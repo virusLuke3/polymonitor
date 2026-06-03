@@ -301,7 +301,7 @@ def get_market_stats(ctx: dict, market_ids: Iterable[int], *, hours: int = 24) -
             f.market_id AS market_id,
             count() AS trade_count_24h,
             toString(sum(f.size * f.price)) AS volume_24h,
-            argMax(toString(f.price), tuple(f.block_number, f.log_index)) AS latest_price,
+            argMax(toString(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS latest_price,
             formatDateTime(
                 max(max_ts_time - toIntervalSecond(greatest(toInt64(0), toInt64(max_ts_block) - toInt64(f.block_number)) * 2)),
                 '%Y-%m-%dT%H:%i:%SZ',
@@ -343,7 +343,7 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
             f.market_id AS market_id,
             count() AS trade_count_24h,
             toString(sum(f.size * f.price)) AS volume_24h,
-            argMax(toString(f.price), tuple(f.block_number, f.log_index)) AS latest_price,
+            argMax(toString(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS latest_price,
             formatDateTime(
                 max(max_ts_time - toIntervalSecond(greatest(toInt64(0), toInt64(max_ts_block) - toInt64(f.block_number)) * 2)),
                 '%Y-%m-%dT%H:%i:%SZ',
