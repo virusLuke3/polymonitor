@@ -17,6 +17,8 @@ from market.market_identity import MarketIdentity, oracle_event_lookup_clause, o
 ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v12"
 DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_AGE_HOURS", "336"))
 DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT = int(os.environ.get("POLYDATA_ACTIVE_MARKET_LOB_PREFETCH_LIMIT", "60"))
+DEFAULT_ACTIVE_MARKET_MIN_PRICE = Decimal(os.environ.get("POLYDATA_ACTIVE_MARKET_MIN_PRICE", "0.05"))
+DEFAULT_ACTIVE_MARKET_MAX_PRICE = Decimal(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_PRICE", "0.95"))
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
@@ -40,7 +42,7 @@ def _default_active_market_price_sql(stats_alias: str) -> str:
     return f"""
     (
         {stats_alias}.latest_price IS NULL
-        OR (CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) >= 0.10 AND CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) <= 0.90)
+        OR (CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) >= {DEFAULT_ACTIVE_MARKET_MIN_PRICE} AND CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) <= {DEFAULT_ACTIVE_MARKET_MAX_PRICE})
     )
     """
 
@@ -107,6 +109,15 @@ def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Opt
     items = payload.get("items")
     if not isinstance(items, list) or not items:
         return None
+    filtered_items = [
+        item
+        for item in items
+        if isinstance(item, dict)
+        and _is_tradeable_probability(item.get("latestPrice") or item.get("latest_price"))
+        and int(item.get("tradeCount24h") or item.get("trade_count_24h") or 0) > 0
+    ]
+    if len(filtered_items) < page_size:
+        return None
     source_page_size = len(items)
     pagination = payload.get("pagination")
     if isinstance(pagination, dict):
@@ -116,7 +127,7 @@ def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Opt
             source_page_size = len(items)
     if len(items) < page_size and source_page_size < page_size:
         return None
-    trimmed_items = items[:page_size]
+    trimmed_items = filtered_items[:page_size]
     return {
         **payload,
         "items": trimmed_items,
@@ -125,7 +136,7 @@ def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Opt
             "pageSize": page_size,
             "total": len(trimmed_items),
             "totalPages": 1,
-            "hasMore": len(items) > page_size,
+            "hasMore": len(filtered_items) > page_size,
         },
     }
 
@@ -409,7 +420,7 @@ def _is_tradeable_probability(value: Any) -> bool:
     price = _decimal_from_any(value)
     if price is None:
         return True
-    return Decimal("0.01") < price < Decimal("0.99")
+    return DEFAULT_ACTIVE_MARKET_MIN_PRICE <= price <= DEFAULT_ACTIVE_MARKET_MAX_PRICE
 
 
 def _has_recent_trade_window(row: Dict[str, Any]) -> bool:
@@ -430,16 +441,9 @@ def _filter_tradeable_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, 
 
 
 def _prefer_tradeable_market_rows(rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
-    """Prefer liquid/recent markets, then fill from active rows instead of collapsing the panel."""
+    """Prefer actively traded, non-terminal markets for the primary active feed."""
     tradeable_rows = _filter_tradeable_market_rows(rows)
-    if len(tradeable_rows) >= target_count:
-        return tradeable_rows
-    if not tradeable_rows:
-        return rows
-
-    seen_ids = {int(row["id"]) for row in tradeable_rows if row.get("id") is not None}
-    fallback_rows = [row for row in rows if row.get("id") is None or int(row["id"]) not in seen_ids]
-    return [*tradeable_rows, *fallback_rows]
+    return tradeable_rows[:target_count] if tradeable_rows else rows[:target_count]
 
 
 def _balanced_probability_score(value: Any) -> float:
@@ -1599,6 +1603,8 @@ def _clickhouse_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int
             continue
         merged = dict(row)
         stats = stats_by_market_id.get(market_id, {})
+        if not _is_tradeable_probability(stats.get("latest_price")):
+            continue
         merged.update(
             {
                 "trade_count_24h": stats.get("trade_count_24h") or 0,
@@ -1872,7 +1878,7 @@ def get_markets_payload(
         params.extend([pattern, pattern, pattern, pattern])
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 2}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 3}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
         return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=markets_runtime_prices_enabled())
@@ -2047,6 +2053,7 @@ def build_active_markets_payload(
         int(row["id"]): {
             "trade_count_24h": row.get("trade_count_24h"),
             "volume_24h": row.get("volume_24h"),
+            "latest_price": row.get("latest_price"),
             "last_trade_at": row.get("last_trade_at") or row.get("latest_trade_at"),
             "price_24h_ago": row.get("price_24h_ago"),
             "has_settle": row.get("has_settle"),
@@ -2097,6 +2104,8 @@ def build_active_markets_payload(
     if include_change_24h:
         rows = enrich_market_rows_with_24h_change(ctx, rows)
     rows = _merge_clickhouse_stats(ctx, rows)
+    rows = _prefer_tradeable_market_rows(rows, max(page_size * 3, page_size))
+    rows = _rank_default_market_rows(rows, now_iso)
     rows = _coalesce_native_market_rows(rows)
     rows = _prefer_lob_ready_market_rows(ctx, rows, page_size)
     rows = _diversify_market_rows(rows, page_size, now_iso)
@@ -2116,7 +2125,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
             "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
-            "v": 16,
+            "v": 17,
         },
         sort_keys=True,
         ensure_ascii=True,
