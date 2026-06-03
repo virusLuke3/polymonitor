@@ -265,19 +265,6 @@ function sourceStatus(insight: MarketWideAiInsightResponse) {
   return 'LOCAL';
 }
 
-function requestSignature(payload: MarketWideAiInsightPayload) {
-  return JSON.stringify({
-    lens: payload.lens,
-    markets: payload.markets.length,
-    groups: payload.marketGroups.length,
-    trades: payload.trades[0]?.txHash || payload.trades.length,
-    oracle: payload.oracle[0]?.txHash || payload.oracle.length,
-    content: payload.content[0]?.id || payload.content.length,
-    whales: payload.whaleSignals?.length || 0,
-    suspicious: payload.suspiciousSignals?.length || 0,
-  });
-}
-
 export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanelProps) {
   const payload = useMemo(() => buildMarketWidePayload(ctx, lens), [
     ctx.alphaSignals,
@@ -291,34 +278,31 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
     ctx.whaleTrades,
     lens,
   ]);
-  const signature = useMemo(() => requestSignature(payload), [payload]);
   const fallback = useMemo(() => localMarketWideFallback(payload), [payload]);
-  const [insight, setInsight] = useState<MarketWideAiInsightResponse>(fallback);
+  const [snapshotInsight, setSnapshotInsight] = useState<MarketWideAiInsightResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const load = () => {
-      setLoading(true);
-      fetchMarketWideAiSnapshot(lens)
-        .then((response) => {
-          if (cancelled) return;
-          setInsight(response);
-        })
-        .catch(() => {
-          if (!cancelled) setInsight(fallback);
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    };
-    setInsight(fallback);
-    load();
+    setLoading(true);
+    setSnapshotInsight(null);
+    fetchMarketWideAiSnapshot(lens)
+      .then((response) => {
+        if (cancelled) return;
+        setSnapshotInsight(response);
+      })
+      .catch(() => {
+        if (!cancelled) setSnapshotInsight(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [fallback, lens, signature]);
+  }, [lens]);
 
+  const insight = snapshotInsight || fallback;
   const focus = insight.focus?.length ? insight.focus : fallback.focus;
   const specialMarkets = insight.specialMarkets?.length ? insight.specialMarkets : (fallback.specialMarkets || []);
   const themes = insight.themes?.length ? insight.themes : (fallback.themes || focus);
