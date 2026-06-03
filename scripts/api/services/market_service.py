@@ -14,8 +14,9 @@ from api.services import clickhouse_orderfilled_service
 from api.services import market_group_service
 from market.market_identity import MarketIdentity, oracle_event_lookup_clause, oracle_event_lookup_terms
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v11"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v12"
 DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_AGE_HOURS", "336"))
+DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT = int(os.environ.get("POLYDATA_ACTIVE_MARKET_LOB_PREFETCH_LIMIT", "60"))
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
@@ -537,6 +538,54 @@ def _coalesce_native_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, A
         representative["trade_count_24h"] = sum(int(row.get("trade_count_24h") or 0) for row in group_rows)
         coalesced.append(representative)
     return [*coalesced, *passthrough]
+
+
+def _book_side_has_levels(side: Any) -> bool:
+    return isinstance(side, dict) and bool(side.get("bids") or side.get("asks"))
+
+
+def _lob_payload_has_levels(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return _book_side_has_levels(payload.get("yes")) or _book_side_has_levels(payload.get("no"))
+
+
+def _prefer_lob_ready_market_rows(ctx: dict, rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+    if not _env_flag("POLYDATA_ACTIVE_MARKET_PREFER_LOB_READY", True):
+        return rows
+    manager = ctx.get("LOB_RUNTIME_MANAGER")
+    if manager is None or not hasattr(manager, "get_market_snapshot"):
+        return rows
+    max_checks = min(len(rows), max(0, DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT), max(target_count * 3, target_count))
+    if max_checks <= 0:
+        return rows
+
+    ready: List[Dict[str, Any]] = []
+    deferred: List[Dict[str, Any]] = []
+    for row in rows[:max_checks]:
+        market_id = row.get("id")
+        yes_token_id = str(row.get("yes_token_id") or "").strip()
+        no_token_id = str(row.get("no_token_id") or "").strip()
+        if market_id is None or not yes_token_id or not no_token_id:
+            deferred.append(row)
+            continue
+        try:
+            payload = manager.get_market_snapshot(
+                market_id=int(market_id),
+                yes_token_id=yes_token_id,
+                no_token_id=no_token_id,
+                market_title=str(row.get("title") or ""),
+            )
+        except Exception:
+            deferred.append(row)
+            continue
+        if _lob_payload_has_levels(payload):
+            ready.append(row)
+        else:
+            deferred.append(row)
+    if not ready:
+        return rows
+    return [*ready, *deferred, *rows[max_checks:]]
 
 
 def _parse_numeric_target(value: str, suffix: str | None = None) -> Optional[float]:
@@ -2047,6 +2096,7 @@ def build_active_markets_payload(
         rows = enrich_market_rows_with_24h_change(ctx, rows)
     rows = _merge_clickhouse_stats(ctx, rows)
     rows = _coalesce_native_market_rows(rows)
+    rows = _prefer_lob_ready_market_rows(ctx, rows, page_size)
     rows = _diversify_market_rows(rows, page_size, now_iso)
     rows = rows[:page_size]
     return {
