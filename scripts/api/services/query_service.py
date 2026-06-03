@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+from api.services import clickhouse_orderfilled_service
+
 
 def fetch_dashboard_market_status(ctx: dict, now_iso: str) -> List[Dict[str, Any]]:
     return ctx["query_all"](
@@ -218,6 +220,9 @@ def fetch_trade_count_estimate(ctx: dict) -> Dict[str, Any]:
 
 
 def get_recent_trades(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
+    clickhouse_rows = clickhouse_orderfilled_service.get_recent_trades(ctx, limit=limit)
+    if clickhouse_rows is not None:
+        return clickhouse_rows
     trade_source = ctx["get_existing_trade_read_source"]()
     if trade_source is None:
         return []

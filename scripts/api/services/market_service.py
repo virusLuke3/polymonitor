@@ -10,10 +10,12 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
+from api.services import clickhouse_orderfilled_service
 from api.services import market_group_service
 from market.market_identity import MarketIdentity, oracle_event_lookup_clause, oracle_event_lookup_terms
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v9"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v11"
+DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_AGE_HOURS", "336"))
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
@@ -43,6 +45,10 @@ def _default_active_market_price_sql(stats_alias: str) -> str:
 
 def _default_active_market_recent_trade_sql(stats_alias: str) -> str:
     return f"COALESCE({stats_alias}.last_trade_at, {stats_alias}.latest_trade_at) >= ?"
+
+
+def _default_active_market_created_recent_sql() -> str:
+    return "m.created_at IS NULL OR m.created_at >= ?"
 
 
 def _iso_hours_before(now_iso: str, hours: int) -> str:
@@ -730,6 +736,9 @@ def get_market_by_id(ctx: dict, market_id: int) -> Optional[dict]:
 
 
 def get_trades_by_market_id(ctx: dict, market_id: int, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    clickhouse_rows = clickhouse_orderfilled_service.get_market_trades(ctx, market_id, limit=limit, offset=offset)
+    if clickhouse_rows is not None:
+        return clickhouse_rows
     trade_source = ctx["get_existing_trade_read_source"]()
     if trade_source is None:
         return []
@@ -1179,7 +1188,13 @@ def get_market_chart_payload(
         limit = 400
         if range_name == "7d":
             limit = 700
-        points = ctx["get_trade_derived_market_price_series"](market_id, limit=limit)
+        clickhouse_points = clickhouse_orderfilled_service.get_price_series(ctx, market_id, limit=limit)
+        points = clickhouse_points if clickhouse_points is not None else ctx["get_trade_derived_market_price_series"](market_id, limit=limit)
+    if not points:
+        limit = 700 if range_name == "7d" else 400
+        clickhouse_points = clickhouse_orderfilled_service.get_price_series(ctx, market_id, limit=limit)
+        if clickhouse_points:
+            points = clickhouse_points
     if include_runtime_series:
         point_count, distinct_count = _chart_point_stats(points)
         needs_clob_series = (
@@ -1443,6 +1458,111 @@ def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _merge_clickhouse_stats(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    market_ids = [int(row["id"]) for row in rows if row.get("id") is not None]
+    stats = clickhouse_orderfilled_service.get_market_stats(ctx, market_ids, hours=24)
+    if not stats:
+        return rows
+    merged_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        market_id = row.get("id")
+        if market_id is None or int(market_id) not in stats:
+            merged_rows.append(row)
+            continue
+        stat = stats[int(market_id)]
+        merged = dict(row)
+        for key in ("trade_count_24h", "volume_24h", "latest_price", "last_trade_at", "latest_trade_at"):
+            value = stat.get(key)
+            if value not in (None, ""):
+                merged[key] = value
+        merged_rows.append(merged)
+    return merged_rows
+
+
+def _clickhouse_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) -> List[Dict[str, Any]]:
+    activity_rows = clickhouse_orderfilled_service.get_recent_market_activity(
+        ctx,
+        limit=max(int(limit) * 20, 1000),
+        hours=24,
+    )
+    if not activity_rows:
+        return []
+    stats_by_market_id = {
+        int(row["market_id"]): row
+        for row in activity_rows
+        if row.get("market_id") is not None
+    }
+    market_ids = list(stats_by_market_id.keys())
+    if not market_ids:
+        return []
+    placeholders = ", ".join("?" for _ in market_ids)
+    created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
+    detail_rows = ctx["query_all"](
+        f"""
+        SELECT
+            m.id,
+            m.slug,
+            m.condition_id,
+            m.end_date,
+            m.created_at,
+            CASE WHEN COALESCE(mss.has_settle, FALSE) THEN 1 ELSE 0 END AS has_settle,
+            CASE WHEN COALESCE(mss.has_propose, FALSE) THEN 1 ELSE 0 END AS has_propose,
+            COALESCE(mss.settlement_code, 0) AS settlement_code,
+            COALESCE(mss.settlement_outcome, 'UNKNOWN') AS settlement_outcome,
+            mss.settlement_source,
+            mss.settlement_event_id,
+            mss.settlement_event_time,
+            mss.settlement_transaction,
+            COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+            COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+            COALESCE(mss.is_final, FALSE) AS is_final,
+            COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+            mss.completion_source,
+            mss.completion_time,
+            COALESCE(mss.gamma_closed, FALSE) AS gamma_closed,
+            mss.gamma_closed_time,
+            0 AS trade_count_24h,
+            0 AS volume_24h,
+            NULL AS latest_price,
+            NULL AS last_trade_at,
+            NULL AS latest_trade_at,
+            NULL AS price_24h_ago
+        FROM markets m
+        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+        WHERE m.id IN ({placeholders})
+          AND COALESCE(mss.has_settle, FALSE) = FALSE
+          AND COALESCE(mss.has_propose, FALSE) = FALSE
+          AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
+          AND COALESCE(mss.settlement_code, 0) = 0
+          AND (m.end_date IS NULL OR m.end_date >= ?)
+          AND ({_default_active_market_created_recent_sql()})
+          AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
+        """,
+        (*market_ids, now_iso, created_cutoff),
+    )
+    detail_by_id = {int(row["id"]): row for row in detail_rows if row.get("id") is not None}
+    candidates: List[Dict[str, Any]] = []
+    for market_id in market_ids:
+        row = detail_by_id.get(market_id)
+        if not row:
+            continue
+        merged = dict(row)
+        stats = stats_by_market_id.get(market_id, {})
+        merged.update(
+            {
+                "trade_count_24h": stats.get("trade_count_24h") or 0,
+                "volume_24h": stats.get("volume_24h") or 0,
+                "latest_price": stats.get("latest_price"),
+                "last_trade_at": stats.get("last_trade_at"),
+                "latest_trade_at": stats.get("latest_trade_at"),
+            }
+        )
+        candidates.append(merged)
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+
 def _active_market_candidate_select_sql(stats_alias: str) -> str:
     return f"""
             SELECT
@@ -1481,6 +1601,7 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
               AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
               AND COALESCE(mss.settlement_code, 0) = 0
               AND (m.end_date IS NULL OR m.end_date >= ?)
+              AND ({_default_active_market_created_recent_sql()})
               AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
               AND {_default_active_market_activity_sql(stats_alias)}
               AND {_default_active_market_price_sql(stats_alias)}
@@ -1489,7 +1610,10 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
 
 
 def _market_list_serving_has_rows(ctx: dict, min_rows: int = 1) -> bool:
-    if not ctx["table_exists"]("market_list_serving"):
+    table_exists = ctx.get("table_exists")
+    if not callable(table_exists):
+        return True
+    if not table_exists("market_list_serving"):
         return False
     min_rows = max(1, int(min_rows))
     row = ctx["query_one"](
@@ -1499,6 +1623,7 @@ def _market_list_serving_has_rows(ctx: dict, min_rows: int = 1) -> bool:
 
 
 def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) -> List[Dict[str, Any]]:
+    created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
     if _is_postgres_ctx(ctx):
         prelimit = max(int(limit) * 30, 5000)
         return ctx["query_all"](
@@ -1512,6 +1637,7 @@ def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) 
                     m.created_at
                 FROM markets m
                 WHERE (m.end_date IS NULL OR m.end_date >= ?)
+                  AND (m.created_at IS NULL OR m.created_at >= ?)
                   AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
                 ORDER BY m.created_at DESC NULLS LAST, m.id DESC
                 LIMIT ?
@@ -1553,7 +1679,7 @@ def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) 
             ORDER BY m.created_at DESC NULLS LAST, m.id DESC
             LIMIT ?
             """,
-            (now_iso, prelimit, limit),
+            (now_iso, created_cutoff, prelimit, limit),
         )
     return ctx["query_all"](
         f"""
@@ -1592,11 +1718,12 @@ def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) 
               AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
               AND COALESCE(mss.settlement_code, 0) = 0
               AND (m.end_date IS NULL OR m.end_date >= ?)
+              AND (m.created_at IS NULL OR m.created_at >= ?)
               AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
             ORDER BY m.created_at DESC NULLS LAST, m.id DESC
             LIMIT ?
         """,
-        (now_iso, limit),
+        (now_iso, created_cutoff, limit),
     )
 
 
@@ -1671,10 +1798,14 @@ def get_markets_payload(
     filters: List[str] = []
     params: List[Any] = []
     recent_trade_cutoff = _iso_hours_before(now_iso, 24 * 7)
+    created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
     serving_has_rows = _market_list_serving_has_rows(ctx, min_rows=max(page_size * 10, 1000))
     if status == "active":
         filters.append("(COALESCE(mss.is_trading_closed, FALSE) = FALSE AND COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))")
         params.append(now_iso)
+        if not query:
+            filters.append(f"({_default_active_market_created_recent_sql()})")
+            params.append(created_cutoff)
         if not query and serving_has_rows:
             filters.append(f"({DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL})")
             filters.append(_default_active_market_activity_sql("mls"))
@@ -1699,7 +1830,14 @@ def get_markets_payload(
         recent_14d_iso = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat().replace("+00:00", "Z")
         recent_30d_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
         raw_limit = min(5000, max((offset + page_size + 1) * 6, 180))
-        if status == "active" and not query and not serving_has_rows:
+        clickhouse_candidate_rows = (
+            _clickhouse_active_market_candidate_rows(ctx, now_iso, raw_limit)
+            if status == "active" and not query
+            else []
+        )
+        if clickhouse_candidate_rows:
+            candidate_rows = clickhouse_candidate_rows
+        elif status == "active" and not query and not serving_has_rows:
             candidate_rows = _fallback_active_market_candidate_rows(ctx, now_iso, raw_limit)
         else:
             candidate_rows = ctx["query_all"](
@@ -1750,7 +1888,7 @@ def get_markets_payload(
                 """,
                 [*params, recent_14d_iso, recent_30d_iso, raw_limit],
             )
-        if status == "active" and serving_has_rows:
+        if status == "active" and serving_has_rows and not clickhouse_candidate_rows:
             candidate_rows = _prefer_gamma_active_candidate_rows(ctx, candidate_rows, offset + page_size + 1)
         working_candidates = candidate_rows[offset: offset + max(page_size * 3, page_size + 1)]
         if not working_candidates and candidate_rows:
@@ -1799,6 +1937,8 @@ def get_markets_payload(
             max_updates=max_runtime_updates,
         )
         if status == "active":
+            visible_rows = _merge_clickhouse_stats(ctx, visible_rows)
+        if status == "active":
             visible_rows = _prefer_tradeable_market_rows(visible_rows, page_size + 1)
             if not query:
                 visible_rows = _coalesce_native_market_rows(visible_rows)
@@ -1827,15 +1967,19 @@ def build_active_markets_payload(
     include_change_24h: bool = False,
 ) -> Dict[str, Any]:
     now_iso = ctx["utc_now_iso"]()
+    created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
     raw_limit = max(page_size * 3, 180)
-    if _market_list_serving_has_rows(ctx, min_rows=max(page_size * 10, 1000)):
+    clickhouse_candidate_rows = _clickhouse_active_market_candidate_rows(ctx, now_iso, raw_limit)
+    if clickhouse_candidate_rows:
+        candidate_rows = clickhouse_candidate_rows
+    elif _market_list_serving_has_rows(ctx, min_rows=max(page_size * 10, 1000)):
         volume_candidate_rows = ctx["query_all"](
             f"""
             {_active_market_candidate_select_sql("stats_24h")}
             ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
             LIMIT ?
             """,
-            (now_iso, _iso_hours_before(now_iso, 24 * 7), raw_limit),
+            (now_iso, created_cutoff, _iso_hours_before(now_iso, 24 * 7), raw_limit),
         )
         recent_candidate_rows = ctx["query_all"](
             f"""
@@ -1843,7 +1987,7 @@ def build_active_markets_payload(
             ORDER BY m.created_at DESC, COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC
             LIMIT ?
             """,
-            (now_iso, _iso_hours_before(now_iso, 24 * 7), min(raw_limit, max(page_size * 2, 80))),
+            (now_iso, created_cutoff, _iso_hours_before(now_iso, 24 * 7), min(raw_limit, max(page_size * 2, 80))),
         )
         candidate_rows = _blend_recent_candidate_rows(volume_candidate_rows, recent_candidate_rows, page_size)
     else:
@@ -1901,6 +2045,7 @@ def build_active_markets_payload(
         )
     if include_change_24h:
         rows = enrich_market_rows_with_24h_change(ctx, rows)
+    rows = _merge_clickhouse_stats(ctx, rows)
     rows = _coalesce_native_market_rows(rows)
     rows = _diversify_market_rows(rows, page_size, now_iso)
     rows = rows[:page_size]
@@ -1918,7 +2063,8 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 14,
+            "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
+            "v": 16,
         },
         sort_keys=True,
         ensure_ascii=True,
@@ -1961,7 +2107,7 @@ def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
     market = get_market_by_id(ctx, market_id)
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    cache_key = json.dumps({"marketId": int(market_id), "v": 10}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"marketId": int(market_id), "v": 11}, sort_keys=True, ensure_ascii=True)
 
     def build_payload() -> Dict[str, Any]:
         price = get_market_price_summary(
@@ -1992,7 +2138,7 @@ def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
         }
         oracle_payload = get_market_oracle_payload(ctx, market_id, market=market)
         oracle_events = oracle_payload.get("timeline", [])
-        trades: List[Dict[str, Any]] = []
+        trades = get_trades_by_market_id(ctx, market_id, limit=24, offset=0)
         normalized_market = ctx["normalize_market"](market)
         identity = _workspace_identity(market_id, market)
         diagnostics = _workspace_diagnostics(
@@ -2070,6 +2216,9 @@ def get_market_workspace_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
         )
     price = _merge_chart_latest_price(price, chart)
     oracle_payload = detail_payload.get("oracle") or get_market_oracle_payload(ctx, market_id, market=market)
+    trades = detail_payload.get("trades") if isinstance(detail_payload.get("trades"), list) else []
+    if not trades:
+        trades = get_trades_by_market_id(ctx, market_id, limit=24, offset=0)
     diagnostics = dict(detail_payload.get("diagnostics") or {})
     if diagnostics:
         diagnostics["workspaceContract"] = "v1"
@@ -2093,7 +2242,7 @@ def get_market_workspace_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
         "selectedOutcome": selected_outcome,
         "price": price,
         "chart": chart,
-        "trades": [],
+        "trades": trades,
         "oracle": oracle_payload,
         "content": detail_payload.get("content"),
         "lob": None,
