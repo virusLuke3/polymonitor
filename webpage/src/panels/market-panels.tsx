@@ -473,7 +473,7 @@ function ActiveMarketsPanel({
     return query ? ranked : ranked;
   }, [marketGroupSort, markets, search]);
 
-  const hasGroups = marketGroups.length > 0;
+  const hasGroups = marketGroups.length > 0 && visibleGroups.some((group) => Number(groupDisplayTradeCount(group) || 0) > 0);
   const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;
 
   return (

@@ -193,10 +193,11 @@ function pickDefaultMarketId(markets: MarketListItem[], featured?: MarketSummary
 }
 
 function pickDefaultMarketGroup(groups: MarketGroupItem[]) {
+  const liveGroups = groups.filter((group) => Number(group.tradeCount24h || 0) > 0);
   return (
-    groups.find((group) => Number(group.volume24h || 0) > 0 && Number(group.outcomeCount || 0) > 1)
-    || groups.find((group) => Number(group.outcomeCount || 0) > 1)
-    || groups[0]
+    liveGroups.find((group) => Number(group.volume24h || 0) > 0 && Number(group.outcomeCount || 0) > 1)
+    || liveGroups.find((group) => Number(group.outcomeCount || 0) > 1)
+    || liveGroups[0]
     || null
   );
 }
