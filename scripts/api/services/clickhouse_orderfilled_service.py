@@ -5,6 +5,8 @@ import os
 import shutil
 import subprocess
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 
 DEFAULT_CONTAINER = "polydata_clickhouse_orderfilled"
@@ -36,6 +38,7 @@ def _identifier(value: str, default: str) -> str:
 
 def _settings() -> Dict[str, str]:
     return {
+        "http_url": os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL", "").strip(),
         "container": os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER", DEFAULT_CONTAINER),
         "database": _identifier(os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE", DEFAULT_DATABASE), DEFAULT_DATABASE),
         "user": os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_USER", DEFAULT_USER),
@@ -62,11 +65,55 @@ def _clickhouse_cmd(query: str) -> List[str]:
     ]
 
 
+def _query_json_rows_http(ctx: dict, query: str, *, timeout_seconds: float) -> Optional[List[Dict[str, Any]]]:
+    settings = _settings()
+    base_url = settings["http_url"]
+    if not base_url:
+        return None
+    params = urlencode(
+        {
+            "database": settings["database"],
+            "user": settings["user"],
+            "password": settings["password"],
+        }
+    )
+    separator = "&" if "?" in base_url else "?"
+    request = Request(
+        f"{base_url}{separator}{params}",
+        data=query.encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "text/plain; charset=utf-8"},
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            output = response.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        logger = ctx.get("app").logger if ctx.get("app") is not None else None
+        if logger is not None:
+            logger.warning("ClickHouse HTTP OrderFilled read failed: %s", exc)
+        return None
+    rows: List[Dict[str, Any]] = []
+    for line in output.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            rows.append(parsed)
+    return rows
+
+
 def _query_json_rows(ctx: dict, query: str, *, timeout_seconds: float = 4.0) -> Optional[List[Dict[str, Any]]]:
     if not clickhouse_orderfilled_enabled():
         return None
     if ctx.get("app") is None:
         return None
+    http_rows = _query_json_rows_http(ctx, query, timeout_seconds=timeout_seconds)
+    if http_rows is not None:
+        return http_rows
     if shutil.which("docker") is None:
         return None
     try:
