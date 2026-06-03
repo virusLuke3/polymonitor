@@ -16,7 +16,7 @@ from market.market_identity import MarketIdentity, oracle_event_lookup_clause, o
 
 ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v12"
 DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_AGE_HOURS", "336"))
-DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT = int(os.environ.get("POLYDATA_ACTIVE_MARKET_LOB_PREFETCH_LIMIT", "60"))
+DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT = int(os.environ.get("POLYDATA_ACTIVE_MARKET_LOB_PREFETCH_LIMIT", "0"))
 DEFAULT_ACTIVE_MARKET_MIN_PRICE = Decimal(os.environ.get("POLYDATA_ACTIVE_MARKET_MIN_PRICE", "0.05"))
 DEFAULT_ACTIVE_MARKET_MAX_PRICE = Decimal(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_PRICE", "0.95"))
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
@@ -443,7 +443,7 @@ def _filter_tradeable_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, 
 def _prefer_tradeable_market_rows(rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
     """Prefer actively traded, non-terminal markets for the primary active feed."""
     tradeable_rows = _filter_tradeable_market_rows(rows)
-    return tradeable_rows[:target_count] if tradeable_rows else rows[:target_count]
+    return tradeable_rows[:target_count]
 
 
 def _balanced_probability_score(value: Any) -> float:
@@ -1537,7 +1537,7 @@ def _merge_clickhouse_stats(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[
 def _clickhouse_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) -> List[Dict[str, Any]]:
     activity_rows = clickhouse_orderfilled_service.get_recent_market_activity(
         ctx,
-        limit=max(int(limit) * 20, 1000),
+        limit=max(int(limit) * 6, 200),
         hours=24,
     )
     if not activity_rows:
@@ -1878,7 +1878,7 @@ def get_markets_payload(
         params.extend([pattern, pattern, pattern, pattern])
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 3}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 4}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
         return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=markets_runtime_prices_enabled())
@@ -2025,7 +2025,7 @@ def build_active_markets_payload(
 ) -> Dict[str, Any]:
     now_iso = ctx["utc_now_iso"]()
     created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
-    raw_limit = max(page_size * 3, 180)
+    raw_limit = max(page_size * 5, 100)
     clickhouse_candidate_rows = _clickhouse_active_market_candidate_rows(ctx, now_iso, raw_limit)
     if clickhouse_candidate_rows:
         candidate_rows = clickhouse_candidate_rows
@@ -2125,7 +2125,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
             "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
-            "v": 17,
+            "v": 18,
         },
         sort_keys=True,
         ensure_ascii=True,

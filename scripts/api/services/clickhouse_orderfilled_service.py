@@ -353,7 +353,9 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
         WHERE f.market_id != 0
           AND f.block_number >= max_fact_block - {hours * 1800}
         GROUP BY f.market_id
-        HAVING trade_count_24h > 0 OR toDecimal128(volume_24h, 10) > 0
+        HAVING (trade_count_24h > 0 OR toDecimal128(volume_24h, 10) > 0)
+           AND toDecimal128(latest_price, 10) >= 0.05
+           AND toDecimal128(latest_price, 10) <= 0.95
         ORDER BY trade_count_24h DESC, toDecimal128(volume_24h, 10) DESC, latest_trade_at DESC
         LIMIT {limit}
         FORMAT JSONEachRow
