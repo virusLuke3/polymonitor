@@ -158,6 +158,17 @@ function polyscanTxUrl(txHash?: string | null) {
   return /^0x[a-fA-F0-9]{64}$/.test(normalized) ? `https://polygonscan.com/tx/${normalized}` : null;
 }
 
+function normalizedTxHash(txHash?: string | null) {
+  const clean = String(txHash || '').trim();
+  if (!clean) return '';
+  return clean.startsWith('0x') ? clean : `0x${clean}`;
+}
+
+function orderfilledSideLabel(rawSide?: string | null) {
+  const side = String(rawSide || '').trim().toUpperCase();
+  return side === 'BUY' || side === 'SELL' ? side : 'TRADE';
+}
+
 function orderfilledList(
   trades: TradeRow[],
   limit = 8,
@@ -165,16 +176,20 @@ function orderfilledList(
   options: { compact?: boolean } = {},
 ) {
   if (!trades.length) return emptyState('Waiting for trade rows.');
+  const visibleTrades = trades.slice(0, limit);
+  const visibleSides = new Set(visibleTrades.map((trade) => orderfilledSideLabel(trade.side)).filter((side) => side === 'BUY' || side === 'SELL'));
+  const showDirectionalSide = visibleSides.size > 1;
   return (
     <div className="wm-orderfilled-list">
-      {trades.slice(0, limit).map((trade) => {
-        const side = String(trade.side || '').toUpperCase();
+      {visibleTrades.map((trade) => {
+        const side = showDirectionalSide ? orderfilledSideLabel(trade.side) : 'TRADE';
         const outcome = String(trade.outcome || '--').toUpperCase();
-        const tone = side === 'BUY' ? 'positive' : 'critical';
+        const tone = side === 'BUY' ? 'positive' : side === 'SELL' ? 'critical' : 'neutral';
         const actor = tradeActor(trade);
         const actorFull = tradeActorFull(trade);
         const marketTitle = resolveMarketTitle?.(trade) || trade.marketTitle || null;
         const txUrl = polyscanTxUrl(trade.txHash);
+        const txHash = normalizedTxHash(trade.txHash);
         const rowKey = `${trade.txHash || 'trade'}-${trade.logIndex ?? 'x'}`;
         const notional = tradeNotional(trade);
         const rowContent = (
@@ -186,14 +201,12 @@ function orderfilledList(
                 <strong>{tradePriceCents(trade.price)}</strong>
                 <em>{notional ? `$${formatCompact(notional)}` : '$--'}</em>
               </div>
-              <span className={`wm-orderfilled-link ${txUrl ? 'ready' : 'disabled'}`}>{txUrl ? 'Polyscan ↗' : 'No tx'}</span>
+              <span className={`wm-orderfilled-link ${txUrl ? 'ready' : 'disabled'}`}>{txUrl ? 'Polyscan' : 'No tx'}</span>
             </div>
             {!options.compact ? <div className="wm-orderfilled-title">{marketTitle || 'Untitled market'}</div> : null}
             <div className="wm-orderfilled-meta">
               <span>{formatRelative(trade.timestamp || null)}</span>
-              <span>{actor}</span>
-              {trade.marketId ? <span>MKT #{trade.marketId}</span> : null}
-              {trade.blockNumber ? <span>BLK {formatCompact(trade.blockNumber)}</span> : null}
+              <span className="wm-orderfilled-hash">{txHash ? shortHash(txHash, 8, 6) : actor}</span>
             </div>
             <div className="wm-orderfilled-tooltip" role="tooltip" aria-hidden="true">
               <div className="wm-orderfilled-tooltip-title">{marketTitle || `Market #${trade.marketId || '--'}`}</div>

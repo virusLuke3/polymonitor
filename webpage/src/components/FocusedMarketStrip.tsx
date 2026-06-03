@@ -769,7 +769,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     let cancelled = false;
     const key = selectedTokenKey;
     setTokenLobState({ key, lob: null, loading: true });
-    fetchMarketLobByToken(selectedTokenId, selectedOutcome?.label || detail?.title || '', selectedNoTokenId, 3500)
+    fetchMarketLobByToken(selectedTokenId, selectedOutcome?.label || detail?.title || '', selectedNoTokenId, 1800)
       .then((lobPayload) => {
         if (!cancelled) setTokenLobState({ key, lob: lobPayload, loading: false });
       })
@@ -847,7 +847,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                     detail?.endDate || selectedGroup?.endDate || focusedMarket?.endDate || null,
                     detail?.createdAt || selectedGroup?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null,
                   )}</span>
-                  <span><strong>{selectedOutcomeLabel}</strong></span>
                 </div>
               </div>
               <div className={`wm-focus-detail-grid${shouldShowOutcomeRail ? '' : ' compact'}`}>
@@ -1009,11 +1008,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
           status="live"
           count={trades.length}
           className="wm-focus-panel wm-focus-trades-panel wm-orderfilled-panel"
-          controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{selectedOutcome?.label || focusedMarket?.title}</span> : undefined}
         >
           <div className="wm-focus-trades">
             <div className="wm-focus-trades-meta">
-              <span>Market: {marketTitle}</span>
               <strong>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : (hasServingTradeActivity ? 'summary only' : noTradesYet ? 'no trades yet' : 'waiting')}</strong>
             </div>
             {!executionAvailable && detail

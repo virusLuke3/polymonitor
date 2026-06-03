@@ -966,8 +966,8 @@ body {
 
 .wm-focus-strip {
   --wm-focus-gap: 4px;
-  --wm-focus-title-size: 14px;
-  --wm-focus-hero-size: 28px;
+  --wm-focus-title-size: 13px;
+  --wm-focus-hero-size: 26px;
   --wm-focus-hero-change-size: 15px;
   --wm-focus-meta-size: 10px;
   --wm-focus-inline-size: 10px;
@@ -1047,9 +1047,9 @@ body {
 
 .wm-focused-market-list .wm-poly-market-card {
   grid-template-columns: 1fr;
-  min-height: 92px;
+  min-height: 98px;
   margin-bottom: 0;
-  padding: 11px 11px 10px 13px;
+  padding: 10px 10px 9px 12px;
 }
 
 .wm-focused-market-list .wm-poly-market-card-main {
@@ -1076,9 +1076,9 @@ body {
   min-height: 0;
   margin-bottom: 0;
   padding-right: 4px;
-  font-size: 13px;
-  line-height: 1.25;
-  -webkit-line-clamp: 2;
+  font-size: 12px;
+  line-height: 1.22;
+  -webkit-line-clamp: 3;
 }
 
 .wm-focused-market-list .wm-poly-market-bottom {
@@ -1201,8 +1201,8 @@ body {
 
 .wm-focus-event-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(82px, 120px);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(78px, 108px);
+  gap: 10px;
   align-items: start;
 }
 
@@ -1234,10 +1234,10 @@ body {
 .wm-focus-title {
   display: -webkit-box;
   font-size: var(--wm-focus-title-size);
-  line-height: 1.14;
+  line-height: 1.18;
   overflow: hidden;
   text-overflow: ellipsis;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
   word-break: normal;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -1251,17 +1251,19 @@ body {
 .wm-focus-kicker,
 .wm-focus-subtitle {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 9px;
   color: #8e8e8e;
-  letter-spacing: 0.24px;
+  letter-spacing: 0.18px;
 }
 
 .wm-focus-kicker {
   display: flex;
   gap: 6px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   margin-bottom: 3px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .wm-focus-kicker span {
@@ -1270,7 +1272,11 @@ body {
 }
 
 .wm-focus-kicker i {
+  min-width: 0;
+  overflow: hidden;
   font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wm-focus-kicker i::before {
@@ -1307,7 +1313,7 @@ body {
 
 .wm-focus-price-hero {
   min-width: 0;
-  max-width: 106px;
+  max-width: 108px;
   text-align: right;
 }
 
@@ -1641,7 +1647,7 @@ body {
   align-items: center;
   gap: 4px;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .wm-focus-chart-tabs button,
@@ -1687,10 +1693,18 @@ body {
   display: inline-flex;
   gap: 8px;
   align-items: center;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 10px;
   color: #8f989d;
+}
+
+.wm-focus-chart-summary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wm-focus-chart-summary strong {
@@ -1775,8 +1789,7 @@ body {
   min-height: 0;
   border: 1px solid rgba(126, 220, 255, 0.08);
   background:
-    linear-gradient(180deg, rgba(12, 15, 15, 0.9), rgba(8, 9, 9, 0.94)),
-    radial-gradient(circle at 70% 45%, rgba(57, 255, 115, 0.04), transparent 38%);
+    linear-gradient(180deg, rgba(11, 13, 14, 0.96), rgba(7, 8, 9, 0.98));
 }
 
 .wm-focus-chart-svg {
@@ -1784,8 +1797,7 @@ body {
   width: 100%;
   height: 300px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 18%),
-    linear-gradient(90deg, rgba(126, 220, 255, 0.018), transparent 28%, transparent 72%, rgba(57, 255, 115, 0.018));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 18%);
 }
 
 .wm-focus-chart-grid {
@@ -1861,12 +1873,13 @@ body {
 }
 
 .wm-focus-chart-line.event-series.selected {
-  stroke-width: 2.4;
+  stroke-width: 3.1;
+  filter: drop-shadow(0 0 5px rgba(126, 220, 255, 0.34));
 }
 
 .wm-focus-chart-line.event-series.muted {
-  opacity: 1;
-  stroke-width: 2.05;
+  opacity: 0.28;
+  stroke-width: 1.15;
 }
 
 .wm-focus-chart-endpoint {
@@ -2848,10 +2861,10 @@ body {
 
 .wm-focus-trades-meta {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 6px 9px;
   border: 1px solid rgba(126, 220, 255, 0.1);
   background:
     linear-gradient(90deg, rgba(57, 255, 115, 0.035), transparent 44%),
@@ -2866,7 +2879,7 @@ body {
 
 .wm-focus-trades-meta strong {
   color: var(--wm-text);
-  font-size: 16px;
+  font-size: 14px;
   letter-spacing: 0;
   text-transform: none;
 }

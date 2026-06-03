@@ -18,6 +18,8 @@ import {
   fetchMarketGroupDetail,
   fetchMarketGroups,
   fetchMarketLob,
+  fetchMarketPrice,
+  fetchMarketTrades,
   fetchRecentOracle,
   fetchRecentTrades,
   fetchRuntimeGlobalWeatherMap,
@@ -1424,8 +1426,20 @@ export function App() {
     }
 
     function refreshLobSnapshot() {
-      fetchMarketLob(currentMarketId, 2600)
+      fetchMarketLob(currentMarketId, 1800)
         .then((lob) => applyLoadedBundle({ ...emptyWorkspaceBundle(), lob }))
+        .catch(() => undefined);
+    }
+
+    function refreshPriceSnapshot() {
+      fetchMarketPrice(currentMarketId, 1800)
+        .then((price) => applyLoadedBundle({ ...emptyWorkspaceBundle(), price }))
+        .catch(() => undefined);
+    }
+
+    function refreshTradeSnapshot() {
+      fetchMarketTrades(currentMarketId, 24, 2200)
+        .then((trades) => applyLoadedBundle({ ...emptyWorkspaceBundle(), trades }))
         .catch(() => undefined);
     }
 
@@ -1434,6 +1448,11 @@ export function App() {
         .then((content) => applyLoadedBundle({ ...emptyWorkspaceBundle(), content }))
         .catch(() => undefined);
     }
+
+    refreshPriceSnapshot();
+    refreshTradeSnapshot();
+    refreshLobSnapshot();
+    refreshContentSnapshot();
 
     fetchWorkspaceBundle(currentMarketId)
       .then((loadedBundle) => applyLoadedBundle(loadedBundle))
@@ -1447,14 +1466,13 @@ export function App() {
           setBundleLoading(false);
         }
       });
-    refreshLobSnapshot();
-    refreshContentSnapshot();
-
     const timer = window.setInterval(() => {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
       fetchWorkspaceBundle(currentMarketId)
         .then((loadedBundle) => applyLoadedBundle(loadedBundle))
         .catch(() => undefined);
+      refreshPriceSnapshot();
+      refreshTradeSnapshot();
       refreshLobSnapshot();
       refreshContentSnapshot();
     }, 45000);

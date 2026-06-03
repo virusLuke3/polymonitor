@@ -551,6 +551,23 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
 
 const workspaceBundleInflight = new Map<string, Promise<WorkspaceBundle>>();
 
+function emptyWorkspaceBundle(): WorkspaceBundle {
+  return {
+    market: null,
+    identity: null,
+    diagnostics: null,
+    health: null,
+    group: null,
+    selectedOutcome: null,
+    price: null,
+    chart: null,
+    trades: [],
+    oracle: null,
+    content: null,
+    lob: null,
+  };
+}
+
 export function fetchMarketAiInsights(payload: MarketAiInsightPayload, timeoutMs = 20000) {
   return apiPostAgentOnce<MarketAiInsightResponse>('/agent/market-insights', payload, timeoutMs);
 }
@@ -570,21 +587,14 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
   if (inflight) return inflight;
 
   const request = (async () => {
-    let detailBundle: WorkspaceBundle;
-    try {
-      detailBundle = await fetchMarketWorkspaceBundle(marketId, 6500);
-    } catch {
-      detailBundle = await fetchMarketDetailBundle(marketId, 6500);
-    }
     const contentPromise = includeContent
-      ? (
-          detailBundle.content?.items?.length
-            ? Promise.resolve(detailBundle.content)
-            : fetchMarketContent(marketId, 20, 5000)
-        )
+      ? fetchMarketContent(marketId, 20, 3800)
       : Promise.resolve(null);
-    const lobPromise = includeLob ? fetchMarketLob(marketId, 2600) : Promise.resolve(null);
-    const [contentResult, lobResult] = await Promise.allSettled([contentPromise, lobPromise]);
+    const lobPromise = includeLob ? fetchMarketLob(marketId, 1800) : Promise.resolve(null);
+    const detailPromise = fetchMarketWorkspaceBundle(marketId, 4200)
+      .catch(() => fetchMarketDetailBundle(marketId, 4200));
+    const [detailResult, contentResult, lobResult] = await Promise.allSettled([detailPromise, contentPromise, lobPromise]);
+    const detailBundle = detailResult.status === 'fulfilled' ? detailResult.value : emptyWorkspaceBundle();
     const secondary: WorkspaceBundle = {
       market: null,
       identity: null,
