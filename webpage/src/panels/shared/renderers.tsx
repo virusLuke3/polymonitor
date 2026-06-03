@@ -151,10 +151,18 @@ function tradePriceCents(value?: string | number | null) {
   return `${Math.round(numeric * 100)}c`;
 }
 
+function polyscanTxUrl(txHash?: string | null) {
+  const clean = String(txHash || '').trim();
+  if (!clean) return null;
+  const normalized = clean.startsWith('0x') ? clean : `0x${clean}`;
+  return /^0x[a-fA-F0-9]{64}$/.test(normalized) ? `https://polygonscan.com/tx/${normalized}` : null;
+}
+
 function orderfilledList(
   trades: TradeRow[],
   limit = 8,
   resolveMarketTitle?: (trade: TradeRow) => string | null | undefined,
+  options: { compact?: boolean } = {},
 ) {
   if (!trades.length) return emptyState('Waiting for trade rows.');
   return (
@@ -166,27 +174,36 @@ function orderfilledList(
         const actor = tradeActor(trade);
         const actorFull = tradeActorFull(trade);
         const marketTitle = resolveMarketTitle?.(trade) || trade.marketTitle || null;
-        return (
-          <article className={`wm-orderfilled-row ${tone}`} key={`${trade.txHash}-${trade.logIndex}`}>
+        const txUrl = polyscanTxUrl(trade.txHash);
+        const rowKey = `${trade.txHash || 'trade'}-${trade.logIndex ?? 'x'}`;
+        const notional = tradeNotional(trade);
+        const rowContent = (
+          <>
             <div className="wm-orderfilled-top">
               <div className="wm-orderfilled-headline">
                 <span className={`wm-chip ${tone}`}>{side || 'FLOW'}</span>
                 <span className={`wm-orderfilled-outcome ${outcome === 'YES' ? 'yes' : outcome === 'NO' ? 'no' : ''}`}>{outcome}</span>
                 <strong>{tradePriceCents(trade.price)}</strong>
-                <em>{tradeNotional(trade) ? `$${formatCompact(tradeNotional(trade))}` : '$--'}</em>
+                <em>{notional ? `$${formatCompact(notional)}` : '$--'}</em>
               </div>
-              {trade.marketId ? <span className="wm-orderfilled-market-id">MKT #{trade.marketId}</span> : null}
+              <span className={`wm-orderfilled-link ${txUrl ? 'ready' : 'disabled'}`}>{txUrl ? 'Polyscan ↗' : 'No tx'}</span>
             </div>
-            <div className="wm-orderfilled-title">{marketTitle || 'Untitled market'}</div>
+            {!options.compact ? <div className="wm-orderfilled-title">{marketTitle || 'Untitled market'}</div> : null}
             <div className="wm-orderfilled-meta">
               <span>{formatRelative(trade.timestamp || null)}</span>
               <span>{actor}</span>
+              {trade.marketId ? <span>MKT #{trade.marketId}</span> : null}
+              {trade.blockNumber ? <span>BLK {formatCompact(trade.blockNumber)}</span> : null}
             </div>
             <div className="wm-orderfilled-tooltip" role="tooltip" aria-hidden="true">
               <div className="wm-orderfilled-tooltip-title">{marketTitle || `Market #${trade.marketId || '--'}`}</div>
               <div className="wm-orderfilled-tooltip-row">
                 <span>Address</span>
                 <strong>{actorFull}</strong>
+              </div>
+              <div className="wm-orderfilled-tooltip-row">
+                <span>Tx</span>
+                <strong>{trade.txHash || '--'}</strong>
               </div>
               <div className="wm-orderfilled-tooltip-row">
                 <span>Time</span>
@@ -199,6 +216,25 @@ function orderfilledList(
                 </div>
               ) : null}
             </div>
+          </>
+        );
+        if (txUrl) {
+          return (
+            <a
+              className={`wm-orderfilled-row ${tone}`}
+              href={txUrl}
+              key={rowKey}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open OrderFilled transaction ${trade.txHash} on Polyscan`}
+            >
+              {rowContent}
+            </a>
+          );
+        }
+        return (
+          <article className={`wm-orderfilled-row ${tone}`} key={rowKey}>
+            {rowContent}
           </article>
         );
       })}

@@ -41,13 +41,6 @@ const FOCUS_CHART = {
 
 const POLYMARKET_SERIES_COLORS = ['#7cb6ff', '#4377ff', '#f5b800', '#ff7a1a', '#7f56d9', '#12b76a', '#f04438', '#06aed4'];
 
-function tradeNotional(trade: TradeRow) {
-  const size = Number(trade.size);
-  const price = Number(trade.price);
-  if (!Number.isFinite(size) || !Number.isFinite(price)) return null;
-  return size * price;
-}
-
 function marketTimeSubtitle(endDate?: string | null, createdAt?: string | null) {
   if (endDate) return `Closes ${formatRelative(endDate)}`;
   if (createdAt) return `Opened ${formatRelative(createdAt)}`;
@@ -171,9 +164,14 @@ function compactDateLabel(value: number) {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function compactMonthLabel(value: number) {
+function compactTimeLabel(value: number, index: number, total: number) {
   if (!Number.isFinite(value)) return '';
-  return new Date(value).toLocaleDateString('en-US', { month: 'short' });
+  if (index === total - 1) return 'Now';
+  return new Date(value).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 }
 
 function chartTimeTicks(points: Array<{ timestamp: string }>, count = 4) {
@@ -452,7 +450,7 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
           return (
             <g key={`${tick.ts}-${tick.label}`}>
               <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
-              <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactMonthLabel(tick.ts)}</text>
+              <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactTimeLabel(tick.ts, timeTicks.indexOf(tick), timeTicks.length)}</text>
             </g>
           );
         })}
@@ -593,7 +591,7 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
             return (
               <g key={`${tick.ts}-${tick.label}`}>
                 <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
-                <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactMonthLabel(tick.ts)}</text>
+                <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactTimeLabel(tick.ts, timeTicks.indexOf(tick), timeTicks.length)}</text>
               </g>
             );
           })}
@@ -806,19 +804,14 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         >
           <div className="wm-focus-detail">
             <div className="wm-focus-event-head">
-              <div className="wm-focus-event-mark" aria-hidden="true">
-                <span>{String(eventCategory || 'M').slice(0, 1).toUpperCase()}</span>
-              </div>
               <div className="wm-focus-detail-copy">
-                <div className="wm-focus-kicker">
+                <strong className="wm-focus-title">{marketTitle}</strong>
+                <div className="wm-focus-kicker wm-focus-market-meta-line">
                   <span>{eventCategory}</span>
                   <i>{outcomeCount ? `${outcomeCount} outcomes` : 'event'}</i>
-                  <i>{marketTimeSubtitle(
-                    detail?.endDate || selectedGroup?.endDate || focusedMarket?.endDate || null,
-                    detail?.createdAt || selectedGroup?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null,
-                  )}</i>
+                  <i>24h Vol {formatCurrencyCompact(displayedVolume)}</i>
+                  <i>{formatCompact(displayedTrades)} tx</i>
                 </div>
-                <strong className="wm-focus-title">{marketTitle}</strong>
               </div>
               <div className="wm-focus-price-hero">
                 <strong>{formatPercent(liveDisplayedYesPrice)}</strong>
@@ -829,12 +822,10 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
             </div>
 
             <div className="wm-focus-chart-card">
-              <div className="wm-focus-chart-marketbar">
-                <div>
-                  <span>{eventCategory}</span>
-                  <strong>{marketTitle}</strong>
-                </div>
-                <em>{selectedOutcomeLabel}</em>
+              <div className="wm-focus-price-strip" aria-label="selected market quote">
+                <span><em>YES</em> <strong>{formatBookPrice(liveDisplayedYesPrice)}</strong></span>
+                <span><em>NO</em> <strong>{formatBookPrice(liveDisplayedNoPrice)}</strong></span>
+                <span><em>Spread</em> <strong>{formatBookPrice(spreadValue)}</strong></span>
               </div>
               <div className="wm-focus-chart-topline">
                 <div className="wm-focus-chart-tabs" aria-label="chart range">
@@ -852,8 +843,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   <i>UTC</i>
                 </div>
                 <div className="wm-focus-chart-summary">
-                  <span>Vol <strong>{formatCurrencyCompact(displayedVolume)}</strong></span>
-                  <span>24h <strong>{formatCompact(displayedTrades)}</strong></span>
+                  <span>{marketTimeSubtitle(
+                    detail?.endDate || selectedGroup?.endDate || focusedMarket?.endDate || null,
+                    detail?.createdAt || selectedGroup?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null,
+                  )}</span>
+                  <span><strong>{selectedOutcomeLabel}</strong></span>
                 </div>
               </div>
               <div className={`wm-focus-detail-grid${shouldShowOutcomeRail ? '' : ' compact'}`}>
@@ -956,23 +950,17 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   <button type="button" className={bookSide === 'no' ? 'active' : ''} onClick={() => setBookSide('no')}>NO</button>
                 </div>
                 <div className="wm-focus-book-market">
-                  <span>Best Ask <strong className="ask">{formatBookPrice(activeBook?.bestAsk)}</strong></span>
-                  <span>Best Bid <strong className="bid">{formatBookPrice(activeBook?.bestBid)}</strong></span>
+                  <span>{selectedOutcomeLabel}</span>
                 </div>
               </div>
-              <div className="wm-focus-book-overview">
-                <article className="wm-book-stat-spread">
-                  <span>Spread</span>
-                  <strong>{formatBookPrice(spreadValue)}</strong>
-                </article>
-                <article className="wm-book-stat-last">
-                  <span>Last</span>
-                  <strong>{formatBookPrice(activePriceForBook)}</strong>
-                </article>
-                <article className="wm-book-stat-depth">
-                  <span>Top Depth</span>
-                  <strong>{formatBookTotal(askDepthTotal + bidDepthTotal)}</strong>
-                </article>
+              <div className="wm-focus-book-quote-strip">
+                <span>Best Bid <strong className="bid">{formatBookPrice(activeBook?.bestBid)}</strong></span>
+                <span>Mid <strong>{formatBookPrice(activePriceForBook)}</strong></span>
+                <span>Best Ask <strong className="ask">{formatBookPrice(activeBook?.bestAsk)}</strong></span>
+              </div>
+              <div className="wm-focus-book-depth-strip">
+                <span>Spread <strong>{formatBookPrice(spreadValue)}</strong></span>
+                <span>Depth <strong>{formatBookTotal(askDepthTotal + bidDepthTotal)}</strong></span>
               </div>
               <div className="wm-focus-book-ladder">
                 <div className="wm-focus-book-side ask">
@@ -990,9 +978,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   </div>
                 </div>
                 <div className="wm-focus-book-mid" aria-label="order book spread">
-                  <span>Mid Market</span>
-                  <strong>{formatBookPrice(activePriceForBook)}</strong>
-                  <em>Spread {formatBookPrice(spreadValue)}</em>
+                  <span />
+                  <strong>MID {formatBookPrice(activePriceForBook)}</strong>
+                  <em />
                 </div>
                 <div className="wm-focus-book-side bid">
                   <div className="wm-focus-book-side-head">
@@ -1025,13 +1013,13 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         >
           <div className="wm-focus-trades">
             <div className="wm-focus-trades-meta">
-              <span>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : (hasServingTradeActivity ? 'summary only' : noTradesYet ? 'no trades yet' : 'waiting for trades')}</span>
-              <strong>{trades[0] && tradeNotional(trades[0]) ? `$${formatCompact(tradeNotional(trades[0]))}` : '--'}</strong>
+              <span>Market: {marketTitle}</span>
+              <strong>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : (hasServingTradeActivity ? 'summary only' : noTradesYet ? 'no trades yet' : 'waiting')}</strong>
             </div>
             {!executionAvailable && detail
               ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
               : trades.length
-              ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade))
+              ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade), { compact: true })
               : emptyState(hasServingTradeActivity ? 'Volume is available, but raw OrderFilled rows are not indexed locally yet.' : noTradesYet ? 'No orderfilled rows exist for this outcome yet.' : 'No local orderfilled rows are available for this market.')}
           </div>
         </Panel>

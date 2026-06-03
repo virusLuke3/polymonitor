@@ -48,47 +48,29 @@ function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload) {
   const marketTitle = ctx.bundle?.market?.title || ctx.selectedMarket?.title || ctx.bundle?.group?.title || ctx.selectedMarketGroupDetail?.title || ctx.selectedMarketGroup?.title || 'Selected market';
   const status = payload.completionStatus || (payload.isFinal ? 'SETTLED' : payload.isTradingClosed ? 'CLOSED' : 'OPEN');
   const outcome = payload.settlementOutcome && payload.settlementOutcome !== 'UNKNOWN' ? payload.settlementOutcome : 'Awaiting oracle';
-  const bookStatus = String(ctx.bundle?.lob?.bookStatus || '').toLowerCase();
-  const hasLiveBook = Boolean(
-    (ctx.bundle?.lob?.yes?.asks || []).length
-      || (ctx.bundle?.lob?.yes?.bids || []).length
-      || (ctx.bundle?.lob?.no?.asks || []).length
-      || (ctx.bundle?.lob?.no?.bids || []).length,
-  );
-  const tradingText = payload.isTradingClosed
-    ? 'Trading closed'
-    : bookStatus === 'no-book' || (!hasLiveBook && ctx.bundle?.lob)
-      ? 'No live CLOB book'
-      : 'Oracle open';
+  const bound = payload.questionId || payload.conditionId || payload.gammaMarketId ? 'Yes' : 'No';
+  const updatedAt = ctx.selectedMarket?.endDate || ctx.bundle?.market?.endDate || null;
   return (
     <div className="wm-oracle-shell focused">
-      <div className="wm-oracle-summary-strip">
-        <span><strong>{status}</strong> status</span>
-          <span><strong>{payload.questionId || payload.conditionId || payload.gammaMarketId ? 'YES' : 'NO'}</strong> bound</span>
-        <span><strong>{payload.timeline?.length || 0}</strong> events</span>
+      <div className="wm-oracle-focused-status-list" aria-label="oracle status summary">
+        <div><span>Status</span><strong>{status}</strong></div>
+        <div><span>Resolution</span><strong>{payload.isResolved ? outcome : 'Unresolved'}</strong></div>
+        <div><span>Bound</span><strong>{bound}</strong></div>
+        <div><span>Events</span><strong>{payload.timeline?.length || 0}</strong></div>
       </div>
-      <article className="wm-oracle-event-card focused">
-        <div className="wm-oracle-event-top">
-          <div className="wm-oracle-stage">
-            <span className={`wm-oracle-stage-dot ${payload.isFinal ? 'positive' : payload.isTradingClosed ? 'warning' : 'neutral'}`} aria-hidden="true" />
-            <strong>{payload.isFinal ? 'Finalized' : payload.isTradingClosed ? 'Closed, waiting oracle' : 'Market bound'}</strong>
-          </div>
-          <span className="wm-status-pill neutral">{status}</span>
+      <article className="wm-oracle-focused-card">
+        <div className="wm-oracle-focused-heading">
+          <span className={`wm-oracle-stage-dot ${payload.isFinal ? 'positive' : payload.isTradingClosed ? 'warning' : 'neutral'}`} aria-hidden="true" />
+          <strong>Market</strong>
+          <em className="wm-oracle-awaiting-badge">{payload.isResolved ? 'resolved' : 'awaiting oracle'}</em>
         </div>
         <div className="wm-oracle-market-title">{marketTitle}</div>
-        <div className="wm-oracle-result-row">
-          <span className={`wm-oracle-outcome ${String(outcome).toLowerCase()}`}>{outcome}</span>
-          <span>{payload.isResolved ? 'RESOLVED' : 'UNRESOLVED'}</span>
-          <span>{payload.localMarketId || payload.marketId ? `MKT #${payload.localMarketId || payload.marketId}` : 'NO LOCAL ID'}</span>
-        </div>
-        <div className="wm-oracle-event-meta">
-          <span>{tradingText}</span>
-          <span>{formatRelative(ctx.selectedMarket?.endDate || ctx.bundle?.market?.endDate || null)}</span>
-        </div>
-        <div className="wm-oracle-proof-grid">
-          <span>Oracle <strong>{shortHash(payload.oracle || '', 8, 5) || '--'}</strong></span>
-          <span>QID <strong>{shortHash(payload.questionId || payload.conditionId || '', 8, 5) || '--'}</strong></span>
-          <span>Source <strong>{payload.settlementSource || 'market'}</strong></span>
+        <div className="wm-oracle-focused-table" aria-label="oracle details">
+          <div><span>Source</span><strong>{payload.settlementSource || 'market'}</strong></div>
+          <div><span>QID</span><strong>{shortHash(payload.questionId || payload.conditionId || '', 8, 5) || '--'}</strong></div>
+          <div><span>Oracle</span><strong>{shortHash(payload.oracle || '', 8, 5) || '--'}</strong></div>
+          <div><span>Updated</span><strong>{formatRelative(updatedAt)}</strong></div>
+          <div><span>Market</span><strong>{payload.localMarketId || payload.marketId ? `#${payload.localMarketId || payload.marketId}` : '--'}</strong></div>
         </div>
       </article>
     </div>

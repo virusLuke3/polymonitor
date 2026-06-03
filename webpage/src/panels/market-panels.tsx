@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem, PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
 import { AiMarketWidePanel } from './shared/ai-market-wide';
-import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative, formatSignedPercent, shortHash, signedClass } from './shared/formatters';
+import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative, shortHash } from './shared/formatters';
 import { emptyState, priceLine } from './shared/renderers';
 import { globalMarkets } from './shared/selectors';
 
@@ -124,26 +124,6 @@ function defaultGroupMarketId(group: MarketGroupItem) {
   if (topWithMarket?.marketId) return Number(topWithMarket.marketId);
   const firstWithMarket = (group.outcomes || []).find((outcome) => outcome.marketId);
   return firstWithMarket?.marketId ? Number(firstWithMarket.marketId) : null;
-}
-
-function groupOutcomePills(outcomes: MarketGroupOutcome[]) {
-  const visible = outcomes.slice(0, 4);
-  const remaining = Math.max(0, outcomes.length - visible.length);
-  if (!visible.length) return <span className="wm-poly-market-outcome">Pending outcomes</span>;
-  return (
-    <>
-      {visible.map((outcome) => (
-        <span
-          className="wm-poly-market-outcome"
-          key={`${outcome.marketId || outcome.gammaMarketId || outcome.label}`}
-          title={outcome.label || 'Outcome'}
-        >
-          {outcome.label || 'Outcome'} <b>{formatPercent(outcome.yesPrice)}</b>
-        </span>
-      ))}
-      {remaining ? <span className="wm-poly-market-more">+{remaining}</span> : null}
-    </>
-  );
 }
 
 function complementPrice(value?: string | number | null) {
@@ -346,8 +326,9 @@ function activeMarketGroupsList(
               </div>
               <strong className="wm-poly-market-title">{group.title}</strong>
               <div className="wm-poly-market-bottom">
-                {groupOutcomePills(group.outcomes?.length ? group.outcomes : (group.topOutcomes || []))}
-                <span className="wm-poly-market-volume">vol {formatCurrencyCompact(groupDisplayVolume(group))} 24h</span>
+                <span className="wm-poly-market-prob">{formatPercent(groupBestLivePrice(group))}</span>
+                <span className="wm-poly-market-volume">Vol {formatCurrencyCompact(groupDisplayVolume(group))}</span>
+                <span className="wm-poly-market-trades">{formatCompact(groupDisplayTradeCount(group))} tx</span>
               </div>
             </div>
             <span className="wm-poly-market-star" aria-hidden="true">☆</span>
@@ -369,8 +350,8 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
           className={`wm-poly-market-card ${selectedMarketId === market.id ? 'active' : ''}`}
           onClick={() => setSelectedMarketId(market.id)}
           aria-pressed={selectedMarketId === market.id}
-          title={market.title}
-          style={{ borderLeftColor: marketAccent(market) }}
+          title={`${market.title}${market.slug ? ` · ${market.slug}` : ''}`}
+          style={{ '--wm-market-accent': marketAccent(market) } as Record<string, string>}
         >
           <div className="wm-poly-market-card-main">
             <div className="wm-poly-market-meta">
@@ -384,9 +365,7 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
             <strong className="wm-poly-market-title">{market.title}</strong>
             <div className="wm-poly-market-bottom">
               <span className="wm-poly-market-prob">{formatPercent(market.latestPrice)}</span>
-              <span className="wm-poly-market-outcome">{shortHash(market.slug || market.conditionId || '', 18, 0)}</span>
-              <span className={`wm-poly-market-change ${signedClass(market.change24h)}`}>{formatSignedPercent(market.change24h)}</span>
-              <span className="wm-poly-market-volume">vol {formatCurrencyCompact(market.volume24h)} 24h</span>
+              <span className="wm-poly-market-volume">Vol {formatCurrencyCompact(market.volume24h)}</span>
               <span className="wm-poly-market-trades">{formatCompact(market.tradeCount24h)} tx</span>
             </div>
           </div>
@@ -479,24 +458,12 @@ function ActiveMarketsPanel({
   return (
     <Panel
       title="MARKETS"
-      badge="LIVE"
+      badge={marketGroupSort === 'new' ? 'NEW' : marketGroupSort === 'volume' ? 'VOLUME' : 'LIVE'}
       status="live"
       count={panelCount}
       className="wm-market-panel"
       controls={
         <div className="wm-market-panel-controls">
-          <label className="wm-market-search" aria-label="Search markets">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-              <circle cx="7" cy="7" r="4.8" />
-              <path d="M10.8 10.8 14 14" />
-            </svg>
-            <input
-              type="search"
-              value={search}
-              onInput={(event) => setSearch(event.currentTarget.value)}
-              placeholder="search..."
-            />
-          </label>
           <select
             className="wm-market-sort"
             value={marketGroupSort}
@@ -510,6 +477,18 @@ function ActiveMarketsPanel({
         </div>
       }
     >
+      <label className="wm-market-search wm-market-search-body" aria-label="Search markets">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.8" />
+          <path d="M10.8 10.8 14 14" />
+        </svg>
+        <input
+          type="search"
+          value={search}
+          onInput={(event) => setSearch(event.currentTarget.value)}
+          placeholder="Search markets..."
+        />
+      </label>
       {hasGroups
         ? activeMarketGroupsList(visibleGroups, selectedMarketId, selectedMarketGroupId, focusMarketGroup)
         : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId)}

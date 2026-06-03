@@ -1036,7 +1036,7 @@ body {
 }
 
 .wm-focused-market-list .wm-market-search {
-  width: min(150px, 34vw);
+  width: 100%;
 }
 
 .wm-focused-market-list .wm-market-sort {
@@ -1047,17 +1047,17 @@ body {
 
 .wm-focused-market-list .wm-poly-market-card {
   grid-template-columns: 1fr;
-  min-height: 114px;
-  margin-bottom: 6px;
-  padding: 9px 9px 9px 11px;
+  min-height: 92px;
+  margin-bottom: 0;
+  padding: 11px 11px 10px 13px;
 }
 
 .wm-focused-market-list .wm-poly-market-card-main {
   display: grid;
   grid-template-rows: auto auto auto;
-  row-gap: 6px;
+  row-gap: 5px;
   align-content: start;
-  padding-right: 27px;
+  padding-right: 25px;
 }
 
 .wm-focused-market-list .wm-poly-market-meta,
@@ -1076,17 +1076,17 @@ body {
   min-height: 0;
   margin-bottom: 0;
   padding-right: 4px;
-  font-size: 12px;
-  line-height: 1.24;
-  -webkit-line-clamp: 3;
+  font-size: 13px;
+  line-height: 1.25;
+  -webkit-line-clamp: 2;
 }
 
 .wm-focused-market-list .wm-poly-market-bottom {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 5px;
+  display: grid;
+  grid-template-columns: minmax(44px, 0.5fr) minmax(92px, 1fr) minmax(54px, 0.7fr);
+  gap: 6px;
   align-items: center;
-  white-space: normal;
+  white-space: nowrap;
   line-height: 1.1;
 }
 
@@ -1094,37 +1094,11 @@ body {
   font-size: 11px;
 }
 
-.wm-focused-market-list .wm-poly-market-outcome {
-  flex: 1 1 calc(50% - 4px);
-  max-width: calc(50% - 4px);
-  min-width: 88px;
-  padding: 2px 5px;
-  border: 1px solid rgba(126, 220, 255, 0.16);
-  background: rgba(126, 220, 255, 0.045);
-  color: #aeb7b7;
-  line-height: 1.2;
-}
-
-.wm-focused-market-list .wm-poly-market-outcome b {
-  color: #eef1ee;
-}
-
-.wm-focused-market-list .wm-poly-market-more {
-  flex: 0 0 auto;
-  padding: 2px 5px;
-  border: 1px solid #2f3437;
-  background: #1b1d1d;
-  color: #8d9696;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 900;
-}
-
 .wm-focused-market-list .wm-poly-market-volume {
   margin-left: 0;
-  padding: 2px 5px;
-  border: 1px solid rgba(57, 255, 115, 0.18);
-  background: rgba(57, 255, 115, 0.055);
+  padding: 0;
+  border: 0;
+  background: transparent;
   line-height: 1.2;
 }
 
@@ -1190,7 +1164,7 @@ body {
 }
 
 .wm-focus-book {
-  gap: 9px;
+  gap: 7px;
   overflow: hidden;
 }
 
@@ -1227,8 +1201,8 @@ body {
 
 .wm-focus-event-head {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) minmax(72px, 106px);
-  gap: 9px;
+  grid-template-columns: minmax(0, 1fr) minmax(82px, 120px);
+  gap: 12px;
   align-items: start;
 }
 
@@ -1260,13 +1234,18 @@ body {
 .wm-focus-title {
   display: -webkit-box;
   font-size: var(--wm-focus-title-size);
-  line-height: 1.12;
+  line-height: 1.14;
   overflow: hidden;
   text-overflow: ellipsis;
   overflow-wrap: anywhere;
   word-break: normal;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.wm-focus-market-meta-line {
+  margin-top: 6px;
+  margin-bottom: 0;
 }
 
 .wm-focus-kicker,
@@ -1334,7 +1313,7 @@ body {
 
 .wm-focus-price-hero strong {
   display: block;
-  font-size: var(--wm-focus-hero-size);
+  font-size: calc(var(--wm-focus-hero-size) + 4px);
   line-height: 1;
 }
 
@@ -1552,13 +1531,46 @@ body {
   overflow: visible;
   border: 1px solid rgba(126, 220, 255, 0.13);
   background:
-    radial-gradient(circle at 74% 14%, rgba(57, 255, 115, 0.055), transparent 28%),
-    linear-gradient(180deg, rgba(18, 19, 19, 0.96), rgba(9, 11, 11, 0.985));
+    linear-gradient(180deg, rgba(15, 18, 18, 0.98), rgba(8, 10, 10, 0.99));
   color: #e8eeee;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.035),
-    inset 0 0 28px rgba(78, 142, 255, 0.025),
-    0 12px 30px rgba(0, 0, 0, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.wm-focus-price-strip {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 10px 0;
+  font-family: var(--font-mono);
+}
+
+.wm-focus-price-strip span {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: #8f989d;
+  white-space: nowrap;
+}
+
+.wm-focus-price-strip em {
+  color: #7f8a8f;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.65px;
+  text-transform: uppercase;
+}
+
+.wm-focus-price-strip strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #f4f8f7;
+  font-size: 15px;
+  font-weight: 950;
+  text-overflow: ellipsis;
 }
 
 .wm-focus-chart-marketbar {
@@ -1611,14 +1623,7 @@ body {
 }
 
 .wm-focus-chart-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(90deg, rgba(126, 220, 255, 0.05), transparent 18%, transparent 82%, rgba(57, 255, 115, 0.035)),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0, rgba(255, 255, 255, 0.018) 1px, transparent 1px, transparent 32px);
-  opacity: 0.62;
+  content: none;
 }
 
 .wm-focus-chart-topline {
@@ -1634,7 +1639,7 @@ body {
 .wm-focus-chart-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   flex-wrap: wrap;
 }
@@ -1648,21 +1653,21 @@ body {
 
 .wm-focus-chart-tabs button {
   appearance: none;
-  min-width: 40px;
-  padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.045);
+  min-width: 38px;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
   color: #9aa4aa;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
 .wm-focus-chart-tabs button.active {
-  border-color: rgba(57, 255, 115, 0.42);
-  background: rgba(57, 255, 115, 0.13);
-  color: #e9fff0;
-  box-shadow: inset 0 0 0 1px rgba(57, 255, 115, 0.07);
+  border-color: rgba(77, 163, 255, 0.34);
+  background: rgba(77, 163, 255, 0.1);
+  color: #d7ebff;
+  box-shadow: none;
 }
 
 .wm-focus-chart-tabs button.ghost {
@@ -1784,9 +1789,9 @@ body {
 }
 
 .wm-focus-chart-grid {
-  stroke: rgba(180, 198, 205, 0.18);
+  stroke: rgba(180, 198, 205, 0.12);
   stroke-width: 1;
-  stroke-dasharray: 2 7;
+  stroke-dasharray: 1 8;
 }
 
 .wm-focus-chart-grid.v {
@@ -1794,7 +1799,7 @@ body {
 }
 
 .wm-focus-chart-axis-text {
-  fill: #899298;
+  fill: rgba(137, 146, 152, 0.68);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
@@ -1812,21 +1817,21 @@ body {
   position: absolute;
   top: 42%;
   right: 38px;
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 900;
-  color: rgba(126, 220, 255, 0.06);
+  color: rgba(126, 220, 255, 0.035);
   pointer-events: none;
   z-index: 1;
 }
 
 .wm-focus-chart-timeline-line {
-  stroke: rgba(180, 198, 205, 0.18);
+  stroke: rgba(180, 198, 205, 0.12);
   stroke-width: 1;
 }
 
 .wm-focus-chart-timeline-handle {
-  fill: #101515;
-  stroke: rgba(180, 198, 205, 0.25);
+  fill: rgba(180, 198, 205, 0.16);
+  stroke: rgba(180, 198, 205, 0.18);
   stroke-width: 1;
   filter: drop-shadow(0 0 5px rgba(57, 255, 115, 0.12));
 }
@@ -1866,11 +1871,12 @@ body {
 
 .wm-focus-chart-endpoint {
   stroke: #0c1010;
-  stroke-width: 1.7;
+  stroke-width: 2.2;
 }
 
 .wm-focus-chart-endpoint.selected {
-  stroke-width: 2;
+  stroke-width: 2.6;
+  filter: drop-shadow(0 0 6px rgba(77, 163, 255, 0.5));
 }
 
 .wm-focus-chart-endpoint.no-dot {
@@ -2086,22 +2092,22 @@ body {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
 
 .wm-focus-book-tabs {
   position: relative;
   display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border: 1px solid rgba(126, 220, 255, 0.14);
+  padding: 1px;
+  gap: 1px;
+  border: 1px solid rgba(126, 220, 255, 0.16);
   border-radius: 6px;
-  background: #0d1011;
+  background: #090d0e;
 }
 
 .wm-focus-book-tabs button {
-  min-width: 48px;
-  padding: 6px 11px;
+  min-width: 46px;
+  padding: 5px 10px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
@@ -2117,13 +2123,10 @@ body {
 .wm-focus-book-tabs button.active {
   border-color: rgba(57, 255, 115, 0.24);
   background:
-    linear-gradient(180deg, rgba(57, 255, 115, 0.16), rgba(57, 255, 115, 0.06)),
+    linear-gradient(180deg, rgba(57, 255, 115, 0.14), rgba(57, 255, 115, 0.05)),
     #0d2216;
   color: #78ffab;
-  box-shadow:
-    0 0 16px rgba(57, 255, 115, 0.16),
-    inset 0 0 0 1px rgba(57, 255, 115, 0.08);
-  animation: wm-book-active-pulse 2200ms ease-in-out infinite;
+  box-shadow: inset 0 0 0 1px rgba(57, 255, 115, 0.08);
 }
 
 .wm-focus-book-market {
@@ -2138,6 +2141,53 @@ body {
   font-weight: 900;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.wm-focus-book-quote-strip,
+.wm-focus-book-depth-strip {
+  flex: 0 0 auto;
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+}
+
+.wm-focus-book-quote-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wm-focus-book-depth-strip {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-bottom: 2px;
+}
+
+.wm-focus-book-quote-strip span,
+.wm-focus-book-depth-strip span {
+  min-width: 0;
+  color: #8c9696;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-focus-book-quote-strip strong,
+.wm-focus-book-depth-strip strong {
+  margin-left: 4px;
+  color: #f1f5f4;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.wm-focus-book-quote-strip strong.ask {
+  color: #ff7f89;
+}
+
+.wm-focus-book-quote-strip strong.bid {
+  color: #69f59b;
 }
 
 .wm-focus-book-market strong {
@@ -2158,30 +2208,22 @@ body {
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 5px;
 }
 
 .wm-focus-book-overview article {
   position: relative;
   min-width: 0;
-  padding: 7px 8px;
-  border: 1px solid #252d2f;
+  padding: 6px 8px;
+  border: 1px solid rgba(126, 220, 255, 0.13);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
-    #101314;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0)),
+    #0d1112;
   overflow: hidden;
-  animation: wm-book-card-enter 340ms ease both;
 }
 
 .wm-focus-book-overview article::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(110deg, transparent 0 36%, rgba(126, 220, 255, 0.08) 48%, transparent 62% 100%);
-  opacity: 0;
-  transform: translateX(-100%);
-  animation: wm-book-stat-scan 3600ms ease-in-out infinite;
-  pointer-events: none;
+  content: none;
 }
 
 .wm-focus-book-overview article:nth-child(2) {
@@ -2217,30 +2259,20 @@ body {
 .wm-focus-book-ladder {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(30px, auto) minmax(0, 1fr);
-  gap: 7px;
+  grid-template-rows: minmax(0, 1fr) minmax(27px, auto) minmax(0, 1fr);
+  gap: 5px;
   flex: 1 1 auto;
   min-height: 0;
-  padding: 7px;
+  padding: 6px;
   border: 1px solid rgba(126, 220, 255, 0.13);
   background:
-    radial-gradient(circle at 50% 0%, rgba(126, 220, 255, 0.04), transparent 46%),
-    #0c0f10;
+    linear-gradient(180deg, rgba(126, 220, 255, 0.035), transparent 45%),
+    #080c0d;
   overflow: hidden;
 }
 
 .wm-focus-book-ladder::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background:
-    linear-gradient(180deg, transparent 0 22%, rgba(126, 220, 255, 0.045) 50%, transparent 78%),
-    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 26px);
-  opacity: 0.58;
-  transform: translateY(-40%);
-  animation: wm-book-ladder-scan 5200ms linear infinite;
-  pointer-events: none;
+  content: none;
 }
 
 .wm-focus-book-side {
@@ -2250,14 +2282,9 @@ body {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border: 1px solid #202829;
-  background: #0f1112;
+  border: 1px solid rgba(126, 220, 255, 0.1);
+  background: #0b0f10;
   overflow: hidden;
-  animation: wm-book-side-enter 260ms ease both;
-}
-
-.wm-focus-book-side.bid {
-  animation-delay: 130ms;
 }
 
 .wm-focus-book-side-head {
@@ -2266,10 +2293,11 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 27px;
-  padding: 5px 8px;
-  border-bottom: 1px solid #202829;
+  min-height: 25px;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(126, 220, 255, 0.1);
   font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.018);
 }
 
 .wm-focus-book-side-head strong {
@@ -2302,14 +2330,18 @@ body {
   display: grid;
   grid-template-columns: minmax(58px, 0.8fr) minmax(62px, 1fr) minmax(72px, 1fr);
   gap: 8px;
-  padding: 4px 8px;
-  border-bottom: 1px solid #1d2425;
+  padding: 4px 8px 3px;
+  border-bottom: 1px solid rgba(126, 220, 255, 0.08);
   color: #6f7b7b;
   font-family: var(--font-mono);
   font-size: var(--wm-book-header-size);
   font-weight: 900;
   letter-spacing: 0.7px;
   text-transform: uppercase;
+}
+
+.wm-focus-book-header span {
+  text-align: right;
 }
 
 .wm-focus-book-header span:nth-child(2),
@@ -2319,7 +2351,7 @@ body {
 
 .wm-focus-book-rows {
   display: grid;
-  grid-auto-rows: minmax(20px, 1fr);
+  grid-auto-rows: minmax(18px, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
@@ -2336,19 +2368,16 @@ body {
   overflow: hidden;
   font-family: var(--font-mono);
   font-size: var(--wm-book-row-size);
-  border-top: 1px solid rgba(255, 255, 255, 0.045);
-  background: #0f1112;
+  border-top: 1px solid rgba(255, 255, 255, 0.035);
+  background: #0b0f10;
   line-height: 1.1;
-  opacity: 0;
-  transform: translateY(-4px);
-  animation: wm-book-row-enter 360ms ease forwards, wm-book-row-live 3400ms ease-in-out infinite;
-  animation-delay: var(--wm-book-row-delay, 0ms), calc(900ms + var(--wm-book-row-delay, 0ms));
-  transition: background 140ms ease, box-shadow 140ms ease;
+  transition: background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 .wm-focus-book-row:hover {
-  background: #151a1b;
+  background: #111718;
   box-shadow: inset 0 0 0 1px rgba(126, 220, 255, 0.12);
+  transform: translateX(1px);
 }
 
 .wm-focus-book-row:first-child {
@@ -2363,6 +2392,10 @@ body {
   z-index: 1;
 }
 
+.wm-focus-book-row strong {
+  text-align: right;
+}
+
 .wm-focus-book-depth-track {
   position: absolute;
   inset: 0;
@@ -2374,14 +2407,19 @@ body {
   position: absolute;
   inset: 0 0 0 auto;
   background:
-    linear-gradient(90deg, rgba(57, 255, 115, 0), rgba(57, 255, 115, 0.18));
+    linear-gradient(90deg, rgba(57, 255, 115, 0), rgba(57, 255, 115, 0.13));
   transition: width 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  animation: wm-book-depth-breathe 2600ms ease-in-out infinite;
+}
+
+.wm-focus-book-row.bid .wm-focus-book-side-fill {
+  inset: 0 auto 0 0;
+  background:
+    linear-gradient(90deg, rgba(57, 255, 115, 0.13), rgba(57, 255, 115, 0));
 }
 
 .wm-focus-book-row.ask .wm-focus-book-side-fill {
   background:
-    linear-gradient(90deg, rgba(255, 91, 103, 0), rgba(255, 91, 103, 0.2));
+    linear-gradient(90deg, rgba(255, 91, 103, 0), rgba(255, 91, 103, 0.13));
 }
 
 .wm-focus-book-row.ask strong {
@@ -2418,27 +2456,22 @@ body {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  min-height: 30px;
-  padding: 6px 10px;
+  min-height: 24px;
+  padding: 3px 8px;
   font-family: var(--font-mono);
   font-size: var(--wm-book-mid-size);
-  border: 1px solid rgba(126, 220, 255, 0.15);
+  border: 0;
+  border-top: 1px solid rgba(126, 220, 255, 0.12);
+  border-bottom: 1px solid rgba(126, 220, 255, 0.12);
   background:
-    linear-gradient(90deg, rgba(255, 91, 103, 0.08), rgba(126, 220, 255, 0.05) 50%, rgba(57, 255, 115, 0.08)),
-    #101314;
+    linear-gradient(90deg, transparent, rgba(126, 220, 255, 0.045) 50%, transparent),
+    #0a0d0e;
   text-transform: none;
   overflow: hidden;
-  animation: wm-book-mid-glow 2400ms ease-in-out infinite;
 }
 
 .wm-focus-book-mid::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(126, 220, 255, 0.11), transparent);
-  transform: translateX(-120%);
-  animation: wm-book-mid-scan 3200ms ease-in-out infinite;
-  pointer-events: none;
+  content: none;
 }
 
 .wm-focus-book-mid span {
@@ -2448,9 +2481,10 @@ body {
 
 .wm-focus-book-mid strong {
   justify-self: center;
-  color: #f3f7f7;
-  font-size: 16px;
+  color: #dfe9e9;
+  font-size: 12px;
   font-weight: 950;
+  letter-spacing: 0.7px;
 }
 
 .wm-focus-book-mid em {
@@ -2817,16 +2851,24 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid #232323;
-  background: #121212;
-  font-size: 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(126, 220, 255, 0.1);
+  background:
+    linear-gradient(90deg, rgba(57, 255, 115, 0.035), transparent 44%),
+    #0d1112;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.4px;
   color: var(--wm-text-dim);
+  text-transform: uppercase;
 }
 
 .wm-focus-trades-meta strong {
   color: var(--wm-text);
-  font-size: 17px;
+  font-size: 16px;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .wm-focus-trades .wm-orderfilled-list {
