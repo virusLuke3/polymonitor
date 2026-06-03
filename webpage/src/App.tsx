@@ -500,6 +500,7 @@ function bundleMatchesMarket(bundle: WorkspaceBundle | null, marketId: number) {
     bundle.lob?.localMarketId,
     bundle.lob?.marketId,
     bundle.selectedOutcome?.marketId,
+    bundle.trades?.[0]?.marketId,
   ];
   return ids.some((id) => Number(id) === Number(marketId));
 }
