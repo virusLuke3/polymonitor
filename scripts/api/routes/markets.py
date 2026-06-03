@@ -23,9 +23,6 @@ def create_markets_blueprint(helpers: dict) -> Blueprint:
 
     @bp.route("/markets/<int:market_id>/trades", methods=["GET"])
     def api_market_trades_by_id(market_id: int):
-        market = helpers["get_market_by_id"](market_id)
-        if not market:
-            return jsonify({"error": "Market not found", "marketId": market_id}), 404
         limit = min(int(request.args.get("limit", 100)), 500)
         offset = max(0, int(request.args.get("offset", 0)))
         return jsonify(helpers["get_trades_by_market_id"](market_id, limit=limit, offset=offset))
@@ -48,16 +45,15 @@ def create_markets_blueprint(helpers: dict) -> Blueprint:
 
     @bp.route("/markets/<int:market_id>/price", methods=["GET"])
     def api_market_price_by_id(market_id: int):
-        market = helpers["get_market_by_id"](market_id)
-        if not market:
-            return jsonify({"error": "Market not found", "marketId": market_id}), 404
-        return jsonify(helpers["get_market_price_summary"](market_id))
+        payload = helpers["get_market_detail_payload"](market_id)
+        status_code = int(payload.get("_status", 200))
+        if status_code >= 400:
+            return jsonify(payload), status_code
+        price = payload.get("price") if isinstance(payload, dict) else None
+        return jsonify(price or {"marketId": market_id, "localMarketId": market_id})
 
     @bp.route("/markets/<int:market_id>/chart", methods=["GET"])
     def api_market_chart_by_id(market_id: int):
-        market = helpers["get_market_by_id"](market_id)
-        if not market:
-            return jsonify({"error": "Market not found", "marketId": market_id}), 404
         range_name = (request.args.get("range") or "1d").strip().lower()
         interval = (request.args.get("interval") or "5m").strip().lower()
         return jsonify(helpers["get_market_chart_payload"](market_id, range_name=range_name, interval=interval))

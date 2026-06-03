@@ -83,7 +83,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, worldcup_dashboard_service, worldcup_intel_service
+from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, market_workspace_cache_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, worldcup_dashboard_service, worldcup_intel_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -277,10 +277,15 @@ def build_route_helpers() -> Dict[str, Any]:
         },
         "get_market_by_id": get_market_by_id,
         "get_market_by_slug": get_market_by_slug,
-        "get_market_chart_payload": get_market_chart_payload,
+        "get_market_chart_payload": lambda market_id, range_name="1d", interval="5m": market_workspace_cache_service.get_market_chart_payload(
+            build_service_context(),
+            market_id,
+            range_name=range_name,
+            interval=interval,
+        ),
         "get_gamma_active_market_filter": lambda: market_data_client.get_gamma_active_market_filter(build_service_context()),
-        "get_market_detail_payload": lambda market_id: market_service.get_market_detail_payload(build_service_context(), market_id),
-        "get_market_workspace_payload": lambda market_id: market_service.get_market_workspace_payload(build_service_context(), market_id),
+        "get_market_detail_payload": lambda market_id: market_workspace_cache_service.get_market_detail_payload(build_service_context(), market_id),
+        "get_market_workspace_payload": lambda market_id: market_workspace_cache_service.get_market_workspace_payload(build_service_context(), market_id),
         "get_market_group_snapshot": get_market_group_snapshot,
         "get_market_groups_payload": lambda query="", page=1, page_size=80, sort="active": market_group_service.get_market_groups_payload(
             build_service_context(),
@@ -322,7 +327,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_recent_trades_snapshot": get_recent_trades_snapshot,
         "get_related_content_payload": lambda market_id, limit=8: content_service.get_related_content_payload(build_service_context(), market_id, limit=limit),
         "get_redis_client": get_redis_client,
-        "get_runtime_lob_payload": lambda market_id: lob_service.get_runtime_lob_payload(build_service_context(), market_id),
+        "get_runtime_lob_payload": lambda market_id: market_workspace_cache_service.get_market_orderbook_payload(build_service_context(), market_id),
         "get_runtime_lob_by_token_payload": lambda token_id, no_token_id="", market_title="": lob_service.get_runtime_lob_by_token_payload(
             build_service_context(),
             token_id,
@@ -337,7 +342,12 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_weather_news_snapshot": get_weather_news_snapshot,
         "search_markets": lambda query, limit=10: market_service.search_markets(build_service_context(), query, limit=limit),
         "set_cached_json": set_cached_json,
-        "get_trades_by_market_id": get_trades_by_market_id,
+        "get_trades_by_market_id": lambda market_id, limit=100, offset=0: market_workspace_cache_service.get_market_flow_rows(
+            build_service_context(),
+            market_id,
+            limit=limit,
+            offset=offset,
+        ),
         "normalize_address": normalize_address,
         "normalize_market": normalize_market,
         "parse_json_list": parse_json_list,

@@ -2122,9 +2122,18 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
         ensure_ascii=True,
     )
     exact_payload = ctx["SNAPSHOT_STORE"].get(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key)
+    exact_payload_was_empty = False
     if exact_payload is not None:
-        ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, exact_payload, 60)
-        return exact_payload
+        exact_items = exact_payload.get("items") if isinstance(exact_payload, dict) else None
+        if isinstance(exact_items, list) and exact_items:
+            ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, exact_payload, 60)
+            return exact_payload
+        exact_payload_was_empty = True
+        ctx["app"].logger.warning(
+            "markets-active exact snapshot ignored because it is empty page_size=%s include_runtime_prices=%s",
+            page_size,
+            include_runtime_prices,
+        )
 
     if markets_latest_snapshot_fallback_enabled():
         latest_payload = ctx["SNAPSHOT_STORE"].get_latest_stale(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, exclude_cache_key=cache_key)
@@ -2138,6 +2147,19 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             ctx["SNAPSHOT_STORE"].set(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, fallback_payload, 60)
             ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, fallback_payload, 60)
             return fallback_payload
+
+    if exact_payload_was_empty:
+        rebuilt_payload = build_active_markets_payload(
+            ctx,
+            page_size=page_size,
+            include_runtime_prices=include_runtime_prices,
+            include_change_24h=include_runtime_prices,
+        )
+        rebuilt_items = rebuilt_payload.get("items") if isinstance(rebuilt_payload, dict) else None
+        if isinstance(rebuilt_items, list) and rebuilt_items:
+            ctx["SNAPSHOT_STORE"].set(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, rebuilt_payload, 60)
+            ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, rebuilt_payload, 60)
+        return rebuilt_payload
 
     return ctx["get_snapshot_payload"](
         ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
