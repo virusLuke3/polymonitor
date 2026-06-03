@@ -788,6 +788,8 @@ def get_trades_by_market_id(ctx: dict, market_id: int, limit: int = 100, offset:
     clickhouse_rows = clickhouse_orderfilled_service.get_market_trades(ctx, market_id, limit=limit, offset=offset)
     if clickhouse_rows is not None:
         return clickhouse_rows
+    if clickhouse_orderfilled_service.clickhouse_orderfilled_enabled():
+        return []
     trade_source = ctx["get_existing_trade_read_source"]()
     if trade_source is None:
         return []

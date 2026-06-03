@@ -223,6 +223,8 @@ def get_recent_trades(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
     clickhouse_rows = clickhouse_orderfilled_service.get_recent_trades(ctx, limit=limit)
     if clickhouse_rows is not None:
         return clickhouse_rows
+    if clickhouse_orderfilled_service.clickhouse_orderfilled_enabled():
+        return []
     trade_source = ctx["get_existing_trade_read_source"]()
     if trade_source is None:
         return []

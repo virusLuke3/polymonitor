@@ -106,7 +106,7 @@ def _query_json_rows_http(ctx: dict, query: str, *, timeout_seconds: float) -> O
     return rows
 
 
-def _query_json_rows(ctx: dict, query: str, *, timeout_seconds: float = 4.0) -> Optional[List[Dict[str, Any]]]:
+def _query_json_rows(ctx: dict, query: str, *, timeout_seconds: float = 1.8) -> Optional[List[Dict[str, Any]]]:
     if not clickhouse_orderfilled_enabled():
         return None
     if ctx.get("app") is None:

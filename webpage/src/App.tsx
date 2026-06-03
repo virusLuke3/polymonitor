@@ -1323,7 +1323,7 @@ export function App() {
     let cancelled = false;
     const eventId = selectedMarketGroupId;
 
-    fetchMarketGroupDetail(eventId, 5500)
+    fetchMarketGroupDetail(eventId, 3000)
       .then((detailPayload) => {
         if (cancelled) return;
         setSelectedMarketGroupDetail(detailPayload);
@@ -1348,7 +1348,7 @@ export function App() {
     const chartRange = selectedMarketGroupChartRange;
     setSelectedMarketGroupChart(null);
 
-    fetchMarketGroupChart(eventId, chartRange, 6500)
+    fetchMarketGroupChart(eventId, chartRange, 3500)
       .then((chartPayload) => {
         if (!cancelled) setSelectedMarketGroupChart(chartPayload);
       })
@@ -1367,7 +1367,7 @@ export function App() {
     const currentMarketId = selectedMarketId;
     const chartRange = selectedMarketGroupChartRange;
 
-    fetchMarketChart(currentMarketId, chartRange, undefined, 6500)
+    fetchMarketChart(currentMarketId, chartRange, undefined, 3500)
       .then((chartPayload) => {
         if (cancelled) return;
         setBundle((previous) => {
@@ -1621,7 +1621,7 @@ export function App() {
   const panelShouldShowLoading = (panelId: string) => {
     if (loading && !bootstrap) return true;
     if (panelLoadingIds.has(panelId) && !runtimePayloadLoaded(panelId)) return true;
-    if (bundleLoading && selectedMarketId != null && MARKET_WORKSPACE_PANEL_IDS.has(panelId)) return true;
+    if (bundleLoading && selectedMarketId != null && MARKET_WORKSPACE_PANEL_IDS.has(panelId) && !bundle?.market && !selectedMarket) return true;
     return false;
   };
 

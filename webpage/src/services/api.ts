@@ -145,7 +145,7 @@ export function fetchMarketsPage(page = 1, query = '', pageSize = 160) {
     status: 'active',
   });
   if (query.trim()) params.set('q', query.trim());
-  return apiGet<MarketsPayload>(`/markets?${params.toString()}`);
+  return apiGetWithTimeout<MarketsPayload>(`/markets?${params.toString()}`, 3500);
 }
 
 export async function fetchAllActiveMarkets(query = '', pageSize = 160, maxPages = 8) {
@@ -183,14 +183,14 @@ export function fetchMarketGroups(query = '', pageSize = 80, sort: 'active' | 'n
     sort,
   });
   if (query.trim()) params.set('q', query.trim());
-  return apiGet<MarketGroupsPayload>(`/market-groups?${params.toString()}`);
+  return apiGetWithTimeout<MarketGroupsPayload>(`/market-groups?${params.toString()}`, 3500);
 }
 
-export function fetchMarketGroupDetail(eventId: string, timeoutMs = 12000) {
+export function fetchMarketGroupDetail(eventId: string, timeoutMs = 3500) {
   return apiGetWithTimeout<MarketGroupDetail>(`/market-groups/${encodeURIComponent(eventId)}/detail`, timeoutMs);
 }
 
-export function fetchMarketGroupChart(eventId: string, range: '1h' | '6h' | '1d' | '1w' | '1m' | 'all' = '1d', timeoutMs = 12000) {
+export function fetchMarketGroupChart(eventId: string, range: '1h' | '6h' | '1d' | '1w' | '1m' | 'all' = '1d', timeoutMs = 4000) {
   return apiGetWithTimeout<MarketGroupChartPayload>(
     `/market-groups/${encodeURIComponent(eventId)}/chart?range=${encodeURIComponent(range)}`,
     timeoutMs,
