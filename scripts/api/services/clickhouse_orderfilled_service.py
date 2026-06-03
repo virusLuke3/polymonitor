@@ -360,7 +360,7 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
         LIMIT {limit}
         FORMAT JSONEachRow
         """,
-        timeout_seconds=6.0,
+        timeout_seconds=2.0,
     )
     if rows is None:
         return None

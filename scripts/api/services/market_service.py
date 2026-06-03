@@ -116,7 +116,7 @@ def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Opt
         and _is_tradeable_probability(item.get("latestPrice") or item.get("latest_price"))
         and int(item.get("tradeCount24h") or item.get("trade_count_24h") or 0) > 0
     ]
-    if len(filtered_items) < page_size:
+    if not filtered_items:
         return None
     source_page_size = len(items)
     pagination = payload.get("pagination")
@@ -1878,7 +1878,7 @@ def get_markets_payload(
         params.extend([pattern, pattern, pattern, pattern])
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 4}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 5}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
         return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=markets_runtime_prices_enabled())
@@ -2125,7 +2125,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
             "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
-            "v": 18,
+            "v": 19,
         },
         sort_keys=True,
         ensure_ascii=True,
