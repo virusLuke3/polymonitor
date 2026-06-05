@@ -1196,7 +1196,7 @@ def get_market_chart_payload(
                 "range": str(range_name or "1d").strip().lower(),
                 "interval": str(interval or "5m").strip().lower(),
                 "includeRuntimeSeries": bool(include_runtime_series),
-                "v": 8,
+                "v": 9,
             },
             sort_keys=True,
             ensure_ascii=True,

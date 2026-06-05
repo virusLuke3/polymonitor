@@ -158,7 +158,7 @@ def _orderfilled_projection_sql() -> str:
         formatDateTime(
             if(
                 isNull(bt.block_time),
-                dateAdd('second', (toInt64(f.block_number) - toInt64(max_ts_block)) * 2, max_ts_time),
+                dateAdd('second', (toInt64(f.block_number) - toInt64(anchor_block)) * 2, anchor_time),
                 bt.block_time
             ),
             '%Y-%m-%dT%H:%i:%SZ',
@@ -186,8 +186,11 @@ def get_market_trades(ctx: dict, market_id: int, *, limit: int = 100, offset: in
         ctx,
         f"""
         WITH
+            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), now('UTC')) FROM block_timestamps) AS max_ts_time
+            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
         SELECT {_orderfilled_projection_sql()}
         FROM {_table_sql()} f
         LEFT JOIN block_timestamps bt ON bt.block_number = f.block_number
@@ -210,7 +213,9 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
         WITH
             (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), now('UTC')) FROM block_timestamps) AS max_ts_time
+            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
         SELECT {_orderfilled_projection_sql()}
         FROM {_table_sql()} f
         LEFT JOIN block_timestamps bt ON bt.block_number = f.block_number
@@ -246,13 +251,16 @@ def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional
         ctx,
         f"""
         WITH
+            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), now('UTC')) FROM block_timestamps) AS max_ts_time
+            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
         SELECT
             formatDateTime(
                 if(
                     isNull(bt.block_time),
-                    dateAdd('second', (toInt64(f.block_number) - toInt64(max_ts_block)) * 2, max_ts_time),
+                    dateAdd('second', (toInt64(f.block_number) - toInt64(anchor_block)) * 2, anchor_time),
                     bt.block_time
                 ),
                 '%Y-%m-%dT%H:%i:%SZ',
@@ -296,14 +304,16 @@ def get_market_stats(ctx: dict, market_ids: Iterable[int], *, hours: int = 24) -
         WITH
             (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), now('UTC')) FROM block_timestamps) AS max_ts_time
+            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
         SELECT
             f.market_id AS market_id,
             count() AS trade_count_24h,
             toString(sum(f.size * f.price)) AS volume_24h,
             argMax(toString(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS latest_price,
             formatDateTime(
-                max(dateAdd('second', (toInt64(f.block_number) - toInt64(max_ts_block)) * 2, max_ts_time)),
+                max(dateAdd('second', (toInt64(f.block_number) - toInt64(anchor_block)) * 2, anchor_time)),
                 '%Y-%m-%dT%H:%i:%SZ',
                 'UTC'
             ) AS latest_trade_at
@@ -338,14 +348,16 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
         WITH
             (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), now('UTC')) FROM block_timestamps) AS max_ts_time
+            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
         SELECT
             f.market_id AS market_id,
             count() AS trade_count_24h,
             toString(sum(f.size * f.price)) AS volume_24h,
             argMax(toString(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS latest_price,
             formatDateTime(
-                max(dateAdd('second', (toInt64(f.block_number) - toInt64(max_ts_block)) * 2, max_ts_time)),
+                max(dateAdd('second', (toInt64(f.block_number) - toInt64(anchor_block)) * 2, anchor_time)),
                 '%Y-%m-%dT%H:%i:%SZ',
                 'UTC'
             ) AS latest_trade_at
