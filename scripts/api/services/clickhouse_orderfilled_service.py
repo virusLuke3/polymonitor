@@ -159,7 +159,7 @@ def _orderfilled_projection_sql() -> str:
         formatDateTime(
             if(
                 isNull(bt.block_time),
-                dateAdd('second', (toInt64(f.block_number) - toInt64(anchor_block)) * 2, anchor_time),
+                addSeconds(anchor_time, (toInt64(f.block_number) - toInt64(anchor_block)) * 2),
                 bt.block_time
             ),
             '%Y-%m-%dT%H:%i:%SZ',
@@ -293,7 +293,7 @@ def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional
             formatDateTime(
                 if(
                     isNull(bt.block_time),
-                    dateAdd('second', (toInt64(f.block_number) - toInt64(anchor_block)) * 2, anchor_time),
+                    addSeconds(anchor_time, (toInt64(f.block_number) - toInt64(anchor_block)) * 2),
                     bt.block_time
                 ),
                 '%Y-%m-%dT%H:%i:%SZ',
@@ -382,7 +382,7 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
             toString(sum(f.size * f.price)) AS volume_24h,
             argMax(toString(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS latest_price,
             formatDateTime(
-                max(dateAdd('second', (toInt64(f.block_number) - toInt64(anchor_block)) * 2, anchor_time)),
+                max(addSeconds(anchor_time, (toInt64(f.block_number) - toInt64(anchor_block)) * 2)),
                 '%Y-%m-%dT%H:%i:%SZ',
                 'UTC'
             ) AS latest_trade_at
