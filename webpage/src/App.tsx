@@ -1763,6 +1763,20 @@ export function App() {
     }
   };
 
+  const focusCommandMarket = (market: MarketListItem) => {
+    selectedMarketGroupIdRef.current = null;
+    selectedMarketIdRef.current = market.id;
+    setWorkspaceMode('world');
+    setSelectedMarketGroupId(null);
+    setSelectedMarketGroupOutcomeKey(null);
+    setSelectedMarketId(market.id);
+    setShowCommandPalette(false);
+    setNotice(`Focused market: ${market.title.slice(0, 72)}${market.title.length > 72 ? '...' : ''}`);
+    window.setTimeout(() => {
+      document.querySelector('.wm-focused-market-row')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }, 0);
+  };
+
   const changeViewMode = (nextMode: '2d' | '3d') => {
     setViewMode(nextMode);
     setMapZoom((current) => clampMapZoom(nextMode === '2d' ? Math.min(2, current) : current));
@@ -2084,14 +2098,7 @@ export function App() {
                     key={market.id}
                     type="button"
                     className="wm-command-result wm-command-market-result"
-                    onClick={() => {
-                      selectedMarketGroupIdRef.current = null;
-                      selectedMarketIdRef.current = market.id;
-                      setSelectedMarketGroupId(null);
-                      setSelectedMarketGroupOutcomeKey(null);
-                      setSelectedMarketId(market.id);
-                      setShowCommandPalette(false);
-                    }}
+                    onClick={() => focusCommandMarket(market)}
                   >
                     <div className="wm-command-result-main">
                       <strong>{market.title}</strong>
