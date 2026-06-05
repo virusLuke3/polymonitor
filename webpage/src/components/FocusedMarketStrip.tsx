@@ -731,13 +731,30 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   );
   const displayChart = chartRenderable ? chart : null;
   const chartPoints = displayChart?.points || [];
+  const focusedMarketDistinctPrices = new Set(
+    chartPoints
+      .map((point) => Number(point.yesPrice))
+      .filter((value) => Number.isFinite(value))
+      .map((value) => value.toFixed(6)),
+  );
+  const focusedMarketDistinctTimes = new Set(
+    chartPoints
+      .map((point) => String(point.timestamp || ''))
+      .filter(Boolean),
+  );
   const hasEventHistory = Boolean((eventChart?.series || []).some((entry) => (entry.points || []).length > 1));
   const hasSelectedEventHistory = Boolean((eventChart?.series || []).some((entry) => (
     (!activeOutcomeKey || entry.outcomeKey === activeOutcomeKey)
       && (entry.points || []).length > 1
   )));
   const hasFocusedMarketHistory = Boolean(chartPoints.length);
-  const showFocusedOutcomeFallback = Boolean(detail && !hasEventHistory && hasFocusedMarketHistory);
+  const hasFocusedMarketCurve = Boolean(
+    chartPoints.length > 2
+      && focusedMarketDistinctTimes.size > 1
+      && focusedMarketDistinctPrices.size > 1
+      && chartStatus !== 'missing'
+      && chartStatus !== 'snapshot',
+  );
   const hasServingTradeActivity = Number(displayedTrades || 0) > 0 || Number(displayedVolume || 0) > 0;
   const liveQuoteAvailable = Boolean(
     hasAnyBookLevels
@@ -853,11 +870,13 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <div className="wm-focus-chart-wrap">
                   {detail
                     ? (
-                        hasEventHistory
-                          ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
-                          : showFocusedOutcomeFallback
+                        hasFocusedMarketCurve
                             ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange)
-                            : emptyState('No event price history is available for this market yet.')
+                            : hasEventHistory
+                              ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
+                              : hasFocusedMarketHistory
+                                ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange)
+                                : emptyState('No event price history is available for this market yet.')
                       )
                     : (chartPoints.length ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange) : emptyState('No local price history is available for this market.'))}
                 </div>
