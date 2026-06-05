@@ -882,8 +882,6 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
             candidate_limit,
         ),
     )
-    rows = _merge_clickhouse_stats(ctx, rows)
-
     def has_serving_data(row: Dict[str, Any]) -> bool:
         return (
             row.get("latest_price") not in (None, "")
@@ -1753,6 +1751,15 @@ def _market_trade_count_24h(row: Dict[str, Any]) -> Optional[int]:
     return 0
 
 
+def _market_volume_24h(ctx: dict, row: Dict[str, Any]) -> Optional[str]:
+    volume = _decimal_from_any(row.get("volume_24h")) or Decimal("0")
+    if volume > 0:
+        return ctx["format_trade_decimal"](volume)
+    if row.get("last_trade_at") not in (None, "") or row.get("latest_trade_at") not in (None, ""):
+        return None
+    return ctx["format_trade_decimal"](volume)
+
+
 def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("id"),
@@ -1769,7 +1776,7 @@ def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "category": row.get("category") or "Uncategorized",
         "tags": ctx["parse_json_list"](row.get("tags")),
         "outcomeCount": _market_outcome_count(ctx, row),
-        "volume24h": ctx["format_trade_decimal"](row.get("volume_24h")),
+        "volume24h": _market_volume_24h(ctx, row),
         "tradeCount24h": _market_trade_count_24h(row),
         "change24h": row.get("change_24h") or _market_change(ctx, row.get("latest_price"), row.get("price_24h_ago")),
         "lastTradeAt": row.get("last_trade_at") or row.get("latest_trade_at"),
