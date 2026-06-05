@@ -102,8 +102,11 @@ cp deploy/systemd/polydata-oracle-sync.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-analytics-sync.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-event-market-serving.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-db-reverse-tunnel.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-db-reverse-tunnel-healthcheck.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-db-reverse-tunnel-healthcheck.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now polydata-local-collector.target
+systemctl --user enable --now polydata-db-reverse-tunnel-healthcheck.timer
 ```
 
 Keep user services alive after logout:
