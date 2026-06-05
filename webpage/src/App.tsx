@@ -7,6 +7,7 @@ import { WeatherMapCityInspector } from '@/components/WeatherMapCityInspector';
 import { WorldGlobe } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
+import { formatCompact, formatCurrencyCompact, formatPercent, formatRelative } from '@/panels/shared/formatters';
 import { WorldCupWorkspace } from '@/workspaces/worldcup/WorldCupWorkspace';
 import {
   fetchAllActiveMarkets,
@@ -217,6 +218,15 @@ function currentUtcClock(now: Date) {
     timeZone: 'UTC',
     hour12: false,
   }).replace(',', '').toUpperCase() + ' UTC';
+}
+
+function commandMarketStatus(market: MarketListItem) {
+  const status = String(market.status || 'market').trim();
+  return status ? status.toUpperCase() : 'MARKET';
+}
+
+function commandMarketFreshness(market: MarketListItem) {
+  return formatRelative(market.lastTradeAt || market.createdAt || market.endDate || null);
 }
 
 function WeatherInlineMap({
@@ -2071,8 +2081,16 @@ export function App() {
                       setShowCommandPalette(false);
                     }}
                   >
-                    <strong>{market.title}</strong>
-                    <span>{market.category || market.status || 'market'}</span>
+                    <div className="wm-command-result-main">
+                      <strong>{market.title}</strong>
+                      <span>{commandMarketStatus(market)} · {market.category || 'Uncategorized'}</span>
+                    </div>
+                    <div className="wm-command-result-metrics" aria-label="Market search result metrics">
+                      <span><em>YES</em><b>{formatPercent(market.latestPrice)}</b></span>
+                      <span><em>VOL</em><b>{formatCurrencyCompact(market.volume24h)}</b></span>
+                      <span><em>TX</em><b>{formatCompact(market.tradeCount24h)}</b></span>
+                      <span><em>AGE</em><b>{commandMarketFreshness(market)}</b></span>
+                    </div>
                   </button>
                 ))}
                 {!commandMarketSearchLoading && commandQuery.trim() && !commandResults.marketHits.length ? (
