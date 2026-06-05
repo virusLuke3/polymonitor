@@ -109,6 +109,8 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertEqual(response["agentGraph"]["mode"], "supervisor-worker")
         self.assertEqual(response["agentGraph"]["nodes"], [
             "evidence_builder",
+            "quant_forecaster",
+            "related_markets",
             "microstructure",
             "catalyst",
             "resolution",
@@ -117,6 +119,48 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         ])
         self.assertEqual(response["usage"]["requests"], 5)
         self.assertEqual(response["usage"]["contextChars"], 777)
+        self.assertIn("quantForecaster", response["agentGraph"])
+        self.assertIn("relatedMarkets", response["agentGraph"])
+
+    def test_forecast_graph_adds_quant_and_related_market_structure(self):
+        payload = {"lens": "overview", "forecastRunId": "fig-structure", "markets": []}
+        context = {
+            "metrics": {"coveredMarkets": 2, "topCategories": ["politics 2"]},
+            "marketCandidates": [{
+                "title": "Peace deal by August?",
+                "category": "politics",
+                "latestPrice": 0.51,
+                "volume24h": 592650,
+                "tradeCount24h": 423,
+            }],
+            "marketGroups": [{
+                "title": "Strait of Hormuz traffic returns to normal",
+                "volume24h": 106903,
+                "tradeCount24h": 1,
+                "outcomes": [
+                    {"label": "By July 31", "yesPrice": 0.455, "volume24h": 82787},
+                    {"label": "By December 31", "yesPrice": 0.745, "volume24h": 24116},
+                ],
+            }],
+            "contextChars": 888,
+        }
+
+        response = run_forecast_intelligence_graph(
+            payload,
+            "overview",
+            context,
+            [],
+            FakeClient(),
+            normalize=lambda raw, _payload, lens, _search, model: {"status": "live", "lens": lens, "model": model, **raw},
+            fallback=lambda _payload, lens, reason, _search: {"status": reason, "lens": lens, "brief": "fallback"},
+        )
+
+        quant = response["agentGraph"]["quantForecaster"]
+        related = response["agentGraph"]["relatedMarkets"]
+        self.assertEqual(quant["repricingZones"][0]["title"], "Peace deal by August?")
+        self.assertEqual(quant["repricingZones"][0]["price"], "51.0%")
+        self.assertEqual(related["ladders"][0]["title"], "Strait of Hormuz traffic returns to normal")
+        self.assertEqual(related["ladders"][0]["spread"], "29.0 pts")
 
     def test_seed_all_lenses_share_one_forecast_run_id_when_timer_runs_default(self):
         stored: dict[tuple[str, str], Any] = {}

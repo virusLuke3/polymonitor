@@ -9,7 +9,7 @@ from agent.common.env import get_bool_env, get_int_env
 from agent.common.json_utils import compact_text, extract_json_object
 
 
-GRAPH_VERSION = "forecast-intelligence-graph-v1"
+GRAPH_VERSION = "forecast-intelligence-graph-v2"
 SPECIALIST_NODES = ("microstructure", "catalyst", "resolution")
 FORECAST_ANALYST_RULES = """
 Prediction-market usefulness rules:
@@ -32,6 +32,36 @@ def _json_hash(payload: Any) -> str:
     except Exception:
         raw = str(payload)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _as_float(value: Any) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return numeric if numeric == numeric else 0.0
+
+
+def _fmt_compact(value: Any) -> str:
+    numeric = _as_float(value)
+    if abs(numeric) >= 1_000_000:
+        return f"{numeric / 1_000_000:.1f}M"
+    if abs(numeric) >= 1_000:
+        return f"{numeric / 1_000:.1f}K"
+    if numeric == int(numeric):
+        return str(int(numeric))
+    return f"{numeric:.1f}"
+
+
+def _fmt_price(value: Any) -> str:
+    numeric = _as_float(value)
+    if numeric <= 0:
+        return "n/a"
+    return f"{numeric * 100:.1f}%"
+
+
+def _fmt_money(value: Any) -> str:
+    return f"${_fmt_compact(value)}"
 
 
 def forecast_run_id(payload: dict[str, Any]) -> str:
@@ -109,6 +139,177 @@ def _deterministic_evidence(context: dict[str, Any], lens: str) -> dict[str, Any
     }
 
 
+def _market_rows(context: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for key in ("marketCandidates", "markets"):
+        values = context.get(key) if isinstance(context.get(key), list) else []
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            title = compact_text(item.get("title") or item.get("market") or "Untitled market", 120)
+            if not title or title in seen:
+                continue
+            seen.add(title)
+            rows.append({
+                "title": title,
+                "category": compact_text(item.get("category") or "market", 40),
+                "price": _as_float(item.get("latestPrice") or item.get("yesPrice") or item.get("price")),
+                "volume24h": _as_float(item.get("volume24h")),
+                "tradeCount24h": _as_float(item.get("tradeCount24h")),
+                "change24h": item.get("change24h"),
+                "endDate": item.get("endDate"),
+                "kind": item.get("kind"),
+            })
+    return rows
+
+
+def _price_band(price: float) -> str:
+    if price <= 0:
+        return "missing-price"
+    if 0.48 <= price <= 0.52:
+        return "50c-repricing-zone"
+    if 0.42 <= price <= 0.58:
+        return "contested-probability"
+    if price >= 0.9:
+        return "near-certain"
+    if price <= 0.1:
+        return "long-shot"
+    return "priced-view"
+
+
+def _build_quant_forecaster(context: dict[str, Any]) -> dict[str, Any]:
+    rows = _market_rows(context)
+    ranked_flow = sorted(
+        rows,
+        key=lambda item: (item["volume24h"], item["tradeCount24h"]),
+        reverse=True,
+    )
+    near_repricing = sorted(
+        [item for item in rows if 0.42 <= item["price"] <= 0.58 and (item["volume24h"] > 0 or item["tradeCount24h"] > 0)],
+        key=lambda item: (item["volume24h"] * 2 + item["tradeCount24h"] * 200),
+        reverse=True,
+    )
+    anomalies: list[dict[str, Any]] = []
+    for item in rows:
+        if item["volume24h"] >= 100_000 and item["tradeCount24h"] <= 2:
+            anomalies.append({
+                "title": item["title"],
+                "type": "volume-without-trade-count",
+                "evidence": f"{_fmt_money(item['volume24h'])}; {_fmt_compact(item['tradeCount24h'])} trades",
+                "interpretation": "Treat as grouped aggregation, stale volume, or ingestion mismatch until fills reconcile.",
+            })
+        if item["price"] >= 0.98 and item["volume24h"] > 0:
+            anomalies.append({
+                "title": item["title"],
+                "type": "near-certain-live-price",
+                "evidence": f"{_fmt_price(item['price'])}; {_fmt_money(item['volume24h'])}",
+                "interpretation": "Could be live/resolved/stale rather than a normal ex-ante probability.",
+            })
+    missing_change = sum(1 for item in rows if item.get("change24h") in (None, "", "null"))
+    return {
+        "node": "quant_forecaster",
+        "universeSize": len(rows),
+        "topFlowMarkets": [
+            {
+                "title": item["title"],
+                "price": _fmt_price(item["price"]),
+                "band": _price_band(item["price"]),
+                "volume24h": _fmt_money(item["volume24h"]),
+                "tradeCount24h": int(item["tradeCount24h"]),
+                "endDate": item.get("endDate"),
+            }
+            for item in ranked_flow[:6]
+        ],
+        "repricingZones": [
+            {
+                "title": item["title"],
+                "price": _fmt_price(item["price"]),
+                "volume24h": _fmt_money(item["volume24h"]),
+                "tradeCount24h": int(item["tradeCount24h"]),
+                "why": "Price sits near 50c/contested territory where fresh information can move probability quickly.",
+            }
+            for item in near_repricing[:6]
+        ],
+        "anomalies": anomalies[:6],
+        "dataWarnings": [
+            f"{missing_change} market rows have missing change24h; directional momentum should not be inferred from volume alone."
+        ] if missing_change else [],
+        "inputHash": _json_hash(rows[:24]),
+    }
+
+
+def _group_outcomes(group: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = group.get("outcomes") if isinstance(group.get("outcomes"), list) else group.get("topOutcomes")
+    outcomes: list[dict[str, Any]] = []
+    for outcome in raw if isinstance(raw, list) else []:
+        if not isinstance(outcome, dict):
+            continue
+        price = _as_float(outcome.get("yesPrice") or outcome.get("price") or outcome.get("latestPrice"))
+        if price <= 0:
+            continue
+        outcomes.append({
+            "label": compact_text(outcome.get("label") or outcome.get("title") or "Outcome", 72),
+            "yesPrice": price,
+            "volume24h": _as_float(outcome.get("volume24h")),
+            "tradeCount24h": _as_float(outcome.get("tradeCount24h")),
+        })
+    return outcomes
+
+
+def _build_related_markets(context: dict[str, Any]) -> dict[str, Any]:
+    groups = context.get("marketGroups") if isinstance(context.get("marketGroups"), list) else []
+    ladders: list[dict[str, Any]] = []
+    anomalies: list[dict[str, Any]] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        title = compact_text(group.get("title") or "Market group", 120)
+        outcomes = _group_outcomes(group)
+        if len(outcomes) < 2:
+            continue
+        prices = [item["yesPrice"] for item in outcomes]
+        low = min(outcomes, key=lambda item: item["yesPrice"])
+        high = max(outcomes, key=lambda item: item["yesPrice"])
+        spread = high["yesPrice"] - low["yesPrice"]
+        near = [item for item in outcomes if 0.42 <= item["yesPrice"] <= 0.58]
+        if spread >= 0.15 or len(near) >= 2:
+            ladders.append({
+                "title": title,
+                "type": "deadline-or-outcome-spread",
+                "spread": f"{spread * 100:.1f} pts",
+                "lowOutcome": {"label": low["label"], "price": _fmt_price(low["yesPrice"])},
+                "highOutcome": {"label": high["label"], "price": _fmt_price(high["yesPrice"])},
+                "near50Outcomes": [
+                    {"label": item["label"], "price": _fmt_price(item["yesPrice"])}
+                    for item in near[:4]
+                ],
+                "interpretation": "Related outcomes disagree enough to form a probability curve or repricing spread.",
+            })
+        if len(outcomes) >= 3 and all(item["yesPrice"] >= 0.98 for item in outcomes[:3]):
+            anomalies.append({
+                "title": title,
+                "type": "multiple-near-certain-outcomes",
+                "evidence": ", ".join(f"{item['label']} {_fmt_price(item['yesPrice'])}" for item in outcomes[:3]),
+                "interpretation": "Likely live/resolved/stale ladder or feed issue; do not read as normal ex-ante probabilities.",
+            })
+        volume = _as_float(group.get("volume24h"))
+        trades = _as_float(group.get("tradeCount24h"))
+        if volume >= 100_000 and trades <= 2:
+            anomalies.append({
+                "title": title,
+                "type": "group-volume-without-group-trades",
+                "evidence": f"{_fmt_money(volume)} group volume; {_fmt_compact(trades)} group trades",
+                "interpretation": "Check underlying child market fills before treating group volume as current flow.",
+            })
+    return {
+        "node": "related_markets",
+        "ladders": sorted(ladders, key=lambda item: _as_float(str(item.get("spread", "0")).split()[0]), reverse=True)[:8],
+        "anomalies": anomalies[:8],
+        "inputHash": _json_hash(groups[:20]),
+    }
+
+
 def _specialist_prompt(node: str, lens: str, context: dict[str, Any], evidence: dict[str, Any]) -> tuple[str, str]:
     role = {
         "microstructure": "You are the market microstructure agent for a Polymarket intelligence graph. Focus on named markets, implied probability, volume, trade-count, liquidity concentration, close probabilities, deadline ladders, and group-vs-single-market mismatches.",
@@ -132,6 +333,8 @@ def _specialist_prompt(node: str, lens: str, context: dict[str, Any], evidence: 
             "suspiciousSignals": context.get("suspiciousSignals", [])[:4],
             "searchResults": context.get("searchResults", [])[:3],
             "specialistAgents": context.get("specialistAgents", []),
+            "quantForecaster": context.get("quantForecaster"),
+            "relatedMarkets": context.get("relatedMarkets"),
         },
         "requiredSchema": {
             "findings": [{"label": "LIQUIDITY|CATALYST|RESOLUTION|RISK|TREND|PROBABILITY", "title": "named market or spread", "summary": "market-level insight with price/probability and why it matters", "severity": "positive|warning|critical|neutral", "evidence": "price + volume/trades"}],
@@ -158,6 +361,8 @@ Write like a prediction-market analyst, not a dashboard narrator.
         "skepticCalibration": calibration,
         "sourceContext": {
             "metrics": context.get("metrics"),
+            "quantForecaster": context.get("quantForecaster"),
+            "relatedMarkets": context.get("relatedMarkets"),
             "marketCandidates": context.get("marketCandidates", [])[:18],
             "markets": context.get("markets", [])[:12],
             "marketGroups": context.get("marketGroups", [])[:12],
@@ -241,12 +446,31 @@ def run_forecast_intelligence_graph(
 ) -> dict[str, Any]:
     run_id = forecast_run_id(payload)
     evidence = _deterministic_evidence(context, lens)
+    quant_forecaster = _build_quant_forecaster(context)
+    related_markets = _build_related_markets(context)
+    graph_context = {
+        **context,
+        "quantForecaster": quant_forecaster,
+        "relatedMarkets": related_markets,
+    }
     events: list[dict[str, Any]] = [{
         "node": "evidence_builder",
         "status": "ok",
         "finishedAt": _utc_now_iso(),
         "inputHash": evidence["inputHash"],
         "outputHash": _json_hash(evidence),
+    }, {
+        "node": "quant_forecaster",
+        "status": "ok",
+        "finishedAt": _utc_now_iso(),
+        "inputHash": quant_forecaster["inputHash"],
+        "outputHash": _json_hash(quant_forecaster),
+    }, {
+        "node": "related_markets",
+        "status": "ok",
+        "finishedAt": _utc_now_iso(),
+        "inputHash": related_markets["inputHash"],
+        "outputHash": _json_hash(related_markets),
     }]
     if not getattr(client, "configured", False):
         response = fallback(payload, lens, "missing-api-key", search_results)
@@ -258,7 +482,7 @@ def run_forecast_intelligence_graph(
     limit = _agent_limit()
     specialists: list[dict[str, Any]] = []
     for node in SPECIALIST_NODES[:limit]:
-        system, user = _specialist_prompt(node, lens, context, evidence)
+        system, user = _specialist_prompt(node, lens, graph_context, evidence)
         raw, event = _call_json_node(
             client,
             node,
@@ -271,7 +495,7 @@ def run_forecast_intelligence_graph(
 
     calibration: dict[str, Any] = {"node": "skeptic", "findings": [], "risks": [], "watch": [], "confidence": "medium"}
     if limit >= 4:
-        system, user = _specialist_prompt("skeptic", lens, {**context, "specialistAgents": specialists}, evidence)
+        system, user = _specialist_prompt("skeptic", lens, {**graph_context, "specialistAgents": specialists}, evidence)
         raw, event = _call_json_node(
             client,
             "skeptic",
@@ -283,7 +507,7 @@ def run_forecast_intelligence_graph(
         if raw:
             calibration = _normalize_node_output(raw, "skeptic")
 
-    system, user = _writer_prompt(lens, context, evidence, specialists, calibration)
+    system, user = _writer_prompt(lens, graph_context, evidence, specialists, calibration)
     raw, event = _call_json_node(
         client,
         "panel_writer",
@@ -311,8 +535,10 @@ def run_forecast_intelligence_graph(
         "version": GRAPH_VERSION,
         "runId": run_id,
         "mode": "supervisor-worker",
-        "nodes": ["evidence_builder", *SPECIALIST_NODES[:limit], *(["skeptic"] if limit >= 4 else []), "panel_writer"],
+        "nodes": ["evidence_builder", "quant_forecaster", "related_markets", *SPECIALIST_NODES[:limit], *(["skeptic"] if limit >= 4 else []), "panel_writer"],
         "events": events,
+        "quantForecaster": quant_forecaster,
+        "relatedMarkets": related_markets,
         "specialists": specialists,
         "calibration": calibration,
     }
