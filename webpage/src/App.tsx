@@ -2071,7 +2071,7 @@ export function App() {
                   <button
                     key={market.id}
                     type="button"
-                    className="wm-command-result"
+                    className="wm-command-result wm-command-market-result"
                     onClick={() => {
                       selectedMarketGroupIdRef.current = null;
                       selectedMarketIdRef.current = market.id;
@@ -2103,7 +2103,7 @@ export function App() {
                   <button
                     key={panel.id}
                     type="button"
-                    className="wm-command-result"
+                    className="wm-command-result wm-command-panel-result"
                     onClick={() => {
                       if (!displayPanelIds.includes(panel.id)) togglePanel(panel.id);
                       setShowCommandPalette(false);
