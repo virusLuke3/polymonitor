@@ -51,9 +51,18 @@
 }
 
 .wm-ai-insights {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 9px;
   min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.wm-ai-insights > * {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .wm-ai-insight-hero {
