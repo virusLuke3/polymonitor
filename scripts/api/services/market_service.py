@@ -695,9 +695,11 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
         return {"items": []}
     ts_query = " & ".join(f"{token}:*" for token in tokens)
     prefix_pattern = f"{cleaned.lower()}%"
+    contains_pattern = f"%{cleaned.lower()}%"
+    candidate_limit = max(limit * 2, 100)
     rows = ctx["query_all"](
         """
-        WITH matched AS (
+        WITH matched AS MATERIALIZED (
             SELECT
                 m.id,
                 ts_rank_cd(
@@ -713,7 +715,7 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
                 (((COALESCE(m.title, '') || ' ') || COALESCE(m.slug, '')) || ' ') || COALESCE(m.category, '')
             ) @@ to_tsquery('simple', ?)
             ORDER BY search_rank DESC, m.created_at DESC
-            LIMIT 500
+            LIMIT 5000
         )
         SELECT
             m.id,
@@ -730,10 +732,21 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
             m.no_token_id,
             m.clob_token_ids,
             COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+            mss.completion_source,
+            mss.completion_time,
             COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+            COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+            COALESCE(mss.is_final, FALSE) AS is_final,
             COALESCE(mss.has_settle, FALSE) AS has_settle,
             COALESCE(mss.has_propose, FALSE) AS has_propose,
             COALESCE(mss.settlement_code, 0) AS settlement_code,
+            COALESCE(mss.settlement_outcome, 'UNKNOWN') AS settlement_outcome,
+            mss.settlement_source,
+            mss.settlement_event_id,
+            mss.settlement_event_time,
+            mss.settlement_transaction,
+            COALESCE(mss.gamma_closed, FALSE) AS gamma_closed,
+            mss.gamma_closed_time,
             COALESCE(mls.latest_price, mlp.latest_yes_price) AS latest_price,
             mls.price_24h_ago,
             COALESCE(mls.volume_24h, 0) AS volume_24h,
@@ -747,7 +760,42 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
                  AND COALESCE(mss.has_propose, FALSE) = FALSE
                  AND COALESCE(mss.settlement_code, 0) = 0
                  AND (m.end_date IS NULL OR m.end_date >= ?)
+                 AND (
+                    mls.latest_price IS NOT NULL
+                    OR mlp.latest_yes_price IS NOT NULL
+                    OR COALESCE(mls.volume_24h, 0) > 0
+                    OR COALESCE(mls.trade_count_24h, 0) > 0
+                    OR mls.last_trade_at IS NOT NULL
+                    OR mls.latest_trade_at IS NOT NULL
+                 )
+                 AND (
+                    COALESCE(mls.latest_price, mlp.latest_yes_price) IS NULL
+                    OR (
+                        CAST(COALESCE(mls.latest_price, mlp.latest_yes_price) AS DECIMAL(18, 10)) >= 0.05
+                        AND CAST(COALESCE(mls.latest_price, mlp.latest_yes_price) AS DECIMAL(18, 10)) <= 0.95
+                    )
+                 )
                 THEN 'active'
+                WHEN COALESCE(mss.is_trading_closed, FALSE) = FALSE
+                 AND COALESCE(mss.has_settle, FALSE) = FALSE
+                 AND COALESCE(mss.has_propose, FALSE) = FALSE
+                 AND COALESCE(mss.settlement_code, 0) = 0
+                 AND (m.end_date IS NULL OR m.end_date >= ?)
+                 AND (
+                    mls.latest_price IS NOT NULL
+                    OR mlp.latest_yes_price IS NOT NULL
+                    OR COALESCE(mls.volume_24h, 0) > 0
+                    OR COALESCE(mls.trade_count_24h, 0) > 0
+                    OR mls.last_trade_at IS NOT NULL
+                    OR mls.latest_trade_at IS NOT NULL
+                 )
+                THEN 'open_terminal'
+                WHEN COALESCE(mss.is_trading_closed, FALSE) = FALSE
+                 AND COALESCE(mss.has_settle, FALSE) = FALSE
+                 AND COALESCE(mss.has_propose, FALSE) = FALSE
+                 AND COALESCE(mss.settlement_code, 0) = 0
+                 AND (m.end_date IS NULL OR m.end_date >= ?)
+                THEN 'open_no_data'
                 ELSE LOWER(COALESCE(mss.completion_status, 'closed'))
             END AS status
         FROM matched
@@ -762,13 +810,47 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
                  AND COALESCE(mss.has_propose, FALSE) = FALSE
                  AND COALESCE(mss.settlement_code, 0) = 0
                  AND (m.end_date IS NULL OR m.end_date >= ?)
+                 AND (
+                    mls.latest_price IS NOT NULL
+                    OR mlp.latest_yes_price IS NOT NULL
+                    OR COALESCE(mls.volume_24h, 0) > 0
+                    OR COALESCE(mls.trade_count_24h, 0) > 0
+                    OR mls.last_trade_at IS NOT NULL
+                    OR mls.latest_trade_at IS NOT NULL
+                 )
+                 AND (
+                    COALESCE(mls.latest_price, mlp.latest_yes_price) IS NULL
+                    OR (
+                        CAST(COALESCE(mls.latest_price, mlp.latest_yes_price) AS DECIMAL(18, 10)) >= 0.05
+                        AND CAST(COALESCE(mls.latest_price, mlp.latest_yes_price) AS DECIMAL(18, 10)) <= 0.95
+                    )
+                 )
+                THEN 0 ELSE 1
+            END ASC,
+            CASE
+                WHEN COALESCE(mss.is_trading_closed, FALSE) = FALSE
+                 AND COALESCE(mss.has_settle, FALSE) = FALSE
+                 AND COALESCE(mss.has_propose, FALSE) = FALSE
+                 AND COALESCE(mss.settlement_code, 0) = 0
+                 AND (m.end_date IS NULL OR m.end_date >= ?)
                 THEN 0 ELSE 1
             END ASC,
             CASE
                 WHEN LOWER(COALESCE(m.title, '')) LIKE ? THEN 0
                 WHEN LOWER(COALESCE(m.slug, '')) LIKE ? THEN 1
-                WHEN LOWER(COALESCE(m.category, '')) LIKE ? THEN 2
-                ELSE 3
+                WHEN LOWER(COALESCE(m.title, '')) LIKE ? THEN 2
+                WHEN LOWER(COALESCE(m.slug, '')) LIKE ? THEN 3
+                WHEN LOWER(COALESCE(m.category, '')) LIKE ? THEN 4
+                ELSE 5
+            END ASC,
+            CASE
+                WHEN COALESCE(mls.trade_count_24h, 0) > 0
+                  OR COALESCE(mls.volume_24h, 0) > 0
+                THEN 0 ELSE 1
+            END ASC,
+            CASE
+                WHEN mls.latest_price IS NOT NULL OR mlp.latest_yes_price IS NOT NULL
+                THEN 0 ELSE 1
             END ASC,
             CASE
                 WHEN COALESCE(mls.trade_count_24h, 0) > 0
@@ -777,15 +859,113 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
                   OR mlp.latest_yes_price IS NOT NULL
                 THEN 0 ELSE 1
             END ASC,
+            COALESCE(mls.last_trade_at, mls.latest_trade_at) DESC NULLS LAST,
             matched.search_rank DESC,
             m.created_at DESC,
             COALESCE(mls.trade_count_24h, 0) DESC,
             COALESCE(mls.volume_24h, 0) DESC
         LIMIT ?
         """,
-        (ts_query, ts_query, now_iso, now_iso, prefix_pattern, prefix_pattern, prefix_pattern, limit),
+        (
+            ts_query,
+            ts_query,
+            now_iso,
+            now_iso,
+            now_iso,
+            now_iso,
+            now_iso,
+            prefix_pattern,
+            prefix_pattern,
+            contains_pattern,
+            contains_pattern,
+            prefix_pattern,
+            candidate_limit,
+        ),
     )
-    return {"items": [_market_list_item(ctx, row) for row in rows]}
+    rows = _merge_clickhouse_stats(ctx, rows)
+
+    def has_serving_data(row: Dict[str, Any]) -> bool:
+        return (
+            row.get("latest_price") not in (None, "")
+            or (_decimal_from_any(row.get("volume_24h")) or Decimal("0")) > 0
+            or _int_value(row.get("trade_count_24h"), 0) > 0
+            or row.get("last_trade_at") not in (None, "")
+            or row.get("latest_trade_at") not in (None, "")
+        )
+
+    def has_tradeable_price(row: Dict[str, Any]) -> bool:
+        price = _decimal_from_any(row.get("latest_price"))
+        if price is None:
+            return True
+        return DEFAULT_ACTIVE_MARKET_MIN_PRICE <= price <= DEFAULT_ACTIVE_MARKET_MAX_PRICE
+
+    for row in rows:
+        status = str(row.get("status") or "").lower()
+        if status in {"active", "open_no_data", "open_terminal"}:
+            if not has_serving_data(row):
+                row["status"] = "open_no_data"
+            elif has_tradeable_price(row):
+                row["status"] = "active"
+            else:
+                row["status"] = "open_terminal"
+
+    query_lower = cleaned.lower()
+
+    def text_rank(row: Dict[str, Any]) -> int:
+        title = str(row.get("title") or "").lower()
+        slug = str(row.get("slug") or "").lower()
+        category = str(row.get("category") or "").lower()
+        if title.startswith(query_lower):
+            return 0
+        if slug.startswith(query_lower):
+            return 1
+        if query_lower in title:
+            return 2
+        if query_lower in slug:
+            return 3
+        if category.startswith(query_lower):
+            return 4
+        return 5
+
+    def timestamp_sort_value(value: Any) -> float:
+        if value in (None, ""):
+            return 0.0
+        if hasattr(value, "timestamp"):
+            try:
+                return float(value.timestamp())
+            except (OverflowError, OSError, TypeError, ValueError):
+                return 0.0
+        try:
+            return float(datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp())
+        except (OverflowError, OSError, TypeError, ValueError):
+            return 0.0
+
+    def numeric_sort_value(value: Any) -> float:
+        parsed = _decimal_from_any(value)
+        return float(parsed or Decimal("0"))
+
+    def row_sort_key(row: Dict[str, Any]) -> tuple:
+        status = str(row.get("status") or "").lower()
+        status_rank = 0 if status == "active" else 1 if status == "open_terminal" else 2 if status == "open_no_data" else 3
+        recent_trade = timestamp_sort_value(row.get("last_trade_at") or row.get("latest_trade_at"))
+        created = timestamp_sort_value(row.get("created_at"))
+        trade_count = _int_value(row.get("trade_count_24h"), 0)
+        volume = numeric_sort_value(row.get("volume_24h"))
+        rank = numeric_sort_value(row.get("search_rank"))
+        return (
+            status_rank,
+            text_rank(row),
+            0 if (trade_count > 0 or volume > 0) else 1,
+            0 if row.get("latest_price") not in (None, "") else 1,
+            -recent_trade,
+            -rank,
+            -created,
+            -trade_count,
+            -volume,
+        )
+
+    rows.sort(key=row_sort_key)
+    return {"items": [_market_list_item(ctx, row) for row in rows[:limit]]}
 
 
 def get_market_by_slug(ctx: dict, slug: str) -> Optional[dict]:
@@ -1563,6 +1743,16 @@ def _is_postgres_ctx(ctx: dict) -> bool:
     return backend in {"postgres", "postgresql"}
 
 
+def _market_trade_count_24h(row: Dict[str, Any]) -> Optional[int]:
+    trade_count = _int_value(row.get("trade_count_24h"), 0)
+    if trade_count > 0:
+        return trade_count
+    volume = _decimal_from_any(row.get("volume_24h")) or Decimal("0")
+    if volume > 0 or row.get("last_trade_at") not in (None, "") or row.get("latest_trade_at") not in (None, ""):
+        return None
+    return 0
+
+
 def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("id"),
@@ -1580,7 +1770,7 @@ def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "tags": ctx["parse_json_list"](row.get("tags")),
         "outcomeCount": _market_outcome_count(ctx, row),
         "volume24h": ctx["format_trade_decimal"](row.get("volume_24h")),
-        "tradeCount24h": int(row.get("trade_count_24h") or 0),
+        "tradeCount24h": _market_trade_count_24h(row),
         "change24h": row.get("change_24h") or _market_change(ctx, row.get("latest_price"), row.get("price_24h_ago")),
         "lastTradeAt": row.get("last_trade_at") or row.get("latest_trade_at"),
         **_settlement_payload(row),

@@ -222,11 +222,11 @@ function currentUtcClock(now: Date) {
 
 function commandMarketStatus(market: MarketListItem) {
   const status = String(market.status || 'market').trim();
-  return status ? status.toUpperCase() : 'MARKET';
+  return status ? status.replace(/[_-]+/g, ' ').toUpperCase() : 'MARKET';
 }
 
 function commandMarketFreshness(market: MarketListItem) {
-  return formatRelative(market.lastTradeAt || market.createdAt || market.endDate || null);
+  return formatRelative(market.lastTradeAt || null);
 }
 
 function WeatherInlineMap({
@@ -1689,7 +1689,7 @@ export function App() {
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setCommandMarketSearchLoading(true);
-      fetchMarketSearch(query, 12)
+      fetchMarketSearch(query, 50)
         .then((payload) => {
           if (!cancelled) setCommandMarketHits(payload.items || []);
         })
@@ -1716,7 +1716,7 @@ export function App() {
     const localMarketHits = availableMarkets.filter((market) => {
       const text = `${market.title} ${market.category || ''} ${market.slug}`.toLowerCase();
       return !query || text.includes(query);
-    }).slice(0, 8);
+    }).slice(0, 30);
     const marketHits = query && commandMarketHits.length ? commandMarketHits : localMarketHits;
     return { panelHits, marketHits };
   }, [availableMarkets, commandMarketHits, commandQuery]);
