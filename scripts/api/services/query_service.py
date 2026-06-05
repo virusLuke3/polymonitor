@@ -4,6 +4,7 @@ import json
 import os
 import hashlib
 import re
+import threading
 from typing import Any, Dict, List
 
 from api.services import clickhouse_orderfilled_service
@@ -321,6 +322,23 @@ def _content_id_for_url(url: str) -> str:
     return f"content:{digest}"
 
 
+_CONTENT_TABLE_EXISTS_CACHE: Dict[tuple[str, str], bool] = {}
+_CONTENT_TABLE_EXISTS_LOCK = threading.Lock()
+
+
+def _content_table_exists(ctx: dict, table_name: str) -> bool:
+    backend = str(ctx["get_backend"]() or "").lower()
+    key = (backend, table_name)
+    with _CONTENT_TABLE_EXISTS_LOCK:
+        cached = _CONTENT_TABLE_EXISTS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    exists = bool(ctx["table_exists"](table_name))
+    with _CONTENT_TABLE_EXISTS_LOCK:
+        _CONTENT_TABLE_EXISTS_CACHE[key] = exists
+    return exists
+
+
 def _ensure_content_tables(ctx: dict) -> None:
     if _api_readonly():
         return
@@ -436,6 +454,10 @@ def _ensure_content_tables(ctx: dict) -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_content_items_topic_time ON content_items (topic_id, published_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_content_links_market_score ON content_links (market_id, link_score DESC, created_at DESC)")
         conn.commit()
+        backend_key = str(ctx["get_backend"]() or "").lower()
+        with _CONTENT_TABLE_EXISTS_LOCK:
+            _CONTENT_TABLE_EXISTS_CACHE[(backend_key, "content_items")] = True
+            _CONTENT_TABLE_EXISTS_CACHE[(backend_key, "content_links")] = True
     except Exception:
         conn.rollback()
         ctx["app"].logger.exception("content table ensure failed")
@@ -690,7 +712,7 @@ def _delete_market_content_links(ctx: dict, *, market_id: int) -> None:
 
 
 def _fetch_persisted_related_content(ctx: dict, market_id: int, limit: int) -> List[Dict[str, Any]]:
-    if not (ctx["table_exists"]("content_items") and ctx["table_exists"]("content_links")):
+    if not (_content_table_exists(ctx, "content_items") and _content_table_exists(ctx, "content_links")):
         return []
     return ctx["query_all"](
         """
@@ -719,7 +741,7 @@ def _fetch_persisted_related_content(ctx: dict, market_id: int, limit: int) -> L
 
 
 def _fetch_topic_content_candidates(ctx: dict, topic_ids: List[str], limit: int) -> List[Dict[str, Any]]:
-    if not topic_ids or not ctx["table_exists"]("content_items"):
+    if not topic_ids or not _content_table_exists(ctx, "content_items"):
         return []
     placeholders = ",".join(["?"] * len(topic_ids))
     return ctx["query_all"](
@@ -980,7 +1002,7 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
 def get_latest_content_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     _ensure_content_tables(ctx)
     version_row: Dict[str, Any] = {}
-    if ctx["table_exists"]("content_items"):
+    if _content_table_exists(ctx, "content_items"):
         try:
             version_row = ctx["query_one"](
                 "SELECT COUNT(*) AS count, MAX(updated_at) AS updated_at FROM content_items"
@@ -998,7 +1020,7 @@ def get_latest_content_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     )
 
     def _builder() -> Dict[str, Any]:
-        if ctx["table_exists"]("content_items"):
+        if _content_table_exists(ctx, "content_items"):
             rows = ctx["query_all"](
                 """
                 SELECT id, content_type, provider, source, category, topic_id, title, url, published_at, summary, source_count, relevance_score
