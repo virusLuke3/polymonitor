@@ -17,33 +17,25 @@ const INTEL_TABS: IntelTab[] = [
   { id: 'research', label: 'Research' },
 ];
 
-function itemText(item: ContentItem) {
-  return `${item.contentType || ''} ${item.source || ''} ${item.title || ''} ${item.summary || ''} ${item.url || ''}`.toLowerCase();
-}
-
-function uniqueItems(items: ContentItem[]) {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const key = String(item.id || item.url || item.title || '');
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+function explicitContentType(item: ContentItem) {
+  return String(item.contentType || '').trim().toLowerCase();
 }
 
 function smartContentByType(items: ContentItem[], tab: IntelTab['id']) {
   if (tab === 'news') return items;
-  const explicit = contentByType(items, tab);
-  const inferred = items.filter((item) => {
-    const text = itemText(item);
-    if (tab === 'video') return /youtube|youtu\.be|vimeo|video|watch|interview|highlights|live|espn|nba|nfl|ufc/.test(text);
-    if (tab === 'report') return /report|brief|dossier|outlook|filing|analysis|explainer|what we know|questions|stats|forecast/.test(text);
-    return /research|study|paper|model|data|forecast|prediction|poll|trend|why|how|analysis|questions/.test(text);
+  return items.filter((item) => {
+    const explicit = explicitContentType(item);
+    if (explicit === tab) return true;
+    const source = String(item.source || '').toLowerCase();
+    const url = String(item.url || '').toLowerCase();
+    if (tab === 'video') {
+      return /youtube|youtu\.be|vimeo|twitch\.tv/.test(`${source} ${url}`);
+    }
+    if (tab === 'report') {
+      return /\.pdf($|[?#])|annual-report|whitepaper|research-report/.test(url);
+    }
+    return /arxiv\.org|ssrn\.com|nber\.org|papers\.ssrn/.test(`${source} ${url}`);
   });
-  const merged = uniqueItems([...explicit, ...inferred]);
-  if (merged.length) return merged;
-  if (tab === 'video') return items.slice(0, Math.min(2, items.length));
-  return items.slice(0, Math.min(4, items.length));
 }
 
 function topSources(items: ContentItem[]) {
@@ -66,6 +58,9 @@ function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
   ) as Record<IntelTab['id'], ReturnType<typeof contentByType>>, [items]);
   const visibleItems = tabItems[activeTab] || [];
   const activeLabel = INTEL_TABS.find((tab) => tab.id === activeTab)?.label || 'Intel';
+  const emptyMessage = activeTab === 'news'
+    ? 'No news intel for this market yet.'
+    : `No explicit ${activeLabel.toLowerCase()} intel for this market yet. Runtime RSS news stays under News.`;
   const sources = useMemo(() => topSources(visibleItems), [visibleItems]);
 
   return (
@@ -101,7 +96,7 @@ function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
           ))}
         </div>
       ) : null}
-      {contentList(visibleItems, `No ${activeLabel.toLowerCase()} intel for this market yet.`, 20)}
+      {contentList(visibleItems, emptyMessage, 20)}
     </Panel>
   );
 }
