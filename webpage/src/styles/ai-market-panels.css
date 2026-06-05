@@ -1,6 +1,11 @@
 .wm-ai-market-panel .wm-panel-body {
+  min-height: 0;
   padding: 8px 10px 10px;
   overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .wm-ai-market-panel .wm-panel-header {
@@ -150,15 +155,14 @@
 .wm-ai-insight-hero p {
   position: relative;
   z-index: 1;
-  display: -webkit-box;
-  overflow: hidden;
+  display: block;
+  overflow: visible;
   margin: 8px 0 0;
   color: rgba(244, 247, 248, 0.94);
   font-size: 13px;
   font-weight: 760;
   line-height: 1.44;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
 }
 
 .wm-ai-insight-section-head {
@@ -261,15 +265,14 @@
 .wm-ai-insight-card p,
 .wm-ai-insight-market-card p,
 .wm-ai-insight-watch p {
-  display: -webkit-box;
-  overflow: hidden;
+  display: block;
+  overflow: visible;
   margin: 4px 0 0;
   color: rgba(218, 224, 226, 0.72);
   font-size: 10.5px;
   font-weight: 650;
   line-height: 1.38;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
 }
 
 .wm-ai-insight-market-card > b {
