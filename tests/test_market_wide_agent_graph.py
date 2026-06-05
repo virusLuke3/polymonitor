@@ -4,9 +4,10 @@ import json
 import unittest
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import patch
 
 from agent.market_wide.graph import GRAPH_VERSION, run_forecast_intelligence_graph
-from agent.market_wide.snapshot import DEFAULT_LENSES, seed_market_wide_snapshots
+from agent.market_wide.snapshot import DEFAULT_LENSES, build_market_wide_snapshot, seed_market_wide_snapshots
 
 
 @dataclass
@@ -135,6 +136,26 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         run_ids = {snapshot["data"].get("forecastRunId") for snapshot in snapshots}
         self.assertEqual(len(run_ids), 1)
         self.assertTrue(next(iter(run_ids)).startswith("fig-seed-"))
+
+    def test_gateway_seed_delegates_budget_to_gateway_host(self):
+        helpers = {
+            "get_active_markets_snapshot": lambda limit: {"items": []},
+            "get_market_groups_payload": lambda query, page, page_size, status: {"items": []},
+            "get_latest_content_payload": lambda limit: {"items": []},
+            "get_recent_trades_snapshot": lambda limit: [],
+            "get_recent_oracle_snapshot": lambda limit: [],
+            "get_cached_json": lambda namespace, cache_key: None,
+        }
+
+        with patch("agent.market_wide.snapshot._seed_live_enabled", return_value=True), \
+             patch("agent.market_wide.snapshot.gateway_configured", return_value=True), \
+             patch("agent.market_wide.snapshot.claim_agent_live_call", side_effect=AssertionError("seed should not double-claim budget")), \
+             patch("agent.market_wide.snapshot.call_market_wide_insight_gateway", return_value={"status": "live", "generatedAt": "2026-06-05T00:00:00Z"}):
+            snapshot = build_market_wide_snapshot(helpers, "trend", live=True, force=True, run_id="fig-test")
+
+        self.assertTrue(snapshot["liveAttempted"])
+        self.assertTrue(snapshot["budget"]["delegatedToGateway"])
+        self.assertEqual(snapshot["data"]["forecastRunId"], "fig-test")
 
 
 if __name__ == "__main__":
