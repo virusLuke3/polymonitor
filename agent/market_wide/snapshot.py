@@ -8,6 +8,7 @@ from typing import Any
 from agent.common.budget import claim_agent_live_call
 from agent.common.gateway_client import call_market_wide_insight_gateway, gateway_configured
 
+from .graph import forecast_run_id
 from .service import LENS_ALIASES, VALID_LENSES, build_market_wide_fallback, build_market_wide_insight
 
 
@@ -143,11 +144,11 @@ def _return_skipped_snapshot(snapshot: dict[str, Any], reason: str) -> dict[str,
     return skipped
 
 
-def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any) -> dict[str, Any]:
+def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any, *, run_id: str | None = None) -> dict[str, Any]:
     active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80)
     market_groups = _safe_call(helpers, "get_market_groups_payload", {}, "", 1, 60, "active")
     content = _safe_call(helpers, "get_latest_content_payload", {}, 12)
-    return {
+    payload = {
         "lens": normalize_lens(lens),
         "markets": _items(active_markets)[:80],
         "marketGroups": _items(market_groups)[:60],
@@ -163,6 +164,8 @@ def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any) -> dict[s
         ),
         "suspiciousSignals": _cached_signal_items(helpers, SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS, _json_key({"limit": 12}), 10),
     }
+    payload["forecastRunId"] = run_id or forecast_run_id(payload)
+    return payload
 
 
 def _seed_live_enabled() -> bool:
@@ -192,7 +195,14 @@ def _snapshot_from_insight(lens: str, insight: dict[str, Any], *, live_attempted
     }
 
 
-def build_market_wide_snapshot(helpers: dict[str, Any], lens: Any, *, live: bool = True, force: bool = False) -> dict[str, Any]:
+def build_market_wide_snapshot(
+    helpers: dict[str, Any],
+    lens: Any,
+    *,
+    live: bool = True,
+    force: bool = False,
+    run_id: str | None = None,
+) -> dict[str, Any]:
     normalized_lens = normalize_lens(lens)
     existing = read_market_wide_snapshot(helpers, normalized_lens, allow_stale=True)
     if existing is not None and not force:
@@ -202,7 +212,7 @@ def build_market_wide_snapshot(helpers: dict[str, Any], lens: Any, *, live: bool
         if not (live and _seed_live_enabled()):
             return _return_skipped_snapshot(existing, "live-disabled-existing-snapshot")
 
-    payload = build_market_wide_seed_payload(helpers, normalized_lens)
+    payload = build_market_wide_seed_payload(helpers, normalized_lens, run_id=run_id)
     live_allowed = bool(live and _seed_live_enabled())
     budget: dict[str, Any] | None = None
     if live_allowed:
@@ -274,8 +284,9 @@ def seed_market_wide_snapshots(
     force: bool = False,
 ) -> list[dict[str, Any]]:
     snapshots: list[dict[str, Any]] = []
+    run_id = f"fig-seed-{_iso(_utc_now()).replace(':', '').replace('-', '')}"
     for lens in lenses:
-        snapshot = build_market_wide_snapshot(helpers, lens, live=live, force=force)
+        snapshot = build_market_wide_snapshot(helpers, lens, live=live, force=force, run_id=run_id)
         if not snapshot.get("skipped"):
             store_market_wide_snapshot(helpers, snapshot)
         snapshots.append(snapshot)

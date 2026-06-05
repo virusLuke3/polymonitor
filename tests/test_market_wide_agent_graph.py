@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+import json
+import unittest
+from dataclasses import dataclass
+from typing import Any
+
+from agent.market_wide.graph import GRAPH_VERSION, run_forecast_intelligence_graph
+from agent.market_wide.snapshot import DEFAULT_LENSES, seed_market_wide_snapshots
+
+
+@dataclass
+class FakeUsage:
+    runtime: str = "chat"
+    input_tokens: int = 11
+    output_tokens: int = 7
+    total_tokens: int = 18
+    input_chars: int = 123
+
+
+class FakeClient:
+    configured = True
+    model = "fake-model"
+
+    def __init__(self) -> None:
+        self.last_usage = FakeUsage()
+        self.workflow_names: list[str] = []
+
+    def complete_json(self, messages: list[dict[str, str]], *, max_tokens: int, workflow_name: str) -> str:
+        self.workflow_names.append(workflow_name)
+        if "panel_writer" in workflow_name:
+            return json.dumps({
+                "brief": "Liquidity is clustering around the leading market while catalyst risk remains visible.",
+                "specialMarkets": [{
+                    "title": "Will the event happen?",
+                    "why": "It combines close odds with visible trade flow.",
+                    "trend": "Knife-edge odds",
+                    "severity": "warning",
+                    "evidence": "52%",
+                }],
+                "themes": [{
+                    "label": "LIQUIDITY",
+                    "title": "Attention concentration",
+                    "summary": "The loaded board is concentrating around one active event.",
+                    "severity": "neutral",
+                    "evidence": "24h volume",
+                }],
+                "watchlist": [{
+                    "title": "Resolution wording",
+                    "reason": "Ambiguous criteria can change how users price the event.",
+                    "horizon": "event close",
+                    "severity": "warning",
+                }],
+                "focus": [{
+                    "label": "SPECIAL",
+                    "title": "Close-price market",
+                    "summary": "The standout market sits near the repricing zone.",
+                    "severity": "warning",
+                    "evidence": "52%",
+                }],
+                "evidence": ["52% top price", "$1.2K volume"],
+            })
+        return json.dumps({
+            "findings": [{
+                "label": "LIQUIDITY",
+                "title": "Visible flow",
+                "summary": "Trade flow is concentrated in the leading market.",
+                "severity": "neutral",
+                "evidence": "$1.2K",
+            }],
+            "risks": ["Evidence can go stale quickly."],
+            "watch": ["Watch the next large fill."],
+            "confidence": "medium",
+            "probabilityAdjustment": "market-implied probability remains the anchor",
+        })
+
+
+class MarketWideAgentGraphTestCase(unittest.TestCase):
+    def test_forecast_graph_runs_specialists_and_preserves_response_schema(self):
+        payload = {"lens": "overview", "forecastRunId": "fig-test", "markets": []}
+        context = {
+            "metrics": {"coveredMarkets": 1, "topCategories": ["politics 1"]},
+            "marketCandidates": [{
+                "title": "Will the event happen?",
+                "category": "politics",
+                "latestPrice": 0.52,
+                "volume24h": 1200,
+                "tradeCount24h": 8,
+            }],
+            "contextChars": 777,
+        }
+        client = FakeClient()
+
+        response = run_forecast_intelligence_graph(
+            payload,
+            "overview",
+            context,
+            [],
+            client,
+            normalize=lambda raw, _payload, lens, _search, model: {"status": "live", "lens": lens, "model": model, **raw},
+            fallback=lambda _payload, lens, reason, _search: {"status": reason, "lens": lens, "brief": "fallback"},
+        )
+
+        self.assertEqual(response["status"], "live")
+        self.assertEqual(response["forecastRunId"], "fig-test")
+        self.assertEqual(response["agentArchitecture"], GRAPH_VERSION)
+        self.assertIn("specialMarkets", response)
+        self.assertEqual(response["agentGraph"]["mode"], "supervisor-worker")
+        self.assertEqual(response["agentGraph"]["nodes"], [
+            "evidence_builder",
+            "microstructure",
+            "catalyst",
+            "resolution",
+            "skeptic",
+            "panel_writer",
+        ])
+        self.assertEqual(response["usage"]["requests"], 5)
+        self.assertEqual(response["usage"]["contextChars"], 777)
+
+    def test_seed_all_lenses_share_one_forecast_run_id_when_timer_runs_default(self):
+        stored: dict[tuple[str, str], Any] = {}
+        helpers = {
+            "get_active_markets_snapshot": lambda limit: {"items": [{"title": "A", "category": "politics"}]},
+            "get_market_groups_payload": lambda query, page, page_size, status: {"items": [{"title": "B", "category": "sports"}]},
+            "get_latest_content_payload": lambda limit: {"items": []},
+            "get_recent_trades_snapshot": lambda limit: [],
+            "get_recent_oracle_snapshot": lambda limit: [],
+            "get_cached_json": lambda namespace, cache_key: stored.get((namespace, cache_key)),
+            "set_cached_json": lambda namespace, cache_key, payload, ttl: stored.__setitem__((namespace, cache_key), payload),
+        }
+
+        snapshots = seed_market_wide_snapshots(helpers, live=False, force=True)
+
+        self.assertEqual([snapshot["lens"] for snapshot in snapshots], list(DEFAULT_LENSES))
+        run_ids = {snapshot["data"].get("forecastRunId") for snapshot in snapshots}
+        self.assertEqual(len(run_ids), 1)
+        self.assertTrue(next(iter(run_ids)).startswith("fig-seed-"))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -9,6 +9,7 @@ from agent.common.json_utils import compact_text, extract_json_object
 from agent.common.llm_client import OpenAICompatibleClient
 from agent.common.tavily_client import TavilySearchClient
 
+from .graph import graph_enabled, run_forecast_intelligence_graph
 from .prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 
@@ -500,6 +501,7 @@ def _fallback_response(payload: dict[str, Any], lens: str, *, reason: str, searc
     return {
         "status": "search-fallback" if reason == "agent-error" and search_results else reason,
         "lens": lens,
+        "forecastRunId": compact_text(payload.get("forecastRunId") or payload.get("forecast_run_id"), 48),
         "generatedAt": _utc_now_iso(),
         "model": "deterministic-fallback",
         "brief": compact_text(brief, 260),
@@ -567,6 +569,7 @@ def _normalize(raw: dict[str, Any], payload: dict[str, Any], lens: str, search_r
     return {
         "status": "live",
         "lens": lens,
+        "forecastRunId": compact_text(payload.get("forecastRunId") or payload.get("forecast_run_id"), 48),
         "generatedAt": _utc_now_iso(),
         "model": model,
         "brief": compact_text(raw.get("brief") or fallback["brief"], 260),
@@ -594,6 +597,21 @@ def build_market_wide_insight(payload: dict[str, Any]) -> dict[str, Any]:
         search_results = []
     context = _build_agent_context(payload, lens, search_results)
     client = OpenAICompatibleClient()
+    if graph_enabled():
+        return run_forecast_intelligence_graph(
+            payload,
+            lens,
+            context,
+            search_results,
+            client,
+            normalize=_normalize,
+            fallback=lambda source_payload, source_lens, reason, results: _fallback_response(
+                source_payload,
+                source_lens,
+                reason=reason,
+                search_results=results,
+            ),
+        )
     if not client.configured:
         return _fallback_response(payload, lens, reason="missing-api-key", search_results=search_results)
     try:
