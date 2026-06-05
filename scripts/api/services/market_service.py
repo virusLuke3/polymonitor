@@ -882,6 +882,8 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
             candidate_limit,
         ),
     )
+    rows = _merge_clickhouse_stats(ctx, rows)
+
     def has_serving_data(row: Dict[str, Any]) -> bool:
         return (
             row.get("latest_price") not in (None, "")

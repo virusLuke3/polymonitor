@@ -332,28 +332,20 @@ def get_market_stats(ctx: dict, market_ids: Iterable[int], *, hours: int = 24) -
     if not ids:
         return {}
     id_csv = ", ".join(str(value) for value in ids)
+    block_window = max(1, int(hours)) * 1800
     rows = _query_json_rows(
         ctx,
         f"""
-        WITH
-            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
-            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
+        WITH (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block
         SELECT
             f.market_id AS market_id,
             count() AS trade_count_24h,
             toString(sum(f.size * f.price)) AS volume_24h,
             argMax(toString(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS latest_price,
-            formatDateTime(
-                max(dateAdd('second', (toInt64(f.block_number) - toInt64(anchor_block)) * 2, anchor_time)),
-                '%Y-%m-%dT%H:%i:%SZ',
-                'UTC'
-            ) AS latest_trade_at
+            max(f.block_number) AS latest_trade_block
         FROM {_table_sql()} f
         WHERE f.market_id IN ({id_csv})
-          AND f.block_number >= max_fact_block - {max(1, int(hours)) * 1800}
+          AND f.block_number >= max_fact_block - {block_window}
         GROUP BY f.market_id
         FORMAT JSONEachRow
         """,
@@ -365,8 +357,7 @@ def get_market_stats(ctx: dict, market_ids: Iterable[int], *, hours: int = 24) -
             "trade_count_24h": int(row.get("trade_count_24h") or 0),
             "volume_24h": row.get("volume_24h") or 0,
             "latest_price": row.get("latest_price"),
-            "last_trade_at": row.get("latest_trade_at"),
-            "latest_trade_at": row.get("latest_trade_at"),
+            "latest_trade_block": row.get("latest_trade_block"),
         }
         for row in rows
         if row.get("market_id") is not None
