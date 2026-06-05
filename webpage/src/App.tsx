@@ -7,7 +7,7 @@ import { WeatherMapCityInspector } from '@/components/WeatherMapCityInspector';
 import { WorldGlobe } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
-import { formatCompact, formatCurrencyCompact, formatPercent, formatRelative } from '@/panels/shared/formatters';
+import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative } from '@/panels/shared/formatters';
 import { WorldCupWorkspace } from '@/workspaces/worldcup/WorldCupWorkspace';
 import {
   fetchAllActiveMarkets,
@@ -67,6 +67,7 @@ type LayerToggle = {
 };
 
 type RegionKey = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
+type CommandPaletteTab = 'markets' | 'panels' | 'commands';
 const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
 const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v1';
 const MARKET_GROUP_SORT_STORAGE_KEY = 'wm:marketGroupSort:v1';
@@ -223,6 +224,14 @@ function currentUtcClock(now: Date) {
 function commandMarketStatus(market: MarketListItem) {
   const status = String(market.status || 'market').trim();
   return status ? status.replace(/[_-]+/g, ' ').toUpperCase() : 'MARKET';
+}
+
+function commandMarketStatusClass(market: MarketListItem) {
+  const status = String(market.status || '').toLowerCase();
+  if (status.includes('active') || status.includes('open')) return 'active';
+  if (status.includes('closed')) return 'closed';
+  if (status.includes('resolved') || status.includes('final')) return 'resolved';
+  return 'neutral';
 }
 
 function commandMarketFreshness(market: MarketListItem) {
@@ -875,6 +884,8 @@ export function App() {
   const [marketQuery] = useState('');
   const [layerQuery, setLayerQuery] = useState('');
   const [commandQuery, setCommandQuery] = useState('');
+  const [commandTab, setCommandTab] = useState<CommandPaletteTab>('markets');
+  const [commandActiveMarketId, setCommandActiveMarketId] = useState<number | null>(null);
   const [commandMarketHits, setCommandMarketHits] = useState<MarketListItem[]>([]);
   const [commandMarketSearchLoading, setCommandMarketSearchLoading] = useState(false);
   const [commandMarketSearchError, setCommandMarketSearchError] = useState('');
@@ -1730,6 +1741,38 @@ export function App() {
     return { panelHits, marketHits };
   }, [availableMarkets, commandMarketHits, commandQuery]);
 
+  useEffect(() => {
+    if (!showCommandPalette || commandTab !== 'markets') return;
+    setCommandActiveMarketId((current) => {
+      if (current != null && commandResults.marketHits.some((market) => market.id === current)) return current;
+      return commandResults.marketHits[0]?.id ?? null;
+    });
+  }, [commandResults.marketHits, commandTab, showCommandPalette]);
+
+  const commandActiveMarket = useMemo(() => (
+    commandResults.marketHits.find((market) => market.id === commandActiveMarketId)
+    || commandResults.marketHits[0]
+    || null
+  ), [commandActiveMarketId, commandResults.marketHits]);
+
+  const handleCommandKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      setShowCommandPalette(false);
+      return;
+    }
+    if (commandTab !== 'markets' || !commandResults.marketHits.length) return;
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter') return;
+    event.preventDefault();
+    if (event.key === 'Enter') {
+      if (commandActiveMarket) focusCommandMarket(commandActiveMarket);
+      return;
+    }
+    const currentIndex = Math.max(0, commandResults.marketHits.findIndex((market) => market.id === commandActiveMarketId));
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    const nextIndex = (currentIndex + direction + commandResults.marketHits.length) % commandResults.marketHits.length;
+    setCommandActiveMarketId(commandResults.marketHits[nextIndex]?.id ?? null);
+  };
+
   const resetWorkspace = () => {
     setRegion('global');
     setMapZoom(1);
@@ -2077,62 +2120,158 @@ export function App() {
 
       {showCommandPalette ? (
         <div className="wm-modal-backdrop" onClick={() => setShowCommandPalette(false)}>
-          <div className="wm-modal wm-command-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="wm-modal-title">Command Palette</div>
-            <input
-              autoFocus
-              className="wm-command-input"
-              value={commandQuery}
-              onInput={(event) => setCommandQuery((event.currentTarget as HTMLInputElement).value)}
-              placeholder="Search markets or panels..."
-            />
-            <div className="wm-command-columns">
-              <div className="wm-command-group">
-                <div className="wm-command-heading">Markets</div>
-                {commandMarketSearchLoading ? <div className="wm-command-empty">Searching PostgreSQL market index...</div> : null}
-                {!commandMarketSearchLoading && commandMarketSearchError ? (
-                  <div className="wm-command-empty">{commandMarketSearchError}</div>
-                ) : null}
-                {commandResults.marketHits.map((market) => (
-                  <button
-                    key={market.id}
-                    type="button"
-                    className="wm-command-result wm-command-market-result"
-                    onClick={() => focusCommandMarket(market)}
-                  >
-                    <div className="wm-command-result-main">
-                      <strong>{market.title}</strong>
-                      <span>{commandMarketStatus(market)} · {market.category || 'Uncategorized'}</span>
-                    </div>
-                    <div className="wm-command-result-metrics" aria-label="Market search result metrics">
-                      <span><em>YES</em><b>{formatPercent(market.latestPrice)}</b></span>
-                      <span><em>VOL</em><b>{formatCurrencyCompact(market.volume24h)}</b></span>
-                      <span><em>TX</em><b>{formatCompact(market.tradeCount24h)}</b></span>
-                      <span><em>AGE</em><b>{commandMarketFreshness(market)}</b></span>
-                    </div>
-                  </button>
-                ))}
-                {!commandMarketSearchLoading && !commandMarketSearchError && commandQuery.trim() && !commandResults.marketHits.length ? (
-                  <div className="wm-command-empty">No matching markets in PostgreSQL.</div>
-                ) : null}
+          <div className="wm-modal wm-command-modal" onClick={(event) => event.stopPropagation()} onKeyDown={handleCommandKeyDown}>
+            <div className="wm-command-header">
+              <div>
+                <span>Market Command Center</span>
+                <strong>Search Markets</strong>
               </div>
-              <div className="wm-command-group">
-                <div className="wm-command-heading">Panels</div>
-                {commandResults.panelHits.map((panel) => (
-                  <button
-                    key={panel.id}
-                    type="button"
-                    className="wm-command-result wm-command-panel-result"
-                    onClick={() => {
-                      if (!displayPanelIds.includes(panel.id)) togglePanel(panel.id);
-                      setShowCommandPalette(false);
-                    }}
-                  >
-                    <strong>{panel.title}</strong>
-                    <span>{panel.description}</span>
-                  </button>
-                ))}
+              <div className="wm-command-source">
+                <span>PostgreSQL</span>
+                <span>ClickHouse TX</span>
+                <span>Live Index</span>
               </div>
+            </div>
+            <div className="wm-command-searchbar">
+              <span aria-hidden="true">⌕</span>
+              <input
+                autoFocus
+                className="wm-command-input"
+                value={commandQuery}
+                onInput={(event) => {
+                  setCommandQuery((event.currentTarget as HTMLInputElement).value);
+                  setCommandTab('markets');
+                }}
+                placeholder="Search markets, tickers, categories, or panels..."
+              />
+              <kbd>⌘K</kbd>
+            </div>
+            <div className="wm-command-tabs" role="tablist" aria-label="Command palette sections">
+              <button type="button" className={commandTab === 'markets' ? 'active' : ''} onClick={() => setCommandTab('markets')}>Markets <span>{commandResults.marketHits.length}</span></button>
+              <button type="button" className={commandTab === 'panels' ? 'active' : ''} onClick={() => setCommandTab('panels')}>Panels <span>{commandResults.panelHits.length}</span></button>
+              <button type="button" className={commandTab === 'commands' ? 'active' : ''} onClick={() => setCommandTab('commands')}>Commands <span>3</span></button>
+            </div>
+            <div className="wm-command-body">
+              {commandTab === 'markets' ? (
+                <div className="wm-command-market-layout">
+                  <div className="wm-command-group wm-command-market-list">
+                    <div className="wm-command-list-head">
+                      <span>Market</span>
+                      <span>YES</span>
+                      <span>VOL</span>
+                      <span>TX</span>
+                      <span>AGE</span>
+                    </div>
+                    {commandMarketSearchLoading ? <div className="wm-command-empty">Searching PostgreSQL market index...</div> : null}
+                    {!commandMarketSearchLoading && commandMarketSearchError ? (
+                      <div className="wm-command-empty error">{commandMarketSearchError}</div>
+                    ) : null}
+                    {commandResults.marketHits.map((market) => {
+                      const active = commandActiveMarket?.id === market.id;
+                      return (
+                        <button
+                          key={market.id}
+                          type="button"
+                          className={`wm-command-result wm-command-market-result ${active ? 'active' : ''}`}
+                          onMouseEnter={() => setCommandActiveMarketId(market.id)}
+                          onFocus={() => setCommandActiveMarketId(market.id)}
+                          onClick={() => focusCommandMarket(market)}
+                        >
+                          <div className="wm-command-result-main">
+                            <strong>{market.title}</strong>
+                            <span>
+                              <i className={`wm-command-status ${commandMarketStatusClass(market)}`}>{commandMarketStatus(market)}</i>
+                              <em>{market.category || 'Uncategorized'}</em>
+                            </span>
+                          </div>
+                          <b>{formatPercent(market.latestPrice)}</b>
+                          <b>{formatCurrencyCompact(market.volume24h)}</b>
+                          <b>{formatCompact(market.tradeCount24h)}</b>
+                          <b>{commandMarketFreshness(market)}</b>
+                        </button>
+                      );
+                    })}
+                    {!commandMarketSearchLoading && !commandMarketSearchError && commandQuery.trim() && !commandResults.marketHits.length ? (
+                      <div className="wm-command-empty">No matching markets in PostgreSQL.</div>
+                    ) : null}
+                  </div>
+                  <aside className="wm-command-preview" aria-label="Selected market preview">
+                    {commandActiveMarket ? (
+                      <>
+                        <div className="wm-command-preview-top">
+                          <span className={`wm-command-status ${commandMarketStatusClass(commandActiveMarket)}`}>{commandMarketStatus(commandActiveMarket)}</span>
+                          <em>{commandActiveMarket.category || 'Market'}</em>
+                        </div>
+                        <strong>{commandActiveMarket.title}</strong>
+                        <div className="wm-command-preview-price">
+                          <span><em>YES</em><b>{formatPercent(commandActiveMarket.latestPrice)}</b></span>
+                          <span><em>24H VOL</em><b>{formatCurrencyCompact(commandActiveMarket.volume24h)}</b></span>
+                          <span><em>24H TX</em><b>{formatCompact(commandActiveMarket.tradeCount24h)}</b></span>
+                          <span><em>LAST TRADE</em><b>{commandMarketFreshness(commandActiveMarket)}</b></span>
+                        </div>
+                        <div className="wm-command-preview-meta">
+                          <span><em>Market ID</em><b>{commandActiveMarket.id}</b></span>
+                          <span><em>Outcomes</em><b>{commandActiveMarket.outcomeCount || 2}</b></span>
+                          <span><em>Closes</em><b>{formatDate(commandActiveMarket.endDate)}</b></span>
+                        </div>
+                        <div className="wm-command-preview-tags">
+                          {(commandActiveMarket.tags || []).slice(0, 5).map((tag) => <span key={tag}>{tag}</span>)}
+                        </div>
+                        <button type="button" className="wm-command-primary" onClick={() => focusCommandMarket(commandActiveMarket)}>Open Market Workspace</button>
+                      </>
+                    ) : (
+                      <div className="wm-command-empty">Search a market to preview live pricing, status, and flow.</div>
+                    )}
+                  </aside>
+                </div>
+              ) : null}
+              {commandTab === 'panels' ? (
+                <div className="wm-command-panel-grid">
+                  {commandResults.panelHits.map((panel) => (
+                    <button
+                      key={panel.id}
+                      type="button"
+                      className={`wm-command-result wm-command-panel-result ${displayPanelIds.includes(panel.id) ? 'enabled' : ''}`}
+                      onClick={() => {
+                        if (!displayPanelIds.includes(panel.id)) togglePanel(panel.id);
+                        setShowCommandPalette(false);
+                      }}
+                    >
+                      <strong>{panel.title}</strong>
+                      <span>{panel.description}</span>
+                      <em>{displayPanelIds.includes(panel.id) ? 'Enabled' : 'Add panel'}</em>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {commandTab === 'commands' ? (
+                <div className="wm-command-panel-grid wm-command-actions-grid">
+                  <button type="button" className="wm-command-result wm-command-panel-result" onClick={() => {
+                    resetWorkspace();
+                    setShowCommandPalette(false);
+                  }}>
+                    <strong>Reset Workspace</strong>
+                    <span>Return to the default market workspace and global region.</span>
+                    <em>Run</em>
+                  </button>
+                  <button type="button" className="wm-command-result wm-command-panel-result" onClick={() => {
+                    setShowCommandPalette(false);
+                    setShowSettings(true);
+                  }}>
+                    <strong>Workspace Settings</strong>
+                    <span>Open panel, region, and monitor preferences.</span>
+                    <em>Open</em>
+                  </button>
+                  <button type="button" className="wm-command-result wm-command-panel-result" onClick={() => {
+                    void copyLink();
+                    setShowCommandPalette(false);
+                  }}>
+                    <strong>Copy Link</strong>
+                    <span>Copy the current monitor URL.</span>
+                    <em>Copy</em>
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
