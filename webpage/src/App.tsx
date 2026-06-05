@@ -1730,9 +1730,9 @@ export function App() {
   const commandResults = useMemo(() => {
     const query = commandQuery.trim().toLowerCase();
     const panelHits = PANEL_LIBRARY.filter((panel) => {
-      const text = `${panel.title} ${panel.description} ${panel.eyebrow}`.toLowerCase();
+      const text = `${panel.title} ${panel.description} ${panel.eyebrow} ${panel.id} ${panel.size || 'default'}`.toLowerCase();
       return !query || text.includes(query);
-    }).slice(0, 8);
+    });
     const localMarketHits = availableMarkets.filter((market) => {
       const text = `${market.title} ${market.category || ''} ${market.slug}`.toLowerCase();
       return !query || text.includes(query);
@@ -1740,6 +1740,12 @@ export function App() {
     const marketHits = query && commandMarketHits.length ? commandMarketHits : localMarketHits;
     return { panelHits, marketHits };
   }, [availableMarkets, commandMarketHits, commandQuery]);
+
+  const commandPanelStats = useMemo(() => ({
+    enabled: PANEL_LIBRARY.filter((panel) => displayPanelIds.includes(panel.id)).length,
+    matching: commandResults.panelHits.length,
+    total: PANEL_LIBRARY.length,
+  }), [commandResults.panelHits.length, displayPanelIds]);
 
   useEffect(() => {
     if (!showCommandPalette || commandTab !== 'markets') return;
@@ -2138,17 +2144,14 @@ export function App() {
                 autoFocus
                 className="wm-command-input"
                 value={commandQuery}
-                onInput={(event) => {
-                  setCommandQuery((event.currentTarget as HTMLInputElement).value);
-                  setCommandTab('markets');
-                }}
+                onInput={(event) => setCommandQuery((event.currentTarget as HTMLInputElement).value)}
                 placeholder="Search markets, tickers, categories, or panels..."
               />
               <kbd>⌘K</kbd>
             </div>
             <div className="wm-command-tabs" role="tablist" aria-label="Command palette sections">
               <button type="button" className={commandTab === 'markets' ? 'active' : ''} onClick={() => setCommandTab('markets')}>Markets <span>{commandResults.marketHits.length}</span></button>
-              <button type="button" className={commandTab === 'panels' ? 'active' : ''} onClick={() => setCommandTab('panels')}>Panels <span>{commandResults.panelHits.length}</span></button>
+              <button type="button" className={commandTab === 'panels' ? 'active' : ''} onClick={() => setCommandTab('panels')}>Panels <span>{commandPanelStats.matching}/{commandPanelStats.total}</span></button>
               <button type="button" className={commandTab === 'commands' ? 'active' : ''} onClick={() => setCommandTab('commands')}>Commands <span>3</span></button>
             </div>
             <div className="wm-command-body">
@@ -2226,22 +2229,39 @@ export function App() {
                 </div>
               ) : null}
               {commandTab === 'panels' ? (
-                <div className="wm-command-panel-grid">
-                  {commandResults.panelHits.map((panel) => (
-                    <button
-                      key={panel.id}
-                      type="button"
-                      className={`wm-command-result wm-command-panel-result ${displayPanelIds.includes(panel.id) ? 'enabled' : ''}`}
-                      onClick={() => {
-                        if (!displayPanelIds.includes(panel.id)) togglePanel(panel.id);
-                        setShowCommandPalette(false);
-                      }}
-                    >
-                      <strong>{panel.title}</strong>
-                      <span>{panel.description}</span>
-                      <em>{displayPanelIds.includes(panel.id) ? 'Enabled' : 'Add panel'}</em>
-                    </button>
-                  ))}
+                <div className="wm-command-panel-section">
+                  <div className="wm-command-panel-summary">
+                    <span>Showing <b>{commandPanelStats.matching}</b> of <b>{commandPanelStats.total}</b> panels</span>
+                    <span>Enabled <b>{commandPanelStats.enabled}</b></span>
+                    {commandQuery.trim() ? <em>Filtered by "{commandQuery.trim()}"</em> : <em>Full panel library</em>}
+                  </div>
+                  <div className="wm-command-panel-grid">
+                    {commandResults.panelHits.map((panel) => (
+                      <button
+                        key={panel.id}
+                        type="button"
+                        className={`wm-command-result wm-command-panel-result ${displayPanelIds.includes(panel.id) ? 'enabled' : ''}`}
+                        onClick={() => {
+                          if (!displayPanelIds.includes(panel.id)) togglePanel(panel.id);
+                          setShowCommandPalette(false);
+                        }}
+                      >
+                        <div className="wm-command-panel-main">
+                          <strong>{panel.title}</strong>
+                          <small>{panel.id}</small>
+                        </div>
+                        <span>{panel.description}</span>
+                        <div className="wm-command-panel-meta">
+                          <i>{panel.eyebrow || 'panel'}</i>
+                          <i>{panel.size || 'default'}</i>
+                          <em>{displayPanelIds.includes(panel.id) ? 'Enabled' : 'Add panel'}</em>
+                        </div>
+                      </button>
+                    ))}
+                    {!commandResults.panelHits.length ? (
+                      <div className="wm-command-empty">No panels match the current query.</div>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
               {commandTab === 'commands' ? (

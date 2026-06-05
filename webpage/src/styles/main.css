@@ -4466,9 +4466,51 @@ body {
   padding-right: 4px;
 }
 
+.wm-command-panel-section {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  height: 100%;
+}
+
+.wm-command-panel-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #8f9893;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.wm-command-panel-summary span,
+.wm-command-panel-summary em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-command-panel-summary b {
+  color: #78ffa6;
+}
+
+.wm-command-panel-summary em {
+  margin-left: auto;
+  color: #b4bdb7;
+  font-style: normal;
+}
+
 .wm-command-panel-result {
   display: grid;
-  grid-template-columns: minmax(0, 0.42fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(140px, 0.38fr) minmax(0, 1fr) minmax(150px, auto);
   align-items: center;
   gap: 12px;
   min-height: 74px;
@@ -4479,12 +4521,21 @@ body {
   border-color: rgba(93, 255, 166, 0.22);
 }
 
-.wm-command-panel-result strong,
+.wm-command-panel-main,
+.wm-command-panel-main strong,
+.wm-command-panel-main small,
 .wm-command-panel-result span,
-.wm-command-panel-result em {
+.wm-command-panel-meta,
+.wm-command-panel-meta i,
+.wm-command-panel-meta em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.wm-command-panel-main {
+  display: grid;
+  gap: 4px;
 }
 
 .wm-command-panel-result strong {
@@ -4494,21 +4545,43 @@ body {
   line-height: 1.14;
 }
 
+.wm-command-panel-main small {
+  color: #79837d;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
 .wm-command-panel-result span {
   color: #b8beb9;
   font-size: 13px;
   line-height: 1.25;
 }
 
-.wm-command-panel-result em {
+.wm-command-panel-meta {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.wm-command-panel-meta i,
+.wm-command-panel-meta em {
   padding: 5px 7px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.055);
   color: #8d9691;
+  font-family: var(--font-mono);
   font-size: 9px;
   font-style: normal;
   font-weight: 900;
   white-space: nowrap;
+}
+
+.wm-command-panel-meta em {
+  background: rgba(93, 255, 166, 0.1);
+  color: #78ffa6;
 }
 
 .wm-command-empty {
