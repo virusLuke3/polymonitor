@@ -17,6 +17,7 @@ def create_bootstrap_blueprint(helpers: dict) -> Blueprint:
     @bp.route("/search", methods=["GET"])
     def api_search():
         query = request.args.get("q") or ""
-        return jsonify(helpers["search_markets"](query))
+        limit = min(50, max(1, int(request.args.get("limit", 10))))
+        return jsonify(helpers["search_markets"](query, limit=limit))
 
     return bp

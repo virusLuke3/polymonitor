@@ -4013,6 +4013,14 @@ body {
   font-size: 12px;
 }
 
+.wm-command-empty {
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  color: var(--wm-text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 12px 14px;
+}
+
 .wm-settings-row {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr);

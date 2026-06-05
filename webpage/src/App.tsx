@@ -19,6 +19,7 @@ import {
   fetchMarketGroups,
   fetchMarketLob,
   fetchMarketPrice,
+  fetchMarketSearch,
   fetchMarketTrades,
   fetchRecentOracle,
   fetchRecentTrades,
@@ -864,6 +865,8 @@ export function App() {
   const [marketQuery] = useState('');
   const [layerQuery, setLayerQuery] = useState('');
   const [commandQuery, setCommandQuery] = useState('');
+  const [commandMarketHits, setCommandMarketHits] = useState<MarketListItem[]>([]);
+  const [commandMarketSearchLoading, setCommandMarketSearchLoading] = useState(false);
   const [layers, setLayers] = useState<LayerToggle[]>(INITIAL_LAYERS);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => readWorkspaceMode());
   const [activePanelIds, setActivePanelIds] = useState<string[]>([]);
@@ -1665,18 +1668,48 @@ export function App() {
     suspiciousTrades: runtimeValue<RuntimeSignalPayload>('suspicious-flow'),
   };
 
+  useEffect(() => {
+    const query = commandQuery.trim();
+    if (!showCommandPalette || !query) {
+      setCommandMarketHits([]);
+      setCommandMarketSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setCommandMarketSearchLoading(true);
+      fetchMarketSearch(query, 12)
+        .then((payload) => {
+          if (!cancelled) setCommandMarketHits(payload.items || []);
+        })
+        .catch(() => {
+          if (!cancelled) setCommandMarketHits([]);
+        })
+        .finally(() => {
+          if (!cancelled) setCommandMarketSearchLoading(false);
+        });
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [commandQuery, showCommandPalette]);
+
   const commandResults = useMemo(() => {
     const query = commandQuery.trim().toLowerCase();
     const panelHits = PANEL_LIBRARY.filter((panel) => {
       const text = `${panel.title} ${panel.description} ${panel.eyebrow}`.toLowerCase();
       return !query || text.includes(query);
     }).slice(0, 8);
-    const marketHits = availableMarkets.filter((market) => {
+    const localMarketHits = availableMarkets.filter((market) => {
       const text = `${market.title} ${market.category || ''} ${market.slug}`.toLowerCase();
       return !query || text.includes(query);
     }).slice(0, 8);
+    const marketHits = query && commandMarketHits.length ? commandMarketHits : localMarketHits;
     return { panelHits, marketHits };
-  }, [availableMarkets, commandQuery]);
+  }, [availableMarkets, commandMarketHits, commandQuery]);
 
   const resetWorkspace = () => {
     setRegion('global');
@@ -2023,6 +2056,7 @@ export function App() {
             <div className="wm-command-columns">
               <div className="wm-command-group">
                 <div className="wm-command-heading">Markets</div>
+                {commandMarketSearchLoading ? <div className="wm-command-empty">Searching PostgreSQL market index...</div> : null}
                 {commandResults.marketHits.map((market) => (
                   <button
                     key={market.id}
@@ -2041,6 +2075,9 @@ export function App() {
                     <span>{market.category || market.status || 'market'}</span>
                   </button>
                 ))}
+                {!commandMarketSearchLoading && commandQuery.trim() && !commandResults.marketHits.length ? (
+                  <div className="wm-command-empty">No matching markets in PostgreSQL.</div>
+                ) : null}
               </div>
               <div className="wm-command-group">
                 <div className="wm-command-heading">Panels</div>

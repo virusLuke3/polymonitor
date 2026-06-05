@@ -688,31 +688,89 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
     cleaned = str(query or "").strip()
     if not cleaned:
         return {"items": []}
-    pattern = f"%{cleaned}%"
+    limit = min(50, max(1, int(limit or 10)))
+    now_iso = ctx["utc_now_iso"]()
+    pattern = f"%{cleaned.lower()}%"
     rows = ctx["query_all"](
         """
-        SELECT id, gamma_market_id, slug, title, condition_id, question_id
-        FROM markets
-        WHERE title LIKE ? OR slug LIKE ? OR condition_id LIKE ? OR question_id LIKE ?
-        ORDER BY created_at DESC
+        SELECT
+            m.id,
+            m.gamma_market_id,
+            m.slug,
+            m.title,
+            m.condition_id,
+            m.question_id,
+            m.end_date,
+            m.created_at,
+            m.category,
+            m.tags,
+            m.yes_token_id,
+            m.no_token_id,
+            m.clob_token_ids,
+            COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+            COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+            COALESCE(mss.has_settle, FALSE) AS has_settle,
+            COALESCE(mss.has_propose, FALSE) AS has_propose,
+            COALESCE(mss.settlement_code, 0) AS settlement_code,
+            COALESCE(mls.latest_price, mlp.latest_yes_price) AS latest_price,
+            mls.price_24h_ago,
+            COALESCE(mls.volume_24h, 0) AS volume_24h,
+            COALESCE(mls.trade_count_24h, 0) AS trade_count_24h,
+            mls.last_trade_at,
+            mls.latest_trade_at,
+            CASE
+                WHEN COALESCE(mss.is_trading_closed, FALSE) = FALSE
+                 AND COALESCE(mss.has_settle, FALSE) = FALSE
+                 AND COALESCE(mss.has_propose, FALSE) = FALSE
+                 AND COALESCE(mss.settlement_code, 0) = 0
+                 AND (m.end_date IS NULL OR m.end_date >= ?)
+                THEN 'active'
+                ELSE LOWER(COALESCE(mss.completion_status, 'closed'))
+            END AS status
+        FROM markets m
+        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+        LEFT JOIN market_list_serving mls ON mls.market_id = m.id
+        LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+        WHERE
+            LOWER(
+                COALESCE(m.title, '') || ' ' ||
+                COALESCE(m.slug, '') || ' ' ||
+                COALESCE(m.condition_id, '') || ' ' ||
+                COALESCE(m.question_id, '') || ' ' ||
+                COALESCE(m.category, '') || ' ' ||
+                COALESCE(m.event_title, '') || ' ' ||
+                COALESCE(CAST(m.tags AS TEXT), '')
+            ) LIKE ?
+        ORDER BY
+            CASE
+                WHEN COALESCE(mss.is_trading_closed, FALSE) = FALSE
+                 AND COALESCE(mss.has_settle, FALSE) = FALSE
+                 AND COALESCE(mss.has_propose, FALSE) = FALSE
+                 AND COALESCE(mss.settlement_code, 0) = 0
+                 AND (m.end_date IS NULL OR m.end_date >= ?)
+                THEN 0 ELSE 1
+            END ASC,
+            CASE
+                WHEN LOWER(COALESCE(m.title, '')) LIKE ? THEN 0
+                WHEN LOWER(COALESCE(m.slug, '')) LIKE ? THEN 1
+                WHEN LOWER(COALESCE(m.category, '')) LIKE ? THEN 2
+                ELSE 3
+            END ASC,
+            CASE
+                WHEN COALESCE(mls.trade_count_24h, 0) > 0
+                  OR COALESCE(mls.volume_24h, 0) > 0
+                  OR mls.latest_price IS NOT NULL
+                  OR mlp.latest_yes_price IS NOT NULL
+                THEN 0 ELSE 1
+            END ASC,
+            m.created_at DESC,
+            COALESCE(mls.trade_count_24h, 0) DESC,
+            COALESCE(mls.volume_24h, 0) DESC
         LIMIT ?
         """,
-        (pattern, pattern, pattern, pattern, limit),
+        (now_iso, pattern, now_iso, pattern, pattern, pattern, limit),
     )
-    return {
-        "items": [
-            {
-                "id": row.get("id"),
-                "localMarketId": row.get("id"),
-                "slug": row.get("slug"),
-                "title": row.get("title"),
-                "conditionId": row.get("condition_id"),
-                "questionId": row.get("question_id"),
-                "gammaMarketId": row.get("gamma_market_id"),
-            }
-            for row in rows
-        ]
-    }
+    return {"items": [_market_list_item(ctx, row) for row in rows]}
 
 
 def get_market_by_slug(ctx: dict, slug: str) -> Optional[dict]:

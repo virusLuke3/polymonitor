@@ -12,6 +12,7 @@ import type {
   MarketGroupDetail,
   MarketGroupOutcome,
   MarketGroupsPayload,
+  MarketListItem,
   MarketsPayload,
   MarketWorkspaceHealth,
   OraclePayload,
@@ -132,6 +133,14 @@ async function apiPostAgentOnce<T>(path: string, body: unknown, timeoutMs = 1800
 
 export function fetchBootstrap() {
   return apiGet<BootstrapPayload>('/bootstrap');
+}
+
+export function fetchMarketSearch(query: string, limit = 12) {
+  const params = new URLSearchParams({
+    q: query.trim(),
+    limit: String(limit),
+  });
+  return apiGet<{ items: MarketListItem[] }>(`/search?${params.toString()}`);
 }
 
 export function fetchMarkets(query = '', pageSize = 160) {
