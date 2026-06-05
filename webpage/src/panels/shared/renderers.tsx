@@ -445,6 +445,10 @@ function contentList(items: ContentItem[], emptyMessage: string, maxItems = 20) 
             {summary ? <p className="wm-intel-summary">{summary}</p> : null}
             <div className="wm-news-meta">
               <span>{formatDate(item.publishedAt || null)}</span>
+              {item.topicId ? <span>{String(item.topicId).toUpperCase()}</span> : null}
+              {item.provider ? <span>{String(item.provider).toUpperCase()}</span> : null}
+              {Number(item.sourceCount || 0) > 1 ? <span>{Number(item.sourceCount)} sources</span> : null}
+              {Number(item.relevanceScore || 0) > 0 ? <span>REL {Number(item.relevanceScore)}</span> : null}
               <b>Read source</b>
             </div>
           </a>

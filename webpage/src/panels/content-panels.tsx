@@ -50,6 +50,29 @@ function topSources(items: ContentItem[]) {
     .slice(0, 5);
 }
 
+function providerMix(items: ContentItem[]) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const provider = String(item.provider || 'rss').trim().toUpperCase();
+    counts.set(provider, (counts.get(provider) || 0) + 1);
+  });
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function topicMix(items: ContentItem[]) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const topic = String(item.topicId || '').trim().toUpperCase();
+    if (!topic) return;
+    counts.set(topic, (counts.get(topic) || 0) + 1);
+  });
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 4);
+}
+
+function sourceCoverage(items: ContentItem[]) {
+  return new Set(items.map((item) => String(item.source || '').trim()).filter(Boolean)).size;
+}
+
 function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
   const [activeTab, setActiveTab] = useState<IntelTab['id']>('news');
   const items = focusedContent(ctx);
@@ -62,15 +85,37 @@ function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
     ? 'No news intel for this market yet.'
     : `No explicit ${activeLabel.toLowerCase()} intel for this market yet. Runtime RSS news stays under News.`;
   const sources = useMemo(() => topSources(visibleItems), [visibleItems]);
+  const providers = useMemo(() => providerMix(items), [items]);
+  const topics = useMemo(() => topicMix(items), [items]);
+  const uniqueSources = useMemo(() => sourceCoverage(items), [items]);
+  const sourceMode = ctx.bundle?.content?.sourceMode || 'runtime-intel';
 
   return (
     <Panel
       title="RELATED INTEL"
-      badge={ctx.bundle?.content?.sourceMode || 'runtime-rss'}
+      badge={sourceMode}
       status="live"
       count={items.length}
       className="wm-market-panel wm-content-feed-panel wm-related-news-panel wm-related-intel-panel"
     >
+      <div className="wm-intel-coverage-row" aria-label="Related intel source coverage">
+        <span>
+          <b>{uniqueSources}</b>
+          sources
+        </span>
+        {providers.map(([provider, count]) => (
+          <span key={provider}>
+            <b>{count}</b>
+            {provider}
+          </span>
+        ))}
+        {topics.map(([topic, count]) => (
+          <span key={topic}>
+            <b>{count}</b>
+            {topic}
+          </span>
+        ))}
+      </div>
       <div className="wm-intel-filter-tabs" role="tablist" aria-label="Related intel content types">
         {INTEL_TABS.map((tab) => (
           <button

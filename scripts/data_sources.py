@@ -152,8 +152,53 @@ RSS_FEEDS: List[Dict[str, str]] = [
         "category": "US",
     },
     {
+        "source": "PBS NewsHour",
+        "url": env_str("POLYDATA_RSS_PBS_NEWSHOUR_URL", "https://www.pbs.org/newshour/feeds/rss/headlines"),
+        "category": "US",
+    },
+    {
+        "source": "ABC News",
+        "url": env_str("POLYDATA_RSS_ABC_NEWS_URL", "https://feeds.abcnews.com/abcnews/topstories"),
+        "category": "US",
+    },
+    {
+        "source": "CBS News",
+        "url": env_str("POLYDATA_RSS_CBS_NEWS_URL", "https://www.cbsnews.com/latest/rss/main"),
+        "category": "US",
+    },
+    {
+        "source": "NBC News",
+        "url": env_str("POLYDATA_RSS_NBC_NEWS_URL", "https://feeds.nbcnews.com/nbcnews/public/news"),
+        "category": "US",
+    },
+    {
+        "source": "Axios",
+        "url": env_str("POLYDATA_RSS_AXIOS_URL", "https://api.axios.com/feed/"),
+        "category": "US",
+    },
+    {
         "source": "AP News",
         "url": env_str("POLYDATA_RSS_AP_NEWS_URL", "https://news.google.com/rss/search?q=site:apnews.com+when:3d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "World",
+    },
+    {
+        "source": "CNN World",
+        "url": env_str("POLYDATA_RSS_CNN_WORLD_URL", "https://news.google.com/rss/search?q=site:cnn.com+world+news+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "World",
+    },
+    {
+        "source": "France 24",
+        "url": env_str("POLYDATA_RSS_FRANCE24_URL", "https://www.france24.com/en/rss"),
+        "category": "World",
+    },
+    {
+        "source": "Euronews",
+        "url": env_str("POLYDATA_RSS_EURONEWS_URL", "https://www.euronews.com/rss?format=xml"),
+        "category": "World",
+    },
+    {
+        "source": "DW News",
+        "url": env_str("POLYDATA_RSS_DW_NEWS_URL", "https://rss.dw.com/xml/rss-en-all"),
         "category": "World",
     },
     {
@@ -177,6 +222,31 @@ RSS_FEEDS: List[Dict[str, str]] = [
         "category": "Politics",
     },
     {
+        "source": "White House",
+        "url": env_str("POLYDATA_RSS_WHITE_HOUSE_URL", "https://www.whitehouse.gov/briefings-statements/feed/"),
+        "category": "Government",
+    },
+    {
+        "source": "Federal Reserve",
+        "url": env_str("POLYDATA_RSS_FEDERAL_RESERVE_URL", "https://www.federalreserve.gov/feeds/press_all.xml"),
+        "category": "Government",
+    },
+    {
+        "source": "SEC",
+        "url": env_str("POLYDATA_RSS_SEC_URL", "https://www.sec.gov/news/pressreleases.rss"),
+        "category": "Government",
+    },
+    {
+        "source": "UN News",
+        "url": env_str("POLYDATA_RSS_UN_NEWS_URL", "https://news.un.org/feed/subscribe/en/news/all/rss.xml"),
+        "category": "Government",
+    },
+    {
+        "source": "CISA",
+        "url": env_str("POLYDATA_RSS_CISA_URL", "https://www.cisa.gov/cybersecurity-advisories/all.xml"),
+        "category": "Government",
+    },
+    {
         "source": "Al Jazeera",
         "url": env_str("POLYDATA_RSS_AL_JAZEERA_URL", "https://www.aljazeera.com/xml/rss/all.xml"),
         "category": "World",
@@ -192,6 +262,51 @@ RSS_FEEDS: List[Dict[str, str]] = [
         "category": "Finance",
     },
     {
+        "source": "Financial Times",
+        "url": env_str("POLYDATA_RSS_FINANCIAL_TIMES_URL", "https://www.ft.com/rss/home"),
+        "category": "Finance",
+    },
+    {
+        "source": "Seeking Alpha",
+        "url": env_str("POLYDATA_RSS_SEEKING_ALPHA_URL", "https://seekingalpha.com/market_currents.xml"),
+        "category": "Finance",
+    },
+    {
+        "source": "MarketWatch",
+        "url": env_str("POLYDATA_RSS_MARKETWATCH_URL", "https://news.google.com/rss/search?q=site:marketwatch.com+markets+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Finance",
+    },
+    {
+        "source": "Bond Market",
+        "url": env_str("POLYDATA_RSS_BOND_MARKET_URL", "https://news.google.com/rss/search?q=(%22bond+market%22+OR+%22treasury+yield%22+OR+%22fixed+income%22)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Finance",
+    },
+    {
+        "source": "Options Market",
+        "url": env_str("POLYDATA_RSS_OPTIONS_MARKET_URL", "https://news.google.com/rss/search?q=(%22options+market%22+OR+VIX+OR+%22market+volatility%22)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Finance",
+    },
+    {
+        "source": "Economic Data",
+        "url": env_str("POLYDATA_RSS_ECONOMIC_DATA_URL", "https://news.google.com/rss/search?q=(CPI+OR+inflation+OR+GDP+OR+%22jobs+report%22+OR+unemployment)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Macro",
+    },
+    {
+        "source": "Oil & Gas",
+        "url": env_str("POLYDATA_RSS_OIL_GAS_URL", "https://news.google.com/rss/search?q=(oil+price+OR+OPEC+OR+%22natural+gas%22+OR+pipeline+OR+LNG+OR+WTI+OR+Brent)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Energy",
+    },
+    {
+        "source": "Reuters Energy",
+        "url": env_str("POLYDATA_RSS_REUTERS_ENERGY_URL", "https://news.google.com/rss/search?q=site:reuters.com+energy+oil+OPEC+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Energy",
+    },
+    {
+        "source": "Gold & Metals",
+        "url": env_str("POLYDATA_RSS_GOLD_METALS_URL", "https://news.google.com/rss/search?q=(%22gold+price%22+OR+%22silver+price%22+OR+%22copper+price%22+OR+%22precious+metals%22)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Commodities",
+    },
+    {
         "source": "CoinDesk",
         "url": env_str("POLYDATA_RSS_COINDESK_URL", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
         "category": "Crypto",
@@ -204,6 +319,31 @@ RSS_FEEDS: List[Dict[str, str]] = [
     {
         "source": "Decrypt",
         "url": env_str("POLYDATA_RSS_DECRYPT_URL", "https://decrypt.co/feed"),
+        "category": "Crypto",
+    },
+    {
+        "source": "The Block",
+        "url": env_str("POLYDATA_RSS_THE_BLOCK_URL", "https://news.google.com/rss/search?q=site:theblock.co+when:1d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Crypto",
+    },
+    {
+        "source": "Blockworks",
+        "url": env_str("POLYDATA_RSS_BLOCKWORKS_URL", "https://blockworks.co/feed"),
+        "category": "Crypto",
+    },
+    {
+        "source": "The Defiant",
+        "url": env_str("POLYDATA_RSS_THE_DEFIANT_URL", "https://thedefiant.io/feed"),
+        "category": "Crypto",
+    },
+    {
+        "source": "Bitcoin Magazine",
+        "url": env_str("POLYDATA_RSS_BITCOIN_MAGAZINE_URL", "https://bitcoinmagazine.com/feed"),
+        "category": "Crypto",
+    },
+    {
+        "source": "Stablecoin Policy",
+        "url": env_str("POLYDATA_RSS_STABLECOIN_POLICY_URL", "https://news.google.com/rss/search?q=(stablecoin+regulation+OR+%22stablecoin+bill%22+OR+USDT+OR+USDC)+when:7d&hl=en-US&gl=US&ceid=US:en"),
         "category": "Crypto",
     },
     {
@@ -232,6 +372,36 @@ RSS_FEEDS: List[Dict[str, str]] = [
         "category": "Tech",
     },
     {
+        "source": "TechCrunch",
+        "url": env_str("POLYDATA_RSS_TECHCRUNCH_URL", "https://techcrunch.com/feed/"),
+        "category": "Tech",
+    },
+    {
+        "source": "The Verge",
+        "url": env_str("POLYDATA_RSS_THE_VERGE_URL", "https://www.theverge.com/rss/index.xml"),
+        "category": "Tech",
+    },
+    {
+        "source": "MIT Tech Review",
+        "url": env_str("POLYDATA_RSS_MIT_TECH_REVIEW_URL", "https://www.technologyreview.com/feed/"),
+        "category": "Tech",
+    },
+    {
+        "source": "VentureBeat AI",
+        "url": env_str("POLYDATA_RSS_VENTUREBEAT_AI_URL", "https://venturebeat.com/category/ai/feed/"),
+        "category": "Tech",
+    },
+    {
+        "source": "ArXiv AI",
+        "url": env_str("POLYDATA_RSS_ARXIV_AI_URL", "https://export.arxiv.org/rss/cs.AI"),
+        "category": "Research",
+    },
+    {
+        "source": "Semiconductor News",
+        "url": env_str("POLYDATA_RSS_SEMICONDUCTOR_NEWS_URL", "https://news.google.com/rss/search?q=(semiconductor+OR+chip+OR+TSMC+OR+NVIDIA+OR+Intel)+when:3d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Tech",
+    },
+    {
         "source": "ESPN",
         "url": ESPN_RSS_NEWS_URL,
         "category": "Sports",
@@ -244,15 +414,305 @@ RSS_FEEDS: List[Dict[str, str]] = [
     {
         "source": "Esports Markets",
         "url": env_str("POLYDATA_RSS_ESPORTS_MARKETS_URL", "https://news.google.com/rss/search?q=(esports+OR+Valorant+OR+%22Counter-Strike%22+OR+%22League+of+Legends%22+OR+Dota+OR+KR%C3%9C+OR+KRU)+when:7d&hl=en-US&gl=US&ceid=US:en"),
-        "category": "Sports",
+        "category": "Esports",
+    },
+    {
+        "source": "HLTV Counter-Strike",
+        "url": env_str("POLYDATA_RSS_HLTV_COUNTER_STRIKE_URL", "https://news.google.com/rss/search?q=site:hltv.org+Counter-Strike+CS2+esports+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Esports",
+    },
+    {
+        "source": "Valorant Esports",
+        "url": env_str("POLYDATA_RSS_VALORANT_ESPORTS_URL", "https://news.google.com/rss/search?q=(Valorant+VCT+esports+match+roster)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Esports",
+    },
+    {
+        "source": "LoL Esports",
+        "url": env_str("POLYDATA_RSS_LOL_ESPORTS_URL", "https://news.google.com/rss/search?q=(%22League+of+Legends%22+LCK+LPL+LEC+esports+match)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Esports",
+    },
+    {
+        "source": "Dot Esports",
+        "url": env_str("POLYDATA_RSS_DOT_ESPORTS_URL", "https://dotesports.com/feed"),
+        "category": "Esports",
     },
     {
         "source": "Sports Markets",
         "url": env_str("POLYDATA_RSS_SPORTS_MARKETS_URL", "https://news.google.com/rss/search?q=(NBA+NFL+MLB+NHL+UFC+esports+injury+odds)+when:2d&hl=en-US&gl=US&ceid=US:en"),
         "category": "Sports",
     },
+    {
+        "source": "NBA Markets",
+        "url": env_str("POLYDATA_RSS_NBA_MARKETS_URL", "https://news.google.com/rss/search?q=(NBA+injury+lineup+odds+Knicks+Celtics+Thunder+Finals)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Sports",
+    },
+    {
+        "source": "Tennis Markets",
+        "url": env_str("POLYDATA_RSS_TENNIS_MARKETS_URL", "https://news.google.com/rss/search?q=(tennis+ATP+WTA+injury+odds+tournament)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Sports",
+    },
+    {
+        "source": "MLB Markets",
+        "url": env_str("POLYDATA_RSS_MLB_MARKETS_URL", "https://news.google.com/rss/search?q=(MLB+pitcher+lineup+injury+odds)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Sports",
+    },
+    {
+        "source": "UFC Markets",
+        "url": env_str("POLYDATA_RSS_UFC_MARKETS_URL", "https://news.google.com/rss/search?q=(UFC+fight+injury+weigh-in+odds)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Sports",
+    },
+    {
+        "source": "NBA Official",
+        "url": env_str("POLYDATA_RSS_NBA_OFFICIAL_NEWS_URL", "https://news.google.com/rss/search?q=site:nba.com+NBA+injury+lineup+finals+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Sports",
+    },
+    {
+        "source": "ESPN NBA",
+        "url": env_str("POLYDATA_RSS_ESPN_NBA_NEWS_URL", "https://news.google.com/rss/search?q=site:espn.com/nba+NBA+injury+lineup+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Sports",
+    },
+    {
+        "source": "The Athletic NBA",
+        "url": env_str("POLYDATA_RSS_ATHLETIC_NBA_NEWS_URL", "https://news.google.com/rss/search?q=site:nytimes.com/athletic+NBA+injury+lineup+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Sports",
+    },
+    {
+        "source": "Reuters Politics",
+        "url": env_str("POLYDATA_RSS_REUTERS_POLITICS_URL", "https://news.google.com/rss/search?q=site:reuters.com+US+politics+election+campaign+when:3d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Politics",
+    },
+    {
+        "source": "AP Politics",
+        "url": env_str("POLYDATA_RSS_AP_POLITICS_URL", "https://news.google.com/rss/search?q=site:apnews.com+politics+election+campaign+when:3d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Politics",
+    },
+    {
+        "source": "Election Polling",
+        "url": env_str("POLYDATA_RSS_ELECTION_POLLING_URL", "https://news.google.com/rss/search?q=(election+polling+OR+%22presidential+poll%22+OR+%22senate+poll%22+OR+FiveThirtyEight)+when:3d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Elections",
+    },
+    {
+        "source": "Campaign Finance",
+        "url": env_str("POLYDATA_RSS_CAMPAIGN_FINANCE_URL", "https://news.google.com/rss/search?q=(campaign+fundraising+OR+FEC+OR+super+PAC+OR+election+spending)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Elections",
+    },
+    {
+        "source": "Crypto Regulation",
+        "url": env_str("POLYDATA_RSS_CRYPTO_REGULATION_URL", "https://news.google.com/rss/search?q=(crypto+regulation+OR+SEC+bitcoin+ETF+OR+stablecoin+bill)+when:3d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Crypto",
+    },
+    {
+        "source": "Crypto Markets",
+        "url": env_str("POLYDATA_RSS_CRYPTO_MARKETS_URL", "https://news.google.com/rss/search?q=(bitcoin+ethereum+solana+crypto+market+ETF+flows)+when:1d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Crypto",
+    },
+    {
+        "source": "Coinbase Blog",
+        "url": env_str("POLYDATA_RSS_COINBASE_BLOG_URL", "https://www.coinbase.com/blog/rss"),
+        "category": "Crypto",
+    },
+    {
+        "source": "OpenAI News",
+        "url": env_str("POLYDATA_RSS_OPENAI_NEWS_URL", "https://openai.com/news/rss.xml"),
+        "category": "Tech",
+    },
+    {
+        "source": "Google AI",
+        "url": env_str("POLYDATA_RSS_GOOGLE_AI_NEWS_URL", "https://news.google.com/rss/search?q=site:blog.google/technology/ai+Google+AI+Gemini+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Tech",
+    },
+    {
+        "source": "Anthropic News",
+        "url": env_str("POLYDATA_RSS_ANTHROPIC_NEWS_URL", "https://news.google.com/rss/search?q=site:anthropic.com/news+Claude+Anthropic+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Tech",
+    },
+    {
+        "source": "AI Markets",
+        "url": env_str("POLYDATA_RSS_AI_MARKETS_URL", "https://news.google.com/rss/search?q=(OpenAI+Anthropic+Gemini+Nvidia+AI+model+LLM)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Research",
+    },
+    {
+        "source": "Big Tech Markets",
+        "url": env_str("POLYDATA_RSS_BIG_TECH_MARKETS_URL", "https://news.google.com/rss/search?q=(Apple+Microsoft+Google+Amazon+Meta+Tesla+Nvidia)+earnings+when:3d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Tech",
+    },
+    {
+        "source": "NHC Advisories",
+        "url": env_str("POLYDATA_RSS_NHC_ADVISORIES_URL", "https://www.nhc.noaa.gov/index-at.xml"),
+        "category": "Weather",
+    },
+    {
+        "source": "NOAA Weather",
+        "url": env_str("POLYDATA_RSS_NOAA_WEATHER_URL", "https://news.google.com/rss/search?q=site:noaa.gov+weather+hurricane+storm+temperature+when:3d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Weather",
+    },
+    {
+        "source": "Weather Markets",
+        "url": env_str("POLYDATA_RSS_WEATHER_MARKETS_URL", "https://news.google.com/rss/search?q=(hurricane+storm+heat+wave+temperature+rainfall+snowfall)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Weather",
+    },
+]
+
+
+CONTENT_TOPIC_REGISTRY: List[Dict[str, object]] = [
+    {
+        "id": "prediction-markets",
+        "label": "Prediction Markets",
+        "categories": ["Prediction Markets"],
+        "keywords": ["polymarket", "prediction market", "prediction markets", "kalshi", "forecasting"],
+        "queries": [
+            'Polymarket OR "prediction market" OR Kalshi when:3d',
+            '"prediction markets" crypto politics sports when:7d',
+        ],
+    },
+    {
+        "id": "politics",
+        "label": "Politics",
+        "categories": ["Politics", "Government", "US"],
+        "keywords": ["politics", "congress", "senate", "house", "trump", "biden", "white house"],
+        "queries": [
+            "US politics Congress White House election campaign when:2d",
+            "Trump Biden Senate House Supreme Court policy when:2d",
+        ],
+    },
+    {
+        "id": "elections",
+        "label": "Elections",
+        "categories": ["Elections", "Politics"],
+        "keywords": ["election", "poll", "polls", "nominee", "presidential", "senate race", "campaign"],
+        "queries": [
+            'election polls presidential campaign nominee "latest poll" when:2d',
+            'senate poll governor poll primary campaign fundraising when:3d',
+        ],
+    },
+    {
+        "id": "sports",
+        "label": "Sports",
+        "categories": ["Sports"],
+        "keywords": ["sports", "nba", "nfl", "mlb", "nhl", "ufc", "tennis", "cricket", "injury", "lineup"],
+        "queries": [
+            "NBA NFL MLB NHL UFC tennis cricket injury lineup odds when:1d",
+            "sports injury report lineup starting pitcher odds when:1d",
+        ],
+    },
+    {
+        "id": "esports",
+        "label": "Esports",
+        "categories": ["Esports", "Sports"],
+        "keywords": ["esports", "counter-strike", "counter strike", "cs2", "valorant", "league of legends", "dota", "kru", "1win", "betclic", "hltv"],
+        "queries": [
+            'esports Counter-Strike CS2 Valorant League of Legends Dota match roster when:3d',
+            'site:hltv.org Counter-Strike CS2 esports match when:7d',
+            'Valorant VCT esports match roster odds when:7d',
+        ],
+    },
+    {
+        "id": "nba",
+        "label": "NBA",
+        "categories": ["Sports"],
+        "keywords": ["nba", "basketball", "knicks", "celtics", "thunder", "finals", "injury report"],
+        "queries": [
+            "NBA injury report lineup finals odds when:1d",
+            "site:espn.com/nba NBA injury lineup when:2d",
+            "site:nba.com NBA injury report finals when:2d",
+        ],
+    },
+    {
+        "id": "crypto",
+        "label": "Crypto",
+        "categories": ["Crypto"],
+        "keywords": ["crypto", "bitcoin", "btc", "ethereum", "eth", "stablecoin", "solana", "defi"],
+        "queries": [
+            "crypto bitcoin ethereum stablecoin ETF regulation market when:1d",
+            "bitcoin ETF flows ethereum solana defi when:1d",
+        ],
+    },
+    {
+        "id": "finance",
+        "label": "Finance",
+        "categories": ["Finance"],
+        "keywords": ["stocks", "equities", "treasury", "yield", "market", "s&p", "nasdaq", "fed"],
+        "queries": [
+            "stocks treasury yields S&P Nasdaq Fed markets when:1d",
+            "earnings market volatility VIX rates equities when:1d",
+        ],
+    },
+    {
+        "id": "macro",
+        "label": "Macro",
+        "categories": ["Macro", "Finance"],
+        "keywords": ["macro", "inflation", "fed", "rates", "jobs", "unemployment", "gdp", "recession"],
+        "queries": [
+            "Fed inflation rates jobs GDP recession macro when:2d",
+            "treasury yields unemployment GDP retail sales when:2d",
+        ],
+    },
+    {
+        "id": "cpi",
+        "label": "CPI",
+        "categories": ["Macro"],
+        "keywords": ["cpi", "inflation", "core cpi", "headline cpi", "shelter", "oer"],
+        "queries": [
+            'CPI inflation "core CPI" shelter OER when:7d',
+            '"inflation report" "consumer prices" Fed when:7d',
+        ],
+    },
+    {
+        "id": "oil-energy",
+        "label": "Oil & Energy",
+        "categories": ["Energy", "Commodities", "Macro"],
+        "keywords": ["oil", "wti", "crude", "brent", "opec", "gas", "lng", "energy"],
+        "queries": [
+            'WTI "crude oil" Brent OPEC natural gas LNG when:2d',
+            'oil prices energy markets gasoline diesel when:2d',
+        ],
+    },
+    {
+        "id": "geopolitics",
+        "label": "Geopolitics",
+        "categories": ["Geopolitics", "World", "Government"],
+        "keywords": ["geopolitics", "war", "ceasefire", "sanctions", "iran", "israel", "ukraine", "russia", "taiwan"],
+        "queries": [
+            "war ceasefire sanctions Iran Israel Ukraine Russia Taiwan when:2d",
+            "geopolitics conflict sanctions defense diplomacy when:2d",
+        ],
+    },
+    {
+        "id": "tech",
+        "label": "Tech",
+        "categories": ["Tech"],
+        "keywords": ["tech", "technology", "apple", "tesla", "nvidia", "semiconductor", "chip", "spacex"],
+        "queries": [
+            "technology Apple Tesla Nvidia semiconductor chips when:2d",
+            "big tech earnings antitrust product launch when:3d",
+        ],
+    },
+    {
+        "id": "ai",
+        "label": "AI",
+        "categories": ["Tech", "Research"],
+        "keywords": ["ai", "openai", "anthropic", "gemini", "llm", "nvidia", "artificial intelligence"],
+        "queries": [
+            'AI OpenAI Anthropic Gemini LLM Nvidia "artificial intelligence" when:2d',
+            'AI model launch benchmark regulation chips when:3d',
+        ],
+    },
+    {
+        "id": "weather",
+        "label": "Weather",
+        "categories": ["Weather", "World"],
+        "keywords": ["weather", "hurricane", "storm", "temperature", "rain", "snow", "heat wave"],
+        "queries": [
+            "weather hurricane storm temperature heat wave when:2d",
+            "NOAA hurricane forecast extreme weather rainfall snowfall when:2d",
+        ],
+    },
 ]
 
 
 def non_empty_feeds(feeds: List[Dict[str, str]]) -> List[Dict[str, str]]:
     return [feed for feed in feeds if str(feed.get("url") or "").strip()]
+
+
+def content_topic_registry() -> List[Dict[str, object]]:
+    return list(CONTENT_TOPIC_REGISTRY)

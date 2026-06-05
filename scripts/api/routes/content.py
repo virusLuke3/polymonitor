@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from flask import Blueprint, jsonify, request
 
 
@@ -14,6 +16,19 @@ def _publish_latest_content(payload: dict) -> None:
         return
 
 
+def _runtime_content_fallback(limit: int, *, market_id: int | None = None, helpers: dict) -> dict:
+    enabled = str(os.environ.get("POLYDATA_CONTENT_API_REFRESH_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        payload = {"items": [], "sourceMode": "database-empty", "degraded": True}
+    else:
+        payload = helpers["get_runtime_content_latest"](limit=limit)
+        payload["sourceMode"] = f"{payload.get('sourceMode') or 'runtime-rss'}:db-fallback"
+        payload["degraded"] = True
+    if market_id is not None:
+        payload["marketId"] = market_id
+    return payload
+
+
 def create_content_blueprint(helpers: dict) -> Blueprint:
     bp = Blueprint("content_routes", __name__)
 
@@ -26,11 +41,7 @@ def create_content_blueprint(helpers: dict) -> Blueprint:
                 return jsonify({"error": "Market not found", "marketId": market_id}), 404
             return jsonify(helpers["get_related_content_payload"](market_id, limit=limit))
         except Exception:
-            payload = helpers["get_runtime_content_latest"](limit=limit)
-            payload["marketId"] = market_id
-            payload["sourceMode"] = f"{payload.get('sourceMode') or 'runtime-rss'}:db-fallback"
-            payload["degraded"] = True
-            return jsonify(payload)
+            return jsonify(_runtime_content_fallback(limit, market_id=market_id, helpers=helpers))
 
     @bp.route("/content/latest", methods=["GET"])
     def api_content_latest():
@@ -38,9 +49,7 @@ def create_content_blueprint(helpers: dict) -> Blueprint:
         try:
             payload = helpers["get_latest_content_payload"](limit=limit)
         except Exception:
-            payload = helpers["get_runtime_content_latest"](limit=limit)
-            payload["sourceMode"] = f"{payload.get('sourceMode') or 'runtime-rss'}:db-fallback"
-            payload["degraded"] = True
+            payload = _runtime_content_fallback(limit, helpers=helpers)
         _publish_latest_content(payload)
         return jsonify(payload)
 

@@ -275,16 +275,21 @@ export type ContentItem = {
   contentType?: string | null;
   source?: string | null;
   category?: string | null;
+  topicId?: string | null;
   title?: string | null;
   url?: string | null;
   publishedAt?: string | null;
   summary?: string | null;
+  provider?: string | null;
+  relevanceScore?: number | null;
+  sourceCount?: number | null;
 };
 
 export type ContentPayload = {
   marketId: number;
   items: ContentItem[];
   sourceMode?: string;
+  topicIds?: string[];
 };
 
 export type SystemHealth = {
