@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -118,6 +119,10 @@ def _compact_quant_for_prompt(quant: dict[str, Any]) -> dict[str, Any]:
     return {
         "topFlowMarkets": (quant.get("topFlowMarkets") or [])[:5],
         "repricingZones": (quant.get("repricingZones") or [])[:5],
+        "priceDriftLeaders": (quant.get("priceDriftLeaders") or [])[:5],
+        "volatilityLeaders": (quant.get("volatilityLeaders") or [])[:5],
+        "lobSpreads": (quant.get("lobSpreads") or [])[:5],
+        "relatedMarketArbitrageScores": (quant.get("relatedMarketArbitrageScores") or [])[:5],
         "anomalies": (quant.get("anomalies") or [])[:3],
         "dataWarnings": (quant.get("dataWarnings") or [])[:2],
     }
@@ -126,6 +131,7 @@ def _compact_quant_for_prompt(quant: dict[str, Any]) -> dict[str, Any]:
 def _compact_related_for_prompt(related: dict[str, Any]) -> dict[str, Any]:
     return {
         "ladders": (related.get("ladders") or [])[:5],
+        "arbitrageScores": (related.get("arbitrageScores") or [])[:5],
         "anomalies": (related.get("anomalies") or [])[:3],
     }
 
@@ -168,12 +174,17 @@ def _market_rows(context: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             seen.add(title)
             rows.append({
+                "id": item.get("id") or item.get("localMarketId"),
+                "conditionId": item.get("conditionId"),
                 "title": title,
                 "category": compact_text(item.get("category") or "market", 40),
                 "price": _as_float(item.get("latestPrice") or item.get("yesPrice") or item.get("price")),
+                "price24hAgo": item.get("price24hAgo") or item.get("price_24h_ago"),
                 "volume24h": _as_float(item.get("volume24h")),
                 "tradeCount24h": _as_float(item.get("tradeCount24h")),
                 "change24h": item.get("change24h"),
+                "bestBid": item.get("bestBid") or item.get("bid") or item.get("yesBid"),
+                "bestAsk": item.get("bestAsk") or item.get("ask") or item.get("yesAsk"),
                 "endDate": item.get("endDate"),
                 "kind": item.get("kind"),
             })
@@ -194,7 +205,108 @@ def _price_band(price: float) -> str:
     return "priced-view"
 
 
-def _build_quant_forecaster(context: dict[str, Any]) -> dict[str, Any]:
+def _price_drift(item: dict[str, Any]) -> float | None:
+    current = _as_float(item.get("price"))
+    previous = _as_float(item.get("price24hAgo"))
+    if current > 0 and previous > 0:
+        return current - previous
+    change = item.get("change24h")
+    if change in (None, "", "null"):
+        return None
+    if isinstance(change, str):
+        cleaned = change.strip().lower().replace("%", "").replace("pts", "").replace("pt", "")
+        if not cleaned:
+            return None
+        try:
+            parsed = float(cleaned)
+        except ValueError:
+            return None
+        return parsed / 100 if "%" in change else parsed
+    try:
+        parsed = float(change)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed == parsed else None
+
+
+def _lob_spread(item: dict[str, Any]) -> tuple[float, float, float] | None:
+    bid = _as_float(item.get("bestBid"))
+    ask = _as_float(item.get("bestAsk"))
+    if bid <= 0 or ask <= 0 or ask < bid:
+        return None
+    return bid, ask, ask - bid
+
+
+def _trade_volatility(context: dict[str, Any]) -> list[dict[str, Any]]:
+    trades = context.get("trades") if isinstance(context.get("trades"), list) else []
+    grouped: dict[str, list[float]] = {}
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        title = compact_text(trade.get("market") or trade.get("marketTitle") or trade.get("title"), 120)
+        price = _as_float(trade.get("price") or trade.get("latestPrice"))
+        if not title or price <= 0 or price > 1:
+            continue
+        grouped.setdefault(title, []).append(price)
+
+    output: list[dict[str, Any]] = []
+    for title, prices in grouped.items():
+        if len(prices) < 3:
+            continue
+        mean = sum(prices) / len(prices)
+        variance = sum((price - mean) ** 2 for price in prices) / len(prices)
+        stdev = math.sqrt(variance)
+        price_range = max(prices) - min(prices)
+        output.append({
+            "title": title,
+            "tradeCount": len(prices),
+            "volatility": f"{stdev * 100:.1f} pts",
+            "priceRange": f"{price_range * 100:.1f} pts",
+            "latestTradePrice": _fmt_price(prices[-1]),
+            "interpretation": "Recent fills show enough price dispersion to deserve a catalyst or liquidity check.",
+            "_rank": stdev * 10 + price_range,
+        })
+    return [
+        {key: value for key, value in item.items() if key != "_rank"}
+        for item in sorted(output, key=lambda item: item["_rank"], reverse=True)[:6]
+    ]
+
+
+def _trade_price_drift(context: dict[str, Any]) -> list[dict[str, Any]]:
+    trades = context.get("trades") if isinstance(context.get("trades"), list) else []
+    grouped: dict[str, list[float]] = {}
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        title = compact_text(trade.get("market") or trade.get("marketTitle") or trade.get("title"), 120)
+        price = _as_float(trade.get("price") or trade.get("latestPrice"))
+        if not title or price <= 0 or price > 1:
+            continue
+        grouped.setdefault(title, []).append(price)
+
+    output: list[dict[str, Any]] = []
+    for title, prices in grouped.items():
+        if len(prices) < 2:
+            continue
+        drift = prices[-1] - prices[0]
+        if abs(drift) < 0.002:
+            continue
+        output.append({
+            "title": title,
+            "source": "recent-fills",
+            "price": _fmt_price(prices[-1]),
+            "drift24h": "n/a",
+            "recentFillDrift": f"{drift * 100:+.1f} pts",
+            "observedTrades": len(prices),
+            "firstObservedTradePrice": _fmt_price(prices[0]),
+            "latestTradePrice": _fmt_price(prices[-1]),
+            "interpretation": "Fallback drift from the recent fills loaded into the agent context; not a full 24h market snapshot drift.",
+            "_rank": abs(drift) * (1 + math.log10(max(1, len(prices)))),
+        })
+    return sorted(output, key=lambda item: item["_rank"], reverse=True)[:6]
+
+
+def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, Any] | None = None) -> dict[str, Any]:
     rows = _market_rows(context)
     ranked_flow = sorted(
         rows,
@@ -207,7 +319,34 @@ def _build_quant_forecaster(context: dict[str, Any]) -> dict[str, Any]:
         reverse=True,
     )
     anomalies: list[dict[str, Any]] = []
+    drift_rows: list[dict[str, Any]] = []
+    lob_rows: list[dict[str, Any]] = []
     for item in rows:
+        drift = _price_drift(item)
+        if drift is not None and item["price"] > 0:
+            drift_rows.append({
+                "title": item["title"],
+                "price": _fmt_price(item["price"]),
+                "source": "market-price-24h",
+                "drift24h": f"{drift * 100:+.1f} pts",
+                "price24hAgo": _fmt_price(item.get("price24hAgo")),
+                "volume24h": _fmt_money(item["volume24h"]),
+                "tradeCount24h": int(item["tradeCount24h"]),
+                "interpretation": "Directional price move over the last 24h; validate against catalysts and fill quality.",
+                "_rank": abs(drift) * (1 + math.log10(max(1.0, item["volume24h"] + item["tradeCount24h"]))),
+            })
+        spread = _lob_spread(item)
+        if spread is not None:
+            bid, ask, width = spread
+            lob_rows.append({
+                "title": item["title"],
+                "bid": _fmt_price(bid),
+                "ask": _fmt_price(ask),
+                "spread": f"{width * 100:.1f} pts",
+                "mid": _fmt_price((bid + ask) / 2),
+                "interpretation": "Wide displayed spread means the last price may overstate executable confidence.",
+                "_rank": width,
+            })
         if item["volume24h"] >= 100_000 and item["tradeCount24h"] <= 2:
             anomalies.append({
                 "title": item["title"],
@@ -223,6 +362,19 @@ def _build_quant_forecaster(context: dict[str, Any]) -> dict[str, Any]:
                 "interpretation": "Could be live/resolved/stale rather than a normal ex-ante probability.",
             })
     missing_change = sum(1 for item in rows if item.get("change24h") in (None, "", "null"))
+    missing_lob = sum(1 for item in rows if _lob_spread(item) is None)
+    drift_titles = {item["title"] for item in drift_rows}
+    trade_drift_rows = [item for item in _trade_price_drift(context) if item["title"] not in drift_titles]
+    drift_leaders = sorted([*drift_rows, *trade_drift_rows], key=lambda item: item["_rank"], reverse=True)[:6]
+    volatility_leaders = _trade_volatility(context)
+    related_scores = []
+    if isinstance(related_markets, dict):
+        related_scores = list(related_markets.get("arbitrageScores") or [])[:6]
+    warnings = []
+    if missing_change:
+        warnings.append(f"{missing_change} market rows have missing change24h/price24hAgo; directional momentum should not be inferred from volume alone.")
+    if missing_lob:
+        warnings.append(f"{missing_lob} market rows have no bid/ask in the agent context; LOB spread is unavailable until orderbook snapshots are joined.")
     return {
         "node": "quant_forecaster",
         "universeSize": len(rows),
@@ -247,11 +399,19 @@ def _build_quant_forecaster(context: dict[str, Any]) -> dict[str, Any]:
             }
             for item in near_repricing[:6]
         ],
+        "priceDriftLeaders": [
+            {key: value for key, value in item.items() if key != "_rank"}
+            for item in drift_leaders
+        ],
+        "volatilityLeaders": volatility_leaders,
+        "lobSpreads": [
+            {key: value for key, value in item.items() if key != "_rank"}
+            for item in sorted(lob_rows, key=lambda item: item["_rank"], reverse=True)[:6]
+        ],
+        "relatedMarketArbitrageScores": related_scores,
         "anomalies": anomalies[:6],
-        "dataWarnings": [
-            f"{missing_change} market rows have missing change24h; directional momentum should not be inferred from volume alone."
-        ] if missing_change else [],
-        "inputHash": _json_hash(rows[:24]),
+        "dataWarnings": warnings[:4],
+        "inputHash": _json_hash({"rows": rows[:24], "volatility": volatility_leaders, "relatedScores": related_scores[:6]}),
     }
 
 
@@ -277,6 +437,7 @@ def _build_related_markets(context: dict[str, Any]) -> dict[str, Any]:
     groups = context.get("marketGroups") if isinstance(context.get("marketGroups"), list) else []
     ladders: list[dict[str, Any]] = []
     anomalies: list[dict[str, Any]] = []
+    arbitrage_scores: list[dict[str, Any]] = []
     for group in groups:
         if not isinstance(group, dict):
             continue
@@ -288,7 +449,37 @@ def _build_related_markets(context: dict[str, Any]) -> dict[str, Any]:
         low = min(outcomes, key=lambda item: item["yesPrice"])
         high = max(outcomes, key=lambda item: item["yesPrice"])
         spread = high["yesPrice"] - low["yesPrice"]
+        probability_sum = sum(prices)
+        sum_deviation = abs(probability_sum - 1.0)
+        monotonic_reversals = sum(
+            1 for index in range(len(prices) - 1)
+            if prices[index + 1] + 0.02 < prices[index]
+        )
+        near_certain_count = sum(1 for price in prices if price >= 0.98)
         near = [item for item in outcomes if 0.42 <= item["yesPrice"] <= 0.58]
+        volume = _as_float(group.get("volume24h"))
+        trades = _as_float(group.get("tradeCount24h"))
+        mismatch = volume >= 100_000 and trades <= 2
+        score = min(
+            100.0,
+            spread * 60
+            + max(0.0, sum_deviation - 0.08) * 80
+            + monotonic_reversals * 12
+            + max(0, near_certain_count - 1) * 15
+            + (8 if mismatch else 0),
+        )
+        if score >= 12:
+            arbitrage_scores.append({
+                "title": title,
+                "score": round(score, 1),
+                "probabilitySum": f"{probability_sum * 100:.1f}%",
+                "sumDeviation": f"{sum_deviation * 100:.1f} pts",
+                "spread": f"{spread * 100:.1f} pts",
+                "monotonicReversals": monotonic_reversals,
+                "nearCertainCount": near_certain_count,
+                "volumeTradeMismatch": mismatch,
+                "interpretation": "Higher score means this related-market group deserves manual inspection for curve, stale-state, or overround/underround inefficiency.",
+            })
         if spread >= 0.15 or len(near) >= 2:
             ladders.append({
                 "title": title,
@@ -309,8 +500,6 @@ def _build_related_markets(context: dict[str, Any]) -> dict[str, Any]:
                 "evidence": ", ".join(f"{item['label']} {_fmt_price(item['yesPrice'])}" for item in outcomes[:3]),
                 "interpretation": "Likely live/resolved/stale ladder or feed issue; do not read as normal ex-ante probabilities.",
             })
-        volume = _as_float(group.get("volume24h"))
-        trades = _as_float(group.get("tradeCount24h"))
         if volume >= 100_000 and trades <= 2:
             anomalies.append({
                 "title": title,
@@ -321,6 +510,7 @@ def _build_related_markets(context: dict[str, Any]) -> dict[str, Any]:
     return {
         "node": "related_markets",
         "ladders": sorted(ladders, key=lambda item: _as_float(str(item.get("spread", "0")).split()[0]), reverse=True)[:8],
+        "arbitrageScores": sorted(arbitrage_scores, key=lambda item: item["score"], reverse=True)[:8],
         "anomalies": anomalies[:8],
         "inputHash": _json_hash(groups[:20]),
     }
@@ -462,8 +652,8 @@ def run_forecast_intelligence_graph(
 ) -> dict[str, Any]:
     run_id = forecast_run_id(payload)
     evidence = _deterministic_evidence(context, lens)
-    quant_forecaster = _build_quant_forecaster(context)
     related_markets = _build_related_markets(context)
+    quant_forecaster = _build_quant_forecaster(context, related_markets)
     graph_context = {
         **context,
         "quantForecaster": quant_forecaster,

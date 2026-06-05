@@ -421,7 +421,12 @@ def build_service_context() -> Dict[str, Any]:
         "fetch_trade_count_estimate": fetch_trade_count_estimate,
         "format_trade_decimal": format_trade_decimal,
         "format_trade_address": format_trade_address,
-        "get_active_markets_snapshot": lambda page_size=40: market_service.get_active_markets_snapshot(build_service_context(), page_size=page_size),
+        "get_active_markets_snapshot": lambda page_size=40, include_runtime_prices=False, include_change_24h=False: market_service.get_active_markets_snapshot(
+            build_service_context(),
+            page_size=page_size,
+            include_runtime_prices=include_runtime_prices,
+            include_change_24h=include_change_24h,
+        ),
         "get_alpha_signal_snapshot": get_alpha_signal_snapshot,
         "get_bootstrap_component_cached": get_bootstrap_component_cached,
         "get_bootstrap_payload_cached": get_bootstrap_payload_cached,

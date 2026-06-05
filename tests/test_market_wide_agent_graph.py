@@ -7,7 +7,17 @@ from typing import Any
 from unittest.mock import patch
 
 from agent.market_wide.graph import GRAPH_VERSION, run_forecast_intelligence_graph
-from agent.market_wide.snapshot import DEFAULT_LENSES, build_market_wide_snapshot, seed_market_wide_snapshots
+from agent.market_wide.snapshot import (
+    QUANT_HISTORY_NAMESPACE,
+    QUANT_SNAPSHOT_NAMESPACE,
+    DEFAULT_LENSES,
+    build_market_wide_snapshot,
+    quant_history_cache_key,
+    quant_snapshot_cache_key,
+    read_market_wide_quant_snapshot,
+    seed_market_wide_snapshots,
+    store_market_wide_snapshot,
+)
 
 
 @dataclass
@@ -81,6 +91,20 @@ class MissingClient:
     model = "missing"
 
 
+class FakeSnapshotStore:
+    def __init__(self) -> None:
+        self.values: dict[tuple[str, str], Any] = {}
+
+    def set(self, namespace: str, cache_key: str, payload: Any, ttl: int) -> None:
+        self.values[(namespace, cache_key)] = payload
+
+    def get(self, namespace: str, cache_key: str) -> Any:
+        return self.values.get((namespace, cache_key))
+
+    def get_stale(self, namespace: str, cache_key: str) -> Any:
+        return self.values.get((namespace, cache_key))
+
+
 class MarketWideAgentGraphTestCase(unittest.TestCase):
     def test_forecast_graph_runs_specialists_and_preserves_response_schema(self):
         payload = {"lens": "overview", "forecastRunId": "fig-test", "markets": []}
@@ -90,9 +114,17 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
                 "title": "Will the event happen?",
                 "category": "politics",
                 "latestPrice": 0.52,
+                "price24hAgo": 0.47,
+                "bestBid": 0.50,
+                "bestAsk": 0.55,
                 "volume24h": 1200,
                 "tradeCount24h": 8,
             }],
+            "trades": [
+                {"market": "Will the event happen?", "price": 0.47},
+                {"market": "Will the event happen?", "price": 0.52},
+                {"market": "Will the event happen?", "price": 0.57},
+            ],
             "contextChars": 777,
         }
         client = FakeClient()
@@ -126,6 +158,9 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertEqual(response["usage"]["contextChars"], 777)
         self.assertIn("quantForecaster", response["agentGraph"])
         self.assertIn("relatedMarkets", response["agentGraph"])
+        self.assertEqual(response["agentGraph"]["quantForecaster"]["priceDriftLeaders"][0]["drift24h"], "+5.0 pts")
+        self.assertEqual(response["agentGraph"]["quantForecaster"]["lobSpreads"][0]["spread"], "5.0 pts")
+        self.assertEqual(response["agentGraph"]["quantForecaster"]["volatilityLeaders"][0]["priceRange"], "10.0 pts")
 
     def test_forecast_graph_adds_quant_and_related_market_structure(self):
         payload = {"lens": "overview", "forecastRunId": "fig-structure", "markets": []}
@@ -135,6 +170,7 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
                 "title": "Peace deal by August?",
                 "category": "politics",
                 "latestPrice": 0.51,
+                "change24h": 0.04,
                 "volume24h": 592650,
                 "tradeCount24h": 423,
             }],
@@ -166,6 +202,9 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertEqual(quant["repricingZones"][0]["price"], "51.0%")
         self.assertEqual(related["ladders"][0]["title"], "Strait of Hormuz traffic returns to normal")
         self.assertEqual(related["ladders"][0]["spread"], "29.0 pts")
+        self.assertEqual(quant["priceDriftLeaders"][0]["drift24h"], "+4.0 pts")
+        self.assertEqual(quant["relatedMarketArbitrageScores"][0]["title"], "Strait of Hormuz traffic returns to normal")
+        self.assertGreater(quant["relatedMarketArbitrageScores"][0]["score"], 0)
 
     def test_missing_api_key_still_exposes_deterministic_structure_nodes(self):
         response = run_forecast_intelligence_graph(
@@ -184,6 +223,45 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertEqual(response["status"], "missing-api-key")
         self.assertEqual(response["agentGraph"]["nodes"], ["evidence_builder", "quant_forecaster", "related_markets"])
         self.assertEqual(response["agentGraph"]["quantForecaster"]["repricingZones"][0]["title"], "Market A")
+
+    def test_store_market_wide_snapshot_persists_quant_snapshot_separately(self):
+        redis_values: dict[tuple[str, str], Any] = {}
+        store = FakeSnapshotStore()
+        helpers = {
+            "set_cached_json": lambda namespace, cache_key, payload, ttl: redis_values.__setitem__((namespace, cache_key), payload),
+            "get_cached_json": lambda namespace, cache_key: redis_values.get((namespace, cache_key)),
+            "SNAPSHOT_STORE": store,
+        }
+        snapshot = {
+            "schemaVersion": 1,
+            "lens": "overview",
+            "generatedAt": "2026-06-05T00:00:00Z",
+            "expiresAt": "2026-06-05T12:00:00Z",
+            "data": {
+                "lens": "overview",
+                "status": "live",
+                "model": "fake-model",
+                "forecastRunId": "fig-quant-test",
+                "agentArchitecture": GRAPH_VERSION,
+                "agentGraph": {
+                    "runId": "fig-quant-test",
+                    "version": GRAPH_VERSION,
+                    "quantForecaster": {"node": "quant_forecaster", "priceDriftLeaders": [{"title": "A"}]},
+                    "relatedMarkets": {"node": "related_markets", "arbitrageScores": [{"title": "Group A", "score": 22.0}]},
+                },
+            },
+        }
+
+        store_market_wide_snapshot(helpers, snapshot)
+
+        latest_key = quant_snapshot_cache_key("overview")
+        history_key = quant_history_cache_key("overview", "fig-quant-test")
+        self.assertIn((QUANT_SNAPSHOT_NAMESPACE, latest_key), redis_values)
+        self.assertIn((QUANT_HISTORY_NAMESPACE, history_key), redis_values)
+        self.assertIn((QUANT_SNAPSHOT_NAMESPACE, latest_key), store.values)
+        quant_snapshot = read_market_wide_quant_snapshot(helpers, "overview")
+        self.assertEqual(quant_snapshot["runId"], "fig-quant-test")
+        self.assertEqual(quant_snapshot["quantForecaster"]["priceDriftLeaders"][0]["title"], "A")
 
     def test_seed_all_lenses_share_one_forecast_run_id_when_timer_runs_default(self):
         stored: dict[tuple[str, str], Any] = {}

@@ -13,6 +13,8 @@ from .service import LENS_ALIASES, VALID_LENSES, build_market_wide_fallback, bui
 
 
 SNAPSHOT_NAMESPACE = "agent:market-wide:snapshot"
+QUANT_SNAPSHOT_NAMESPACE = "agent:market-wide:quant"
+QUANT_HISTORY_NAMESPACE = "agent:market-wide:quant-history"
 SNAPSHOT_VERSION = "v1"
 DEFAULT_LENSES = ("overview", "special", "trend")
 SIGNAL_SNAPSHOT_NAMESPACE_ALPHA = "snapshot:signals:alpha"
@@ -34,6 +36,16 @@ def snapshot_ttl_seconds() -> int:
         return 43200
 
 
+def quant_snapshot_ttl_seconds() -> int:
+    try:
+        return max(
+            snapshot_ttl_seconds(),
+            int(os.environ.get("POLYDATA_AGENT_MARKET_WIDE_QUANT_TTL_SECONDS", str(7 * 86400))),
+        )
+    except ValueError:
+        return 7 * 86400
+
+
 def snapshot_min_live_interval_seconds() -> int:
     try:
         return max(300, int(os.environ.get("POLYDATA_AGENT_MARKET_WIDE_MIN_LIVE_INTERVAL_SECONDS", "43200")))
@@ -49,6 +61,15 @@ def normalize_lens(lens: Any) -> str:
 
 def snapshot_cache_key(lens: Any) -> str:
     return f"{SNAPSHOT_VERSION}:{normalize_lens(lens)}"
+
+
+def quant_snapshot_cache_key(lens: Any) -> str:
+    return f"{SNAPSHOT_VERSION}:{normalize_lens(lens)}"
+
+
+def quant_history_cache_key(lens: Any, run_id: Any) -> str:
+    run = str(run_id or "unknown").strip() or "unknown"
+    return f"{SNAPSHOT_VERSION}:{normalize_lens(lens)}:{run}"
 
 
 def _utc_now() -> datetime:
@@ -145,7 +166,9 @@ def _return_skipped_snapshot(snapshot: dict[str, Any], reason: str) -> dict[str,
 
 
 def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any, *, run_id: str | None = None) -> dict[str, Any]:
-    active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80)
+    active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80, False, True)
+    if not _items(active_markets):
+        active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80)
     market_groups = _safe_call(helpers, "get_market_groups_payload", {}, "", 1, 60, "active")
     content = _safe_call(helpers, "get_latest_content_payload", {}, 12)
     payload = {
@@ -245,6 +268,76 @@ def store_market_wide_snapshot(helpers: dict[str, Any], snapshot: dict[str, Any]
     store = helpers.get("SNAPSHOT_STORE")
     if store is not None and hasattr(store, "set"):
         store.set(SNAPSHOT_NAMESPACE, key, snapshot, ttl)
+    store_market_wide_quant_snapshot(helpers, snapshot)
+
+
+def _quant_snapshot_from_market_wide_snapshot(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    data = snapshot.get("data")
+    if not isinstance(data, dict):
+        return None
+    graph = data.get("agentGraph")
+    if not isinstance(graph, dict):
+        return None
+    quant = graph.get("quantForecaster")
+    related = graph.get("relatedMarkets")
+    if not isinstance(quant, dict) and not isinstance(related, dict):
+        return None
+    lens = normalize_lens(snapshot.get("lens") or data.get("lens"))
+    run_id = data.get("forecastRunId") or graph.get("runId")
+    generated_at = data.get("snapshotGeneratedAt") or data.get("generatedAt") or snapshot.get("generatedAt")
+    return {
+        "schemaVersion": 1,
+        "lens": lens,
+        "runId": run_id,
+        "generatedAt": generated_at,
+        "expiresAt": snapshot.get("expiresAt") or data.get("snapshotExpiresAt"),
+        "status": data.get("status"),
+        "model": data.get("model"),
+        "graphVersion": data.get("agentArchitecture") or graph.get("version"),
+        "source": "agent-quant-snapshot",
+        "sourceSnapshotKey": snapshot_cache_key(lens),
+        "quantForecaster": quant if isinstance(quant, dict) else {},
+        "relatedMarkets": related if isinstance(related, dict) else {},
+    }
+
+
+def store_market_wide_quant_snapshot(helpers: dict[str, Any], snapshot: dict[str, Any]) -> None:
+    payload = _quant_snapshot_from_market_wide_snapshot(snapshot)
+    if payload is None:
+        return
+    lens = normalize_lens(payload.get("lens"))
+    latest_key = quant_snapshot_cache_key(lens)
+    history_key = quant_history_cache_key(lens, payload.get("runId"))
+    ttl = quant_snapshot_ttl_seconds()
+    setter = helpers.get("set_cached_json")
+    if callable(setter):
+        setter(QUANT_SNAPSHOT_NAMESPACE, latest_key, payload, ttl)
+        setter(QUANT_HISTORY_NAMESPACE, history_key, payload, ttl)
+    store = helpers.get("SNAPSHOT_STORE")
+    if store is not None and hasattr(store, "set"):
+        store.set(QUANT_SNAPSHOT_NAMESPACE, latest_key, payload, ttl)
+        store.set(QUANT_HISTORY_NAMESPACE, history_key, payload, ttl)
+
+
+def read_market_wide_quant_snapshot(helpers: dict[str, Any], lens: Any, *, allow_stale: bool = True) -> dict[str, Any] | None:
+    key = quant_snapshot_cache_key(lens)
+    getter = helpers.get("get_cached_json")
+    if callable(getter):
+        cached = getter(QUANT_SNAPSHOT_NAMESPACE, key)
+        if isinstance(cached, dict):
+            return cached
+    store = helpers.get("SNAPSHOT_STORE")
+    if store is not None and hasattr(store, "get"):
+        cached = store.get(QUANT_SNAPSHOT_NAMESPACE, key)
+        if isinstance(cached, dict):
+            return cached
+    if allow_stale and store is not None and hasattr(store, "get_stale"):
+        stale = store.get_stale(QUANT_SNAPSHOT_NAMESPACE, key)
+        if isinstance(stale, dict):
+            payload = dict(stale)
+            payload["cacheStatus"] = "stale-snapshot"
+            return payload
+    return None
 
 
 def read_market_wide_snapshot(helpers: dict[str, Any], lens: Any, *, allow_stale: bool = True) -> dict[str, Any] | None:

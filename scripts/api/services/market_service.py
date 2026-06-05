@@ -1774,6 +1774,7 @@ def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "endDate": row.get("end_date"),
         "createdAt": row.get("created_at"),
         "latestPrice": row.get("latest_price"),
+        "price24hAgo": row.get("price_24h_ago"),
         "status": row.get("status"),
         "category": row.get("category") or "Uncategorized",
         "tags": ctx["parse_json_list"](row.get("tags")),
@@ -2389,16 +2390,39 @@ def build_active_markets_payload(
     }
 
 
-def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runtime_prices: bool = False) -> Dict[str, Any]:
+def _active_markets_payload_has_price_history_schema(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        return False
+    return any(
+        isinstance(item, dict)
+        and (
+            item.get("price24hAgo") not in (None, "")
+            or item.get("change24h") not in (None, "")
+        )
+        for item in items[:20]
+    )
+
+
+def get_active_markets_snapshot(
+    ctx: dict,
+    page_size: int = 40,
+    *,
+    include_runtime_prices: bool = False,
+    include_change_24h: bool = False,
+) -> Dict[str, Any]:
+    should_include_change_24h = bool(include_change_24h or include_runtime_prices)
     cache_key = json.dumps(
         {
             "page": 1,
             "pageSize": page_size,
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
-            "includeChange24h": include_runtime_prices,
+            "includeChange24h": should_include_change_24h,
             "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
-            "v": 20,
+            "v": 21,
         },
         sort_keys=True,
         ensure_ascii=True,
@@ -2417,10 +2441,12 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             include_runtime_prices,
         )
 
-    if markets_latest_snapshot_fallback_enabled():
+    if markets_latest_snapshot_fallback_enabled() and not include_runtime_prices:
         latest_payload = ctx["SNAPSHOT_STORE"].get_latest_stale(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, exclude_cache_key=cache_key)
         fallback_payload = _trim_active_markets_payload(ctx, latest_payload, page_size)
-        if fallback_payload is not None:
+        if fallback_payload is not None and (
+            not should_include_change_24h or _active_markets_payload_has_price_history_schema(fallback_payload)
+        ):
             ctx["app"].logger.info(
                 "markets-active latest-snapshot-fallback page_size=%s include_runtime_prices=%s",
                 page_size,
@@ -2429,13 +2455,18 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             ctx["SNAPSHOT_STORE"].set(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, fallback_payload, 60)
             ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, fallback_payload, 60)
             return fallback_payload
+        if fallback_payload is not None:
+            ctx["app"].logger.info(
+                "markets-active latest-snapshot-fallback skipped because cached schema lacks price24hAgo page_size=%s",
+                page_size,
+            )
 
     if exact_payload_was_empty:
         rebuilt_payload = build_active_markets_payload(
             ctx,
             page_size=page_size,
             include_runtime_prices=include_runtime_prices,
-            include_change_24h=include_runtime_prices,
+            include_change_24h=should_include_change_24h,
         )
         rebuilt_items = rebuilt_payload.get("items") if isinstance(rebuilt_payload, dict) else None
         if isinstance(rebuilt_items, list) and rebuilt_items:
@@ -2450,7 +2481,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             ctx,
             page_size=page_size,
             include_runtime_prices=include_runtime_prices,
-            include_change_24h=include_runtime_prices,
+            include_change_24h=should_include_change_24h,
         ),
         ttl_seconds=60,
     )

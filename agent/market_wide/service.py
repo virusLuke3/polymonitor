@@ -61,12 +61,19 @@ def _market_candidates(payload: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         candidates.append({
+            "id": item.get("id") or item.get("localMarketId"),
+            "conditionId": item.get("conditionId"),
+            "yesTokenId": item.get("yesTokenId"),
+            "noTokenId": item.get("noTokenId"),
             "title": item.get("title") or item.get("slug") or "Untitled market",
             "category": item.get("category") or "market",
             "volume24h": item.get("volume24h"),
             "tradeCount24h": item.get("tradeCount24h"),
             "latestPrice": item.get("latestPrice"),
+            "price24hAgo": item.get("price24hAgo"),
             "change24h": item.get("change24h"),
+            "bestBid": item.get("bestBid") or item.get("bid") or item.get("yesBid"),
+            "bestAsk": item.get("bestAsk") or item.get("ask") or item.get("yesAsk"),
             "endDate": item.get("endDate"),
             "createdAt": item.get("createdAt"),
             "kind": "market",
@@ -137,12 +144,19 @@ def _compact_market(item: Any) -> dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
     return {
+        "id": item.get("id") or item.get("localMarketId"),
+        "conditionId": item.get("conditionId"),
+        "yesTokenId": item.get("yesTokenId"),
+        "noTokenId": item.get("noTokenId"),
         "title": compact_text(item.get("title") or item.get("slug") or "Untitled market", 120),
         "category": compact_text(item.get("category") or "market", 40),
         "volume24h": item.get("volume24h"),
         "tradeCount24h": item.get("tradeCount24h"),
         "latestPrice": item.get("latestPrice"),
+        "price24hAgo": item.get("price24hAgo"),
         "change24h": item.get("change24h"),
+        "bestBid": item.get("bestBid") or item.get("bid") or item.get("yesBid"),
+        "bestAsk": item.get("bestAsk") or item.get("ask") or item.get("yesAsk"),
         "endDate": item.get("endDate"),
     }
 
@@ -164,6 +178,7 @@ def _compact_group(group: Any) -> dict[str, Any] | None:
                 "label": compact_text(outcome.get("label") or outcome.get("title"), 56),
                 "yesPrice": outcome.get("yesPrice"),
                 "volume24h": outcome.get("volume24h"),
+                "tradeCount24h": outcome.get("tradeCount24h"),
             }
             for outcome in outcomes[:3]
             if isinstance(outcome, dict)
@@ -175,6 +190,8 @@ def _compact_trade(item: Any) -> dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
     return {
+        "marketId": item.get("marketId") or item.get("localMarketId"),
+        "conditionId": item.get("conditionId"),
         "market": compact_text(item.get("marketTitle") or item.get("title") or item.get("conditionId"), 90),
         "outcome": compact_text(item.get("outcome") or item.get("assetName"), 48),
         "side": compact_text(item.get("side") or item.get("type"), 20),
@@ -273,13 +290,18 @@ def _build_agent_context(payload: dict[str, Any], lens: str, search_results: lis
         "lens": lens,
         "metrics": _summary_metrics(payload),
         "marketCandidates": _compact_list(_market_candidates(payload), 18, lambda item: {
+            "id": item.get("id"),
+            "conditionId": item.get("conditionId"),
             "title": compact_text(item.get("title"), 120),
             "category": compact_text(item.get("category"), 40),
             "kind": item.get("kind"),
             "volume24h": item.get("volume24h"),
             "tradeCount24h": item.get("tradeCount24h"),
             "latestPrice": item.get("latestPrice"),
+            "price24hAgo": item.get("price24hAgo"),
             "change24h": item.get("change24h"),
+            "bestBid": item.get("bestBid"),
+            "bestAsk": item.get("bestAsk"),
             "outcomeCount": item.get("outcomeCount"),
             "endDate": item.get("endDate"),
         }),
