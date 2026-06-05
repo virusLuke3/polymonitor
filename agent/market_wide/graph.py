@@ -114,6 +114,22 @@ def _normalize_node_output(raw: dict[str, Any], node: str) -> dict[str, Any]:
     }
 
 
+def _compact_quant_for_prompt(quant: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "topFlowMarkets": (quant.get("topFlowMarkets") or [])[:5],
+        "repricingZones": (quant.get("repricingZones") or [])[:5],
+        "anomalies": (quant.get("anomalies") or [])[:3],
+        "dataWarnings": (quant.get("dataWarnings") or [])[:2],
+    }
+
+
+def _compact_related_for_prompt(related: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ladders": (related.get("ladders") or [])[:5],
+        "anomalies": (related.get("anomalies") or [])[:3],
+    }
+
+
 def _deterministic_evidence(context: dict[str, Any], lens: str) -> dict[str, Any]:
     metrics = context.get("metrics") if isinstance(context.get("metrics"), dict) else {}
     candidates = context.get("marketCandidates") if isinstance(context.get("marketCandidates"), list) else []
@@ -322,19 +338,19 @@ def _specialist_prompt(node: str, lens: str, context: dict[str, Any], evidence: 
         "evidence": evidence,
         "context": {
             "metrics": context.get("metrics"),
-            "marketCandidates": context.get("marketCandidates", [])[:12],
-            "markets": context.get("markets", [])[:8],
-            "marketGroups": context.get("marketGroups", [])[:8],
-            "trades": context.get("trades", [])[:6],
-            "oracle": context.get("oracle", [])[:6],
-            "content": context.get("content", [])[:6],
-            "alphaSignals": context.get("alphaSignals", [])[:4],
-            "whaleSignals": context.get("whaleSignals", [])[:4],
-            "suspiciousSignals": context.get("suspiciousSignals", [])[:4],
-            "searchResults": context.get("searchResults", [])[:3],
+            "marketCandidates": context.get("marketCandidates", [])[:8],
+            "markets": context.get("markets", [])[:5],
+            "marketGroups": context.get("marketGroups", [])[:4],
+            "trades": context.get("trades", [])[:4],
+            "oracle": context.get("oracle", [])[:4],
+            "content": context.get("content", [])[:4],
+            "alphaSignals": context.get("alphaSignals", [])[:2],
+            "whaleSignals": context.get("whaleSignals", [])[:2],
+            "suspiciousSignals": context.get("suspiciousSignals", [])[:2],
+            "searchResults": context.get("searchResults", [])[:2],
             "specialistAgents": context.get("specialistAgents", []),
-            "quantForecaster": context.get("quantForecaster"),
-            "relatedMarkets": context.get("relatedMarkets"),
+            "quantForecaster": _compact_quant_for_prompt(context.get("quantForecaster") or {}),
+            "relatedMarkets": _compact_related_for_prompt(context.get("relatedMarkets") or {}),
         },
         "requiredSchema": {
             "findings": [{"label": "LIQUIDITY|CATALYST|RESOLUTION|RISK|TREND|PROBABILITY", "title": "named market or spread", "summary": "market-level insight with price/probability and why it matters", "severity": "positive|warning|critical|neutral", "evidence": "price + volume/trades"}],
@@ -361,15 +377,15 @@ Write like a prediction-market analyst, not a dashboard narrator.
         "skepticCalibration": calibration,
         "sourceContext": {
             "metrics": context.get("metrics"),
-            "quantForecaster": context.get("quantForecaster"),
-            "relatedMarkets": context.get("relatedMarkets"),
-            "marketCandidates": context.get("marketCandidates", [])[:18],
-            "markets": context.get("markets", [])[:12],
-            "marketGroups": context.get("marketGroups", [])[:12],
-            "trades": context.get("trades", [])[:8],
-            "oracle": context.get("oracle", [])[:8],
-            "content": context.get("content", [])[:8],
-            "searchResults": context.get("searchResults", [])[:3],
+            "quantForecaster": _compact_quant_for_prompt(context.get("quantForecaster") or {}),
+            "relatedMarkets": _compact_related_for_prompt(context.get("relatedMarkets") or {}),
+            "marketCandidates": context.get("marketCandidates", [])[:10],
+            "markets": context.get("markets", [])[:6],
+            "marketGroups": context.get("marketGroups", [])[:5],
+            "trades": context.get("trades", [])[:4],
+            "oracle": context.get("oracle", [])[:4],
+            "content": context.get("content", [])[:4],
+            "searchResults": context.get("searchResults", [])[:2],
         },
         "requiredSchema": {
             "brief": "one or two concise English sentences. Must name at least one market and include a price/probability or spread. Avoid generic category/breadth wording.",
