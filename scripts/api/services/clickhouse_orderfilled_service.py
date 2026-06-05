@@ -157,8 +157,8 @@ def _orderfilled_projection_sql() -> str:
         lower(f.token_id) AS token_id,
         formatDateTime(
             if(
-                bt.block_number = 0,
-                max_ts_time - toIntervalSecond(greatest(toInt64(0), toInt64(max_ts_block) - toInt64(f.block_number)) * 2),
+                isNull(bt.block_time),
+                dateAdd('second', (toInt64(f.block_number) - toInt64(max_ts_block)) * 2, max_ts_time),
                 bt.block_time
             ),
             '%Y-%m-%dT%H:%i:%SZ',
@@ -251,8 +251,8 @@ def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional
         SELECT
             formatDateTime(
                 if(
-                    bt.block_number = 0,
-                    max_ts_time - toIntervalSecond(greatest(toInt64(0), toInt64(max_ts_block) - toInt64(f.block_number)) * 2),
+                    isNull(bt.block_time),
+                    dateAdd('second', (toInt64(f.block_number) - toInt64(max_ts_block)) * 2, max_ts_time),
                     bt.block_time
                 ),
                 '%Y-%m-%dT%H:%i:%SZ',
@@ -303,7 +303,7 @@ def get_market_stats(ctx: dict, market_ids: Iterable[int], *, hours: int = 24) -
             toString(sum(f.size * f.price)) AS volume_24h,
             argMax(toString(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS latest_price,
             formatDateTime(
-                max(max_ts_time - toIntervalSecond(greatest(toInt64(0), toInt64(max_ts_block) - toInt64(f.block_number)) * 2)),
+                max(dateAdd('second', (toInt64(f.block_number) - toInt64(max_ts_block)) * 2, max_ts_time)),
                 '%Y-%m-%dT%H:%i:%SZ',
                 'UTC'
             ) AS latest_trade_at
@@ -345,7 +345,7 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
             toString(sum(f.size * f.price)) AS volume_24h,
             argMax(toString(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS latest_price,
             formatDateTime(
-                max(max_ts_time - toIntervalSecond(greatest(toInt64(0), toInt64(max_ts_block) - toInt64(f.block_number)) * 2)),
+                max(dateAdd('second', (toInt64(f.block_number) - toInt64(max_ts_block)) * 2, max_ts_time)),
                 '%Y-%m-%dT%H:%i:%SZ',
                 'UTC'
             ) AS latest_trade_at
