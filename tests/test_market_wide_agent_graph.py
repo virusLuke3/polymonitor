@@ -76,6 +76,11 @@ class FakeClient:
         })
 
 
+class MissingClient:
+    configured = False
+    model = "missing"
+
+
 class MarketWideAgentGraphTestCase(unittest.TestCase):
     def test_forecast_graph_runs_specialists_and_preserves_response_schema(self):
         payload = {"lens": "overview", "forecastRunId": "fig-test", "markets": []}
@@ -161,6 +166,24 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertEqual(quant["repricingZones"][0]["price"], "51.0%")
         self.assertEqual(related["ladders"][0]["title"], "Strait of Hormuz traffic returns to normal")
         self.assertEqual(related["ladders"][0]["spread"], "29.0 pts")
+
+    def test_missing_api_key_still_exposes_deterministic_structure_nodes(self):
+        response = run_forecast_intelligence_graph(
+            {"lens": "overview", "forecastRunId": "fig-missing"},
+            "overview",
+            {
+                "marketCandidates": [{"title": "Market A", "latestPrice": 0.5, "volume24h": 1000, "tradeCount24h": 10}],
+                "marketGroups": [],
+            },
+            [],
+            MissingClient(),
+            normalize=lambda raw, _payload, lens, _search, model: {"status": "live", "lens": lens, "model": model, **raw},
+            fallback=lambda _payload, lens, reason, _search: {"status": reason, "lens": lens, "brief": "fallback"},
+        )
+
+        self.assertEqual(response["status"], "missing-api-key")
+        self.assertEqual(response["agentGraph"]["nodes"], ["evidence_builder", "quant_forecaster", "related_markets"])
+        self.assertEqual(response["agentGraph"]["quantForecaster"]["repricingZones"][0]["title"], "Market A")
 
     def test_seed_all_lenses_share_one_forecast_run_id_when_timer_runs_default(self):
         stored: dict[tuple[str, str], Any] = {}

@@ -476,7 +476,15 @@ def run_forecast_intelligence_graph(
         response = fallback(payload, lens, "missing-api-key", search_results)
         response["forecastRunId"] = run_id
         response["agentArchitecture"] = GRAPH_VERSION
-        response["agentGraph"] = {"version": GRAPH_VERSION, "runId": run_id, "events": events, "mode": "deterministic-fallback"}
+        response["agentGraph"] = {
+            "version": GRAPH_VERSION,
+            "runId": run_id,
+            "mode": "deterministic-fallback",
+            "nodes": ["evidence_builder", "quant_forecaster", "related_markets"],
+            "events": events,
+            "quantForecaster": quant_forecaster,
+            "relatedMarkets": related_markets,
+        }
         return response
 
     limit = _agent_limit()
