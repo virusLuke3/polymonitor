@@ -3,7 +3,7 @@ Description=Run polyData PostgreSQL reverse tunnel healthcheck
 
 [Timer]
 OnBootSec=45s
-OnUnitActiveSec=60s
+OnUnitActiveSec=120s
 AccuracySec=10s
 Unit=polydata-db-reverse-tunnel-healthcheck.service
 
