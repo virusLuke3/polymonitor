@@ -23,6 +23,11 @@ LENS_ALIASES = {
 }
 
 
+class _DeterministicFallbackClient:
+    configured = False
+    model = "deterministic-fallback"
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -670,4 +675,20 @@ def build_market_wide_fallback(payload: dict[str, Any], *, reason: str = "cache-
     lens = LENS_ALIASES.get(lens, lens)
     if lens not in VALID_LENSES:
         lens = "overview"
+    if graph_enabled():
+        context = _build_agent_context(payload, lens, [])
+        return run_forecast_intelligence_graph(
+            payload,
+            lens,
+            context,
+            [],
+            _DeterministicFallbackClient(),
+            normalize=_normalize,
+            fallback=lambda source_payload, source_lens, _node_reason, results: _fallback_response(
+                source_payload,
+                source_lens,
+                reason=reason,
+                search_results=results,
+            ),
+        )
     return _fallback_response(payload, lens, reason=reason)
