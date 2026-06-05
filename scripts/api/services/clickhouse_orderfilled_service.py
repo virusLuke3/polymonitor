@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -179,6 +180,36 @@ def _table_sql() -> str:
     return _settings()["table"]
 
 
+def _timestamp_needs_repair(value: Any) -> bool:
+    text = str(value or "").strip()
+    return not text or text.startswith("1970-01-01")
+
+
+def _repair_block_timestamps(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not rows:
+        return rows
+    timestamps = [str(row.get("timestamp") or "") for row in rows]
+    if len({value for value in timestamps if value}) > 1 and not all(_timestamp_needs_repair(value) for value in timestamps):
+        return rows
+    blocks: List[int] = []
+    for row in rows:
+        try:
+            blocks.append(int(row.get("block_number") or 0))
+        except (TypeError, ValueError):
+            blocks.append(0)
+    max_block = max(blocks or [0])
+    if max_block <= 0:
+        return rows
+    now = datetime.now(timezone.utc)
+    repaired: List[Dict[str, Any]] = []
+    for row, block in zip(rows, blocks):
+        seconds_ago = max(0, (max_block - block) * 2)
+        repaired_row = dict(row)
+        repaired_row["timestamp"] = (now - timedelta(seconds=seconds_ago)).isoformat().replace("+00:00", "Z")
+        repaired.append(repaired_row)
+    return repaired
+
+
 def get_market_trades(ctx: dict, market_id: int, *, limit: int = 100, offset: int = 0) -> Optional[List[Dict[str, Any]]]:
     limit = min(max(int(limit), 1), 500)
     offset = max(int(offset), 0)
@@ -202,6 +233,7 @@ def get_market_trades(ctx: dict, market_id: int, *, limit: int = 100, offset: in
     )
     if rows is None:
         return None
+    rows = _repair_block_timestamps(rows)
     return [ctx["normalize_trade"](row) for row in rows]
 
 
@@ -228,6 +260,7 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
     )
     if rows is None:
         return None
+    rows = _repair_block_timestamps(rows)
     normalized = [ctx["normalize_trade"](row) for row in rows]
     market_ids = sorted({int(row["marketId"]) for row in normalized if row.get("marketId") is not None})
     title_map: Dict[int, str] = {}
@@ -280,6 +313,7 @@ def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional
     )
     if rows is None:
         return None
+    rows = _repair_block_timestamps(rows)
     rows.reverse()
     yes_price = None
     no_price = None

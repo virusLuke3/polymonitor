@@ -257,7 +257,7 @@ def get_market_chart_payload(ctx: dict, market_id: int, *, range_name: str = "1d
             "layer": "chart",
             "range": normalized_range,
             "interval": normalized_interval,
-            "v": 3,
+            "v": 4,
         }
     )
     result = _cached_layer(
