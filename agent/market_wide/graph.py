@@ -11,6 +11,15 @@ from agent.common.json_utils import compact_text, extract_json_object
 
 GRAPH_VERSION = "forecast-intelligence-graph-v1"
 SPECIALIST_NODES = ("microstructure", "catalyst", "resolution")
+FORECAST_ANALYST_RULES = """
+Prediction-market usefulness rules:
+- Do not write generic dashboard observations such as "activity is broad", "sports supplies count", or "liquidity is uneven" unless immediately tied to a named market and a price/volume/trade-count implication.
+- Prefer market-level theses: named market, current implied probability, volume/trade-count, deadline or outcome bucket, catalyst, and resolution caveat.
+- Surface probability structure: near-50c repricing zones, deadline ladders, term spreads, mutually related markets, one-sided liquidity, stale prices, and group-vs-single-market mismatches.
+- Explain what would move the price next: official source, match result, court/government release, shipping/oil data, oracle update, or new large fills.
+- Say "no directional edge" when price-change data is missing; then identify what data would be needed. Do not fill the gap with category commentary.
+- Keep all claims informational. Do not recommend trades, position sizing, or financial advice.
+"""
 
 
 def _utc_now_iso() -> str:
@@ -102,10 +111,10 @@ def _deterministic_evidence(context: dict[str, Any], lens: str) -> dict[str, Any
 
 def _specialist_prompt(node: str, lens: str, context: dict[str, Any], evidence: dict[str, Any]) -> tuple[str, str]:
     role = {
-        "microstructure": "You are the market microstructure agent for a Polymarket intelligence graph. Focus on price, volume, trade-flow, liquidity, close probabilities, and unusual clusters.",
-        "catalyst": "You are the catalyst research agent for a Polymarket intelligence graph. Focus on news, content, search results, category rotation, and event catalysts.",
-        "resolution": "You are the resolution-risk agent for a Polymarket intelligence graph. Focus on market wording, oracle/resolution events, ambiguity, and settlement risk.",
-        "skeptic": "You are the skeptic and calibration agent for a Polymarket intelligence graph. Challenge weak evidence, stale signals, narrative overreach, and probability miscalibration.",
+        "microstructure": "You are the market microstructure agent for a Polymarket intelligence graph. Focus on named markets, implied probability, volume, trade-count, liquidity concentration, close probabilities, deadline ladders, and group-vs-single-market mismatches.",
+        "catalyst": "You are the catalyst research agent for a Polymarket intelligence graph. Focus on named markets, current prices, concrete external triggers, related-market catalysts, event timing, and what news/data would move probability.",
+        "resolution": "You are the resolution-risk agent for a Polymarket intelligence graph. Focus on market wording, deadline buckets, official source hierarchy, oracle/resolution events, ambiguity, and settlement risk that changes how prices should be interpreted.",
+        "skeptic": "You are the skeptic and calibration agent for a Polymarket intelligence graph. Challenge weak evidence, missing price-change data, stale signals, narrative overreach, and probability miscalibration.",
     }[node]
     user_context = {
         "lens": lens,
@@ -125,20 +134,22 @@ def _specialist_prompt(node: str, lens: str, context: dict[str, Any], evidence: 
             "specialistAgents": context.get("specialistAgents", []),
         },
         "requiredSchema": {
-            "findings": [{"label": "LIQUIDITY|CATALYST|RESOLUTION|RISK|TREND", "title": "short title", "summary": "short evidence-grounded sentence", "severity": "positive|warning|critical|neutral", "evidence": "short value"}],
+            "findings": [{"label": "LIQUIDITY|CATALYST|RESOLUTION|RISK|TREND|PROBABILITY", "title": "named market or spread", "summary": "market-level insight with price/probability and why it matters", "severity": "positive|warning|critical|neutral", "evidence": "price + volume/trades"}],
             "risks": ["up to three risks or caveats"],
-            "watch": ["up to three things to watch next"],
+            "watch": ["up to three concrete triggers that would move probability"],
             "confidence": "low|medium|high",
-            "probabilityAdjustment": "terse adjustment note, if relevant",
+            "probabilityAdjustment": "terse note on implied probability, term spread, or no directional edge",
         },
     }
-    return role + " Return compact JSON only. Do not provide financial advice.", json.dumps(user_context, ensure_ascii=False, default=str)
+    return role + FORECAST_ANALYST_RULES + "\nReturn compact JSON only.", json.dumps(user_context, ensure_ascii=False, default=str)
 
 
 def _writer_prompt(lens: str, context: dict[str, Any], evidence: dict[str, Any], agents: list[dict[str, Any]], calibration: dict[str, Any]) -> tuple[str, str]:
     system = """You are the panel writer for polyData's Forecast Intelligence Graph.
 Return compact JSON only. Use the specialist agent outputs as evidence, but write one coherent dashboard payload.
-Do not provide financial advice. Phrase conclusions as prediction-market structure, catalyst, and resolution-risk signals."""
+The user does not need a category summary. The user needs prediction-market intelligence: named markets, implied probabilities, why the market is priced that way, what could move it, and what resolution wording can break the read.
+Write like a prediction-market analyst, not a dashboard narrator.
+""" + FORECAST_ANALYST_RULES
     user = {
         "lens": lens,
         "architecture": GRAPH_VERSION,
@@ -147,16 +158,21 @@ Do not provide financial advice. Phrase conclusions as prediction-market structu
         "skepticCalibration": calibration,
         "sourceContext": {
             "metrics": context.get("metrics"),
-            "marketCandidates": context.get("marketCandidates", [])[:12],
+            "marketCandidates": context.get("marketCandidates", [])[:18],
+            "markets": context.get("markets", [])[:12],
+            "marketGroups": context.get("marketGroups", [])[:12],
+            "trades": context.get("trades", [])[:8],
+            "oracle": context.get("oracle", [])[:8],
+            "content": context.get("content", [])[:8],
             "searchResults": context.get("searchResults", [])[:3],
         },
         "requiredSchema": {
-            "brief": "one or two concise English sentences; concrete conclusion first",
-            "specialMarkets": [{"title": "market/event title", "why": "why unusual", "trend": "short label", "severity": "positive|warning|critical|neutral", "evidence": "short value"}],
-            "themes": [{"label": "MACRO|SPORTS|CRYPTO|POLITICS|RISK|LIQUIDITY|TREND", "title": "theme", "summary": "broader Polymarket implication", "severity": "positive|warning|critical|neutral", "evidence": "short value"}],
-            "watchlist": [{"title": "thing to watch", "reason": "why it matters", "horizon": "today|24h|this week|event close", "severity": "positive|warning|critical|neutral"}],
-            "focus": [{"label": "BREADTH|SPECIAL|TREND|RISK|CATALYSTS|LIQUIDITY|ATTENTION", "title": "short title", "summary": "one concise sentence", "severity": "positive|warning|critical|neutral", "evidence": "short value"}],
-            "evidence": ["up to four terse evidence bullets"],
+            "brief": "one or two concise English sentences. Must name at least one market and include a price/probability or spread. Avoid generic category/breadth wording.",
+            "specialMarkets": [{"title": "exact market/event title", "why": "why this market matters in prediction-market terms: price, volume/trades, catalyst, resolution or term-structure", "trend": "probability structure label such as 50c repricing zone|deadline ladder|term spread|liquidity anomaly|resolution premium", "severity": "positive|warning|critical|neutral", "evidence": "price + volume/trades"}],
+            "themes": [{"label": "PROBABILITY|CATALYST|RESOLUTION|LIQUIDITY|SPREAD|RISK|TREND", "title": "named market cluster or relationship", "summary": "specific thesis about pricing, curve, catalyst, or resolution; not category summary", "severity": "positive|warning|critical|neutral", "evidence": "short price/volume/trade evidence"}],
+            "watchlist": [{"title": "specific market trigger", "reason": "what update would change implied probability or resolve ambiguity", "horizon": "today|24h|this week|event close", "severity": "positive|warning|critical|neutral"}],
+            "focus": [{"label": "PROBABILITY|SPREAD|CATALYSTS|RESOLUTION|LIQUIDITY|RISK", "title": "market-level title", "summary": "one useful sentence with market, price/probability, and interpretation", "severity": "positive|warning|critical|neutral", "evidence": "price + flow evidence"}],
+            "evidence": ["up to four terse bullets, each with a named market and numeric evidence"],
         },
     }
     return system, json.dumps(user, ensure_ascii=False, default=str)
