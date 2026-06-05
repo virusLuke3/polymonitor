@@ -1503,8 +1503,17 @@ def build_active_markets_payload(page_size: int = 40) -> Dict[str, Any]:
     return market_service.build_active_markets_payload(build_service_context(), page_size=page_size)
 
 
-def get_active_markets_snapshot(page_size: int = 40) -> Dict[str, Any]:
-    return market_service.get_active_markets_snapshot(build_service_context(), page_size=page_size)
+def get_active_markets_snapshot(
+    page_size: int = 40,
+    include_runtime_prices: bool = False,
+    include_change_24h: bool = False,
+) -> Dict[str, Any]:
+    return market_service.get_active_markets_snapshot(
+        build_service_context(),
+        page_size=page_size,
+        include_runtime_prices=include_runtime_prices,
+        include_change_24h=include_change_24h,
+    )
 
 
 def build_bootstrap_payload() -> Dict[str, Any]:
