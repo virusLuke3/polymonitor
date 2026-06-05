@@ -877,6 +877,7 @@ export function App() {
   const [commandQuery, setCommandQuery] = useState('');
   const [commandMarketHits, setCommandMarketHits] = useState<MarketListItem[]>([]);
   const [commandMarketSearchLoading, setCommandMarketSearchLoading] = useState(false);
+  const [commandMarketSearchError, setCommandMarketSearchError] = useState('');
   const [layers, setLayers] = useState<LayerToggle[]>(INITIAL_LAYERS);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => readWorkspaceMode());
   const [activePanelIds, setActivePanelIds] = useState<string[]>([]);
@@ -1683,18 +1684,26 @@ export function App() {
     if (!showCommandPalette || !query) {
       setCommandMarketHits([]);
       setCommandMarketSearchLoading(false);
+      setCommandMarketSearchError('');
       return;
     }
 
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setCommandMarketSearchLoading(true);
+      setCommandMarketSearchError('');
       fetchMarketSearch(query, 50)
         .then((payload) => {
-          if (!cancelled) setCommandMarketHits(payload.items || []);
+          if (!cancelled) {
+            setCommandMarketHits(payload.items || []);
+            setCommandMarketSearchError('');
+          }
         })
         .catch(() => {
-          if (!cancelled) setCommandMarketHits([]);
+          if (!cancelled) {
+            setCommandMarketHits([]);
+            setCommandMarketSearchError('PostgreSQL market search is unavailable.');
+          }
         })
         .finally(() => {
           if (!cancelled) setCommandMarketSearchLoading(false);
@@ -2067,6 +2076,9 @@ export function App() {
               <div className="wm-command-group">
                 <div className="wm-command-heading">Markets</div>
                 {commandMarketSearchLoading ? <div className="wm-command-empty">Searching PostgreSQL market index...</div> : null}
+                {!commandMarketSearchLoading && commandMarketSearchError ? (
+                  <div className="wm-command-empty">{commandMarketSearchError}</div>
+                ) : null}
                 {commandResults.marketHits.map((market) => (
                   <button
                     key={market.id}
@@ -2093,7 +2105,7 @@ export function App() {
                     </div>
                   </button>
                 ))}
-                {!commandMarketSearchLoading && commandQuery.trim() && !commandResults.marketHits.length ? (
+                {!commandMarketSearchLoading && !commandMarketSearchError && commandQuery.trim() && !commandResults.marketHits.length ? (
                   <div className="wm-command-empty">No matching markets in PostgreSQL.</div>
                 ) : null}
               </div>

@@ -140,7 +140,7 @@ export function fetchMarketSearch(query: string, limit = 12) {
     q: query.trim(),
     limit: String(limit),
   });
-  return apiGet<{ items: MarketListItem[] }>(`/search?${params.toString()}`);
+  return apiGetWithTimeout<{ items: MarketListItem[] }>(`/search?${params.toString()}`, 5000);
 }
 
 export function fetchMarkets(query = '', pageSize = 160) {
