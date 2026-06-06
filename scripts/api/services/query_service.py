@@ -887,6 +887,7 @@ def _merge_content_payloads(primary: List[Dict[str, Any]], fallback: List[Dict[s
 
 
 _RELATED_TAB_CONTENT_TYPES = ("video", "report", "research")
+_RELATED_TAB_TARGET_COUNT = 6
 
 
 def _fetch_content_type_candidates(ctx: dict, topic_ids: List[str], content_type: str, limit: int) -> List[Dict[str, Any]]:
@@ -961,28 +962,39 @@ def _augment_related_content_tabs(
                         and str(row.get("topic_id") or "").strip() != primary_topic
                     )
                 ]
-    existing_types = {str(row.get("content_type") or "").strip().lower() for row in rows}
-    missing_types = [content_type for content_type in _RELATED_TAB_CONTENT_TYPES if content_type not in existing_types]
-    if not missing_types:
+    existing_by_type = {
+        content_type: sum(1 for row in rows if str(row.get("content_type") or "").strip().lower() == content_type)
+        for content_type in _RELATED_TAB_CONTENT_TYPES
+    }
+    target_count = min(_RELATED_TAB_TARGET_COUNT, max(4, limit // 2))
+    needed_by_type = {
+        content_type: max(0, target_count - existing_count)
+        for content_type, existing_count in existing_by_type.items()
+    }
+    if not any(needed_by_type.values()):
         return rows
     seen_urls = {str(row.get("url") or "").strip() for row in rows if str(row.get("url") or "").strip()}
     supplemental_items: List[Dict[str, Any]] = []
-    for content_type in missing_types:
+    for content_type, needed_count in needed_by_type.items():
+        if needed_count <= 0:
+            continue
         candidate_rows: List[Dict[str, Any]] = []
         for topic_id in topic_ids:
             topic_rows = [
-                row for row in _fetch_content_type_candidates(ctx, [topic_id], content_type, 6)
+                row for row in _fetch_content_type_candidates(ctx, [topic_id], content_type, max(12, needed_count * 4))
                 if str(row.get("url") or "").strip() not in seen_urls
             ]
             if topic_rows:
-                candidate_rows = topic_rows
+                candidate_rows.extend(topic_rows)
+                seen_urls.update(str(row.get("url") or "").strip() for row in topic_rows if str(row.get("url") or "").strip())
+            if len(candidate_rows) >= needed_count * 4:
                 break
         if not candidate_rows:
             continue
         items = _merge_content_payloads(
-            _rank_topic_candidates_for_market(candidate_rows, market, tags, 2),
-            _topic_rows_to_payloads(candidate_rows, limit=2, default_score=18),
-            limit=2,
+            _rank_topic_candidates_for_market(candidate_rows, market, tags, needed_count),
+            _topic_rows_to_payloads(candidate_rows, limit=needed_count, default_score=18),
+            limit=needed_count,
         )
         for item in items:
             item["relevanceScore"] = max(64, int(item.get("relevanceScore") or 0))

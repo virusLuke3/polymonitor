@@ -26,7 +26,7 @@ DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_GDELT_DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 MAX_FEED_WORKERS = 10
 MAX_ITEMS_PER_FEED = 25
-MAX_DYNAMIC_ITEMS_PER_FEED = 12
+MAX_DYNAMIC_ITEMS_PER_FEED = 20
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 GOOGLE_NEWS_RSS_TEMPLATE = "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
 SOURCE_TIER_BONUS = {
@@ -145,7 +145,7 @@ class RuntimeContentProvider:
         keywords = self._topic_keywords(topic)
         scored = [(self._score_item(item=item, keywords=keywords), item) for item in items]
         scored.sort(key=lambda entry: (entry[0], entry[1].published_at or "", entry[1].title), reverse=True)
-        ranked = [item for score, item in scored if score >= 20 or self._item_matches_topic(item, topic)]
+        ranked = self._rank_topic_items_with_type_mix(scored=scored, topic=topic, limit=limit)
         with self._lock:
             self._topic_cache[cache_key] = {"fetched_at": now, "items": ranked}
             if len(self._topic_cache) > 32:
@@ -299,7 +299,7 @@ class RuntimeContentProvider:
         queries = [str(query or "").strip() for query in (topic.get("queries") or []) if str(query or "").strip()]
         topic_search_enabled = str(os.environ.get("POLYDATA_CONTENT_TOPIC_SEARCH_PROVIDER", "1")).strip().lower() in {"1", "true", "yes", "on"}
         topic_media_search_enabled = str(os.environ.get("POLYDATA_CONTENT_TOPIC_MEDIA_SEARCH_PROVIDER", "1")).strip().lower() in {"1", "true", "yes", "on"}
-        supplemental_queries = self._topic_supplemental_queries(topic, queries[0] if queries else "")
+        supplemental_queries = self._topic_supplemental_queries(topic, queries)
         if topic_search_enabled and queries:
             items.extend(replace(item, topic_id=topic_id) for item in self._fetch_search_provider_items(query=queries[0], category=category))
         if topic_search_enabled and topic_media_search_enabled:
@@ -324,27 +324,76 @@ class RuntimeContentProvider:
 
         google_queries = [*queries, *supplemental_queries]
         if google_queries:
-            with ThreadPoolExecutor(max_workers=min(4, len(google_queries))) as executor:
+            with ThreadPoolExecutor(max_workers=min(6, len(google_queries))) as executor:
                 futures = [executor.submit(fetch_query, query) for query in google_queries]
                 for future in as_completed(futures):
                     items.extend(future.result())
         return items
 
     @staticmethod
-    def _topic_supplemental_queries(topic: Dict[str, Any], base_query: str) -> List[str]:
-        base = str(base_query or "").strip()
-        if not base:
+    def _topic_supplemental_queries(topic: Dict[str, Any], base_queries: List[str]) -> List[str]:
+        bases = [str(query or "").strip() for query in base_queries[:3] if str(query or "").strip()]
+        if not bases:
             keywords = [str(value or "").strip() for value in (topic.get("keywords") or [])[:6] if str(value or "").strip()]
-            base = " ".join(keywords)
-        if not base:
+            bases = [" ".join(keywords).strip()]
+        bases = [re.sub(r"\bwhen:\d+[dhmw]\b", "", base, flags=re.IGNORECASE).strip() for base in bases if base]
+        if not bases:
             return []
-        base = re.sub(r"\bwhen:\d+[dhmw]\b", "", base, flags=re.IGNORECASE).strip()
-        return [
-            f"site:youtube.com ({base}) analysis video when:7d",
-            f"site:youtu.be ({base}) analysis video when:7d",
-            f"filetype:pdf ({base}) report outlook analysis when:30d",
-            f"({base}) research paper working paper study forecast when:30d",
-        ]
+        queries: List[str] = []
+        for base in bases:
+            queries.extend(
+                [
+                    f"site:youtube.com ({base}) analysis preview when:14d",
+                    f"site:youtube.com ({base}) interview highlights when:14d",
+                    f"site:youtu.be ({base}) analysis preview when:14d",
+                    f"filetype:pdf ({base}) report outlook analysis when:60d",
+                    f"filetype:pdf ({base}) injury report odds forecast when:60d",
+                    f"({base}) research paper working paper study forecast when:60d",
+                    f"site:arxiv.org ({base}) research paper when:365d",
+                    f"site:ssrn.com ({base}) research paper when:365d",
+                ]
+            )
+        deduped: List[str] = []
+        for query in queries:
+            if query not in deduped:
+                deduped.append(query)
+        return deduped[:18]
+
+    def _rank_topic_items_with_type_mix(
+        self,
+        *,
+        scored: List[tuple[int, RuntimeContentItem]],
+        topic: Dict[str, Any],
+        limit: int,
+    ) -> List[RuntimeContentItem]:
+        eligible = [(score, item) for score, item in scored if score >= 20 or self._item_matches_topic(item, topic)]
+        if not eligible:
+            return []
+        type_quota = min(max(4, int(limit) // 8), 10)
+        selected: List[RuntimeContentItem] = []
+        seen: set[str] = set()
+
+        def add_item(item: RuntimeContentItem) -> None:
+            key = self._dedupe_key(item)
+            if key in seen:
+                return
+            selected.append(item)
+            seen.add(key)
+
+        for content_type in ("video", "report", "research"):
+            count = 0
+            for _, item in eligible:
+                if item.content_type != content_type:
+                    continue
+                add_item(item)
+                count += 1
+                if count >= type_quota:
+                    break
+        for _, item in eligible:
+            add_item(item)
+            if len(selected) >= limit:
+                break
+        return selected[:limit]
 
     def _fetch_topic_gdelt_items(self, topic: Dict[str, Any]) -> List[RuntimeContentItem]:
         topic_id = str(topic.get("id") or "")
@@ -803,11 +852,11 @@ class RuntimeContentProvider:
     @staticmethod
     def _infer_content_type(*, source: str, title: str, url: str) -> str:
         text = f"{source} {title} {url}".lower()
-        if re.search(r"youtube|youtu\.be|vimeo|twitch\.tv", text):
+        if re.search(r"youtube|youtu\.be|vimeo|twitch\.tv|video|watch\?|highlights?|interview|podcast", text):
             return "video"
-        if re.search(r"\.pdf($|[?#])|annual-report|whitepaper|policy-paper|research-report|special-report", text):
+        if re.search(r"\.pdf($|[?#])|annual-report|whitepaper|policy-paper|research-report|special-report|outlook|briefing|forecast|preview|injury report", text):
             return "report"
-        if re.search(r"arxiv\.org|ssrn\.com|nber\.org|working paper|journal|research paper", text):
+        if re.search(r"arxiv\.org|ssrn\.com|nber\.org|working paper|journal|research paper|study|analysis model", text):
             return "research"
         return "news"
 
