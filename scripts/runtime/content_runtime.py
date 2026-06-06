@@ -299,12 +299,15 @@ class RuntimeContentProvider:
         queries = [str(query or "").strip() for query in (topic.get("queries") or []) if str(query or "").strip()]
         topic_search_enabled = str(os.environ.get("POLYDATA_CONTENT_TOPIC_SEARCH_PROVIDER", "1")).strip().lower() in {"1", "true", "yes", "on"}
         topic_media_search_enabled = str(os.environ.get("POLYDATA_CONTENT_TOPIC_MEDIA_SEARCH_PROVIDER", "1")).strip().lower() in {"1", "true", "yes", "on"}
+        topic_research_enabled = str(os.environ.get("POLYDATA_CONTENT_TOPIC_RESEARCH_PROVIDER", "1")).strip().lower() in {"1", "true", "yes", "on"}
         supplemental_queries = self._topic_supplemental_queries(topic, queries)
         if topic_search_enabled and queries:
             items.extend(replace(item, topic_id=topic_id) for item in self._fetch_search_provider_items(query=queries[0], category=category))
         if topic_search_enabled and topic_media_search_enabled:
             for supplemental_query in supplemental_queries:
                 items.extend(replace(item, topic_id=topic_id) for item in self._fetch_search_provider_items(query=supplemental_query, category=category))
+        if topic_research_enabled:
+            items.extend(replace(item, topic_id=topic_id) for item in self._fetch_topic_research_items(topic))
 
         def fetch_query(query: str) -> List[RuntimeContentItem]:
             url = GOOGLE_NEWS_RSS_TEMPLATE.format(query=quote_plus(query))
@@ -358,6 +361,123 @@ class RuntimeContentProvider:
             if query not in deduped:
                 deduped.append(query)
         return deduped[:18]
+
+    def _fetch_topic_research_items(self, topic: Dict[str, Any]) -> List[RuntimeContentItem]:
+        topic_id = str(topic.get("id") or "")
+        category = str(topic.get("label") or topic_id or "Research")
+        queries = self._topic_research_queries(topic)
+        if not queries:
+            return []
+        items: List[RuntimeContentItem] = []
+        with ThreadPoolExecutor(max_workers=min(4, len(queries) * 2)) as executor:
+            futures = []
+            for query in queries:
+                futures.append(executor.submit(self._fetch_arxiv_research_items, query=query, category=category))
+                futures.append(executor.submit(self._fetch_semantic_scholar_items, query=query, category=category))
+            for future in as_completed(futures):
+                items.extend(future.result())
+        return items
+
+    @staticmethod
+    def _topic_research_queries(topic: Dict[str, Any]) -> List[str]:
+        topic_id = str(topic.get("id") or "").strip().lower()
+        presets = {
+            "sports": ["sports analytics", "sports betting markets", "sports forecasting"],
+            "esports": ["esports analytics", "esports performance prediction", "competitive gaming analytics"],
+            "nba": ["basketball analytics", "NBA player performance prediction", "basketball forecasting"],
+            "prediction-markets": ["prediction markets", "forecasting markets", "information aggregation markets"],
+            "crypto": ["cryptocurrency market prediction", "crypto asset pricing", "blockchain market microstructure"],
+            "finance": ["financial market forecasting", "asset pricing", "market microstructure"],
+            "macro": ["macroeconomic forecasting", "inflation forecasting", "economic nowcasting"],
+            "cpi": ["inflation forecasting", "consumer price index forecasting", "CPI nowcasting"],
+            "oil-energy": ["oil price forecasting", "energy markets", "crude oil volatility"],
+            "politics": ["political forecasting", "election forecasting", "public opinion forecasting"],
+            "elections": ["election forecasting", "polling errors", "political prediction markets"],
+            "geopolitics": ["geopolitical risk", "conflict forecasting", "war risk forecasting"],
+            "tech": ["technology forecasting", "innovation diffusion", "technology adoption"],
+            "ai": ["artificial intelligence forecasting", "large language models", "AI adoption"],
+            "weather": ["weather forecasting", "extreme weather prediction", "climate risk"],
+        }
+        if topic_id in presets:
+            return presets[topic_id]
+        keywords = [str(value or "").strip() for value in (topic.get("keywords") or []) if str(value or "").strip()]
+        cleaned = [re.sub(r"[^A-Za-z0-9 ]+", " ", keyword).strip() for keyword in keywords[:6]]
+        cleaned = [keyword for keyword in cleaned if len(keyword) >= 3]
+        return [" ".join(cleaned[:3])] if cleaned else []
+
+    def _fetch_arxiv_research_items(self, *, query: str, category: str) -> List[RuntimeContentItem]:
+        try:
+            response = self._session.get(
+                "https://export.arxiv.org/api/query",
+                params={
+                    "search_query": f"all:{query}",
+                    "start": 0,
+                    "max_results": 8,
+                    "sortBy": "submittedDate",
+                    "sortOrder": "descending",
+                },
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            items = self._parse_feed(
+                response.text,
+                source="arXiv",
+                category=category,
+                max_items=8,
+                provider="arxiv",
+                max_age_days=3650,
+            )
+        except Exception:
+            return []
+        return [replace(item, content_type="research", source=f"arXiv: {query}") for item in items]
+
+    def _fetch_semantic_scholar_items(self, *, query: str, category: str) -> List[RuntimeContentItem]:
+        try:
+            response = self._session.get(
+                "https://api.semanticscholar.org/graph/v1/paper/search",
+                params={
+                    "query": query,
+                    "limit": 8,
+                    "fields": "title,url,abstract,year,publicationDate,venue",
+                },
+                timeout=self.timeout_seconds,
+                headers={"Accept": "application/json"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            return []
+        items: List[RuntimeContentItem] = []
+        for index, row in enumerate((payload or {}).get("data") or []):
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get("title") or "").strip()
+            paper_id = str(row.get("paperId") or "").strip()
+            url = str(row.get("url") or "").strip() or (f"https://www.semanticscholar.org/paper/{paper_id}" if paper_id else "")
+            if not title or not url:
+                continue
+            summary = self._clean_summary(str(row.get("abstract") or ""))
+            if self._looks_low_quality_item(title=title, summary=summary, url=url):
+                continue
+            published_at = self._parse_date(str(row.get("publicationDate") or ""))
+            if not published_at and row.get("year"):
+                published_at = f"{int(row['year']):04d}-01-01T00:00:00Z"
+            venue = str(row.get("venue") or "").strip()
+            source_label = f"Semantic Scholar: {venue}" if venue else "Semantic Scholar"
+            items.append(
+                RuntimeContentItem(
+                    id=f"semantic-scholar:{paper_id or url or index}",
+                    content_type="research",
+                    source=source_label,
+                    category=category,
+                    title=unescape(title),
+                    url=url,
+                    published_at=published_at,
+                    summary=summary,
+                    provider="semantic-scholar",
+                )
+            )
+        return items
 
     def _rank_topic_items_with_type_mix(
         self,
@@ -653,6 +773,7 @@ class RuntimeContentProvider:
         max_items: int = MAX_ITEMS_PER_FEED,
         provider: str = "rss",
         topic_id: str = "",
+        max_age_days: int = 14,
     ) -> List[RuntimeContentItem]:
         root = ET.fromstring(payload)
         parsed: List[RuntimeContentItem] = []
@@ -684,7 +805,7 @@ class RuntimeContentProvider:
             if not title or not url:
                 continue
             title = unescape(title.strip())
-            if published_at and not self._is_recent_published_at(published_at, max_age_days=14):
+            if published_at and not self._is_recent_published_at(published_at, max_age_days=max_age_days):
                 continue
             if self._looks_low_quality_item(title=title, summary=summary, url=url):
                 continue
