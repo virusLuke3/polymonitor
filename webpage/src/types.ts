@@ -270,6 +270,49 @@ export type ChartPayload = {
   points: ChartPoint[];
 };
 
+export type QuantFrontendPricePoint = {
+  tokenId: string;
+  marketId: number;
+  marketSlug?: string | null;
+  tokenSide: string;
+  tsMinute?: string | null;
+  timestamp: number;
+  price: string | number;
+};
+
+export type QuantBlockClosePoint = {
+  tokenId: string;
+  marketId: number;
+  marketSlug?: string | null;
+  tokenSide: string;
+  blockNumber: number;
+  closePrice: string | number;
+  closeTxHash?: string | null;
+  closeLogIndex?: number | null;
+  tradeCount?: number | string | null;
+  volume?: string | number | null;
+};
+
+export type QuantBuildRun = {
+  runId: number;
+  source: string;
+  mode?: string | null;
+  status: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  marketsTotal?: number | string | null;
+  marketsComplete?: number | string | null;
+  rowsWritten?: number | string | null;
+  errorCount?: number | string | null;
+  lastError?: string | null;
+};
+
+export type QuantListPayload<T> = {
+  items: T[];
+  count: number;
+  source?: string;
+};
+
 export type ContentItem = {
   id?: string | number;
   contentType?: string | null;

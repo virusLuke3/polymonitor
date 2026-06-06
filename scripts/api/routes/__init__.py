@@ -12,6 +12,7 @@ from .content import create_content_blueprint
 from .lob import create_lob_blueprint
 from .market_groups import create_market_groups_blueprint
 from .markets import create_markets_blueprint
+from .quant import create_quant_blueprint
 from .runtime_panels import create_runtime_panels_blueprint
 from .runtime_sports import create_runtime_sports_blueprint
 from .system import create_system_blueprint
@@ -26,6 +27,7 @@ def register_blueprints(app: Flask, helpers: dict) -> None:
         create_bootstrap_blueprint,
         create_market_groups_blueprint,
         create_markets_blueprint,
+        create_quant_blueprint,
         create_runtime_panels_blueprint,
         create_runtime_sports_blueprint,
         create_content_blueprint,

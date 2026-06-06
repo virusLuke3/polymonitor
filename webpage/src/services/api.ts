@@ -17,6 +17,10 @@ import type {
   MarketWorkspaceHealth,
   OraclePayload,
   PriceSummary,
+  QuantBlockClosePoint,
+  QuantBuildRun,
+  QuantFrontendPricePoint,
+  QuantListPayload,
   RuntimeMarketGroup,
   RuntimeCryptoFundingPayload,
   RuntimeCommodityTransmissionPayload,
@@ -217,6 +221,53 @@ export function fetchRecentTrades(limit = 24) {
 
 export function fetchRecentOracle(limit = 24) {
   return apiGet<OraclePayload['timeline']>(`/oracle/recent?limit=${limit}`);
+}
+
+export type QuantPriceQuery = {
+  marketSlug?: string;
+  tokenSide?: string;
+  tokenId?: string;
+  from?: string;
+  to?: string;
+  fromBlock?: string;
+  toBlock?: string;
+  limit?: number;
+};
+
+function appendQuantParams(query: QuantPriceQuery, mode: 'frontend' | 'block') {
+  const params = new URLSearchParams();
+  if (query.marketSlug?.trim()) params.set('market_slug', query.marketSlug.trim());
+  if (query.tokenSide?.trim()) params.set('token_side', query.tokenSide.trim());
+  if (query.tokenId?.trim()) params.set('token_id', query.tokenId.trim());
+  if (mode === 'frontend') {
+    if (query.from?.trim()) params.set('from', query.from.trim());
+    if (query.to?.trim()) params.set('to', query.to.trim());
+  } else {
+    if (query.fromBlock?.trim()) params.set('from_block', query.fromBlock.trim());
+    if (query.toBlock?.trim()) params.set('to_block', query.toBlock.trim());
+  }
+  params.set('limit', String(query.limit || 240));
+  return params.toString();
+}
+
+export function fetchQuantFrontendPrices(query: QuantPriceQuery = {}) {
+  return apiGetWithTimeout<QuantListPayload<QuantFrontendPricePoint>>(
+    `/quant/frontend-prices?${appendQuantParams(query, 'frontend')}`,
+    8000,
+  );
+}
+
+export function fetchQuantBlockClosePrices(query: QuantPriceQuery = {}) {
+  return apiGetWithTimeout<QuantListPayload<QuantBlockClosePoint>>(
+    `/quant/block-close-prices?${appendQuantParams(query, 'block')}`,
+    8000,
+  );
+}
+
+export function fetchQuantBuildStatus(source = '', limit = 24) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (source.trim()) params.set('source', source.trim());
+  return apiGetWithTimeout<QuantListPayload<QuantBuildRun>>(`/quant/price-build-status?${params.toString()}`, 8000);
 }
 
 export function fetchLatestContent(limit = 8) {
