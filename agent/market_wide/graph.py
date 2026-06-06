@@ -130,6 +130,8 @@ def _compact_quant_for_prompt(quant: dict[str, Any]) -> dict[str, Any]:
         "repricingZones": (quant.get("repricingZones") or [])[:3],
         "priceDriftLeaders": (quant.get("priceDriftLeaders") or [])[:3],
         "volatilityLeaders": (quant.get("volatilityLeaders") or [])[:3],
+        "fillTapeMicrostructure": (quant.get("fillTapeMicrostructure") or [])[:3],
+        "priceSourceConflicts": (quant.get("priceSourceConflicts") or [])[:3],
         "lobSpreads": (quant.get("lobSpreads") or [])[:3],
         "relatedMarketArbitrageScores": (quant.get("relatedMarketArbitrageScores") or [])[:3],
         "anomalies": (quant.get("anomalies") or [])[:2],
@@ -170,6 +172,31 @@ def _compact_prompt_list(items: Any, limit: int) -> list[dict[str, Any]]:
         compacted = _market_prompt_item(item)
         if compacted:
             output.append(compacted)
+    return output
+
+
+def _compact_fill_tape_for_prompt(items: Any, limit: int = 3) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    output: list[dict[str, Any]] = []
+    for item in items[:limit]:
+        if not isinstance(item, dict):
+            continue
+        output.append({
+            "title": compact_text(item.get("title"), 100),
+            "snapshotLatestPrice": item.get("snapshotLatestPrice"),
+            "detailLatestPrice": item.get("detailLatestPrice"),
+            "detailYesPrice": item.get("detailYesPrice"),
+            "latestFillYesPrice": item.get("latestFillYesPrice"),
+            "fillVwapYesPrice": item.get("fillVwapYesPrice"),
+            "recentFillDrift": item.get("recentFillDrift"),
+            "fillYesPriceRange": item.get("fillYesPriceRange"),
+            "fillCountLoaded": item.get("fillCountLoaded"),
+            "lastFillAt": item.get("lastFillAt"),
+            "fillFreshness": item.get("fillFreshness"),
+            "pairedFillRatio": item.get("pairedFillRatio"),
+            "priceSourceConflict": item.get("priceSourceConflict"),
+        })
     return output
 
 
@@ -475,6 +502,64 @@ def _trade_price_drift(context: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(output, key=lambda item: item["_rank"], reverse=True)[:6]
 
 
+def _fill_tape_microstructure(context: dict[str, Any]) -> list[dict[str, Any]]:
+    tapes = context.get("topMarketFillTape") if isinstance(context.get("topMarketFillTape"), list) else []
+    output: list[dict[str, Any]] = []
+    for item in tapes:
+        if not isinstance(item, dict):
+            continue
+        title = compact_text(item.get("title") or "Untitled market", 120)
+        latest_fill = _as_float(item.get("latestFillYesPrice"))
+        oldest_fill = _as_float(item.get("oldestLoadedFillYesPrice"))
+        fill_count = int(_as_float(item.get("fillCountLoaded")))
+        fill_range = _as_float(item.get("fillYesPriceRange"))
+        fill_drift = item.get("recentFillDrift")
+        if fill_drift in (None, "", "null") and latest_fill > 0 and oldest_fill > 0:
+            fill_drift = latest_fill - oldest_fill
+        fill_drift_value = _as_float(fill_drift)
+        paired_ratio = item.get("pairedFillRatio")
+        conflict = bool(item.get("priceSourceConflict"))
+        source_prices = {
+            "snapshot": _fmt_price(item.get("snapshotLatestPrice")),
+            "detail": _fmt_price(item.get("detailYesPrice") or item.get("detailLatestPrice")),
+            "latestFill": _fmt_price(latest_fill),
+            "fillVwap": _fmt_price(item.get("fillVwapYesPrice")),
+        }
+        if conflict:
+            interpretation = "Snapshot/detail/recent-fill sources disagree; anchor live commentary to the recent fill tape and discount stale detail prices."
+        elif latest_fill > 0 and abs(fill_drift_value) >= 0.02:
+            interpretation = "Loaded recent fills show directional repricing; treat this as a low-cost tape drift, not full 24h momentum."
+        elif latest_fill > 0 and 0.48 <= latest_fill <= 0.52 and fill_range <= 0.01:
+            interpretation = "Recent fills are pinned near 50c; this is a balanced repricing zone unless a named catalyst breaks it."
+        elif latest_fill > 0:
+            interpretation = "Recent fills provide a fresher implied probability check than the market summary row."
+        else:
+            interpretation = "Top-market detail loaded, but no usable recent fill prices were available."
+        output.append({
+            "title": title,
+            "snapshotPrice": source_prices["snapshot"],
+            "detailPrice": source_prices["detail"],
+            "latestFillPrice": source_prices["latestFill"],
+            "fillVwapPrice": source_prices["fillVwap"],
+            "fillCountLoaded": fill_count,
+            "recentFillDrift": f"{fill_drift_value * 100:+.1f} pts" if fill_drift is not None else "n/a",
+            "fillPriceRange": f"{fill_range * 100:.1f} pts" if fill_range > 0 else "0.0 pts",
+            "lastFillAt": item.get("lastFillAt"),
+            "fillFreshness": item.get("fillFreshness"),
+            "pairedFillRatio": paired_ratio,
+            "priceSourceConflict": conflict,
+            "interpretation": interpretation,
+            "_rank": (8 if conflict else 0)
+                + abs(fill_drift_value) * 20
+                + fill_range * 8
+                + math.log10(max(1, fill_count)),
+        })
+    return [
+        {key: value for key, value in item.items() if key != "_rank"}
+        for item in sorted(output, key=lambda item: item["_rank"], reverse=True)[:8]
+    ]
+
+
 def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, Any] | None = None) -> dict[str, Any]:
     rows = _market_rows(context)
     ranked_flow = sorted(
@@ -539,11 +624,27 @@ def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, 
     related_scores = []
     if isinstance(related_markets, dict):
         related_scores = list(related_markets.get("arbitrageScores") or [])[:6]
+    fill_tape_rows = _fill_tape_microstructure(context)
+    price_source_conflicts = [
+        {
+            "title": item.get("title"),
+            "snapshotPrice": item.get("snapshotPrice"),
+            "detailPrice": item.get("detailPrice"),
+            "latestFillPrice": item.get("latestFillPrice"),
+            "fillCountLoaded": item.get("fillCountLoaded"),
+            "lastFillAt": item.get("lastFillAt"),
+            "interpretation": item.get("interpretation"),
+        }
+        for item in fill_tape_rows
+        if item.get("priceSourceConflict")
+    ]
     warnings = []
     if missing_change:
         warnings.append(f"{missing_change} market rows have missing change24h/price24hAgo; directional momentum should not be inferred from volume alone.")
     if missing_lob:
         warnings.append(f"{missing_lob} market rows have no bid/ask in the agent context; LOB spread is unavailable until orderbook snapshots are joined.")
+    if price_source_conflicts:
+        warnings.append(f"{len(price_source_conflicts)} top-market fill-tape rows disagree across snapshot/detail/recent fills; prefer recent-fill evidence for live reads.")
     return {
         "node": "quant_forecaster",
         "universeSize": len(rows),
@@ -573,6 +674,8 @@ def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, 
             for item in drift_leaders
         ],
         "volatilityLeaders": volatility_leaders,
+        "fillTapeMicrostructure": fill_tape_rows,
+        "priceSourceConflicts": price_source_conflicts[:6],
         "lobSpreads": [
             {key: value for key, value in item.items() if key != "_rank"}
             for item in sorted(lob_rows, key=lambda item: item["_rank"], reverse=True)[:6]
@@ -580,7 +683,12 @@ def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, 
         "relatedMarketArbitrageScores": related_scores,
         "anomalies": anomalies[:6],
         "dataWarnings": warnings[:4],
-        "inputHash": _json_hash({"rows": rows[:24], "volatility": volatility_leaders, "relatedScores": related_scores[:6]}),
+        "inputHash": _json_hash({
+            "rows": rows[:24],
+            "volatility": volatility_leaders,
+            "fillTape": fill_tape_rows[:8],
+            "relatedScores": related_scores[:6],
+        }),
     }
 
 
@@ -799,6 +907,18 @@ def _build_reflexion_memory(context: dict[str, Any], lens: str, quant: dict[str,
             "lesson": "Recheck whether the score was true inefficiency, stale/resolved state, or non-exclusive outcome structure.",
             "createdAt": _utc_now_iso(),
         })
+    for item in (quant.get("priceSourceConflicts") or [])[:3]:
+        title = compact_text(item.get("title") or "fill-tape-conflict", 120)
+        items.append({
+            "memoryKey": _memory_key(lens, title, "fill-tape-conflict"),
+            "lens": lens,
+            "runId": run_id,
+            "kind": "fill-tape-conflict",
+            "title": title,
+            "observation": item,
+            "lesson": "When summary/detail/recent-fill prices disagree, prefer recent fills for live analysis and flag the ingestion conflict explicitly.",
+            "createdAt": _utc_now_iso(),
+        })
     return {
         "node": "reflexion_memory",
         "priorEpisodesLoaded": len(prior),
@@ -881,6 +1001,7 @@ def _specialist_prompt(
             "metrics": context.get("metrics"),
             "marketCandidates": _compact_prompt_list(context.get("marketCandidates"), 5),
             "marketGroups": _compact_prompt_list(context.get("marketGroups"), 3),
+            "topMarketFillTape": _compact_fill_tape_for_prompt(context.get("topMarketFillTape"), 3),
             "trades": _compact_prompt_list(context.get("trades"), 2),
             "oracle": context.get("oracle", [])[:2],
             "content": context.get("content", [])[:2],
@@ -932,6 +1053,7 @@ Write like a prediction-market analyst, not a dashboard narrator.
             "relatedMarkets": _compact_related_for_prompt(context.get("relatedMarkets") or {}),
             "marketCandidates": _compact_prompt_list(context.get("marketCandidates"), 6),
             "marketGroups": _compact_prompt_list(context.get("marketGroups"), 3),
+            "topMarketFillTape": _compact_fill_tape_for_prompt(context.get("topMarketFillTape"), 4),
             "trades": _compact_prompt_list(context.get("trades"), 2),
             "oracle": context.get("oracle", [])[:2],
             "content": context.get("content", [])[:2],

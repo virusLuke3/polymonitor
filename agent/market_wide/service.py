@@ -206,6 +206,50 @@ def _compact_trade(item: Any) -> dict[str, Any] | None:
     }
 
 
+def _compact_fill_tape(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    fills = item.get("recentFills") if isinstance(item.get("recentFills"), list) else []
+    return {
+        "marketId": item.get("marketId"),
+        "conditionId": item.get("conditionId"),
+        "title": compact_text(item.get("title") or "Untitled market", 120),
+        "category": compact_text(item.get("category") or "market", 40),
+        "snapshotLatestPrice": item.get("snapshotLatestPrice"),
+        "snapshotPrice24hAgo": item.get("snapshotPrice24hAgo"),
+        "snapshotChange24h": item.get("snapshotChange24h"),
+        "snapshotVolume24h": item.get("snapshotVolume24h"),
+        "snapshotTradeCount24h": item.get("snapshotTradeCount24h"),
+        "detailLatestPrice": item.get("detailLatestPrice"),
+        "detailYesPrice": item.get("detailYesPrice"),
+        "detailNoPrice": item.get("detailNoPrice"),
+        "detailNoAsYesPrice": item.get("detailNoAsYesPrice"),
+        "fillCountLoaded": item.get("fillCountLoaded"),
+        "latestFillYesPrice": item.get("latestFillYesPrice"),
+        "oldestLoadedFillYesPrice": item.get("oldestLoadedFillYesPrice"),
+        "recentFillDrift": item.get("recentFillDrift"),
+        "fillYesPriceRange": item.get("fillYesPriceRange"),
+        "fillVwapYesPrice": item.get("fillVwapYesPrice"),
+        "lastFillAt": item.get("lastFillAt"),
+        "fillFreshness": item.get("fillFreshness"),
+        "fillFreshnessSeconds": item.get("fillFreshnessSeconds"),
+        "pairedFillRatio": item.get("pairedFillRatio"),
+        "priceSourceConflict": bool(item.get("priceSourceConflict")),
+        "recentFills": [
+            {
+                "timestamp": fill.get("timestamp"),
+                "outcome": compact_text(fill.get("outcome"), 12),
+                "side": compact_text(fill.get("side"), 12),
+                "yesPrice": fill.get("yesPrice"),
+                "size": fill.get("size"),
+                "txHash": compact_text(fill.get("txHash"), 24),
+            }
+            for fill in fills[:8]
+            if isinstance(fill, dict)
+        ],
+    }
+
+
 def _compact_content(item: Any) -> dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
@@ -291,6 +335,7 @@ def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, A
         ("marketCandidates", 12),
         ("markets", 8),
         ("marketGroups", 6),
+        ("topMarketFillTape", 5),
         ("content", 4),
         ("oracle", 4),
         ("alphaSignals", 4),
@@ -311,6 +356,7 @@ def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, A
     reduced["forecastMemory"] = reduced.get("forecastMemory", [])[:4] if isinstance(reduced.get("forecastMemory"), list) else []
     reduced["markets"] = reduced.get("markets", [])[:4] if isinstance(reduced.get("markets"), list) else []
     reduced["marketGroups"] = reduced.get("marketGroups", [])[:3] if isinstance(reduced.get("marketGroups"), list) else []
+    reduced["topMarketFillTape"] = reduced.get("topMarketFillTape", [])[:3] if isinstance(reduced.get("topMarketFillTape"), list) else []
     reduced["marketCandidates"] = reduced.get("marketCandidates", [])[:8] if isinstance(reduced.get("marketCandidates"), list) else []
     return reduced
 
@@ -338,6 +384,7 @@ def _build_agent_context(payload: dict[str, Any], lens: str, search_results: lis
         }),
         "markets": _compact_list(_items(payload, "markets"), 12, _compact_market),
         "marketGroups": _compact_list(_items(payload, "marketGroups"), 10, _compact_group),
+        "topMarketFillTape": _compact_list(_items(payload, "topMarketFillTape"), 8, _compact_fill_tape),
         "trades": _compact_list(_items(payload, "trades"), 6, _compact_trade),
         "oracle": _compact_list(_items(payload, "oracle"), 6, _compact_oracle),
         "content": _compact_list(_items(payload, "content"), 6, _compact_content),
@@ -489,10 +536,13 @@ def _summary_metrics(payload: dict[str, Any]) -> dict[str, Any]:
     whales = _signal_items(payload, "whaleSignals")
     suspicious = _signal_items(payload, "suspiciousSignals")
     alpha = _signal_items(payload, "alphaSignals")
+    fill_tape = _items(payload, "topMarketFillTape")
     return {
         "activeMarkets": len(markets),
         "marketGroups": len(groups),
         "coveredMarkets": len(candidates),
+        "fillTapeMarkets": len(fill_tape),
+        "fillTapeConflicts": sum(1 for item in fill_tape if isinstance(item, dict) and item.get("priceSourceConflict")),
         "topCategories": _top_categories(candidates),
         "visible24hVolume": _fmt_currency(_volume_total(candidates)),
         "tradeRows": len(trades),

@@ -12,6 +12,7 @@ from agent.market_wide.snapshot import (
     QUANT_HISTORY_NAMESPACE,
     QUANT_SNAPSHOT_NAMESPACE,
     DEFAULT_LENSES,
+    build_market_wide_seed_payload,
     build_market_wide_snapshot,
     quant_history_cache_key,
     quant_snapshot_cache_key,
@@ -137,6 +138,22 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
                 {"market": "Will the event happen?", "price": 0.52},
                 {"market": "Will the event happen?", "price": 0.57},
             ],
+            "topMarketFillTape": [{
+                "title": "Will the event happen?",
+                "snapshotLatestPrice": 0.52,
+                "detailYesPrice": 1.0,
+                "detailNoPrice": 0.0,
+                "latestFillYesPrice": 0.52,
+                "oldestLoadedFillYesPrice": 0.50,
+                "fillCountLoaded": 6,
+                "recentFillDrift": 0.02,
+                "fillYesPriceRange": 0.04,
+                "fillVwapYesPrice": 0.515,
+                "lastFillAt": "2026-06-06T00:00:00Z",
+                "fillFreshness": "fresh-fills",
+                "pairedFillRatio": 0.5,
+                "priceSourceConflict": True,
+            }],
             "forecastMemory": [{
                 "memoryKey": "overview:price-drift:old",
                 "lens": "overview",
@@ -193,6 +210,8 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertEqual(response["agentGraph"]["quantForecaster"]["priceDriftLeaders"][0]["drift24h"], "+5.0 pts")
         self.assertEqual(response["agentGraph"]["quantForecaster"]["lobSpreads"][0]["spread"], "5.0 pts")
         self.assertEqual(response["agentGraph"]["quantForecaster"]["volatilityLeaders"][0]["priceRange"], "10.0 pts")
+        self.assertEqual(response["agentGraph"]["quantForecaster"]["fillTapeMicrostructure"][0]["latestFillPrice"], "52.0%")
+        self.assertEqual(response["agentGraph"]["quantForecaster"]["priceSourceConflicts"][0]["detailPrice"], "100.0%")
 
     def test_agent_context_preserves_forecast_memory_from_seed_payload(self):
         payload = {
@@ -205,12 +224,62 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
                 "lesson": "Recheck stale-state versus true inefficiency.",
                 "observation": {"score": 82, "interpretation": "Inspect curve mismatch."},
             }],
+            "topMarketFillTape": [{
+                "marketId": 1,
+                "title": "Top tape market",
+                "snapshotLatestPrice": 0.5,
+                "detailYesPrice": 1.0,
+                "latestFillYesPrice": 0.5,
+                "fillCountLoaded": 2,
+                "priceSourceConflict": True,
+            }],
         }
 
         context = _build_agent_context(payload, "overview", [])
 
         self.assertEqual(context["forecastMemory"][0]["memoryKey"], "overview:related-arbitrage:abc")
         self.assertEqual(context["forecastMemory"][0]["observation"]["score"], 82)
+        self.assertEqual(context["topMarketFillTape"][0]["title"], "Top tape market")
+        self.assertTrue(context["topMarketFillTape"][0]["priceSourceConflict"])
+
+    def test_seed_payload_adds_low_cost_top_market_fill_tape(self):
+        active_market = {
+            "id": 1843143,
+            "title": "Roland Garros ATP: Matteo Arnaldi vs Flavio Cobolli",
+            "category": "sports",
+            "latestPrice": 0.5,
+            "volume24h": 3_364_793,
+            "tradeCount24h": 6_982,
+        }
+        helpers = {
+            "get_active_markets_snapshot": lambda *args: {"items": [active_market]},
+            "get_market_groups_payload": lambda query, page, page_size, status: {"items": []},
+            "get_latest_content_payload": lambda limit: {"items": []},
+            "get_recent_trades_snapshot": lambda limit: [],
+            "get_recent_oracle_snapshot": lambda limit: [],
+            "get_market_by_id": lambda market_id: {
+                "id": market_id,
+                "title": active_market["title"],
+                "latestPrice": 1.0,
+                "latestYesPrice": 1.0,
+                "latestNoPrice": 0.0,
+            },
+            "get_trades_by_market_id": lambda market_id, limit=100, offset=0: [
+                {"timestamp": "2026-06-06T02:44:59Z", "outcome": "YES", "price": 0.5, "size": 20, "txHash": "0x1"},
+                {"timestamp": "2026-06-06T02:44:59Z", "outcome": "NO", "price": 0.5, "size": 20, "txHash": "0x1"},
+                {"timestamp": "2026-06-06T02:40:00Z", "outcome": "YES", "price": 0.48, "size": 10, "txHash": "0x2"},
+            ],
+        }
+
+        payload = build_market_wide_seed_payload(helpers, "overview", run_id="fig-fill-tape")
+
+        tape = payload["topMarketFillTape"][0]
+        self.assertEqual(tape["marketId"], 1843143)
+        self.assertEqual(tape["latestFillYesPrice"], 0.5)
+        self.assertEqual(tape["oldestLoadedFillYesPrice"], 0.48)
+        self.assertAlmostEqual(tape["recentFillDrift"], 0.02)
+        self.assertAlmostEqual(tape["pairedFillRatio"], 0.5)
+        self.assertTrue(tape["priceSourceConflict"])
 
     def test_forecast_graph_adds_quant_and_related_market_structure(self):
         payload = {"lens": "overview", "forecastRunId": "fig-structure", "markets": []}
