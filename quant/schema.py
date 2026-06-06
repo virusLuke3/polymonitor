@@ -18,6 +18,7 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
         question_id TEXT,
         market_title TEXT,
         token_id TEXT NOT NULL PRIMARY KEY,
+        token_id_hex TEXT,
         token_side TEXT NOT NULL,
         outcome_index INTEGER,
         active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -140,6 +141,7 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
 
 
 ALTER_TABLE_SQL: tuple[str, ...] = (
+    "ALTER TABLE quant.market_token_metadata ADD COLUMN IF NOT EXISTS token_id_hex TEXT",
     "ALTER TABLE quant.market_token_block_close ADD COLUMN IF NOT EXISTS yes_probability_close NUMERIC(20, 10)",
     "ALTER TABLE quant.market_token_block_close ADD COLUMN IF NOT EXISTS vwap_price NUMERIC(20, 10)",
     "ALTER TABLE quant.market_token_block_close ADD COLUMN IF NOT EXISTS yes_probability_vwap NUMERIC(20, 10)",
@@ -162,6 +164,7 @@ ALTER_TABLE_SQL: tuple[str, ...] = (
 CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_metadata_slug_side ON quant.market_token_metadata (market_slug, token_side)",
     "CREATE INDEX IF NOT EXISTS idx_quant_metadata_market_side ON quant.market_token_metadata (market_id, token_side)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_metadata_token_hex ON quant.market_token_metadata (token_id_hex)",
     "CREATE INDEX IF NOT EXISTS idx_quant_eligibility_eligible ON quant.market_price_eligibility (eligible, market_id)",
     "CREATE INDEX IF NOT EXISTS idx_quant_frontend_slug_side_time ON quant.market_token_frontend_price_1m (market_slug, token_side, ts_minute)",
     "CREATE INDEX IF NOT EXISTS idx_quant_frontend_market_side_time ON quant.market_token_frontend_price_1m (market_id, token_side, ts_minute)",

@@ -24,13 +24,16 @@ def fetch_orderfilled_trade_stats(ch: ClickHouseClient, token_ids: list[str]) ->
     rows = ch.query_json_rows(
         f"""
         SELECT
-            lower(token_id) AS token_id,
+            token_key AS token_id,
             count() AS trade_count,
             min(block_number) AS first_block,
             max(block_number) AS last_block
-        FROM {table}
-        WHERE lower(token_id) IN ({quoted})
-        GROUP BY lower(token_id)
+        FROM (
+            SELECT lower(token_id) AS token_key, block_number
+            FROM {table}
+            WHERE lower(token_id) IN ({quoted})
+        )
+        GROUP BY token_key
         """
     )
     stats: dict[str, TradeStats] = {}
@@ -63,7 +66,7 @@ def refresh_eligibility(conn: Any, ch: ClickHouseClient | None = None, *, batch_
             cur.execute(
                 """
                 SELECT
-                    token_id, market_id, market_slug, token_side, archived, deprecated,
+                    token_id, token_id_hex, market_id, market_slug, token_side, archived, deprecated,
                     duplicate_group_key,
                     row_number() OVER (
                         PARTITION BY duplicate_group_key, token_side
@@ -78,11 +81,12 @@ def refresh_eligibility(conn: Any, ch: ClickHouseClient | None = None, *, batch_
             rows = [dict(row) for row in cur.fetchall()]
         if not rows:
             break
-        stats = fetch_orderfilled_trade_stats(client, [str(row["token_id"]) for row in rows])
+        stats = fetch_orderfilled_trade_stats(client, [str(row["token_id_hex"]) for row in rows if row.get("token_id_hex")])
         upserts = []
         for row in rows:
             token_id = str(row["token_id"])
-            token_stats = stats.get(token_id.lower())
+            token_id_hex = str(row.get("token_id_hex") or "").lower()
+            token_stats = stats.get(token_id_hex)
             trade_count = token_stats.trade_count if token_stats else 0
             archived = bool(row.get("archived"))
             deprecated = bool(row.get("deprecated"))

@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover - exercised only in under-provisioned en
     dict_row = None
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_dotenv_files() -> None:
@@ -75,7 +75,10 @@ class PostgresSettings:
     user: str = os.environ.get("POLYDATA_POSTGRES_USER", os.environ.get("POLYMARKET_POSTGRES_USER", "poly_user"))
     password: str = os.environ.get(
         "POLYDATA_POSTGRES_PASSWORD",
-        os.environ.get("POLYMARKET_POSTGRES_PASSWORD", os.environ.get("POLYMARKET_POSTGRESQL_PASSWORD", "")),
+        os.environ.get(
+            "POLYMARKET_POSTGRES_PASSWORD",
+            os.environ.get("POLYMARKET_POSTGRESQL_PASSWORD", os.environ.get("POLYMARKET_PostgreSQL_PASSWORD", "")),
+        ),
     )
     database: str = os.environ.get("POLYDATA_POSTGRES_DATABASE", os.environ.get("POLYMARKET_POSTGRES_DATABASE", "poly_data_core"))
     search_path: str = os.environ.get("POLYDATA_POSTGRES_SEARCH_PATH", "quant,core,oracle,ops,public")

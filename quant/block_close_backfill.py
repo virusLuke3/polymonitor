@@ -60,25 +60,27 @@ def fetch_eligible_block_tokens(conn: Any, *, limit: int | None = None) -> dict[
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            SELECT m.token_id, m.market_id, m.market_slug, m.token_side
+            SELECT m.token_id, m.token_id_hex, m.market_id, m.market_slug, m.token_side
             FROM quant.market_token_metadata m
             JOIN quant.market_price_eligibility e ON e.token_id = m.token_id
             WHERE e.eligible = TRUE
+              AND m.token_id_hex IS NOT NULL
             ORDER BY m.market_id ASC, m.outcome_index ASC, m.token_id ASC
             {limit_sql}
             """,
             params,
         )
-        return {str(row["token_id"]).lower(): dict(row) for row in cur.fetchall()}
+        return {str(row["token_id_hex"]).lower(): dict(row) for row in cur.fetchall()}
 
 
 def insert_block_close_rows(conn: Any, metadata_by_token: dict[str, dict[str, Any]], rows: list[dict[str, Any]]) -> int:
     values = []
     for row in rows:
-        token_id = str(row.get("token_id") or "").lower()
-        meta = metadata_by_token.get(token_id)
+        clickhouse_token_id = str(row.get("token_id") or "").lower()
+        meta = metadata_by_token.get(clickhouse_token_id)
         if not meta:
             continue
+        token_id = str(meta["token_id"])
         close_price = _decimal_or_none(row.get("close_price"))
         vwap_price = _decimal_or_none(row.get("vwap_price"))
         close_raw_price = _decimal_or_none(row.get("close_raw_price"))

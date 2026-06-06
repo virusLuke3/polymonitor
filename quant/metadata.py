@@ -15,6 +15,7 @@ class MarketTokenMetadata:
     question_id: str | None
     market_title: str | None
     token_id: str
+    token_id_hex: str | None
     token_side: str
     outcome_index: int | None
     active: bool
@@ -27,6 +28,7 @@ class MarketTokenMetadata:
 
 
 def _row_to_metadata(row: dict[str, Any]) -> MarketTokenMetadata:
+    token_id = str(row["token_id"])
     return MarketTokenMetadata(
         market_id=int(row["market_id"]),
         gamma_market_id=row.get("gamma_market_id"),
@@ -34,7 +36,8 @@ def _row_to_metadata(row: dict[str, Any]) -> MarketTokenMetadata:
         condition_id=row.get("condition_id"),
         question_id=row.get("question_id"),
         market_title=row.get("market_title"),
-        token_id=str(row["token_id"]),
+        token_id=token_id,
+        token_id_hex=derive_clickhouse_token_id_hex(token_id),
         token_side=str(row.get("token_side") or "").upper(),
         outcome_index=row.get("outcome_index"),
         active=bool(row.get("active", True)),
@@ -45,6 +48,24 @@ def _row_to_metadata(row: dict[str, Any]) -> MarketTokenMetadata:
         end_date=row.get("end_date"),
         created_at=row.get("created_at"),
     )
+
+
+def derive_clickhouse_token_id_hex(token_id: str | None) -> str | None:
+    """Convert a CLOB decimal token id to ClickHouse's normalized hex token id."""
+
+    text = str(token_id or "").strip().lower()
+    if not text:
+        return None
+    if text.startswith("0x"):
+        text = text[2:]
+    if len(text) == 64 and all(ch in "0123456789abcdef" for ch in text):
+        return text
+    if not text.isdigit():
+        return None
+    try:
+        return format(int(text), "064x")
+    except ValueError:
+        return None
 
 
 def fetch_market_token_metadata(conn: Any, *, limit: int | None = None, market_slug: str | None = None) -> list[MarketTokenMetadata]:
@@ -105,6 +126,7 @@ def upsert_market_token_metadata(conn: Any, rows: Iterable[MarketTokenMetadata])
             row.question_id,
             row.market_title,
             row.token_id,
+            row.token_id_hex,
             row.token_side,
             row.outcome_index,
             row.active,
@@ -124,10 +146,10 @@ def upsert_market_token_metadata(conn: Any, rows: Iterable[MarketTokenMetadata])
             """
             INSERT INTO quant.market_token_metadata (
                 market_id, gamma_market_id, market_slug, condition_id, question_id,
-                market_title, token_id, token_side, outcome_index, active, closed,
+                market_title, token_id, token_id_hex, token_side, outcome_index, active, closed,
                 archived, deprecated, duplicate_group_key, end_date, created_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (token_id) DO UPDATE SET
                 market_id = EXCLUDED.market_id,
@@ -136,6 +158,7 @@ def upsert_market_token_metadata(conn: Any, rows: Iterable[MarketTokenMetadata])
                 condition_id = EXCLUDED.condition_id,
                 question_id = EXCLUDED.question_id,
                 market_title = EXCLUDED.market_title,
+                token_id_hex = EXCLUDED.token_id_hex,
                 token_side = EXCLUDED.token_side,
                 outcome_index = EXCLUDED.outcome_index,
                 active = EXCLUDED.active,
