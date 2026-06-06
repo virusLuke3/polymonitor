@@ -46,13 +46,12 @@
           <div class="sidebar-group">
             <h2>Getting Started</h2>
             <a class="active" href="#introduction">Introduction</a>
-            <a href="#getting-started">Getting Started</a>
-            <a href="#design-philosophy">Design Philosophy</a>
+            <a href="#getting-started">What polyData tracks</a>
+            <a href="#quickstart">Data Coverage</a>
           </div>
           <div class="sidebar-group">
             <h2>Usage</h2>
-            <a href="#quickstart">Quickstart</a>
-            <a href="#authentication">Authentication</a>
+            <a href="#authentication">Realtime Coverage</a>
             <a href="#runtime">Runtime API</a>
             <a href="#errors">Errors</a>
           </div>
@@ -74,53 +73,44 @@
         <main class="docs-content">
           <div class="docs-kicker" id="introduction">Getting Started</div>
           <h1>Introduction</h1>
-          <p>polyData Monitor is an open-source, real-time Polymarket intelligence dashboard that aggregates market prices, on-chain flow, oracle activity, order-book depth, macro context, news, and AI-powered analysis into a single map-first interface.</p>
-          <p>The product is designed for traders, researchers, operators, and builders who need to understand what is moving, why it is moving, and where resolution or liquidity risk is building.</p>
+          <p>polyData Monitor is an open-source Polymarket intelligence system. It turns markets, order books, on-chain trades, UMA oracle activity, outside news, macro data, weather data, sports data, and AI summaries into one operator-facing dashboard for understanding what is moving, why it is moving, and where liquidity or resolution risk is building.</p>
+          <p>The project is not just a frontend over the public Polymarket website. It maintains its own market catalog, token catalog, chain index, runtime snapshots, and panel registry so analysts can inspect a market from listing through trading, closure, oracle review, settlement, and archive.</p>
 
-          <h2 id="getting-started">What you can do</h2>
+          <h2 id="getting-started">What polyData tracks</h2>
           <ul>
-            <li>Track active Polymarket markets and fast-changing outcomes in real time.</li>
-            <li>Inspect market depth, recent trades, whale flow, suspicious activity, and oracle history.</li>
-            <li>Connect market movement with related news, reports, video, research, macro data, sports, weather, and crypto signals.</li>
-            <li>Run the dashboard as static assets behind Nginx while `/wm-api/` proxies to the runtime API.</li>
+            <li>Every discoverable Polymarket market identity: Gamma id, slug, condition id, question id, oracle, CLOB token ids, outcome labels, category, tags, created time, and end time.</li>
+            <li>Live market state: active and closed flags, latest prices, 24 hour price change, volume, trade count, best bid/ask, order-book depth, and last activity time.</li>
+            <li>Polygon chain flow: OrderFilled events, maker/taker addresses, side, outcome token, price, size, fee fields, non-trade cashflows, and address-level flow summaries.</li>
+            <li>UMA resolution data: adapter mappings, question initialization, request/propose/dispute/settle events, proposed price, settled price, transaction hashes, block numbers, and matched market identity.</li>
+            <li>External context: RSS and news feeds, Jin10 macro flashes, BWENews, Yahoo/finance quotes, crypto funding venues, DeFi metrics, weather feeds, sports schedules, ESPN data, and AI-generated market briefs.</li>
           </ul>
 
-          <div class="quick-grid" id="quickstart">
-            <a class="quick-card" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/development.md" target="_blank" rel="noopener noreferrer">
-              <strong>Quickstart</strong>
-              <span>Build the Vite/Preact dashboard and run the local API helper.</span>
-            </a>
-            <a class="quick-card" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/architecture.md" target="_blank" rel="noopener noreferrer">
-              <strong>Architecture</strong>
-              <span>Review data pipelines, API boundaries, runtime cache, and frontend serving.</span>
-            </a>
-            <a class="quick-card" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/panel-modules.md" target="_blank" rel="noopener noreferrer">
-              <strong>Panel Modules</strong>
-              <span>Add panels through frontend and backend manifests instead of dashboard shell code.</span>
-            </a>
-            <a class="quick-card" href="https://github.com/virusLuke3/polymonitor/blob/main/deploy/README.md" target="_blank" rel="noopener noreferrer">
-              <strong>Deployment</strong>
-              <span>Use public Nginx and systemd templates for production-style hosting.</span>
-            </a>
-          </div>
+          <h2 id="quickstart">Data coverage</h2>
+          <p>As of June 6, 2026, the local PostgreSQL market catalog contains 1,280,986 market rows. The earliest indexed market creation time is October 2, 2020, and the newest market rows are collected through June 6, 2026. The UMA oracle index contains 2,778,072 oracle events from July 11, 2022 through May 3, 2026. The ClickHouse OrderFilled store contains more than 1.44 billion trade rows and more than 230 million non-trade cashflow rows, covering Polygon blocks from 5,243,433 through 88,017,065, which maps to October 2, 2020 through June 6, 2026.</p>
+          <p>The backfill path starts from Polymarket Gamma active and closed events, hydrates missing fields from CLOB by slug or condition id, and supplements missed markets from Polygon exchange registry events. The live path keeps moving forward with checkpointed market discovery, overlapping block scans, and a shared safe high-water block for market, oracle, and trade sync. Runtime panels read from PostgreSQL, ClickHouse, Redis, and SQLite snapshot caches so the public dashboard can stay fast while long-running collectors continue to update the underlying data.</p>
 
-          <h2 id="design-philosophy">Design Philosophy</h2>
-          <p>polyData keeps dense operational information visible without turning the dashboard into a text wall. Panels use stable scan paths: entity on the left, title and metadata in the center, value or status on the right.</p>
+          <h2 id="authentication">How coverage stays complete and real time</h2>
+          <p>polyData uses several independent collection paths because no single Polymarket endpoint is complete enough for historical and live analysis. Gamma provides the canonical event and market surface; CLOB provides condition-level market and token data; Polygon RPC provides registry, trade, and oracle truth; ClickHouse stores high-volume OrderFilled and cashflow data; PostgreSQL stores canonical market, oracle, serving, and status tables; Redis and SQLite snapshots protect the UI from slow or stale upstream calls.</p>
+          <p>The sync loop refreshes markets first, then scans oracle and trade blocks with overlap windows. This ordering matters because markets can arrive after chain activity; re-scanning recent blocks lets late-discovered markets attach to already-seen trades and oracle events. Watchers then precompute panel payloads for macro, finance, weather, sports, new-market signals, and other runtime modules. Each panel can show live, cached, stale, or degraded states without forcing the browser to perform expensive joins.</p>
 
           <h2 id="platform">Platform Overview</h2>
-          <p>The workspace combines a Flask API, PostgreSQL-backed market data, Redis and SQLite runtime snapshots, and a Vite/Preact frontend. Production hosting serves built frontend files from `/var/www/polydata` and proxies API calls through `/wm-api/`.</p>
+          <p>The workspace combines Python collectors, PostgreSQL market/oracle serving tables, ClickHouse high-volume trade storage, Redis runtime cache, SQLite snapshot fallback, a Flask API, and a Vite/Preact dashboard. Production hosting serves built frontend files from `/var/www/polydata` and proxies browser API calls through `/wm-api/`.</p>
 
-          <h2 id="features">Features &amp; Interface</h2>
-          <p>Core surfaces include active markets, grouped outcomes, order-book snapshots, OrderFilled flow, oracle events, related intelligence, AI market briefs, macro panels, sports odds, weather markets, and Telegram publishing workflows.</p>
+          <h2 id="features">Market lifecycle model</h2>
+          <p>polyData treats a Polymarket market as a lifecycle, not as a static row. The lifecycle starts when a market is discovered from Gamma, CLOB, or on-chain TokenRegistered events. It becomes tradeable when condition id and CLOB token ids are available, then active when prices, BBO, volume, or OrderFilled flow appear. It moves into closing when the end date passes or trading flags close, then into oracle review when UMA request, proposal, dispute, or settlement events are matched by question id, condition id, ancillary data, title/date evidence, or neg-risk request mapping. It becomes resolved when final status and settlement outcome are known, then archived while still remaining queryable for historical price, trade, flow, and oracle analysis.</p>
+          <p>This model lets the dashboard answer different questions at each stage: what just listed, what is liquid now, what is moving abnormally, what is near close, what is waiting on UMA, what was disputed, what settled, and what can be used as historical precedent.</p>
 
           <h2 id="panels">Panel Modules</h2>
-          <p>New dashboard panels should live in their own modules with explicit metadata, fetch behavior, rendering, and optional runtime snapshot routes. The central registry should only aggregate modules.</p>
+          <p>The dashboard currently registers 68 panels. They are split into small frontend modules with explicit metadata, fetch behavior, and renderers; runtime panels also have backend registry entries and snapshot routes. The panel system is designed so new intelligence surfaces can be added without stuffing custom state into the dashboard shell.</p>
+          <p>Core market panels show the live market list, focused market summary, market context, probability chart, LOB depth, BBO-style depth data, new-market signals, and grouped Polymarket macro market clusters. They help users move from broad discovery to one selected market and inspect identifiers, timing, category, price surface, order book, and first-seen probability.</p>
+          <p>Chain and oracle panels cover OrderFilled Flow, Whale Tracker, Flow Watch, Oracle Feed, and AI Trend Radar. These panels surface latest on-chain trades, largest maker/taker flows, oracle-adjacent activity, recent UMA events, and market-wide trend clusters that connect price action with settlement risk.</p>
+          <p>AI and intelligence panels include AI Market Brief, AI Special Markets, Alpha Signal, PolyBeats, Related News, Jin10 Flash, BWE News, AI Model Race, Consumer App Pulse, Chain Policy, IPO News, Broker Research, and Geopolitical &amp; Sanctions Shock. They connect market movement with catalysts, news, smart-money flow, regulatory signals, and generated summaries.</p>
+          <p>Finance and crypto panels include Commodities Watch, Crypto Watch, Crypto Funding Watch, DeFi Token Watch, DeFi Yields, DeFi Security, Crypto Perps, TradFi Perps, Big Tech Cap, Global Indices, Commodity Equity Transmission, Crypto Fear &amp; Greed, Crypto ETF, Stablecoins, and Trade Policy. They translate outside market pressure into Polymarket-relevant signals across spot assets, perps, ETFs, macro-sensitive equities, supply chains, and policy shocks.</p>
+          <p>Macro panels include CPI Release Command, CPI Components, Goods / Tariff, Labor / Services, Fed / Growth Risk, CPI Release Calendar, Energy &amp; Gasoline Shock, Food &amp; Retail Basket Pressure, Supply / Tariff, Shelter / OER, Labor / Wages, Growth / Demand, Inflation Nowcast, and Fed / Rates Gap. They focus on inflation, rates, labor, demand, recession, and Fed-market context.</p>
+          <p>Weather, sports, and time panels include Global Temp Monitor, Weather Market Browser, Weather City Snapshot, Weather Quote Curve, Weather Quote Table, WU 1 Day, WU 7 Day, Weather News, World Clock, NBA Scoreboard, NBA Intel, ESPN Matchup Predictor, Esports Intel, and Sports Odds. They connect weather and sports markets with live external feeds, forecasts, schedules, lineups, odds, and city-level market coverage.</p>
 
           <h2 id="deployment">Deployment</h2>
           <p>For production-style hosting, build the frontend locally or on the serving host, publish `webpage/dist` into the static web root, and keep API process management in systemd.</p>
-
-          <h2 id="authentication">Authentication</h2>
-          <p>The current public dashboard does not require end-user authentication. Runtime API deployments should keep private tokens, upstream keys, and host-specific details outside public docs.</p>
 
           <h2 id="runtime">Runtime API</h2>
           <p>The frontend reads through `/wm-api/`, which lets Nginx route the browser to the active API service without hard-coding private hosts in client code.</p>
@@ -145,11 +135,12 @@
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#getting-started">What you can do</a>
-          <a href="#quickstart">Quick links</a>
-          <a href="#design-philosophy">Design Philosophy</a>
+          <a class="active" href="#getting-started">What polyData tracks</a>
+          <a href="#quickstart">Data coverage</a>
+          <a href="#authentication">Realtime coverage</a>
           <a href="#platform">Platform Overview</a>
-          <a href="#research">Paper</a>
+          <a href="#features">Market lifecycle</a>
+          <a href="#panels">Panel modules</a>
         </aside>
       </div>
     </div>
