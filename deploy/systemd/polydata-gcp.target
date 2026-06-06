@@ -1,6 +1,36 @@
 [Unit]
 Description=polyData GCP serving and seed-cache services
-Wants=polydata-db-tunnel.service polydata-api.service polydata-content-topic-refresh.service polydata-alpha-signal-seed.service polydata-bootstrap-seed.service polydata-cpi-release-calendar-seed.service polydata-crypto-funding-seed.service polydata-defi-token-watch-seed.service polydata-energy-gasoline-shock-seed.service polydata-f1-seed.service polydata-finance-external-sources-seed.service polydata-finance-watch-panels-seed.service polydata-food-retail-basket-seed.service polydata-geo-sanctions-shock.service polydata-global-weather-map-seed.service polydata-grid-esports-seed.service polydata-inflation-nowcast-seed.service polydata-jin10-seed.service polydata-macro-cpi-panels-seed.service polydata-macro-cpi-registry-seed.service polydata-market-group-seed.service polydata-nba-seed.service polydata-new-market-signal.service polydata-polymarket-macro-map-seed.service polydata-sports-odds-seed.service polydata-suspicious-trades-seed.service polydata-tech-panels-seed.service polydata-weather-news-seed.service polydata-whale-trades-seed.service polydata-worldcup-dashboard-seed.service
+Wants=polydata-db-tunnel.service
+Wants=polydata-api.service
+Wants=polydata-content-topic-refresh.service
+Wants=polydata-alpha-signal-seed.service
+Wants=polydata-bootstrap-seed.service
+Wants=polydata-cpi-release-calendar-seed.service
+Wants=polydata-crypto-funding-seed.service
+Wants=polydata-defi-token-watch-seed.service
+Wants=polydata-energy-gasoline-shock-seed.service
+Wants=polydata-f1-seed.service
+Wants=polydata-finance-external-sources-seed.service
+Wants=polydata-finance-watch-panels-seed.service
+Wants=polydata-food-retail-basket-seed.service
+Wants=polydata-geo-sanctions-shock.service
+Wants=polydata-global-weather-map-seed.service
+Wants=polydata-grid-esports-seed.service
+Wants=polydata-inflation-nowcast-seed.service
+Wants=polydata-jin10-seed.service
+Wants=polydata-macro-cpi-panels-seed.service
+Wants=polydata-macro-cpi-registry-seed.service
+Wants=polydata-market-group-seed.service
+Wants=polydata-nba-seed.service
+Wants=polydata-new-market-signal.service
+Wants=polydata-polybeats-feed-seed.service
+Wants=polydata-polymarket-macro-map-seed.service
+Wants=polydata-sports-odds-seed.service
+Wants=polydata-suspicious-trades-seed.service
+Wants=polydata-tech-panels-seed.service
+Wants=polydata-weather-news-seed.service
+Wants=polydata-whale-trades-seed.service
+Wants=polydata-worldcup-dashboard-seed.service
 After=network-online.target
 
 [Install]

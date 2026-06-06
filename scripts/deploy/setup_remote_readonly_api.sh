@@ -96,6 +96,15 @@ POLYDATA_GUNICORN_MAX_REQUESTS_JITTER=${GUNICORN_MAX_REQUESTS_JITTER}
 POLYDATA_REDIS_URL=${REDIS_URL}
 POLYDATA_REDIS_PREFIX=polydata:
 POLYDATA_SNAPSHOT_SQLITE_PATH=${SNAPSHOT_SQLITE_PATH}
+POLYDATA_RUNTIME_TRUST_ENV=0
+POLYDATA_CONTENT_API_REFRESH_ENABLED=false
+POLYDATA_CONTENT_MARKET_DYNAMIC=false
+POLYDATA_CONTENT_TOPIC_SEARCH_PROVIDER=true
+POLYDATA_CONTENT_TOPIC_MEDIA_SEARCH_PROVIDER=true
+POLYDATA_CONTENT_TOPIC_RESEARCH_PROVIDER=true
+POLYDATA_CONTENT_TOPIC_REFRESH_INTERVAL_SECONDS=900
+POLYDATA_CONTENT_TOPIC_REFRESH_LIMIT=48
+POLYDATA_CONTENT_TOPIC_IDS=
 POLYDATA_AGENT_ENABLED=false
 POLYDATA_AGENT_LOCAL_ONLY=true
 POLYDATA_AGENT_RATE_LIMIT_PER_MINUTE=6
@@ -199,11 +208,14 @@ GCP_UNITS=(
   polydata.target
   polydata-alpha-signal-seed.service
   polydata-bootstrap-seed.service
+  polydata-content-topic-refresh.service
   polydata-cpi-release-calendar-seed.service
   polydata-crypto-funding-seed.service
+  polydata-defi-token-watch-seed.service
   polydata-energy-gasoline-shock-seed.service
   polydata-f1-seed.service
   polydata-finance-external-sources-seed.service
+  polydata-finance-watch-panels-seed.service
   polydata-food-retail-basket-seed.service
   polydata-geo-sanctions-shock.service
   polydata-global-weather-map-seed.service
@@ -215,9 +227,11 @@ GCP_UNITS=(
   polydata-market-group-seed.service
   polydata-nba-seed.service
   polydata-new-market-signal.service
+  polydata-polybeats-feed-seed.service
   polydata-polymarket-macro-map-seed.service
   polydata-sports-odds-seed.service
   polydata-suspicious-trades-seed.service
+  polydata-tech-panels-seed.service
   polydata-weather-news-seed.service
   polydata-whale-trades-seed.service
   polydata-worldcup-dashboard-seed.service
@@ -258,7 +272,6 @@ systemctl --user stop \
   polydata-analytics-sync.service \
   polydata-event-market-serving.service \
   polydata-market-workspace-serving.service \
-  polydata-new-market-signal.service \
   polydata-db-reverse-tunnel.service \
   >/dev/null 2>&1 || true
 systemctl --user disable \
@@ -269,7 +282,6 @@ systemctl --user disable \
   polydata-analytics-sync.service \
   polydata-event-market-serving.service \
   polydata-market-workspace-serving.service \
-  polydata-new-market-signal.service \
   polydata-db-reverse-tunnel.service \
   >/dev/null 2>&1 || true
 systemctl --user enable --now polydata-gcp.target

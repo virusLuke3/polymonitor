@@ -16,6 +16,9 @@ from typing import Any, Callable, Dict, Optional
 _scripts_root = Path(__file__).resolve().parents[1]
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
+_repo_root = _scripts_root.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
 
 try:
     import redis
@@ -23,7 +26,7 @@ except ImportError:
     redis = None
 
 from api.config import load_api_settings
-from api.services import signal_service
+from api.services import polybeats_service, signal_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
@@ -32,6 +35,7 @@ DEFAULT_INTERVAL_SECONDS = 45
 DEFAULT_ALPHA_LIMIT = 8
 DEFAULT_WHALE_LIMIT = 14
 DEFAULT_SUSPICIOUS_LIMIT = 12
+DEFAULT_POLYBEATS_LIMIT = 8
 DEFAULT_DB_READ_TIMEOUT_SECONDS = 12
 DEFAULT_SIGNAL_DATA_STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 SEED_META_NAMESPACE = "seed-meta:signals"
@@ -67,6 +71,16 @@ COMPONENTS = {
         "default_limit": DEFAULT_SUSPICIOUS_LIMIT,
         "cache_key_builder": signal_service.build_suspicious_trades_cache_key,
         "fetcher": signal_service.fetch_live_suspicious_trades_payload,
+    },
+    "polybeats": {
+        "panel_id": polybeats_service.PANEL_ID,
+        "cache_key": polybeats_service.PANEL_ID,
+        "namespace": polybeats_service.SNAPSHOT_NAMESPACE,
+        "service_name": "polydata-polybeats-feed-seed.service",
+        "limit_env": "POLYDATA_POLYBEATS_LIMIT",
+        "default_limit": DEFAULT_POLYBEATS_LIMIT,
+        "cache_key_builder": polybeats_service.build_polybeats_cache_key,
+        "fetcher": polybeats_service.fetch_live_polybeats_payload,
     },
 }
 

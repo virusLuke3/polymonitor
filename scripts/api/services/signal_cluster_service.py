@@ -234,6 +234,7 @@ def build_polybeats_clusters(
                     "labels": profile.get("labels") or [],
                     "tradeCount": profile.get("tradeCount"),
                     "volumeNotional": profile.get("volumeNotional"),
+                    "activeMarkets": profile.get("activeMarkets"),
                     "marketTradeCount": profile.get("marketTradeCount"),
                     "marketVolumeNotional": profile.get("marketVolumeNotional"),
                     "firstTradeAt": profile.get("firstTradeAt"),

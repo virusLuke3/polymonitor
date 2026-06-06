@@ -3,6 +3,7 @@ import { fetchRuntimePanels } from '@/services/api';
 
 const PANEL_RUNTIME_LIMITS: Record<string, number> = {
   'alpha-signal': 8,
+  'polybeats-feed': 8,
   'cpi-components-pressure-registry': 48,
   'cpi-release-calendar': 8,
   'cpi-release-command-center': 36,

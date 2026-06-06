@@ -1384,6 +1384,35 @@ export type RuntimeSignalPayload = {
   generatedAt?: string;
 };
 
+export type RuntimePolybeatsWallet = RuntimeSignalAddress & {
+  netCashPnlProxy?: string | null;
+  tradeCashPnl?: string | null;
+  redeemCashflow?: string | null;
+  pnlSource?: string | null;
+  smartScore?: string | null;
+  activeMarkets?: number | string | null;
+};
+
+export type RuntimePolybeatsItem = RuntimeTradeSignal & {
+  id?: string | null;
+  domain?: string | null;
+  marketSlug?: string | null;
+  marketCategory?: string | null;
+  tags?: string[];
+  wallets?: RuntimePolybeatsWallet[];
+  explanation?: string | null;
+  narrativeSource?: string | null;
+};
+
+export type RuntimePolybeatsPayload = {
+  items: RuntimePolybeatsItem[];
+  generatedAt?: string;
+  status?: string | null;
+  cacheMode?: string | null;
+  source?: string | null;
+  sources?: Record<string, string | null | undefined>;
+};
+
 export type RuntimeNewMarketSignalItem = {
   marketId?: number | null;
   title?: string | null;

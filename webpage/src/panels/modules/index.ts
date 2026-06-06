@@ -10,6 +10,7 @@ import { panel as sampleChainTrades } from './sample-chain-trades';
 import { panel as oracleTimeline } from './oracle-timeline';
 import { panel as relatedNews } from './related-news';
 import { panel as alphaSignal } from './alpha-signal';
+import { panel as polybeatsFeed } from './polybeats-feed';
 import { panel as whaleTracker } from './whale-tracker';
 import { panel as suspiciousFlow } from './suspicious-flow';
 import { panel as commoditiesWatch } from './commodities-watch';
@@ -79,6 +80,7 @@ export const PANEL_MODULES: PanelModule[] = [
   oracleTimeline,
   relatedNews,
   alphaSignal,
+  polybeatsFeed,
   whaleTracker,
   suspiciousFlow,
   commoditiesWatch,

@@ -85,12 +85,18 @@ GCP manual flow:
 ```bash
 mkdir -p ~/.config/systemd/user
 cp deploy/systemd/polydata-gcp.target deploy/systemd/polydata.target ~/.config/systemd/user/
+cp deploy/systemd/polydata-api.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-content-topic-refresh.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-*-seed.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-geo-sanctions-shock.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-new-market-signal.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now polydata-gcp.target
 ```
+
+`polydata-content-topic-refresh.service` is a GCP-side seed worker. It fetches
+topic-level news/video/report/research sources and writes PostgreSQL
+`content_items` / `content_links`; it should not run on the local collector host.
 
 Local collector manual flow:
 

@@ -41,6 +41,7 @@ import type {
   RuntimeNbaIntelPayload,
   RuntimeNewMarketSignalsPayload,
   RuntimeOnchainTradfiPerpRadarPayload,
+  RuntimePolybeatsPayload,
   RuntimePolymarketMacroMapPayload,
   RuntimeSignalPayload,
   RuntimeSportsOddsPayload,
@@ -380,6 +381,10 @@ export function fetchRuntimeGeoSanctionsShock(limit = 6) {
 
 export function fetchRuntimeAlpha(limit = 8) {
   return apiGet<RuntimeSignalPayload>(`/runtime/signals/alpha?limit=${limit}`);
+}
+
+export function fetchRuntimePolybeats(limit = 8) {
+  return apiGet<RuntimePolybeatsPayload>(`/runtime/signals/polybeats?limit=${limit}`);
 }
 
 export function fetchRuntimeNewMarketSignals(limit = 12) {

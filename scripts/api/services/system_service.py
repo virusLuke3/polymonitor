@@ -296,6 +296,14 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 45,
     },
     {
+        "panelId": "polybeats-feed",
+        "namespace": "seed-meta:signals",
+        "cacheKey": "polybeats-feed",
+        "serviceName": "polydata-polybeats-feed-seed.service",
+        "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 45,
+    },
+    {
         "panelId": "whale-trades",
         "namespace": "seed-meta:signals",
         "cacheKey": "whale-trades",
@@ -369,7 +377,11 @@ def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
         "redis": bool(ctx["get_redis_client"]()),
         "apiStatus": "ok",
         "lobRuntime": {"status": "ready", "mode": "memory"},
-        "contentSync": {"status": "runtime-rss" if not ctx["table_exists"]("content_items") else "database"},
+        "contentSync": {
+            "status": "database-runtime-intel"
+            if ctx["table_exists"]("content_items") and ctx["table_exists"]("content_links")
+            else "runtime-intel"
+        },
     }
     if not ctx["table_exists"]("sync_state"):
         payload["syncState"] = {}
