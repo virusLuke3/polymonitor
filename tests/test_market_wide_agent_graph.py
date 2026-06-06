@@ -164,7 +164,11 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertEqual(response["agentArchitecture"], GRAPH_VERSION)
         self.assertIn("specialMarkets", response)
         self.assertIn(response["agentGraph"]["mode"], {"supervisor-worker", "langgraph-supervisor-worker"})
-        self.assertIn(response["agentGraph"]["runtime"], {"sequential-stategraph-fallback", "langgraph-stategraph"})
+        self.assertIn(response["agentGraph"]["runtime"], {
+            "sequential-stategraph-fallback",
+            "langgraph-stategraph",
+            "langgraph-supervisor-stategraph",
+        })
         self.assertEqual(response["agentGraph"]["nodes"], [
             "evidence_builder",
             "related_markets",
@@ -273,6 +277,8 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
             "quant_forecaster",
             "reflexion_memory",
             "calibration_agent",
+            "skeptic",
+            "panel_writer",
         ])
         self.assertEqual(response["agentGraph"]["quantForecaster"]["repricingZones"][0]["title"], "Market A")
 

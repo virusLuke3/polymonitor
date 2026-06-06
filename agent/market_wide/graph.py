@@ -1007,13 +1007,77 @@ def _usage_total(events: list[dict[str, Any]]) -> dict[str, int]:
     return total
 
 
-def _run_langgraph_preflight(state: dict[str, Any]) -> dict[str, Any] | None:
+def _graph_context(state: dict[str, Any]) -> dict[str, Any]:
+    context = state.get("context") if isinstance(state.get("context"), dict) else {}
+    output = {
+        **context,
+        "quantForecaster": state.get("quantForecaster") or {},
+        "relatedMarkets": state.get("relatedMarkets") or {},
+        "reflexionMemory": state.get("reflexionMemory") or {},
+    }
+    if state.get("specialists"):
+        output["specialistAgents"] = state.get("specialists")
+    if state.get("calibrationAgent"):
+        output["calibrationAgent"] = state.get("calibrationAgent")
+    return output
+
+
+def _graph_nodes(limit: int, *, configured: bool = True) -> list[str]:
+    if not configured:
+        return ["evidence_builder", "related_markets", "quant_forecaster", "reflexion_memory", "calibration_agent", "skeptic", "panel_writer"]
+    return [
+        "evidence_builder",
+        "related_markets",
+        "quant_forecaster",
+        "reflexion_memory",
+        *SPECIALIST_NODES[:limit],
+        "calibration_agent",
+        *(["skeptic"] if limit >= 4 else []),
+        "panel_writer",
+    ]
+
+
+def _graph_response(state: dict[str, Any], *, configured: bool) -> dict[str, Any]:
+    response = dict(state.get("response") or {})
+    events: list[dict[str, Any]] = list(state.get("events") or [])
+    response["forecastRunId"] = state["runId"]
+    response["agentArchitecture"] = GRAPH_VERSION
+    response["agentGraph"] = {
+        "version": GRAPH_VERSION,
+        "runId": state["runId"],
+        "mode": "langgraph-supervisor-worker" if configured else "deterministic-fallback",
+        "runtime": state.get("graphRuntime") or "langgraph-supervisor-stategraph",
+        "nodes": _graph_nodes(int(state.get("limit") or 0), configured=configured),
+        "events": events,
+        "evidenceBuilder": state.get("evidence") or {},
+        "quantForecaster": state.get("quantForecaster") or {},
+        "relatedMarkets": state.get("relatedMarkets") or {},
+        "reflexionMemory": state.get("reflexionMemory") or {},
+        "calibrationAgent": state.get("calibrationAgent") or {},
+        "specialists": state.get("specialists") or [],
+        "calibration": state.get("calibration") or {"node": "skeptic", "findings": [], "risks": [], "watch": [], "confidence": "medium"},
+    }
+    response["usage"] = {**response.get("usage", {}), **_usage_total(events), "contextChars": (state.get("context") or {}).get("contextChars")}
+    response["agentRuntime"] = "forecast-intelligence-graph"
+    return response
+
+
+def _run_langgraph_supervisor(
+    state: dict[str, Any],
+    client: Any,
+    *,
+    normalize: Callable[[dict[str, Any], dict[str, Any], str, list[dict[str, str]], str], dict[str, Any]],
+    fallback: Callable[[dict[str, Any], str, str, list[dict[str, str]]], dict[str, Any]],
+    search_results: list[dict[str, str]],
+) -> dict[str, Any] | None:
     if not langgraph_enabled():
         return None
     try:
         from langgraph.graph import END, StateGraph
     except Exception:
         return None
+    configured = bool(getattr(client, "configured", False))
+    limit = int(state.get("limit") or _agent_limit())
 
     def evidence_node(current: dict[str, Any]) -> dict[str, Any]:
         evidence = _deterministic_evidence(current["context"], current["lens"])
@@ -1069,19 +1133,171 @@ def _run_langgraph_preflight(state: dict[str, Any]) -> dict[str, Any] | None:
         ))
         return current
 
+    def specialist_node(node: str):
+        def run(current: dict[str, Any]) -> dict[str, Any]:
+            graph_context = _graph_context(current)
+            if not configured:
+                output = {"node": node, "findings": [], "risks": ["missing-api-key"], "watch": [], "confidence": "low"}
+                current.setdefault("specialists", []).append(output)
+                current.setdefault("events", []).append(_node_event(
+                    run_id=current["runId"],
+                    lens=current["lens"],
+                    node=node,
+                    output=output,
+                    status="skipped",
+                    error="missing-api-key",
+                ))
+                return current
+            react_trace = _run_react_tools(node, graph_context)
+            system, user = _specialist_prompt(node, current["lens"], graph_context, current.get("evidence") or {}, react_trace)
+            raw, event = _call_json_node(
+                client,
+                node,
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                max_tokens=520,
+                run_id=current["runId"],
+            )
+            event["lens"] = current["lens"]
+            event["toolCalls"] = react_trace
+            output = _normalize_node_output(raw, node) if raw else {
+                "node": node,
+                "findings": [],
+                "risks": [event.get("error", "agent failed")],
+                "watch": [],
+                "confidence": "low",
+            }
+            if isinstance(event.get("outputJson"), dict):
+                event["outputJson"]["toolCalls"] = react_trace
+            else:
+                event["outputJson"] = {**output, "toolCalls": react_trace}
+                event["outputHash"] = _json_hash(event["outputJson"])
+            current.setdefault("events", []).append(event)
+            current.setdefault("specialists", []).append(output)
+            return current
+        return run
+
+    def calibration_node(current: dict[str, Any]) -> dict[str, Any]:
+        graph_context = _graph_context(current)
+        calibration_agent = _build_calibration_agent(
+            graph_context,
+            current.get("quantForecaster") or {},
+            current.get("relatedMarkets") or {},
+            current.get("reflexionMemory") or {},
+            current.get("specialists") or [],
+        )
+        current["calibrationAgent"] = calibration_agent
+        current.setdefault("events", []).append(_node_event(
+            run_id=current["runId"],
+            lens=current["lens"],
+            node="calibration_agent",
+            output=calibration_agent,
+            input_hash=calibration_agent["inputHash"],
+        ))
+        return current
+
+    def skeptic_node(current: dict[str, Any]) -> dict[str, Any]:
+        if limit < 4:
+            current["calibration"] = {"node": "skeptic", "findings": [], "risks": [], "watch": [], "confidence": "medium"}
+            return current
+        graph_context = _graph_context(current)
+        if not configured:
+            output = {"node": "skeptic", "findings": [], "risks": ["missing-api-key"], "watch": [], "confidence": "low"}
+            current["calibration"] = output
+            current.setdefault("events", []).append(_node_event(
+                run_id=current["runId"],
+                lens=current["lens"],
+                node="skeptic",
+                output=output,
+                status="skipped",
+                error="missing-api-key",
+            ))
+            return current
+        react_trace = _run_react_tools("skeptic", graph_context)
+        system, user = _specialist_prompt("skeptic", current["lens"], graph_context, current.get("evidence") or {}, react_trace)
+        raw, event = _call_json_node(
+            client,
+            "skeptic",
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            max_tokens=520,
+            run_id=current["runId"],
+        )
+        event["lens"] = current["lens"]
+        event["toolCalls"] = react_trace
+        output = _normalize_node_output(raw, "skeptic") if raw else {"node": "skeptic", "findings": [], "risks": [], "watch": [], "confidence": "medium"}
+        if isinstance(event.get("outputJson"), dict):
+            event["outputJson"]["toolCalls"] = react_trace
+        else:
+            event["outputJson"] = {**output, "toolCalls": react_trace}
+            event["outputHash"] = _json_hash(event["outputJson"])
+        current.setdefault("events", []).append(event)
+        current["calibration"] = output
+        return current
+
+    def writer_node(current: dict[str, Any]) -> dict[str, Any]:
+        graph_context = _graph_context(current)
+        if not configured:
+            response = fallback(current["payload"], current["lens"], "missing-api-key", search_results)
+            current["response"] = response
+            return current
+        system, user = _writer_prompt(
+            current["lens"],
+            graph_context,
+            current.get("evidence") or {},
+            current.get("specialists") or [],
+            current.get("calibration") or {"node": "skeptic", "findings": [], "risks": [], "watch": [], "confidence": "medium"},
+            current.get("calibrationAgent") or {},
+            current.get("reflexionMemory") or {},
+        )
+        raw, event = _call_json_node(
+            client,
+            "panel_writer",
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            max_tokens=950,
+            run_id=current["runId"],
+        )
+        event["lens"] = current["lens"]
+        current.setdefault("events", []).append(event)
+        if not raw:
+            response = fallback(current["payload"], current["lens"], "agent-error", search_results)
+        else:
+            try:
+                response = normalize(raw, current["payload"], current["lens"], search_results, getattr(client, "model", ""))
+            except Exception as exc:
+                current.setdefault("events", []).append({
+                    "node": "response_normalizer",
+                    "status": "error",
+                    "finishedAt": _utc_now_iso(),
+                    "error": compact_text(str(exc), 180),
+                })
+                response = fallback(current["payload"], current["lens"], "agent-error", search_results)
+        current["response"] = response
+        return current
+
     workflow = StateGraph(dict)
     workflow.add_node("evidence_builder", evidence_node)
     workflow.add_node("related_markets", related_node)
     workflow.add_node("quant_forecaster", quant_node)
     workflow.add_node("reflexion_memory", memory_node)
+    for node in SPECIALIST_NODES[:limit]:
+        workflow.add_node(node, specialist_node(node))
+    workflow.add_node("calibration_agent", calibration_node)
+    workflow.add_node("skeptic", skeptic_node)
+    workflow.add_node("panel_writer", writer_node)
     workflow.set_entry_point("evidence_builder")
     workflow.add_edge("evidence_builder", "related_markets")
     workflow.add_edge("related_markets", "quant_forecaster")
     workflow.add_edge("quant_forecaster", "reflexion_memory")
-    workflow.add_edge("reflexion_memory", END)
+    previous = "reflexion_memory"
+    for node in SPECIALIST_NODES[:limit]:
+        workflow.add_edge(previous, node)
+        previous = node
+    workflow.add_edge(previous, "calibration_agent")
+    workflow.add_edge("calibration_agent", "skeptic")
+    workflow.add_edge("skeptic", "panel_writer")
+    workflow.add_edge("panel_writer", END)
     app = workflow.compile()
     result = app.invoke(state)
-    result["graphRuntime"] = "langgraph-stategraph"
+    result["graphRuntime"] = "langgraph-supervisor-stategraph"
     return result
 
 
@@ -1122,9 +1338,21 @@ def run_forecast_intelligence_graph(
         "lens": lens,
         "context": context,
         "runId": run_id,
+        "limit": _agent_limit(),
+        "specialists": [],
         "events": [],
     }
-    state = _run_langgraph_preflight(state) or _run_sequential_preflight(state)
+    langgraph_state = _run_langgraph_supervisor(
+        state,
+        client,
+        normalize=normalize,
+        fallback=fallback,
+        search_results=search_results,
+    )
+    if langgraph_state is not None and isinstance(langgraph_state.get("response"), dict):
+        return _graph_response(langgraph_state, configured=bool(getattr(client, "configured", False)))
+
+    state = _run_sequential_preflight(state)
     evidence = state["evidence"]
     related_markets = state["relatedMarkets"]
     quant_forecaster = state["quantForecaster"]
