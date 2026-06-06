@@ -956,10 +956,15 @@ def _augment_related_content_tabs(
     seen_urls = {str(row.get("url") or "").strip() for row in rows if str(row.get("url") or "").strip()}
     supplemental_items: List[Dict[str, Any]] = []
     for content_type in missing_types:
-        candidate_rows = [
-            row for row in _fetch_content_type_candidates(ctx, topic_ids, content_type, 6)
-            if str(row.get("url") or "").strip() not in seen_urls
-        ]
+        candidate_rows: List[Dict[str, Any]] = []
+        for topic_id in topic_ids:
+            topic_rows = [
+                row for row in _fetch_content_type_candidates(ctx, [topic_id], content_type, 6)
+                if str(row.get("url") or "").strip() not in seen_urls
+            ]
+            if topic_rows:
+                candidate_rows = topic_rows
+                break
         if not candidate_rows:
             continue
         items = _merge_content_payloads(
