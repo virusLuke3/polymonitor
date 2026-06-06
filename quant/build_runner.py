@@ -20,7 +20,7 @@ from typing import Any
 from .block_close_algorithm import orderfilled_block_close_sql
 from .block_close_backfill import backfill_block_close_prices
 from .db import ClickHouseClient, PostgresSettings, postgres_connection
-from .eligibility import refresh_eligibility
+from .eligibility import fetch_orderfilled_trade_stats
 from .frontend_backfill import insert_frontend_points, backfill_frontend_prices
 from .frontend_client import FrontendPriceClient
 from .metadata import refresh_market_token_metadata
@@ -102,9 +102,6 @@ def fetch_frontend_build_candidates(conn: Any, *, since_ts: int, limit: int) -> 
                 AND (
                     m.created_at >= to_timestamp(%s)
                     OR m.end_date >= to_timestamp(%s)
-                    OR m.active = TRUE
-                    OR m.closed = FALSE
-                    OR m.created_at IS NULL
                 )
             ORDER BY
                 s.last_complete_ts ASC NULLS FIRST,
@@ -140,9 +137,6 @@ def fetch_block_close_build_candidates(conn: Any, *, since_ts: int, limit: int) 
                 AND (
                     m.created_at >= to_timestamp(%s)
                     OR m.end_date >= to_timestamp(%s)
-                    OR m.active = TRUE
-                    OR m.closed = FALSE
-                    OR m.created_at IS NULL
                 )
             ORDER BY
                 s.last_complete_block ASC NULLS FIRST,
@@ -156,6 +150,102 @@ def fetch_block_close_build_candidates(conn: Any, *, since_ts: int, limit: int) 
         )
         return [dict(row) for row in cur.fetchall()]
 
+
+def fetch_eligibility_refresh_candidates(conn: Any, *, since_ts: int, limit: int) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                m.token_id, m.token_id_hex, m.market_id, m.market_slug, m.token_side,
+                m.archived, m.deprecated, m.duplicate_group_key,
+                row_number() OVER (
+                    PARTITION BY m.duplicate_group_key, m.token_side
+                    ORDER BY m.created_at NULLS LAST, m.market_id ASC
+                ) AS duplicate_rank
+            FROM quant.market_token_metadata m
+            LEFT JOIN quant.market_price_eligibility e ON e.token_id = m.token_id
+            WHERE
+                m.token_id_hex IS NOT NULL
+                AND (
+                    m.created_at >= to_timestamp(%s)
+                    OR m.end_date >= to_timestamp(%s)
+                )
+            ORDER BY e.checked_at ASC NULLS FIRST, m.market_id ASC, m.token_id ASC
+            LIMIT %s
+            """,
+            (int(since_ts), int(since_ts), int(limit)),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
+def refresh_since_eligibility(conn: Any, ch: ClickHouseClient, *, since_ts: int, batch_size: int = 1000) -> int:
+    rows = fetch_eligibility_refresh_candidates(conn, since_ts=since_ts, limit=batch_size)
+    if not rows:
+        return 0
+    stats = fetch_orderfilled_trade_stats(ch, [str(row["token_id_hex"]) for row in rows if row.get("token_id_hex")])
+    upserts = []
+    for row in rows:
+        token_id = str(row["token_id"])
+        token_id_hex = str(row.get("token_id_hex") or "").lower()
+        token_stats = stats.get(token_id_hex)
+        trade_count = token_stats.trade_count if token_stats else 0
+        archived = bool(row.get("archived"))
+        deprecated = bool(row.get("deprecated"))
+        duplicate = int(row.get("duplicate_rank") or 1) > 1
+        eligible = bool(trade_count > 0 and not archived and not deprecated and not duplicate)
+        reasons = []
+        if trade_count <= 0:
+            reasons.append("no_orderfilled_trades")
+        if archived:
+            reasons.append("archived")
+        if deprecated:
+            reasons.append("deprecated")
+        if duplicate:
+            reasons.append("duplicate_market")
+        upserts.append(
+            (
+                token_id,
+                int(row["market_id"]),
+                row.get("market_slug"),
+                row.get("token_side"),
+                eligible,
+                trade_count > 0,
+                archived,
+                deprecated,
+                duplicate,
+                ",".join(reasons) if reasons else None,
+                trade_count,
+                token_stats.first_block if token_stats else None,
+                token_stats.last_block if token_stats else None,
+            )
+        )
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO quant.market_price_eligibility (
+                token_id, market_id, market_slug, token_side, eligible,
+                has_orderfilled_trades, is_archived, is_deprecated, is_duplicate_market,
+                skip_reason, orderfilled_trade_count, first_orderfilled_block, last_orderfilled_block,
+                checked_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (token_id) DO UPDATE SET
+                market_id = EXCLUDED.market_id,
+                market_slug = EXCLUDED.market_slug,
+                token_side = EXCLUDED.token_side,
+                eligible = EXCLUDED.eligible,
+                has_orderfilled_trades = EXCLUDED.has_orderfilled_trades,
+                is_archived = EXCLUDED.is_archived,
+                is_deprecated = EXCLUDED.is_deprecated,
+                is_duplicate_market = EXCLUDED.is_duplicate_market,
+                skip_reason = EXCLUDED.skip_reason,
+                orderfilled_trade_count = EXCLUDED.orderfilled_trade_count,
+                first_orderfilled_block = EXCLUDED.first_orderfilled_block,
+                last_orderfilled_block = EXCLUDED.last_orderfilled_block,
+                checked_at = now()
+            """,
+            upserts,
+        )
+    return len(upserts)
 
 def update_frontend_state(
     conn: Any,
@@ -497,11 +587,11 @@ def run_daemon(args: argparse.Namespace) -> None:
         with postgres_connection(PostgresSettings()) as conn:
             create_schema(conn)
             if cycle_started >= metadata_next:
-                count = refresh_market_token_metadata(conn)
+                count = refresh_market_token_metadata(conn, since_ts=args.since_ts)
                 metadata_next = cycle_started + args.metadata_interval_seconds
                 print(json.dumps({"event": "metadata_refreshed", "count": count}, sort_keys=True), flush=True)
             if cycle_started >= eligibility_next:
-                count = refresh_eligibility(conn, ClickHouseClient())
+                count = refresh_since_eligibility(conn, ClickHouseClient(), since_ts=args.since_ts)
                 eligibility_next = cycle_started + args.eligibility_interval_seconds
                 print(json.dumps({"event": "eligibility_refreshed", "count": count}, sort_keys=True), flush=True)
 

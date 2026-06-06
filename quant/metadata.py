@@ -68,12 +68,28 @@ def derive_clickhouse_token_id_hex(token_id: str | None) -> str | None:
         return None
 
 
-def fetch_market_token_metadata(conn: Any, *, limit: int | None = None, market_slug: str | None = None) -> list[MarketTokenMetadata]:
+def fetch_market_token_metadata(
+    conn: Any,
+    *,
+    limit: int | None = None,
+    market_slug: str | None = None,
+    since_ts: int | None = None,
+) -> list[MarketTokenMetadata]:
     params: list[Any] = []
     filters = ["mt.token_id IS NOT NULL", "mt.token_id <> ''"]
     if market_slug:
         filters.append("m.slug = %s")
         params.append(market_slug)
+    if since_ts is not None:
+        filters.append(
+            """
+            (
+                m.created_at >= to_timestamp(%s)
+                OR m.end_date >= to_timestamp(%s)
+            )
+            """
+        )
+        params.extend([int(since_ts), int(since_ts)])
     limit_sql = ""
     if limit is not None:
         limit_sql = "LIMIT %s"
@@ -102,8 +118,8 @@ def fetch_market_token_metadata(conn: Any, *, limit: int | None = None, market_s
                 OR m.title ILIKE '%%deprecated%%'
             ) AS deprecated,
             lower(COALESCE(NULLIF(m.condition_id, ''), NULLIF(m.question_id, ''), NULLIF(m.slug, ''))) AS duplicate_group_key,
-            mt.end_date,
-            mt.created_at
+            COALESCE(mt.end_date, m.end_date) AS end_date,
+            m.created_at AS created_at
         FROM core.market_tokens mt
         JOIN core.markets m ON m.id = mt.market_id
         LEFT JOIN core.market_status_snapshot mss ON mss.market_id = m.id
@@ -175,5 +191,5 @@ def upsert_market_token_metadata(conn: Any, rows: Iterable[MarketTokenMetadata])
         return cur.rowcount or len(values)
 
 
-def refresh_market_token_metadata(conn: Any, *, limit: int | None = None, market_slug: str | None = None) -> int:
-    return upsert_market_token_metadata(conn, fetch_market_token_metadata(conn, limit=limit, market_slug=market_slug))
+def refresh_market_token_metadata(conn: Any, *, limit: int | None = None, market_slug: str | None = None, since_ts: int | None = None) -> int:
+    return upsert_market_token_metadata(conn, fetch_market_token_metadata(conn, limit=limit, market_slug=market_slug, since_ts=since_ts))
