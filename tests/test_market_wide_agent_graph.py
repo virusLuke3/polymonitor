@@ -371,6 +371,25 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertTrue(snapshot["budget"]["delegatedToGateway"])
         self.assertEqual(snapshot["data"]["forecastRunId"], "fig-test")
 
+    def test_gateway_seed_timeout_falls_back_without_crashing(self):
+        helpers = {
+            "get_active_markets_snapshot": lambda *args: {"items": []},
+            "get_market_groups_payload": lambda query, page, page_size, status: {"items": []},
+            "get_latest_content_payload": lambda limit: {"items": []},
+            "get_recent_trades_snapshot": lambda limit: [],
+            "get_recent_oracle_snapshot": lambda limit: [],
+            "get_cached_json": lambda namespace, cache_key: None,
+        }
+
+        with patch("agent.market_wide.snapshot._seed_live_enabled", return_value=True), \
+             patch("agent.market_wide.snapshot.gateway_configured", return_value=True), \
+             patch("agent.market_wide.snapshot.call_market_wide_insight_gateway", side_effect=TimeoutError("gateway timed out")):
+            snapshot = build_market_wide_snapshot(helpers, "trend", live=True, force=True, run_id="fig-timeout")
+
+        self.assertTrue(snapshot["liveAttempted"])
+        self.assertEqual(snapshot["data"]["status"], "gateway-error")
+        self.assertIn("gateway timed out", snapshot["data"]["error"])
+
 
 if __name__ == "__main__":
     unittest.main()
