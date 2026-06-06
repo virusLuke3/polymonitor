@@ -81,8 +81,8 @@ const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const SITE_NAV_LINKS = [
   { label: 'Blog', href: '/blog/' },
-  { label: 'Docs', href: '/docs/' },
-  { label: 'Paper', href: '/paper/' },
+  { label: 'Docs', href: '/docs/documentation/' },
+  { label: 'Paper', href: 'https://arxiv.org/pdf/2604.20421', external: true },
   { label: 'GitHub', href: 'https://github.com/virusLuke3/polymonitor', external: true },
 ];
 const INTERVAL_RUNTIME_PANELS = RUNTIME_PANEL_MODULES.filter(

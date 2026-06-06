@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>polyData Documentation</title>
+    <meta name="description" content="Documentation for polyData Monitor, a live Polymarket intelligence dashboard." />
+    <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs-page.css" />
+  </head>
+  <body>
+    <div class="docs-shell">
+      <header class="docs-topbar">
+        <a class="docs-brand" href="/">
+          <img src="/icons/polydata-monitor.svg" alt="" />
+          <span>POLYDATA</span>
+        </a>
+        <div class="docs-actions" aria-label="Documentation actions">
+          <div class="docs-search"><span>Search...</span><kbd>Ctrl K</kbd></div>
+          <button class="docs-assistant" type="button">Ask Assistant</button>
+        </div>
+        <nav class="docs-nav" aria-label="Top navigation">
+          <a href="/blog/">Blog</a>
+          <a href="/">Dashboard</a>
+          <a href="https://arxiv.org/pdf/2604.20421" target="_blank" rel="noopener noreferrer">Paper</a>
+          <a href="https://github.com/virusLuke3/polymonitor" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a class="docs-cta" href="/">Get Early Access</a>
+        </nav>
+      </header>
+
+      <nav class="docs-tabs" aria-label="Documentation sections">
+        <a class="docs-tab active" href="/docs/documentation/">Documentation</a>
+        <a class="docs-tab" href="https://github.com/virusLuke3/polymonitor/tree/main/docs" target="_blank" rel="noopener noreferrer">API Reference</a>
+        <a class="docs-tab" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/updates.md" target="_blank" rel="noopener noreferrer">Changelog</a>
+      </nav>
+
+      <div class="docs-layout">
+        <aside class="docs-sidebar" aria-label="Documentation navigation">
+          <div class="sidebar-group">
+            <h2>Getting Started</h2>
+            <a class="active" href="#introduction">Introduction</a>
+            <a href="#getting-started">Getting Started</a>
+            <a href="#design-philosophy">Design Philosophy</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Usage</h2>
+            <a href="#quickstart">Quickstart</a>
+            <a href="#authentication">Authentication</a>
+            <a href="#runtime">Runtime API</a>
+            <a href="#errors">Errors</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Platform &amp; Features</h2>
+            <a href="#platform">Platform Overview</a>
+            <a href="#features">Features &amp; Interface</a>
+            <a href="#panels">Panel Modules</a>
+            <a href="#deployment">Deployment</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Intelligence &amp; Analysis</h2>
+            <a href="#signals">Signal Intelligence</a>
+            <a href="#oracle">Oracle Watch</a>
+            <a href="#research">Research Links</a>
+          </div>
+        </aside>
+
+        <main class="docs-content">
+          <div class="docs-kicker" id="introduction">Getting Started</div>
+          <h1>Introduction</h1>
+          <p>polyData Monitor is an open-source, real-time Polymarket intelligence dashboard that aggregates market prices, on-chain flow, oracle activity, order-book depth, macro context, news, and AI-powered analysis into a single map-first interface.</p>
+          <p>The product is designed for traders, researchers, operators, and builders who need to understand what is moving, why it is moving, and where resolution or liquidity risk is building.</p>
+
+          <h2 id="getting-started">What you can do</h2>
+          <ul>
+            <li>Track active Polymarket markets and fast-changing outcomes in real time.</li>
+            <li>Inspect market depth, recent trades, whale flow, suspicious activity, and oracle history.</li>
+            <li>Connect market movement with related news, reports, video, research, macro data, sports, weather, and crypto signals.</li>
+            <li>Run the dashboard as static assets behind Nginx while `/wm-api/` proxies to the runtime API.</li>
+          </ul>
+
+          <div class="quick-grid" id="quickstart">
+            <a class="quick-card" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/development.md" target="_blank" rel="noopener noreferrer">
+              <strong>Quickstart</strong>
+              <span>Build the Vite/Preact dashboard and run the local API helper.</span>
+            </a>
+            <a class="quick-card" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/architecture.md" target="_blank" rel="noopener noreferrer">
+              <strong>Architecture</strong>
+              <span>Review data pipelines, API boundaries, runtime cache, and frontend serving.</span>
+            </a>
+            <a class="quick-card" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/panel-modules.md" target="_blank" rel="noopener noreferrer">
+              <strong>Panel Modules</strong>
+              <span>Add panels through frontend and backend manifests instead of dashboard shell code.</span>
+            </a>
+            <a class="quick-card" href="https://github.com/virusLuke3/polymonitor/blob/main/deploy/README.md" target="_blank" rel="noopener noreferrer">
+              <strong>Deployment</strong>
+              <span>Use public Nginx and systemd templates for production-style hosting.</span>
+            </a>
+          </div>
+
+          <h2 id="design-philosophy">Design Philosophy</h2>
+          <p>polyData keeps dense operational information visible without turning the dashboard into a text wall. Panels use stable scan paths: entity on the left, title and metadata in the center, value or status on the right.</p>
+
+          <h2 id="platform">Platform Overview</h2>
+          <p>The workspace combines a Flask API, PostgreSQL-backed market data, Redis and SQLite runtime snapshots, and a Vite/Preact frontend. Production hosting serves built frontend files from `/var/www/polydata` and proxies API calls through `/wm-api/`.</p>
+
+          <h2 id="features">Features &amp; Interface</h2>
+          <p>Core surfaces include active markets, grouped outcomes, order-book snapshots, OrderFilled flow, oracle events, related intelligence, AI market briefs, macro panels, sports odds, weather markets, and Telegram publishing workflows.</p>
+
+          <h2 id="panels">Panel Modules</h2>
+          <p>New dashboard panels should live in their own modules with explicit metadata, fetch behavior, rendering, and optional runtime snapshot routes. The central registry should only aggregate modules.</p>
+
+          <h2 id="deployment">Deployment</h2>
+          <p>For production-style hosting, build the frontend locally or on the serving host, publish `webpage/dist` into the static web root, and keep API process management in systemd.</p>
+
+          <h2 id="authentication">Authentication</h2>
+          <p>The current public dashboard does not require end-user authentication. Runtime API deployments should keep private tokens, upstream keys, and host-specific details outside public docs.</p>
+
+          <h2 id="runtime">Runtime API</h2>
+          <p>The frontend reads through `/wm-api/`, which lets Nginx route the browser to the active API service without hard-coding private hosts in client code.</p>
+
+          <h2 id="errors">Errors</h2>
+          <p>Panels should show cached, stale, empty, or degraded states clearly. Operators can verify service health through the public deployment templates and the runtime health endpoints.</p>
+
+          <h2 id="signals">Signal Intelligence</h2>
+          <p>The signal layer connects price action with chain flow, liquidity, external content, and generated market context so a move can be reviewed from one surface.</p>
+
+          <h2 id="oracle">Oracle Watch</h2>
+          <p>Oracle panels track proposal, settlement, and resolution context so markets with nearby UMA or settlement risk are easier to spot.</p>
+
+          <h2 id="research">Research Links</h2>
+          <p>The project paper is available on arXiv, and implementation details are published through the GitHub repository.</p>
+
+          <div class="question-box">
+            <span>Ask a question...</span>
+            <span><kbd>Ctrl+I</kbd> <span class="send-dot">↑</span></span>
+          </div>
+        </main>
+
+        <aside class="docs-toc" aria-label="On this page">
+          <div class="toc-title">On this page</div>
+          <a class="active" href="#getting-started">What you can do</a>
+          <a href="#quickstart">Quick links</a>
+          <a href="#design-philosophy">Design Philosophy</a>
+          <a href="#platform">Platform Overview</a>
+          <a href="#research">Paper</a>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>
