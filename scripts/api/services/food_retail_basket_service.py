@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 FOOD_BASKET_SNAPSHOT_NAMESPACE = "snapshot:macro:food-retail-basket-pressure"
 FOOD_BASKET_CACHE_KEY = "panel-v1"
 DEFAULT_ITEM_LIMIT = 8
-FRED_CSV_LOOKBACK_YEARS = 6
+FRED_CSV_LOOKBACK_YEARS = 4
 SERIES = (
     {"key": "food", "seriesId": "CPIUFDSL", "label": "Food CPI", "weight": 1.0},
     {"key": "home", "seriesId": "CUSR0000SAF11", "label": "Food at home", "weight": 1.3},

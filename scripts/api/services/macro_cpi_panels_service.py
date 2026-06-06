@@ -14,7 +14,7 @@ MAX_ITEM_LIMIT = 60
 DEFAULT_TTL_SECONDS = 21600
 FRED_SOURCE = "FRED CSV / public macro series"
 CACHE_KEY = "panel-v2"
-FRED_CSV_LOOKBACK_YEARS = 6
+FRED_CSV_LOOKBACK_YEARS = 4
 MACRO_CPI_PANEL_IDS = (
     "supply-tariff-import-watch",
     "shelter-rent-oer-pressure",

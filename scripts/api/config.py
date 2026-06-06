@@ -312,7 +312,7 @@ def load_api_settings() -> ApiSettings:
             "POLYDATA_FINANCE_FRED_CSV_URL_TEMPLATE",
             FINANCE_FRED_CSV_URL_TEMPLATE or "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
         ),
-        fred_csv_lookback_years=max(1, _get_int("POLYDATA_FRED_CSV_LOOKBACK_YEARS", 6)),
+        fred_csv_lookback_years=max(1, _get_int("POLYDATA_FRED_CSV_LOOKBACK_YEARS", 4)),
         finance_barchart_quote_url_template=_get_str(
             "POLYDATA_FINANCE_BARCHART_QUOTE_URL_TEMPLATE",
             FINANCE_BARCHART_QUOTE_URL_TEMPLATE or "https://www.barchart.com/stocks/quotes/{symbol}",
