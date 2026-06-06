@@ -1040,7 +1040,14 @@ def _augment_related_content_tabs(
 def refresh_topic_content(ctx: dict, *, topic_ids: List[str] | None = None, limit_per_topic: int = 24) -> Dict[str, Any]:
     runtime_payload = ctx["CONTENT_RUNTIME_PROVIDER"].refresh_topics(topic_ids=topic_ids, limit_per_topic=limit_per_topic)
     stored_by_topic: Dict[str, int] = {}
+    skipped_by_topic: Dict[str, Dict[str, int]] = {}
     for topic_id, items in runtime_payload.items():
+        existing_count = _count_topic_content(ctx, topic_id=topic_id)
+        fresh_count = len(items)
+        if existing_count > 0 and fresh_count < max(4, existing_count // 2):
+            stored_by_topic[topic_id] = existing_count
+            skipped_by_topic[topic_id] = {"existing": existing_count, "fresh": fresh_count}
+            continue
         _delete_topic_content(ctx, topic_id=topic_id)
         stored_by_topic[topic_id] = _persist_topic_content(ctx, topic_id=topic_id, items=items)
     return {
@@ -1049,7 +1056,16 @@ def refresh_topic_content(ctx: dict, *, topic_ids: List[str] | None = None, limi
         "itemCount": sum(len(items) for items in runtime_payload.values()),
         "storedCount": sum(stored_by_topic.values()),
         "topics": stored_by_topic,
+        "skippedTopics": skipped_by_topic,
     }
+
+
+def _count_topic_content(ctx: dict, *, topic_id: str) -> int:
+    topic_id = str(topic_id or "").strip()
+    if not topic_id or not _content_table_exists(ctx, "content_items"):
+        return 0
+    row = ctx["query_one"]("SELECT COUNT(*) AS count FROM content_items WHERE topic_id = ?", (topic_id,)) or {}
+    return int(row.get("count") or 0)
 
 
 def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) -> Dict[str, Any]:
