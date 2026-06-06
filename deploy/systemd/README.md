@@ -28,9 +28,12 @@ not a separate code tree.
 - `polydata-*-seed.service` runtime seed watchers
 - `polydata-new-market-signal.service`
 - `polydata-geo-sanctions-shock.service`
+- `polydata-quant-backtest-runner.service`
 
 These services should write/read Redis and SQLite seed snapshots. They should not
 run raw market discovery, OrderFilled indexing, or oracle chain scans on GCP.
+The quant backtest runner is the exception that writes quant backtest result
+tables by consuming already-built queued runs; it does not rebuild price sources.
 
 Use the remote deploy helper from the same commit you want GCP to run:
 
@@ -52,6 +55,7 @@ disables local collector units on GCP.
 - `polydata-analytics-sync.service`
 - `polydata-event-market-serving.service`
 - `polydata-db-reverse-tunnel.service`
+- `polydata-quant-backtest-runner.service`
 
 Use the local helper:
 
@@ -90,6 +94,7 @@ cp deploy/systemd/polydata-content-topic-refresh.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-*-seed.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-geo-sanctions-shock.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-new-market-signal.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-quant-backtest-runner.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now polydata-gcp.target
 ```
@@ -112,6 +117,7 @@ cp deploy/systemd/polydata-event-market-serving.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-db-reverse-tunnel.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-db-reverse-tunnel-healthcheck.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-db-reverse-tunnel-healthcheck.timer ~/.config/systemd/user/
+cp deploy/systemd/polydata-quant-backtest-runner.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now polydata-local-collector.target
 systemctl --user enable --now polydata-db-reverse-tunnel-healthcheck.timer

@@ -229,6 +229,7 @@ GCP_UNITS=(
   polydata-new-market-signal.service
   polydata-polybeats-feed-seed.service
   polydata-polymarket-macro-map-seed.service
+  polydata-quant-backtest-runner.service
   polydata-sports-odds-seed.service
   polydata-suspicious-trades-seed.service
   polydata-tech-panels-seed.service
