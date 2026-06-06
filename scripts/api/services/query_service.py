@@ -329,6 +329,12 @@ def _content_id_for_url(url: str) -> str:
     return f"content:{digest}"
 
 
+def _content_id_for_topic_url(topic_id: str, url: str) -> str:
+    normalized = f"{str(topic_id or '').strip()}|{str(url or '').strip()}"
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+    return f"topic-content:{digest}"
+
+
 _CONTENT_TABLE_EXISTS_CACHE: Dict[tuple[str, str], bool] = {}
 _CONTENT_TABLES_ENSURED_CACHE: set[str] = set()
 _CONTENT_TABLE_EXISTS_LOCK = threading.Lock()
@@ -367,7 +373,7 @@ def _ensure_content_tables(ctx: dict) -> None:
                     category TEXT,
                     topic_id TEXT,
                     title TEXT NOT NULL,
-                    url TEXT NOT NULL UNIQUE,
+                    url TEXT NOT NULL,
                     published_at TEXT,
                     summary TEXT,
                     source_count INTEGER DEFAULT 1,
@@ -423,7 +429,7 @@ def _ensure_content_tables(ctx: dict) -> None:
                     category TEXT,
                     topic_id TEXT,
                     title TEXT NOT NULL,
-                    url TEXT NOT NULL UNIQUE,
+                    url TEXT NOT NULL,
                     published_at TEXT,
                     summary TEXT,
                     source_count INTEGER DEFAULT 1,
@@ -462,8 +468,25 @@ def _ensure_content_tables(ctx: dict) -> None:
                 ("content_links", "topic_id TEXT"),
             ):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column_sql}")
+            conn.execute(
+                """
+                DO $$
+                DECLARE constraint_name text;
+                BEGIN
+                    SELECT conname INTO constraint_name
+                    FROM pg_constraint
+                    WHERE conrelid = 'content_items'::regclass
+                      AND contype = 'u'
+                      AND pg_get_constraintdef(oid) = 'UNIQUE (url)';
+                    IF constraint_name IS NOT NULL THEN
+                        EXECUTE format('ALTER TABLE content_items DROP CONSTRAINT %I', constraint_name);
+                    END IF;
+                END $$;
+                """
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_content_items_published_at ON content_items (published_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_content_items_topic_time ON content_items (topic_id, published_at DESC)")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_content_items_topic_url ON content_items (COALESCE(topic_id, ''), url)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_content_links_market_score ON content_links (market_id, link_score DESC, created_at DESC)")
         conn.commit()
         backend_key = str(ctx["get_backend"]() or "").lower()
@@ -616,8 +639,8 @@ def _persist_topic_content(ctx: dict, *, topic_id: str, items: List[Dict[str, An
             title = str(item.get("title") or "").strip()
             if not url or not title:
                 continue
-            content_id = _content_id_for_url(url)
             item_topic_id = str(item.get("topicId") or topic_id or "").strip()
+            content_id = _content_id_for_url(url) if backend == "sqlite" else _content_id_for_topic_url(item_topic_id, url)
             params = (
                 content_id,
                 item.get("contentType") or "news",
