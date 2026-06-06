@@ -330,6 +330,7 @@ def _content_id_for_url(url: str) -> str:
 
 
 _CONTENT_TABLE_EXISTS_CACHE: Dict[tuple[str, str], bool] = {}
+_CONTENT_TABLES_ENSURED_CACHE: set[str] = set()
 _CONTENT_TABLE_EXISTS_LOCK = threading.Lock()
 
 
@@ -349,8 +350,11 @@ def _content_table_exists(ctx: dict, table_name: str) -> bool:
 def _ensure_content_tables(ctx: dict) -> None:
     if _api_readonly():
         return
-    conn = ctx["get_connection"](ctx["DB_PATH"])
     backend = str(ctx["get_backend"]() or "").lower()
+    with _CONTENT_TABLE_EXISTS_LOCK:
+        if backend in _CONTENT_TABLES_ENSURED_CACHE:
+            return
+    conn = ctx["get_connection"](ctx["DB_PATH"])
     try:
         if backend == "sqlite":
             conn.execute(
@@ -408,6 +412,7 @@ def _ensure_content_tables(ctx: dict) -> None:
                     pass
                 _ = column
         else:
+            conn.execute("SELECT pg_advisory_xact_lock(hashtext('polydata_content_schema'))")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS content_items (
@@ -465,6 +470,7 @@ def _ensure_content_tables(ctx: dict) -> None:
         with _CONTENT_TABLE_EXISTS_LOCK:
             _CONTENT_TABLE_EXISTS_CACHE[(backend_key, "content_items")] = True
             _CONTENT_TABLE_EXISTS_CACHE[(backend_key, "content_links")] = True
+            _CONTENT_TABLES_ENSURED_CACHE.add(backend_key)
     except Exception:
         conn.rollback()
         ctx["app"].logger.exception("content table ensure failed")
