@@ -159,7 +159,7 @@ class MarketGroupWatcher:
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
         self.requests.trust_env = False
-        self._runtime_cache: Dict[str, Any] = {}
+        self._runtime_cache: Dict[str, Dict[str, Any]] = {}
 
     def ttl_seconds(self, kind: str) -> int:
         configured = int(os.environ.get("POLYDATA_MARKET_GROUP_SEED_TTL_SECONDS", "0") or 0)
@@ -190,8 +190,8 @@ class MarketGroupWatcher:
                     "FINANCE_RUNTIME_TTL_SECONDS": self.settings.finance_runtime_ttl_seconds,
                     "requests": self.requests,
                     "_safe_float": _safe_float,
-                    "get_cached_runtime_payload": lambda namespace, cache_key: self._runtime_cache.get(f"{namespace}:{cache_key}"),
-                    "set_cached_runtime_payload": self._set_runtime_cache,
+                    "get_cached_runtime_payload": self.get_cached_runtime_payload,
+                    "set_cached_runtime_payload": self.set_cached_runtime_payload,
                 },
                 symbol,
                 interval=interval,
@@ -201,8 +201,21 @@ class MarketGroupWatcher:
             "utc_now_iso": utc_now_iso,
         }
 
-    def _set_runtime_cache(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> Any:
-        self._runtime_cache[f"{namespace}:{cache_key}"] = payload
+    def get_cached_runtime_payload(self, namespace: str, cache_key: str) -> Any:
+        composite_key = f"{namespace}:{cache_key}"
+        cached = self._runtime_cache.get(composite_key)
+        if not cached:
+            return None
+        if float(cached.get("expires_at") or 0.0) <= time.monotonic():
+            self._runtime_cache.pop(composite_key, None)
+            return None
+        return cached.get("payload")
+
+    def set_cached_runtime_payload(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> Any:
+        self._runtime_cache[f"{namespace}:{cache_key}"] = {
+            "payload": payload,
+            "expires_at": time.monotonic() + max(1, int(ttl_seconds)),
+        }
         return payload
 
     def load_previous_payload(self, namespace: str, cache_key: str) -> Dict[str, Any]:

@@ -5,6 +5,7 @@ import io
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 SNAPSHOT_NAMESPACE_PREFIX = "snapshot:macro:"
@@ -13,6 +14,7 @@ MAX_ITEM_LIMIT = 60
 DEFAULT_TTL_SECONDS = 21600
 FRED_SOURCE = "FRED CSV / public macro series"
 CACHE_KEY = "panel-v2"
+FRED_CSV_LOOKBACK_YEARS = 6
 MACRO_CPI_PANEL_IDS = (
     "supply-tariff-import-watch",
     "shelter-rent-oer-pressure",
@@ -153,8 +155,23 @@ def ttl_seconds(ctx: dict) -> int:
 
 
 def _fred_url(ctx: dict, series_id: str) -> str:
-    template = getattr(ctx["SETTINGS"], "food_basket_fred_csv_url_template", "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}")
-    return str(template).format(series_id=series_id)
+    settings = ctx["SETTINGS"]
+    template = getattr(
+        settings,
+        "finance_fred_csv_url_template",
+        getattr(settings, "food_basket_fred_csv_url_template", "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"),
+    )
+    url = str(template).format(series_id=series_id)
+    lookback_years = int(getattr(settings, "fred_csv_lookback_years", FRED_CSV_LOOKBACK_YEARS) or FRED_CSV_LOOKBACK_YEARS)
+    start_date = f"{max(1900, datetime.now(timezone.utc).year - lookback_years)}-01-01"
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("cosd", start_date)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _fred_row_date(row: Dict[str, Any]) -> str:
+    return str(row.get("observation_date") or row.get("DATE") or row.get("date") or "").strip()
 
 
 def _fetch_fred_series(ctx: dict, spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -165,7 +182,7 @@ def _fetch_fred_series(ctx: dict, spec: Dict[str, Any]) -> Dict[str, Any]:
     reader = csv.DictReader(io.StringIO(str(text or "")))
     for row in reader:
         value = _float(row.get(series_id))
-        date = str(row.get("observation_date") or "").strip()
+        date = _fred_row_date(row)
         if value is None or not date:
             continue
         rows.append({"date": date, "value": value})

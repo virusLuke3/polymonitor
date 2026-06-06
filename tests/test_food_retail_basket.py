@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,7 @@ def fred_csv(series_id: str, values: list[float]) -> str:
 
 
 def make_ctx(*, fail: bool = False):
+    requested_urls = []
     series_values = {
         "CPIUFDSL": [320, 321, 322, 322.5, 323, 323.4, 323.9, 324.2, 324.8, 325.2, 325.6, 326.0, 326.5, 327.2],
         "CUSR0000SAF11": [300, 300.4, 301, 301.4, 302, 302.6, 303, 303.7, 304.2, 304.8, 305.4, 306.2, 307, 308.4],
@@ -50,9 +52,10 @@ def make_ctx(*, fail: bool = False):
     }
 
     def http_text_get(url: str, **kwargs):
+        requested_urls.append(url)
         if fail:
             raise RuntimeError("fred failed")
-        series_id = url.rsplit("=", 1)[-1]
+        series_id = parse_qs(urlsplit(url).query)["id"][0]
         return fred_csv(series_id, series_values[series_id])
 
     return {
@@ -67,11 +70,13 @@ def make_ctx(*, fail: bool = False):
         "SNAPSHOT_STORE": None,
         "get_cached_json": lambda *args: None,
         "set_cached_json": lambda *args: None,
+        "requested_urls": requested_urls,
     }
 
 
 def test_food_retail_basket_builds_official_component_snapshot():
-    payload = food_retail_basket_service.get_food_retail_basket_snapshot(make_ctx(), limit=4)
+    ctx = make_ctx()
+    payload = food_retail_basket_service.get_food_retail_basket_snapshot(ctx, limit=4)
 
     assert payload["status"] == "ok"
     assert payload["cacheMode"] == "live-build"
@@ -80,6 +85,7 @@ def test_food_retail_basket_builds_official_component_snapshot():
     assert len(payload["items"]) == 4
     assert payload["items"][0]["source"] == "FRED / BLS CPI"
     assert payload["items"][0]["momPct"] > 0
+    assert all("cosd=" in url for url in ctx["requested_urls"])
 
 
 def test_food_retail_basket_warms_when_all_sources_fail():

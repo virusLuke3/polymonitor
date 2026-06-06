@@ -41,6 +41,13 @@ def range_to_seconds(range_name: str) -> int:
     return mapping.get(normalized, 86400)
 
 
+def _price_scale_compatible(left: Optional[float], right: Optional[float]) -> bool:
+    if left in (None, 0) or right in (None, 0):
+        return False
+    ratio = max(abs(float(left)), abs(float(right))) / max(min(abs(float(left)), abs(float(right))), 1e-12)
+    return ratio <= 20
+
+
 def get_yahoo_market_snapshot(
     ctx: dict,
     symbol: str,
@@ -89,6 +96,8 @@ def get_yahoo_market_snapshot(
         )
     current = ctx["_safe_float"](meta.get("regularMarketPrice")) or last_price
     previous = ctx["_safe_float"](meta.get("chartPreviousClose")) or first_price
+    if current is not None and previous is not None and not _price_scale_compatible(current, previous):
+        previous = first_price if _price_scale_compatible(current, first_price) else None
     change_pct = None
     if current is not None and previous not in (None, 0):
         change_pct = ((current - float(previous)) / float(previous)) * 100

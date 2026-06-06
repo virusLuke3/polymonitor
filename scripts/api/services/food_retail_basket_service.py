@@ -5,11 +5,13 @@ import io
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 FOOD_BASKET_SNAPSHOT_NAMESPACE = "snapshot:macro:food-retail-basket-pressure"
 FOOD_BASKET_CACHE_KEY = "panel-v1"
 DEFAULT_ITEM_LIMIT = 8
+FRED_CSV_LOOKBACK_YEARS = 6
 SERIES = (
     {"key": "food", "seriesId": "CPIUFDSL", "label": "Food CPI", "weight": 1.0},
     {"key": "home", "seriesId": "CUSR0000SAF11", "label": "Food at home", "weight": 1.3},
@@ -35,16 +37,31 @@ def _float(value: Any) -> Optional[float]:
     return n if n == n else None
 
 
+def _fred_url(ctx: dict, series_id: str) -> str:
+    settings = ctx["SETTINGS"]
+    template = getattr(settings, "food_basket_fred_csv_url_template", "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}")
+    url = str(template).format(series_id=series_id)
+    lookback_years = int(getattr(settings, "fred_csv_lookback_years", FRED_CSV_LOOKBACK_YEARS) or FRED_CSV_LOOKBACK_YEARS)
+    start_date = f"{max(1900, datetime.now(timezone.utc).year - lookback_years)}-01-01"
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("cosd", start_date)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _fred_row_date(row: Dict[str, Any]) -> str:
+    return str(row.get("observation_date") or row.get("DATE") or row.get("date") or "").strip()
+
+
 def _fetch_series(ctx: dict, spec: Dict[str, Any]) -> Dict[str, Any]:
-    template = ctx["SETTINGS"].food_basket_fred_csv_url_template
-    url = template.format(series_id=spec["seriesId"])
+    url = _fred_url(ctx, spec["seriesId"])
     text = ctx["http_text_get"](url, timeout=15, headers={"User-Agent": "polydata-food-basket/1.0"})
     rows: List[Dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(str(text or "")))
     value_col = spec["seriesId"]
     for row in reader:
         value = _float(row.get(value_col))
-        date = str(row.get("observation_date") or "").strip()
+        date = _fred_row_date(row)
         if value is None or not date:
             continue
         rows.append({"date": date, "value": value})

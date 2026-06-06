@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -31,9 +32,11 @@ def fred_csv(series_id: str, values: list[float]) -> str:
 
 def make_context():
     cached = {}
+    requested_urls = []
 
     def http_text_get(url, **kwargs):
-        series_id = url.rsplit("=", 1)[-1]
+        requested_urls.append(url)
+        series_id = parse_qs(urlsplit(url).query)["id"][0]
         return fred_csv(series_id, [100 + i for i in range(13)])
 
     def http_json_get(url, **kwargs):
@@ -60,17 +63,20 @@ def make_context():
         "SNAPSHOT_STORE": None,
         "get_cached_json": lambda namespace, key: cached.get((namespace, key)),
         "set_cached_json": lambda namespace, key, payload, ttl: cached.__setitem__((namespace, key), payload),
+        "requested_urls": requested_urls,
     }
 
 
 def test_macro_cpi_panel_builds_fred_and_policy_items():
-    payload = macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot(make_context(), limit=8, allow_live_build=True)
+    ctx = make_context()
+    payload = macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot(ctx, limit=8, allow_live_build=True)
 
     assert payload["status"] == "ok"
     assert payload["cacheMode"] == "live-build"
     assert payload["summary"]["coverage"] >= 3
     assert any(item["source"] == "Federal Register" for item in payload["items"])
     assert payload["sources"]["ppi_all"] == "ok"
+    assert all("cosd=" in url for url in ctx["requested_urls"])
 
 
 def test_all_remaining_macro_panels_return_normalized_payloads():

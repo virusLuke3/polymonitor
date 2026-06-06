@@ -44,7 +44,9 @@ def fetch_live_market_group_payload(ctx: dict, items: List[tuple[str, str, str]]
                 symbol,
                 interval="5m" if is_crypto else "30m",
                 range_name="1d" if is_crypto else "5d",
-                ttl_seconds=5 if is_crypto else None,
+                # Market group watcher freshness should reflect a real source fetch
+                # each run; seeded Redis/SQLite handles serving cache for readers.
+                ttl_seconds=5,
             )
         except Exception:
             ctx["app"].logger.exception("yahoo snapshot failed symbol=%s", symbol)

@@ -87,6 +87,40 @@ class MarketGroupSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("ok", meta["status"])
         self.assertEqual(1, meta["recordCount"])
 
+    def test_watcher_runtime_cache_respects_ttl(self):
+        watcher, _ = self.make_watcher()
+        with patch.object(market_group_watcher.time, "monotonic", return_value=1000.0):
+            watcher.set_cached_runtime_payload("yahoo-chart", "gold", {"price": 2400}, ttl_seconds=10)
+
+        with patch.object(market_group_watcher.time, "monotonic", return_value=1005.0):
+            self.assertEqual({"price": 2400}, watcher.get_cached_runtime_payload("yahoo-chart", "gold"))
+
+        with patch.object(market_group_watcher.time, "monotonic", return_value=1011.0):
+            self.assertIsNone(watcher.get_cached_runtime_payload("yahoo-chart", "gold"))
+
+    def test_market_group_live_fetch_bypasses_in_process_yahoo_cache(self):
+        ttl_values = []
+
+        def yahoo(symbol, interval="30m", range_name="5d", ttl_seconds=None):
+            ttl_values.append((symbol, interval, range_name, ttl_seconds))
+            return {
+                "price": 2400.0,
+                "changePercent": 1.2,
+                "currency": "USD",
+                "volume24h": 1000,
+                "points": [],
+            }
+
+        ctx = {
+            "get_yahoo_market_snapshot": yahoo,
+            "utc_now_iso": lambda: "2026-05-03T08:00:00Z",
+            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None)),
+        }
+        payload = runtime_service.fetch_live_market_group_payload(ctx, [("gold", "GOLD", "GC=F")], kind="commodities")
+
+        self.assertEqual("ok", payload["status"])
+        self.assertEqual([("GC=F", "30m", "5d", 5)], ttl_values)
+
     def test_api_reads_seeded_market_group_without_live_fetch(self):
         with tempfile.TemporaryDirectory() as snapshot_dir:
             settings = make_settings(str(Path(snapshot_dir) / "snapshots.sqlite3"))

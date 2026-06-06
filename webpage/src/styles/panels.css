@@ -5566,12 +5566,15 @@ body.panel-resize-active iframe {
 
 .wm-crypto-market-row {
   min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   min-height: 58px;
   display: grid;
-  grid-template-columns: minmax(54px, 0.55fr) minmax(80px, 1fr) minmax(86px, 0.8fr) minmax(58px, 0.55fr) auto;
+  grid-template-columns: minmax(52px, 0.45fr) minmax(72px, 1fr) minmax(76px, 0.62fr) minmax(48px, 52px);
   align-items: center;
   gap: 8px;
   padding: 8px 9px;
+  overflow: hidden;
   border: 1px solid #262b2b;
   border-left: 3px solid rgba(255, 255, 255, 0.28);
   border-radius: 3px;
@@ -5688,10 +5691,20 @@ body.panel-resize-active iframe {
   overflow: hidden;
   color: #dbe0dd;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 900;
+  line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wm-crypto-market-flow {
+  justify-items: end;
+  text-align: right;
+}
+
+.wm-crypto-market-panel .wm-market-signal-chip {
+  display: none;
 }
 
 .wm-market-signal-chip {
@@ -6470,15 +6483,23 @@ body.panel-resize-active iframe {
 }
 
 .wm-funding-panel .wm-panel-body {
-  padding: 8px;
+  padding: 8px 10px 10px;
   overflow-x: hidden;
 }
 
 .wm-funding-monitor {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
+}
+
+.wm-funding-summary {
   min-width: 0;
+}
+
+.wm-funding-radar-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .wm-funding-empty-state {
@@ -6679,12 +6700,11 @@ body.panel-resize-active iframe {
 }
 
 .wm-funding-table {
-  display: flex;
-  flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: visible;
-  border: 1px solid rgba(75, 92, 106, 0.34);
-  background: rgba(12, 13, 14, 0.72);
+  border: 0;
+  background: transparent;
 }
 
 .wm-funding-section-head {
@@ -6729,133 +6749,175 @@ body.panel-resize-active iframe {
 }
 
 .wm-funding-table-body {
-  display: flex;
-  flex-direction: column;
+  min-width: 0;
   min-height: 0;
+  display: grid;
+  gap: 5px;
   overflow: visible;
 }
 
 .wm-funding-asset-row {
   position: relative;
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 0;
   min-width: 0;
-  padding: 7px 8px 8px 0;
-  border-left: 3px solid #5f6570;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(52px, 0.45fr) minmax(72px, 1fr) minmax(76px, 0.62fr) minmax(48px, 52px);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  overflow: hidden;
+  border: 1px solid #262b2b;
+  border-left: 3px solid rgba(255, 255, 255, 0.28);
+  border-radius: 3px;
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.005)),
-    #111213;
-  transition: background 140ms ease, border-color 140ms ease;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    #171b1c;
+  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
 .wm-funding-asset-row:hover {
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01)),
-    #151515;
+  border-color: #3a3a3a;
+  background-color: #1d2223;
+  transform: translateX(1px);
 }
 
 .wm-funding-asset-row:last-child {
-  border-bottom: 0;
+  border-bottom: 1px solid #262b2b;
 }
 
-.wm-funding-asset-row.bias-longs-pay {
+.wm-funding-asset-row.bias-longs-pay,
+.wm-funding-asset-row.up {
   border-left-color: var(--wm-green);
   background:
-    linear-gradient(90deg, rgba(57, 255, 115, 0.09), rgba(17, 18, 19, 0.92) 42%),
-    #111213;
+    linear-gradient(90deg, rgba(57, 255, 115, 0.08), rgba(23, 27, 28, 0.96) 42%),
+    #171b1c;
 }
 
-.wm-funding-asset-row.bias-shorts-pay {
+.wm-funding-asset-row.bias-shorts-pay,
+.wm-funding-asset-row.down {
   border-left-color: var(--wm-red);
   background:
-    linear-gradient(90deg, rgba(255, 75, 75, 0.1), rgba(17, 18, 19, 0.92) 42%),
-    #111213;
+    linear-gradient(90deg, rgba(255, 93, 93, 0.09), rgba(23, 27, 28, 0.96) 42%),
+    #171b1c;
 }
 
 .wm-funding-asset-row.bias-mixed {
   border-left-color: rgba(255, 255, 255, 0.45);
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.055), rgba(17, 18, 19, 0.92) 42%),
-    #111213;
 }
 
-.wm-funding-row-rank {
-  padding-top: 2px;
-  color: #777c77;
+.wm-funding-row-asset,
+.wm-funding-row-value,
+.wm-funding-row-flow {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.wm-funding-row-asset strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #eef1ee;
   font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  text-align: center;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.wm-funding-row-main {
-  display: flex;
+.wm-funding-row-asset span,
+.wm-funding-row-flow em,
+.wm-funding-row-value span {
   min-width: 0;
-  flex-direction: column;
-  gap: 6px;
+  overflow: hidden;
+  color: #7f8783;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.wm-funding-row-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
+.wm-funding-row-context {
   min-width: 0;
+  display: grid;
+  gap: 3px;
 }
 
-.wm-funding-row-identity {
+.wm-funding-row-context strong {
   min-width: 0;
+  overflow: hidden;
+  color: #dbe0dd;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.wm-funding-row-symbol {
+.wm-funding-row-context span {
+  min-width: 0;
+  overflow: hidden;
+  color: #7f8783;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-funding-row-value {
+  justify-items: end;
+  text-align: right;
+}
+
+.wm-funding-row-value strong {
+  min-width: 0;
   overflow: hidden;
   color: #f1f1f1;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.2;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wm-funding-row-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
-  color: #7f857f;
-  font-family: var(--font-mono);
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.45px;
-  text-transform: uppercase;
+.wm-funding-row-value .up {
+  color: var(--wm-green);
 }
 
-.wm-funding-row-signal {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: flex-end;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 1px;
+.wm-funding-row-value .down {
+  color: var(--wm-red);
 }
 
-.wm-funding-row-signal strong {
-  color: #f2f2f2;
+.wm-funding-row-value .flat {
+  color: #a0a0a0;
+}
+
+.wm-funding-row-flow {
+  justify-items: end;
+  text-align: right;
+}
+
+.wm-funding-row-flow b {
+  min-width: 0;
+  overflow: hidden;
+  color: #dbe0dd;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 9px;
   font-weight: 900;
-  line-height: 1;
-}
-
-.wm-funding-row-signal span {
-  color: #858985;
-  font-family: var(--font-mono);
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wm-funding-row-tags {
