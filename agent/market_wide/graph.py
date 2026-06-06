@@ -126,23 +126,136 @@ def _normalize_node_output(raw: dict[str, Any], node: str) -> dict[str, Any]:
 
 def _compact_quant_for_prompt(quant: dict[str, Any]) -> dict[str, Any]:
     return {
-        "topFlowMarkets": (quant.get("topFlowMarkets") or [])[:5],
-        "repricingZones": (quant.get("repricingZones") or [])[:5],
-        "priceDriftLeaders": (quant.get("priceDriftLeaders") or [])[:5],
-        "volatilityLeaders": (quant.get("volatilityLeaders") or [])[:5],
-        "lobSpreads": (quant.get("lobSpreads") or [])[:5],
-        "relatedMarketArbitrageScores": (quant.get("relatedMarketArbitrageScores") or [])[:5],
-        "anomalies": (quant.get("anomalies") or [])[:3],
+        "topFlowMarkets": (quant.get("topFlowMarkets") or [])[:3],
+        "repricingZones": (quant.get("repricingZones") or [])[:3],
+        "priceDriftLeaders": (quant.get("priceDriftLeaders") or [])[:3],
+        "volatilityLeaders": (quant.get("volatilityLeaders") or [])[:3],
+        "lobSpreads": (quant.get("lobSpreads") or [])[:3],
+        "relatedMarketArbitrageScores": (quant.get("relatedMarketArbitrageScores") or [])[:3],
+        "anomalies": (quant.get("anomalies") or [])[:2],
         "dataWarnings": (quant.get("dataWarnings") or [])[:2],
     }
 
 
 def _compact_related_for_prompt(related: dict[str, Any]) -> dict[str, Any]:
     return {
-        "ladders": (related.get("ladders") or [])[:5],
-        "arbitrageScores": (related.get("arbitrageScores") or [])[:5],
-        "anomalies": (related.get("anomalies") or [])[:3],
+        "ladders": (related.get("ladders") or [])[:3],
+        "arbitrageScores": (related.get("arbitrageScores") or [])[:3],
+        "anomalies": (related.get("anomalies") or [])[:2],
     }
+
+
+def _market_prompt_item(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    return {
+        "title": compact_text(item.get("title") or item.get("market") or item.get("question"), 100),
+        "category": compact_text(item.get("category"), 32),
+        "price": item.get("latestPrice") or item.get("yesPrice"),
+        "price24hAgo": item.get("price24hAgo"),
+        "change24h": item.get("change24h"),
+        "volume24h": item.get("volume24h"),
+        "tradeCount24h": item.get("tradeCount24h"),
+        "bid": item.get("bestBid"),
+        "ask": item.get("bestAsk"),
+        "endDate": item.get("endDate"),
+    }
+
+
+def _compact_prompt_list(items: Any, limit: int) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    output: list[dict[str, Any]] = []
+    for item in items[:limit]:
+        compacted = _market_prompt_item(item)
+        if compacted:
+            output.append(compacted)
+    return output
+
+
+def _compact_memory_for_prompt(items: Any, limit: int = 3) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    output: list[dict[str, Any]] = []
+    for item in items[:limit]:
+        if not isinstance(item, dict):
+            continue
+        observation = item.get("observation") if isinstance(item.get("observation"), dict) else {}
+        output.append({
+            "kind": item.get("kind"),
+            "title": compact_text(item.get("title"), 100),
+            "lesson": compact_text(item.get("lesson"), 140),
+            "score": observation.get("score"),
+            "drift24h": observation.get("drift24h"),
+            "spread": observation.get("spread"),
+        })
+    return output
+
+
+def _compact_agent_for_prompt(agent: Any) -> dict[str, Any] | None:
+    if not isinstance(agent, dict):
+        return None
+    return {
+        "node": agent.get("node"),
+        "confidence": agent.get("confidence"),
+        "findings": (agent.get("findings") or [])[:2],
+        "risks": _compact_string_list(agent.get("risks"), 2),
+        "watch": _compact_string_list(agent.get("watch"), 2),
+        "probabilityAdjustment": compact_text(agent.get("probabilityAdjustment"), 80),
+    }
+
+
+def _compact_agents_for_prompt(agents: Any, limit: int = 4) -> list[dict[str, Any]]:
+    if not isinstance(agents, list):
+        return []
+    output: list[dict[str, Any]] = []
+    for agent in agents[:limit]:
+        compacted = _compact_agent_for_prompt(agent)
+        if compacted:
+            output.append(compacted)
+    return output
+
+
+def _compact_react_observation(tool_name: str, observation: dict[str, Any]) -> dict[str, Any]:
+    if tool_name == "quant_snapshot":
+        quant = observation.get("quantForecaster") if isinstance(observation.get("quantForecaster"), dict) else {}
+        related = observation.get("relatedMarkets") if isinstance(observation.get("relatedMarkets"), dict) else {}
+        return {
+            "repricingZones": (quant.get("repricingZones") or [])[:2],
+            "priceDriftLeaders": (quant.get("priceDriftLeaders") or [])[:2],
+            "lobSpreads": (quant.get("lobSpreads") or [])[:2],
+            "arbitrageScores": (related.get("arbitrageScores") or [])[:2],
+            "warnings": (quant.get("dataWarnings") or [])[:2],
+        }
+    if tool_name == "catalyst_scan":
+        return {
+            "content": [
+                {
+                    "title": compact_text(item.get("title"), 90),
+                    "summary": compact_text(item.get("summary"), 120),
+                    "publishedAt": item.get("publishedAt"),
+                }
+                for item in observation.get("content", [])[:2]
+                if isinstance(item, dict)
+            ],
+            "watchSignals": [
+                {"title": compact_text(item.get("title"), 90), "summary": compact_text(item.get("summary"), 120)}
+                for item in observation.get("watchSignals", [])[:2]
+                if isinstance(item, dict)
+            ],
+        }
+    if tool_name == "memory_scan":
+        return {"priorEpisodes": _compact_memory_for_prompt(observation.get("priorEpisodes"), 3)}
+    if tool_name == "resolution_scan":
+        return {
+            "deadlineGroups": observation.get("deadlineGroups", [])[:3],
+            "oracle": [
+                {"title": compact_text(item.get("title"), 90), "status": item.get("status")}
+                for item in observation.get("oracle", [])[:2]
+                if isinstance(item, dict)
+            ],
+        }
+    return observation
 
 
 def _evidence_refs(payload: Any, limit: int = 6) -> list[str]:
@@ -644,11 +757,12 @@ def _run_react_tools(node: str, context: dict[str, Any]) -> list[dict[str, Any]]
         if tool is None:
             continue
         observation = tool(context)
+        compacted = _compact_react_observation(tool_name, observation)
         trace.append({
             "round": index,
             "thought": f"{node} needs structured evidence before writing claims.",
             "action": tool_name,
-            "observation": observation,
+            "observation": compacted,
             "observationHash": _json_hash(observation),
         })
     return trace
@@ -765,20 +879,18 @@ def _specialist_prompt(
         "evidence": evidence,
         "context": {
             "metrics": context.get("metrics"),
-            "marketCandidates": context.get("marketCandidates", [])[:8],
-            "markets": context.get("markets", [])[:5],
-            "marketGroups": context.get("marketGroups", [])[:4],
-            "trades": context.get("trades", [])[:4],
-            "oracle": context.get("oracle", [])[:4],
-            "content": context.get("content", [])[:4],
+            "marketCandidates": _compact_prompt_list(context.get("marketCandidates"), 5),
+            "marketGroups": _compact_prompt_list(context.get("marketGroups"), 3),
+            "trades": _compact_prompt_list(context.get("trades"), 2),
+            "oracle": context.get("oracle", [])[:2],
+            "content": context.get("content", [])[:2],
             "alphaSignals": context.get("alphaSignals", [])[:2],
             "whaleSignals": context.get("whaleSignals", [])[:2],
-            "suspiciousSignals": context.get("suspiciousSignals", [])[:2],
-            "searchResults": context.get("searchResults", [])[:2],
-            "specialistAgents": context.get("specialistAgents", []),
+            "searchResults": context.get("searchResults", [])[:1],
+            "specialistAgents": _compact_agents_for_prompt(context.get("specialistAgents"), 4),
             "quantForecaster": _compact_quant_for_prompt(context.get("quantForecaster") or {}),
             "relatedMarkets": _compact_related_for_prompt(context.get("relatedMarkets") or {}),
-            "forecastMemory": context.get("forecastMemory", [])[:6] if isinstance(context.get("forecastMemory"), list) else [],
+            "forecastMemory": _compact_memory_for_prompt(context.get("forecastMemory"), 3),
             "reactToolTrace": react_trace or [],
         },
         "requiredSchema": {
@@ -818,14 +930,13 @@ Write like a prediction-market analyst, not a dashboard narrator.
             "metrics": context.get("metrics"),
             "quantForecaster": _compact_quant_for_prompt(context.get("quantForecaster") or {}),
             "relatedMarkets": _compact_related_for_prompt(context.get("relatedMarkets") or {}),
-            "marketCandidates": context.get("marketCandidates", [])[:10],
-            "markets": context.get("markets", [])[:6],
-            "marketGroups": context.get("marketGroups", [])[:5],
-            "trades": context.get("trades", [])[:4],
-            "oracle": context.get("oracle", [])[:4],
-            "content": context.get("content", [])[:4],
-            "searchResults": context.get("searchResults", [])[:2],
-            "forecastMemory": context.get("forecastMemory", [])[:6] if isinstance(context.get("forecastMemory"), list) else [],
+            "marketCandidates": _compact_prompt_list(context.get("marketCandidates"), 6),
+            "marketGroups": _compact_prompt_list(context.get("marketGroups"), 3),
+            "trades": _compact_prompt_list(context.get("trades"), 2),
+            "oracle": context.get("oracle", [])[:2],
+            "content": context.get("content", [])[:2],
+            "searchResults": context.get("searchResults", [])[:1],
+            "forecastMemory": _compact_memory_for_prompt(context.get("forecastMemory"), 3),
         },
         "requiredSchema": {
             "brief": "one or two concise English sentences. Must name at least one market and include a price/probability or spread. Avoid generic category/breadth wording.",
