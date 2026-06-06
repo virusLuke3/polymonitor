@@ -97,7 +97,7 @@ def _get_markets(ctx: dict, market_ids: Iterable[Any]) -> Dict[int, Dict[str, An
     try:
         rows = ctx["query_all"](
             f"""
-            SELECT id, title, slug, category, end_date, active
+            SELECT id, title, slug, category, end_date
             FROM markets
             WHERE id IN ({placeholders})
             """,
