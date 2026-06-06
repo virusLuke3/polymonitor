@@ -68,20 +68,9 @@ class FoodRetailBasketWatcher:
         return _redis_key(self.redis_prefix, self.namespace(), self.cache_key())
 
     def _http_text_get(self, url: str, *, timeout: int = 15, headers: Dict[str, str] | None = None) -> str:
-        request_timeout = max(20, int(timeout or 15))
-        last_error: Exception | None = None
-        for attempt in range(2):
-            try:
-                response = self.requests.get(url, timeout=request_timeout, headers=headers)
-                response.raise_for_status()
-                return response.text
-            except requests.RequestException as exc:
-                last_error = exc
-                if attempt == 0:
-                    time.sleep(0.8)
-                    continue
-                raise
-        raise last_error or RuntimeError(f"failed to fetch {url}")
+        response = self.requests.get(url, timeout=min(12, int(timeout or 12)), headers=headers)
+        response.raise_for_status()
+        return response.text
 
     def context(self) -> Dict[str, Any]:
         return {
