@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import os
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
@@ -140,6 +141,9 @@ def _action_for(entry: Dict[str, Any]) -> Dict[str, str]:
 
 def _related_news(ctx: dict, market_id: Optional[int]) -> list[Dict[str, Any]]:
     if market_id is None:
+        return []
+    enabled = str(os.environ.get("POLYDATA_SIGNAL_RELATED_NEWS_ENABLED", "0")).strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
         return []
     try:
         payload = ctx["get_related_content_by_market_id"](market_id, limit=2)
