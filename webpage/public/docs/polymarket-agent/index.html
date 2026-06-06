@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Polymarket Agent - polyData Documentation</title>
-    <meta name="description" content="Architecture, runtime flow, inputs, and outputs for the polyData Polymarket Agent and Forecast Intelligence Graph." />
+    <meta name="description" content="Architecture, workflow, inputs, outputs, debate nodes, calibration, and resolution memory for the polyData Polymarket Agent." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/docs-page.css?v=20260606-polymarket-agent" />
+    <link rel="stylesheet" href="/docs-page.css?v=20260606-polymarket-agent-v2" />
   </head>
   <body>
     <div class="docs-shell">
@@ -79,188 +79,262 @@
         <main class="docs-content">
           <div class="docs-kicker">Panels</div>
           <h1>Polymarket Agent</h1>
-          <p>The Polymarket Agent is polyData's market-wide forecasting analyst. It turns active markets, fill tape, oracle events, related-market structure, news, and historical forecast memory into auditable AI panels for the dashboard.</p>
+          <p>The Polymarket Agent is not a room full of LLM personas chatting with each other. It is a structured forecasting workflow: deterministic evidence first, a small number of specialist agents second, limited debate and critique third, then calibration, panel adaptation, snapshot storage, and resolution memory.</p>
 
           <figure class="docs-figure">
             <div class="docs-figure-frame">
-              <img src="/docs-assets/images/polymarket-agent-architecture.svg" alt="Diagram of the Polymarket Agent LangGraph supervisor architecture" />
+              <img src="/docs-assets/images/polymarket-agent-architecture.svg" alt="Diagram of the Polymarket Agent Forecast Intelligence Graph" />
             </div>
-            <figcaption>The Forecast Intelligence Graph coordinates deterministic evidence builders, specialist agents, calibration, memory, and a final panel writer.</figcaption>
+            <figcaption>The target Forecast Intelligence Graph keeps state structured and auditable: evidence, specialist reports, debate, calibration, panel output, and resolution feedback are separate layers.</figcaption>
           </figure>
 
-          <h2 id="overview">What It Produces</h2>
-          <p>The agent powers the three market-wide AI panels on the dashboard. They share the same architecture and seed payload, but use different lenses so each panel emphasizes a different analyst job.</p>
+          <h2 id="core-judgment">Core Judgment</h2>
+          <p>Prediction-market intelligence should optimize for evidence quality, calibration, and post-resolution learning. More agents only help when they own different evidence surfaces or decision checks. A 20-persona or 50-persona swarm would add cost and drift without making the final probability more auditable.</p>
+          <ul>
+            <li><strong>Structured state beats long conversation.</strong> Every node writes compact JSON with input hashes, evidence references, model usage, latency, and errors.</li>
+            <li><strong>Specialists must be evidence-bounded.</strong> Resolution, microstructure, catalyst, related-market, and quant nodes should not invent data outside their input packet.</li>
+            <li><strong>Debate should be small and explicit.</strong> Bull and bear agents run only after evidence exists, and their job is to stress one probability read rather than chat freely.</li>
+            <li><strong>Calibration is a first-class output.</strong> The system should compare market-implied probability, agent probability, historical Brier score, category calibration, and data quality.</li>
+            <li><strong>Resolution closes the loop.</strong> Polymarket markets eventually resolve, so every forecast can become memory: what evidence worked, what was stale, and what fooled the system.</li>
+          </ul>
+
+          <h2 id="target-workflow">Target Workflow</h2>
+          <pre class="docs-code"><code>Market Trigger
+  -> Evidence Builder
+  -> Parallel Specialist Agents
+  -> Debate / Critique
+  -> Calibration Aggregator
+  -> Panel Adapter
+  -> Snapshot Store
+  -> Resolution Memory</code></pre>
+          <p>This graph is intentionally closer to an investment research workflow than to a generic role-play framework. It borrows the useful parts of financial multi-agent systems: analyst specialization, bull/bear review, risk control, structured reports, and reinforcement from realized outcomes.</p>
+
+          <h2 id="node-roles">Agent Roles</h2>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>Node</th>
+                  <th>Type</th>
+                  <th>Responsibility</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Supervisor</strong></td>
+                  <td>State machine</td>
+                  <td>Routes the graph, enforces budget, retries failed nodes, records events, and never writes the forecast conclusion itself.</td>
+                </tr>
+                <tr>
+                  <td><strong>Evidence Builder</strong></td>
+                  <td>Deterministic code</td>
+                  <td>Loads Polymarket prices, liquidity, volume, order book snapshots, trades, related markets, oracle text, resolution criteria, news, and search context.</td>
+                </tr>
+                <tr>
+                  <td><strong>Resolution Agent</strong></td>
+                  <td>LLM specialist</td>
+                  <td>Parses market wording, title traps, resolution criteria, official-source hierarchy, oracle state, and ambiguous settlement paths.</td>
+                </tr>
+                <tr>
+                  <td><strong>Microstructure Agent</strong></td>
+                  <td>LLM specialist</td>
+                  <td>Reads spread, fill tape, whale flow, paired YES/NO fills, price-source conflicts, liquidity gaps, and fake momentum risk.</td>
+                </tr>
+                <tr>
+                  <td><strong>Catalyst Agent</strong></td>
+                  <td>LLM specialist</td>
+                  <td>Finds official news, event timing, external data releases, social or media catalysts, and only returns claims with evidence references.</td>
+                </tr>
+                <tr>
+                  <td><strong>Related Markets Agent</strong></td>
+                  <td>Hybrid</td>
+                  <td>Links sibling markets, deadline ladders, same-event derivatives, category clusters, and adjacent-event price inconsistencies.</td>
+                </tr>
+                <tr>
+                  <td><strong>Quant Forecaster</strong></td>
+                  <td>Non-LLM</td>
+                  <td>Computes price drift, volatility, spread, fill concentration, LOB metrics, historical-similarity features, and data-quality flags.</td>
+                </tr>
+                <tr>
+                  <td><strong>Bull Agent</strong></td>
+                  <td>Debate node</td>
+                  <td>Argues why the probability should move higher using only the evidence packet and specialist reports.</td>
+                </tr>
+                <tr>
+                  <td><strong>Bear Agent</strong></td>
+                  <td>Debate node</td>
+                  <td>Argues why the probability should move lower or why the apparent signal is stale, illiquid, or resolution-contaminated.</td>
+                </tr>
+                <tr>
+                  <td><strong>Skeptic Agent</strong></td>
+                  <td>Critique node</td>
+                  <td>Finds hallucination risk, old news, low-liquidity traps, contradictory prices, and unsupported causal claims.</td>
+                </tr>
+                <tr>
+                  <td><strong>Calibration Agent</strong></td>
+                  <td>Aggregator</td>
+                  <td>Combines market-implied probability, agent probability, Brier history, category calibration, and data-quality discounts into final confidence.</td>
+                </tr>
+                <tr>
+                  <td><strong>Panel Writer</strong></td>
+                  <td>Adapter</td>
+                  <td>Does not re-reason from scratch. It converts the calibrated run into AI Insights, Special Radar, and Trend Watch views.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="panel-lenses">Three Panels, One Run</h2>
+          <p>The three dashboard panels should not be three isolated agents. They should share one <code>forecast_run_id</code>, one evidence bundle, one event log, and one calibration state. The panels are lenses over the same run.</p>
           <div class="docs-table-wrap">
             <table class="docs-table">
               <thead>
                 <tr>
                   <th>Panel</th>
                   <th>Lens</th>
-                  <th>Primary use</th>
+                  <th>What it should emphasize</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td><strong>AI Insights</strong><br /><code>overview</code></td>
-                  <td>Market-wide brief</td>
-                  <td>Find the most important live market read, the strongest probability structure, and the main caveat.</td>
+                  <td><strong>AI Insights</strong></td>
+                  <td><code>overview</code></td>
+                  <td>Market-wide read, dominant probability structure, highest-value caveat, and why the board matters now.</td>
                 </tr>
                 <tr>
-                  <td><strong>Special Radar</strong><br /><code>special</code></td>
-                  <td>Unusual-market radar</td>
-                  <td>Highlight special situations such as 50c repricing zones, conflicting prices, deadline ladders, or stale/resolution risk.</td>
+                  <td><strong>Special Radar</strong></td>
+                  <td><code>special</code></td>
+                  <td>Anomalous markets, low-liquidity moves, stale or conflicting prices, deadline ladders, and cross-market mispricing.</td>
                 </tr>
                 <tr>
-                  <td><strong>Trend Watch</strong><br /><code>trend</code></td>
-                  <td>Trend and catalyst synthesis</td>
-                  <td>Connect active markets to broader narrative clusters, related-market spreads, catalysts, and next watch items.</td>
+                  <td><strong>Trend Watch</strong></td>
+                  <td><code>trend</code></td>
+                  <td>Category rotation, attention migration, catalyst clusters, and whether isolated event interest is becoming a broader trend.</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <h2 id="architecture">Architecture</h2>
-          <p>The runtime is a LangGraph supervisor-worker state graph. Deterministic nodes create compact evidence and quantitative structure first. Specialist workers then reason over that state, and the panel writer converts it into dashboard JSON.</p>
+          <h2 id="inputs">Structured Inputs</h2>
+          <p>The agent's job is to transform data into a calibrated market read. It should not compensate for missing data by writing more prose.</p>
           <div class="docs-table-wrap">
             <table class="docs-table">
               <thead>
                 <tr>
-                  <th>Layer</th>
-                  <th>Node</th>
-                  <th>Responsibility</th>
+                  <th>Input surface</th>
+                  <th>Examples</th>
+                  <th>Used by</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td>Supervisor</td>
-                  <td><code>langgraph-supervisor-stategraph</code></td>
-                  <td>Schedules the node graph, preserves shared state, records events, and routes the run to the final writer.</td>
+                  <td>Price and liquidity</td>
+                  <td><code>latestPrice</code>, <code>price24hAgo</code>, volume, trade count, bid/ask, LOB spread</td>
+                  <td>Evidence Builder, Microstructure, Quant Forecaster, Calibration</td>
                 </tr>
                 <tr>
-                  <td>Evidence</td>
-                  <td><code>evidence_builder</code></td>
-                  <td>Compresses source metrics, top market, category concentration, and input hashes into a deterministic evidence packet.</td>
+                  <td>Fill tape</td>
+                  <td><code>topMarketFillTape</code>, fill VWAP, recent fill drift, paired-fill ratio, price-source conflicts</td>
+                  <td>Microstructure, Quant Forecaster, Skeptic</td>
                 </tr>
                 <tr>
-                  <td>Structure</td>
-                  <td><code>related_markets</code></td>
-                  <td>Builds deadline ladders, related-market spreads, probability-sum warnings, and arbitrage-style stress scores.</td>
+                  <td>Resolution context</td>
+                  <td>Market title, rules, end date, oracle events, official source hierarchy, settlement state</td>
+                  <td>Resolution Agent, Bear Agent, Skeptic</td>
                 </tr>
                 <tr>
-                  <td>Quant</td>
-                  <td><code>quant_forecaster</code></td>
-                  <td>Computes top flow markets, repricing zones, price drift, volatility, LOB spread, fill-tape microstructure, and price-source conflicts.</td>
+                  <td>External catalysts</td>
+                  <td>News, official releases, match feeds, government calendars, social/media trend signals</td>
+                  <td>Catalyst Agent, Bull Agent, Panel Writer</td>
                 </tr>
                 <tr>
-                  <td>Workers</td>
-                  <td><code>microstructure</code>, <code>catalyst</code>, <code>resolution</code></td>
-                  <td>Separate agents inspect trading structure, external catalysts, and resolution/oracle risk with ReAct-style tool observations.</td>
+                  <td>Related markets</td>
+                  <td>Same-event children, handicap markets, deadline ladders, adjacent category markets</td>
+                  <td>Related Markets Agent, Quant Forecaster, Calibration</td>
                 </tr>
                 <tr>
-                  <td>Discipline</td>
-                  <td><code>calibration_agent</code>, <code>skeptic</code></td>
-                  <td>Discounts weak evidence, challenges generic claims, and forces the output to stay anchored to named markets and probabilities.</td>
-                </tr>
-                <tr>
-                  <td>Memory</td>
-                  <td><code>reflexion_memory</code></td>
-                  <td>Stores reusable lessons such as price-drift episodes, related-market stress, and fill-tape conflict observations.</td>
-                </tr>
-                <tr>
-                  <td>Writer</td>
-                  <td><code>panel_writer</code></td>
-                  <td>Produces the final panel schema: brief, focus, specialMarkets, themes, watchlist, evidence, and graph metadata.</td>
+                  <td>Historical memory</td>
+                  <td>Prior forecast episodes, realized resolution, price drift after prediction, Brier score, category reliability</td>
+                  <td>Calibration Agent, Resolution Memory</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <h2 id="flow">Runtime Flow</h2>
-          <ol>
-            <li>The GCP timer or manual seed command creates one shared <code>forecastRunId</code> for the configured lenses.</li>
-            <li>The seed payload loads active markets, market groups, recent trades, oracle events, content, cached signal feeds, and forecast memory.</li>
-            <li>The low-cost fill-tape enrichment reads recent flow for the top markets so the agent can distinguish live prices from stale detail rows.</li>
-            <li>The LangGraph supervisor runs deterministic evidence, related-market, quant, and memory nodes before invoking specialist workers.</li>
-            <li>Workers use compact ReAct tool traces such as <code>quant_snapshot</code>, <code>data_quality</code>, <code>catalyst_scan</code>, and <code>resolution_scan</code>.</li>
-            <li>The calibration and skeptic nodes apply data-quality discounts and force probability discipline.</li>
-            <li>The panel writer returns compact dashboard JSON, which is stored in the snapshot cache and exposed through the runtime API.</li>
-          </ol>
-
-          <h2 id="inputs">Inputs</h2>
-          <div class="docs-table-wrap">
-            <table class="docs-table">
-              <thead>
-                <tr>
-                  <th>Input</th>
-                  <th>Where it comes from</th>
-                  <th>Why it matters</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><code>markets</code></td>
-                  <td>Active market snapshot</td>
-                  <td>Provides title, category, latest price, 24h volume, trade count, end date, and candidate universe.</td>
-                </tr>
-                <tr>
-                  <td><code>marketGroups</code></td>
-                  <td>Market group snapshot</td>
-                  <td>Allows the agent to inspect outcome ladders, deadline curves, and probability-sum anomalies.</td>
-                </tr>
-                <tr>
-                  <td><code>topMarketFillTape</code></td>
-                  <td>Recent flow for top markets</td>
-                  <td>Gives fresh fill prices, VWAP, fill drift, paired-fill ratio, and price-source conflict detection without full LOB costs.</td>
-                </tr>
-                <tr>
-                  <td><code>trades</code> and <code>oracle</code></td>
-                  <td>Recent trade and oracle snapshots</td>
-                  <td>Help separate normal trading flow from resolution-adjacent or already-settled behavior.</td>
-                </tr>
-                <tr>
-                  <td><code>content</code> and signals</td>
-                  <td>News, alpha, whale, and suspicious-flow caches</td>
-                  <td>Connects market moves to catalysts while keeping claims grounded in available evidence.</td>
-                </tr>
-                <tr>
-                  <td><code>forecastMemory</code></td>
-                  <td>Snapshot store</td>
-                  <td>Feeds prior lessons, Brier score fields, and episodic memory back into the next run.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <h2 id="outputs">Outputs</h2>
-          <p>The primary output is a panel snapshot. The same run also stores quantitative diagnostics and node-level audit events so a bad or surprising panel can be traced back to the exact node and evidence packet.</p>
+          <h2 id="outputs">Structured Outputs</h2>
+          <p>Each node writes a bounded JSON object. The final panel is only one product of the run; the audit trail and calibration record are equally important.</p>
           <pre class="docs-code"><code>{
-  "status": "live",
-  "lens": "overview",
-  "brief": "...",
-  "focus": [],
-  "specialMarkets": [],
-  "themes": [],
-  "watchlist": [],
-  "evidence": [],
-  "agentGraph": {
-    "runtime": "langgraph-supervisor-stategraph",
-    "nodes": ["evidence_builder", "related_markets", "quant_forecaster", "..."],
-    "quantForecaster": {
-      "fillTapeMicrostructure": [],
-      "priceSourceConflicts": [],
-      "dataWarnings": []
-    },
-    "events": []
-  }
+  "runId": "fig-...",
+  "marketId": "1843143",
+  "node": "quant_forecaster",
+  "inputHash": "...",
+  "outputJson": {
+    "priceDriftLeaders": [],
+    "fillTapeMicrostructure": [],
+    "priceSourceConflicts": [],
+    "dataWarnings": []
+  },
+  "model": "deterministic",
+  "tokens": 0,
+  "latencyMs": 12,
+  "error": null,
+  "evidenceRefs": []
 }</code></pre>
 
-          <h2 id="quality">Quality Controls</h2>
+          <h2 id="evaluation">Evaluation Loop</h2>
+          <p>The architecture is judged by whether it improves forecasting discipline, not by whether the output sounds polished. The core metrics are calibration, discriminative power, and cost-quality.</p>
           <ul>
-            <li><strong>Price-source conflict detection:</strong> compares snapshot price, market detail price, latest fill, fill VWAP, and detail yes/no price before trusting a probability read.</li>
-            <li><strong>Data-quality discounts:</strong> labels missing <code>change24h</code>, missing LOB spread, stale fill tape, and group-volume/trade-count mismatch.</li>
-            <li><strong>Event log:</strong> records <code>run_id</code>, node, input hash, output JSON, model, token usage, latency, errors, and evidence references.</li>
-            <li><strong>Prompt caps:</strong> compact context keeps writer calls below model input limits while preserving high-signal quant evidence.</li>
-            <li><strong>Fallback safety:</strong> if the gateway, model, or budget path fails, deterministic fallback snapshots keep the dashboard available but expose status and error state.</li>
+            <li><strong>Calibration:</strong> compare forecast probabilities against eventual resolution and compute Brier score by category and market type.</li>
+            <li><strong>Discriminative power:</strong> measure whether high-confidence signals separate from low-confidence signals after resolution or price drift.</li>
+            <li><strong>Cost-quality:</strong> compare token spend and latency against improvement in calibrated output and analyst usefulness.</li>
+            <li><strong>Resolution memory:</strong> store why the system was right or wrong, then feed that lesson into the next run.</li>
+            <li><strong>Replay audit:</strong> reconstruct a run from event logs instead of relying on a long conversation transcript.</li>
+          </ul>
+
+          <h2 id="current-state">Current State</h2>
+          <p>The production system already follows part of this design. It uses LangGraph, shared lenses, deterministic evidence and quant nodes, specialist workers, calibration, skeptic checks, snapshot storage, and event logs. The next upgrades are narrower and more important than adding more personas.</p>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>Implemented</th>
+                  <th>Next iteration</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Shared <code>forecastRunId</code> across overview, special, and trend lenses.</td>
+                  <td>Add explicit Bull/Bear debate over selected high-value markets only.</td>
+                </tr>
+                <tr>
+                  <td>LangGraph supervisor runtime with event logging and ReAct-style tool traces.</td>
+                  <td>Promote event logs into the primary replay and benchmark surface.</td>
+                </tr>
+                <tr>
+                  <td>Quant forecaster with fill tape, price drift, volatility, LOB spread, related-market scores, and price-source conflicts.</td>
+                  <td>Add market state classifier: live-active, stale-summary, likely-resolved, repricing-zone, derivative, placeholder.</td>
+                </tr>
+                <tr>
+                  <td>Calibration agent and skeptic node.</td>
+                  <td>Back them with category-level Brier history and realized resolution memory.</td>
+                </tr>
+                <tr>
+                  <td>Panel writer emits AI Insights, Special Radar, and Trend Watch.</td>
+                  <td>Make the writer a pure adapter over calibrated run state, not a second reasoning pass.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="references">Design References</h2>
+          <p>This design is closer to specialized forecasting and financial-agent systems than to generic role-prompt frameworks.</p>
+          <ul>
+            <li><a href="https://tradingagents-ai.github.io/" target="_blank" rel="noopener noreferrer">TradingAgents</a>: financial workflow with analysts, bull/bear researchers, trader synthesis, risk review, and final decision control.</li>
+            <li><a href="https://deepwiki.com/TauricResearch/TradingAgents/1.1-system-architecture/" target="_blank" rel="noopener noreferrer">TradingAgents system architecture</a>: structured reports and institutional-style coordination.</li>
+            <li><a href="https://huggingface.co/papers/2407.06567" target="_blank" rel="noopener noreferrer">FinCon</a>: manager-analyst hierarchy, risk control, and verbal reinforcement for financial decision workflows.</li>
+            <li><a href="https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6280940" target="_blank" rel="noopener noreferrer">PROPHET</a>: prediction-market modeling with price time series, event text semantics, and order-book microstructure.</li>
+            <li><a href="https://www.foresightflow.org/publications/coordination-architectural-layer" target="_blank" rel="noopener noreferrer">ForesightFlow</a>: coordination layer, calibration, discriminative power, and cost-quality evaluation for forecasting agents.</li>
+            <li><a href="https://huggingface.co/papers/2406.11638" target="_blank" rel="noopener noreferrer">MASAI</a>, <a href="https://huggingface.co/papers/2409.05556" target="_blank" rel="noopener noreferrer">SciAgents</a>, and <a href="https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6499821" target="_blank" rel="noopener noreferrer">DrugAgent</a>: task-specific systems that use short trajectories, explicit responsibilities, structured inputs and outputs, and domain knowledge instead of open-ended chat.</li>
           </ul>
 
           <h2 id="apis">Runtime APIs</h2>
@@ -275,15 +349,15 @@
               <tbody>
                 <tr>
                   <td><code>/runtime/agent/market-wide-insights/&lt;lens&gt;</code></td>
-                  <td>The dashboard-ready panel snapshot for <code>overview</code>, <code>special</code>, or <code>trend</code>.</td>
+                  <td>Dashboard-ready panel snapshot for <code>overview</code>, <code>special</code>, or <code>trend</code>.</td>
                 </tr>
                 <tr>
                   <td><code>/runtime/agent/market-wide-quant/&lt;lens&gt;</code></td>
-                  <td>The latest quant snapshot, including fill-tape microstructure and price-source conflicts.</td>
+                  <td>Quant snapshot with price drift, fill-tape microstructure, related-market scores, and data-quality warnings.</td>
                 </tr>
                 <tr>
                   <td><code>/runtime/agent/market-wide-events/&lt;run_id&gt;</code></td>
-                  <td>Node-level event log for audit, debugging, latency inspection, and model-output review.</td>
+                  <td>Node-level audit log for replay, debugging, latency inspection, and model-output review.</td>
                 </tr>
               </tbody>
             </table>
@@ -292,12 +366,15 @@
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#overview">What It Produces</a>
-          <a href="#architecture">Architecture</a>
-          <a href="#flow">Runtime Flow</a>
-          <a href="#inputs">Inputs</a>
-          <a href="#outputs">Outputs</a>
-          <a href="#quality">Quality Controls</a>
+          <a class="active" href="#core-judgment">Core Judgment</a>
+          <a href="#target-workflow">Target Workflow</a>
+          <a href="#node-roles">Agent Roles</a>
+          <a href="#panel-lenses">Three Panels, One Run</a>
+          <a href="#inputs">Structured Inputs</a>
+          <a href="#outputs">Structured Outputs</a>
+          <a href="#evaluation">Evaluation Loop</a>
+          <a href="#current-state">Current State</a>
+          <a href="#references">Design References</a>
           <a href="#apis">Runtime APIs</a>
         </aside>
       </div>
