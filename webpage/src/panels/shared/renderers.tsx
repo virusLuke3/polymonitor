@@ -420,6 +420,16 @@ function cleanIntelSummary(value?: string | null) {
   return text;
 }
 
+function cleanIntelSource(value?: string | null, fallback?: string | null) {
+  const raw = String(value || fallback || 'intel').trim();
+  if (!raw) return 'intel';
+  const withoutProvider = raw
+    .replace(/^(tavily|brave search|serpapi|gdelt doc|topic search|market search)\s*:\s*/i, '')
+    .replace(/^google news\s*:\s*/i, '');
+  const parts = withoutProvider.split(':').map((part) => part.trim()).filter(Boolean);
+  return parts[parts.length - 1] || withoutProvider || raw;
+}
+
 function contentList(items: ContentItem[], emptyMessage: string, maxItems = 20) {
   if (!items.length) return emptyState(emptyMessage);
   return (
@@ -429,13 +439,14 @@ function contentList(items: ContentItem[], emptyMessage: string, maxItems = 20) 
         const tags = contentTags(item, tone);
         const priority = contentPriority(tags);
         const summary = cleanIntelSummary(item.summary);
+        const source = cleanIntelSource(item.source, item.contentType);
         return (
           <a className={`wm-intel-card ${tone} priority-${priority}`} href={item.url || '#'} target="_blank" rel="noreferrer" key={`${item.url}-${index}`}>
             <span className="wm-intel-rank">{String(index + 1).padStart(2, '0')}</span>
             <div className="wm-intel-topline">
               <div className="wm-intel-meta">
                 <span className="wm-intel-dot" aria-hidden="true" />
-                <span className="wm-news-source">{item.source || item.contentType || 'intel'}</span>
+                <span className="wm-news-source">{source}</span>
                 {tags.map((tag) => (
                   <span className={`wm-intel-tag ${tag.tone}`} key={`${item.url || item.title}-${tag.label}`}>{tag.label}</span>
                 ))}
@@ -445,10 +456,6 @@ function contentList(items: ContentItem[], emptyMessage: string, maxItems = 20) 
             {summary ? <p className="wm-intel-summary">{summary}</p> : null}
             <div className="wm-news-meta">
               <span>{formatDate(item.publishedAt || null)}</span>
-              {item.topicId ? <span>{String(item.topicId).toUpperCase()}</span> : null}
-              {item.provider ? <span>{String(item.provider).toUpperCase()}</span> : null}
-              {Number(item.sourceCount || 0) > 1 ? <span>{Number(item.sourceCount)} sources</span> : null}
-              {Number(item.relevanceScore || 0) > 0 ? <span>REL {Number(item.relevanceScore)}</span> : null}
               <b>Read source</b>
             </div>
           </a>

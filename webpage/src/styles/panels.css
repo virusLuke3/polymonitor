@@ -8840,65 +8840,6 @@ body.panel-resize-active iframe {
   gap: 8px;
 }
 
-.wm-intel-coverage-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  padding: 0 0 7px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.wm-intel-coverage-card {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  column-gap: 6px;
-  row-gap: 2px;
-  padding: 7px 8px 6px;
-  border: 1px solid rgba(135, 255, 185, 0.14);
-  border-radius: 5px;
-  background: linear-gradient(180deg, rgba(13, 26, 19, 0.76), rgba(7, 13, 10, 0.78));
-  color: var(--wm-text-dim);
-  font-family: var(--font-mono);
-  font-weight: 900;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.wm-intel-coverage-card em,
-.wm-intel-coverage-card small,
-.wm-intel-coverage-card b {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wm-intel-coverage-card em {
-  color: rgba(241, 244, 241, 0.58);
-  font-size: 8px;
-  font-style: normal;
-  letter-spacing: 0.08em;
-  line-height: 1;
-}
-
-.wm-intel-coverage-card b {
-  justify-self: end;
-  color: #7cffaa;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.wm-intel-coverage-card small {
-  grid-column: 1 / -1;
-  color: rgba(126, 220, 255, 0.78);
-  font-size: 8px;
-  line-height: 1.15;
-}
-
 .wm-intel-filter-tabs {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -8946,46 +8887,6 @@ body.panel-resize-active iframe {
   color: inherit;
   font-size: 9px;
   font-weight: 900;
-  opacity: 0.78;
-}
-
-.wm-intel-source-strip {
-  min-width: 0;
-  display: flex;
-  gap: 5px;
-  overflow: hidden;
-  padding: 0 0 7px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.wm-intel-source-strip span {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 6px;
-  border: 1px solid rgba(126, 220, 255, 0.14);
-  background: linear-gradient(180deg, rgba(15, 24, 28, 0.92), rgba(9, 12, 14, 0.9));
-  color: #7edcff;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.wm-intel-source-strip b {
-  min-width: 0;
-  overflow: hidden;
-  color: inherit;
-  font-weight: inherit;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wm-intel-source-strip em {
-  flex: 0 0 auto;
-  color: #f1f4f1;
-  font-style: normal;
   opacity: 0.78;
 }
 
