@@ -53,7 +53,7 @@ function topSources(items: ContentItem[]) {
 function providerMix(items: ContentItem[]) {
   const counts = new Map<string, number>();
   items.forEach((item) => {
-    const provider = String(item.provider || 'rss').trim().toUpperCase();
+    const provider = providerLabel(item.provider || 'rss');
     counts.set(provider, (counts.get(provider) || 0) + 1);
   });
   return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -71,6 +71,32 @@ function topicMix(items: ContentItem[]) {
 
 function sourceCoverage(items: ContentItem[]) {
   return new Set(items.map((item) => String(item.source || '').trim()).filter(Boolean)).size;
+}
+
+function providerLabel(value?: string | null) {
+  const raw = String(value || 'rss').trim().toLowerCase();
+  if (raw.includes('google-news')) return 'Google News';
+  if (raw.includes('gdelt')) return 'GDELT';
+  if (raw.includes('tavily')) return 'Tavily';
+  if (raw.includes('brave')) return 'Brave';
+  if (raw.includes('serpapi')) return 'SerpAPI';
+  if (raw.includes('rss')) return 'RSS';
+  return raw.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'RSS';
+}
+
+function topicLabel(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return raw
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b(ai|cpi|nba)\b/gi, (match) => match.toUpperCase())
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function compactMix(entries: Array<[string, number]>, formatter: (value: string) => string = (value) => value) {
+  const visible = entries.slice(0, 2).map(([label, count]) => `${formatter(label)} ${count}`);
+  const hidden = Math.max(0, entries.length - visible.length);
+  return hidden ? `${visible.join(' / ')} +${hidden}` : visible.join(' / ');
 }
 
 function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
@@ -99,22 +125,21 @@ function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
       className="wm-market-panel wm-content-feed-panel wm-related-news-panel wm-related-intel-panel"
     >
       <div className="wm-intel-coverage-row" aria-label="Related intel source coverage">
-        <span>
+        <span className="wm-intel-coverage-card">
+          <em>Sources</em>
           <b>{uniqueSources}</b>
-          sources
+          <small>{items.length} items</small>
         </span>
-        {providers.map(([provider, count]) => (
-          <span key={provider}>
-            <b>{count}</b>
-            {provider}
-          </span>
-        ))}
-        {topics.map(([topic, count]) => (
-          <span key={topic}>
-            <b>{count}</b>
-            {topic}
-          </span>
-        ))}
+        <span className="wm-intel-coverage-card">
+          <em>Mode</em>
+          <b>{providers[0]?.[0] || 'RSS'}</b>
+          <small>{compactMix(providers.slice(1)) || 'Primary feed'}</small>
+        </span>
+        <span className="wm-intel-coverage-card">
+          <em>Topics</em>
+          <b>{topicLabel(topics[0]?.[0]) || 'Market'}</b>
+          <small>{compactMix(topics.slice(1), topicLabel) || 'Focused'}</small>
+        </span>
       </div>
       <div className="wm-intel-filter-tabs" role="tablist" aria-label="Related intel content types">
         {INTEL_TABS.map((tab) => (
