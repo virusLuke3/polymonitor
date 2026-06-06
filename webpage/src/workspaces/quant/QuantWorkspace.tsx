@@ -10,7 +10,7 @@ import {
   fetchQuantFrontendPrices,
   type QuantPriceQuery,
 } from '@/services/api';
-import type { QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint } from '@/types';
+import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint } from '@/types';
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
@@ -39,13 +39,16 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function waitForRun(runId: number) {
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+async function waitForRun(runId: number, onStatus: (run: QuantBacktestRun) => void) {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
     const response = await fetchQuantBacktestRun(runId);
+    onStatus(response.item);
     if (!['queued', 'running'].includes(response.item.status)) return response.item;
-    await sleep(900);
+    await sleep(1000);
   }
-  return (await fetchQuantBacktestRun(runId)).item;
+  const response = await fetchQuantBacktestRun(runId);
+  onStatus(response.item);
+  return response.item;
 }
 
 function signalsFromTrades(result: BacktestResult): Signal[] {
@@ -92,6 +95,7 @@ export function QuantWorkspace() {
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const [marketSlug, setMarketSlug] = useState('');
   const [runId, setRunId] = useState(1);
+  const [backtestStatus, setBacktestStatus] = useState('idle');
   const [performanceSearch, setPerformanceSearch] = useState('');
   const [performanceSortKey, setPerformanceSortKey] = useState<PerformanceSortKey>('metric');
   const [performanceSortDirection, setPerformanceSortDirection] = useState<SortDirection>('asc');
@@ -133,6 +137,7 @@ export function QuantWorkspace() {
   const runBacktest = async () => {
     setLoading(true);
     setError('');
+    setBacktestStatus('submitting');
     try {
       const nextRows = await refreshQuantRows();
       if (!marketSlug.trim()) {
@@ -150,11 +155,16 @@ export function QuantWorkspace() {
         initialCapital: 100000,
         positionSize: 100,
       });
+      setRunId(created.runId);
+      setBacktestStatus(created.item.status);
       const completedRun = ['queued', 'running'].includes(created.item.status)
-        ? await waitForRun(created.runId)
+        ? await waitForRun(created.runId, (run) => setBacktestStatus(run.status))
         : created.item;
       if (completedRun.status === 'failed') {
         throw new Error(completedRun.error || 'Backtest failed');
+      }
+      if (['queued', 'running'].includes(completedRun.status)) {
+        throw new Error(`Backtest ${completedRun.status}; try refresh in a moment`);
       }
       const [metricsResult, equityResult, tradesResult] = await Promise.all([
         fetchQuantBacktestMetrics(completedRun.runId),
@@ -165,10 +175,12 @@ export function QuantWorkspace() {
       setRunId(completedRun.runId);
       setBacktestResult(result);
       setSelectedTradeId(result.trades[0]?.id ?? null);
+      setBacktestStatus(completedRun.status);
       if (!nextRows.frontendRows.length && !nextRows.blockRows.length) setError('');
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Quant API unavailable');
       setBacktestResult(buildBacktestResult(renderedPrices, priceSource, timeframe, runId + 1));
+      setBacktestStatus('failed');
     } finally {
       setLoading(false);
     }
@@ -290,6 +302,7 @@ export function QuantWorkspace() {
         <span>frontend rows {frontendRows.length}</span>
         <span>block close rows {blockRows.length}</span>
         <span>build runs {runs.length}</span>
+        <span>backtest {backtestStatus}</span>
         <span>UTC+0</span>
         <span>%</span>
         <span>log</span>

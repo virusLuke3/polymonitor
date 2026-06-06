@@ -276,7 +276,7 @@ export function fetchQuantBuildStatus(source = '', limit = 24) {
 }
 
 export function createQuantBacktestRun(payload: QuantBacktestCreatePayload) {
-  return apiPostWithTimeout<{ item: QuantBacktestRun; runId: number; status: string }>('/quant/backtest-runs', payload, 30000);
+  return apiPostWithTimeout<{ item: QuantBacktestRun; runId: number; status: string }>('/quant/backtest-runs', payload, 8000);
 }
 
 export function fetchQuantBacktestRun(runId: number) {

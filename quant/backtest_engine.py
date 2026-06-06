@@ -96,6 +96,38 @@ def create_and_execute_backtest(conn: Any, payload: dict[str, Any]) -> dict[str,
     return get_backtest_run_for_update_free(conn, run_id)
 
 
+def list_queued_backtest_run_ids(conn: Any, *, limit: int = 10) -> list[int]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT run_id
+            FROM quant.quant_backtest_runs
+            WHERE status = 'queued'
+            ORDER BY created_at ASC
+            LIMIT %s
+            """,
+            (int(limit),),
+        )
+        return [int(row["run_id"]) for row in cur.fetchall()]
+
+
+def claim_backtest_run(conn: Any, run_id: int) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE quant.quant_backtest_runs
+            SET status = 'running',
+                started_at = CASE WHEN started_at IS NULL THEN now() ELSE started_at END,
+                error = NULL
+            WHERE run_id = %s
+              AND status = 'queued'
+            RETURNING run_id
+            """,
+            (int(run_id),),
+        )
+        return cur.fetchone() is not None
+
+
 def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
     market_slug = str(payload.get("market_slug", payload.get("marketSlug", ""))).strip()
     if not market_slug:
