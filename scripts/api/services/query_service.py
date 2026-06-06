@@ -879,6 +879,77 @@ def _merge_content_payloads(primary: List[Dict[str, Any]], fallback: List[Dict[s
     return merged
 
 
+_RELATED_TAB_CONTENT_TYPES = ("video", "report", "research")
+
+
+def _fetch_content_type_candidates(ctx: dict, topic_ids: List[str], content_type: str, limit: int) -> List[Dict[str, Any]]:
+    topic_ids = [str(topic_id or "").strip() for topic_id in topic_ids if str(topic_id or "").strip()]
+    content_type = str(content_type or "").strip().lower()
+    if not topic_ids or not content_type or not _content_table_exists(ctx, "content_items"):
+        return []
+    placeholders = ",".join(["?"] * len(topic_ids))
+    return ctx["query_all"](
+        f"""
+        SELECT
+            id,
+            content_type,
+            provider,
+            source,
+            category,
+            topic_id,
+            title,
+            url,
+            published_at,
+            summary,
+            source_count,
+            relevance_score,
+            relevance_score AS link_score
+        FROM content_items
+        WHERE topic_id IN ({placeholders})
+          AND content_type = ?
+        ORDER BY CASE WHEN published_at IS NULL THEN 1 ELSE 0 END, published_at DESC, relevance_score DESC
+        LIMIT ?
+        """,
+        (*topic_ids, content_type, max(1, limit)),
+    )
+
+
+def _augment_related_content_tabs(
+    ctx: dict,
+    *,
+    market_id: int,
+    market: Dict[str, Any],
+    tags: List[str],
+    topic_ids: List[str],
+    rows: List[Dict[str, Any]],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    existing_types = {str(row.get("content_type") or "").strip().lower() for row in rows}
+    missing_types = [content_type for content_type in _RELATED_TAB_CONTENT_TYPES if content_type not in existing_types]
+    if not missing_types:
+        return rows
+    seen_urls = {str(row.get("url") or "").strip() for row in rows if str(row.get("url") or "").strip()}
+    supplemental_items: List[Dict[str, Any]] = []
+    for content_type in missing_types:
+        candidate_rows = [
+            row for row in _fetch_content_type_candidates(ctx, topic_ids, content_type, 6)
+            if str(row.get("url") or "").strip() not in seen_urls
+        ]
+        if not candidate_rows:
+            continue
+        items = _merge_content_payloads(
+            _rank_topic_candidates_for_market(candidate_rows, market, tags, 2),
+            _topic_rows_to_payloads(candidate_rows, limit=2, default_score=18),
+            limit=2,
+        )
+        supplemental_items.extend(items)
+        seen_urls.update(str(item.get("url") or "").strip() for item in items if str(item.get("url") or "").strip())
+    if not supplemental_items:
+        return rows
+    _persist_related_content(ctx, market_id=market_id, market=market, items=supplemental_items)
+    return _fetch_persisted_related_content(ctx, market_id, max(limit + len(supplemental_items) + 4, limit))
+
+
 def refresh_topic_content(ctx: dict, *, topic_ids: List[str] | None = None, limit_per_topic: int = 24) -> Dict[str, Any]:
     runtime_payload = ctx["CONTENT_RUNTIME_PROVIDER"].refresh_topics(topic_ids=topic_ids, limit_per_topic=limit_per_topic)
     stored_by_topic: Dict[str, int] = {}
@@ -905,11 +976,20 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
         category=str(market.get("category") or ""),
         tags=tags,
     )
-    rows = _fetch_persisted_related_content(ctx, market_id, limit)
+    rows = _fetch_persisted_related_content(ctx, market_id, max(limit, 24))
     if rows:
         row_topics = {str(row.get("topic_id") or "").strip() for row in rows if str(row.get("topic_id") or "").strip()}
         primary_topic = str(topic_ids[0] if topic_ids else "").strip()
         if row_topics and primary_topic and primary_topic in row_topics:
+            rows = _augment_related_content_tabs(
+                ctx,
+                market_id=market_id,
+                market=market,
+                tags=tags,
+                topic_ids=topic_ids,
+                rows=rows,
+                limit=limit,
+            )
             return {
                 "marketId": market_id,
                 "localMarketId": market_id,
@@ -935,7 +1015,16 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
     )
     if primary_items:
         _persist_related_content(ctx, market_id=market_id, market=market, items=primary_items)
-        persisted_rows = _fetch_persisted_related_content(ctx, market_id, limit)
+        persisted_rows = _fetch_persisted_related_content(ctx, market_id, max(limit, 24))
+        persisted_rows = _augment_related_content_tabs(
+            ctx,
+            market_id=market_id,
+            market=market,
+            tags=tags,
+            topic_ids=topic_ids,
+            rows=persisted_rows,
+            limit=limit,
+        )
         return {
             "marketId": market_id,
             "localMarketId": market_id,
@@ -947,7 +1036,16 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
     topic_items = _rank_topic_candidates_for_market(topic_rows, market, tags, limit)
     if topic_items:
         _persist_related_content(ctx, market_id=market_id, market=market, items=topic_items)
-        persisted_rows = _fetch_persisted_related_content(ctx, market_id, limit)
+        persisted_rows = _fetch_persisted_related_content(ctx, market_id, max(limit, 24))
+        persisted_rows = _augment_related_content_tabs(
+            ctx,
+            market_id=market_id,
+            market=market,
+            tags=tags,
+            topic_ids=topic_ids,
+            rows=persisted_rows,
+            limit=limit,
+        )
         return {
             "marketId": market_id,
             "localMarketId": market_id,

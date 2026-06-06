@@ -21,21 +21,21 @@ function explicitContentType(item: ContentItem) {
   return String(item.contentType || '').trim().toLowerCase();
 }
 
+function inferredContentType(item: ContentItem): IntelTab['id'] {
+  const explicit = explicitContentType(item);
+  if (explicit === 'video' || explicit === 'report' || explicit === 'research') return explicit;
+  const source = String(item.source || '').toLowerCase();
+  const url = String(item.url || '').toLowerCase();
+  const title = String(item.title || '').toLowerCase();
+  const haystack = `${source} ${url} ${title}`;
+  if (/youtube|youtu\.be|vimeo|twitch\.tv/.test(haystack)) return 'video';
+  if (/\.pdf($|[?#])|annual-report|whitepaper|research-report|special-report/.test(haystack)) return 'report';
+  if (/arxiv\.org|ssrn\.com|nber\.org|working paper|research paper|journal/.test(haystack)) return 'research';
+  return 'news';
+}
+
 function smartContentByType(items: ContentItem[], tab: IntelTab['id']) {
-  if (tab === 'news') return items;
-  return items.filter((item) => {
-    const explicit = explicitContentType(item);
-    if (explicit === tab) return true;
-    const source = String(item.source || '').toLowerCase();
-    const url = String(item.url || '').toLowerCase();
-    if (tab === 'video') {
-      return /youtube|youtu\.be|vimeo|twitch\.tv/.test(`${source} ${url}`);
-    }
-    if (tab === 'report') {
-      return /\.pdf($|[?#])|annual-report|whitepaper|research-report/.test(url);
-    }
-    return /arxiv\.org|ssrn\.com|nber\.org|papers\.ssrn/.test(`${source} ${url}`);
-  });
+  return items.filter((item) => inferredContentType(item) === tab);
 }
 
 function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
