@@ -354,7 +354,7 @@ a {
 }
 
 .docs-figure-frame {
-  overflow-x: auto;
+  overflow: hidden;
   border: 1px solid var(--doc-border-strong);
   border-radius: 8px;
   background: #ffffff;
@@ -364,7 +364,8 @@ a {
 .docs-figure img {
   display: block;
   width: 100%;
-  min-width: 680px;
+  min-width: 0;
+  max-width: 100%;
   height: auto;
 }
 
