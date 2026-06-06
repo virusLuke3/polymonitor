@@ -18,6 +18,894 @@
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
 }
 
+.qtv-shell {
+  min-height: 100vh;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 44px minmax(0, 1fr) 28px;
+  overflow: hidden;
+  background: #090909;
+  color: #d9d9d9;
+  font-family: var(--font-body);
+}
+
+.qtv-topbar {
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border-bottom: 1px solid #2c2c2c;
+  background: #101010;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+  padding: 0 12px;
+}
+
+.qtv-left-tools,
+.qtv-right-tools,
+.qtv-timeframes,
+.qtv-ohlc,
+.qtv-tester-actions,
+.qtv-strategy-title,
+.qtv-statusbar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.qtv-left-tools {
+  gap: 8px;
+}
+
+.qtv-right-tools {
+  gap: 8px;
+}
+
+.qtv-logo {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  border: 1px solid #2a3444;
+  border-radius: 4px;
+  background: #111827;
+  color: #f4f4f5;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  padding: 0 10px;
+  text-decoration: none;
+}
+
+.qtv-topbar button,
+.qtv-topbar select,
+.qtv-topbar input,
+.qtv-tool-tabs button,
+.qtv-subtabs button,
+.qtv-tester-head button,
+.qtv-filter-strip button {
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #c7c7c7;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  outline: none;
+}
+
+.qtv-topbar button,
+.qtv-tool-tabs button,
+.qtv-subtabs button,
+.qtv-tester-head button,
+.qtv-filter-strip button {
+  cursor: pointer;
+}
+
+.qtv-topbar button:hover,
+.qtv-tool-tabs button:hover,
+.qtv-subtabs button:hover,
+.qtv-tester-head button:hover,
+.qtv-filter-strip button:hover {
+  background: #1a1a1a;
+  color: #ffffff;
+}
+
+.qtv-timeframes {
+  gap: 1px;
+  border-left: 1px solid #2c2c2c;
+  border-right: 1px solid #2c2c2c;
+  padding: 0 8px;
+}
+
+.qtv-timeframes button {
+  min-width: 34px;
+  padding: 0 7px;
+}
+
+.qtv-timeframes button.active {
+  color: #3b82f6;
+}
+
+.qtv-symbol-search {
+  display: grid;
+  grid-template-columns: auto minmax(170px, 260px);
+  align-items: center;
+  height: 30px;
+  min-width: 220px;
+  border: 1px solid #2a3444;
+  border-radius: 4px;
+  background: #0d1117;
+}
+
+.qtv-symbol-search span {
+  border-right: 1px solid #2a3444;
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 0 8px;
+}
+
+.qtv-symbol-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #f3f4f6;
+  font-family: var(--font-mono);
+  padding: 0 8px;
+}
+
+.qtv-right-tools select {
+  min-width: 220px;
+  border-color: #2a3444;
+  background: #0d1117;
+  color: #d9d9d9;
+  padding: 0 10px;
+}
+
+.qtv-right-tools .primary {
+  border-color: #2f7df4;
+  background: #2f7df4;
+  color: #ffffff;
+  padding: 0 14px;
+}
+
+.qtv-error {
+  position: fixed;
+  z-index: 20;
+  top: 44px;
+  left: 0;
+  right: 0;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.45);
+  background: rgba(127, 29, 29, 0.86);
+  color: #fecaca;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px 12px;
+}
+
+.qtv-workspace {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(460px, 58fr) minmax(340px, 42fr);
+  overflow: hidden;
+}
+
+.qtv-chart-shell {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  overflow: hidden;
+  border-bottom: 1px solid #2c2c2c;
+  background: #0f0f0f;
+}
+
+.qtv-draw-rail {
+  display: grid;
+  grid-auto-rows: 36px;
+  align-content: start;
+  gap: 2px;
+  border-right: 1px solid #2c2c2c;
+  background: #101010;
+  padding: 10px 7px;
+}
+
+.qtv-draw-rail button {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #d4d4d8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.qtv-draw-rail button:hover {
+  border-color: #343434;
+  background: #181818;
+}
+
+.qtv-chart-stack {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 144px;
+  overflow: hidden;
+  position: relative;
+  background: #0f0f0f;
+}
+
+.qtv-chart-info {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  left: 10px;
+  right: 90px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  pointer-events: none;
+}
+
+.qtv-chart-info strong {
+  display: block;
+  color: #e5e7eb;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.qtv-chart-info span {
+  color: #a1a1aa;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.qtv-indicator-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.qtv-indicator-legend span {
+  color: #a1a1aa;
+}
+
+.qtv-indicator-legend b {
+  color: #db2777;
+  font-weight: 900;
+}
+
+.qtv-indicator-legend i {
+  color: #f59e0b;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.qtv-indicator-legend em {
+  color: #2f6df6;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.qtv-ohlc {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.qtv-ohlc b {
+  color: #00b894;
+}
+
+.qtv-main-chart,
+.qtv-rsi-chart,
+.qtv-equity-chart {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.036) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.036) 1px, transparent 1px),
+    #0f0f0f;
+  background-size: 78px 42px;
+}
+
+.qtv-grid-line {
+  stroke: rgba(255, 255, 255, 0.09);
+  stroke-width: 1;
+}
+
+.qtv-band-fill {
+  fill: url(#qtvBand);
+  opacity: 0.84;
+}
+
+.qtv-band-line {
+  fill: none;
+  stroke: #2f6df6;
+  stroke-width: 1.1;
+  filter: drop-shadow(0 0 7px rgba(47, 109, 246, 0.34));
+}
+
+.qtv-ma-line {
+  fill: none;
+  stroke: #f59e0b;
+  stroke-width: 1.25;
+}
+
+.qtv-current-line {
+  stroke: #db2777;
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.qtv-resolution-line {
+  stroke: rgba(239, 68, 68, 0.62);
+  stroke-dasharray: 7 7;
+  stroke-width: 1.2;
+}
+
+.qtv-candle line {
+  stroke-width: 1.3;
+}
+
+.qtv-candle rect {
+  stroke-width: 0.8;
+}
+
+.qtv-candle.up line,
+.qtv-candle.up rect {
+  fill: #00b894;
+  stroke: #12d6bd;
+}
+
+.qtv-candle.down line,
+.qtv-candle.down rect {
+  fill: #ff3b55;
+  stroke: #ff5d6f;
+}
+
+.qtv-candle .qtv-volume-bar {
+  stroke: 0;
+  opacity: 0.62;
+}
+
+.qtv-candle.up .qtv-volume-bar {
+  fill: #0f9ea4;
+}
+
+.qtv-candle.down .qtv-volume-bar {
+  fill: #d92d66;
+}
+
+.qtv-axis-text {
+  fill: #d4d4d8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.qtv-time-axis {
+  fill: #a1a1aa;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-anchor: middle;
+}
+
+.qtv-price-badges rect {
+  fill: #2f6df6;
+}
+
+.qtv-price-badges rect.ask {
+  fill: #db2777;
+}
+
+.qtv-price-badges text {
+  fill: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  text-anchor: middle;
+}
+
+.qtv-signal path {
+  stroke-width: 1.2;
+}
+
+.qtv-signal rect {
+  stroke-width: 1.4;
+}
+
+.qtv-signal text {
+  fill: #f8fafc;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  text-anchor: middle;
+}
+
+.qtv-signal.open path,
+.qtv-signal.open rect {
+  fill: #2563eb;
+  stroke: #60a5fa;
+}
+
+.qtv-signal.close path,
+.qtv-signal.close rect {
+  fill: #e11d48;
+  stroke: #fb7185;
+}
+
+.qtv-signal.selected rect {
+  stroke: #facc15;
+  filter: drop-shadow(0 0 15px rgba(250, 204, 21, 0.78));
+}
+
+.qtv-indicator-pane {
+  min-height: 0;
+  border-top: 1px solid #2c2c2c;
+  background: #101522;
+}
+
+.qtv-rsi-chart {
+  background: #101522;
+}
+
+.qtv-rsi-chart rect {
+  fill: rgba(47, 109, 246, 0.12);
+}
+
+.qtv-rsi-chart text {
+  fill: #d4d4d8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.qtv-rsi-line {
+  fill: none;
+  stroke: #2f6df6;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 11px rgba(47, 109, 246, 0.54));
+}
+
+.qtv-rsi-fill {
+  fill: rgba(47, 109, 246, 0.16);
+}
+
+.qtv-rsi-threshold {
+  stroke: rgba(255, 255, 255, 0.34);
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.qtv-rsi-chart g rect {
+  fill: #2f6df6;
+}
+
+.qtv-rsi-chart g text {
+  fill: #ffffff;
+  font-weight: 900;
+  text-anchor: middle;
+}
+
+.qtv-bottom-panel {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 36px 42px 34px minmax(0, 1fr);
+  overflow: hidden;
+  border-top: 1px solid #343434;
+  background: #111827;
+}
+
+.qtv-tool-tabs {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-width: 0;
+  border-bottom: 1px solid #293140;
+  background: #0e121b;
+  padding: 0 12px;
+}
+
+.qtv-tool-tabs button,
+.qtv-subtabs button {
+  position: relative;
+  align-self: stretch;
+  height: auto;
+  border-radius: 0;
+  color: #a1a1aa;
+  padding: 0;
+}
+
+.qtv-tool-tabs button.active,
+.qtv-subtabs button.active {
+  color: #3b82f6;
+}
+
+.qtv-tool-tabs button.active::after,
+.qtv-subtabs button.active::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: #3b82f6;
+}
+
+.qtv-powered {
+  margin-left: auto;
+  color: #71717a;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.qtv-tester-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 16px;
+  border-bottom: 1px solid #293140;
+  background: #111827;
+  padding: 0 12px;
+}
+
+.qtv-strategy-title,
+.qtv-tester-actions {
+  gap: 9px;
+}
+
+.qtv-strategy-title strong {
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.qtv-tester-head button,
+.qtv-filter-strip button {
+  height: 26px;
+  border-color: #293140;
+  background: #0f172a;
+  color: #a1a1aa;
+  padding: 0 9px;
+}
+
+.qtv-tester-actions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #a1a1aa;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.qtv-tester-actions input {
+  accent-color: #3b82f6;
+}
+
+.qtv-subtabs {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  min-width: 0;
+  border-bottom: 1px solid #293140;
+  background: #111827;
+  padding: 0 12px;
+}
+
+.qtv-overview {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 74px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.qtv-metrics-row {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(128px, 1fr));
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid #293140;
+  scrollbar-width: thin;
+}
+
+.qtv-metric {
+  min-width: 0;
+  border-right: 1px solid #293140;
+  background: #111827;
+  padding: 10px 12px;
+}
+
+.qtv-metric span {
+  display: block;
+  color: #a1a1aa;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.qtv-metric strong {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+
+.qtv-metric em {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.positive {
+  color: #22c55e !important;
+}
+
+.negative {
+  color: #ef4444 !important;
+}
+
+.neutral {
+  color: #e5e7eb !important;
+}
+
+.qtv-result-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  overflow: hidden;
+}
+
+.qtv-equity-wrap,
+.qtv-table-wrap,
+.qtv-properties {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-color: rgba(107, 114, 128, 0.68) #0b1220;
+  scrollbar-width: thin;
+}
+
+.qtv-equity-chart {
+  min-height: 220px;
+  background: #111827;
+}
+
+.qtv-equity-chart line {
+  stroke: rgba(255, 255, 255, 0.08);
+}
+
+.qtv-equity-fill {
+  fill: rgba(20, 184, 166, 0.2);
+}
+
+.qtv-equity-line {
+  fill: none;
+  stroke: #14b8a6;
+  stroke-width: 2;
+}
+
+.qtv-drawdown-fill {
+  fill: rgba(124, 58, 237, 0.42);
+}
+
+.qtv-drawdown-line {
+  fill: none;
+  stroke: #7c3aed;
+  stroke-width: 1.3;
+}
+
+.qtv-mini-table {
+  border-left: 1px solid #293140;
+  background: #0f172a;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+.qtv-mini-table strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.qtv-mini-table div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  border-bottom: 1px solid rgba(41, 49, 64, 0.78);
+  padding: 7px 0;
+}
+
+.qtv-mini-table span,
+.qtv-mini-table b {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.qtv-mini-table span {
+  min-width: 0;
+  color: #a1a1aa;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-mini-table b {
+  color: #e5e7eb;
+  font-weight: 900;
+}
+
+.qtv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.qtv-table th,
+.qtv-table td {
+  border-bottom: 1px solid #293140;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.qtv-table th {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  background: #111827;
+  color: #a1a1aa;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.qtv-table tr:hover,
+.qtv-table tr.selected {
+  background: #172033;
+}
+
+.qtv-filter-strip {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid #293140;
+  background: #111827;
+  padding: 8px 10px;
+}
+
+.qtv-properties {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+
+.qtv-properties section {
+  border: 1px solid #293140;
+  border-radius: 4px;
+  background: #111827;
+}
+
+.qtv-properties h3 {
+  margin: 0;
+  border-bottom: 1px solid #293140;
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 10px;
+}
+
+.qtv-properties div {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 8px;
+  border-bottom: 1px solid rgba(41, 49, 64, 0.78);
+  padding: 8px 10px;
+}
+
+.qtv-properties span {
+  color: #71717a;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.qtv-properties strong {
+  min-width: 0;
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.qtv-statusbar {
+  justify-content: flex-end;
+  gap: 14px;
+  border-top: 1px solid #2c2c2c;
+  background: #101010;
+  color: #a1a1aa;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 12px;
+}
+
+@media (max-width: 1180px) {
+  .qtv-shell {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
+  .qtv-topbar,
+  .qtv-left-tools,
+  .qtv-right-tools {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 44px;
+  }
+
+  .qtv-workspace {
+    grid-template-rows: minmax(520px, 56vh) minmax(420px, 1fr);
+  }
+
+  .qtv-result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qtv-mini-table {
+    border-left: 0;
+    border-top: 1px solid #293140;
+  }
+}
+
+@media (max-width: 760px) {
+  .qtv-chart-shell {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .qtv-draw-rail {
+    padding: 8px 4px;
+  }
+
+  .qtv-symbol-search {
+    grid-template-columns: 1fr;
+    min-width: 180px;
+  }
+
+  .qtv-symbol-search span {
+    display: none;
+  }
+
+  .qtv-metrics-row {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
+  .qtv-properties {
+    grid-template-columns: 1fr;
+  }
+}
+
 .qb-shell {
   min-height: 100vh;
   display: flex;
