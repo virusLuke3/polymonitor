@@ -949,6 +949,8 @@ def _augment_related_content_tabs(
             _topic_rows_to_payloads(candidate_rows, limit=2, default_score=18),
             limit=2,
         )
+        for item in items:
+            item["relevanceScore"] = max(64, int(item.get("relevanceScore") or 0))
         supplemental_items.extend(items)
         seen_urls.update(str(item.get("url") or "").strip() for item in items if str(item.get("url") or "").strip())
     if not supplemental_items:
