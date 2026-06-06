@@ -20,6 +20,7 @@ LOCAL_COLLECTOR_SERVICES=(
   "polydata-market-workspace-serving.service"
   "polydata-db-reverse-tunnel.service"
   "polydata-quant-backtest-runner.service"
+  "polydata-quant-price-build-runner.service"
 )
 DATA_SERVICES=(
   "polydata-market-sync.service"
@@ -30,6 +31,7 @@ DATA_SERVICES=(
   "polydata-event-market-serving.service"
   "polydata-market-workspace-serving.service"
   "polydata-quant-backtest-runner.service"
+  "polydata-quant-price-build-runner.service"
 )
 
 usage() {

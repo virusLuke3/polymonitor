@@ -56,6 +56,11 @@ disables local collector units on GCP.
 - `polydata-event-market-serving.service`
 - `polydata-db-reverse-tunnel.service`
 - `polydata-quant-backtest-runner.service`
+- `polydata-quant-price-build-runner.service`
+
+The quant price build runner belongs on the local collector. It incrementally
+builds frontend prices-history and OrderFilled block close tables from
+September 2025 onward, then keeps active markets fresh with overlap upserts.
 
 Use the local helper:
 
