@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Platform Overview - polyData Documentation</title>
-    <meta name="description" content="polyData platform architecture overview." />
+    <meta name="description" content="polyData platform architecture, data plane, runtime plane, and operator workflows." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/docs-page.css" />
+    <link rel="stylesheet" href="/docs-page.css?v=20260606-platform-overview" />
   </head>
   <body>
     <div class="docs-shell">
@@ -77,13 +77,111 @@
         <main class="docs-content">
           <div class="docs-kicker">Platform & Features</div>
           <h1>Platform Overview</h1>
-          <h2 id="runtime-shape">Runtime shape</h2>
-          <p>The workspace combines Python collectors, PostgreSQL market/oracle serving tables, ClickHouse high-volume trade storage, Redis runtime cache, SQLite snapshot fallback, a Flask API, and a Vite/Preact dashboard.</p>
+          <p>polyData Monitor is a Polymarket intelligence platform built around one idea: a market should be inspected as a living system, not as a single price chart. The platform joins market identity, order-book state, chain-level fills, oracle resolution, external context, and AI summaries into a single operational surface.</p>
+          <p>The product is designed for researchers, traders, builders, and operators who need to answer three questions quickly: what is the market, what is happening inside it, and what could change its resolution or liquidity profile.</p>
+
+          <h2 id="platform-shape">Platform shape</h2>
+          <p>The workspace combines Python collectors, PostgreSQL market and oracle serving tables, ClickHouse high-volume trade storage, Redis runtime cache, SQLite snapshot fallback, a Flask API, and a Vite/Preact dashboard. Each layer is allowed to fail independently so the interface can show cached, stale, empty, or degraded states instead of silently hiding missing data.</p>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>Layer</th>
+                  <th>Purpose</th>
+                  <th>Primary assets</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Data collection</strong></td>
+                  <td>Discovers markets, hydrates token identity, scans chain events, and refreshes external feeds.</td>
+                  <td>Gamma, CLOB, Polygon RPC, UMA oracle logs, RSS/news, finance, weather, sports, crypto feeds.</td>
+                </tr>
+                <tr>
+                  <td><strong>Storage</strong></td>
+                  <td>Separates canonical market metadata from high-volume fill history and runtime snapshots.</td>
+                  <td>PostgreSQL, ClickHouse, Redis, SQLite fallback snapshots.</td>
+                </tr>
+                <tr>
+                  <td><strong>Serving API</strong></td>
+                  <td>Normalizes backend state into dashboard-ready endpoints with clear status and cache metadata.</td>
+                  <td>Flask services under <code>/wm-api/</code>, panel registry routes, market workspace APIs.</td>
+                </tr>
+                <tr>
+                  <td><strong>Interface</strong></td>
+                  <td>Presents markets through panels, map/context surfaces, lifecycle state, search, and operator workflows.</td>
+                  <td>Vite/Preact frontend, docs pages, public static deployment.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="data-plane">Data plane</h2>
+          <p>The data plane starts with market identity. polyData collects Gamma events and markets, resolves CLOB slugs and token ids, and supplements missed markets from on-chain exchange registry events. This gives each market a stable identity made from question text, slug, condition id, outcome tokens, event context, and series context when available.</p>
+          <p>The chain index then adds execution and resolution truth. OrderFilled rows capture maker/taker fill activity, token flow, price, size, and fees. Oracle rows capture request, proposal, dispute, settlement, transaction hashes, block numbers, proposed prices, settled prices, and matching metadata.</p>
+
+          <h2 id="runtime-plane">Runtime plane</h2>
+          <p>The runtime plane is optimized for repeated dashboard reads. Expensive sync and enrichment work runs outside the browser. The frontend reads normalized endpoints through <code>/wm-api/</code>, which lets Nginx route browser requests to the active API service without exposing private hosts or deployment details.</p>
+          <p>Runtime responses should carry enough status for the UI to be honest: fresh when a watcher is current, cached when a recent snapshot is still usable, stale when the system is behind, empty when no data exists, and degraded when an upstream source or local worker is unavailable.</p>
+
+          <h2 id="analysis-plane">Analysis plane</h2>
+          <p>The analysis plane connects market movement to causes and risks. It combines price history, best bid/ask, order-book depth, OrderFilled flow, oracle status, external content, macro context, and generated summaries. The goal is not to replace analyst judgment; it is to compress the first pass so an analyst can decide what deserves deeper review.</p>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>Signal family</th>
+                  <th>What it explains</th>
+                  <th>Typical panels</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Market state</strong></td>
+                  <td>Whether a market is discoverable, tradeable, active, closing, in oracle review, settled, or archived.</td>
+                  <td>Market workspace, lifecycle view, active market scanners.</td>
+                </tr>
+                <tr>
+                  <td><strong>Trading flow</strong></td>
+                  <td>Where liquidity, volume, maker/taker activity, and unusual fill patterns are forming.</td>
+                  <td>OrderFilled analytics, signal intelligence, liquidity panels.</td>
+                </tr>
+                <tr>
+                  <td><strong>Resolution risk</strong></td>
+                  <td>Whether oracle state, proposal status, disputes, or settlement timing could affect final outcome.</td>
+                  <td>Oracle watch, settlement monitor, matched UMA event panels.</td>
+                </tr>
+                <tr>
+                  <td><strong>External context</strong></td>
+                  <td>Which news, macro, sports, weather, finance, or crypto catalysts may explain a move.</td>
+                  <td>News panels, macro panels, finance and crypto context panels.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="panel-surface">Panel surface</h2>
+          <p>The dashboard currently registers 68 panels. Panels are small modules with explicit metadata, fetch behavior, rendering logic, and degraded-state handling. This makes the interface extensible: a new data source can be added as a panel without rewriting the whole market workspace.</p>
+          <p>Panel groups cover market discovery, market workspace context, chain flow, oracle resolution, AI summaries, finance context, crypto context, macro context, weather, sports, and time-aware tools. The panel system is intentionally modular because Polymarket questions cross many domains.</p>
+
+          <h2 id="operator-workflows">Operator workflows</h2>
+          <p>polyData is built around workflows rather than isolated charts. A typical workflow starts from market discovery, opens a market workspace, checks price and liquidity, inspects OrderFilled activity, verifies oracle state, reviews external catalysts, then saves or shares the resulting context.</p>
+          <p>For live monitoring, the priority is fast triage: identify markets with active movement, verify whether the movement is real liquidity or thin-book noise, check whether resolution risk is nearby, and decide whether the market needs manual review.</p>
+
+          <h2 id="reliability-model">Reliability model</h2>
+          <p>The platform assumes upstream data can be partial, delayed, or inconsistent. Gamma and CLOB are useful but not complete historical truth; Polygon logs are authoritative but require identity matching; oracle events are precise but sometimes need adapter and ancillary-data decoding. The serving layer therefore records provenance, cache status, and matching confidence where possible.</p>
+          <p>This reliability model is visible in the product: panels should show what source they used, whether data is fresh or cached, and what part of the lifecycle is currently known. The result is a system that can be used during live market movement without pretending every upstream dependency is perfect.</p>
         </main>
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#runtime-shape">Runtime shape</a>
+          <a class="active" href="#platform-shape">Platform shape</a>
+          <a href="#data-plane">Data plane</a>
+          <a href="#runtime-plane">Runtime plane</a>
+          <a href="#analysis-plane">Analysis plane</a>
+          <a href="#panel-surface">Panel surface</a>
+          <a href="#operator-workflows">Operator workflows</a>
+          <a href="#reliability-model">Reliability model</a>
         </aside>
       </div>
     </div>
