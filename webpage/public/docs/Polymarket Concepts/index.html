@@ -77,6 +77,13 @@
         <main class="docs-content">
           <div class="docs-kicker">Polymarket Concepts</div>
           <h1>Polymarket Concepts</h1>
+          <h2 id="lifecycle-overview">Lifecycle Overview</h2>
+          <figure class="docs-figure">
+            <div class="docs-figure-frame">
+              <img src="/docs-assets/images/paperbanana/polymarket-market-lifecycle-overview.webp" alt="Polymarket market lifecycle overview with Market, OrderFilled, and Oracle lanes" loading="lazy" width="1603" height="523" />
+            </div>
+            <figcaption>Polymarket market lifecycle in polyData Monitor: market identity, OrderFilled trading activity, and oracle resolution state.</figcaption>
+          </figure>
           <h2 id="market">Market</h2>
           <p>Polymarket has five concepts that are easy to confuse: market, event, series, slug, and token. A token is the lowest-level settleable asset. A market is the tradable question. An event organizes one or more related markets. A series is a broader collection that can group events across seasons, recurring themes, elections, tournaments, or long-running topics. A slug is a human-readable lookup key used in URLs and APIs.</p>
           <p>A market is the smallest tradable unit. In the common binary case, it asks one concrete Yes/No question and has two outcome tokens. An event is the page-level container users often see in the Polymarket frontend. A slug is not a chain id and it is not the asset a wallet holds. The token is the actual result asset.</p>
@@ -124,7 +131,8 @@ OrderFilled rows:
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#market">Market</a>
+          <a class="active" href="#lifecycle-overview">Lifecycle Overview</a>
+          <a href="#market">Market</a>
           <a href="#orderfilled">OrderFilled</a>
           <a href="#oracle">Oracle</a>
         </aside>
