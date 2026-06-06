@@ -328,6 +328,26 @@ a {
   margin: 10px 0;
 }
 
+.docs-code {
+  max-width: 721px;
+  margin: 4px 0 32px;
+  padding: 18px 20px;
+  overflow-x: auto;
+  border: 1px solid var(--doc-border-strong);
+  border-radius: 12px;
+  background: #fbfdfc;
+  color: #2d352f;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 24px;
+  white-space: pre;
+}
+
+.docs-code code {
+  font: inherit;
+}
+
 .quick-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
