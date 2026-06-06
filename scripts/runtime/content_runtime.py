@@ -429,7 +429,11 @@ class RuntimeContentProvider:
             )
         except Exception:
             return []
-        return [replace(item, content_type="research", source=f"arXiv: {query}") for item in items]
+        return [
+            replace(item, content_type="research", source=f"arXiv: {query}")
+            for item in items
+            if self._research_item_matches_query(item=item, query=query)
+        ]
 
     def _fetch_semantic_scholar_items(self, *, query: str, category: str) -> List[RuntimeContentItem]:
         try:
@@ -464,20 +468,47 @@ class RuntimeContentProvider:
                 published_at = f"{int(row['year']):04d}-01-01T00:00:00Z"
             venue = str(row.get("venue") or "").strip()
             source_label = f"Semantic Scholar: {venue}" if venue else "Semantic Scholar"
-            items.append(
-                RuntimeContentItem(
-                    id=f"semantic-scholar:{paper_id or url or index}",
-                    content_type="research",
-                    source=source_label,
-                    category=category,
-                    title=unescape(title),
-                    url=url,
-                    published_at=published_at,
-                    summary=summary,
-                    provider="semantic-scholar",
-                )
+            item = RuntimeContentItem(
+                id=f"semantic-scholar:{paper_id or url or index}",
+                content_type="research",
+                source=source_label,
+                category=category,
+                title=unescape(title),
+                url=url,
+                published_at=published_at,
+                summary=summary,
+                provider="semantic-scholar",
             )
+            if self._research_item_matches_query(item=item, query=query):
+                items.append(item)
         return items
+
+    @staticmethod
+    def _research_item_matches_query(*, item: RuntimeContentItem, query: str) -> bool:
+        haystack = f"{item.title} {item.summary} {item.url}".lower()
+        generic = {
+            "analytics",
+            "analysis",
+            "forecasting",
+            "prediction",
+            "markets",
+            "market",
+            "performance",
+            "competitive",
+            "information",
+            "aggregation",
+            "adoption",
+            "models",
+            "model",
+        }
+        terms = [
+            token
+            for token in re.findall(r"[a-z0-9]+", str(query or "").lower())
+            if len(token) >= 3 and token not in generic
+        ]
+        if not terms:
+            terms = [token for token in re.findall(r"[a-z0-9]+", str(query or "").lower()) if len(token) >= 4]
+        return any(term in haystack for term in terms)
 
     def _rank_topic_items_with_type_mix(
         self,
