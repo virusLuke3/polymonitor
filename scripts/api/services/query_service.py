@@ -949,6 +949,18 @@ def _augment_related_content_tabs(
     rows: List[Dict[str, Any]],
     limit: int,
 ) -> List[Dict[str, Any]]:
+    primary_topic = str(topic_ids[0] if topic_ids else "").strip()
+    if primary_topic:
+        for content_type in _RELATED_TAB_CONTENT_TYPES:
+            primary_rows = _fetch_content_type_candidates(ctx, [primary_topic], content_type, 1)
+            if primary_rows:
+                rows = [
+                    row for row in rows
+                    if not (
+                        str(row.get("content_type") or "").strip().lower() == content_type
+                        and str(row.get("topic_id") or "").strip() != primary_topic
+                    )
+                ]
     existing_types = {str(row.get("content_type") or "").strip().lower() for row in rows}
     missing_types = [content_type for content_type in _RELATED_TAB_CONTENT_TYPES if content_type not in existing_types]
     if not missing_types:
