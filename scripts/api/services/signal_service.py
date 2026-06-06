@@ -87,6 +87,19 @@ def _money_text(ctx: dict, value: Any) -> str:
     return f"${parsed.quantize(Decimal('1'))}"
 
 
+def _is_near_resolved_price(ctx: dict, price: Any) -> bool:
+    parsed = ctx["_safe_decimal"](price)
+    return parsed is not None and (parsed > Decimal("0.98") or parsed < Decimal("0.02"))
+
+
+def _whale_route_key(row: Dict[str, Any]) -> Optional[tuple[str, str]]:
+    market_id = str(row.get("market_id") or row.get("marketId") or "").strip()
+    route = str(row.get("taker") or row.get("maker") or "").strip().lower()
+    if not market_id or not route:
+        return None
+    return (market_id, route)
+
+
 def _clickhouse_source_states(status: str, *, rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     states: Dict[str, Any] = {
         "clickhouse": "ok" if status == "ok" else status,
@@ -129,6 +142,12 @@ def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         ("critical_threshold_notional", "criticalThresholdNotional"),
         ("market_window_notional", "marketWindowNotional"),
         ("market_share", "marketShare"),
+        ("entry_yes_price", "entryYesPrice"),
+        ("price_after_1m", "priceAfter1m"),
+        ("price_after_5m", "priceAfter5m"),
+        ("price_after_15m", "priceAfter15m"),
+        ("edge_after_fees", "edgeAfterFees"),
+        ("edge_fee_probability", "edgeFeeProbability"),
     ):
         if row.get(source_key) is not None:
             item[target_key] = ctx["format_trade_decimal"](row.get(source_key)) if source_key != "source_mode" and source_key != "signal_type" else row.get(source_key)
@@ -137,24 +156,30 @@ def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
 
 def _format_alpha_volume_signal(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     flow = ctx["format_trade_decimal"](row.get("flow_notional"))
+    net_flow = ctx["format_trade_decimal"](row.get("net_flow_notional"))
     max_trade = ctx["format_trade_decimal"](row.get("max_trade_notional"))
     market_share = _format_percent(ctx, row.get("market_share"))
+    net_strength = _format_percent(ctx, row.get("net_direction_strength"))
     side = str(row.get("side") or "FLOW").upper()
     outcome = str(row.get("outcome") or "--").upper()
+    direction = str(row.get("direction") or ("bearish" if outcome == "NO" else "bullish")).lower()
     market_title = row.get("market_title") or "Market flow"
     window_minutes = row.get("window_minutes") or 15
     score = ctx["format_trade_decimal"](row.get("score"))
     max_trade_text = _money_text(ctx, row.get("max_trade_notional"))
+    edge = ctx["format_trade_decimal"](row.get("edge_after_fees"))
+    post_5m = ctx["format_trade_decimal"](row.get("price_after_5m"))
+    post_summary = f"; 5m edge {edge}" if edge is not None else ""
     return {
         "kind": "volume-flow",
         "severity": row.get("severity") or _severity_for_notional(ctx, row.get("flow_notional")),
-        "bias": "bearish" if outcome == "NO" or side == "SELL" else "bullish",
+        "bias": "bearish" if direction == "bearish" else "bullish",
         "sourceLabel": "FLOW+$",
         "sourceTag": "FLOW",
-        "headline": f"{window_minutes}m directional flow",
+        "headline": f"{window_minutes}m net directional flow",
         "action": {"label": "Sell" if side == "SELL" else "Buy", "outcome": "No" if outcome == "NO" else "Yes" if outcome == "YES" else outcome.title()},
         "title": f"{side} {outcome} flow {_money_text(ctx, row.get('flow_notional'))}: {market_title}",
-        "summary": f"{row.get('trade_count') or 0} fills; max fill {max_trade_text}; {market_share} of market baseline",
+        "summary": f"net {net_strength}; {row.get('trade_count') or 0} fills; max fill {max_trade_text}; {market_share} of market baseline{post_summary}",
         "timestamp": row.get("timestamp"),
         "marketId": row.get("market_id"),
         "localMarketId": row.get("market_id"),
@@ -169,11 +194,26 @@ def _format_alpha_volume_signal(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any
         "sourceMode": row.get("source_mode") or "clickhouse-volume-alpha",
         "metrics": {
             "flowNotional": flow,
+            "netFlowNotional": net_flow,
+            "bullishNotional": ctx["format_trade_decimal"](row.get("bullish_notional")),
+            "bearishNotional": ctx["format_trade_decimal"](row.get("bearish_notional")),
+            "oppositeFlowNotional": ctx["format_trade_decimal"](row.get("opposite_flow_notional")),
+            "netDirectionStrength": ctx["format_trade_decimal"](row.get("net_direction_strength")),
+            "churnRatio": ctx["format_trade_decimal"](row.get("churn_ratio")),
             "maxTradeNotional": max_trade,
             "marketBaselineNotional": ctx["format_trade_decimal"](row.get("market_baseline_notional")),
             "marketShare": ctx["format_trade_decimal"](row.get("market_share")),
+            "uniqueTraderCount": row.get("unique_trader_count"),
+            "priceHealth": ctx["format_trade_decimal"](row.get("price_health")),
+            "entryYesPrice": ctx["format_trade_decimal"](row.get("entry_yes_price")),
+            "priceAfter1m": ctx["format_trade_decimal"](row.get("price_after_1m")),
+            "priceAfter5m": post_5m,
+            "priceAfter15m": ctx["format_trade_decimal"](row.get("price_after_15m")),
+            "edgeAfterFees": edge,
+            "edgeFeeProbability": ctx["format_trade_decimal"](row.get("edge_fee_probability")),
             "tradeCount": row.get("trade_count"),
             "score": score,
+            "volumeScore": ctx["format_trade_decimal"](row.get("volume_score")),
             "thresholdFlowNotional": ctx["format_trade_decimal"](row.get("threshold_flow_notional")),
         },
     }
@@ -536,6 +576,7 @@ def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int =
     rows = _query_whale_rows(ctx, limit=max(limit * 2, limit), lookback_days=lookback_days)
     items: List[Dict[str, Any]] = []
     seen_hashes: set[str] = set()
+    seen_routes: set[tuple[str, str]] = set()
     source_modes: set[str] = set()
     for row in rows:
         tx_hash = str(row.get("tx_hash") or "")
@@ -543,6 +584,13 @@ def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int =
             continue
         if tx_hash:
             seen_hashes.add(tx_hash)
+        if _is_near_resolved_price(ctx, row.get("price")):
+            continue
+        route_key = _whale_route_key(row)
+        if route_key is not None and str(row.get("source_mode") or "") == "clickhouse-volume-whales":
+            if route_key in seen_routes:
+                continue
+            seen_routes.add(route_key)
         source_modes.add(str(row.get("source_mode") or "unknown"))
         items.append(_format_trade_item(ctx, row))
         if len(items) >= limit:

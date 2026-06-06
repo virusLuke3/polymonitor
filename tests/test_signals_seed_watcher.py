@@ -190,9 +190,23 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
                 "outcome": "YES",
                 "side": "BUY",
                 "flow_notional": "15000",
+                "net_flow_notional": "14000",
+                "bullish_notional": "15000",
+                "bearish_notional": "1000",
+                "opposite_flow_notional": "1000",
+                "net_direction_strength": "0.875",
+                "churn_ratio": "0.125",
                 "max_trade_notional": "8000",
                 "market_baseline_notional": "50000",
                 "market_share": "0.30",
+                "unique_trader_count": 6,
+                "price_health": "0.75",
+                "entry_yes_price": "0.62",
+                "price_after_1m": "0.64",
+                "price_after_5m": "0.67",
+                "price_after_15m": "0.66",
+                "edge_after_fees": "0.04",
+                "edge_fee_probability": "0.01",
                 "trade_count": 12,
                 "avg_price": "0.62",
                 "score": "88",
@@ -213,6 +227,9 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("clickhouse-volume-alpha", payload["items"][0]["sourceMode"])
         self.assertEqual("volume-flow", payload["items"][0]["kind"])
         self.assertIn("High flow market", payload["items"][0]["title"])
+        self.assertEqual("0.875", payload["items"][0]["metrics"]["netDirectionStrength"])
+        self.assertEqual("0.67", payload["items"][0]["metrics"]["priceAfter5m"])
+        self.assertEqual("0.04", payload["items"][0]["metrics"]["edgeAfterFees"])
 
     def test_whale_live_payload_uses_clickhouse_volume_rows(self):
         ctx = {
@@ -249,6 +266,67 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("clickhouse-volume-whales", payload["sourceMode"])
         self.assertEqual("10000", payload["items"][0]["notional"])
         self.assertEqual("single-trade", payload["items"][0]["signalType"])
+
+    def test_whale_live_payload_filters_near_resolved_and_dedupes_router_splits(self):
+        ctx = {
+            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)),
+            "utc_now_iso": lambda: "2026-06-06T02:00:00Z",
+            "query_all": lambda sql, params=(): [],
+            "_safe_decimal": lambda value: signal_service.Decimal(str(value)) if value is not None else None,
+            "format_trade_decimal": lambda value: str(value) if value is not None else None,
+            "format_trade_address": lambda value: value,
+            "parse_iso_datetime": lambda value: None,
+            "utc_date_days_ago": lambda days: "2026-05-30T02:00:00Z",
+        }
+        whale_rows = [
+            {
+                "market_id": 20,
+                "market_title": "Near resolved",
+                "timestamp": "2026-06-06T01:59:59Z",
+                "tx_hash": "0xnear",
+                "outcome": "YES",
+                "side": "BUY",
+                "price": "0.991",
+                "size": "25000",
+                "notional": "24775",
+                "taker": "0xrouter",
+                "severity": "critical",
+                "source_mode": "clickhouse-volume-whales",
+            },
+            {
+                "market_id": 21,
+                "market_title": "Split market",
+                "timestamp": "2026-06-06T01:59:58Z",
+                "tx_hash": "0xkeep",
+                "outcome": "YES",
+                "side": "BUY",
+                "price": "0.50",
+                "size": "20000",
+                "notional": "10000",
+                "taker": "0xrouter",
+                "severity": "critical",
+                "source_mode": "clickhouse-volume-whales",
+            },
+            {
+                "market_id": 21,
+                "market_title": "Split market",
+                "timestamp": "2026-06-06T01:59:57Z",
+                "tx_hash": "0xsplit",
+                "outcome": "YES",
+                "side": "BUY",
+                "price": "0.51",
+                "size": "12000",
+                "notional": "6120",
+                "taker": "0xrouter",
+                "severity": "critical",
+                "source_mode": "clickhouse-volume-whales",
+            },
+        ]
+        with patch.object(signal_service.clickhouse_orderfilled_service, "get_volume_whale_rows", return_value=whale_rows):
+            payload = signal_service.fetch_live_whale_trades_payload(ctx, limit=3)
+
+        self.assertEqual("ok", payload["status"])
+        self.assertEqual(["0xkeep"], [item["txHash"] for item in payload["items"]])
 
     def test_whale_bootstrap_fallback_filters_stale_trades(self):
         stale_bootstrap = {

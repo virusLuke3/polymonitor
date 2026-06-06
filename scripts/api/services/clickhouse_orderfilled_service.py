@@ -18,6 +18,10 @@ DEFAULT_TABLE = "orderfilled_fact"
 DEFAULT_WHALE_VOLUME_WINDOW_MINUTES = 60
 DEFAULT_ALPHA_VOLUME_WINDOW_MINUTES = 15
 DEFAULT_ALPHA_MARKET_BASELINE_MINUTES = 60
+DEFAULT_SIGNAL_MIN_PRICE = 0.02
+DEFAULT_SIGNAL_MAX_PRICE = 0.98
+DEFAULT_ALPHA_MIN_NET_STRENGTH = 0.55
+DEFAULT_ALPHA_EDGE_FEE_PROBABILITY = 0.01
 
 
 def _env_flag(name: str, default: bool = True) -> bool:
@@ -209,6 +213,142 @@ def _float_env(name: str, default: float, *, minimum: float = 0.0, maximum: floa
     return min(max(value, minimum), maximum)
 
 
+def _float_or_none(value: Any) -> Optional[float]:
+    try:
+        parsed = float(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed == parsed else None
+
+
+def _signal_block(row: Dict[str, Any]) -> Optional[int]:
+    for key in ("latest_block", "block_number"):
+        try:
+            block = int(row.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if block > 0:
+            return block
+    return None
+
+
+def _direction_sign(row: Dict[str, Any]) -> int:
+    direction = str(row.get("direction") or row.get("dominant_direction") or "").lower()
+    if direction == "bullish":
+        return 1
+    if direction == "bearish":
+        return -1
+    side = str(row.get("side") or "").upper()
+    outcome = str(row.get("outcome") or "").upper()
+    if (side, outcome) in {("BUY", "YES"), ("SELL", "NO")}:
+        return 1
+    if (side, outcome) in {("SELL", "YES"), ("BUY", "NO")}:
+        return -1
+    return 0
+
+
+def _entry_yes_price(row: Dict[str, Any]) -> Optional[float]:
+    raw = row.get("entry_yes_price") or row.get("yes_price")
+    parsed = _float_or_none(raw)
+    if parsed is not None:
+        return parsed
+    price = _float_or_none(row.get("price") or row.get("avg_price"))
+    if price is None:
+        return None
+    outcome = str(row.get("outcome") or "").upper()
+    return 1.0 - price if outcome == "NO" else price
+
+
+def _attach_post_signal_metrics(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    signals: List[Dict[str, Any]] = []
+    for row in rows:
+        block = _signal_block(row)
+        entry_yes = _entry_yes_price(row)
+        direction = _direction_sign(row)
+        market_id = row.get("market_id")
+        if block is None or entry_yes is None or direction == 0 or market_id is None:
+            continue
+        signals.append(
+            {
+                "market_id": int(market_id),
+                "block": block,
+                "entry_yes": entry_yes,
+                "direction": direction,
+            }
+        )
+    if not signals:
+        return rows
+
+    market_ids = sorted({signal["market_id"] for signal in signals})
+    min_block = min(signal["block"] for signal in signals)
+    max_block = max(signal["block"] for signal in signals)
+    horizon_blocks = {1: 30, 5: 150, 15: 450}
+    market_csv = ", ".join(str(value) for value in market_ids)
+    post_rows = _query_json_rows(
+        ctx,
+        f"""
+        SELECT
+            market_id,
+            block_number,
+            log_index,
+            toString(if(outcome_code = 2, 1 - price, price)) AS yes_price
+        FROM {_table_sql()}
+        WHERE market_id IN ({market_csv})
+          AND block_number >= {min_block}
+          AND block_number <= {max_block + max(horizon_blocks.values()) + 90}
+        ORDER BY market_id ASC, block_number ASC, log_index ASC
+        FORMAT JSONEachRow
+        """,
+        timeout_seconds=1.5,
+    )
+    if post_rows is None:
+        return rows
+
+    by_market: Dict[int, List[Dict[str, Any]]] = {}
+    for point in post_rows:
+        try:
+            market_id = int(point.get("market_id") or 0)
+            block = int(point.get("block_number") or 0)
+            price = float(str(point.get("yes_price")))
+        except (TypeError, ValueError):
+            continue
+        if market_id <= 0 or block <= 0:
+            continue
+        by_market.setdefault(market_id, []).append({"block": block, "yes_price": price})
+
+    fee = _float_env("POLYDATA_ALPHA_EDGE_FEE_PROBABILITY", DEFAULT_ALPHA_EDGE_FEE_PROBABILITY, maximum=0.25)
+    enhanced: List[Dict[str, Any]] = []
+    for row in rows:
+        block = _signal_block(row)
+        entry_yes = _entry_yes_price(row)
+        direction = _direction_sign(row)
+        try:
+            market_id = int(row.get("market_id") or 0)
+        except (TypeError, ValueError):
+            market_id = 0
+        updated = dict(row)
+        if block is None or entry_yes is None or direction == 0 or market_id <= 0:
+            enhanced.append(updated)
+            continue
+        points = by_market.get(market_id) or []
+        after_yes: Dict[int, Optional[float]] = {}
+        for minutes, blocks in horizon_blocks.items():
+            target = block + blocks
+            value = next((point["yes_price"] for point in points if point["block"] >= target), None)
+            after_yes[minutes] = value
+            if value is not None:
+                action_price = value if direction > 0 else 1.0 - value
+                updated[f"price_after_{minutes}m"] = f"{action_price:.10f}"
+        five_min_yes = after_yes.get(5)
+        if five_min_yes is not None:
+            edge = direction * (five_min_yes - entry_yes) - fee
+            updated["edge_after_fees"] = f"{edge:.10f}"
+        updated.setdefault("entry_yes_price", f"{entry_yes:.10f}")
+        updated["edge_fee_probability"] = f"{fee:.10f}"
+        enhanced.append(updated)
+    return enhanced
+
+
 def _attach_market_titles(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     market_ids = sorted({int(row["market_id"]) for row in rows if row.get("market_id") is not None})
     if not market_ids or "query_all" not in ctx:
@@ -230,6 +370,16 @@ def _attach_market_titles(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[st
         if market_id is not None and not row.get("market_title"):
             row["market_title"] = title_map.get(int(market_id))
     return rows
+
+
+def _non_placeholder_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    filtered: List[Dict[str, Any]] = []
+    for row in rows:
+        title = str(row.get("market_title") or "").strip().lower()
+        if title.startswith("trade indexer placeholder market"):
+            continue
+        filtered.append(row)
+    return filtered
 
 
 def _timestamp_needs_repair(value: Any) -> bool:
@@ -344,6 +494,8 @@ def get_volume_whale_rows(ctx: dict, *, limit: int = 14, window_minutes: Optiona
     min_critical = _float_env("POLYDATA_WHALE_CRITICAL_NOTIONAL", 10000.0)
     relative_share = _float_env("POLYDATA_WHALE_MARKET_SHARE_THRESHOLD", 0.10, maximum=1.0)
     relative_min = _float_env("POLYDATA_WHALE_RELATIVE_MIN_NOTIONAL", 500.0)
+    min_price = _float_env("POLYDATA_SIGNAL_MIN_PRICE", DEFAULT_SIGNAL_MIN_PRICE, maximum=0.49)
+    max_price = _float_env("POLYDATA_SIGNAL_MAX_PRICE", DEFAULT_SIGNAL_MAX_PRICE, minimum=0.51, maximum=1.0)
     notional_expr = "toFloat64(f.price) * toFloat64(f.size)"
     rows = _query_json_rows(
         ctx,
@@ -366,6 +518,7 @@ def get_volume_whale_rows(ctx: dict, *, limit: int = 14, window_minutes: Optiona
             toString(greatest({min_critical:.6f}, p999_notional)) AS critical_threshold_notional,
             toString(mv.market_window_notional) AS market_window_notional,
             toString(if(mv.market_window_notional > 0, {notional_expr} / mv.market_window_notional, 0)) AS market_share,
+            toString(if(f.outcome_code = 2, 1 - f.price, f.price)) AS entry_yes_price,
             multiIf(
                 {notional_expr} >= greatest({min_critical:.6f}, p999_notional), 'critical',
                 {notional_expr} >= greatest({min_elevated:.6f}, p995_notional), 'elevated',
@@ -385,6 +538,8 @@ def get_volume_whale_rows(ctx: dict, *, limit: int = 14, window_minutes: Optiona
         ) mv ON mv.market_id = f.market_id
         WHERE f.market_id != 0
           AND f.block_number >= max_fact_block - window_blocks
+          AND toFloat64(f.price) >= {min_price:.6f}
+          AND toFloat64(f.price) <= {max_price:.6f}
           AND (
               {notional_expr} >= greatest({min_watch:.6f}, p99_notional)
               OR (
@@ -407,7 +562,9 @@ def get_volume_whale_rows(ctx: dict, *, limit: int = 14, window_minutes: Optiona
     if rows is None:
         return None
     rows = _repair_block_timestamps(rows)
-    return _attach_market_titles(ctx, rows)[:limit]
+    rows = _attach_post_signal_metrics(ctx, rows)
+    rows = _attach_market_titles(ctx, rows)
+    return _non_placeholder_rows(rows)[:limit]
 
 
 def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[Dict[str, Any]]]:
@@ -430,6 +587,12 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
     min_single = _float_env("POLYDATA_ALPHA_MIN_SINGLE_TRADE_NOTIONAL", 2500.0)
     relative_flow = _float_env("POLYDATA_ALPHA_RELATIVE_MIN_FLOW_NOTIONAL", 500.0)
     relative_share = _float_env("POLYDATA_ALPHA_MARKET_SHARE_THRESHOLD", 0.12, maximum=1.0)
+    min_price = _float_env("POLYDATA_SIGNAL_MIN_PRICE", DEFAULT_SIGNAL_MIN_PRICE, maximum=0.49)
+    max_price = _float_env("POLYDATA_SIGNAL_MAX_PRICE", DEFAULT_SIGNAL_MAX_PRICE, minimum=0.51, maximum=1.0)
+    min_net_strength = _float_env("POLYDATA_ALPHA_MIN_NET_STRENGTH", DEFAULT_ALPHA_MIN_NET_STRENGTH, maximum=1.0)
+    price_health_expr = (
+        f"greatest(0, least(1, 1 - abs(entry_yes_price - 0.5) / greatest(0.5 - {min_price:.6f}, 0.001)))"
+    )
     rows = _query_json_rows(
         ctx,
         f"""
@@ -449,20 +612,74 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
                     FROM {_table_sql()}
                     WHERE market_id != 0
                       AND block_number >= max_fact_block - window_blocks
+                      AND toFloat64(price) >= {min_price:.6f}
+                      AND toFloat64(price) <= {max_price:.6f}
                     GROUP BY market_id, outcome_code, side_code
                 )
             ) AS p95_flow_notional
         SELECT
             f.market_id AS market_id,
-            multiIf(f.outcome_code = 1, 'YES', f.outcome_code = 2, 'NO', 'UNKNOWN') AS outcome,
-            multiIf(f.side_code = 1, 'BUY', f.side_code = 2, 'SELL', 'UNKNOWN') AS side,
+            multiIf(
+                sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2))
+                >= sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2)),
+                'bullish',
+                'bearish'
+            ) AS direction,
+            multiIf(direction = 'bullish', 'YES', direction = 'bearish', 'NO', 'UNKNOWN') AS outcome,
+            'BUY' AS side,
             count() AS trade_count,
-            toString(sum(toFloat64(f.price) * toFloat64(f.size))) AS flow_notional,
+            toString(greatest(
+                sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2)),
+                sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2))
+            )) AS flow_notional,
+            toString(abs(
+                sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2))
+                - sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2))
+            )) AS net_flow_notional,
+            toString(
+                sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2))
+            ) AS bullish_notional,
+            toString(
+                sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2))
+            ) AS bearish_notional,
+            toString(
+                least(
+                    sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2)),
+                    sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2))
+                )
+            ) AS opposite_flow_notional,
+            toString(
+                abs(
+                    sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2))
+                    - sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2))
+                )
+                / greatest(
+                    sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2))
+                    + sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2)),
+                    1
+                )
+            ) AS net_direction_strength,
+            toString(
+                1 - abs(
+                    sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2))
+                    - sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2))
+                )
+                / greatest(
+                    sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2))
+                    + sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2)),
+                    1
+                )
+            ) AS churn_ratio,
             toString(max(toFloat64(f.price) * toFloat64(f.size))) AS max_trade_notional,
             toString(sum(toFloat64(f.size))) AS flow_size,
-            toString(sum(toFloat64(f.price) * toFloat64(f.size)) / greatest(sum(toFloat64(f.size)), 1)) AS avg_price,
+            argMax(toFloat64(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS entry_yes_price,
+            toString(multiIf(direction = 'bullish', entry_yes_price, direction = 'bearish', 1 - entry_yes_price, entry_yes_price)) AS avg_price,
             toString(mv.market_baseline_notional) AS market_baseline_notional,
-            toString(if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0)) AS market_share,
+            toString(if(mv.market_baseline_notional > 0, greatest(
+                sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 1 AND f.outcome_code = 1) OR (f.side_code = 2 AND f.outcome_code = 2)),
+                sumIf(toFloat64(f.price) * toFloat64(f.size), (f.side_code = 2 AND f.outcome_code = 1) OR (f.side_code = 1 AND f.outcome_code = 2))
+            ) / mv.market_baseline_notional, 0)) AS market_share,
+            uniqExact(f.taker) AS unique_trader_count,
             max(f.block_number) AS latest_block,
             argMax(f.log_index, tuple(f.block_number, f.log_index)) AS latest_log_index,
             lower(argMax(f.tx_hash, tuple(f.block_number, f.log_index))) AS tx_hash,
@@ -472,20 +689,28 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
                 'UTC'
             ) AS timestamp,
             multiIf(
-                sum(toFloat64(f.price) * toFloat64(f.size)) >= 10000 OR max(toFloat64(f.price) * toFloat64(f.size)) >= 10000 OR if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0) >= 0.25, 'critical',
-                sum(toFloat64(f.price) * toFloat64(f.size)) >= 2500 OR max(toFloat64(f.price) * toFloat64(f.size)) >= 2500 OR if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0) >= 0.15, 'elevated',
+                toFloat64(flow_notional) >= 10000 OR max(toFloat64(f.price) * toFloat64(f.size)) >= 10000 OR toFloat64(market_share) >= 0.25, 'critical',
+                toFloat64(flow_notional) >= 2500 OR max(toFloat64(f.price) * toFloat64(f.size)) >= 2500 OR toFloat64(market_share) >= 0.15, 'elevated',
                 'watch'
             ) AS severity,
+            toString({price_health_expr}) AS price_health,
             toString(
-                least(sum(toFloat64(f.price) * toFloat64(f.size)) / 1000 * 30, 45)
-                + least(max(toFloat64(f.price) * toFloat64(f.size)) / 2500 * 20, 25)
-                + least(if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0) * 100, 20)
-                + least(count(), 10)
+                least(toFloat64(net_flow_notional) / 1000 * 35, 40)
+                + least(toFloat64(net_direction_strength) * 35, 25)
+                + least(toFloat64(market_share) * 100, 15)
+                + least({price_health_expr} * 15, 10)
+                + least(toFloat64(unique_trader_count), 10)
             ) AS score,
+            toString(
+                least(toFloat64(flow_notional) / 1000 * 30, 45)
+                + least(max(toFloat64(f.price) * toFloat64(f.size)) / 2500 * 20, 25)
+                + least(toFloat64(market_share) * 100, 20)
+                + least(count(), 10)
+            ) AS volume_score,
             toString(greatest({min_flow:.6f}, p95_flow_notional)) AS threshold_flow_notional,
             {window_minutes} AS window_minutes,
             {baseline_minutes} AS baseline_minutes,
-            'directional-flow' AS signal_type,
+            'net-directional-flow' AS signal_type,
             'clickhouse-volume-alpha' AS source_mode
         FROM {_table_sql()} f
         LEFT JOIN
@@ -498,16 +723,30 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
         ) mv ON mv.market_id = f.market_id
         WHERE f.market_id != 0
           AND f.block_number >= max_fact_block - window_blocks
-        GROUP BY f.market_id, f.outcome_code, f.side_code, mv.market_baseline_notional
+          AND toFloat64(f.price) >= {min_price:.6f}
+          AND toFloat64(f.price) <= {max_price:.6f}
+        GROUP BY f.market_id, mv.market_baseline_notional
         HAVING
-            sum(toFloat64(f.price) * toFloat64(f.size)) >= greatest({min_flow:.6f}, p95_flow_notional)
+            entry_yes_price >= {min_price:.6f}
+            AND entry_yes_price <= {max_price:.6f}
+            AND toFloat64(net_direction_strength) >= {min_net_strength:.6f}
+            AND (
+            toFloat64(flow_notional) >= greatest({min_flow:.6f}, p95_flow_notional)
             OR max(toFloat64(f.price) * toFloat64(f.size)) >= {min_single:.6f}
             OR (
-                sum(toFloat64(f.price) * toFloat64(f.size)) >= {relative_flow:.6f}
-                AND if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0) >= {relative_share:.6f}
+                toFloat64(flow_notional) >= {relative_flow:.6f}
+                AND toFloat64(market_share) >= {relative_share:.6f}
             )
-        ORDER BY toFloat64(score) DESC, toFloat64(flow_notional) DESC, latest_block DESC, latest_log_index DESC
-        LIMIT {limit * 3}
+            )
+        ORDER BY
+            toFloat64(score) DESC,
+            toFloat64(net_direction_strength) DESC,
+            toFloat64(market_share) DESC,
+            toFloat64(price_health) DESC,
+            toFloat64(unique_trader_count) DESC,
+            latest_block DESC,
+            latest_log_index DESC
+        LIMIT {limit * 6}
         FORMAT JSONEachRow
         """,
         timeout_seconds=2.5,
@@ -515,7 +754,20 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
     if rows is None:
         return None
     rows = _repair_block_timestamps(rows)
-    return _attach_market_titles(ctx, rows)[:limit]
+    rows = _attach_post_signal_metrics(ctx, rows)
+    rows.sort(
+        key=lambda row: (
+            _float_or_none(row.get("score")) or 0.0,
+            _float_or_none(row.get("net_direction_strength")) or 0.0,
+            _float_or_none(row.get("market_share")) or 0.0,
+            _float_or_none(row.get("price_health")) or 0.0,
+            _float_or_none(row.get("edge_after_fees")) or -999.0,
+            int(row.get("unique_trader_count") or 0),
+        ),
+        reverse=True,
+    )
+    rows = _attach_market_titles(ctx, rows)
+    return _non_placeholder_rows(rows)[:limit]
 
 
 def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional[List[Dict[str, Any]]]:
