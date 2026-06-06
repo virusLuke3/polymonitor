@@ -33,6 +33,7 @@ DEFAULT_ALPHA_LIMIT = 8
 DEFAULT_WHALE_LIMIT = 14
 DEFAULT_SUSPICIOUS_LIMIT = 12
 DEFAULT_DB_READ_TIMEOUT_SECONDS = 12
+DEFAULT_SIGNAL_DATA_STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 SEED_META_NAMESPACE = "seed-meta:signals"
 
 
@@ -98,6 +99,49 @@ def _record_count(payload: Dict[str, Any]) -> int:
     return len(items) if isinstance(items, list) else 0
 
 
+def _parse_item_timestamp(raw: Any) -> Optional[datetime]:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _payload_timestamp_stats(payload: Dict[str, Any], *, stale_after_seconds: int) -> Dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    timestamps: list[datetime] = []
+    for item in payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        for key in ("timestamp", "eventTime", "lastTradeAt"):
+            parsed = _parse_item_timestamp(item.get(key))
+            if parsed is not None:
+                timestamps.append(parsed.astimezone(timezone.utc))
+                break
+    if not timestamps:
+        return {
+            "maxItemTimestamp": None,
+            "oldestItemTimestamp": None,
+            "dataAgeSeconds": None,
+            "oldestDataAgeSeconds": None,
+            "staleItemCount": 0,
+            "freshItemCount": 0,
+        }
+    newest = max(timestamps)
+    oldest = min(timestamps)
+    ages = [max(0, int((now - ts).total_seconds())) for ts in timestamps]
+    stale_count = sum(1 for age in ages if age > stale_after_seconds)
+    return {
+        "maxItemTimestamp": newest.isoformat().replace("+00:00", "Z"),
+        "oldestItemTimestamp": oldest.isoformat().replace("+00:00", "Z"),
+        "dataAgeSeconds": max(0, int((now - newest).total_seconds())),
+        "oldestDataAgeSeconds": max(0, int((now - oldest).total_seconds())),
+        "staleItemCount": stale_count,
+        "freshItemCount": len(timestamps) - stale_count,
+    }
+
+
 class SignalsWatcher:
     def __init__(
         self,
@@ -129,6 +173,10 @@ class SignalsWatcher:
         if configured > 0:
             return configured
         return max(60, self.interval_seconds * 3)
+
+    def stale_after_seconds(self) -> int:
+        configured = int(os.environ.get("POLYDATA_SIGNAL_DATA_STALE_AFTER_SECONDS", "0") or 0)
+        return configured if configured > 0 else DEFAULT_SIGNAL_DATA_STALE_AFTER_SECONDS
 
     def cache_key(self) -> str:
         builder: Callable[..., str] = self.spec["cache_key_builder"]
@@ -169,11 +217,13 @@ class SignalsWatcher:
         error_summary: Optional[str] = None,
         preserve_last_success: bool = False,
         metadata: Optional[Dict[str, Any]] = None,
+        source_states: Optional[Dict[str, Any]] = None,
+        payload_status: Optional[str] = None,
     ) -> None:
         previous = self.load_seed_meta()
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and str(status or "").strip().lower() in {"ok", "degraded", "preserved", "empty"}:
+        if not preserve_last_success and str(status or "").strip().lower() in {"ok", "degraded", "empty"}:
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id=str(self.spec["panel_id"]),
@@ -185,10 +235,10 @@ class SignalsWatcher:
             last_attempt_at=attempted_at,
             last_success_at=last_success_at or attempted_at,
             record_count=record_count,
-            source_states={"database": status},
+            source_states=source_states or {"database": status},
             error_summary=error_summary,
             cache_mode="seeded",
-            payload_status=status,
+            payload_status=payload_status or status,
             metadata=metadata,
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, str(self.spec["cache_key"]), payload)
@@ -214,12 +264,14 @@ class SignalsWatcher:
             if previous:
                 preserved = {**previous, "cacheMode": "seeded", "status": previous.get("status") or "stale"}
                 self.store_payload(preserved)
+                stats = _payload_timestamp_stats(previous, stale_after_seconds=self.stale_after_seconds())
                 self.store_seed_meta(
                     status="preserved",
                     record_count=_record_count(previous),
                     error_summary=str(exc),
-                    preserve_last_success=False,
-                    metadata={"result": "preserved", "component": self.component},
+                    preserve_last_success=True,
+                    metadata={"result": "preserved", "component": self.component, **stats},
+                    payload_status=preserved.get("status") or "preserved",
                 )
                 return {"status": "preserved", "recordCount": _record_count(previous), "error": str(exc)}
             self.store_seed_meta(
@@ -235,21 +287,34 @@ class SignalsWatcher:
         if previous and record_count <= 0:
             preserved = {**previous, "cacheMode": "seeded", "status": previous.get("status") or "stale"}
             self.store_payload(preserved)
+            stats = _payload_timestamp_stats(previous, stale_after_seconds=self.stale_after_seconds())
             self.store_seed_meta(
                 status="preserved",
                 record_count=_record_count(previous),
                 error_summary=f"{self.component} returned empty payload",
-                metadata={"result": "preserved-empty", "component": self.component},
+                preserve_last_success=True,
+                metadata={"result": "preserved-empty", "component": self.component, **stats},
+                payload_status=preserved.get("status") or "preserved",
             )
             return {"status": "preserved", "recordCount": _record_count(previous), "error": "empty payload"}
 
+        stats = _payload_timestamp_stats(payload, stale_after_seconds=self.stale_after_seconds())
+        payload_status = str(payload.get("status") or "").strip().lower()
         status = "ok" if record_count > 0 else "empty"
-        self.store_payload({**payload, "status": status, "cacheMode": "seeded"})
+        if payload_status in {"degraded", "stale", "empty", "error"}:
+            status = payload_status
+        data_age = stats.get("dataAgeSeconds")
+        if record_count > 0 and isinstance(data_age, int) and data_age > self.stale_after_seconds():
+            status = "stale"
+        stored_payload = {**payload, "status": status, "cacheMode": "seeded"}
+        self.store_payload(stored_payload)
         self.store_seed_meta(
             status=status,
             record_count=record_count,
             error_summary=None if record_count else f"{self.component} payload contained no items",
-            metadata={"result": "stored", "component": self.component, "limit": self.limit},
+            metadata={"result": "stored", "component": self.component, "limit": self.limit, **stats},
+            source_states={"database": status},
+            payload_status=status,
         )
         return {"status": status, "recordCount": record_count, "component": self.component}
 

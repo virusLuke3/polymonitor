@@ -13,6 +13,7 @@ LEGACY_CORE_TARGET="polydata-core.target"
 LOCAL_COLLECTOR_SERVICES=(
   "polydata-market-sync.service"
   "polydata-trade-sync.service"
+  "polydata-block-timestamps-live.service"
   "polydata-oracle-sync.service"
   "polydata-analytics-sync.service"
   "polydata-event-market-serving.service"
@@ -22,6 +23,7 @@ LOCAL_COLLECTOR_SERVICES=(
 DATA_SERVICES=(
   "polydata-market-sync.service"
   "polydata-trade-sync.service"
+  "polydata-block-timestamps-live.service"
   "polydata-oracle-sync.service"
   "polydata-analytics-sync.service"
   "polydata-event-market-serving.service"
@@ -191,6 +193,14 @@ start_docker_dependencies() {
     docker run -d --name polydata_redis -p 6379:6379 redis:7-alpine >/dev/null
     echo "Redis container created: polydata_redis"
   fi
+
+  if docker_container_exists "polydata_clickhouse_orderfilled"; then
+    docker start polydata_clickhouse_orderfilled >/dev/null
+    echo "ClickHouse container ready: polydata_clickhouse_orderfilled"
+  else
+    echo "polydata_clickhouse_orderfilled container not found; create/configure OrderFilled ClickHouse before starting trade sync." >&2
+    exit 1
+  fi
 }
 
 stop_gcp_and_legacy_runtime() {
@@ -253,7 +263,7 @@ stop_services() {
 status_services() {
   echo "Docker containers:"
   if command -v docker >/dev/null 2>&1; then
-    for name in polydata_postgres polydata_redis; do
+    for name in polydata_postgres polydata_redis polydata_clickhouse_orderfilled; do
       docker ps --filter "name=${name}" --format '  {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
     done
   else

@@ -111,26 +111,7 @@ def ensure_orderfilled_raw_schema(conn) -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
-        conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {ORDERFILLED_SYNC_WINDOWS_TABLE} (
-                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                from_block BIGINT NOT NULL,
-                to_block BIGINT NOT NULL,
-                exchange_set VARCHAR(128) NOT NULL DEFAULT 'known_orderfilled',
-                chain_log_count BIGINT NOT NULL DEFAULT 0,
-                db_log_count BIGINT NOT NULL DEFAULT 0,
-                missing_count BIGINT NOT NULL DEFAULT 0,
-                repaired_count BIGINT NOT NULL DEFAULT 0,
-                status VARCHAR(32) NOT NULL,
-                audited_at TIMESTAMP NULL,
-                repaired_at TIMESTAMP NULL,
-                last_error LONGTEXT,
-                UNIQUE KEY uq_orderfilled_window (from_block, to_block, exchange_set),
-                KEY idx_orderfilled_window_status (status, from_block)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """
-        )
+        ensure_orderfilled_sync_windows_schema(conn)
         return
 
     conn.execute(
@@ -166,6 +147,34 @@ def ensure_orderfilled_raw_schema(conn) -> None:
     conn.execute(f"CREATE INDEX IF NOT EXISTS idx_orderfilled_raw_block_log ON {ORDERFILLED_RAW_TABLE}(block_number, log_index)")
     conn.execute(f"CREATE INDEX IF NOT EXISTS idx_orderfilled_raw_maker_block ON {ORDERFILLED_RAW_TABLE}(maker, block_number)")
     conn.execute(f"CREATE INDEX IF NOT EXISTS idx_orderfilled_raw_taker_block ON {ORDERFILLED_RAW_TABLE}(taker, block_number)")
+    ensure_orderfilled_sync_windows_schema(conn)
+
+
+def ensure_orderfilled_sync_windows_schema(conn) -> None:
+    backend = get_backend()
+    if backend == "mysql":
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {ORDERFILLED_SYNC_WINDOWS_TABLE} (
+                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                from_block BIGINT NOT NULL,
+                to_block BIGINT NOT NULL,
+                exchange_set VARCHAR(128) NOT NULL DEFAULT 'known_orderfilled',
+                chain_log_count BIGINT NOT NULL DEFAULT 0,
+                db_log_count BIGINT NOT NULL DEFAULT 0,
+                missing_count BIGINT NOT NULL DEFAULT 0,
+                repaired_count BIGINT NOT NULL DEFAULT 0,
+                status VARCHAR(32) NOT NULL,
+                audited_at TIMESTAMP NULL,
+                repaired_at TIMESTAMP NULL,
+                last_error LONGTEXT,
+                UNIQUE KEY uq_orderfilled_window (from_block, to_block, exchange_set),
+                KEY idx_orderfilled_window_status (status, from_block)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        return
+
     conn.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {ORDERFILLED_SYNC_WINDOWS_TABLE} (
@@ -290,7 +299,7 @@ def upsert_orderfilled_sync_window(
     status: str,
     last_error: Optional[str] = None,
 ) -> None:
-    ensure_orderfilled_raw_schema(conn)
+    ensure_orderfilled_sync_windows_schema(conn)
     missing_count = max(0, int(chain_log_count) - int(db_log_count))
     if get_backend() == "mysql":
         conn.execute(

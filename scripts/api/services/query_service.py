@@ -228,7 +228,14 @@ def get_recent_trades(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
     if clickhouse_rows is not None:
         return clickhouse_rows
     if clickhouse_orderfilled_service.clickhouse_orderfilled_enabled():
-        return []
+        fallback_enabled = str(os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_FALLBACK_ON_UNAVAILABLE", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not fallback_enabled:
+            raise RuntimeError("ClickHouse OrderFilled read is enabled but unavailable")
     trade_source = ctx["get_existing_trade_read_source"]()
     if trade_source is None:
         return []

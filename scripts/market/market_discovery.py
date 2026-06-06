@@ -8,6 +8,7 @@
 """
 
 import json
+import os
 import sys
 import time
 import argparse
@@ -50,6 +51,7 @@ from db import (
     get_backend,
     get_db,
     get_connection,
+    get_table_columns,
     init_schema,
     table_exists,
 )
@@ -261,6 +263,8 @@ def fetch_market_by_condition_id_from_clob(condition_id: str) -> Optional[Dict]:
     cid = _ensure_0x(condition_id)
     if not cid:
         return None
+    if str(os.environ.get("POLYDATA_MARKET_BACKFILL_SKIP_HTTP") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return None
     try:
         resp = _get_session().get(f"{CLOB_API_BASE}/markets/{cid}", timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
@@ -394,6 +398,7 @@ def _build_minimal_market_from_registry(
 ) -> Dict:
     token_ids = sorted([str(token0), str(token1)])
     cid = _ensure_0x(condition_id)
+    recovered_at = datetime.now(timezone.utc).isoformat()
     return {
         "condition_id": cid,
         "question_id": None,
@@ -405,7 +410,7 @@ def _build_minimal_market_from_registry(
         "no_token_id": token_ids[1],
         "clob_token_ids": token_ids,
         "enable_neg_risk": 1 if exchange_name == "neg_risk" else 0,
-        "created_at": None,
+        "created_at": recovered_at,
         "end_date": None,
         "category": "",
         "tags": ["onchain-registry"],
@@ -2576,46 +2581,18 @@ def upsert_market_tokens_for_conditions(conn, condition_ids: List[str]) -> int:
         for row in cur.fetchall():
             rows_by_condition[str(row[1])] = tuple(row)
 
+    columns = set(get_table_columns(conn, "market_tokens"))
+    has_raw_columns = {"raw_end_date", "raw_created_at", "raw_updated_at"}.issubset(columns)
     token_rows: List[Tuple[Any, ...]] = []
     now = datetime.now(timezone.utc)
     for market_id, condition_id, yes_token_id, no_token_id, end_date, created_at in rows_by_condition.values():
         local_id = int(market_id)
         if yes_token_id:
-            token_rows.append(
-                (
-                    -((local_id * 2) - 1),
-                    local_id,
-                    condition_id,
-                    str(yes_token_id),
-                    "YES",
-                    0,
-                    True,
-                    end_date,
-                    None,
-                    created_at,
-                    None,
-                    now,
-                    None,
-                )
-            )
+            base = (-((local_id * 2) - 1), local_id, condition_id, str(yes_token_id), "YES", 0, True, end_date, created_at, now)
+            token_rows.append(base[:8] + (None, base[8], None, base[9], None) if has_raw_columns else base)
         if no_token_id:
-            token_rows.append(
-                (
-                    -(local_id * 2),
-                    local_id,
-                    condition_id,
-                    str(no_token_id),
-                    "NO",
-                    1,
-                    True,
-                    end_date,
-                    None,
-                    created_at,
-                    None,
-                    now,
-                    None,
-                )
-            )
+            base = (-(local_id * 2), local_id, condition_id, str(no_token_id), "NO", 1, True, end_date, created_at, now)
+            token_rows.append(base[:8] + (None, base[8], None, base[9], None) if has_raw_columns else base)
 
     if not token_rows:
         return 0
@@ -2627,24 +2604,44 @@ def upsert_market_tokens_for_conditions(conn, condition_ids: List[str]) -> int:
             chunk = negative_ids[start : start + chunk_size]
             placeholders = ",".join(["?"] * len(chunk))
             cur.execute(f"DELETE FROM market_tokens WHERE id IN ({placeholders})", tuple(chunk))
-    cur.executemany(
-        """
-        INSERT INTO market_tokens (
-            id, market_id, condition_id, token_id, outcome, outcome_index, active,
-            end_date, raw_end_date, created_at, raw_created_at, updated_at, raw_updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(token_id) DO UPDATE SET
-            market_id=excluded.market_id,
-            condition_id=excluded.condition_id,
-            outcome=excluded.outcome,
-            outcome_index=excluded.outcome_index,
-            active=excluded.active,
-            end_date=COALESCE(excluded.end_date, market_tokens.end_date),
-            created_at=COALESCE(excluded.created_at, market_tokens.created_at),
-            updated_at=excluded.updated_at
-        """,
-        token_rows,
-    )
+    if has_raw_columns:
+        cur.executemany(
+            """
+            INSERT INTO market_tokens (
+                id, market_id, condition_id, token_id, outcome, outcome_index, active,
+                end_date, raw_end_date, created_at, raw_created_at, updated_at, raw_updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(token_id) DO UPDATE SET
+                market_id=excluded.market_id,
+                condition_id=excluded.condition_id,
+                outcome=excluded.outcome,
+                outcome_index=excluded.outcome_index,
+                active=excluded.active,
+                end_date=COALESCE(excluded.end_date, market_tokens.end_date),
+                created_at=COALESCE(excluded.created_at, market_tokens.created_at),
+                updated_at=excluded.updated_at
+            """,
+            token_rows,
+        )
+    else:
+        cur.executemany(
+            """
+            INSERT INTO market_tokens (
+                id, market_id, condition_id, token_id, outcome, outcome_index, active,
+                end_date, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(token_id) DO UPDATE SET
+                market_id=excluded.market_id,
+                condition_id=excluded.condition_id,
+                outcome=excluded.outcome,
+                outcome_index=excluded.outcome_index,
+                active=excluded.active,
+                end_date=COALESCE(excluded.end_date, market_tokens.end_date),
+                created_at=COALESCE(excluded.created_at, market_tokens.created_at),
+                updated_at=excluded.updated_at
+            """,
+            token_rows,
+        )
     conn.commit()
     return len(token_rows)
 

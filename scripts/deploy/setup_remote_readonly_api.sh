@@ -18,11 +18,17 @@ LOCAL_DB_SSH_HOST="${LOCAL_DB_SSH_HOST:-}"
 LOCAL_DB_FORWARD_HOST="${LOCAL_DB_FORWARD_HOST:-127.0.0.1}"
 LOCAL_DB_FORWARD_PORT="${LOCAL_DB_FORWARD_PORT:-45432}"
 REMOTE_DB_TUNNEL_PORT="${REMOTE_DB_TUNNEL_PORT:-45432}"
+LOCAL_CLICKHOUSE_FORWARD_HOST="${LOCAL_CLICKHOUSE_FORWARD_HOST:-127.0.0.1}"
+LOCAL_CLICKHOUSE_FORWARD_PORT="${LOCAL_CLICKHOUSE_FORWARD_PORT:-18123}"
+REMOTE_CLICKHOUSE_TUNNEL_PORT="${REMOTE_CLICKHOUSE_TUNNEL_PORT:-18123}"
 
 POSTGRES_DATABASE="${POSTGRES_DATABASE:-poly_data_core}"
 POSTGRES_USER="${POSTGRES_USER:-poly_user}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 POSTGRES_SEARCH_PATH="${POSTGRES_SEARCH_PATH:-core,oracle,ops,public}"
+CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-poly_orderfilled}"
+CLICKHOUSE_USER="${CLICKHOUSE_USER:-poly_user}"
+CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-PolyUserPass_007!}"
 API_PORT="${API_PORT:-18500}"
 SERVER_NAME="${SERVER_NAME:-${REMOTE_HOST}}"
 PYTHON_BIN="${PYTHON_BIN:-${REMOTE_REPO_ROOT}/.venv/bin/python}"
@@ -72,6 +78,12 @@ POLYDATA_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POLYDATA_POSTGRES_DATABASE=${POSTGRES_DATABASE}
 POLYDATA_POSTGRES_SEARCH_PATH=${POSTGRES_SEARCH_PATH}
 
+POLYDATA_ORDERFILLED_CLICKHOUSE_READ_ENABLED=1
+POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL=http://127.0.0.1:${REMOTE_CLICKHOUSE_TUNNEL_PORT}
+POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
+POLYDATA_ORDERFILLED_CLICKHOUSE_USER=${CLICKHOUSE_USER}
+CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+
 POLYDATA_PYTHON_BIN=${PYTHON_BIN}
 POLYDATA_API_READONLY=1
 POLYDATA_API_HOST=127.0.0.1
@@ -100,7 +112,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ssh -N -L ${REMOTE_DB_TUNNEL_PORT}:${LOCAL_DB_FORWARD_HOST}:${LOCAL_DB_FORWARD_PORT} ${LOCAL_DB_SSH_USER}@${LOCAL_DB_SSH_HOST} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes
+ExecStart=/usr/bin/ssh -N -L ${REMOTE_DB_TUNNEL_PORT}:${LOCAL_DB_FORWARD_HOST}:${LOCAL_DB_FORWARD_PORT} -L ${REMOTE_CLICKHOUSE_TUNNEL_PORT}:${LOCAL_CLICKHOUSE_FORWARD_HOST}:${LOCAL_CLICKHOUSE_FORWARD_PORT} ${LOCAL_DB_SSH_USER}@${LOCAL_DB_SSH_HOST} -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes
 Restart=always
 RestartSec=5
 
@@ -287,6 +299,23 @@ with conn.cursor() as cur:
 conn.close()
 PY"
 
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "set -a; . ~/.config/polydata/polydata.env; set +a; python3 - <<'PY'
+import os
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+base = os.environ['POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL'].rstrip('/')
+params = urlencode({
+    'database': os.environ.get('POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE', 'poly_orderfilled'),
+    'user': os.environ.get('POLYDATA_ORDERFILLED_CLICKHOUSE_USER', 'poly_user'),
+    'password': os.environ.get('CLICKHOUSE_PASSWORD', ''),
+})
+separator = '&' if '?' in base else '?'
+req = Request(f'{base}{separator}{params}', data=b'SELECT 1 FORMAT JSONEachRow', method='POST')
+with urlopen(req, timeout=5) as resp:
+    print('clickhouse-ok', resp.read().decode().strip())
+PY"
+
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "curl -fsS http://127.0.0.1:${API_PORT}/health && echo && curl -fsS http://127.0.0.1:${API_PORT}/system/health >/dev/null && echo api-ok"
 
 echo "[5/7] Verifying Nginx proxy ..."
@@ -298,4 +327,4 @@ ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "for unit in polydata-marke
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "sudo systemctl --no-pager --full status nginx redis-server | sed -n '1,160p'"
 
 echo "[7/7] Done."
-echo "Remote PostgreSQL API host is configured on ${REMOTE_HOST}."
+echo "Remote PostgreSQL + ClickHouse readonly API host is configured on ${REMOTE_HOST}."

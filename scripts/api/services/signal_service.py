@@ -96,7 +96,7 @@ def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict
         logger = getattr(ctx.get("app"), "logger", None)
         if logger is not None:
             logger.exception("whale rows trade source failed")
-        return _query_market_activity_rows(ctx, limit=limit)
+        return _query_market_activity_rows(ctx, limit=limit, threshold_dt=threshold_dt)
     rows: List[Dict[str, Any]] = []
     for trade in recent_trades:
         market_id = trade.get("marketId") or trade.get("market_id")
@@ -124,15 +124,16 @@ def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict
                 "notional": notional,
                 "maker": trade.get("maker"),
                 "taker": trade.get("taker"),
+                "source_mode": "live-trades",
             }
         )
     rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
     if not rows:
-        return _query_market_activity_rows(ctx, limit=limit)
+        return _query_market_activity_rows(ctx, limit=limit, threshold_dt=threshold_dt)
     return rows[: max(limit * 2, limit)]
 
 
-def _query_market_activity_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]]:
+def _query_market_activity_rows(ctx: dict, *, limit: int, threshold_dt: Any = None) -> List[Dict[str, Any]]:
     """Fallback when raw recent trades are unavailable over the remote DB tunnel."""
     payload = _read_bootstrap_activity_payload(ctx)
     if payload is None:
@@ -152,11 +153,15 @@ def _query_market_activity_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]
         trade_count = int(market.get("tradeCount24h") or 0)
         if notional <= 0 and trade_count <= 0:
             continue
+        timestamp = market.get("lastTradeAt")
+        timestamp_dt = ctx["parse_iso_datetime"](timestamp)
+        if threshold_dt is not None and (timestamp_dt is None or timestamp_dt < threshold_dt):
+            continue
         rows.append(
             {
                 "market_id": market.get("id"),
                 "market_title": market.get("title"),
-                "timestamp": market.get("lastTradeAt"),
+                "timestamp": timestamp,
                 "tx_hash": None,
                 "outcome": None,
                 "side": "activity",
@@ -165,10 +170,11 @@ def _query_market_activity_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]
                 "notional": notional,
                 "maker": None,
                 "taker": None,
+                "source_mode": "market-activity-fallback",
             }
         )
     if not rows:
-        rows.extend(_query_bootstrap_trade_rows(ctx, limit=limit))
+        rows.extend(_query_bootstrap_trade_rows(ctx, limit=limit, threshold_dt=threshold_dt))
     rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
     return rows[: max(limit * 2, limit)]
 
@@ -192,7 +198,7 @@ def _read_bootstrap_activity_payload(ctx: dict) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _query_bootstrap_trade_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]]:
+def _query_bootstrap_trade_rows(ctx: dict, *, limit: int, threshold_dt: Any = None) -> List[Dict[str, Any]]:
     payload = _read_bootstrap_payload(ctx)
     trades = (payload or {}).get("globalTradesPreview")
     if not isinstance(trades, list):
@@ -204,6 +210,10 @@ def _query_bootstrap_trade_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]
         market_id = trade.get("marketId") or trade.get("market_id")
         if market_id is None:
             continue
+        timestamp = trade.get("timestamp")
+        timestamp_dt = ctx["parse_iso_datetime"](timestamp)
+        if threshold_dt is not None and (timestamp_dt is None or timestamp_dt < threshold_dt):
+            continue
         price = ctx["_safe_decimal"](trade.get("price"))
         size = ctx["_safe_decimal"](trade.get("size"))
         notional = ctx["_safe_decimal"](trade.get("notional"))
@@ -213,7 +223,7 @@ def _query_bootstrap_trade_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]
             {
                 "market_id": market_id,
                 "market_title": trade.get("marketTitle") or trade.get("market_title"),
-                "timestamp": trade.get("timestamp"),
+                "timestamp": timestamp,
                 "tx_hash": trade.get("txHash") or trade.get("tx_hash"),
                 "outcome": trade.get("outcome"),
                 "side": trade.get("side"),
@@ -222,6 +232,7 @@ def _query_bootstrap_trade_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]
                 "notional": notional,
                 "maker": trade.get("maker"),
                 "taker": trade.get("taker"),
+                "source_mode": "bootstrap-trades-fallback",
             }
         )
     rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
@@ -421,16 +432,25 @@ def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int =
     rows = _query_whale_rows(ctx, limit=max(limit * 2, limit), lookback_days=lookback_days)
     items: List[Dict[str, Any]] = []
     seen_hashes: set[str] = set()
+    source_modes: set[str] = set()
     for row in rows:
         tx_hash = str(row.get("tx_hash") or "")
         if tx_hash and tx_hash in seen_hashes:
             continue
         if tx_hash:
             seen_hashes.add(tx_hash)
+        source_modes.add(str(row.get("source_mode") or "unknown"))
         items.append(_format_trade_item(ctx, row))
         if len(items) >= limit:
             break
-    return normalize_signal_payload({"items": items, "generatedAt": ctx["utc_now_iso"]()}, generated_at=ctx["utc_now_iso"]())
+    status = "empty"
+    if items:
+        status = "ok" if source_modes == {"live-trades"} else "degraded"
+    source_mode = "live-trades" if source_modes == {"live-trades"} else "fallback" if source_modes else "none"
+    return normalize_signal_payload(
+        {"items": items, "generatedAt": ctx["utc_now_iso"](), "status": status, "sourceMode": source_mode},
+        generated_at=ctx["utc_now_iso"](),
+    )
 
 
 def fetch_live_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
@@ -624,6 +644,7 @@ def _append_signal(signals: List[Dict[str, Any]], *, kind: str, severity: str, t
 
 def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     recent_limit = max(96, limit * int(os.environ.get("POLYDATA_ALPHA_TRADE_MULTIPLIER", "12")))
+    trade_source_status = "ok"
     try:
         recent_trades = ctx["get_recent_trades"](limit=recent_limit)
     except Exception:
@@ -631,6 +652,7 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
         if logger is not None:
             logger.exception("alpha trade source failed")
         recent_trades = []
+        trade_source_status = "degraded"
     addresses_by_market: Dict[int, set[str]] = {}
     for trade in recent_trades:
         market_id = trade.get("marketId") or trade.get("market_id")
@@ -688,7 +710,10 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
 
     signals: List[Dict[str, Any]] = list(polybeats_clusters)
 
-    whales = [_format_trade_item(ctx, row) for row in _query_whale_rows(ctx, limit=6, lookback_days=7)[:6]] if len(signals) < limit else []
+    whale_rows = _query_whale_rows(ctx, limit=6, lookback_days=7)[:6] if len(signals) < limit else []
+    if any(str(row.get("source_mode") or "") != "live-trades" for row in whale_rows):
+        trade_source_status = "degraded"
+    whales = [_format_trade_item(ctx, row) for row in whale_rows]
     for trade in whales[:3]:
         if len(signals) >= limit:
             break
@@ -795,7 +820,11 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
         deduped.append(signal)
         if len(deduped) >= limit:
             break
-    return normalize_signal_payload({"items": deduped, "generatedAt": ctx["utc_now_iso"]()}, generated_at=ctx["utc_now_iso"]())
+    status = "empty" if not deduped else "degraded" if trade_source_status != "ok" else "ok"
+    return normalize_signal_payload(
+        {"items": deduped, "generatedAt": ctx["utc_now_iso"](), "status": status, "sourceMode": trade_source_status},
+        generated_at=ctx["utc_now_iso"](),
+    )
 
 
 def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:

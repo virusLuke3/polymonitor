@@ -1,13 +1,13 @@
 [Unit]
-Description=polyData OrderFilled ClickHouse live sync
-After=network-online.target
+Description=polyData ClickHouse block timestamp live sync
+After=network-online.target polydata-trade-sync.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/bin/bash -lc 'exec scripts/trade/run_trades_indexer_clickhouse_live.sh'
+ExecStart=/bin/bash -lc 'exec scripts/clickhouse/run_block_timestamps_live.sh'
 Restart=always
 RestartSec=10
 StandardOutput=journal

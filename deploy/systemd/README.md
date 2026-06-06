@@ -46,7 +46,8 @@ disables local collector units on GCP.
 `polydata-local-collector.target` starts:
 
 - `polydata-market-sync.service`
-- `polydata-trade-sync.service` / OrderFilled placeholder until ClickHouse is ready
+- `polydata-trade-sync.service` / OrderFilled ClickHouse live sync
+- `polydata-block-timestamps-live.service` / ClickHouse block timestamp live sync
 - `polydata-oracle-sync.service`
 - `polydata-analytics-sync.service`
 - `polydata-event-market-serving.service`
@@ -98,6 +99,7 @@ mkdir -p ~/.config/systemd/user
 cp deploy/systemd/polydata-local-collector.target ~/.config/systemd/user/
 cp deploy/systemd/polydata-market-sync.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-trade-sync.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-block-timestamps-live.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-oracle-sync.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-analytics-sync.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-event-market-serving.service ~/.config/systemd/user/
@@ -120,7 +122,7 @@ loginctl enable-linger "$USER"
 On GCP, these units should be inactive:
 
 ```bash
-systemctl --user is-active polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-event-market-serving.service polydata-db-reverse-tunnel.service polydata-local-collector.target
+systemctl --user is-active polydata-market-sync.service polydata-trade-sync.service polydata-block-timestamps-live.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-event-market-serving.service polydata-db-reverse-tunnel.service polydata-local-collector.target
 ```
 
 On the local collector host, `polydata-api.service` and `polydata-gcp.target`

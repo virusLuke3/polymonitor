@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -166,9 +167,69 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
 
         payload = signal_service.fetch_live_alpha_signal_payload(ctx, limit=3)
 
-        self.assertEqual("ok", payload["status"])
+        self.assertEqual("degraded", payload["status"])
         self.assertGreaterEqual(len(payload["items"]), 1)
         self.assertEqual("macro", payload["items"][0]["kind"])
+
+    def test_whale_bootstrap_fallback_filters_stale_trades(self):
+        stale_bootstrap = {
+            "globalTradesPreview": [
+                {
+                    "marketId": 1,
+                    "marketTitle": "Old market",
+                    "timestamp": "2026-04-28T11:00:40Z",
+                    "price": "0.97",
+                    "size": "60",
+                    "notional": "58.2",
+                    "side": "BUY",
+                    "outcome": "YES",
+                    "txHash": "old",
+                }
+            ]
+        }
+        ctx = {
+            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None)),
+            "utc_now_iso": lambda: "2026-06-06T01:00:00Z",
+            "utc_date_days_ago": lambda days: "2026-05-30T01:00:00Z",
+            "parse_iso_datetime": lambda value: datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None,
+            "get_recent_trades": lambda limit=24: [],
+            "get_active_markets_snapshot": lambda page_size=8: {"items": []},
+            "get_cached_json": lambda namespace, key: stale_bootstrap if (namespace, key) == ("bootstrap", "workspace-default-v9") else None,
+            "SNAPSHOT_STORE": None,
+            "_safe_decimal": signal_service.Decimal,
+            "format_trade_decimal": lambda value: str(value) if value is not None else None,
+            "format_trade_address": lambda value: value,
+        }
+
+        payload = signal_service.fetch_live_whale_trades_payload(ctx, limit=3)
+
+        self.assertEqual("empty", payload["status"])
+        self.assertEqual([], payload["items"])
+
+    def test_watcher_marks_old_payload_stale_even_with_records(self):
+        watcher, fake_redis = self.make_watcher(component="whales", limit=14)
+        payload = {
+            "items": [{"title": "Old whale", "timestamp": "2026-04-28T11:00:40Z"}],
+            "generatedAt": "2026-06-06T01:00:00Z",
+            "status": "ok",
+        }
+        with patch.object(watcher, "fetch_payload", return_value=payload), patch.object(
+            signals_watcher,
+            "datetime",
+            SimpleNamespace(
+                now=lambda tz=None: datetime(2026, 6, 6, 1, 0, 0, tzinfo=timezone.utc),
+                fromisoformat=datetime.fromisoformat,
+            ),
+        ):
+            result = watcher.run_once()
+
+        self.assertEqual("stale", result["status"])
+        stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
+        self.assertEqual("stale", stored["status"])
+        meta = json.loads(fake_redis.get("polydata:seed-meta:signals:whale-trades") or "{}")
+        self.assertEqual("stale", meta["status"])
+        self.assertEqual("2026-04-28T11:00:40Z", meta["metadata"]["maxItemTimestamp"])
+        self.assertGreater(meta["metadata"]["dataAgeSeconds"], 7 * 24 * 60 * 60)
 
 
 if __name__ == "__main__":
