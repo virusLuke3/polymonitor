@@ -52,6 +52,9 @@ export type Trade = {
   id: string;
   entryTime: string;
   exitTime: string;
+  entryX?: number;
+  exitX?: number;
+  xAxis?: string;
   marketId: string;
   market: string;
   outcome: 'YES' | 'NO';

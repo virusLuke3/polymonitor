@@ -137,6 +137,103 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
         PRIMARY KEY (source, token_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_runs (
+        run_id BIGSERIAL PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'queued',
+        market_slug TEXT NOT NULL,
+        token_side TEXT NOT NULL,
+        price_source TEXT NOT NULL,
+        from_ts BIGINT,
+        to_ts BIGINT,
+        from_block BIGINT,
+        to_block BIGINT,
+        rows_processed BIGINT NOT NULL DEFAULT 0,
+        error TEXT,
+        meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_parameters (
+        run_id BIGINT PRIMARY KEY REFERENCES quant.quant_backtest_runs(run_id) ON DELETE CASCADE,
+        entry_threshold NUMERIC(20, 10) NOT NULL,
+        exit_threshold NUMERIC(20, 10) NOT NULL,
+        stop_loss NUMERIC(20, 10) NOT NULL,
+        take_profit NUMERIC(20, 10) NOT NULL,
+        max_holding_bars INTEGER NOT NULL,
+        initial_capital NUMERIC(38, 10) NOT NULL DEFAULT 100000,
+        position_size NUMERIC(38, 10) NOT NULL DEFAULT 100,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_metrics (
+        run_id BIGINT NOT NULL REFERENCES quant.quant_backtest_runs(run_id) ON DELETE CASCADE,
+        metric_key TEXT NOT NULL,
+        metric_name TEXT NOT NULL,
+        metric_group TEXT NOT NULL DEFAULT 'overview',
+        value NUMERIC(38, 10),
+        formatted_value TEXT,
+        delta TEXT,
+        status TEXT NOT NULL DEFAULT 'neutral',
+        tooltip TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (run_id, metric_key)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_equity (
+        run_id BIGINT NOT NULL REFERENCES quant.quant_backtest_runs(run_id) ON DELETE CASCADE,
+        point_index INTEGER NOT NULL,
+        x_axis TEXT NOT NULL,
+        x_value BIGINT NOT NULL,
+        equity NUMERIC(38, 10) NOT NULL,
+        drawdown NUMERIC(38, 10) NOT NULL,
+        drawdown_pct NUMERIC(20, 10) NOT NULL,
+        cumulative_return NUMERIC(20, 10) NOT NULL,
+        PRIMARY KEY (run_id, point_index)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_trades (
+        run_id BIGINT NOT NULL REFERENCES quant.quant_backtest_runs(run_id) ON DELETE CASCADE,
+        trade_id TEXT NOT NULL,
+        market_slug TEXT NOT NULL,
+        token_side TEXT NOT NULL,
+        side TEXT NOT NULL DEFAULT 'LONG',
+        x_axis TEXT NOT NULL,
+        entry_x BIGINT NOT NULL,
+        exit_x BIGINT NOT NULL,
+        entry_price NUMERIC(20, 10) NOT NULL,
+        exit_price NUMERIC(20, 10) NOT NULL,
+        size NUMERIC(38, 10) NOT NULL,
+        notional NUMERIC(38, 10) NOT NULL,
+        pnl NUMERIC(38, 10) NOT NULL,
+        pnl_pct NUMERIC(20, 10) NOT NULL,
+        holding_bars INTEGER NOT NULL,
+        exit_reason TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (run_id, trade_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_events (
+        run_id BIGINT NOT NULL REFERENCES quant.quant_backtest_runs(run_id) ON DELETE CASCADE,
+        event_index INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        x_axis TEXT NOT NULL,
+        x_value BIGINT NOT NULL,
+        trade_id TEXT,
+        price NUMERIC(20, 10),
+        message TEXT,
+        meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (run_id, event_index)
+    )
+    """,
 )
 
 
@@ -171,6 +268,10 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_block_close_slug_side_block ON quant.market_token_block_close (market_slug, token_side, block_number)",
     "CREATE INDEX IF NOT EXISTS idx_quant_block_close_market_side_block ON quant.market_token_block_close (market_id, token_side, block_number)",
     "CREATE INDEX IF NOT EXISTS idx_quant_build_state_status ON quant.market_price_build_market_state (source, status, updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_status ON quant.quant_backtest_runs (status, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_market ON quant.quant_backtest_runs (market_slug, token_side, price_source, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_trades_run_pnl ON quant.quant_backtest_trades (run_id, pnl)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_equity_run_x ON quant.quant_backtest_equity (run_id, point_index)",
 )
 
 

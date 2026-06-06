@@ -307,6 +307,90 @@ export type QuantBuildRun = {
   lastError?: string | null;
 };
 
+export type QuantBacktestRun = {
+  runId: number;
+  status: string;
+  marketSlug: string;
+  tokenSide: string;
+  priceSource: string;
+  fromTs?: number | string | null;
+  toTs?: number | string | null;
+  fromBlock?: number | string | null;
+  toBlock?: number | string | null;
+  rowsProcessed?: number | string | null;
+  error?: string | null;
+  createdAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  entryThreshold?: string | number | null;
+  exitThreshold?: string | number | null;
+  stopLoss?: string | number | null;
+  takeProfit?: string | number | null;
+  maxHoldingBars?: number | string | null;
+  initialCapital?: string | number | null;
+  positionSize?: string | number | null;
+};
+
+export type QuantBacktestMetric = {
+  runId: number;
+  metricKey: string;
+  metricName: string;
+  metricGroup: 'overview' | 'prediction' | string;
+  value?: string | number | null;
+  formattedValue?: string | null;
+  delta?: string | null;
+  status?: 'positive' | 'negative' | 'neutral' | string | null;
+  tooltip?: string | null;
+  sortOrder?: number | string | null;
+};
+
+export type QuantBacktestEquityPoint = {
+  runId: number;
+  pointIndex: number;
+  xAxis: 'timestamp' | 'block_number' | string;
+  xValue: number | string;
+  equity: string | number;
+  drawdown: string | number;
+  drawdownPct: string | number;
+  cumulativeReturn: string | number;
+};
+
+export type QuantBacktestTrade = {
+  runId: number;
+  tradeId: string;
+  marketSlug: string;
+  tokenSide: 'YES' | 'NO' | string;
+  side: 'LONG' | 'SHORT' | string;
+  xAxis: 'timestamp' | 'block_number' | string;
+  entryX: number | string;
+  exitX: number | string;
+  entryPrice: string | number;
+  exitPrice: string | number;
+  size: string | number;
+  notional: string | number;
+  pnl: string | number;
+  pnlPct: string | number;
+  holdingBars: number | string;
+  exitReason: string;
+};
+
+export type QuantBacktestCreatePayload = {
+  marketSlug: string;
+  tokenSide: string;
+  priceSource: string;
+  from?: string;
+  to?: string;
+  fromBlock?: string;
+  toBlock?: string;
+  entryThreshold?: number;
+  exitThreshold?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  maxHoldingBars?: number;
+  initialCapital?: number;
+  positionSize?: number;
+};
+
 export type QuantListPayload<T> = {
   items: T[];
   count: number;

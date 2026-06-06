@@ -17,6 +17,11 @@ import type {
   MarketWorkspaceHealth,
   OraclePayload,
   PriceSummary,
+  QuantBacktestCreatePayload,
+  QuantBacktestEquityPoint,
+  QuantBacktestMetric,
+  QuantBacktestRun,
+  QuantBacktestTrade,
   QuantBlockClosePoint,
   QuantBuildRun,
   QuantFrontendPricePoint,
@@ -268,6 +273,26 @@ export function fetchQuantBuildStatus(source = '', limit = 24) {
   const params = new URLSearchParams({ limit: String(limit) });
   if (source.trim()) params.set('source', source.trim());
   return apiGetWithTimeout<QuantListPayload<QuantBuildRun>>(`/quant/price-build-status?${params.toString()}`, 8000);
+}
+
+export function createQuantBacktestRun(payload: QuantBacktestCreatePayload) {
+  return apiPostWithTimeout<{ item: QuantBacktestRun; runId: number; status: string }>('/quant/backtest-runs', payload, 30000);
+}
+
+export function fetchQuantBacktestRun(runId: number) {
+  return apiGetWithTimeout<{ item: QuantBacktestRun }>(`/quant/backtest-runs/${runId}`, 8000);
+}
+
+export function fetchQuantBacktestTrades(runId: number, limit = 10000) {
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestTrade>>(`/quant/backtest-runs/${runId}/trades?limit=${limit}`, 10000);
+}
+
+export function fetchQuantBacktestEquity(runId: number, limit = 25000) {
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestEquityPoint>>(`/quant/backtest-runs/${runId}/equity?limit=${limit}`, 10000);
+}
+
+export function fetchQuantBacktestMetrics(runId: number) {
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestMetric>>(`/quant/backtest-runs/${runId}/metrics`, 8000);
 }
 
 export function fetchLatestContent(limit = 8) {

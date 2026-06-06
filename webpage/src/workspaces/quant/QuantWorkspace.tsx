@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import {
+  createQuantBacktestRun,
+  fetchQuantBacktestEquity,
+  fetchQuantBacktestMetrics,
+  fetchQuantBacktestRun,
+  fetchQuantBacktestTrades,
   fetchQuantBlockClosePrices,
   fetchQuantBuildStatus,
   fetchQuantFrontendPrices,
@@ -10,8 +15,8 @@ import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
 import { MARKET_INFO, MOCK_PRICES, MOCK_SIGNALS } from './data/mockBacktestData';
-import type { BacktestResult, PerformanceSortKey, PriceSource, SortDirection, TesterTab, TradeFilter } from './types';
-import { blockToPrices, frontendToPrices } from './utils/apiAdapters';
+import type { BacktestResult, PerformanceSortKey, PriceSource, Signal, SortDirection, TesterTab, TradeFilter } from './types';
+import { backtestApiToResult, blockToPrices, frontendToPrices } from './utils/apiAdapters';
 import { buildBacktestResult } from './utils/backtest';
 import { downloadText, fmtPrice } from './utils/formatters';
 
@@ -26,6 +31,54 @@ function tradesToCsv(trades: BacktestResult['trades']) {
   return [headers.join(','), ...rows].join('\n');
 }
 
+function backendPriceSource(priceSource: PriceSource) {
+  return priceSource === 'orderfilled' ? 'orderfilled_block_close' : 'frontend';
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function waitForRun(runId: number) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const response = await fetchQuantBacktestRun(runId);
+    if (!['queued', 'running'].includes(response.item.status)) return response.item;
+    await sleep(900);
+  }
+  return (await fetchQuantBacktestRun(runId)).item;
+}
+
+function signalsFromTrades(result: BacktestResult): Signal[] {
+  const derived = result.trades.flatMap((trade) => {
+    if (!trade.entryX || !trade.exitX) return [];
+    return [
+      {
+        id: `${trade.id}-entry`,
+        timestamp: trade.entryX,
+        action: 'OPEN' as const,
+        outcome: trade.outcome,
+        price: trade.entryPrice,
+        size: trade.size,
+        notional: trade.notional,
+        reason: 'entry threshold reached',
+        tradeId: trade.id,
+      },
+      {
+        id: `${trade.id}-exit`,
+        timestamp: trade.exitX,
+        action: 'CLOSE' as const,
+        outcome: trade.outcome,
+        price: trade.exitPrice,
+        size: trade.size,
+        notional: trade.notional,
+        reason: trade.exitReason,
+        tradeId: trade.id,
+      },
+    ];
+  });
+  return derived.length ? derived : MOCK_SIGNALS;
+}
+
 export function QuantWorkspace() {
   const [frontendRows, setFrontendRows] = useState<QuantFrontendPricePoint[]>([]);
   const [blockRows, setBlockRows] = useState<QuantBlockClosePoint[]>([]);
@@ -36,7 +89,7 @@ export function QuantWorkspace() {
   const [priceSource, setPriceSource] = useState<PriceSource>('frontend');
   const [testerTab, setTesterTab] = useState<TesterTab>('overview');
   const [deepBacktest, setDeepBacktest] = useState(false);
-  const [selectedTradeId, setSelectedTradeId] = useState<string | null>('T-118');
+  const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const [marketSlug, setMarketSlug] = useState('');
   const [runId, setRunId] = useState(1);
   const [performanceSearch, setPerformanceSearch] = useState('');
@@ -51,6 +104,7 @@ export function QuantWorkspace() {
   }, [blockRows, frontendRows, priceSource]);
   const renderedPrices = activePrices.length ? activePrices : MOCK_PRICES;
   const [backtestResult, setBacktestResult] = useState<BacktestResult>(() => buildBacktestResult(MOCK_PRICES, 'frontend', '5m', 1));
+  const strategySignals = useMemo(() => signalsFromTrades(backtestResult), [backtestResult]);
   const latestPrice = renderedPrices[renderedPrices.length - 1]?.close || 0;
   const query: QuantPriceQuery = { marketSlug, tokenSide: 'YES', limit: 360 };
 
@@ -81,10 +135,37 @@ export function QuantWorkspace() {
     setError('');
     try {
       const nextRows = await refreshQuantRows();
-      const nextRunId = runId + 1;
-      const nextPrices = priceSource === 'orderfilled' ? blockToPrices(nextRows.blockRows) : frontendToPrices(nextRows.frontendRows);
-      setRunId(nextRunId);
-      setBacktestResult(buildBacktestResult(nextPrices.length ? nextPrices : MOCK_PRICES, priceSource, timeframe, nextRunId));
+      if (!marketSlug.trim()) {
+        throw new Error('market_slug is required for real backtest');
+      }
+      const created = await createQuantBacktestRun({
+        marketSlug: marketSlug.trim(),
+        tokenSide: 'YES',
+        priceSource: backendPriceSource(priceSource),
+        entryThreshold: 0.58,
+        exitThreshold: 0.44,
+        stopLoss: 0.075,
+        takeProfit: 0.16,
+        maxHoldingBars: timeframe === '1m' ? 240 : 96,
+        initialCapital: 100000,
+        positionSize: 100,
+      });
+      const completedRun = ['queued', 'running'].includes(created.item.status)
+        ? await waitForRun(created.runId)
+        : created.item;
+      if (completedRun.status === 'failed') {
+        throw new Error(completedRun.error || 'Backtest failed');
+      }
+      const [metricsResult, equityResult, tradesResult] = await Promise.all([
+        fetchQuantBacktestMetrics(completedRun.runId),
+        fetchQuantBacktestEquity(completedRun.runId),
+        fetchQuantBacktestTrades(completedRun.runId),
+      ]);
+      const result = backtestApiToResult(completedRun, metricsResult.items || [], equityResult.items || [], tradesResult.items || [], priceSource);
+      setRunId(completedRun.runId);
+      setBacktestResult(result);
+      setSelectedTradeId(result.trades[0]?.id ?? null);
+      if (!nextRows.frontendRows.length && !nextRows.blockRows.length) setError('');
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Quant API unavailable');
       setBacktestResult(buildBacktestResult(renderedPrices, priceSource, timeframe, runId + 1));
@@ -175,7 +256,7 @@ export function QuantWorkspace() {
           prices={renderedPrices}
           market={MARKET_INFO}
           selectedTradeId={selectedTradeId}
-          signals={MOCK_SIGNALS}
+          signals={strategySignals}
         />
 
         <StrategyTesterPanel

@@ -117,3 +117,63 @@ def get_price_build_status(conn: Any, *, source: str | None = None, limit: int =
             params,
         )
         return [dict(row) for row in cur.fetchall()]
+
+
+def get_backtest_run(conn: Any, *, run_id: int) -> dict[str, Any] | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT r.*, p.entry_threshold, p.exit_threshold, p.stop_loss, p.take_profit,
+                   p.max_holding_bars, p.initial_capital, p.position_size
+            FROM quant.quant_backtest_runs r
+            LEFT JOIN quant.quant_backtest_parameters p ON p.run_id = r.run_id
+            WHERE r.run_id = %s
+            """,
+            (int(run_id),),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def get_backtest_metrics(conn: Any, *, run_id: int) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.quant_backtest_metrics
+            WHERE run_id = %s
+            ORDER BY sort_order ASC, metric_key ASC
+            """,
+            (int(run_id),),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_backtest_equity(conn: Any, *, run_id: int, limit: int = 25000) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.quant_backtest_equity
+            WHERE run_id = %s
+            ORDER BY point_index ASC
+            LIMIT %s
+            """,
+            (int(run_id), int(limit)),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_backtest_trades(conn: Any, *, run_id: int, limit: int = 10000) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.quant_backtest_trades
+            WHERE run_id = %s
+            ORDER BY entry_x ASC, trade_id ASC
+            LIMIT %s
+            """,
+            (int(run_id), int(limit)),
+        )
+        return [dict(row) for row in cur.fetchall()]
