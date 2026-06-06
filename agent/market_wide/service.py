@@ -250,6 +250,30 @@ def _compact_search_result(item: Any) -> dict[str, str] | None:
     }
 
 
+def _compact_forecast_memory(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    observation = item.get("observation") if isinstance(item.get("observation"), dict) else {}
+    return {
+        "memoryKey": item.get("memoryKey"),
+        "runId": item.get("runId"),
+        "kind": item.get("kind"),
+        "title": compact_text(item.get("title"), 120),
+        "lesson": compact_text(item.get("lesson"), 180),
+        "createdAt": item.get("createdAt"),
+        "brierScore": item.get("brierScore"),
+        "observation": {
+            "title": compact_text(observation.get("title"), 120),
+            "score": observation.get("score"),
+            "latestPrice": observation.get("latestPrice"),
+            "price24hAgo": observation.get("price24hAgo"),
+            "drift24h": observation.get("drift24h"),
+            "spread": observation.get("spread"),
+            "interpretation": compact_text(observation.get("interpretation"), 180),
+        },
+    }
+
+
 def _compact_list(values: list[Any], limit: int, mapper: Any) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     for value in values[:limit]:
@@ -274,6 +298,7 @@ def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, A
         ("suspiciousSignals", 4),
         ("trades", 4),
         ("searchResults", 2),
+        ("forecastMemory", 8),
     ):
         if isinstance(reduced.get(key), list):
             reduced[key] = reduced[key][:limit]
@@ -283,6 +308,7 @@ def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, A
         reduced[key] = []
     if len(json.dumps(reduced, ensure_ascii=False, default=str)) <= max_chars:
         return reduced
+    reduced["forecastMemory"] = reduced.get("forecastMemory", [])[:4] if isinstance(reduced.get("forecastMemory"), list) else []
     reduced["markets"] = reduced.get("markets", [])[:4] if isinstance(reduced.get("markets"), list) else []
     reduced["marketGroups"] = reduced.get("marketGroups", [])[:3] if isinstance(reduced.get("marketGroups"), list) else []
     reduced["marketCandidates"] = reduced.get("marketCandidates", [])[:8] if isinstance(reduced.get("marketCandidates"), list) else []
@@ -319,6 +345,7 @@ def _build_agent_context(payload: dict[str, Any], lens: str, search_results: lis
         "whaleSignals": _compact_list(_signal_items(payload, "whaleSignals"), 5, _compact_signal),
         "suspiciousSignals": _compact_list(_signal_items(payload, "suspiciousSignals"), 5, _compact_signal),
         "searchResults": _compact_list(search_results, 3, _compact_search_result),
+        "forecastMemory": _compact_list(_items(payload, "forecastMemory"), 12, _compact_forecast_memory),
     }
     context = _limit_context_chars(context, max_chars)
     context["contextChars"] = len(json.dumps(context, ensure_ascii=False, default=str))

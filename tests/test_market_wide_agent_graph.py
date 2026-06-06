@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import patch
 
 from agent.market_wide.graph import GRAPH_VERSION, run_forecast_intelligence_graph
+from agent.market_wide.service import _build_agent_context
 from agent.market_wide.snapshot import (
     QUANT_HISTORY_NAMESPACE,
     QUANT_SNAPSHOT_NAMESPACE,
@@ -136,6 +137,14 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
                 {"market": "Will the event happen?", "price": 0.52},
                 {"market": "Will the event happen?", "price": 0.57},
             ],
+            "forecastMemory": [{
+                "memoryKey": "overview:price-drift:old",
+                "lens": "overview",
+                "runId": "fig-old",
+                "kind": "price-drift",
+                "title": "Will the event happen?",
+                "lesson": "Prior drift should be rechecked before reuse.",
+            }],
             "contextChars": 777,
         }
         client = FakeClient()
@@ -174,10 +183,30 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertIn("relatedMarkets", response["agentGraph"])
         self.assertIn("reflexionMemory", response["agentGraph"])
         self.assertIn("calibrationAgent", response["agentGraph"])
+        self.assertEqual(response["agentGraph"]["reflexionMemory"]["priorEpisodesLoaded"], 1)
         self.assertTrue(response["agentGraph"]["events"][0].get("outputJson"))
+        self.assertTrue(any((event.get("outputJson") or {}).get("toolCalls") for event in response["agentGraph"]["events"]))
         self.assertEqual(response["agentGraph"]["quantForecaster"]["priceDriftLeaders"][0]["drift24h"], "+5.0 pts")
         self.assertEqual(response["agentGraph"]["quantForecaster"]["lobSpreads"][0]["spread"], "5.0 pts")
         self.assertEqual(response["agentGraph"]["quantForecaster"]["volatilityLeaders"][0]["priceRange"], "10.0 pts")
+
+    def test_agent_context_preserves_forecast_memory_from_seed_payload(self):
+        payload = {
+            "lens": "overview",
+            "forecastMemory": [{
+                "memoryKey": "overview:related-arbitrage:abc",
+                "runId": "fig-old",
+                "kind": "related-arbitrage",
+                "title": "Related market group",
+                "lesson": "Recheck stale-state versus true inefficiency.",
+                "observation": {"score": 82, "interpretation": "Inspect curve mismatch."},
+            }],
+        }
+
+        context = _build_agent_context(payload, "overview", [])
+
+        self.assertEqual(context["forecastMemory"][0]["memoryKey"], "overview:related-arbitrage:abc")
+        self.assertEqual(context["forecastMemory"][0]["observation"]["score"], 82)
 
     def test_forecast_graph_adds_quant_and_related_market_structure(self):
         payload = {"lens": "overview", "forecastRunId": "fig-structure", "markets": []}

@@ -1067,6 +1067,8 @@ def run_forecast_intelligence_graph(
         )
         event["lens"] = lens
         event["toolCalls"] = react_trace
+        if isinstance(event.get("outputJson"), dict):
+            event["outputJson"]["toolCalls"] = react_trace
         events.append(event)
         specialists.append(_normalize_node_output(raw, node) if raw else {"node": node, "findings": [], "risks": [event.get("error", "agent failed")], "watch": [], "confidence": "low"})
 
@@ -1093,6 +1095,8 @@ def run_forecast_intelligence_graph(
         )
         event["lens"] = lens
         event["toolCalls"] = react_trace
+        if isinstance(event.get("outputJson"), dict):
+            event["outputJson"]["toolCalls"] = react_trace
         events.append(event)
         if raw:
             calibration = _normalize_node_output(raw, "skeptic")
