@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -15,7 +14,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from quant.backtest_engine import create_backtest_run  # noqa: E402
-from quant.backtest_runner import run_backtest_job  # noqa: E402
 from quant.db import PostgresSettings, postgres_connection  # noqa: E402
 from quant.read_api import (  # noqa: E402
     get_backtest_equity,
@@ -27,16 +25,6 @@ from quant.read_api import (  # noqa: E402
     get_price_build_status,
 )
 from quant.schema import create_schema  # noqa: E402
-
-
-BACKTEST_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="quant-backtest")
-BACKGROUND_BACKTESTS: set[Future] = set()
-
-
-def _submit_backtest_run(run_id: int) -> None:
-    future = BACKTEST_EXECUTOR.submit(run_backtest_job, run_id)
-    BACKGROUND_BACKTESTS.add(future)
-    future.add_done_callback(BACKGROUND_BACKTESTS.discard)
 
 
 def _parse_int_arg(name: str, default: int | None = None) -> int | None:
@@ -183,7 +171,6 @@ def create_quant_blueprint(_: dict) -> Blueprint:
             with postgres_connection(PostgresSettings(), readonly=False) as conn:
                 create_schema(conn)
                 run_id = create_backtest_run(conn, payload)
-            _submit_backtest_run(run_id)
             with postgres_connection(PostgresSettings(), readonly=True) as conn:
                 row = get_backtest_run(conn, run_id=run_id)
         except ValueError as exc:
