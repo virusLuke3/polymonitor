@@ -449,6 +449,75 @@
   filter: drop-shadow(0 0 15px rgba(250, 204, 21, 0.78));
 }
 
+.qtv-crosshair line {
+  stroke: rgba(226, 232, 240, 0.52);
+  stroke-dasharray: 3 4;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.qtv-chart-tooltip {
+  position: absolute;
+  z-index: 6;
+  min-width: 178px;
+  transform: translate(12px, -50%);
+  border: 1px solid rgba(71, 85, 105, 0.92);
+  border-radius: 4px;
+  background: rgba(9, 13, 22, 0.94);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.46);
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  pointer-events: none;
+  padding: 8px 10px;
+}
+
+.qtv-chart-tooltip strong,
+.qtv-chart-tooltip span {
+  display: block;
+}
+
+.qtv-chart-tooltip strong {
+  margin-bottom: 5px;
+  color: #f8fafc;
+}
+
+.qtv-chart-tooltip span {
+  color: #a1a1aa;
+  line-height: 1.45;
+}
+
+.qtv-trade-focus-line {
+  stroke: rgba(250, 204, 21, 0.74);
+  stroke-dasharray: 5 5;
+  stroke-width: 1.4;
+  pointer-events: none;
+}
+
+.qtv-trade-focus-path {
+  fill: none;
+  stroke: #facc15;
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+  filter: drop-shadow(0 0 10px rgba(250, 204, 21, 0.5));
+  pointer-events: none;
+}
+
+.qtv-trade-focus-pill {
+  position: absolute;
+  right: 100px;
+  top: 48px;
+  z-index: 5;
+  border: 1px solid rgba(250, 204, 21, 0.62);
+  border-radius: 4px;
+  background: rgba(39, 30, 8, 0.92);
+  color: #fde68a;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 6px 9px;
+}
+
 .qtv-indicator-pane {
   min-height: 0;
   border-top: 1px solid #2c2c2c;
@@ -621,6 +690,23 @@
   scrollbar-width: thin;
 }
 
+.qtv-prediction-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(145px, 1fr));
+  border-bottom: 1px solid #293140;
+  background: #0f172a;
+  overflow-x: auto;
+}
+
+.qtv-prediction-metrics .qtv-metric {
+  min-height: 58px;
+  background: #0f172a;
+}
+
+.qtv-prediction-metrics .qtv-metric strong {
+  font-size: 12px;
+}
+
 .qtv-metric {
   min-width: 0;
   border-right: 1px solid #293140;
@@ -753,6 +839,53 @@
   font-weight: 900;
 }
 
+.qtv-mini-table button {
+  width: 100%;
+  height: 28px;
+  margin-top: 10px;
+  border: 1px solid #293140;
+  border-radius: 4px;
+  background: #111827;
+  color: #dbeafe;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.qtv-table-controls {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #293140;
+  background: #111827;
+  padding: 8px 10px;
+}
+
+.qtv-table-controls input {
+  width: min(320px, 46vw);
+  height: 28px;
+  border: 1px solid #293140;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  outline: none;
+  padding: 0 9px;
+}
+
+.qtv-table-controls span,
+.qtv-filter-strip span {
+  margin-left: auto;
+  color: #71717a;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 .qtv-table {
   width: 100%;
   border-collapse: collapse;
@@ -778,6 +911,16 @@
   text-transform: uppercase;
 }
 
+.qtv-table th button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-transform: inherit;
+}
+
 .qtv-table tr:hover,
 .qtv-table tr.selected {
   background: #172033;
@@ -792,6 +935,12 @@
   border-bottom: 1px solid #293140;
   background: #111827;
   padding: 8px 10px;
+}
+
+.qtv-filter-strip button.active {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
 }
 
 .qtv-properties {
