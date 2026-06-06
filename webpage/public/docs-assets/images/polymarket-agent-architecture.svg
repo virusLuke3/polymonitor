@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860" role="img" aria-labelledby="title desc">
+  <title id="title">Polymarket Agent architecture</title>
+  <desc id="desc">A LangGraph supervisor coordinates deterministic evidence builders, quant forecaster, specialist workers, calibration, memory, and panel writer for Polymarket market-wide intelligence.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6fff8"/>
+      <stop offset="0.54" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef7ff"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#28d96f"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fde68a"/>
+      <stop offset="1" stop-color="#fbbf24"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#102016" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64746b"/>
+    </marker>
+    <style>
+      text { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .title { fill: #0f1f17; font-size: 34px; font-weight: 750; }
+      .subtitle { fill: #59675f; font-size: 17px; font-weight: 500; }
+      .section { fill: #10b981; font-size: 14px; font-weight: 750; letter-spacing: .04em; }
+      .label { fill: #12201a; font-size: 19px; font-weight: 750; }
+      .small { fill: #506057; font-size: 13px; font-weight: 520; }
+      .mono { fill: #27362f; font-size: 12px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+      .box { fill: #ffffff; stroke: #dfe8e2; stroke-width: 1.3; filter: url(#shadow); }
+      .soft { fill: #f8fffb; stroke: #dfe8e2; stroke-width: 1.3; }
+      .lane { fill: rgba(255,255,255,.72); stroke: #dce9e1; stroke-width: 1.3; }
+      .arrow { fill: none; stroke: #64746b; stroke-width: 2; marker-end: url(#arrow); }
+      .dashed { fill: none; stroke: #8da199; stroke-width: 2; stroke-dasharray: 8 8; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1400" height="860" rx="0" fill="url(#bg)"/>
+  <text class="section" x="62" y="62">POLYMARKET AGENT</text>
+  <text class="title" x="62" y="104">Forecast Intelligence Graph</text>
+  <text class="subtitle" x="62" y="134">A controlled supervisor-worker runtime for market-wide prediction-market analysis.</text>
+
+  <rect class="lane" x="54" y="178" width="1288" height="132" rx="16"/>
+  <text class="section" x="78" y="213">INPUTS</text>
+
+  <rect class="box" x="78" y="232" width="188" height="58" rx="12"/>
+  <text class="label" x="96" y="256">Market universe</text>
+  <text class="small" x="96" y="277">active markets + groups</text>
+
+  <rect class="box" x="292" y="232" width="188" height="58" rx="12"/>
+  <text class="label" x="310" y="256">Fill tape</text>
+  <text class="small" x="310" y="277">top market recent fills</text>
+
+  <rect class="box" x="506" y="232" width="188" height="58" rx="12"/>
+  <text class="label" x="524" y="256">Signals</text>
+  <text class="small" x="524" y="277">oracle, whales, alpha</text>
+
+  <rect class="box" x="720" y="232" width="188" height="58" rx="12"/>
+  <text class="label" x="738" y="256">Context</text>
+  <text class="small" x="738" y="277">news + market content</text>
+
+  <rect class="box" x="934" y="232" width="188" height="58" rx="12"/>
+  <text class="label" x="952" y="256">Memory</text>
+  <text class="small" x="952" y="277">prior forecast episodes</text>
+
+  <rect class="box" x="1148" y="232" width="188" height="58" rx="12"/>
+  <text class="label" x="1166" y="256">Lens</text>
+  <text class="small" x="1166" y="277">overview / special / trend</text>
+
+  <rect class="lane" x="54" y="350" width="1288" height="300" rx="16"/>
+  <text class="section" x="78" y="385">LANGGRAPH SUPERVISOR RUNTIME</text>
+
+  <rect x="78" y="412" width="196" height="92" rx="14" fill="url(#green)" filter="url(#shadow)"/>
+  <text class="label" x="98" y="442" fill="#ffffff">Supervisor</text>
+  <text class="small" x="98" y="467" fill="#eafff1">state graph scheduling</text>
+  <text class="mono" x="98" y="488" fill="#eafff1">run_id + events</text>
+
+  <rect class="box" x="338" y="378" width="198" height="70" rx="13"/>
+  <text class="label" x="358" y="406">Evidence builder</text>
+  <text class="small" x="358" y="428">compact deterministic facts</text>
+
+  <rect class="box" x="338" y="474" width="198" height="70" rx="13"/>
+  <text class="label" x="358" y="502">Related markets</text>
+  <text class="small" x="358" y="524">ladders + arb scores</text>
+
+  <rect class="box" x="338" y="570" width="198" height="70" rx="13"/>
+  <text class="label" x="358" y="598">Quant forecaster</text>
+  <text class="small" x="358" y="620">drift, spread, conflicts</text>
+
+  <rect class="box" x="596" y="378" width="208" height="70" rx="13"/>
+  <text class="label" x="616" y="406">Microstructure</text>
+  <text class="small" x="616" y="428">price, flow, LOB caveats</text>
+
+  <rect class="box" x="596" y="474" width="208" height="70" rx="13"/>
+  <text class="label" x="616" y="502">Catalyst agent</text>
+  <text class="small" x="616" y="524">news and event triggers</text>
+
+  <rect class="box" x="596" y="570" width="208" height="70" rx="13"/>
+  <text class="label" x="616" y="598">Resolution agent</text>
+  <text class="small" x="616" y="620">wording, oracle, status</text>
+
+  <rect class="box" x="862" y="378" width="214" height="70" rx="13"/>
+  <text class="label" x="882" y="406">Calibration</text>
+  <text class="small" x="882" y="428">discount weak evidence</text>
+
+  <rect class="box" x="862" y="474" width="214" height="70" rx="13"/>
+  <text class="label" x="882" y="502">Skeptic</text>
+  <text class="small" x="882" y="524">challenge overreach</text>
+
+  <rect class="box" x="862" y="570" width="214" height="70" rx="13"/>
+  <text class="label" x="882" y="598">Reflexion memory</text>
+  <text class="small" x="882" y="620">lessons for next run</text>
+
+  <rect x="1142" y="452" width="224" height="106" rx="16" fill="url(#blue)" filter="url(#shadow)"/>
+  <text class="label" x="1164" y="486" fill="#05202c">Panel writer</text>
+  <text class="small" x="1164" y="513" fill="#063141">one coherent dashboard JSON</text>
+  <text class="mono" x="1164" y="536" fill="#063141">brief / focus / evidence</text>
+
+  <path class="arrow" d="M 176 310 L 176 412"/>
+  <path class="arrow" d="M 274 458 L 338 413"/>
+  <path class="arrow" d="M 274 458 L 338 509"/>
+  <path class="arrow" d="M 274 458 L 338 605"/>
+  <path class="arrow" d="M 536 413 L 596 413"/>
+  <path class="arrow" d="M 536 509 L 596 509"/>
+  <path class="arrow" d="M 536 605 L 596 605"/>
+  <path class="arrow" d="M 804 413 L 862 413"/>
+  <path class="arrow" d="M 804 509 L 862 509"/>
+  <path class="arrow" d="M 804 605 L 862 605"/>
+  <path class="arrow" d="M 1076 413 L 1142 490"/>
+  <path class="arrow" d="M 1076 509 L 1142 509"/>
+  <path class="arrow" d="M 1076 605 L 1142 528"/>
+
+  <rect class="lane" x="54" y="688" width="1288" height="126" rx="16"/>
+  <text class="section" x="78" y="724">OUTPUTS</text>
+
+  <rect class="soft" x="78" y="744" width="224" height="56" rx="12"/>
+  <text class="label" x="96" y="767">AI panels</text>
+  <text class="small" x="96" y="788">AI Insights, Special Radar, Trend Watch</text>
+
+  <rect class="soft" x="334" y="744" width="224" height="56" rx="12"/>
+  <text class="label" x="352" y="767">Quant snapshots</text>
+  <text class="small" x="352" y="788">fill tape, drift, conflict taxonomy</text>
+
+  <rect class="soft" x="590" y="744" width="224" height="56" rx="12"/>
+  <text class="label" x="608" y="767">Event log</text>
+  <text class="small" x="608" y="788">node latency, model, errors, evidence</text>
+
+  <rect class="soft" x="846" y="744" width="224" height="56" rx="12"/>
+  <text class="label" x="864" y="767">Forecast memory</text>
+  <text class="small" x="864" y="788">episodes, Brier inputs, lessons</text>
+
+  <rect class="soft" x="1102" y="744" width="224" height="56" rx="12"/>
+  <text class="label" x="1120" y="767">Snapshot cache</text>
+  <text class="small" x="1120" y="788">Redis / DB for runtime panels</text>
+
+  <path class="arrow" d="M 1254 558 L 1254 744"/>
+  <path class="dashed" d="M 958 744 C 958 680 980 656 1030 638"/>
+</svg>

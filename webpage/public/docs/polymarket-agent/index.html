@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Polymarket Agent - polyData Documentation</title>
+    <meta name="description" content="Architecture, runtime flow, inputs, and outputs for the polyData Polymarket Agent and Forecast Intelligence Graph." />
+    <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs-page.css?v=20260606-polymarket-agent" />
+  </head>
+  <body>
+    <div class="docs-shell">
+      <header class="docs-topbar">
+        <a class="docs-brand" href="/">
+          <img src="/icons/polydata-monitor.svg" alt="" />
+          <span>POLYDATA</span>
+        </a>
+        <div class="docs-actions" aria-label="Documentation actions">
+          <div class="docs-search" aria-label="Search documentation">
+            <svg class="docs-search-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="m16.5 16.5 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <span class="docs-search-placeholder">Search...</span>
+            <kbd>Ctrl K</kbd>
+          </div>
+          <button class="docs-assistant" type="button">Ask Assistant</button>
+        </div>
+        <nav class="docs-nav" aria-label="Top navigation">
+          <a href="/blog/">Blog</a>
+          <a href="/">Dashboard</a>
+          <a href="https://arxiv.org/pdf/2604.20421" target="_blank" rel="noopener noreferrer">Paper</a>
+          <a href="https://github.com/virusLuke3/polymonitor" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a class="docs-cta" href="/">Get Early Access</a>
+        </nav>
+      </header>
+
+      <nav class="docs-tabs" aria-label="Documentation sections">
+        <a class="docs-tab active" href="/docs/documentation/">Documentation</a>
+        <a class="docs-tab" href="https://github.com/virusLuke3/polymonitor/tree/main/docs" target="_blank" rel="noopener noreferrer">API Reference</a>
+        <a class="docs-tab" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/updates.md" target="_blank" rel="noopener noreferrer">Changelog</a>
+      </nav>
+
+      <div class="docs-layout">
+        <aside class="docs-sidebar" aria-label="Documentation navigation">
+          <div class="sidebar-group">
+            <h2>Getting Started</h2>
+            <a href="/docs/documentation/">Introduction</a>
+            <a href="/docs/what-polydata-tracks/">What polyData tracks</a>
+            <a href="/docs/data-coverage/">Data Coverage</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Polymarket Concepts</h2>
+            <a href="/docs/Polymarket%20Concepts/">Polymarket Concepts</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Panels</h2>
+            <a href="/docs/panels-market-lifecycle/">Market & Lifecycle</a>
+            <a href="/docs/panels-flow-trading/">Flow & Trading</a>
+            <a href="/docs/panels-intelligence-news/">Intelligence & News</a>
+            <a class="active" href="/docs/polymarket-agent/">Polymarket Agent</a>
+            <a href="/docs/panels-macro-context/">Macro, Weather & Sports</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Platform & Features</h2>
+            <a href="/docs/platform-overview/">Platform Overview</a>
+            <a href="/docs/features-interface/">Features & Interface</a>
+            <a href="/docs/panel-modules/">Panel Modules</a>
+            <a href="/docs/deployment/">Deployment</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Intelligence & Analysis</h2>
+            <a href="/docs/signal-intelligence/">Signal Intelligence</a>
+            <a href="/docs/oracle-watch/">Oracle Watch</a>
+            <a href="/docs/research-links/">Research Links</a>
+          </div>
+        </aside>
+
+        <main class="docs-content">
+          <div class="docs-kicker">Panels</div>
+          <h1>Polymarket Agent</h1>
+          <p>The Polymarket Agent is polyData's market-wide forecasting analyst. It turns active markets, fill tape, oracle events, related-market structure, news, and historical forecast memory into auditable AI panels for the dashboard.</p>
+
+          <figure class="docs-figure">
+            <div class="docs-figure-frame">
+              <img src="/docs-assets/images/polymarket-agent-architecture.svg" alt="Diagram of the Polymarket Agent LangGraph supervisor architecture" />
+            </div>
+            <figcaption>The Forecast Intelligence Graph coordinates deterministic evidence builders, specialist agents, calibration, memory, and a final panel writer.</figcaption>
+          </figure>
+
+          <h2 id="overview">What It Produces</h2>
+          <p>The agent powers the three market-wide AI panels on the dashboard. They share the same architecture and seed payload, but use different lenses so each panel emphasizes a different analyst job.</p>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>Panel</th>
+                  <th>Lens</th>
+                  <th>Primary use</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>AI Insights</strong><br /><code>overview</code></td>
+                  <td>Market-wide brief</td>
+                  <td>Find the most important live market read, the strongest probability structure, and the main caveat.</td>
+                </tr>
+                <tr>
+                  <td><strong>Special Radar</strong><br /><code>special</code></td>
+                  <td>Unusual-market radar</td>
+                  <td>Highlight special situations such as 50c repricing zones, conflicting prices, deadline ladders, or stale/resolution risk.</td>
+                </tr>
+                <tr>
+                  <td><strong>Trend Watch</strong><br /><code>trend</code></td>
+                  <td>Trend and catalyst synthesis</td>
+                  <td>Connect active markets to broader narrative clusters, related-market spreads, catalysts, and next watch items.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="architecture">Architecture</h2>
+          <p>The runtime is a LangGraph supervisor-worker state graph. Deterministic nodes create compact evidence and quantitative structure first. Specialist workers then reason over that state, and the panel writer converts it into dashboard JSON.</p>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>Layer</th>
+                  <th>Node</th>
+                  <th>Responsibility</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Supervisor</td>
+                  <td><code>langgraph-supervisor-stategraph</code></td>
+                  <td>Schedules the node graph, preserves shared state, records events, and routes the run to the final writer.</td>
+                </tr>
+                <tr>
+                  <td>Evidence</td>
+                  <td><code>evidence_builder</code></td>
+                  <td>Compresses source metrics, top market, category concentration, and input hashes into a deterministic evidence packet.</td>
+                </tr>
+                <tr>
+                  <td>Structure</td>
+                  <td><code>related_markets</code></td>
+                  <td>Builds deadline ladders, related-market spreads, probability-sum warnings, and arbitrage-style stress scores.</td>
+                </tr>
+                <tr>
+                  <td>Quant</td>
+                  <td><code>quant_forecaster</code></td>
+                  <td>Computes top flow markets, repricing zones, price drift, volatility, LOB spread, fill-tape microstructure, and price-source conflicts.</td>
+                </tr>
+                <tr>
+                  <td>Workers</td>
+                  <td><code>microstructure</code>, <code>catalyst</code>, <code>resolution</code></td>
+                  <td>Separate agents inspect trading structure, external catalysts, and resolution/oracle risk with ReAct-style tool observations.</td>
+                </tr>
+                <tr>
+                  <td>Discipline</td>
+                  <td><code>calibration_agent</code>, <code>skeptic</code></td>
+                  <td>Discounts weak evidence, challenges generic claims, and forces the output to stay anchored to named markets and probabilities.</td>
+                </tr>
+                <tr>
+                  <td>Memory</td>
+                  <td><code>reflexion_memory</code></td>
+                  <td>Stores reusable lessons such as price-drift episodes, related-market stress, and fill-tape conflict observations.</td>
+                </tr>
+                <tr>
+                  <td>Writer</td>
+                  <td><code>panel_writer</code></td>
+                  <td>Produces the final panel schema: brief, focus, specialMarkets, themes, watchlist, evidence, and graph metadata.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="flow">Runtime Flow</h2>
+          <ol>
+            <li>The GCP timer or manual seed command creates one shared <code>forecastRunId</code> for the configured lenses.</li>
+            <li>The seed payload loads active markets, market groups, recent trades, oracle events, content, cached signal feeds, and forecast memory.</li>
+            <li>The low-cost fill-tape enrichment reads recent flow for the top markets so the agent can distinguish live prices from stale detail rows.</li>
+            <li>The LangGraph supervisor runs deterministic evidence, related-market, quant, and memory nodes before invoking specialist workers.</li>
+            <li>Workers use compact ReAct tool traces such as <code>quant_snapshot</code>, <code>data_quality</code>, <code>catalyst_scan</code>, and <code>resolution_scan</code>.</li>
+            <li>The calibration and skeptic nodes apply data-quality discounts and force probability discipline.</li>
+            <li>The panel writer returns compact dashboard JSON, which is stored in the snapshot cache and exposed through the runtime API.</li>
+          </ol>
+
+          <h2 id="inputs">Inputs</h2>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>Input</th>
+                  <th>Where it comes from</th>
+                  <th>Why it matters</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>markets</code></td>
+                  <td>Active market snapshot</td>
+                  <td>Provides title, category, latest price, 24h volume, trade count, end date, and candidate universe.</td>
+                </tr>
+                <tr>
+                  <td><code>marketGroups</code></td>
+                  <td>Market group snapshot</td>
+                  <td>Allows the agent to inspect outcome ladders, deadline curves, and probability-sum anomalies.</td>
+                </tr>
+                <tr>
+                  <td><code>topMarketFillTape</code></td>
+                  <td>Recent flow for top markets</td>
+                  <td>Gives fresh fill prices, VWAP, fill drift, paired-fill ratio, and price-source conflict detection without full LOB costs.</td>
+                </tr>
+                <tr>
+                  <td><code>trades</code> and <code>oracle</code></td>
+                  <td>Recent trade and oracle snapshots</td>
+                  <td>Help separate normal trading flow from resolution-adjacent or already-settled behavior.</td>
+                </tr>
+                <tr>
+                  <td><code>content</code> and signals</td>
+                  <td>News, alpha, whale, and suspicious-flow caches</td>
+                  <td>Connects market moves to catalysts while keeping claims grounded in available evidence.</td>
+                </tr>
+                <tr>
+                  <td><code>forecastMemory</code></td>
+                  <td>Snapshot store</td>
+                  <td>Feeds prior lessons, Brier score fields, and episodic memory back into the next run.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="outputs">Outputs</h2>
+          <p>The primary output is a panel snapshot. The same run also stores quantitative diagnostics and node-level audit events so a bad or surprising panel can be traced back to the exact node and evidence packet.</p>
+          <pre class="docs-code"><code>{
+  "status": "live",
+  "lens": "overview",
+  "brief": "...",
+  "focus": [],
+  "specialMarkets": [],
+  "themes": [],
+  "watchlist": [],
+  "evidence": [],
+  "agentGraph": {
+    "runtime": "langgraph-supervisor-stategraph",
+    "nodes": ["evidence_builder", "related_markets", "quant_forecaster", "..."],
+    "quantForecaster": {
+      "fillTapeMicrostructure": [],
+      "priceSourceConflicts": [],
+      "dataWarnings": []
+    },
+    "events": []
+  }
+}</code></pre>
+
+          <h2 id="quality">Quality Controls</h2>
+          <ul>
+            <li><strong>Price-source conflict detection:</strong> compares snapshot price, market detail price, latest fill, fill VWAP, and detail yes/no price before trusting a probability read.</li>
+            <li><strong>Data-quality discounts:</strong> labels missing <code>change24h</code>, missing LOB spread, stale fill tape, and group-volume/trade-count mismatch.</li>
+            <li><strong>Event log:</strong> records <code>run_id</code>, node, input hash, output JSON, model, token usage, latency, errors, and evidence references.</li>
+            <li><strong>Prompt caps:</strong> compact context keeps writer calls below model input limits while preserving high-signal quant evidence.</li>
+            <li><strong>Fallback safety:</strong> if the gateway, model, or budget path fails, deterministic fallback snapshots keep the dashboard available but expose status and error state.</li>
+          </ul>
+
+          <h2 id="apis">Runtime APIs</h2>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr>
+                  <th>Endpoint</th>
+                  <th>Returns</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>/runtime/agent/market-wide-insights/&lt;lens&gt;</code></td>
+                  <td>The dashboard-ready panel snapshot for <code>overview</code>, <code>special</code>, or <code>trend</code>.</td>
+                </tr>
+                <tr>
+                  <td><code>/runtime/agent/market-wide-quant/&lt;lens&gt;</code></td>
+                  <td>The latest quant snapshot, including fill-tape microstructure and price-source conflicts.</td>
+                </tr>
+                <tr>
+                  <td><code>/runtime/agent/market-wide-events/&lt;run_id&gt;</code></td>
+                  <td>Node-level event log for audit, debugging, latency inspection, and model-output review.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </main>
+
+        <aside class="docs-toc" aria-label="On this page">
+          <div class="toc-title">On this page</div>
+          <a class="active" href="#overview">What It Produces</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#flow">Runtime Flow</a>
+          <a href="#inputs">Inputs</a>
+          <a href="#outputs">Outputs</a>
+          <a href="#quality">Quality Controls</a>
+          <a href="#apis">Runtime APIs</a>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>
