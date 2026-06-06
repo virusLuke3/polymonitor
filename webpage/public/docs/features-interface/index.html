@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Introduction - polyData Documentation</title>
-    <meta name="description" content="Documentation for polyData Monitor, a live Polymarket intelligence dashboard." />
+    <title>Features &amp; Interface - polyData Documentation</title>
+    <meta name="description" content="polyData market lifecycle and interface model." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/docs-page.css" />
   </head>
@@ -45,7 +45,7 @@
         <aside class="docs-sidebar" aria-label="Documentation navigation">
           <div class="sidebar-group">
             <h2>Getting Started</h2>
-            <a class="active" href="/docs/documentation/">Introduction</a>
+            <a href="/docs/documentation/">Introduction</a>
             <a href="/docs/what-polydata-tracks/">What polyData tracks</a>
             <a href="/docs/data-coverage/">Data Coverage</a>
           </div>
@@ -62,7 +62,7 @@
           <div class="sidebar-group">
             <h2>Platform & Features</h2>
             <a href="/docs/platform-overview/">Platform Overview</a>
-            <a href="/docs/features-interface/">Features & Interface</a>
+            <a class="active" href="/docs/features-interface/">Features & Interface</a>
             <a href="/docs/panel-modules/">Panel Modules</a>
             <a href="/docs/deployment/">Deployment</a>
           </div>
@@ -75,19 +75,18 @@
         </aside>
 
         <main class="docs-content">
-          <div class="docs-kicker">Getting Started</div>
-          <h1>Introduction</h1>
-          <h2 id="overview">What polyData is</h2>
-          <p>polyData Monitor is an open-source Polymarket intelligence system. It turns markets, order books, on-chain trades, UMA oracle activity, outside news, macro data, weather data, sports data, and AI summaries into one operator-facing dashboard for understanding what is moving, why it is moving, and where liquidity or resolution risk is building.</p>
-          <p>The project is not just a frontend over the public Polymarket website. It maintains its own market catalog, token catalog, chain index, runtime snapshots, and panel registry so analysts can inspect a market from listing through trading, closure, oracle review, settlement, and archive.</p>
-          <h2 id="next">Next</h2>
-          <p>Start with <a href="/docs/what-polydata-tracks/">What polyData tracks</a>, then read <a href="/docs/Polymarket%20Concepts/">Polymarket Concepts</a> for the market, OrderFilled, and oracle data model.</p>
+          <div class="docs-kicker">Platform & Features</div>
+          <h1>Features & Interface</h1>
+          <h2 id="market-lifecycle">Market lifecycle model</h2>
+          <p>polyData treats a Polymarket market as a lifecycle, not as a static row. The lifecycle starts when a market is discovered from Gamma, CLOB, or on-chain TokenRegistered events. It becomes tradeable when condition id and CLOB token ids are available, then active when prices, BBO, volume, or OrderFilled flow appear.</p>
+          <h2 id="resolution-stage">Resolution stage</h2>
+          <p>The market moves into closing when the end date passes or trading flags close, then into oracle review when UMA request, proposal, dispute, or settlement events are matched. It becomes resolved when final status and settlement outcome are known, then archived while still remaining queryable.</p>
         </main>
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#overview">What polyData is</a>
-          <a href="#next">Next</a>
+          <a class="active" href="#market-lifecycle">Market lifecycle model</a>
+          <a href="#resolution-stage">Resolution stage</a>
         </aside>
       </div>
     </div>

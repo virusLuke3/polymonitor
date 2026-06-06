@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Polymarket Concepts - polyData Documentation</title>
-    <meta name="description" content="Core Polymarket concepts for polyData: markets, events, series, slugs, tokens, OrderFilled data, maker/taker roles, and oracle settlement." />
+    <meta name="description" content="Core Polymarket concepts for polyData." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/docs-page.css" />
   </head>
@@ -46,8 +46,8 @@
           <div class="sidebar-group">
             <h2>Getting Started</h2>
             <a href="/docs/documentation/">Introduction</a>
-            <a href="/docs/documentation/#getting-started">What polyData tracks</a>
-            <a href="/docs/documentation/#quickstart">Data Coverage</a>
+            <a href="/docs/what-polydata-tracks/">What polyData tracks</a>
+            <a href="/docs/data-coverage/">Data Coverage</a>
           </div>
           <div class="sidebar-group">
             <h2>Polymarket Concepts</h2>
@@ -55,34 +55,31 @@
           </div>
           <div class="sidebar-group">
             <h2>Usage</h2>
-            <a href="/docs/documentation/#authentication">Realtime Coverage</a>
-            <a href="/docs/documentation/#runtime">Runtime API</a>
-            <a href="/docs/documentation/#errors">Errors</a>
+            <a href="/docs/realtime-coverage/">Realtime Coverage</a>
+            <a href="/docs/runtime-api/">Runtime API</a>
+            <a href="/docs/errors/">Errors</a>
           </div>
           <div class="sidebar-group">
-            <h2>Platform &amp; Features</h2>
-            <a href="/docs/documentation/#platform">Platform Overview</a>
-            <a href="/docs/documentation/#features">Features &amp; Interface</a>
-            <a href="/docs/documentation/#panels">Panel Modules</a>
-            <a href="/docs/documentation/#deployment">Deployment</a>
+            <h2>Platform & Features</h2>
+            <a href="/docs/platform-overview/">Platform Overview</a>
+            <a href="/docs/features-interface/">Features & Interface</a>
+            <a href="/docs/panel-modules/">Panel Modules</a>
+            <a href="/docs/deployment/">Deployment</a>
           </div>
           <div class="sidebar-group">
-            <h2>Intelligence &amp; Analysis</h2>
-            <a href="/docs/documentation/#signals">Signal Intelligence</a>
-            <a href="/docs/documentation/#oracle-watch">Oracle Watch</a>
-            <a href="/docs/documentation/#research">Research Links</a>
+            <h2>Intelligence & Analysis</h2>
+            <a href="/docs/signal-intelligence/">Signal Intelligence</a>
+            <a href="/docs/oracle-watch/">Oracle Watch</a>
+            <a href="/docs/research-links/">Research Links</a>
           </div>
         </aside>
 
         <main class="docs-content">
           <div class="docs-kicker">Polymarket Concepts</div>
           <h1>Polymarket Concepts</h1>
-          <p>This page defines the Polymarket objects that polyData treats as first-class data. The goal is to avoid mixing market pages, event containers, outcome tokens, trade receipts, on-chain fill events, and oracle settlement events into one vague "market data" bucket.</p>
-
           <h2 id="market">Market</h2>
           <p>Polymarket has five concepts that are easy to confuse: market, event, series, slug, and token. A token is the lowest-level settleable asset. A market is the tradable question. An event organizes one or more related markets. A series is a broader collection that can group events across seasons, recurring themes, elections, tournaments, or long-running topics. A slug is a human-readable lookup key used in URLs and APIs.</p>
-          <p>A market is the smallest tradable unit. In the common binary case, it asks one concrete Yes/No question and has two outcome tokens. An event is the page-level container users often see in the Polymarket frontend. For example, an election winner event can contain separate markets for Trump, Biden, Other, and additional candidates. A series is the directory above events, such as an NBA season, an Oscars year, or a recurring macro topic.</p>
-          <p>A slug is not a market and it is not a token. It is a readable identifier for URLs, API lookup, and audit trails. The token is the actual wallet-held result asset. A binary market has a Yes token and a No token; these outcome tokens are ERC-1155 assets on Polygon built around the Conditional Token Framework. If the event happens, the Yes token redeems to $1 and the No token redeems to $0; if it does not happen, the reverse is true.</p>
+          <p>A market is the smallest tradable unit. In the common binary case, it asks one concrete Yes/No question and has two outcome tokens. An event is the page-level container users often see in the Polymarket frontend. A slug is not a chain id and it is not the asset a wallet holds. The token is the actual result asset.</p>
           <pre class="docs-code"><code>Series
 - title: 2028 U.S. Presidential Election
 - slug: us-presidential-election-2028
@@ -97,13 +94,10 @@
     - conditionId: 0xabc...
     - token A: YES
     - token B: NO</code></pre>
-          <p>Polymarket price history should also be read carefully. The public price-history surface is not a traditional OHLCV candle feed. For supported markets it can be queried at fine intervals such as one minute, but the value is midpoint-oriented price history. Midpoint is the average of the current best bid and best ask. The Polymarket frontend generally displays midpoint and falls back to last traded price when the spread is wider than $0.10.</p>
-          <p>Live order book data is a separate layer. Polymarket supports live CLOB/order-book data, but it does not provide a complete official historical LOB archive. polyData therefore models market identity, token identity, price history, BBO/depth snapshots, trades, and on-chain fills as separate layers.</p>
-
+          <p>Polymarket price history is not traditional OHLCV candle data. It is midpoint-oriented price history. Midpoint is the average of the current best bid and best ask. The frontend generally displays midpoint and falls back to last traded price when the spread is wider than $0.10. Live order book data is a separate layer, and Polymarket does not provide a complete official historical LOB archive.</p>
           <h2 id="orderfilled">OrderFilled</h2>
-          <p>When people say "trade data" on Polymarket, they often mix two layers. A trade is the execution-result view: it says which market traded, which outcome was involved, what side the taker took, what price was matched, what total size traded, and which maker orders were consumed. The Trade Object includes fields such as id, taker_order_id, market, asset_id, side, size, price, status, match_time, outcome, trader_side, transaction_hash, and maker_orders.</p>
+          <p>A trade is the execution-result view: it says which market traded, which outcome was involved, what side the taker took, what price was matched, what total size traded, and which maker orders were consumed.</p>
           <p>OrderFilled is the on-chain fill-event view. When execution is settled through the Exchange contract, the contract emits fill-level events with orderHash, maker, taker, makerAssetId, takerAssetId, makerAmountFilled, takerAmountFilled, and fee. In short: trade is the execution receipt; OrderFilled is the fill-level ledger.</p>
-          <p>The difference comes from the CLOB. A marketable order immediately consumes resting orders. If a taker buys 100 YES and the best ask is split across seller A for 30 shares, seller B for 20 shares, and seller C for 50 shares, the user can experience one 100-share trade while the chain records three OrderFilled events. Counting each fill as an independent user-level trade can overstate trade count and fragment taker intent.</p>
           <pre class="docs-code"><code>Aggregated trade:
 - side: BUY
 - price: 0.52
@@ -114,12 +108,11 @@ OrderFilled rows:
 - A_SELL filled for 30
 - B_SELL filled for 20
 - C_SELL filled for 50</code></pre>
-          <p>Maker and taker are roles in a specific execution, not permanent user categories. The maker provided liquidity by placing a resting order on the book. The taker removed liquidity by submitting a marketable order that matched against that liquidity. Order, trade, fill, and transaction are also separate layers: an order is the instruction, a trade is the matching result, OrderFilled is the chain-level fill event, and a transaction is the blockchain settlement record.</p>
-
+          <p>Maker and taker are roles in a specific execution, not permanent user categories. Order, trade, fill, and transaction are also separate layers: an order is the instruction, a trade is the matching result, OrderFilled is the chain-level fill event, and a transaction is the blockchain settlement record.</p>
           <h2 id="oracle">Oracle</h2>
-          <p>Oracle data explains how a market leaves the trading phase and becomes a settled outcome. A market price can move toward 0 or 1 before a market is final, but price alone does not prove settlement. The oracle layer records what answer was requested, what was proposed, whether the proposal was disputed, and what finally settled.</p>
+          <p>Oracle data explains how a market leaves the trading phase and becomes a settled outcome. Price alone does not prove settlement. The oracle layer records what answer was requested, what was proposed, whether the proposal was disputed, and what finally settled.</p>
           <p>Many Polymarket markets resolve through UMA-related adapter and oracle contracts. The lifecycle can include question initialization, request, proposal, dispute, and settlement. polyData stores transaction hashes, log indexes, block numbers, event times, proposed prices, settled prices, participants, and matching metadata for these events.</p>
-          <p>The hard part is identity matching. Some oracle events can be matched directly through question id or condition id. Others require adapter mappings, ancillary data decoding, title/date matching, or neg-risk request mappings. polyData preserves these matching paths so the lifecycle remains auditable from the public market page down to the chain event that finalized the result.</p>
+          <p>The hard part is identity matching. Some oracle events can be matched directly through question id or condition id. Others require adapter mappings, ancillary data decoding, title/date matching, or neg-risk request mappings.</p>
           <pre class="docs-code"><code>Market lifecycle:
 1. Discovered from Gamma, CLOB, or on-chain registry events
 2. Made tradeable through condition id and outcome tokens

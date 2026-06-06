@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Introduction - polyData Documentation</title>
-    <meta name="description" content="Documentation for polyData Monitor, a live Polymarket intelligence dashboard." />
+    <title>Panel Modules - polyData Documentation</title>
+    <meta name="description" content="The dashboard panel registry and module model." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/docs-page.css" />
   </head>
@@ -45,7 +45,7 @@
         <aside class="docs-sidebar" aria-label="Documentation navigation">
           <div class="sidebar-group">
             <h2>Getting Started</h2>
-            <a class="active" href="/docs/documentation/">Introduction</a>
+            <a href="/docs/documentation/">Introduction</a>
             <a href="/docs/what-polydata-tracks/">What polyData tracks</a>
             <a href="/docs/data-coverage/">Data Coverage</a>
           </div>
@@ -63,7 +63,7 @@
             <h2>Platform & Features</h2>
             <a href="/docs/platform-overview/">Platform Overview</a>
             <a href="/docs/features-interface/">Features & Interface</a>
-            <a href="/docs/panel-modules/">Panel Modules</a>
+            <a class="active" href="/docs/panel-modules/">Panel Modules</a>
             <a href="/docs/deployment/">Deployment</a>
           </div>
           <div class="sidebar-group">
@@ -75,19 +75,18 @@
         </aside>
 
         <main class="docs-content">
-          <div class="docs-kicker">Getting Started</div>
-          <h1>Introduction</h1>
-          <h2 id="overview">What polyData is</h2>
-          <p>polyData Monitor is an open-source Polymarket intelligence system. It turns markets, order books, on-chain trades, UMA oracle activity, outside news, macro data, weather data, sports data, and AI summaries into one operator-facing dashboard for understanding what is moving, why it is moving, and where liquidity or resolution risk is building.</p>
-          <p>The project is not just a frontend over the public Polymarket website. It maintains its own market catalog, token catalog, chain index, runtime snapshots, and panel registry so analysts can inspect a market from listing through trading, closure, oracle review, settlement, and archive.</p>
-          <h2 id="next">Next</h2>
-          <p>Start with <a href="/docs/what-polydata-tracks/">What polyData tracks</a>, then read <a href="/docs/Polymarket%20Concepts/">Polymarket Concepts</a> for the market, OrderFilled, and oracle data model.</p>
+          <div class="docs-kicker">Platform & Features</div>
+          <h1>Panel Modules</h1>
+          <h2 id="registry">Panel registry</h2>
+          <p>The dashboard currently registers 68 panels. They are split into small frontend modules with explicit metadata, fetch behavior, and renderers; runtime panels also have backend registry entries and snapshot routes.</p>
+          <h2 id="coverage">Panel coverage</h2>
+          <p>Core market, chain, oracle, AI, finance, crypto, macro, weather, sports, and time panels give the dashboard separate surfaces for discovery, context, flow, settlement risk, and external catalysts.</p>
         </main>
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#overview">What polyData is</a>
-          <a href="#next">Next</a>
+          <a class="active" href="#registry">Panel registry</a>
+          <a href="#coverage">Panel coverage</a>
         </aside>
       </div>
     </div>

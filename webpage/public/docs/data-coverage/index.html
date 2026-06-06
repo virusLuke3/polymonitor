@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Introduction - polyData Documentation</title>
-    <meta name="description" content="Documentation for polyData Monitor, a live Polymarket intelligence dashboard." />
+    <title>Data Coverage - polyData Documentation</title>
+    <meta name="description" content="Historical and live data coverage in polyData." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/docs-page.css" />
   </head>
@@ -45,9 +45,9 @@
         <aside class="docs-sidebar" aria-label="Documentation navigation">
           <div class="sidebar-group">
             <h2>Getting Started</h2>
-            <a class="active" href="/docs/documentation/">Introduction</a>
+            <a href="/docs/documentation/">Introduction</a>
             <a href="/docs/what-polydata-tracks/">What polyData tracks</a>
-            <a href="/docs/data-coverage/">Data Coverage</a>
+            <a class="active" href="/docs/data-coverage/">Data Coverage</a>
           </div>
           <div class="sidebar-group">
             <h2>Polymarket Concepts</h2>
@@ -76,18 +76,21 @@
 
         <main class="docs-content">
           <div class="docs-kicker">Getting Started</div>
-          <h1>Introduction</h1>
-          <h2 id="overview">What polyData is</h2>
-          <p>polyData Monitor is an open-source Polymarket intelligence system. It turns markets, order books, on-chain trades, UMA oracle activity, outside news, macro data, weather data, sports data, and AI summaries into one operator-facing dashboard for understanding what is moving, why it is moving, and where liquidity or resolution risk is building.</p>
-          <p>The project is not just a frontend over the public Polymarket website. It maintains its own market catalog, token catalog, chain index, runtime snapshots, and panel registry so analysts can inspect a market from listing through trading, closure, oracle review, settlement, and archive.</p>
-          <h2 id="next">Next</h2>
-          <p>Start with <a href="/docs/what-polydata-tracks/">What polyData tracks</a>, then read <a href="/docs/Polymarket%20Concepts/">Polymarket Concepts</a> for the market, OrderFilled, and oracle data model.</p>
+          <h1>Data Coverage</h1>
+          <h2 id="coverage-window">Coverage window</h2>
+          <p>As of June 6, 2026, the local PostgreSQL market catalog contains 1,280,986 market rows. The earliest indexed market creation time is October 2, 2020, and the newest market rows are collected through June 6, 2026.</p>
+          <p>The UMA oracle index contains 2,778,072 oracle events from July 11, 2022 through May 3, 2026. The ClickHouse OrderFilled store contains more than 1.44 billion trade rows and more than 230 million non-trade cashflow rows, covering Polygon blocks from 5,243,433 through 88,017,065, which maps to October 2, 2020 through June 6, 2026.</p>
+          <h2 id="backfill-path">Backfill path</h2>
+          <p>The backfill path starts from Polymarket Gamma active and closed events, hydrates missing fields from CLOB by slug or condition id, and supplements missed markets from Polygon exchange registry events.</p>
+          <h2 id="live-path">Live path</h2>
+          <p>The live path keeps moving forward with checkpointed market discovery, overlapping block scans, and a shared safe high-water block for market, oracle, and trade sync.</p>
         </main>
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#overview">What polyData is</a>
-          <a href="#next">Next</a>
+          <a class="active" href="#coverage-window">Coverage window</a>
+          <a href="#backfill-path">Backfill path</a>
+          <a href="#live-path">Live path</a>
         </aside>
       </div>
     </div>

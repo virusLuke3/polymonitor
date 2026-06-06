@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Introduction - polyData Documentation</title>
-    <meta name="description" content="Documentation for polyData Monitor, a live Polymarket intelligence dashboard." />
+    <title>Runtime API - polyData Documentation</title>
+    <meta name="description" content="How the frontend reaches the runtime API." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/docs-page.css" />
   </head>
@@ -45,7 +45,7 @@
         <aside class="docs-sidebar" aria-label="Documentation navigation">
           <div class="sidebar-group">
             <h2>Getting Started</h2>
-            <a class="active" href="/docs/documentation/">Introduction</a>
+            <a href="/docs/documentation/">Introduction</a>
             <a href="/docs/what-polydata-tracks/">What polyData tracks</a>
             <a href="/docs/data-coverage/">Data Coverage</a>
           </div>
@@ -56,7 +56,7 @@
           <div class="sidebar-group">
             <h2>Usage</h2>
             <a href="/docs/realtime-coverage/">Realtime Coverage</a>
-            <a href="/docs/runtime-api/">Runtime API</a>
+            <a class="active" href="/docs/runtime-api/">Runtime API</a>
             <a href="/docs/errors/">Errors</a>
           </div>
           <div class="sidebar-group">
@@ -75,19 +75,15 @@
         </aside>
 
         <main class="docs-content">
-          <div class="docs-kicker">Getting Started</div>
-          <h1>Introduction</h1>
-          <h2 id="overview">What polyData is</h2>
-          <p>polyData Monitor is an open-source Polymarket intelligence system. It turns markets, order books, on-chain trades, UMA oracle activity, outside news, macro data, weather data, sports data, and AI summaries into one operator-facing dashboard for understanding what is moving, why it is moving, and where liquidity or resolution risk is building.</p>
-          <p>The project is not just a frontend over the public Polymarket website. It maintains its own market catalog, token catalog, chain index, runtime snapshots, and panel registry so analysts can inspect a market from listing through trading, closure, oracle review, settlement, and archive.</p>
-          <h2 id="next">Next</h2>
-          <p>Start with <a href="/docs/what-polydata-tracks/">What polyData tracks</a>, then read <a href="/docs/Polymarket%20Concepts/">Polymarket Concepts</a> for the market, OrderFilled, and oracle data model.</p>
+          <div class="docs-kicker">Usage</div>
+          <h1>Runtime API</h1>
+          <h2 id="runtime-routing">Runtime routing</h2>
+          <p>The frontend reads through <code>/wm-api/</code>, which lets Nginx route the browser to the active API service without hard-coding private hosts in client code.</p>
         </main>
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#overview">What polyData is</a>
-          <a href="#next">Next</a>
+          <a class="active" href="#runtime-routing">Runtime routing</a>
         </aside>
       </div>
     </div>

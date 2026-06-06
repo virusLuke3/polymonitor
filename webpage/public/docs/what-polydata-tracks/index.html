@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Introduction - polyData Documentation</title>
-    <meta name="description" content="Documentation for polyData Monitor, a live Polymarket intelligence dashboard." />
+    <title>What polyData tracks - polyData Documentation</title>
+    <meta name="description" content="The market, chain, oracle, and external data tracked by polyData." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/docs-page.css" />
   </head>
@@ -45,8 +45,8 @@
         <aside class="docs-sidebar" aria-label="Documentation navigation">
           <div class="sidebar-group">
             <h2>Getting Started</h2>
-            <a class="active" href="/docs/documentation/">Introduction</a>
-            <a href="/docs/what-polydata-tracks/">What polyData tracks</a>
+            <a href="/docs/documentation/">Introduction</a>
+            <a class="active" href="/docs/what-polydata-tracks/">What polyData tracks</a>
             <a href="/docs/data-coverage/">Data Coverage</a>
           </div>
           <div class="sidebar-group">
@@ -76,18 +76,24 @@
 
         <main class="docs-content">
           <div class="docs-kicker">Getting Started</div>
-          <h1>Introduction</h1>
-          <h2 id="overview">What polyData is</h2>
-          <p>polyData Monitor is an open-source Polymarket intelligence system. It turns markets, order books, on-chain trades, UMA oracle activity, outside news, macro data, weather data, sports data, and AI summaries into one operator-facing dashboard for understanding what is moving, why it is moving, and where liquidity or resolution risk is building.</p>
-          <p>The project is not just a frontend over the public Polymarket website. It maintains its own market catalog, token catalog, chain index, runtime snapshots, and panel registry so analysts can inspect a market from listing through trading, closure, oracle review, settlement, and archive.</p>
-          <h2 id="next">Next</h2>
-          <p>Start with <a href="/docs/what-polydata-tracks/">What polyData tracks</a>, then read <a href="/docs/Polymarket%20Concepts/">Polymarket Concepts</a> for the market, OrderFilled, and oracle data model.</p>
+          <h1>What polyData tracks</h1>
+          <h2 id="market-identity">Market identity</h2>
+          <p>polyData stores every discoverable Polymarket market identity: Gamma id, slug, condition id, question id, oracle, CLOB token ids, outcome labels, category, tags, created time, and end time.</p>
+          <h2 id="live-state">Live market state</h2>
+          <p>Runtime data includes active and closed flags, latest prices, 24 hour price change, volume, trade count, best bid/ask, order-book depth, and last activity time.</p>
+          <h2 id="chain-oracle-context">Chain and oracle context</h2>
+          <p>Polygon chain data includes OrderFilled events, maker/taker addresses, side, outcome token, price, size, fee fields, non-trade cashflows, and address-level flow summaries.</p>
+          <p>UMA resolution data includes adapter mappings, question initialization, request/propose/dispute/settle events, proposed price, settled price, transaction hashes, block numbers, and matched market identity.</p>
+          <h2 id="external-context">External context</h2>
+          <p>External data includes RSS and news feeds, Jin10 macro flashes, BWENews, Yahoo and finance quotes, crypto funding venues, DeFi metrics, weather feeds, sports schedules, ESPN data, and AI-generated market briefs.</p>
         </main>
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#overview">What polyData is</a>
-          <a href="#next">Next</a>
+          <a class="active" href="#market-identity">Market identity</a>
+          <a href="#live-state">Live market state</a>
+          <a href="#chain-oracle-context">Chain and oracle context</a>
+          <a href="#external-context">External context</a>
         </aside>
       </div>
     </div>

@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Introduction - polyData Documentation</title>
-    <meta name="description" content="Documentation for polyData Monitor, a live Polymarket intelligence dashboard." />
+    <title>Realtime Coverage - polyData Documentation</title>
+    <meta name="description" content="How polyData keeps market coverage complete and current." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/docs-page.css" />
   </head>
@@ -45,7 +45,7 @@
         <aside class="docs-sidebar" aria-label="Documentation navigation">
           <div class="sidebar-group">
             <h2>Getting Started</h2>
-            <a class="active" href="/docs/documentation/">Introduction</a>
+            <a href="/docs/documentation/">Introduction</a>
             <a href="/docs/what-polydata-tracks/">What polyData tracks</a>
             <a href="/docs/data-coverage/">Data Coverage</a>
           </div>
@@ -55,7 +55,7 @@
           </div>
           <div class="sidebar-group">
             <h2>Usage</h2>
-            <a href="/docs/realtime-coverage/">Realtime Coverage</a>
+            <a class="active" href="/docs/realtime-coverage/">Realtime Coverage</a>
             <a href="/docs/runtime-api/">Runtime API</a>
             <a href="/docs/errors/">Errors</a>
           </div>
@@ -75,19 +75,21 @@
         </aside>
 
         <main class="docs-content">
-          <div class="docs-kicker">Getting Started</div>
-          <h1>Introduction</h1>
-          <h2 id="overview">What polyData is</h2>
-          <p>polyData Monitor is an open-source Polymarket intelligence system. It turns markets, order books, on-chain trades, UMA oracle activity, outside news, macro data, weather data, sports data, and AI summaries into one operator-facing dashboard for understanding what is moving, why it is moving, and where liquidity or resolution risk is building.</p>
-          <p>The project is not just a frontend over the public Polymarket website. It maintains its own market catalog, token catalog, chain index, runtime snapshots, and panel registry so analysts can inspect a market from listing through trading, closure, oracle review, settlement, and archive.</p>
-          <h2 id="next">Next</h2>
-          <p>Start with <a href="/docs/what-polydata-tracks/">What polyData tracks</a>, then read <a href="/docs/Polymarket%20Concepts/">Polymarket Concepts</a> for the market, OrderFilled, and oracle data model.</p>
+          <div class="docs-kicker">Usage</div>
+          <h1>Realtime Coverage</h1>
+          <h2 id="collection-paths">Collection paths</h2>
+          <p>polyData uses several independent collection paths because no single Polymarket endpoint is complete enough for historical and live analysis. Gamma provides the canonical event and market surface; CLOB provides condition-level market and token data; Polygon RPC provides registry, trade, and oracle truth.</p>
+          <h2 id="cache-layers">Cache layers</h2>
+          <p>ClickHouse stores high-volume OrderFilled and cashflow data; PostgreSQL stores canonical market, oracle, serving, and status tables; Redis and SQLite snapshots protect the UI from slow or stale upstream calls.</p>
+          <h2 id="sync-loop">Sync loop</h2>
+          <p>The sync loop refreshes markets first, then scans oracle and trade blocks with overlap windows. This ordering matters because markets can arrive after chain activity; re-scanning recent blocks lets late-discovered markets attach to already-seen trades and oracle events.</p>
         </main>
 
         <aside class="docs-toc" aria-label="On this page">
           <div class="toc-title">On this page</div>
-          <a class="active" href="#overview">What polyData is</a>
-          <a href="#next">Next</a>
+          <a class="active" href="#collection-paths">Collection paths</a>
+          <a href="#cache-layers">Cache layers</a>
+          <a href="#sync-loop">Sync loop</a>
         </aside>
       </div>
     </div>
