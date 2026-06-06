@@ -71,6 +71,12 @@ def _local_access_allowed() -> bool:
     return _is_loopback(request.remote_addr)
 
 
+def _claim_gateway_live_call(kind: str):
+    if _truthy_env("POLYDATA_AGENT_GATEWAY_BUDGET_DISABLED", False):
+        return True, {"enabled": False, "scope": "gateway", "kind": kind}
+    return claim_agent_live_call(kind)
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
 
@@ -91,7 +97,7 @@ def create_app() -> Flask:
             payload = {}
         if not isinstance(payload, dict):
             return jsonify({"error": "JSON object required"}), 400
-        allowed, budget = claim_agent_live_call("gateway:market")
+        allowed, budget = _claim_gateway_live_call("gateway:market")
         if not allowed:
             result = build_market_insight_fallback(payload)
             result["servedBy"] = "agent-gateway"
@@ -116,7 +122,7 @@ def create_app() -> Flask:
             payload = {}
         if not isinstance(payload, dict):
             return jsonify({"error": "JSON object required"}), 400
-        allowed, budget = claim_agent_live_call("gateway:market-wide")
+        allowed, budget = _claim_gateway_live_call("gateway:market-wide")
         if not allowed:
             result = build_market_wide_fallback(payload, reason="budget-fallback")
             result["servedBy"] = "agent-gateway"
