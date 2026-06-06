@@ -176,7 +176,7 @@ function nbaGames(items: NonNullable<PanelRenderContext['nba']>['items']) {
 export const sportsPanelRenderers: PanelRenderMap = {
   'nba-scoreboard': {
     render: (ctx) => (
-      <Panel title="NBA SCOREBOARD" badge="SPORTS" status="live" count={ctx.nba?.items.length || 0}>
+      <Panel title="NBA SCOREBOARD" badge="SPORTS" status="live" count={ctx.nba?.items.length || 0} className="wm-market-panel wm-nba-scoreboard-panel" dataPanelId="nba-scoreboard">
         {nbaGames(ctx.nba?.items || [])}
       </Panel>
     ),
@@ -184,7 +184,7 @@ export const sportsPanelRenderers: PanelRenderMap = {
   'nba-intel': {
     size: 'wide',
     render: (ctx) => (
-      <Panel title="NBA INTEL" badge="ESPN" status="live" count={ctx.nbaIntel?.items.length || 0}>
+      <Panel title="NBA INTEL" badge="ESPN" status="live" count={ctx.nbaIntel?.items.length || 0} className="wm-market-panel wm-nba-intel-panel" dataPanelId="nba-intel">
         {nbaIntelPanel(ctx)}
       </Panel>
     ),
@@ -192,7 +192,7 @@ export const sportsPanelRenderers: PanelRenderMap = {
   'espn-matchup-predictor': {
     size: 'wide',
     render: (ctx) => (
-      <Panel title="ESPN MATCHUP PREDICTOR" badge="BPI" status="live" count={ctx.nbaMatchupPredictor?.items.length || 0} className="wm-market-panel wm-matchup-predictor-panel">
+      <Panel title="ESPN MATCHUP PREDICTOR" badge="BPI" status="live" count={ctx.nbaMatchupPredictor?.items.length || 0} className="wm-market-panel wm-matchup-predictor-panel" dataPanelId="espn-matchup-predictor">
         {nbaMatchupPredictorPanel(ctx)}
       </Panel>
     ),
