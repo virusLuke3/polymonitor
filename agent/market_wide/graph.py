@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -77,6 +78,14 @@ def graph_enabled() -> bool:
     return get_bool_env("POLYDATA_AGENT_MARKET_WIDE_GRAPH_ENABLED", True)
 
 
+def langgraph_enabled() -> bool:
+    return get_bool_env("POLYDATA_AGENT_MARKET_WIDE_LANGGRAPH_ENABLED", True)
+
+
+def react_tools_enabled() -> bool:
+    return get_bool_env("POLYDATA_AGENT_MARKET_WIDE_REACT_TOOLS_ENABLED", True)
+
+
 def _agent_limit() -> int:
     return max(0, min(4, get_int_env("POLYDATA_AGENT_MARKET_WIDE_GRAPH_AGENT_LIMIT", 4)))
 
@@ -133,6 +142,53 @@ def _compact_related_for_prompt(related: dict[str, Any]) -> dict[str, Any]:
         "ladders": (related.get("ladders") or [])[:5],
         "arbitrageScores": (related.get("arbitrageScores") or [])[:5],
         "anomalies": (related.get("anomalies") or [])[:3],
+    }
+
+
+def _evidence_refs(payload: Any, limit: int = 6) -> list[str]:
+    refs: list[str] = []
+    if isinstance(payload, dict):
+        for key in ("title", "evidence", "summary", "probabilityAdjustment"):
+            value = payload.get(key)
+            if value:
+                refs.append(compact_text(value, 120))
+        for key in ("findings", "risks", "watch", "topFlowMarkets", "repricingZones", "priceDriftLeaders", "arbitrageScores"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                for item in value[:2]:
+                    refs.extend(_evidence_refs(item, limit=2))
+    elif isinstance(payload, list):
+        for item in payload[:2]:
+            refs.extend(_evidence_refs(item, limit=2))
+    return list(dict.fromkeys(refs))[:limit]
+
+
+def _node_event(
+    *,
+    run_id: str,
+    lens: str,
+    node: str,
+    output: dict[str, Any],
+    status: str = "ok",
+    input_hash: str | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+    latency_ms: int = 0,
+    error: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "runId": run_id,
+        "lens": lens,
+        "node": node,
+        "status": status,
+        "startedAt": started_at,
+        "finishedAt": finished_at or _utc_now_iso(),
+        "latencyMs": latency_ms,
+        "inputHash": input_hash or _json_hash(output),
+        "outputHash": _json_hash(output),
+        "outputJson": output,
+        "error": error,
+        "evidenceRefs": _evidence_refs(output),
     }
 
 
@@ -516,7 +572,188 @@ def _build_related_markets(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _specialist_prompt(node: str, lens: str, context: dict[str, Any], evidence: dict[str, Any]) -> tuple[str, str]:
+def _react_tool_quant_snapshot(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "quantForecaster": _compact_quant_for_prompt(context.get("quantForecaster") or {}),
+        "relatedMarkets": _compact_related_for_prompt(context.get("relatedMarkets") or {}),
+    }
+
+
+def _react_tool_data_quality(context: dict[str, Any]) -> dict[str, Any]:
+    quant = context.get("quantForecaster") if isinstance(context.get("quantForecaster"), dict) else {}
+    metrics = context.get("metrics") if isinstance(context.get("metrics"), dict) else {}
+    return {
+        "warnings": quant.get("dataWarnings") or [],
+        "metrics": metrics,
+        "contextChars": context.get("contextChars"),
+    }
+
+
+def _react_tool_catalyst_scan(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "content": context.get("content", [])[:4],
+        "oracle": context.get("oracle", [])[:4],
+        "watchSignals": [
+            *(context.get("alphaSignals", [])[:2] if isinstance(context.get("alphaSignals"), list) else []),
+            *(context.get("whaleSignals", [])[:2] if isinstance(context.get("whaleSignals"), list) else []),
+        ],
+    }
+
+
+def _react_tool_resolution_scan(context: dict[str, Any]) -> dict[str, Any]:
+    groups = context.get("marketGroups") if isinstance(context.get("marketGroups"), list) else []
+    markets = context.get("marketCandidates") if isinstance(context.get("marketCandidates"), list) else []
+    return {
+        "deadlineGroups": [
+            {
+                "title": item.get("title"),
+                "endDate": item.get("endDate"),
+                "outcomeCount": item.get("outcomeCount"),
+            }
+            for item in [*groups[:3], *markets[:3]]
+            if isinstance(item, dict)
+        ],
+        "oracle": context.get("oracle", [])[:4],
+    }
+
+
+def _react_tool_memory_scan(context: dict[str, Any]) -> dict[str, Any]:
+    memory = context.get("forecastMemory") if isinstance(context.get("forecastMemory"), list) else []
+    return {"priorEpisodes": memory[:6]}
+
+
+def _run_react_tools(node: str, context: dict[str, Any]) -> list[dict[str, Any]]:
+    if not react_tools_enabled():
+        return []
+    plan = {
+        "microstructure": ["quant_snapshot", "data_quality"],
+        "catalyst": ["catalyst_scan", "quant_snapshot"],
+        "resolution": ["resolution_scan", "data_quality"],
+        "skeptic": ["memory_scan", "data_quality", "quant_snapshot"],
+    }.get(node, ["quant_snapshot"])
+    tools = {
+        "quant_snapshot": _react_tool_quant_snapshot,
+        "data_quality": _react_tool_data_quality,
+        "catalyst_scan": _react_tool_catalyst_scan,
+        "resolution_scan": _react_tool_resolution_scan,
+        "memory_scan": _react_tool_memory_scan,
+    }
+    trace: list[dict[str, Any]] = []
+    for index, tool_name in enumerate(plan, start=1):
+        tool = tools.get(tool_name)
+        if tool is None:
+            continue
+        observation = tool(context)
+        trace.append({
+            "round": index,
+            "thought": f"{node} needs structured evidence before writing claims.",
+            "action": tool_name,
+            "observation": observation,
+            "observationHash": _json_hash(observation),
+        })
+    return trace
+
+
+def _memory_key(lens: str, title: str, kind: str) -> str:
+    return f"{lens}:{kind}:{_json_hash(title)}"
+
+
+def _build_reflexion_memory(context: dict[str, Any], lens: str, quant: dict[str, Any], related: dict[str, Any], run_id: str) -> dict[str, Any]:
+    prior = context.get("forecastMemory") if isinstance(context.get("forecastMemory"), list) else []
+    items: list[dict[str, Any]] = []
+    for item in (quant.get("priceDriftLeaders") or [])[:3]:
+        title = compact_text(item.get("title") or "market", 120)
+        items.append({
+            "memoryKey": _memory_key(lens, title, "price-drift"),
+            "lens": lens,
+            "runId": run_id,
+            "kind": "price-drift",
+            "title": title,
+            "observation": item,
+            "lesson": "Compare this drift against the next run and any resolution/oracle update before treating it as durable signal.",
+            "createdAt": _utc_now_iso(),
+        })
+    for item in (related.get("arbitrageScores") or [])[:3]:
+        title = compact_text(item.get("title") or "related-market", 120)
+        items.append({
+            "memoryKey": _memory_key(lens, title, "related-arbitrage"),
+            "lens": lens,
+            "runId": run_id,
+            "kind": "related-arbitrage",
+            "title": title,
+            "observation": item,
+            "lesson": "Recheck whether the score was true inefficiency, stale/resolved state, or non-exclusive outcome structure.",
+            "createdAt": _utc_now_iso(),
+        })
+    return {
+        "node": "reflexion_memory",
+        "priorEpisodesLoaded": len(prior),
+        "newEpisodes": items[:6],
+        "inputHash": _json_hash({"prior": prior[:8], "quant": quant.get("inputHash"), "related": related.get("inputHash")}),
+    }
+
+
+def _build_calibration_agent(
+    context: dict[str, Any],
+    quant: dict[str, Any],
+    related: dict[str, Any],
+    memory: dict[str, Any],
+    specialists: list[dict[str, Any]],
+) -> dict[str, Any]:
+    warnings = list(quant.get("dataWarnings") or [])
+    prior = context.get("forecastMemory") if isinstance(context.get("forecastMemory"), list) else []
+    brier_values = []
+    for item in prior:
+        if not isinstance(item, dict):
+            continue
+        score = item.get("brierScore")
+        try:
+            if score is not None:
+                brier_values.append(float(score))
+        except (TypeError, ValueError):
+            continue
+    avg_brier = sum(brier_values) / len(brier_values) if brier_values else None
+    related_scores = related.get("arbitrageScores") if isinstance(related.get("arbitrageScores"), list) else []
+    confidence = "medium"
+    if warnings or any(_as_float(item.get("score")) >= 80 for item in related_scores[:3]):
+        confidence = "low"
+    if avg_brier is not None and avg_brier <= 0.18 and not warnings:
+        confidence = "high"
+    return {
+        "node": "calibration_agent",
+        "confidence": confidence,
+        "history": {
+            "priorEpisodesLoaded": len(prior),
+            "brierCount": len(brier_values),
+            "avgBrierScore": round(avg_brier, 4) if avg_brier is not None else None,
+        },
+        "probabilityDiscipline": [
+            "Use market-implied price as anchor unless a named catalyst or resolution issue explains the deviation.",
+            "Discount signals when change24h, LOB spread, or resolution state is missing.",
+        ],
+        "discounts": warnings[:4],
+        "relatedMarketStress": related_scores[:4],
+        "specialistConfidence": [
+            {"node": item.get("node"), "confidence": item.get("confidence")}
+            for item in specialists[:4]
+            if isinstance(item, dict)
+        ],
+        "inputHash": _json_hash({
+            "warnings": warnings,
+            "related": related_scores[:4],
+            "memory": memory.get("inputHash"),
+            "specialists": specialists,
+        }),
+    }
+
+
+def _specialist_prompt(
+    node: str,
+    lens: str,
+    context: dict[str, Any],
+    evidence: dict[str, Any],
+    react_trace: list[dict[str, Any]] | None = None,
+) -> tuple[str, str]:
     role = {
         "microstructure": "You are the market microstructure agent for a Polymarket intelligence graph. Focus on named markets, implied probability, volume, trade-count, liquidity concentration, close probabilities, deadline ladders, and group-vs-single-market mismatches.",
         "catalyst": "You are the catalyst research agent for a Polymarket intelligence graph. Focus on named markets, current prices, concrete external triggers, related-market catalysts, event timing, and what news/data would move probability.",
@@ -541,6 +778,8 @@ def _specialist_prompt(node: str, lens: str, context: dict[str, Any], evidence: 
             "specialistAgents": context.get("specialistAgents", []),
             "quantForecaster": _compact_quant_for_prompt(context.get("quantForecaster") or {}),
             "relatedMarkets": _compact_related_for_prompt(context.get("relatedMarkets") or {}),
+            "forecastMemory": context.get("forecastMemory", [])[:6] if isinstance(context.get("forecastMemory"), list) else [],
+            "reactToolTrace": react_trace or [],
         },
         "requiredSchema": {
             "findings": [{"label": "LIQUIDITY|CATALYST|RESOLUTION|RISK|TREND|PROBABILITY", "title": "named market or spread", "summary": "market-level insight with price/probability and why it matters", "severity": "positive|warning|critical|neutral", "evidence": "price + volume/trades"}],
@@ -553,7 +792,15 @@ def _specialist_prompt(node: str, lens: str, context: dict[str, Any], evidence: 
     return role + FORECAST_ANALYST_RULES + "\nReturn compact JSON only.", json.dumps(user_context, ensure_ascii=False, default=str)
 
 
-def _writer_prompt(lens: str, context: dict[str, Any], evidence: dict[str, Any], agents: list[dict[str, Any]], calibration: dict[str, Any]) -> tuple[str, str]:
+def _writer_prompt(
+    lens: str,
+    context: dict[str, Any],
+    evidence: dict[str, Any],
+    agents: list[dict[str, Any]],
+    calibration: dict[str, Any],
+    calibration_agent: dict[str, Any] | None = None,
+    memory: dict[str, Any] | None = None,
+) -> tuple[str, str]:
     system = """You are the panel writer for polyData's Forecast Intelligence Graph.
 Return compact JSON only. Use the specialist agent outputs as evidence, but write one coherent dashboard payload.
 The user does not need a category summary. The user needs prediction-market intelligence: named markets, implied probabilities, why the market is priced that way, what could move it, and what resolution wording can break the read.
@@ -565,6 +812,8 @@ Write like a prediction-market analyst, not a dashboard narrator.
         "evidenceBuilder": evidence,
         "specialistAgents": agents,
         "skepticCalibration": calibration,
+        "calibrationAgent": calibration_agent or {},
+        "reflexionMemory": memory or {},
         "sourceContext": {
             "metrics": context.get("metrics"),
             "quantForecaster": _compact_quant_for_prompt(context.get("quantForecaster") or {}),
@@ -576,6 +825,7 @@ Write like a prediction-market analyst, not a dashboard narrator.
             "oracle": context.get("oracle", [])[:4],
             "content": context.get("content", [])[:4],
             "searchResults": context.get("searchResults", [])[:2],
+            "forecastMemory": context.get("forecastMemory", [])[:6] if isinstance(context.get("forecastMemory"), list) else [],
         },
         "requiredSchema": {
             "brief": "one or two concise English sentences. Must name at least one market and include a price/probability or spread. Avoid generic category/breadth wording.",
@@ -591,7 +841,9 @@ Write like a prediction-market analyst, not a dashboard narrator.
 
 def _call_json_node(client: Any, node: str, messages: list[dict[str, str]], *, max_tokens: int, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     started = _utc_now_iso()
+    start_monotonic = time.monotonic()
     event: dict[str, Any] = {
+        "runId": run_id,
         "node": node,
         "startedAt": started,
         "inputHash": _json_hash(messages),
@@ -608,7 +860,10 @@ def _call_json_node(client: Any, node: str, messages: list[dict[str, str]], *, m
         usage = getattr(client, "last_usage", None)
         event.update({
             "finishedAt": _utc_now_iso(),
+            "latencyMs": int((time.monotonic() - start_monotonic) * 1000),
             "outputHash": output_hash,
+            "outputJson": raw,
+            "evidenceRefs": _evidence_refs(raw),
             "model": getattr(client, "model", ""),
             "runtime": getattr(usage, "runtime", ""),
             "usage": {
@@ -622,6 +877,7 @@ def _call_json_node(client: Any, node: str, messages: list[dict[str, str]], *, m
     except Exception as exc:
         event.update({
             "finishedAt": _utc_now_iso(),
+            "latencyMs": int((time.monotonic() - start_monotonic) * 1000),
             "status": "error",
             "error": compact_text(str(exc), 180),
         })
@@ -640,6 +896,105 @@ def _usage_total(events: list[dict[str, Any]]) -> dict[str, int]:
     return total
 
 
+def _run_langgraph_preflight(state: dict[str, Any]) -> dict[str, Any] | None:
+    if not langgraph_enabled():
+        return None
+    try:
+        from langgraph.graph import END, StateGraph
+    except Exception:
+        return None
+
+    def evidence_node(current: dict[str, Any]) -> dict[str, Any]:
+        evidence = _deterministic_evidence(current["context"], current["lens"])
+        current["evidence"] = evidence
+        current.setdefault("events", []).append(_node_event(
+            run_id=current["runId"],
+            lens=current["lens"],
+            node="evidence_builder",
+            output=evidence,
+            input_hash=evidence["inputHash"],
+        ))
+        return current
+
+    def related_node(current: dict[str, Any]) -> dict[str, Any]:
+        related = _build_related_markets(current["context"])
+        current["relatedMarkets"] = related
+        current.setdefault("events", []).append(_node_event(
+            run_id=current["runId"],
+            lens=current["lens"],
+            node="related_markets",
+            output=related,
+            input_hash=related["inputHash"],
+        ))
+        return current
+
+    def quant_node(current: dict[str, Any]) -> dict[str, Any]:
+        quant = _build_quant_forecaster(current["context"], current.get("relatedMarkets") or {})
+        current["quantForecaster"] = quant
+        current.setdefault("events", []).append(_node_event(
+            run_id=current["runId"],
+            lens=current["lens"],
+            node="quant_forecaster",
+            output=quant,
+            input_hash=quant["inputHash"],
+        ))
+        return current
+
+    def memory_node(current: dict[str, Any]) -> dict[str, Any]:
+        memory = _build_reflexion_memory(
+            current["context"],
+            current["lens"],
+            current.get("quantForecaster") or {},
+            current.get("relatedMarkets") or {},
+            current["runId"],
+        )
+        current["reflexionMemory"] = memory
+        current.setdefault("events", []).append(_node_event(
+            run_id=current["runId"],
+            lens=current["lens"],
+            node="reflexion_memory",
+            output=memory,
+            input_hash=memory["inputHash"],
+        ))
+        return current
+
+    workflow = StateGraph(dict)
+    workflow.add_node("evidence_builder", evidence_node)
+    workflow.add_node("related_markets", related_node)
+    workflow.add_node("quant_forecaster", quant_node)
+    workflow.add_node("reflexion_memory", memory_node)
+    workflow.set_entry_point("evidence_builder")
+    workflow.add_edge("evidence_builder", "related_markets")
+    workflow.add_edge("related_markets", "quant_forecaster")
+    workflow.add_edge("quant_forecaster", "reflexion_memory")
+    workflow.add_edge("reflexion_memory", END)
+    app = workflow.compile()
+    result = app.invoke(state)
+    result["graphRuntime"] = "langgraph-stategraph"
+    return result
+
+
+def _run_sequential_preflight(state: dict[str, Any]) -> dict[str, Any]:
+    evidence = _deterministic_evidence(state["context"], state["lens"])
+    related = _build_related_markets(state["context"])
+    quant = _build_quant_forecaster(state["context"], related)
+    memory = _build_reflexion_memory(state["context"], state["lens"], quant, related, state["runId"])
+    state.update({
+        "evidence": evidence,
+        "relatedMarkets": related,
+        "quantForecaster": quant,
+        "reflexionMemory": memory,
+        "graphRuntime": "sequential-stategraph-fallback",
+        "events": [
+            _node_event(run_id=state["runId"], lens=state["lens"], node="evidence_builder", output=evidence, input_hash=evidence["inputHash"]),
+            _node_event(run_id=state["runId"], lens=state["lens"], node="related_markets", output=related, input_hash=related["inputHash"]),
+            _node_event(run_id=state["runId"], lens=state["lens"], node="quant_forecaster", output=quant, input_hash=quant["inputHash"]),
+            _node_event(run_id=state["runId"], lens=state["lens"], node="reflexion_memory", output=memory, input_hash=memory["inputHash"]),
+        ],
+    })
+    return state
+
+
 def run_forecast_intelligence_graph(
     payload: dict[str, Any],
     lens: str,
@@ -651,34 +1006,35 @@ def run_forecast_intelligence_graph(
     fallback: Callable[[dict[str, Any], str, str, list[dict[str, str]]], dict[str, Any]],
 ) -> dict[str, Any]:
     run_id = forecast_run_id(payload)
-    evidence = _deterministic_evidence(context, lens)
-    related_markets = _build_related_markets(context)
-    quant_forecaster = _build_quant_forecaster(context, related_markets)
+    state = {
+        "payload": payload,
+        "lens": lens,
+        "context": context,
+        "runId": run_id,
+        "events": [],
+    }
+    state = _run_langgraph_preflight(state) or _run_sequential_preflight(state)
+    evidence = state["evidence"]
+    related_markets = state["relatedMarkets"]
+    quant_forecaster = state["quantForecaster"]
+    reflexion_memory = state["reflexionMemory"]
+    graph_runtime = state.get("graphRuntime") or "sequential-stategraph-fallback"
     graph_context = {
         **context,
         "quantForecaster": quant_forecaster,
         "relatedMarkets": related_markets,
+        "reflexionMemory": reflexion_memory,
     }
-    events: list[dict[str, Any]] = [{
-        "node": "evidence_builder",
-        "status": "ok",
-        "finishedAt": _utc_now_iso(),
-        "inputHash": evidence["inputHash"],
-        "outputHash": _json_hash(evidence),
-    }, {
-        "node": "quant_forecaster",
-        "status": "ok",
-        "finishedAt": _utc_now_iso(),
-        "inputHash": quant_forecaster["inputHash"],
-        "outputHash": _json_hash(quant_forecaster),
-    }, {
-        "node": "related_markets",
-        "status": "ok",
-        "finishedAt": _utc_now_iso(),
-        "inputHash": related_markets["inputHash"],
-        "outputHash": _json_hash(related_markets),
-    }]
+    events: list[dict[str, Any]] = list(state.get("events") or [])
     if not getattr(client, "configured", False):
+        calibration_agent = _build_calibration_agent(graph_context, quant_forecaster, related_markets, reflexion_memory, [])
+        events.append(_node_event(
+            run_id=run_id,
+            lens=lens,
+            node="calibration_agent",
+            output=calibration_agent,
+            input_hash=calibration_agent["inputHash"],
+        ))
         response = fallback(payload, lens, "missing-api-key", search_results)
         response["forecastRunId"] = run_id
         response["agentArchitecture"] = GRAPH_VERSION
@@ -686,17 +1042,22 @@ def run_forecast_intelligence_graph(
             "version": GRAPH_VERSION,
             "runId": run_id,
             "mode": "deterministic-fallback",
-            "nodes": ["evidence_builder", "quant_forecaster", "related_markets"],
+            "runtime": graph_runtime,
+            "nodes": ["evidence_builder", "related_markets", "quant_forecaster", "reflexion_memory", "calibration_agent"],
             "events": events,
+            "evidenceBuilder": evidence,
             "quantForecaster": quant_forecaster,
             "relatedMarkets": related_markets,
+            "reflexionMemory": reflexion_memory,
+            "calibrationAgent": calibration_agent,
         }
         return response
 
     limit = _agent_limit()
     specialists: list[dict[str, Any]] = []
     for node in SPECIALIST_NODES[:limit]:
-        system, user = _specialist_prompt(node, lens, graph_context, evidence)
+        react_trace = _run_react_tools(node, graph_context)
+        system, user = _specialist_prompt(node, lens, graph_context, evidence, react_trace)
         raw, event = _call_json_node(
             client,
             node,
@@ -704,12 +1065,25 @@ def run_forecast_intelligence_graph(
             max_tokens=520,
             run_id=run_id,
         )
+        event["lens"] = lens
+        event["toolCalls"] = react_trace
         events.append(event)
         specialists.append(_normalize_node_output(raw, node) if raw else {"node": node, "findings": [], "risks": [event.get("error", "agent failed")], "watch": [], "confidence": "low"})
 
+    calibration_agent = _build_calibration_agent(graph_context, quant_forecaster, related_markets, reflexion_memory, specialists)
+    events.append(_node_event(
+        run_id=run_id,
+        lens=lens,
+        node="calibration_agent",
+        output=calibration_agent,
+        input_hash=calibration_agent["inputHash"],
+    ))
+
     calibration: dict[str, Any] = {"node": "skeptic", "findings": [], "risks": [], "watch": [], "confidence": "medium"}
     if limit >= 4:
-        system, user = _specialist_prompt("skeptic", lens, {**graph_context, "specialistAgents": specialists}, evidence)
+        skeptic_context = {**graph_context, "specialistAgents": specialists, "calibrationAgent": calibration_agent}
+        react_trace = _run_react_tools("skeptic", skeptic_context)
+        system, user = _specialist_prompt("skeptic", lens, skeptic_context, evidence, react_trace)
         raw, event = _call_json_node(
             client,
             "skeptic",
@@ -717,11 +1091,13 @@ def run_forecast_intelligence_graph(
             max_tokens=520,
             run_id=run_id,
         )
+        event["lens"] = lens
+        event["toolCalls"] = react_trace
         events.append(event)
         if raw:
             calibration = _normalize_node_output(raw, "skeptic")
 
-    system, user = _writer_prompt(lens, graph_context, evidence, specialists, calibration)
+    system, user = _writer_prompt(lens, graph_context, evidence, specialists, calibration, calibration_agent, reflexion_memory)
     raw, event = _call_json_node(
         client,
         "panel_writer",
@@ -729,6 +1105,7 @@ def run_forecast_intelligence_graph(
         max_tokens=950,
         run_id=run_id,
     )
+    event["lens"] = lens
     events.append(event)
     if not raw:
         response = fallback(payload, lens, "agent-error", search_results)
@@ -748,11 +1125,15 @@ def run_forecast_intelligence_graph(
     response["agentGraph"] = {
         "version": GRAPH_VERSION,
         "runId": run_id,
-        "mode": "supervisor-worker",
-        "nodes": ["evidence_builder", "quant_forecaster", "related_markets", *SPECIALIST_NODES[:limit], *(["skeptic"] if limit >= 4 else []), "panel_writer"],
+        "mode": "langgraph-supervisor-worker" if graph_runtime == "langgraph-stategraph" else "supervisor-worker",
+        "runtime": graph_runtime,
+        "nodes": ["evidence_builder", "related_markets", "quant_forecaster", "reflexion_memory", *SPECIALIST_NODES[:limit], "calibration_agent", *(["skeptic"] if limit >= 4 else []), "panel_writer"],
         "events": events,
+        "evidenceBuilder": evidence,
         "quantForecaster": quant_forecaster,
         "relatedMarkets": related_markets,
+        "reflexionMemory": reflexion_memory,
+        "calibrationAgent": calibration_agent,
         "specialists": specialists,
         "calibration": calibration,
     }

@@ -28,4 +28,12 @@ def create_agent_snapshot_blueprint(helpers: dict) -> Blueprint:
         response.headers["Cache-Control"] = "public, max-age=30, stale-while-revalidate=300"
         return response
 
+    @bp.route("/runtime/agent/market-wide-events/<run_id>", methods=["GET"])
+    def api_market_wide_events(run_id: str):
+        store = helpers.get("SNAPSHOT_STORE")
+        if store is None or not hasattr(store, "get_agent_node_events"):
+            return jsonify({"error": "agent-event-log-unavailable", "status": "unavailable", "runId": run_id}), 404
+        events = store.get_agent_node_events(run_id)
+        return jsonify({"status": "ok", "runId": run_id, "items": events, "count": len(events)})
+
     return bp

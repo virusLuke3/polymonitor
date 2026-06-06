@@ -146,6 +146,20 @@ def _cached_signal_items(helpers: dict[str, Any], namespace: str, cache_key: str
     return _items(_read_cached_snapshot(helpers, namespace, cache_key))[:limit]
 
 
+def _forecast_memory_items(helpers: dict[str, Any], lens: str, limit: int = 24) -> list[Any]:
+    store = helpers.get("SNAPSHOT_STORE")
+    if store is not None and hasattr(store, "get_agent_forecast_memory"):
+        try:
+            items = store.get_agent_forecast_memory(lens, limit=limit)
+            if isinstance(items, list):
+                return items[:limit]
+        except Exception:
+            logger = getattr(helpers.get("app"), "logger", None)
+            if logger is not None:
+                logger.exception("agent forecast memory read failed lens=%s", lens)
+    return []
+
+
 def _snapshot_age_seconds(snapshot: dict[str, Any]) -> float | None:
     data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
     generated_at = data.get("snapshotGeneratedAt") or data.get("generatedAt") or snapshot.get("generatedAt")
@@ -170,13 +184,14 @@ def _return_skipped_snapshot(snapshot: dict[str, Any], reason: str) -> dict[str,
 
 
 def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any, *, run_id: str | None = None) -> dict[str, Any]:
+    normalized_lens = normalize_lens(lens)
     active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80, False, True)
     if not _items(active_markets):
         active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80)
     market_groups = _safe_call(helpers, "get_market_groups_payload", {}, "", 1, 60, "active")
     content = _safe_call(helpers, "get_latest_content_payload", {}, 12)
     payload = {
-        "lens": normalize_lens(lens),
+        "lens": normalized_lens,
         "markets": _items(active_markets)[:80],
         "marketGroups": _items(market_groups)[:60],
         "trades": _safe_call(helpers, "get_recent_trades_snapshot", [], 24)[:24],
@@ -190,6 +205,7 @@ def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any, *, run_id
             10,
         ),
         "suspiciousSignals": _cached_signal_items(helpers, SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS, _json_key({"limit": 12}), 10),
+        "forecastMemory": _forecast_memory_items(helpers, normalized_lens, limit=24),
     }
     payload = _json_safe_payload(payload)
     payload["forecastRunId"] = run_id or forecast_run_id(payload)
@@ -274,6 +290,8 @@ def store_market_wide_snapshot(helpers: dict[str, Any], snapshot: dict[str, Any]
     if store is not None and hasattr(store, "set"):
         store.set(SNAPSHOT_NAMESPACE, key, snapshot, ttl)
     store_market_wide_quant_snapshot(helpers, snapshot)
+    store_market_wide_agent_events(helpers, snapshot)
+    store_market_wide_forecast_memory(helpers, snapshot)
 
 
 def _quant_snapshot_from_market_wide_snapshot(snapshot: dict[str, Any]) -> dict[str, Any] | None:
@@ -322,6 +340,70 @@ def store_market_wide_quant_snapshot(helpers: dict[str, Any], snapshot: dict[str
     if store is not None and hasattr(store, "set"):
         store.set(QUANT_SNAPSHOT_NAMESPACE, latest_key, payload, ttl)
         store.set(QUANT_HISTORY_NAMESPACE, history_key, payload, ttl)
+
+
+def _agent_events_from_snapshot(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
+    graph = data.get("agentGraph") if isinstance(data.get("agentGraph"), dict) else {}
+    events = graph.get("events") if isinstance(graph.get("events"), list) else []
+    lens = normalize_lens(snapshot.get("lens") or data.get("lens"))
+    run_id = data.get("forecastRunId") or graph.get("runId")
+    output_by_node = {
+        "evidence_builder": graph.get("evidenceBuilder"),
+        "quant_forecaster": graph.get("quantForecaster"),
+        "related_markets": graph.get("relatedMarkets"),
+        "reflexion_memory": graph.get("reflexionMemory"),
+        "calibration_agent": graph.get("calibrationAgent"),
+        "skeptic": graph.get("calibration"),
+    }
+    for specialist in graph.get("specialists") or []:
+        if isinstance(specialist, dict) and specialist.get("node"):
+            output_by_node[str(specialist["node"])] = specialist
+    normalized: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        item = dict(event)
+        node = str(item.get("node") or "")
+        item.setdefault("runId", run_id)
+        item.setdefault("lens", lens)
+        if "outputJson" not in item and isinstance(output_by_node.get(node), dict):
+            item["outputJson"] = output_by_node[node]
+        normalized.append(item)
+    return normalized
+
+
+def store_market_wide_agent_events(helpers: dict[str, Any], snapshot: dict[str, Any]) -> None:
+    store = helpers.get("SNAPSHOT_STORE")
+    if store is None or not hasattr(store, "record_agent_node_events"):
+        return
+    events = _agent_events_from_snapshot(snapshot)
+    if not events:
+        return
+    try:
+        store.record_agent_node_events(events)
+    except Exception:
+        logger = getattr(helpers.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("agent node event log write failed")
+
+
+def store_market_wide_forecast_memory(helpers: dict[str, Any], snapshot: dict[str, Any]) -> None:
+    data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
+    graph = data.get("agentGraph") if isinstance(data.get("agentGraph"), dict) else {}
+    memory = graph.get("reflexionMemory") if isinstance(graph.get("reflexionMemory"), dict) else {}
+    episodes = memory.get("newEpisodes") if isinstance(memory.get("newEpisodes"), list) else []
+    if not episodes:
+        return
+    store = helpers.get("SNAPSHOT_STORE")
+    if store is None or not hasattr(store, "upsert_agent_forecast_memory"):
+        return
+    try:
+        store.upsert_agent_forecast_memory(episodes)
+    except Exception:
+        logger = getattr(helpers.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("agent forecast memory write failed")
 
 
 def read_market_wide_quant_snapshot(helpers: dict[str, Any], lens: Any, *, allow_stale: bool = True) -> dict[str, Any] | None:

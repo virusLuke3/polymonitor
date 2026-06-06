@@ -94,6 +94,8 @@ class MissingClient:
 class FakeSnapshotStore:
     def __init__(self) -> None:
         self.values: dict[tuple[str, str], Any] = {}
+        self.events: list[dict[str, Any]] = []
+        self.memories: list[dict[str, Any]] = []
 
     def set(self, namespace: str, cache_key: str, payload: Any, ttl: int) -> None:
         self.values[(namespace, cache_key)] = payload
@@ -103,6 +105,15 @@ class FakeSnapshotStore:
 
     def get_stale(self, namespace: str, cache_key: str) -> Any:
         return self.values.get((namespace, cache_key))
+
+    def record_agent_node_events(self, events: list[dict[str, Any]]) -> None:
+        self.events.extend(events)
+
+    def upsert_agent_forecast_memory(self, memories: list[dict[str, Any]]) -> None:
+        self.memories.extend(memories)
+
+    def get_agent_forecast_memory(self, lens: str, limit: int = 24) -> list[dict[str, Any]]:
+        return [item for item in self.memories if item.get("lens") == lens][:limit]
 
 
 class MarketWideAgentGraphTestCase(unittest.TestCase):
@@ -143,14 +154,17 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertEqual(response["forecastRunId"], "fig-test")
         self.assertEqual(response["agentArchitecture"], GRAPH_VERSION)
         self.assertIn("specialMarkets", response)
-        self.assertEqual(response["agentGraph"]["mode"], "supervisor-worker")
+        self.assertIn(response["agentGraph"]["mode"], {"supervisor-worker", "langgraph-supervisor-worker"})
+        self.assertIn(response["agentGraph"]["runtime"], {"sequential-stategraph-fallback", "langgraph-stategraph"})
         self.assertEqual(response["agentGraph"]["nodes"], [
             "evidence_builder",
-            "quant_forecaster",
             "related_markets",
+            "quant_forecaster",
+            "reflexion_memory",
             "microstructure",
             "catalyst",
             "resolution",
+            "calibration_agent",
             "skeptic",
             "panel_writer",
         ])
@@ -158,6 +172,9 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertEqual(response["usage"]["contextChars"], 777)
         self.assertIn("quantForecaster", response["agentGraph"])
         self.assertIn("relatedMarkets", response["agentGraph"])
+        self.assertIn("reflexionMemory", response["agentGraph"])
+        self.assertIn("calibrationAgent", response["agentGraph"])
+        self.assertTrue(response["agentGraph"]["events"][0].get("outputJson"))
         self.assertEqual(response["agentGraph"]["quantForecaster"]["priceDriftLeaders"][0]["drift24h"], "+5.0 pts")
         self.assertEqual(response["agentGraph"]["quantForecaster"]["lobSpreads"][0]["spread"], "5.0 pts")
         self.assertEqual(response["agentGraph"]["quantForecaster"]["volatilityLeaders"][0]["priceRange"], "10.0 pts")
@@ -221,7 +238,13 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response["status"], "missing-api-key")
-        self.assertEqual(response["agentGraph"]["nodes"], ["evidence_builder", "quant_forecaster", "related_markets"])
+        self.assertEqual(response["agentGraph"]["nodes"], [
+            "evidence_builder",
+            "related_markets",
+            "quant_forecaster",
+            "reflexion_memory",
+            "calibration_agent",
+        ])
         self.assertEqual(response["agentGraph"]["quantForecaster"]["repricingZones"][0]["title"], "Market A")
 
     def test_store_market_wide_snapshot_persists_quant_snapshot_separately(self):
@@ -246,8 +269,21 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
                 "agentGraph": {
                     "runId": "fig-quant-test",
                     "version": GRAPH_VERSION,
+                    "events": [
+                        {"node": "quant_forecaster", "status": "ok", "inputHash": "ih", "outputHash": "oh"},
+                        {"node": "calibration_agent", "status": "ok", "inputHash": "cih", "outputHash": "coh"},
+                    ],
                     "quantForecaster": {"node": "quant_forecaster", "priceDriftLeaders": [{"title": "A"}]},
                     "relatedMarkets": {"node": "related_markets", "arbitrageScores": [{"title": "Group A", "score": 22.0}]},
+                    "reflexionMemory": {
+                        "node": "reflexion_memory",
+                        "newEpisodes": [{
+                            "memoryKey": "overview:price-drift:a",
+                            "lens": "overview",
+                            "runId": "fig-quant-test",
+                            "title": "A",
+                        }],
+                    },
                 },
             },
         }
@@ -262,11 +298,15 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         quant_snapshot = read_market_wide_quant_snapshot(helpers, "overview")
         self.assertEqual(quant_snapshot["runId"], "fig-quant-test")
         self.assertEqual(quant_snapshot["quantForecaster"]["priceDriftLeaders"][0]["title"], "A")
+        self.assertEqual(len(store.events), 2)
+        self.assertEqual(store.events[0]["runId"], "fig-quant-test")
+        self.assertEqual(store.events[0]["outputJson"]["priceDriftLeaders"][0]["title"], "A")
+        self.assertEqual(store.memories[0]["memoryKey"], "overview:price-drift:a")
 
     def test_seed_all_lenses_share_one_forecast_run_id_when_timer_runs_default(self):
         stored: dict[tuple[str, str], Any] = {}
         helpers = {
-            "get_active_markets_snapshot": lambda limit: {"items": [{"title": "A", "category": "politics"}]},
+            "get_active_markets_snapshot": lambda *args: {"items": [{"title": "A", "category": "politics"}]},
             "get_market_groups_payload": lambda query, page, page_size, status: {"items": [{"title": "B", "category": "sports"}]},
             "get_latest_content_payload": lambda limit: {"items": []},
             "get_recent_trades_snapshot": lambda limit: [],
@@ -284,7 +324,7 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
 
     def test_gateway_seed_delegates_budget_to_gateway_host(self):
         helpers = {
-            "get_active_markets_snapshot": lambda limit: {"items": []},
+            "get_active_markets_snapshot": lambda *args: {"items": []},
             "get_market_groups_payload": lambda query, page, page_size, status: {"items": []},
             "get_latest_content_payload": lambda limit: {"items": []},
             "get_recent_trades_snapshot": lambda limit: [],
