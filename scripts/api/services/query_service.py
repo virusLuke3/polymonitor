@@ -921,6 +921,24 @@ def _fetch_content_type_candidates(ctx: dict, topic_ids: List[str], content_type
     )
 
 
+def _content_payload_as_row(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": item.get("id"),
+        "content_type": item.get("contentType"),
+        "provider": item.get("provider"),
+        "source": item.get("source"),
+        "category": item.get("category"),
+        "topic_id": item.get("topicId"),
+        "title": item.get("title"),
+        "url": item.get("url"),
+        "published_at": item.get("publishedAt"),
+        "summary": item.get("summary"),
+        "source_count": item.get("sourceCount"),
+        "relevance_score": item.get("relevanceScore"),
+        "link_score": item.get("relevanceScore"),
+    }
+
+
 def _augment_related_content_tabs(
     ctx: dict,
     *,
@@ -955,6 +973,8 @@ def _augment_related_content_tabs(
         seen_urls.update(str(item.get("url") or "").strip() for item in items if str(item.get("url") or "").strip())
     if not supplemental_items:
         return rows
+    if _api_readonly():
+        return [*rows, *(_content_payload_as_row(item) for item in supplemental_items)]
     _persist_related_content(ctx, market_id=market_id, market=market, items=supplemental_items)
     return _fetch_persisted_related_content(ctx, market_id, max(limit + len(supplemental_items) + 4, limit))
 
