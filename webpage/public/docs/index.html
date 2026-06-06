@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>polyData Docs</title>
+    <meta name="description" content="Public documentation for polyData Monitor." />
+    <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/site-pages.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <img src="/icons/polydata-monitor.svg" alt="" />
+          <span><strong>POLYDATA MONITOR</strong><span>Polymarket intelligence workspace</span></span>
+        </a>
+        <nav class="top-nav" aria-label="Resources">
+          <a href="/blog/">Blog</a>
+          <a class="active" href="/docs/">Docs</a>
+          <a href="/paper/">Paper</a>
+          <a href="https://github.com/virusLuke3/polymonitor" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </nav>
+      </header>
+      <main>
+        <div class="eyebrow">Documentation</div>
+        <h1>Public operating notes for the monitor.</h1>
+        <p class="lede">These docs cover the stable parts of polyData Monitor: architecture, development commands, panel module boundaries, deployment templates, and public updates.</p>
+
+        <h2 class="section-title">Core Docs</h2>
+        <div class="grid">
+          <a class="item" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/architecture.md" target="_blank" rel="noopener noreferrer">
+            <small>System</small>
+            <strong>Architecture</strong>
+            <p>How the Flask API, data pipelines, runtime snapshots, and Vite dashboard fit together.</p>
+          </a>
+          <a class="item" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/development.md" target="_blank" rel="noopener noreferrer">
+            <small>Workflow</small>
+            <strong>Development</strong>
+            <p>Local build, API, systemd, and verification commands for contributors.</p>
+          </a>
+          <a class="item" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/panel-modules.md" target="_blank" rel="noopener noreferrer">
+            <small>Panels</small>
+            <strong>Panel Modules</strong>
+            <p>The manifest-based frontend and backend panel pattern used by the dashboard.</p>
+          </a>
+          <a class="item" href="https://github.com/virusLuke3/polymonitor/blob/main/deploy/README.md" target="_blank" rel="noopener noreferrer">
+            <small>Deploy</small>
+            <strong>Deployment Templates</strong>
+            <p>Public Nginx and systemd templates for production-style hosting.</p>
+          </a>
+          <a class="item" href="https://github.com/virusLuke3/polymonitor/blob/main/telegram/README.md" target="_blank" rel="noopener noreferrer">
+            <small>Channels</small>
+            <strong>Telegram Publishing</strong>
+            <p>How selected monitor updates can be published into topic-based Telegram channels.</p>
+          </a>
+          <a class="item" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/updates.md" target="_blank" rel="noopener noreferrer">
+            <small>Updates</small>
+            <strong>Change Log</strong>
+            <p>A public stream for shipped changes, polish, next steps, and release notes.</p>
+          </a>
+        </div>
+      </main>
+      <footer class="site-footer">
+        <span>polyData Monitor v0.2.1</span>
+        <span><a href="/">Dashboard</a></span>
+      </footer>
+    </div>
+  </body>
+</html>

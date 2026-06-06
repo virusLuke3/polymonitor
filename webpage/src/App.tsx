@@ -79,6 +79,12 @@ const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
 const APP_VERSION = 'v0.2.1';
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
+const SITE_NAV_LINKS = [
+  { label: 'Blog', href: '/blog/' },
+  { label: 'Docs', href: '/docs/' },
+  { label: 'Paper', href: '/paper/' },
+  { label: 'GitHub', href: 'https://github.com/virusLuke3/polymonitor', external: true },
+];
 const INTERVAL_RUNTIME_PANELS = RUNTIME_PANEL_MODULES.filter(
   (panel) => typeof panel.fetchData === 'function' && Number(panel.refresh?.intervalMs || 0) > 0,
 );
@@ -1906,6 +1912,18 @@ export function App() {
           </button>
           <div className="wm-defcon-pill">POLYMARKET <span>LIVE</span></div>
         </div>
+        <nav className="wm-site-nav" aria-label="polyData resources">
+          {SITE_NAV_LINKS.map((link) => (
+            <a
+              key={link.label}
+              href={link.href}
+              target={link.external ? '_blank' : undefined}
+              rel={link.external ? 'noopener noreferrer' : undefined}
+            >
+              {link.label}
+            </a>
+          ))}
+        </nav>
         <div className="wm-toolbar-right">
           <button className="wm-counter-pill" type="button">{liveMetrics[1]?.value || 0}</button>
           <button className="wm-tool-button" type="button" onClick={() => setShowCommandPalette(true)}>⌘K Search</button>
