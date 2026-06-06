@@ -298,8 +298,13 @@ class RuntimeContentProvider:
         items: List[RuntimeContentItem] = []
         queries = [str(query or "").strip() for query in (topic.get("queries") or []) if str(query or "").strip()]
         topic_search_enabled = str(os.environ.get("POLYDATA_CONTENT_TOPIC_SEARCH_PROVIDER", "1")).strip().lower() in {"1", "true", "yes", "on"}
+        topic_media_search_enabled = str(os.environ.get("POLYDATA_CONTENT_TOPIC_MEDIA_SEARCH_PROVIDER", "1")).strip().lower() in {"1", "true", "yes", "on"}
+        supplemental_queries = self._topic_supplemental_queries(topic, queries[0] if queries else "")
         if topic_search_enabled and queries:
             items.extend(replace(item, topic_id=topic_id) for item in self._fetch_search_provider_items(query=queries[0], category=category))
+        if topic_search_enabled and topic_media_search_enabled:
+            for supplemental_query in supplemental_queries:
+                items.extend(replace(item, topic_id=topic_id) for item in self._fetch_search_provider_items(query=supplemental_query, category=category))
 
         def fetch_query(query: str) -> List[RuntimeContentItem]:
             url = GOOGLE_NEWS_RSS_TEMPLATE.format(query=quote_plus(query))
@@ -317,12 +322,29 @@ class RuntimeContentProvider:
             except Exception:
                 return []
 
-        if queries:
-            with ThreadPoolExecutor(max_workers=min(3, len(queries))) as executor:
-                futures = [executor.submit(fetch_query, query) for query in queries]
+        google_queries = [*queries, *supplemental_queries]
+        if google_queries:
+            with ThreadPoolExecutor(max_workers=min(4, len(google_queries))) as executor:
+                futures = [executor.submit(fetch_query, query) for query in google_queries]
                 for future in as_completed(futures):
                     items.extend(future.result())
         return items
+
+    @staticmethod
+    def _topic_supplemental_queries(topic: Dict[str, Any], base_query: str) -> List[str]:
+        base = str(base_query or "").strip()
+        if not base:
+            keywords = [str(value or "").strip() for value in (topic.get("keywords") or [])[:6] if str(value or "").strip()]
+            base = " ".join(keywords)
+        if not base:
+            return []
+        base = re.sub(r"\bwhen:\d+[dhmw]\b", "", base, flags=re.IGNORECASE).strip()
+        return [
+            f"site:youtube.com ({base}) analysis video when:7d",
+            f"site:youtu.be ({base}) analysis video when:7d",
+            f"filetype:pdf ({base}) report outlook analysis when:30d",
+            f"({base}) research paper working paper study forecast when:30d",
+        ]
 
     def _fetch_topic_gdelt_items(self, topic: Dict[str, Any]) -> List[RuntimeContentItem]:
         topic_id = str(topic.get("id") or "")
