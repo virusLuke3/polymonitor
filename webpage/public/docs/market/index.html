@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Market - polyData Documentation</title>
+    <meta name="description" content="Polymarket market, event, series, slug, token, price history, and order book concepts for polyData." />
+    <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs-page.css" />
+  </head>
+  <body>
+    <div class="docs-shell">
+      <header class="docs-topbar">
+        <a class="docs-brand" href="/">
+          <img src="/icons/polydata-monitor.svg" alt="" />
+          <span>POLYDATA</span>
+        </a>
+        <div class="docs-actions" aria-label="Documentation actions">
+          <div class="docs-search" aria-label="Search documentation">
+            <svg class="docs-search-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="m16.5 16.5 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <span class="docs-search-placeholder">Search...</span>
+            <kbd>Ctrl K</kbd>
+          </div>
+          <button class="docs-assistant" type="button">Ask Assistant</button>
+        </div>
+        <nav class="docs-nav" aria-label="Top navigation">
+          <a href="/blog/">Blog</a>
+          <a href="/">Dashboard</a>
+          <a href="https://arxiv.org/pdf/2604.20421" target="_blank" rel="noopener noreferrer">Paper</a>
+          <a href="https://github.com/virusLuke3/polymonitor" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a class="docs-cta" href="/">Get Early Access</a>
+        </nav>
+      </header>
+
+      <nav class="docs-tabs" aria-label="Documentation sections">
+        <a class="docs-tab active" href="/docs/documentation/">Documentation</a>
+        <a class="docs-tab" href="https://github.com/virusLuke3/polymonitor/tree/main/docs" target="_blank" rel="noopener noreferrer">API Reference</a>
+        <a class="docs-tab" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/updates.md" target="_blank" rel="noopener noreferrer">Changelog</a>
+      </nav>
+
+      <div class="docs-layout">
+        <aside class="docs-sidebar" aria-label="Documentation navigation">
+          <div class="sidebar-group">
+            <h2>Getting Started</h2>
+            <a href="/docs/documentation/">Introduction</a>
+            <a href="/docs/documentation/#getting-started">What polyData tracks</a>
+            <a href="/docs/documentation/#quickstart">Data Coverage</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Polymarket Concepts</h2>
+            <a class="active" href="/docs/market/">Market</a>
+            <a href="/docs/orderfilled/">OrderFilled</a>
+            <a href="/docs/oracle/">Oracle</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Usage</h2>
+            <a href="/docs/documentation/#authentication">Realtime Coverage</a>
+            <a href="/docs/documentation/#runtime">Runtime API</a>
+            <a href="/docs/documentation/#errors">Errors</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Platform &amp; Features</h2>
+            <a href="/docs/documentation/#platform">Platform Overview</a>
+            <a href="/docs/documentation/#features">Features &amp; Interface</a>
+            <a href="/docs/documentation/#panels">Panel Modules</a>
+            <a href="/docs/documentation/#deployment">Deployment</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Intelligence &amp; Analysis</h2>
+            <a href="/docs/documentation/#signals">Signal Intelligence</a>
+            <a href="/docs/documentation/#oracle-watch">Oracle Watch</a>
+            <a href="/docs/documentation/#research">Research Links</a>
+          </div>
+        </aside>
+
+        <main class="docs-content">
+          <div class="docs-kicker">Polymarket Concepts</div>
+          <h1>Market</h1>
+          <p>Polymarket has several objects that sound similar but live at different layers: market, event, series, slug, and token. polyData keeps them separate because pricing, liquidity, ownership, settlement, and user navigation do not happen at the same level.</p>
+
+          <h2 id="market-event-series">Market, event, series</h2>
+          <p>A market is the smallest tradable question. In the common binary case, it asks one concrete Yes/No question and has two outcome tokens. An event is a higher-level container that groups one or more related markets. A series is a broader collection that can organize events across a season, tournament, recurring topic, election cycle, or long-running theme.</p>
+          <p>For example, a presidential-election series can contain one event for the election winner. That event can contain separate Yes/No markets for individual candidates. The frontend often shows the event page, but the order book, tokens, prices, fills, and settlement data belong to the individual markets underneath it.</p>
+          <pre class="docs-code"><code>Series
+- title: 2028 U.S. Presidential Election
+- slug: us-presidential-election-2028
+
+  Event
+  - title: Who will win the 2028 U.S. presidential election?
+  - slug: who-will-win-the-2028-us-presidential-election
+
+    Market
+    - question: Will Donald Trump win the 2028 U.S. presidential election?
+    - slug: will-donald-trump-win-the-2028-us-presidential-election
+    - conditionId: 0xabc...
+    - token A: YES
+    - token B: NO</code></pre>
+
+          <h2 id="slug-token">Slug and token</h2>
+          <p>A slug is not the market itself and it is not a token. It is a human-readable lookup key used in URLs, API routes, and audits. It is useful for linking a browser page to a known object, but it is not a chain identifier and it is not the asset a wallet holds.</p>
+          <p>The token is the lowest-level settlement asset. A binary Polymarket market has a Yes token and a No token. These outcome tokens are ERC-1155 assets on Polygon built around the Conditional Token Framework. If the event happens, the Yes token redeems to $1 and the No token redeems to $0; if it does not happen, the reverse is true.</p>
+
+          <h2 id="price-history">Price history</h2>
+          <p>Polymarket price history should not be read as traditional OHLCV candle data. The public historical series is price history, not a full open-high-low-close-volume tape. For supported markets it can be requested at fine intervals such as one minute, but the value is tied to the platform's displayed probability surface rather than an exchange-style OHLCV bar.</p>
+          <p>The key price concept is midpoint: the average of the current best bid and best ask. Polymarket's frontend generally displays midpoint. When the bid-ask spread is wider than $0.10, the frontend falls back to the last traded price. polyData models this distinction explicitly so charts, BBO panels, and trade panels do not pretend they are reading the same data layer.</p>
+
+          <h2 id="lob-data">LOB data</h2>
+          <p>Polymarket supports live order book data, but it does not provide a complete official historical limit-order-book archive. That means historical analysis has to distinguish between price history, live BBO snapshots, depth snapshots captured by polyData, and actual trade or fill records. A price move without historical LOB depth cannot always prove where liquidity sat before the move.</p>
+          <p>polyData therefore stores market identity, token identity, price history, BBO/depth state, and on-chain fills as separate layers. This lets an analyst ask whether a market moved because the midpoint changed, the spread widened, the book was thin, a large taker consumed resting orders, or the market entered a resolution phase.</p>
+        </main>
+
+        <aside class="docs-toc" aria-label="On this page">
+          <div class="toc-title">On this page</div>
+          <a class="active" href="#market-event-series">Market, event, series</a>
+          <a href="#slug-token">Slug and token</a>
+          <a href="#price-history">Price history</a>
+          <a href="#lob-data">LOB data</a>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>

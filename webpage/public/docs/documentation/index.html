@@ -50,10 +50,10 @@
             <a href="#quickstart">Data Coverage</a>
           </div>
           <div class="sidebar-group">
-            <h2>Polymarket 基础概念</h2>
-            <a href="#market">Market</a>
-            <a href="#orderfilled">OrderFilled</a>
-            <a href="#oracle">Oracle</a>
+            <h2>Polymarket Concepts</h2>
+            <a href="/docs/market/">Market</a>
+            <a href="/docs/orderfilled/">OrderFilled</a>
+            <a href="/docs/oracle/">Oracle</a>
           </div>
           <div class="sidebar-group">
             <h2>Usage</h2>
@@ -94,60 +94,6 @@
           <h2 id="quickstart">Data coverage</h2>
           <p>As of June 6, 2026, the local PostgreSQL market catalog contains 1,280,986 market rows. The earliest indexed market creation time is October 2, 2020, and the newest market rows are collected through June 6, 2026. The UMA oracle index contains 2,778,072 oracle events from July 11, 2022 through May 3, 2026. The ClickHouse OrderFilled store contains more than 1.44 billion trade rows and more than 230 million non-trade cashflow rows, covering Polygon blocks from 5,243,433 through 88,017,065, which maps to October 2, 2020 through June 6, 2026.</p>
           <p>The backfill path starts from Polymarket Gamma active and closed events, hydrates missing fields from CLOB by slug or condition id, and supplements missed markets from Polygon exchange registry events. The live path keeps moving forward with checkpointed market discovery, overlapping block scans, and a shared safe high-water block for market, oracle, and trade sync. Runtime panels read from PostgreSQL, ClickHouse, Redis, and SQLite snapshot caches so the public dashboard can stay fast while long-running collectors continue to update the underlying data.</p>
-
-          <h2 id="market">Market</h2>
-          <p>理解 Polymarket 的第一步，是把五个容易混淆的概念分开：market、event、series、slug、token。最底层的是 token，它是真正持仓、交易和结算的链上结果资产；market 是可交易问题；event 把一个或多个相关 market 组织起来；series 是更高层的长期分组或专题容器；slug 则是 URL 和 API 查询里使用的人类可读标识符。</p>
-          <p>Market 是可交易的最小单位，通常是一个明确的二元 Yes / No 问题。例如「特朗普会赢 2028 年美国总统大选吗？」就是一个 market，它有自己的 condition id、question id、slug、oracle、Yes token 和 No token。Event 是更上层的主题容器。例如「谁会赢 2028 年美国总统大选？」这个 event 下面可以有多个 market：Trump?、Biden?、Other?、Gavin Newsom?，每一个仍然是独立的 Yes / No 市场。</p>
-          <p>Series 比 event 更高一层。它通常用来组织一串相关 event，例如一个体育赛季、一个奥斯卡年份、一组 recurring 宏观主题，或者一个长期资产主题。可以这样类比：series 是 NBA 2025-26 赛季，event 是湖人 vs 勇士这一场，market 是「湖人会赢吗？」或「库里得分会超过 30 吗？」。polyData 保存这层结构，是因为价格、流动性和结算风险发生在 market/token 层，而用户导航、主题聚合和研究分析经常发生在 event 或 series 层。</p>
-          <p>Slug 不是市场本身，也不是 token。它是对象的可读别名，常用于 Polymarket 前端 URL 和 API 查询，例如 event slug、market slug、series slug。Slug 适合做人类审计、页面定位和补充查询，但它不是链上 ID，也不是交易用 token id。Token 才是最底层的结果份额：一个二元 market 对应 Yes token 和 No token，它们是 Polygon 上基于 Conditional Token Framework 的 ERC-1155 资产。事件发生时 Yes 兑付 $1、No 兑付 $0；事件不发生时相反。</p>
-          <pre class="docs-code"><code>Series
-- title: 2028 U.S. Presidential Election
-- slug: us-presidential-election-2028
-
-  Event
-  - title: Who will win the 2028 U.S. presidential election?
-  - slug: who-will-win-the-2028-us-presidential-election
-
-    Market 1
-    - question: Will Donald Trump win the 2028 U.S. presidential election?
-    - slug: will-donald-trump-win-the-2028-us-presidential-election
-    - conditionId: 0xabc...
-    - token A: YES
-    - token B: NO
-
-    Market 2
-    - question: Will Joe Biden win the 2028 U.S. presidential election?
-    - slug: will-joe-biden-win-the-2028-us-presidential-election
-    - conditionId: 0xghi...
-    - token A: YES
-    - token B: NO</code></pre>
-          <p>K 线和 LOB 也容易误解。Polymarket 的官方接口支持一部分市场的历史 price history，最细可以到 1 分钟级别，但它不是传统 OHLCV K 线，而是 midpoint 价格序列。Midpoint 是当前 best bid 和 best ask 的平均值，Polymarket 前端默认显示的也是 midpoint；当 bid-ask spread 大于 $0.10 时，前端才改用最近成交价。LOB 数据则不同：Polymarket 可以流式获取实时订单簿，但不提供完整的历史 LOB 档案。因此 polyData 会把价格历史、实时盘口快照、成交数据和链上 fill 数据分开建模。</p>
-
-          <h2 id="orderfilled">OrderFilled</h2>
-          <p>在 Polymarket 里说「trade 数据」时，最常见的问题是把 trade 和 OrderFilled 混成同一种东西。Trade 更像成交结果视角：它告诉你这次成交了哪个 market、哪个 outcome、方向、价格、总数量、taker order，以及它吃掉了哪些 maker orders。官方 Trade Object 里有 id、taker_order_id、market、asset_id、side、size、price、status、match_time、outcome、trader_side、transaction_hash，以及最关键的 maker_orders 数组。这个数组说明，一笔 trade 可以同时关联多张 maker 订单。</p>
-          <p>OrderFilled 是链上订单填充事件视角。交易在链上结算时，Exchange 合约会发出 OrderFilled 事件，字段包括 orderHash、maker、taker、makerAssetId、takerAssetId、makerAmountFilled、takerAmountFilled、fee。它描述的是某一张订单被填了多少、给出了什么资产、收到了什么资产、承担了多少费用。所以一句话理解：trade 是成交单据，OrderFilled 是订单腿明细 / fill 明细。</p>
-          <p>为什么会有这个区别？因为 Polymarket 使用 CLOB。一个可成交订单会立刻去吃盘口上的 resting orders。如果你买 100 股 YES，盘口上最低卖价 0.52 由卖家 A 的 30 股、卖家 B 的 20 股、卖家 C 的 50 股组成，那么用户侧可能看到一笔 100 股 trade；但链上会更自然地记录三条 OrderFilled，因为本质上是三张 maker 订单分别被填充。分析时如果把每条 OrderFilled 都当成独立 trade，就会高估成交笔数、打碎 taker 意图，也会把订单腿误判为独立交易决策。</p>
-          <pre class="docs-code"><code>One taker buy:
-- BUY 100 YES at limit 0.55
-- matched against resting sells at 0.52
-
-Aggregated trade view:
-- side: BUY
-- price: 0.52
-- size: 100
-- maker_orders: A 30, B 20, C 50
-
-OrderFilled view:
-- fill 1: orderHash A_SELL, size 30
-- fill 2: orderHash B_SELL, size 20
-- fill 3: orderHash C_SELL, size 50</code></pre>
-          <p>Maker 和 taker 也不是两种固定的人，而是成交角色。Maker 是先把订单挂在订单簿上、提供流动性的一方；taker 是发出可成交订单、从订单簿上拿走流动性的一方。同一个地址可以在一笔成交里是 maker，在另一笔成交里是 taker。polyData 的 Whale Tracker、Flow Watch、Orderfilled Flow、可疑流动性分析和地址画像，都必须明确自己读的是聚合 trade、maker leg、taker leg，还是链上 OrderFilled 事件。</p>
-          <p>Trade、OrderFilled 和 transaction 也不是同义词。Order 是用户提交的订单；trade 是撮合产生的成交结果；OrderFilled 是链上结算时的订单填充事件；transaction 是把这些结算写进链上的交易。它们描述的是同一套撮合流程的不同层级。</p>
-
-          <h2 id="oracle">Oracle</h2>
-          <p>Oracle 决定一个 Polymarket market 如何从交易阶段进入结算阶段。对于 UMA 相关市场，问题会通过 adapter、ancillary data、question id、condition id 等信息映射到 oracle 请求。生命周期里可能出现 request、proposal、dispute、settlement 等事件，这些事件记录了谁提出了结果、是否被 dispute、最终 settled price / outcome 是什么、对应哪笔链上交易。</p>
-          <p>polyData 单独索引 oracle，是因为临近结算时只看价格是不够的。两个市场都可能交易在 99%，但一个已经 final，另一个可能仍在等待 proposal、处在 dispute window，或者存在 wording / adapter 映射风险。Oracle Feed 和 Oracle Watch 这类 panel 会跟踪最新 UMA 事件、聚焦市场的 settlement state、proposal / settlement transaction、final status 和匹配质量，让用户区分「价格共识」和「结算机制」。</p>
-          <p>最难的是身份匹配。有些 oracle 事件可以直接通过 question id 或 condition id 绑定到 market；有些需要 ancillary data、标题和日期消歧、adapter mapping，或者 neg-risk request mapping。polyData 同时保存 market 元数据和 oracle-event 映射层，就是为了让一个市场从前端页面到链上结算事件都可追溯、可审计。</p>
 
           <h2 id="authentication">How coverage stays complete and real time</h2>
           <p>polyData uses several independent collection paths because no single Polymarket endpoint is complete enough for historical and live analysis. Gamma provides the canonical event and market surface; CLOB provides condition-level market and token data; Polygon RPC provides registry, trade, and oracle truth; ClickHouse stores high-volume OrderFilled and cashflow data; PostgreSQL stores canonical market, oracle, serving, and status tables; Redis and SQLite snapshots protect the UI from slow or stale upstream calls.</p>
@@ -197,9 +143,6 @@ OrderFilled view:
           <div class="toc-title">On this page</div>
           <a class="active" href="#getting-started">What polyData tracks</a>
           <a href="#quickstart">Data coverage</a>
-          <a href="#market">Market</a>
-          <a href="#orderfilled">OrderFilled</a>
-          <a href="#oracle">Oracle</a>
           <a href="#authentication">Realtime coverage</a>
           <a href="#platform">Platform Overview</a>
           <a href="#features">Market lifecycle</a>

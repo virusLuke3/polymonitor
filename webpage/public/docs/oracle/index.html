@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Oracle - polyData Documentation</title>
+    <meta name="description" content="Polymarket UMA oracle, proposal, dispute, settlement, and identity matching concepts for polyData." />
+    <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs-page.css" />
+  </head>
+  <body>
+    <div class="docs-shell">
+      <header class="docs-topbar">
+        <a class="docs-brand" href="/">
+          <img src="/icons/polydata-monitor.svg" alt="" />
+          <span>POLYDATA</span>
+        </a>
+        <div class="docs-actions" aria-label="Documentation actions">
+          <div class="docs-search" aria-label="Search documentation">
+            <svg class="docs-search-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+              <path d="m16.5 16.5 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <span class="docs-search-placeholder">Search...</span>
+            <kbd>Ctrl K</kbd>
+          </div>
+          <button class="docs-assistant" type="button">Ask Assistant</button>
+        </div>
+        <nav class="docs-nav" aria-label="Top navigation">
+          <a href="/blog/">Blog</a>
+          <a href="/">Dashboard</a>
+          <a href="https://arxiv.org/pdf/2604.20421" target="_blank" rel="noopener noreferrer">Paper</a>
+          <a href="https://github.com/virusLuke3/polymonitor" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a class="docs-cta" href="/">Get Early Access</a>
+        </nav>
+      </header>
+
+      <nav class="docs-tabs" aria-label="Documentation sections">
+        <a class="docs-tab active" href="/docs/documentation/">Documentation</a>
+        <a class="docs-tab" href="https://github.com/virusLuke3/polymonitor/tree/main/docs" target="_blank" rel="noopener noreferrer">API Reference</a>
+        <a class="docs-tab" href="https://github.com/virusLuke3/polymonitor/blob/main/docs/updates.md" target="_blank" rel="noopener noreferrer">Changelog</a>
+      </nav>
+
+      <div class="docs-layout">
+        <aside class="docs-sidebar" aria-label="Documentation navigation">
+          <div class="sidebar-group">
+            <h2>Getting Started</h2>
+            <a href="/docs/documentation/">Introduction</a>
+            <a href="/docs/documentation/#getting-started">What polyData tracks</a>
+            <a href="/docs/documentation/#quickstart">Data Coverage</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Polymarket Concepts</h2>
+            <a href="/docs/market/">Market</a>
+            <a href="/docs/orderfilled/">OrderFilled</a>
+            <a class="active" href="/docs/oracle/">Oracle</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Usage</h2>
+            <a href="/docs/documentation/#authentication">Realtime Coverage</a>
+            <a href="/docs/documentation/#runtime">Runtime API</a>
+            <a href="/docs/documentation/#errors">Errors</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Platform &amp; Features</h2>
+            <a href="/docs/documentation/#platform">Platform Overview</a>
+            <a href="/docs/documentation/#features">Features &amp; Interface</a>
+            <a href="/docs/documentation/#panels">Panel Modules</a>
+            <a href="/docs/documentation/#deployment">Deployment</a>
+          </div>
+          <div class="sidebar-group">
+            <h2>Intelligence &amp; Analysis</h2>
+            <a href="/docs/documentation/#signals">Signal Intelligence</a>
+            <a href="/docs/documentation/#oracle-watch">Oracle Watch</a>
+            <a href="/docs/documentation/#research">Research Links</a>
+          </div>
+        </aside>
+
+        <main class="docs-content">
+          <div class="docs-kicker">Polymarket Concepts</div>
+          <h1>Oracle</h1>
+          <p>Oracle data explains how a market leaves the trading phase and becomes a settled outcome. For polyData, oracle indexing is not a side feed; it is part of the market lifecycle.</p>
+
+          <h2 id="oracle-role">What the oracle decides</h2>
+          <p>A Polymarket price can move toward 0 or 1 before a market is final, but price alone does not prove settlement. The oracle layer records the resolution process: what answer was requested, what was proposed, whether the proposal was disputed, and what finally settled. This is the difference between market consensus and settlement state.</p>
+          <p>That distinction matters near resolution. Two markets can both trade near 99%, but one can be final while another is still waiting for a proposal, entering a dispute window, or carrying wording risk. polyData's oracle panels are designed to make those states visible.</p>
+
+          <h2 id="uma-flow">UMA event flow</h2>
+          <p>Many Polymarket markets resolve through UMA-related adapter and oracle contracts. The lifecycle can include question initialization, price request, price proposal, dispute, and settlement. polyData stores transaction hashes, log indexes, block numbers, event times, proposed prices, settled prices, participants, and matching metadata for these events.</p>
+          <pre class="docs-code"><code>Market resolution path:
+1. Question is initialized or prepared through an adapter
+2. Oracle price is requested
+3. A result is proposed
+4. The proposal can be disputed
+5. The oracle settles the final answer
+6. The market becomes final and redeemable</code></pre>
+
+          <h2 id="identity-matching">Identity matching</h2>
+          <p>The hard part is not only reading logs. The hard part is mapping oracle logs back to the correct market. Some events can be matched directly through question id or condition id. Others require adapter mappings, ancillary data decoding, title/date matching, or neg-risk request mappings. polyData preserves those matching paths so an analyst can audit why an oracle event belongs to a market.</p>
+          <p>This is also why the market catalog stores more than display names. Gamma ids, slugs, condition ids, question ids, oracle addresses, event metadata, token ids, and raw timing fields are all useful when a settlement event has to be reconciled with a market page.</p>
+
+          <h2 id="polydata-oracle">How polyData uses oracle data</h2>
+          <p>The Oracle Feed panel surfaces recent oracle events across markets. Focused market views show whether the selected market is still trading, awaiting oracle activity, proposed, disputed, settled, or final. AI and flow panels can then separate price momentum from resolution risk.</p>
+          <p>In the broader lifecycle, oracle indexing closes the loop from discovery to archive. A market is discovered, becomes tradeable, accumulates price and OrderFilled history, approaches close, enters oracle review, settles, and remains queryable as historical evidence. Without the oracle layer, historical market data would show where prices ended but not why the market became final.</p>
+        </main>
+
+        <aside class="docs-toc" aria-label="On this page">
+          <div class="toc-title">On this page</div>
+          <a class="active" href="#oracle-role">What the oracle decides</a>
+          <a href="#uma-flow">UMA event flow</a>
+          <a href="#identity-matching">Identity matching</a>
+          <a href="#polydata-oracle">How polyData uses it</a>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>
