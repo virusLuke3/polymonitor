@@ -15,6 +15,9 @@ DEFAULT_DATABASE = "poly_orderfilled"
 DEFAULT_USER = "poly_user"
 DEFAULT_PASSWORD = "PolyUserPass_007!"
 DEFAULT_TABLE = "orderfilled_fact"
+DEFAULT_WHALE_VOLUME_WINDOW_MINUTES = 60
+DEFAULT_ALPHA_VOLUME_WINDOW_MINUTES = 15
+DEFAULT_ALPHA_MARKET_BASELINE_MINUTES = 60
 
 
 def _env_flag(name: str, default: bool = True) -> bool:
@@ -26,6 +29,16 @@ def _env_flag(name: str, default: bool = True) -> bool:
 
 def clickhouse_orderfilled_enabled() -> bool:
     return _env_flag("POLYDATA_ORDERFILLED_CLICKHOUSE_READ_ENABLED", True)
+
+
+def clickhouse_read_mode() -> str:
+    if not clickhouse_orderfilled_enabled():
+        return "disabled"
+    if os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL", "").strip():
+        return "http-tunnel"
+    if shutil.which("docker") is not None:
+        return "docker-exec"
+    return "unavailable"
 
 
 def _identifier(value: str, default: str) -> str:
@@ -180,6 +193,45 @@ def _table_sql() -> str:
     return _settings()["table"]
 
 
+def _int_env(name: str, default: int, *, minimum: int = 1, maximum: int = 1000000) -> int:
+    try:
+        value = int(str(os.environ.get(name, default)).strip())
+    except (TypeError, ValueError):
+        value = default
+    return min(max(value, minimum), maximum)
+
+
+def _float_env(name: str, default: float, *, minimum: float = 0.0, maximum: float = 1_000_000_000.0) -> float:
+    try:
+        value = float(str(os.environ.get(name, default)).strip())
+    except (TypeError, ValueError):
+        value = default
+    return min(max(value, minimum), maximum)
+
+
+def _attach_market_titles(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    market_ids = sorted({int(row["market_id"]) for row in rows if row.get("market_id") is not None})
+    if not market_ids or "query_all" not in ctx:
+        return rows
+    try:
+        placeholders = ", ".join("?" for _ in market_ids)
+        market_rows = ctx["query_all"](
+            f"SELECT id, title FROM markets WHERE id IN ({placeholders})",
+            market_ids,
+        )
+    except Exception:
+        logger = ctx.get("app").logger if ctx.get("app") is not None else None
+        if logger is not None:
+            logger.warning("ClickHouse OrderFilled title enrichment failed", exc_info=True)
+        return rows
+    title_map = {int(row["id"]): str(row.get("title") or "") for row in market_rows if row.get("id") is not None}
+    for row in rows:
+        market_id = row.get("market_id")
+        if market_id is not None and not row.get("market_title"):
+            row["market_title"] = title_map.get(int(market_id))
+    return rows
+
+
 def _timestamp_needs_repair(value: Any) -> bool:
     text = str(value or "").strip()
     return not text or text.startswith("1970-01-01")
@@ -220,8 +272,8 @@ def get_market_trades(ctx: dict, market_id: int, *, limit: int = 100, offset: in
             (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
             (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time
         SELECT {_orderfilled_projection_sql()}
         FROM {_table_sql()} f
         LEFT JOIN block_timestamps bt ON bt.block_number = f.block_number
@@ -246,8 +298,8 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
             (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
             (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time
         SELECT {_orderfilled_projection_sql()}
         FROM {_table_sql()} f
         LEFT JOIN block_timestamps bt ON bt.block_number = f.block_number
@@ -278,6 +330,194 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
     return normalized
 
 
+def get_volume_whale_rows(ctx: dict, *, limit: int = 14, window_minutes: Optional[int] = None) -> Optional[List[Dict[str, Any]]]:
+    limit = min(max(int(limit), 1), 100)
+    window_minutes = window_minutes or _int_env(
+        "POLYDATA_WHALE_VOLUME_WINDOW_MINUTES",
+        DEFAULT_WHALE_VOLUME_WINDOW_MINUTES,
+        minimum=5,
+        maximum=24 * 60,
+    )
+    window_blocks = max(60, int(window_minutes) * 30)
+    min_watch = _float_env("POLYDATA_WHALE_MIN_NOTIONAL", 1000.0)
+    min_elevated = _float_env("POLYDATA_WHALE_ELEVATED_NOTIONAL", 2500.0)
+    min_critical = _float_env("POLYDATA_WHALE_CRITICAL_NOTIONAL", 10000.0)
+    relative_share = _float_env("POLYDATA_WHALE_MARKET_SHARE_THRESHOLD", 0.10, maximum=1.0)
+    relative_min = _float_env("POLYDATA_WHALE_RELATIVE_MIN_NOTIONAL", 500.0)
+    notional_expr = "toFloat64(f.price) * toFloat64(f.size)"
+    rows = _query_json_rows(
+        ctx,
+        f"""
+        WITH
+            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
+            {window_blocks} AS window_blocks,
+            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
+            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time,
+            (SELECT quantileTDigest(0.99)(toFloat64(price) * toFloat64(size)) FROM {_table_sql()} WHERE market_id != 0 AND block_number >= max_fact_block - window_blocks) AS p99_notional,
+            (SELECT quantileTDigest(0.995)(toFloat64(price) * toFloat64(size)) FROM {_table_sql()} WHERE market_id != 0 AND block_number >= max_fact_block - window_blocks) AS p995_notional,
+            (SELECT quantileTDigest(0.999)(toFloat64(price) * toFloat64(size)) FROM {_table_sql()} WHERE market_id != 0 AND block_number >= max_fact_block - window_blocks) AS p999_notional
+        SELECT
+            {_orderfilled_projection_sql()},
+            toString({notional_expr}) AS notional,
+            toString(greatest({min_watch:.6f}, p99_notional)) AS threshold_notional,
+            toString(greatest({min_elevated:.6f}, p995_notional)) AS elevated_threshold_notional,
+            toString(greatest({min_critical:.6f}, p999_notional)) AS critical_threshold_notional,
+            toString(mv.market_window_notional) AS market_window_notional,
+            toString(if(mv.market_window_notional > 0, {notional_expr} / mv.market_window_notional, 0)) AS market_share,
+            multiIf(
+                {notional_expr} >= greatest({min_critical:.6f}, p999_notional), 'critical',
+                {notional_expr} >= greatest({min_elevated:.6f}, p995_notional), 'elevated',
+                'watch'
+            ) AS severity,
+            'single-trade' AS signal_type,
+            'clickhouse-volume-whales' AS source_mode
+        FROM {_table_sql()} f
+        LEFT JOIN block_timestamps bt ON bt.block_number = f.block_number
+        LEFT JOIN
+        (
+            SELECT market_id, sum(toFloat64(price) * toFloat64(size)) AS market_window_notional
+            FROM {_table_sql()}
+            WHERE market_id != 0
+              AND block_number >= max_fact_block - window_blocks
+            GROUP BY market_id
+        ) mv ON mv.market_id = f.market_id
+        WHERE f.market_id != 0
+          AND f.block_number >= max_fact_block - window_blocks
+          AND (
+              {notional_expr} >= greatest({min_watch:.6f}, p99_notional)
+              OR (
+                  mv.market_window_notional > 0
+                  AND {notional_expr} >= {relative_min:.6f}
+                  AND {notional_expr} / mv.market_window_notional >= {relative_share:.6f}
+              )
+          )
+        ORDER BY
+            multiIf(severity = 'critical', 3, severity = 'elevated', 2, 1) DESC,
+            {notional_expr} DESC,
+            market_share DESC,
+            f.block_number DESC,
+            f.log_index DESC
+        LIMIT {limit * 4}
+        FORMAT JSONEachRow
+        """,
+        timeout_seconds=2.5,
+    )
+    if rows is None:
+        return None
+    rows = _repair_block_timestamps(rows)
+    return _attach_market_titles(ctx, rows)[:limit]
+
+
+def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[Dict[str, Any]]]:
+    limit = min(max(int(limit), 1), 50)
+    window_minutes = _int_env(
+        "POLYDATA_ALPHA_VOLUME_WINDOW_MINUTES",
+        DEFAULT_ALPHA_VOLUME_WINDOW_MINUTES,
+        minimum=5,
+        maximum=6 * 60,
+    )
+    baseline_minutes = _int_env(
+        "POLYDATA_ALPHA_MARKET_BASELINE_MINUTES",
+        DEFAULT_ALPHA_MARKET_BASELINE_MINUTES,
+        minimum=15,
+        maximum=24 * 60,
+    )
+    window_blocks = max(60, window_minutes * 30)
+    baseline_blocks = max(window_blocks, baseline_minutes * 30)
+    min_flow = _float_env("POLYDATA_ALPHA_MIN_FLOW_NOTIONAL", 1000.0)
+    min_single = _float_env("POLYDATA_ALPHA_MIN_SINGLE_TRADE_NOTIONAL", 2500.0)
+    relative_flow = _float_env("POLYDATA_ALPHA_RELATIVE_MIN_FLOW_NOTIONAL", 500.0)
+    relative_share = _float_env("POLYDATA_ALPHA_MARKET_SHARE_THRESHOLD", 0.12, maximum=1.0)
+    rows = _query_json_rows(
+        ctx,
+        f"""
+        WITH
+            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
+            {window_blocks} AS window_blocks,
+            {baseline_blocks} AS baseline_blocks,
+            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
+            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time,
+            (
+                SELECT quantileTDigest(0.95)(flow_notional)
+                FROM
+                (
+                    SELECT sum(toFloat64(price) * toFloat64(size)) AS flow_notional
+                    FROM {_table_sql()}
+                    WHERE market_id != 0
+                      AND block_number >= max_fact_block - window_blocks
+                    GROUP BY market_id, outcome_code, side_code
+                )
+            ) AS p95_flow_notional
+        SELECT
+            f.market_id AS market_id,
+            multiIf(f.outcome_code = 1, 'YES', f.outcome_code = 2, 'NO', 'UNKNOWN') AS outcome,
+            multiIf(f.side_code = 1, 'BUY', f.side_code = 2, 'SELL', 'UNKNOWN') AS side,
+            count() AS trade_count,
+            toString(sum(toFloat64(f.price) * toFloat64(f.size))) AS flow_notional,
+            toString(max(toFloat64(f.price) * toFloat64(f.size))) AS max_trade_notional,
+            toString(sum(toFloat64(f.size))) AS flow_size,
+            toString(sum(toFloat64(f.price) * toFloat64(f.size)) / greatest(sum(toFloat64(f.size)), 1)) AS avg_price,
+            toString(mv.market_baseline_notional) AS market_baseline_notional,
+            toString(if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0)) AS market_share,
+            max(f.block_number) AS latest_block,
+            argMax(f.log_index, tuple(f.block_number, f.log_index)) AS latest_log_index,
+            lower(argMax(f.tx_hash, tuple(f.block_number, f.log_index))) AS tx_hash,
+            formatDateTime(
+                addSeconds(anchor_time, (toInt64(max(f.block_number)) - toInt64(anchor_block)) * 2),
+                '%Y-%m-%dT%H:%i:%SZ',
+                'UTC'
+            ) AS timestamp,
+            multiIf(
+                sum(toFloat64(f.price) * toFloat64(f.size)) >= 10000 OR max(toFloat64(f.price) * toFloat64(f.size)) >= 10000 OR if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0) >= 0.25, 'critical',
+                sum(toFloat64(f.price) * toFloat64(f.size)) >= 2500 OR max(toFloat64(f.price) * toFloat64(f.size)) >= 2500 OR if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0) >= 0.15, 'elevated',
+                'watch'
+            ) AS severity,
+            toString(
+                least(sum(toFloat64(f.price) * toFloat64(f.size)) / 1000 * 30, 45)
+                + least(max(toFloat64(f.price) * toFloat64(f.size)) / 2500 * 20, 25)
+                + least(if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0) * 100, 20)
+                + least(count(), 10)
+            ) AS score,
+            toString(greatest({min_flow:.6f}, p95_flow_notional)) AS threshold_flow_notional,
+            {window_minutes} AS window_minutes,
+            {baseline_minutes} AS baseline_minutes,
+            'directional-flow' AS signal_type,
+            'clickhouse-volume-alpha' AS source_mode
+        FROM {_table_sql()} f
+        LEFT JOIN
+        (
+            SELECT market_id, sum(toFloat64(price) * toFloat64(size)) AS market_baseline_notional
+            FROM {_table_sql()}
+            WHERE market_id != 0
+              AND block_number >= max_fact_block - baseline_blocks
+            GROUP BY market_id
+        ) mv ON mv.market_id = f.market_id
+        WHERE f.market_id != 0
+          AND f.block_number >= max_fact_block - window_blocks
+        GROUP BY f.market_id, f.outcome_code, f.side_code, mv.market_baseline_notional
+        HAVING
+            sum(toFloat64(f.price) * toFloat64(f.size)) >= greatest({min_flow:.6f}, p95_flow_notional)
+            OR max(toFloat64(f.price) * toFloat64(f.size)) >= {min_single:.6f}
+            OR (
+                sum(toFloat64(f.price) * toFloat64(f.size)) >= {relative_flow:.6f}
+                AND if(mv.market_baseline_notional > 0, sum(toFloat64(f.price) * toFloat64(f.size)) / mv.market_baseline_notional, 0) >= {relative_share:.6f}
+            )
+        ORDER BY toFloat64(score) DESC, toFloat64(flow_notional) DESC, latest_block DESC, latest_log_index DESC
+        LIMIT {limit * 3}
+        FORMAT JSONEachRow
+        """,
+        timeout_seconds=2.5,
+    )
+    if rows is None:
+        return None
+    rows = _repair_block_timestamps(rows)
+    return _attach_market_titles(ctx, rows)[:limit]
+
+
 def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional[List[Dict[str, Any]]]:
     limit = min(max(int(limit), 1), 1200)
     rows = _query_json_rows(
@@ -287,8 +527,8 @@ def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional
             (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
             (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time
         SELECT
             formatDateTime(
                 if(
@@ -374,8 +614,8 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
             (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
             (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC'), max_ts_time, now('UTC')) AS anchor_time
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time
         SELECT
             f.market_id AS market_id,
             count() AS trade_count_24h,

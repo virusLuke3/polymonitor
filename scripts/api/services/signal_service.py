@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from . import address_intel_service, signal_cluster_service
+from . import clickhouse_orderfilled_service
 
 
 CRITICAL_NOTIONAL = Decimal("2500")
@@ -62,8 +61,52 @@ def _severity_for_notional(ctx: dict, notional: Any) -> str:
     return "watch"
 
 
+def _is_live_signal_source(source_mode: str) -> bool:
+    return str(source_mode or "") in {"live-trades", "clickhouse-volume-whales", "clickhouse-volume-alpha"}
+
+
+def _clickhouse_signal_queries_available(ctx: dict) -> bool:
+    return ctx.get("app") is not None and callable(ctx.get("query_all"))
+
+
+def _format_percent(ctx: dict, value: Any) -> str:
+    parsed = ctx["_safe_decimal"](value)
+    if parsed is None:
+        return "--"
+    return f"{(parsed * Decimal('100')).quantize(Decimal('0.1'))}%"
+
+
+def _money_text(ctx: dict, value: Any) -> str:
+    parsed = ctx["_safe_decimal"](value)
+    if parsed is None:
+        return "$--"
+    if parsed >= Decimal("1000000"):
+        return f"${(parsed / Decimal('1000000')).quantize(Decimal('0.1'))}M"
+    if parsed >= Decimal("1000"):
+        return f"${(parsed / Decimal('1000')).quantize(Decimal('0.1'))}k"
+    return f"${parsed.quantize(Decimal('1'))}"
+
+
+def _clickhouse_source_states(status: str, *, rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    states: Dict[str, Any] = {
+        "clickhouse": "ok" if status == "ok" else status,
+        "clickhouseMode": clickhouse_orderfilled_service.clickhouse_read_mode(),
+    }
+    latest_block = None
+    for row in rows or []:
+        raw = row.get("latest_block") or row.get("block_number")
+        try:
+            block = int(raw)
+        except (TypeError, ValueError):
+            continue
+        latest_block = block if latest_block is None else max(latest_block, block)
+    if latest_block is not None:
+        states["clickhouseLatestBlock"] = latest_block
+    return states
+
+
 def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    item = {
         "marketId": row.get("market_id"),
         "localMarketId": row.get("market_id"),
         "marketTitle": row.get("market_title"),
@@ -76,11 +119,72 @@ def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "notional": ctx["format_trade_decimal"](row.get("notional")),
         "maker": ctx["format_trade_address"](row.get("maker")),
         "taker": ctx["format_trade_address"](row.get("taker")),
-        "severity": _severity_for_notional(ctx, row.get("notional")),
+        "severity": row.get("severity") or _severity_for_notional(ctx, row.get("notional")),
+    }
+    for source_key, target_key in (
+        ("source_mode", "sourceMode"),
+        ("signal_type", "signalType"),
+        ("threshold_notional", "thresholdNotional"),
+        ("elevated_threshold_notional", "elevatedThresholdNotional"),
+        ("critical_threshold_notional", "criticalThresholdNotional"),
+        ("market_window_notional", "marketWindowNotional"),
+        ("market_share", "marketShare"),
+    ):
+        if row.get(source_key) is not None:
+            item[target_key] = ctx["format_trade_decimal"](row.get(source_key)) if source_key != "source_mode" and source_key != "signal_type" else row.get(source_key)
+    return item
+
+
+def _format_alpha_volume_signal(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
+    flow = ctx["format_trade_decimal"](row.get("flow_notional"))
+    max_trade = ctx["format_trade_decimal"](row.get("max_trade_notional"))
+    market_share = _format_percent(ctx, row.get("market_share"))
+    side = str(row.get("side") or "FLOW").upper()
+    outcome = str(row.get("outcome") or "--").upper()
+    market_title = row.get("market_title") or "Market flow"
+    window_minutes = row.get("window_minutes") or 15
+    score = ctx["format_trade_decimal"](row.get("score"))
+    max_trade_text = _money_text(ctx, row.get("max_trade_notional"))
+    return {
+        "kind": "volume-flow",
+        "severity": row.get("severity") or _severity_for_notional(ctx, row.get("flow_notional")),
+        "bias": "bearish" if outcome == "NO" or side == "SELL" else "bullish",
+        "sourceLabel": "FLOW+$",
+        "sourceTag": "FLOW",
+        "headline": f"{window_minutes}m directional flow",
+        "action": {"label": "Sell" if side == "SELL" else "Buy", "outcome": "No" if outcome == "NO" else "Yes" if outcome == "YES" else outcome.title()},
+        "title": f"{side} {outcome} flow {_money_text(ctx, row.get('flow_notional'))}: {market_title}",
+        "summary": f"{row.get('trade_count') or 0} fills; max fill {max_trade_text}; {market_share} of market baseline",
+        "timestamp": row.get("timestamp"),
+        "marketId": row.get("market_id"),
+        "localMarketId": row.get("market_id"),
+        "marketTitle": market_title,
+        "txHash": row.get("tx_hash"),
+        "side": side,
+        "outcome": outcome,
+        "price": ctx["format_trade_decimal"](row.get("avg_price")),
+        "notional": flow,
+        "contributors": ["clickhouse", "volume", "flow"],
+        "relatedContent": [],
+        "sourceMode": row.get("source_mode") or "clickhouse-volume-alpha",
+        "metrics": {
+            "flowNotional": flow,
+            "maxTradeNotional": max_trade,
+            "marketBaselineNotional": ctx["format_trade_decimal"](row.get("market_baseline_notional")),
+            "marketShare": ctx["format_trade_decimal"](row.get("market_share")),
+            "tradeCount": row.get("trade_count"),
+            "score": score,
+            "thresholdFlowNotional": ctx["format_trade_decimal"](row.get("threshold_flow_notional")),
+        },
     }
 
 
 def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict[str, Any]]:
+    if _clickhouse_signal_queries_available(ctx):
+        volume_rows = clickhouse_orderfilled_service.get_volume_whale_rows(ctx, limit=max(limit * 2, limit))
+        if volume_rows is not None:
+            return volume_rows
+
     iso_days_before = ctx.get("iso_days_before")
     if callable(iso_days_before):
         threshold = iso_days_before(ctx["utc_now_iso"](), lookback_days) or ctx["utc_date_days_ago"](lookback_days)
@@ -445,10 +549,16 @@ def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int =
             break
     status = "empty"
     if items:
-        status = "ok" if source_modes == {"live-trades"} else "degraded"
-    source_mode = "live-trades" if source_modes == {"live-trades"} else "fallback" if source_modes else "none"
+        status = "ok" if source_modes and all(_is_live_signal_source(mode) for mode in source_modes) else "degraded"
+    source_mode = next(iter(source_modes)) if len(source_modes) == 1 else "mixed-live" if source_modes and all(_is_live_signal_source(mode) for mode in source_modes) else "fallback" if source_modes else "none"
     return normalize_signal_payload(
-        {"items": items, "generatedAt": ctx["utc_now_iso"](), "status": status, "sourceMode": source_mode},
+        {
+            "items": items,
+            "generatedAt": ctx["utc_now_iso"](),
+            "status": status,
+            "sourceMode": source_mode,
+            "sourceStates": _clickhouse_source_states("ok" if status == "ok" else status, rows=rows),
+        },
         generated_at=ctx["utc_now_iso"](),
     )
 
@@ -643,75 +753,24 @@ def _append_signal(signals: List[Dict[str, Any]], *, kind: str, severity: str, t
 
 
 def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    recent_limit = max(96, limit * int(os.environ.get("POLYDATA_ALPHA_TRADE_MULTIPLIER", "12")))
     trade_source_status = "ok"
-    try:
-        recent_trades = ctx["get_recent_trades"](limit=recent_limit)
-    except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
-        if logger is not None:
-            logger.exception("alpha trade source failed")
-        recent_trades = []
-        trade_source_status = "degraded"
-    addresses_by_market: Dict[int, set[str]] = {}
-    for trade in recent_trades:
-        market_id = trade.get("marketId") or trade.get("market_id")
-        if market_id is None:
-            continue
+    signals: List[Dict[str, Any]] = []
+    volume_rows = None
+    if _clickhouse_signal_queries_available(ctx):
         try:
-            market_id_int = int(market_id)
-        except (TypeError, ValueError):
-            continue
-        addresses_by_market.setdefault(market_id_int, set()).update(signal_cluster_service.collect_trade_addresses(ctx, [trade]))
-    market_notional_rank: Dict[int, Decimal] = {}
-    for trade in recent_trades:
-        market_id = trade.get("marketId") or trade.get("market_id")
-        if market_id is None:
-            continue
-        try:
-            market_id_int = int(market_id)
-        except (TypeError, ValueError):
-            continue
-        price = ctx["_safe_decimal"](trade.get("price")) or Decimal("0")
-        size = ctx["_safe_decimal"](trade.get("size")) or Decimal("0")
-        notional = ctx["_safe_decimal"](trade.get("notional")) or (price * size)
-        market_notional_rank[market_id_int] = market_notional_rank.get(market_id_int, Decimal("0")) + notional
-    max_profile_markets = int(os.environ.get("POLYDATA_ALPHA_PROFILE_MARKETS", "5"))
-    max_profile_addresses = int(os.environ.get("POLYDATA_ALPHA_PROFILE_ADDRESSES", "16"))
-    profiled_market_ids = {
-        market_id
-        for market_id, _ in sorted(market_notional_rank.items(), key=lambda item: item[1], reverse=True)[:max_profile_markets]
-    }
-    address_profiles_by_market = {}
-    if recent_trades:
-        try:
-            address_profiles_by_market = {
-                market_id: address_intel_service.get_address_profiles(ctx, list(addresses)[:max_profile_addresses], market_id=market_id)
-                for market_id, addresses in addresses_by_market.items()
-                if addresses and market_id in profiled_market_ids
-            }
+            volume_rows = clickhouse_orderfilled_service.get_alpha_volume_signal_rows(ctx, limit=limit)
         except Exception:
             logger = getattr(ctx.get("app"), "logger", None)
             if logger is not None:
-                logger.exception("alpha address profile source failed")
-            address_profiles_by_market = {}
-    try:
-        polybeats_clusters = signal_cluster_service.build_polybeats_clusters(
-            ctx,
-            recent_trades,
-            address_profiles_by_market,
-            limit=limit,
-        )
-    except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
-        if logger is not None:
-            logger.exception("alpha cluster build failed")
-        polybeats_clusters = []
-
-    signals: List[Dict[str, Any]] = list(polybeats_clusters)
+                logger.exception("alpha volume source failed")
+            trade_source_status = "degraded"
+    if volume_rows is not None:
+        signals.extend(_format_alpha_volume_signal(ctx, row) for row in volume_rows[:limit])
+    else:
+        trade_source_status = "degraded"
 
     whale_rows = _query_whale_rows(ctx, limit=6, lookback_days=7)[:6] if len(signals) < limit else []
-    if any(str(row.get("source_mode") or "") != "live-trades" for row in whale_rows):
+    if any(not _is_live_signal_source(str(row.get("source_mode") or "")) for row in whale_rows):
         trade_source_status = "degraded"
     whales = [_format_trade_item(ctx, row) for row in whale_rows]
     for trade in whales[:3]:
@@ -727,89 +786,6 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
             contributors=["whale", "onchain"],
         )
 
-    suspicious = _build_suspicious_trade_items(ctx, limit=6) if len(signals) < limit else []
-    for trade in suspicious[:3]:
-        if len(signals) >= limit:
-            break
-        _append_signal(
-            signals,
-            kind="suspicious",
-            severity=trade.get("severity") or "watch",
-            title=trade.get("marketTitle") or "Pre-oracle activity",
-            summary=f"{trade.get('eventStatus') or 'oracle'} proximity trade, notional {trade.get('notional') or '--'}",
-            timestamp=trade.get("timestamp"),
-            contributors=["oracle", "timing"],
-        )
-
-    try:
-        active_markets = ctx["get_active_markets_snapshot"](page_size=8).get("items", [])
-    except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
-        if logger is not None:
-            logger.exception("alpha active markets source failed")
-        active_markets = []
-    for market in active_markets[:2]:
-        if len(signals) >= limit:
-            break
-        price = ctx["_safe_decimal"](market.get("latestPrice"))
-        change_24h = ctx["_safe_decimal"](market.get("change24h"))
-        if price is None:
-            continue
-        severity = "watch"
-        if change_24h is not None and abs(change_24h) >= Decimal("0.08"):
-            severity = "elevated"
-        _append_signal(
-            signals,
-            kind="momentum",
-            severity=severity,
-            title=market.get("title"),
-            summary=f"Live probability {ctx['format_trade_decimal'](price)} with 24h change {ctx['format_trade_decimal'](change_24h) or '--'}",
-            timestamp=ctx["utc_now_iso"](),
-            contributors=["price", "market"],
-        )
-
-    if len(signals) < limit:
-        try:
-            crypto = ctx["get_market_group_snapshot"](ctx["CRYPTO_SYMBOLS"][:3], kind="crypto").get("items", [])
-        except Exception:
-            logger = getattr(ctx.get("app"), "logger", None)
-            if logger is not None:
-                logger.exception("alpha crypto source failed")
-            crypto = []
-        for item in crypto[:2]:
-            change = ctx["_safe_float"](item.get("changePercent"))
-            _append_signal(
-                signals,
-                kind="macro",
-                severity="elevated" if change is not None and abs(change) >= 2 else "watch",
-                title=f"{item.get('label')} momentum",
-                summary=f"24h move {change:+.2f}% with runtime quote {item.get('price')}" if change is not None else "Runtime quote available",
-                timestamp=ctx["utc_now_iso"](),
-                contributors=["crypto", "macro"],
-            )
-            if len(signals) >= limit:
-                break
-
-    if len(signals) < limit:
-        try:
-            nowcast = ctx["get_inflation_nowcast_snapshot"]()
-        except Exception:
-            logger = getattr(ctx.get("app"), "logger", None)
-            if logger is not None:
-                logger.exception("alpha inflation source failed")
-            nowcast = {}
-        mom = nowcast.get("monthOverMonth") or {}
-        if mom:
-            _append_signal(
-                signals,
-                kind="macro",
-                severity="watch",
-                title="Cleveland Fed nowcast",
-                summary=f"CPI MoM {mom.get('CPI', '--')} / Core CPI {mom.get('Core CPI', '--')}",
-                timestamp=ctx["utc_now_iso"](),
-                contributors=["macro", "inflation"],
-            )
-
     deduped: List[Dict[str, Any]] = []
     seen = set()
     for signal in signals:
@@ -820,9 +796,17 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
         deduped.append(signal)
         if len(deduped) >= limit:
             break
-    status = "empty" if not deduped else "degraded" if trade_source_status != "ok" else "ok"
+    status = "degraded" if trade_source_status != "ok" else "ok" if deduped else "empty"
+    source_rows = volume_rows or whale_rows
+    source_state_status = "ok" if trade_source_status == "ok" else trade_source_status
     return normalize_signal_payload(
-        {"items": deduped, "generatedAt": ctx["utc_now_iso"](), "status": status, "sourceMode": trade_source_status},
+        {
+            "items": deduped,
+            "generatedAt": ctx["utc_now_iso"](),
+            "status": status,
+            "sourceMode": trade_source_status,
+            "sourceStates": _clickhouse_source_states(source_state_status, rows=source_rows),
+        },
         generated_at=ctx["utc_now_iso"](),
     )
 

@@ -313,7 +313,7 @@ class SignalsWatcher:
             record_count=record_count,
             error_summary=None if record_count else f"{self.component} payload contained no items",
             metadata={"result": "stored", "component": self.component, "limit": self.limit, **stats},
-            source_states={"database": status},
+            source_states=payload.get("sourceStates") if isinstance(payload.get("sourceStates"), dict) else {"database": status},
             payload_status=status,
         )
         return {"status": status, "recordCount": record_count, "component": self.component}

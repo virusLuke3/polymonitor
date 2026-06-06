@@ -168,8 +168,87 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         payload = signal_service.fetch_live_alpha_signal_payload(ctx, limit=3)
 
         self.assertEqual("degraded", payload["status"])
-        self.assertGreaterEqual(len(payload["items"]), 1)
-        self.assertEqual("macro", payload["items"][0]["kind"])
+        self.assertEqual([], payload["items"])
+
+    def test_alpha_live_payload_uses_clickhouse_volume_rows_without_address_profiles(self):
+        ctx = {
+            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)),
+            "utc_now_iso": lambda: "2026-06-06T02:00:00Z",
+            "query_all": lambda sql, params=(): [],
+            "get_recent_trades": lambda limit=24: [],
+            "_safe_decimal": lambda value: signal_service.Decimal(str(value)) if value is not None else None,
+            "format_trade_decimal": lambda value: str(value) if value is not None else None,
+            "format_trade_address": lambda value: value,
+            "parse_iso_datetime": lambda value: None,
+            "utc_date_days_ago": lambda days: "2026-05-30T02:00:00Z",
+        }
+        volume_rows = [
+            {
+                "market_id": 10,
+                "market_title": "High flow market",
+                "timestamp": "2026-06-06T01:59:58Z",
+                "outcome": "YES",
+                "side": "BUY",
+                "flow_notional": "15000",
+                "max_trade_notional": "8000",
+                "market_baseline_notional": "50000",
+                "market_share": "0.30",
+                "trade_count": 12,
+                "avg_price": "0.62",
+                "score": "88",
+                "threshold_flow_notional": "1000",
+                "severity": "critical",
+                "source_mode": "clickhouse-volume-alpha",
+                "window_minutes": 15,
+            }
+        ]
+        with patch.object(signal_service.clickhouse_orderfilled_service, "get_alpha_volume_signal_rows", return_value=volume_rows), patch.object(
+            signal_service.clickhouse_orderfilled_service,
+            "get_volume_whale_rows",
+            return_value=[],
+        ):
+            payload = signal_service.fetch_live_alpha_signal_payload(ctx, limit=3)
+
+        self.assertEqual("ok", payload["status"])
+        self.assertEqual("clickhouse-volume-alpha", payload["items"][0]["sourceMode"])
+        self.assertEqual("volume-flow", payload["items"][0]["kind"])
+        self.assertIn("High flow market", payload["items"][0]["title"])
+
+    def test_whale_live_payload_uses_clickhouse_volume_rows(self):
+        ctx = {
+            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)),
+            "utc_now_iso": lambda: "2026-06-06T02:00:00Z",
+            "query_all": lambda sql, params=(): [],
+            "_safe_decimal": lambda value: signal_service.Decimal(str(value)) if value is not None else None,
+            "format_trade_decimal": lambda value: str(value) if value is not None else None,
+            "format_trade_address": lambda value: value,
+            "parse_iso_datetime": lambda value: None,
+            "utc_date_days_ago": lambda days: "2026-05-30T02:00:00Z",
+        }
+        whale_rows = [
+            {
+                "market_id": 20,
+                "market_title": "Whale market",
+                "timestamp": "2026-06-06T01:59:59Z",
+                "tx_hash": "0xabc",
+                "outcome": "NO",
+                "side": "BUY",
+                "price": "0.40",
+                "size": "25000",
+                "notional": "10000",
+                "severity": "critical",
+                "source_mode": "clickhouse-volume-whales",
+                "signal_type": "single-trade",
+                "market_share": "0.22",
+            }
+        ]
+        with patch.object(signal_service.clickhouse_orderfilled_service, "get_volume_whale_rows", return_value=whale_rows):
+            payload = signal_service.fetch_live_whale_trades_payload(ctx, limit=3)
+
+        self.assertEqual("ok", payload["status"])
+        self.assertEqual("clickhouse-volume-whales", payload["sourceMode"])
+        self.assertEqual("10000", payload["items"][0]["notional"])
+        self.assertEqual("single-trade", payload["items"][0]["signalType"])
 
     def test_whale_bootstrap_fallback_filters_stale_trades(self):
         stale_bootstrap = {
