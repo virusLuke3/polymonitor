@@ -146,10 +146,16 @@
 }
 
 .wm-dashboard .wm-temp-city-card {
+  box-sizing: border-box;
+  height: 76px;
   min-height: 76px;
-  padding: 8px 8px 8px 10px;
+  padding: 6px 8px 5px 10px;
   border-left-width: 3px;
+  display: grid;
+  grid-template-rows: 19px 18px 14px 12px;
+  gap: 2px;
   background: linear-gradient(90deg, rgba(126, 220, 255, 0.06), transparent 58%);
+  overflow: hidden;
 }
 
 .wm-dashboard .wm-temp-city-card.hot,
@@ -160,20 +166,48 @@
 }
 
 .wm-dashboard .wm-temp-city-main strong {
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .wm-dashboard .wm-temp-city-main b {
   color: #ffb073;
-  font-size: 20px;
+  font-size: 18px;
 }
 
 .wm-dashboard .wm-temp-city-card .wm-weather-table-mini {
-  height: 22px;
+  height: 18px;
 }
 
 .wm-dashboard .wm-temp-city-stats {
   gap: 4px;
+}
+
+.wm-dashboard .wm-temp-city-main div {
+  gap: 0;
+}
+
+.wm-dashboard .wm-temp-city-main span,
+.wm-dashboard .wm-temp-city-stats span,
+.wm-dashboard .wm-temp-city-market {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.wm-dashboard .wm-temp-city-stats span {
+  gap: 0;
+}
+
+.wm-dashboard .wm-temp-city-market {
+  height: 12px;
+  padding: 1px 5px;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.wm-dashboard .wm-temp-city-market span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wm-dashboard .wm-weather-detail-stack {
