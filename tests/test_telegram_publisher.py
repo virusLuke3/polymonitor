@@ -66,6 +66,7 @@ def make_settings(state_path: str) -> TelegramSettings:
         disable_notification=False,
         publish_on_api_fetch=False,
         news=TopicConfig(name="news", chat_id="@news"),
+        intel=TopicConfig(name="intel", chat_id="@intel"),
         alpha=TopicConfig(name="alpha", chat_id="@alpha"),
         macro=TopicConfig(name="macro", chat_id="@macro"),
         nba=TopicConfig(name="nba", chat_id="@nba"),
@@ -173,7 +174,7 @@ def test_rich_news_and_alpha_messages_include_tags_meme_and_links():
     assert alpha_message.link_preview is True
 
 
-def test_related_news_formatter_includes_market_context_and_routes_to_news():
+def test_related_news_formatter_includes_market_context_and_routes_to_intel():
     payload = {
         "marketId": 1871431,
         "marketTitle": "NBA player performance market",
@@ -193,11 +194,12 @@ def test_related_news_formatter_includes_market_context_and_routes_to_news():
     messages = format_related_news(payload)
     message = messages[0]
 
-    assert len(messages) == 8
-    assert message.topic == "news"
+    assert len(messages) == 1
+    assert message.topic == "intel"
     assert "NBA player performance market" in message.text
-    assert "NEWS | ESPN" in message.text
-    assert "Source: https://news.example/nba-lineup-0" in message.text
+    assert "News 10" in message.text
+    assert "1. NEWS | ESPN" in message.text
+    assert "Top source: https://news.example/nba-lineup-0" in message.text
     assert message.link_preview is True
 
 
@@ -220,10 +222,11 @@ def test_related_news_formatter_accepts_single_item_payload():
         }
     )[0]
 
-    assert message.topic == "news"
+    assert message.topic == "intel"
     assert "NBA player performance market" in message.text
-    assert "NEWS | ESPN" in message.text
-    assert "Source: https://news.example/nba-lineup" in message.text
+    assert "News 1" in message.text
+    assert "1. NEWS | ESPN" in message.text
+    assert "Top source: https://news.example/nba-lineup" in message.text
     assert message.link_preview is True
 
 
@@ -319,7 +322,7 @@ def test_resolve_polydata_api_base_skips_dead_local_and_uses_remote():
 
 def test_format_panel_snapshot_routes_known_panel_ids():
     assert format_panel_snapshot("latest-content", {"items": [{"id": "n1", "title": "Hello", "source": "RSS"}]})[0].topic == "news"
-    assert format_panel_snapshot("related-news", {"marketId": 1, "marketTitle": "Market", "items": [{"id": "r1", "title": "Intel"}]})[0].topic == "news"
+    assert format_panel_snapshot("related-news", {"marketId": 1, "marketTitle": "Market", "items": [{"id": "r1", "title": "Intel"}]})[0].topic == "intel"
     assert format_panel_snapshot("alpha-signal", {"items": [{"id": "a1", "title": "Signal"}]})[0].topic == "alpha"
     assert format_panel_snapshot("polymarket-macro-map", {"items": [{"id": "m1", "title": "Macro"}]})[0].topic == "macro"
     assert format_panel_snapshot("unknown", {"items": [{"id": "x", "title": "Nope"}]}) == []

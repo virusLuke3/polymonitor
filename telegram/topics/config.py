@@ -80,6 +80,7 @@ class TelegramSettings:
     disable_notification: bool
     publish_on_api_fetch: bool
     news: TopicConfig
+    intel: TopicConfig
     alpha: TopicConfig
     macro: TopicConfig
     nba: TopicConfig
@@ -89,6 +90,8 @@ class TelegramSettings:
     def topic_config(self, topic: str) -> TopicConfig:
         if topic == "news":
             return self.news
+        if topic == "intel":
+            return self.intel
         if topic == "alpha":
             return self.alpha
         if topic == "macro":
@@ -153,6 +156,13 @@ def load_settings() -> TelegramSettings:
         disable_notification=_get_bool("POLYDATA_TELEGRAM_DISABLE_NOTIFICATION", False),
         publish_on_api_fetch=_get_bool("POLYDATA_TELEGRAM_PUBLISH_ON_API_FETCH", False),
         news=_topic("news", "POLYDATA_TELEGRAM_CHANNEL_NEWS", "POLYDATA_TELEGRAM_THREAD_NEWS"),
+        intel=_topic_from_candidates(
+            "intel",
+            (
+                ("POLYDATA_TELEGRAM_CHANNEL_INTEL", "POLYDATA_TELEGRAM_THREAD_INTEL"),
+                ("POLYDATA_TELEGRAM_CHANNEL_MARKET_INTEL", "POLYDATA_TELEGRAM_THREAD_MARKET_INTEL"),
+            ),
+        ),
         alpha=_topic("alpha", "POLYDATA_TELEGRAM_CHANNEL_ALPHA", "POLYDATA_TELEGRAM_THREAD_ALPHA"),
         macro=_topic("macro", "POLYDATA_TELEGRAM_CHANNEL_MACRO", "POLYDATA_TELEGRAM_THREAD_MACRO"),
         nba=_topic("nba", "POLYDATA_TELEGRAM_CHANNEL_NBA", "POLYDATA_TELEGRAM_THREAD_NBA"),

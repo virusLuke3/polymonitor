@@ -7,7 +7,7 @@ from urllib.parse import quote_plus
 
 from .models import MessageCandidate
 
-RELATED_NEWS_TELEGRAM_LIMIT = 8
+RELATED_NEWS_SUMMARY_LIMIT = 3
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -307,32 +307,60 @@ def format_latest_content(payload: Dict[str, Any]) -> List[MessageCandidate]:
 
 
 def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
-    messages: List[MessageCandidate] = []
+    items = list(_iter_items(payload))
+    if not items:
+        return []
     market_title = _text(payload.get("marketTitle") or payload.get("question"), "Focused market")
     market_id = _text(payload.get("marketId") or payload.get("localMarketId"))
     category = _text(payload.get("marketCategory"))
-    for item in list(_iter_items(payload))[:RELATED_NEWS_TELEGRAM_LIMIT]:
+    counts: Dict[str, int] = {}
+    for item in items:
+        content_type = _text(item.get("contentType"), "news").lower()
+        counts[content_type] = counts.get(content_type, 0) + 1
+    count_line = " | ".join(
+        f"{label} {counts.get(key, 0)}"
+        for key, label in (("news", "News"), ("video", "Video"), ("report", "Reports"), ("research", "Research"))
+        if counts.get(key, 0)
+    )
+    top_lines: List[str] = []
+    first_url = ""
+    source_labels: List[str] = []
+    for index, item in enumerate(items[:RELATED_NEWS_SUMMARY_LIMIT], start=1):
         title = _text(item.get("title") or item.get("headline"))
         if not title:
             continue
         source = _text(item.get("source"), "Related intel")
         content_type = _text(item.get("contentType"), "news").lower()
-        summary = _text(item.get("summary") or item.get("description"))
         url = _first_url(item.get("url"))
-        text = _compose_post(
-            header="Related Intel",
-            title=market_title,
-            lines=[
-                f"{content_type.upper()} | {source}",
-                title,
-                summary[:260] if summary and summary != title else "",
-            ],
-            tags=_hashtags("RelatedIntel", category, content_type, source),
-            url=_source_link(url, "Source"),
+        if not first_url and url:
+            first_url = url
+        if source and source not in source_labels:
+            source_labels.append(source)
+        top_lines.append(f"{index}. {content_type.upper()} | {source} | {title[:140]}")
+    if not top_lines:
+        return []
+    text = _compose_post(
+        header="Market Intel",
+        title=market_title,
+        lines=[
+            count_line,
+            *top_lines,
+            f"Source mode: {_text(payload.get('sourceMode'))}" if payload.get("sourceMode") else "",
+        ],
+        tags=_hashtags("MarketIntel", category, source_labels[:3]),
+        url=_source_link(first_url, "Top source"),
+    )
+    version = "|".join(str(item.get("id") or item.get("url") or item.get("title") or "") for item in items[:RELATED_NEWS_SUMMARY_LIMIT])
+    dedupe = _short_hash("related-news-summary", market_id, version, len(items), count_line)
+    return [
+        MessageCandidate(
+            topic="intel",
+            dedupe_key=dedupe,
+            text=text,
+            metadata={"panel": "related-news", "marketId": market_id},
+            link_preview=bool(first_url),
         )
-        dedupe = _short_hash("related-news", market_id, item.get("id"), title.lower(), url)
-        messages.append(MessageCandidate(topic="news", dedupe_key=dedupe, text=text, metadata={"panel": "related-news", "marketId": market_id}, link_preview=bool(url)))
-    return messages
+    ]
 
 
 def format_alpha_signal(payload: Dict[str, Any]) -> List[MessageCandidate]:
