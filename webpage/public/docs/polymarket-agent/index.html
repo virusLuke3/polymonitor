@@ -81,12 +81,22 @@
           <h1>Polymarket Agent</h1>
           <p>The Polymarket Agent is not a room full of LLM personas chatting with each other. It is a structured forecasting workflow: deterministic evidence first, a small number of specialist agents second, limited debate and critique third, then calibration, panel adaptation, snapshot storage, and resolution memory.</p>
 
-          <figure class="docs-figure">
+          <figure id="agent-architecture" class="docs-figure">
             <div class="docs-figure-frame">
-              <img src="/docs-assets/images/polymarket-agent-architecture.png" alt="Diagram of the Polymarket Agent Forecast Intelligence Graph" />
+              <a class="docs-figure-zoom" href="#agent-architecture-zoom" aria-label="Open Polymarket Agent architecture diagram">
+                <img src="/docs-assets/images/polymarket-agent-architecture.png" alt="Diagram of the Polymarket Agent Forecast Intelligence Graph" />
+              </a>
             </div>
             <figcaption>The target Forecast Intelligence Graph keeps state structured and auditable: evidence, specialist reports, debate, calibration, panel output, and resolution feedback are separate layers.</figcaption>
           </figure>
+
+          <div id="agent-architecture-zoom" class="docs-lightbox" role="dialog" aria-modal="true" aria-label="Polymarket Agent architecture diagram">
+            <a class="docs-lightbox-backdrop" href="#agent-architecture" aria-label="Close diagram"></a>
+            <div class="docs-lightbox-panel">
+              <a class="docs-lightbox-close" href="#agent-architecture" aria-label="Close diagram">x</a>
+              <img src="/docs-assets/images/polymarket-agent-architecture.png" alt="Diagram of the Polymarket Agent Forecast Intelligence Graph" />
+            </div>
+          </div>
 
           <h2 id="core-judgment">Core Judgment</h2>
           <p>Prediction-market intelligence should optimize for evidence quality, calibration, and post-resolution learning. More agents only help when they own different evidence surfaces or decision checks. A 20-persona or 50-persona swarm would add cost and drift without making the final probability more auditable.</p>

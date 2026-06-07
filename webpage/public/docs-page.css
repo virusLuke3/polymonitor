@@ -404,6 +404,11 @@ a {
   box-shadow: 0 1px 2px rgba(22, 34, 26, 0.04);
 }
 
+.docs-figure-zoom {
+  display: block;
+  cursor: zoom-in;
+}
+
 .docs-figure img {
   display: block;
   width: 100%;
@@ -418,6 +423,70 @@ a {
   font-size: 14px;
   font-weight: 400;
   line-height: 22px;
+}
+
+.docs-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.docs-lightbox:target {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.docs-lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 14, 12, 0.74);
+}
+
+.docs-lightbox-panel {
+  position: relative;
+  z-index: 1;
+  max-width: min(96vw, 1600px);
+  max-height: 92vh;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+.docs-lightbox-panel img {
+  display: block;
+  width: auto;
+  max-width: calc(96vw - 24px);
+  height: auto;
+  max-height: calc(92vh - 24px);
+}
+
+.docs-lightbox-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid rgba(17, 24, 39, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111827;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
 }
 
 .quick-grid {
