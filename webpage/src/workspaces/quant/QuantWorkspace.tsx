@@ -141,6 +141,7 @@ export function QuantWorkspace() {
   const [deepBacktest, setDeepBacktest] = useState(false);
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const [marketSlug, setMarketSlug] = useState(defaultMarketSlug);
+  const [marketSearchQuery, setMarketSearchQuery] = useState(defaultMarketSlug);
   const [backtestStatus, setBacktestStatus] = useState('idle');
   const [performanceSearch, setPerformanceSearch] = useState('');
   const [performanceSortKey, setPerformanceSortKey] = useState<PerformanceSortKey>('metric');
@@ -260,13 +261,16 @@ export function QuantWorkspace() {
       .then((payload) => {
         const items = payload.items || [];
         setQuantMarkets(items);
-        if (!marketSlug.trim() && items[0]?.marketSlug) setMarketSlug(items[0].marketSlug);
+        if (!marketSlug.trim() && items[0]?.marketSlug) {
+          setMarketSlug(items[0].marketSlug);
+          setMarketSearchQuery(items[0].marketSlug);
+        }
       })
       .catch(() => setQuantMarkets([]));
   }, []);
 
   useEffect(() => {
-    const text = marketSlug.trim();
+    const text = marketSearchQuery.trim();
     const timer = window.setTimeout(() => {
       void fetchQuantPriceMarkets(text, 40)
         .then((payload) => {
@@ -280,7 +284,7 @@ export function QuantWorkspace() {
         .catch(() => undefined);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [marketSlug]);
+  }, [marketSearchQuery]);
 
   useEffect(() => {
     if (!marketSlug.trim()) return;
@@ -351,12 +355,14 @@ export function QuantWorkspace() {
     <div className="qtv-shell">
       <WorkspaceHeader
         marketSlug={marketSlug}
+        marketQuery={marketSearchQuery}
         timeframe={timeframe}
         priceSource={priceSource}
         backtestEngine={backtestEngine}
         loading={loading}
         marketOptions={quantMarkets}
         onMarketSlugChange={setMarketSlug}
+        onMarketQueryChange={setMarketSearchQuery}
         onTimeframeChange={setTimeframe}
         onPriceSourceChange={setPriceSource}
         onBacktestEngineChange={setBacktestEngine}
