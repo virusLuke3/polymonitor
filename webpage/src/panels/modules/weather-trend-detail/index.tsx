@@ -84,6 +84,15 @@ function TrendChart({
   const avgPath = pathFor(points.map((point) => point.avg), min, range);
   const highPath = pathFor(points.map((point) => point.high), min, range);
   const last = points[points.length - 1];
+  const labeledPoints = points
+    .map((point, index) => ({ ...point, index }))
+    .filter((point) => point.label);
+  const maxLabels = title.toLowerCase().includes('day') && points.length > 12 ? 5 : 6;
+  const labelIndexes = new Set(
+    labeledPoints
+      .filter((_, index) => index === 0 || index === labeledPoints.length - 1 || index % Math.max(1, Math.ceil(labeledPoints.length / maxLabels)) === 0)
+      .map((point) => point.index),
+  );
   return (
     <section className="wm-weather-trend-card">
       <div className="wm-weather-trend-title">
@@ -110,7 +119,7 @@ function TrendChart({
         <text className="last-label" x="305" y="86">Last {tempLabel(last?.high, unit)}</text>
         {points.map((point, index) => {
           if (!point.label) return null;
-          if (index !== 0 && index !== points.length - 1 && index % 3 !== 1) return null;
+          if (!labelIndexes.has(index)) return null;
           const x = 38 + (index / Math.max(1, points.length - 1)) * 260;
           return <text key={`${title}-x-${point.label}`} className="x-label" x={x} y="178" textAnchor="middle">{point.label}</text>;
         })}

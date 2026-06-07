@@ -23,7 +23,15 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
     current.push(`${point.x.toFixed(1)},${point.y.toFixed(1)}`);
   }
   if (current.length) segments.push(current);
-  const labelIndexes = bins.map((_, index) => index).filter((index) => index === 0 || index === bins.length - 1 || index % 2 === 1);
+  const labelStep = Math.max(1, Math.ceil(bins.length / 5));
+  const labelIndexes = bins
+    .map((_, index) => index)
+    .filter((index) => index === 0 || index === bins.length - 1 || index % labelStep === 0);
+  const compactLabel = (label?: string | null) => {
+    const value = String(label || '').replace(/\s+/g, ' ').trim();
+    if (value.length <= 22) return value;
+    return `${value.slice(0, 20)}...`;
+  };
   return (
     <div className="wm-weather-quote-curve-panel">
       <div className="wm-weather-chart-title">
@@ -55,7 +63,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
           const x = 42 + (index / Math.max(1, bins.length - 1)) * 276;
           return (
             <text className="wm-weather-quote-x-label" key={`x-${index}`} x={x} y="196" textAnchor="end" transform={`rotate(-44 ${x} 196)`}>
-              {bins[index]?.label || ''}
+              {compactLabel(bins[index]?.label)}
             </text>
           );
         })}
