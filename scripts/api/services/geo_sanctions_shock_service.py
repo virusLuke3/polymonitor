@@ -837,7 +837,7 @@ def _fetch_ucdp_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     return {
         "state": "ok" if items else "empty",
         "provider": "UCDP",
-        "items": items[:12],
+        "items": items[:UCDP_MAX_EVENTS],
         "targetScores": dict(target_scores),
         "hotspotCount": hotspot_count,
         "version": version,
