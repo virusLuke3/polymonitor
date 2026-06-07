@@ -7,6 +7,8 @@ from urllib.parse import quote_plus
 
 from .models import MessageCandidate
 
+RELATED_NEWS_TELEGRAM_LIMIT = 8
+
 
 def _text(value: Any, default: str = "") -> str:
     text = str(value or "").strip()
@@ -309,7 +311,7 @@ def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
     market_title = _text(payload.get("marketTitle") or payload.get("question"), "Focused market")
     market_id = _text(payload.get("marketId") or payload.get("localMarketId"))
     category = _text(payload.get("marketCategory"))
-    for item in _iter_items(payload):
+    for item in list(_iter_items(payload))[:RELATED_NEWS_TELEGRAM_LIMIT]:
         title = _text(item.get("title") or item.get("headline"))
         if not title:
             continue

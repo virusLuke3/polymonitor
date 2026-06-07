@@ -174,6 +174,34 @@ def test_rich_news_and_alpha_messages_include_tags_meme_and_links():
 
 
 def test_related_news_formatter_includes_market_context_and_routes_to_news():
+    payload = {
+        "marketId": 1871431,
+        "marketTitle": "NBA player performance market",
+        "marketCategory": "Sports",
+        "items": [
+            {
+                "id": f"intel-{index}",
+                "contentType": "news",
+                "title": f"Lineup update moves player props {index}",
+                "source": "ESPN",
+                "summary": "A starter is questionable before tipoff.",
+                "url": f"https://news.example/nba-lineup-{index}",
+            }
+            for index in range(10)
+        ],
+    }
+    messages = format_related_news(payload)
+    message = messages[0]
+
+    assert len(messages) == 8
+    assert message.topic == "news"
+    assert "NBA player performance market" in message.text
+    assert "NEWS | ESPN" in message.text
+    assert "Source: https://news.example/nba-lineup-0" in message.text
+    assert message.link_preview is True
+
+
+def test_related_news_formatter_accepts_single_item_payload():
     message = format_related_news(
         {
             "marketId": 1871431,
