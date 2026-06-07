@@ -7,7 +7,7 @@ from urllib.parse import quote_plus
 
 from .models import MessageCandidate
 
-RELATED_NEWS_SUMMARY_LIMIT = 3
+RELATED_NEWS_GROUP_LIMIT = 2
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -322,35 +322,47 @@ def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
         for key, label in (("news", "News"), ("video", "Video"), ("report", "Reports"), ("research", "Research"))
         if counts.get(key, 0)
     )
-    top_lines: List[str] = []
+    grouped: Dict[str, List[str]] = {"news": [], "video": [], "report": [], "research": []}
     first_url = ""
     source_labels: List[str] = []
-    for index, item in enumerate(items[:RELATED_NEWS_SUMMARY_LIMIT], start=1):
+    for item in items:
         title = _text(item.get("title") or item.get("headline"))
         if not title:
             continue
         source = _text(item.get("source"), "Related intel")
         content_type = _text(item.get("contentType"), "news").lower()
+        group_key = content_type if content_type in grouped else "news"
         url = _first_url(item.get("url"))
         if not first_url and url:
             first_url = url
         if source and source not in source_labels:
             source_labels.append(source)
-        top_lines.append(f"{index}. {content_type.upper()} | {source} | {title[:140]}")
-    if not top_lines:
+        if len(grouped[group_key]) < RELATED_NEWS_GROUP_LIMIT:
+            grouped[group_key].append(f"- {source} | {title[:140]}")
+    section_lines: List[str] = []
+    for key, label in (("news", "News"), ("video", "Video"), ("report", "Reports"), ("research", "Research")):
+        lines = grouped[key]
+        if not lines:
+            continue
+        section_lines.append(f"{label}:")
+        section_lines.extend(lines)
+    if not section_lines:
         return []
     text = _compose_post(
         header="Market Intel",
         title=market_title,
         lines=[
             count_line,
-            *top_lines,
+            *section_lines,
             f"Source mode: {_text(payload.get('sourceMode'))}" if payload.get("sourceMode") else "",
         ],
         tags=_hashtags("MarketIntel", category, source_labels[:3]),
         url=_source_link(first_url, "Top source"),
     )
-    version = "|".join(str(item.get("id") or item.get("url") or item.get("title") or "") for item in items[:RELATED_NEWS_SUMMARY_LIMIT])
+    version_items = []
+    for key in ("news", "video", "report", "research"):
+        version_items.extend(grouped[key])
+    version = "|".join(version_items)
     dedupe = _short_hash("related-news-summary", market_id, version, len(items), count_line)
     return [
         MessageCandidate(

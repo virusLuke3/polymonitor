@@ -182,13 +182,25 @@ def test_related_news_formatter_includes_market_context_and_routes_to_intel():
         "items": [
             {
                 "id": f"intel-{index}",
-                "contentType": "news",
-                "title": f"Lineup update moves player props {index}",
-                "source": "ESPN",
+                "contentType": content_type,
+                "title": f"{label} moves player props {index}",
+                "source": source,
                 "summary": "A starter is questionable before tipoff.",
                 "url": f"https://news.example/nba-lineup-{index}",
             }
-            for index in range(10)
+            for index, (content_type, label, source) in enumerate(
+                [
+                    ("news", "Lineup update", "ESPN"),
+                    ("news", "Injury report", "The Athletic"),
+                    ("news", "Rotation note", "AP"),
+                    ("video", "Film breakdown", "YouTube"),
+                    ("video", "Postgame clip", "NBA"),
+                    ("report", "Betting report", "Action Network"),
+                    ("report", "Model report", "NumberFire"),
+                    ("research", "Research note", "SSRN"),
+                    ("research", "Paper abstract", "arXiv"),
+                ]
+            )
         ],
     }
     messages = format_related_news(payload)
@@ -197,8 +209,16 @@ def test_related_news_formatter_includes_market_context_and_routes_to_intel():
     assert len(messages) == 1
     assert message.topic == "intel"
     assert "NBA player performance market" in message.text
-    assert "News 10" in message.text
-    assert "1. NEWS | ESPN" in message.text
+    assert "News 3 | Video 2 | Reports 2 | Research 2" in message.text
+    assert "News:" in message.text
+    assert "- ESPN | Lineup update moves player props 0" in message.text
+    assert "Video:" in message.text
+    assert "- YouTube | Film breakdown moves player props 3" in message.text
+    assert "Reports:" in message.text
+    assert "- Action Network | Betting report moves player props 5" in message.text
+    assert "Research:" in message.text
+    assert "- SSRN | Research note moves player props 7" in message.text
+    assert "Rotation note moves player props 2" not in message.text
     assert "Top source: https://news.example/nba-lineup-0" in message.text
     assert message.link_preview is True
 
@@ -225,7 +245,8 @@ def test_related_news_formatter_accepts_single_item_payload():
     assert message.topic == "intel"
     assert "NBA player performance market" in message.text
     assert "News 1" in message.text
-    assert "1. NEWS | ESPN" in message.text
+    assert "News:" in message.text
+    assert "- ESPN | Lineup update moves player props" in message.text
     assert "Top source: https://news.example/nba-lineup" in message.text
     assert message.link_preview is True
 
