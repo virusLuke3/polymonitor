@@ -7,6 +7,8 @@ import { runtimePanelFromRenderer } from '../helpers';
 
 type UcdpTab = 'state-based' | 'non-state' | 'one-sided';
 
+const UCDP_DISPLAY_LIMIT = 50;
+
 const UCDP_TABS: { key: UcdpTab; label: string }[] = [
   { key: 'state-based', label: 'State' },
   { key: 'non-state', label: 'Non-state' },
@@ -80,7 +82,8 @@ function GeoShockPanel({ payload }: {
   }, [events]);
   const filtered = events.filter((event) => violenceKey(event.violenceType) === activeTab);
   const totalDeaths = filtered.reduce((sum, event) => sum + Number(event.deathsBest || 0), 0);
-  const visibleRows = filtered.slice(0, 50);
+  const visibleRows = filtered.slice(0, UCDP_DISPLAY_LIMIT);
+  const activeCount = counts[activeTab];
 
   return (
     <Panel
@@ -98,11 +101,11 @@ function GeoShockPanel({ payload }: {
       )}
       badge={badgeLabel(payload?.status)}
       status={panelTone(payload?.status)}
-      count={events.length || undefined}
+      count={activeCount || undefined}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
           <strong>UCDP conflict events</strong>
-          <p>Mirrors WorldMonitor: UCDP event-level conflict data grouped by violence type, with country, deaths, date, and actors.</p>
+          <p>Mirrors WorldMonitor: cache up to 2,000 UCDP events, group by violence type, and render the first 50 rows for the selected category.</p>
         </div>
       ) : null}
       className="wm-market-panel wm-geo-shock-panel"
@@ -161,8 +164,11 @@ function GeoShockPanel({ payload }: {
         ) : (
           <div className="wm-geo-shock-empty">No UCDP events in this category.</div>
         )}
-        {filtered.length > visibleRows.length ? (
-          <div className="wm-geo-ucdp-more">{filtered.length - visibleRows.length} more not shown</div>
+        {visibleRows.length ? (
+          <div className="wm-geo-ucdp-more">
+            <span>Showing {formatCompactNumber(visibleRows.length)} of {formatCompactNumber(filtered.length)}</span>
+            <span>Cache {formatCompactNumber(events.length)}</span>
+          </div>
         ) : null}
       </div>
     </Panel>

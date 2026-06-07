@@ -10813,12 +10813,19 @@ a.wm-orderfilled-row {
 }
 
 .wm-geo-ucdp-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   color: #78827b;
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 900;
-  text-align: right;
   text-transform: uppercase;
+}
+
+.wm-geo-ucdp-more span:last-child {
+  color: #4f5a54;
 }
 
 .wm-macro-registry-data-strip {
