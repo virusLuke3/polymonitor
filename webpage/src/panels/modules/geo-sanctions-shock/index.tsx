@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGeoSanctionsShock } from '@/services/api';
-import type { RuntimeGeoSanctionsShockPayload } from '@/types';
+import type { RuntimeGeoSanctionsShockItem, RuntimeGeoSanctionsShockPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
@@ -52,6 +52,14 @@ function kindGlyph(kind?: string | null) {
   return 'G';
 }
 
+function formatDate(value?: string | null) {
+  const text = String(value || '').trim();
+  if (!text) return '--';
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return text.slice(0, 10);
+  return parsed.toISOString().slice(0, 10);
+}
+
 function formatAge(value?: string | null) {
   const text = String(value || '').trim();
   if (!text) return '--';
@@ -67,6 +75,18 @@ function formatAge(value?: string | null) {
   if (hours < 24) return `${hours}H AGO`;
   if (days < 30) return `${days}D AGO`;
   return parsed.toISOString().slice(0, 10);
+}
+
+function violenceLabel(value?: string | number | null) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === '1' || normalized === 'state-based') return 'STATE';
+  if (normalized === '2' || normalized === 'non-state') return 'NON-STATE';
+  if (normalized === '3' || normalized === 'one-sided') return 'ONE-SIDED';
+  return 'CONFLICT';
+}
+
+function isUcdpConflict(item: RuntimeGeoSanctionsShockItem) {
+  return String(item.kind || '').toLowerCase() === 'conflict' && String(item.source || '').toUpperCase() === 'UCDP';
 }
 
 function GeoShockPanel({ payload }: {
@@ -107,18 +127,48 @@ function GeoShockPanel({ payload }: {
             {items.length ? items.slice(0, 12).map((item) => {
               const sevClass = severityClass(item.severity);
               const targetLabel = upperMetric(item.targetLabels?.[0] || item.country || '');
+              const ucdpConflict = isUcdpConflict(item);
+              const actors = [item.sideA, item.sideB].map((part) => String(part || '').trim()).filter(Boolean).join(' vs ');
+              const deaths = Number(item.deathsBest ?? 0);
               return (
-                <article key={item.id || `${item.headline}-${item.occurredAt}`} className={`wm-geo-shock-row ${sevClass}`}>
+                <article key={item.id || `${item.headline}-${item.occurredAt}`} className={`wm-geo-shock-row ${sevClass}${ucdpConflict ? ' is-conflict' : ''}`}>
                   <span className={`wm-row-glyph ${sevClass}`}>{kindGlyph(item.kind)}</span>
                   <div className="wm-geo-shock-row-main">
-                    <div className="wm-geo-shock-row-top">
-                      <span className={`wm-geo-shock-kind ${sevClass}`}>{severityLabel(item.severity)}</span>
-                      <span className="wm-geo-shock-domain">{kindLabel(item.kind)}</span>
-                      <span className="wm-geo-shock-source">{upperMetric(item.source || 'SOURCE')}</span>
-                      <span className="wm-geo-shock-time">{formatAge(item.occurredAt)}</span>
-                    </div>
-                    <div className="wm-geo-shock-headline">{item.headline || 'Monitoring update'}</div>
-                    {targetLabel && targetLabel !== '--' ? <span className="wm-geo-shock-target-mini">{targetLabel}</span> : null}
+                    {ucdpConflict ? (
+                      <>
+                        <div className="wm-geo-conflict-grid">
+                          <span>
+                            <i>Country</i>
+                            <strong>{item.country || '--'}</strong>
+                          </span>
+                          <span>
+                            <i>Deaths</i>
+                            <strong>{deaths ? deaths.toLocaleString() : '0'}</strong>
+                          </span>
+                          <span>
+                            <i>Date</i>
+                            <strong>{formatDate(item.occurredAt)}</strong>
+                          </span>
+                          <span>
+                            <i>Type</i>
+                            <strong>{violenceLabel(item.violenceType)}</strong>
+                          </span>
+                        </div>
+                        <div className="wm-geo-shock-headline">{actors || item.headline || 'UCDP conflict event'}</div>
+                        <div className="wm-geo-shock-summary">{item.locationLabel || item.summary || 'UCDP georeferenced conflict event'}</div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="wm-geo-shock-row-top">
+                          <span className={`wm-geo-shock-kind ${sevClass}`}>{severityLabel(item.severity)}</span>
+                          <span className="wm-geo-shock-domain">{kindLabel(item.kind)}</span>
+                          <span className="wm-geo-shock-source">{upperMetric(item.source || 'SOURCE')}</span>
+                          <span className="wm-geo-shock-time">{formatAge(item.occurredAt)}</span>
+                        </div>
+                        <div className="wm-geo-shock-headline">{item.headline || 'Monitoring update'}</div>
+                        {targetLabel && targetLabel !== '--' ? <span className="wm-geo-shock-target-mini">{targetLabel}</span> : null}
+                      </>
+                    )}
                   </div>
                 </article>
               );

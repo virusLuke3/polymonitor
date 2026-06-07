@@ -1019,6 +1019,13 @@ export type RuntimeGeoSanctionsShockItem = {
   targetLabels?: string[];
   country?: string | null;
   tags?: string[];
+  sideA?: string | null;
+  sideB?: string | null;
+  locationLabel?: string | null;
+  violenceType?: string | number | null;
+  deathsBest?: number | null;
+  deathsLow?: number | null;
+  deathsHigh?: number | null;
 };
 
 export type RuntimeGeoSanctionsShockTargetBreakdown = {

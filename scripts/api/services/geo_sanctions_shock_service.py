@@ -638,6 +638,14 @@ def _normalize_ucdp_item(raw: Dict[str, Any], index: int) -> Optional[Dict[str, 
         best = int(raw.get("best") or 0)
     except (TypeError, ValueError):
         best = 0
+    try:
+        low = int(raw.get("low") or 0)
+    except (TypeError, ValueError):
+        low = 0
+    try:
+        high = int(raw.get("high") or 0)
+    except (TypeError, ValueError):
+        high = 0
 
     text_blob = " ".join(part for part in (headline, dyad_name, country, region, location, side_a, side_b) if part)
     if best >= 20 or _has_keyword(text_blob, keywords=NUCLEAR_KEYWORDS):
@@ -674,6 +682,13 @@ def _normalize_ucdp_item(raw: Dict[str, Any], index: int) -> Optional[Dict[str, 
         "targetLabels": _target_hits(text_blob),
         "country": country or location or region,
         "tags": tags,
+        "sideA": side_a,
+        "sideB": side_b,
+        "locationLabel": location,
+        "violenceType": _text_or_none(raw.get("type_of_violence")),
+        "deathsBest": best,
+        "deathsLow": low,
+        "deathsHigh": high,
 }
 
 
@@ -1282,7 +1297,7 @@ def _select_geo_shock_items(
         add(item)
     for item in _sort_shock_items(all_items):
         add(item)
-    return _sort_shock_items(selected)
+    return selected
 
 
 def _nuclear_risk(items: List[Dict[str, Any]], targets: List[str]) -> str:
@@ -1338,7 +1353,6 @@ def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict
     }
 
     all_items = [
-        *(ofac_snapshot.get("focusEntries") or []),
         *(notices_snapshot.get("items") or []),
         *(conflict_snapshot.get("items") or []),
     ]

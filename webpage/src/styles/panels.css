@@ -10869,6 +10869,18 @@ a.wm-orderfilled-row {
   padding-left: 8px;
 }
 
+.wm-geo-shock-row.is-conflict {
+  grid-template-columns: 0 minmax(0, 1fr);
+  gap: 0;
+  padding: 8px 0 9px 10px;
+  border-left-color: #79d8ff;
+  background: linear-gradient(90deg, rgba(121, 216, 255, 0.06), transparent 72%);
+}
+
+.wm-geo-shock-row.is-conflict .wm-row-glyph {
+  display: none;
+}
+
 .wm-geo-shock-row:last-child {
   border-bottom: 0;
 }
@@ -10956,6 +10968,60 @@ a.wm-orderfilled-row {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wm-geo-conflict-grid {
+  display: grid;
+  grid-template-columns: minmax(84px, 1.4fr) minmax(50px, 0.7fr) minmax(72px, 0.9fr) minmax(74px, 0.9fr);
+  gap: 5px;
+  min-width: 0;
+}
+
+.wm-geo-conflict-grid span {
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid rgba(121, 216, 255, 0.13);
+  background: rgba(255, 255, 255, 0.018);
+  display: grid;
+  gap: 2px;
+}
+
+.wm-geo-conflict-grid i {
+  min-width: 0;
+  color: #7f8682;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  line-height: 1;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-geo-conflict-grid strong {
+  min-width: 0;
+  color: #d8f5ff;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-geo-shock-row.is-conflict .wm-geo-shock-headline {
+  color: #f3f5f3;
+  font-size: 11px;
+  -webkit-line-clamp: 1;
+}
+
+.wm-geo-shock-row.is-conflict .wm-geo-shock-summary {
+  color: #919992;
+  font-size: 10px;
 }
 
 .wm-geo-shock-row-main > .wm-geo-shock-target-mini {
