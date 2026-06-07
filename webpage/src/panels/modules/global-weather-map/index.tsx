@@ -4,6 +4,7 @@ import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeW
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { WeatherCanvasSparkline } from '../weather-detail-utils';
 
 function statusBadge(status?: string | null) {
   const text = String(status || '').toLowerCase();
@@ -80,24 +81,7 @@ function MiniSpark({ city }: { city: RuntimeGlobalWeatherCity }) {
   const points = hourly.length >= 2 ? hourly : (city.bins || []).filter((bin) => num(bin.midPriceYes) !== null).slice(0, 12).map((bin, index) => ({ time: String(index), temp: num(bin.midPriceYes)! * 100 }));
   if (points.length < 2) return <span className="wm-weather-table-mini-empty">--</span>;
   const values = points.map((point) => num(point.temp) ?? 0);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = Math.max(1, max - min);
-  const polyline = values.map((value, index) => {
-    const x = (index / Math.max(1, values.length - 1)) * 112;
-    const y = 28 - ((value - min) / range) * 24;
-    return `${x.toFixed(1)},${Math.max(2, Math.min(28, y)).toFixed(1)}`;
-  }).join(' ');
-  return (
-    <svg className="wm-weather-table-mini" viewBox="0 0 112 30" aria-hidden="true">
-      <polyline points={polyline} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      {values.map((value, index) => {
-        const x = (index / Math.max(1, values.length - 1)) * 112;
-        const y = 28 - ((value - min) / range) * 24;
-        return <circle key={`${city.cityId}-mini-${index}`} cx={x} cy={Math.max(2, Math.min(28, y))} r="1.8" />;
-      })}
-    </svg>
-  );
+  return <WeatherCanvasSparkline values={values} className="wm-weather-table-mini" />;
 }
 
 function TemperatureCard({
