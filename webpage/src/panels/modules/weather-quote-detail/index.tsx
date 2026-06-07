@@ -8,7 +8,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
   const values = bins.map((bin) => num(bin.midPriceYes));
   const hasQuote = values.some((value) => value !== null);
   const points = values.map((value, index) => {
-    const x = 42 + (index / Math.max(1, bins.length - 1)) * 276;
+    const x = 42 + (index / Math.max(1, bins.length - 1)) * 378;
     const y = value === null ? null : 136 - Math.max(0, Math.min(1, value)) * 108;
     return { x, y, value };
   });
@@ -46,18 +46,18 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
         <strong>{cityName || 'Selected city'} Mid Price Curve</strong>
         <span>YES Mid %</span>
       </div>
-      <svg className="wm-weather-quote-curve-large" viewBox="0 0 340 188" aria-hidden="true">
+      <svg className="wm-weather-quote-curve-large" viewBox="0 0 440 188" aria-hidden="true">
         {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
           const y = 136 - tick * 108;
           return (
             <g key={`y-${tick}`}>
-              <line x1="42" y1={y} x2="318" y2={y} />
+              <line x1="42" y1={y} x2="420" y2={y} />
               <text x="36" y={y + 4} textAnchor="end">{Math.round(tick * 100)}%</text>
             </g>
           );
         })}
         <line x1="42" y1="28" x2="42" y2="136" />
-        <line x1="42" y1="136" x2="318" y2="136" />
+        <line x1="42" y1="136" x2="420" y2="136" />
         {segments.map((segment, index) => (
           <polyline key={`quote-segment-${index}`} points={segment.join(' ')} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
         ))}
@@ -68,7 +68,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
           </g>
         ))}
         {labelIndexes.map((index) => {
-          const x = 42 + (index / Math.max(1, bins.length - 1)) * 276;
+          const x = 42 + (index / Math.max(1, bins.length - 1)) * 378;
           return (
             <text className="wm-weather-quote-x-label" key={`x-${index}`} x={x} y="166" textAnchor="middle">
               {compactLabel(bins[index]?.label)}

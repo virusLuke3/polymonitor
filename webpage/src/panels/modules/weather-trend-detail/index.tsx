@@ -45,7 +45,7 @@ function sevenDayPoints(city?: RuntimeGlobalWeatherCity | null): TrendPoint[] {
   });
 }
 
-function pathFor(values: number[], min: number, range: number, width = 260) {
+function pathFor(values: number[], min: number, range: number, width = 360) {
   return values.map((value, index) => {
     const x = 38 + (index / Math.max(1, values.length - 1)) * width;
     const y = 152 - ((value - min) / range) * 124;
@@ -95,27 +95,27 @@ function TrendChart({
         <span className="avg">Avg</span>
         <span className="high">High</span>
       </div>
-      <svg className="wm-weather-trend-chart" viewBox="0 0 330 190" aria-hidden="true">
+      <svg className="wm-weather-trend-chart" viewBox="0 0 440 190" aria-hidden="true">
         {[0, 0.33, 0.66, 1].map((tick) => {
           const value = min + range * tick;
           const y = 152 - tick * 124;
           return (
             <g key={`${title}-${tick}`}>
-              <line x1="38" y1={y} x2="298" y2={y} />
+              <line x1="38" y1={y} x2="398" y2={y} />
               <text x="32" y={y + 4} textAnchor="end">{value.toFixed(1)}°{unit}</text>
             </g>
           );
         })}
         <path className="avg" d={avgPath} />
         <path className="high" d={highPath} />
-        <line className="last-guide" x1="298" y1="28" x2="298" y2="152" />
-        <circle className="high" cx="298" cy={152 - ((last!.high - min) / range) * 124} r="3.6" />
-        <text className="last-label" x="305" y="70">Max {tempLabel(max, unit)}</text>
-        <text className="last-label" x="305" y="86">Last {tempLabel(last?.high, unit)}</text>
+        <line className="last-guide" x1="398" y1="28" x2="398" y2="152" />
+        <circle className="high" cx="398" cy={152 - ((last!.high - min) / range) * 124} r="3.6" />
+        <text className="last-label" x="405" y="70">Max {tempLabel(max, unit)}</text>
+        <text className="last-label" x="405" y="86">Last {tempLabel(last?.high, unit)}</text>
         {points.map((point, index) => {
           if (!point.label) return null;
           if (!labelIndexes.has(index)) return null;
-          const x = 38 + (index / Math.max(1, points.length - 1)) * 260;
+          const x = 38 + (index / Math.max(1, points.length - 1)) * 360;
           return <text key={`${title}-x-${point.label}`} className="x-label" x={x} y="178" textAnchor="middle">{point.label}</text>;
         })}
       </svg>

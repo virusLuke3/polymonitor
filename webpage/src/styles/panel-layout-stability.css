@@ -123,6 +123,230 @@
   min-width: 0;
 }
 
+/* Weather panel polish for dense 5-column dashboards. */
+.wm-dashboard .wm-global-temperature-monitor-panel .wm-panel-body,
+.wm-dashboard .wm-weather-market-browser-panel .wm-panel-body,
+.wm-dashboard .wm-weather-city-snapshot-panel .wm-panel-body,
+.wm-dashboard .wm-weather-quote-detail-panel .wm-panel-body,
+.wm-dashboard .wm-weather-quote-table-only-panel .wm-panel-body,
+.wm-dashboard .wm-weather-trend-detail-panel .wm-panel-body,
+.wm-dashboard .wm-weather-news-panel .wm-panel-body {
+  padding: 10px !important;
+  background:
+    radial-gradient(circle at 82% 112%, rgba(65, 128, 172, 0.16), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0) 36%),
+    #0d0f10 !important;
+}
+
+.wm-dashboard .wm-temp-city-list,
+.wm-dashboard .wm-weather-market-list,
+.wm-dashboard .wm-weather-news-list {
+  gap: 0;
+  padding-right: 2px;
+}
+
+.wm-dashboard .wm-temp-city-card {
+  min-height: 76px;
+  padding: 8px 8px 8px 10px;
+  border-left-width: 3px;
+  background: linear-gradient(90deg, rgba(126, 220, 255, 0.06), transparent 58%);
+}
+
+.wm-dashboard .wm-temp-city-card.hot,
+.wm-dashboard .wm-temp-city-card.cool,
+.wm-dashboard .wm-temp-city-card.selected {
+  margin-left: 0;
+  padding-left: 10px;
+}
+
+.wm-dashboard .wm-temp-city-main strong {
+  font-size: 16px;
+}
+
+.wm-dashboard .wm-temp-city-main b {
+  color: #ffb073;
+  font-size: 20px;
+}
+
+.wm-dashboard .wm-temp-city-card .wm-weather-table-mini {
+  height: 22px;
+}
+
+.wm-dashboard .wm-temp-city-stats {
+  gap: 4px;
+}
+
+.wm-dashboard .wm-weather-detail-stack {
+  display: grid;
+  grid-template-rows: 58px 42px minmax(72px, 1fr) 32px 14px;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.wm-dashboard .wm-weather-city-hero {
+  min-height: 0;
+  align-items: center;
+  padding: 8px 10px;
+  background:
+    linear-gradient(90deg, rgba(126, 220, 255, 0.11), rgba(255, 255, 255, 0.02)),
+    #141819;
+}
+
+.wm-dashboard .wm-weather-city-hero strong {
+  font-size: 19px;
+}
+
+.wm-dashboard .wm-weather-city-hero b {
+  font-size: 24px;
+}
+
+.wm-dashboard .wm-weather-city-stats {
+  gap: 4px;
+}
+
+.wm-dashboard .wm-weather-city-stats span {
+  padding: 5px 6px;
+}
+
+.wm-dashboard .wm-weather-city-stats i {
+  font-size: 7.5px;
+}
+
+.wm-dashboard .wm-weather-city-stats strong {
+  font-size: 11px;
+}
+
+.wm-dashboard .wm-weather-detail-line,
+.wm-dashboard .wm-weather-city-line {
+  height: 100% !important;
+  min-height: 0 !important;
+  border-color: rgba(126, 220, 255, 0.18);
+  background: #050606;
+}
+
+.wm-dashboard .wm-weather-city-daily {
+  gap: 4px;
+  overflow: hidden;
+}
+
+.wm-dashboard .wm-weather-city-daily span {
+  min-height: 0;
+  padding: 4px 5px;
+}
+
+.wm-dashboard .wm-weather-city-daily i,
+.wm-dashboard .wm-weather-city-daily em {
+  font-size: 7px;
+}
+
+.wm-dashboard .wm-weather-city-daily strong {
+  font-size: 9px;
+}
+
+.wm-dashboard .wm-weather-city-marketline {
+  overflow: hidden;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.wm-dashboard .wm-weather-quote-curve-panel,
+.wm-dashboard .wm-weather-trend-card {
+  grid-template-rows: 18px minmax(0, 1fr) auto;
+  align-content: stretch;
+  gap: 7px;
+  border-color: rgba(255, 153, 0, 0.2);
+  background:
+    radial-gradient(circle at 70% 120%, rgba(255, 153, 0, 0.08), transparent 38%),
+    #050505;
+}
+
+.wm-dashboard .wm-weather-trend-card {
+  grid-template-rows: 18px minmax(0, 1fr);
+  border-color: rgba(126, 220, 255, 0.18);
+}
+
+.wm-dashboard .wm-weather-quote-curve-large,
+.wm-dashboard .wm-weather-trend-chart {
+  height: 100% !important;
+  min-height: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-dashboard .wm-weather-quote-curve-large text,
+.wm-dashboard .wm-weather-trend-chart text {
+  font-size: 9px;
+}
+
+.wm-dashboard .wm-weather-quote-x-label,
+.wm-dashboard .wm-weather-trend-chart .x-label {
+  font-size: 8px !important;
+}
+
+.wm-dashboard .wm-weather-trend-chart path {
+  stroke-width: 3;
+}
+
+.wm-dashboard .wm-weather-quote-history-strip {
+  min-height: 22px;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.wm-dashboard .wm-weather-quote-history-strip button {
+  height: 22px;
+  padding: 0 8px;
+}
+
+.wm-dashboard .wm-weather-quote-table-panel {
+  grid-template-rows: auto 42px minmax(0, 1fr);
+  align-content: stretch;
+  gap: 7px;
+  padding: 9px 10px;
+  border-color: rgba(255, 153, 0, 0.2);
+}
+
+.wm-dashboard .wm-weather-quote-table-head span {
+  font-size: 14px;
+}
+
+.wm-dashboard .wm-weather-quote-table-head strong {
+  display: -webkit-box;
+  white-space: normal;
+  line-height: 1.15;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.wm-dashboard .wm-weather-quote-table-head b {
+  font-size: 23px;
+}
+
+.wm-dashboard .wm-weather-quote-table-panel .wm-weather-quote-meta {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.wm-dashboard .wm-weather-quote-table-panel .wm-weather-quote-meta span {
+  padding: 5px 6px;
+}
+
+.wm-dashboard .wm-weather-quote-table-panel .wm-weather-quote-table th,
+.wm-dashboard .wm-weather-quote-table-panel .wm-weather-quote-table td {
+  padding: 5px;
+  font-size: 8.5px;
+}
+
+.wm-dashboard .wm-weather-quote-table-panel .wm-weather-quote-table th:first-child,
+.wm-dashboard .wm-weather-quote-table-panel .wm-weather-quote-table td:first-child {
+  width: 36%;
+}
+
+.wm-dashboard .wm-weather-news-item {
+  min-height: 44px;
+  padding: 7px 8px 7px 10px;
+  background: linear-gradient(90deg, rgba(255, 71, 71, 0.07), rgba(255, 255, 255, 0.02));
+}
+
 @media (max-width: 1500px) {
   .wm-dashboard .wm-panels-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
