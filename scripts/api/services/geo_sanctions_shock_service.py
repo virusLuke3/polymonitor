@@ -29,9 +29,10 @@ DEFAULT_GDELT_CONFLICT_QUERY = (
     "(missile OR drone OR airstrike OR sanctions OR ceasefire OR military OR nuclear) "
     "(Iran OR Russia OR Ukraine OR China OR Taiwan OR Israel OR Gaza)"
 )
-DEFAULT_ITEM_LIMIT = 12
+DEFAULT_ITEM_LIMIT = 2000
 UCDP_PAGE_SIZE = 1000
-UCDP_MAX_PAGES = 6
+UCDP_MAX_PAGES = 12
+UCDP_MAX_EVENTS = 2000
 UCDP_TRAILING_WINDOW_DAYS = 365
 TARGET_ALIASES: Dict[str, tuple[str, ...]] = {
     "IRAN": ("iran", "iranian", "tehran", "persian gulf"),
@@ -613,7 +614,7 @@ def _fetch_gdelt_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     return {
         "state": "ok" if items else "empty",
         "provider": "GDELT",
-        "items": items[:12],
+        "items": items[:UCDP_MAX_EVENTS],
         "targetScores": dict(target_scores),
         "hotspotCount": hotspot_count,
     }
@@ -1292,8 +1293,7 @@ def _select_geo_shock_items(
         seen.add(key)
         selected.append(item)
 
-    conflict_quota = min(4, max(2, limit // 3)) if conflict_items else 0
-    for item in _sort_shock_items(conflict_items)[:conflict_quota]:
+    for item in _sort_shock_items(conflict_items):
         add(item)
     for item in _sort_shock_items(all_items):
         add(item)

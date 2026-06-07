@@ -10633,6 +10633,194 @@ a.wm-orderfilled-row {
   gap: 7px;
 }
 
+.wm-geo-ucdp-panel {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  font-family: var(--font-mono);
+}
+
+.wm-geo-ucdp-header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wm-geo-ucdp-tabs {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  flex: 1 1 auto;
+}
+
+.wm-geo-ucdp-tabs button {
+  min-width: 0;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid #2c3032;
+  background: rgba(255, 255, 255, 0.025);
+  color: #8f9692;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.wm-geo-ucdp-tabs button.active {
+  border-color: rgba(121, 216, 255, 0.62);
+  background: rgba(121, 216, 255, 0.11);
+  color: #7bdfff;
+}
+
+.wm-geo-ucdp-tabs b {
+  color: #d6dcd8;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-geo-ucdp-total {
+  flex: 0 0 auto;
+  color: #ff5d5d;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-geo-ucdp-table {
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.wm-geo-ucdp-table th {
+  padding: 5px 6px;
+  border-bottom: 1px solid #2b2d2f;
+  color: #7d8580;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  line-height: 1;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.wm-geo-ucdp-table th:nth-child(1) {
+  width: 23%;
+}
+
+.wm-geo-ucdp-table th:nth-child(2) {
+  width: 18%;
+  text-align: right;
+}
+
+.wm-geo-ucdp-table th:nth-child(3) {
+  width: 24%;
+}
+
+.wm-geo-ucdp-table th:nth-child(4) {
+  width: 35%;
+}
+
+.wm-geo-ucdp-table td {
+  min-width: 0;
+  padding: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  vertical-align: top;
+}
+
+.wm-geo-ucdp-table tr:hover td {
+  background: rgba(121, 216, 255, 0.045);
+}
+
+.wm-geo-ucdp-country,
+.wm-geo-ucdp-date {
+  color: #cfd6d1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-geo-ucdp-date {
+  color: #8c9690;
+}
+
+.wm-geo-ucdp-deaths {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wm-geo-ucdp-deaths strong {
+  color: #ff5d5d;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.wm-geo-ucdp-deaths small {
+  display: block;
+  color: #727a75;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.wm-geo-ucdp-actors {
+  min-width: 0;
+}
+
+.wm-geo-ucdp-actors strong,
+.wm-geo-ucdp-actors span {
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-geo-ucdp-actors strong {
+  color: #f0f3f1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.wm-geo-ucdp-actors span {
+  margin-top: 3px;
+  color: #848c86;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.wm-geo-ucdp-more {
+  color: #78827b;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  text-align: right;
+  text-transform: uppercase;
+}
+
 .wm-macro-registry-data-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

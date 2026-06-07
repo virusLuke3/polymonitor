@@ -1,9 +1,17 @@
-import { useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGeoSanctionsShock } from '@/services/api';
 import type { RuntimeGeoSanctionsShockItem, RuntimeGeoSanctionsShockPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+
+type UcdpTab = 'state-based' | 'non-state' | 'one-sided';
+
+const UCDP_TABS: { key: UcdpTab; label: string }[] = [
+  { key: 'state-based', label: 'State' },
+  { key: 'non-state', label: 'Non-state' },
+  { key: 'one-sided', label: 'One-sided' },
+];
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -17,41 +25,6 @@ function panelTone(status?: string | null): 'live' | 'muted' {
   return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
 }
 
-function upperMetric(value?: string | null) {
-  const text = String(value || '').trim();
-  return text ? text.toUpperCase() : '--';
-}
-
-function severityClass(level?: string | null) {
-  const normalized = String(level || '').toLowerCase();
-  if (normalized === 'critical') return 'sev-critical';
-  if (normalized === 'warning') return 'sev-warning';
-  return 'sev-watch';
-}
-
-function severityLabel(level?: string | null) {
-  const normalized = String(level || '').toLowerCase();
-  if (normalized === 'critical') return 'CRITICAL';
-  if (normalized === 'warning') return 'ALERT';
-  return 'WATCH';
-}
-
-function kindLabel(kind?: string | null) {
-  const normalized = String(kind || '').toLowerCase();
-  if (normalized === 'sanction') return 'SANCTION';
-  if (normalized === 'notice') return 'NOTICE';
-  if (normalized === 'conflict') return 'CONFLICT';
-  return 'SIGNAL';
-}
-
-function kindGlyph(kind?: string | null) {
-  const normalized = String(kind || '').toLowerCase();
-  if (normalized === 'sanction') return 'S';
-  if (normalized === 'notice') return 'N';
-  if (normalized === 'conflict') return '!';
-  return 'G';
-}
-
 function formatDate(value?: string | null) {
   const text = String(value || '').trim();
   if (!text) return '--';
@@ -60,40 +33,54 @@ function formatDate(value?: string | null) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function formatAge(value?: string | null) {
-  const text = String(value || '').trim();
-  if (!text) return '--';
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) return text.slice(0, 10);
-  const diffMs = Date.now() - parsed.getTime();
-  const absDiff = Math.abs(diffMs);
-  const minutes = Math.floor(absDiff / 60000);
-  const hours = Math.floor(absDiff / 3600000);
-  const days = Math.floor(absDiff / 86400000);
-  if (minutes < 1) return 'JUST NOW';
-  if (minutes < 60) return `${minutes}M AGO`;
-  if (hours < 24) return `${hours}H AGO`;
-  if (days < 30) return `${days}D AGO`;
-  return parsed.toISOString().slice(0, 10);
+function formatCompactNumber(value?: number | null) {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return '0';
+  return numeric.toLocaleString();
 }
 
-function violenceLabel(value?: string | number | null) {
+function violenceKey(value?: string | number | null): UcdpTab {
   const normalized = String(value ?? '').trim().toLowerCase();
-  if (normalized === '1' || normalized === 'state-based') return 'STATE';
-  if (normalized === '2' || normalized === 'non-state') return 'NON-STATE';
-  if (normalized === '3' || normalized === 'one-sided') return 'ONE-SIDED';
-  return 'CONFLICT';
+  if (normalized === '2' || normalized === 'non-state') return 'non-state';
+  if (normalized === '3' || normalized === 'one-sided') return 'one-sided';
+  return 'state-based';
 }
 
 function isUcdpConflict(item: RuntimeGeoSanctionsShockItem) {
   return String(item.kind || '').toLowerCase() === 'conflict' && String(item.source || '').toUpperCase() === 'UCDP';
 }
 
+function eventActors(item: RuntimeGeoSanctionsShockItem) {
+  const actors = [item.sideA, item.sideB].map((part) => String(part || '').trim()).filter(Boolean);
+  return actors.length ? actors.join(' vs ') : item.headline || 'UCDP conflict event';
+}
+
+function deathRange(item: RuntimeGeoSanctionsShockItem) {
+  const low = Number(item.deathsLow ?? 0);
+  const high = Number(item.deathsHigh ?? 0);
+  if (!Number.isFinite(low) || !Number.isFinite(high) || (!low && !high)) return '';
+  return `(${formatCompactNumber(low)}-${formatCompactNumber(high)})`;
+}
+
 function GeoShockPanel({ payload }: {
   payload?: RuntimeGeoSanctionsShockPayload | null;
 }) {
   const [showHelp, setShowHelp] = useState(false);
-  const items = payload?.items || [];
+  const [activeTab, setActiveTab] = useState<UcdpTab>('state-based');
+  const events = useMemo(
+    () => (payload?.items || []).filter(isUcdpConflict),
+    [payload?.items],
+  );
+  const counts = useMemo(() => {
+    const result: Record<UcdpTab, number> = { 'state-based': 0, 'non-state': 0, 'one-sided': 0 };
+    events.forEach((event) => {
+      result[violenceKey(event.violenceType)] += 1;
+    });
+    return result;
+  }, [events]);
+  const filtered = events.filter((event) => violenceKey(event.violenceType) === activeTab);
+  const totalDeaths = filtered.reduce((sum, event) => sum + Number(event.deathsBest || 0), 0);
+  const visibleRows = filtered.slice(0, 50);
 
   return (
     <Panel
@@ -111,72 +98,72 @@ function GeoShockPanel({ payload }: {
       )}
       badge={badgeLabel(payload?.status)}
       status={panelTone(payload?.status)}
-      count={items.length || undefined}
+      count={events.length || undefined}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Geo shock registry</strong>
-          <p>Composes OFAC, Federal Register, and conflict feeds into tradeable geopolitical macro-risk signals.</p>
+          <strong>UCDP conflict events</strong>
+          <p>Mirrors WorldMonitor: UCDP event-level conflict data grouped by violence type, with country, deaths, date, and actors.</p>
         </div>
       ) : null}
       className="wm-market-panel wm-geo-shock-panel"
       dataPanelId="geo-sanctions-shock"
     >
-      <div className="wm-geo-shock-layout">
-        <section className="wm-geo-shock-section compact">
-          <div className="wm-geo-shock-feed">
-            {items.length ? items.slice(0, 12).map((item) => {
-              const sevClass = severityClass(item.severity);
-              const targetLabel = upperMetric(item.targetLabels?.[0] || item.country || '');
-              const ucdpConflict = isUcdpConflict(item);
-              const actors = [item.sideA, item.sideB].map((part) => String(part || '').trim()).filter(Boolean).join(' vs ');
-              const deaths = Number(item.deathsBest ?? 0);
-              return (
-                <article key={item.id || `${item.headline}-${item.occurredAt}`} className={`wm-geo-shock-row ${sevClass}${ucdpConflict ? ' is-conflict' : ''}`}>
-                  <span className={`wm-row-glyph ${sevClass}`}>{kindGlyph(item.kind)}</span>
-                  <div className="wm-geo-shock-row-main">
-                    {ucdpConflict ? (
-                      <>
-                        <div className="wm-geo-conflict-grid">
-                          <span>
-                            <i>Country</i>
-                            <strong>{item.country || '--'}</strong>
-                          </span>
-                          <span>
-                            <i>Deaths</i>
-                            <strong>{deaths ? deaths.toLocaleString() : '0'}</strong>
-                          </span>
-                          <span>
-                            <i>Date</i>
-                            <strong>{formatDate(item.occurredAt)}</strong>
-                          </span>
-                          <span>
-                            <i>Type</i>
-                            <strong>{violenceLabel(item.violenceType)}</strong>
-                          </span>
-                        </div>
-                        <div className="wm-geo-shock-headline">{actors || item.headline || 'UCDP conflict event'}</div>
-                        <div className="wm-geo-shock-summary">{item.locationLabel || item.summary || 'UCDP georeferenced conflict event'}</div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="wm-geo-shock-row-top">
-                          <span className={`wm-geo-shock-kind ${sevClass}`}>{severityLabel(item.severity)}</span>
-                          <span className="wm-geo-shock-domain">{kindLabel(item.kind)}</span>
-                          <span className="wm-geo-shock-source">{upperMetric(item.source || 'SOURCE')}</span>
-                          <span className="wm-geo-shock-time">{formatAge(item.occurredAt)}</span>
-                        </div>
-                        <div className="wm-geo-shock-headline">{item.headline || 'Monitoring update'}</div>
-                        {targetLabel && targetLabel !== '--' ? <span className="wm-geo-shock-target-mini">{targetLabel}</span> : null}
-                      </>
-                    )}
-                  </div>
-                </article>
-              );
-            }) : (
-              <div className="wm-geo-shock-empty">No seeded shock items yet.</div>
-            )}
+      <div className="wm-geo-ucdp-panel">
+        <div className="wm-geo-ucdp-header">
+          <div className="wm-geo-ucdp-tabs" role="tablist" aria-label="UCDP violence type">
+            {UCDP_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.key}
+                className={activeTab === tab.key ? 'active' : undefined}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                <span>{tab.label}</span>
+                <b>{counts[tab.key]}</b>
+              </button>
+            ))}
           </div>
-        </section>
+          <span className="wm-geo-ucdp-total">{formatCompactNumber(totalDeaths)} deaths</span>
+        </div>
+
+        {visibleRows.length ? (
+          <table className="wm-geo-ucdp-table">
+            <thead>
+              <tr>
+                <th>Country</th>
+                <th>Deaths</th>
+                <th>Date</th>
+                <th>Actors</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((event) => {
+                const deaths = Number(event.deathsBest ?? 0);
+                return (
+                  <tr key={event.id || `${event.country}-${event.occurredAt}-${eventActors(event)}`}>
+                    <td className="wm-geo-ucdp-country">{event.country || '--'}</td>
+                    <td className="wm-geo-ucdp-deaths">
+                      <strong>{formatCompactNumber(deaths)}</strong>
+                      {deathRange(event) ? <small>{deathRange(event)}</small> : null}
+                    </td>
+                    <td className="wm-geo-ucdp-date">{formatDate(event.occurredAt)}</td>
+                    <td className="wm-geo-ucdp-actors">
+                      <strong>{eventActors(event)}</strong>
+                      {event.locationLabel || event.summary ? <span>{event.locationLabel || event.summary}</span> : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="wm-geo-shock-empty">No UCDP events in this category.</div>
+        )}
+        {filtered.length > visibleRows.length ? (
+          <div className="wm-geo-ucdp-more">{filtered.length - visibleRows.length} more not shown</div>
+        ) : null}
       </div>
     </Panel>
   );
@@ -195,9 +182,9 @@ export const panel = runtimePanelFromRenderer(renderers, {
   id: 'geo-sanctions-shock',
   title: 'Geopolitical & Sanctions Shock',
   eyebrow: 'world',
-  description: 'Geopolitical shocks, sanctions changes, and linked macro-risk markets.',
+  description: 'UCDP conflict events, sanctions changes, and linked macro-risk markets.',
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeGeoSanctionsShock(12),
+  fetchData: () => fetchRuntimeGeoSanctionsShock(2000),
 });
