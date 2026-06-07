@@ -11,6 +11,8 @@ from decimal import Decimal, ROUND_HALF_UP
 import json
 from typing import Any
 
+from .build_targets import target_reason, upsert_price_build_targets_for_market
+
 
 SUPPORTED_PRICE_SOURCES = {"frontend", "orderfilled_block_close"}
 
@@ -182,6 +184,18 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                 params.position_size,
             ),
         )
+    upsert_price_build_targets_for_market(
+        conn,
+        source=price_source,
+        market_slug=market_slug,
+        token_side=token_side,
+        priority=2000,
+        reason=target_reason("backtest_requested", {"run_id": run_id}),
+        from_ts=from_ts,
+        to_ts=to_ts,
+        from_block=from_block,
+        to_block=to_block,
+    )
     return run_id
 
 

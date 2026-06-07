@@ -124,6 +124,9 @@ def postgres_connection(settings: PostgresSettings | None = None, *, readonly: b
         if cfg.search_path:
             with conn.cursor() as cur:
                 cur.execute("SET search_path TO " + cfg.search_path)
+        with conn.cursor() as cur:
+            cur.execute("SET max_parallel_workers_per_gather = 0")
+            cur.execute("SET work_mem = '32MB'")
         if readonly:
             with conn.cursor() as cur:
                 cur.execute("SET TRANSACTION READ ONLY")

@@ -57,10 +57,23 @@ disables local collector units on GCP.
 - `polydata-db-reverse-tunnel.service`
 - `polydata-quant-backtest-runner.service`
 - `polydata-quant-price-build-runner.service`
+- `polydata-quant-frontend-price-build-runner@0..1.service`
 
-The quant price build runner belongs on the local collector. It incrementally
-builds frontend prices-history and OrderFilled block close tables from
-September 2025 onward, then keeps active markets fresh with overlap upserts.
+Quant price building belongs on the local collector. The default production
+split is:
+
+- `polydata-quant-price-build-runner.service`: metadata, eligibility, and
+  OrderFilled block close builds.
+- `polydata-quant-frontend-price-build-runner@0..1.service`: two frontend
+  prices-history shards by default. Increase
+  `POLYDATA_QUANT_FRONTEND_SHARD_COUNT` and enable more instances only after
+  PostgreSQL shared memory is sized for the extra parallel load.
+
+Frontend shards do not scan every token after September 2025. They prioritize
+explicit build targets, then eligible markets with at least
+`POLYDATA_QUANT_FRONTEND_MIN_ORDERFILLED_TRADES` OrderFilled trades. This keeps
+the production universe bounded while letting backtest-requested markets jump
+the queue.
 
 Use the local helper:
 
@@ -123,8 +136,11 @@ cp deploy/systemd/polydata-db-reverse-tunnel.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-db-reverse-tunnel-healthcheck.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-db-reverse-tunnel-healthcheck.timer ~/.config/systemd/user/
 cp deploy/systemd/polydata-quant-backtest-runner.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-quant-price-build-runner.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-quant-frontend-price-build-runner@.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now polydata-local-collector.target
+systemctl --user enable --now polydata-quant-frontend-price-build-runner@0.service polydata-quant-frontend-price-build-runner@1.service
 systemctl --user enable --now polydata-db-reverse-tunnel-healthcheck.timer
 ```
 

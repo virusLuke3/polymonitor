@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -138,6 +139,25 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS quant.market_price_build_targets (
+        source TEXT NOT NULL,
+        token_id TEXT NOT NULL REFERENCES quant.market_token_metadata(token_id) ON DELETE CASCADE,
+        market_id BIGINT NOT NULL,
+        market_slug TEXT,
+        token_side TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 100,
+        reason TEXT,
+        requested_from_ts TIMESTAMPTZ,
+        requested_to_ts TIMESTAMPTZ,
+        requested_from_block BIGINT,
+        requested_to_block BIGINT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (source, token_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS quant.quant_backtest_runs (
         run_id BIGSERIAL PRIMARY KEY,
         status TEXT NOT NULL DEFAULT 'queued',
@@ -262,12 +282,16 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_metadata_slug_side ON quant.market_token_metadata (market_slug, token_side)",
     "CREATE INDEX IF NOT EXISTS idx_quant_metadata_market_side ON quant.market_token_metadata (market_id, token_side)",
     "CREATE INDEX IF NOT EXISTS idx_quant_metadata_token_hex ON quant.market_token_metadata (token_id_hex)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_metadata_dates ON quant.market_token_metadata (created_at, end_date)",
     "CREATE INDEX IF NOT EXISTS idx_quant_eligibility_eligible ON quant.market_price_eligibility (eligible, market_id)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_eligibility_trade_count ON quant.market_price_eligibility (eligible, orderfilled_trade_count DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_frontend_slug_side_time ON quant.market_token_frontend_price_1m (market_slug, token_side, ts_minute)",
     "CREATE INDEX IF NOT EXISTS idx_quant_frontend_market_side_time ON quant.market_token_frontend_price_1m (market_id, token_side, ts_minute)",
     "CREATE INDEX IF NOT EXISTS idx_quant_block_close_slug_side_block ON quant.market_token_block_close (market_slug, token_side, block_number)",
     "CREATE INDEX IF NOT EXISTS idx_quant_block_close_market_side_block ON quant.market_token_block_close (market_id, token_side, block_number)",
     "CREATE INDEX IF NOT EXISTS idx_quant_build_state_status ON quant.market_price_build_market_state (source, status, updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_build_targets_active ON quant.market_price_build_targets (source, status, priority DESC, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_build_targets_slug_side ON quant.market_price_build_targets (market_slug, token_side, source)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_status ON quant.quant_backtest_runs (status, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_market ON quant.quant_backtest_runs (market_slug, token_side, price_source, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_trades_run_pnl ON quant.quant_backtest_trades (run_id, pnl)",
@@ -275,12 +299,57 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
 )
 
 
+ADD_COLUMN_RE = re.compile(r"^ALTER TABLE (?P<table>[a-z_]+\.[a-z_]+) ADD COLUMN IF NOT EXISTS (?P<column>[a-z_]+)\b", re.IGNORECASE)
+INDEX_RE = re.compile(r"^CREATE INDEX IF NOT EXISTS (?P<index>[a-z_][a-z0-9_]*)\b", re.IGNORECASE)
+
+
+def _column_exists(conn: Any, table: str, column: str) -> bool:
+    schema_name, table_name = table.split(".", 1)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s AND column_name = %s
+            LIMIT 1
+            """,
+            (schema_name, table_name, column),
+        )
+        return cur.fetchone() is not None
+
+
+def _index_exists(conn: Any, index_name: str) -> bool:
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s) IS NOT NULL AS exists", (f"quant.{index_name}",))
+        row = cur.fetchone()
+        return bool(row and row["exists"])
+
+
+def _should_skip_statement(conn: Any, statement: str) -> bool:
+    text = " ".join(statement.strip().split())
+    add_match = ADD_COLUMN_RE.match(text)
+    if add_match and _column_exists(conn, add_match.group("table"), add_match.group("column")):
+        return True
+    index_match = INDEX_RE.match(text)
+    if index_match and _index_exists(conn, index_match.group("index")):
+        return True
+    if text.upper().startswith("ALTER TABLE QUANT.MARKET_TOKEN_BLOCK_CLOSE ALTER COLUMN SOURCE SET DEFAULT"):
+        return True
+    return False
+
+
 def create_schema(conn: Any) -> None:
     with conn.cursor() as cur:
         cur.execute(CREATE_SCHEMA_SQL)
         for statement in CREATE_TABLE_SQL:
             cur.execute(statement)
-        for statement in ALTER_TABLE_SQL:
+    for statement in ALTER_TABLE_SQL:
+        if _should_skip_statement(conn, statement):
+            continue
+        with conn.cursor() as cur:
             cur.execute(statement)
-        for statement in CREATE_INDEX_SQL:
+    for statement in CREATE_INDEX_SQL:
+        if _should_skip_statement(conn, statement):
+            continue
+        with conn.cursor() as cur:
             cur.execute(statement)
