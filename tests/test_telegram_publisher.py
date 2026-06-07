@@ -15,6 +15,7 @@ from telegram.topics.formatters import (
     format_latest_content,
     format_nba_scoreboard,
     format_panel_snapshot,
+    format_related_news,
     format_weather_map,
     format_weather_news,
 )
@@ -172,6 +173,32 @@ def test_rich_news_and_alpha_messages_include_tags_meme_and_links():
     assert alpha_message.link_preview is True
 
 
+def test_related_news_formatter_includes_market_context_and_routes_to_news():
+    message = format_related_news(
+        {
+            "marketId": 1871431,
+            "marketTitle": "NBA player performance market",
+            "marketCategory": "Sports",
+            "items": [
+                {
+                    "id": "intel-1",
+                    "contentType": "news",
+                    "title": "Lineup update moves player props",
+                    "source": "ESPN",
+                    "summary": "A starter is questionable before tipoff.",
+                    "url": "https://news.example/nba-lineup",
+                }
+            ],
+        }
+    )[0]
+
+    assert message.topic == "news"
+    assert "NBA player performance market" in message.text
+    assert "NEWS | ESPN" in message.text
+    assert "Source: https://news.example/nba-lineup" in message.text
+    assert message.link_preview is True
+
+
 def test_publish_state_dedupes_and_dry_run_does_not_mark(tmp_path: Path):
     state_path = str(tmp_path / "telegram_state.json")
     settings = make_settings(state_path)
@@ -264,6 +291,7 @@ def test_resolve_polydata_api_base_skips_dead_local_and_uses_remote():
 
 def test_format_panel_snapshot_routes_known_panel_ids():
     assert format_panel_snapshot("latest-content", {"items": [{"id": "n1", "title": "Hello", "source": "RSS"}]})[0].topic == "news"
+    assert format_panel_snapshot("related-news", {"marketId": 1, "marketTitle": "Market", "items": [{"id": "r1", "title": "Intel"}]})[0].topic == "news"
     assert format_panel_snapshot("alpha-signal", {"items": [{"id": "a1", "title": "Signal"}]})[0].topic == "alpha"
     assert format_panel_snapshot("polymarket-macro-map", {"items": [{"id": "m1", "title": "Macro"}]})[0].topic == "macro"
     assert format_panel_snapshot("unknown", {"items": [{"id": "x", "title": "Nope"}]}) == []

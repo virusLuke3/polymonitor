@@ -16,6 +16,17 @@ def _publish_latest_content(payload: dict) -> None:
         return
 
 
+def _publish_related_content(payload: dict) -> None:
+    try:
+        from telegram.topics.runtime_bridge import publish_panel_snapshot
+    except Exception:
+        return
+    try:
+        publish_panel_snapshot("related-news", payload)
+    except Exception:
+        return
+
+
 def _runtime_content_fallback(limit: int, *, market_id: int | None = None, helpers: dict) -> dict:
     enabled = str(os.environ.get("POLYDATA_CONTENT_API_REFRESH_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "on"}
     if not enabled:
@@ -39,7 +50,15 @@ def create_content_blueprint(helpers: dict) -> Blueprint:
             market = helpers["get_market_by_id"](market_id)
             if not market:
                 return jsonify({"error": "Market not found", "marketId": market_id}), 404
-            return jsonify(helpers["get_related_content_payload"](market_id, limit=limit))
+            payload = helpers["get_related_content_payload"](market_id, limit=limit)
+            payload = {
+                **payload,
+                "marketTitle": market.get("title"),
+                "marketSlug": market.get("slug"),
+                "marketCategory": market.get("category"),
+            }
+            _publish_related_content(payload)
+            return jsonify(payload)
         except Exception:
             return jsonify(_runtime_content_fallback(limit, market_id=market_id, helpers=helpers))
 

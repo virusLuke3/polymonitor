@@ -304,6 +304,35 @@ def format_latest_content(payload: Dict[str, Any]) -> List[MessageCandidate]:
     return messages
 
 
+def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
+    messages: List[MessageCandidate] = []
+    market_title = _text(payload.get("marketTitle") or payload.get("question"), "Focused market")
+    market_id = _text(payload.get("marketId") or payload.get("localMarketId"))
+    category = _text(payload.get("marketCategory"))
+    for item in _iter_items(payload):
+        title = _text(item.get("title") or item.get("headline"))
+        if not title:
+            continue
+        source = _text(item.get("source"), "Related intel")
+        content_type = _text(item.get("contentType"), "news").lower()
+        summary = _text(item.get("summary") or item.get("description"))
+        url = _first_url(item.get("url"))
+        text = _compose_post(
+            header="Related Intel",
+            title=market_title,
+            lines=[
+                f"{content_type.upper()} | {source}",
+                title,
+                summary[:260] if summary and summary != title else "",
+            ],
+            tags=_hashtags("RelatedIntel", category, content_type, source),
+            url=_source_link(url, "Source"),
+        )
+        dedupe = _short_hash("related-news", market_id, item.get("id"), title.lower(), url)
+        messages.append(MessageCandidate(topic="news", dedupe_key=dedupe, text=text, metadata={"panel": "related-news", "marketId": market_id}, link_preview=bool(url)))
+    return messages
+
+
 def format_alpha_signal(payload: Dict[str, Any]) -> List[MessageCandidate]:
     messages: List[MessageCandidate] = []
     for item in _iter_items(payload):
@@ -403,6 +432,8 @@ def format_all_snapshots(snapshots: Dict[str, Dict[str, Any]]) -> List[MessageCa
 def format_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> List[MessageCandidate]:
     if panel_id == "latest-content":
         return format_latest_content(payload)
+    if panel_id in {"related-news", "related-intel"}:
+        return format_related_news(payload)
     if panel_id == "alpha-signal":
         return format_alpha_signal(payload)
     if panel_id == "new-market-signals":
