@@ -45,6 +45,8 @@ import type {
   OracleEvent,
   PanelRenderContext,
   RuntimeF1Payload,
+  RuntimeGeoSanctionsShockItem,
+  RuntimeGeoSanctionsShockPayload,
   RuntimeGlobalWeatherMapPayload,
   RuntimeInflationNowcastPayload,
   RuntimeJin10Payload,
@@ -99,6 +101,7 @@ const INITIAL_LAYERS: LayerToggle[] = [
   { id: 'trade', label: 'OrderFilled Tape', icon: '↗', enabled: true, hint: 'CHAIN' },
   { id: 'lob', label: 'Runtime LOB', icon: '▦', enabled: true, hint: 'BOOK' },
   { id: 'intel', label: 'Linked Intel', icon: '✦', enabled: true, hint: 'NEWS' },
+  { id: 'ucdp', label: 'UCDP Conflicts', icon: '△', enabled: true, hint: 'CONFLICT' },
 ];
 
 const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
@@ -246,8 +249,15 @@ function commandMarketFreshness(market: MarketListItem) {
   return formatRelative(market.lastTradeAt || null);
 }
 
+function hasGeoConflictCoordinates(item: RuntimeGeoSanctionsShockItem) {
+  const lat = Number(item.latitude);
+  const lon = Number(item.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+}
+
 function WeatherInlineMap({
   payload,
+  ucdpEvents,
   loading,
   error,
   selectedCityId,
@@ -256,6 +266,7 @@ function WeatherInlineMap({
   now,
 }: {
   payload?: RuntimeGlobalWeatherMapPayload | null;
+  ucdpEvents: RuntimeGeoSanctionsShockItem[];
   loading: boolean;
   error?: string | null;
   selectedCityId: string | null;
@@ -308,7 +319,7 @@ function WeatherInlineMap({
       {!items.length && !loading ? (
         <div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>WEATHER MAP WARMING</span></div>
       ) : null}
-      {items.length ? <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={selectCity} height={620} /> : null}
+      {items.length ? <WeatherDeckMap items={items} ucdpEvents={ucdpEvents} selectedCityId={selected?.cityId || null} onSelectCity={selectCity} height={620} /> : null}
       {detailOpen && selected ? <WeatherMapCityInspector city={selected} onClose={() => setDetailOpen(false)} /> : null}
     </div>
   );
@@ -1649,6 +1660,12 @@ function WorldMonitorApp() {
   }, [layerQuery, layers]);
   const enabledLayerIds = useMemo(() => layers.filter((layer) => layer.enabled).map((layer) => layer.id), [layers]);
   const activeLayerCount = enabledLayerIds.length;
+  const geoShockPayload = runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined;
+  const ucdpLayerEnabled = enabledLayerIds.includes('ucdp');
+  const ucdpMapEvents = useMemo(
+    () => (ucdpLayerEnabled ? (geoShockPayload?.items || []).filter(hasGeoConflictCoordinates) : []),
+    [geoShockPayload, ucdpLayerEnabled],
+  );
 
   const runtimeValue = <T,>(panelId: string): T | null => (runtimeData[panelId] as T | undefined) || null;
   const runtimePayloadLoaded = (panelId: string) => runtimeData[panelId] !== undefined && runtimeData[panelId] !== null;
@@ -2010,6 +2027,7 @@ function WorldMonitorApp() {
                     recentTrades={currentGlobalTrades}
                     recentOracle={currentGlobalOracle}
                     contentItems={currentLatestContent}
+                    ucdpEvents={ucdpMapEvents}
                     region={region}
                     zoomLevel={mapZoom}
                     enabledLayerIds={enabledLayerIds}
@@ -2017,6 +2035,7 @@ function WorldMonitorApp() {
                 ) : (
                   <WeatherInlineMap
                     payload={weatherMapPayload || (runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined) || null}
+                    ucdpEvents={ucdpMapEvents}
                     loading={weatherMapLoading}
                     error={weatherMapError}
                     selectedCityId={selectedWeatherCityId}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'preact/hooks';
-import type { ContentItem, MarketListItem, MarketSummary, OracleEvent, TradeRow } from '@/types';
+import type { ContentItem, MarketListItem, MarketSummary, OracleEvent, RuntimeGeoSanctionsShockItem, TradeRow } from '@/types';
 
 type GlobePoint = {
   layer: GlobeLayerId;
@@ -27,7 +27,7 @@ type GlobeRing = {
   color: string;
 };
 
-type GlobeLayerId = 'markets' | 'oracle' | 'trade' | 'lob' | 'intel';
+type GlobeLayerId = 'markets' | 'oracle' | 'trade' | 'lob' | 'intel' | 'ucdp';
 
 type WorldGlobeProps = {
   markets: MarketListItem[];
@@ -35,6 +35,7 @@ type WorldGlobeProps = {
   recentTrades: TradeRow[];
   recentOracle: OracleEvent[];
   contentItems: ContentItem[];
+  ucdpEvents: RuntimeGeoSanctionsShockItem[];
   region: string;
   zoomLevel: number;
   enabledLayerIds: string[];
@@ -104,12 +105,56 @@ function resolveGeo(text: string, index = 0) {
   return { lat, lng };
 }
 
+function numberValue(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function ucdpColor(item: RuntimeGeoSanctionsShockItem) {
+  const type = String(item.violenceType || '').trim();
+  if (type === '1') return '#ff4d4d';
+  if (type === '2') return '#ff9f1c';
+  if (type === '3') return '#ffd400';
+  const severity = String(item.severity || '').toLowerCase();
+  if (severity === 'critical') return '#ff4d4d';
+  if (severity === 'warning') return '#ff9f1c';
+  return '#ffd400';
+}
+
+function ucdpLabel(item: RuntimeGeoSanctionsShockItem) {
+  const country = item.country || item.locationLabel || 'UCDP';
+  const deaths = numberValue(item.deathsBest);
+  const actors = [item.sideA, item.sideB].filter(Boolean).join(' vs ');
+  return `${country}${deaths != null ? ` · ${deaths} deaths` : ''}${actors ? ` · ${actors}` : ''}`;
+}
+
+function buildUcdpPoints(events: RuntimeGeoSanctionsShockItem[]) {
+  return events.slice(0, 1200).flatMap((item, index): GlobePoint[] => {
+    const lat = numberValue(item.latitude);
+    const lng = numberValue(item.longitude);
+    if (lat == null || lng == null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return [];
+    const deaths = Math.max(0, numberValue(item.deathsBest) ?? 0);
+    const radius = Math.min(0.48, 0.14 + Math.log10(deaths + 1) * 0.08);
+    return [{
+      layer: 'ucdp',
+      lat,
+      lng,
+      size: radius + (index % 3) * 0.012,
+      altitude: deaths >= 20 ? 0.15 : 0.1,
+      color: ucdpColor(item),
+      label: ucdpLabel(item),
+    }];
+  });
+}
+
 function buildPoints(
   markets: MarketListItem[],
   selectedMarket: MarketSummary | null,
   recentTrades: TradeRow[],
   recentOracle: OracleEvent[],
   contentItems: ContentItem[],
+  ucdpEvents: RuntimeGeoSanctionsShockItem[],
   enabledLayerIds: string[],
 ) {
   const enabledLayers = new Set(enabledLayerIds);
@@ -168,6 +213,7 @@ function buildPoints(
       label: trade.txHash || 'Trade',
     };
   });
+  const ucdpPoints = buildUcdpPoints(ucdpEvents);
 
   const arcs: GlobeArc[] = marketPoints.slice(0, 10).map((point, index) => ({
     layer: 'lob',
@@ -184,24 +230,28 @@ function buildPoints(
     { layer: 'lob', ...selectedGeo, color: '#ffcf4b' },
     ...oraclePoints.slice(0, 3).map((point) => ({ layer: 'oracle' as const, lat: point.lat, lng: point.lng, color: '#ff5c5c' })),
     ...contentPoints.slice(0, 2).map((point) => ({ layer: 'intel' as const, lat: point.lat, lng: point.lng, color: '#39ff73' })),
+    ...ucdpPoints
+      .filter((point) => point.size >= 0.24)
+      .slice(0, 28)
+      .map((point) => ({ layer: 'ucdp' as const, lat: point.lat, lng: point.lng, color: point.color })),
   ];
 
   return {
-    points: [...marketPoints, ...oraclePoints, ...contentPoints, ...tradePoints].filter((point) => isEnabled(point.layer)),
+    points: [...marketPoints, ...oraclePoints, ...contentPoints, ...tradePoints, ...ucdpPoints].filter((point) => isEnabled(point.layer)),
     rings: rings.filter((ring) => isEnabled(ring.layer)),
     arcs: arcs.filter((arc) => isEnabled(arc.layer)),
     selectedGeo,
   };
 }
 
-export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle, contentItems, region, zoomLevel, enabledLayerIds }: WorldGlobeProps) {
+export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle, contentItems, ucdpEvents, region, zoomLevel, enabledLayerIds }: WorldGlobeProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const globeRef = useRef<any>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const globeData = useMemo(
-    () => buildPoints(markets, selectedMarket, recentTrades, recentOracle, contentItems, enabledLayerIds),
-    [contentItems, enabledLayerIds, markets, recentOracle, recentTrades, selectedMarket],
+    () => buildPoints(markets, selectedMarket, recentTrades, recentOracle, contentItems, ucdpEvents, enabledLayerIds),
+    [contentItems, enabledLayerIds, markets, recentOracle, recentTrades, selectedMarket, ucdpEvents],
   );
 
   useEffect(() => {
@@ -224,6 +274,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
         .pointAltitude(((point: object) => (point as GlobePoint).altitude) as any)
         .pointRadius(((point: object) => (point as GlobePoint).size) as any)
         .pointColor(((point: object) => (point as GlobePoint).color) as any)
+        .pointLabel(((point: object) => (point as GlobePoint).label) as any)
         .pointResolution(18)
         .pointsMerge(false)
         .arcStroke(0.58)

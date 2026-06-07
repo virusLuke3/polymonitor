@@ -13675,6 +13675,45 @@ a.wm-orderfilled-row {
   pointer-events: none;
 }
 
+.wm-ucdp-map-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.wm-ucdp-map-point {
+  --ucdp-size: 9px;
+  --ucdp-color: #ff9f1c;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--ucdp-size);
+  height: var(--ucdp-size);
+  margin-left: calc(var(--ucdp-size) / -2);
+  margin-top: calc(var(--ucdp-size) / -2);
+  border: 1px solid rgba(255, 245, 190, 0.86);
+  border-radius: 999px;
+  background: var(--ucdp-color);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--ucdp-color) 26%, transparent),
+    0 0 16px color-mix(in srgb, var(--ucdp-color) 54%, transparent);
+  opacity: 0.88;
+}
+
+.wm-ucdp-map-point.type-1 {
+  border-radius: 2px;
+}
+
+.wm-ucdp-map-point.type-2 {
+  border-radius: 999px;
+}
+
+.wm-ucdp-map-point.type-3 {
+  border-radius: 0;
+  transform-origin: center;
+}
+
 .wm-weather-html-label {
   position: absolute;
   left: 0;
@@ -13822,6 +13861,10 @@ a.wm-orderfilled-row {
 
 .wm-weather-deck-legend i.cool {
   background: #48d7be;
+}
+
+.wm-weather-deck-legend i.ucdp {
+  background: #ff4d4d;
 }
 
 .wm-weather-deck-tooltip {

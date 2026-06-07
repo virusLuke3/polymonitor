@@ -1022,6 +1022,8 @@ export type RuntimeGeoSanctionsShockItem = {
   sideA?: string | null;
   sideB?: string | null;
   locationLabel?: string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
   violenceType?: string | number | null;
   deathsBest?: number | null;
   deathsLow?: number | null;

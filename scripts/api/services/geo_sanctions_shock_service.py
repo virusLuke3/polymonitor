@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -77,6 +78,16 @@ def _local_name(tag: str) -> str:
 def _text_or_none(value: Any) -> Optional[str]:
     text = str(value or "").strip()
     return text or None
+
+
+def _float_or_none(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def _unique(values: Iterable[str]) -> List[str]:
@@ -633,6 +644,8 @@ def _normalize_ucdp_item(raw: Dict[str, Any], index: int) -> Optional[Dict[str, 
     )
     side_a = _text_or_none(raw.get("side_a"))
     side_b = _text_or_none(raw.get("side_b"))
+    latitude = _float_or_none(raw.get("latitude") or raw.get("lat"))
+    longitude = _float_or_none(raw.get("longitude") or raw.get("lon") or raw.get("lng"))
     headline = conflict_name or dyad_name or " vs ".join(part for part in (side_a, side_b) if part) or "UCDP conflict event"
 
     try:
@@ -686,6 +699,8 @@ def _normalize_ucdp_item(raw: Dict[str, Any], index: int) -> Optional[Dict[str, 
         "sideA": side_a,
         "sideB": side_b,
         "locationLabel": location,
+        "latitude": latitude,
+        "longitude": longitude,
         "violenceType": _text_or_none(raw.get("type_of_violence")),
         "deathsBest": best,
         "deathsLow": low,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import { getWeatherMapFallbackStyle, getWeatherMapStyle } from '@/config/weatherBasemap';
-import type { RuntimeGlobalWeatherCity } from '@/types';
+import type { RuntimeGeoSanctionsShockItem, RuntimeGlobalWeatherCity } from '@/types';
 
 type WeatherTone = 'hot' | 'cool' | 'neutral';
 type MarketTone = 'market' | 'watch' | 'none';
@@ -33,6 +33,7 @@ type WeatherMapPoint = {
 
 type WeatherDeckMapProps = {
   items: RuntimeGlobalWeatherCity[];
+  ucdpEvents?: RuntimeGeoSanctionsShockItem[];
   selectedCityId?: string | null;
   onSelectCity?: (cityId: string) => void;
   height?: number;
@@ -64,10 +65,40 @@ type WeatherScreenPoint = WeatherMapPoint & {
   visible: boolean;
 };
 
+type ConflictMapPoint = {
+  id: string;
+  lon: number;
+  lat: number;
+  country: string;
+  actors: string;
+  deaths: number;
+  violenceType: string;
+  color: string;
+  size: number;
+  label: string;
+};
+
+type ConflictScreenPoint = ConflictMapPoint & {
+  x: number;
+  y: number;
+  visible: boolean;
+};
+
 function numberValue(value?: string | number | null) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function conflictColor(item: RuntimeGeoSanctionsShockItem) {
+  const type = String(item.violenceType || '').trim();
+  if (type === '1') return '#ff4d4d';
+  if (type === '2') return '#ff9f1c';
+  if (type === '3') return '#ffd400';
+  const severity = String(item.severity || '').toLowerCase();
+  if (severity === 'critical') return '#ff4d4d';
+  if (severity === 'warning') return '#ff9f1c';
+  return '#ffd400';
 }
 
 function temperatureLabel(value: number | null, unit: string) {
@@ -182,6 +213,31 @@ function normalizePoints(items: RuntimeGlobalWeatherCity[]): WeatherMapPoint[] {
   });
 }
 
+function normalizeConflictPoints(items: RuntimeGeoSanctionsShockItem[] = []): ConflictMapPoint[] {
+  return items.slice(0, 1200).flatMap((item, index): ConflictMapPoint[] => {
+    const lat = numberValue(item.latitude);
+    const lon = numberValue(item.longitude);
+    if (lat == null || lon == null || lat < -90 || lat > 90 || lon < -180 || lon > 180) return [];
+    const deaths = Math.max(0, numberValue(item.deathsBest) ?? 0);
+    const country = String(item.country || item.locationLabel || 'UCDP');
+    const actors = [item.sideA, item.sideB].filter(Boolean).join(' vs ');
+    const color = conflictColor(item);
+    const size = Math.min(20, 7 + Math.log10(deaths + 1) * 5);
+    return [{
+      id: String(item.id || `ucdp-${index}`),
+      lon,
+      lat,
+      country,
+      actors,
+      deaths,
+      violenceType: String(item.violenceType || ''),
+      color,
+      size,
+      label: `${country}${deaths ? ` · ${deaths} deaths` : ''}${actors ? ` · ${actors}` : ''}`,
+    }];
+  });
+}
+
 function projectScreenPoints(map: MapLibreMap | null, points: WeatherMapPoint[]): WeatherScreenPoint[] {
   if (!map) return [];
   const canvas = map.getCanvas();
@@ -194,6 +250,22 @@ function projectScreenPoints(map: MapLibreMap | null, points: WeatherMapPoint[])
       x: projected.x,
       y: projected.y,
       visible: projected.x > -90 && projected.x < width + 90 && projected.y > -60 && projected.y < height + 60,
+    };
+  });
+}
+
+function projectConflictScreenPoints(map: MapLibreMap | null, points: ConflictMapPoint[]): ConflictScreenPoint[] {
+  if (!map) return [];
+  const canvas = map.getCanvas();
+  const width = canvas.clientWidth || canvas.width;
+  const height = canvas.clientHeight || canvas.height;
+  return points.map((point) => {
+    const projected = map.project([point.lon, point.lat]);
+    return {
+      ...point,
+      x: projected.x,
+      y: projected.y,
+      visible: projected.x > -40 && projected.x < width + 40 && projected.y > -40 && projected.y < height + 40,
     };
   });
 }
@@ -229,18 +301,43 @@ function WeatherHtmlLabels({
   );
 }
 
-export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, height = 320, interactive = true, showLabels = true }: WeatherDeckMapProps) {
+function UcdpConflictLayer({ points }: { points: ConflictScreenPoint[] }) {
+  const visiblePoints = points.filter((point) => point.visible).slice(0, 850);
+  if (!visiblePoints.length) return null;
+  return (
+    <div className="wm-ucdp-map-layer" aria-label="UCDP conflict event overlay">
+      {visiblePoints.map((point) => (
+        <span
+          key={`ucdp-map-${point.id}`}
+          className={`wm-ucdp-map-point type-${point.violenceType || 'unknown'}`}
+          title={point.label}
+          style={{
+            transform: `translate(${Math.round(point.x)}px, ${Math.round(point.y)}px)`,
+            '--ucdp-color': point.color,
+            '--ucdp-size': `${point.size}px`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, onSelectCity, height = 320, interactive = true, showLabels = true }: WeatherDeckMapProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mapHostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const onSelectRef = useRef(onSelectCity);
   const pointsRef = useRef<WeatherMapPoint[]>([]);
+  const conflictPointsRef = useRef<ConflictMapPoint[]>([]);
   const fallbackAppliedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapDegraded, setMapDegraded] = useState(false);
   const [screenPoints, setScreenPoints] = useState<WeatherScreenPoint[]>([]);
+  const [conflictScreenPoints, setConflictScreenPoints] = useState<ConflictScreenPoint[]>([]);
   const points = useMemo(() => normalizePoints(items), [items]);
+  const conflictPoints = useMemo(() => normalizeConflictPoints(ucdpEvents), [ucdpEvents]);
   const hasProjectedPoints = screenPoints.some((point) => point.visible);
+  const hasProjectedConflicts = conflictScreenPoints.some((point) => point.visible);
   const showHtmlLayer = showLabels && hasProjectedPoints;
 
   useEffect(() => {
@@ -250,6 +347,10 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
   useEffect(() => {
     pointsRef.current = points;
   }, [points]);
+
+  useEffect(() => {
+    conflictPointsRef.current = conflictPoints;
+  }, [conflictPoints]);
 
   useEffect(() => {
     const host = mapHostRef.current;
@@ -272,6 +373,7 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
     mapRef.current = map;
     const syncScreenPoints = () => {
       setScreenPoints(projectScreenPoints(map, pointsRef.current));
+      setConflictScreenPoints(projectConflictScreenPoints(map, conflictPointsRef.current));
     };
     const resizeAndSync = () => {
       if (!mapRef.current) return;
@@ -334,7 +436,8 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
 
   useEffect(() => {
     setScreenPoints(projectScreenPoints(mapRef.current, points));
-  }, [points, selectedCityId]);
+    setConflictScreenPoints(projectConflictScreenPoints(mapRef.current, conflictPoints));
+  }, [conflictPoints, points, selectedCityId]);
 
   return (
     <div
@@ -343,10 +446,12 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
       style={{ height: `${height}px` }}
     >
       <div ref={mapHostRef} className={`wm-weather-deck-basemap ${mapReady || hasProjectedPoints ? 'ready' : ''}`} />
+      {hasProjectedConflicts ? <UcdpConflictLayer points={conflictScreenPoints} /> : null}
       {showHtmlLayer ? <WeatherHtmlLabels points={screenPoints} selectedCityId={selectedCityId} onSelectCity={onSelectCity} /> : null}
       <div className="wm-weather-deck-legend" aria-hidden="true">
         <span><i className="hot" />HOT</span>
         <span><i className="cool" />COOL</span>
+        {conflictPoints.length ? <span><i className="ucdp" />UCDP</span> : null}
       </div>
       <div className="wm-weather-deck-status">{mapDegraded ? 'Fallback tiles' : 'MapLibre'}</div>
     </div>
