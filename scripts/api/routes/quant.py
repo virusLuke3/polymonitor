@@ -13,9 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from quant.backtest_engine import create_backtest_run  # noqa: E402
-from quant.db import PostgresSettings, postgres_connection  # noqa: E402
-from quant.read_api import (  # noqa: E402
+from quant.api.read_api import (  # noqa: E402
     get_backtest_equity,
     get_backtest_metrics,
     get_backtest_run,
@@ -24,7 +22,9 @@ from quant.read_api import (  # noqa: E402
     get_frontend_prices,
     get_price_build_status,
 )
-from quant.schema import create_schema  # noqa: E402
+from quant.backtest.backtest_engine import create_backtest_run  # noqa: E402
+from quant.core.db import PostgresSettings, postgres_connection  # noqa: E402
+from quant.core.schema import create_schema  # noqa: E402
 
 
 def _parse_int_arg(name: str, default: int | None = None) -> int | None:
@@ -88,6 +88,7 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "error_count": "errorCount",
         "last_error": "lastError",
         "price_source": "priceSource",
+        "backtest_engine": "backtestEngine",
         "from_ts": "fromTs",
         "to_ts": "toTs",
         "from_block": "fromBlock",

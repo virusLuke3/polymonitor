@@ -6,6 +6,6 @@ This package keeps the first two production price sources separate:
 * orderfilled_block_close: block_number based OrderFilled close prices.
 """
 
-from .db import ClickHouseSettings, PostgresSettings
+from .core.db import ClickHouseSettings, PostgresSettings
 
 __all__ = ["ClickHouseSettings", "PostgresSettings"]
