@@ -20,6 +20,7 @@
 
 html {
   scroll-behavior: smooth;
+  scroll-padding-top: 150px;
   color-scheme: light;
 }
 
@@ -223,6 +224,9 @@ a {
 }
 
 .docs-tabs {
+  position: sticky;
+  top: 72px;
+  z-index: 35;
   display: flex;
   align-items: stretch;
   gap: 34px;
@@ -354,6 +358,12 @@ a {
   font-weight: 800;
   line-height: 1.3;
   letter-spacing: -0.01em;
+}
+
+.docs-content h1,
+.docs-content h2,
+.docs-content h3 {
+  scroll-margin-top: 150px;
 }
 
 .docs-content p,
