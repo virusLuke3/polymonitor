@@ -6,7 +6,7 @@
     <title>Platform Overview - polyData Documentation</title>
     <meta name="description" content="polyMonitor platform variants, workspace capabilities, and specialized Polymarket monitoring surfaces." />
     <link rel="icon" href="/icons/polydata-monitor.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/docs-page.css?v=20260607-platform-overview-variants" />
+    <link rel="stylesheet" href="/docs-page.css?v=20260607-worldmonitor-style" />
   </head>
   <body>
     <div class="docs-shell">
@@ -79,8 +79,8 @@
         <main class="docs-content">
           <div class="docs-kicker">Platform & Features</div>
           <h1>Platform Overview</h1>
-          <p>polyMonitor runs specialized Polymarket intelligence workspaces from a shared codebase. Each workspace keeps the same core data model - market identity, price history, order-book state, OrderFilled flow, oracle resolution, external context, and runtime snapshots - but optimizes the interface for a different monitoring task.</p>
-          <p>The platform is designed for researchers, traders, builders, and operators who need to move between broad market surveillance, quantitative backtesting, and event-specific coverage without leaving the same data and API stack.</p>
+          <p>polyMonitor platform variants, capabilities, and specialized monitoring configurations for Polymarket intelligence, quantitative research, and event-specific coverage.</p>
+          <p>polyMonitor runs three specialized workspaces from a single codebase, each optimized for different monitoring needs.</p>
 
           <h2 id="platform-variants">Platform Variants</h2>
           <div class="docs-table-wrap">
@@ -111,6 +111,7 @@
               </tbody>
             </table>
           </div>
+          <p>Each workspace keeps the same core data model - market identity, price history, order-book state, OrderFilled flow, oracle resolution, external context, and runtime snapshots - while changing the interface around the task at hand.</p>
 
           <h2 id="polymonitor">polyMonitor</h2>
           <p>The default workspace is the general Polymarket monitoring surface. It is organized around market discovery, market workspace inspection, lifecycle state, chain-level OrderFilled flow, oracle state, and cross-domain context. The goal is to make a market inspectable as a living system rather than a single probability number.</p>
