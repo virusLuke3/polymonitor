@@ -765,6 +765,14 @@ def _db_weather_market_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[Lis
             conn = connector(ctx.get("DB_PATH"), readonly=True)
         except TypeError:
             conn = connector(ctx.get("DB_PATH"))
+        for statement in (
+            "SET LOCAL max_parallel_workers_per_gather = 0",
+            "SET LOCAL work_mem = '4MB'",
+        ):
+            try:
+                conn.execute(statement)
+            except Exception:
+                pass
         cursor = conn.execute(
             """
             SELECT
@@ -812,7 +820,9 @@ def _db_weather_market_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[Lis
                     OR lower(COALESCE(m.slug, '')) LIKE '%%climate%%'
                     OR lower(COALESCE(m.category, '')) = 'weather'
                 )
-                AND (m.end_date IS NULL OR (m.end_date >= ? AND m.end_date <= ?))
+                AND m.end_date IS NOT NULL
+                AND m.end_date >= ?
+                AND m.end_date <= ?
                 AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
                 AND COALESCE(mss.is_resolved, FALSE) = FALSE
                 AND COALESCE(mss.gamma_closed, FALSE) = FALSE
