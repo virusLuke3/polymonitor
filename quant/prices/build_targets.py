@@ -51,9 +51,9 @@ def upsert_price_build_targets_for_market(
             )
             SELECT
                 %s, m.token_id, m.market_id, m.market_slug, m.token_side, %s, %s,
-                CASE WHEN %s IS NULL THEN NULL ELSE to_timestamp(%s) END,
-                CASE WHEN %s IS NULL THEN NULL ELSE to_timestamp(%s) END,
-                %s, %s,
+                CASE WHEN %s::double precision IS NULL THEN NULL ELSE to_timestamp(%s::double precision) END,
+                CASE WHEN %s::double precision IS NULL THEN NULL ELSE to_timestamp(%s::double precision) END,
+                %s::bigint, %s::bigint,
                 'active', now()
             FROM quant.market_token_metadata m
             WHERE {" AND ".join(filters)}
