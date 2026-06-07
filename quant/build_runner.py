@@ -217,9 +217,21 @@ def fetch_block_close_build_candidates(
                     OR m.end_date >= to_timestamp(%s)
                 )
                 AND (
-                    t.requested_to_block IS NULL
-                    OR s.last_complete_block IS NULL
-                    OR s.last_complete_block < t.requested_to_block
+                    (
+                        t.token_id IS NOT NULL
+                        AND t.requested_to_block IS NOT NULL
+                        AND (
+                            s.last_complete_block IS NULL
+                            OR s.last_complete_block < t.requested_to_block
+                        )
+                    )
+                    OR (
+                        (t.token_id IS NULL OR t.requested_to_block IS NULL)
+                        AND (
+                            s.last_complete_block IS NULL
+                            OR s.last_complete_block < e.last_orderfilled_block
+                        )
+                    )
                 )
             ORDER BY
                 CASE WHEN t.token_id IS NOT NULL THEN 0 ELSE 1 END,
@@ -893,7 +905,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--from-block", type=int)
     parser.add_argument("--to-block", type=int)
     parser.add_argument("--daemon", action="store_true")
-    parser.add_argument("--source-mode", choices=("both", "frontend", "orderfilled_block_close"), default="both")
+    parser.add_argument("--source-mode", choices=("both", "frontend", "orderfilled_block_close", "maintenance"), default="both")
     parser.add_argument("--since-ts", type=int, default=SEPTEMBER_2025_TS)
     parser.add_argument("--token-limit", type=int, default=20)
     parser.add_argument("--frontend-token-limit", type=int)

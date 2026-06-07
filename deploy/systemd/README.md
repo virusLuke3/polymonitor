@@ -56,14 +56,19 @@ disables local collector units on GCP.
 - `polydata-event-market-serving.service`
 - `polydata-db-reverse-tunnel.service`
 - `polydata-quant-backtest-runner.service`
+- `polydata-quant-price-maintenance.service`
 - `polydata-quant-price-build-runner.service`
 - `polydata-quant-frontend-price-build-runner@0..1.service`
 
 Quant price building belongs on the local collector. The default production
 split is:
 
-- `polydata-quant-price-build-runner.service`: metadata, eligibility, and
-  OrderFilled block close builds.
+- `polydata-quant-price-maintenance.service`: market metadata and
+  OrderFilled eligibility refresh. Keep this separate so maintenance queries do
+  not stall block close catchup.
+- `polydata-quant-price-build-runner.service`: OrderFilled block close builds
+  only. It skips maintenance and prioritizes tokens whose
+  `last_complete_block` has not reached `last_orderfilled_block`.
 - `polydata-quant-frontend-price-build-runner@0..1.service`: two frontend
   prices-history shards by default. Increase
   `POLYDATA_QUANT_FRONTEND_SHARD_COUNT` and enable more instances only after
@@ -136,6 +141,7 @@ cp deploy/systemd/polydata-db-reverse-tunnel.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-db-reverse-tunnel-healthcheck.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-db-reverse-tunnel-healthcheck.timer ~/.config/systemd/user/
 cp deploy/systemd/polydata-quant-backtest-runner.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-quant-price-maintenance.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-quant-price-build-runner.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-quant-frontend-price-build-runner@.service ~/.config/systemd/user/
 systemctl --user daemon-reload

@@ -1,0 +1,17 @@
+[Unit]
+Description=polyData quant metadata and price eligibility maintenance worker
+After=network-online.target polydata-db-reverse-tunnel.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/polydata.env
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" -m quant.build_runner --daemon --source-mode maintenance --since-ts "${POLYDATA_QUANT_PRICE_BUILD_SINCE_TS:-1756684800}" --token-limit "${POLYDATA_QUANT_MAINTENANCE_TOKEN_LIMIT:-40}" --sleep-seconds "${POLYDATA_QUANT_MAINTENANCE_SLEEP_SECONDS:-60}" --metadata-interval-seconds "${POLYDATA_QUANT_METADATA_INTERVAL_SECONDS:-21600}" --eligibility-interval-seconds "${POLYDATA_QUANT_ELIGIBILITY_INTERVAL_SECONDS:-900}" --block-min-orderfilled-trades "${POLYDATA_QUANT_BLOCK_MIN_ORDERFILLED_TRADES:-1}"'
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=polydata-local-collector.target
