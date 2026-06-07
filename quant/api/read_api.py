@@ -15,10 +15,87 @@ def get_quant_price_markets(
     """Return markets that actually have quant price rows available."""
 
     params: list[Any] = []
+    search_text = (search or "").strip().lower()
+    if search_text:
+        text = f"%{search_text}%"
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH candidates AS (
+                    SELECT DISTINCT
+                        md.market_id,
+                        md.market_slug,
+                        md.market_title,
+                        md.condition_id,
+                        md.end_date
+                    FROM quant.market_token_metadata md
+                    WHERE md.market_slug IS NOT NULL
+                      AND (lower(md.market_slug) LIKE %s OR lower(md.market_title) LIKE %s)
+                    ORDER BY md.market_slug
+                    LIMIT 200
+                )
+                SELECT
+                    c.market_id,
+                    c.market_slug,
+                    COALESCE(%s, 'YES') AS token_side,
+                    COALESCE(b.block_rows, 0) AS block_rows,
+                    b.first_block,
+                    b.last_block,
+                    b.latest_block_price,
+                    b.latest_block_at,
+                    COALESCE(f.frontend_rows, 0) AS frontend_rows,
+                    f.first_ts,
+                    f.last_ts,
+                    f.latest_frontend_price,
+                    f.latest_frontend_at,
+                    c.market_title,
+                    c.condition_id,
+                    c.end_date
+                FROM candidates c
+                LEFT JOIN LATERAL (
+                    SELECT
+                        count(*) AS block_rows,
+                        min(block_number) AS first_block,
+                        max(block_number) AS last_block,
+                        (array_agg(COALESCE(yes_probability_close, close_price) ORDER BY block_number DESC))[1] AS latest_block_price,
+                        max(built_at) AS latest_block_at
+                    FROM quant.market_token_block_close b
+                    WHERE b.market_slug = c.market_slug
+                      AND (%s::text IS NULL OR b.token_side = %s::text)
+                ) b ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT
+                        count(*) AS frontend_rows,
+                        min(timestamp) AS first_ts,
+                        max(timestamp) AS last_ts,
+                        (array_agg(price ORDER BY timestamp DESC))[1] AS latest_frontend_price,
+                        max(fetched_at) AS latest_frontend_at
+                    FROM quant.market_token_frontend_price_1m f
+                    WHERE f.market_slug = c.market_slug
+                      AND (%s::text IS NULL OR f.token_side = %s::text)
+                ) f ON TRUE
+                WHERE COALESCE(b.block_rows, 0) > 0 OR COALESCE(f.frontend_rows, 0) > 0
+                ORDER BY (COALESCE(b.block_rows, 0) + COALESCE(f.frontend_rows, 0)) DESC,
+                         c.market_slug ASC
+                LIMIT %s
+                """,
+                [
+                    text,
+                    text,
+                    token_side.upper() if token_side else None,
+                    token_side.upper() if token_side else None,
+                    token_side.upper() if token_side else None,
+                    token_side.upper() if token_side else None,
+                    token_side.upper() if token_side else None,
+                    int(limit),
+                ],
+            )
+            return [dict(row) for row in cur.fetchall()]
+
     filters: list[str] = []
-    if search:
+    if search_text:
         filters.append("(lower(market_slug) LIKE %s OR lower(market_title) LIKE %s)")
-        text = f"%{search.lower()}%"
+        text = f"%{search_text}%"
         params.extend([text, text])
     if token_side:
         filters.append("token_side = %s")

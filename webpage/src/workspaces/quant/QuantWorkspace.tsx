@@ -134,7 +134,7 @@ export function QuantWorkspace() {
   const [dataStatus, setDataStatus] = useState<DataStatus>('idle');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [timeframe, setTimeframe] = useState('5m');
+  const [timeframe, setTimeframe] = useState('2500');
   const [priceSource, setPriceSource] = useState<PriceSource>('orderfilled');
   const [backtestEngine, setBacktestEngine] = useState<BacktestEngine>('backtrader');
   const [testerTab, setTesterTab] = useState<TesterTab>('overview');
@@ -160,14 +160,19 @@ export function QuantWorkspace() {
     [marketSlug, quantMarkets],
   );
   const marketInfo = useMemo(() => marketInfoFromSelection(marketSlug, selectedMarket), [marketSlug, selectedMarket]);
-  const query: QuantPriceQuery = { marketSlug, tokenSide: 'YES', limit: 5000 };
+  const chartLimit = useMemo(() => {
+    const parsed = Number(timeframe);
+    return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
+  }, [timeframe]);
+  const query: QuantPriceQuery = { marketSlug, tokenSide: 'YES', limit: chartLimit };
+  const blockChartQuery: QuantPriceQuery = { marketSlug, limit: chartLimit };
 
   const refreshQuantRows = async () => {
     const hasMarketSlug = Boolean(marketSlug.trim());
     if (hasMarketSlug) setDataStatus('loading');
     const [frontendResult, blockResult, statusResult] = await Promise.allSettled([
       hasMarketSlug ? fetchQuantFrontendPrices(query) : Promise.resolve({ count: 0, items: [] }),
-      hasMarketSlug ? fetchQuantBlockClosePrices(query) : Promise.resolve({ count: 0, items: [] }),
+      hasMarketSlug ? fetchQuantBlockClosePrices(blockChartQuery) : Promise.resolve({ count: 0, items: [] }),
       fetchQuantBuildStatus('', 12),
     ]);
     const nextFrontendRows = frontendResult.status === 'fulfilled' ? frontendResult.value.items || [] : frontendRows;
@@ -197,15 +202,16 @@ export function QuantWorkspace() {
       if (!marketSlug.trim()) {
         throw new Error('market_slug is required for real backtest');
       }
-      const sourceRows = priceSource === 'orderfilled' ? nextRows.blockRows : nextRows.frontendRows;
+      const backtestBlockRows = nextRows.blockRows.filter((row) => String(row.tokenSide || '').toUpperCase() === 'YES');
+      const sourceRows = priceSource === 'orderfilled' ? backtestBlockRows : nextRows.frontendRows;
       if (!sourceRows.length) {
         throw new Error(`No ${backendPriceSource(priceSource)} rows for ${marketSlug.trim()}`);
       }
-      const firstBlock = nextRows.blockRows[0]?.blockNumber;
-      const lastBlock = nextRows.blockRows[nextRows.blockRows.length - 1]?.blockNumber;
+      const firstBlock = backtestBlockRows[0]?.blockNumber;
+      const lastBlock = backtestBlockRows[backtestBlockRows.length - 1]?.blockNumber;
       const firstTs = nextRows.frontendRows[0]?.timestamp;
       const lastTs = nextRows.frontendRows[nextRows.frontendRows.length - 1]?.timestamp;
-      const strategy = strategyDefaults(priceSource === 'orderfilled' ? blockToPrices(nextRows.blockRows) : frontendToPrices(nextRows.frontendRows));
+      const strategy = strategyDefaults(priceSource === 'orderfilled' ? blockToPrices(backtestBlockRows) : frontendToPrices(nextRows.frontendRows));
       const created = await createQuantBacktestRun({
         marketSlug: marketSlug.trim(),
         tokenSide: 'YES',
@@ -217,7 +223,7 @@ export function QuantWorkspace() {
         exitThreshold: strategy.exitThreshold,
         stopLoss: 0.075,
         takeProfit: 0.16,
-        maxHoldingBars: timeframe === '1m' ? 240 : 96,
+        maxHoldingBars: Math.max(20, Math.min(240, Math.floor(chartLimit / 30))),
         initialCapital: 100000,
         positionSize: 100,
       });
@@ -260,6 +266,23 @@ export function QuantWorkspace() {
   }, []);
 
   useEffect(() => {
+    const text = marketSlug.trim();
+    const timer = window.setTimeout(() => {
+      void fetchQuantPriceMarkets(text, 40)
+        .then((payload) => {
+          const items = payload.items || [];
+          setQuantMarkets((current) => {
+            const existing = new Map(current.map((market) => [`${market.marketSlug}-${market.tokenSide}`, market]));
+            for (const item of items) existing.set(`${item.marketSlug}-${item.tokenSide}`, item);
+            return Array.from(existing.values()).slice(0, 80);
+          });
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [marketSlug]);
+
+  useEffect(() => {
     if (!marketSlug.trim()) return;
     const timer = window.setTimeout(() => {
       void refreshQuantRows().catch((loadError) => {
@@ -267,7 +290,7 @@ export function QuantWorkspace() {
       });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [marketSlug, priceSource]);
+  }, [marketSlug, priceSource, timeframe]);
 
   const filteredPerformanceRows = useMemo(() => {
     const queryText = performanceSearch.trim().toLowerCase();

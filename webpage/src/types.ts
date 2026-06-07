@@ -287,9 +287,15 @@ export type QuantBlockClosePoint = {
   tokenSide: string;
   blockNumber: number;
   closePrice: string | number;
+  yesProbabilityClose?: string | number | null;
+  vwapPrice?: string | number | null;
+  yesProbabilityVwap?: string | number | null;
+  closeRawPrice?: string | number | null;
+  closePriceSource?: string | null;
   closeTxHash?: string | null;
   closeLogIndex?: number | null;
   tradeCount?: number | string | null;
+  rawTradeCount?: number | string | null;
   volume?: string | number | null;
 };
 

@@ -1,23 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
-  CandlestickSeries,
   ColorType,
   createChart,
   HistogramSeries,
   LineSeries,
-  type CandlestickData,
   type HistogramData,
   type IChartApi,
   type ISeriesApi,
   type LineData,
   type Time,
 } from 'lightweight-charts';
-import type { CandlePoint, DataStatus, MarketInfo, PricePoint, Signal } from '../types';
-import { clamp, movingAverage, scaleFactory, toCandles } from '../utils/backtest';
+import type { DataStatus, MarketInfo, PricePoint, Signal } from '../types';
+import { movingAverage } from '../utils/backtest';
 import { fmtPrice, formatTime } from '../utils/formatters';
 
 const DRAW_TOOLS = ['+', 'T', '/', 'R', 'Fib', 'Br', 'Mag', 'Lock', 'Eye'];
-const SYNTHETIC_BLOCK_AXIS_START = 1_704_067_200;
 
 type PriceChartPanelProps = {
   prices: PricePoint[];
@@ -29,31 +26,58 @@ type PriceChartPanelProps = {
 };
 
 type SeriesRefs = {
-  candle: ISeriesApi<'Candlestick'> | null;
-  volume: ISeriesApi<'Histogram'> | null;
+  yes: ISeriesApi<'Line'> | null;
+  no: ISeriesApi<'Line'> | null;
   ma: ISeriesApi<'Line'> | null;
+  volume: ISeriesApi<'Histogram'> | null;
 };
 
-type SignalMarker = NonNullable<ReturnType<typeof markerPosition>>;
-
-function chartTime(point: PricePoint, index: number): Time {
-  if (point.source.includes('block')) return (SYNTHETIC_BLOCK_AXIS_START + index * 60) as Time;
-  return Math.max(0, Math.floor(point.timestamp)) as Time;
+function chartTime(point: PricePoint): Time {
+  return Math.floor(point.timestamp) as Time;
 }
 
-function timeLabel(point: PricePoint | CandlePoint | undefined, source: string) {
+function blockLabel(value: number) {
+  if (!Number.isFinite(value)) return '';
+  return value.toLocaleString('en-US');
+}
+
+function pointLabel(point: PricePoint | undefined, source: string) {
   if (!point) return '--';
-  if (source.includes('block')) return `block ${point.timestamp.toLocaleString('en-US')}`;
+  if (source.includes('block')) return `block ${blockLabel(point.timestamp)}`;
   return formatTime(point.timestamp);
 }
 
-function priceDelta(points: CandlePoint[]) {
-  const latest = points[points.length - 1];
-  const previous = points[points.length - 2] || points[0];
-  if (!latest || !previous) return { absolute: 0, percent: 0 };
-  const absolute = latest.close - previous.close;
-  const percent = previous.close ? (absolute / previous.close) * 100 : 0;
-  return { absolute, percent };
+function sortUnique(points: PricePoint[]) {
+  const seen = new Set<number>();
+  return points
+    .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.close))
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .filter((point) => {
+      const key = Math.floor(point.timestamp);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function sidePoints(points: PricePoint[], side: string) {
+  const sideRows = points.filter((point) => (point.tokenSide || 'YES').toUpperCase() === side);
+  return sortUnique(sideRows.length ? sideRows : points);
+}
+
+function lineData(points: PricePoint[]): LineData<Time>[] {
+  return points.map((point) => ({
+    time: chartTime(point),
+    value: point.close,
+  }));
+}
+
+function volumeData(points: PricePoint[]): HistogramData<Time>[] {
+  return points.map((point) => ({
+    time: chartTime(point),
+    value: Math.max(0, point.volume),
+    color: 'rgba(148,163,184,0.24)',
+  }));
 }
 
 function formatSigned(value: number, digits = 3) {
@@ -61,24 +85,24 @@ function formatSigned(value: number, digits = 3) {
   return `${sign}${value.toFixed(digits)}`;
 }
 
-function markerPosition(signal: Signal, candles: CandlePoint[]) {
-  if (!candles.length) return null;
+function markerPosition(signal: Signal, points: PricePoint[]) {
+  if (!points.length) return null;
   let bestIndex = 0;
   let bestDistance = Number.POSITIVE_INFINITY;
-  candles.forEach((candle, index) => {
-    const distance = Math.abs(candle.timestamp - signal.timestamp);
+  points.forEach((point, index) => {
+    const distance = Math.abs(point.timestamp - signal.timestamp);
     if (distance < bestDistance) {
       bestDistance = distance;
       bestIndex = index;
     }
   });
-  const candle = candles[bestIndex];
-  if (!candle) return null;
+  const point = points[bestIndex];
+  if (!point) return null;
   return {
     signal,
-    candle,
-    left: `${(bestIndex / Math.max(1, candles.length - 1)) * 100}%`,
-    top: `${clamp((1 - candle.close) * 100, 8, 82)}%`,
+    point,
+    left: `${(bestIndex / Math.max(1, points.length - 1)) * 100}%`,
+    top: `${Math.max(7, Math.min(84, (1 - point.close) * 100))}%`,
   };
 }
 
@@ -92,27 +116,32 @@ export function PriceChartPanel({
 }: PriceChartPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<SeriesRefs>({ candle: null, volume: null, ma: null });
-  const candlesRef = useRef<CandlePoint[]>([]);
-  const timeLabelRef = useRef<Map<number, string>>(new Map());
-  const [hover, setHover] = useState<CandlePoint | null>(null);
-  const points = useMemo(() => prices.slice(-900), [prices]);
-  const candles = useMemo(() => toCandles(points), [points]);
-  const latest = candles[candles.length - 1];
-  const first = candles[0];
-  const delta = priceDelta(candles);
-  const volumeTotal = candles.reduce((sum, candle) => sum + (Number.isFinite(candle.volume) ? candle.volume : 0), 0);
-  const closes = candles.map((point) => point.close);
-  const ma = useMemo(() => movingAverage(closes, Math.min(20, Math.max(2, Math.floor(candles.length / 8)))), [candles.length, closes]);
-  useEffect(() => {
-    candlesRef.current = candles;
-  }, [candles]);
+  const seriesRef = useRef<SeriesRefs>({ yes: null, no: null, ma: null, volume: null });
+  const pointsRef = useRef<PricePoint[]>([]);
+  const [hover, setHover] = useState<PricePoint | null>(null);
 
-  const markers = useMemo(
-    () => signals.map((signal) => markerPosition(signal, candles)).filter((marker): marker is SignalMarker => Boolean(marker)),
-    [candles, signals],
-  );
+  const allPoints = useMemo(() => sortUnique(prices), [prices]);
+  const yesPoints = useMemo(() => sidePoints(prices, 'YES'), [prices]);
+  const noPoints = useMemo(() => sidePoints(prices, 'NO'), [prices]);
+  const primaryPoints = yesPoints.length ? yesPoints : allPoints;
+  const latest = hover || primaryPoints[primaryPoints.length - 1];
+  const previous = primaryPoints[Math.max(0, primaryPoints.length - 2)];
+  const delta = latest && previous ? latest.close - previous.close : 0;
+  const deltaPct = latest && previous?.close ? (delta / previous.close) * 100 : 0;
+  const minPrice = primaryPoints.reduce((min, point) => Math.min(min, point.close), Number.POSITIVE_INFINITY);
+  const maxPrice = primaryPoints.reduce((max, point) => Math.max(max, point.close), Number.NEGATIVE_INFINITY);
+  const volumeTotal = allPoints.reduce((sum, point) => sum + (Number.isFinite(point.volume) ? point.volume : 0), 0);
+  const maPoints = useMemo(() => {
+    const closes = primaryPoints.map((point) => point.close);
+    const ma = movingAverage(closes, Math.min(40, Math.max(3, Math.floor(primaryPoints.length / 20))));
+    return primaryPoints.map((point, index) => ({ ...point, close: ma[index] ?? point.close }));
+  }, [primaryPoints]);
+  const markers = useMemo(() => signals.map((signal) => markerPosition(signal, primaryPoints)).filter(Boolean), [primaryPoints, signals]);
   const focusedMarkers = markers.filter((marker) => marker?.signal.tradeId === selectedTradeId);
+
+  useEffect(() => {
+    pointsRef.current = primaryPoints;
+  }, [primaryPoints]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -120,7 +149,7 @@ export function PriceChartPanel({
 
     const chart = createChart(container, {
       autoSize: false,
-      height: Math.max(280, container.clientHeight || 360),
+      height: Math.max(300, container.clientHeight || 420),
       width: Math.max(360, container.clientWidth || 760),
       layout: {
         attributionLogo: false,
@@ -131,55 +160,66 @@ export function PriceChartPanel({
       },
       grid: {
         vertLines: { color: 'rgba(255,255,255,0.055)' },
-        horzLines: { color: 'rgba(255,255,255,0.07)' },
+        horzLines: { color: 'rgba(255,255,255,0.075)' },
       },
       rightPriceScale: {
         borderColor: 'rgba(148,163,184,0.18)',
-        scaleMargins: { top: 0.08, bottom: 0.24 },
+        scaleMargins: { top: 0.08, bottom: 0.22 },
       },
       timeScale: {
         borderColor: 'rgba(148,163,184,0.18)',
         fixLeftEdge: true,
         fixRightEdge: true,
         secondsVisible: false,
-        timeVisible: true,
-        rightOffset: 5,
-        barSpacing: 8,
-        tickMarkFormatter: (time: Time) => timeLabelRef.current.get(Number(time)) || '',
+        timeVisible: false,
+        rightOffset: 2,
+        barSpacing: 5,
+        tickMarkFormatter: (time: Time) => priceSource.includes('block') ? blockLabel(Number(time)) : formatTime(Number(time)),
+      },
+      localization: {
+        priceFormatter: (value: number) => `${Math.round(value * 100)}%`,
+        timeFormatter: (time: Time) => priceSource.includes('block') ? `block ${blockLabel(Number(time))}` : formatTime(Number(time)),
       },
       crosshair: {
         horzLine: { color: 'rgba(148,163,184,0.42)', labelBackgroundColor: '#1f2937' },
         vertLine: { color: 'rgba(148,163,184,0.28)', labelBackgroundColor: '#1f2937' },
       },
-      localization: {
-        priceFormatter: (value: number) => fmtPrice(value),
-      },
     });
-    const candle = chart.addSeries(CandlestickSeries, {
-      upColor: '#00b894',
-      downColor: '#ff3b55',
-      borderUpColor: '#12d6bd',
-      borderDownColor: '#ff5d6f',
-      wickUpColor: '#12d6bd',
-      wickDownColor: '#ff5d6f',
-      priceLineColor: '#2f6df6',
+    const yes = chart.addSeries(LineSeries, {
+      color: '#22c55e',
+      lineWidth: 2,
+      priceLineColor: '#2563eb',
       priceLineWidth: 1,
+      title: 'YES probability',
+      autoscaleInfoProvider: () => ({
+        priceRange: { minValue: 0, maxValue: 1 },
+      }),
     });
-    const maSeries = chart.addSeries(LineSeries, {
-      color: '#f59e0b',
+    const no = chart.addSeries(LineSeries, {
+      color: '#3b82f6',
       lineWidth: 2,
       priceLineVisible: false,
+      title: 'NO token -> YES probability',
+      autoscaleInfoProvider: () => ({
+        priceRange: { minValue: 0, maxValue: 1 },
+      }),
+    });
+    const ma = chart.addSeries(LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 1,
+      priceLineVisible: false,
       lastValueVisible: false,
+      title: 'MA',
     });
     const volume = chart.addSeries(HistogramSeries, {
-      color: 'rgba(20,184,166,0.42)',
+      color: 'rgba(148,163,184,0.24)',
       priceFormat: { type: 'volume' },
       priceScaleId: '',
       priceLineVisible: false,
       lastValueVisible: false,
     });
-    volume.priceScale().applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
-    seriesRef.current = { candle, volume, ma: maSeries };
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    seriesRef.current = { yes, no, ma, volume };
     chartRef.current = chart;
 
     chart.subscribeCrosshairMove((param) => {
@@ -188,14 +228,17 @@ export function PriceChartPanel({
         setHover(null);
         return;
       }
-      const currentCandles = candlesRef.current;
-      const index = currentCandles.findIndex((item, itemIndex) => Number(chartTime(item, itemIndex)) === time);
-      setHover(index >= 0 ? currentCandles[index] || null : null);
+      const currentPoints = pointsRef.current;
+      const point = currentPoints.reduce<PricePoint | null>((best, candidate) => {
+        if (!best) return candidate;
+        return Math.abs(candidate.timestamp - time) < Math.abs(best.timestamp - time) ? candidate : best;
+      }, null);
+      setHover(point);
     });
 
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
-      chart.resize(Math.max(360, Math.floor(entry.contentRect.width)), Math.max(280, Math.floor(entry.contentRect.height)));
+      chart.resize(Math.max(360, Math.floor(entry.contentRect.width)), Math.max(300, Math.floor(entry.contentRect.height)));
       chart.timeScale().fitContent();
     });
     observer.observe(container);
@@ -204,44 +247,20 @@ export function PriceChartPanel({
       observer.disconnect();
       chart.remove();
       chartRef.current = null;
-      seriesRef.current = { candle: null, volume: null, ma: null };
+      seriesRef.current = { yes: null, no: null, ma: null, volume: null };
     };
-  }, []);
+  }, [priceSource]);
 
   useEffect(() => {
     const chart = chartRef.current;
     const series = seriesRef.current;
-    if (!chart || !series.candle || !series.volume || !series.ma) return;
-    const candleData: CandlestickData<Time>[] = candles.map((candle, index) => ({
-      time: chartTime(candle, index),
-      open: candle.open,
-      high: candle.high,
-      low: candle.low,
-      close: candle.close,
-    }));
-    timeLabelRef.current = new Map(candles.map((candle, index) => {
-      const time = Number(chartTime(candle, index));
-      const label = priceSource.includes('block')
-        ? `b${Math.round(candle.timestamp / 1000)}k`
-        : formatTime(candle.timestamp);
-      return [time, label];
-    }));
-    const volumeData: HistogramData<Time>[] = candles.map((candle, index) => ({
-      time: chartTime(candle, index),
-      value: Math.max(0, candle.volume),
-      color: candle.close >= candle.open ? 'rgba(20,184,166,0.45)' : 'rgba(255,59,85,0.42)',
-    }));
-    const maData: LineData<Time>[] = candles.map((candle, index) => ({
-      time: chartTime(candle, index),
-      value: ma[index] ?? candle.close,
-    }));
-    series.candle.setData(candleData);
-    series.volume.setData(volumeData);
-    series.ma.setData(maData);
+    if (!chart || !series.yes || !series.no || !series.ma || !series.volume) return;
+    series.yes.setData(lineData(yesPoints));
+    series.no.setData(noPoints.length ? lineData(noPoints) : []);
+    series.ma.setData(lineData(maPoints));
+    series.volume.setData(volumeData(allPoints));
     chart.timeScale().fitContent();
-  }, [candles, ma]);
-
-  const shown = hover || latest;
+  }, [allPoints, maPoints, noPoints, yesPoints]);
 
   return (
     <section className="qtv-chart-shell">
@@ -253,30 +272,30 @@ export function PriceChartPanel({
         <div className="qtv-chart-info">
           <div>
             <strong>{market.title}</strong>
-            <span>{market.category} - YES - Polymarket - {priceSource}</span>
+            <span>{market.category} - YES probability - {priceSource}</span>
             <div className="qtv-indicator-legend">
-              <span>Rows <b>{candles.length.toLocaleString('en-US')}</b></span>
-              <span>Range <i>{timeLabel(first, priceSource)}</i> <em>{timeLabel(latest, priceSource)}</em></span>
+              <span>Rows <b>{allPoints.length.toLocaleString('en-US')}</b></span>
+              <span>Range <i>{pointLabel(primaryPoints[0], priceSource)}</i> <em>{pointLabel(primaryPoints[primaryPoints.length - 1], priceSource)}</em></span>
               <span>Volume <b>{volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></span>
             </div>
           </div>
           <div className="qtv-ohlc">
-            <span>O {fmtPrice(shown?.open || 0)}</span>
-            <span>H {fmtPrice(shown?.high || 0)}</span>
-            <span>L {fmtPrice(shown?.low || 0)}</span>
-            <span>C {fmtPrice(shown?.close || 0)}</span>
-            <b className={delta.absolute >= 0 ? 'positive' : 'negative'}>{formatSigned(delta.absolute)} ({formatSigned(delta.percent, 2)}%)</b>
+            <span>Block {latest ? blockLabel(latest.timestamp) : '--'}</span>
+            <span>Price {fmtPrice(latest?.close || 0)}</span>
+            <span>Min {Number.isFinite(minPrice) ? fmtPrice(minPrice) : '--'}</span>
+            <span>Max {Number.isFinite(maxPrice) ? fmtPrice(maxPrice) : '--'}</span>
+            <b className={delta >= 0 ? 'positive' : 'negative'}>{formatSigned(delta)} ({formatSigned(deltaPct, 2)}%)</b>
           </div>
         </div>
 
         <div className="qtv-tv-chart" ref={containerRef}>
-          {!candles.length ? (
+          {!allPoints.length ? (
             <div className="qtv-chart-empty">
               <strong>{dataStatus === 'loading' ? 'Loading market prices' : 'No real price rows'}</strong>
-              <span>Select a market with quant price coverage or run the price builder first.</span>
+              <span>Search or select a market with quant block close coverage.</span>
             </div>
           ) : null}
-          {markers.map((marker) => (
+          {markers.map((marker) => marker ? (
             <div
               key={marker.signal.id}
               className={`qtv-html-signal ${marker.signal.action === 'OPEN' || marker.signal.action === 'BUY' ? 'open' : 'close'} ${marker.signal.tradeId === selectedTradeId ? 'selected' : ''}`}
@@ -285,48 +304,10 @@ export function PriceChartPanel({
             >
               {marker.signal.action === 'SELL' ? 'SELL' : marker.signal.action}
             </div>
-          ))}
+          ) : null)}
           {focusedMarkers.length ? <div className="qtv-trade-focus-pill">{selectedTradeId} entry / exit located</div> : null}
-        </div>
-
-        <div className="qtv-indicator-pane">
-          <RsiPane points={candles} />
         </div>
       </div>
     </section>
-  );
-}
-
-function RsiPane({ points }: { points: CandlePoint[] }) {
-  const width = 1280;
-  const height = 144;
-  const padding = { left: 18, right: 88, top: 10, bottom: 24 };
-  const xMin = points[0]?.timestamp || 0;
-  const xMax = points[points.length - 1]?.timestamp || 1;
-  const scale = scaleFactory(width, height, padding, xMin, xMax, 20, 80);
-  const rsi = points.map((point, index) => ({
-    x: point.timestamp,
-    y: clamp(48 + Math.sin(index / 5) * 18 + Math.cos(index / 11) * 9 + (point.close - 0.5) * 40, 22, 78),
-  }));
-  const path = rsi.map((point, index) => `${index === 0 ? 'M' : 'L'} ${scale.x(point.x).toFixed(2)} ${scale.y(point.y).toFixed(2)}`).join(' ');
-  const areaPath = `${path} L ${scale.x(rsi[rsi.length - 1]?.x || xMax).toFixed(2)} ${height - padding.bottom} L ${padding.left} ${height - padding.bottom} Z`;
-  return (
-    <svg className="qtv-rsi-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="RSI indicator pane">
-      {Array.from({ length: 4 }, (_, index) => {
-        const y = padding.top + (scale.plotH / 3) * index;
-        return <line key={index} className="qtv-grid-line" x1={padding.left} x2={width - padding.right} y1={y} y2={y} />;
-      })}
-      <rect x={padding.left} y={scale.y(70)} width={scale.plotW} height={scale.y(30) - scale.y(70)} />
-      <line className="qtv-rsi-threshold" x1={padding.left} x2={width - padding.right} y1={scale.y(70)} y2={scale.y(70)} />
-      <line className="qtv-rsi-threshold" x1={padding.left} x2={width - padding.right} y1={scale.y(30)} y2={scale.y(30)} />
-      <path className="qtv-rsi-fill" d={areaPath} />
-      <path className="qtv-rsi-line" d={path} />
-      <text x={width - 52} y={scale.y(70) + 4}>70.00</text>
-      <text x={width - 52} y={scale.y(30) + 4}>30.00</text>
-      <g>
-        <rect x={width - 78} y={scale.y(rsi[rsi.length - 1]?.y || 50) - 11} width="62" height="22" rx="3" />
-        <text x={width - 47} y={scale.y(rsi[rsi.length - 1]?.y || 50) + 4}>{fmtPrice((rsi[rsi.length - 1]?.y || 50) / 100)}</text>
-      </g>
-    </svg>
   );
 }

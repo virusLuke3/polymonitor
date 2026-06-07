@@ -158,6 +158,17 @@
   padding: 0 8px;
 }
 
+.qtv-market-select {
+  max-width: 260px;
+  min-width: 180px;
+  border-color: #2a3444 !important;
+  background: #0d1117 !important;
+  color: #d9d9d9 !important;
+  font-family: var(--font-mono) !important;
+  font-size: 11px !important;
+  padding: 0 8px;
+}
+
 .qtv-right-tools select {
   min-width: 190px;
   border-color: #2a3444;
@@ -232,7 +243,7 @@
 .qtv-chart-stack {
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 144px;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   position: relative;
   background: #0f0f0f;

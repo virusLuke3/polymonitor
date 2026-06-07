@@ -15,16 +15,17 @@ export function frontendToPrices(rows: QuantFrontendPricePoint[]): PricePoint[] 
     close: toNumber(row.price),
     volume: 0,
     source: 'frontend',
-  })).filter((row) => row.timestamp && row.close);
+  })).filter((row) => row.timestamp && Number.isFinite(row.close));
 }
 
 export function blockToPrices(rows: QuantBlockClosePoint[]): PricePoint[] {
   return rows.map((row) => ({
     timestamp: Number(row.blockNumber),
-    close: toNumber(row.closePrice),
+    close: toNumber(row.yesProbabilityClose ?? row.closePrice),
     volume: toNumber(row.volume),
+    tokenSide: row.tokenSide,
     source: 'orderfilled_block_close',
-  })).filter((row) => row.timestamp && row.close);
+  })).filter((row) => row.timestamp && Number.isFinite(row.close));
 }
 
 function formatAxisValue(value: unknown, axis: string) {

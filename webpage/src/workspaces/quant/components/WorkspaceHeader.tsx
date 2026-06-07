@@ -51,13 +51,27 @@ export function WorkspaceHeader({
             </option>
           ))}
         </datalist>
+        <select className="qtv-market-select" value={marketSlug} onChange={(event) => onMarketSlugChange(event.currentTarget.value)}>
+          {marketOptions.map((market) => (
+            <option key={`${market.marketSlug}-${market.tokenSide}-select`} value={market.marketSlug}>
+              {market.marketTitle || market.marketSlug}
+            </option>
+          ))}
+        </select>
         <button type="button" title="Add market">+</button>
         <div className="qtv-timeframes">
-          {['1m', '5m', '15m', '1h', '4h', '1d'].map((item) => (
-            <button key={item} className={timeframe === item ? 'active' : ''} type="button" onClick={() => onTimeframeChange(item)}>{item}</button>
+          {([
+            ['500', '500blk'],
+            ['1000', '1k'],
+            ['2500', '2.5k'],
+            ['5000', '5k'],
+            ['15000', '15k'],
+            ['25000', 'All'],
+          ] as Array<[string, string]>).map(([value, label]) => (
+            <button key={value} className={timeframe === value ? 'active' : ''} type="button" onClick={() => onTimeframeChange(value)}>{label}</button>
           ))}
         </div>
-        <button type="button" title="Candles">Candles</button>
+        <button type="button" title="Line">Line</button>
         <button type="button" title="Indicators">Indicators</button>
         <button type="button" title="Compare">Layout</button>
         <button type="button" title="Undo">Undo</button>
