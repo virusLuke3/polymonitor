@@ -55,7 +55,7 @@ def _publish_candidates(candidates: Iterable[MessageCandidate], settings: Telegr
                 telegram=telegram,
                 dry_run=settings.dry_run,
             )
-        if result.sent or result.skipped_seen:
+        if result.sent or result.skipped_seen or result.skipped_unconfigured:
             _log(
                 "panel=%s candidates=%s sent=%s skipped_seen=%s skipped_unconfigured=%s"
                 % (panel_id, result.candidates, result.sent, result.skipped_seen, result.skipped_unconfigured)
@@ -78,4 +78,3 @@ def _state_lock(state_path: str):
 
 def _log(message: str) -> None:
     print(f"[telegram-runtime-bridge] {message}", file=sys.stderr)
-
