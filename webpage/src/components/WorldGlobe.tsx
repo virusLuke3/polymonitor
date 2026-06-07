@@ -27,6 +27,17 @@ type GlobeRing = {
   color: string;
 };
 
+type GlobeHtmlMarker = {
+  layer: GlobeLayerId;
+  lat: number;
+  lng: number;
+  color: string;
+  size: number;
+  tone: 'state' | 'nonstate' | 'onesided' | 'watch';
+  deaths: number;
+  label: string;
+};
+
 type GlobeLayerId = 'markets' | 'oracle' | 'trade' | 'lob' | 'intel' | 'ucdp';
 
 type WorldGlobeProps = {
@@ -122,6 +133,14 @@ function ucdpColor(item: RuntimeGeoSanctionsShockItem) {
   return '#ffd400';
 }
 
+function ucdpTone(item: RuntimeGeoSanctionsShockItem): GlobeHtmlMarker['tone'] {
+  const type = String(item.violenceType || '').trim();
+  if (type === '1') return 'state';
+  if (type === '2') return 'nonstate';
+  if (type === '3') return 'onesided';
+  return 'watch';
+}
+
 function ucdpLabel(item: RuntimeGeoSanctionsShockItem) {
   const country = item.country || item.locationLabel || 'UCDP';
   const deaths = numberValue(item.deathsBest);
@@ -129,23 +148,48 @@ function ucdpLabel(item: RuntimeGeoSanctionsShockItem) {
   return `${country}${deaths != null ? ` · ${deaths} deaths` : ''}${actors ? ` · ${actors}` : ''}`;
 }
 
-function buildUcdpPoints(events: RuntimeGeoSanctionsShockItem[]) {
-  return events.slice(0, 1200).flatMap((item, index): GlobePoint[] => {
+function buildUcdpMarkers(events: RuntimeGeoSanctionsShockItem[]) {
+  return events.slice(0, 1200).flatMap((item): GlobeHtmlMarker[] => {
     const lat = numberValue(item.latitude);
     const lng = numberValue(item.longitude);
     if (lat == null || lng == null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return [];
     const deaths = Math.max(0, numberValue(item.deathsBest) ?? 0);
-    const radius = Math.min(0.48, 0.14 + Math.log10(deaths + 1) * 0.08);
+    const size = Math.min(14, 5 + Math.log10(deaths + 1) * 4);
     return [{
       layer: 'ucdp',
       lat,
       lng,
-      size: radius + (index % 3) * 0.012,
-      altitude: deaths >= 20 ? 0.15 : 0.1,
       color: ucdpColor(item),
+      size,
+      tone: ucdpTone(item),
+      deaths,
       label: ucdpLabel(item),
     }];
   });
+}
+
+function createUcdpMarkerElement(marker: GlobeHtmlMarker) {
+  const el = document.createElement('div');
+  el.className = `wm-globe-html-marker wm-globe-html-marker-${marker.tone} ${marker.deaths >= 20 ? 'is-major' : ''}`;
+  el.title = marker.label;
+  el.style.setProperty('--marker-color', marker.color);
+  el.style.setProperty('--marker-size', `${marker.size}px`);
+
+  const hit = document.createElement('div');
+  hit.className = 'wm-globe-html-hit';
+
+  const dot = document.createElement('span');
+  dot.className = 'wm-globe-html-dot';
+  hit.appendChild(dot);
+
+  if (marker.deaths >= 20) {
+    const pulse = document.createElement('span');
+    pulse.className = 'wm-globe-html-pulse';
+    hit.appendChild(pulse);
+  }
+
+  el.appendChild(hit);
+  return el;
 }
 
 function buildPoints(
@@ -213,7 +257,7 @@ function buildPoints(
       label: trade.txHash || 'Trade',
     };
   });
-  const ucdpPoints = buildUcdpPoints(ucdpEvents);
+  const ucdpMarkers = buildUcdpMarkers(ucdpEvents);
 
   const arcs: GlobeArc[] = marketPoints.slice(0, 10).map((point, index) => ({
     layer: 'lob',
@@ -230,14 +274,11 @@ function buildPoints(
     { layer: 'lob', ...selectedGeo, color: '#ffcf4b' },
     ...oraclePoints.slice(0, 3).map((point) => ({ layer: 'oracle' as const, lat: point.lat, lng: point.lng, color: '#ff5c5c' })),
     ...contentPoints.slice(0, 2).map((point) => ({ layer: 'intel' as const, lat: point.lat, lng: point.lng, color: '#39ff73' })),
-    ...ucdpPoints
-      .filter((point) => point.size >= 0.24)
-      .slice(0, 28)
-      .map((point) => ({ layer: 'ucdp' as const, lat: point.lat, lng: point.lng, color: point.color })),
   ];
 
   return {
-    points: [...marketPoints, ...oraclePoints, ...contentPoints, ...tradePoints, ...ucdpPoints].filter((point) => isEnabled(point.layer)),
+    points: [...marketPoints, ...oraclePoints, ...contentPoints, ...tradePoints].filter((point) => isEnabled(point.layer)),
+    htmlMarkers: ucdpMarkers.filter((marker) => isEnabled(marker.layer)),
     rings: rings.filter((ring) => isEnabled(ring.layer)),
     arcs: arcs.filter((arc) => isEnabled(arc.layer)),
     selectedGeo,
@@ -290,7 +331,11 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
         .ringMaxRadius(5.4)
         .ringPropagationSpeed(1.9)
         .ringRepeatPeriod(1280)
-        .htmlElementsData([]);
+        .htmlElementsData([])
+        .htmlLat(((marker: object) => (marker as GlobeHtmlMarker).lat) as any)
+        .htmlLng(((marker: object) => (marker as GlobeHtmlMarker).lng) as any)
+        .htmlAltitude(0.003)
+        .htmlElement(((marker: object) => createUcdpMarkerElement(marker as GlobeHtmlMarker)) as any);
 
       const controls = globe.controls();
       controls.autoRotate = true;
@@ -336,6 +381,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
     globe.pointsData(globeData.points);
     globe.ringsData(globeData.rings);
     globe.arcsData(globeData.arcs);
+    globe.htmlElementsData(globeData.htmlMarkers);
     const regionView = REGION_VIEW[region] || GLOBAL_VIEW;
     const altitude = resolveAltitude(regionView.altitude, zoomLevel);
     globe.pointOfView(

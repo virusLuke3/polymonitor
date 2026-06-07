@@ -5423,6 +5423,64 @@ body {
     linear-gradient(180deg, rgba(3, 6, 20, 0.04), rgba(3, 5, 14, 0.12) 46%, rgba(2, 2, 7, 0.5));
 }
 
+.wm-globe-html-marker {
+  --marker-color: #ff9f1c;
+  --marker-size: 8px;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wm-globe-html-hit {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+}
+
+.wm-globe-html-dot {
+  position: relative;
+  z-index: 2;
+  width: var(--marker-size);
+  height: var(--marker-size);
+  border: 1.5px solid rgba(255, 226, 170, 0.9);
+  border-radius: 999px;
+  background: var(--marker-color);
+  box-shadow: 0 0 6px 2px color-mix(in srgb, var(--marker-color) 52%, transparent);
+}
+
+.wm-globe-html-marker-state .wm-globe-html-dot {
+  border-radius: 3px;
+}
+
+.wm-globe-html-marker-onesided .wm-globe-html-dot {
+  clip-path: polygon(50% 0%, 100% 86%, 0% 86%);
+  border-radius: 0;
+}
+
+.wm-globe-html-pulse {
+  position: absolute;
+  inset: 3px;
+  z-index: 1;
+  border: 1px solid color-mix(in srgb, var(--marker-color) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--marker-color) 18%, transparent);
+  animation: wm-globe-marker-pulse 2.1s ease-out infinite;
+}
+
+@keyframes wm-globe-marker-pulse {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.45);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.85);
+  }
+}
+
 .wm-panel-list,
 .wm-depth-list,
 .wm-summary-grid {
