@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ContentItem, MarketListItem, MarketSummary, OracleEvent, RuntimeGeoSanctionsShockItem, TradeRow } from '@/types';
 
 type GlobePoint = {
@@ -29,6 +29,7 @@ type GlobeRing = {
 
 type GlobeHtmlMarker = {
   layer: GlobeLayerId;
+  id: string;
   lat: number;
   lng: number;
   color: string;
@@ -36,6 +37,15 @@ type GlobeHtmlMarker = {
   tone: 'state' | 'nonstate' | 'onesided' | 'watch';
   deaths: number;
   label: string;
+  country: string;
+  location: string;
+  occurredAt: string | null;
+  source: string;
+  sourceUrl: string | null;
+  sideA: string;
+  sideB: string;
+  violenceType: string;
+  severity: string;
 };
 
 type GlobeLayerId = 'markets' | 'oracle' | 'trade' | 'lob' | 'intel' | 'ucdp';
@@ -148,6 +158,26 @@ function ucdpLabel(item: RuntimeGeoSanctionsShockItem) {
   return `${country}${deaths != null ? ` · ${deaths} deaths` : ''}${actors ? ` · ${actors}` : ''}`;
 }
 
+function markerDateLabel(value?: string | null) {
+  if (!value) return 'DATE --';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 16).toUpperCase();
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).toUpperCase();
+}
+
+function markerViolenceLabel(value?: unknown) {
+  const text = String(value || '').trim();
+  if (text === '1') return 'STATE-BASED';
+  if (text === '2') return 'NON-STATE';
+  if (text === '3') return 'ONE-SIDED';
+  return text || 'UCDP EVENT';
+}
+
 function buildUcdpMarkers(events: RuntimeGeoSanctionsShockItem[]) {
   return events.slice(0, 1200).flatMap((item): GlobeHtmlMarker[] => {
     const lat = numberValue(item.latitude);
@@ -157,6 +187,7 @@ function buildUcdpMarkers(events: RuntimeGeoSanctionsShockItem[]) {
     const size = Math.min(14, 5 + Math.log10(deaths + 1) * 4);
     return [{
       layer: 'ucdp',
+      id: String(item.id || `${lat}:${lng}:${item.occurredAt || ''}`),
       lat,
       lng,
       color: ucdpColor(item),
@@ -164,16 +195,39 @@ function buildUcdpMarkers(events: RuntimeGeoSanctionsShockItem[]) {
       tone: ucdpTone(item),
       deaths,
       label: ucdpLabel(item),
+      country: item.country || 'Unknown',
+      location: item.locationLabel || item.summary || 'Unknown location',
+      occurredAt: item.occurredAt || null,
+      source: item.source || 'UCDP',
+      sourceUrl: item.sourceUrl || null,
+      sideA: item.sideA || '',
+      sideB: item.sideB || '',
+      violenceType: markerViolenceLabel(item.violenceType),
+      severity: item.severity || 'watch',
     }];
   });
 }
 
-function createUcdpMarkerElement(marker: GlobeHtmlMarker) {
+function createUcdpMarkerElement(marker: GlobeHtmlMarker, onSelect: (marker: GlobeHtmlMarker) => void) {
   const el = document.createElement('div');
   el.className = `wm-globe-html-marker wm-globe-html-marker-${marker.tone} ${marker.deaths >= 20 ? 'is-major' : ''}`;
   el.title = marker.label;
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', marker.label);
   el.style.setProperty('--marker-color', marker.color);
   el.style.setProperty('--marker-size', `${marker.size}px`);
+  const selectMarker = (event: Event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(marker);
+  };
+  el.addEventListener('click', selectMarker);
+  el.addEventListener('keydown', (event) => {
+    if ((event as KeyboardEvent).key === 'Enter' || (event as KeyboardEvent).key === ' ') {
+      selectMarker(event);
+    }
+  });
 
   const hit = document.createElement('div');
   hit.className = 'wm-globe-html-hit';
@@ -289,6 +343,9 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
   const containerRef = useRef<HTMLDivElement | null>(null);
   const globeRef = useRef<any>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const onMarkerSelectRef = useRef<(marker: GlobeHtmlMarker) => void>(() => undefined);
+  const [selectedMarker, setSelectedMarker] = useState<GlobeHtmlMarker | null>(null);
+  onMarkerSelectRef.current = (marker: GlobeHtmlMarker) => setSelectedMarker(marker);
 
   const globeData = useMemo(
     () => buildPoints(markets, selectedMarket, recentTrades, recentOracle, contentItems, ucdpEvents, enabledLayerIds),
@@ -335,7 +392,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
         .htmlLat(((marker: object) => (marker as GlobeHtmlMarker).lat) as any)
         .htmlLng(((marker: object) => (marker as GlobeHtmlMarker).lng) as any)
         .htmlAltitude(0.003)
-        .htmlElement(((marker: object) => createUcdpMarkerElement(marker as GlobeHtmlMarker)) as any);
+        .htmlElement(((marker: object) => createUcdpMarkerElement(marker as GlobeHtmlMarker, onMarkerSelectRef.current)) as any);
 
       const controls = globe.controls();
       controls.autoRotate = true;
@@ -390,10 +447,56 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
     );
   }, [globeData, region, zoomLevel]);
 
+  useEffect(() => {
+    if (!selectedMarker) return;
+    if (!globeData.htmlMarkers.some((marker) => marker.id === selectedMarker.id)) {
+      setSelectedMarker(null);
+    }
+  }, [globeData.htmlMarkers, selectedMarker]);
+
   return (
     <div className="wm-globe-runtime-wrap">
       <div ref={containerRef} className="wm-globe-runtime" />
       <div className="wm-globe-shade" />
+      {selectedMarker ? (
+        <div className={`wm-globe-marker-card tone-${selectedMarker.tone}`}>
+          <button type="button" className="wm-globe-marker-close" aria-label="Close conflict detail" onClick={() => setSelectedMarker(null)}>
+            x
+          </button>
+          <div className="wm-globe-marker-card-kicker">
+            <span>{selectedMarker.violenceType}</span>
+            <em>{markerDateLabel(selectedMarker.occurredAt)}</em>
+          </div>
+          <h3>{selectedMarker.country}</h3>
+          <p>{selectedMarker.location}</p>
+          <div className="wm-globe-marker-card-grid">
+            <span>
+              <b>{selectedMarker.deaths}</b>
+              <em>DEATHS</em>
+            </span>
+            <span>
+              <b>{selectedMarker.severity.toUpperCase()}</b>
+              <em>SEVERITY</em>
+            </span>
+            <span>
+              <b>{selectedMarker.source}</b>
+              <em>SOURCE</em>
+            </span>
+          </div>
+          {(selectedMarker.sideA || selectedMarker.sideB) ? (
+            <div className="wm-globe-marker-actors">
+              <span>{selectedMarker.sideA || 'UNKNOWN'}</span>
+              <strong>VS</strong>
+              <span>{selectedMarker.sideB || 'UNKNOWN'}</span>
+            </div>
+          ) : null}
+          {selectedMarker.sourceUrl ? (
+            <a href={selectedMarker.sourceUrl} target="_blank" rel="noreferrer" className="wm-globe-marker-link">
+              OPEN SOURCE
+            </a>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

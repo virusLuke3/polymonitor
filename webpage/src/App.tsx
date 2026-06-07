@@ -79,6 +79,8 @@ const WORKSPACE_MODE_STORAGE_KEY = 'polydata:workspace-mode:v1';
 const REGION_STORAGE_KEY = 'polydata:region:v1';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
 const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
+const GEO_SHOCK_STORAGE_KEY = 'polydata:seed:world:geo-sanctions-shock:v1';
+const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
 const APP_VERSION = 'v0.2.1';
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
@@ -350,6 +352,43 @@ function readStringStorage<T extends string>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   const raw = window.localStorage.getItem(key);
   return (raw as T) || fallback;
+}
+
+type GeoShockLocalSeed = {
+  storedAt: number;
+  payload: RuntimeGeoSanctionsShockPayload;
+};
+
+function hasRenderableGeoShockPayload(payload?: RuntimeGeoSanctionsShockPayload | null) {
+  return Boolean((payload?.items || []).some(hasGeoConflictCoordinates));
+}
+
+function readGeoShockRuntimeSeed(): PanelRuntimeData {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(GEO_SHOCK_STORAGE_KEY);
+    if (!raw) return {};
+    const cached = JSON.parse(raw) as GeoShockLocalSeed;
+    if (!cached?.payload || !hasRenderableGeoShockPayload(cached.payload)) return {};
+    if (Date.now() - Number(cached.storedAt || 0) > GEO_SHOCK_LOCAL_STALE_MS) return {};
+    return {
+      'geo-sanctions-shock': {
+        ...cached.payload,
+        cacheMode: 'local-stale',
+      },
+    };
+  } catch {
+    return {};
+  }
+}
+
+function writeGeoShockRuntimeSeed(payload?: RuntimeGeoSanctionsShockPayload | null) {
+  if (typeof window === 'undefined' || !hasRenderableGeoShockPayload(payload)) return;
+  try {
+    window.localStorage.setItem(GEO_SHOCK_STORAGE_KEY, JSON.stringify({ storedAt: Date.now(), payload }));
+  } catch {
+    // The remote seed remains authoritative; local storage is only a first-paint fallback.
+  }
 }
 
 function readSearchParam(key: string): string | null {
@@ -898,7 +937,7 @@ function WorldMonitorApp() {
   const [globalTrades, setGlobalTrades] = useState<TradeRow[]>([]);
   const [globalOracle, setGlobalOracle] = useState<OracleEvent[]>([]);
   const [latestContent, setLatestContent] = useState<ContentItem[]>([]);
-  const [runtimeData, setRuntimeData] = useState<PanelRuntimeData>({});
+  const [runtimeData, setRuntimeData] = useState<PanelRuntimeData>(() => readGeoShockRuntimeSeed());
   const [panelLoadingIds, setPanelLoadingIds] = useState<Set<string>>(() => new Set());
   const [marketQuery] = useState('');
   const [layerQuery, setLayerQuery] = useState('');
@@ -1124,6 +1163,10 @@ function WorldMonitorApp() {
     }
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }, [workspaceMode]);
+
+  useEffect(() => {
+    writeGeoShockRuntimeSeed(runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined);
+  }, [runtimeData]);
 
   useEffect(() => {
     bootstrapRef.current = bootstrap;
