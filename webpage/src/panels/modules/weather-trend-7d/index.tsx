@@ -32,7 +32,6 @@ function WeatherTrend7dPanel({
 
 const renderers: PanelRenderMap = {
   'weather-trend-7d': {
-    size: 'wide',
     render: (ctx) => (
       <WeatherTrend7dPanel
         payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined}

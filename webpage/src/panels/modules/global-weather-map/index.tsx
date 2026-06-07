@@ -194,7 +194,6 @@ function TemperatureMonitorPanel({
 
 const renderers: PanelRenderMap = {
   'global-temperature-monitor': {
-    size: 'wide',
     render: (ctx) => (
       <TemperatureMonitorPanel
         payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined}

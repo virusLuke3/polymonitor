@@ -36,19 +36,13 @@ function sevenDayPoints(city?: RuntimeGlobalWeatherCity | null): TrendPoint[] {
   const days = (city?.daily || [])
     .filter((point) => num(point.high) !== null || num(point.low) !== null)
     .slice(0, 7);
-  const points: TrendPoint[] = [];
-  for (const day of days) {
+  return days.map((day) => {
     const high = num(day.high) ?? num(day.low) ?? 0;
     const low = num(day.low) ?? high;
     const avg = (high + low) / 2;
     const label = String(day.date || '').slice(5) || '--';
-    points.push(
-      { label: '', avg: avg - (avg - low) * 0.55, high: low },
-      { label, avg, high },
-      { label: '', avg: avg - (avg - low) * 0.35, high: low + (high - low) * 0.18 },
-    );
-  }
-  return points;
+    return { label, avg, high };
+  });
 }
 
 function pathFor(values: number[], min: number, range: number, width = 260) {
@@ -87,7 +81,8 @@ function TrendChart({
   const labeledPoints = points
     .map((point, index) => ({ ...point, index }))
     .filter((point) => point.label);
-  const maxLabels = title.toLowerCase().includes('day') && points.length > 12 ? 5 : 6;
+  const isOneDay = title.toLowerCase().includes('1 day');
+  const maxLabels = isOneDay ? 5 : 7;
   const labelIndexes = new Set(
     labeledPoints
       .filter((_, index) => index === 0 || index === labeledPoints.length - 1 || index % Math.max(1, Math.ceil(labeledPoints.length / maxLabels)) === 0)
@@ -155,7 +150,6 @@ function WeatherTrendDetailPanel({
 
 const renderers: PanelRenderMap = {
   'weather-trend-detail': {
-    size: 'wide',
     render: (ctx) => (
       <WeatherTrendDetailPanel
         payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined}

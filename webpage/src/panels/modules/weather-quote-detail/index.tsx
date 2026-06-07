@@ -9,7 +9,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
   const hasQuote = values.some((value) => value !== null);
   const points = values.map((value, index) => {
     const x = 42 + (index / Math.max(1, bins.length - 1)) * 276;
-    const y = value === null ? null : 160 - Math.max(0, Math.min(1, value)) * 132;
+    const y = value === null ? null : 136 - Math.max(0, Math.min(1, value)) * 108;
     return { x, y, value };
   });
   const segments: string[][] = [];
@@ -23,14 +23,22 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
     current.push(`${point.x.toFixed(1)},${point.y.toFixed(1)}`);
   }
   if (current.length) segments.push(current);
-  const labelStep = Math.max(1, Math.ceil(bins.length / 5));
+  const labelStep = Math.max(1, Math.ceil(bins.length / 4));
   const labelIndexes = bins
     .map((_, index) => index)
     .filter((index) => index === 0 || index === bins.length - 1 || index % labelStep === 0);
   const compactLabel = (label?: string | null) => {
     const value = String(label || '').replace(/\s+/g, ' ').trim();
-    if (value.length <= 22) return value;
-    return `${value.slice(0, 20)}...`;
+    const range = value.match(/between\s+(\d+)[^\d]+(\d+)/i);
+    if (range) return `${range[1]}-${range[2]}°`;
+    const below = value.match(/(\d+)\s*°?[CF]?\s*or below/i);
+    if (below) return `<=${below[1]}°`;
+    const above = value.match(/(\d+)\s*°?[CF]?\s*or higher/i);
+    if (above) return `>=${above[1]}°`;
+    const firstNumber = value.match(/(\d+)\s*°?[CF]?/);
+    if (firstNumber) return `${firstNumber[1]}°`;
+    if (value.length <= 12) return value;
+    return `${value.slice(0, 10)}...`;
   };
   return (
     <div className="wm-weather-quote-curve-panel">
@@ -38,9 +46,9 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
         <strong>{cityName || 'Selected city'} Mid Price Curve</strong>
         <span>YES Mid %</span>
       </div>
-      <svg className="wm-weather-quote-curve-large" viewBox="0 0 340 220" aria-hidden="true">
+      <svg className="wm-weather-quote-curve-large" viewBox="0 0 340 188" aria-hidden="true">
         {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
-          const y = 160 - tick * 132;
+          const y = 136 - tick * 108;
           return (
             <g key={`y-${tick}`}>
               <line x1="42" y1={y} x2="318" y2={y} />
@@ -48,21 +56,21 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
             </g>
           );
         })}
-        <line x1="42" y1="28" x2="42" y2="160" />
-        <line x1="42" y1="160" x2="318" y2="160" />
+        <line x1="42" y1="28" x2="42" y2="136" />
+        <line x1="42" y1="136" x2="318" y2="136" />
         {segments.map((segment, index) => (
           <polyline key={`quote-segment-${index}`} points={segment.join(' ')} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
         ))}
         {points.map((point, index) => point.y === null ? null : (
           <g key={`quote-dot-${index}`}>
             <circle cx={point.x} cy={point.y} r={point.value && point.value >= 0.99 ? 4.2 : 3.2} />
-            {point.value && point.value >= 0.99 ? <text x={point.x + 6} y={point.y + 15}>{priceLabel(point.value)}</text> : null}
+            {point.value && point.value >= 0.99 && (index === 0 || index === points.length - 1) ? <text x={point.x + 6} y={point.y + 15}>{priceLabel(point.value)}</text> : null}
           </g>
         ))}
         {labelIndexes.map((index) => {
           const x = 42 + (index / Math.max(1, bins.length - 1)) * 276;
           return (
-            <text className="wm-weather-quote-x-label" key={`x-${index}`} x={x} y="196" textAnchor="end" transform={`rotate(-44 ${x} 196)`}>
+            <text className="wm-weather-quote-x-label" key={`x-${index}`} x={x} y="166" textAnchor="middle">
               {compactLabel(bins[index]?.label)}
             </text>
           );
@@ -109,7 +117,6 @@ function WeatherQuoteDetailPanel({
 
 const renderers: PanelRenderMap = {
   'weather-quote-detail': {
-    size: 'wide',
     render: (ctx) => (
       <WeatherQuoteDetailPanel
         payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined}

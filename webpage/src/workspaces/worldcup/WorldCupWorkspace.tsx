@@ -55,7 +55,7 @@ type WorldCupSignalItem = {
 };
 
 const WORLD_CUP_DASHBOARD_CLASS = 'wm-dashboard wm-worldcup-dashboard wm-worldcup-v5';
-const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v5';
+const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v6';
 const WORLD_CUP_PANEL_DRAG_THRESHOLD = 5;
 const WORLD_CUP_PANEL_ORDER: WorldCupPanelId[] = [
   'calendar',

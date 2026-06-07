@@ -125,7 +125,6 @@ function WeatherMarketBrowserPanel({
 
 const renderers: PanelRenderMap = {
   'weather-market-browser': {
-    size: 'wide',
     render: (ctx) => (
       <WeatherMarketBrowserPanel
         payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined}

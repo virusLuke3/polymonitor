@@ -112,7 +112,6 @@ function WeatherQuoteTablePanel({
 
 const renderers: PanelRenderMap = {
   'weather-quote-table': {
-    size: 'wide',
     render: (ctx) => (
       <WeatherQuoteTablePanel
         payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined}
