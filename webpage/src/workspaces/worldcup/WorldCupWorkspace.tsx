@@ -2074,7 +2074,7 @@ function SourceAuditPanel({
   );
 }
 
-export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCupWorkspaceProps) {
+export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPayload }: WorldCupWorkspaceProps) {
   const { payload, loading, error } = useWorldCupDashboard(marketGroups);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
@@ -2134,6 +2134,14 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   const selectedCity = matchCity(payload.cities, selectedCityId || selectedMatch?.cityId || nextMatch?.cityId || payload.cities[0]?.id || '');
   const selectedWeather = payload.weather.find((item) => item.cityId === selectedCity.id) || null;
   const nextCity = nextMatch ? matchCity(payload.cities, nextMatch.cityId) : null;
+  const geoConflictEvents = useMemo(
+    () => (geoShockPayload?.items || []).filter((item) => {
+      const lat = Number(item.latitude);
+      const lon = Number(item.longitude);
+      return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+    }),
+    [geoShockPayload],
+  );
   const linkedMarketCount = payload.matches.filter((match) => match.marketLinked).length + selectedMarkets.length;
   const selectedCityMatchCount = Math.max(
     WORLD_CUP_HOST_MATCH_COUNTS[selectedCity.id] || 0,
@@ -2275,6 +2283,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
           marketGroups={marketGroups}
           odds={payload.odds}
           rosters={payload.rosters}
+          conflicts={geoConflictEvents}
           nextMatch={nextMatch}
           selectedCityId={selectedCityId}
           selectedMatchId={selectedMatch?.id || null}

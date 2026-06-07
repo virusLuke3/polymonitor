@@ -1,4 +1,4 @@
-import type { ContentItem, MarketGroupItem, RuntimeGlobalWeatherMapPayload } from '@/types';
+import type { ContentItem, MarketGroupItem, RuntimeGeoSanctionsShockPayload, RuntimeGlobalWeatherMapPayload } from '@/types';
 
 export type WorldCupStage =
   | 'group'
@@ -176,4 +176,5 @@ export type WorldCupWorkspaceProps = {
   marketGroups: MarketGroupItem[];
   latestContent: ContentItem[];
   weatherPayload?: RuntimeGlobalWeatherMapPayload | null;
+  geoShockPayload?: RuntimeGeoSanctionsShockPayload | null;
 };

@@ -1959,6 +1959,7 @@ function WorldMonitorApp() {
           marketGroups={marketGroups}
           latestContent={currentLatestContent}
           weatherPayload={(runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined) || null}
+          geoShockPayload={(runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined) || null}
         />
       ) : (
       <main className="wm-dashboard">

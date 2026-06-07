@@ -6,7 +6,7 @@ import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import { feature } from 'topojson-client';
 import countriesAtlas from 'world-atlas/countries-50m.json';
 import { OPENFREEMAP_DARK_STYLE } from '@/config/weatherBasemap';
-import type { MarketGroupItem } from '@/types';
+import type { MarketGroupItem, RuntimeGeoSanctionsShockItem } from '@/types';
 import { matchPolymarketMarkets, WORLD_CUP_HOST_MATCH_COUNTS } from './data';
 import type {
   WorldCupCityWeather,
@@ -23,6 +23,7 @@ type WorldCupMapProps = {
   marketGroups: MarketGroupItem[];
   odds: WorldCupOddsSnapshot[];
   rosters: WorldCupTeamRoster[];
+  conflicts: RuntimeGeoSanctionsShockItem[];
   nextMatch: WorldCupMatch | null;
   selectedCityId: string | null;
   selectedMatchId: string | null;
@@ -30,7 +31,7 @@ type WorldCupMapProps = {
 };
 
 type HostCountryKey = 'us' | 'canada' | 'mexico';
-type WorldCupLayerKey = 'cities' | 'schedule' | 'weather' | 'markets' | 'odds' | 'transit' | 'teams';
+type WorldCupLayerKey = 'cities' | 'schedule' | 'weather' | 'markets' | 'odds' | 'transit' | 'teams' | 'conflicts';
 type WorldCupMapMode = 'schedule' | 'weather' | 'market' | 'travel' | 'risk';
 type WorldCupTimeFilter = 'now' | '24h' | '7d' | 'group' | 'knockout' | 'all';
 type WorldCupDetailTab = 'matches' | 'weather' | 'markets' | 'venue' | 'teams';
@@ -68,6 +69,20 @@ type PointSignal = {
   weight: number;
 };
 
+type ConflictSignal = {
+  type: 'conflict';
+  id: string;
+  lon: number;
+  lat: number;
+  country: string;
+  label: string;
+  sublabel: string;
+  deaths: number;
+  violenceType: string;
+  color: [number, number, number, number];
+  ringColor: [number, number, number, number];
+};
+
 type SchedulePath = {
   type: 'schedule';
   id: string;
@@ -78,7 +93,7 @@ type SchedulePath = {
   next: boolean;
 };
 
-type DeckObject = CitySignal | PointSignal | SchedulePath;
+type DeckObject = CitySignal | PointSignal | SchedulePath | ConflictSignal;
 
 type EnabledLayers = Record<WorldCupLayerKey, boolean>;
 
@@ -127,14 +142,15 @@ const DEFAULT_ENABLED_LAYERS: EnabledLayers = {
   odds: false,
   transit: false,
   teams: false,
+  conflicts: true,
 };
 
 const MODE_LAYER_PRESETS: Record<WorldCupMapMode, EnabledLayers> = {
-  schedule: { cities: true, schedule: true, weather: false, markets: false, odds: false, transit: false, teams: false },
-  weather: { cities: true, schedule: false, weather: true, markets: false, odds: false, transit: false, teams: false },
-  market: { cities: true, schedule: false, weather: false, markets: true, odds: true, transit: false, teams: false },
-  travel: { cities: true, schedule: false, weather: false, markets: false, odds: false, transit: true, teams: true },
-  risk: { cities: true, schedule: true, weather: true, markets: true, odds: false, transit: true, teams: false },
+  schedule: { cities: true, schedule: true, weather: false, markets: false, odds: false, transit: false, teams: false, conflicts: true },
+  weather: { cities: true, schedule: false, weather: true, markets: false, odds: false, transit: false, teams: false, conflicts: true },
+  market: { cities: true, schedule: false, weather: false, markets: true, odds: true, transit: false, teams: false, conflicts: true },
+  travel: { cities: true, schedule: false, weather: false, markets: false, odds: false, transit: true, teams: true, conflicts: true },
+  risk: { cities: true, schedule: true, weather: true, markets: true, odds: false, transit: true, teams: false, conflicts: true },
 };
 
 const COLORS = {
@@ -151,6 +167,9 @@ const COLORS = {
   transit: [155, 164, 166, 112] as [number, number, number, number],
   team: [48, 218, 186, 98] as [number, number, number, number],
   route: [242, 184, 75, 72] as [number, number, number, number],
+  conflictState: [255, 74, 74, 176] as [number, number, number, number],
+  conflictNonState: [255, 159, 28, 168] as [number, number, number, number],
+  conflictOneSided: [255, 214, 0, 156] as [number, number, number, number],
 };
 
 function firstSymbolLayerId(map: MapLibreMap) {
@@ -467,6 +486,12 @@ function escapeHtml(value: unknown) {
   }[char] || char));
 }
 
+function numberValue(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function weatherRiskScore(weather: WorldCupCityWeather | null) {
   if (!weather) return 0;
   const precip = weather.current.precipitationProbability || 0;
@@ -739,6 +764,39 @@ function buildDeckSignals(citySignals: CitySignal[], matches: WorldCupMatch[]) {
   return { schedulePaths, weather, markets, odds, transit, teams };
 }
 
+function conflictColor(item: RuntimeGeoSanctionsShockItem): [number, number, number, number] {
+  const type = String(item.violenceType || '').trim();
+  if (type === '1') return COLORS.conflictState;
+  if (type === '2') return COLORS.conflictNonState;
+  if (type === '3') return COLORS.conflictOneSided;
+  return String(item.severity || '').toLowerCase() === 'critical' ? COLORS.conflictState : COLORS.conflictNonState;
+}
+
+function buildConflictSignals(items: RuntimeGeoSanctionsShockItem[]): ConflictSignal[] {
+  return items.slice(0, 1200).flatMap((item, index): ConflictSignal[] => {
+    const lat = numberValue(item.latitude);
+    const lon = numberValue(item.longitude);
+    if (lat == null || lon == null || lat < -90 || lat > 90 || lon < -180 || lon > 180) return [];
+    const deaths = Math.max(0, numberValue(item.deathsBest) ?? 0);
+    const country = String(item.country || item.locationLabel || 'UCDP');
+    const actors = [item.sideA, item.sideB].filter(Boolean).join(' vs ');
+    const color = conflictColor(item);
+    return [{
+      type: 'conflict',
+      id: String(item.id || `ucdp-${index}`),
+      lon,
+      lat,
+      country,
+      label: country,
+      sublabel: `${deaths} deaths${actors ? ` · ${actors}` : ''}`,
+      deaths,
+      violenceType: String(item.violenceType || ''),
+      color,
+      ringColor: [color[0], color[1], color[2], 48],
+    }];
+  });
+}
+
 function getActiveSignal(citySignals: CitySignal[], selectedCityId: string | null, selectedMatchId: string | null, matches: WorldCupMatch[], nextMatch: WorldCupMatch | null) {
   const selectedMatch = matches.find((match) => match.id === selectedMatchId) || null;
   return citySignals.find((signal) => signal.city.id === selectedCityId)
@@ -775,11 +833,41 @@ function selectedCountryCode(
 function buildDeckLayers(
   citySignals: CitySignal[],
   signals: ReturnType<typeof buildDeckSignals>,
+  conflicts: ConflictSignal[],
   enabledLayers: EnabledLayers,
   zoom: number,
 ) {
   const layers = [];
   const showDenseLabels = zoom >= 2.85;
+
+  if (enabledLayers.conflicts) {
+    layers.push(new ScatterplotLayer<ConflictSignal>({
+      id: 'wc-ucdp-conflict-ring-layer',
+      data: conflicts.filter((signal) => signal.deaths >= 20).slice(0, 320),
+      getPosition: (d) => [d.lon, d.lat],
+      getRadius: (d) => 17000 + Math.min(120000, Math.log10(d.deaths + 1) * 31000),
+      getFillColor: (d) => d.ringColor,
+      getLineColor: (d) => d.color,
+      radiusMinPixels: 8,
+      radiusMaxPixels: 34,
+      lineWidthMinPixels: 1,
+      stroked: true,
+      pickable: false,
+    }));
+    layers.push(new ScatterplotLayer<ConflictSignal>({
+      id: 'wc-ucdp-conflict-layer',
+      data: conflicts,
+      getPosition: (d) => [d.lon, d.lat],
+      getRadius: (d) => 6000 + Math.min(64000, Math.log10(d.deaths + 1) * 15000),
+      getFillColor: (d) => d.color,
+      getLineColor: [255, 245, 190, 214],
+      radiusMinPixels: 3,
+      radiusMaxPixels: 18,
+      lineWidthMinPixels: 0.75,
+      stroked: true,
+      pickable: true,
+    }));
+  }
 
   if (enabledLayers.schedule) {
     layers.push(new PathLayer<SchedulePath>({
@@ -953,6 +1041,11 @@ function getDeckTooltip(info: PickingInfo<DeckObject>) {
       html: `<div class="deckgl-tooltip"><strong>${escapeHtml(matchTitle(obj.match))}</strong><br/>${escapeHtml(obj.city.city)} · ${escapeHtml(shortKickoff(obj.match))}</div>`,
     };
   }
+  if (obj.type === 'conflict') {
+    return {
+      html: `<div class="deckgl-tooltip"><strong>${escapeHtml(obj.label)}</strong><br/>${escapeHtml(obj.sublabel)}<br/>UCDP event</div>`,
+    };
+  }
   return {
     html: `<div class="deckgl-tooltip"><strong>${escapeHtml(obj.label)}</strong><br/>${escapeHtml(obj.city.city)} · ${escapeHtml(obj.sublabel)}</div>`,
   };
@@ -1012,6 +1105,7 @@ function LayerPanel({
     {
       title: 'Risk',
       rows: [
+        { key: 'conflicts', icon: '!', label: 'UCDP Conflicts', status: 'Live', tone: 'risk' },
         { key: 'weather', icon: '🌦️', label: 'Weather Risk', status: 'Forecast', tone: 'weather' },
         { key: 'transit', icon: '✈️', label: 'Airport / Transit', status: 'Ops', tone: 'ops' },
         { key: 'teams', icon: '🏨', label: 'Team Bases', status: 'Squads', tone: 'core' },
@@ -1106,6 +1200,7 @@ export function WorldCupMap({
   marketGroups,
   odds,
   rosters,
+  conflicts,
   nextMatch,
   selectedCityId,
   selectedMatchId,
@@ -1119,7 +1214,7 @@ export function WorldCupMap({
   const styleTimeoutRef = useRef<number | null>(null);
   const explicitSelectedCityRef = useRef<string | null>(null);
   const fallbackAppliedRef = useRef(false);
-  const dataRef = useRef({ cities, matches, weather, nextMatch, selectedCityId, selectedMatchId });
+  const dataRef = useRef({ cities, matches, weather, conflicts, nextMatch, selectedCityId, selectedMatchId });
   const enabledLayersRef = useRef(DEFAULT_ENABLED_LAYERS);
   const timeFilterRef = useRef<WorldCupTimeFilter>('all');
   const [enabledLayers, setEnabledLayers] = useState<EnabledLayers>(DEFAULT_ENABLED_LAYERS);
@@ -1171,8 +1266,8 @@ export function WorldCupMap({
   const mapSummary = useMemo(() => {
     const enabledCount = Object.values(enabledLayers).filter(Boolean).length;
     const visibleMatches = timeFilter === 'all' ? matches.length : filteredMatches.length;
-    return `Showing ${visibleCitySignals.length} cities · ${visibleMatches} matches · ${enabledCount} layers · ${timeFilter.toUpperCase()}`;
-  }, [cities, enabledLayers, filteredMatches.length, matches.length, timeFilter, visibleCitySignals.length]);
+    return `Showing ${visibleCitySignals.length} cities · ${visibleMatches} matches · ${conflicts.length} conflicts · ${enabledCount} layers · ${timeFilter.toUpperCase()}`;
+  }, [conflicts.length, enabledLayers, filteredMatches.length, matches.length, timeFilter, visibleCitySignals.length]);
 
   const updateDeckLayers = () => {
     const map = mapRef.current;
@@ -1195,6 +1290,7 @@ export function WorldCupMap({
       layers: buildDeckLayers(
         currentVisibleCitySignals,
         buildDeckSignals(currentVisibleCitySignals, currentFilteredMatches),
+        buildConflictSignals(current.conflicts),
         enabledLayersRef.current,
         map.getZoom(),
       ),
@@ -1293,7 +1389,7 @@ export function WorldCupMap({
   };
 
   useEffect(() => {
-    dataRef.current = { cities, matches, weather, nextMatch, selectedCityId, selectedMatchId };
+    dataRef.current = { cities, matches, weather, conflicts, nextMatch, selectedCityId, selectedMatchId };
     updateDeckLayers();
     const signal = getActiveSignal(
       buildCitySignals(cities, matches, weatherByCity, nextMatch, selectedMatchId, explicitSelectedCityRef.current),
@@ -1303,7 +1399,7 @@ export function WorldCupMap({
       nextMatch,
     );
     highlightCountry(signal ? selectedCountryCode(cities, matches, selectedCityId, selectedMatchId, nextMatch, explicitSelectedCityRef.current) : null);
-  }, [cities, matches, weather, nextMatch, selectedCityId, selectedMatchId, weatherByCity]);
+  }, [cities, conflicts, matches, weather, nextMatch, selectedCityId, selectedMatchId, weatherByCity]);
 
   useEffect(() => {
     const host = mapHostRef.current;
@@ -1346,6 +1442,7 @@ export function WorldCupMap({
         getTooltip: (info: PickingInfo<DeckObject>) => getDeckTooltip(info),
         onClick: (info: PickingInfo<DeckObject>) => {
           const object = info.object;
+          if (!object || object.type === 'conflict') return;
           const city = object?.type === 'host-city' ? object.city : object?.city;
           if (!city) return;
           explicitSelectedCityRef.current = city.id;
