@@ -4,7 +4,6 @@ import { fetchRuntimeGeoSanctionsShock } from '@/services/api';
 import type { RuntimeGeoSanctionsShockPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { PanelGlyph, SourceStack, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -70,26 +69,19 @@ function formatAge(value?: string | null) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function geoSignalLabel(payload?: RuntimeGeoSanctionsShockPayload | null) {
-  const summary = payload?.summary;
-  const nuclear = String(summary?.nuclearRisk || '').toLowerCase();
-  if (nuclear === 'critical' || nuclear === 'elevated') return `NUCLEAR RISK ${upperMetric(nuclear)}`;
-  if ((summary?.newSanctionsCount ?? 0) > 0) return 'SANCTIONS ACTIVE';
-  if ((summary?.hotspotCount ?? 0) > 0) return 'HOTSPOTS WATCH';
-  return 'GEO QUIET';
-}
-
-function geoSignalTone(payload?: RuntimeGeoSanctionsShockPayload | null) {
-  const signal = geoSignalLabel(payload);
-  if (/CRITICAL|ELEVATED|ACTIVE/.test(signal)) return signalToneClass('alert high');
-  if (/WATCH/.test(signal)) return signalToneClass('watch');
-  return signalToneClass('quiet');
-}
-
 function sourceCoverage(payload?: RuntimeGeoSanctionsShockPayload | null) {
   const sources = Object.values(payload?.sources || {});
   const live = sources.filter((state) => /^(ok|redis-seed|sqlite-seed|stale-seed|seeded)$/i.test(String(state || ''))).length;
   return `${live}/${sources.length || 0}`;
+}
+
+function GeoMetric({ label, value, tone }: { label: string; value?: string | number | null; tone?: string }) {
+  return (
+    <span className={tone ? `wm-geo-data-metric ${tone}` : 'wm-geo-data-metric'}>
+      <i>{label}</i>
+      <strong>{String(value ?? '--') || '--'}</strong>
+    </span>
+  );
 }
 
 function GeoShockPanel({ payload }: {
@@ -98,7 +90,7 @@ function GeoShockPanel({ payload }: {
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
-  const signal = geoSignalLabel(payload);
+  const targetSummary = upperMetric(summary?.targetSummary || summary?.targetLabels?.[0] || '--');
 
   return (
     <Panel
@@ -127,36 +119,16 @@ function GeoShockPanel({ payload }: {
       dataPanelId="geo-sanctions-shock"
     >
       <div className="wm-geo-shock-layout">
-        <div className={`wm-intel-signal-band ${geoSignalTone(payload)}`}>
-          <div className="wm-intel-signal-main">
-            <PanelGlyph icon="geo" tone={geoSignalTone(payload)} />
-            <div className="wm-intel-signal-copy">
-              <span>World shock driver</span>
-              <strong>{signal}</strong>
-            </div>
-          </div>
-          <em>{`${summary?.newSanctionsCount ?? 0} sanctions / ${summary?.hotspotCount ?? 0} hotspots`}</em>
+        <div className="wm-geo-shock-data-strip" aria-label="GEO sanctions shock data summary">
+          <GeoMetric label="Sanctions" value={summary?.newSanctionsCount ?? 0} tone={(summary?.newSanctionsCount ?? 0) ? 'hot' : undefined} />
+          <GeoMetric label="Hotspots" value={summary?.hotspotCount ?? 0} tone={(summary?.hotspotCount ?? 0) ? 'watch' : undefined} />
+          <GeoMetric label="Nuclear" value={upperMetric(summary?.nuclearRisk || 'guarded')} tone={String(summary?.nuclearRisk || '').toLowerCase() === 'elevated' ? 'hot' : undefined} />
+          <GeoMetric label="Sources" value={sourceCoverage(payload)} />
+          <GeoMetric label="Targets" value={targetSummary} />
+          <GeoMetric label="Rows" value={items.length} />
         </div>
-        <div className="wm-geo-shock-scanbar">
-          <div>
-            <span>TARGETS</span>
-            <strong>{upperMetric(summary?.targetSummary || summary?.targetLabels?.[0] || 'MONITORING')}</strong>
-          </div>
-          <div>
-            <span>NUCLEAR</span>
-            <strong>{upperMetric(summary?.nuclearRisk || 'guarded')}</strong>
-          </div>
-          <div>
-            <span>SOURCES</span>
-            <strong>{sourceCoverage(payload)}</strong>
-          </div>
-        </div>
-        <SourceStack sources={payload?.sources} labels={{ ofacSdn: 'OFAC', ofacConsolidated: 'OFAC-C', federalRegister: 'FEDREG', conflictFeed: payload?.conflictProvider || 'CONFLICT' }} />
 
         <section className="wm-geo-shock-section compact">
-          <header className="wm-geo-shock-section-header">
-            <span>LATEST SHOCKS</span>
-          </header>
           <div className="wm-geo-shock-feed">
             {items.length ? items.slice(0, 6).map((item) => {
               const sevClass = severityClass(item.severity);

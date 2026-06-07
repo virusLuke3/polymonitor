@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeMacroRegistryItem, RuntimeMacroRegistryPayload } from '@/types';
-import { MacroAlertStrip, PanelGlyph, RowGlyph, SourceStack, StatusBadge, signalToneClass } from './macro-intel';
+import { RowGlyph, StatusBadge, signalToneClass } from './macro-intel';
 import type { PanelGlyphName } from './macro-intel';
 
 export type MacroRegistryConfig = {
@@ -51,6 +51,15 @@ function displayValue(value?: number | string | null) {
   return text || '--';
 }
 
+function DataMetric({ label, value, tone }: { label: string; value?: number | string | null; tone?: string }) {
+  return (
+    <span className={tone ? `wm-macro-data-metric ${tone}` : 'wm-macro-data-metric'}>
+      <i>{label}</i>
+      <strong>{displayValue(value)}</strong>
+    </span>
+  );
+}
+
 function RegistryRow({ item }: { item: RuntimeMacroRegistryItem }) {
   const tone = rowTone(item);
   const meta = String(item.group || item.domainTag || item.type || 'macro').toUpperCase();
@@ -66,9 +75,9 @@ function RegistryRow({ item }: { item: RuntimeMacroRegistryItem }) {
           <span>{meta}</span>
           <span className="wm-macro-registry-source">{source}</span>
           <span className={`wm-macro-registry-tag ${tone}`}>{domain}</span>
+          {item.ageLabel ? <span className="wm-macro-registry-age">{item.ageLabel}</span> : null}
         </div>
         <strong>{item.label || 'Macro registry row'}</strong>
-        <em>{item.implication || item.type || 'macro signal'}</em>
       </div>
       <div className="wm-macro-registry-right">
         <strong className="wm-macro-registry-value">{displayValue(item.valueLabel || item.value)}</strong>
@@ -112,32 +121,16 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
       className="wm-market-panel wm-macro-registry-panel"
       dataPanelId={config.panelId}
     >
-      <div className={`wm-intel-signal-band ${tone}`}>
-        <div className="wm-intel-signal-main">
-          <PanelGlyph icon={config.glyph} tone={tone} />
-          <div className="wm-intel-signal-copy">
-            <span>{summary?.signalLabel || 'CPI macro registry'}</span>
-            <strong>{summary?.signal || config.emptyTitle}</strong>
-          </div>
-        </div>
-        <em>{config.badge}</em>
+      <div className="wm-macro-registry-data-strip" aria-label={`${config.title} data summary`}>
+        <DataMetric label="Top" value={topMover?.label || summary?.topLabel || '--'} />
+        <DataMetric label="Value" value={topMover?.valueLabel || topMover?.value || summary?.topValueLabel || '--'} />
+        <DataMetric label="Move" value={topMover?.changeLabel || summary?.topChangeLabel || '--'} tone={tone} />
+        <DataMetric label="Sources" value={`${compactNumber(summary?.coverage)}/${compactNumber(summary?.sourceCount)}`} />
+        <DataMetric label="Alert" value={summary?.hotCount ?? 0} tone="hot" />
+        <DataMetric label="Cool" value={summary?.coolCount ?? 0} tone="cool" />
+        <DataMetric label="Watch" value={summary?.watchCount ?? 0} tone="watch" />
+        <DataMetric label="Rows" value={summary?.rowCount ?? items.length} />
       </div>
-      <div className="wm-macro-registry-scanbar" aria-label={`${config.title} source and coverage summary`}>
-        <div>
-          <span>TOP MOVE</span>
-          <strong>{topMover?.label || summary?.topLabel || '--'}</strong>
-        </div>
-        <div>
-          <span>MOVE</span>
-          <strong>{topMover?.changeLabel || summary?.topChangeLabel || '--'}</strong>
-        </div>
-        <div>
-          <span>SOURCES</span>
-          <strong>{compactNumber(summary?.coverage)}/{compactNumber(summary?.sourceCount)}</strong>
-        </div>
-      </div>
-      <MacroAlertStrip hot={summary?.hotCount} cool={summary?.coolCount} watch={summary?.watchCount} />
-      <SourceStack sources={payload?.sources} />
       <div className="wm-macro-registry-list">
         {items.length ? items.map((item) => <RegistryRow key={item.key || `${item.group}-${item.label}`} item={item} />) : (
           <div className="wm-empty-state">

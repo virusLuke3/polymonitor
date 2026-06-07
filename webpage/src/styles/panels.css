@@ -10630,7 +10630,87 @@ a.wm-orderfilled-row {
 
 .wm-geo-shock-layout {
   display: grid;
-  gap: 8px;
+  gap: 7px;
+}
+
+.wm-geo-shock-data-strip,
+.wm-macro-registry-data-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.wm-macro-registry-data-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.wm-geo-data-metric,
+.wm-macro-data-metric {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid #252a2d;
+  background: rgba(255, 255, 255, 0.018);
+  display: grid;
+  gap: 3px;
+}
+
+.wm-geo-data-metric i,
+.wm-macro-data-metric i {
+  min-width: 0;
+  color: #7f8682;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  line-height: 1.05;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-geo-data-metric strong,
+.wm-macro-data-metric strong {
+  min-width: 0;
+  color: #f1f4f1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.12;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-geo-data-metric.hot,
+.wm-macro-data-metric.hot {
+  border-color: rgba(255, 59, 59, 0.42);
+}
+
+.wm-geo-data-metric.hot strong,
+.wm-macro-data-metric.hot strong {
+  color: #ff6f6f;
+}
+
+.wm-geo-data-metric.cool,
+.wm-macro-data-metric.cool {
+  border-color: rgba(91, 207, 161, 0.4);
+}
+
+.wm-geo-data-metric.cool strong,
+.wm-macro-data-metric.cool strong {
+  color: #6ce3a7;
+}
+
+.wm-geo-data-metric.watch,
+.wm-macro-data-metric.watch {
+  border-color: rgba(255, 159, 0, 0.42);
+}
+
+.wm-geo-data-metric.watch strong,
+.wm-macro-data-metric.watch strong {
+  color: #ffbd4a;
 }
 
 .wm-geo-shock-scanbar,
@@ -10774,7 +10854,7 @@ a.wm-orderfilled-row {
   align-items: start;
   gap: 5px;
   min-width: 0;
-  padding: 9px 0 10px;
+  padding: 7px 0 8px;
   border: 0;
   border-bottom: 1px solid #252525;
   border-left: 2px solid transparent;
@@ -10868,9 +10948,13 @@ a.wm-orderfilled-row {
 .wm-geo-shock-headline {
   color: #f2f4f2;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
-  line-height: 1.38;
+  line-height: 1.32;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .wm-geo-shock-summary {
@@ -14223,7 +14307,7 @@ a.wm-orderfilled-row {
 }
 
 .wm-macro-registry-row {
-  grid-template-columns: 4px minmax(0, 1fr) minmax(72px, auto);
+  grid-template-columns: 4px minmax(0, 1fr) minmax(76px, auto);
   grid-template-areas:
     "marker main right";
   column-gap: 8px;
@@ -14291,6 +14375,7 @@ a.wm-orderfilled-row {
 
 .wm-macro-registry-main {
   grid-area: main;
+  gap: 2px;
 }
 
 .wm-macro-registry-meta {
@@ -14340,6 +14425,11 @@ a.wm-orderfilled-row {
   color: #9aa09b !important;
 }
 
+.wm-macro-registry-age {
+  margin-left: auto;
+  color: #6f7672 !important;
+}
+
 .wm-macro-registry-tag {
   padding: 2px 6px;
   border: 1px solid #2d3336;
@@ -14382,6 +14472,14 @@ a.wm-orderfilled-row {
   white-space: nowrap;
 }
 
+.wm-macro-registry-main strong {
+  line-height: 1.25;
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
 .wm-macro-driver-value {
   justify-self: end;
   font-size: 13px;
@@ -14392,7 +14490,7 @@ a.wm-orderfilled-row {
   min-width: 0;
   display: grid;
   justify-items: end;
-  gap: 4px;
+  gap: 3px;
 }
 
 .wm-macro-registry-value {
@@ -14409,6 +14507,7 @@ a.wm-orderfilled-row {
 .wm-macro-registry-row .wm-status-badge {
   min-width: 0;
   width: auto;
+  max-width: 72px;
 }
 
 .wm-macro-driver-top {
