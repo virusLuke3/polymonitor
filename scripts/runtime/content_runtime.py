@@ -520,7 +520,8 @@ class RuntimeContentProvider:
         eligible = [(score, item) for score, item in scored if score >= 20 or self._item_matches_topic(item, topic)]
         if not eligible:
             return []
-        type_quota = min(max(4, int(limit) // 8), 10)
+        news_quota = min(max(4, int(limit) // 3), max(1, int(limit)))
+        type_quota = min(max(3, int(limit) // 8), 10)
         selected: List[RuntimeContentItem] = []
         seen: set[str] = set()
 
@@ -531,6 +532,12 @@ class RuntimeContentProvider:
             selected.append(item)
             seen.add(key)
 
+        for _, item in eligible:
+            if item.content_type != "news":
+                continue
+            add_item(item)
+            if sum(1 for selected_item in selected if selected_item.content_type == "news") >= news_quota:
+                break
         for content_type in ("video", "report", "research"):
             count = 0
             for _, item in eligible:
@@ -1008,7 +1015,7 @@ class RuntimeContentProvider:
             return "video"
         if re.search(r"\.pdf($|[?#])|annual-report|whitepaper|policy-paper|research-report|special-report|outlook|briefing|forecast|preview|injury report", text):
             return "report"
-        if re.search(r"arxiv\.org|ssrn\.com|nber\.org|working paper|journal|research paper|study|analysis model", text):
+        if re.search(r"arxiv\.org|ssrn\.com|nber\.org|working paper|journal|research paper", text):
             return "research"
         return "news"
 

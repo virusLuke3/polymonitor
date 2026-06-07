@@ -915,7 +915,7 @@ def _merge_content_payloads(primary: List[Dict[str, Any]], fallback: List[Dict[s
     return merged
 
 
-_RELATED_TAB_CONTENT_TYPES = ("video", "report", "research")
+_RELATED_TAB_CONTENT_TYPES = ("news", "video", "report", "research")
 _RELATED_TAB_TARGET_COUNT = 6
 
 
@@ -995,7 +995,7 @@ def _augment_related_content_tabs(
         content_type: sum(1 for row in rows if str(row.get("content_type") or "").strip().lower() == content_type)
         for content_type in _RELATED_TAB_CONTENT_TYPES
     }
-    target_count = min(_RELATED_TAB_TARGET_COUNT, max(4, limit // 2))
+    target_count = min(_RELATED_TAB_TARGET_COUNT, max(2, limit // max(1, len(_RELATED_TAB_CONTENT_TYPES))))
     needed_by_type = {
         content_type: max(0, target_count - existing_count)
         for content_type, existing_count in existing_by_type.items()

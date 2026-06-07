@@ -32,7 +32,7 @@ function inferContentType(item: ContentItem) {
   const haystack = `${item.title || ''} ${item.source || ''} ${item.url || ''}`.toLowerCase();
   if (/youtube|youtu\.be|vimeo|video|livestream|stream/.test(haystack)) return 'video';
   if (/report|brief|dossier|outlook|filing/.test(haystack)) return 'report';
-  if (/research|analysis|paper|study|forecast/.test(haystack)) return 'research';
+  if (/arxiv\.org|ssrn\.com|nber\.org|working paper|research paper|journal/.test(haystack)) return 'research';
   return 'news';
 }
 
