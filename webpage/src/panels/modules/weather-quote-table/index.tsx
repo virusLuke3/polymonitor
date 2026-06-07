@@ -8,6 +8,7 @@ import {
   bookCoverage,
   bookPrice,
   displayQuoteBins,
+  marketSourceLabel,
   midCoverage,
   num,
   panelStatus,
@@ -85,6 +86,7 @@ function WeatherQuoteTablePanel({
           <div className="wm-weather-quote-meta">
             <span><i>Book</i><strong>{bookCoverage(city)}</strong></span>
             <span><i>Mid/Last</i><strong>{midCoverage(city)}</strong></span>
+            <span><i>Market</i><strong>{marketSourceLabel(city)}</strong></span>
             <span><i>Bid</i><strong>{priceLabel(topBin?.bestBidYes)}</strong></span>
             <span><i>Ask</i><strong>{priceLabel(topBin?.bestAskYes)}</strong></span>
           </div>

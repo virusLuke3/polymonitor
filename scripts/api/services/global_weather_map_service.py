@@ -744,6 +744,7 @@ def _normalize_temperature_event(ctx: dict, event: Dict[str, Any], city: Dict[st
     return {
         "eventSlug": slug,
         "eventTitle": event_title,
+        "marketSource": "gamma-api",
         "eventStatus": "live" if event.get("active") is not False and event.get("closed") is not True else "inactive",
         "marketUrl": f"https://polymarket.com/event/{slug}" if slug else None,
         "quoteCoverage": f"{quoted}/{len(bins)}",
@@ -993,6 +994,7 @@ def _normalize_temperature_db_group(ctx: dict, city: Dict[str, Any], date_iso: s
     return {
         "eventSlug": event_slug,
         "eventTitle": f"Highest temperature in {city.get('city')} on {date_iso}?",
+        "marketSource": "psql-db",
         "marketFamily": "highest_temperature",
         "marketFamilyLabel": _family_label("highest_temperature"),
         "metricType": "highest_temperature",
@@ -1065,6 +1067,7 @@ def _normalize_weather_db_group(ctx: dict, city: Optional[Dict[str, Any]], date_
     return {
         "eventSlug": event_slug,
         "eventTitle": titles[0] if len(rows) == 1 and titles else f"{_family_label(family)} in {city_name}",
+        "marketSource": "psql-db",
         "marketFamily": family,
         "marketFamilyLabel": _family_label(family),
         "metricType": family,

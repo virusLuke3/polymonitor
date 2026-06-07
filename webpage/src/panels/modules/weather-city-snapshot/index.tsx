@@ -7,6 +7,7 @@ import {
   bookCoverage,
   currentWeatherTemp,
   highWeatherTemp,
+  marketSourceLabel,
   panelStatus,
   selectedWeatherCity,
   sourceStatus,
@@ -63,7 +64,7 @@ function WeatherCitySnapshotPanel({
             )) : <span><i>Daily</i><strong>--</strong><em>pending</em></span>}
           </div>
           <div className="wm-weather-city-marketline">
-            <span>{weatherSourceLabel(city, payload)} · {sourceStatus(city)}</span>
+            <span>{weatherSourceLabel(city, payload)} · {marketSourceLabel(city)} · {sourceStatus(city)}</span>
             {city.marketUrl ? <a href={city.marketUrl} target="_blank" rel="noreferrer">Open market</a> : <em>No live market link</em>}
           </div>
         </div>

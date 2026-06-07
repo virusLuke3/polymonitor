@@ -254,6 +254,7 @@ def test_global_weather_map_uses_local_market_database_before_gamma(monkeypatch)
 
     assert fake_conn.closed is True
     assert city["sourceStates"]["polymarket"] == "ok"
+    assert city["marketSource"] == "psql-db"
     assert city["quoteCoverage"] == "1/1"
     assert city["topBin"]["label"] == "Will the highest temperature in New York City be 80°F or higher on May 12?"
     assert city["topBin"]["midPriceYes"] == 0.46
@@ -330,6 +331,7 @@ def test_global_weather_map_ignores_closed_db_weather_markets(monkeypatch):
     assert bins[0]["marketId"] == 602
     assert bins[0]["midPriceYes"] == 0.24
     assert bins[0]["marketStatus"] == "live"
+    assert payload["items"][0]["marketSource"] == "psql-db"
 
 
 def test_global_weather_map_indexes_low_temperature_and_precipitation(monkeypatch):

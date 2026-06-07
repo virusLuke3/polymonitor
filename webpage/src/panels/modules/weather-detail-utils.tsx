@@ -137,6 +137,14 @@ export function sourceStatus(city?: RuntimeGlobalWeatherCity | null) {
   return 'seed';
 }
 
+export function marketSourceLabel(city?: RuntimeGlobalWeatherCity | null) {
+  const source = String(city?.marketSource || '').toLowerCase();
+  if (source === 'psql-db') return 'PSQL DB';
+  if (source === 'gamma-api') return 'GAMMA API';
+  if (source) return source.toUpperCase();
+  return 'NO MARKET';
+}
+
 export function weatherSourceLabel(city?: RuntimeGlobalWeatherCity | null, payload?: RuntimeGlobalWeatherMapPayload | null) {
   const states = city?.sourceStates || {};
   const openMeteo = String(states.openMeteo || payload?.sources?.openMeteo || '').toLowerCase();

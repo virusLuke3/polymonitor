@@ -1239,6 +1239,7 @@ export type RuntimeGlobalWeatherCity = {
   daily?: Array<{ date?: string | null; high?: number | string | null; low?: number | string | null }>;
   eventSlug?: string | null;
   eventTitle?: string | null;
+  marketSource?: string | null;
   eventStatus?: string | null;
   marketFamily?: string | null;
   marketFamilyLabel?: string | null;
@@ -1250,6 +1251,7 @@ export type RuntimeGlobalWeatherCity = {
   markets?: Array<{
     eventSlug?: string | null;
     eventTitle?: string | null;
+    marketSource?: string | null;
     eventStatus?: string | null;
     marketFamily?: string | null;
     marketFamilyLabel?: string | null;
