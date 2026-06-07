@@ -260,6 +260,78 @@ def test_global_weather_map_uses_local_market_database_before_gamma(monkeypatch)
     assert city["bins"][0]["marketSlug"] == "highest-temperature-in-new-york-on-may-12-2026-80forhigher"
 
 
+def test_global_weather_map_ignores_closed_db_weather_markets(monkeypatch):
+    monkeypatch.setattr(
+        global_weather_map_service,
+        "_clob_yes_quote",
+        lambda ctx, market: {"bestBidYes": None, "bestAskYes": None, "bookStatus": "no-book"},
+    )
+    db_rows = [
+        {
+            "market_id": 601,
+            "slug": "highest-temperature-in-new-york-on-may-12-2026-80forhigher",
+            "title": "Will the highest temperature in New York City be 80°F or higher on May 12?",
+            "description": "",
+            "end_date": "2026-05-12T12:00:00Z",
+            "created_at": "2026-05-12T00:00:00Z",
+            "yes_token_id": "closed-yes",
+            "no_token_id": "closed-no",
+            "clob_token_ids": '["closed-yes", "closed-no"]',
+            "latest_yes_price": 0.99,
+            "latest_trade_price": 0.99,
+            "serving_latest_price": 0.99,
+            "latest_trade_at": "2026-05-12T11:58:00Z",
+            "serving_latest_trade_at": "2026-05-12T11:58:00Z",
+            "is_trading_closed": 1,
+            "is_resolved": 0,
+            "gamma_closed": 0,
+        },
+        {
+            "market_id": 602,
+            "slug": "highest-temperature-in-new-york-on-may-12-2026-82forhigher",
+            "title": "Will the highest temperature in New York City be 82°F or higher on May 12?",
+            "description": "",
+            "end_date": "2026-05-12T12:00:00Z",
+            "created_at": "2026-05-12T00:00:00Z",
+            "yes_token_id": "active-yes",
+            "no_token_id": "active-no",
+            "clob_token_ids": '["active-yes", "active-no"]',
+            "latest_yes_price": 0.24,
+            "latest_trade_price": 0.24,
+            "serving_latest_price": 0.24,
+            "latest_trade_at": "2026-05-12T11:58:00Z",
+            "serving_latest_trade_at": "2026-05-12T11:58:00Z",
+            "is_trading_closed": 0,
+            "is_resolved": 0,
+            "gamma_closed": 0,
+        },
+    ]
+
+    def http_json_get(url, *, params=None, **kwargs):
+        if "open.example" in url:
+            return [
+                {
+                    "current": {"temperature_2m": 22.0, "weather_code": 2, "time": "2026-05-12T12:00"},
+                    "hourly": {"time": ["2026-05-12T12:00"], "temperature_2m": [22.0]},
+                    "daily": {"time": ["2026-05-12"], "temperature_2m_max": [27.0], "temperature_2m_min": [16.0]},
+                }
+            ]
+        if "aviation.example" in url:
+            return []
+        return []
+
+    ctx = make_ctx(http_json_get=http_json_get)
+    ctx["DB_PATH"] = "fake"
+    ctx["get_connection"] = lambda *args, **kwargs: FakeConnection(db_rows)
+    payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=1)
+    bins = payload["items"][0]["bins"]
+
+    assert len(bins) == 1
+    assert bins[0]["marketId"] == 602
+    assert bins[0]["midPriceYes"] == 0.24
+    assert bins[0]["marketStatus"] == "live"
+
+
 def test_global_weather_map_indexes_low_temperature_and_precipitation(monkeypatch):
     monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", lambda ctx, market: {"bookStatus": "no-book"})
     db_rows = [

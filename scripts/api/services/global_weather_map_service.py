@@ -812,6 +812,9 @@ def _db_weather_market_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[Lis
                     OR lower(COALESCE(m.category, '')) = 'weather'
                 )
                 AND (m.end_date IS NULL OR (m.end_date >= ? AND m.end_date <= ?))
+                AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
+                AND COALESCE(mss.is_resolved, FALSE) = FALSE
+                AND COALESCE(mss.gamma_closed, FALSE) = FALSE
             ORDER BY m.end_date ASC, m.id ASC
             LIMIT 12000
             """,
@@ -1085,7 +1088,7 @@ def _db_markets_by_city(ctx: dict, cities: List[Dict[str, Any]], dates: List[Dic
     family_counts: Dict[str, int] = {}
     unmapped: List[Dict[str, Any]] = []
     for row in rows:
-        if _truthy(row.get("is_resolved")):
+        if _truthy(row.get("is_trading_closed")) or _truthy(row.get("is_resolved")) or _truthy(row.get("gamma_closed")):
             continue
         haystack = _normalize_text(row.get("title"), row.get("description"), row.get("slug"))
         family = _market_family(haystack)
