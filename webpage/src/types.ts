@@ -1262,6 +1262,8 @@ export type RuntimeGlobalWeatherCity = {
   }>;
   marketFamilies?: string[];
   sourceStates?: Record<string, string>;
+  weatherCarryForward?: boolean;
+  weatherCarryForwardFields?: string[];
   updatedAt?: string | null;
 };
 

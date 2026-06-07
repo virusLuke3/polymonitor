@@ -4,15 +4,16 @@ import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
 import {
   bestQuoteBin,
+  bookCoverage,
   currentWeatherTemp,
   highWeatherTemp,
   panelStatus,
-  quoteCoverage,
   selectedWeatherCity,
   sourceStatus,
   statusBadge,
   tempLabel,
   updatedLabel,
+  weatherSourceLabel,
   WeatherMiniLine,
 } from '../weather-detail-utils';
 
@@ -48,7 +49,7 @@ function WeatherCitySnapshotPanel({
           <div className="wm-weather-city-stats">
             <span><i>Low</i><strong>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)}</strong></span>
             <span><i>High</i><strong>{tempLabel(highWeatherTemp(city), unit)}</strong></span>
-            <span><i>Quotes</i><strong>{quoteCoverage(city)}</strong></span>
+            <span><i>Book</i><strong>{bookCoverage(city)}</strong></span>
             <span><i>Updated</i><strong>{updatedLabel(city, payload?.generatedAt)}</strong></span>
           </div>
           <WeatherMiniLine city={city} className="wm-weather-city-line" />
@@ -62,7 +63,7 @@ function WeatherCitySnapshotPanel({
             )) : <span><i>Daily</i><strong>--</strong><em>pending</em></span>}
           </div>
           <div className="wm-weather-city-marketline">
-            <span>{sourceStatus(city)}</span>
+            <span>{weatherSourceLabel(city, payload)} · {sourceStatus(city)}</span>
             {city.marketUrl ? <a href={city.marketUrl} target="_blank" rel="noreferrer">Open market</a> : <em>No live market link</em>}
           </div>
         </div>

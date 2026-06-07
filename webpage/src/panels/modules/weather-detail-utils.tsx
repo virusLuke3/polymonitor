@@ -28,6 +28,13 @@ export function priceLabel(value?: string | number | null) {
   return `${Math.round(parsed * 1000) / 10}%`;
 }
 
+export function bookPrice(bin?: RuntimeWeatherQuoteBin | null) {
+  const bid = num(bin?.bestBidYes);
+  const ask = num(bin?.bestAskYes);
+  if (bid !== null && ask !== null) return (bid + ask) / 2;
+  return bid ?? ask ?? null;
+}
+
 export function selectedWeatherCity(payload?: RuntimeGlobalWeatherMapPayload | null, selectedCityId?: string | null) {
   const items = payload?.items || [];
   if (!items.length) return null;
@@ -42,6 +49,27 @@ export function bestQuoteBin(city?: RuntimeGlobalWeatherCity | null): RuntimeWea
     if ((num(bin.midPriceYes) ?? -1) > (num(best?.midPriceYes) ?? -1)) best = bin;
   }
   return best;
+}
+
+export function bestBookQuoteBin(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin | null {
+  let best: RuntimeWeatherQuoteBin | null = null;
+  for (const bin of city?.bins || []) {
+    const value = bookPrice(bin);
+    if (value !== null && value > (bookPrice(best) ?? -1)) best = bin;
+  }
+  return best;
+}
+
+export function bookCoverage(city?: RuntimeGlobalWeatherCity | null) {
+  const bins = city?.bins || [];
+  if (!bins.length) return '0/0';
+  return `${bins.filter((bin) => bookPrice(bin) !== null).length}/${bins.length}`;
+}
+
+export function midCoverage(city?: RuntimeGlobalWeatherCity | null) {
+  const bins = city?.bins || [];
+  if (!bins.length) return '0/0';
+  return `${bins.filter((bin) => num(bin.midPriceYes) !== null).length}/${bins.length}`;
 }
 
 export function expectedQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
@@ -107,6 +135,17 @@ export function sourceStatus(city?: RuntimeGlobalWeatherCity | null) {
   if (sourceStates.openMeteo === 'ok') return 'weather live';
   if (sourceStates.metar === 'ok') return 'metar live';
   return 'seed';
+}
+
+export function weatherSourceLabel(city?: RuntimeGlobalWeatherCity | null, payload?: RuntimeGlobalWeatherMapPayload | null) {
+  const states = city?.sourceStates || {};
+  const openMeteo = String(states.openMeteo || payload?.sources?.openMeteo || '').toLowerCase();
+  const metar = String(states.metar || states.aviationWeather || payload?.sources?.aviationWeather || '').toLowerCase();
+  if (city?.weatherCarryForward || openMeteo === 'stale') return 'STALE WX';
+  if (openMeteo === 'ok') return 'OPEN-METEO';
+  if (metar === 'ok') return 'METAR OK';
+  if (openMeteo === 'error') return 'WX ERROR';
+  return 'WX SEED';
 }
 
 export function updatedLabel(city?: RuntimeGlobalWeatherCity | null, fallback?: string | null) {

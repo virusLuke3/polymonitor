@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
-import { displayQuoteBins, num, panelStatus, selectedWeatherCity, statusBadge } from '../weather-detail-utils';
+import { bookPrice, displayQuoteBins, panelStatus, selectedWeatherCity, statusBadge } from '../weather-detail-utils';
 import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '../weather-live-chart';
 
 function percentAxisLabel(value: number) {
@@ -11,10 +11,11 @@ function percentAxisLabel(value: number) {
 }
 
 function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityName?: string | null }) {
-  const values = bins.map((bin) => num(bin.midPriceYes));
-  const hasQuote = values.some((value) => value !== null);
+  const values = bins.map((bin) => bookPrice(bin));
+  const hasBookQuote = values.some((value) => value !== null);
+  const hasLastOnly = bins.some((bin) => bookPrice(bin) === null && bin.midPriceYes !== null);
   const chartSeries = useMemo<WeatherLiveChartSeries[]>(() => [{
-    id: 'quote-mid',
+    id: 'book-mid',
     type: 'area',
     color: '#ff9900',
     topColor: 'rgba(255, 153, 0, 0.36)',
@@ -29,15 +30,19 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
   return (
     <div className="wm-weather-quote-curve-panel">
       <div className="wm-weather-chart-title">
-        <strong>{cityName || 'Selected city'} Mid Price Curve</strong>
-        <span>YES Mid %</span>
+        <strong>{cityName || 'Selected city'} Book Price Curve</strong>
+        <span>YES Book %</span>
       </div>
-      <WeatherLiveChart
-        className="wm-weather-quote-curve-large"
-        series={chartSeries}
-        showTimeScale={false}
-        valueFormatter={percentAxisLabel}
-      />
+      {hasBookQuote ? (
+        <WeatherLiveChart
+          className="wm-weather-quote-curve-large"
+          series={chartSeries}
+          showTimeScale={false}
+          valueFormatter={percentAxisLabel}
+        />
+      ) : (
+        <div className="wm-weather-detail-empty-line wm-weather-quote-curve-large">No live CLOB book quotes for this market.</div>
+      )}
       <div className="wm-weather-quote-history-strip">
         <button type="button">Play History</button>
         <span className="muted">24h ago</span>
@@ -46,7 +51,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
         <span className="cyan">1h ago</span>
         <span className="yellow">30m ago</span>
       </div>
-      {!hasQuote ? <p>No matching Polymarket temperature market was found for this city. Expected bins are shown as missing quotes.</p> : null}
+      {hasLastOnly ? <p>LAST prices are kept in the table but are not plotted as live book quotes.</p> : null}
     </div>
   );
 }

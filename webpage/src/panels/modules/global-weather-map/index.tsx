@@ -4,7 +4,7 @@ import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeW
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { WeatherCanvasSparkline } from '../weather-detail-utils';
+import { bookCoverage as liveBookCoverage, WeatherCanvasSparkline, weatherSourceLabel } from '../weather-detail-utils';
 
 function statusBadge(status?: string | null) {
   const text = String(status || '').toLowerCase();
@@ -71,11 +71,6 @@ function bestBin(city: RuntimeGlobalWeatherCity): RuntimeWeatherQuoteBin | null 
   return best;
 }
 
-function quoteCoverage(city: RuntimeGlobalWeatherCity) {
-  const coverage = city.quoteCoverage || (city.bins?.length ? `${city.bins.filter((bin) => num(bin.midPriceYes) !== null).length}/${city.bins.length}` : '0/0');
-  return coverage;
-}
-
 function MiniSpark({ city }: { city: RuntimeGlobalWeatherCity }) {
   const hourly = (city.hourly || []).filter((point) => num(point.temp) !== null).slice(0, 12);
   const points = hourly.length >= 2 ? hourly : (city.bins || []).filter((bin) => num(bin.midPriceYes) !== null).slice(0, 12).map((bin, index) => ({ time: String(index), temp: num(bin.midPriceYes)! * 100 }));
@@ -95,7 +90,7 @@ function TemperatureCard({
 }) {
   const top = bestBin(city);
   const unit = city.unit || top?.unit || '';
-  const coverage = quoteCoverage(city);
+  const coverage = liveBookCoverage(city);
   const hasMarket = Boolean(city.marketUrl || top);
   const cityId = String(city.cityId || '');
   const selectCity = () => {
@@ -117,7 +112,7 @@ function TemperatureCard({
       <div className="wm-temp-city-main">
         <div>
           <strong>{city.city || '--'}</strong>
-          <span>{city.condition || 'Weather update'}</span>
+          <span>{city.condition || 'Weather update'} · {weatherSourceLabel(city)}</span>
         </div>
         <b>{tempLabel(currentTempValue(city), unit)}</b>
       </div>
@@ -130,13 +125,13 @@ function TemperatureCard({
       {hasMarket ? (
         <div className="wm-temp-city-market">
           {city.marketUrl ? <a href={city.marketUrl} target="_blank" rel="noreferrer">Polymarket</a> : <span>Market</span>}
-          <span>{top?.label || 'Quote bins'}</span>
-          <b>{priceLabel(top?.midPriceYes)}</b>
-          <em>{coverage}</em>
-        </div>
-      ) : null}
-    </article>
-  );
+        <span>{top?.label || 'Quote bins'}</span>
+        <b>{priceLabel(top?.midPriceYes)}</b>
+        <em>{coverage}</em>
+      </div>
+    ) : null}
+  </article>
+);
 }
 
 function TemperatureMonitorPanel({

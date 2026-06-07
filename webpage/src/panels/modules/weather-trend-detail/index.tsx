@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
-import { num, panelStatus, selectedWeatherCity, statusBadge, tempLabel } from '../weather-detail-utils';
+import { num, panelStatus, selectedWeatherCity, statusBadge, tempLabel, weatherSourceLabel } from '../weather-detail-utils';
 import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '../weather-live-chart';
 
 type TrendPoint = {
@@ -96,6 +96,7 @@ function TrendChart({
     <section className="wm-weather-trend-card">
       <div className="wm-weather-trend-title">
         <strong>{title}</strong>
+        <span className="source">{weatherSourceLabel(city)}</span>
         <span className="avg">Avg</span>
         <span className="high">High</span>
       </div>

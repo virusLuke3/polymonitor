@@ -3,12 +3,15 @@ import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/t
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
 import {
+  bestBookQuoteBin,
   bestQuoteBin,
+  bookCoverage,
+  bookPrice,
   displayQuoteBins,
+  midCoverage,
   num,
   panelStatus,
   priceLabel,
-  quoteCoverage,
   selectedWeatherCity,
   statusBadge,
   tempLabel,
@@ -58,7 +61,9 @@ function WeatherQuoteTablePanel({
 }) {
   const city = selectedWeatherCity(payload, selectedCityId);
   const bins = displayQuoteBins(city);
-  const topBin = bestQuoteBin(city);
+  const topBookBin = bestBookQuoteBin(city);
+  const topBin = topBookBin || bestQuoteBin(city);
+  const topBookPrice = bookPrice(topBin);
   const topLabel = topBin?.label || bins[Math.floor(bins.length / 2)]?.label || '--';
   return (
     <Panel
@@ -75,13 +80,13 @@ function WeatherQuoteTablePanel({
               <span>{city.city || '--'} Quote Table</span>
               <strong>{topLabel}</strong>
             </div>
-            <b>{priceLabel(topBin?.midPriceYes)}</b>
+            <b>{priceLabel(topBookPrice ?? topBin?.midPriceYes)}</b>
           </div>
           <div className="wm-weather-quote-meta">
-            <span><i>Coverage</i><strong>{quoteCoverage(city)}</strong></span>
+            <span><i>Book</i><strong>{bookCoverage(city)}</strong></span>
+            <span><i>Mid/Last</i><strong>{midCoverage(city)}</strong></span>
             <span><i>Bid</i><strong>{priceLabel(topBin?.bestBidYes)}</strong></span>
             <span><i>Ask</i><strong>{priceLabel(topBin?.bestAskYes)}</strong></span>
-            <span><i>Source</i><strong>{sourceLabel(topBin?.priceSource)}</strong></span>
           </div>
           <div className="wm-weather-quote-table-wrap">
             <table className="wm-weather-quote-table">
@@ -90,7 +95,7 @@ function WeatherQuoteTablePanel({
                   <th>Bin</th>
                   <th>Bid</th>
                   <th>Ask</th>
-                  <th>Mid</th>
+                  <th>Last/Mid</th>
                   <th>Source</th>
                   <th>Book</th>
                 </tr>

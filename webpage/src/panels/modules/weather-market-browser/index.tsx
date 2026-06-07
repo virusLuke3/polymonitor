@@ -4,7 +4,7 @@ import { fetchRuntimeGlobalTemperatureMonitor } from '@/services/api';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { panelStatus, priceLabel, quoteCoverage, statusBadge } from '../weather-detail-utils';
+import { bookCoverage, panelStatus, priceLabel, statusBadge } from '../weather-detail-utils';
 
 const FAMILY_LABELS: Record<string, string> = {
   highest_temperature: 'High',
@@ -62,7 +62,7 @@ function MarketRow({
       <strong>{city.city || 'Global'}</strong>
       <em>{top?.label || market.eventTitle || 'Weather market'}</em>
       <b>{priceLabel(top?.midPriceYes)}</b>
-      <i>{market.quoteCoverage || quoteCoverage(city)}</i>
+      <i>{bookCoverage(city)}</i>
     </button>
   );
 }
