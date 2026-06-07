@@ -13742,8 +13742,11 @@ a.wm-orderfilled-row {
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-left: 3px solid transparent;
   background: rgba(255, 255, 255, 0.025);
+  display: grid;
   grid-template-columns: 1fr;
+  grid-template-rows: 14px minmax(15px, auto);
   align-content: start;
+  align-items: start;
   gap: 4px;
   overflow: hidden;
   text-decoration: none;
@@ -13771,10 +13774,14 @@ a.wm-orderfilled-row {
 .wm-weather-news-card-head,
 .wm-weather-news-card-foot {
   min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
+  display: block;
   gap: 8px;
+}
+
+.wm-weather-news-card-head {
+  grid-column: 1;
+  grid-row: 1;
+  overflow: hidden;
 }
 
 .wm-weather-news-card-head > div {
@@ -13788,6 +13795,7 @@ a.wm-orderfilled-row {
   align-items: center;
   gap: 5px;
   overflow: hidden;
+  line-height: 1;
 }
 
 .wm-weather-news-dot {
@@ -13871,15 +13879,17 @@ a.wm-orderfilled-row {
 
 .wm-weather-news-item strong {
   display: -webkit-box;
+  grid-column: 1;
+  grid-row: 2;
   min-width: 0;
   overflow: hidden;
   color: #eef1ee;
   font-family: var(--font-mono);
   font-size: 11.5px;
   font-weight: 900;
-  line-height: 1.28;
+  line-height: 1.25;
   white-space: normal;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
 }
 
@@ -13890,7 +13900,7 @@ a.wm-orderfilled-row {
 }
 
 .wm-weather-news-item em {
-  display: -webkit-box;
+  display: none;
   min-width: 0;
   overflow: hidden;
   font-style: normal;
@@ -13912,8 +13922,7 @@ a.wm-orderfilled-row {
 }
 
 .wm-weather-news-card-foot {
-  align-items: center;
-  justify-content: space-between;
+  display: none;
 }
 
 @media (max-width: 640px) {
