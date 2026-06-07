@@ -672,6 +672,7 @@
 }
 
 .qtv-bottom-panel {
+  position: relative;
   min-height: 0;
   display: grid;
   grid-template-rows: 36px 42px 34px minmax(0, 1fr);
@@ -756,6 +757,11 @@
   padding: 0 9px;
 }
 
+.qtv-tester-head button.active {
+  border-color: #2563eb;
+  color: #dbeafe;
+}
+
 .qtv-tester-actions label {
   display: inline-flex;
   align-items: center;
@@ -778,6 +784,92 @@
   border-bottom: 1px solid #293140;
   background: #111827;
   padding: 0 12px;
+}
+
+.qtv-subtabs-static span {
+  color: #3b82f6;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.qtv-settings-strip {
+  position: absolute;
+  z-index: 6;
+  top: 78px;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 34px;
+  border-bottom: 1px solid #293140;
+  background: #0b1220;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
+  color: #94a3b8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 12px;
+}
+
+.qtv-settings-strip span {
+  white-space: nowrap;
+}
+
+.qtv-settings-strip b {
+  color: #e5e7eb;
+  font-weight: 900;
+}
+
+.qtv-tool-panel {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  overflow: hidden;
+  background: #111827;
+}
+
+.qtv-tool-panel-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.qtv-tool-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  align-content: start;
+  overflow: auto;
+  border-right: 1px solid #293140;
+}
+
+.qtv-tool-grid .qtv-metric {
+  min-height: 72px;
+  border-bottom: 1px solid #293140;
+}
+
+.qtv-tool-mini {
+  border-left: 0;
+}
+
+.qtv-tool-empty {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  min-height: 180px;
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  text-align: center;
+  padding: 24px;
+}
+
+.qtv-tool-empty strong {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.qtv-tool-empty span {
+  color: #94a3b8;
+  font-size: 11px;
 }
 
 .qtv-overview {
@@ -1036,6 +1128,14 @@
   color: #a1a1aa;
   font-size: 10px;
   text-transform: uppercase;
+}
+
+.qtv-table tbody tr {
+  cursor: pointer;
+}
+
+.qtv-table tr.selected td {
+  background: rgba(37, 99, 235, 0.14);
 }
 
 .qtv-table th button {
