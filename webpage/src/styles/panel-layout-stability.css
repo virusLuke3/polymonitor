@@ -41,12 +41,16 @@
   min-height: 0;
 }
 
+.wm-dashboard .wm-weather-detail-stack {
+  overflow: auto;
+}
+
 .wm-dashboard .wm-weather-quote-curve-large,
 .wm-dashboard .wm-weather-trend-chart {
   display: block;
   width: 100%;
-  height: min(236px, calc(100% - 38px));
-  min-height: 190px;
+  height: clamp(118px, calc(100% - 38px), 190px);
+  min-height: 0;
 }
 
 .wm-dashboard .wm-weather-detail-line,
@@ -80,18 +84,5 @@
 @media (max-width: 1100px) {
   .wm-dashboard .wm-panels-grid {
     grid-auto-rows: auto;
-  }
-
-  .wm-dashboard .wm-panel[data-panel-id='global-temperature-monitor'],
-  .wm-dashboard .wm-panel[data-panel-id='weather-city-snapshot'],
-  .wm-dashboard .wm-panel[data-panel-id='weather-quote-detail'],
-  .wm-dashboard .wm-panel[data-panel-id='weather-quote-table'],
-  .wm-dashboard .wm-panel[data-panel-id='weather-trend-detail'],
-  .wm-dashboard .wm-panel[data-panel-id='weather-trend-7d'],
-  .wm-dashboard .wm-panel[data-panel-id='weather-news'],
-  .wm-dashboard .wm-panel[data-panel-id='nba-scoreboard'],
-  .wm-dashboard .wm-panel[data-panel-id='nba-intel'],
-  .wm-dashboard .wm-panel[data-panel-id='espn-matchup-predictor'] {
-    min-height: 360px;
   }
 }

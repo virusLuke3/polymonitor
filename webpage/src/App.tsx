@@ -70,7 +70,7 @@ type LayerToggle = {
 type RegionKey = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
 type CommandPaletteTab = 'markets' | 'panels' | 'commands';
 const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
-const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v2';
+const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v3';
 const MARKET_GROUP_SORT_STORAGE_KEY = 'wm:marketGroupSort:v1';
 const VIEW_STORAGE_KEY = 'polydata:map-view:v2';
 const WORKSPACE_MODE_STORAGE_KEY = 'polydata:workspace-mode:v1';
@@ -136,25 +136,12 @@ type PanelLayoutPrefs = Record<string, { rowSpan?: number; colSpan?: number }>;
 type PanelSizeHint = 'default' | 'wide' | 'tall' | undefined;
 type WorkspaceMode = 'world' | 'worldcup';
 
-const DEFAULT_TALL_PANEL_IDS = new Set([
-  'global-temperature-monitor',
-  'weather-city-snapshot',
-  'weather-quote-detail',
-  'weather-quote-table',
-  'weather-trend-detail',
-  'weather-trend-7d',
-  'weather-news',
-  'nba-scoreboard',
-  'nba-intel',
-  'espn-matchup-predictor',
-]);
-
 function clampSpan(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-function defaultPanelRowSpan(panelId: string, size: PanelSizeHint) {
-  return size === 'tall' || DEFAULT_TALL_PANEL_IDS.has(panelId) ? 2 : 1;
+function defaultPanelRowSpan(size: PanelSizeHint) {
+  return size === 'tall' ? 2 : 1;
 }
 
 function defaultPanelColSpan(size: PanelSizeHint) {
@@ -164,7 +151,7 @@ function defaultPanelColSpan(size: PanelSizeHint) {
 function getPanelLayout(layoutPrefs: PanelLayoutPrefs, panelId: string, size: PanelSizeHint) {
   const saved = layoutPrefs[panelId] || {};
   return {
-    rowSpan: clampSpan(saved.rowSpan ?? defaultPanelRowSpan(panelId, size), PANEL_MIN_ROW_SPAN, PANEL_MAX_ROW_SPAN),
+    rowSpan: clampSpan(saved.rowSpan ?? defaultPanelRowSpan(size), PANEL_MIN_ROW_SPAN, PANEL_MAX_ROW_SPAN),
     colSpan: clampSpan(saved.colSpan ?? defaultPanelColSpan(size), PANEL_MIN_COL_SPAN, PANEL_MAX_COL_SPAN),
   };
 }
