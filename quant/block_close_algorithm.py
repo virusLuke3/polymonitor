@@ -35,13 +35,17 @@ def orderfilled_block_close_sql(
     table: str = "orderfilled_fact",
     from_block: int,
     to_block: int,
+    market_ids: Iterable[int] | None = None,
     token_ids: Iterable[str] | None = None,
 ) -> str:
     filters = [f"block_number BETWEEN {int(from_block)} AND {int(to_block)}"]
+    market_list = sorted({int(market_id) for market_id in market_ids or [] if int(market_id or 0) > 0})
+    if market_list:
+        filters.append(f"market_id IN ({','.join(str(market_id) for market_id in market_list)})")
     token_list = [str(token).lower() for token in token_ids or [] if str(token or "").strip()]
     if token_list:
         quoted = ",".join(quote_clickhouse_string(token) for token in token_list)
-        filters.append(f"lower(token_id) IN ({quoted})")
+        filters.append(f"token_id IN ({quoted})")
     where_sql = " AND ".join(filters)
     internal_addresses = ",".join(quote_clickhouse_string(address) for address in INTERNAL_COUNTERPARTIES)
     return f"""

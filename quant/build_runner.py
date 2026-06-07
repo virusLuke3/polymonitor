@@ -257,6 +257,82 @@ def fetch_block_close_build_candidates(
         return [dict(row) for row in cur.fetchall()]
 
 
+def fetch_block_close_market_sibling_candidates(
+    conn: Any,
+    *,
+    market_ids: list[int],
+    since_ts: int,
+    limit: int,
+    min_orderfilled_trades: int,
+) -> list[dict[str, Any]]:
+    if not market_ids:
+        return []
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                m.token_id, m.token_id_hex, m.market_id, m.market_slug, m.token_side,
+                m.active, m.closed, m.end_date, m.created_at,
+                e.first_orderfilled_block, e.last_orderfilled_block, e.orderfilled_trade_count,
+                t.priority AS target_priority, t.reason AS target_reason,
+                t.requested_from_block, t.requested_to_block,
+                s.last_complete_block, s.attempt_count, s.last_error
+            FROM quant.market_token_metadata m
+            JOIN quant.market_price_eligibility e ON e.token_id = m.token_id
+            LEFT JOIN quant.market_price_build_targets t
+                ON t.source = %s AND t.token_id = m.token_id AND t.status = 'active'
+            LEFT JOIN quant.market_price_build_market_state s
+                ON s.source = %s AND s.token_id = m.token_id
+            WHERE
+                m.market_id = ANY(%s::bigint[])
+                AND e.eligible = TRUE
+                AND (
+                    t.token_id IS NOT NULL
+                    OR e.orderfilled_trade_count >= %s
+                )
+                AND m.token_id_hex IS NOT NULL
+                AND e.first_orderfilled_block IS NOT NULL
+                AND e.last_orderfilled_block IS NOT NULL
+                AND (
+                    m.created_at >= to_timestamp(%s)
+                    OR m.end_date >= to_timestamp(%s)
+                )
+                AND (
+                    (
+                        t.token_id IS NOT NULL
+                        AND t.requested_to_block IS NOT NULL
+                        AND (
+                            s.last_complete_block IS NULL
+                            OR s.last_complete_block < t.requested_to_block
+                        )
+                    )
+                    OR (
+                        (t.token_id IS NULL OR t.requested_to_block IS NULL)
+                        AND (
+                            s.last_complete_block IS NULL
+                            OR s.last_complete_block < e.last_orderfilled_block
+                        )
+                    )
+                )
+            ORDER BY
+                m.market_id ASC,
+                m.outcome_index ASC,
+                m.token_id ASC
+            LIMIT %s
+            """,
+            (
+                BLOCK_CLOSE_SOURCE,
+                BLOCK_CLOSE_SOURCE,
+                [int(market_id) for market_id in market_ids],
+                int(min_orderfilled_trades),
+                int(since_ts),
+                int(since_ts),
+                int(limit),
+            ),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
 def fetch_eligibility_refresh_candidates(
     conn: Any,
     *,
@@ -457,43 +533,68 @@ def update_block_state(
         )
 
 
+def _block_close_insert_value(token: dict[str, Any], row: dict[str, Any]) -> tuple[Any, ...]:
+    close_price = _decimal_or_none(row.get("close_price"))
+    vwap_price = _decimal_or_none(row.get("vwap_price"))
+    close_raw_price = _decimal_or_none(row.get("close_raw_price"))
+    close_maker_amount = _decimal_or_none(row.get("close_maker_amount"))
+    close_taker_amount = _decimal_or_none(row.get("close_taker_amount"))
+    return (
+        str(token["token_id"]),
+        int(token["market_id"]),
+        token.get("market_slug"),
+        token["token_side"],
+        int(row["block_number"]),
+        close_price,
+        _yes_probability(str(token["token_side"]), close_price),
+        vwap_price,
+        _yes_probability(str(token["token_side"]), vwap_price),
+        close_raw_price,
+        row.get("close_price_source") or "unknown",
+        row.get("close_tx_hash"),
+        int(row["close_log_index"]) if row.get("close_log_index") is not None else None,
+        close_maker_amount,
+        close_taker_amount,
+        int(row.get("clean_trade_count") or 0),
+        int(row.get("raw_trade_count") or 0),
+        int(row.get("internal_filtered_count") or 0),
+        int(row.get("invalid_size_count") or 0),
+        int(row.get("invalid_price_count") or 0),
+        int(row.get("amount_ratio_count") or 0),
+        int(row.get("raw_price_fallback_count") or 0),
+        int(row.get("extreme_trade_count") or 0),
+        json.dumps(_anomaly_flags(row), sort_keys=True),
+        _decimal_or_none(row.get("volume")) or Decimal("0"),
+    )
+
+
 def insert_single_token_block_close_rows(conn: Any, token: dict[str, Any], rows: list[dict[str, Any]]) -> int:
+    return insert_block_close_values(conn, [_block_close_insert_value(token, row) for row in rows])
+
+
+def insert_market_block_close_rows(
+    conn: Any,
+    *,
+    tokens_by_clickhouse_id: dict[str, dict[str, Any]],
+    planned_ranges: dict[str, tuple[int, int]],
+    rows: list[dict[str, Any]],
+) -> int:
     values = []
     for row in rows:
-        close_price = _decimal_or_none(row.get("close_price"))
-        vwap_price = _decimal_or_none(row.get("vwap_price"))
-        close_raw_price = _decimal_or_none(row.get("close_raw_price"))
-        close_maker_amount = _decimal_or_none(row.get("close_maker_amount"))
-        close_taker_amount = _decimal_or_none(row.get("close_taker_amount"))
-        values.append(
-            (
-                str(token["token_id"]),
-                int(token["market_id"]),
-                token.get("market_slug"),
-                token["token_side"],
-                int(row["block_number"]),
-                close_price,
-                _yes_probability(str(token["token_side"]), close_price),
-                vwap_price,
-                _yes_probability(str(token["token_side"]), vwap_price),
-                close_raw_price,
-                row.get("close_price_source") or "unknown",
-                row.get("close_tx_hash"),
-                int(row["close_log_index"]) if row.get("close_log_index") is not None else None,
-                close_maker_amount,
-                close_taker_amount,
-                int(row.get("clean_trade_count") or 0),
-                int(row.get("raw_trade_count") or 0),
-                int(row.get("internal_filtered_count") or 0),
-                int(row.get("invalid_size_count") or 0),
-                int(row.get("invalid_price_count") or 0),
-                int(row.get("amount_ratio_count") or 0),
-                int(row.get("raw_price_fallback_count") or 0),
-                int(row.get("extreme_trade_count") or 0),
-                json.dumps(_anomaly_flags(row), sort_keys=True),
-                _decimal_or_none(row.get("volume")) or Decimal("0"),
-            )
-        )
+        clickhouse_token_id = str(row.get("token_id") or "").lower()
+        token = tokens_by_clickhouse_id.get(clickhouse_token_id)
+        planned_range = planned_ranges.get(clickhouse_token_id)
+        if not token or not planned_range:
+            continue
+        block_number = int(row["block_number"])
+        start_block, to_block = planned_range
+        if block_number < start_block or block_number > to_block:
+            continue
+        values.append(_block_close_insert_value(token, row))
+    return insert_block_close_values(conn, values)
+
+
+def insert_block_close_values(conn: Any, values: list[tuple[Any, ...]]) -> int:
     if not values:
         return 0
     with conn.cursor() as cur:
@@ -691,10 +792,23 @@ def run_block_close_incremental(
         shard_index=shard_index,
         shard_count=shard_count,
     )
+    if tokens:
+        market_ids = sorted({int(token["market_id"]) for token in tokens})
+        expanded_tokens = fetch_block_close_market_sibling_candidates(
+            conn,
+            market_ids=market_ids,
+            since_ts=since_ts,
+            limit=max(int(token_limit), int(token_limit) * 3),
+            min_orderfilled_trades=min_orderfilled_trades,
+        )
+        tokens_by_id = {str(token["token_id"]): token for token in tokens}
+        for token in expanded_tokens:
+            tokens_by_id[str(token["token_id"])] = token
+        tokens = list(tokens_by_id.values())
     rows_written = 0
     failures = 0
-    touched = 0
     table = ch.settings.orderfilled_table
+    planned_tokens = []
     for token in tokens:
         first_block = int(token.get("first_orderfilled_block") or 0)
         last_block = int(token.get("last_orderfilled_block") or 0)
@@ -712,25 +826,52 @@ def run_block_close_incremental(
             to_block = min(to_block, requested_to_block)
         if to_block < start_block:
             continue
-        touched += 1
+        planned_token = dict(token)
+        planned_token["planned_from_block"] = start_block
+        planned_token["planned_to_block"] = to_block
+        planned_token["clickhouse_token_id"] = str(token["token_id_hex"]).lower()
+        planned_tokens.append(planned_token)
+
+    touched = len(planned_tokens)
+    tokens_by_market: dict[int, list[dict[str, Any]]] = {}
+    for token in planned_tokens:
+        tokens_by_market.setdefault(int(token["market_id"]), []).append(token)
+
+    for market_id, market_tokens in tokens_by_market.items():
+        from_block = min(int(token["planned_from_block"]) for token in market_tokens)
+        to_block = max(int(token["planned_to_block"]) for token in market_tokens)
+        token_ids = [str(token["clickhouse_token_id"]) for token in market_tokens]
+        tokens_by_clickhouse_id = {str(token["clickhouse_token_id"]): token for token in market_tokens}
+        planned_ranges = {
+            str(token["clickhouse_token_id"]): (int(token["planned_from_block"]), int(token["planned_to_block"]))
+            for token in market_tokens
+        }
         try:
             sql = orderfilled_block_close_sql(
                 table=table,
-                from_block=start_block,
+                from_block=from_block,
                 to_block=to_block,
-                token_ids=[str(token["token_id_hex"]).lower()],
+                market_ids=[market_id],
+                token_ids=token_ids,
             )
             rows = ch.query_json_rows(sql)
-            written = insert_single_token_block_close_rows(conn, token, rows)
+            written = insert_market_block_close_rows(
+                conn,
+                tokens_by_clickhouse_id=tokens_by_clickhouse_id,
+                planned_ranges=planned_ranges,
+                rows=rows,
+            )
             rows_written += written
-            update_block_state(conn, token=token, status="complete", last_complete_block=to_block)
+            for token in market_tokens:
+                update_block_state(conn, token=token, status="complete", last_complete_block=int(token["planned_to_block"]))
             print(
                 json.dumps(
                     {
                         "source": BLOCK_CLOSE_SOURCE,
-                        "token_id": token["token_id"],
-                        "market_slug": token.get("market_slug"),
-                        "from_block": start_block,
+                        "market_id": market_id,
+                        "market_slug": market_tokens[0].get("market_slug"),
+                        "token_count": len(market_tokens),
+                        "from_block": from_block,
                         "to_block": to_block,
                         "rows_written": written,
                     },
@@ -739,8 +880,15 @@ def run_block_close_incremental(
                 flush=True,
             )
         except Exception as exc:  # noqa: BLE001
-            failures += 1
-            update_block_state(conn, token=token, status="error", last_complete_block=last_complete or first_block, last_error=repr(exc))
+            failures += len(market_tokens)
+            for token in market_tokens:
+                update_block_state(
+                    conn,
+                    token=token,
+                    status="error",
+                    last_complete_block=int(token.get("last_complete_block") or token.get("first_orderfilled_block") or 0),
+                    last_error=repr(exc),
+                )
     return {"tokens": touched, "rows_written": rows_written, "failures": failures}
 
 
