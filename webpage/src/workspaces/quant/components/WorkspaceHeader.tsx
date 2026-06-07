@@ -1,13 +1,17 @@
-import type { PriceSource } from '../types';
+import type { QuantPriceMarket } from '@/types';
+import type { BacktestEngine, PriceSource } from '../types';
 
 type WorkspaceHeaderProps = {
   marketSlug: string;
   timeframe: string;
   priceSource: PriceSource;
+  backtestEngine: BacktestEngine;
   loading: boolean;
+  marketOptions: QuantPriceMarket[];
   onMarketSlugChange: (value: string) => void;
   onTimeframeChange: (value: string) => void;
   onPriceSourceChange: (value: PriceSource) => void;
+  onBacktestEngineChange: (value: BacktestEngine) => void;
   onRunBacktest: () => void;
   onExport: (format: 'csv' | 'json') => void;
 };
@@ -16,10 +20,13 @@ export function WorkspaceHeader({
   marketSlug,
   timeframe,
   priceSource,
+  backtestEngine,
   loading,
+  marketOptions,
   onMarketSlugChange,
   onTimeframeChange,
   onPriceSourceChange,
+  onBacktestEngineChange,
   onRunBacktest,
   onExport,
 }: WorkspaceHeaderProps) {
@@ -30,8 +37,20 @@ export function WorkspaceHeader({
         <button type="button" title="Menu">Menu</button>
         <label className="qtv-symbol-search">
           <span>Search</span>
-          <input value={marketSlug} onInput={(event) => onMarketSlugChange(event.currentTarget.value)} placeholder="market_slug" />
+          <input
+            value={marketSlug}
+            list="qtv-market-slugs"
+            onInput={(event) => onMarketSlugChange(event.currentTarget.value)}
+            placeholder="market_slug"
+          />
         </label>
+        <datalist id="qtv-market-slugs">
+          {marketOptions.map((market) => (
+            <option key={`${market.marketSlug}-${market.tokenSide}`} value={market.marketSlug}>
+              {market.marketTitle || market.marketSlug}
+            </option>
+          ))}
+        </datalist>
         <button type="button" title="Add market">+</button>
         <div className="qtv-timeframes">
           {['1m', '5m', '15m', '1h', '4h', '1d'].map((item) => (
@@ -48,8 +67,11 @@ export function WorkspaceHeader({
         <select value={priceSource} onChange={(event) => onPriceSourceChange(event.currentTarget.value as PriceSource)}>
           <option value="frontend">Frontend price-history</option>
           <option value="orderfilled">OrderFilled block close</option>
-          <option value="orderbook">Orderbook mid</option>
-          <option value="conservative">Conservative bid/ask</option>
+        </select>
+        <select value={backtestEngine} onChange={(event) => onBacktestEngineChange(event.currentTarget.value as BacktestEngine)}>
+          <option value="builtin">Built-in</option>
+          <option value="backtrader">Backtrader</option>
+          <option value="nautilus_trader">Nautilus Trader</option>
         </select>
         <button type="button">Save</button>
         <button type="button" onClick={() => onExport('json')}>Snapshot</button>

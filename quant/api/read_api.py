@@ -5,6 +5,71 @@ from __future__ import annotations
 from typing import Any
 
 
+def get_quant_price_markets(
+    conn: Any,
+    *,
+    search: str | None = None,
+    token_side: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return markets that actually have quant price rows available."""
+
+    params: list[Any] = []
+    filters: list[str] = []
+    if search:
+        filters.append("(lower(market_slug) LIKE %s OR lower(market_title) LIKE %s)")
+        text = f"%{search.lower()}%"
+        params.extend([text, text])
+    if token_side:
+        filters.append("token_side = %s")
+        params.append(token_side.upper())
+    where_sql = "WHERE " + " AND ".join(filters) if filters else ""
+    params.append(int(limit))
+
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            WITH titled AS (
+                SELECT
+                    p.market_id,
+                    p.market_slug,
+                    COALESCE(md.token_side, 'YES') AS token_side,
+                    COALESCE(p.block_rows_written, 0) AS block_rows,
+                    p.first_orderfilled_block AS first_block,
+                    COALESCE(p.max_block_complete, p.last_orderfilled_block) AS last_block,
+                    NULL::numeric AS latest_block_price,
+                    p.updated_at AS latest_block_at,
+                    COALESCE(p.frontend_rows_written, 0) AS frontend_rows,
+                    extract(epoch FROM p.min_frontend_complete_ts)::bigint AS first_ts,
+                    extract(epoch FROM p.max_frontend_complete_ts)::bigint AS last_ts,
+                    NULL::numeric AS latest_frontend_price,
+                    p.updated_at AS latest_frontend_at,
+                    max(md.market_title) AS market_title,
+                    max(md.condition_id) AS condition_id,
+                    max(md.end_date) AS end_date
+                FROM quant.market_price_build_market_progress p
+                LEFT JOIN quant.market_token_metadata md
+                    ON md.market_id = p.market_id AND md.token_side = 'YES'
+                WHERE p.market_slug IS NOT NULL
+                  AND (COALESCE(p.block_rows_written, 0) > 0 OR COALESCE(p.frontend_rows_written, 0) > 0)
+                GROUP BY
+                    p.market_id, p.market_slug, md.token_side, p.block_rows_written,
+                    p.first_orderfilled_block, p.max_block_complete, p.last_orderfilled_block,
+                    p.frontend_rows_written, p.min_frontend_complete_ts, p.max_frontend_complete_ts,
+                    p.updated_at
+            )
+            SELECT *
+            FROM titled
+            {where_sql}
+            ORDER BY GREATEST(COALESCE(last_ts, 0), COALESCE(last_block, 0)) DESC,
+                     (block_rows + frontend_rows) DESC
+            LIMIT %s
+            """,
+            params,
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
 def get_frontend_prices(
     conn: Any,
     *,

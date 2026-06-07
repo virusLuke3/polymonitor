@@ -8,16 +8,15 @@ import {
   fetchQuantBlockClosePrices,
   fetchQuantBuildStatus,
   fetchQuantFrontendPrices,
+  fetchQuantPriceMarkets,
   type QuantPriceQuery,
 } from '@/services/api';
-import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint } from '@/types';
+import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantPriceMarket } from '@/types';
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
-import { MARKET_INFO, MOCK_PRICES, MOCK_SIGNALS } from './data/mockBacktestData';
-import type { BacktestResult, PerformanceSortKey, PriceSource, Signal, SortDirection, TesterTab, TradeFilter } from './types';
-import { backtestApiToResult, blockToPrices, frontendToPrices } from './utils/apiAdapters';
-import { buildBacktestResult } from './utils/backtest';
+import type { BacktestEngine, BacktestResult, DataStatus, MarketInfo, PerformanceSortKey, PriceSource, Signal, SortDirection, TesterTab, TradeFilter } from './types';
+import { backtestApiToResult, blockToPrices, emptyBacktestResult, frontendToPrices } from './utils/apiAdapters';
 import { downloadText, fmtPrice } from './utils/formatters';
 
 function rowSortValue(value: string) {
@@ -33,6 +32,11 @@ function tradesToCsv(trades: BacktestResult['trades']) {
 
 function backendPriceSource(priceSource: PriceSource) {
   return priceSource === 'orderfilled' ? 'orderfilled_block_close' : 'frontend';
+}
+
+function defaultMarketSlug() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('market') || params.get('market_slug') || params.get('slug') || '';
 }
 
 function sleep(ms: number) {
@@ -52,7 +56,7 @@ async function waitForRun(runId: number, onStatus: (run: QuantBacktestRun) => vo
 }
 
 function signalsFromTrades(result: BacktestResult): Signal[] {
-  const derived = result.trades.flatMap((trade) => {
+  return result.trades.flatMap((trade) => {
     if (!trade.entryX || !trade.exitX) return [];
     return [
       {
@@ -79,22 +83,64 @@ function signalsFromTrades(result: BacktestResult): Signal[] {
       },
     ];
   });
-  return derived.length ? derived : MOCK_SIGNALS;
+}
+
+function toNumber(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function quantile(values: number[], ratio: number) {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * ratio)));
+  return sorted[index] ?? 0;
+}
+
+function strategyDefaults(prices: Array<{ close: number }>) {
+  const closes = prices.map((price) => price.close).filter((value) => Number.isFinite(value) && value > 0);
+  const entry = Math.max(0.01, Math.min(0.95, quantile(closes, 0.68) || 0.58));
+  const rawExit = Math.max(0.001, Math.min(0.94, quantile(closes, 0.42) || entry * 0.82));
+  const exit = rawExit >= entry ? Math.max(0.001, entry * 0.82) : rawExit;
+  return {
+    entryThreshold: Number(entry.toFixed(4)),
+    exitThreshold: Number(exit.toFixed(4)),
+  };
+}
+
+function marketInfoFromSelection(slug: string, market?: QuantPriceMarket): MarketInfo {
+  return {
+    id: String(market?.marketId || slug || 'quant-market'),
+    conditionId: market?.conditionId || '-',
+    title: market?.marketTitle || slug || 'Select a Polymarket market',
+    category: 'Polymarket',
+    slug: market?.marketSlug || slug,
+    startTime: market?.firstTs ? new Date(toNumber(market.firstTs) * 1000).toISOString() : '-',
+    endTime: market?.endDate || '-',
+    resolutionTime: market?.endDate || '-',
+    resolvedOutcome: 'PENDING',
+    yesTokenId: 'YES',
+    noTokenId: 'NO',
+    liquidity: '-',
+    volume: `${toNumber(market?.blockRows).toLocaleString('en-US')} block rows`,
+  };
 }
 
 export function QuantWorkspace() {
   const [frontendRows, setFrontendRows] = useState<QuantFrontendPricePoint[]>([]);
   const [blockRows, setBlockRows] = useState<QuantBlockClosePoint[]>([]);
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
+  const [quantMarkets, setQuantMarkets] = useState<QuantPriceMarket[]>([]);
+  const [dataStatus, setDataStatus] = useState<DataStatus>('idle');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [timeframe, setTimeframe] = useState('5m');
-  const [priceSource, setPriceSource] = useState<PriceSource>('frontend');
+  const [priceSource, setPriceSource] = useState<PriceSource>('orderfilled');
+  const [backtestEngine, setBacktestEngine] = useState<BacktestEngine>('backtrader');
   const [testerTab, setTesterTab] = useState<TesterTab>('overview');
   const [deepBacktest, setDeepBacktest] = useState(false);
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
-  const [marketSlug, setMarketSlug] = useState('');
-  const [runId, setRunId] = useState(1);
+  const [marketSlug, setMarketSlug] = useState(defaultMarketSlug);
   const [backtestStatus, setBacktestStatus] = useState('idle');
   const [performanceSearch, setPerformanceSearch] = useState('');
   const [performanceSortKey, setPerformanceSortKey] = useState<PerformanceSortKey>('metric');
@@ -106,14 +152,19 @@ export function QuantWorkspace() {
     if (priceSource === 'frontend') return frontendToPrices(frontendRows);
     return [];
   }, [blockRows, frontendRows, priceSource]);
-  const renderedPrices = activePrices.length ? activePrices : MOCK_PRICES;
-  const [backtestResult, setBacktestResult] = useState<BacktestResult>(() => buildBacktestResult(MOCK_PRICES, 'frontend', '5m', 1));
+  const [backtestResult, setBacktestResult] = useState<BacktestResult>(() => emptyBacktestResult());
   const strategySignals = useMemo(() => signalsFromTrades(backtestResult), [backtestResult]);
-  const latestPrice = renderedPrices[renderedPrices.length - 1]?.close || 0;
-  const query: QuantPriceQuery = { marketSlug, tokenSide: 'YES', limit: 360 };
+  const latestPrice = activePrices[activePrices.length - 1]?.close || 0;
+  const selectedMarket = useMemo(
+    () => quantMarkets.find((market) => market.marketSlug === marketSlug && market.tokenSide === 'YES') || quantMarkets.find((market) => market.marketSlug === marketSlug),
+    [marketSlug, quantMarkets],
+  );
+  const marketInfo = useMemo(() => marketInfoFromSelection(marketSlug, selectedMarket), [marketSlug, selectedMarket]);
+  const query: QuantPriceQuery = { marketSlug, tokenSide: 'YES', limit: 5000 };
 
   const refreshQuantRows = async () => {
     const hasMarketSlug = Boolean(marketSlug.trim());
+    if (hasMarketSlug) setDataStatus('loading');
     const [frontendResult, blockResult, statusResult] = await Promise.allSettled([
       hasMarketSlug ? fetchQuantFrontendPrices(query) : Promise.resolve({ count: 0, items: [] }),
       hasMarketSlug ? fetchQuantBlockClosePrices(query) : Promise.resolve({ count: 0, items: [] }),
@@ -124,8 +175,11 @@ export function QuantWorkspace() {
     if (frontendResult.status === 'fulfilled') setFrontendRows(nextFrontendRows);
     if (blockResult.status === 'fulfilled') setBlockRows(nextBlockRows);
     if (statusResult.status === 'fulfilled') setRuns(statusResult.value.items || []);
+    const activeRowCount = priceSource === 'orderfilled' ? nextBlockRows.length : nextFrontendRows.length;
+    if (hasMarketSlug) setDataStatus(activeRowCount ? 'ready' : 'empty');
     const rejected = [frontendResult, blockResult, statusResult].find((result) => result.status === 'rejected');
     if (hasMarketSlug && rejected?.status === 'rejected') {
+      setDataStatus('error');
       throw rejected.reason instanceof Error ? rejected.reason : new Error('Quant API unavailable');
     }
     return {
@@ -143,19 +197,30 @@ export function QuantWorkspace() {
       if (!marketSlug.trim()) {
         throw new Error('market_slug is required for real backtest');
       }
+      const sourceRows = priceSource === 'orderfilled' ? nextRows.blockRows : nextRows.frontendRows;
+      if (!sourceRows.length) {
+        throw new Error(`No ${backendPriceSource(priceSource)} rows for ${marketSlug.trim()}`);
+      }
+      const firstBlock = nextRows.blockRows[0]?.blockNumber;
+      const lastBlock = nextRows.blockRows[nextRows.blockRows.length - 1]?.blockNumber;
+      const firstTs = nextRows.frontendRows[0]?.timestamp;
+      const lastTs = nextRows.frontendRows[nextRows.frontendRows.length - 1]?.timestamp;
+      const strategy = strategyDefaults(priceSource === 'orderfilled' ? blockToPrices(nextRows.blockRows) : frontendToPrices(nextRows.frontendRows));
       const created = await createQuantBacktestRun({
         marketSlug: marketSlug.trim(),
         tokenSide: 'YES',
         priceSource: backendPriceSource(priceSource),
-        entryThreshold: 0.58,
-        exitThreshold: 0.44,
+        backtestEngine,
+        ...(priceSource === 'orderfilled' && firstBlock && lastBlock ? { fromBlock: String(firstBlock), toBlock: String(lastBlock) } : {}),
+        ...(priceSource === 'frontend' && firstTs && lastTs ? { from: String(firstTs), to: String(lastTs) } : {}),
+        entryThreshold: strategy.entryThreshold,
+        exitThreshold: strategy.exitThreshold,
         stopLoss: 0.075,
         takeProfit: 0.16,
         maxHoldingBars: timeframe === '1m' ? 240 : 96,
         initialCapital: 100000,
         positionSize: 100,
       });
-      setRunId(created.runId);
       setBacktestStatus(created.item.status);
       const completedRun = ['queued', 'running'].includes(created.item.status)
         ? await waitForRun(created.runId, (run) => setBacktestStatus(run.status))
@@ -172,14 +237,12 @@ export function QuantWorkspace() {
         fetchQuantBacktestTrades(completedRun.runId),
       ]);
       const result = backtestApiToResult(completedRun, metricsResult.items || [], equityResult.items || [], tradesResult.items || [], priceSource);
-      setRunId(completedRun.runId);
       setBacktestResult(result);
       setSelectedTradeId(result.trades[0]?.id ?? null);
       setBacktestStatus(completedRun.status);
       if (!nextRows.frontendRows.length && !nextRows.blockRows.length) setError('');
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Quant API unavailable');
-      setBacktestResult(buildBacktestResult(renderedPrices, priceSource, timeframe, runId + 1));
       setBacktestStatus('failed');
     } finally {
       setLoading(false);
@@ -187,10 +250,24 @@ export function QuantWorkspace() {
   };
 
   useEffect(() => {
-    void refreshQuantRows().catch(() => {
-      setError('');
-    });
+    void fetchQuantPriceMarkets('', 40)
+      .then((payload) => {
+        const items = payload.items || [];
+        setQuantMarkets(items);
+        if (!marketSlug.trim() && items[0]?.marketSlug) setMarketSlug(items[0].marketSlug);
+      })
+      .catch(() => setQuantMarkets([]));
   }, []);
+
+  useEffect(() => {
+    if (!marketSlug.trim()) return;
+    const timer = window.setTimeout(() => {
+      void refreshQuantRows().catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : 'Quant API unavailable');
+      });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [marketSlug, priceSource]);
 
   const filteredPerformanceRows = useMemo(() => {
     const queryText = performanceSearch.trim().toLowerCase();
@@ -240,9 +317,9 @@ export function QuantWorkspace() {
       downloadText(`quant-backtest-${backtestResult.runId}.csv`, tradesToCsv(backtestResult.trades), 'text/csv;charset=utf-8');
       return;
     }
-    downloadText(
+      downloadText(
       `quant-backtest-${backtestResult.runId}.json`,
-      JSON.stringify({ market: MARKET_INFO, priceSource, timeframe, result: backtestResult }, null, 2),
+      JSON.stringify({ market: marketInfo, priceSource, backtestEngine, timeframe, result: backtestResult }, null, 2),
       'application/json;charset=utf-8',
     );
   };
@@ -253,10 +330,13 @@ export function QuantWorkspace() {
         marketSlug={marketSlug}
         timeframe={timeframe}
         priceSource={priceSource}
+        backtestEngine={backtestEngine}
         loading={loading}
+        marketOptions={quantMarkets}
         onMarketSlugChange={setMarketSlug}
         onTimeframeChange={setTimeframe}
         onPriceSourceChange={setPriceSource}
+        onBacktestEngineChange={setBacktestEngine}
         onRunBacktest={() => void runBacktest()}
         onExport={exportBacktest}
       />
@@ -265,10 +345,12 @@ export function QuantWorkspace() {
 
       <main className="qtv-workspace">
         <PriceChartPanel
-          prices={renderedPrices}
-          market={MARKET_INFO}
+          prices={activePrices}
+          market={marketInfo}
           selectedTradeId={selectedTradeId}
           signals={strategySignals}
+          priceSource={backendPriceSource(priceSource)}
+          dataStatus={dataStatus}
         />
 
         <StrategyTesterPanel
@@ -301,6 +383,7 @@ export function QuantWorkspace() {
         <span>latest YES {fmtPrice(latestPrice)}</span>
         <span>frontend rows {frontendRows.length}</span>
         <span>block close rows {blockRows.length}</span>
+        <span>engine {backtestEngine}</span>
         <span>build runs {runs.length}</span>
         <span>backtest {backtestStatus}</span>
         <span>UTC+0</span>

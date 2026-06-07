@@ -293,6 +293,25 @@ export type QuantBlockClosePoint = {
   volume?: string | number | null;
 };
 
+export type QuantPriceMarket = {
+  marketId?: number | string | null;
+  marketSlug: string;
+  marketTitle?: string | null;
+  tokenSide: string;
+  conditionId?: string | null;
+  endDate?: string | null;
+  blockRows?: number | string | null;
+  frontendRows?: number | string | null;
+  firstBlock?: number | string | null;
+  lastBlock?: number | string | null;
+  latestBlockPrice?: string | number | null;
+  latestBlockAt?: string | null;
+  firstTs?: number | string | null;
+  lastTs?: number | string | null;
+  latestFrontendPrice?: string | number | null;
+  latestFrontendAt?: string | null;
+};
+
 export type QuantBuildRun = {
   runId: number;
   source: string;
@@ -313,6 +332,7 @@ export type QuantBacktestRun = {
   marketSlug: string;
   tokenSide: string;
   priceSource: string;
+  backtestEngine?: string | null;
   fromTs?: number | string | null;
   toTs?: number | string | null;
   fromBlock?: number | string | null;
@@ -378,6 +398,7 @@ export type QuantBacktestCreatePayload = {
   marketSlug: string;
   tokenSide: string;
   priceSource: string;
+  backtestEngine?: string;
   from?: string;
   to?: string;
   fromBlock?: string;

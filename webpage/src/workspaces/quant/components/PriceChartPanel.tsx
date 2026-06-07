@@ -1,84 +1,247 @@
-import { useMemo, useState } from 'preact/hooks';
-import type { CandlePoint, MarketInfo, PricePoint, Signal } from '../types';
-import { MOCK_PRICES, MOCK_SIGNALS } from '../data/mockBacktestData';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import {
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  HistogramSeries,
+  LineSeries,
+  type CandlestickData,
+  type HistogramData,
+  type IChartApi,
+  type ISeriesApi,
+  type LineData,
+  type Time,
+} from 'lightweight-charts';
+import type { CandlePoint, DataStatus, MarketInfo, PricePoint, Signal } from '../types';
 import { clamp, movingAverage, scaleFactory, toCandles } from '../utils/backtest';
 import { fmtPrice, formatTime } from '../utils/formatters';
 
 const DRAW_TOOLS = ['+', 'T', '/', 'R', 'Fib', 'Br', 'Mag', 'Lock', 'Eye'];
-
-type HoverPoint = {
-  candle: CandlePoint;
-  x: number;
-  y: number;
-};
+const SYNTHETIC_BLOCK_AXIS_START = 1_704_067_200;
 
 type PriceChartPanelProps = {
   prices: PricePoint[];
   market: MarketInfo;
   selectedTradeId: string | null;
   signals?: Signal[];
+  priceSource: string;
+  dataStatus: DataStatus;
 };
 
-export function PriceChartPanel({ prices, market, selectedTradeId, signals = MOCK_SIGNALS }: PriceChartPanelProps) {
-  const [hover, setHover] = useState<HoverPoint | null>(null);
-  const width = 1280;
-  const height = 560;
-  const padding = { left: 18, right: 88, top: 22, bottom: 88 };
-  const points = prices.length ? prices.slice(-128) : MOCK_PRICES;
-  const candles = useMemo(() => toCandles(points), [points]);
-  const xMin = candles[0]?.timestamp || 0;
-  const xMax = candles[candles.length - 1]?.timestamp || 1;
-  const scale = scaleFactory(width, height, padding, xMin, xMax, 0, 1);
-  const closes = candles.map((point) => point.close);
-  const ma = movingAverage(closes, 18);
-  const upper = ma.map((value, index) => Math.min(1, value + 0.05 + Math.abs(Math.sin(index / 11)) * 0.014));
-  const lower = ma.map((value, index) => Math.max(0, value - 0.05 - Math.abs(Math.cos(index / 13)) * 0.014));
-  const toScaledPath = (items: Array<{ x: number; y: number }>) => items.map((point, index) => (
-    `${index === 0 ? 'M' : 'L'} ${scale.x(point.x).toFixed(2)} ${scale.y(point.y).toFixed(2)}`
-  )).join(' ');
-  const upperPoints = candles.map((point, index) => ({ x: point.timestamp, y: upper[index] ?? point.close }));
-  const lowerPoints = candles.map((point, index) => ({ x: point.timestamp, y: lower[index] ?? point.close }));
-  const maPoints = candles.map((point, index) => ({ x: point.timestamp, y: ma[index] ?? point.close }));
-  const upperPath = toScaledPath(upperPoints);
-  const lowerPath = toScaledPath(lowerPoints);
-  const maPath = toScaledPath(maPoints);
-  const lowerBandPath = lowerPoints.slice().reverse().map((point) => `L ${scale.x(point.x).toFixed(2)} ${scale.y(point.y).toFixed(2)}`).join(' ');
-  const candleStep = scale.plotW / Math.max(1, candles.length - 1);
-  const candleW = Math.max(3, Math.min(9, candleStep * 0.58));
-  const maxVolume = Math.max(...candles.map((point) => point.volume), 1);
-  const fallbackCandle = toCandles(MOCK_PRICES)[0] ?? {
-    timestamp: 0,
-    open: 0.5,
-    high: 0.52,
-    low: 0.48,
-    close: 0.5,
-    volume: 0,
-    source: 'fallback',
-  };
-  const firstPoint = candles[0] ?? fallbackCandle;
-  const latest = candles[candles.length - 1] ?? firstPoint;
-  const markerSignals = signals.map((signal) => {
-    const nearest = candles.reduce((best, point) => (
-      Math.abs(point.timestamp - signal.timestamp) < Math.abs(best.timestamp - signal.timestamp) ? point : best
-    ), firstPoint);
-    return {
-      ...signal,
-      x: scale.x(nearest.timestamp),
-      y: scale.y(nearest.close),
-      candle: nearest,
-    };
-  });
-  const focusedSignals = markerSignals.filter((signal) => signal.tradeId === selectedTradeId);
+type SeriesRefs = {
+  candle: ISeriesApi<'Candlestick'> | null;
+  volume: ISeriesApi<'Histogram'> | null;
+  ma: ISeriesApi<'Line'> | null;
+};
 
-  const handleMouseMove = (event: MouseEvent) => {
-    const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * width;
-    const y = ((event.clientY - rect.top) / rect.height) * height;
-    const nearest = candles.reduce((best, candle) => (
-      Math.abs(scale.x(candle.timestamp) - x) < Math.abs(scale.x(best.timestamp) - x) ? candle : best
-    ), firstPoint);
-    setHover({ candle: nearest, x: scale.x(nearest.timestamp), y: clamp(y, padding.top, height - padding.bottom) });
+type SignalMarker = NonNullable<ReturnType<typeof markerPosition>>;
+
+function chartTime(point: PricePoint, index: number): Time {
+  if (point.source.includes('block')) return (SYNTHETIC_BLOCK_AXIS_START + index * 60) as Time;
+  return Math.max(0, Math.floor(point.timestamp)) as Time;
+}
+
+function timeLabel(point: PricePoint | CandlePoint | undefined, source: string) {
+  if (!point) return '--';
+  if (source.includes('block')) return `block ${point.timestamp.toLocaleString('en-US')}`;
+  return formatTime(point.timestamp);
+}
+
+function priceDelta(points: CandlePoint[]) {
+  const latest = points[points.length - 1];
+  const previous = points[points.length - 2] || points[0];
+  if (!latest || !previous) return { absolute: 0, percent: 0 };
+  const absolute = latest.close - previous.close;
+  const percent = previous.close ? (absolute / previous.close) * 100 : 0;
+  return { absolute, percent };
+}
+
+function formatSigned(value: number, digits = 3) {
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(digits)}`;
+}
+
+function markerPosition(signal: Signal, candles: CandlePoint[]) {
+  if (!candles.length) return null;
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  candles.forEach((candle, index) => {
+    const distance = Math.abs(candle.timestamp - signal.timestamp);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  const candle = candles[bestIndex];
+  if (!candle) return null;
+  return {
+    signal,
+    candle,
+    left: `${(bestIndex / Math.max(1, candles.length - 1)) * 100}%`,
+    top: `${clamp((1 - candle.close) * 100, 8, 82)}%`,
   };
+}
+
+export function PriceChartPanel({
+  prices,
+  market,
+  selectedTradeId,
+  signals = [],
+  priceSource,
+  dataStatus,
+}: PriceChartPanelProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<SeriesRefs>({ candle: null, volume: null, ma: null });
+  const candlesRef = useRef<CandlePoint[]>([]);
+  const timeLabelRef = useRef<Map<number, string>>(new Map());
+  const [hover, setHover] = useState<CandlePoint | null>(null);
+  const points = useMemo(() => prices.slice(-900), [prices]);
+  const candles = useMemo(() => toCandles(points), [points]);
+  const latest = candles[candles.length - 1];
+  const first = candles[0];
+  const delta = priceDelta(candles);
+  const volumeTotal = candles.reduce((sum, candle) => sum + (Number.isFinite(candle.volume) ? candle.volume : 0), 0);
+  const closes = candles.map((point) => point.close);
+  const ma = useMemo(() => movingAverage(closes, Math.min(20, Math.max(2, Math.floor(candles.length / 8)))), [candles.length, closes]);
+  useEffect(() => {
+    candlesRef.current = candles;
+  }, [candles]);
+
+  const markers = useMemo(
+    () => signals.map((signal) => markerPosition(signal, candles)).filter((marker): marker is SignalMarker => Boolean(marker)),
+    [candles, signals],
+  );
+  const focusedMarkers = markers.filter((marker) => marker?.signal.tradeId === selectedTradeId);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    const chart = createChart(container, {
+      autoSize: false,
+      height: Math.max(280, container.clientHeight || 360),
+      width: Math.max(360, container.clientWidth || 760),
+      layout: {
+        attributionLogo: false,
+        background: { type: ColorType.Solid, color: '#0b0d10' },
+        textColor: '#9ca3af',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: 'rgba(255,255,255,0.055)' },
+        horzLines: { color: 'rgba(255,255,255,0.07)' },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(148,163,184,0.18)',
+        scaleMargins: { top: 0.08, bottom: 0.24 },
+      },
+      timeScale: {
+        borderColor: 'rgba(148,163,184,0.18)',
+        fixLeftEdge: true,
+        fixRightEdge: true,
+        secondsVisible: false,
+        timeVisible: true,
+        rightOffset: 5,
+        barSpacing: 8,
+        tickMarkFormatter: (time: Time) => timeLabelRef.current.get(Number(time)) || '',
+      },
+      crosshair: {
+        horzLine: { color: 'rgba(148,163,184,0.42)', labelBackgroundColor: '#1f2937' },
+        vertLine: { color: 'rgba(148,163,184,0.28)', labelBackgroundColor: '#1f2937' },
+      },
+      localization: {
+        priceFormatter: (value: number) => fmtPrice(value),
+      },
+    });
+    const candle = chart.addSeries(CandlestickSeries, {
+      upColor: '#00b894',
+      downColor: '#ff3b55',
+      borderUpColor: '#12d6bd',
+      borderDownColor: '#ff5d6f',
+      wickUpColor: '#12d6bd',
+      wickDownColor: '#ff5d6f',
+      priceLineColor: '#2f6df6',
+      priceLineWidth: 1,
+    });
+    const maSeries = chart.addSeries(LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const volume = chart.addSeries(HistogramSeries, {
+      color: 'rgba(20,184,166,0.42)',
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+    seriesRef.current = { candle, volume, ma: maSeries };
+    chartRef.current = chart;
+
+    chart.subscribeCrosshairMove((param) => {
+      const time = Number(param.time);
+      if (!Number.isFinite(time)) {
+        setHover(null);
+        return;
+      }
+      const currentCandles = candlesRef.current;
+      const index = currentCandles.findIndex((item, itemIndex) => Number(chartTime(item, itemIndex)) === time);
+      setHover(index >= 0 ? currentCandles[index] || null : null);
+    });
+
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      chart.resize(Math.max(360, Math.floor(entry.contentRect.width)), Math.max(280, Math.floor(entry.contentRect.height)));
+      chart.timeScale().fitContent();
+    });
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = { candle: null, volume: null, ma: null };
+    };
+  }, []);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series.candle || !series.volume || !series.ma) return;
+    const candleData: CandlestickData<Time>[] = candles.map((candle, index) => ({
+      time: chartTime(candle, index),
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+    }));
+    timeLabelRef.current = new Map(candles.map((candle, index) => {
+      const time = Number(chartTime(candle, index));
+      const label = priceSource.includes('block')
+        ? `b${Math.round(candle.timestamp / 1000)}k`
+        : formatTime(candle.timestamp);
+      return [time, label];
+    }));
+    const volumeData: HistogramData<Time>[] = candles.map((candle, index) => ({
+      time: chartTime(candle, index),
+      value: Math.max(0, candle.volume),
+      color: candle.close >= candle.open ? 'rgba(20,184,166,0.45)' : 'rgba(255,59,85,0.42)',
+    }));
+    const maData: LineData<Time>[] = candles.map((candle, index) => ({
+      time: chartTime(candle, index),
+      value: ma[index] ?? candle.close,
+    }));
+    series.candle.setData(candleData);
+    series.volume.setData(volumeData);
+    series.ma.setData(maData);
+    chart.timeScale().fitContent();
+  }, [candles, ma]);
+
+  const shown = hover || latest;
 
   return (
     <section className="qtv-chart-shell">
@@ -90,129 +253,41 @@ export function PriceChartPanel({ prices, market, selectedTradeId, signals = MOC
         <div className="qtv-chart-info">
           <div>
             <strong>{market.title}</strong>
-            <span>{market.category} - YES - 5m - Polymarket</span>
+            <span>{market.category} - YES - Polymarket - {priceSource}</span>
             <div className="qtv-indicator-legend">
-              <span>Volume SMA 9 <b>38.963M</b></span>
-              <span>BB 20 2 <b>0.663</b> <i>0.585</i> <em>0.522</em></span>
-              <span>OrderFilled close <b>block axis</b></span>
+              <span>Rows <b>{candles.length.toLocaleString('en-US')}</b></span>
+              <span>Range <i>{timeLabel(first, priceSource)}</i> <em>{timeLabel(latest, priceSource)}</em></span>
+              <span>Volume <b>{volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></span>
             </div>
           </div>
           <div className="qtv-ohlc">
-            <span>O {fmtPrice(latest.open)}</span>
-            <span>H {fmtPrice(latest.high)}</span>
-            <span>L {fmtPrice(latest.low)}</span>
-            <span>C {fmtPrice(latest.close)}</span>
-            <b>+0.012 (+1.9%)</b>
+            <span>O {fmtPrice(shown?.open || 0)}</span>
+            <span>H {fmtPrice(shown?.high || 0)}</span>
+            <span>L {fmtPrice(shown?.low || 0)}</span>
+            <span>C {fmtPrice(shown?.close || 0)}</span>
+            <b className={delta.absolute >= 0 ? 'positive' : 'negative'}>{formatSigned(delta.absolute)} ({formatSigned(delta.percent, 2)}%)</b>
           </div>
         </div>
 
-        <svg
-          className="qtv-main-chart"
-          viewBox={`0 0 ${width} ${height}`}
-          preserveAspectRatio="none"
-          role="img"
-          aria-label="Prediction market candlestick chart with strategy signals"
-          onMouseMove={handleMouseMove}
-          onMouseLeave={() => setHover(null)}
-        >
-          <defs>
-            <linearGradient id="qtvBand" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stop-color="#2f6df6" stop-opacity="0.34" />
-              <stop offset="100%" stop-color="#2f6df6" stop-opacity="0.05" />
-            </linearGradient>
-          </defs>
-          {Array.from({ length: 10 }, (_, index) => {
-            const y = padding.top + (scale.plotH / 9) * index;
-            return <line key={`h-${index}`} className="qtv-grid-line" x1={padding.left} x2={width - padding.right} y1={y} y2={y} />;
-          })}
-          {Array.from({ length: 14 }, (_, index) => {
-            const x = padding.left + (scale.plotW / 13) * index;
-            return <line key={`v-${index}`} className="qtv-grid-line" y1={padding.top} y2={height - padding.bottom + 78} x1={x} x2={x} />;
-          })}
-
-          <path className="qtv-band-fill" d={`${upperPath} ${lowerBandPath} Z`} />
-          <path className="qtv-band-line" d={upperPath} />
-          <path className="qtv-band-line" d={lowerPath} />
-          <path className="qtv-ma-line" d={maPath} />
-          <line className="qtv-current-line" x1={padding.left} x2={width - padding.right + 18} y1={scale.y(latest.close)} y2={scale.y(latest.close)} />
-          <line className="qtv-resolution-line" x1={scale.x(candles[Math.floor(candles.length * 0.82)]?.timestamp || xMax)} x2={scale.x(candles[Math.floor(candles.length * 0.82)]?.timestamp || xMax)} y1={padding.top} y2={height - padding.bottom + 78} />
-
-          {focusedSignals.map((signal) => (
-            <line key={`focus-${signal.id}`} className="qtv-trade-focus-line" x1={signal.x} x2={signal.x} y1={padding.top} y2={height - padding.bottom + 78} />
-          ))}
-          {focusedSignals.length >= 2 ? (
-            <path className="qtv-trade-focus-path" d={`M ${focusedSignals[0]?.x ?? 0} ${focusedSignals[0]?.y ?? 0} L ${focusedSignals[1]?.x ?? 0} ${focusedSignals[1]?.y ?? 0}`} />
+        <div className="qtv-tv-chart" ref={containerRef}>
+          {!candles.length ? (
+            <div className="qtv-chart-empty">
+              <strong>{dataStatus === 'loading' ? 'Loading market prices' : 'No real price rows'}</strong>
+              <span>Select a market with quant price coverage or run the price builder first.</span>
+            </div>
           ) : null}
-
-          {candles.map((candle) => {
-            const x = scale.x(candle.timestamp);
-            const openY = scale.y(candle.open);
-            const closeY = scale.y(candle.close);
-            const highY = scale.y(candle.high);
-            const lowY = scale.y(candle.low);
-            const bullish = candle.close >= candle.open;
-            const bodyY = Math.min(openY, closeY);
-            const bodyH = Math.max(2, Math.abs(openY - closeY));
-            const volumeH = Math.max(3, (candle.volume / maxVolume) * 58);
-            return (
-              <g key={candle.timestamp} className={bullish ? 'qtv-candle up' : 'qtv-candle down'}>
-                <line x1={x} x2={x} y1={highY} y2={lowY} />
-                <rect x={x - candleW / 2} y={bodyY} width={candleW} height={bodyH} />
-                <rect className="qtv-volume-bar" x={x - candleW / 2} y={height - 18 - volumeH} width={candleW} height={volumeH} />
-              </g>
-            );
-          })}
-
-          {markerSignals.map((signal) => {
-            const isOpen = signal.action === 'OPEN' || signal.action === 'BUY';
-            const labelY = isOpen ? signal.y - 45 : signal.y + 27;
-            const arrowY = isOpen ? signal.y - 21 : signal.y + 22;
-            return (
-              <g key={signal.id} className={`qtv-signal ${isOpen ? 'open' : 'close'} ${selectedTradeId === signal.tradeId ? 'selected' : ''}`}>
-                <title>{`Action: ${signal.action} ${signal.outcome}\nPrice: ${signal.price}\nSize: ${signal.size} shares\nNotional: ${signal.notional} USDC\nReason: ${signal.reason}`}</title>
-                <path d={isOpen ? `M ${signal.x} ${arrowY} l 8 14 h -16 z` : `M ${signal.x} ${arrowY} l 8 -14 h -16 z`} />
-                <rect x={signal.x - 30} y={labelY} width="60" height="26" rx="4" />
-                <text x={signal.x} y={labelY + 17}>{signal.action === 'SELL' ? 'Sell' : signal.action}</text>
-              </g>
-            );
-          })}
-
-          {hover ? (
-            <g className="qtv-crosshair">
-              <line x1={hover.x} x2={hover.x} y1={padding.top} y2={height - padding.bottom + 78} />
-              <line x1={padding.left} x2={width - padding.right} y1={hover.y} y2={hover.y} />
-            </g>
-          ) : null}
-
-          {[1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4].map((value) => (
-            <text key={value} className="qtv-axis-text" x={width - 52} y={scale.y(value) + 4}>{value.toFixed(2)}</text>
+          {markers.map((marker) => (
+            <div
+              key={marker.signal.id}
+              className={`qtv-html-signal ${marker.signal.action === 'OPEN' || marker.signal.action === 'BUY' ? 'open' : 'close'} ${marker.signal.tradeId === selectedTradeId ? 'selected' : ''}`}
+              style={{ left: marker.left, top: marker.top }}
+              title={`${marker.signal.action} ${marker.signal.outcome} @ ${fmtPrice(marker.signal.price)}\n${marker.signal.reason}`}
+            >
+              {marker.signal.action === 'SELL' ? 'SELL' : marker.signal.action}
+            </div>
           ))}
-          <g className="qtv-price-badges">
-            <rect x={width - 80} y={scale.y(latest.close) - 12} width="64" height="22" rx="3" />
-            <text x={width - 48} y={scale.y(latest.close) + 4}>{fmtPrice(latest.close)}</text>
-            <rect className="ask" x={width - 80} y={scale.y(latest.close) + 13} width="64" height="20" rx="3" />
-            <text x={width - 48} y={scale.y(latest.close) + 28}>ASK 0.62</text>
-          </g>
-          {['23:01', '02:01', '05:01', '08:01', '11:01', '14:01', '17:01', '20:01'].map((label, index) => (
-            <text key={label} className="qtv-time-axis" x={padding.left + (scale.plotW / 7) * index} y={height - 4}>{label}</text>
-          ))}
-        </svg>
-
-        {hover ? (
-          <div className="qtv-chart-tooltip" style={{ left: `${(hover.x / width) * 100}%`, top: `${(hover.y / height) * 100}%` }}>
-            <strong>{formatTime(hover.candle.timestamp)}</strong>
-            <span>O {fmtPrice(hover.candle.open)} H {fmtPrice(hover.candle.high)}</span>
-            <span>L {fmtPrice(hover.candle.low)} C {fmtPrice(hover.candle.close)}</span>
-            <span>Volume {hover.candle.volume.toLocaleString('en-US')}</span>
-            <span>Source {hover.candle.source}</span>
-          </div>
-        ) : null}
-
-        {focusedSignals.length ? (
-          <div className="qtv-trade-focus-pill">
-            {selectedTradeId} entry / exit located
-          </div>
-        ) : null}
+          {focusedMarkers.length ? <div className="qtv-trade-focus-pill">{selectedTradeId} entry / exit located</div> : null}
+        </div>
 
         <div className="qtv-indicator-pane">
           <RsiPane points={candles} />

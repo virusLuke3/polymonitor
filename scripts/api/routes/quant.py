@@ -21,6 +21,7 @@ from quant.api.read_api import (  # noqa: E402
     get_block_close_prices,
     get_frontend_prices,
     get_price_build_status,
+    get_quant_price_markets,
 )
 from quant.backtest.backtest_engine import create_backtest_run  # noqa: E402
 from quant.core.db import PostgresSettings, postgres_connection  # noqa: E402
@@ -120,12 +121,37 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "pnl_pct": "pnlPct",
         "holding_bars": "holdingBars",
         "exit_reason": "exitReason",
+        "block_rows": "blockRows",
+        "frontend_rows": "frontendRows",
+        "first_block": "firstBlock",
+        "last_block": "lastBlock",
+        "latest_block_price": "latestBlockPrice",
+        "latest_block_at": "latestBlockAt",
+        "first_ts": "firstTs",
+        "last_ts": "lastTs",
+        "latest_frontend_price": "latestFrontendPrice",
+        "latest_frontend_at": "latestFrontendAt",
+        "market_title": "marketTitle",
+        "condition_id": "conditionId",
+        "end_date": "endDate",
     }
     return {mapping.get(key, key): _json_value(value) for key, value in row.items()}
 
 
 def create_quant_blueprint(_: dict) -> Blueprint:
     bp = Blueprint("quant_routes", __name__, url_prefix="/quant")
+
+    @bp.route("/markets", methods=["GET"])
+    def api_quant_price_markets():
+        limit = min(max(_parse_int_arg("limit", 50) or 50, 1), 200)
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            rows = get_quant_price_markets(
+                conn,
+                search=(request.args.get("q") or "").strip() or None,
+                token_side=(request.args.get("token_side") or "").strip() or None,
+                limit=limit,
+            )
+        return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
 
     @bp.route("/frontend-prices", methods=["GET"])
     def api_quant_frontend_prices():

@@ -159,7 +159,7 @@
 }
 
 .qtv-right-tools select {
-  min-width: 220px;
+  min-width: 190px;
   border-color: #2a3444;
   background: #0d1117;
   color: #d9d9d9;
@@ -236,6 +236,46 @@
   overflow: hidden;
   position: relative;
   background: #0f0f0f;
+}
+
+.qtv-tv-chart {
+  position: relative;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  background: #0b0d10;
+}
+
+.qtv-tv-chart canvas {
+  font-variant-numeric: tabular-nums;
+}
+
+.qtv-chart-empty {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  gap: 7px;
+  min-width: min(380px, 72vw);
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(71, 85, 105, 0.82);
+  border-radius: 4px;
+  background: rgba(12, 16, 24, 0.92);
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  padding: 14px 16px;
+  pointer-events: none;
+}
+
+.qtv-chart-empty strong {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.qtv-chart-empty span {
+  color: #94a3b8;
+  font-size: 11px;
 }
 
 .qtv-chart-info {
@@ -505,8 +545,8 @@
 
 .qtv-trade-focus-pill {
   position: absolute;
-  right: 100px;
-  top: 48px;
+  right: 18px;
+  top: 54px;
   z-index: 5;
   border: 1px solid rgba(250, 204, 21, 0.62);
   border-radius: 4px;
@@ -516,6 +556,61 @@
   font-size: 11px;
   font-weight: 900;
   padding: 6px 9px;
+}
+
+.qtv-html-signal {
+  position: absolute;
+  z-index: 4;
+  min-width: 48px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  color: #f8fafc;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.36);
+  pointer-events: auto;
+}
+
+.qtv-html-signal::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-right: 5px solid transparent;
+  border-left: 5px solid transparent;
+}
+
+.qtv-html-signal.open {
+  background: #2563eb;
+  border-color: #60a5fa;
+}
+
+.qtv-html-signal.open::after {
+  border-top: 7px solid #60a5fa;
+}
+
+.qtv-html-signal.close {
+  background: #e11d48;
+  border-color: #fb7185;
+}
+
+.qtv-html-signal.close::after {
+  top: -7px;
+  bottom: auto;
+  border-bottom: 7px solid #fb7185;
+}
+
+.qtv-html-signal.selected {
+  border-color: #facc15;
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.55), 0 0 18px rgba(250, 204, 21, 0.46);
 }
 
 .qtv-indicator-pane {
@@ -679,6 +774,27 @@
   display: grid;
   grid-template-rows: 74px minmax(0, 1fr);
   overflow: hidden;
+}
+
+.qtv-tester-empty {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  min-height: 0;
+  background: #111827;
+  color: #e5e7eb;
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.qtv-tester-empty strong {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.qtv-tester-empty span {
+  color: #94a3b8;
+  font-size: 11px;
 }
 
 .qtv-metrics-row {

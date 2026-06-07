@@ -7,7 +7,6 @@ import type {
   QuantFrontendPricePoint,
 } from '@/types';
 import type { BacktestMetric, BacktestResult, EquityPoint, PerformanceRow, PricePoint, PriceSource, PropertyGroup, Trade } from '../types';
-import { MARKET_INFO } from '../data/mockBacktestData';
 import { toNumber } from './formatters';
 
 export function frontendToPrices(rows: QuantFrontendPricePoint[]): PricePoint[] {
@@ -106,9 +105,9 @@ function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): Proper
         { label: 'market slug', value: run.marketSlug },
         { label: 'token side', value: run.tokenSide },
         { label: 'source', value: run.priceSource },
-        { label: 'condition id', value: MARKET_INFO.conditionId },
-        { label: 'resolution', value: MARKET_INFO.resolutionTime },
-        { label: 'resolved', value: MARKET_INFO.resolvedOutcome },
+        { label: 'engine', value: run.backtestEngine || 'builtin' },
+        { label: 'from block', value: String(run.fromBlock ?? '-') },
+        { label: 'to block', value: String(run.toBlock ?? '-') },
       ],
     },
     {
@@ -154,5 +153,26 @@ export function backtestApiToResult(
     performanceRows: performanceRows(metrics, uiTrades),
     propertyGroups: propertyGroups(run, priceSource),
     predictionMetrics,
+  };
+}
+
+export function emptyBacktestResult(): BacktestResult {
+  return {
+    runId: 0,
+    generatedAt: '',
+    metrics: [],
+    equity: [],
+    trades: [],
+    performanceRows: [],
+    propertyGroups: [
+      {
+        title: 'Backtest',
+        rows: [
+          { label: 'status', value: 'No completed run' },
+          { label: 'data', value: 'Select a market and run a backtest' },
+        ],
+      },
+    ],
+    predictionMetrics: [],
   };
 }

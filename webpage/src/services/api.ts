@@ -26,6 +26,7 @@ import type {
   QuantBuildRun,
   QuantFrontendPricePoint,
   QuantListPayload,
+  QuantPriceMarket,
   RuntimeMarketGroup,
   RuntimeCryptoFundingPayload,
   RuntimeCommodityTransmissionPayload,
@@ -238,6 +239,12 @@ export type QuantPriceQuery = {
   toBlock?: string;
   limit?: number;
 };
+
+export function fetchQuantPriceMarkets(query = '', limit = 40) {
+  const params = new URLSearchParams({ limit: String(limit), token_side: 'YES' });
+  if (query.trim()) params.set('q', query.trim());
+  return apiGetWithTimeout<QuantListPayload<QuantPriceMarket>>(`/quant/markets?${params.toString()}`, 8000);
+}
 
 function appendQuantParams(query: QuantPriceQuery, mode: 'frontend' | 'block') {
   const params = new URLSearchParams();

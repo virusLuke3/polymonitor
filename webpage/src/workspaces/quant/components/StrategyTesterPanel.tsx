@@ -52,6 +52,8 @@ export function StrategyTesterPanel({
   onTradeFilterToggle,
   onTradeSelect,
 }: StrategyTesterPanelProps) {
+  const hasCompletedRun = result.runId > 0 && result.metrics.length > 0;
+
   return (
     <section className="qtv-bottom-panel">
       <nav className="qtv-tool-tabs" aria-label="Backtest tools">
@@ -86,29 +88,36 @@ export function StrategyTesterPanel({
       </nav>
 
       {testerTab === 'overview' ? (
-        <div className="qtv-overview">
-          <div className="qtv-metrics-row">
-            {result.metrics.map((metric) => <MetricCard key={metric.name} metric={metric} />)}
-          </div>
-          <div className="qtv-result-grid">
-            <div className="qtv-equity-wrap">
-              <div className="qtv-prediction-metrics">
-                {result.predictionMetrics.map((metric) => <MetricCard key={metric.name} metric={metric} />)}
-              </div>
-              <EquityDrawdownChart points={result.equity} />
+        hasCompletedRun ? (
+          <div className="qtv-overview">
+            <div className="qtv-metrics-row">
+              {result.metrics.map((metric) => <MetricCard key={metric.name} metric={metric} />)}
             </div>
-            <div className="qtv-mini-table">
-              <strong>Strategy Report</strong>
-              {result.performanceRows.slice(0, 8).map((row) => (
-                <div key={row.metric}>
-                  <span>{row.metric}</span>
-                  <b>{row.all}</b>
+            <div className="qtv-result-grid">
+              <div className="qtv-equity-wrap">
+                <div className="qtv-prediction-metrics">
+                  {result.predictionMetrics.map((metric) => <MetricCard key={metric.name} metric={metric} />)}
                 </div>
-              ))}
-              <button type="button" onClick={() => onExport('csv')}>Export CSV</button>
+                <EquityDrawdownChart points={result.equity} />
+              </div>
+              <div className="qtv-mini-table">
+                <strong>Strategy Report</strong>
+                {result.performanceRows.slice(0, 8).map((row) => (
+                  <div key={row.metric}>
+                    <span>{row.metric}</span>
+                    <b>{row.all}</b>
+                  </div>
+                ))}
+                <button type="button" onClick={() => onExport('csv')}>Export CSV</button>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="qtv-tester-empty">
+            <strong>No completed real backtest</strong>
+            <span>Select a market with rows, choose a framework, then run backtest.</span>
+          </div>
+        )
       ) : null}
 
       {testerTab === 'performance' ? (

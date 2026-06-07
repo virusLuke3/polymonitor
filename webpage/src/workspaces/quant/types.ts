@@ -2,6 +2,8 @@ import type { QuantBlockClosePoint, QuantFrontendPricePoint } from '@/types';
 
 export type TesterTab = 'overview' | 'performance' | 'trades' | 'properties';
 export type PriceSource = 'frontend' | 'orderfilled' | 'orderbook' | 'conservative';
+export type BacktestEngine = 'builtin' | 'backtrader' | 'nautilus_trader';
+export type DataStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 export type MetricStatus = 'positive' | 'negative' | 'neutral';
 export type TradeFilter = 'profitable' | 'losing' | 'yes' | 'no' | 'longHolding' | 'shortHolding';
 export type PerformanceSortKey = 'metric' | 'all' | 'long' | 'short' | 'description';
