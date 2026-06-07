@@ -1400,7 +1400,7 @@ def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict
     return payload
 
 
-def get_geo_sanctions_shock_snapshot(ctx: dict, limit: int = 6) -> Dict[str, Any]:
+def get_geo_sanctions_shock_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
     payload = _seeded_payload_from_cache(ctx)
     if payload is None:
         payload = _seeded_fallback_payload(ctx)

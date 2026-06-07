@@ -449,7 +449,7 @@ def build_service_context() -> Dict[str, Any]:
         "get_finance_liquidity_regime_snapshot": lambda limit=12: finance_panels_service.get_finance_liquidity_regime_snapshot(build_service_context(), limit=limit),
         "get_food_retail_basket_snapshot": lambda limit=8: food_retail_basket_service.get_food_retail_basket_snapshot(build_service_context(), limit=limit),
         "get_f1_panel_snapshot": lambda limit=10: f1_runtime_service.get_f1_panel_snapshot(build_service_context(), limit=limit),
-        "get_geo_sanctions_shock_snapshot": lambda limit=6: geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit),
+        "get_geo_sanctions_shock_snapshot": lambda limit=geo_sanctions_shock_service.DEFAULT_ITEM_LIMIT: geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit),
         "get_global_weather_map_snapshot": lambda limit=34: global_weather_map_service.get_global_weather_map_snapshot(build_service_context(), limit=limit),
         "get_grid_esports_snapshot": lambda limit=10: grid_esports_service.get_grid_esports_snapshot(build_service_context(), limit=limit),
         "get_sports_odds_snapshot": lambda limit=8: sports_odds_service.get_sports_odds_snapshot(build_service_context(), limit=limit),
@@ -921,7 +921,7 @@ def get_inflation_nowcast_snapshot() -> Dict[str, Any]:
     return runtime_service.get_inflation_nowcast_snapshot(build_service_context())
 
 
-def get_geo_sanctions_shock_snapshot(limit: int = 6) -> Dict[str, Any]:
+def get_geo_sanctions_shock_snapshot(limit: int = geo_sanctions_shock_service.DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
     return geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit)
 
 
