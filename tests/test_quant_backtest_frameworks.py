@@ -62,10 +62,13 @@ def test_builtin_framework_runs_and_annotates_result():
 
 
 def test_nautilus_framework_runs_through_python312_worker_when_available():
-    try:
-        _nautilus_python_bin()
-    except RuntimeError as exc:
-        pytest.skip(str(exc))
+    if sys.version_info >= (3, 12):
+        pytest.importorskip("nautilus_trader")
+    else:
+        try:
+            _nautilus_python_bin()
+        except RuntimeError as exc:
+            pytest.skip(str(exc))
 
     points = [
         PricePoint(x_value=1, price=Decimal("0.60"), volume=Decimal("1")),
