@@ -69,28 +69,11 @@ function formatAge(value?: string | null) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function sourceCoverage(payload?: RuntimeGeoSanctionsShockPayload | null) {
-  const sources = Object.values(payload?.sources || {});
-  const live = sources.filter((state) => /^(ok|redis-seed|sqlite-seed|stale-seed|seeded)$/i.test(String(state || ''))).length;
-  return `${live}/${sources.length || 0}`;
-}
-
-function GeoMetric({ label, value, tone }: { label: string; value?: string | number | null; tone?: string }) {
-  return (
-    <span className={tone ? `wm-geo-data-metric ${tone}` : 'wm-geo-data-metric'}>
-      <i>{label}</i>
-      <strong>{String(value ?? '--') || '--'}</strong>
-    </span>
-  );
-}
-
 function GeoShockPanel({ payload }: {
   payload?: RuntimeGeoSanctionsShockPayload | null;
 }) {
   const [showHelp, setShowHelp] = useState(false);
-  const summary = payload?.summary;
   const items = payload?.items || [];
-  const targetSummary = upperMetric(summary?.targetSummary || summary?.targetLabels?.[0] || '--');
 
   return (
     <Panel
@@ -119,18 +102,9 @@ function GeoShockPanel({ payload }: {
       dataPanelId="geo-sanctions-shock"
     >
       <div className="wm-geo-shock-layout">
-        <div className="wm-geo-shock-data-strip" aria-label="GEO sanctions shock data summary">
-          <GeoMetric label="Sanctions" value={summary?.newSanctionsCount ?? 0} tone={(summary?.newSanctionsCount ?? 0) ? 'hot' : undefined} />
-          <GeoMetric label="Hotspots" value={summary?.hotspotCount ?? 0} tone={(summary?.hotspotCount ?? 0) ? 'watch' : undefined} />
-          <GeoMetric label="Nuclear" value={upperMetric(summary?.nuclearRisk || 'guarded')} tone={String(summary?.nuclearRisk || '').toLowerCase() === 'elevated' ? 'hot' : undefined} />
-          <GeoMetric label="Sources" value={sourceCoverage(payload)} />
-          <GeoMetric label="Targets" value={targetSummary} />
-          <GeoMetric label="Rows" value={items.length} />
-        </div>
-
         <section className="wm-geo-shock-section compact">
           <div className="wm-geo-shock-feed">
-            {items.length ? items.slice(0, 6).map((item) => {
+            {items.length ? items.slice(0, 12).map((item) => {
               const sevClass = severityClass(item.severity);
               const targetLabel = upperMetric(item.targetLabels?.[0] || item.country || '');
               return (
@@ -175,5 +149,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeGeoSanctionsShock(6),
+  fetchData: () => fetchRuntimeGeoSanctionsShock(12),
 });

@@ -29,7 +29,7 @@ DEFAULT_GDELT_CONFLICT_QUERY = (
     "(missile OR drone OR airstrike OR sanctions OR ceasefire OR military OR nuclear) "
     "(Iran OR Russia OR Ukraine OR China OR Taiwan OR Israel OR Gaza)"
 )
-DEFAULT_ITEM_LIMIT = 8
+DEFAULT_ITEM_LIMIT = 12
 TARGET_ALIASES: Dict[str, tuple[str, ...]] = {
     "IRAN": ("iran", "iranian", "tehran", "persian gulf"),
     "RUSSIA": ("russia", "russian", "moscow", "crimea", "kremlin"),
@@ -242,7 +242,7 @@ def _previous_seed_payload(ctx: dict) -> Dict[str, Any]:
 
 
 def _with_limit(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
-    normalized_limit = max(1, min(int(limit or 6), DEFAULT_ITEM_LIMIT))
+    normalized_limit = max(1, min(int(limit or DEFAULT_ITEM_LIMIT), DEFAULT_ITEM_LIMIT))
     result = _copy_payload(payload)
     items = result.get("items")
     if isinstance(items, list):

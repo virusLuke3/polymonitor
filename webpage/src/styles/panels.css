@@ -10633,7 +10633,6 @@ a.wm-orderfilled-row {
   gap: 7px;
 }
 
-.wm-geo-shock-data-strip,
 .wm-macro-registry-data-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -10644,7 +10643,6 @@ a.wm-orderfilled-row {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.wm-geo-data-metric,
 .wm-macro-data-metric {
   min-width: 0;
   padding: 6px 7px;
@@ -10654,7 +10652,6 @@ a.wm-orderfilled-row {
   gap: 3px;
 }
 
-.wm-geo-data-metric i,
 .wm-macro-data-metric i {
   min-width: 0;
   color: #7f8682;
@@ -10670,7 +10667,6 @@ a.wm-orderfilled-row {
   white-space: nowrap;
 }
 
-.wm-geo-data-metric strong,
 .wm-macro-data-metric strong {
   min-width: 0;
   color: #f1f4f1;
@@ -10683,32 +10679,26 @@ a.wm-orderfilled-row {
   white-space: nowrap;
 }
 
-.wm-geo-data-metric.hot,
 .wm-macro-data-metric.hot {
   border-color: rgba(255, 59, 59, 0.42);
 }
 
-.wm-geo-data-metric.hot strong,
 .wm-macro-data-metric.hot strong {
   color: #ff6f6f;
 }
 
-.wm-geo-data-metric.cool,
 .wm-macro-data-metric.cool {
   border-color: rgba(91, 207, 161, 0.4);
 }
 
-.wm-geo-data-metric.cool strong,
 .wm-macro-data-metric.cool strong {
   color: #6ce3a7;
 }
 
-.wm-geo-data-metric.watch,
 .wm-macro-data-metric.watch {
   border-color: rgba(255, 159, 0, 0.42);
 }
 
-.wm-geo-data-metric.watch strong,
 .wm-macro-data-metric.watch strong {
   color: #ffbd4a;
 }

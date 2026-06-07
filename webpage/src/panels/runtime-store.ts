@@ -21,7 +21,7 @@ const PANEL_RUNTIME_LIMITS: Record<string, number> = {
   'esports-intel': 3,
   'fed-reaction-growth-risk-board': 36,
   'food-retail-basket-pressure': 8,
-  'geo-sanctions-shock': 6,
+  'geo-sanctions-shock': 12,
   'global-index-monitor': 12,
   'global-temperature-monitor': 60,
   'weather-market-browser': 60,

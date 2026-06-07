@@ -451,7 +451,7 @@ export function fetchRuntimeFedReactionGrowthRiskBoard(limit = 36) {
   return apiGet<RuntimeMacroRegistryPayload>(`/runtime/macro/fed-reaction-growth-risk-board?limit=${limit}`);
 }
 
-export function fetchRuntimeGeoSanctionsShock(limit = 6) {
+export function fetchRuntimeGeoSanctionsShock(limit = 12) {
   return apiGet<RuntimeGeoSanctionsShockPayload>(`/runtime/world/geo-sanctions-shock?limit=${limit}`);
 }
 
