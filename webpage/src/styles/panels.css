@@ -12729,6 +12729,17 @@ a.wm-orderfilled-row {
   background: #020202;
 }
 
+.wm-weather-live-chart {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wm-weather-live-chart table,
+.wm-weather-live-chart canvas {
+  font-family: var(--font-mono) !important;
+}
+
 .wm-weather-quote-curve-large line,
 .wm-weather-trend-chart line {
   stroke: rgba(255, 255, 255, 0.09);

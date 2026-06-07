@@ -1,8 +1,10 @@
+import { useMemo } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
 import { num, panelStatus, selectedWeatherCity, statusBadge, tempLabel } from '../weather-detail-utils';
+import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '../weather-live-chart';
 
 type TrendPoint = {
   label: string;
@@ -45,14 +47,6 @@ function sevenDayPoints(city?: RuntimeGlobalWeatherCity | null): TrendPoint[] {
   });
 }
 
-function pathFor(values: number[], min: number, range: number, width = 360) {
-  return values.map((value, index) => {
-    const x = 38 + (index / Math.max(1, values.length - 1)) * width;
-    const y = 152 - ((value - min) / range) * 124;
-    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${Math.max(18, Math.min(152, y)).toFixed(1)}`;
-  }).join(' ');
-}
-
 function TrendChart({
   title,
   city,
@@ -63,6 +57,33 @@ function TrendChart({
   points: TrendPoint[];
 }) {
   const unit = city?.unit || '';
+  const chartSeries = useMemo<WeatherLiveChartSeries[]>(() => {
+    const currentYear = new Date().getUTCFullYear();
+    const isOneDay = title.toLowerCase().includes('1 day');
+    const dataTime = (point: TrendPoint, index: number) => {
+      if (isOneDay) {
+        const [hour = '0', minute = '0'] = point.label.split(':');
+        const parsed = Date.UTC(currentYear, 0, 1, Number(hour), Number(minute));
+        return numericTime(Math.floor(parsed / 1000) + index);
+      }
+      const parsed = Date.parse(`${currentYear}-${point.label}T00:00:00Z`);
+      return numericTime(Number.isFinite(parsed) ? Math.floor(parsed / 1000) : index + 1);
+    };
+    return [
+      {
+        id: `${title}-avg`,
+        type: 'line',
+        color: '#ff9900',
+        data: points.map((point, index) => ({ time: dataTime(point, index), value: point.avg })),
+      },
+      {
+        id: `${title}-high`,
+        type: 'line',
+        color: '#7edcff',
+        data: points.map((point, index) => ({ time: dataTime(point, index), value: point.high })),
+      },
+    ];
+  }, [points, title]);
   if (points.length < 2) {
     return (
       <section className="wm-weather-trend-card">
@@ -71,23 +92,6 @@ function TrendChart({
       </section>
     );
   }
-  const all = points.flatMap((point) => [point.avg, point.high]);
-  const min = Math.floor(Math.min(...all));
-  const max = Math.ceil(Math.max(...all));
-  const range = Math.max(1, max - min);
-  const avgPath = pathFor(points.map((point) => point.avg), min, range);
-  const highPath = pathFor(points.map((point) => point.high), min, range);
-  const last = points[points.length - 1];
-  const labeledPoints = points
-    .map((point, index) => ({ ...point, index }))
-    .filter((point) => point.label);
-  const isOneDay = title.toLowerCase().includes('1 day');
-  const maxLabels = isOneDay ? 5 : 7;
-  const labelIndexes = new Set(
-    labeledPoints
-      .filter((_, index) => index === 0 || index === labeledPoints.length - 1 || index % Math.max(1, Math.ceil(labeledPoints.length / maxLabels)) === 0)
-      .map((point) => point.index),
-  );
   return (
     <section className="wm-weather-trend-card">
       <div className="wm-weather-trend-title">
@@ -95,30 +99,11 @@ function TrendChart({
         <span className="avg">Avg</span>
         <span className="high">High</span>
       </div>
-      <svg className="wm-weather-trend-chart" viewBox="0 0 440 190" aria-hidden="true">
-        {[0, 0.33, 0.66, 1].map((tick) => {
-          const value = min + range * tick;
-          const y = 152 - tick * 124;
-          return (
-            <g key={`${title}-${tick}`}>
-              <line x1="38" y1={y} x2="398" y2={y} />
-              <text x="32" y={y + 4} textAnchor="end">{value.toFixed(1)}°{unit}</text>
-            </g>
-          );
-        })}
-        <path className="avg" d={avgPath} />
-        <path className="high" d={highPath} />
-        <line className="last-guide" x1="398" y1="28" x2="398" y2="152" />
-        <circle className="high" cx="398" cy={152 - ((last!.high - min) / range) * 124} r="3.6" />
-        <text className="last-label" x="405" y="70">Max {tempLabel(max, unit)}</text>
-        <text className="last-label" x="405" y="86">Last {tempLabel(last?.high, unit)}</text>
-        {points.map((point, index) => {
-          if (!point.label) return null;
-          if (!labelIndexes.has(index)) return null;
-          const x = 38 + (index / Math.max(1, points.length - 1)) * 360;
-          return <text key={`${title}-x-${point.label}`} className="x-label" x={x} y="178" textAnchor="middle">{point.label}</text>;
-        })}
-      </svg>
+      <WeatherLiveChart
+        className="wm-weather-trend-chart"
+        series={chartSeries}
+        valueFormatter={(value) => tempLabel(value, unit)}
+      />
     </section>
   );
 }

@@ -15,6 +15,7 @@
     "d3-geo": "^3.1.1",
     "deck.gl": "^9.3.2",
     "globe.gl": "^2.45.3",
+    "lightweight-charts": "^5.2.0",
     "maplibre-gl": "^5.24.0",
     "preact": "^10.26.4",
     "three": "^0.183.2",
