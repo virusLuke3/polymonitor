@@ -35,6 +35,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
       <WeatherLiveChart
         className="wm-weather-quote-curve-large"
         series={chartSeries}
+        showTimeScale={false}
         valueFormatter={percentAxisLabel}
       />
       <div className="wm-weather-quote-history-strip">

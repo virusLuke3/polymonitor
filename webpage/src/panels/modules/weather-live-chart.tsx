@@ -39,10 +39,12 @@ export function numericTime(value: number): Time {
 export function WeatherLiveChart({
   className = '',
   series,
+  showTimeScale = true,
   valueFormatter,
 }: {
   className?: string;
   series: WeatherLiveChartSeries[];
+  showTimeScale?: boolean;
   valueFormatter?: (value: number) => string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -84,6 +86,7 @@ export function WeatherLiveChart({
       },
       timeScale: {
         borderColor: 'rgba(255,255,255,0.10)',
+        visible: showTimeScale,
         fixLeftEdge: true,
         fixRightEdge: true,
         secondsVisible: false,
@@ -118,7 +121,7 @@ export function WeatherLiveChart({
       chart.remove();
       chartRef.current = null;
     };
-  }, []);
+  }, [showTimeScale]);
 
   useEffect(() => {
     const chart = chartRef.current;
