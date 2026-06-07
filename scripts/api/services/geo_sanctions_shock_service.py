@@ -1249,6 +1249,42 @@ def _build_target_breakdown(items: List[Dict[str, Any]], target_scores: Dict[str
     return breakdown
 
 
+def _sort_shock_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(
+        items,
+        key=lambda item: (
+            _parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc),
+            SEVERITY_ORDER.get(str(item.get("severity")), 0),
+        ),
+        reverse=True,
+    )
+
+
+def _select_geo_shock_items(
+    all_items: List[Dict[str, Any]],
+    conflict_items: List[Dict[str, Any]],
+    *,
+    item_limit: int,
+) -> List[Dict[str, Any]]:
+    limit = max(3, min(int(item_limit or DEFAULT_ITEM_LIMIT), DEFAULT_ITEM_LIMIT))
+    selected: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(item: Dict[str, Any]) -> None:
+        key = str(item.get("id") or item.get("headline") or "")
+        if not key or key in seen or len(selected) >= limit:
+            return
+        seen.add(key)
+        selected.append(item)
+
+    conflict_quota = min(4, max(2, limit // 3)) if conflict_items else 0
+    for item in _sort_shock_items(conflict_items)[:conflict_quota]:
+        add(item)
+    for item in _sort_shock_items(all_items):
+        add(item)
+    return _sort_shock_items(selected)
+
+
 def _nuclear_risk(items: List[Dict[str, Any]], targets: List[str]) -> str:
     nuclear_items = [
         item for item in items
@@ -1306,14 +1342,11 @@ def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict
         *(notices_snapshot.get("items") or []),
         *(conflict_snapshot.get("items") or []),
     ]
-    all_items.sort(
-        key=lambda item: (
-            _parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc),
-            SEVERITY_ORDER.get(str(item.get("severity")), 0),
-        ),
-        reverse=True,
+    items = _select_geo_shock_items(
+        all_items,
+        [item for item in (conflict_snapshot.get("items") or []) if isinstance(item, dict)],
+        item_limit=item_limit,
     )
-    items = all_items[: max(3, min(int(item_limit or DEFAULT_ITEM_LIMIT), DEFAULT_ITEM_LIMIT))]
 
     target_scores = _merge_target_scores(
         ofac_snapshot.get("targetScores") or {},
