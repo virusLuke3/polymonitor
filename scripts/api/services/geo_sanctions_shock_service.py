@@ -30,6 +30,9 @@ DEFAULT_GDELT_CONFLICT_QUERY = (
     "(Iran OR Russia OR Ukraine OR China OR Taiwan OR Israel OR Gaza)"
 )
 DEFAULT_ITEM_LIMIT = 12
+UCDP_PAGE_SIZE = 1000
+UCDP_MAX_PAGES = 6
+UCDP_TRAILING_WINDOW_DAYS = 365
 TARGET_ALIASES: Dict[str, tuple[str, ...]] = {
     "IRAN": ("iran", "iranian", "tehran", "persian gulf"),
     "RUSSIA": ("russia", "russian", "moscow", "crimea", "kremlin"),
@@ -621,10 +624,15 @@ def _normalize_ucdp_item(raw: Dict[str, Any], index: int) -> Optional[Dict[str, 
     dyad_name = _text_or_none(raw.get("dyad_name"))
     country = _text_or_none(raw.get("country"))
     region = _text_or_none(raw.get("region"))
-    location = _text_or_none(raw.get("where_coordinates")) or _text_or_none(raw.get("where_description"))
+    location = (
+        _text_or_none(raw.get("where_coordinates"))
+        or _text_or_none(raw.get("where_description"))
+        or _text_or_none(raw.get("location"))
+        or _text_or_none(raw.get("adm_1"))
+    )
     side_a = _text_or_none(raw.get("side_a"))
     side_b = _text_or_none(raw.get("side_b"))
-    headline = conflict_name or dyad_name or "UCDP conflict event"
+    headline = conflict_name or dyad_name or " vs ".join(part for part in (side_a, side_b) if part) or "UCDP conflict event"
 
     try:
         best = int(raw.get("best") or 0)
@@ -666,7 +674,80 @@ def _normalize_ucdp_item(raw: Dict[str, Any], index: int) -> Optional[Dict[str, 
         "targetLabels": _target_hits(text_blob),
         "country": country or location or region,
         "tags": tags,
+}
+
+
+def _ucdp_version_candidates(configured_url: str) -> List[str]:
+    year = datetime.now(timezone.utc).year - 2000
+    candidates = [f"{year}.1", f"{year - 1}.1", "25.1", "24.1"]
+    configured = str(configured_url or "").rstrip("/").rsplit("/", 1)[-1]
+    if configured and "." in configured:
+        candidates.append(configured)
+    return _unique(candidates)
+
+
+def _ucdp_url_for_version(configured_url: str, version: str) -> str:
+    base = str(configured_url or "https://ucdpapi.pcr.uu.se/api/gedevents/25.1").strip().rstrip("/")
+    tail = base.rsplit("/", 1)[-1]
+    if "." in tail:
+        return f"{base.rsplit('/', 1)[0]}/{version}"
+    return f"{base}/{version}"
+
+
+def _fetch_ucdp_page(ctx: dict, *, api_url: str, token: str, version: str, page: int) -> Dict[str, Any]:
+    requests_lib = ctx.get("requests")
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "polydata-runtime/1.0",
+        "x-ucdp-access-token": token,
     }
+    response = requests_lib.get(
+        _ucdp_url_for_version(api_url, version),
+        params={"pagesize": UCDP_PAGE_SIZE, "page": page},
+        timeout=30,
+        headers=headers,
+    )
+    status_code = int(getattr(response, "status_code", 500) or 500)
+    if status_code == 429:
+        raise RuntimeError("ucdp-rate-limited")
+    if status_code in {401, 403}:
+        raise RuntimeError(f"ucdp-access-denied:{status_code}")
+    response.raise_for_status()
+    payload = response.json() if hasattr(response, "json") else {}
+    if not isinstance(payload, dict):
+        raise RuntimeError("ucdp-invalid-payload")
+    return payload
+
+
+def _discover_ucdp_version(ctx: dict, *, api_url: str, token: str) -> tuple[str, Dict[str, Any]]:
+    errors: List[str] = []
+    for version in _ucdp_version_candidates(api_url):
+        try:
+            payload = _fetch_ucdp_page(ctx, api_url=api_url, token=token, version=version, page=0)
+        except RuntimeError as exc:
+            message = str(exc)
+            if message.startswith("ucdp-access-denied") or message == "ucdp-rate-limited":
+                raise
+            errors.append(f"{version}:{message}")
+            continue
+        except Exception as exc:
+            errors.append(f"{version}:{type(exc).__name__}")
+            continue
+        if isinstance(payload.get("Result"), list):
+            return version, payload
+        errors.append(f"{version}:no-result")
+    raise RuntimeError("ucdp-version-discovery-failed:" + ";".join(errors[:4]))
+
+
+def _latest_ucdp_event_datetime(rows: Iterable[Dict[str, Any]]) -> Optional[datetime]:
+    latest: Optional[datetime] = None
+    for row in rows:
+        parsed = _parse_datetime(row.get("date_start") or row.get("date_end"))
+        if parsed is None:
+            continue
+        if latest is None or parsed > latest:
+            latest = parsed
+    return latest
 
 
 def _fetch_ucdp_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
@@ -681,36 +762,45 @@ def _fetch_ucdp_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     if requests_lib is None:
         return {"state": "requests-missing", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
 
-    date_floor = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "polydata-runtime/1.0",
-        "x-ucdp-access-token": token,
-    }
     try:
-        response = requests_lib.get(
-            api_url,
-            params={"pagesize": 50, "StartDate": date_floor},
-            timeout=25,
-            headers=headers,
-        )
-        status_code = int(getattr(response, "status_code", 500) or 500)
-        if status_code == 429:
+        version, page0 = _discover_ucdp_version(ctx, api_url=api_url, token=token)
+        total_pages = max(1, int(page0.get("TotalPages") or 1))
+        newest_page = total_pages - 1
+        page_payloads: List[Dict[str, Any]] = []
+        failed_pages = 0
+        for offset in range(UCDP_MAX_PAGES):
+            page = newest_page - offset
+            if page < 0:
+                break
+            try:
+                page_payloads.append(page0 if page == 0 else _fetch_ucdp_page(ctx, api_url=api_url, token=token, version=version, page=page))
+            except Exception as exc:
+                failed_pages += 1
+                ctx["app"].logger.warning("geo shock ucdp page fetch failed version=%s page=%s error=%s", version, page, exc)
+    except Exception as exc:
+        text = str(exc)
+        if text == "ucdp-rate-limited":
             ctx["app"].logger.warning("geo shock ucdp rate limited")
             return {"state": "rate-limited", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
-        if status_code in {401, 403}:
-            ctx["app"].logger.warning("geo shock ucdp access denied status=%s", status_code)
+        if text.startswith("ucdp-access-denied"):
+            ctx["app"].logger.warning("geo shock ucdp access denied error=%s", text)
             return {"state": "access-denied", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
-        response.raise_for_status()
-        payload = response.json() if hasattr(response, "json") else {}
-    except Exception as exc:
         status_code = _exception_http_status(exc)
         if status_code == 429:
             return {"state": "rate-limited", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
         ctx["app"].logger.exception("geo shock ucdp fetch failed")
         return {"state": "error", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
 
-    rows = _coerce_conflict_rows((payload or {}).get("Result") if isinstance(payload, dict) else payload)
+    rows: List[Dict[str, Any]] = []
+    for payload in page_payloads:
+        rows.extend(_coerce_conflict_rows((payload or {}).get("Result") if isinstance(payload, dict) else payload))
+    latest = _latest_ucdp_event_datetime(rows)
+    if latest is not None:
+        floor = latest - timedelta(days=UCDP_TRAILING_WINDOW_DAYS)
+        rows = [
+            row for row in rows
+            if (_parse_datetime(row.get("date_start") or row.get("date_end")) or datetime.min.replace(tzinfo=timezone.utc)) >= floor
+        ]
     items: List[Dict[str, Any]] = []
     target_scores: Dict[str, int] = defaultdict(int)
     for index, row in enumerate(rows):
@@ -734,6 +824,9 @@ def _fetch_ucdp_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
         "items": items[:12],
         "targetScores": dict(target_scores),
         "hotspotCount": hotspot_count,
+        "version": version,
+        "rawCount": len(rows),
+        "failedPages": failed_pages,
     }
 
 
