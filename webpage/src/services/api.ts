@@ -48,6 +48,7 @@ import type {
   RuntimeJin10Payload,
   RuntimeMacroDriverPayload,
   RuntimeMacroRegistryPayload,
+  RuntimeCpiReleaseCommandPayload,
   RuntimeNbaMatchupPredictorPayload,
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
@@ -528,7 +529,7 @@ export function fetchRuntimeFedRatesPolymarketGap(limit = 8) {
 }
 
 export function fetchRuntimeCpiReleaseCommandCenter(limit = 36) {
-  return apiGet<RuntimeMacroRegistryPayload>(`/runtime/macro/cpi-release-command-center?limit=${limit}`);
+  return apiGet<RuntimeCpiReleaseCommandPayload>(`/runtime/macro/cpi-release-command-center?limit=${limit}`);
 }
 
 export function fetchRuntimeCpiComponentsPressureRegistry(limit = 48) {

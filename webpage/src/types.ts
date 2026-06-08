@@ -1573,6 +1573,46 @@ export type RuntimeMacroRegistryPayload = {
   items?: RuntimeMacroRegistryItem[];
 };
 
+export type RuntimeCpiReleaseCommandEvent = {
+  key?: string | null;
+  title?: string | null;
+  period?: string | null;
+  releaseAt?: string | null;
+  status?: string | null;
+  unit?: string | null;
+  actual?: number | string | null;
+  actualLabel?: string | null;
+  forecast?: number | string | null;
+  forecastLabel?: string | null;
+  forecastKind?: string | null;
+  previous?: number | string | null;
+  previousLabel?: string | null;
+  surprise?: number | string | null;
+  surpriseLabel?: string | null;
+  seriesId?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  forecastSource?: string | null;
+  forecastSourceUrl?: string | null;
+  asOf?: string | null;
+};
+
+export type RuntimeCpiReleaseCommandPayload = RuntimeMacroRegistryPayload & {
+  release?: RuntimeCpiCalendarItem & {
+    hoursToEvent?: number | string | null;
+  } | null;
+  events?: RuntimeCpiReleaseCommandEvent[];
+  actualSeries?: Record<string, unknown>;
+  summary?: (RuntimeMacroRegistrySummary & {
+    period?: string | null;
+    eventCount?: number | string | null;
+    actualCount?: number | string | null;
+    forecastCount?: number | string | null;
+    previousCount?: number | string | null;
+    hoursToEvent?: number | string | null;
+  }) | null;
+};
+
 export type RuntimeTradeSignal = {
   marketId?: number | null;
   marketTitle?: string | null;

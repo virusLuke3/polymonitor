@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from api.services import cpi_release_calendar_service, energy_gasoline_shock_service, food_retail_basket_service, macro_cpi_panels_service, runtime_service
 
@@ -11,6 +14,44 @@ DEFAULT_ITEM_LIMIT = 36
 MAX_ITEM_LIMIT = 60
 SNAPSHOT_NAMESPACE_PREFIX = "snapshot:macro-registry:"
 CACHE_KEY = "panel-v1"
+FRED_CSV_LOOKBACK_YEARS = 4
+
+CPI_EVENT_SPECS = (
+    {
+        "key": "headline-yoy",
+        "title": "Inflation Rate YoY",
+        "seriesId": "CPIAUCSL",
+        "metric": "yoy",
+        "nowcastKey": "CPI",
+        "bucket": "yearOverYear",
+    },
+    {
+        "key": "core-yoy",
+        "title": "Core Inflation Rate YoY",
+        "seriesId": "CPILFESL",
+        "seriesCandidates": ("CPILFESL", "CPILFENS"),
+        "metric": "yoy",
+        "nowcastKey": "Core CPI",
+        "bucket": "yearOverYear",
+    },
+    {
+        "key": "headline-mom",
+        "title": "Inflation Rate MoM",
+        "seriesId": "CPIAUCSL",
+        "metric": "mom",
+        "nowcastKey": "CPI",
+        "bucket": "monthOverMonth",
+    },
+    {
+        "key": "core-mom",
+        "title": "Core Inflation Rate MoM",
+        "seriesId": "CPILFESL",
+        "seriesCandidates": ("CPILFESL", "CPILFENS"),
+        "metric": "mom",
+        "nowcastKey": "Core CPI",
+        "bucket": "monthOverMonth",
+    },
+)
 
 
 PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
@@ -104,6 +145,11 @@ def _value_label(value: Any, unit: Any = None) -> str:
     if abs(number) >= 1000:
         return f"{number / 1000:.1f}K"
     return f"{number:.2f}" if abs(number) < 100 else f"{number:.1f}"
+
+
+def _pct_value_label(value: Any) -> str:
+    number = _float(value)
+    return "--" if number is None else f"{number:.1f}%"
 
 
 def _source_label(source: Any) -> str:
@@ -208,6 +254,7 @@ def _row(
     source: str = "",
     source_url: str = "",
     implication: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     normalized_tone = _status_tone(tone)
     value_label = _value_label(value, unit)
@@ -231,6 +278,7 @@ def _row(
         "severityLabel": _severity_label(normalized_tone),
         "ageLabel": _age_label(date),
         "implication": implication,
+        "metadata": metadata or {},
     }
 
 
@@ -300,6 +348,13 @@ def _calendar_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 source=str(item.get("source") or "Official calendar"),
                 source_url=str(item.get("sourceUrl") or ""),
                 implication=str(item.get("marketRelevance") or "release timing"),
+                metadata={
+                    "id": item.get("id"),
+                    "kind": str(item.get("kind") or kind).lower(),
+                    "referencePeriod": item.get("referencePeriod"),
+                    "releaseAt": item.get("releaseAt"),
+                    "releaseTimeEt": item.get("releaseTimeEt"),
+                },
             )
         )
     return rows
@@ -331,6 +386,7 @@ def _nowcast_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                     source=str(payload.get("source") or "Cleveland Fed"),
                     source_url=str(payload.get("url") or ""),
                     implication="inflation bucket pressure",
+                    metadata={"bucket": bucket_name, "nowcastKey": key},
                 )
             )
     for index, item in enumerate(payload.get("quarterly") or []):
@@ -356,6 +412,229 @@ def _nowcast_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
             )
         )
     return rows
+
+
+def _fred_url(ctx: dict, series_id: str) -> str:
+    settings = ctx.get("SETTINGS")
+    template = getattr(
+        settings,
+        "finance_fred_csv_url_template",
+        getattr(settings, "food_basket_fred_csv_url_template", "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"),
+    )
+    url = str(template).format(series_id=series_id)
+    lookback_years = int(getattr(settings, "fred_csv_lookback_years", FRED_CSV_LOOKBACK_YEARS) or FRED_CSV_LOOKBACK_YEARS)
+    start_date = f"{max(1900, datetime.now(timezone.utc).year - lookback_years)}-01-01"
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("cosd", start_date)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _fred_row_date(row: Dict[str, Any]) -> str:
+    return str(row.get("observation_date") or row.get("DATE") or row.get("date") or "").strip()
+
+
+def _series_candidates(series_id: str) -> List[str]:
+    for spec in CPI_EVENT_SPECS:
+        if str(spec.get("seriesId")) == series_id and spec.get("seriesCandidates"):
+            return [str(item) for item in spec.get("seriesCandidates") or []]
+    return [series_id]
+
+
+def _fetch_cpi_series_stats(ctx: dict) -> Dict[str, Dict[str, Any]]:
+    getter = ctx.get("http_text_get")
+    if not callable(getter):
+        return {}
+    stats: Dict[str, Dict[str, Any]] = {}
+    for primary_series_id in sorted({str(spec["seriesId"]) for spec in CPI_EVENT_SPECS}):
+        for series_id in _series_candidates(primary_series_id):
+            try:
+                url = _fred_url(ctx, series_id)
+                text = getter(url, timeout=12, headers={"User-Agent": "polydata-cpi-release-command/1.0"})
+                if not str(text or "").lstrip().lower().startswith("observation_date"):
+                    continue
+                reader = csv.DictReader(io.StringIO(str(text or "")))
+                rows: List[Dict[str, Any]] = []
+                for row in reader:
+                    value = _float(row.get(series_id))
+                    date = _fred_row_date(row)
+                    if value is not None and date:
+                        rows.append({"date": date, "value": value})
+                rows.sort(key=lambda item: item["date"])
+                if len(rows) < 14:
+                    continue
+                latest = rows[-1]
+                previous = rows[-2]
+                prior = rows[-3]
+                year_ago = rows[-13]
+                prev_year_ago = rows[-14]
+                latest_mom = (latest["value"] / previous["value"] - 1.0) * 100.0 if previous["value"] else None
+                previous_mom = (previous["value"] / prior["value"] - 1.0) * 100.0 if prior["value"] else None
+                latest_yoy = (latest["value"] / year_ago["value"] - 1.0) * 100.0 if year_ago["value"] else None
+                previous_yoy = (previous["value"] / prev_year_ago["value"] - 1.0) * 100.0 if prev_year_ago["value"] else None
+                stats[primary_series_id] = {
+                    "seriesId": primary_series_id,
+                    "resolvedSeriesId": series_id,
+                    "date": latest["date"],
+                    "source": "FRED / BLS CPI",
+                    "sourceUrl": url,
+                    "latestValue": round(latest["value"], 3),
+                    "mom": round(latest_mom, 2) if latest_mom is not None else None,
+                    "previousMom": round(previous_mom, 2) if previous_mom is not None else None,
+                    "yoy": round(latest_yoy, 2) if latest_yoy is not None else None,
+                    "previousYoy": round(previous_yoy, 2) if previous_yoy is not None else None,
+                }
+                break
+            except Exception:
+                continue
+    return stats
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _event_hours_to_release(release_at: Any) -> Optional[float]:
+    parsed = _parse_datetime(release_at)
+    if parsed is None:
+        return None
+    return round((parsed - datetime.now(timezone.utc)).total_seconds() / 3600.0, 1)
+
+
+def _release_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    releases = [row for row in rows if str(row.get("type") or "").lower() == "release" and str(row.get("group") or "").upper() == "CPI"]
+    if not releases:
+        return {}
+    now = datetime.now(timezone.utc)
+    def release_sort(row: Dict[str, Any]) -> tuple[int, datetime]:
+        parsed = _parse_datetime(row.get("date")) or datetime.max.replace(tzinfo=timezone.utc)
+        return (0 if parsed >= now else 1, parsed)
+    row = sorted(releases, key=release_sort)[0]
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    release_at = metadata.get("releaseAt") or row.get("date")
+    return {
+        "id": metadata.get("id") or row.get("key"),
+        "kind": "cpi",
+        "title": row.get("label") or "Consumer Price Index",
+        "referencePeriod": metadata.get("referencePeriod"),
+        "releaseAt": release_at,
+        "releaseTimeEt": metadata.get("releaseTimeEt") or row.get("changeLabel") or row.get("value"),
+        "source": row.get("source"),
+        "sourceUrl": row.get("sourceUrl"),
+        "hoursToEvent": _event_hours_to_release(release_at),
+    }
+
+
+def _nowcast_lookup_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    lookup: Dict[str, Any] = {}
+    for row in rows:
+        if str(row.get("type") or "").lower() != "model":
+            continue
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        label = str(metadata.get("nowcastKey") or row.get("label") or "").strip().lower()
+        bucket = str(metadata.get("bucket") or "").strip()
+        value = _float(row.get("value"))
+        if not label or value is None:
+            continue
+        if not bucket:
+            bucket = "yearOverYear" if abs(value) >= 1.0 else "monthOverMonth"
+        lookup[f"{bucket}:{label}"] = {
+            "value": round(value, 2),
+            "label": _pct_value_label(value),
+            "source": row.get("source") or "Cleveland Fed Inflation Nowcasting",
+            "sourceUrl": row.get("sourceUrl"),
+            "generatedAt": row.get("date"),
+        }
+    return lookup
+
+
+def _period_from_release(release: Dict[str, Any]) -> Optional[str]:
+    text = str(release.get("referencePeriod") or "").strip()
+    if text:
+        return text
+    parsed = _parse_datetime(release.get("releaseAt"))
+    if parsed is None:
+        return None
+    month = parsed.month - 1
+    year = parsed.year
+    if month == 0:
+        month = 12
+        year -= 1
+    return f"{year}-{month:02d}"
+
+
+def _compose_cpi_release_events(ctx: dict, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    release = _release_from_rows(rows)
+    release_at = _parse_datetime(release.get("releaseAt"))
+    is_released = bool(release_at and release_at <= datetime.now(timezone.utc))
+    period = _period_from_release(release)
+    nowcasts = _nowcast_lookup_from_rows(rows)
+    actual_series = _fetch_cpi_series_stats(ctx)
+    events: List[Dict[str, Any]] = []
+    for spec in CPI_EVENT_SPECS:
+        stat = actual_series.get(str(spec["seriesId"])) or {}
+        metric = str(spec["metric"])
+        latest_metric = stat.get(metric)
+        previous_metric = stat.get(f"previous{metric.title()}")
+        actual = latest_metric if is_released else None
+        previous = previous_metric if is_released else latest_metric
+        forecast = nowcasts.get(f"{spec['bucket']}:{str(spec['nowcastKey']).lower()}") or {}
+        surprise = None
+        if actual is not None and _float(forecast.get("value")) is not None:
+            surprise = round(float(actual) - float(forecast["value"]), 2)
+        events.append(
+            {
+                "key": spec["key"],
+                "title": spec["title"],
+                "period": period or stat.get("date"),
+                "releaseAt": release.get("releaseAt"),
+                "status": "released" if is_released else "scheduled",
+                "unit": "%",
+                "actual": actual,
+                "actualLabel": _pct_value_label(actual),
+                "forecast": forecast.get("value"),
+                "forecastLabel": forecast.get("label") or "--",
+                "forecastKind": "Nowcast",
+                "previous": previous,
+                "previousLabel": _pct_value_label(previous),
+                "surprise": surprise,
+                "surpriseLabel": _signed(surprise, suffix="pp") if surprise is not None else "--",
+                "seriesId": spec["seriesId"],
+                "source": stat.get("source") or "BLS / FRED",
+                "sourceUrl": stat.get("sourceUrl") or "",
+                "forecastSource": forecast.get("source") or "Cleveland Fed Inflation Nowcasting",
+                "forecastSourceUrl": forecast.get("sourceUrl") or "",
+                "asOf": stat.get("date"),
+            }
+        )
+    forecast_count = sum(1 for item in events if _float(item.get("forecast")) is not None)
+    previous_count = sum(1 for item in events if _float(item.get("previous")) is not None)
+    actual_count = sum(1 for item in events if _float(item.get("actual")) is not None)
+    return {
+        "release": release,
+        "events": events,
+        "actualSeries": actual_series,
+        "eventSummary": {
+            "period": period,
+            "status": "released" if is_released else "scheduled",
+            "eventCount": len(events),
+            "actualCount": actual_count,
+            "forecastCount": forecast_count,
+            "previousCount": previous_count,
+            "hoursToEvent": release.get("hoursToEvent"),
+            "signal": "CPI RELEASE SCHEDULED" if not is_released else "CPI RELEASED",
+            "sourceLabel": "BLS calendar / Cleveland Fed nowcast / FRED actuals",
+        },
+    }
 
 
 def _energy_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -481,8 +760,12 @@ def _summarize(panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str
 def _payload(ctx: dict, panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str], *, limit: int) -> Dict[str, Any]:
     config = PANEL_CONFIGS[panel_id]
     capped = _rank_rows(rows)[: _limit(limit)]
+    cpi_release = _compose_cpi_release_events(ctx, capped) if panel_id == "cpi-release-command-center" else {}
+    summary = _summarize(panel_id, capped, sources, config)
+    if panel_id == "cpi-release-command-center":
+        summary = {**summary, **(cpi_release.get("eventSummary") or {})}
     status = "ok" if capped and any(str(value).lower() in {"ok", "redis-seed", "sqlite-seed", "stale-seed"} for value in sources.values()) else ("degraded" if capped else "warming")
-    return {
+    payload = {
         "generatedAt": _utc_now_iso(ctx),
         "panelId": panel_id,
         "source": config.get("source"),
@@ -490,9 +773,12 @@ def _payload(ctx: dict, panel_id: str, rows: List[Dict[str, Any]], sources: Dict
         "status": status,
         "cacheMode": "composed-seed",
         "sources": sources,
-        "summary": _summarize(panel_id, capped, sources, config),
+        "summary": summary,
         "items": capped,
     }
+    if panel_id == "cpi-release-command-center":
+        payload.update(cpi_release)
+    return payload
 
 
 def _with_mode(payload: Dict[str, Any], mode: str) -> Dict[str, Any]:
@@ -658,4 +944,8 @@ def normalize_macro_cpi_registry_payload(payload: Any, *, ctx: dict, panel_id: s
     result["source"] = str(result.get("source") or PANEL_CONFIGS.get(panel_id, {}).get("source") or "Public macro sources")
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     result["summary"] = _summarize(panel_id, result["items"], result["sources"], PANEL_CONFIGS.get(panel_id, {}))
+    if panel_id == "cpi-release-command-center":
+        cpi_release = _compose_cpi_release_events(ctx, result["items"])
+        result.update(cpi_release)
+        result["summary"] = {**result["summary"], **(cpi_release.get("eventSummary") or {})}
     return result
