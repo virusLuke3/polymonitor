@@ -1493,7 +1493,7 @@ function WorldMonitorApp() {
     const currentMarketId = selectedMarketId;
     const chartRange = selectedMarketGroupChartRange;
 
-    fetchMarketChart(currentMarketId, chartRange, undefined, 3500)
+    fetchMarketChart(currentMarketId, chartRange, undefined, 12000)
       .then((chartPayload) => {
         if (cancelled) return;
         setBundle((previous) => {

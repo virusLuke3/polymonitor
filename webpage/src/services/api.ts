@@ -777,8 +777,8 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
       ? fetchMarketContent(marketId, 20, 3800)
       : Promise.resolve(null);
     const lobPromise = includeLob ? fetchMarketLob(marketId, 1800) : Promise.resolve(null);
-    const detailPromise = fetchMarketWorkspaceBundle(marketId, 4200)
-      .catch(() => fetchMarketDetailBundle(marketId, 4200));
+    const detailPromise = fetchMarketWorkspaceBundle(marketId, 18000)
+      .catch(() => fetchMarketDetailBundle(marketId, 12000));
     const [detailResult, contentResult, lobResult] = await Promise.allSettled([detailPromise, contentPromise, lobPromise]);
     const detailBundle = detailResult.status === 'fulfilled' ? detailResult.value : emptyWorkspaceBundle();
     const secondary: WorkspaceBundle = {
