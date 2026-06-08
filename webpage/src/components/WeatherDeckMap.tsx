@@ -138,11 +138,47 @@ type DeckTooltipState = {
 
 type DeckHoverObject = WeatherMapPoint | ConflictMapPoint | ConflictClusterPoint;
 
+type CountryNameLabel = {
+  id: string;
+  name: string;
+  lon: number;
+  lat: number;
+  kind: 'major' | 'risk';
+  level?: CountryRiskLevel;
+  score?: number;
+  importance: number;
+  minZoom: number;
+};
+
 const LOCAL_WORLD_COUNTRIES_GEOJSON_URL = '/map-data/world-countries.geojson';
 const WEATHER_COUNTRY_SOURCE_ID = 'wm-weather-country-boundaries';
 const WEATHER_COUNTRY_NO_MATCH = '__weather_country_no_match__';
 const WEATHER_DECK_POINT_NOTE = 'Perf note: before refactor WeatherDeckMap rendered up to 42 weather label buttons and 520 UCDP event buttons, driven by map.project() screen-state updates. Cities and UCDP markers now render as deck.gl GPU layers; only one tooltip plus selected detail panels remain as DOM.';
 void WEATHER_DECK_POINT_NOTE;
+
+const MAJOR_COUNTRY_LABELS: CountryNameLabel[] = [
+  { id: 'US', name: 'UNITED STATES', lon: -99, lat: 38, kind: 'major', importance: 10, minZoom: 0 },
+  { id: 'CA', name: 'CANADA', lon: -101, lat: 58, kind: 'major', importance: 8, minZoom: 0 },
+  { id: 'BR', name: 'BRAZIL', lon: -53, lat: -10, kind: 'major', importance: 9, minZoom: 0 },
+  { id: 'MX', name: 'MEXICO', lon: -102, lat: 23, kind: 'major', importance: 6, minZoom: 1.4 },
+  { id: 'GB', name: 'UNITED KINGDOM', lon: -2.5, lat: 54.3, kind: 'major', importance: 6, minZoom: 1.2 },
+  { id: 'FR', name: 'FRANCE', lon: 2, lat: 46.5, kind: 'major', importance: 6, minZoom: 1.8 },
+  { id: 'DE', name: 'GERMANY', lon: 10.5, lat: 51.2, kind: 'major', importance: 6, minZoom: 1.8 },
+  { id: 'RU', name: 'RUSSIA', lon: 90, lat: 61, kind: 'major', importance: 10, minZoom: 0 },
+  { id: 'CN', name: 'CHINA', lon: 104, lat: 35, kind: 'major', importance: 10, minZoom: 0 },
+  { id: 'IN', name: 'INDIA', lon: 78, lat: 22, kind: 'major', importance: 9, minZoom: 0 },
+  { id: 'JP', name: 'JAPAN', lon: 138, lat: 38, kind: 'major', importance: 7, minZoom: 1.2 },
+  { id: 'ID', name: 'INDONESIA', lon: 117, lat: -2, kind: 'major', importance: 7, minZoom: 1.3 },
+  { id: 'AU', name: 'AUSTRALIA', lon: 134, lat: -25, kind: 'major', importance: 8, minZoom: 0 },
+  { id: 'ZA', name: 'SOUTH AFRICA', lon: 24, lat: -29, kind: 'major', importance: 6, minZoom: 1.2 },
+  { id: 'NG', name: 'NIGERIA', lon: 8, lat: 9.5, kind: 'major', importance: 6, minZoom: 1.8 },
+  { id: 'EG', name: 'EGYPT', lon: 30, lat: 27, kind: 'major', importance: 6, minZoom: 1.6 },
+  { id: 'TR', name: 'TURKEY', lon: 35, lat: 39, kind: 'major', importance: 6, minZoom: 1.6 },
+  { id: 'IR', name: 'IRAN', lon: 53, lat: 32, kind: 'major', importance: 6, minZoom: 1.6 },
+  { id: 'SA', name: 'SAUDI ARABIA', lon: 45, lat: 24, kind: 'major', importance: 5, minZoom: 1.8 },
+  { id: 'KZ', name: 'KAZAKHSTAN', lon: 67, lat: 48, kind: 'major', importance: 6, minZoom: 1.4 },
+  { id: 'AR', name: 'ARGENTINA', lon: -64, lat: -36, kind: 'major', importance: 5, minZoom: 1.6 },
+];
 
 const COUNTRY_ISO2_ALIASES: Record<string, string> = {
   afghanistan: 'AF',
@@ -301,17 +337,17 @@ function countryRiskLevel(score: number): CountryRiskLevel {
 }
 
 function countryRiskColor(level: CountryRiskLevel) {
-  if (level === 'critical') return '#ff3535';
-  if (level === 'elevated') return '#ff7a1a';
-  if (level === 'watch') return '#f4c400';
-  return '#3b82f6';
+  if (level === 'critical') return '#c91f2f';
+  if (level === 'elevated') return '#a9571b';
+  if (level === 'watch') return '#8f8612';
+  return '#2f5f8a';
 }
 
 function countryRiskOpacity(level: CountryRiskLevel) {
-  if (level === 'critical') return 0.42;
-  if (level === 'elevated') return 0.3;
-  if (level === 'watch') return 0.2;
-  return 0.08;
+  if (level === 'critical') return 0.28;
+  if (level === 'elevated') return 0.2;
+  if (level === 'watch') return 0.13;
+  return 0.05;
 }
 
 function parseDateMs(value?: string | null) {
@@ -558,6 +594,45 @@ function addSourceSafe(map: MapLibreMap, id: string, data: string) {
   map.addSource(id, { type: 'geojson', data });
 }
 
+function setPaintSafe(map: MapLibreMap, layerId: string, property: string, value: unknown) {
+  if (!map.getLayer(layerId)) return;
+  try {
+    map.setPaintProperty(layerId, property, value as any);
+  } catch {
+    // Third-party basemap styles can omit or lock individual paint properties.
+  }
+}
+
+function tuneWeatherBasemap(map: MapLibreMap) {
+  if (!map.getStyle()) return;
+  setPaintSafe(map, 'background', 'background-color', '#060708');
+  ['landcover', 'landuse', 'landuse_residential', 'building', 'building-top'].forEach((id) => {
+    setPaintSafe(map, id, 'fill-color', '#101315');
+    setPaintSafe(map, id, 'fill-opacity', 0.72);
+  });
+  ['park_national_park', 'park_nature_reserve'].forEach((id) => {
+    setPaintSafe(map, id, 'fill-color', '#111916');
+    setPaintSafe(map, id, 'fill-opacity', 0.46);
+  });
+  setPaintSafe(map, 'water', 'fill-color', '#121b21');
+  setPaintSafe(map, 'water', 'fill-opacity', 0.92);
+  setPaintSafe(map, 'water_shadow', 'fill-color', '#07090a');
+  ['boundary_country_outline', 'boundary_country_inner', 'boundary_state', 'boundary_county'].forEach((id) => {
+    setPaintSafe(map, id, 'line-color', '#59646a');
+    setPaintSafe(map, id, 'line-opacity', id.includes('country') ? 0.42 : 0.2);
+  });
+  ['place_country_1', 'place_country_2', 'place_state', 'place_continent'].forEach((id) => {
+    setPaintSafe(map, id, 'text-color', '#8f9da4');
+    setPaintSafe(map, id, 'text-halo-color', '#030405');
+    setPaintSafe(map, id, 'text-halo-width', 1.2);
+  });
+  ['place_city_r6', 'place_city_r5', 'place_city_dot_r6', 'place_city_dot_r5'].forEach((id) => {
+    setPaintSafe(map, id, 'text-color', '#77848a');
+    setPaintSafe(map, id, 'text-halo-color', '#030405');
+    setPaintSafe(map, id, 'text-halo-width', 1);
+  });
+}
+
 function riskMatchExpression(risks: CountryRisk[], field: 'color' | 'opacity') {
   const pairs = risks.flatMap((risk): any[] => [
     risk.iso2,
@@ -575,7 +650,7 @@ function updateCountryRiskPaint(map: MapLibreMap | null, risks: CountryRisk[]) {
     map.setPaintProperty('wm-weather-country-risk-border', 'line-opacity', [
       'match',
       ['get', 'ISO3166-1-Alpha-2'],
-      ...risks.flatMap((risk): any[] => [risk.iso2, risk.level === 'quiet' ? 0.14 : 0.46]),
+      ...risks.flatMap((risk): any[] => [risk.iso2, risk.level === 'quiet' ? 0.1 : 0.34]),
       0,
     ]);
   } catch {
@@ -602,8 +677,8 @@ function ensureCountryLayers(map: MapLibreMap, risks: CountryRisk[]) {
     source: WEATHER_COUNTRY_SOURCE_ID,
     paint: {
       'line-color': riskMatchExpression(risks, 'color'),
-      'line-opacity': 0.26,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 1.5, 0.7, 4, 1.2, 6, 1.65],
+      'line-opacity': 0.2,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 1.5, 0.55, 4, 0.95, 6, 1.35],
     },
   }, beforeId);
   addLayerSafe(map, {
@@ -707,13 +782,64 @@ function pointInBounds(point: { lon: number; lat: number }, bounds: [number, num
   return point.lon >= west && point.lon <= east && point.lat >= south && point.lat <= north;
 }
 
+function countryRiskLabelPoint(risk: CountryRisk): CountryNameLabel | null {
+  if (!risk.points.length) return null;
+  let lon = 0;
+  let lat = 0;
+  let weight = 0;
+  risk.points.forEach((point) => {
+    const pointWeight = Math.max(1, Math.log10(point.deaths + 2));
+    lon += point.lon * pointWeight;
+    lat += point.lat * pointWeight;
+    weight += pointWeight;
+  });
+  if (weight <= 0) return null;
+  return {
+    id: risk.iso2,
+    name: compactText(risk.name, 18).toUpperCase(),
+    lon: lon / weight,
+    lat: lat / weight,
+    kind: 'risk',
+    level: risk.level,
+    score: risk.score,
+    importance: Math.max(4, Math.min(10, risk.score / 10)),
+    minZoom: risk.level === 'critical' ? 0 : risk.level === 'elevated' ? 1.2 : 2.2,
+  };
+}
+
+function buildCountryNameLabels(risks: CountryRisk[], zoom: number, bounds: [number, number, number, number] | null): CountryNameLabel[] {
+  const majorBudget = zoom < 1.4 ? 10 : zoom < 2.4 ? 16 : MAJOR_COUNTRY_LABELS.length;
+  const riskBudget = zoom < 1.4 ? 8 : zoom < 2.4 ? 14 : 26;
+  const labels = new Map<string, CountryNameLabel>();
+
+  MAJOR_COUNTRY_LABELS
+    .filter((label) => zoom >= label.minZoom && pointInBounds(label, bounds))
+    .sort((a, b) => b.importance - a.importance)
+    .slice(0, majorBudget)
+    .forEach((label) => labels.set(label.id, label));
+
+  risks
+    .map(countryRiskLabelPoint)
+    .filter((label): label is CountryNameLabel => Boolean(label))
+    .filter((label) => zoom >= label.minZoom && pointInBounds(label, bounds))
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, riskBudget)
+    .forEach((label) => {
+      const existing = labels.get(label.id);
+      if (!existing || label.importance >= existing.importance) labels.set(label.id, label);
+    });
+
+  return Array.from(labels.values())
+    .sort((a, b) => a.kind.localeCompare(b.kind) || b.importance - a.importance);
+}
+
 function pickCityLabels(points: WeatherMapPoint[], zoom: number, selectedCityId?: string | null) {
   if (zoom < 2.2 && !selectedCityId) {
     return points
       .filter((point) => IMPORTANT_CITY_IDS.has(point.id))
-      .slice(0, 18);
+      .slice(0, 12);
   }
-  const budget = zoom < 3.6 ? 24 : zoom < 5.2 ? 42 : 72;
+  const budget = zoom < 3.6 ? 18 : zoom < 5.2 ? 32 : 56;
   return points
     .filter((point) => shouldShowLabel(point, selectedCityId))
     .sort((a, b) => (
@@ -802,6 +928,7 @@ function clusterConflictPoints(points: ConflictMapPoint[], zoom: number, bounds:
 function buildWeatherDeckLayers({
   cities,
   conflicts,
+  countryRisks,
   selectedCityId,
   selectedConflictId,
   zoom,
@@ -810,6 +937,7 @@ function buildWeatherDeckLayers({
 }: {
   cities: WeatherMapPoint[];
   conflicts: ConflictMapPoint[];
+  countryRisks: CountryRisk[];
   selectedCityId?: string | null;
   selectedConflictId?: string | null;
   zoom: number;
@@ -819,24 +947,53 @@ function buildWeatherDeckLayers({
   const layers: (Layer | null)[] = [];
   const cityLabels = showLabels ? pickCityLabels(cities, zoom, selectedCityId) : [];
   const conflictClusters = clusterConflictPoints(conflicts, zoom, bounds);
+  const countryLabels = buildCountryNameLabels(countryRisks, zoom, bounds);
   const clusterMemberIds = zoom < 5
     ? new Set(conflictClusters.flatMap((cluster) => cluster.count >= 3 ? [cluster.sample.id] : []))
     : new Set<string>();
   const conflictSingles = visibleConflictSingles(conflicts, zoom, bounds, selectedConflictId)
     .filter((point) => !clusterMemberIds.has(point.id) || point.id === selectedConflictId);
 
+  if (countryLabels.length) {
+    layers.push(new TextLayer<CountryNameLabel>({
+      id: 'country-name-labels',
+      data: countryLabels,
+      getPosition: (label) => [label.lon, label.lat],
+      getText: (label) => label.name,
+      getSize: (label) => label.kind === 'major'
+        ? Math.min(18, 9.5 + label.importance * 0.55)
+        : Math.min(14, 8.5 + Math.log10((label.score || 1) + 1) * 2.4),
+      getColor: (label) => {
+        if (label.kind === 'risk') {
+          if (label.level === 'critical') return [218, 82, 78, 175];
+          if (label.level === 'elevated') return [211, 132, 70, 165];
+          return [204, 184, 83, 150];
+        }
+        return [166, 178, 184, 132];
+      },
+      getTextAnchor: 'middle',
+      getAlignmentBaseline: 'center',
+      fontFamily: 'Arial, sans-serif',
+      fontWeight: 800,
+      characterSet: 'auto',
+      outlineWidth: 2,
+      outlineColor: [0, 0, 0, 165],
+      pickable: false,
+    }));
+  }
+
   if (cities.length) {
     layers.push(new ScatterplotLayer<WeatherMapPoint>({
       id: 'weather-city-points',
       data: cities,
       getPosition: (point) => [point.lon, point.lat],
-      getRadius: (point) => point.id === selectedCityId ? 52000 : IMPORTANT_CITY_IDS.has(point.id) ? 38000 : 26000,
-      getFillColor: (point) => weatherColor(point, point.id === selectedCityId ? 245 : 205),
-      getLineColor: [255, 241, 190, 210],
+      getRadius: (point) => point.id === selectedCityId ? 42000 : IMPORTANT_CITY_IDS.has(point.id) ? 30000 : 19000,
+      getFillColor: (point) => weatherColor(point, point.id === selectedCityId ? 230 : 175),
+      getLineColor: [255, 232, 172, 150],
       getLineWidth: (point) => point.id === selectedCityId ? 2 : 1,
       lineWidthMinPixels: 1,
-      radiusMinPixels: 4,
-      radiusMaxPixels: 15,
+      radiusMinPixels: 3,
+      radiusMaxPixels: 11,
       pickable: true,
       autoHighlight: true,
       highlightColor: [255, 245, 190, 120],
@@ -850,12 +1007,12 @@ function buildWeatherDeckLayers({
       getPosition: (point) => [point.lon, point.lat],
       getText: (point) => `${point.city}\n${point.sublabel}`,
       getPixelOffset: (point) => [point.labelDx + 8, point.labelDy - 2],
-      getSize: (point) => point.id === selectedCityId ? 13 : 11,
+      getSize: (point) => point.id === selectedCityId ? 12 : 9.5,
       getColor: (point) => point.temperatureTone === 'hot'
-        ? [255, 176, 115, 235]
+        ? [226, 145, 94, 205]
         : point.temperatureTone === 'cool'
-          ? [128, 234, 220, 235]
-          : [115, 216, 255, 228],
+          ? [112, 206, 196, 205]
+          : [122, 190, 220, 198],
       getTextAnchor: 'start',
       getAlignmentBaseline: 'center',
       fontFamily: 'monospace',
@@ -871,12 +1028,12 @@ function buildWeatherDeckLayers({
       id: 'ucdp-conflict-clusters',
       data: conflictClusters,
       getPosition: (cluster) => [cluster.lon, cluster.lat],
-      getRadius: (cluster) => Math.max(75000, Math.log2(cluster.count + 1) * 65000),
-      getFillColor: (cluster) => hexToRgba(cluster.color, 145),
-      getLineColor: (cluster) => hexToRgba(cluster.color, 235),
-      getLineWidth: 2,
-      radiusMinPixels: 9,
-      radiusMaxPixels: 34,
+      getRadius: (cluster) => Math.max(52000, Math.log2(cluster.count + 1) * 43000),
+      getFillColor: (cluster) => hexToRgba(cluster.color, 105),
+      getLineColor: (cluster) => hexToRgba(cluster.color, 185),
+      getLineWidth: 1.25,
+      radiusMinPixels: 6,
+      radiusMaxPixels: 24,
       lineWidthMinPixels: 1,
       pickable: true,
       autoHighlight: true,
@@ -887,8 +1044,8 @@ function buildWeatherDeckLayers({
       data: conflictClusters,
       getPosition: (cluster) => [cluster.lon, cluster.lat],
       getText: (cluster) => String(cluster.count),
-      getSize: 12,
-      getColor: [255, 246, 210, 235],
+      getSize: 10,
+      getColor: [235, 218, 184, 210],
       getTextAnchor: 'middle',
       getAlignmentBaseline: 'center',
       fontFamily: 'monospace',
@@ -904,12 +1061,12 @@ function buildWeatherDeckLayers({
       id: 'ucdp-conflict-events',
       data: conflictSingles,
       getPosition: (point) => [point.lon, point.lat],
-      getRadius: (point) => Math.max(12000, Math.sqrt(point.deaths + 1) * 9000),
-      getFillColor: (point) => hexToRgba(point.color, point.id === selectedConflictId ? 245 : 195),
-      getLineColor: (point) => point.id === selectedConflictId ? [255, 246, 210, 245] : hexToRgba(point.color, 235),
+      getRadius: (point) => Math.max(9000, Math.sqrt(point.deaths + 1) * 6200),
+      getFillColor: (point) => hexToRgba(point.color, point.id === selectedConflictId ? 230 : 150),
+      getLineColor: (point) => point.id === selectedConflictId ? [255, 246, 210, 230] : hexToRgba(point.color, 180),
       getLineWidth: (point) => point.id === selectedConflictId ? 2 : 1,
-      radiusMinPixels: 4,
-      radiusMaxPixels: 18,
+      radiusMinPixels: 3,
+      radiusMaxPixels: 12,
       lineWidthMinPixels: 1,
       pickable: true,
       autoHighlight: true,
@@ -1165,6 +1322,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     const layers = buildWeatherDeckLayers({
       cities: pointsRef.current,
       conflicts: conflictPointsRef.current,
+      countryRisks: countryRisksRef.current,
       selectedCityId: selectedCityIdRef.current,
       selectedConflictId: selectedConflictIdRef.current,
       zoom,
@@ -1416,6 +1574,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     const handleStyleReady = () => {
       styleSettled = true;
       setMapReady(true);
+      tuneWeatherBasemap(map);
       ensureDeckOverlay();
       ensureCountryLayers(map, countryRisksRef.current);
       setupCountryInteractions(map, countryRiskByIsoRef, setCountryHover, onCountrySelectRef);
