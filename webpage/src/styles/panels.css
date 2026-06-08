@@ -13857,7 +13857,11 @@ a.wm-orderfilled-row {
 }
 
 .wm-inline-weather-map {
-  position: relative;
+  position: absolute;
+  inset: 0;
+  display: block;
+  min-width: 0;
+  min-height: 0;
 }
 
 .wm-weather-deck-map {
