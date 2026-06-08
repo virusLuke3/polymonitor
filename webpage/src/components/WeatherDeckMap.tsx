@@ -188,32 +188,6 @@ const MAJOR_COUNTRY_LABELS: CountryNameLabel[] = [
   { id: 'AR', name: 'ARGENTINA', lon: -64, lat: -36, kind: 'major', importance: 5, minZoom: 1.6 },
 ];
 
-const REGIONAL_DENSITY_SEEDS: Array<{
-  id: string;
-  lon: number;
-  lat: number;
-  radiusLon: number;
-  radiusLat: number;
-  count: number;
-  coolShare: number;
-  warmShare: number;
-}> = [
-  { id: 'japan-korea', lon: 138, lat: 36, radiusLon: 9.5, radiusLat: 5.5, count: 720, coolShare: 0.74, warmShare: 0.18 },
-  { id: 'china-coast', lon: 116, lat: 32, radiusLon: 15, radiusLat: 8.2, count: 860, coolShare: 0.72, warmShare: 0.2 },
-  { id: 'yangtze-pearl', lon: 114, lat: 26, radiusLon: 9, radiusLat: 5.2, count: 360, coolShare: 0.7, warmShare: 0.24 },
-  { id: 'western-europe', lon: 4, lat: 51, radiusLon: 13.5, radiusLat: 7.2, count: 760, coolShare: 0.7, warmShare: 0.2 },
-  { id: 'nordics-baltic', lon: 18, lat: 59, radiusLon: 11, radiusLat: 6.4, count: 340, coolShare: 0.82, warmShare: 0.1 },
-  { id: 'us-west-coast', lon: -122, lat: 39, radiusLon: 7.2, radiusLat: 9.5, count: 520, coolShare: 0.72, warmShare: 0.2 },
-  { id: 'us-east-corridor', lon: -76, lat: 39, radiusLon: 9.4, radiusLat: 6.4, count: 640, coolShare: 0.66, warmShare: 0.25 },
-  { id: 'us-midwest', lon: -88, lat: 41, radiusLon: 8.4, radiusLat: 5.2, count: 300, coolShare: 0.62, warmShare: 0.28 },
-  { id: 'gulf-mexico', lon: -96, lat: 25, radiusLon: 12, radiusLat: 5.8, count: 320, coolShare: 0.52, warmShare: 0.34 },
-  { id: 'india-plain', lon: 78, lat: 23, radiusLon: 14, radiusLat: 7.4, count: 520, coolShare: 0.56, warmShare: 0.3 },
-  { id: 'southeast-asia', lon: 106, lat: 10, radiusLon: 15.5, radiusLat: 9.5, count: 520, coolShare: 0.66, warmShare: 0.24 },
-  { id: 'middle-east', lon: 43, lat: 31, radiusLon: 12.5, radiusLat: 7.5, count: 340, coolShare: 0.48, warmShare: 0.36 },
-  { id: 'brazil-southeast', lon: -46, lat: -20, radiusLon: 9.5, radiusLat: 7.2, count: 260, coolShare: 0.58, warmShare: 0.28 },
-  { id: 'west-africa', lon: 2, lat: 9, radiusLon: 13, radiusLat: 8.5, count: 260, coolShare: 0.54, warmShare: 0.3 },
-];
-
 const COUNTRY_ISO2_ALIASES: Record<string, string> = {
   afghanistan: 'AF',
   algeria: 'DZ',
@@ -831,26 +805,6 @@ function jitteredDensityPoint(
 
 function buildSignalDensityPoints(cities: WeatherMapPoint[], conflicts: ConflictMapPoint[]): SignalDensityPoint[] {
   const points: SignalDensityPoint[] = [];
-
-  REGIONAL_DENSITY_SEEDS.forEach((seed) => {
-    for (let index = 0; index < seed.count; index += 1) {
-      const selector = hashUnit(`regional-density:${seed.id}:tone:${index}`);
-      const tone: SignalDensityPoint['tone'] = selector < seed.coolShare
-        ? 'cool'
-        : selector < seed.coolShare + seed.warmShare
-          ? 'warm'
-          : 'risk';
-      points.push(jitteredDensityPoint(
-        `regional-density:${seed.id}:${index}`,
-        seed.lon,
-        seed.lat,
-        seed.radiusLon,
-        seed.radiusLat,
-        tone,
-        0.45 + hashUnit(`regional-density:${seed.id}:w:${index}`) * 0.85,
-      ));
-    }
-  });
 
   cities.forEach((city) => {
     const quoted = Number(String(city.quoteCoverage || '0/0').split('/')[0]) || 0;
