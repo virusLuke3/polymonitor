@@ -87,7 +87,7 @@ export type MarketGroupItem = {
   topOutcomes: MarketGroupOutcome[];
 };
 
-export type MarketGroupSort = 'active' | 'new' | 'volume';
+export type MarketGroupSort = 'active' | 'new' | 'volume' | 'close' | 'move' | 'trades';
 export type MarketGroupChartRange = '1h' | '6h' | '1d' | '1w' | '1m' | 'all';
 
 export type MarketGroupsPayload = {
