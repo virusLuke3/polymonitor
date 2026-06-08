@@ -116,7 +116,7 @@ class QuantEventTileWatcher:
         }
 
     def cache_key(self, event_slug: str) -> str:
-        return _cache_key("event-price-tile", self.query_args(event_slug), version=1)
+        return _cache_key("event-price-tile", self.query_args(event_slug), version=2)
 
     def redis_key(self, event_slug: str) -> str:
         return _redis_key(self.redis_prefix, NAMESPACE, self.cache_key(event_slug))

@@ -354,11 +354,12 @@ export function QuantWorkspace() {
     return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
   }, [timeframe]);
   const chartRange = chartRangeFromTimeframe(timeframe);
+  const chartRequestLimit = selectedEntityKind === 'event' && chartRange === 'full' ? 250000 : chartLimit;
   const semanticChartQuery: QuantPriceQuery & { priceSource: string; scope: string; maxOutcomes: number; topN?: number; maxPoints?: number } = {
     marketSlug,
     priceSource: backendPriceSource(priceSource),
     scope: 'auto',
-    limit: chartLimit,
+    limit: chartRequestLimit,
     maxOutcomes: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
     topN: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
     maxPoints: selectedEntityKind === 'event' ? (chartRange === 'full' ? EVENT_TILE_FULL_MAX_POINTS : EVENT_TILE_MAX_POINTS) : undefined,

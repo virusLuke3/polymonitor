@@ -375,15 +375,16 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         event_slug = (request.args.get("event_slug") or request.args.get("market_slug") or "").strip()
         if not event_slug:
             return jsonify({"error": "event_slug is required"}), 400
-        limit = min(max(_parse_int_arg("limit", 2500) or 2500, 1), 25000)
+        tile_range = (request.args.get("range") or "latest").strip().lower()
+        limit_cap = 250000 if tile_range in {"all", "full"} else 25000
+        limit = min(max(_parse_int_arg("limit", 2500) or 2500, 1), limit_cap)
         max_outcomes = min(max(_parse_int_arg("max_outcomes", 100) or 100, 1), 200)
         max_points = min(max(_parse_int_arg("max_points", 600) or 600, 50), 2500)
         top_n = min(max(_parse_int_arg("top_n", 12) or 12, 1), max_outcomes)
         price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
         point_format = (request.args.get("point_format") or "lite").strip().lower()
-        tile_range = (request.args.get("range") or "latest").strip().lower()
         resolution = (request.args.get("resolution") or "auto").strip().lower()
-        cache_key = _cache_key("event-price-tile", version=1)
+        cache_key = _cache_key("event-price-tile", version=2)
 
         def build_payload() -> dict[str, Any]:
             persisted = _load_persistent_tile(cache_key)
