@@ -337,16 +337,16 @@ function countryRiskLevel(score: number): CountryRiskLevel {
 }
 
 function countryRiskColor(level: CountryRiskLevel) {
-  if (level === 'critical') return '#c91f2f';
-  if (level === 'elevated') return '#a9571b';
-  if (level === 'watch') return '#8f8612';
+  if (level === 'critical') return '#d73535';
+  if (level === 'elevated') return '#b86523';
+  if (level === 'watch') return '#a19216';
   return '#2f5f8a';
 }
 
 function countryRiskOpacity(level: CountryRiskLevel) {
-  if (level === 'critical') return 0.28;
-  if (level === 'elevated') return 0.2;
-  if (level === 'watch') return 0.13;
+  if (level === 'critical') return 0.34;
+  if (level === 'elevated') return 0.24;
+  if (level === 'watch') return 0.16;
   return 0.05;
 }
 
@@ -605,21 +605,21 @@ function setPaintSafe(map: MapLibreMap, layerId: string, property: string, value
 
 function tuneWeatherBasemap(map: MapLibreMap) {
   if (!map.getStyle()) return;
-  setPaintSafe(map, 'background', 'background-color', '#060708');
+  setPaintSafe(map, 'background', 'background-color', '#0b0d0e');
   ['landcover', 'landuse', 'landuse_residential', 'building', 'building-top'].forEach((id) => {
-    setPaintSafe(map, id, 'fill-color', '#101315');
-    setPaintSafe(map, id, 'fill-opacity', 0.72);
+    setPaintSafe(map, id, 'fill-color', '#151819');
+    setPaintSafe(map, id, 'fill-opacity', 0.86);
   });
   ['park_national_park', 'park_nature_reserve'].forEach((id) => {
-    setPaintSafe(map, id, 'fill-color', '#111916');
-    setPaintSafe(map, id, 'fill-opacity', 0.46);
+    setPaintSafe(map, id, 'fill-color', '#18201b');
+    setPaintSafe(map, id, 'fill-opacity', 0.56);
   });
-  setPaintSafe(map, 'water', 'fill-color', '#121b21');
-  setPaintSafe(map, 'water', 'fill-opacity', 0.92);
-  setPaintSafe(map, 'water_shadow', 'fill-color', '#07090a');
+  setPaintSafe(map, 'water', 'fill-color', '#27343a');
+  setPaintSafe(map, 'water', 'fill-opacity', 1);
+  setPaintSafe(map, 'water_shadow', 'fill-color', '#111619');
   ['boundary_country_outline', 'boundary_country_inner', 'boundary_state', 'boundary_county'].forEach((id) => {
-    setPaintSafe(map, id, 'line-color', '#59646a');
-    setPaintSafe(map, id, 'line-opacity', id.includes('country') ? 0.42 : 0.2);
+    setPaintSafe(map, id, 'line-color', '#687176');
+    setPaintSafe(map, id, 'line-opacity', id.includes('country') ? 0.56 : 0.28);
   });
   ['place_country_1', 'place_country_2', 'place_state', 'place_continent'].forEach((id) => {
     setPaintSafe(map, id, 'text-color', '#8f9da4');
