@@ -782,12 +782,27 @@ function weatherColor(point: WeatherMapPoint, alpha = 220): [number, number, num
 }
 
 function hashUnit(seed: string) {
+  return (hashValue(seed) % 10000) / 10000;
+}
+
+function hashValue(seed: string) {
   let hash = 2166136261;
   for (let index = 0; index < seed.length; index += 1) {
     hash ^= seed.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
-  return ((hash >>> 0) % 10000) / 10000;
+  return hash >>> 0;
+}
+
+function seededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function jitteredDensityPoint(
@@ -799,8 +814,9 @@ function jitteredDensityPoint(
   tone: SignalDensityPoint['tone'],
   weight: number,
 ): SignalDensityPoint {
-  const rawX = hashUnit(`${id}:x`) * 2 - 1;
-  const rawY = hashUnit(`${id}:y`) * 2 - 1;
+  const random = seededRandom(hashValue(id));
+  const rawX = random() * 2 - 1;
+  const rawY = random() * 2 - 1;
   const x = Math.sign(rawX) * Math.pow(Math.abs(rawX), 0.68);
   const y = Math.sign(rawY) * Math.pow(Math.abs(rawY), 0.72);
   const latScale = Math.max(0.34, Math.cos((lat * Math.PI) / 180));
