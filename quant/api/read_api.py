@@ -212,7 +212,15 @@ def get_quant_price_events(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     where_params: list[Any] = []
-    filters = ["member_count > 0"]
+    filters = [
+        "member_count > 0",
+        """
+        NOT (
+            member_count = 1
+            AND COALESCE(source, '') LIKE 'fallback.%%'
+        )
+        """,
+    ]
     search_text = (search or "").strip().lower()
     if search_text:
         text = f"%{search_text}%"

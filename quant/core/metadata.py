@@ -251,16 +251,6 @@ def _fallback_event(row: dict[str, Any]) -> dict[str, str] | None:
             "source": "fallback.central_bank_rate",
         }
 
-    matchup = [part.strip() for part in MATCHUP_RE.split(title, maxsplit=1) if part.strip()]
-    if len(matchup) == 2 and slug:
-        return {
-            "event_id": f"inferred:matchup:{slug}",
-            "event_slug": slug,
-            "event_title": title,
-            "outcome_label": matchup[0],
-            "grouping_confidence": "inferred",
-            "source": "fallback.matchup",
-        }
     return None
 
 
