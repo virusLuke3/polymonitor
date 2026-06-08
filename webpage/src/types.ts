@@ -129,6 +129,7 @@ export type MarketGroupChartPayload = {
   range: string;
   interval?: string | null;
   historyStatus?: string | null;
+  priceSource?: string | null;
   generatedAt?: string;
   series: MarketGroupChartSeries[];
 };
@@ -267,6 +268,9 @@ export type ChartPayload = {
   targetPrice?: string | number | null;
   targetLabel?: string | null;
   referenceRule?: string | null;
+  priceSource?: string | null;
+  servingSource?: string | null;
+  servingUpdatedAt?: string | null;
   points: ChartPoint[];
 };
 

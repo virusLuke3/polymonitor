@@ -668,6 +668,18 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
   );
 }
 
+function chartSourceLabel(source?: string | null, status?: string | null) {
+  const normalizedSource = String(source || '').toLowerCase();
+  const normalizedStatus = String(status || '').toLowerCase();
+  if (normalizedStatus === 'snapshot') return 'Snapshot only';
+  if (normalizedStatus === 'flat') return 'Flat quote';
+  if (normalizedSource.includes('orderfilled')) return 'OrderFilled history';
+  if (normalizedSource.includes('trade-history')) return 'Trade history';
+  if (normalizedSource.includes('clob')) return 'CLOB quote history';
+  if (normalizedSource.includes('serving')) return 'DB price history';
+  return normalizedStatus ? `History ${normalizedStatus}` : 'History';
+}
+
 export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const { renderPanelSlot, ...ctx } = props;
   const focusedMarket = (
@@ -731,6 +743,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const displayedTrades = selectedOutcome?.tradeCount24h ?? price?.tradeCount24h ?? marketStats?.tradeCount24h;
   const displayedNoPrice = chartLatestPoint?.noPrice ?? price?.latestNoPrice ?? selectedOutcome?.noPrice;
   const chartStatus = String(chart?.historyStatus || '').toLowerCase();
+  const chartSource = String(chart?.priceSource || '').toLowerCase();
+  const eventChartStatus = String(eventChart?.historyStatus || '').toLowerCase();
+  const eventChartSource = String(eventChart?.priceSource || '').toLowerCase();
   const chartPointCount = chart?.points?.length || 0;
   const chartRenderable = Boolean(
     chart
@@ -755,7 +770,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     (!activeOutcomeKey || entry.outcomeKey === activeOutcomeKey)
       && (entry.points || []).length > 1
   )));
-  const hasFocusedMarketHistory = Boolean(chartPoints.length);
+  const hasFocusedMarketHistory = Boolean(
+    chartPoints.length > 1
+      && chartStatus !== 'missing'
+      && chartStatus !== 'snapshot'
+  );
   const hasFocusedMarketCurve = Boolean(
     chartPoints.length > 2
       && focusedMarketDistinctTimes.size > 1
@@ -763,6 +782,12 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       && chartStatus !== 'missing'
       && chartStatus !== 'snapshot',
   );
+  const preferEventChart = Boolean(detail && shouldShowOutcomeRail && hasSelectedEventHistory);
+  const chartSourceText = preferEventChart || (!hasFocusedMarketCurve && hasEventHistory)
+    ? chartSourceLabel(eventChartSource || 'clob-history', eventChartStatus)
+    : hasFocusedMarketCurve || hasFocusedMarketHistory
+      ? chartSourceLabel(chartSource, chartStatus)
+      : chartSourceLabel(chartSource, chartStatus);
   const hasServingTradeActivity = Number(displayedTrades || 0) > 0 || Number(displayedVolume || 0) > 0;
   const liveQuoteAvailable = Boolean(
     hasAnyBookLevels
@@ -868,6 +893,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   <i>UTC</i>
                 </div>
                 <div className="wm-focus-chart-summary">
+                  <span>{chartSourceText}</span>
                   <span>{marketTimeSubtitle(
                     detail?.endDate || selectedGroup?.endDate || focusedMarket?.endDate || null,
                     detail?.createdAt || selectedGroup?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null,
@@ -878,15 +904,15 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <div className="wm-focus-chart-wrap">
                   {detail
                     ? (
-                        hasFocusedMarketCurve
-                            ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange)
+                        preferEventChart
+                            ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
+                            : hasFocusedMarketCurve
+                              ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange)
                             : hasEventHistory
                               ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
-                              : hasFocusedMarketHistory
-                                ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange)
-                                : emptyState('No event price history is available for this market yet.')
+                              : emptyState(chartStatus === 'snapshot' ? 'Only a latest-price snapshot is available for this outcome.' : 'No event price history is available for this market yet.')
                       )
-                    : (chartPoints.length ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange) : emptyState('No local price history is available for this market.'))}
+                    : (hasFocusedMarketCurve ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange) : emptyState(chartStatus === 'snapshot' ? 'Only a latest-price snapshot is available for this market.' : 'No local price history is available for this market.'))}
                 </div>
                 {detail ? eventChartLegend(detail, eventChart, activeOutcomeKey, (outcome) => {
                   ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);

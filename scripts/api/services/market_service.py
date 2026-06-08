@@ -1345,6 +1345,7 @@ def _get_market_chart_serving_payload(ctx: dict, market_id: int, range_name: str
         "kind": row.get("kind") or "probability",
         "historyStatus": history_status,
         "points": points,
+        "priceSource": "serving-history" if history_status == "ok" else "serving-snapshot",
         "servingSource": "postgres",
         "servingUpdatedAt": row.get("updated_at"),
     }
@@ -1535,7 +1536,7 @@ def get_market_chart_payload(
                 "range": str(range_name or "1d").strip().lower(),
                 "interval": str(interval or "5m").strip().lower(),
                 "includeRuntimeSeries": bool(include_runtime_series),
-                "v": 10,
+                "v": 11,
             },
             sort_keys=True,
             ensure_ascii=True,
@@ -1579,17 +1580,21 @@ def get_market_chart_payload(
     recent_volume = _decimal_from_any(price.get("volume24h")) or Decimal("0")
     recent_trades = int(price.get("tradeCount24h") or 0)
     points: List[Dict[str, Any]] = []
+    price_source = "missing"
     if recent_volume > 0 or recent_trades > 0:
         limit = 400
         if range_name == "7d":
             limit = 700
         clickhouse_points = clickhouse_orderfilled_service.get_price_series(ctx, market_id, limit=limit)
         points = clickhouse_points if clickhouse_points is not None else ctx["get_trade_derived_market_price_series"](market_id, limit=limit)
+        if points:
+            price_source = "orderfilled-history" if clickhouse_points is not None else "trade-history"
     if not points:
         limit = 700 if range_name == "7d" else 400
         clickhouse_points = clickhouse_orderfilled_service.get_price_series(ctx, market_id, limit=limit)
         if clickhouse_points:
             points = clickhouse_points
+            price_source = "orderfilled-history"
     if include_runtime_series:
         point_count, distinct_count = _chart_point_stats(points)
         needs_clob_series = (
@@ -1602,6 +1607,7 @@ def get_market_chart_payload(
             clob_count, clob_distinct_count = _chart_point_stats(clob_points)
             if clob_count > point_count and (clob_distinct_count > distinct_count or distinct_count <= 1):
                 points = clob_points
+                price_source = "clob-history"
     effective_range = range_name
     effective_interval = interval
     if not points and latest not in (None, ""):
@@ -1612,6 +1618,7 @@ def get_market_chart_payload(
         ]
         effective_range = "snapshot"
         effective_interval = "snapshot"
+        price_source = "snapshot"
     history_status = _chart_history_status(effective_range, effective_interval, points)
     return {
         "marketId": market_id,
@@ -1620,6 +1627,7 @@ def get_market_chart_payload(
         "interval": effective_interval,
         "kind": "probability",
         "historyStatus": history_status,
+        "priceSource": price_source,
         "points": points,
     }
 
