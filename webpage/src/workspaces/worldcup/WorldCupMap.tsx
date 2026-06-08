@@ -1,6 +1,6 @@
 import type { PickingInfo } from '@deck.gl/core';
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import { GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import { feature } from 'topojson-client';
@@ -43,6 +43,28 @@ type MapRegionHover = {
   screenY: number;
 };
 
+type WorldCupRiskLevel = 'quiet' | 'watch' | 'elevated' | 'critical';
+
+type CountryConflictRisk = {
+  iso2: string;
+  name: string;
+  eventCount: number;
+  deaths: number;
+  stateCount: number;
+  nonStateCount: number;
+  oneSidedCount: number;
+  latestAt: string | null;
+  score: number;
+  level: WorldCupRiskLevel;
+  topActors: string[];
+  topLocations: string[];
+  conflicts: ConflictSignal[];
+};
+
+type SelectedRiskIntel =
+  | { kind: 'country'; risk: CountryConflictRisk }
+  | { kind: 'conflict'; conflict: ConflictSignal };
+
 type CitySignal = {
   type: 'host-city';
   city: WorldCupVenueCity;
@@ -74,11 +96,23 @@ type ConflictSignal = {
   id: string;
   lon: number;
   lat: number;
+  iso2: string | null;
   country: string;
+  location: string;
   label: string;
   sublabel: string;
+  actors: string;
+  sideA: string;
+  sideB: string;
   deaths: number;
+  deathsLow: number | null;
+  deathsHigh: number | null;
   violenceType: string;
+  violenceLabel: string;
+  occurredAt: string | null;
+  source: string | null;
+  sourceUrl: string | null;
+  tone: 'state' | 'nonstate' | 'onesided' | 'unknown';
   color: [number, number, number, number];
   ringColor: [number, number, number, number];
 };
@@ -133,6 +167,35 @@ const HOST_COUNTRY_META: Record<string, { key: HostCountryKey; iso2: string; lab
   '484': { key: 'mexico', iso2: 'MX', label: 'MEXICO' },
 };
 const HOST_COUNTRY_ISO2 = new Set(Object.values(HOST_COUNTRY_META).map((item) => item.iso2));
+const COUNTRY_NAME_TO_ISO2 = new Map<string, string>(
+  (COUNTRIES_GEOJSON.features || []).flatMap((item: any) => {
+    const props = item.properties || {};
+    const iso2 = String(props['ISO3166-1-Alpha-2'] || '').toUpperCase();
+    const name = String(props.name || '').toLowerCase();
+    return iso2 && name ? [[name, iso2]] : [];
+  }),
+);
+const COUNTRY_ISO2_ALIASES: Record<string, string> = {
+  burma: 'MM',
+  congo: 'CG',
+  'democratic republic of congo': 'CD',
+  'democratic republic of the congo': 'CD',
+  'dr congo': 'CD',
+  kosovo: 'XK',
+  palestine: 'PS',
+  russia: 'RU',
+  'russian federation': 'RU',
+  'south sudan': 'SS',
+  sri_lanka: 'LK',
+  'sri lanka': 'LK',
+  syria: 'SY',
+  taiwan: 'TW',
+  turkey: 'TR',
+  turkiye: 'TR',
+  'united states': 'US',
+  'united states of america': 'US',
+  usa: 'US',
+};
 
 const DEFAULT_ENABLED_LAYERS: EnabledLayers = {
   cities: true,
@@ -310,7 +373,63 @@ function addSourceSafe(map: MapLibreMap, id: string, data: any) {
   map.addSource(id, { type: 'geojson', data });
 }
 
-function setupCountryHover(map: MapLibreMap, setRegionHover: (hover: MapRegionHover | null) => void) {
+function countryRiskPaintExpression(risks: CountryConflictRisk[], field: 'color' | 'opacity') {
+  const pairs = risks.flatMap((risk): any[] => [
+    risk.iso2,
+    field === 'color' ? riskColor(risk.level) : riskOpacity(risk.level),
+  ]);
+  return ['match', ['get', 'ISO3166-1-Alpha-2'], ...pairs, field === 'color' ? 'rgba(0,0,0,0)' : 0] as any;
+}
+
+function updateCountryRiskPaint(map: MapLibreMap | null, risks: CountryConflictRisk[]) {
+  if (!map || !map.getStyle() || !map.getLayer('wc-country-risk-fill')) return;
+  try {
+    map.setPaintProperty('wc-country-risk-fill', 'fill-color', countryRiskPaintExpression(risks, 'color'));
+    map.setPaintProperty('wc-country-risk-fill', 'fill-opacity', countryRiskPaintExpression(risks, 'opacity'));
+    map.setPaintProperty('wc-country-risk-border', 'line-color', countryRiskPaintExpression(risks, 'color'));
+    map.setPaintProperty('wc-country-risk-border', 'line-opacity', [
+      'match',
+      ['get', 'ISO3166-1-Alpha-2'],
+      ...risks.flatMap((risk): any[] => [risk.iso2, risk.level === 'quiet' ? 0.12 : 0.52]),
+      0,
+    ]);
+  } catch {
+    // Style can be briefly unavailable while switching basemaps.
+  }
+}
+
+function ensureCountryRiskLayers(map: MapLibreMap, risks: CountryConflictRisk[]) {
+  if (!map.getStyle()) return;
+  const beforeId = firstSymbolLayerId(map);
+  addSourceSafe(map, 'country-boundaries', LOCAL_WORLD_COUNTRIES_GEOJSON_URL);
+  addLayerSafe(map, {
+    id: 'wc-country-risk-fill',
+    type: 'fill',
+    source: 'country-boundaries',
+    paint: {
+      'fill-color': countryRiskPaintExpression(risks, 'color'),
+      'fill-opacity': countryRiskPaintExpression(risks, 'opacity'),
+    },
+  }, beforeId);
+  addLayerSafe(map, {
+    id: 'wc-country-risk-border',
+    type: 'line',
+    source: 'country-boundaries',
+    paint: {
+      'line-color': countryRiskPaintExpression(risks, 'color'),
+      'line-opacity': 0.28,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 1.75, 0.8, 4, 1.25, 6, 1.8],
+    },
+  }, beforeId);
+  updateCountryRiskPaint(map, risks);
+}
+
+function setupCountryHover(
+  map: MapLibreMap,
+  setRegionHover: (hover: MapRegionHover | null) => void,
+  riskByIsoRef?: { current: Map<string, CountryConflictRisk> },
+  onCountrySelectRef?: { current: (risk: CountryConflictRisk) => void },
+) {
   if ((map as any).__worldCupCountryHoverSetup) return;
   (map as any).__worldCupCountryHoverSetup = true;
   let hoveredIso2 = '';
@@ -343,23 +462,40 @@ function setupCountryHover(map: MapLibreMap, setRegionHover: (hover: MapRegionHo
     }
 
     const canvasRect = map.getCanvas().getBoundingClientRect();
+    const risk = riskByIsoRef?.current.get(iso2);
     setRegionHover({
       region: props?.name || iso2,
-      country: HOST_COUNTRY_ISO2.has(iso2) ? `${iso2} HOST COUNTRY` : iso2,
+      country: risk ? `${iso2} · ${risk.score}/100 · ${risk.eventCount} events` : HOST_COUNTRY_ISO2.has(iso2) ? `${iso2} HOST COUNTRY` : `${iso2} · no conflict rows`,
       screenX: event.point.x + canvasRect.left,
       screenY: event.point.y + canvasRect.top,
     });
   });
 
   map.on('mouseout', clearHover);
+  map.on('click', (event) => {
+    if (!map.getLayer('country-interactive')) return;
+    const features = map.queryRenderedFeatures(event.point, { layers: ['country-interactive'] });
+    const props = features[0]?.properties as Record<string, string> | undefined;
+    const iso2 = props?.['ISO3166-1-Alpha-2'] || '';
+    if (!iso2) return;
+    const risk = riskByIsoRef?.current.get(iso2) || emptyCountryRisk(iso2, props?.name || iso2);
+    onCountrySelectRef?.current(risk);
+  });
 }
 
-async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: MapRegionHover | null) => void) {
+async function loadMapSupportLayers(
+  map: MapLibreMap,
+  setRegionHover: (hover: MapRegionHover | null) => void,
+  countryRisks: CountryConflictRisk[],
+  riskByIsoRef: { current: Map<string, CountryConflictRisk> },
+  onCountrySelectRef: { current: (risk: CountryConflictRisk) => void },
+) {
   if (!map.getStyle() || (map as any).__worldCupSupportLayersLoading) return;
   (map as any).__worldCupSupportLayersLoading = true;
   const beforeId = firstSymbolLayerId(map);
   try {
     addSourceSafe(map, 'country-boundaries', LOCAL_WORLD_COUNTRIES_GEOJSON_URL);
+    ensureCountryRiskLayers(map, countryRisks);
     addLayerSafe(map, {
       id: 'country-interactive',
       type: 'fill',
@@ -450,7 +586,7 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
     addLayerSafe(map, { id: 'wc-us-state-lines', type: 'line', source: 'wc-us-states', paint: adminPaint }, beforeId);
     addLayerSafe(map, { id: 'wc-canada-province-lines', type: 'line', source: 'wc-canada-provinces', paint: adminPaint }, beforeId);
     addLayerSafe(map, { id: 'wc-mexico-state-lines', type: 'line', source: 'wc-mexico-states', paint: adminPaint }, beforeId);
-    setupCountryHover(map, setRegionHover);
+    setupCountryHover(map, setRegionHover, riskByIsoRef, onCountrySelectRef);
   } finally {
     (map as any).__worldCupSupportLayersLoading = false;
   }
@@ -490,6 +626,91 @@ function numberValue(value?: string | number | null) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeCountryName(value?: string | null) {
+  return String(value || '').toLowerCase().replace(/[_-]+/g, ' ').replace(/[().]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function iso2ForConflictCountry(country?: string | null) {
+  const normalized = normalizeCountryName(country);
+  if (!normalized) return null;
+  return COUNTRY_NAME_TO_ISO2.get(normalized) || COUNTRY_ISO2_ALIASES[normalized] || null;
+}
+
+function conflictTone(type?: string | number | null): ConflictSignal['tone'] {
+  const normalized = String(type || '').trim();
+  if (normalized === '1') return 'state';
+  if (normalized === '2') return 'nonstate';
+  if (normalized === '3') return 'onesided';
+  return 'unknown';
+}
+
+function conflictViolenceLabel(type?: string | number | null) {
+  const normalized = String(type || '').trim();
+  if (normalized === '1') return 'STATE';
+  if (normalized === '2') return 'NON-STATE';
+  if (normalized === '3') return 'ONE-SIDED';
+  return 'CONFLICT';
+}
+
+function riskLevel(score: number): WorldCupRiskLevel {
+  if (score >= 72) return 'critical';
+  if (score >= 46) return 'elevated';
+  if (score >= 16) return 'watch';
+  return 'quiet';
+}
+
+function riskColor(level: WorldCupRiskLevel) {
+  if (level === 'critical') return '#ff3535';
+  if (level === 'elevated') return '#ff7a1a';
+  if (level === 'watch') return '#f4c400';
+  return '#3b82f6';
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const value = hex.replace('#', '');
+  const numeric = Number.parseInt(value.length === 3 ? value.split('').map((char) => `${char}${char}`).join('') : value, 16);
+  if (!Number.isFinite(numeric)) return [115, 216, 255];
+  return [(numeric >> 16) & 255, (numeric >> 8) & 255, numeric & 255];
+}
+
+function riskOpacity(level: WorldCupRiskLevel) {
+  if (level === 'critical') return 0.43;
+  if (level === 'elevated') return 0.32;
+  if (level === 'watch') return 0.22;
+  return 0.08;
+}
+
+function parseDateMs(value?: string | null) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function shortDate(value?: string | null) {
+  if (!value) return '--';
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return value.slice(0, 10);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function emptyCountryRisk(iso2: string, name: string): CountryConflictRisk {
+  return {
+    iso2,
+    name,
+    eventCount: 0,
+    deaths: 0,
+    stateCount: 0,
+    nonStateCount: 0,
+    oneSidedCount: 0,
+    latestAt: null,
+    score: 0,
+    level: 'quiet',
+    topActors: [],
+    topLocations: [],
+    conflicts: [],
+  };
 }
 
 function weatherRiskScore(weather: WorldCupCityWeather | null) {
@@ -560,6 +781,13 @@ function formatCompact(value: number | null | undefined) {
   if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
   if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
   return `$${value.toFixed(0)}`;
+}
+
+function formatCount(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '--';
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(Math.round(value));
 }
 
 function probabilityWidth(value: number | null | undefined) {
@@ -779,22 +1007,78 @@ function buildConflictSignals(items: RuntimeGeoSanctionsShockItem[]): ConflictSi
     if (lat == null || lon == null || lat < -90 || lat > 90 || lon < -180 || lon > 180) return [];
     const deaths = Math.max(0, numberValue(item.deathsBest) ?? 0);
     const country = String(item.country || item.locationLabel || 'UCDP');
-    const actors = [item.sideA, item.sideB].filter(Boolean).join(' vs ');
+    const sideA = String(item.sideA || '').trim();
+    const sideB = String(item.sideB || '').trim();
+    const actors = [sideA, sideB].filter(Boolean).join(' vs ');
     const color = conflictColor(item);
+    const tone = conflictTone(item.violenceType);
     return [{
       type: 'conflict',
       id: String(item.id || `ucdp-${index}`),
       lon,
       lat,
+      iso2: iso2ForConflictCountry(country),
       country,
+      location: String(item.locationLabel || country),
       label: country,
       sublabel: `${deaths} deaths${actors ? ` · ${actors}` : ''}`,
+      actors,
+      sideA,
+      sideB,
       deaths,
+      deathsLow: numberValue(item.deathsLow),
+      deathsHigh: numberValue(item.deathsHigh),
       violenceType: String(item.violenceType || ''),
+      violenceLabel: conflictViolenceLabel(item.violenceType),
+      occurredAt: item.occurredAt ? String(item.occurredAt) : null,
+      source: item.source ? String(item.source) : null,
+      sourceUrl: item.sourceUrl ? String(item.sourceUrl) : null,
+      tone,
       color,
       ringColor: [color[0], color[1], color[2], 48],
     }];
   });
+}
+
+function buildCountryConflictRisks(conflicts: ConflictSignal[]): CountryConflictRisk[] {
+  const groups = new Map<string, CountryConflictRisk>();
+  conflicts.forEach((conflict) => {
+    if (!conflict.iso2) return;
+    const existing = groups.get(conflict.iso2) || emptyCountryRisk(conflict.iso2, conflict.country);
+    existing.conflicts.push(conflict);
+    existing.eventCount += 1;
+    existing.deaths += conflict.deaths;
+    if (conflict.tone === 'state') existing.stateCount += 1;
+    if (conflict.tone === 'nonstate') existing.nonStateCount += 1;
+    if (conflict.tone === 'onesided') existing.oneSidedCount += 1;
+    if (!existing.latestAt || parseDateMs(conflict.occurredAt) > parseDateMs(existing.latestAt)) {
+      existing.latestAt = conflict.occurredAt;
+    }
+    groups.set(conflict.iso2, existing);
+  });
+
+  return Array.from(groups.values()).map((risk) => {
+    const actorCounts = new Map<string, number>();
+    const locationCounts = new Map<string, number>();
+    risk.conflicts.forEach((conflict) => {
+      if (conflict.actors) actorCounts.set(conflict.actors, (actorCounts.get(conflict.actors) || 0) + 1);
+      if (conflict.location) locationCounts.set(conflict.location, (locationCounts.get(conflict.location) || 0) + 1);
+    });
+    const score = Math.min(100, Math.round(
+      Math.log10(risk.deaths + 1) * 24
+      + Math.min(30, risk.eventCount * 1.65)
+      + risk.stateCount * 2.2
+      + risk.oneSidedCount * 1.4,
+    ));
+    return {
+      ...risk,
+      score,
+      level: riskLevel(score),
+      conflicts: risk.conflicts.slice().sort((a, b) => parseDateMs(b.occurredAt) - parseDateMs(a.occurredAt)),
+      topActors: Array.from(actorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([actor]) => actor),
+      topLocations: Array.from(locationCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([location]) => location),
+    };
+  }).sort((a, b) => b.score - a.score || b.deaths - a.deaths || b.eventCount - a.eventCount);
 }
 
 function getActiveSignal(citySignals: CitySignal[], selectedCityId: string | null, selectedMatchId: string | null, matches: WorldCupMatch[], nextMatch: WorldCupMatch | null) {
@@ -836,17 +1120,54 @@ function buildDeckLayers(
   conflicts: ConflictSignal[],
   enabledLayers: EnabledLayers,
   zoom: number,
+  pulsePhase = 0,
+  countryRiskByIso: Map<string, CountryConflictRisk> = new Map(),
 ) {
   const layers = [];
   const showDenseLabels = zoom >= 2.85;
+
+  layers.push(new GeoJsonLayer<any>({
+    id: 'wc-country-risk-deck-layer',
+    data: COUNTRIES_GEOJSON,
+    pickable: true,
+    stroked: true,
+    filled: true,
+    autoHighlight: true,
+    getFillColor: (featureItem: any) => {
+      const iso2 = String(featureItem.properties?.['ISO3166-1-Alpha-2'] || '');
+      const risk = countryRiskByIso.get(iso2);
+      if (!risk) return [115, 216, 255, 1];
+      const [r, g, b] = hexToRgb(riskColor(risk.level));
+      return [r, g, b, Math.round(riskOpacity(risk.level) * 255)];
+    },
+    getLineColor: (featureItem: any) => {
+      const iso2 = String(featureItem.properties?.['ISO3166-1-Alpha-2'] || '');
+      const risk = countryRiskByIso.get(iso2);
+      if (!risk) return [255, 255, 255, 8];
+      const [r, g, b] = hexToRgb(riskColor(risk.level));
+      return [r, g, b, risk.level === 'quiet' ? 44 : 150];
+    },
+    getLineWidth: (featureItem: any) => {
+      const iso2 = String(featureItem.properties?.['ISO3166-1-Alpha-2'] || '');
+      return countryRiskByIso.has(iso2) ? 1.25 : 0.4;
+    },
+    lineWidthMinPixels: 0.5,
+    lineWidthMaxPixels: 2.4,
+    highlightColor: [75, 210, 255, 58],
+    updateTriggers: {
+      getFillColor: [conflicts.length, pulsePhase],
+      getLineColor: [conflicts.length],
+      getLineWidth: [conflicts.length],
+    },
+  }));
 
   if (enabledLayers.conflicts) {
     layers.push(new ScatterplotLayer<ConflictSignal>({
       id: 'wc-ucdp-conflict-ring-layer',
       data: conflicts.filter((signal) => signal.deaths >= 20).slice(0, 320),
       getPosition: (d) => [d.lon, d.lat],
-      getRadius: (d) => 17000 + Math.min(120000, Math.log10(d.deaths + 1) * 31000),
-      getFillColor: (d) => d.ringColor,
+      getRadius: (d) => 17000 + Math.min(120000, Math.log10(d.deaths + 1) * 31000) + pulsePhase * 16000,
+      getFillColor: (d) => [d.color[0], d.color[1], d.color[2], Math.max(18, 62 - Math.round(pulsePhase * 32))],
       getLineColor: (d) => d.color,
       radiusMinPixels: 8,
       radiusMaxPixels: 34,
@@ -858,7 +1179,7 @@ function buildDeckLayers(
       id: 'wc-ucdp-conflict-layer',
       data: conflicts,
       getPosition: (d) => [d.lon, d.lat],
-      getRadius: (d) => 6000 + Math.min(64000, Math.log10(d.deaths + 1) * 15000),
+      getRadius: (d) => 6000 + Math.min(64000, Math.log10(d.deaths + 1) * 15000) + pulsePhase * 2800,
       getFillColor: (d) => d.color,
       getLineColor: [255, 245, 190, 214],
       radiusMinPixels: 3,
@@ -1030,7 +1351,13 @@ function buildDeckLayers(
 
 function getDeckTooltip(info: PickingInfo<DeckObject>) {
   if (!info.object) return null;
-  const obj = info.object;
+  const obj = info.object as any;
+  const iso2 = String(obj.properties?.['ISO3166-1-Alpha-2'] || '');
+  if (iso2) {
+    return {
+      html: `<div class="deckgl-tooltip"><strong>${escapeHtml(obj.properties?.name || iso2)}</strong><br/>${escapeHtml(iso2)} country layer</div>`,
+    };
+  }
   if (obj.type === 'host-city') {
     return {
       html: `<div class="deckgl-tooltip"><strong>${escapeHtml(obj.city.city)}</strong><br/>${escapeHtml(obj.city.venue)}<br/>${obj.plannedMatchCount} matches · ${escapeHtml(obj.weather?.current.condition || 'weather pending')}</div>`,
@@ -1049,6 +1376,89 @@ function getDeckTooltip(info: PickingInfo<DeckObject>) {
   return {
     html: `<div class="deckgl-tooltip"><strong>${escapeHtml(obj.label)}</strong><br/>${escapeHtml(obj.city.city)} · ${escapeHtml(obj.sublabel)}</div>`,
   };
+}
+
+function RiskMetricBar({ label, value, max, tone }: { label: string; value: number; max: number; tone: string }) {
+  const width = max > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
+  return (
+    <p className={`wm-worldcup-risk-bar ${tone}`}>
+      <span>{label}</span>
+      <i><b style={{ width: `${width}%` }} /></i>
+      <strong>{value}</strong>
+    </p>
+  );
+}
+
+function MapRiskIntelPanel({ intel, onClose }: { intel: SelectedRiskIntel; onClose: () => void }) {
+  if (intel.kind === 'conflict') {
+    const conflict = intel.conflict;
+    return (
+      <aside className={`wm-worldcup-risk-panel conflict tone-${conflict.tone}`}>
+        <button type="button" onClick={onClose} aria-label="Close risk detail">×</button>
+        <header>
+          <span>{conflict.violenceLabel}</span>
+          <strong>{conflict.country}</strong>
+          <em>{shortDate(conflict.occurredAt)} · {conflict.source || 'UCDP'}</em>
+        </header>
+        <div className="wm-worldcup-risk-scoreline">
+          <b>{formatCount(conflict.deaths)}</b>
+          <small>deaths</small>
+        </div>
+        <section className="wm-worldcup-risk-details">
+          <span>LOCATION</span>
+          <strong>{conflict.location || conflict.country}</strong>
+          <span>ACTORS</span>
+          <strong>{conflict.actors || '--'}</strong>
+          {conflict.deathsLow != null || conflict.deathsHigh != null ? (
+            <>
+              <span>RANGE</span>
+              <strong>{conflict.deathsLow ?? '--'} - {conflict.deathsHigh ?? '--'}</strong>
+            </>
+          ) : null}
+        </section>
+        {conflict.sourceUrl ? <a href={conflict.sourceUrl} target="_blank" rel="noreferrer">OPEN SOURCE</a> : null}
+      </aside>
+    );
+  }
+
+  const risk = intel.risk;
+  const max = Math.max(1, risk.stateCount, risk.nonStateCount, risk.oneSidedCount);
+  return (
+    <aside className={`wm-worldcup-risk-panel country level-${risk.level}`}>
+      <button type="button" onClick={onClose} aria-label="Close country risk detail">×</button>
+      <header>
+        <span>{risk.iso2}</span>
+        <strong>{risk.name}</strong>
+        <em>Updated {shortDate(risk.latestAt)}</em>
+      </header>
+      <div className="wm-worldcup-risk-scoreline">
+        <b>{risk.score}/100</b>
+        <small>{risk.level === 'quiet' ? 'stable' : risk.level}</small>
+      </div>
+      <div className="wm-worldcup-risk-bars">
+        <RiskMetricBar label="State" value={risk.stateCount} max={max} tone="state" />
+        <RiskMetricBar label="Non-state" value={risk.nonStateCount} max={max} tone="nonstate" />
+        <RiskMetricBar label="One-sided" value={risk.oneSidedCount} max={max} tone="onesided" />
+      </div>
+      <div className="wm-worldcup-risk-stats">
+        <span><b>{formatCount(risk.eventCount)}</b><em>events</em></span>
+        <span><b>{formatCount(risk.deaths)}</b><em>deaths</em></span>
+        <span><b>{formatCount(risk.conflicts.length)}</b><em>rows</em></span>
+      </div>
+      {risk.topActors.length ? (
+        <section className="wm-worldcup-risk-details compact">
+          <span>TOP ACTORS</span>
+          {risk.topActors.map((actor) => <strong key={actor}>{actor}</strong>)}
+        </section>
+      ) : null}
+      {risk.topLocations.length ? (
+        <section className="wm-worldcup-risk-details compact">
+          <span>HOTSPOTS</span>
+          {risk.topLocations.map((location) => <strong key={location}>{location}</strong>)}
+        </section>
+      ) : null}
+    </aside>
+  );
 }
 
 function LayerPanel({
@@ -1211,10 +1621,14 @@ export function WorldCupMap({
   const mapRef = useRef<MapLibreMap | null>(null);
   const deckOverlayRef = useRef<MapboxOverlay | null>(null);
   const pulseRafRef = useRef<number | null>(null);
+  const riskPulseTimerRef = useRef<number | null>(null);
   const styleTimeoutRef = useRef<number | null>(null);
   const explicitSelectedCityRef = useRef<string | null>(null);
   const fallbackAppliedRef = useRef(false);
   const dataRef = useRef({ cities, matches, weather, conflicts, nextMatch, selectedCityId, selectedMatchId });
+  const countryRisksRef = useRef<CountryConflictRisk[]>([]);
+  const countryRiskByIsoRef = useRef<Map<string, CountryConflictRisk>>(new Map());
+  const onCountrySelectRef = useRef<(risk: CountryConflictRisk) => void>(() => undefined);
   const enabledLayersRef = useRef(DEFAULT_ENABLED_LAYERS);
   const timeFilterRef = useRef<WorldCupTimeFilter>('all');
   const [enabledLayers, setEnabledLayers] = useState<EnabledLayers>(DEFAULT_ENABLED_LAYERS);
@@ -1225,6 +1639,7 @@ export function WorldCupMap({
   const [mapDegraded, setMapDegraded] = useState(false);
   const [regionHover, setRegionHover] = useState<MapRegionHover | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [selectedRiskIntel, setSelectedRiskIntel] = useState<SelectedRiskIntel | null>(null);
 
   const weatherByCity = useMemo(() => {
     const index = new Map<string, WorldCupCityWeather>();
@@ -1236,6 +1651,9 @@ export function WorldCupMap({
     () => buildCitySignals(cities, matches, weatherByCity, nextMatch, selectedMatchId, explicitSelectedCityRef.current),
     [cities, matches, nextMatch, selectedCityId, selectedMatchId, weatherByCity],
   );
+  const conflictSignals = useMemo(() => buildConflictSignals(conflicts), [conflicts]);
+  const countryRisks = useMemo(() => buildCountryConflictRisks(conflictSignals), [conflictSignals]);
+  const countryRiskByIso = useMemo(() => new Map(countryRisks.map((risk) => [risk.iso2, risk])), [countryRisks]);
   const filteredMatches = useMemo(() => filterMatchesForTime(matches, nextMatch, timeFilter), [matches, nextMatch, timeFilter]);
   const visibleCitySignals = useMemo(
     () => visibleCitySignalsForFilter(citySignals, filteredMatches, timeFilter),
@@ -1293,6 +1711,8 @@ export function WorldCupMap({
         buildConflictSignals(current.conflicts),
         enabledLayersRef.current,
         map.getZoom(),
+        (Math.sin(performance.now() / 680) + 1) / 2,
+        countryRiskByIsoRef.current,
       ),
     });
   };
@@ -1389,6 +1809,26 @@ export function WorldCupMap({
   };
 
   useEffect(() => {
+    countryRisksRef.current = countryRisks;
+    countryRiskByIsoRef.current = countryRiskByIso;
+    updateCountryRiskPaint(mapRef.current, countryRisks);
+    if (selectedRiskIntel?.kind === 'country') {
+      const refreshed = countryRiskByIso.get(selectedRiskIntel.risk.iso2);
+      if (refreshed && refreshed !== selectedRiskIntel.risk) {
+        setSelectedRiskIntel({ kind: 'country', risk: refreshed });
+      }
+    }
+  }, [countryRiskByIso, countryRisks, selectedRiskIntel]);
+
+  useEffect(() => {
+    onCountrySelectRef.current = (risk: CountryConflictRisk) => {
+      setSelectedRiskIntel({ kind: 'country', risk });
+      setInspectorOpen(false);
+      highlightCountry(risk.iso2);
+    };
+  });
+
+  useEffect(() => {
     dataRef.current = { cities, matches, weather, conflicts, nextMatch, selectedCityId, selectedMatchId };
     updateDeckLayers();
     const signal = getActiveSignal(
@@ -1441,10 +1881,29 @@ export function WorldCupMap({
         useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
         getTooltip: (info: PickingInfo<DeckObject>) => getDeckTooltip(info),
         onClick: (info: PickingInfo<DeckObject>) => {
-          const object = info.object;
-          if (!object || object.type === 'conflict') return;
+          const object = info.object as any;
+          if (!object) return;
+          const iso2 = String(object.properties?.['ISO3166-1-Alpha-2'] || '');
+          if (iso2) {
+            const risk = countryRiskByIsoRef.current.get(iso2) || emptyCountryRisk(iso2, String(object.properties?.name || iso2));
+            setSelectedRiskIntel({ kind: 'country', risk });
+            setInspectorOpen(false);
+            highlightCountry(iso2);
+            if (info.coordinate) {
+              map.easeTo({ center: info.coordinate as [number, number], zoom: Math.max(map.getZoom(), 2.7), duration: 360, offset: [-170, 0] });
+            }
+            return;
+          }
+          if (object.type === 'conflict') {
+            setSelectedRiskIntel({ kind: 'conflict', conflict: object });
+            setInspectorOpen(false);
+            highlightCountry(object.iso2);
+            map.easeTo({ center: [object.lon, object.lat], zoom: Math.max(map.getZoom(), 2.9), duration: 360, offset: [-160, 0] });
+            return;
+          }
           const city = object?.type === 'host-city' ? object.city : object?.city;
           if (!city) return;
+          setSelectedRiskIntel(null);
           explicitSelectedCityRef.current = city.id;
           onSelectCity(city.id);
           setInspectorOpen(true);
@@ -1468,8 +1927,10 @@ export function WorldCupMap({
       setMapReady(true);
       localizeBasemapLabels(map);
       applyWorldMonitorMapPaint(map);
-      loadMapSupportLayers(map, setRegionHover)
+      ensureCountryRiskLayers(map, countryRisksRef.current);
+      loadMapSupportLayers(map, setRegionHover, countryRisksRef.current, countryRiskByIsoRef, onCountrySelectRef)
         .then(() => {
+          updateCountryRiskPaint(map, countryRisksRef.current);
           highlightCountry(selectedCountryCode(
             dataRef.current.cities,
             dataRef.current.matches,
@@ -1523,6 +1984,8 @@ export function WorldCupMap({
     map.on('error', onError);
     map.on('data', onData);
 
+    riskPulseTimerRef.current = window.setInterval(updateDeckLayers, 900);
+
     styleTimeoutRef.current = window.setTimeout(() => {
       if (!tileLoadOk) switchToLocalFallback();
     }, 14000);
@@ -1538,6 +2001,7 @@ export function WorldCupMap({
     return () => {
       if (styleTimeoutRef.current) window.clearTimeout(styleTimeoutRef.current);
       if (pulseRafRef.current) cancelAnimationFrame(pulseRafRef.current);
+      if (riskPulseTimerRef.current) window.clearInterval(riskPulseTimerRef.current);
       resizeObserver.disconnect();
       setRegionHover(null);
       deckOverlayRef.current?.finalize();
@@ -1572,6 +2036,15 @@ export function WorldCupMap({
           <strong>{regionHover.region}</strong>
           <span>{regionHover.country}</span>
         </div>
+      ) : null}
+      {selectedRiskIntel ? (
+        <MapRiskIntelPanel
+          intel={selectedRiskIntel}
+          onClose={() => {
+            setSelectedRiskIntel(null);
+            highlightCountry(null);
+          }}
+        />
       ) : null}
       {activeSignal ? (
         <aside className={`wm-worldcup-map-inspector ${inspectorOpen ? 'open' : 'collapsed'}`}>

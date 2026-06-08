@@ -3494,6 +3494,240 @@ body.panel-resize-active iframe {
   text-transform: uppercase;
 }
 
+.wm-worldcup-risk-panel {
+  position: absolute;
+  z-index: 14;
+  right: 16px;
+  top: 18px;
+  width: min(410px, calc(100% - 318px));
+  max-height: calc(100% - 34px);
+  overflow: hidden auto;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 4px solid #73d8ff;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(115, 216, 255, 0.08), transparent 38%),
+    rgba(5, 6, 6, 0.9);
+  box-shadow: 0 22px 62px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  color: #f4f6f4;
+  font-family: var(--font-mono);
+  backdrop-filter: blur(8px);
+}
+
+.wm-worldcup-risk-panel.level-critical,
+.wm-worldcup-risk-panel.tone-state {
+  border-left-color: #ff4a4a;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(255, 74, 74, 0.13), transparent 38%),
+    rgba(5, 6, 6, 0.92);
+}
+
+.wm-worldcup-risk-panel.level-elevated,
+.wm-worldcup-risk-panel.tone-nonstate {
+  border-left-color: #ff9f1c;
+}
+
+.wm-worldcup-risk-panel.level-watch,
+.wm-worldcup-risk-panel.tone-onesided {
+  border-left-color: #ffd400;
+}
+
+.wm-worldcup-risk-panel > button {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #aeb6b2;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.wm-worldcup-risk-panel > button:hover {
+  border-color: rgba(115, 216, 255, 0.52);
+  color: #73d8ff;
+}
+
+.wm-worldcup-risk-panel header {
+  display: grid;
+  gap: 4px;
+  padding-right: 34px;
+}
+
+.wm-worldcup-risk-panel header span,
+.wm-worldcup-risk-panel header em,
+.wm-worldcup-risk-details span,
+.wm-worldcup-risk-scoreline small {
+  color: #8f9898;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wm-worldcup-risk-panel header strong {
+  overflow: hidden;
+  color: #f6f7f3;
+  font-size: 22px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-risk-scoreline {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-worldcup-risk-scoreline b {
+  color: #ff9f1c;
+  font-size: 36px;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+}
+
+.wm-worldcup-risk-panel.level-critical .wm-worldcup-risk-scoreline b,
+.wm-worldcup-risk-panel.tone-state .wm-worldcup-risk-scoreline b {
+  color: #ff555f;
+}
+
+.wm-worldcup-risk-bars {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.wm-worldcup-risk-bar {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 38px;
+  gap: 10px;
+  align-items: center;
+  margin: 0;
+}
+
+.wm-worldcup-risk-bar span,
+.wm-worldcup-risk-bar strong {
+  color: #aeb6b2;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.wm-worldcup-risk-bar strong {
+  color: #f4f6f4;
+  text-align: right;
+}
+
+.wm-worldcup-risk-bar i {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.wm-worldcup-risk-bar b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #73d8ff;
+}
+
+.wm-worldcup-risk-bar.state b {
+  background: #ff4a4a;
+  box-shadow: 0 0 16px rgba(255, 74, 74, 0.34);
+}
+
+.wm-worldcup-risk-bar.nonstate b {
+  background: #ff9f1c;
+  box-shadow: 0 0 16px rgba(255, 159, 28, 0.34);
+}
+
+.wm-worldcup-risk-bar.onesided b {
+  background: #ffd400;
+  box-shadow: 0 0 16px rgba(255, 212, 0, 0.26);
+}
+
+.wm-worldcup-risk-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.wm-worldcup-risk-stats span {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wm-worldcup-risk-stats b,
+.wm-worldcup-risk-stats em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-risk-stats b {
+  color: #f6f7f3;
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.wm-worldcup-risk-stats em {
+  margin-top: 3px;
+  color: #8f9898;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wm-worldcup-risk-details {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-worldcup-risk-details strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #f4f6f4;
+  font-size: 12px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-risk-panel a {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 14px;
+  padding: 6px 9px;
+  border: 1px solid rgba(115, 216, 255, 0.34);
+  color: #73d8ff;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+}
+
 .wm-worldcup-map-layer-panel {
   position: absolute;
   z-index: 8;
@@ -13685,6 +13919,7 @@ a.wm-orderfilled-row {
 .wm-ucdp-map-point {
   --ucdp-size: 9px;
   --ucdp-color: #ff9f1c;
+  appearance: none;
   position: absolute;
   left: 0;
   top: 0;
@@ -13692,13 +13927,55 @@ a.wm-orderfilled-row {
   height: var(--ucdp-size);
   margin-left: calc(var(--ucdp-size) / -2);
   margin-top: calc(var(--ucdp-size) / -2);
+  padding: 0;
   border: 1px solid rgba(255, 245, 190, 0.86);
   border-radius: 999px;
   background: var(--ucdp-color);
+  cursor: pointer;
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--ucdp-color) 26%, transparent),
     0 0 16px color-mix(in srgb, var(--ucdp-color) 54%, transparent);
   opacity: 0.88;
+  pointer-events: auto;
+  transform-origin: center;
+  transition: border-color 140ms ease, opacity 140ms ease, box-shadow 140ms ease;
+  animation: wm-ucdp-breathe 2.8s ease-in-out infinite;
+}
+
+.wm-ucdp-map-point::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border: 1px solid color-mix(in srgb, var(--ucdp-color) 54%, transparent);
+  border-radius: inherit;
+  opacity: 0.48;
+  transform: scale(0.72);
+  animation: wm-ucdp-pulse 2.4s ease-out infinite;
+}
+
+.wm-ucdp-map-point::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.44);
+  opacity: 0.22;
+}
+
+.wm-ucdp-map-point:hover,
+.wm-ucdp-map-point.selected {
+  border-color: rgba(255, 255, 255, 0.95);
+  opacity: 1;
+  z-index: 6;
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--ucdp-color) 32%, transparent),
+    0 0 26px color-mix(in srgb, var(--ucdp-color) 70%, transparent);
+}
+
+.wm-ucdp-map-point.major {
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--ucdp-color) 25%, transparent),
+    0 0 24px color-mix(in srgb, var(--ucdp-color) 68%, transparent);
 }
 
 .wm-ucdp-map-point.type-1 {
@@ -13712,6 +13989,29 @@ a.wm-orderfilled-row {
 .wm-ucdp-map-point.type-3 {
   border-radius: 0;
   transform-origin: center;
+}
+
+@keyframes wm-ucdp-breathe {
+  0%, 100% {
+    filter: brightness(0.96);
+  }
+
+  50% {
+    filter: brightness(1.22);
+  }
+}
+
+@keyframes wm-ucdp-pulse {
+  0% {
+    opacity: 0.5;
+    transform: scale(0.72);
+  }
+
+  82%,
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
 }
 
 .wm-weather-html-label {
@@ -13867,6 +14167,11 @@ a.wm-orderfilled-row {
   background: #ff4d4d;
 }
 
+.wm-weather-deck-legend i.country {
+  border-radius: 2px;
+  background: #ff7a1a;
+}
+
 .wm-weather-deck-tooltip {
   background: rgba(0, 0, 0, 0.9);
   border: 1px solid rgba(255, 170, 0, 0.35);
@@ -13879,6 +14184,311 @@ a.wm-orderfilled-row {
 
 .wm-weather-deck-tooltip strong {
   color: #73d8ff;
+}
+
+.wm-map-country-tooltip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 7;
+  display: grid;
+  gap: 2px;
+  min-width: 132px;
+  max-width: 240px;
+  padding: 7px 9px;
+  border: 1px solid rgba(115, 216, 255, 0.38);
+  border-left: 3px solid #73d8ff;
+  border-radius: 5px;
+  background: rgba(5, 7, 8, 0.9);
+  color: #f3f6f5;
+  font-family: var(--font-mono);
+  pointer-events: none;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(5px);
+}
+
+.wm-map-country-tooltip.level-critical {
+  border-color: rgba(255, 77, 77, 0.52);
+  border-left-color: #ff4d4d;
+}
+
+.wm-map-country-tooltip.level-elevated {
+  border-color: rgba(255, 159, 28, 0.52);
+  border-left-color: #ff9f1c;
+}
+
+.wm-map-country-tooltip.level-watch {
+  border-color: rgba(255, 212, 0, 0.48);
+  border-left-color: #ffd400;
+}
+
+.wm-map-country-tooltip strong,
+.wm-map-country-tooltip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-map-country-tooltip strong {
+  color: #73d8ff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.wm-map-country-tooltip span {
+  color: #b8c0bd;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+
+.wm-map-risk-inspector {
+  position: absolute;
+  top: 64px;
+  right: 74px;
+  z-index: 8;
+  width: min(380px, calc(100% - 116px));
+  max-height: calc(100% - 108px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-left: 4px solid #73d8ff;
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(115, 216, 255, 0.09), transparent 38%),
+    rgba(8, 9, 10, 0.9);
+  color: #f4f6f4;
+  font-family: var(--font-mono);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(7px);
+}
+
+.wm-map-risk-inspector.level-critical,
+.wm-map-conflict-inspector.tone-state {
+  border-left-color: #ff4d4d;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(255, 77, 77, 0.12), transparent 38%),
+    rgba(8, 9, 10, 0.91);
+}
+
+.wm-map-risk-inspector.level-elevated,
+.wm-map-conflict-inspector.tone-nonstate {
+  border-left-color: #ff9f1c;
+}
+
+.wm-map-risk-inspector.level-watch,
+.wm-map-conflict-inspector.tone-onesided {
+  border-left-color: #ffd400;
+}
+
+.wm-map-risk-close {
+  position: absolute;
+  right: 9px;
+  top: 9px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #9da4a1;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.wm-map-risk-close:hover {
+  border-color: rgba(115, 216, 255, 0.56);
+  color: #73d8ff;
+}
+
+.wm-map-risk-head {
+  display: grid;
+  gap: 3px;
+  padding-right: 32px;
+}
+
+.wm-map-risk-head span,
+.wm-map-risk-head em,
+.wm-map-risk-list span,
+.wm-map-conflict-body span {
+  color: #8f9894;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.wm-map-risk-head strong {
+  overflow: hidden;
+  color: #f4f6f4;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-map-risk-score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-map-risk-score strong {
+  color: #ff9f1c;
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+}
+
+.wm-map-risk-score span {
+  color: #9da4a1;
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wm-map-risk-bars {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.wm-map-risk-bar {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 34px;
+  gap: 10px;
+  align-items: center;
+}
+
+.wm-map-risk-bar span,
+.wm-map-risk-bar strong {
+  color: #aeb6b2;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.wm-map-risk-bar strong {
+  color: #f5f7f5;
+  text-align: right;
+}
+
+.wm-map-risk-bar i {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.wm-map-risk-bar b {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: #73d8ff;
+  box-shadow: 0 0 16px rgba(115, 216, 255, 0.34);
+}
+
+.wm-map-risk-bar.state b {
+  background: #ff4d4d;
+  box-shadow: 0 0 16px rgba(255, 77, 77, 0.34);
+}
+
+.wm-map-risk-bar.nonstate b {
+  background: #ff9f1c;
+  box-shadow: 0 0 16px rgba(255, 159, 28, 0.34);
+}
+
+.wm-map-risk-bar.onesided b {
+  background: #ffd400;
+  box-shadow: 0 0 16px rgba(255, 212, 0, 0.28);
+}
+
+.wm-map-risk-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.wm-map-risk-stats span {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wm-map-risk-stats b,
+.wm-map-risk-stats em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-map-risk-stats b {
+  color: #f5f7f5;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.wm-map-risk-stats em {
+  margin-top: 3px;
+  color: #8f9894;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.wm-map-risk-list,
+.wm-map-conflict-body {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-map-risk-list strong,
+.wm-map-conflict-body strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #f4f6f4;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-map-risk-link {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 14px;
+  padding: 6px 9px;
+  border: 1px solid rgba(115, 216, 255, 0.32);
+  color: #73d8ff;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  text-decoration: none;
+}
+
+@media (max-width: 860px) {
+  .wm-map-risk-inspector {
+    left: 14px;
+    right: 14px;
+    top: 82px;
+    width: auto;
+  }
 }
 
 .wm-weather-detail,
