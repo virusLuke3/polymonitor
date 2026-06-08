@@ -150,6 +150,14 @@ type CountryNameLabel = {
   minZoom: number;
 };
 
+type SignalDensityPoint = {
+  id: string;
+  lon: number;
+  lat: number;
+  tone: 'cool' | 'warm' | 'risk' | 'alert';
+  weight: number;
+};
+
 const LOCAL_WORLD_COUNTRIES_GEOJSON_URL = '/map-data/world-countries.geojson';
 const WEATHER_COUNTRY_SOURCE_ID = 'wm-weather-country-boundaries';
 const WEATHER_COUNTRY_NO_MATCH = '__weather_country_no_match__';
@@ -747,6 +755,85 @@ function weatherColor(point: WeatherMapPoint, alpha = 220): [number, number, num
   return [115, 216, 255, alpha];
 }
 
+function hashUnit(seed: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) % 10000) / 10000;
+}
+
+function jitteredDensityPoint(
+  id: string,
+  lon: number,
+  lat: number,
+  radiusLon: number,
+  radiusLat: number,
+  tone: SignalDensityPoint['tone'],
+  weight: number,
+): SignalDensityPoint {
+  const angle = hashUnit(`${id}:a`) * Math.PI * 2;
+  const distance = Math.sqrt(hashUnit(`${id}:d`));
+  const latScale = Math.max(0.34, Math.cos((lat * Math.PI) / 180));
+  return {
+    id,
+    lon: Math.max(-179.8, Math.min(179.8, lon + Math.cos(angle) * distance * radiusLon / latScale)),
+    lat: Math.max(-84, Math.min(84, lat + Math.sin(angle) * distance * radiusLat)),
+    tone,
+    weight,
+  };
+}
+
+function buildSignalDensityPoints(cities: WeatherMapPoint[], conflicts: ConflictMapPoint[]): SignalDensityPoint[] {
+  const points: SignalDensityPoint[] = [];
+
+  cities.forEach((city) => {
+    const quoted = Number(String(city.quoteCoverage || '0/0').split('/')[0]) || 0;
+    const priceWeight = city.topBinPrice == null ? 0 : Math.min(1, Math.max(0, city.topBinPrice));
+    const baseCount = IMPORTANT_CITY_IDS.has(city.id) ? 22 : 9;
+    const signalCount = Math.min(34, baseCount + Math.round(quoted * 0.35) + Math.round(priceWeight * 9));
+    const tone: SignalDensityPoint['tone'] = city.temperatureTone === 'cool'
+      ? 'cool'
+      : city.temperatureTone === 'hot' || city.marketTone === 'market'
+        ? 'warm'
+        : 'cool';
+    for (let index = 0; index < signalCount; index += 1) {
+      points.push(jitteredDensityPoint(
+        `city-density:${city.id}:${index}`,
+        city.lon,
+        city.lat,
+        IMPORTANT_CITY_IDS.has(city.id) ? 2.9 : 1.55,
+        IMPORTANT_CITY_IDS.has(city.id) ? 1.75 : 1.05,
+        tone,
+        0.55 + hashUnit(`${city.id}:w:${index}`) * 0.8,
+      ));
+    }
+  });
+
+  conflicts
+    .slice()
+    .sort((a, b) => conflictPriority(b) - conflictPriority(a))
+    .slice(0, 760)
+    .forEach((conflict) => {
+      const severityCount = Math.min(12, 2 + Math.round(Math.log10(conflict.deaths + 2) * 3));
+      const tone: SignalDensityPoint['tone'] = conflict.tone === 'onesided' ? 'risk' : conflict.tone === 'state' ? 'alert' : 'warm';
+      for (let index = 0; index < severityCount; index += 1) {
+        points.push(jitteredDensityPoint(
+          `conflict-density:${conflict.id}:${index}`,
+          conflict.lon,
+          conflict.lat,
+          1.35 + Math.log10(conflict.deaths + 2) * 0.35,
+          0.85 + Math.log10(conflict.deaths + 2) * 0.24,
+          tone,
+          0.72 + Math.min(1.2, Math.log10(conflict.deaths + 2) * 0.24),
+        ));
+      }
+    });
+
+  return points.slice(0, 3200);
+}
+
 function paddedBounds(map: MapLibreMap | null, padRatio = 0.18): [number, number, number, number] | null {
   if (!map) return null;
   const bounds = map.getBounds();
@@ -917,6 +1004,7 @@ function buildWeatherDeckLayers({
   cities,
   conflicts,
   countryRisks,
+  densityPoints,
   selectedCityId,
   selectedConflictId,
   zoom,
@@ -926,6 +1014,7 @@ function buildWeatherDeckLayers({
   cities: WeatherMapPoint[];
   conflicts: ConflictMapPoint[];
   countryRisks: CountryRisk[];
+  densityPoints: SignalDensityPoint[];
   selectedCityId?: string | null;
   selectedConflictId?: string | null;
   zoom: number;
@@ -933,6 +1022,7 @@ function buildWeatherDeckLayers({
   showLabels: boolean;
 }): LayersList {
   const layers: (Layer | null)[] = [];
+  const visibleDensityPoints = densityPoints.filter((point) => pointInBounds(point, bounds));
   const cityLabels = showLabels ? pickCityLabels(cities, zoom, selectedCityId) : [];
   const conflictClusters = clusterConflictPoints(conflicts, zoom, bounds);
   const countryLabels = buildCountryNameLabels(countryRisks, zoom, bounds);
@@ -941,6 +1031,25 @@ function buildWeatherDeckLayers({
     : new Set<string>();
   const conflictSingles = visibleConflictSingles(conflicts, zoom, bounds, selectedConflictId)
     .filter((point) => !clusterMemberIds.has(point.id) || point.id === selectedConflictId);
+
+  if (visibleDensityPoints.length) {
+    layers.push(new ScatterplotLayer<SignalDensityPoint>({
+      id: 'signal-density-speckles',
+      data: visibleDensityPoints,
+      getPosition: (point) => [point.lon, point.lat],
+      getRadius: (point) => 2600 + point.weight * 4200,
+      getFillColor: (point) => {
+        if (point.tone === 'cool') return [40, 178, 228, 68];
+        if (point.tone === 'risk') return [236, 211, 64, 74];
+        if (point.tone === 'alert') return [255, 86, 76, 72];
+        return [255, 153, 35, 70];
+      },
+      radiusMinPixels: 0.9,
+      radiusMaxPixels: zoom < 3 ? 2.4 : 3.8,
+      pickable: false,
+      stroked: false,
+    }));
+  }
 
   if (countryLabels.length) {
     layers.push(new TextLayer<CountryNameLabel>({
@@ -1285,6 +1394,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
   const mapInteractingRef = useRef(false);
   const pointsRef = useRef<WeatherMapPoint[]>([]);
   const conflictPointsRef = useRef<ConflictMapPoint[]>([]);
+  const densityPointsRef = useRef<SignalDensityPoint[]>([]);
   const countryRisksRef = useRef<CountryRisk[]>([]);
   const selectedCityIdRef = useRef<string | null>(selectedCityId);
   const selectedConflictIdRef = useRef<string | null>(null);
@@ -1299,6 +1409,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
   const [selectedConflict, setSelectedConflict] = useState<ConflictMapPoint | null>(null);
   const points = useMemo(() => normalizePoints(items), [items]);
   const conflictPoints = useMemo(() => normalizeConflictPoints(ucdpEvents), [ucdpEvents]);
+  const densityPoints = useMemo(() => buildSignalDensityPoints(points, conflictPoints), [conflictPoints, points]);
   const countryRisks = useMemo(() => buildCountryRisks(conflictPoints), [conflictPoints]);
   const countryRiskByIso = useMemo(() => new Map(countryRisks.map((risk) => [risk.iso2, risk])), [countryRisks]);
 
@@ -1311,6 +1422,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       cities: pointsRef.current,
       conflicts: conflictPointsRef.current,
       countryRisks: countryRisksRef.current,
+      densityPoints: densityPointsRef.current,
       selectedCityId: selectedCityIdRef.current,
       selectedConflictId: selectedConflictIdRef.current,
       zoom,
@@ -1480,6 +1592,11 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     }
     scheduleDeckUpdate();
   }, [conflictPoints]);
+
+  useEffect(() => {
+    densityPointsRef.current = densityPoints;
+    scheduleDeckUpdate();
+  }, [densityPoints]);
 
   useEffect(() => {
     countryRisksRef.current = countryRisks;
