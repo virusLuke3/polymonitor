@@ -12,6 +12,7 @@ import type {
   MarketGroupDetail,
   MarketGroupOutcome,
   MarketGroupsPayload,
+  MarketGroupSort,
   MarketListItem,
   MarketsPayload,
   MarketWorkspaceHealth,
@@ -228,7 +229,7 @@ export async function fetchAllActiveMarkets(query = '', pageSize = 160, maxPages
   } satisfies MarketsPayload;
 }
 
-export function fetchMarketGroups(query = '', pageSize = 80, sort: 'active' | 'new' | 'volume' = 'active') {
+export function fetchMarketGroups(query = '', pageSize = 80, sort: MarketGroupSort = 'active') {
   const params = new URLSearchParams({
     page: '1',
     pageSize: String(pageSize),
