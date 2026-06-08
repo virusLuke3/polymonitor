@@ -81,7 +81,8 @@ function marketTiming(market: MarketListItem) {
 }
 
 function groupTiming(group: MarketGroupItem) {
-  if (group.createdAt) return formatRelative(group.createdAt);
+  if (group.lastActivityAt) return `${formatRelative(group.lastActivityAt)} active`;
+  if (group.createdAt) return `${formatRelative(group.createdAt)} listed`;
   if (group.endDate) return `closes ${formatRelative(group.endDate)}`;
   return '--';
 }
@@ -116,6 +117,11 @@ function groupAccent(group: MarketGroupItem) {
   if (topic.includes('finance') || topic.includes('fed') || topic.includes('macro')) return '#eab308';
   if (topic.includes('tech') || topic.includes('ai')) return '#a78bfa';
   return '#22c55e';
+}
+
+function topicClassName(topic: string) {
+  const normalized = String(topic || 'market').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return normalized ? `topic-${normalized}` : 'topic-market';
 }
 
 function defaultGroupMarketId(group: MarketGroupItem) {
@@ -188,6 +194,35 @@ function groupActivityLabel(group: MarketGroupItem) {
   return groupOutcomeLabel(group);
 }
 
+function groupActivityTimestamp(group: MarketGroupItem) {
+  return parseTimestamp(group.lastActivityAt) || parseTimestamp(group.createdAt);
+}
+
+function groupActiveRank(group: MarketGroupItem) {
+  const now = Date.now();
+  const activityTs = groupActivityTimestamp(group);
+  const createdTs = parseTimestamp(group.createdAt);
+  const activityAgeHours = activityTs ? (now - activityTs) / 36e5 : Number.POSITIVE_INFINITY;
+  const createdAgeHours = createdTs ? (now - createdTs) / 36e5 : Number.POSITIVE_INFINITY;
+  const volume = Number(groupDisplayVolume(group) || 0);
+  const trades = Number(groupDisplayTradeCount(group) || 0);
+  const price = Number(groupBestLivePrice(group));
+  const tradableSignal = Number.isFinite(price) && price > 0.01 && price < 0.99 ? 1 : 0;
+  const freshness =
+    trades > 0 ? 700 :
+    activityAgeHours <= 24 ? 620 :
+    createdAgeHours <= 48 ? 580 :
+    activityAgeHours <= 72 ? 520 :
+    createdAgeHours <= 168 ? 460 :
+    activityAgeHours <= 168 ? 420 :
+    activityAgeHours <= 336 ? 220 :
+    createdAgeHours <= 336 ? 180 :
+    0;
+  const impact = Math.log10(Math.max(volume, 0) + 1) * 38 + Math.log10(Math.max(trades, 0) + 1) * 62;
+  const multiOutcomeBonus = Number(group.outcomeCount || group.outcomes?.length || 0) > 2 ? 18 : 0;
+  return freshness + impact + multiOutcomeBonus + tradableSignal * 24;
+}
+
 function groupBestLivePrice(group: MarketGroupItem) {
   const candidates = [...(group.outcomes || []), ...(group.topOutcomes || [])]
     .map((outcome) => Number(outcome.yesPrice))
@@ -256,13 +291,13 @@ function activeMarketGroupsList(
           <button
             key={group.groupId}
             type="button"
-            className={`wm-poly-market-card ${selected ? 'active' : ''}`}
+            className={`wm-poly-market-card ${topicClassName(groupTopic(group))} ${selected ? 'active' : ''}`}
             onClick={() => {
               focusMarketGroup(group, group.defaultOutcomeKey || null, defaultMarketId);
             }}
             aria-pressed={selected}
             title={group.title}
-            style={{ borderLeftColor: groupAccent(group) }}
+            style={{ '--wm-market-accent': groupAccent(group), borderLeftColor: groupAccent(group) } as Record<string, string>}
           >
             <div className="wm-poly-market-card-main">
               <div className="wm-poly-market-meta">
@@ -296,7 +331,7 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
         <button
           key={market.id}
           type="button"
-          className={`wm-poly-market-card ${selectedMarketId === market.id ? 'active' : ''}`}
+          className={`wm-poly-market-card ${topicClassName(marketTopic(market))} ${selectedMarketId === market.id ? 'active' : ''}`}
           onClick={() => setSelectedMarketId(market.id)}
           aria-pressed={selectedMarketId === market.id}
           title={`${market.title}${market.slug ? ` · ${market.slug}` : ''}`}
@@ -369,7 +404,7 @@ function ActiveMarketsPanel({
     if (marketGroupSort === 'close') return liveFiltered.sort((a, b) => timestampOrInfinity(a.endDate) - timestampOrInfinity(b.endDate));
     if (marketGroupSort === 'move') return liveFiltered.sort((a, b) => groupMoveScore(b) - groupMoveScore(a));
     if (marketGroupSort === 'trades') return liveFiltered.sort((a, b) => Number(groupDisplayTradeCount(b) || 0) - Number(groupDisplayTradeCount(a) || 0));
-    return liveFiltered;
+    return liveFiltered.sort((a, b) => groupActiveRank(b) - groupActiveRank(a));
   }, [marketGroupSort, marketGroups, search]);
 
   const visibleMarkets = useMemo(() => {

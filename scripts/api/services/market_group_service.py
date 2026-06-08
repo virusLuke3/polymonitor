@@ -859,8 +859,25 @@ def _serving_market_groups_payload(
         where.append("(title ILIKE ? OR COALESCE(event_slug, '') ILIKE ? OR COALESCE(category, '') ILIKE ? OR tags::text ILIKE ?)")
         params.extend([like, like, like, like])
     where_sql = " AND ".join(where)
+    active_order_sql = """
+        CASE
+          WHEN COALESCE(trade_count_24h, 0) > 0 THEN 0
+          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '24 hours') THEN 1
+          WHEN created_at >= (CURRENT_TIMESTAMP - INTERVAL '48 hours') THEN 2
+          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '3 days') THEN 3
+          WHEN created_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 4
+          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 5
+          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '14 days') THEN 6
+          WHEN COALESCE(volume_24h, 0) >= 100000 THEN 7
+          ELSE 8
+        END ASC,
+        active_rank DESC,
+        volume_24h DESC,
+        last_activity_at DESC NULLS LAST,
+        created_at DESC NULLS LAST
+    """
     order_sql = {
-        "active": "active_rank DESC, volume_24h DESC, last_activity_at DESC NULLS LAST, created_at DESC NULLS LAST",
+        "active": active_order_sql,
         "new": "created_at DESC NULLS LAST, last_activity_at DESC NULLS LAST, volume_24h DESC",
         "volume": "volume_24h DESC, last_activity_at DESC NULLS LAST, active_rank DESC",
     }.get(sort, "active_rank DESC, volume_24h DESC, last_activity_at DESC NULLS LAST")

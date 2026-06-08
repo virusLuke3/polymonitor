@@ -77,6 +77,8 @@ export type MarketGroupItem = {
   category?: string | null;
   tags?: string[];
   createdAt?: string | null;
+  lastActivityAt?: string | null;
+  generatedAt?: string | null;
   endDate?: string | null;
   volume24h?: string | number | null;
   tradeCount24h?: number | string | null;
