@@ -72,17 +72,20 @@ class QuantFrontendActiveWatcher:
                         GROUP BY e.event_slug
                     ),
                     selected_events AS (
-                        SELECT event_slug
+                        SELECT
+                            event_slug,
+                            row_number() OVER (
+                                ORDER BY
+                                    (event_slug = '2026-fifa-world-cup-winner-595') DESC,
+                                    active DESC,
+                                    latest_timestamp ASC NULLS FIRST,
+                                    block_rows DESC,
+                                    event_slug ASC
+                            ) AS priority
                         FROM active_events
                         WHERE active
                            OR end_date >= now() - interval '14 days'
                            OR event_slug = '2026-fifa-world-cup-winner-595'
-                        ORDER BY
-                            (event_slug = '2026-fifa-world-cup-winner-595') DESC,
-                            active DESC,
-                            latest_timestamp ASC NULLS FIRST,
-                            block_rows DESC,
-                            event_slug ASC
                         LIMIT %s
                     )
                     SELECT
@@ -96,7 +99,7 @@ class QuantFrontendActiveWatcher:
                     FROM quant.market_event_members m
                     JOIN selected_events e ON e.event_slug = m.event_slug
                     WHERE m.token_yes_id IS NOT NULL OR m.token_no_id IS NOT NULL
-                    ORDER BY m.event_slug ASC, m.outcome_order ASC, m.market_id ASC
+                    ORDER BY e.priority ASC, m.outcome_order ASC, m.market_id ASC
                     LIMIT %s
                     """,
                     (self.max_events, self.max_tokens),
