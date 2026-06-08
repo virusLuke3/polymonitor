@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -19,7 +20,7 @@ from typing import Any
 
 from ..core.db import ClickHouseClient, PostgresSettings, postgres_connection
 from ..core.eligibility import fetch_orderfilled_trade_stats, refresh_eligibility
-from ..core.metadata import refresh_market_token_metadata
+from ..core.metadata import refresh_market_event_memberships, refresh_market_token_metadata
 from ..core.schema import create_schema
 from ..prices.block_close_algorithm import orderfilled_block_close_sql, quote_clickhouse_string
 from ..prices.block_close_backfill import backfill_block_close_prices
@@ -31,6 +32,7 @@ SEPTEMBER_2025_TS = 1756684800
 FRONTEND_SOURCE = "frontend"
 BLOCK_CLOSE_SOURCE = "orderfilled_block_close"
 BLOCK_CLOSE_QUERY_TOKEN_BATCH_SIZE = 200
+SLUG_TIMESTAMP_RE = re.compile(r"(?:^|-)(\d{10})(?:$|-)")
 
 
 def utc_now_ts() -> int:
@@ -51,6 +53,74 @@ def maybe_datetime_to_ts(value: Any) -> int | None:
         return int(value)
     except Exception:
         return None
+
+
+def frontend_target_end_ts(token: dict[str, Any], end_ts: int) -> int:
+    token_end_ts = int(end_ts)
+    end_date_ts = maybe_datetime_to_ts(token.get("end_date"))
+    if end_date_ts and bool(token.get("closed")):
+        token_end_ts = min(token_end_ts, end_date_ts + 86400)
+    requested_to_ts = maybe_datetime_to_ts(token.get("requested_to_ts"))
+    if requested_to_ts:
+        token_end_ts = min(token_end_ts, requested_to_ts)
+    return token_end_ts
+
+
+def is_short_crypto_market(token: dict[str, Any]) -> bool:
+    slug = str(token.get("market_slug") or "").lower()
+    title = str(token.get("market_title") or "").lower()
+    text = f"{slug} {title}"
+    if "updown" not in text:
+        return False
+    if not any(symbol in text for symbol in ("btc", "bitcoin", "eth", "ethereum", "sol", "xrp", "doge")):
+        return False
+    return any(marker in text for marker in ("5m", "15m", "30m", "1h", "hour"))
+
+
+def parse_slug_timestamp(token: dict[str, Any]) -> int | None:
+    slug = str(token.get("market_slug") or "")
+    matches = SLUG_TIMESTAMP_RE.findall(slug)
+    if not matches:
+        return None
+    try:
+        value = int(matches[-1])
+    except ValueError:
+        return None
+    if 1_600_000_000 <= value <= 2_200_000_000:
+        return value
+    return None
+
+
+def classify_frontend_tier(
+    token: dict[str, Any],
+    *,
+    recent_days: int,
+    backtest_min_orderfilled_trades: int,
+    defer_low_value: bool,
+    now_ts: int,
+) -> str:
+    if token.get("target_priority"):
+        return "target_full"
+    trade_count = int(token.get("orderfilled_trade_count") or 0)
+    active = bool(token.get("active")) and not bool(token.get("closed"))
+    end_date_ts = maybe_datetime_to_ts(token.get("end_date"))
+    if trade_count <= 0:
+        if not active or (end_date_ts and end_date_ts < int(now_ts)):
+            return "skipped_no_orderfilled"
+        return "waiting_no_orderfilled"
+    if is_short_crypto_market(token):
+        return "crypto_short_full"
+    if active:
+        return "active_full"
+    if end_date_ts and end_date_ts >= int(now_ts) - int(recent_days) * 86400:
+        return "recent_full"
+    if trade_count >= int(backtest_min_orderfilled_trades):
+        return "backtest_value_full"
+    if defer_low_value:
+        return "deferred_low_value"
+    if end_date_ts:
+        return "longtail_event_window"
+    return "backtest_value_full"
 
 
 def start_run(conn: Any, *, source: str, mode: str, meta: dict[str, Any]) -> int:
@@ -106,6 +176,7 @@ def fetch_frontend_build_candidates(
     conn: Any,
     *,
     since_ts: int,
+    end_ts: int,
     limit: int,
     min_orderfilled_trades: int,
     include_active_without_trades: bool,
@@ -119,7 +190,7 @@ def fetch_frontend_build_candidates(
             f"""
             SELECT
                 m.token_id, m.market_id, m.market_slug, m.token_side,
-                m.active, m.closed, m.end_date, m.created_at,
+                m.active, m.closed, m.end_date, m.created_at, m.market_title,
                 e.eligible, e.orderfilled_trade_count,
                 t.priority AS target_priority, t.reason AS target_reason,
                 t.requested_from_ts, t.requested_to_ts,
@@ -136,11 +207,25 @@ def fetch_frontend_build_candidates(
                 AND COALESCE(e.is_duplicate_market, FALSE) = FALSE
                 AND {shard_sql("m", shard_count=shard_count)}
                 AND m.created_at >= to_timestamp(%s)
+                AND COALESCE(s.status, '') NOT IN ('skipped', 'deferred')
                 AND (
                     t.token_id IS NOT NULL
                     OR (
                         %s = TRUE
                         AND %s = FALSE
+                        AND (
+                            COALESCE(e.orderfilled_trade_count, 0) > 0
+                            OR m.closed = TRUE
+                            OR m.active = FALSE
+                            OR m.end_date < now()
+                        )
+                        AND (
+                            s.last_complete_ts IS NULL
+                            OR s.last_complete_ts < LEAST(
+                                to_timestamp(%s),
+                                COALESCE(m.end_date + interval '1 day', to_timestamp(%s))
+                            )
+                        )
                     )
                     OR (
                         %s = FALSE
@@ -177,6 +262,8 @@ def fetch_frontend_build_candidates(
                 int(since_ts),
                 bool(all_markets),
                 bool(targets_only),
+                int(end_ts),
+                int(end_ts),
                 bool(targets_only),
                 int(min_orderfilled_trades),
                 bool(include_active_without_trades),
@@ -205,12 +292,22 @@ def fetch_block_close_build_candidates(
             SELECT
                 m.token_id, m.token_id_hex, m.market_id, m.market_slug, m.token_side,
                 m.active, m.closed, m.end_date, m.created_at,
-                e.eligible, e.first_orderfilled_block, e.last_orderfilled_block, e.orderfilled_trade_count,
+                e.eligible,
+                COALESCE(e.first_orderfilled_block, oms.first_orderfilled_block) AS first_orderfilled_block,
+                GREATEST(
+                    COALESCE(e.last_orderfilled_block, 0),
+                    COALESCE(oms.last_orderfilled_block, 0)
+                ) AS last_orderfilled_block,
+                GREATEST(
+                    COALESCE(e.orderfilled_trade_count, 0),
+                    COALESCE(oms.trade_count, 0)
+                ) AS orderfilled_trade_count,
                 t.priority AS target_priority, t.reason AS target_reason,
                 t.requested_from_block, t.requested_to_block,
                 s.last_complete_block, s.attempt_count, s.last_error
             FROM quant.market_token_metadata m
             JOIN quant.market_price_eligibility e ON e.token_id = m.token_id
+            LEFT JOIN quant.market_orderfilled_market_stats oms ON oms.market_id = m.market_id
             LEFT JOIN quant.market_price_build_targets t
                 ON t.source = %s AND t.token_id = m.token_id AND t.status = 'active'
             LEFT JOIN quant.market_price_build_market_state s
@@ -219,14 +316,14 @@ def fetch_block_close_build_candidates(
                 e.eligible = TRUE
                 AND (
                     t.token_id IS NOT NULL
-                    OR e.orderfilled_trade_count >= %s
+                    OR GREATEST(COALESCE(e.orderfilled_trade_count, 0), COALESCE(oms.trade_count, 0)) >= %s
                 )
                 AND m.token_id_hex IS NOT NULL
-                AND e.first_orderfilled_block IS NOT NULL
-                AND e.last_orderfilled_block IS NOT NULL
+                AND COALESCE(e.first_orderfilled_block, oms.first_orderfilled_block) IS NOT NULL
+                AND GREATEST(COALESCE(e.last_orderfilled_block, 0), COALESCE(oms.last_orderfilled_block, 0)) > 0
                 AND {shard_sql("m", shard_count=shard_count)}
                 AND m.created_at >= to_timestamp(%s)
-                AND (%s IS NULL OR m.created_at < to_timestamp(%s))
+                AND (%s::bigint IS NULL OR m.created_at < to_timestamp(%s))
                 AND (
                     %s = FALSE
                     OR t.token_id IS NOT NULL
@@ -246,7 +343,10 @@ def fetch_block_close_build_candidates(
                         (t.token_id IS NULL OR t.requested_to_block IS NULL)
                         AND (
                             s.last_complete_block IS NULL
-                            OR s.last_complete_block < e.last_orderfilled_block
+                            OR s.last_complete_block < GREATEST(
+                                COALESCE(e.last_orderfilled_block, 0),
+                                COALESCE(oms.last_orderfilled_block, 0)
+                            )
                         )
                     )
                 )
@@ -294,12 +394,22 @@ def fetch_block_close_market_sibling_candidates(
             SELECT
                 m.token_id, m.token_id_hex, m.market_id, m.market_slug, m.token_side,
                 m.active, m.closed, m.end_date, m.created_at,
-                e.eligible, e.first_orderfilled_block, e.last_orderfilled_block, e.orderfilled_trade_count,
+                e.eligible,
+                COALESCE(e.first_orderfilled_block, oms.first_orderfilled_block) AS first_orderfilled_block,
+                GREATEST(
+                    COALESCE(e.last_orderfilled_block, 0),
+                    COALESCE(oms.last_orderfilled_block, 0)
+                ) AS last_orderfilled_block,
+                GREATEST(
+                    COALESCE(e.orderfilled_trade_count, 0),
+                    COALESCE(oms.trade_count, 0)
+                ) AS orderfilled_trade_count,
                 t.priority AS target_priority, t.reason AS target_reason,
                 t.requested_from_block, t.requested_to_block,
                 s.last_complete_block, s.attempt_count, s.last_error
             FROM quant.market_token_metadata m
             JOIN quant.market_price_eligibility e ON e.token_id = m.token_id
+            LEFT JOIN quant.market_orderfilled_market_stats oms ON oms.market_id = m.market_id
             LEFT JOIN quant.market_price_build_targets t
                 ON t.source = %s AND t.token_id = m.token_id AND t.status = 'active'
             LEFT JOIN quant.market_price_build_market_state s
@@ -309,13 +419,13 @@ def fetch_block_close_market_sibling_candidates(
                 AND e.eligible = TRUE
                 AND (
                     t.token_id IS NOT NULL
-                    OR e.orderfilled_trade_count >= %s
+                    OR GREATEST(COALESCE(e.orderfilled_trade_count, 0), COALESCE(oms.trade_count, 0)) >= %s
                 )
                 AND m.token_id_hex IS NOT NULL
-                AND e.first_orderfilled_block IS NOT NULL
-                AND e.last_orderfilled_block IS NOT NULL
+                AND COALESCE(e.first_orderfilled_block, oms.first_orderfilled_block) IS NOT NULL
+                AND GREATEST(COALESCE(e.last_orderfilled_block, 0), COALESCE(oms.last_orderfilled_block, 0)) > 0
                 AND m.created_at >= to_timestamp(%s)
-                AND (%s IS NULL OR m.created_at < to_timestamp(%s))
+                AND (%s::bigint IS NULL OR m.created_at < to_timestamp(%s))
                 AND (
                     (
                         t.token_id IS NOT NULL
@@ -329,7 +439,10 @@ def fetch_block_close_market_sibling_candidates(
                         (t.token_id IS NULL OR t.requested_to_block IS NULL)
                         AND (
                             s.last_complete_block IS NULL
-                            OR s.last_complete_block < e.last_orderfilled_block
+                            OR s.last_complete_block < GREATEST(
+                                COALESCE(e.last_orderfilled_block, 0),
+                                COALESCE(oms.last_orderfilled_block, 0)
+                            )
                         )
                     )
                 )
@@ -882,6 +995,7 @@ def refresh_since_eligibility(
         )
     return len(upserts)
 
+
 def update_frontend_state(
     conn: Any,
     *,
@@ -922,6 +1036,163 @@ def update_frontend_state(
                 last_error[:4000] if last_error else None,
             ),
         )
+
+
+def mark_frontend_skipped_no_orderfilled(
+    conn: Any,
+    *,
+    since_ts: int,
+    end_ts: int,
+    limit: int,
+    shard_index: int,
+    shard_count: int,
+) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            WITH candidates AS (
+                SELECT
+                    m.token_id, m.market_id, m.market_slug, m.token_side,
+                    LEAST(
+                        to_timestamp(%s),
+                        COALESCE(m.end_date + interval '1 day', to_timestamp(%s))
+                    ) AS last_complete_ts
+                FROM quant.market_token_metadata m
+                LEFT JOIN quant.market_price_eligibility e ON e.token_id = m.token_id
+                LEFT JOIN quant.market_price_build_targets t
+                    ON t.source = %s AND t.token_id = m.token_id AND t.status = 'active'
+                LEFT JOIN quant.market_price_build_market_state s
+                    ON s.source = %s AND s.token_id = m.token_id
+                WHERE
+                    COALESCE(e.is_archived, m.archived, FALSE) = FALSE
+                    AND COALESCE(e.is_deprecated, m.deprecated, FALSE) = FALSE
+                    AND COALESCE(e.is_duplicate_market, FALSE) = FALSE
+                    AND {shard_sql("m", shard_count=shard_count)}
+                    AND m.created_at >= to_timestamp(%s)
+                    AND t.token_id IS NULL
+                    AND COALESCE(e.orderfilled_trade_count, 0) <= 0
+                    AND (
+                        m.closed = TRUE
+                        OR m.active = FALSE
+                        OR m.end_date < now()
+                    )
+                    AND COALESCE(s.status, '') NOT IN ('skipped', 'deferred')
+                ORDER BY m.created_at ASC NULLS LAST, m.market_id ASC, m.token_id ASC
+                LIMIT %s
+            )
+            INSERT INTO quant.market_price_build_market_state (
+                source, token_id, market_id, market_slug, token_side,
+                status, last_complete_ts, attempt_count, last_error, updated_at
+            )
+            SELECT
+                %s, token_id, market_id, market_slug, token_side,
+                'skipped', last_complete_ts, 1, 'frontend_tier:skipped_no_orderfilled', now()
+            FROM candidates
+            ON CONFLICT (source, token_id) DO UPDATE SET
+                market_id = EXCLUDED.market_id,
+                market_slug = EXCLUDED.market_slug,
+                token_side = EXCLUDED.token_side,
+                status = EXCLUDED.status,
+                last_complete_ts = GREATEST(
+                    COALESCE(quant.market_price_build_market_state.last_complete_ts, to_timestamp(0)),
+                    EXCLUDED.last_complete_ts
+                ),
+                attempt_count = quant.market_price_build_market_state.attempt_count + 1,
+                last_error = EXCLUDED.last_error,
+                updated_at = now()
+            """,
+            (
+                int(end_ts),
+                int(end_ts),
+                FRONTEND_SOURCE,
+                FRONTEND_SOURCE,
+                *shard_params(shard_count=shard_count, shard_index=shard_index),
+                int(since_ts),
+                int(limit),
+                FRONTEND_SOURCE,
+            ),
+        )
+        return cur.rowcount or 0
+
+
+def mark_frontend_deferred_low_value(
+    conn: Any,
+    *,
+    since_ts: int,
+    end_ts: int,
+    recent_days: int,
+    min_orderfilled_trades: int,
+    limit: int,
+    shard_index: int,
+    shard_count: int,
+) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            WITH candidates AS (
+                SELECT
+                    m.token_id, m.market_id, m.market_slug, m.token_side,
+                    LEAST(
+                        to_timestamp(%s),
+                        COALESCE(m.end_date + interval '1 day', to_timestamp(%s))
+                    ) AS last_complete_ts
+                FROM quant.market_token_metadata m
+                LEFT JOIN quant.market_price_eligibility e ON e.token_id = m.token_id
+                LEFT JOIN quant.market_price_build_targets t
+                    ON t.source = %s AND t.token_id = m.token_id AND t.status = 'active'
+                LEFT JOIN quant.market_price_build_market_state s
+                    ON s.source = %s AND s.token_id = m.token_id
+                WHERE
+                    COALESCE(e.is_archived, m.archived, FALSE) = FALSE
+                    AND COALESCE(e.is_deprecated, m.deprecated, FALSE) = FALSE
+                    AND COALESCE(e.is_duplicate_market, FALSE) = FALSE
+                    AND {shard_sql("m", shard_count=shard_count)}
+                    AND m.created_at >= to_timestamp(%s)
+                    AND t.token_id IS NULL
+                    AND COALESCE(e.orderfilled_trade_count, 0) > 0
+                    AND COALESCE(e.orderfilled_trade_count, 0) < %s
+                    AND NOT (m.active = TRUE AND m.closed = FALSE)
+                    AND (m.end_date IS NULL OR m.end_date < now() - (%s::text || ' days')::interval)
+                    AND lower(COALESCE(m.market_slug, '')) NOT LIKE '%%updown%%'
+                    AND COALESCE(s.status, '') NOT IN ('skipped', 'deferred')
+                ORDER BY m.created_at ASC NULLS LAST, m.market_id ASC, m.token_id ASC
+                LIMIT %s
+            )
+            INSERT INTO quant.market_price_build_market_state (
+                source, token_id, market_id, market_slug, token_side,
+                status, last_complete_ts, attempt_count, last_error, updated_at
+            )
+            SELECT
+                %s, token_id, market_id, market_slug, token_side,
+                'deferred', last_complete_ts, 1, 'frontend_tier:deferred_low_value', now()
+            FROM candidates
+            ON CONFLICT (source, token_id) DO UPDATE SET
+                market_id = EXCLUDED.market_id,
+                market_slug = EXCLUDED.market_slug,
+                token_side = EXCLUDED.token_side,
+                status = EXCLUDED.status,
+                last_complete_ts = GREATEST(
+                    COALESCE(quant.market_price_build_market_state.last_complete_ts, to_timestamp(0)),
+                    EXCLUDED.last_complete_ts
+                ),
+                attempt_count = quant.market_price_build_market_state.attempt_count + 1,
+                last_error = EXCLUDED.last_error,
+                updated_at = now()
+            """,
+            (
+                int(end_ts),
+                int(end_ts),
+                FRONTEND_SOURCE,
+                FRONTEND_SOURCE,
+                *shard_params(shard_count=shard_count, shard_index=shard_index),
+                int(since_ts),
+                int(min_orderfilled_trades),
+                int(recent_days),
+                int(limit),
+                FRONTEND_SOURCE,
+            ),
+        )
+        return cur.rowcount or 0
 
 
 def update_block_state(
@@ -1221,32 +1492,86 @@ def run_frontend_for_tokens(
     min_orderfilled_trades: int,
     include_active_without_trades: bool,
     all_markets: bool,
+    recent_days: int,
+    event_window_days: int,
+    backtest_min_orderfilled_trades: int,
+    defer_low_value: bool,
+    crypto_window_seconds: int,
+    crypto_after_seconds: int,
+    request_pause_seconds: float,
 ) -> dict[str, int]:
     rows_written = 0
     failures = 0
     touched = 0
+    skipped = 0
     for token in tokens:
         is_target = bool(token.get("target_priority"))
-        is_all_market_fill = bool(all_markets)
         is_trade_eligible = bool(token.get("eligible")) and int(token.get("orderfilled_trade_count") or 0) >= int(min_orderfilled_trades)
         is_live_fill = bool(include_active_without_trades) and bool(token.get("active")) and not bool(token.get("closed"))
+        tier = classify_frontend_tier(
+            token,
+            recent_days=recent_days,
+            backtest_min_orderfilled_trades=backtest_min_orderfilled_trades,
+            defer_low_value=defer_low_value,
+            now_ts=end_ts,
+        )
+        if bool(all_markets) and tier in {"skipped_no_orderfilled", "deferred_low_value"} and not is_target:
+            skipped += 1
+            state_status = "skipped" if tier == "skipped_no_orderfilled" else "deferred"
+            update_frontend_state(
+                conn,
+                token=token,
+                status=state_status,
+                last_complete_ts=frontend_target_end_ts(token, end_ts),
+                rows_written=0,
+                last_error=f"frontend_tier:{tier}",
+            )
+            conn.commit()
+            print(
+                json.dumps(
+                    {
+                        "source": FRONTEND_SOURCE,
+                        "token_id": token["token_id"],
+                        "market_slug": token.get("market_slug"),
+                        "frontend_tier": tier,
+                        "status": state_status,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            continue
+        is_all_market_fill = bool(all_markets) and tier != "skipped_no_orderfilled"
         if not (is_target or is_all_market_fill or is_trade_eligible or is_live_fill):
             continue
         last_ts = maybe_datetime_to_ts(token.get("last_complete_ts"))
         requested_from_ts = maybe_datetime_to_ts(token.get("requested_from_ts"))
         requested_to_ts = maybe_datetime_to_ts(token.get("requested_to_ts"))
         created_at_ts = maybe_datetime_to_ts(token.get("created_at"))
-        base_start_ts = requested_from_ts or created_at_ts or since_ts
+        end_date_ts = maybe_datetime_to_ts(token.get("end_date"))
+        event_start_ts = None
+        event_end_limit_ts = None
+        if tier == "crypto_short_full":
+            slug_ts = parse_slug_timestamp(token)
+            if slug_ts:
+                event_start_ts = max(created_at_ts or int(since_ts), slug_ts - int(crypto_window_seconds))
+                event_end_limit_ts = slug_ts + int(crypto_after_seconds)
+        if tier == "longtail_event_window" and end_date_ts:
+            event_start_ts = max(created_at_ts or int(since_ts), end_date_ts - int(event_window_days) * 86400)
+        base_start_ts = requested_from_ts or event_start_ts or created_at_ts or since_ts
         anchor_ts = last_ts or base_start_ts
         if requested_from_ts and (last_ts is None or last_ts < requested_from_ts):
             anchor_ts = requested_from_ts
+        if event_start_ts and (last_ts is None or last_ts < event_start_ts):
+            anchor_ts = event_start_ts
         if created_at_ts and (last_ts is None or last_ts < created_at_ts):
             anchor_ts = max(anchor_ts, created_at_ts)
         start_ts = max(int(since_ts), int(anchor_ts - overlap_seconds))
         token_end_ts = min(int(end_ts), start_ts + int(window_seconds) - 1)
         if requested_to_ts:
             token_end_ts = min(token_end_ts, requested_to_ts)
-        end_date_ts = maybe_datetime_to_ts(token.get("end_date"))
+        if event_end_limit_ts:
+            token_end_ts = min(token_end_ts, event_end_limit_ts)
         if end_date_ts and bool(token.get("closed")):
             token_end_ts = min(token_end_ts, end_date_ts + 86400)
         if token_end_ts <= start_ts:
@@ -1258,6 +1583,7 @@ def run_frontend_for_tokens(
                 start_ts=start_ts,
                 end_ts=token_end_ts,
                 fidelity_minutes=fidelity_minutes,
+                pause_seconds=request_pause_seconds,
             )
             written = insert_frontend_points(
                 conn,
@@ -1286,6 +1612,7 @@ def run_frontend_for_tokens(
                         "market_slug": token.get("market_slug"),
                         "start_ts": start_ts,
                         "end_ts": token_end_ts,
+                        "frontend_tier": tier,
                         "rows_written": written,
                         "failures": len(token_failures),
                     },
@@ -1293,10 +1620,12 @@ def run_frontend_for_tokens(
                 ),
                 flush=True,
             )
+            if request_pause_seconds > 0:
+                time.sleep(float(request_pause_seconds))
         except Exception as exc:  # noqa: BLE001
             failures += 1
             update_frontend_state(conn, token=token, status="error", last_complete_ts=last_ts or since_ts, rows_written=0, last_error=repr(exc))
-    return {"tokens": touched, "rows_written": rows_written, "failures": failures}
+    return {"tokens": touched + skipped, "rows_written": rows_written, "failures": failures, "skipped": skipped}
 
 
 def run_frontend_incremental(
@@ -1313,12 +1642,72 @@ def run_frontend_incremental(
     include_active_without_trades: bool,
     targets_only: bool,
     all_markets: bool,
+    recent_days: int,
+    event_window_days: int,
+    backtest_min_orderfilled_trades: int,
+    defer_low_value: bool,
+    crypto_window_seconds: int,
+    crypto_after_seconds: int,
+    request_pause_seconds: float,
     shard_index: int,
     shard_count: int,
 ) -> dict[str, int]:
+    bulk_skipped = 0
+    if all_markets:
+        bulk_skipped = mark_frontend_skipped_no_orderfilled(
+            conn,
+            since_ts=since_ts,
+            end_ts=end_ts,
+            limit=max(int(token_limit) * 20, 1000),
+            shard_index=shard_index,
+            shard_count=shard_count,
+        )
+        if bulk_skipped:
+            conn.commit()
+            print(
+                json.dumps(
+                    {
+                        "event": "frontend_bulk_skipped_no_orderfilled",
+                        "source": FRONTEND_SOURCE,
+                        "skipped": bulk_skipped,
+                        "shard_index": shard_index,
+                        "shard_count": shard_count,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+    bulk_deferred = 0
+    if all_markets and defer_low_value:
+        bulk_deferred = mark_frontend_deferred_low_value(
+            conn,
+            since_ts=since_ts,
+            end_ts=end_ts,
+            recent_days=recent_days,
+            min_orderfilled_trades=backtest_min_orderfilled_trades,
+            limit=max(int(token_limit) * 20, 1000),
+            shard_index=shard_index,
+            shard_count=shard_count,
+        )
+        if bulk_deferred:
+            conn.commit()
+            print(
+                json.dumps(
+                    {
+                        "event": "frontend_bulk_deferred_low_value",
+                        "source": FRONTEND_SOURCE,
+                        "deferred": bulk_deferred,
+                        "shard_index": shard_index,
+                        "shard_count": shard_count,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
     tokens = fetch_frontend_build_candidates(
         conn,
         since_ts=since_ts,
+        end_ts=end_ts,
         limit=token_limit,
         min_orderfilled_trades=min_orderfilled_trades,
         include_active_without_trades=include_active_without_trades,
@@ -1327,7 +1716,7 @@ def run_frontend_incremental(
         shard_index=shard_index,
         shard_count=shard_count,
     )
-    return run_frontend_for_tokens(
+    result = run_frontend_for_tokens(
         conn,
         client,
         tokens,
@@ -1339,7 +1728,17 @@ def run_frontend_incremental(
         min_orderfilled_trades=min_orderfilled_trades,
         include_active_without_trades=include_active_without_trades,
         all_markets=all_markets,
+        recent_days=recent_days,
+        event_window_days=event_window_days,
+        backtest_min_orderfilled_trades=backtest_min_orderfilled_trades,
+        defer_low_value=defer_low_value,
+        crypto_window_seconds=crypto_window_seconds,
+        crypto_after_seconds=crypto_after_seconds,
+        request_pause_seconds=request_pause_seconds,
     )
+    result["tokens"] = int(result.get("tokens") or 0) + int(bulk_skipped) + int(bulk_deferred)
+    result["skipped"] = int(result.get("skipped") or 0) + int(bulk_skipped) + int(bulk_deferred)
+    return result
 
 
 def run_block_close_for_tokens(
@@ -1534,6 +1933,13 @@ def run_market_price_incremental(
     frontend_min_orderfilled_trades: int,
     frontend_include_active_without_trades: bool,
     frontend_all_markets: bool,
+    frontend_recent_days: int,
+    frontend_event_window_days: int,
+    frontend_backtest_min_orderfilled_trades: int,
+    frontend_defer_low_value: bool,
+    frontend_crypto_window_seconds: int,
+    frontend_crypto_after_seconds: int,
+    frontend_request_pause_seconds: float,
     fidelity_minutes: int,
     shard_index: int,
     shard_count: int,
@@ -1570,6 +1976,13 @@ def run_market_price_incremental(
         min_orderfilled_trades=frontend_min_orderfilled_trades,
         include_active_without_trades=frontend_include_active_without_trades,
         all_markets=frontend_all_markets,
+        recent_days=frontend_recent_days,
+        event_window_days=frontend_event_window_days,
+        backtest_min_orderfilled_trades=frontend_backtest_min_orderfilled_trades,
+        defer_low_value=frontend_defer_low_value,
+        crypto_window_seconds=frontend_crypto_window_seconds,
+        crypto_after_seconds=frontend_crypto_after_seconds,
+        request_pause_seconds=frontend_request_pause_seconds,
     )
     update_market_progress(conn, market_ids=market_ids, end_ts=end_ts)
     return {
@@ -1610,8 +2023,10 @@ def run_daemon(args: argparse.Namespace) -> None:
                 print(json.dumps({"event": "orderfilled_market_stats_refreshed", "count": count}, sort_keys=True), flush=True)
             if not args.skip_maintenance and cycle_started >= metadata_next:
                 count = refresh_market_token_metadata(conn, since_ts=args.since_ts)
+                event_result = refresh_market_event_memberships(conn, since_ts=args.since_ts)
                 metadata_next = cycle_started + args.metadata_interval_seconds
                 print(json.dumps({"event": "metadata_refreshed", "count": count}, sort_keys=True), flush=True)
+                print(json.dumps({"event": "event_memberships_refreshed", **event_result}, sort_keys=True), flush=True)
             if not args.skip_maintenance and cycle_started >= eligibility_next:
                 count = refresh_since_eligibility(
                     conn,
@@ -1638,6 +2053,13 @@ def run_daemon(args: argparse.Namespace) -> None:
                         "frontend_min_orderfilled_trades": args.frontend_min_orderfilled_trades,
                         "frontend_include_active_without_trades": args.frontend_include_active_without_trades,
                         "frontend_all_markets": args.frontend_all_markets,
+                        "frontend_recent_days": args.frontend_recent_days,
+                        "frontend_event_window_days": args.frontend_event_window_days,
+                        "frontend_backtest_min_orderfilled_trades": args.frontend_backtest_min_orderfilled_trades,
+                        "frontend_defer_low_value": args.frontend_defer_low_value,
+                        "frontend_crypto_window_seconds": args.frontend_crypto_window_seconds,
+                        "frontend_crypto_after_seconds": args.frontend_crypto_after_seconds,
+                        "frontend_request_pause_seconds": args.frontend_request_pause_seconds,
                         "shard_index": args.shard_index,
                         "shard_count": args.shard_count,
                     },
@@ -1657,6 +2079,13 @@ def run_daemon(args: argparse.Namespace) -> None:
                     frontend_min_orderfilled_trades=args.frontend_min_orderfilled_trades,
                     frontend_include_active_without_trades=args.frontend_include_active_without_trades,
                     frontend_all_markets=args.frontend_all_markets,
+                    frontend_recent_days=args.frontend_recent_days,
+                    frontend_event_window_days=args.frontend_event_window_days,
+                    frontend_backtest_min_orderfilled_trades=args.frontend_backtest_min_orderfilled_trades,
+                    frontend_defer_low_value=args.frontend_defer_low_value,
+                    frontend_crypto_window_seconds=args.frontend_crypto_window_seconds,
+                    frontend_crypto_after_seconds=args.frontend_crypto_after_seconds,
+                    frontend_request_pause_seconds=args.frontend_request_pause_seconds,
                     fidelity_minutes=args.fidelity_minutes,
                     shard_index=args.shard_index,
                     shard_count=args.shard_count,
@@ -1684,6 +2113,13 @@ def run_daemon(args: argparse.Namespace) -> None:
                         "min_orderfilled_trades": args.frontend_min_orderfilled_trades,
                         "include_active_without_trades": args.frontend_include_active_without_trades,
                         "all_markets": args.frontend_all_markets,
+                        "recent_days": args.frontend_recent_days,
+                        "event_window_days": args.frontend_event_window_days,
+                        "backtest_min_orderfilled_trades": args.frontend_backtest_min_orderfilled_trades,
+                        "defer_low_value": args.frontend_defer_low_value,
+                        "crypto_window_seconds": args.frontend_crypto_window_seconds,
+                        "crypto_after_seconds": args.frontend_crypto_after_seconds,
+                        "request_pause_seconds": args.frontend_request_pause_seconds,
                         "targets_only": args.frontend_targets_only,
                         "shard_index": args.shard_index,
                         "shard_count": args.shard_count,
@@ -1702,6 +2138,13 @@ def run_daemon(args: argparse.Namespace) -> None:
                     include_active_without_trades=args.frontend_include_active_without_trades,
                     targets_only=args.frontend_targets_only,
                     all_markets=args.frontend_all_markets,
+                    recent_days=args.frontend_recent_days,
+                    event_window_days=args.frontend_event_window_days,
+                    backtest_min_orderfilled_trades=args.frontend_backtest_min_orderfilled_trades,
+                    defer_low_value=args.frontend_defer_low_value,
+                    crypto_window_seconds=args.frontend_crypto_window_seconds,
+                    crypto_after_seconds=args.frontend_crypto_after_seconds,
+                    request_pause_seconds=args.frontend_request_pause_seconds,
                     shard_index=args.shard_index,
                     shard_count=args.shard_count,
                 )
@@ -1767,6 +2210,7 @@ def run_once(args: argparse.Namespace) -> dict[str, Any]:
         create_schema(conn)
         if args.refresh_metadata:
             refresh_market_token_metadata(conn)
+            refresh_market_event_memberships(conn)
         if args.refresh_eligibility:
             refresh_eligibility(conn, ClickHouseClient())
 
@@ -1839,6 +2283,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frontend-window-seconds", type=int, default=7 * 86400)
     parser.add_argument("--frontend-overlap-seconds", type=int, default=6 * 3600)
     parser.add_argument("--frontend-lag-seconds", type=int, default=120)
+    parser.add_argument("--frontend-recent-days", type=int, default=30)
+    parser.add_argument("--frontend-event-window-days", type=int, default=7)
+    parser.add_argument("--frontend-backtest-min-orderfilled-trades", type=int, default=100)
+    parser.add_argument("--frontend-defer-low-value", action="store_true")
+    parser.add_argument("--frontend-crypto-window-seconds", type=int, default=6 * 3600)
+    parser.add_argument("--frontend-crypto-after-seconds", type=int, default=2 * 3600)
+    parser.add_argument("--frontend-request-pause-seconds", type=float, default=0.0)
     parser.add_argument("--block-min-orderfilled-trades", type=int, default=1)
     parser.add_argument("--block-window", type=int, default=50000)
     parser.add_argument("--block-overlap", type=int, default=2000)

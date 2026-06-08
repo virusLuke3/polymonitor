@@ -51,7 +51,9 @@ export function WorkspaceHeader({
     if (selectedMarketProp?.marketSlug) choices.set(selectedMarketProp.marketSlug, selectedMarketProp);
     for (const market of marketOptions) {
       const current = choices.get(market.marketSlug);
-      if (!current || market.tokenSide === 'YES') choices.set(market.marketSlug, market);
+      if (!current || (current.itemKind !== 'event' && (market.itemKind === 'event' || market.tokenSide === 'YES'))) {
+        choices.set(market.marketSlug, market);
+      }
     }
     return Array.from(choices.values()).slice(0, 40);
   }, [marketOptions, selectedMarketProp]);
@@ -86,6 +88,7 @@ export function WorkspaceHeader({
   };
 
   const selectedRows = Number(selectedMarket?.blockRows || selectedMarket?.frontendRows || 0);
+  const selectedKind = selectedMarket?.itemKind === 'event' ? 'Event' : 'Market';
   const selectedSubtitle = selectedMarket?.marketSlug || marketSlug || 'No market selected';
   const sourceLabel = priceSource === 'orderfilled' ? 'OrderFilled block close' : 'Frontend price-history';
   const engineLabel = backtestEngine === 'nautilus_trader' ? 'Nautilus Trader' : backtestEngine === 'backtrader' ? 'Backtrader' : 'Built-in';
@@ -111,9 +114,9 @@ export function WorkspaceHeader({
         <button className="qtv-market-identity" type="button" title={selectedSubtitle} onClick={() => setMarketMenuOpen(true)}>
           <span>
             <strong>{selectedMarket?.marketTitle || marketSlug || 'Select market'}</strong>
-            <em>Polymarket · outcome probabilities · {sourceLabel}</em>
+            <em>Polymarket {selectedKind.toLowerCase()} · outcome probabilities · {sourceLabel}</em>
           </span>
-          <b>{selectedRows ? `${selectedRows.toLocaleString('en-US')} rows` : 'No rows'}</b>
+          <b>{selectedMarket?.itemKind === 'event' ? `${Number(selectedMarket.outcomeCount || 0).toLocaleString('en-US')} outcomes` : selectedRows ? `${selectedRows.toLocaleString('en-US')} rows` : 'No rows'}</b>
         </button>
 
         <div className="qtv-workbar-group qtv-search-group">
@@ -164,8 +167,8 @@ export function WorkspaceHeader({
           {marketMenuOpen ? (
             <div id="quant-market-search-results" className="qtv-market-palette" role="listbox">
               <div className="qtv-palette-head">
-                <strong>{activeSearchText ? 'Search markets' : 'Recent quant markets'}</strong>
-                <span>{activeSearchText || 'Markets with block close coverage'}</span>
+                <strong>{activeSearchText ? 'Search events and markets' : 'Recent quant coverage'}</strong>
+                <span>{activeSearchText || 'Events first, then individual markets'}</span>
               </div>
               {isSearching ? (
                 <div className="qtv-market-menu-empty">
@@ -197,14 +200,15 @@ export function WorkspaceHeader({
                     <strong>{market.marketTitle || market.marketSlug}</strong>
                     <small>{market.marketSlug}</small>
                     <em>
-                      Range {market.firstBlock ? `block ${Number(market.firstBlock).toLocaleString('en-US')}` : '-'}
+                      {market.itemKind === 'event' ? `${Number(market.readyMembers || 0).toLocaleString('en-US')} ready / ${Number(market.totalMembers || market.outcomeCount || 0).toLocaleString('en-US')} members` : 'Range'}
+                      {market.itemKind !== 'event' && market.firstBlock ? ` block ${Number(market.firstBlock).toLocaleString('en-US')}` : ''}
                       {market.lastBlock ? ` - ${Number(market.lastBlock).toLocaleString('en-US')}` : ''}
                       {' · outcome probabilities'}
                     </em>
                   </span>
                   <span className="qtv-result-meta">
-                    <b>{Number(market.blockRows || market.frontendRows || 0).toLocaleString('en-US')} rows</b>
-                    <small>{market.endDate ? 'Active/dated' : 'Quant'}</small>
+                    <b>{market.itemKind === 'event' ? `${Number(market.outcomeCount || 0).toLocaleString('en-US')} outcomes` : `${Number(market.blockRows || market.frontendRows || 0).toLocaleString('en-US')} rows`}</b>
+                    <small>{market.itemKind === 'event' ? market.groupingConfidence || 'event' : market.endDate ? 'Active/dated' : 'Quant'}</small>
                   </span>
                 </button>
               )) : (

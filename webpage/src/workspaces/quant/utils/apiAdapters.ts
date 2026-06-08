@@ -31,7 +31,7 @@ export function blockToPrices(rows: QuantBlockClosePoint[]): PricePoint[] {
 
 export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | undefined): PricePoint[] {
   if (!payload) return [];
-  const source = payload.market?.source || 'quant_market_series';
+  const source = payload.event?.source || payload.market?.source || 'quant_market_series';
   return (payload.outcomes || []).flatMap((outcome) => (
     (() => {
       const complementByX = new Map<string, number>();
@@ -39,7 +39,7 @@ export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | 
         const x = String(point.x ?? point.blockNumber ?? point.timestamp ?? '');
         if (x) complementByX.set(x, toNumber(point.price));
       });
-      return (outcome.points || []).map((point) => {
+      const yesRows = (outcome.points || []).map((point) => {
         const x = String(point.x ?? point.blockNumber ?? point.timestamp ?? '');
         const yesPrice = toNumber(point.price);
         const directNo = complementByX.get(x);
@@ -50,15 +50,34 @@ export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | 
           close: yesPrice,
           volume: toNumber(point.volume),
           source,
-          tokenId: outcome.tokenId,
-          tokenSide: outcome.tokenSide,
-          outcomeLabel: outcome.outcomeLabel || outcome.tokenSide,
+          tokenId: outcome.buyYesTokenId || outcome.tokenId,
+          tokenSide: outcome.buyYesTokenSide || 'YES',
+          outcomeLabel: outcome.buyYesLabel || outcome.outcomeLabel || outcome.tokenSide,
           yesPrice,
           noPrice,
           yesPriceKind: 'direct' as const,
           noPriceKind: hasDirectNo ? 'direct' as const : 'implied' as const,
         };
       });
+      const noRows = (outcome.complementPoints || [])
+        .filter((point) => !point.isImplied)
+        .map((point) => {
+          const noPrice = toNumber(point.price);
+          return {
+            timestamp: Number(point.x ?? point.blockNumber ?? point.timestamp),
+            close: noPrice,
+            volume: toNumber(point.volume),
+            source,
+            tokenId: outcome.buyNoTokenId || point.tokenId || undefined,
+            tokenSide: outcome.buyNoTokenSide || 'NO',
+            outcomeLabel: outcome.buyNoLabel || `${outcome.outcomeLabel || 'Outcome'} No`,
+            yesPrice: Math.max(0, Math.min(1, 1 - noPrice)),
+            noPrice,
+            yesPriceKind: 'implied' as const,
+            noPriceKind: 'direct' as const,
+          };
+        });
+      return [...yesRows, ...noRows];
     })()
   )).filter((row) => row.timestamp && Number.isFinite(row.close));
 }

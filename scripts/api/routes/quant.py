@@ -19,9 +19,11 @@ from quant.api.read_api import (  # noqa: E402
     get_backtest_run,
     get_backtest_trades,
     get_block_close_prices,
+    get_event_price_series,
     get_frontend_prices,
     get_market_price_series,
     get_price_build_status,
+    get_quant_price_events,
     get_quant_price_markets,
 )
 from quant.backtest.backtest_engine import create_backtest_run  # noqa: E402
@@ -139,6 +141,23 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "latest_frontend_price": "latestFrontendPrice",
         "latest_frontend_at": "latestFrontendAt",
         "market_title": "marketTitle",
+        "item_kind": "itemKind",
+        "event_id": "eventId",
+        "event_slug": "eventSlug",
+        "event_title": "eventTitle",
+        "event_category": "eventCategory",
+        "event_subcategory": "eventSubcategory",
+        "event_image_url": "eventImageUrl",
+        "event_icon_url": "eventIconUrl",
+        "event": "event",
+        "members": "members",
+        "outcome_count": "outcomeCount",
+        "total_members": "totalMembers",
+        "ready_members": "readyMembers",
+        "orderfilled_rows": "orderfilledRows",
+        "grouping_confidence": "groupingConfidence",
+        "coverage_status": "coverageStatus",
+        "outcome_key": "outcomeKey",
         "condition_id": "conditionId",
         "end_date": "endDate",
         "outcome_index": "outcomeIndex",
@@ -189,6 +208,17 @@ def create_quant_blueprint(_: dict) -> Blueprint:
             )
         return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
 
+    @bp.route("/events", methods=["GET"])
+    def api_quant_price_events():
+        limit = min(max(_parse_int_arg("limit", 50) or 50, 1), 200)
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            rows = get_quant_price_events(
+                conn,
+                search=(request.args.get("q") or "").strip() or None,
+                limit=limit,
+            )
+        return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
+
     @bp.route("/frontend-prices", methods=["GET"])
     def api_quant_frontend_prices():
         limit = min(max(_parse_int_arg("limit", 1000) or 1000, 1), 25000)
@@ -235,6 +265,28 @@ def create_quant_blueprint(_: dict) -> Blueprint:
                 price_source=price_source,
                 scope=scope,
                 token_side=(request.args.get("token_side") or "").strip() or None,
+                from_ts=_parse_time_arg("from"),
+                to_ts=_parse_time_arg("to"),
+                from_block=_parse_int_arg("from_block"),
+                to_block=_parse_int_arg("to_block"),
+                limit=limit,
+                max_outcomes=max_outcomes,
+            )
+        return jsonify(_camel_row(payload))
+
+    @bp.route("/event-price-series", methods=["GET"])
+    def api_quant_event_price_series():
+        event_slug = (request.args.get("event_slug") or request.args.get("market_slug") or "").strip()
+        if not event_slug:
+            return jsonify({"error": "event_slug is required"}), 400
+        limit = min(max(_parse_int_arg("limit", 2500) or 2500, 1), 25000)
+        max_outcomes = min(max(_parse_int_arg("max_outcomes", 100) or 100, 1), 200)
+        price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            payload = get_event_price_series(
+                conn,
+                event_slug=event_slug,
+                price_source=price_source,
                 from_ts=_parse_time_arg("from"),
                 to_ts=_parse_time_arg("to"),
                 from_block=_parse_int_arg("from_block"),

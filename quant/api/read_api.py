@@ -205,6 +205,135 @@ def get_quant_price_markets(
         return [dict(row) for row in cur.fetchall()]
 
 
+def get_quant_price_events(
+    conn: Any,
+    *,
+    search: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    where_params: list[Any] = []
+    filters = ["member_count > 0"]
+    search_text = (search or "").strip().lower()
+    if search_text:
+        text = f"%{search_text}%"
+        conditions = [
+            """
+            (
+                lower(event_slug) LIKE %s
+                OR lower(event_title) LIKE %s
+                OR EXISTS (
+                    SELECT 1
+                    FROM quant.market_event_members sm
+                    WHERE sm.event_slug = ranked.event_slug
+                      AND (
+                        lower(sm.market_slug) LIKE %s
+                        OR lower(sm.question) LIKE %s
+                        OR lower(sm.outcome_label) LIKE %s
+                      )
+                )
+            )
+            """
+        ]
+        where_params.extend([text, text, text, text, text])
+        terms = [term for term in re.split(r"[^a-z0-9]+", search_text) if term]
+        if len(terms) > 1:
+            conditions.append(
+                "("
+                + " AND ".join(["lower(event_slug || ' ' || event_title) LIKE %s" for _ in terms])
+                + ")"
+            )
+            where_params.extend([f"%{term}%" for term in terms])
+        filters.append("(" + " OR ".join(conditions) + ")")
+    where_sql = "WHERE " + " AND ".join(filters)
+    params = [
+        *where_params,
+        search_text,
+        search_text,
+        f"{search_text}%",
+        f"{search_text}%",
+        int(limit),
+    ]
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            WITH ranked AS (
+                SELECT
+                    e.event_id,
+                    e.event_slug,
+                    e.event_title,
+                    e.event_category,
+                    e.event_subcategory,
+                    e.event_image_url,
+                    e.event_icon_url,
+                    e.start_date,
+                    e.end_date,
+                    e.resolution_date,
+                    e.status,
+                    e.grouping_confidence,
+                    e.source,
+                    COUNT(m.market_id) AS member_count,
+                    COUNT(*) FILTER (WHERE m.coverage_status IN ('ready', 'partial')) AS ready_members,
+                    COALESCE(SUM(m.block_rows), 0) AS block_rows,
+                    COALESCE(SUM(m.frontend_rows), 0) AS frontend_rows,
+                    COALESCE(SUM(m.orderfilled_rows), 0) AS orderfilled_rows,
+                    MIN(m.latest_block) AS first_block,
+                    MAX(m.latest_block) AS last_block,
+                    MAX(m.latest_timestamp) AS latest_frontend_at
+                FROM quant.market_event_metadata e
+                JOIN quant.market_event_members m ON m.event_slug = e.event_slug
+                GROUP BY
+                    e.event_id, e.event_slug, e.event_title, e.event_category,
+                    e.event_subcategory, e.event_image_url, e.event_icon_url,
+                    e.start_date, e.end_date, e.resolution_date, e.status,
+                    e.grouping_confidence, e.source
+            )
+            SELECT
+                'event' AS item_kind,
+                event_id,
+                event_slug,
+                event_slug AS market_slug,
+                event_title,
+                event_title AS market_title,
+                event_category,
+                event_subcategory,
+                event_image_url,
+                event_icon_url,
+                status,
+                grouping_confidence,
+                source,
+                'EVENT' AS token_side,
+                member_count AS outcome_count,
+                member_count AS total_members,
+                ready_members,
+                block_rows,
+                frontend_rows,
+                orderfilled_rows,
+                first_block,
+                last_block,
+                extract(epoch FROM start_date)::bigint AS first_ts,
+                extract(epoch FROM end_date)::bigint AS last_ts,
+                latest_frontend_at,
+                end_date
+            FROM ranked
+            {where_sql}
+            ORDER BY
+                CASE
+                    WHEN lower(event_slug) = %s THEN 0
+                    WHEN lower(event_title) = %s THEN 1
+                    WHEN lower(event_slug) LIKE %s THEN 2
+                    WHEN lower(event_title) LIKE %s THEN 3
+                    ELSE 9
+                END,
+                ready_members DESC,
+                (block_rows + frontend_rows) DESC,
+                event_title ASC
+            LIMIT %s
+            """,
+            params,
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
 def _fetch_market_tokens(conn: Any, *, market_slug: str, scope: str, max_outcomes: int) -> tuple[list[dict[str, Any]], str]:
     with conn.cursor() as cur:
         cur.execute(
@@ -249,6 +378,232 @@ def _fetch_market_tokens(conn: Any, *, market_slug: str, scope: str, max_outcome
 
 def _complement_side(token_side: str | None) -> str:
     return "NO" if str(token_side or "").upper() == "YES" else "YES"
+
+
+def _no_label_from_member(question: str | None, outcome_label: str | None) -> str:
+    title = _clean_label(question)
+    parts = [part.strip() for part in MATCHUP_RE.split(title, maxsplit=1) if part.strip()]
+    if len(parts) == 2 and _clean_label(outcome_label).lower() == parts[0].lower():
+        return parts[1]
+    label = _clean_label(outcome_label)
+    return f"{label} No" if label else "No"
+
+
+def _fetch_token_price_points(
+    cur: Any,
+    *,
+    token_id: str | None,
+    source: str,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    from_block: int | None = None,
+    to_block: int | None = None,
+    limit: int = 2500,
+) -> list[dict[str, Any]]:
+    if not token_id:
+        return []
+    params: list[Any] = [str(token_id)]
+    if source == "frontend":
+        filters = ["token_id = %s"]
+        if from_ts is not None:
+            filters.append("timestamp >= %s")
+            params.append(int(from_ts))
+        if to_ts is not None:
+            filters.append("timestamp <= %s")
+            params.append(int(to_ts))
+        params.append(int(limit))
+        cur.execute(
+            f"""
+            WITH limited AS (
+                SELECT token_id, market_id, market_slug, token_side, ts_minute, timestamp, price
+                FROM quant.market_token_frontend_price_1m
+                WHERE {" AND ".join(filters)}
+                ORDER BY ts_minute DESC
+                LIMIT %s
+            )
+            SELECT *
+            FROM limited
+            ORDER BY ts_minute ASC
+            """,
+            params,
+        )
+        return [
+            {
+                "x": row["timestamp"],
+                "timestamp": row["timestamp"],
+                "token_id": row["token_id"],
+                "token_side": row["token_side"],
+                "price": row["price"],
+                "volume": 0,
+                "is_implied": False,
+            }
+            for row in cur.fetchall()
+        ]
+
+    filters = ["token_id = %s"]
+    if from_block is not None:
+        filters.append("block_number >= %s")
+        params.append(int(from_block))
+    if to_block is not None:
+        filters.append("block_number <= %s")
+        params.append(int(to_block))
+    params.append(int(limit))
+    cur.execute(
+        f"""
+        WITH limited AS (
+            SELECT
+                token_id, market_id, market_slug, token_side, block_number,
+                close_price, yes_probability_close, vwap_price, yes_probability_vwap,
+                volume, trade_count
+            FROM quant.market_token_block_close
+            WHERE {" AND ".join(filters)}
+            ORDER BY block_number DESC
+            LIMIT %s
+        )
+        SELECT *
+        FROM limited
+        ORDER BY block_number ASC
+        """,
+        params,
+    )
+    return [
+        {
+            "x": row["block_number"],
+            "block_number": row["block_number"],
+            "token_id": row["token_id"],
+            "token_side": row["token_side"],
+            "price": row["close_price"],
+            "yes_probability_close": row["yes_probability_close"],
+            "vwap_price": row["vwap_price"],
+            "yes_probability_vwap": row["yes_probability_vwap"],
+            "volume": row["volume"],
+            "trade_count": row["trade_count"],
+            "is_implied": False,
+        }
+        for row in cur.fetchall()
+    ]
+
+
+def get_event_price_series(
+    conn: Any,
+    *,
+    event_slug: str,
+    price_source: str,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    from_block: int | None = None,
+    to_block: int | None = None,
+    limit: int = 2500,
+    max_outcomes: int = 100,
+) -> dict[str, Any]:
+    source = "orderfilled_block_close" if price_source == "orderfilled_block_close" else "frontend"
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.market_event_metadata
+            WHERE event_slug = %s
+            """,
+            (event_slug,),
+        )
+        event = dict(cur.fetchone() or {})
+        if not event:
+            return {
+                "event": {
+                    "event_slug": event_slug,
+                    "event_title": event_slug,
+                    "source": source,
+                    "scope": "event",
+                    "x_axis": "block_number" if source == "orderfilled_block_close" else "timestamp",
+                },
+                "members": [],
+                "outcomes": [],
+                "count": 0,
+            }
+
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.market_event_members
+            WHERE event_slug = %s
+            ORDER BY outcome_order ASC, outcome_label ASC, market_id ASC
+            LIMIT %s
+            """,
+            (event_slug, int(max_outcomes)),
+        )
+        members = [dict(row) for row in cur.fetchall()]
+
+        outcomes: list[dict[str, Any]] = []
+        for member in members:
+            yes_points = _fetch_token_price_points(
+                cur,
+                token_id=member.get("token_yes_id"),
+                source=source,
+                from_ts=from_ts,
+                to_ts=to_ts,
+                from_block=from_block,
+                to_block=to_block,
+                limit=limit,
+            )
+            no_points = _fetch_token_price_points(
+                cur,
+                token_id=member.get("token_no_id"),
+                source=source,
+                from_ts=from_ts,
+                to_ts=to_ts,
+                from_block=from_block,
+                to_block=to_block,
+                limit=limit,
+            )
+            label = _clean_label(member.get("outcome_label")) or _clean_label(member.get("question"))
+            no_label = _no_label_from_member(member.get("question"), label)
+            outcomes.append(
+                {
+                    "market_id": member.get("market_id"),
+                    "market_slug": member.get("market_slug"),
+                    "market_title": member.get("question"),
+                    "condition_id": member.get("condition_id"),
+                    "end_date": event.get("end_date"),
+                    "event_slug": member.get("event_slug"),
+                    "event_id": member.get("event_id"),
+                    "token_id": member.get("token_yes_id"),
+                    "token_side": "YES",
+                    "outcome_index": member.get("outcome_order"),
+                    "outcome_label": label,
+                    "outcome_key": member.get("outcome_key"),
+                    "coverage_status": member.get("coverage_status"),
+                    "buy_yes_token_id": member.get("token_yes_id"),
+                    "buy_yes_token_side": "YES",
+                    "buy_yes_label": label,
+                    "buy_yes_price": yes_points[-1]["price"] if yes_points else None,
+                    "buy_no_token_id": member.get("token_no_id"),
+                    "buy_no_token_side": "NO",
+                    "buy_no_label": no_label,
+                    "buy_no_price": no_points[-1]["price"] if no_points else None,
+                    "rows": len(yes_points),
+                    "first_x": yes_points[0]["x"] if yes_points else None,
+                    "last_x": yes_points[-1]["x"] if yes_points else None,
+                    "latest_price": yes_points[-1]["price"] if yes_points else None,
+                    "points": yes_points,
+                    "complement_rows": len(no_points),
+                    "complement_first_x": no_points[0]["x"] if no_points else None,
+                    "complement_last_x": no_points[-1]["x"] if no_points else None,
+                    "complement_latest_price": no_points[-1]["price"] if no_points else None,
+                    "complement_points": no_points,
+                }
+            )
+
+    return {
+        "event": {
+            **event,
+            "source": source,
+            "scope": "event",
+            "x_axis": "block_number" if source == "orderfilled_block_close" else "timestamp",
+        },
+        "members": members,
+        "outcomes": outcomes,
+        "count": len(outcomes),
+    }
 
 
 def get_market_price_series(

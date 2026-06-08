@@ -6,7 +6,9 @@ import {
   fetchQuantBacktestRun,
   fetchQuantBacktestTrades,
   fetchQuantBuildStatus,
+  fetchQuantEventPriceSeries,
   fetchQuantMarketPriceSeries,
+  fetchQuantPriceEvents,
   fetchQuantPriceMarkets,
   isAbortLikeError,
   type QuantPriceQuery,
@@ -129,11 +131,12 @@ function defaultOutcomeTokenId(outcomes: QuantMarketSeriesOutcome[]) {
 }
 
 function marketInfoFromSelection(slug: string, market?: QuantPriceMarket): MarketInfo {
+  const isEvent = market?.itemKind === 'event';
   return {
     id: String(market?.marketId || slug || 'quant-market'),
     conditionId: market?.conditionId || '-',
     title: market?.marketTitle || slug || 'Select a Polymarket market',
-    category: 'Polymarket',
+    category: isEvent ? 'Polymarket Event' : 'Polymarket',
     slug: market?.marketSlug || slug,
     startTime: market?.firstTs ? new Date(toNumber(market.firstTs) * 1000).toISOString() : '-',
     endTime: market?.endDate || '-',
@@ -142,7 +145,9 @@ function marketInfoFromSelection(slug: string, market?: QuantPriceMarket): Marke
     yesTokenId: 'YES',
     noTokenId: 'NO',
     liquidity: '-',
-    volume: `${toNumber(market?.blockRows).toLocaleString('en-US')} block rows`,
+    volume: isEvent
+      ? `${toNumber(market?.readyMembers).toLocaleString('en-US')} / ${toNumber(market?.totalMembers || market?.outcomeCount).toLocaleString('en-US')} members ready`
+      : `${toNumber(market?.blockRows).toLocaleString('en-US')} block rows`,
   };
 }
 
@@ -198,12 +203,14 @@ export function QuantWorkspace() {
   }, [marketSeries, selectedOutcomeTokenId]);
   const selectedMarket = useMemo(
     () => (
-      quantMarkets.find((market) => market.marketSlug === marketSlug && market.tokenSide === 'YES')
+      (selectedMarketMeta?.marketSlug === marketSlug ? selectedMarketMeta : undefined)
+      || quantMarkets.find((market) => market.marketSlug === marketSlug && market.itemKind === 'event')
+      || quantMarkets.find((market) => market.marketSlug === marketSlug && market.tokenSide === 'YES')
       || quantMarkets.find((market) => market.marketSlug === marketSlug)
-      || (selectedMarketMeta?.marketSlug === marketSlug ? selectedMarketMeta : undefined)
     ),
     [marketSlug, quantMarkets, selectedMarketMeta],
   );
+  const selectedEntityKind = selectedMarket?.itemKind === 'event' ? 'event' : 'market';
   const marketInfo = useMemo(() => marketInfoFromSelection(marketSlug, selectedMarket), [marketSlug, selectedMarket]);
   const marketCoverageRows = toNumber(selectedMarket?.blockRows || selectedMarket?.frontendRows || marketSeries?.outcomes?.reduce((sum, outcome) => sum + toNumber(outcome.rows), 0));
   const chartLimit = useMemo(() => {
@@ -215,9 +222,10 @@ export function QuantWorkspace() {
     priceSource: backendPriceSource(priceSource),
     scope: 'auto',
     limit: chartLimit,
-    maxOutcomes: 24,
+    maxOutcomes: selectedEntityKind === 'event' ? 100 : 24,
   };
   const priceRequestKey = [
+    selectedEntityKind,
     marketSlug.trim(),
     backendPriceSource(priceSource),
     timeframe,
@@ -225,7 +233,8 @@ export function QuantWorkspace() {
     selectedBacktestAction,
   ].join('|');
 
-  const seriesKeyForSlug = (slug: string) => [
+  const seriesKeyForSlug = (slug: string, itemKind = selectedEntityKind) => [
+    itemKind,
     slug.trim(),
     backendPriceSource(priceSource),
     timeframe,
@@ -251,7 +260,11 @@ export function QuantWorkspace() {
       }
     }
     const [seriesResult, statusResult] = await Promise.allSettled([
-      hasMarketSlug ? fetchQuantMarketPriceSeries(semanticChartQuery) : Promise.resolve(null),
+      hasMarketSlug
+        ? (selectedEntityKind === 'event'
+          ? fetchQuantEventPriceSeries({ ...semanticChartQuery, eventSlug: marketSlug, maxOutcomes: 100 })
+          : fetchQuantMarketPriceSeries(semanticChartQuery))
+        : Promise.resolve(null),
       fetchQuantBuildStatus('', 12),
     ]);
     if (requestSeq !== priceLoadSeq.current) {
@@ -379,14 +392,15 @@ export function QuantWorkspace() {
 
   const selectMarketSlug = (slug: string) => {
     const nextSlug = slug.trim();
-    const nextMarket = quantMarkets.find((market) => market.marketSlug === nextSlug && market.tokenSide === 'YES')
+    const nextMarket = quantMarkets.find((market) => market.marketSlug === nextSlug && market.itemKind === 'event')
+      || quantMarkets.find((market) => market.marketSlug === nextSlug && market.tokenSide === 'YES')
       || quantMarkets.find((market) => market.marketSlug === nextSlug)
       || null;
     setMarketSlug(nextSlug);
     setMarketSearchQuery('');
     setMarketReloadKey((current) => current + 1);
     setSelectedMarketMeta(nextMarket);
-    const cached = nextSlug ? priceSeriesCacheRef.current.get(seriesKeyForSlug(nextSlug)) : null;
+    const cached = nextSlug ? priceSeriesCacheRef.current.get(seriesKeyForSlug(nextSlug, nextMarket?.itemKind === 'event' ? 'event' : 'market')) : null;
     setFrontendRows([]);
     setBlockRows([]);
     setMarketSeries(cached || null);
@@ -403,16 +417,20 @@ export function QuantWorkspace() {
 
   const prefetchMarketSlug = (slug: string) => {
     const nextSlug = slug.trim();
-    const cacheKey = seriesKeyForSlug(nextSlug);
+    const nextMarket = quantMarkets.find((market) => market.marketSlug === nextSlug && market.itemKind === 'event')
+      || quantMarkets.find((market) => market.marketSlug === nextSlug);
+    const nextKind = nextMarket?.itemKind === 'event' ? 'event' : 'market';
+    const cacheKey = seriesKeyForSlug(nextSlug, nextKind);
     if (!nextSlug || priceSeriesCacheRef.current.has(cacheKey) || pricePrefetchingRef.current.has(cacheKey)) return;
     pricePrefetchingRef.current.add(cacheKey);
-    void fetchQuantMarketPriceSeries({
+    const request = {
       marketSlug: nextSlug,
       priceSource: backendPriceSource(priceSource),
       scope: 'auto',
       limit: chartLimit,
-      maxOutcomes: 24,
-    })
+      maxOutcomes: nextKind === 'event' ? 100 : 24,
+    };
+    void (nextKind === 'event' ? fetchQuantEventPriceSeries({ ...request, eventSlug: nextSlug }) : fetchQuantMarketPriceSeries(request))
       .then((payload) => {
         priceSeriesCacheRef.current.set(cacheKey, payload);
         if (import.meta.env.DEV) console.debug('[quant] prefetched price series', { cacheKey });
@@ -431,10 +449,19 @@ export function QuantWorkspace() {
     marketSearchSeq.current = seq;
     setMarketSearchStatus('loading');
     const timer = window.setTimeout(() => {
-      void fetchQuantPriceMarkets(text, 40)
-        .then((payload) => {
+      void Promise.allSettled([fetchQuantPriceEvents(text, 24), fetchQuantPriceMarkets(text, 40)])
+        .then(([eventResult, marketResult]) => {
           if (seq !== marketSearchSeq.current) return;
-          const items = payload.items || [];
+          const events = eventResult.status === 'fulfilled' ? eventResult.value.items || [] : [];
+          const markets = marketResult.status === 'fulfilled' ? marketResult.value.items || [] : [];
+          const seen = new Set<string>();
+          const items = [...events, ...markets].filter((item) => {
+            const key = `${item.itemKind || 'market'}:${item.marketSlug}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            if (item.itemKind !== 'event' && events.some((event) => event.marketSlug === item.marketSlug)) return false;
+            return true;
+          });
           setQuantMarkets(items);
           setMarketSearchStatus(items.length ? 'ready' : 'empty');
           if (!marketSlug.trim() && !text && items[0]?.marketSlug) {
@@ -465,7 +492,7 @@ export function QuantWorkspace() {
       });
     }, 60);
     return () => window.clearTimeout(timer);
-  }, [marketReloadKey, marketSlug, priceSource, timeframe, selectedOutcomeTokenId, selectedBacktestAction]);
+  }, [marketReloadKey, marketSlug, priceSource, timeframe, selectedOutcomeTokenId, selectedBacktestAction, selectedEntityKind]);
 
   useEffect(() => {
     const outcomes = marketSeries?.outcomes || [];

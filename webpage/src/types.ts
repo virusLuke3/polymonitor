@@ -303,24 +303,31 @@ export type QuantMarketSeriesPoint = {
   x: number | string;
   timestamp?: number | string | null;
   blockNumber?: number | string | null;
+  tokenId?: string | null;
+  tokenSide?: string | null;
   price: string | number;
   yesProbabilityClose?: string | number | null;
   vwapPrice?: string | number | null;
   yesProbabilityVwap?: string | number | null;
   volume?: string | number | null;
   tradeCount?: number | string | null;
+  isImplied?: boolean | null;
 };
 
 export type QuantMarketSeriesOutcome = {
   marketId?: number | string | null;
   marketSlug?: string | null;
   marketTitle?: string | null;
+  eventId?: string | null;
+  eventSlug?: string | null;
   conditionId?: string | null;
   endDate?: string | null;
   tokenId: string;
   tokenSide: string;
   outcomeIndex?: number | string | null;
   outcomeLabel: string;
+  outcomeKey?: string | null;
+  coverageStatus?: string | null;
   buyYesTokenId?: string | null;
   buyYesTokenSide?: string | null;
   buyYesLabel?: string | null;
@@ -342,7 +349,7 @@ export type QuantMarketSeriesOutcome = {
 };
 
 export type QuantMarketSeriesPayload = {
-  market: {
+  market?: {
     marketId?: number | string | null;
     marketSlug?: string | null;
     marketTitle?: string | null;
@@ -352,11 +359,32 @@ export type QuantMarketSeriesPayload = {
     scope: string;
     xAxis: 'timestamp' | 'block_number' | string;
   };
+  event?: {
+    eventId?: string | null;
+    eventSlug?: string | null;
+    eventTitle?: string | null;
+    status?: string | null;
+    groupingConfidence?: string | null;
+    source: string;
+    scope: string;
+    xAxis: 'timestamp' | 'block_number' | string;
+  };
+  members?: Array<Record<string, unknown>>;
   outcomes: QuantMarketSeriesOutcome[];
   count: number;
 };
 
 export type QuantPriceMarket = {
+  itemKind?: 'market' | 'event' | string;
+  eventId?: string | null;
+  eventSlug?: string | null;
+  eventTitle?: string | null;
+  groupingConfidence?: string | null;
+  source?: string | null;
+  outcomeCount?: number | string | null;
+  totalMembers?: number | string | null;
+  readyMembers?: number | string | null;
+  orderfilledRows?: number | string | null;
   marketId?: number | string | null;
   marketSlug: string;
   marketTitle?: string | null;

@@ -278,6 +278,12 @@ export function fetchQuantPriceMarkets(query = '', limit = 40) {
   return apiGetWithTimeout<QuantListPayload<QuantPriceMarket>>(`/quant/markets?${params.toString()}`, 15000);
 }
 
+export function fetchQuantPriceEvents(query = '', limit = 40) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (query.trim()) params.set('q', query.trim());
+  return apiGetWithTimeout<QuantListPayload<QuantPriceMarket>>(`/quant/events?${params.toString()}`, 15000);
+}
+
 function appendQuantParams(query: QuantPriceQuery, mode: 'frontend' | 'block') {
   const params = new URLSearchParams();
   if (query.marketSlug?.trim()) params.set('market_slug', query.marketSlug.trim());
@@ -321,6 +327,20 @@ export function fetchQuantMarketPriceSeries(query: QuantPriceQuery & { priceSour
   params.set('limit', String(query.limit || 2500));
   params.set('max_outcomes', String(query.maxOutcomes || 24));
   return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/market-price-series?${params.toString()}`, 20000);
+}
+
+export function fetchQuantEventPriceSeries(query: QuantPriceQuery & { eventSlug?: string; priceSource?: string; maxOutcomes?: number } = {}) {
+  const params = new URLSearchParams();
+  const eventSlug = query.eventSlug || query.marketSlug;
+  if (eventSlug?.trim()) params.set('event_slug', eventSlug.trim());
+  if (query.priceSource?.trim()) params.set('price_source', query.priceSource.trim());
+  if (query.from?.trim()) params.set('from', query.from.trim());
+  if (query.to?.trim()) params.set('to', query.to.trim());
+  if (query.fromBlock?.trim()) params.set('from_block', query.fromBlock.trim());
+  if (query.toBlock?.trim()) params.set('to_block', query.toBlock.trim());
+  params.set('limit', String(query.limit || 2500));
+  params.set('max_outcomes', String(query.maxOutcomes || 100));
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-series?${params.toString()}`, 25000);
 }
 
 export function fetchQuantBuildStatus(source = '', limit = 24) {

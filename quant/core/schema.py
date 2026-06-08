@@ -33,6 +33,63 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS quant.market_event_metadata (
+        event_id TEXT NOT NULL,
+        event_slug TEXT NOT NULL PRIMARY KEY,
+        event_title TEXT NOT NULL,
+        event_category TEXT,
+        event_subcategory TEXT,
+        event_image_url TEXT,
+        event_icon_url TEXT,
+        description TEXT,
+        start_date TIMESTAMPTZ,
+        end_date TIMESTAMPTZ,
+        resolution_date TIMESTAMPTZ,
+        status TEXT NOT NULL DEFAULT 'unknown',
+        volume NUMERIC(38, 10),
+        liquidity NUMERIC(38, 10),
+        grouping_confidence TEXT NOT NULL DEFAULT 'official',
+        source TEXT NOT NULL DEFAULT 'core.markets',
+        created_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.market_event_members (
+        event_slug TEXT NOT NULL REFERENCES quant.market_event_metadata(event_slug) ON DELETE CASCADE,
+        event_id TEXT NOT NULL,
+        market_id BIGINT NOT NULL,
+        market_slug TEXT NOT NULL,
+        condition_id TEXT,
+        question TEXT,
+        outcome_label TEXT NOT NULL,
+        outcome_key TEXT NOT NULL,
+        outcome_order INTEGER NOT NULL DEFAULT 0,
+        token_yes_id TEXT,
+        token_no_id TEXT,
+        clob_token_ids JSONB,
+        status TEXT NOT NULL DEFAULT 'unknown',
+        active BOOLEAN NOT NULL DEFAULT FALSE,
+        closed BOOLEAN NOT NULL DEFAULT FALSE,
+        resolved BOOLEAN NOT NULL DEFAULT FALSE,
+        volume NUMERIC(38, 10),
+        liquidity NUMERIC(38, 10),
+        block_rows BIGINT NOT NULL DEFAULT 0,
+        frontend_rows BIGINT NOT NULL DEFAULT 0,
+        orderfilled_rows BIGINT NOT NULL DEFAULT 0,
+        latest_yes NUMERIC(20, 10),
+        latest_no NUMERIC(20, 10),
+        latest_block BIGINT,
+        latest_timestamp TIMESTAMPTZ,
+        coverage_status TEXT NOT NULL DEFAULT 'none',
+        grouping_confidence TEXT NOT NULL DEFAULT 'official',
+        source TEXT NOT NULL DEFAULT 'core.markets',
+        created_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (event_slug, market_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS quant.market_price_eligibility (
         token_id TEXT PRIMARY KEY REFERENCES quant.market_token_metadata(token_id) ON DELETE CASCADE,
         market_id BIGINT NOT NULL,
@@ -317,6 +374,8 @@ ALTER_TABLE_SQL: tuple[str, ...] = (
     "ALTER TABLE quant.market_token_block_close ADD COLUMN IF NOT EXISTS anomaly_flags JSONB NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE quant.market_token_block_close ALTER COLUMN source SET DEFAULT 'clean_orderfilled_fact'",
     "ALTER TABLE quant.quant_backtest_runs ADD COLUMN IF NOT EXISTS backtest_engine TEXT NOT NULL DEFAULT 'builtin'",
+    "ALTER TABLE quant.market_event_members ADD COLUMN IF NOT EXISTS grouping_confidence TEXT NOT NULL DEFAULT 'official'",
+    "ALTER TABLE quant.market_event_metadata ADD COLUMN IF NOT EXISTS grouping_confidence TEXT NOT NULL DEFAULT 'official'",
 )
 
 
@@ -347,6 +406,11 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_engine ON quant.quant_backtest_runs (backtest_engine, status, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_trades_run_pnl ON quant.quant_backtest_trades (run_id, pnl)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_equity_run_x ON quant.quant_backtest_equity (run_id, point_index)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_metadata_search ON quant.market_event_metadata (event_slug, event_title)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_metadata_status ON quant.market_event_metadata (status, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_members_market ON quant.market_event_members (market_id)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_members_coverage ON quant.market_event_members (event_slug, coverage_status, outcome_order)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_members_active ON quant.market_event_members (active, closed, updated_at DESC)",
 )
 
 
