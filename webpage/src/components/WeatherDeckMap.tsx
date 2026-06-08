@@ -605,18 +605,6 @@ function setPaintSafe(map: MapLibreMap, layerId: string, property: string, value
 
 function tuneWeatherBasemap(map: MapLibreMap) {
   if (!map.getStyle()) return;
-  setPaintSafe(map, 'background', 'background-color', '#111416');
-  ['landcover', 'landuse', 'landuse_residential', 'building', 'building-top'].forEach((id) => {
-    setPaintSafe(map, id, 'fill-color', '#171b1d');
-    setPaintSafe(map, id, 'fill-opacity', 0.9);
-  });
-  ['park_national_park', 'park_nature_reserve'].forEach((id) => {
-    setPaintSafe(map, id, 'fill-color', '#1a241e');
-    setPaintSafe(map, id, 'fill-opacity', 0.62);
-  });
-  setPaintSafe(map, 'water', 'fill-color', '#313b40');
-  setPaintSafe(map, 'water', 'fill-opacity', 1);
-  setPaintSafe(map, 'water_shadow', 'fill-color', '#171d20');
   ['boundary_country_outline', 'boundary_country_inner', 'boundary_state', 'boundary_county'].forEach((id) => {
     setPaintSafe(map, id, 'line-color', '#7a8286');
     setPaintSafe(map, id, 'line-opacity', id.includes('country') ? 0.62 : 0.34);
