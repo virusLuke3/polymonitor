@@ -219,12 +219,15 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
     bp = Blueprint("quant_routes", __name__, url_prefix="/quant")
     get_cached_json = helpers.get("get_cached_json")
     set_cached_json = helpers.get("set_cached_json")
+    get_snapshot_payload = helpers.get("get_snapshot_payload")
 
     def _cache_key(name: str, *, version: int = 1) -> str:
         args = {key: request.args.getlist(key) for key in sorted(request.args.keys())}
         return json.dumps({"name": name, "v": version, "args": args}, sort_keys=True, ensure_ascii=True)
 
-    def _cached_quant_payload(namespace: str, cache_key: str, ttl_seconds: int, builder):
+    def _cached_quant_payload(namespace: str, cache_key: str, ttl_seconds: int, builder, *, snapshot: bool = False):
+        if snapshot and callable(get_snapshot_payload):
+            return get_snapshot_payload(namespace, cache_key, builder, ttl_seconds=ttl_seconds)
         if callable(get_cached_json):
             cached = get_cached_json(namespace, cache_key)
             if isinstance(cached, dict):
@@ -380,7 +383,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                 )
             return _camel_row(_apply_point_payload_format(payload, point_format))
 
-        return jsonify(_cached_quant_payload("quant-event-tile", cache_key, 10, build_payload))
+        return jsonify(_cached_quant_payload("quant-event-tile", cache_key, 45, build_payload, snapshot=True))
 
     @bp.route("/price-build-status", methods=["GET"])
     def api_quant_price_build_status():

@@ -26,6 +26,7 @@ Wants=polydata-new-market-signal.service
 Wants=polydata-polybeats-feed-seed.service
 Wants=polydata-polymarket-macro-map-seed.service
 Wants=polydata-quant-backtest-runner.service
+Wants=polydata-quant-event-tile-seed.service
 Wants=polydata-sports-odds-seed.service
 Wants=polydata-suspicious-trades-seed.service
 Wants=polydata-tech-panels-seed.service
