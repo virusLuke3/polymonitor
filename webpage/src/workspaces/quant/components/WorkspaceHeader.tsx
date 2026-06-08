@@ -170,7 +170,7 @@ export function WorkspaceHeader({
                     <em>
                       Range {market.firstBlock ? `block ${Number(market.firstBlock).toLocaleString('en-US')}` : '-'}
                       {market.lastBlock ? ` - ${Number(market.lastBlock).toLocaleString('en-US')}` : ''}
-                      {' · YES probability'}
+                      {' · outcome probabilities'}
                     </em>
                   </span>
                   <span className="qtv-result-meta">

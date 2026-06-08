@@ -45,7 +45,7 @@ export type Signal = {
   id: string;
   timestamp: number;
   action: 'OPEN' | 'CLOSE' | 'BUY' | 'SELL';
-  outcome: 'YES' | 'NO';
+  outcome: string;
   price: number;
   size: number;
   notional: number;
@@ -62,7 +62,7 @@ export type Trade = {
   xAxis?: string;
   marketId: string;
   market: string;
-  outcome: 'YES' | 'NO';
+  outcome: string;
   side: 'LONG' | 'SHORT';
   entryPrice: number;
   exitPrice: number;

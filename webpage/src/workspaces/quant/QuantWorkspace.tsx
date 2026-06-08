@@ -11,7 +11,7 @@ import {
   isAbortLikeError,
   type QuantPriceQuery,
 } from '@/services/api';
-import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesPayload, QuantPriceMarket } from '@/types';
+import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantPriceMarket } from '@/types';
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
@@ -108,6 +108,26 @@ function strategyDefaults(prices: Array<{ close: number }>) {
   };
 }
 
+type BacktestAction = 'YES' | 'NO';
+
+function outcomePricePoints(outcome: QuantMarketSeriesOutcome | null | undefined, action: BacktestAction = 'YES') {
+  const points = action === 'NO' ? outcome?.complementPoints || [] : outcome?.points || [];
+  return points.map((point) => ({
+    timestamp: Number(point.x ?? point.blockNumber ?? point.timestamp),
+    close: toNumber(point.price),
+    volume: toNumber(point.volume),
+    source: action === 'NO' ? 'selected_outcome_no' : 'selected_outcome_yes',
+    tokenId: action === 'NO' ? outcome?.buyNoTokenId || undefined : outcome?.buyYesTokenId || outcome?.tokenId,
+    tokenSide: action === 'NO' ? outcome?.buyNoTokenSide || undefined : outcome?.buyYesTokenSide || outcome?.tokenSide,
+    outcomeLabel: action === 'NO' ? outcome?.buyNoLabel || `${outcome?.outcomeLabel || 'Outcome'} No` : outcome?.buyYesLabel || outcome?.outcomeLabel,
+  })).filter((point) => point.timestamp && Number.isFinite(point.close));
+}
+
+function defaultOutcomeTokenId(outcomes: QuantMarketSeriesOutcome[]) {
+  const sorted = outcomes.slice().sort((left, right) => toNumber(right.latestPrice) - toNumber(left.latestPrice));
+  return sorted[0]?.tokenId || outcomes[0]?.tokenId || '';
+}
+
 function marketInfoFromSelection(slug: string, market?: QuantPriceMarket): MarketInfo {
   return {
     id: String(market?.marketId || slug || 'quant-market'),
@@ -130,6 +150,8 @@ export function QuantWorkspace() {
   const [frontendRows, setFrontendRows] = useState<QuantFrontendPricePoint[]>([]);
   const [blockRows, setBlockRows] = useState<QuantBlockClosePoint[]>([]);
   const [marketSeries, setMarketSeries] = useState<QuantMarketSeriesPayload | null>(null);
+  const [selectedOutcomeTokenId, setSelectedOutcomeTokenId] = useState('');
+  const [selectedBacktestAction, setSelectedBacktestAction] = useState<BacktestAction>('YES');
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
   const [quantMarkets, setQuantMarkets] = useState<QuantPriceMarket[]>([]);
   const [marketSearchStatus, setMarketSearchStatus] = useState<DataStatus>('idle');
@@ -166,6 +188,11 @@ export function QuantWorkspace() {
   const strategySignals = useMemo(() => signalsFromTrades(backtestResult), [backtestResult]);
   const latestPrice = activePrices[activePrices.length - 1]?.close || 0;
   const displayedPriceRows = activePrices.length;
+  const selectedOutcome = useMemo(() => {
+    const outcomes = marketSeries?.outcomes || [];
+    if (!outcomes.length) return null;
+    return outcomes.find((outcome) => outcome.tokenId === selectedOutcomeTokenId) || outcomes[0] || null;
+  }, [marketSeries, selectedOutcomeTokenId]);
   const selectedMarket = useMemo(
     () => (
       quantMarkets.find((market) => market.marketSlug === marketSlug && market.tokenSide === 'YES')
@@ -181,7 +208,6 @@ export function QuantWorkspace() {
   }, [timeframe]);
   const semanticChartQuery: QuantPriceQuery & { priceSource: string; scope: string; maxOutcomes: number } = {
     marketSlug,
-    tokenSide: 'YES',
     priceSource: backendPriceSource(priceSource),
     scope: 'auto',
     limit: chartLimit,
@@ -223,13 +249,18 @@ export function QuantWorkspace() {
       if (!marketSlug.trim()) {
         throw new Error('market_slug is required for real backtest');
       }
-      const loadedSeriesPrices = marketSeriesToPrices(marketSeries);
+      const loadedSeriesPrices = outcomePricePoints(selectedOutcome, selectedBacktestAction);
       const loadedBlockRows = blockRows.filter((row) => String(row.tokenSide || '').toUpperCase() === 'YES');
       const hasLoadedRows = loadedSeriesPrices.length > 0 || (priceSource === 'orderfilled' ? loadedBlockRows.length > 0 : frontendRows.length > 0);
       const nextRows = hasLoadedRows
         ? { frontendRows, blockRows, marketSeries }
         : await refreshQuantRows();
-      const seriesPrices = marketSeriesToPrices(nextRows.marketSeries);
+      const nextSelectedOutcome = (
+        nextRows.marketSeries?.outcomes?.find((outcome) => outcome.tokenId === selectedOutcomeTokenId)
+        || nextRows.marketSeries?.outcomes?.[0]
+        || selectedOutcome
+      );
+      const seriesPrices = outcomePricePoints(nextSelectedOutcome, selectedBacktestAction);
       const backtestBlockRows = nextRows.blockRows.filter((row) => String(row.tokenSide || '').toUpperCase() === 'YES');
       const sourceRows = seriesPrices.length ? seriesPrices : (priceSource === 'orderfilled' ? blockToPrices(backtestBlockRows) : frontendToPrices(nextRows.frontendRows));
       if (!sourceRows.length) {
@@ -242,9 +273,20 @@ export function QuantWorkspace() {
       const firstTs = priceSource === 'frontend' ? firstX : nextRows.frontendRows[0]?.timestamp;
       const lastTs = priceSource === 'frontend' ? lastX : nextRows.frontendRows[nextRows.frontendRows.length - 1]?.timestamp;
       const strategy = strategyDefaults(sourceRows);
+      const selectedTokenId = selectedBacktestAction === 'NO'
+        ? nextSelectedOutcome?.buyNoTokenId
+        : nextSelectedOutcome?.buyYesTokenId || nextSelectedOutcome?.tokenId;
+      const selectedTokenSide = selectedBacktestAction === 'NO'
+        ? nextSelectedOutcome?.buyNoTokenSide
+        : nextSelectedOutcome?.buyYesTokenSide || nextSelectedOutcome?.tokenSide;
+      const selectedOutcomeLabel = selectedBacktestAction === 'NO'
+        ? nextSelectedOutcome?.buyNoLabel || `${nextSelectedOutcome?.outcomeLabel || 'Outcome'} No`
+        : nextSelectedOutcome?.buyYesLabel || nextSelectedOutcome?.outcomeLabel;
       const created = await createQuantBacktestRun({
-        marketSlug: marketSlug.trim(),
-        tokenSide: 'YES',
+        marketSlug: (nextSelectedOutcome?.marketSlug || marketSlug).trim(),
+        tokenSide: selectedTokenSide || 'YES',
+        tokenId: selectedTokenId || undefined,
+        outcomeLabel: selectedOutcomeLabel,
         priceSource: backendPriceSource(priceSource),
         backtestEngine,
         ...(priceSource === 'orderfilled' && firstBlock && lastBlock ? { fromBlock: String(firstBlock), toBlock: String(lastBlock) } : {}),
@@ -297,6 +339,8 @@ export function QuantWorkspace() {
     setFrontendRows([]);
     setBlockRows([]);
     setMarketSeries(null);
+    setSelectedOutcomeTokenId('');
+    setSelectedBacktestAction('YES');
     setBacktestResult(emptyBacktestResult());
     setSelectedTradeId(null);
     setError('');
@@ -344,6 +388,17 @@ export function QuantWorkspace() {
     }, 350);
     return () => window.clearTimeout(timer);
   }, [marketReloadKey, marketSlug, priceSource, timeframe]);
+
+  useEffect(() => {
+    const outcomes = marketSeries?.outcomes || [];
+    if (!outcomes.length) {
+      setSelectedOutcomeTokenId('');
+      return;
+    }
+    if (!outcomes.some((outcome) => outcome.tokenId === selectedOutcomeTokenId)) {
+      setSelectedOutcomeTokenId(defaultOutcomeTokenId(outcomes));
+    }
+  }, [marketSeries, selectedOutcomeTokenId]);
 
   const filteredPerformanceRows = useMemo(() => {
     const queryText = performanceSearch.trim().toLowerCase();
@@ -451,6 +506,48 @@ export function QuantWorkspace() {
           dataStatus={dataStatus}
         />
 
+        {marketSeries?.outcomes?.length ? (
+          <section className="qtv-outcome-board" aria-label="Polymarket outcomes">
+            {marketSeries.outcomes.map((outcome) => {
+              const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
+              return (
+              <div
+                key={outcome.tokenId}
+                className={`qtv-outcome-row ${isSelected ? 'active' : ''}`}
+              >
+                <span>
+                  <strong>{outcome.outcomeLabel}</strong>
+                  <em>{Number(outcome.rows || 0).toLocaleString('en-US')} rows</em>
+                </span>
+                <b>{fmtPrice(toNumber(outcome.latestPrice))}</b>
+                <div className="qtv-outcome-actions">
+                  <button
+                    className={isSelected && selectedBacktestAction === 'YES' ? 'active' : ''}
+                    type="button"
+                    onClick={() => {
+                      setSelectedOutcomeTokenId(outcome.tokenId);
+                      setSelectedBacktestAction('YES');
+                    }}
+                  >
+                    Buy Yes {fmtPrice(toNumber(outcome.buyYesPrice ?? outcome.latestPrice))}
+                  </button>
+                  <button
+                    className={isSelected && selectedBacktestAction === 'NO' ? 'active no' : 'no'}
+                    type="button"
+                    disabled={!outcome.buyNoTokenId}
+                    onClick={() => {
+                      setSelectedOutcomeTokenId(outcome.tokenId);
+                      setSelectedBacktestAction('NO');
+                    }}
+                  >
+                    Buy No {fmtPrice(toNumber(outcome.buyNoPrice ?? outcome.complementLatestPrice))}
+                  </button>
+                </div>
+              </div>
+            );})}
+          </section>
+        ) : null}
+
         <StrategyTesterPanel
           result={backtestResult}
           testerTab={testerTab}
@@ -478,7 +575,7 @@ export function QuantWorkspace() {
 
       <div className="qtv-statusbar">
         <span>source {priceSource}</span>
-        <span>latest YES {fmtPrice(latestPrice)}</span>
+        <span>target {selectedOutcome?.outcomeLabel || 'outcome'} {selectedBacktestAction} {fmtPrice(toNumber(selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoPrice : selectedOutcome?.buyYesPrice) || latestPrice)}</span>
         <span>outcomes {marketSeries?.outcomes?.length || 0}</span>
         <span>frontend rows {priceSource === 'frontend' ? displayedPriceRows : frontendRows.length}</span>
         <span>block close rows {priceSource === 'orderfilled' ? displayedPriceRows : blockRows.length}</span>

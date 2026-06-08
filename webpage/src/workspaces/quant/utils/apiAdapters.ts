@@ -22,7 +22,7 @@ export function frontendToPrices(rows: QuantFrontendPricePoint[]): PricePoint[] 
 export function blockToPrices(rows: QuantBlockClosePoint[]): PricePoint[] {
   return rows.map((row) => ({
     timestamp: Number(row.blockNumber),
-    close: toNumber(row.yesProbabilityClose ?? row.closePrice),
+    close: toNumber(row.closePrice ?? row.yesProbabilityClose),
     volume: toNumber(row.volume),
     tokenSide: row.tokenSide,
     source: 'orderfilled_block_close',
@@ -67,8 +67,15 @@ function metricToCard(row: QuantBacktestMetric): BacktestMetric {
   };
 }
 
-function tradeToUi(row: QuantBacktestTrade): Trade {
+function runOutcomeLabel(run: QuantBacktestRun) {
+  const meta = run.meta || {};
+  const label = typeof meta.outcome_label === 'string' ? meta.outcome_label : typeof meta.outcomeLabel === 'string' ? meta.outcomeLabel : '';
+  return label.trim();
+}
+
+function tradeToUi(row: QuantBacktestTrade, run: QuantBacktestRun): Trade {
   const xAxis = row.xAxis || 'timestamp';
+  const outcomeLabel = runOutcomeLabel(run);
   return {
     id: row.tradeId,
     entryTime: formatAxisValue(row.entryX, xAxis),
@@ -78,7 +85,7 @@ function tradeToUi(row: QuantBacktestTrade): Trade {
     xAxis,
     marketId: row.marketSlug,
     market: row.marketSlug,
-    outcome: row.tokenSide === 'NO' ? 'NO' : 'YES',
+    outcome: outcomeLabel || (row.tokenSide === 'NO' ? 'NO' : 'YES'),
     side: row.side === 'SHORT' ? 'SHORT' : 'LONG',
     entryPrice: toNumber(row.entryPrice),
     exitPrice: toNumber(row.exitPrice),
@@ -116,12 +123,15 @@ function performanceRows(metrics: QuantBacktestMetric[], trades: Trade[]): Perfo
 }
 
 function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): PropertyGroup[] {
+  const meta = run.meta || {};
   return [
     {
       title: 'Market Info',
       rows: [
         { label: 'market slug', value: run.marketSlug },
         { label: 'token side', value: run.tokenSide },
+        { label: 'outcome', value: runOutcomeLabel(run) || run.tokenSide },
+        { label: 'token id', value: typeof meta.token_id === 'string' ? meta.token_id : '-' },
         { label: 'source', value: run.priceSource },
         { label: 'engine', value: run.backtestEngine || 'builtin' },
         { label: 'from block', value: String(run.fromBlock ?? '-') },
@@ -160,7 +170,7 @@ export function backtestApiToResult(
 ): BacktestResult {
   const overviewMetrics = metrics.filter((metric) => metric.metricGroup !== 'prediction').map(metricToCard);
   const predictionMetrics = metrics.filter((metric) => metric.metricGroup === 'prediction').map(metricToCard);
-  const uiTrades = trades.map(tradeToUi);
+  const uiTrades = trades.map((trade) => tradeToUi(trade, run));
   const uiEquity = equity.map(equityToUi);
   return {
     runId: run.runId,

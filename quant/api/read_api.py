@@ -247,6 +247,10 @@ def _fetch_market_tokens(conn: Any, *, market_slug: str, scope: str, max_outcome
         return [dict(row) for row in cur.fetchall()], "event"
 
 
+def _complement_side(token_side: str | None) -> str:
+    return "NO" if str(token_side or "").upper() == "YES" else "YES"
+
+
 def get_market_price_series(
     conn: Any,
     *,
@@ -281,9 +285,33 @@ def get_market_price_series(
         tokens = [token for token in tokens if str(token.get("token_side") or "").upper() == wanted]
 
     outcomes: list[dict[str, Any]] = []
+    market_ids = sorted({int(token["market_id"]) for token in tokens if token.get("market_id") is not None})
+    tokens_by_market_side: dict[tuple[int, str], dict[str, Any]] = {}
     with conn.cursor() as cur:
-        for token in tokens:
-            params: list[Any] = [token["token_id"]]
+        if market_ids:
+            cur.execute(
+                """
+                SELECT
+                    market_id, market_slug, market_title, condition_id, end_date,
+                    token_id, token_side, outcome_index
+                FROM quant.market_token_metadata
+                WHERE market_id = ANY(%s::bigint[])
+                """,
+                (market_ids,),
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                tokens_by_market_side[(int(item["market_id"]), str(item.get("token_side") or "").upper())] = item
+
+        points_cache: dict[str, list[dict[str, Any]]] = {}
+
+        def fetch_points(token_id: str | None) -> list[dict[str, Any]]:
+            if not token_id:
+                return []
+            cache_key = str(token_id)
+            if cache_key in points_cache:
+                return points_cache[cache_key]
+            params: list[Any] = [cache_key]
             if source == "frontend":
                 filters = ["token_id = %s"]
                 if from_ts is not None:
@@ -310,7 +338,7 @@ def get_market_price_series(
                     """,
                     params,
                 )
-                points = [
+                rows = [
                     {
                         "x": row["timestamp"],
                         "timestamp": row["timestamp"],
@@ -319,7 +347,6 @@ def get_market_price_series(
                     }
                     for row in cur.fetchall()
                 ]
-                x_axis = "timestamp"
             else:
                 filters = ["token_id = %s"]
                 if from_block is not None:
@@ -347,7 +374,7 @@ def get_market_price_series(
                     """,
                     params,
                 )
-                points = [
+                rows = [
                     {
                         "x": row["block_number"],
                         "block_number": row["block_number"],
@@ -360,7 +387,15 @@ def get_market_price_series(
                     }
                     for row in cur.fetchall()
                 ]
-                x_axis = "block_number"
+            points_cache[cache_key] = rows
+            return rows
+
+        for token in tokens:
+            points = fetch_points(str(token.get("token_id") or ""))
+            complement_token = tokens_by_market_side.get(
+                (int(token["market_id"]), _complement_side(str(token.get("token_side") or "")))
+            )
+            complement_points = fetch_points(str(complement_token.get("token_id") or "")) if complement_token else []
             label = infer_outcome_label(
                 token.get("market_title"),
                 token.get("token_side"),
@@ -377,11 +412,24 @@ def get_market_price_series(
                     "token_side": token.get("token_side"),
                     "outcome_index": token.get("outcome_index"),
                     "outcome_label": label,
+                    "buy_yes_token_id": token.get("token_id"),
+                    "buy_yes_token_side": token.get("token_side"),
+                    "buy_yes_label": f"{label} Yes",
+                    "buy_yes_price": points[-1]["price"] if points else None,
+                    "buy_no_token_id": complement_token.get("token_id") if complement_token else None,
+                    "buy_no_token_side": complement_token.get("token_side") if complement_token else None,
+                    "buy_no_label": f"{label} No",
+                    "buy_no_price": complement_points[-1]["price"] if complement_points else None,
                     "rows": len(points),
                     "first_x": points[0]["x"] if points else None,
                     "last_x": points[-1]["x"] if points else None,
                     "latest_price": points[-1]["price"] if points else None,
                     "points": points,
+                    "complement_rows": len(complement_points),
+                    "complement_first_x": complement_points[0]["x"] if complement_points else None,
+                    "complement_last_x": complement_points[-1]["x"] if complement_points else None,
+                    "complement_latest_price": complement_points[-1]["price"] if complement_points else None,
+                    "complement_points": complement_points,
                 }
             )
 

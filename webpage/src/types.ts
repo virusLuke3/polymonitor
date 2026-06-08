@@ -321,11 +321,24 @@ export type QuantMarketSeriesOutcome = {
   tokenSide: string;
   outcomeIndex?: number | string | null;
   outcomeLabel: string;
+  buyYesTokenId?: string | null;
+  buyYesTokenSide?: string | null;
+  buyYesLabel?: string | null;
+  buyYesPrice?: string | number | null;
+  buyNoTokenId?: string | null;
+  buyNoTokenSide?: string | null;
+  buyNoLabel?: string | null;
+  buyNoPrice?: string | number | null;
   rows: number;
   firstX?: number | string | null;
   lastX?: number | string | null;
   latestPrice?: string | number | null;
   points: QuantMarketSeriesPoint[];
+  complementRows?: number | string | null;
+  complementFirstX?: number | string | null;
+  complementLastX?: number | string | null;
+  complementLatestPrice?: string | number | null;
+  complementPoints?: QuantMarketSeriesPoint[];
 };
 
 export type QuantMarketSeriesPayload = {
@@ -399,6 +412,7 @@ export type QuantBacktestRun = {
   maxHoldingBars?: number | string | null;
   initialCapital?: string | number | null;
   positionSize?: string | number | null;
+  meta?: Record<string, unknown> | null;
 };
 
 export type QuantBacktestMetric = {
@@ -447,6 +461,8 @@ export type QuantBacktestTrade = {
 export type QuantBacktestCreatePayload = {
   marketSlug: string;
   tokenSide: string;
+  tokenId?: string;
+  outcomeLabel?: string;
   priceSource: string;
   backtestEngine?: string;
   from?: string;

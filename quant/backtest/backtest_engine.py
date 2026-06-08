@@ -135,6 +135,8 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
     market_slug = str(payload.get("market_slug", payload.get("marketSlug", ""))).strip()
     if not market_slug:
         raise ValueError("market_slug is required")
+    token_id = str(payload.get("token_id", payload.get("tokenId", ""))).strip() or None
+    outcome_label = str(payload.get("outcome_label", payload.get("outcomeLabel", ""))).strip() or None
     token_side = str(payload.get("token_side", payload.get("tokenSide", "YES"))).strip().upper() or "YES"
     if token_side not in {"YES", "NO"}:
         raise ValueError("token_side must be YES or NO")
@@ -166,7 +168,14 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                 to_ts,
                 from_block,
                 to_block,
-                json.dumps({"strategy": "fixed_threshold_v1", "backtest_engine": backtest_engine}),
+                json.dumps(
+                    {
+                        "strategy": "fixed_threshold_v1",
+                        "backtest_engine": backtest_engine,
+                        "token_id": token_id,
+                        "outcome_label": outcome_label,
+                    }
+                ),
             ),
         )
         run_id = int(cur.fetchone()["run_id"])
@@ -247,9 +256,22 @@ def mark_run_failed(conn: Any, run_id: int, error: str) -> None:
 
 
 def fetch_price_points(conn: Any, run: dict[str, Any], *, limit: int = 25000) -> list[PricePoint]:
+    meta = run.get("meta") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except json.JSONDecodeError:
+            meta = {}
+    token_id = str(meta.get("token_id") or "").strip()
     if run["price_source"] == "frontend":
-        filters = ["market_slug = %s", "token_side = %s"]
-        values: list[Any] = [run["market_slug"], run["token_side"]]
+        filters: list[str]
+        values: list[Any]
+        if token_id:
+            filters = ["token_id = %s"]
+            values = [token_id]
+        else:
+            filters = ["market_slug = %s", "token_side = %s"]
+            values = [run["market_slug"], run["token_side"]]
         if run.get("from_ts") is not None:
             filters.append("timestamp >= %s")
             values.append(run["from_ts"])
@@ -270,8 +292,12 @@ def fetch_price_points(conn: Any, run: dict[str, Any], *, limit: int = 25000) ->
             )
             return [_price_point(row) for row in cur.fetchall()]
 
-    filters = ["market_slug = %s", "token_side = %s"]
-    values = [run["market_slug"], run["token_side"]]
+    if token_id:
+        filters = ["token_id = %s"]
+        values = [token_id]
+    else:
+        filters = ["market_slug = %s", "token_side = %s"]
+        values = [run["market_slug"], run["token_side"]]
     if run.get("from_block") is not None:
         filters.append("block_number >= %s")
         values.append(run["from_block"])

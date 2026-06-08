@@ -26,11 +26,12 @@ type PriceChartPanelProps = {
 };
 
 type SeriesRefs = {
-  yes: ISeriesApi<'Line'> | null;
-  no: ISeriesApi<'Line'> | null;
+  lines: Map<string, ISeriesApi<'Line'>>;
   ma: ISeriesApi<'Line'> | null;
   volume: ISeriesApi<'Histogram'> | null;
 };
+
+const SERIES_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#06b6d4', '#ef4444', '#a855f7', '#f97316', '#84cc16'];
 
 function chartTime(point: PricePoint): Time {
   return Math.floor(point.timestamp) as Time;
@@ -63,6 +64,28 @@ function sortUnique(points: PricePoint[]) {
 function sidePoints(points: PricePoint[], side: string) {
   const sideRows = points.filter((point) => (point.tokenSide || 'YES').toUpperCase() === side);
   return sortUnique(sideRows.length ? sideRows : points);
+}
+
+function outcomeKey(point: PricePoint) {
+  return point.outcomeLabel || point.tokenSide || point.tokenId || 'YES';
+}
+
+function outcomeGroups(points: PricePoint[]) {
+  const groups = new Map<string, PricePoint[]>();
+  points.forEach((point) => {
+    const key = outcomeKey(point);
+    const rows = groups.get(key) || [];
+    rows.push(point);
+    groups.set(key, rows);
+  });
+  return Array.from(groups.entries())
+    .map(([label, rows]) => ({ label, points: sortUnique(rows) }))
+    .filter((group) => group.points.length)
+    .sort((left, right) => {
+      const leftLatest = left.points[left.points.length - 1]?.close ?? 0;
+      const rightLatest = right.points[right.points.length - 1]?.close ?? 0;
+      return rightLatest - leftLatest;
+    });
 }
 
 function lineData(points: PricePoint[]): LineData<Time>[] {
@@ -116,14 +139,14 @@ export function PriceChartPanel({
 }: PriceChartPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<SeriesRefs>({ yes: null, no: null, ma: null, volume: null });
+  const seriesRef = useRef<SeriesRefs>({ lines: new Map(), ma: null, volume: null });
   const pointsRef = useRef<PricePoint[]>([]);
   const [hover, setHover] = useState<PricePoint | null>(null);
 
   const allPoints = useMemo(() => sortUnique(prices), [prices]);
+  const groupedOutcomes = useMemo(() => outcomeGroups(prices), [prices]);
   const yesPoints = useMemo(() => sidePoints(prices, 'YES'), [prices]);
-  const noPoints = useMemo(() => sidePoints(prices, 'NO'), [prices]);
-  const primaryPoints = yesPoints.length ? yesPoints : allPoints;
+  const primaryPoints = groupedOutcomes[0]?.points || yesPoints || allPoints;
   const latest = hover || primaryPoints[primaryPoints.length - 1];
   const previous = primaryPoints[Math.max(0, primaryPoints.length - 2)];
   const delta = latest && previous ? latest.close - previous.close : 0;
@@ -185,25 +208,6 @@ export function PriceChartPanel({
         vertLine: { color: 'rgba(148,163,184,0.28)', labelBackgroundColor: '#1f2937' },
       },
     });
-    const yes = chart.addSeries(LineSeries, {
-      color: '#22c55e',
-      lineWidth: 2,
-      priceLineColor: '#2563eb',
-      priceLineWidth: 1,
-      title: 'YES probability',
-      autoscaleInfoProvider: () => ({
-        priceRange: { minValue: 0, maxValue: 1 },
-      }),
-    });
-    const no = chart.addSeries(LineSeries, {
-      color: '#3b82f6',
-      lineWidth: 2,
-      priceLineVisible: false,
-      title: 'NO token -> YES probability',
-      autoscaleInfoProvider: () => ({
-        priceRange: { minValue: 0, maxValue: 1 },
-      }),
-    });
     const ma = chart.addSeries(LineSeries, {
       color: '#f59e0b',
       lineWidth: 1,
@@ -219,7 +223,7 @@ export function PriceChartPanel({
       lastValueVisible: false,
     });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    seriesRef.current = { yes, no, ma, volume };
+    seriesRef.current = { lines: new Map(), ma, volume };
     chartRef.current = chart;
 
     chart.subscribeCrosshairMove((param) => {
@@ -247,20 +251,48 @@ export function PriceChartPanel({
       observer.disconnect();
       chart.remove();
       chartRef.current = null;
-      seriesRef.current = { yes: null, no: null, ma: null, volume: null };
+      seriesRef.current = { lines: new Map(), ma: null, volume: null };
     };
   }, [priceSource]);
 
   useEffect(() => {
     const chart = chartRef.current;
     const series = seriesRef.current;
-    if (!chart || !series.yes || !series.no || !series.ma || !series.volume) return;
-    series.yes.setData(lineData(yesPoints));
-    series.no.setData(noPoints.length ? lineData(noPoints) : []);
+    if (!chart || !series.ma || !series.volume) return;
+    const activeLabels = new Set(groupedOutcomes.map((group) => group.label));
+    Array.from(series.lines.entries()).forEach(([label, line]) => {
+      if (!activeLabels.has(label)) {
+        chart.removeSeries(line);
+        series.lines.delete(label);
+      }
+    });
+    groupedOutcomes.forEach((group, index) => {
+      let line = series.lines.get(group.label);
+      if (!line) {
+        line = chart.addSeries(LineSeries, {
+          color: SERIES_COLORS[index % SERIES_COLORS.length],
+          lineWidth: 2,
+          priceLineVisible: index === 0,
+          priceLineColor: SERIES_COLORS[index % SERIES_COLORS.length],
+          priceLineWidth: 1,
+          title: group.label,
+          autoscaleInfoProvider: () => ({
+            priceRange: { minValue: 0, maxValue: 1 },
+          }),
+        });
+        series.lines.set(group.label, line);
+      }
+      line.applyOptions({
+        color: SERIES_COLORS[index % SERIES_COLORS.length],
+        priceLineVisible: index === 0,
+        priceLineColor: SERIES_COLORS[index % SERIES_COLORS.length],
+      });
+      line.setData(lineData(group.points));
+    });
     series.ma.setData(lineData(maPoints));
     series.volume.setData(volumeData(allPoints));
     chart.timeScale().fitContent();
-  }, [allPoints, maPoints, noPoints, yesPoints]);
+  }, [allPoints, groupedOutcomes, maPoints]);
 
   return (
     <section className="qtv-chart-shell">
@@ -272,11 +304,22 @@ export function PriceChartPanel({
         <div className="qtv-chart-info">
           <div>
             <strong>{market.title}</strong>
-            <span>{market.category} - YES probability - {priceSource}</span>
+            <span>{market.category} - outcome probabilities - {priceSource}</span>
             <div className="qtv-indicator-legend">
               <span>Rows <b>{allPoints.length.toLocaleString('en-US')}</b></span>
               <span>Range <i>{pointLabel(primaryPoints[0], priceSource)}</i> <em>{pointLabel(primaryPoints[primaryPoints.length - 1], priceSource)}</em></span>
               <span>Volume <b>{volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></span>
+            </div>
+            <div className="qtv-outcome-legend">
+              {groupedOutcomes.slice(0, 8).map((group, index) => {
+                const point = group.points[group.points.length - 1];
+                return (
+                  <span key={group.label}>
+                    <i style={{ backgroundColor: SERIES_COLORS[index % SERIES_COLORS.length] }} />
+                    {group.label} <b>{fmtPrice(point?.close || 0)}</b>
+                  </span>
+                );
+              })}
             </div>
           </div>
           <div className="qtv-ohlc">
