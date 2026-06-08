@@ -275,11 +275,7 @@ export function QuantWorkspace() {
       void fetchQuantPriceMarkets(text, 40)
         .then((payload) => {
           const items = payload.items || [];
-          setQuantMarkets((current) => {
-            const existing = new Map(current.map((market) => [`${market.marketSlug}-${market.tokenSide}`, market]));
-            for (const item of items) existing.set(`${item.marketSlug}-${item.tokenSide}`, item);
-            return Array.from(existing.values()).slice(0, 80);
-          });
+          setQuantMarkets(items);
         })
         .catch(() => undefined);
     }, 300);

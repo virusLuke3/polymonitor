@@ -18,6 +18,10 @@ def get_quant_price_markets(
     search_text = (search or "").strip().lower()
     if search_text:
         text = f"%{search_text}%"
+        prefix_text = f"{search_text}%"
+        slug_prefix_text = f"{search_text}-%"
+        slug_token_text = f"%-{search_text}-%"
+        title_word_text = f"% {search_text} %"
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -27,11 +31,21 @@ def get_quant_price_markets(
                         md.market_slug,
                         md.market_title,
                         md.condition_id,
-                        md.end_date
+                        md.end_date,
+                        CASE
+                            WHEN lower(md.market_slug) = %s THEN 0
+                            WHEN lower(md.market_slug) LIKE %s THEN 1
+                            WHEN lower(md.market_slug) LIKE %s THEN 2
+                            WHEN lower(md.market_slug) LIKE %s THEN 3
+                            WHEN lower(md.market_title) = %s THEN 4
+                            WHEN lower(md.market_title) LIKE %s THEN 5
+                            WHEN lower(md.market_title) LIKE %s THEN 6
+                            ELSE 9
+                        END AS search_rank
                     FROM quant.market_token_metadata md
                     WHERE md.market_slug IS NOT NULL
                       AND (lower(md.market_slug) LIKE %s OR lower(md.market_title) LIKE %s)
-                    ORDER BY md.market_slug
+                    ORDER BY search_rank ASC, md.market_slug
                     LIMIT 200
                 )
                 SELECT
@@ -75,11 +89,19 @@ def get_quant_price_markets(
                       AND (%s::text IS NULL OR f.token_side = %s::text)
                 ) f ON TRUE
                 WHERE COALESCE(b.block_rows, 0) > 0 OR COALESCE(f.frontend_rows, 0) > 0
-                ORDER BY (COALESCE(b.block_rows, 0) + COALESCE(f.frontend_rows, 0)) DESC,
+                ORDER BY c.search_rank ASC,
+                         (COALESCE(b.block_rows, 0) + COALESCE(f.frontend_rows, 0)) DESC,
                          c.market_slug ASC
                 LIMIT %s
                 """,
                 [
+                    search_text,
+                    slug_prefix_text,
+                    prefix_text,
+                    slug_token_text,
+                    search_text,
+                    prefix_text,
+                    title_word_text,
                     text,
                     text,
                     token_side.upper() if token_side else None,
