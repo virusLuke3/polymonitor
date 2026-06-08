@@ -188,6 +188,32 @@ const MAJOR_COUNTRY_LABELS: CountryNameLabel[] = [
   { id: 'AR', name: 'ARGENTINA', lon: -64, lat: -36, kind: 'major', importance: 5, minZoom: 1.6 },
 ];
 
+const REGIONAL_DENSITY_SEEDS: Array<{
+  id: string;
+  lon: number;
+  lat: number;
+  radiusLon: number;
+  radiusLat: number;
+  count: number;
+  coolShare: number;
+  warmShare: number;
+}> = [
+  { id: 'japan-korea', lon: 138, lat: 36, radiusLon: 9.5, radiusLat: 5.5, count: 720, coolShare: 0.74, warmShare: 0.18 },
+  { id: 'china-coast', lon: 116, lat: 32, radiusLon: 15, radiusLat: 8.2, count: 860, coolShare: 0.72, warmShare: 0.2 },
+  { id: 'yangtze-pearl', lon: 114, lat: 26, radiusLon: 9, radiusLat: 5.2, count: 360, coolShare: 0.7, warmShare: 0.24 },
+  { id: 'western-europe', lon: 4, lat: 51, radiusLon: 13.5, radiusLat: 7.2, count: 760, coolShare: 0.7, warmShare: 0.2 },
+  { id: 'nordics-baltic', lon: 18, lat: 59, radiusLon: 11, radiusLat: 6.4, count: 340, coolShare: 0.82, warmShare: 0.1 },
+  { id: 'us-west-coast', lon: -122, lat: 39, radiusLon: 7.2, radiusLat: 9.5, count: 520, coolShare: 0.72, warmShare: 0.2 },
+  { id: 'us-east-corridor', lon: -76, lat: 39, radiusLon: 9.4, radiusLat: 6.4, count: 640, coolShare: 0.66, warmShare: 0.25 },
+  { id: 'us-midwest', lon: -88, lat: 41, radiusLon: 8.4, radiusLat: 5.2, count: 300, coolShare: 0.62, warmShare: 0.28 },
+  { id: 'gulf-mexico', lon: -96, lat: 25, radiusLon: 12, radiusLat: 5.8, count: 320, coolShare: 0.52, warmShare: 0.34 },
+  { id: 'india-plain', lon: 78, lat: 23, radiusLon: 14, radiusLat: 7.4, count: 520, coolShare: 0.56, warmShare: 0.3 },
+  { id: 'southeast-asia', lon: 106, lat: 10, radiusLon: 15.5, radiusLat: 9.5, count: 520, coolShare: 0.66, warmShare: 0.24 },
+  { id: 'middle-east', lon: 43, lat: 31, radiusLon: 12.5, radiusLat: 7.5, count: 340, coolShare: 0.48, warmShare: 0.36 },
+  { id: 'brazil-southeast', lon: -46, lat: -20, radiusLon: 9.5, radiusLat: 7.2, count: 260, coolShare: 0.58, warmShare: 0.28 },
+  { id: 'west-africa', lon: 2, lat: 9, radiusLon: 13, radiusLat: 8.5, count: 260, coolShare: 0.54, warmShare: 0.3 },
+];
+
 const COUNTRY_ISO2_ALIASES: Record<string, string> = {
   afghanistan: 'AF',
   algeria: 'DZ',
@@ -788,14 +814,34 @@ function jitteredDensityPoint(
 function buildSignalDensityPoints(cities: WeatherMapPoint[], conflicts: ConflictMapPoint[]): SignalDensityPoint[] {
   const points: SignalDensityPoint[] = [];
 
+  REGIONAL_DENSITY_SEEDS.forEach((seed) => {
+    for (let index = 0; index < seed.count; index += 1) {
+      const selector = hashUnit(`regional-density:${seed.id}:tone:${index}`);
+      const tone: SignalDensityPoint['tone'] = selector < seed.coolShare
+        ? 'cool'
+        : selector < seed.coolShare + seed.warmShare
+          ? 'warm'
+          : 'risk';
+      points.push(jitteredDensityPoint(
+        `regional-density:${seed.id}:${index}`,
+        seed.lon,
+        seed.lat,
+        seed.radiusLon,
+        seed.radiusLat,
+        tone,
+        0.45 + hashUnit(`regional-density:${seed.id}:w:${index}`) * 0.85,
+      ));
+    }
+  });
+
   cities.forEach((city) => {
     const quoted = Number(String(city.quoteCoverage || '0/0').split('/')[0]) || 0;
     const priceWeight = city.topBinPrice == null ? 0 : Math.min(1, Math.max(0, city.topBinPrice));
-    const baseCount = IMPORTANT_CITY_IDS.has(city.id) ? 22 : 9;
-    const signalCount = Math.min(34, baseCount + Math.round(quoted * 0.35) + Math.round(priceWeight * 9));
+    const baseCount = IMPORTANT_CITY_IDS.has(city.id) ? 26 : 11;
+    const signalCount = Math.min(38, baseCount + Math.round(quoted * 0.28) + Math.round(priceWeight * 7));
     const tone: SignalDensityPoint['tone'] = city.temperatureTone === 'cool'
       ? 'cool'
-      : city.temperatureTone === 'hot' || city.marketTone === 'market'
+      : city.temperatureTone === 'hot' && priceWeight > 0.62
         ? 'warm'
         : 'cool';
     for (let index = 0; index < signalCount; index += 1) {
@@ -816,7 +862,7 @@ function buildSignalDensityPoints(cities: WeatherMapPoint[], conflicts: Conflict
     .sort((a, b) => conflictPriority(b) - conflictPriority(a))
     .slice(0, 760)
     .forEach((conflict) => {
-      const severityCount = Math.min(12, 2 + Math.round(Math.log10(conflict.deaths + 2) * 3));
+      const severityCount = Math.min(8, 1 + Math.round(Math.log10(conflict.deaths + 2) * 2.2));
       const tone: SignalDensityPoint['tone'] = conflict.tone === 'onesided' ? 'risk' : conflict.tone === 'state' ? 'alert' : 'warm';
       for (let index = 0; index < severityCount; index += 1) {
         points.push(jitteredDensityPoint(
@@ -831,7 +877,7 @@ function buildSignalDensityPoints(cities: WeatherMapPoint[], conflicts: Conflict
       }
     });
 
-  return points.slice(0, 3200);
+  return points.slice(0, 7800);
 }
 
 function paddedBounds(map: MapLibreMap | null, padRatio = 0.18): [number, number, number, number] | null {
@@ -877,14 +923,14 @@ function countryRiskLabelPoint(risk: CountryRisk): CountryNameLabel | null {
     kind: 'risk',
     level: risk.level,
     score: risk.score,
-    importance: Math.max(4, Math.min(10, risk.score / 10)),
-    minZoom: risk.level === 'critical' ? 0 : risk.level === 'elevated' ? 1.2 : 2.2,
+    importance: Math.max(3, Math.min(8, risk.score / 12)),
+    minZoom: risk.level === 'critical' ? 0.8 : risk.level === 'elevated' ? 1.8 : 2.8,
   };
 }
 
 function buildCountryNameLabels(risks: CountryRisk[], zoom: number, bounds: [number, number, number, number] | null): CountryNameLabel[] {
-  const majorBudget = zoom < 1.4 ? 10 : zoom < 2.4 ? 16 : MAJOR_COUNTRY_LABELS.length;
-  const riskBudget = zoom < 1.4 ? 8 : zoom < 2.4 ? 14 : 26;
+  const majorBudget = zoom < 1.4 ? 9 : zoom < 2.4 ? 13 : MAJOR_COUNTRY_LABELS.length;
+  const riskBudget = zoom < 1.4 ? 4 : zoom < 2.4 ? 8 : 16;
   const labels = new Map<string, CountryNameLabel>();
 
   MAJOR_COUNTRY_LABELS
@@ -912,9 +958,9 @@ function pickCityLabels(points: WeatherMapPoint[], zoom: number, selectedCityId?
   if (zoom < 2.2 && !selectedCityId) {
     return points
       .filter((point) => IMPORTANT_CITY_IDS.has(point.id))
-      .slice(0, 12);
+      .slice(0, 8);
   }
-  const budget = zoom < 3.6 ? 18 : zoom < 5.2 ? 32 : 56;
+  const budget = zoom < 3.2 ? 12 : zoom < 5.2 ? 24 : 48;
   return points
     .filter((point) => shouldShowLabel(point, selectedCityId))
     .sort((a, b) => (
@@ -1039,13 +1085,13 @@ function buildWeatherDeckLayers({
       getPosition: (point) => [point.lon, point.lat],
       getRadius: (point) => 2600 + point.weight * 4200,
       getFillColor: (point) => {
-        if (point.tone === 'cool') return [40, 178, 228, 68];
-        if (point.tone === 'risk') return [236, 211, 64, 74];
-        if (point.tone === 'alert') return [255, 86, 76, 72];
-        return [255, 153, 35, 70];
+        if (point.tone === 'cool') return [41, 183, 232, 82];
+        if (point.tone === 'risk') return [235, 211, 58, 62];
+        if (point.tone === 'alert') return [255, 91, 76, 56];
+        return [255, 155, 42, 58];
       },
       radiusMinPixels: 0.9,
-      radiusMaxPixels: zoom < 3 ? 2.4 : 3.8,
+      radiusMaxPixels: zoom < 3 ? 2.2 : 3.4,
       pickable: false,
       stroked: false,
     }));
@@ -1058,15 +1104,15 @@ function buildWeatherDeckLayers({
       getPosition: (label) => [label.lon, label.lat],
       getText: (label) => label.name,
       getSize: (label) => label.kind === 'major'
-        ? Math.min(18, 9.5 + label.importance * 0.55)
-        : Math.min(14, 8.5 + Math.log10((label.score || 1) + 1) * 2.4),
+        ? Math.min(15.5, 8.8 + label.importance * 0.46)
+        : Math.min(11.5, 7.8 + Math.log10((label.score || 1) + 1) * 1.8),
       getColor: (label) => {
         if (label.kind === 'risk') {
-          if (label.level === 'critical') return [218, 82, 78, 175];
-          if (label.level === 'elevated') return [211, 132, 70, 165];
-          return [204, 184, 83, 150];
+          if (label.level === 'critical') return [170, 158, 150, 132];
+          if (label.level === 'elevated') return [160, 154, 145, 118];
+          return [148, 148, 138, 105];
         }
-        return [166, 178, 184, 132];
+        return [164, 174, 180, 118];
       },
       getTextAnchor: 'middle',
       getAlignmentBaseline: 'center',
@@ -1104,12 +1150,12 @@ function buildWeatherDeckLayers({
       getPosition: (point) => [point.lon, point.lat],
       getText: (point) => `${point.city}\n${point.sublabel}`,
       getPixelOffset: (point) => [point.labelDx + 8, point.labelDy - 2],
-      getSize: (point) => point.id === selectedCityId ? 12 : 9.5,
+      getSize: (point) => point.id === selectedCityId ? 11.5 : 8.8,
       getColor: (point) => point.temperatureTone === 'hot'
-        ? [226, 145, 94, 205]
+        ? [214, 135, 86, 182]
         : point.temperatureTone === 'cool'
-          ? [112, 206, 196, 205]
-          : [122, 190, 220, 198],
+          ? [104, 196, 190, 184]
+          : [118, 178, 208, 174],
       getTextAnchor: 'start',
       getAlignmentBaseline: 'center',
       fontFamily: 'monospace',
@@ -1125,24 +1171,27 @@ function buildWeatherDeckLayers({
       id: 'ucdp-conflict-clusters',
       data: conflictClusters,
       getPosition: (cluster) => [cluster.lon, cluster.lat],
-      getRadius: (cluster) => Math.max(52000, Math.log2(cluster.count + 1) * 43000),
-      getFillColor: (cluster) => hexToRgba(cluster.color, 105),
-      getLineColor: (cluster) => hexToRgba(cluster.color, 185),
-      getLineWidth: 1.25,
-      radiusMinPixels: 6,
-      radiusMaxPixels: 24,
+      getRadius: (cluster) => Math.max(39000, Math.log2(cluster.count + 1) * 32000),
+      getFillColor: (cluster) => hexToRgba(cluster.color, 74),
+      getLineColor: (cluster) => hexToRgba(cluster.color, 132),
+      getLineWidth: 1,
+      radiusMinPixels: 4.5,
+      radiusMaxPixels: 18,
       lineWidthMinPixels: 1,
       pickable: true,
       autoHighlight: true,
       highlightColor: [255, 255, 180, 80],
     }));
+  }
+
+  if (conflictClusters.length && zoom < 2.75) {
     layers.push(new TextLayer<ConflictClusterPoint>({
       id: 'ucdp-conflict-cluster-counts',
       data: conflictClusters,
       getPosition: (cluster) => [cluster.lon, cluster.lat],
       getText: (cluster) => String(cluster.count),
-      getSize: 10,
-      getColor: [235, 218, 184, 210],
+      getSize: 8.5,
+      getColor: [224, 210, 186, 162],
       getTextAnchor: 'middle',
       getAlignmentBaseline: 'center',
       fontFamily: 'monospace',
