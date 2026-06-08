@@ -145,6 +145,7 @@ export function QuantWorkspace() {
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const [marketSlug, setMarketSlug] = useState(defaultMarketSlug);
   const [marketSearchQuery, setMarketSearchQuery] = useState('');
+  const [marketReloadKey, setMarketReloadKey] = useState(0);
   const [backtestStatus, setBacktestStatus] = useState('idle');
   const [performanceSearch, setPerformanceSearch] = useState('');
   const [performanceSortKey, setPerformanceSortKey] = useState<PerformanceSortKey>('metric');
@@ -291,6 +292,7 @@ export function QuantWorkspace() {
       || null;
     setMarketSlug(nextSlug);
     setMarketSearchQuery('');
+    setMarketReloadKey((current) => current + 1);
     setSelectedMarketMeta(nextMarket);
     setFrontendRows([]);
     setBlockRows([]);
@@ -341,7 +343,7 @@ export function QuantWorkspace() {
       });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [marketSlug, priceSource, timeframe]);
+  }, [marketReloadKey, marketSlug, priceSource, timeframe]);
 
   const filteredPerformanceRows = useMemo(() => {
     const queryText = performanceSearch.trim().toLowerCase();
