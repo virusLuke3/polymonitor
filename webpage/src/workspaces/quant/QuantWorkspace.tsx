@@ -144,7 +144,7 @@ export function QuantWorkspace() {
   const [deepBacktest, setDeepBacktest] = useState(false);
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const [marketSlug, setMarketSlug] = useState(defaultMarketSlug);
-  const [marketSearchQuery, setMarketSearchQuery] = useState(defaultMarketSlug);
+  const [marketSearchQuery, setMarketSearchQuery] = useState('');
   const [backtestStatus, setBacktestStatus] = useState('idle');
   const [performanceSearch, setPerformanceSearch] = useState('');
   const [performanceSortKey, setPerformanceSortKey] = useState<PerformanceSortKey>('metric');
@@ -290,7 +290,7 @@ export function QuantWorkspace() {
       || quantMarkets.find((market) => market.marketSlug === nextSlug)
       || null;
     setMarketSlug(nextSlug);
-    setMarketSearchQuery(nextSlug);
+    setMarketSearchQuery('');
     setSelectedMarketMeta(nextMarket);
     setFrontendRows([]);
     setBlockRows([]);
@@ -315,7 +315,6 @@ export function QuantWorkspace() {
           setMarketSearchStatus(items.length ? 'ready' : 'empty');
           if (!marketSlug.trim() && !text && items[0]?.marketSlug) {
             setMarketSlug(items[0].marketSlug);
-            setMarketSearchQuery(items[0].marketSlug);
             setSelectedMarketMeta(items[0]);
           }
         })
@@ -329,7 +328,7 @@ export function QuantWorkspace() {
         });
     }, text ? 180 : 0);
     return () => window.clearTimeout(timer);
-  }, [marketSearchQuery, marketSlug]);
+  }, [marketSearchQuery]);
 
   useEffect(() => {
     if (!marketSlug.trim()) return;
@@ -426,6 +425,7 @@ export function QuantWorkspace() {
         backtestEngine={backtestEngine}
         loading={loading}
         marketOptions={quantMarkets}
+        selectedMarket={selectedMarket}
         marketSearchStatus={marketSearchStatus}
         onMarketSlugChange={selectMarketSlug}
         onMarketQueryChange={setMarketSearchQuery}

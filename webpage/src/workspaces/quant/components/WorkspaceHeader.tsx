@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { QuantPriceMarket } from '@/types';
 import type { BacktestEngine, DataStatus, PriceSource } from '../types';
 import './WorkspaceHeader.css';
@@ -11,6 +11,7 @@ type WorkspaceHeaderProps = {
   backtestEngine: BacktestEngine;
   loading: boolean;
   marketOptions: QuantPriceMarket[];
+  selectedMarket?: QuantPriceMarket;
   marketSearchStatus: DataStatus;
   onMarketSlugChange: (value: string) => void;
   onMarketQueryChange: (value: string) => void;
@@ -30,6 +31,7 @@ export function WorkspaceHeader({
   backtestEngine,
   loading,
   marketOptions,
+  selectedMarket: selectedMarketProp,
   marketSearchStatus,
   onMarketSlugChange,
   onMarketQueryChange,
@@ -41,33 +43,48 @@ export function WorkspaceHeader({
   onExport,
 }: WorkspaceHeaderProps) {
   const [marketMenuOpen, setMarketMenuOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const marketChoices = useMemo(() => {
     const choices = new Map<string, QuantPriceMarket>();
+    if (selectedMarketProp?.marketSlug) choices.set(selectedMarketProp.marketSlug, selectedMarketProp);
     for (const market of marketOptions) {
       const current = choices.get(market.marketSlug);
       if (!current || market.tokenSide === 'YES') choices.set(market.marketSlug, market);
     }
-    return Array.from(choices.values()).slice(0, 24);
-  }, [marketOptions]);
+    return Array.from(choices.values()).slice(0, 40);
+  }, [marketOptions, selectedMarketProp]);
   const selectedMarket = useMemo(
-    () => marketChoices.find((market) => market.marketSlug === marketSlug),
-    [marketChoices, marketSlug],
+    () => selectedMarketProp || marketChoices.find((market) => market.marketSlug === marketSlug),
+    [marketChoices, marketSlug, selectedMarketProp],
   );
   const activeSearchText = marketQuery.trim();
-  const isSearchingNewText = marketSearchStatus === 'loading' && Boolean(activeSearchText) && activeSearchText !== marketSlug;
-  const hasSearchError = marketSearchStatus === 'error' && Boolean(activeSearchText) && activeSearchText !== marketSlug;
+  const isSearching = marketSearchStatus === 'loading';
+  const hasSearchError = marketSearchStatus === 'error';
+
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [marketQuery, marketOptions]);
 
   const chooseMarket = (slug: string) => {
     onMarketSlugChange(slug);
-    onMarketQueryChange(slug);
+    onMarketQueryChange('');
     setMarketMenuOpen(false);
   };
 
-  const chooseFirstMarket = () => {
-    if (isSearchingNewText) return;
-    const firstSlug = marketChoices[0]?.marketSlug;
-    if (firstSlug) chooseMarket(firstSlug);
+  const chooseHighlightedMarket = () => {
+    const highlightedSlug = marketChoices[Math.min(highlightedIndex, marketChoices.length - 1)]?.marketSlug;
+    if (highlightedSlug) chooseMarket(highlightedSlug);
   };
+
+  const moveHighlight = (delta: number) => {
+    setHighlightedIndex((current) => {
+      if (!marketChoices.length) return 0;
+      return (current + delta + marketChoices.length) % marketChoices.length;
+    });
+  };
+
+  const selectedRows = Number(selectedMarket?.blockRows || selectedMarket?.frontendRows || 0);
+  const selectedSubtitle = selectedMarket?.marketSlug || marketSlug || 'No market selected';
 
   return (
     <header className="qtv-topbar">
@@ -75,10 +92,13 @@ export function WorkspaceHeader({
         <a className="qtv-logo" href="/">POLYDATA</a>
         <button type="button" title="Menu">Menu</button>
         <div
-          className="qtv-symbol-search qtv-market-combobox"
+          className={`qtv-market-command ${marketMenuOpen ? 'open' : ''}`}
           onBlur={() => window.setTimeout(() => setMarketMenuOpen(false), 120)}
+          role="combobox"
+          aria-expanded={marketMenuOpen}
+          aria-haspopup="listbox"
         >
-          <span>Search</span>
+          <span className="qtv-command-label">Search</span>
           <input
             value={marketQuery}
             onFocus={() => setMarketMenuOpen(true)}
@@ -87,59 +107,90 @@ export function WorkspaceHeader({
               setMarketMenuOpen(true);
             }}
             onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setMarketMenuOpen(true);
+                moveHighlight(1);
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setMarketMenuOpen(true);
+                moveHighlight(-1);
+              }
               if (event.key === 'Enter') {
                 event.preventDefault();
-                chooseFirstMarket();
+                chooseHighlightedMarket();
               }
               if (event.key === 'Escape') setMarketMenuOpen(false);
             }}
-            placeholder="Search market"
+            placeholder="Search markets, slugs, token IDs..."
+            aria-autocomplete="list"
+            aria-controls="quant-market-search-results"
           />
           <button
-            className="qtv-market-menu-toggle"
+            className="qtv-command-toggle"
             type="button"
-            title="Open market list"
+            title="Open market search"
             onClick={() => setMarketMenuOpen((current) => !current)}
           >
             ▾
           </button>
           {marketMenuOpen ? (
-            <div className="qtv-market-menu" role="listbox">
-              {isSearchingNewText ? (
+            <div id="quant-market-search-results" className="qtv-market-palette" role="listbox">
+              <div className="qtv-palette-head">
+                <strong>{activeSearchText ? 'Search markets' : 'Recent quant markets'}</strong>
+                <span>{activeSearchText || 'Markets with block close coverage'}</span>
+              </div>
+              {isSearching ? (
                 <div className="qtv-market-menu-empty">
-                  <strong>Searching markets</strong>
-                  <span>{activeSearchText}</span>
+                  <strong>Searching markets...</strong>
+                  <span>{activeSearchText || 'Loading recent markets'}</span>
                 </div>
               ) : hasSearchError ? (
                 <div className="qtv-market-menu-empty">
-                  <strong>Search unavailable</strong>
-                  <span>Try again or select an existing market.</span>
+                  <strong>Failed to load markets</strong>
+                  <span>Retry by editing the query.</span>
                 </div>
-              ) : marketChoices.length ? marketChoices.map((market) => (
+              ) : marketChoices.length ? marketChoices.map((market, index) => (
                 <button
                   key={market.marketSlug}
-                  className={market.marketSlug === marketSlug ? 'active' : ''}
+                  className={`${market.marketSlug === marketSlug ? 'selected' : ''} ${index === highlightedIndex ? 'highlighted' : ''}`}
                   type="button"
                   role="option"
                   aria-selected={market.marketSlug === marketSlug}
+                  id={`quant-market-option-${index}`}
                   onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setHighlightedIndex(index)}
                   onClick={() => chooseMarket(market.marketSlug)}
                 >
-                  <strong>{market.marketTitle || market.marketSlug}</strong>
-                  <span>{market.marketSlug}</span>
-                  <em>{Number(market.blockRows || 0).toLocaleString('en-US')} block rows</em>
+                  <i aria-hidden="true">{market.marketSlug === marketSlug ? '✓' : ''}</i>
+                  <span className="qtv-result-main">
+                    <strong>{market.marketTitle || market.marketSlug}</strong>
+                    <small>{market.marketSlug}</small>
+                    <em>
+                      Range {market.firstBlock ? `block ${Number(market.firstBlock).toLocaleString('en-US')}` : '-'}
+                      {market.lastBlock ? ` - ${Number(market.lastBlock).toLocaleString('en-US')}` : ''}
+                      {' · YES probability'}
+                    </em>
+                  </span>
+                  <span className="qtv-result-meta">
+                    <b>{Number(market.blockRows || market.frontendRows || 0).toLocaleString('en-US')} rows</b>
+                    <small>{market.endDate ? 'Active/dated' : 'Quant'}</small>
+                  </span>
                 </button>
               )) : (
                 <div className="qtv-market-menu-empty">
                   <strong>No matching markets</strong>
-                  <span>{activeSearchText || 'Only markets with quant rows are listed.'}</span>
+                  <span>{activeSearchText ? `No markets found for ${activeSearchText}` : 'Only markets with quant rows are listed.'}</span>
                 </div>
               )}
             </div>
           ) : null}
         </div>
-        <button className="qtv-selected-market" type="button" title={marketSlug} onClick={() => setMarketMenuOpen(true)}>
-          {selectedMarket?.marketTitle || marketSlug || 'Select market'}
+        <button className="qtv-selected-market" type="button" title={selectedSubtitle} onClick={() => setMarketMenuOpen(true)}>
+          <strong>{selectedMarket?.marketTitle || marketSlug || 'Select market'}</strong>
+          <span>{selectedSubtitle}</span>
+          {selectedRows ? <em>{selectedRows.toLocaleString('en-US')} rows</em> : null}
         </button>
         <button type="button" title="Add market">+</button>
         <div className="qtv-timeframes">
