@@ -684,7 +684,11 @@ def get_event_price_tile(
     source = "orderfilled_block_close" if price_source == "orderfilled_block_close" else "frontend"
     top_n = max(1, min(int(top_n or 12), int(max_outcomes or 100)))
     max_points = max(50, min(int(max_points or 600), 2500))
-    source_limit = min(int(limit or 2500), max(250, max_points * 2))
+    normalized_range = str(tile_range or "latest").strip().lower()
+    if normalized_range in {"all", "full"}:
+        source_limit = min(max(int(limit or 25000), max_points * 8), 250000)
+    else:
+        source_limit = min(int(limit or 2500), max(250, max_points * 2))
     with conn.cursor() as cur:
         cur.execute("SELECT * FROM quant.market_event_metadata WHERE event_slug = %s", (event_slug,))
         event = dict(cur.fetchone() or {})

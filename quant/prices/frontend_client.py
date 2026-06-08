@@ -86,6 +86,33 @@ class FrontendPriceClient:
                 points[parsed.timestamp] = parsed
         return [points[key] for key in sorted(points)]
 
+    def fetch_prices_history_interval(
+        self,
+        token_id: str,
+        *,
+        interval: str = "all",
+        fidelity_minutes: int = 60,
+    ) -> list[FrontendPricePoint]:
+        response = self.session.get(
+            f"{self.clob_api_base}/prices-history",
+            params={
+                "market": str(token_id),
+                "interval": str(interval or "all"),
+                "fidelity": int(fidelity_minutes),
+            },
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json() if response.content else {}
+        history = payload.get("history", []) if isinstance(payload, dict) else []
+        points: dict[int, FrontendPricePoint] = {}
+        for item in history:
+            parsed = normalize_price_history_item(item)
+            if parsed is None:
+                continue
+            points[parsed.timestamp] = parsed
+        return [points[key] for key in sorted(points)]
+
     def fetch_segmented_prices_history(
         self,
         token_id: str,

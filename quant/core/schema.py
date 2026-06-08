@@ -156,6 +156,26 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS quant.quant_price_series_tiles (
+        tile_key TEXT PRIMARY KEY,
+        scope TEXT NOT NULL,
+        entity_slug TEXT NOT NULL,
+        price_source TEXT NOT NULL,
+        range_name TEXT NOT NULL,
+        resolution TEXT NOT NULL,
+        top_n INTEGER NOT NULL,
+        max_points INTEGER NOT NULL,
+        payload JSONB NOT NULL,
+        payload_bytes BIGINT NOT NULL DEFAULT 0,
+        row_count BIGINT NOT NULL DEFAULT 0,
+        data_min_x BIGINT,
+        data_max_x BIGINT,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS quant.market_price_build_runs (
         run_id BIGSERIAL PRIMARY KEY,
         source TEXT NOT NULL,
@@ -411,6 +431,8 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_event_members_market ON quant.market_event_members (market_id)",
     "CREATE INDEX IF NOT EXISTS idx_quant_event_members_coverage ON quant.market_event_members (event_slug, coverage_status, outcome_order)",
     "CREATE INDEX IF NOT EXISTS idx_quant_event_members_active ON quant.market_event_members (active, closed, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_price_series_tiles_lookup ON quant.quant_price_series_tiles (scope, entity_slug, price_source, range_name, resolution, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_price_series_tiles_expiry ON quant.quant_price_series_tiles (expires_at)",
 )
 
 

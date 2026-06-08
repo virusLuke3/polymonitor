@@ -355,6 +355,16 @@ export function fetchQuantEventPriceSeries(query: QuantPriceQuery & { eventSlug?
   return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-tile?${params.toString()}`, 45000);
 }
 
+export function quantEventPriceStreamUrl(query: QuantPriceQuery & { eventSlug?: string; priceSource?: string; maxOutcomes?: number; interval?: number } = {}) {
+  const params = new URLSearchParams();
+  const eventSlug = query.eventSlug || query.marketSlug;
+  if (eventSlug?.trim()) params.set('event_slug', eventSlug.trim());
+  if (query.priceSource?.trim()) params.set('price_source', query.priceSource.trim());
+  params.set('max_outcomes', String(query.maxOutcomes || 24));
+  params.set('interval', String(query.interval || 5));
+  return `${API_BASE}/quant/event-price-stream?${params.toString()}`;
+}
+
 export function fetchQuantBuildStatus(source = '', limit = 24) {
   const params = new URLSearchParams({ limit: String(limit) });
   if (source.trim()) params.set('source', source.trim());

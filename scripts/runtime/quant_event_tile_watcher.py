@@ -187,6 +187,74 @@ class QuantEventTileWatcher:
         serialized = json.dumps(payload, ensure_ascii=True, default=str)
         self.snapshot_store.set(NAMESPACE, cache_key, payload, self.ttl_seconds)
         self.redis_client.set(_redis_key(self.redis_prefix, NAMESPACE, cache_key), serialized, ex=self.ttl_seconds)
+        points = [
+            point
+            for outcome in payload.get("outcomes") or []
+            for series_name in ("points", "complementPoints")
+            for point in outcome.get(series_name) or []
+            if isinstance(point, dict)
+        ]
+        x_values = [int(point.get("x") or point.get("blockNumber") or point.get("timestamp") or 0) for point in points]
+        with postgres_connection(PostgresSettings(), readonly=False) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS quant.quant_price_series_tiles (
+                        tile_key TEXT PRIMARY KEY,
+                        scope TEXT NOT NULL,
+                        entity_slug TEXT NOT NULL,
+                        price_source TEXT NOT NULL,
+                        range_name TEXT NOT NULL,
+                        resolution TEXT NOT NULL,
+                        top_n INTEGER NOT NULL,
+                        max_points INTEGER NOT NULL,
+                        payload JSONB NOT NULL,
+                        payload_bytes BIGINT NOT NULL DEFAULT 0,
+                        row_count BIGINT NOT NULL DEFAULT 0,
+                        data_min_x BIGINT,
+                        data_max_x BIGINT,
+                        expires_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    INSERT INTO quant.quant_price_series_tiles (
+                        tile_key, scope, entity_slug, price_source, range_name, resolution,
+                        top_n, max_points, payload, payload_bytes, row_count,
+                        data_min_x, data_max_x, expires_at
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s,
+                        now() + (%s::text || ' seconds')::interval
+                    )
+                    ON CONFLICT (tile_key) DO UPDATE SET
+                        payload = EXCLUDED.payload,
+                        payload_bytes = EXCLUDED.payload_bytes,
+                        row_count = EXCLUDED.row_count,
+                        data_min_x = EXCLUDED.data_min_x,
+                        data_max_x = EXCLUDED.data_max_x,
+                        expires_at = EXCLUDED.expires_at,
+                        updated_at = now()
+                    """,
+                    (
+                        cache_key,
+                        "event",
+                        event_slug,
+                        self.price_source,
+                        self.tile_range,
+                        self.resolution,
+                        self.top_n,
+                        self.max_points,
+                        serialized,
+                        len(serialized),
+                        len(points),
+                        min(x_values) if x_values else None,
+                        max(x_values) if x_values else None,
+                        self.ttl_seconds,
+                    ),
+                )
 
     def store_seed_meta(self, *, status: str, record_count: int, error_summary: str | None, metadata: dict[str, Any]) -> None:
         attempted_at = utc_now_iso()

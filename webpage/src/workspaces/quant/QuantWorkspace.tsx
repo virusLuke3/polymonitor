@@ -11,9 +11,10 @@ import {
   fetchQuantPriceEvents,
   fetchQuantPriceMarkets,
   isAbortLikeError,
+  quantEventPriceStreamUrl,
   type QuantPriceQuery,
 } from '@/services/api';
-import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantPriceMarket } from '@/types';
+import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
@@ -40,6 +41,7 @@ const DEFAULT_QUANT_EVENT_SLUG = '2026-fifa-world-cup-winner-595';
 const DEFAULT_QUANT_EVENT_TITLE = '2026 FIFA World Cup Winner';
 const EVENT_TILE_OUTCOME_LIMIT = 12;
 const EVENT_TILE_MAX_POINTS = 240;
+const EVENT_TILE_FULL_MAX_POINTS = 900;
 
 function formatBlockNumber(value: number | undefined) {
   return Number.isFinite(value) ? Math.round(Number(value)).toLocaleString('en-US') : '--';
@@ -57,8 +59,18 @@ function defaultEntityKind() {
   return 'event';
 }
 
+function defaultPriceSource(): PriceSource {
+  const params = new URLSearchParams(window.location.search);
+  const source = `${params.get('source') || params.get('price_source') || ''}`.toLowerCase();
+  return source.includes('orderfilled') || source.includes('block') ? 'orderfilled' : 'frontend';
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function chartRangeFromTimeframe(timeframe: string) {
+  return timeframe === '25000' ? 'full' : 'latest';
 }
 
 async function waitForRun(runId: number, onStatus: (run: QuantBacktestRun) => void) {
@@ -131,6 +143,21 @@ type OutcomeSortKey = 'order' | 'probability' | 'rows' | 'volume';
 type RefreshQuantRowsOptions = {
   silent?: boolean;
 };
+type EventPriceStreamOutcome = {
+  tokenId?: string | null;
+  outcomeLabel?: string | null;
+  buyYesPrice?: string | number | null;
+  buyNoPrice?: string | number | null;
+  latestPrice?: string | number | null;
+  lastX?: string | number | null;
+  rows?: string | number | null;
+};
+type EventPriceStreamPayload = {
+  eventSlug?: string;
+  priceSource?: string;
+  updatedAt?: string;
+  outcomes?: EventPriceStreamOutcome[];
+};
 
 function outcomePricePoints(outcome: QuantMarketSeriesOutcome | null | undefined, action: BacktestAction = 'YES') {
   const points = action === 'NO' ? outcome?.complementPoints || [] : outcome?.points || [];
@@ -148,6 +175,52 @@ function outcomePricePoints(outcome: QuantMarketSeriesOutcome | null | undefined
 function defaultOutcomeTokenId(outcomes: QuantMarketSeriesOutcome[]) {
   const sorted = outcomes.slice().sort((left, right) => toNumber(right.latestPrice) - toNumber(left.latestPrice));
   return sorted[0]?.tokenId || outcomes[0]?.tokenId || '';
+}
+
+function appendStreamPoint(points: QuantMarketSeriesPoint[] | undefined, x: number, price: string | number | null | undefined, tokenId: string | null | undefined, tokenSide: string | null | undefined) {
+  if (!Number.isFinite(x) || price === null || price === undefined) return points || [];
+  const current = points || [];
+  const last = current[current.length - 1];
+  const lastX = Number(last?.x ?? last?.blockNumber ?? last?.timestamp);
+  if (Number.isFinite(lastX) && x <= lastX) return current;
+  return [
+    ...current,
+    {
+      x,
+      blockNumber: x,
+      tokenId,
+      tokenSide,
+      price,
+      volume: 0,
+      isImplied: false,
+    },
+  ];
+}
+
+function mergeEventPriceStream(current: QuantMarketSeriesPayload | null, update: EventPriceStreamPayload): QuantMarketSeriesPayload | null {
+  if (!current?.outcomes?.length || !update.outcomes?.length) return current;
+  const latestByToken = new Map(update.outcomes.map((outcome) => [String(outcome.tokenId || ''), outcome]));
+  return {
+    ...current,
+    outcomes: current.outcomes.map((outcome) => {
+      const latest = latestByToken.get(String(outcome.tokenId || ''));
+      if (!latest) return outcome;
+      const lastX = Number(latest.lastX);
+      const nextPoints = appendStreamPoint(outcome.points, lastX, latest.latestPrice ?? latest.buyYesPrice, outcome.buyYesTokenId || outcome.tokenId, outcome.buyYesTokenSide || outcome.tokenSide);
+      const nextComplementPoints = appendStreamPoint(outcome.complementPoints, lastX, latest.buyNoPrice, outcome.buyNoTokenId, outcome.buyNoTokenSide || 'NO');
+      return {
+        ...outcome,
+        buyYesPrice: latest.buyYesPrice ?? outcome.buyYesPrice,
+        buyNoPrice: latest.buyNoPrice ?? outcome.buyNoPrice,
+        latestPrice: latest.latestPrice ?? latest.buyYesPrice ?? outcome.latestPrice,
+        lastX: latest.lastX ?? outcome.lastX,
+        rows: toNumber(latest.rows ?? outcome.rows),
+        points: nextPoints,
+        complementPoints: nextComplementPoints,
+        complementRows: nextComplementPoints.length || outcome.complementRows,
+      };
+    }),
+  };
 }
 
 function isClosedStatus(status: unknown) {
@@ -221,7 +294,7 @@ export function QuantWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [timeframe, setTimeframe] = useState('2500');
-  const [priceSource, setPriceSource] = useState<PriceSource>('orderfilled');
+  const [priceSource, setPriceSource] = useState<PriceSource>(defaultPriceSource);
   const [backtestEngine, setBacktestEngine] = useState<BacktestEngine>('backtrader');
   const [testerTab, setTesterTab] = useState<TesterTab>('overview');
   const [deepBacktest, setDeepBacktest] = useState(false);
@@ -285,6 +358,7 @@ export function QuantWorkspace() {
     const parsed = Number(timeframe);
     return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
   }, [timeframe]);
+  const chartRange = chartRangeFromTimeframe(timeframe);
   const semanticChartQuery: QuantPriceQuery & { priceSource: string; scope: string; maxOutcomes: number; topN?: number; maxPoints?: number } = {
     marketSlug,
     priceSource: backendPriceSource(priceSource),
@@ -292,7 +366,9 @@ export function QuantWorkspace() {
     limit: chartLimit,
     maxOutcomes: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
     topN: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
-    maxPoints: selectedEntityKind === 'event' ? EVENT_TILE_MAX_POINTS : undefined,
+    maxPoints: selectedEntityKind === 'event' ? (chartRange === 'full' ? EVENT_TILE_FULL_MAX_POINTS : EVENT_TILE_MAX_POINTS) : undefined,
+    range: selectedEntityKind === 'event' ? chartRange : undefined,
+    resolution: selectedEntityKind === 'event' ? 'auto' : undefined,
   };
   const priceRequestKey = [
     selectedEntityKind,
@@ -642,6 +718,37 @@ export function QuantWorkspace() {
     }, intervalMs);
     return () => window.clearInterval(timer);
   }, [livePriceRefreshEnabled, marketSlug, priceSource, timeframe, selectedOutcomeTokenId, selectedBacktestAction, selectedEntityKind]);
+
+  useEffect(() => {
+    if (!livePriceRefreshEnabled || selectedEntityKind !== 'event' || !marketSlug.trim() || typeof EventSource === 'undefined') return undefined;
+    const stream = new EventSource(quantEventPriceStreamUrl({
+      eventSlug: marketSlug,
+      priceSource: backendPriceSource(priceSource),
+      maxOutcomes: EVENT_TILE_OUTCOME_LIMIT,
+      interval: priceSource === 'frontend' ? 15 : 5,
+    }));
+    const onPrice = (event: MessageEvent) => {
+      try {
+        const update = JSON.parse(String(event.data || '{}')) as EventPriceStreamPayload;
+        setMarketSeries((current) => {
+          const merged = mergeEventPriceStream(current, update);
+          if (merged) priceSeriesCacheRef.current.set(priceRequestKey, merged);
+          return merged;
+        });
+        setLastPriceRefreshAt(new Date().toLocaleTimeString());
+      } catch (streamError) {
+        if (import.meta.env.DEV) console.debug('[quant] event price stream parse failed', streamError);
+      }
+    };
+    stream.addEventListener('price', onPrice as EventListener);
+    stream.onerror = () => {
+      if (import.meta.env.DEV) console.debug('[quant] event price stream disconnected');
+    };
+    return () => {
+      stream.removeEventListener('price', onPrice as EventListener);
+      stream.close();
+    };
+  }, [livePriceRefreshEnabled, marketSlug, priceRequestKey, priceSource, selectedEntityKind]);
 
   useEffect(() => {
     const outcomes = marketSeries?.outcomes || [];

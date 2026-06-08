@@ -5,9 +5,10 @@ from decimal import Decimal
 import json
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -237,6 +238,26 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             set_cached_json(namespace, cache_key, payload, ttl_seconds)
         return payload
 
+    def _load_persistent_tile(cache_key: str) -> dict[str, Any] | None:
+        try:
+            with postgres_connection(PostgresSettings(), readonly=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT payload
+                        FROM quant.quant_price_series_tiles
+                        WHERE tile_key = %s
+                          AND (expires_at IS NULL OR expires_at > now())
+                        LIMIT 1
+                        """,
+                        (cache_key,),
+                    )
+                    row = cur.fetchone()
+        except Exception:
+            return None
+        payload = row.get("payload") if row else None
+        return payload if isinstance(payload, dict) else None
+
     @bp.route("/markets", methods=["GET"])
     def api_quant_price_markets():
         limit = min(max(_parse_int_arg("limit", 50) or 50, 1), 200)
@@ -365,6 +386,9 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         cache_key = _cache_key("event-price-tile", version=1)
 
         def build_payload() -> dict[str, Any]:
+            persisted = _load_persistent_tile(cache_key)
+            if persisted is not None:
+                return persisted
             with postgres_connection(PostgresSettings(), readonly=True) as conn:
                 payload = get_event_price_tile(
                     conn,
@@ -384,6 +408,67 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             return _camel_row(_apply_point_payload_format(payload, point_format))
 
         return jsonify(_cached_quant_payload("quant-event-tile", cache_key, 45, build_payload, snapshot=True))
+
+    @bp.route("/event-price-stream", methods=["GET"])
+    def api_quant_event_price_stream():
+        event_slug = (request.args.get("event_slug") or request.args.get("market_slug") or "").strip()
+        if not event_slug:
+            return jsonify({"error": "event_slug is required"}), 400
+        price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
+        interval_seconds = min(max(_parse_int_arg("interval", 5) or 5, 2), 60)
+        max_outcomes = min(max(_parse_int_arg("max_outcomes", 24) or 24, 1), 100)
+
+        def build_latest_payload() -> dict[str, Any]:
+            with postgres_connection(PostgresSettings(), readonly=True) as conn:
+                payload = get_event_price_tile(
+                    conn,
+                    event_slug=event_slug,
+                    price_source=price_source,
+                    limit=1,
+                    max_outcomes=max_outcomes,
+                    top_n=max_outcomes,
+                    max_points=50,
+                    tile_range="latest",
+                    resolution="latest",
+                )
+            payload = _camel_row(_apply_point_payload_format(payload, "lite"))
+            return {
+                "eventSlug": event_slug,
+                "priceSource": price_source,
+                "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "outcomes": [
+                    {
+                        "tokenId": outcome.get("tokenId"),
+                        "outcomeLabel": outcome.get("outcomeLabel"),
+                        "buyYesPrice": outcome.get("buyYesPrice"),
+                        "buyNoPrice": outcome.get("buyNoPrice"),
+                        "latestPrice": outcome.get("latestPrice"),
+                        "lastX": outcome.get("lastX"),
+                        "rows": outcome.get("rows"),
+                    }
+                    for outcome in payload.get("outcomes") or []
+                ],
+            }
+
+        @stream_with_context
+        def generate():
+            last_serialized = ""
+            while True:
+                try:
+                    serialized = json.dumps(build_latest_payload(), ensure_ascii=True, default=str)
+                    if serialized != last_serialized:
+                        last_serialized = serialized
+                        yield f"event: price\\ndata: {serialized}\\n\\n"
+                    else:
+                        yield ": keepalive\\n\\n"
+                except GeneratorExit:
+                    return
+                except Exception as exc:
+                    serialized_error = json.dumps({"error": str(exc), "eventSlug": event_slug}, ensure_ascii=True)
+                    yield f"event: error\\ndata: {serialized_error}\\n\\n"
+                time.sleep(interval_seconds)
+
+        return Response(generate(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @bp.route("/price-build-status", methods=["GET"])
     def api_quant_price_build_status():
