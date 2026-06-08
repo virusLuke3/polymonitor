@@ -727,16 +727,16 @@ def _interleave_group_categories(groups: List[Dict[str, Any]], page_size: int) -
 
 
 def _limit_group_category_dominance(groups: List[Dict[str, Any]], page_size: int) -> List[Dict[str, Any]]:
-    """Preserve DB impact rank while preventing high-frequency sports/games from owning the first screen."""
+    """Preserve impact rank while keeping the first screen diverse across categories."""
     if not groups:
         return groups
     page_size = max(1, int(page_size))
-    noisy_buckets = {"sports", "games"}
-    noisy_limit = max(2, min(4, page_size // 5))
+    first_screen_limit = min(page_size, 24)
+    category_limit = max(2, min(4, max(1, first_screen_limit // 6)))
     selected: List[Dict[str, Any]] = []
     deferred: List[Dict[str, Any]] = []
     seen: set[str] = set()
-    noisy_count = 0
+    bucket_counts: Dict[str, int] = {}
     for group in groups:
         bucket = _group_category_bucket(group)
         if bucket == "placeholder":
@@ -744,14 +744,13 @@ def _limit_group_category_dominance(groups: List[Dict[str, Any]], page_size: int
         key = str(group.get("eventId") or group.get("groupId") or group.get("slug") or "")
         if key and key in seen:
             continue
-        if bucket in noisy_buckets and noisy_count >= noisy_limit and len(selected) < page_size:
+        if len(selected) < first_screen_limit and bucket_counts.get(bucket, 0) >= category_limit:
             deferred.append(group)
             continue
         selected.append(group)
         if key:
             seen.add(key)
-        if bucket in noisy_buckets:
-            noisy_count += 1
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
     for group in deferred:
         key = str(group.get("eventId") or group.get("groupId") or group.get("slug") or "")
         if key and key in seen:
