@@ -41,6 +41,10 @@ const DEFAULT_QUANT_EVENT_TITLE = '2026 FIFA World Cup Winner';
 const EVENT_TILE_OUTCOME_LIMIT = 12;
 const EVENT_TILE_MAX_POINTS = 240;
 
+function formatBlockNumber(value: number | undefined) {
+  return Number.isFinite(value) ? Math.round(Number(value)).toLocaleString('en-US') : '--';
+}
+
 function defaultMarketSlug() {
   const params = new URLSearchParams(window.location.search);
   return params.get('event_slug') || params.get('event') || params.get('market') || params.get('market_slug') || params.get('slug') || DEFAULT_QUANT_EVENT_SLUG;
@@ -254,6 +258,8 @@ export function QuantWorkspace() {
   const strategySignals = useMemo(() => signalsFromTrades(backtestResult), [backtestResult]);
   const latestPrice = activePrices[activePrices.length - 1]?.close || 0;
   const displayedPriceRows = activePrices.length;
+  const firstVisibleBlock = activePrices[0]?.timestamp;
+  const latestVisibleBlock = activePrices[activePrices.length - 1]?.timestamp;
   const selectedOutcome = useMemo(() => {
     const outcomes = marketSeries?.outcomes || [];
     if (!outcomes.length) return null;
@@ -800,6 +806,14 @@ export function QuantWorkspace() {
             setMarketReloadKey((current) => current + 1);
           }}
         />
+
+        {backendPriceSource(priceSource).includes('block') && activePrices.length ? (
+          <section className="qtv-block-axis-band" aria-label="Visible chart block number axis">
+            <span><i>First block</i><b>{formatBlockNumber(firstVisibleBlock)}</b></span>
+            <strong><i>Latest block</i><b>{formatBlockNumber(latestVisibleBlock)}</b></strong>
+            <span><i>Last block</i><b>{formatBlockNumber(latestVisibleBlock)}</b></span>
+          </section>
+        ) : null}
 
         {marketSeries?.outcomes?.length ? (
           <section className={`qtv-outcome-board ${useOutcomeTable ? 'table-mode' : 'card-mode'}`} aria-label="Polymarket outcomes">

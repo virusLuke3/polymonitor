@@ -201,7 +201,7 @@
 .qtv-workspace {
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(430px, 62fr) auto minmax(250px, 34fr);
+  grid-template-rows: minmax(430px, 62fr) auto auto minmax(250px, 34fr);
   overflow: hidden;
 }
 
@@ -212,6 +212,56 @@
   overflow: hidden;
   border-bottom: 1px solid #222b3a;
   background: #070a0f;
+}
+
+.qtv-block-axis-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  min-height: 30px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  border-bottom: 1px solid #222b3a;
+  background:
+    linear-gradient(180deg, rgba(10, 15, 24, 0.98), rgba(7, 10, 15, 0.98)),
+    repeating-linear-gradient(90deg, transparent 0, transparent 119px, rgba(148, 163, 184, 0.08) 120px);
+  color: #8f9bad;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0;
+  padding: 0 78px 0 14px;
+}
+
+.qtv-block-axis-band span,
+.qtv-block-axis-band strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.qtv-block-axis-band span:last-child {
+  justify-self: end;
+}
+
+.qtv-block-axis-band i {
+  color: #64748b;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.qtv-block-axis-band b {
+  overflow: hidden;
+  color: #cbd5e1;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.qtv-block-axis-band strong b {
+  color: #58a6ff;
 }
 
 .qtv-outcome-board {
