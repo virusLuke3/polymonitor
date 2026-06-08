@@ -231,11 +231,11 @@
 
 .qtv-market-palette {
   position: absolute;
-  z-index: 90;
+  z-index: 80;
   top: 36px;
   left: 0;
-  width: min(920px, calc(100vw - 28px));
-  max-height: min(60vh, calc(100vh - 118px));
+  width: min(720px, calc(100vw - 28px));
+  max-height: min(44vh, calc(100vh - 118px));
   overflow: hidden;
   border: 1px solid #263244;
   border-radius: 5px;
@@ -244,7 +244,29 @@
   padding: 0;
 }
 
+.qtv-market-palette.full {
+  position: fixed;
+  z-index: 100;
+  top: 72px;
+  left: 50%;
+  width: min(980px, calc(100vw - 64px));
+  max-height: min(72vh, calc(100vh - 128px));
+  transform: translateX(-50%);
+  border-color: #2f81f7;
+}
+
+.qtv-market-palette-backdrop {
+  position: fixed;
+  z-index: 98;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.36);
+  pointer-events: none;
+}
+
 .qtv-palette-head {
+  position: sticky;
+  z-index: 3;
+  top: 0;
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -268,7 +290,8 @@
 }
 
 .qtv-palette-head span,
-.qtv-palette-head em {
+.qtv-palette-head em,
+.qtv-palette-head-actions {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -280,7 +303,36 @@
   font-style: normal;
 }
 
+.qtv-palette-head-actions {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end !important;
+  gap: 6px !important;
+  min-width: max-content !important;
+}
+
+.qtv-palette-head-actions button {
+  height: 23px;
+  border: 1px solid #263244;
+  border-radius: 3px;
+  background: #0b111c;
+  color: #cbd5e1;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  padding: 0 7px;
+}
+
+.qtv-palette-head-actions button:hover {
+  border-color: #2f81f7;
+  color: #dbeafe;
+}
+
 .qtv-palette-tools {
+  position: sticky;
+  z-index: 2;
+  top: 44px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -354,9 +406,27 @@
 
 .qtv-palette-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 160px;
-  max-height: calc(min(60vh, calc(100vh - 118px)) - 96px);
+  max-height: calc(min(44vh, calc(100vh - 118px)) - 96px);
+}
+
+.qtv-market-palette.full .qtv-palette-body {
+  grid-template-columns: minmax(0, 1fr) 300px;
+  max-height: calc(min(72vh, calc(100vh - 128px)) - 96px);
+}
+
+.qtv-market-palette.compact .qtv-search-preview {
+  display: none;
+}
+
+.qtv-market-palette.compact .qtv-palette-head {
+  padding: 7px 10px;
+}
+
+.qtv-market-palette.compact .qtv-palette-tools {
+  top: 38px;
+  padding: 6px 8px;
 }
 
 .qtv-results-list {
@@ -389,7 +459,7 @@
   grid-template-columns: 52px minmax(0, 1fr) auto !important;
   align-items: center !important;
   width: 100%;
-  min-height: 60px;
+  min-height: 58px;
   border: 1px solid transparent;
   border-left: 2px solid transparent;
   border-radius: 3px;
@@ -397,6 +467,17 @@
   color: #e5e7eb !important;
   text-align: left;
   padding: 7px 9px;
+}
+
+.qtv-market-palette.compact .qtv-result-row {
+  grid-template-columns: 48px minmax(0, 1fr) auto !important;
+  min-height: 50px;
+  padding: 6px 8px;
+}
+
+.qtv-market-palette.compact .qtv-result-main em,
+.qtv-market-palette.compact .qtv-result-badges small {
+  display: none;
 }
 
 .qtv-result-row.highlighted,

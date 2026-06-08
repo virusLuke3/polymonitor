@@ -36,14 +36,19 @@ function backendPriceSource(priceSource: PriceSource) {
   return priceSource === 'orderfilled' ? 'orderfilled_block_close' : 'frontend';
 }
 
+const DEFAULT_QUANT_EVENT_SLUG = '2026-fifa-world-cup-winner-595';
+const DEFAULT_QUANT_EVENT_TITLE = '2026 FIFA World Cup Winner';
+
 function defaultMarketSlug() {
   const params = new URLSearchParams(window.location.search);
-  return params.get('event_slug') || params.get('event') || params.get('market') || params.get('market_slug') || params.get('slug') || '';
+  return params.get('event_slug') || params.get('event') || params.get('market') || params.get('market_slug') || params.get('slug') || DEFAULT_QUANT_EVENT_SLUG;
 }
 
 function defaultEntityKind() {
   const params = new URLSearchParams(window.location.search);
-  return params.get('event_slug') || params.get('event') || params.get('kind') === 'event' ? 'event' : 'market';
+  if (params.get('event_slug') || params.get('event')) return 'event';
+  if (params.get('market') || params.get('market_slug') || params.get('slug')) return params.get('kind') === 'event' ? 'event' : 'market';
+  return 'event';
 }
 
 function sleep(ms: number) {
@@ -154,6 +159,24 @@ function isSelectionLive(market: QuantPriceMarket | null | undefined, series: Qu
   return endTs > Date.now() - 12 * 60 * 60 * 1000;
 }
 
+function defaultEventMeta(): QuantPriceMarket {
+  return {
+    itemKind: 'event',
+    eventSlug: DEFAULT_QUANT_EVENT_SLUG,
+    eventTitle: DEFAULT_QUANT_EVENT_TITLE,
+    groupingConfidence: 'official',
+    source: 'default',
+    outcomeCount: 60,
+    totalMembers: 60,
+    readyMembers: 0,
+    marketSlug: DEFAULT_QUANT_EVENT_SLUG,
+    marketTitle: DEFAULT_QUANT_EVENT_TITLE,
+    tokenSide: 'EVENT',
+    blockRows: 0,
+    frontendRows: 0,
+  };
+}
+
 function marketInfoFromSelection(slug: string, market?: QuantPriceMarket): MarketInfo {
   const isEvent = market?.itemKind === 'event';
   return {
@@ -184,7 +207,9 @@ export function QuantWorkspace() {
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
   const [quantMarkets, setQuantMarkets] = useState<QuantPriceMarket[]>([]);
   const [marketSearchStatus, setMarketSearchStatus] = useState<DataStatus>('idle');
-  const [selectedMarketMeta, setSelectedMarketMeta] = useState<QuantPriceMarket | null>(null);
+  const [selectedMarketMeta, setSelectedMarketMeta] = useState<QuantPriceMarket | null>(() => (
+    defaultMarketSlug() === DEFAULT_QUANT_EVENT_SLUG ? defaultEventMeta() : null
+  ));
   const [dataStatus, setDataStatus] = useState<DataStatus>('idle');
   const [loadingMessage, setLoadingMessage] = useState('');
   const [loading, setLoading] = useState(false);

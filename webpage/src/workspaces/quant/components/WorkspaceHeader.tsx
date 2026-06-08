@@ -27,6 +27,7 @@ type WorkspaceHeaderProps = {
 type SearchFilter = 'all' | 'events' | 'markets' | 'tokens' | 'ready' | 'active' | 'recent' | 'official';
 type SearchSort = 'relevance' | 'volume' | 'coverage' | 'outcomes' | 'updated';
 type SearchResultKind = 'event' | 'market' | 'token';
+type SearchPaletteMode = 'compact' | 'full';
 
 type SearchResult = {
   key: string;
@@ -46,6 +47,8 @@ type SearchResult = {
   updated: number;
   priority: number;
 };
+
+const DEFAULT_QUANT_EVENT_SLUG = '2026-fifa-world-cup-winner-595';
 
 const FILTERS: Array<{ value: SearchFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -112,6 +115,21 @@ function titleForMarket(market: QuantPriceMarket) {
 function tokenLike(query: string) {
   const text = query.trim();
   return text.length >= 10 && (/^[0-9]+$/.test(text) || /^0x[0-9a-f]+$/i.test(text) || /^[a-z0-9_-]{16,}$/i.test(text));
+}
+
+function searchTextForMarket(market: QuantPriceMarket, result?: SearchResult) {
+  return [
+    result?.title,
+    result?.slug,
+    result?.subtitle,
+    market.marketTitle,
+    market.marketSlug,
+    market.eventTitle,
+    market.eventSlug,
+    market.conditionId,
+    extraString(market, 'tokenId'),
+    market.tokenSide,
+  ].filter(Boolean).join(' ').toLowerCase();
 }
 
 function storedFilter(): SearchFilter {
@@ -183,7 +201,9 @@ export function WorkspaceHeader({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [searchFilter, setSearchFilter] = useState<SearchFilter>(storedFilter);
   const [sortMode, setSortMode] = useState<SearchSort>('relevance');
+  const [paletteMode, setPaletteMode] = useState<SearchPaletteMode>('compact');
   const inputRef = useRef<HTMLInputElement>(null);
+  const commandRef = useRef<HTMLDivElement>(null);
   const previousQueryRef = useRef('');
   const marketChoices = useMemo(() => {
     const choices = new Map<string, QuantPriceMarket>();
@@ -219,6 +239,7 @@ export function WorkspaceHeader({
       return results;
     });
     const filtered = base.filter((result) => {
+      if (query && !searchTextForMarket(result.market, result).includes(query)) return false;
       if (activeFilter === 'events' && result.kind !== 'event') return false;
       if (activeFilter === 'markets' && result.kind !== 'market') return false;
       if (activeFilter === 'tokens' && result.kind !== 'token') return false;
@@ -228,13 +249,16 @@ export function WorkspaceHeader({
       if (activeFilter === 'recent' && result.kind === 'token') return false;
       return true;
     });
+    const priorityFor = (result: SearchResult) => (
+      result.priority + (!query && result.market.marketSlug === DEFAULT_QUANT_EVENT_SLUG ? -0.75 : 0)
+    );
     const sorted = filtered.slice().sort((left, right) => {
       if (queryIsTokenLike && left.kind !== right.kind) return left.kind === 'token' ? -1 : right.kind === 'token' ? 1 : 0;
-      if (sortMode === 'volume') return right.volume - left.volume || left.priority - right.priority;
-      if (sortMode === 'coverage') return right.rows - left.rows || left.priority - right.priority;
-      if (sortMode === 'outcomes') return right.outcomes - left.outcomes || left.priority - right.priority;
-      if (sortMode === 'updated') return right.updated - left.updated || left.priority - right.priority;
-      return left.priority - right.priority || right.rows - left.rows || left.title.localeCompare(right.title);
+      if (sortMode === 'volume') return right.volume - left.volume || priorityFor(left) - priorityFor(right);
+      if (sortMode === 'coverage') return right.rows - left.rows || priorityFor(left) - priorityFor(right);
+      if (sortMode === 'outcomes') return right.outcomes - left.outcomes || priorityFor(left) - priorityFor(right);
+      if (sortMode === 'updated') return right.updated - left.updated || priorityFor(left) - priorityFor(right);
+      return priorityFor(left) - priorityFor(right) || right.rows - left.rows || left.title.localeCompare(right.title);
     });
     return activeFilter === 'recent' ? sorted.slice(0, 18) : sorted.slice(0, 48);
   }, [activeFilter, activeSearchText, marketChoices, queryIsTokenLike, sortMode]);
@@ -288,6 +312,7 @@ export function WorkspaceHeader({
     const onGlobalKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        setPaletteMode('full');
         setMarketMenuOpen(true);
         inputRef.current?.focus();
         inputRef.current?.select();
@@ -297,10 +322,26 @@ export function WorkspaceHeader({
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
   }, []);
 
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!marketMenuOpen) return;
+      const target = event.target as Node | null;
+      if (target && commandRef.current?.contains(target)) return;
+      setMarketMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+  }, [marketMenuOpen]);
+
   const chooseMarket = (slug: string) => {
     onMarketSlugChange(slug);
     onMarketQueryChange('');
     setMarketMenuOpen(false);
+    setPaletteMode('compact');
+  };
+
+  const setExplicitPaletteMode = (mode: SearchPaletteMode) => {
+    setPaletteMode(mode);
   };
 
   const chooseResult = (result: SearchResult | null) => {
@@ -325,7 +366,7 @@ export function WorkspaceHeader({
     });
   };
 
-  const selectedRows = Number(selectedMarket?.blockRows || selectedMarket?.frontendRows || 0);
+  const selectedRows = selectedMarket ? rowsForMarket(selectedMarket) : 0;
   const selectedKind = selectedMarket?.itemKind === 'event' ? 'Event' : 'Market';
   const selectedSubtitle = selectedMarket?.marketSlug || marketSlug || 'No market selected';
   const sourceLabel = priceSource === 'orderfilled' ? 'OrderFilled block close' : 'Frontend price-history';
@@ -349,7 +390,16 @@ export function WorkspaceHeader({
       </div>
 
       <div className="qtv-workbar">
-        <button className="qtv-market-identity" type="button" title={selectedSubtitle} onClick={() => setMarketMenuOpen(true)}>
+        <button
+          className="qtv-market-identity"
+          type="button"
+          title={selectedSubtitle}
+          onClick={() => {
+            setPaletteMode('compact');
+            setMarketMenuOpen(true);
+            inputRef.current?.focus();
+          }}
+        >
           <span>
             <strong>{selectedMarket?.marketTitle || marketSlug || 'Select market'}</strong>
             <em>Polymarket {selectedKind.toLowerCase()} · outcome probabilities · {sourceLabel}</em>
@@ -359,8 +409,8 @@ export function WorkspaceHeader({
 
         <div className="qtv-workbar-group qtv-search-group">
         <div
-          className={`qtv-market-command ${marketMenuOpen ? 'open' : ''}`}
-          onBlur={() => window.setTimeout(() => setMarketMenuOpen(false), 120)}
+          ref={commandRef}
+          className={`qtv-market-command ${marketMenuOpen ? 'open' : ''} ${paletteMode === 'full' && marketMenuOpen ? 'full-mode' : ''}`}
           role="combobox"
           aria-expanded={marketMenuOpen}
           aria-haspopup="listbox"
@@ -369,7 +419,14 @@ export function WorkspaceHeader({
           <input
             value={marketQuery}
             ref={inputRef}
-            onFocus={() => setMarketMenuOpen(true)}
+            onFocus={() => {
+              if (!marketMenuOpen) setPaletteMode('compact');
+              setMarketMenuOpen(true);
+            }}
+            onClick={() => {
+              if (!marketMenuOpen) setPaletteMode('compact');
+              setMarketMenuOpen(true);
+            }}
             onInput={(event) => {
               onMarketQueryChange(event.currentTarget.value);
               setMarketMenuOpen(true);
@@ -389,7 +446,10 @@ export function WorkspaceHeader({
                 event.preventDefault();
                 chooseHighlightedResult();
               }
-              if (event.key === 'Escape') setMarketMenuOpen(false);
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                setMarketMenuOpen(false);
+              }
               if (event.key === 'Tab' && marketMenuOpen) {
                 event.preventDefault();
                 cycleFilter();
@@ -402,19 +462,31 @@ export function WorkspaceHeader({
           <button
             className="qtv-command-toggle"
             type="button"
-            title="Open market search"
-            onClick={() => setMarketMenuOpen((current) => !current)}
+            title={marketMenuOpen ? 'Close market search' : 'Open market search'}
+            onClick={() => {
+              setPaletteMode('compact');
+              setMarketMenuOpen((current) => !current);
+              if (!marketMenuOpen) window.setTimeout(() => inputRef.current?.focus(), 0);
+            }}
           >
             ▾
           </button>
           {marketMenuOpen ? (
-            <div id="quant-market-search-results" className="qtv-market-palette" role="listbox">
+            <>
+            {paletteMode === 'full' ? <div className="qtv-market-palette-backdrop" aria-hidden="true" /> : null}
+            <div id="quant-market-search-results" className={`qtv-market-palette ${paletteMode}`} role="listbox">
               <div className="qtv-palette-head">
                 <div>
-                  <strong>Search Polymarket events and markets</strong>
-                  <span>{activeSearchText ? 'Search results' : 'Recent quant coverage'}</span>
+                  <strong>{activeSearchText ? 'Search results' : 'Recent coverage'}</strong>
+                  <span>{activeSearchText ? 'Events · Markets · Tokens · Conditions' : 'Events first, then individual markets'}</span>
                 </div>
-                <em>Events first, then individual markets</em>
+                <div className="qtv-palette-head-actions" onMouseDown={(event) => event.preventDefault()}>
+                  {isRefining ? <em>Updating events...</em> : null}
+                  <button type="button" onClick={() => setExplicitPaletteMode(paletteMode === 'full' ? 'compact' : 'full')}>
+                    {paletteMode === 'full' ? 'Collapse' : 'Expand'}
+                  </button>
+                  <button type="button" aria-label="Close search" onClick={() => setMarketMenuOpen(false)}>×</button>
+                </div>
               </div>
               <div className="qtv-palette-tools" onMouseDown={(event) => event.preventDefault()}>
                 <div className="qtv-filter-chips" aria-label="Search filters">
@@ -430,7 +502,6 @@ export function WorkspaceHeader({
                   ))}
                 </div>
                 <label className="qtv-sort-select" onMouseDown={(event) => event.stopPropagation()}>
-                  {isRefining ? <em>Updating events...</em> : null}
                   <span>Sort</span>
                   <select value={sortMode} onChange={(event) => setSortMode(event.currentTarget.value as SearchSort)}>
                     {SORTS.map((sort) => <option key={sort.value} value={sort.value}>{sort.label}</option>)}
@@ -536,6 +607,7 @@ export function WorkspaceHeader({
                 </div>
               ) : null}
             </div>
+            </>
           ) : null}
         </div>
         <button className="qtv-icon-button" type="button" title="Add market">+</button>

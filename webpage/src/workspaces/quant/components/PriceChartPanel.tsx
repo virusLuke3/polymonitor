@@ -20,6 +20,8 @@ type EventSortMode = 'probability' | 'outcome' | 'volume' | 'change';
 type EventSideMode = 'auto' | 'yes' | 'no' | 'both';
 type EventLabelMode = 'selected' | 'top' | 'all';
 type TooltipMode = 'compact' | 'full';
+type DataWindowMode = 'compact' | 'expanded';
+type DataWindowDock = 'floating' | 'left' | 'right';
 
 const DRAW_TOOLS = [
   ['cursor', 'Cursor', 'M5 4l10 8-5 1.5L8 18 5 4z'],
@@ -73,6 +75,15 @@ type Drawing = {
   kind: 'trend' | 'ray' | 'hline' | 'vline' | 'measure' | 'text';
   points: Array<{ timestamp: number; price: number }>;
   text?: string;
+};
+
+type DataWindowSettings = {
+  visible: boolean;
+  minimized: boolean;
+  mode: DataWindowMode;
+  dock: DataWindowDock;
+  x?: number;
+  y?: number;
 };
 
 const SERIES_COLORS = ['#3b82f6', '#f59e0b', '#22c55e', '#ef4444', '#06b6d4', '#a855f7', '#f97316', '#84cc16', '#ec4899', '#14b8a6', '#eab308', '#94a3b8', '#60a5fa', '#fb7185'];
@@ -197,6 +208,32 @@ function persistedState<T extends string>(key: string, fallback: T): T {
   }
 }
 
+function persistedDataWindowSettings(): DataWindowSettings {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem('polymonitor.quant.dataWindowSettings') || '{}') as Partial<DataWindowSettings>;
+    return {
+      visible: typeof parsed.visible === 'boolean' ? parsed.visible : false,
+      minimized: typeof parsed.minimized === 'boolean' ? parsed.minimized : false,
+      mode: parsed.mode === 'expanded' ? 'expanded' : 'compact',
+      dock: parsed.dock === 'left' || parsed.dock === 'right' ? parsed.dock : 'floating',
+      x: Number.isFinite(parsed.x) ? Number(parsed.x) : 12,
+      y: Number.isFinite(parsed.y) ? Number(parsed.y) : 122,
+    };
+  } catch {
+    return { visible: false, minimized: false, mode: 'compact', dock: 'floating', x: 12, y: 122 };
+  }
+}
+
+function clampDataWindowPosition(x: number, y: number, bounds?: DOMRect | null) {
+  if (!bounds) return { x: Math.max(8, x), y: Math.max(48, y) };
+  const maxX = Math.max(8, bounds.width - 240);
+  const maxY = Math.max(56, bounds.height - 130);
+  return {
+    x: Math.max(8, Math.min(maxX, x)),
+    y: Math.max(56, Math.min(maxY, y)),
+  };
+}
+
 function markerPosition(signal: Signal, points: PricePoint[]) {
   if (!points.length) return null;
   let bestIndex = 0;
@@ -248,6 +285,14 @@ function pointSnapshot(point: PricePoint | null | undefined, latestPoint: PriceP
     deltaNo: no - latestNo,
     deltaYesPct: latestYes ? ((yes - latestYes) / latestYes) * 100 : 0,
     deltaNoPct: latestNo ? ((no - latestNo) / latestNo) * 100 : 0,
+  };
+}
+
+function pointToScreenSafe(point: PricePoint, points: PricePoint[]) {
+  const index = points.findIndex((row) => Math.floor(row.timestamp) === Math.floor(point.timestamp));
+  return {
+    x: `${((index >= 0 ? index : 0) / Math.max(1, points.length - 1)) * 100}%`,
+    y: `${Math.max(8, Math.min(86, (1 - clampProbability(point.close)) * 100))}%`,
   };
 }
 
@@ -303,9 +348,11 @@ export function PriceChartPanel({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<SeriesRefs>({ lines: new Map(), ma: null, volume: null });
   const pointsRef = useRef<PricePoint[]>([]);
+  const dataWindowDragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const [hover, setHover] = useState<PricePoint | null>(null);
   const [pinnedPoint, setPinnedPoint] = useState<PricePoint | null>(null);
-  const [dataWindowOpen, setDataWindowOpen] = useState(true);
+  const [dataWindowSettings, setDataWindowSettings] = useState<DataWindowSettings>(persistedDataWindowSettings);
+  const [dataWindowMenuOpen, setDataWindowMenuOpen] = useState(false);
   const [scaleMode, setScaleMode] = useState<ScaleMode>('full');
   const [activeTool, setActiveTool] = useState('cursor');
   const [drawings, setDrawings] = useState<Drawing[]>([]);
@@ -370,6 +417,8 @@ export function PriceChartPanel({
   const primaryPoints = selectedGroup?.points || visibleOutcomeGroups[0]?.points || allPoints;
   const latestPoint = primaryPoints[primaryPoints.length - 1] || null;
   const latest = hover || latestPoint;
+  const firstPrimaryPoint = primaryPoints[0] || null;
+  const lastPrimaryPoint = primaryPoints[primaryPoints.length - 1] || null;
   const previous = primaryPoints[Math.max(0, primaryPoints.length - 2)];
   const delta = latest && previous ? latest.close - previous.close : 0;
   const deltaPct = latest && previous?.close ? (delta / previous.close) * 100 : 0;
@@ -385,9 +434,12 @@ export function PriceChartPanel({
     const ma = movingAverage(closes, Math.min(40, Math.max(3, Math.floor(primaryPoints.length / 20))));
     return primaryPoints.map((point, index) => ({ ...point, close: ma[index] ?? point.close }));
   }, [primaryPoints]);
-  const inspectPoint = pinnedPoint || hover || latestPoint;
-  const inspectMaPoint = inspectPoint ? nearestPoint(maPoints, inspectPoint.timestamp) : null;
-  const inspect = pointSnapshot(inspectPoint, latestPoint, inspectMaPoint);
+  const dataWindowPoint = pinnedPoint || latestPoint;
+  const dataWindowMaPoint = dataWindowPoint ? nearestPoint(maPoints, dataWindowPoint.timestamp) : null;
+  const dataWindowInspect = pointSnapshot(dataWindowPoint, latestPoint, dataWindowMaPoint);
+  const hoverMaPoint = hover ? nearestPoint(maPoints, hover.timestamp) : null;
+  const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
+  const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints) : null;
   const markers = useMemo(() => signals.map((signal) => markerPosition(signal, primaryPoints)).filter(Boolean), [primaryPoints, signals]);
   const focusedMarkers = markers.filter((marker) => marker?.signal.tradeId === selectedTradeId);
 
@@ -398,6 +450,35 @@ export function PriceChartPanel({
     window.localStorage.setItem('polydata.quant.event.labelMode', labelMode);
     window.localStorage.setItem('polydata.quant.event.tooltipMode', tooltipMode);
   }, [compareMode, displayMode, eventSortMode, labelMode, tooltipMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem('polymonitor.quant.dataWindowSettings', JSON.stringify(dataWindowSettings));
+  }, [dataWindowSettings]);
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      const drag = dataWindowDragRef.current;
+      if (!drag) return;
+      const bounds = containerRef.current?.parentElement?.getBoundingClientRect();
+      const next = clampDataWindowPosition(
+        drag.baseX + event.clientX - drag.startX,
+        drag.baseY + event.clientY - drag.startY,
+        bounds,
+      );
+      setDataWindowSettings((current) => ({ ...current, dock: 'floating', x: next.x, y: next.y }));
+    };
+    const onPointerUp = () => {
+      dataWindowDragRef.current = null;
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+  }, []);
 
   useEffect(() => {
     pointsRef.current = primaryPoints;
@@ -424,11 +505,26 @@ export function PriceChartPanel({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setPinnedPoint(null);
+        if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.qtv-data-window')) {
+          setPinnedPoint(null);
+          setDataWindowSettings((current) => ({ ...current, visible: false, minimized: false }));
+        } else {
+          setPinnedPoint(null);
+        }
         setPendingDrawing(null);
       }
       if (event.key.toLowerCase() === 'd' && !(event.target instanceof HTMLInputElement)) {
-        setDataWindowOpen((current) => !current);
+        event.preventDefault();
+        if (event.shiftKey) {
+          if (hover) {
+            setPinnedPoint(hover);
+            setDataWindowSettings((current) => ({ ...current, visible: true, minimized: false }));
+          } else {
+            setPinnedPoint(null);
+          }
+          return;
+        }
+        setDataWindowSettings((current) => ({ ...current, visible: !current.visible, minimized: false }));
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -626,6 +722,7 @@ export function PriceChartPanel({
     if (!point) return;
     if (activeTool === 'cursor' || activeTool === 'crosshair') {
       setPinnedPoint(hover || nearestPoint(primaryPoints, point.timestamp));
+      setDataWindowSettings((current) => ({ ...current, visible: true, minimized: false, mode: current.mode || 'compact' }));
       return;
     }
     if (activeTool === 'hline' || activeTool === 'vline') {
@@ -677,6 +774,52 @@ export function PriceChartPanel({
     link.download = `polydata-${market.slug || 'quant'}-chart.png`;
     link.click();
   };
+
+  const hasLoadedPrices = allPoints.length > 0;
+  const isLoadingPrices = ['loading', 'metadata_loading', 'price_loading', 'partial'].includes(dataStatus) && !hasLoadedPrices;
+  const rowsText = isLoadingPrices
+    ? 'Loading...'
+    : hasLoadedPrices
+      ? allPoints.length.toLocaleString('en-US')
+      : dataStatus === 'empty'
+        ? 'No price rows'
+        : '--';
+  const selectedText = hasLoadedPrices && selectedGroup ? `${selectedGroup.label} ${fmtPrice(selectedLatest)}` : '--';
+  const sumText = eventMode && hasLoadedPrices ? fmtPrice(normalizedView ? 1 : allYesSum) : '--';
+  const visibleSumText = eventMode && hasLoadedPrices ? fmtPrice(visibleYesSum) : '--';
+  const latestPriceText = latest && hasLoadedPrices ? fmtPrice(latest.close) : '--';
+  const loadingTitle = dataStatus === 'metadata_loading'
+    ? 'Loading market metadata'
+    : dataStatus === 'price_loading'
+      ? eventMode ? 'Loading event price series' : 'Loading market price series'
+      : dataStatus === 'partial'
+        ? 'Partial coverage loaded'
+        : dataStatus === 'error'
+          ? 'Price request failed'
+          : dataStatus === 'empty'
+            ? 'No price rows found'
+            : 'Waiting for real price rows';
+  const updateDataWindow = (patch: Partial<DataWindowSettings>) => {
+    setDataWindowSettings((current) => ({ ...current, ...patch }));
+  };
+  const startDataWindowDrag = (event: PointerEvent) => {
+    if ((event.target as HTMLElement | null)?.closest('button')) return;
+    event.preventDefault();
+    const base = clampDataWindowPosition(dataWindowSettings.x ?? 12, dataWindowSettings.y ?? 122, containerRef.current?.parentElement?.getBoundingClientRect());
+    dataWindowDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      baseX: base.x,
+      baseY: base.y,
+    };
+    setDataWindowSettings((current) => ({ ...current, dock: 'floating', x: base.x, y: base.y }));
+  };
+  const dataWindowStyle = dataWindowSettings.dock === 'floating'
+    ? {
+      left: `${dataWindowSettings.x ?? 12}px`,
+      top: `${dataWindowSettings.y ?? 122}px`,
+    }
+    : undefined;
 
   return (
     <section className="qtv-chart-shell">
@@ -752,7 +895,32 @@ export function PriceChartPanel({
           <button type="button" title="Alert scaffold">Alert</button>
           <button type="button" title="Snapshot PNG" onClick={exportSnapshot}>Snapshot</button>
           <button type="button" title="Export loaded CSV" onClick={exportLoadedCsv}>CSV</button>
-          <button className={dataWindowOpen ? 'active' : ''} type="button" title="Toggle data window (D)" onClick={() => setDataWindowOpen((current) => !current)}>Data</button>
+          <span className="qtv-data-control">
+            <button
+              className={dataWindowSettings.visible ? 'active' : ''}
+              type="button"
+              title="Data Window"
+              onClick={() => {
+                updateDataWindow({ visible: !dataWindowSettings.visible, minimized: false });
+                setDataWindowMenuOpen(false);
+              }}
+            >
+              Data{pinnedPoint ? ' •' : ''}
+            </button>
+            <button className={dataWindowMenuOpen ? 'active' : ''} type="button" title="Data Window menu" onClick={() => setDataWindowMenuOpen((current) => !current)}>▾</button>
+            {dataWindowMenuOpen ? (
+              <div className="qtv-data-menu">
+                <button type="button" onClick={() => updateDataWindow({ visible: true, minimized: false })}>Show Data Window</button>
+                <button type="button" onClick={() => updateDataWindow({ visible: false, minimized: false })}>Hide Data Window</button>
+                <button type="button" onClick={() => updateDataWindow({ mode: 'compact', visible: true, minimized: false })}>Compact</button>
+                <button type="button" onClick={() => updateDataWindow({ mode: 'expanded', visible: true, minimized: false })}>Expanded</button>
+                <button type="button" onClick={() => updateDataWindow({ dock: 'floating', visible: true, minimized: false })}>Floating</button>
+                <button type="button" onClick={() => updateDataWindow({ dock: 'left', visible: true, minimized: false })}>Dock left</button>
+                <button type="button" onClick={() => updateDataWindow({ dock: 'right', visible: true, minimized: false })}>Dock right</button>
+                <button type="button" onClick={() => setPinnedPoint(null)}>Clear pinned point</button>
+              </div>
+            ) : null}
+          </span>
         </div>
 
         <div className="qtv-chart-info">
@@ -760,14 +928,14 @@ export function PriceChartPanel({
             <strong>{market.title}</strong>
             <span>{market.category} · {eventMode ? `${displayedOutcomeCount} outcomes` : 'outcome probability'} · {priceSource}</span>
             <div className="qtv-indicator-legend">
-              <span>Rows <b>{allPoints.length.toLocaleString('en-US')}</b></span>
-              <span>Range <i>{pointLabel(primaryPoints[0], priceSource)}</i> <em>{pointLabel(primaryPoints[primaryPoints.length - 1], priceSource)}</em></span>
-              <span>Volume <b>{volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></span>
-              <span>Selected <b title={selectedGroup?.fullLabel}>{selectedGroup?.label || 'Outcome'} {fmtPrice(selectedLatest)}</b></span>
+              <span>Rows <b>{rowsText}</b></span>
+              <span>Range <i>{hasLoadedPrices ? pointLabel(primaryPoints[0], priceSource) : '--'}</i> <em>{hasLoadedPrices ? pointLabel(primaryPoints[primaryPoints.length - 1], priceSource) : '--'}</em></span>
+              <span>Volume <b>{hasLoadedPrices ? volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</b></span>
+              <span>Selected <b title={selectedGroup?.fullLabel}>{selectedText}</b></span>
               {eventMode ? (
                 <span title="Binary market prices may not sum exactly to 100% due to spread, stale data, independent markets, fees, or direct/implied price differences.">
-                  Sum <b className={sumWarning ? 'negative' : ''}>{fmtPrice(normalizedView ? 1 : allYesSum)}</b>
-                  <em>visible {fmtPrice(visibleYesSum)}</em>
+                  Sum <b className={sumWarning && hasLoadedPrices ? 'negative' : ''}>{sumText}</b>
+                  <em>visible {visibleSumText}</em>
                 </span>
               ) : null}
             </div>
@@ -798,10 +966,10 @@ export function PriceChartPanel({
           </div>
           <div className="qtv-ohlc">
             <span>Block {latest ? blockLabel(latest.timestamp) : '--'}</span>
-            <span>Price {fmtPrice(latest?.close || 0)}</span>
+            <span>Price {latestPriceText}</span>
             <span>Min {Number.isFinite(minPrice) ? fmtPrice(minPrice) : '--'}</span>
             <span>Max {Number.isFinite(maxPrice) ? fmtPrice(maxPrice) : '--'}</span>
-            <b className={delta >= 0 ? 'positive' : 'negative'}>{formatSigned(delta)} ({formatSigned(deltaPct, 2)}%)</b>
+            <b className={delta >= 0 ? 'positive' : 'negative'}>{hasLoadedPrices ? `${formatSigned(delta)} (${formatSigned(deltaPct, 2)}%)` : '--'}</b>
           </div>
           <div className="qtv-scale-switch" aria-label="Chart scale mode">
             {SCALE_MODES.map(([mode, label]) => (
@@ -810,23 +978,44 @@ export function PriceChartPanel({
           </div>
         </div>
 
-        {dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'partial' ? (
+        {dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'partial' || dataStatus === 'loading' ? (
           <div className="qtv-chart-loading-ribbon">
-            <b>{loadingMessage || (dataStatus === 'metadata_loading' ? 'Loading market metadata...' : 'Loading price series...')}</b>
-            <span>Coverage {marketCoverageRows ? marketCoverageRows.toLocaleString('en-US') : '--'} · Loaded {(loadedPriceRows ?? allPoints.length).toLocaleString('en-US')} · Backtest {backtestRows.toLocaleString('en-US')}</span>
+            <b>{loadingMessage || loadingTitle}</b>
+            <span>Outcomes {eventMode ? displayedOutcomeCount.toLocaleString('en-US') : '--'} · Source {priceSource}</span>
+            <span>Coverage {marketCoverageRows ? marketCoverageRows.toLocaleString('en-US') : '--'} · Loaded {hasLoadedPrices ? (loadedPriceRows ?? allPoints.length).toLocaleString('en-US') : 'Loading...'} · Backtest {backtestRows ? backtestRows.toLocaleString('en-US') : '--'}</span>
           </div>
         ) : null}
 
-        {dataWindowOpen && inspect ? (
-          <div className={`qtv-data-window ${pinnedPoint ? 'pinned' : ''} ${tooltipMode === 'compact' ? 'compact' : 'full'}`}>
-            <header>
-              <strong>{pinnedPoint ? 'Pinned Data Window' : tooltipMode === 'compact' ? 'Compact Tooltip' : hover ? 'Crosshair Data Window' : 'Latest Data Window'}</strong>
-              {pinnedPoint ? <button type="button" onClick={() => setPinnedPoint(null)}>Clear</button> : null}
+        {dataWindowSettings.visible && dataWindowSettings.minimized ? (
+          <button
+            className={`qtv-data-window-chip dock-${dataWindowSettings.dock}`}
+            type="button"
+            onClick={() => updateDataWindow({ minimized: false, visible: true })}
+          >
+            Data Window {pinnedPoint ? 'Pinned' : 'Latest'}
+          </button>
+        ) : null}
+
+        {dataWindowSettings.visible && !dataWindowSettings.minimized && dataWindowInspect ? (
+          <div
+            className={`qtv-data-window ${pinnedPoint ? 'pinned' : ''} ${dataWindowSettings.mode} dock-${dataWindowSettings.dock}`}
+            style={dataWindowStyle}
+            tabIndex={0}
+          >
+            <header onPointerDown={(event) => startDataWindowDrag(event as unknown as PointerEvent)}>
+              <strong>{dataWindowSettings.mode === 'compact' ? 'Compact Tooltip' : 'Data Window'}</strong>
+              <i>{pinnedPoint ? 'Pinned' : 'Latest'}</i>
+              <button type="button" title="Minimize" onClick={() => updateDataWindow({ minimized: true })}>_</button>
+              {pinnedPoint ? <button type="button" title="Clear pinned point" onClick={() => setPinnedPoint(null)}>Clear</button> : null}
+              <button type="button" title="Close" onClick={() => updateDataWindow({ visible: false, minimized: false })}>×</button>
             </header>
-            <div><span>Block</span><b>{blockLabel(inspect.point.timestamp)}</b></div>
-            <div><span>{inspect.point.outcomeShortLabel || inspect.point.outcomeLabel || selectedGroup?.label || 'Outcome'}</span><b>YES {fmtPrice(inspect.yes)} / NO {fmtPrice(inspect.no)}</b></div>
+            <div><span>Block</span><b>{blockLabel(dataWindowInspect.point.timestamp)}</b></div>
+            <div><span>Outcome</span><b>{dataWindowInspect.point.outcomeShortLabel || dataWindowInspect.point.outcomeLabel || selectedGroup?.label || 'Outcome'}</b></div>
+            <div><span>YES</span><b>{fmtPrice(dataWindowInspect.yes)} <em>{dataWindowInspect.yesKind}</em></b></div>
+            <div><span>NO</span><b>{fmtPrice(dataWindowInspect.no)} <em>{dataWindowInspect.noKind}</em></b></div>
+            <div><span>Source</span><b>{priceSource}</b></div>
             {visibleOutcomeGroups.slice(0, 3).map((group) => {
-              const point = nearestPoint(group.points, inspect.point.timestamp);
+              const point = nearestPoint(group.points, dataWindowInspect.point.timestamp);
               return (
                 <div key={group.key} title={group.fullLabel}>
                   <span>{group.label}</span>
@@ -834,19 +1023,18 @@ export function PriceChartPanel({
                 </div>
               );
             })}
-            {tooltipMode === 'full' ? (
+            {dataWindowSettings.mode === 'expanded' ? (
               <>
                 <div><span>Market</span><b>{market.title}</b></div>
-                <div><span>MA</span><b>{inspect.ma === undefined ? '--' : fmtPrice(inspect.ma)}</b></div>
-                <div><span>Volume</span><b>{inspect.point.volume.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></div>
+                <div><span>MA</span><b>{dataWindowInspect.ma === undefined ? '--' : fmtPrice(dataWindowInspect.ma)}</b></div>
+                <div><span>Volume</span><b>{dataWindowInspect.point.volume.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></div>
                 <div><span>Window</span><b>{allPoints.length.toLocaleString('en-US')} rows · {scaleMode}</b></div>
                 <footer>
-                  <span className={inspect.deltaYes >= 0 ? 'positive' : 'negative'}>Δ YES {formatSigned(inspect.deltaYes)} ({formatSigned(inspect.deltaYesPct, 2)}%)</span>
-                  <span className={inspect.deltaNo >= 0 ? 'positive' : 'negative'}>Δ NO {formatSigned(inspect.deltaNo)} ({formatSigned(inspect.deltaNoPct, 2)}%)</span>
+                  <span className={dataWindowInspect.deltaYes >= 0 ? 'positive' : 'negative'}>Δ YES {formatSigned(dataWindowInspect.deltaYes)} ({formatSigned(dataWindowInspect.deltaYesPct, 2)}%)</span>
+                  <span className={dataWindowInspect.deltaNo >= 0 ? 'positive' : 'negative'}>Δ NO {formatSigned(dataWindowInspect.deltaNo)} ({formatSigned(dataWindowInspect.deltaNoPct, 2)}%)</span>
                 </footer>
               </>
             ) : null}
-            <div><span>Source</span><b>{priceSource}</b></div>
           </div>
         ) : null}
 
@@ -863,15 +1051,19 @@ export function PriceChartPanel({
         <div className="qtv-tv-chart" ref={containerRef} onClick={(event) => handleChartClick(event as unknown as MouseEvent)}>
           {!allPoints.length ? (
             <div className="qtv-chart-empty">
-              <strong>
-                {dataStatus === 'metadata_loading' ? 'Loading market metadata...' : null}
-                {dataStatus === 'price_loading' ? 'Loading price series...' : null}
-                {dataStatus === 'error' ? 'Price request failed' : null}
-                {dataStatus === 'empty' ? 'No price rows found' : null}
-                {['idle', 'loading', 'partial', 'ready'].includes(dataStatus) ? 'No real price rows' : null}
-              </strong>
-              <span>{loadingMessage || 'Try All window, change source, or choose another outcome.'}</span>
-              {onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
+              <strong>{loadingTitle}</strong>
+              <span>{loadingMessage || 'Preparing event metadata and block-close coverage.'}</span>
+              <dl>
+                <div><dt>Outcomes</dt><dd>{eventMode ? displayedOutcomeCount.toLocaleString('en-US') : '--'}</dd></div>
+                <div><dt>Source</dt><dd>{priceSource}</dd></div>
+                <div><dt>Coverage</dt><dd>{marketCoverageRows ? marketCoverageRows.toLocaleString('en-US') : '--'}</dd></div>
+                <div><dt>Loaded rows</dt><dd>{isLoadingPrices ? 'Loading...' : rowsText}</dd></div>
+              </dl>
+              <div className="qtv-chart-empty-actions">
+                {onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
+                <button type="button" onClick={() => setDisplayMode('all')}>Show members</button>
+                <button type="button" onClick={() => setScaleMode('full')}>Full scale</button>
+              </div>
             </div>
           ) : null}
           {!drawingsHidden ? (
@@ -908,6 +1100,20 @@ export function PriceChartPanel({
               <button type="button">Run backtest from here</button>
               <button type="button" onClick={() => { setReplayEnabled(true); setReplayIndex(Math.max(0, rawAllPoints.findIndex((point) => point.timestamp >= pinnedPoint.timestamp))); }}>Set replay start</button>
               <button type="button" onClick={exportLoadedCsv}>Export window</button>
+            </div>
+          ) : null}
+          {hoverInspect && hoverScreen && (!pinnedPoint || Math.floor(pinnedPoint.timestamp) !== Math.floor(hoverInspect.point.timestamp)) ? (
+            <div className={`qtv-hover-tooltip ${tooltipMode}`} style={{ left: hoverScreen.x, top: hoverScreen.y }}>
+              <strong>{hoverInspect.point.outcomeShortLabel || hoverInspect.point.outcomeLabel || selectedGroup?.label || 'Outcome'}</strong>
+              <span>Block {blockLabel(hoverInspect.point.timestamp)}</span>
+              <b>YES {fmtPrice(hoverInspect.yes)} · NO {fmtPrice(hoverInspect.no)}</b>
+            </div>
+          ) : null}
+          {priceSource.includes('block') && hasLoadedPrices ? (
+            <div className="qtv-block-axis-readout" aria-label="Visible block number range">
+              <span>{firstPrimaryPoint ? blockLabel(firstPrimaryPoint.timestamp) : '--'}</span>
+              <b>{hover ? `hover ${blockLabel(hover.timestamp)}` : lastPrimaryPoint ? `latest ${blockLabel(lastPrimaryPoint.timestamp)}` : '--'}</b>
+              <span>{lastPrimaryPoint ? blockLabel(lastPrimaryPoint.timestamp) : '--'}</span>
             </div>
           ) : null}
         </div>
