@@ -4,7 +4,7 @@ import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
 import { PanelLoading } from '@/components/Panel';
 import WeatherDeckMap from '@/components/WeatherDeckMap';
 import { WeatherMapCityInspector } from '@/components/WeatherMapCityInspector';
-import { WorldGlobe } from '@/components/WorldGlobe';
+import { WorldGlobe, type WorldGlobeStatusMetrics } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
 import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative } from '@/panels/shared/formatters';
@@ -70,6 +70,7 @@ type LayerToggle = {
 };
 
 type RegionKey = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
+type MapViewMode = '3d' | '2d' | 'heatmap' | 'density';
 type CommandPaletteTab = 'markets' | 'panels' | 'commands';
 const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
 const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v4';
@@ -116,6 +117,16 @@ const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
   { value: 'africa', label: 'Africa' },
   { value: 'oceania', label: 'Oceania' },
 ];
+const MAP_VIEW_OPTIONS: Array<{ value: MapViewMode; label: string }> = [
+  { value: '3d', label: '3D Globe' },
+  { value: '2d', label: '2D Map' },
+  { value: 'heatmap', label: 'Heatmap' },
+  { value: 'density', label: 'Risk Density' },
+];
+
+function isMapViewMode(value: unknown): value is MapViewMode {
+  return value === '3d' || value === '2d' || value === 'heatmap' || value === 'density';
+}
 
 const MAP_BOTTOM_PANEL_IDS: string[] = [];
 const FOCUSED_STRIP_PANEL_IDS = new Set(['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled', 'oracle-feed']);
@@ -398,7 +409,14 @@ function readSearchParam(key: string): string | null {
 
 function readMarketGroupSortStorage(): MarketGroupSort {
   const saved = readStringStorage<string>(MARKET_GROUP_SORT_STORAGE_KEY, 'active');
-  return saved === 'new' || saved === 'volume' || saved === 'active' ? saved : 'active';
+  return saved === 'new'
+    || saved === 'volume'
+    || saved === 'active'
+    || saved === 'close'
+    || saved === 'move'
+    || saved === 'trades'
+    ? saved
+    : 'active';
 }
 
 function readWorkspaceMode(): WorkspaceMode {
@@ -956,9 +974,19 @@ function WorldMonitorApp() {
   const [loading, setLoading] = useState(true);
   const [bundleLoading, setBundleLoading] = useState(false);
   const [now, setNow] = useState(() => new Date());
-  const [viewMode, setViewMode] = useState<'2d' | '3d'>(() => {
+  const [viewMode, setViewMode] = useState<MapViewMode>(() => {
     const override = readSearchParam('view');
-    return override === '2d' || override === '3d' ? override : '3d';
+    if (isMapViewMode(override)) return override;
+    const stored = readStringStorage(VIEW_STORAGE_KEY, '3d');
+    return isMapViewMode(stored) ? stored : '3d';
+  });
+  const [globeStatus, setGlobeStatus] = useState<WorldGlobeStatusMetrics>({
+    fps: 0,
+    markerTotal: 0,
+    markerVisible: 0,
+    qualitySetting: 'auto',
+    qualityLevel: 'high',
+    dpr: 1,
   });
   const [region, setRegion] = useState<RegionKey>(() => {
     const override = readSearchParam('region');
@@ -1709,6 +1737,10 @@ function WorldMonitorApp() {
     () => (ucdpLayerEnabled ? (geoShockPayload?.items || []).filter(hasGeoConflictCoordinates) : []),
     [geoShockPayload, ucdpLayerEnabled],
   );
+  const mapVisibleEventCount = viewMode === '3d' ? globeStatus.markerVisible : ucdpMapEvents.length;
+  const mapQualityLabel = viewMode === '3d'
+    ? `${globeStatus.qualitySetting.toUpperCase()} · ${globeStatus.fps ? Math.round(globeStatus.fps) : '--'} FPS`
+    : MAP_VIEW_OPTIONS.find((option) => option.value === viewMode)?.label || '2D Map';
 
   const runtimeValue = <T,>(panelId: string): T | null => (runtimeData[panelId] as T | undefined) || null;
   const runtimePayloadLoaded = (panelId: string) => runtimeData[panelId] !== undefined && runtimeData[panelId] !== null;
@@ -1894,10 +1926,11 @@ function WorldMonitorApp() {
     }, 0);
   };
 
-  const changeViewMode = (nextMode: '2d' | '3d') => {
+  const changeViewMode = (nextMode: MapViewMode) => {
     setViewMode(nextMode);
-    setMapZoom((current) => clampMapZoom(nextMode === '2d' ? Math.min(2, current) : current));
-    setNotice(nextMode === '2d' ? '2D map enabled' : '3D globe enabled');
+    setMapZoom((current) => clampMapZoom(nextMode === '3d' ? current : Math.min(2, current)));
+    const label = MAP_VIEW_OPTIONS.find((option) => option.value === nextMode)?.label || nextMode;
+    setNotice(`${label} enabled`);
   };
 
   const loadWeatherMap = async (force = false) => {
@@ -1922,7 +1955,7 @@ function WorldMonitorApp() {
   };
 
   useEffect(() => {
-    if (viewMode === '2d') {
+    if (viewMode !== '3d') {
       void loadWeatherMap(false);
     }
   }, [viewMode]);
@@ -2014,17 +2047,30 @@ function WorldMonitorApp() {
               <div className="wm-map-title">Polymarket Signal Atlas</div>
             </div>
             <div className="wm-map-status-strip" aria-label="Global map status">
-              <span className="wm-status-chip">POLYDATA MONITOR</span>
+              <span className="wm-status-chip">POLYDATA MONITOR · LIVE</span>
               <div className="wm-map-clock">{currentUtcClock(now)}</div>
+              <span className="wm-map-status-metric">Events <b>{ucdpMapEvents.length}</b></span>
+              <span className="wm-map-status-metric">Visible <b>{mapVisibleEventCount}</b></span>
+              <span className="wm-map-status-metric">Quality <b>{mapQualityLabel}</b></span>
             </div>
-            <div className="wm-map-view-toggle">
-              <button type="button" className={viewMode === '2d' ? 'active' : ''} onClick={() => changeViewMode('2d')}>2D</button>
-              <button type="button" className={viewMode === '3d' ? 'active' : ''} onClick={() => changeViewMode('3d')}>3D</button>
+            <div className="wm-map-view-toggle" role="tablist" aria-label="Map view mode">
+              {MAP_VIEW_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === option.value}
+                  className={viewMode === option.value ? 'active' : ''}
+                  onClick={() => changeViewMode(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
           </div>
 
           <div className="wm-map-stage">
-            <div className={`wm-globe-area ${viewMode === '2d' ? 'wm-globe-area-flat' : ''}`}>
+            <div className={`wm-globe-area ${viewMode !== '3d' ? 'wm-globe-area-flat' : ''}`}>
               <aside className={`wm-layer-sidebar ${showPanelLibrary ? '' : 'collapsed'}`}>
                 <div className="wm-toggle-header">
                   <span>Layers</span>
@@ -2074,6 +2120,7 @@ function WorldMonitorApp() {
                     region={region}
                     zoomLevel={mapZoom}
                     enabledLayerIds={enabledLayerIds}
+                    onMetricsChange={setGlobeStatus}
                   />
                 ) : (
                   <WeatherInlineMap
@@ -2394,9 +2441,10 @@ function WorldMonitorApp() {
             </label>
             <label className="wm-settings-row">
               <span>Map Mode</span>
-              <select value={viewMode} onChange={(event) => setViewMode((event.currentTarget as HTMLSelectElement).value as '2d' | '3d')}>
-                <option value="2d">2D</option>
-                <option value="3d">3D</option>
+              <select value={viewMode} onChange={(event) => setViewMode((event.currentTarget as HTMLSelectElement).value as MapViewMode)}>
+                {MAP_VIEW_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </label>
             <label className="wm-settings-row">

@@ -8,7 +8,7 @@ import type {
 } from './worldGlobeMarkersTypes';
 
 const GLOBE_RADIUS = 100;
-const HTML_MARKER_CAP = 32;
+const HTML_MARKER_CAP = 20;
 
 const REGION_BOUNDS: Record<string, { minLat: number; maxLat: number; minLng: number; maxLng: number }> = {
   global: { minLat: -90, maxLat: 90, minLng: -180, maxLng: 180 },
@@ -22,10 +22,10 @@ const REGION_BOUNDS: Record<string, { minLat: number; maxLat: number; minLng: nu
 };
 
 const QUALITY_BUDGETS: Record<GlobeQualityLevel, { visible: number; raw: number; html: number }> = {
-  ultra: { visible: 2200, raw: 1600, html: 40 },
-  high: { visible: 1400, raw: 900, html: 32 },
-  medium: { visible: 780, raw: 430, html: 24 },
-  low: { visible: 360, raw: 130, html: 16 },
+  ultra: { visible: 2000, raw: 1500, html: 20 },
+  high: { visible: 1200, raw: 820, html: 20 },
+  medium: { visible: 680, raw: 380, html: 14 },
+  low: { visible: 280, raw: 95, html: 8 },
 };
 
 const GLOBAL_REGION_BOUNDS = REGION_BOUNDS.global as { minLat: number; maxLat: number; minLng: number; maxLng: number };
@@ -90,6 +90,14 @@ function markerPriority(item: GlobeWorkerEvent, deaths: number, rank: number, se
     + Math.min(520, ageScore / 30);
 }
 
+function markerVisual(rank: number, violenceType?: string | number | null, selected = false) {
+  const type = String(violenceType || '').trim();
+  if (selected) return { visualKind: 'selected' as const, shape: 'square' as const };
+  if (rank >= 5) return { visualKind: 'critical' as const, shape: 'square' as const };
+  if (rank >= 4 || type === '3') return { visualKind: 'warning' as const, shape: 'triangle' as const };
+  return { visualKind: 'incident' as const, shape: 'circle' as const };
+}
+
 function eventLabel(item: GlobeWorkerEvent, deaths: number) {
   const country = item.country || item.locationLabel || 'UCDP';
   const actors = [item.sideA, item.sideB].filter(Boolean).join(' vs ');
@@ -136,6 +144,8 @@ function normalizeEvents(events: GlobeWorkerEvent[], selectedId?: string | null,
     const rank = severityRank(item, deaths);
     const color = ucdpColorByRank(rank, item.violenceType);
     const id = String(item.id || `${lat}:${lng}:${item.occurredAt || ''}`);
+    const selected = id === selectedId;
+    const visual = markerVisual(rank, item.violenceType, selected);
     normalized.push({
       id,
       kind: 'event',
@@ -156,7 +166,11 @@ function normalizeEvents(events: GlobeWorkerEvent[], selectedId?: string | null,
       sideB: item.sideB || '',
       violenceType: markerViolenceLabel(item.violenceType),
       severity: rank >= 5 ? 'critical' : rank >= 4 ? 'warning' : item.severity || 'watch',
-      priority: markerPriority(item, deaths, rank, id === selectedId, id === hoveredId),
+      summary: item.summary || eventLabel(item, deaths),
+      ...visual,
+      strongGlow: false,
+      pulsing: false,
+      priority: markerPriority(item, deaths, rank, selected, id === hoveredId),
     });
   }
   return normalized;
@@ -172,6 +186,7 @@ function gridSizeFor(zoomLevel: number, qualityLevel: GlobeQualityLevel, idle: b
 
 function shouldShowRaw(marker: GlobeMarkerMeta, zoomLevel: number, qualityLevel: GlobeQualityLevel, idle: boolean) {
   const critical = marker.priority >= 5 * 1200 || marker.deaths >= 50 || marker.severity === 'critical';
+  if (marker.visualKind === 'selected') return true;
   if (qualityLevel === 'low') return critical;
   if (idle && marker.deaths < 10) return false;
   if (zoomLevel <= 1) return critical || marker.deaths >= 10;
@@ -216,10 +231,42 @@ function clusterMarkers(markers: GlobeMarkerMeta[], gridSize: number) {
       deaths: cluster.deaths,
       label: `${count} conflict events · ${max.country}`,
       location: `${count} clustered events`,
+      summary: `${count} events in this cell; highest-priority source event is ${max.location}.`,
+      visualKind: 'cluster',
+      shape: 'cluster',
+      strongGlow: false,
+      pulsing: false,
       priority: max.priority + count * 12,
     });
   }
   return result;
+}
+
+function applyVisualBudgets(markers: GlobeMarkerMeta[], selectedId?: string | null) {
+  let glowCount = 0;
+  let pulseCount = 0;
+  return markers.map((marker) => {
+    const selected = marker.id === selectedId;
+    const strongCandidate = selected || marker.visualKind === 'critical' || (marker.kind === 'cluster' && marker.count >= 12);
+    const pulseCandidate = selected || (marker.visualKind === 'critical' && marker.deaths >= 50);
+    const strongGlow = strongCandidate && glowCount < 150;
+    const pulsing = pulseCandidate && pulseCount < 24;
+    if (strongGlow) glowCount += 1;
+    if (pulsing) pulseCount += 1;
+    return {
+      ...marker,
+      visualKind: selected ? 'selected' : marker.visualKind,
+      strongGlow,
+      pulsing,
+    };
+  });
+}
+
+function markerFlag(marker: GlobeMarkerMeta) {
+  if (marker.shape === 'cluster') return 1;
+  if (marker.shape === 'square') return 2;
+  if (marker.shape === 'triangle') return 3;
+  return 0;
 }
 
 function writeBuffers(markers: GlobeMarkerMeta[]) {
@@ -239,9 +286,9 @@ function writeBuffers(markers: GlobeMarkerMeta[]) {
     colors[pos] = r;
     colors[pos + 1] = g;
     colors[pos + 2] = b;
-    sizes[index] = marker.size;
-    opacities[index] = marker.kind === 'cluster' ? 0.78 : 0.88;
-    flags[index] = marker.kind === 'cluster' ? 1 : 0;
+    sizes[index] = marker.size * (marker.strongGlow ? 1.08 : 0.92);
+    opacities[index] = marker.strongGlow ? 0.86 : marker.kind === 'cluster' ? 0.7 : 0.68;
+    flags[index] = markerFlag(marker);
   });
 
   return { positions, colors, sizes, opacities, flags };
@@ -262,11 +309,11 @@ export function buildMarkerPayload(message: GlobeMarkerWorkerRequest): GlobeMark
   }
 
   const clustered = clusterMarkers(clusterCandidates, gridSizeFor(message.zoomLevel, message.qualityLevel, message.idle));
-  const visible = [...raw, ...clustered]
+  const visible = applyVisualBudgets([...raw, ...clustered]
     .sort((a, b) => b.priority - a.priority)
-    .slice(0, budgets.visible);
-  const htmlMarkers = sorted
-    .filter((marker) => marker.severity === 'critical' || marker.deaths >= 50)
+    .slice(0, budgets.visible), message.selectedId);
+  const htmlMarkers = visible
+    .filter((marker) => marker.kind !== 'cluster' && (marker.visualKind === 'selected' || marker.visualKind === 'critical' || marker.deaths >= 50))
     .slice(0, Math.min(HTML_MARKER_CAP, budgets.html));
   const buffers = writeBuffers(visible);
 

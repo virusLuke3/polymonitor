@@ -1,4 +1,4 @@
-export type GlobeQualitySetting = 'auto' | 'high' | 'balanced' | 'performance';
+export type GlobeQualitySetting = 'auto' | 'high' | 'balanced' | 'performance' | 'battery';
 export type GlobeQualityLevel = 'ultra' | 'high' | 'medium' | 'low';
 
 export type GlobeWorkerEvent = {
@@ -41,6 +41,11 @@ export type GlobeMarkerMeta = {
   sideB: string;
   violenceType: string;
   severity: string;
+  summary: string;
+  visualKind: 'selected' | 'critical' | 'warning' | 'incident' | 'cluster';
+  shape: 'circle' | 'square' | 'triangle' | 'cluster';
+  strongGlow: boolean;
+  pulsing: boolean;
   priority: number;
 };
 

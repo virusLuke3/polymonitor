@@ -38,6 +38,15 @@ type GlobeHtmlMarker = GlobeMarkerMeta;
 
 type GlobeLayerId = 'markets' | 'oracle' | 'trade' | 'lob' | 'intel' | 'ucdp';
 
+export type WorldGlobeStatusMetrics = {
+  fps: number;
+  markerTotal: number;
+  markerVisible: number;
+  qualitySetting: GlobeQualitySetting;
+  qualityLevel: GlobeQualityLevel;
+  dpr: number;
+};
+
 type WorldGlobeProps = {
   markets: MarketListItem[];
   selectedMarket: MarketSummary | null;
@@ -48,6 +57,7 @@ type WorldGlobeProps = {
   region: string;
   zoomLevel: number;
   enabledLayerIds: string[];
+  onMetricsChange?: (metrics: WorldGlobeStatusMetrics) => void;
 };
 
 const GLOBAL_VIEW = { lat: 20, lng: 6, altitude: 1.54 };
@@ -62,13 +72,14 @@ const QUALITY_PIXEL_RATIO: Record<GlobeQualityLevel, number> = {
   ultra: 1.5,
   high: 1.25,
   medium: 1,
-  low: 0.8,
+  low: 0.75,
 };
 const QUALITY_LABELS: Record<GlobeQualitySetting, string> = {
   auto: 'Auto',
-  high: 'High quality',
+  high: 'High Quality',
   balanced: 'Balanced',
   performance: 'Performance',
+  battery: 'Battery Saver',
 };
 const REGION_VIEW: Record<string, { lat: number; lng: number; altitude: number }> = {
   global: { lat: 20, lng: 6, altitude: 1.54 },
@@ -145,9 +156,17 @@ function markerDateLabel(value?: string | null) {
   }).toUpperCase();
 }
 
+function markerViolenceLabelForFilter(value?: unknown) {
+  const text = String(value || '').trim();
+  if (text === '1') return 'STATE-BASED';
+  if (text === '2') return 'NON-STATE';
+  if (text === '3') return 'ONE-SIDED';
+  return text || 'UCDP EVENT';
+}
+
 function createUcdpMarkerElement(marker: GlobeHtmlMarker, onSelect: (marker: GlobeHtmlMarker) => void) {
   const el = document.createElement('div');
-  el.className = `wm-globe-html-marker wm-globe-html-marker-${marker.tone} ${marker.deaths >= 50 ? 'is-major' : ''}`;
+  el.className = `wm-globe-html-marker wm-globe-html-marker-${marker.tone} shape-${marker.shape} visual-${marker.visualKind} ${marker.strongGlow ? 'is-strong' : ''}`;
   el.title = marker.label;
   el.setAttribute('role', 'button');
   el.setAttribute('tabindex', '0');
@@ -173,7 +192,7 @@ function createUcdpMarkerElement(marker: GlobeHtmlMarker, onSelect: (marker: Glo
   dot.className = 'wm-globe-html-dot';
   hit.appendChild(dot);
 
-  if (marker.deaths >= 50) {
+  if (marker.pulsing) {
     const pulse = document.createElement('span');
     pulse.className = 'wm-globe-html-pulse';
     hit.appendChild(pulse);
@@ -287,6 +306,8 @@ type GlobePerfMetrics = {
   renderUpdateMs: number;
   lastRefreshAt: number;
   qualityLevel: GlobeQualityLevel;
+  qualitySetting: GlobeQualitySetting;
+  dpr: number;
 };
 
 const DEFAULT_PERF_METRICS: GlobePerfMetrics = {
@@ -304,12 +325,14 @@ const DEFAULT_PERF_METRICS: GlobePerfMetrics = {
   renderUpdateMs: 0,
   lastRefreshAt: 0,
   qualityLevel: 'high',
+  qualitySetting: 'auto',
+  dpr: 1,
 };
 
 function getInitialQualitySetting(): GlobeQualitySetting {
   try {
     const stored = localStorage.getItem(GLOBE_QUALITY_STORAGE_KEY);
-    if (stored === 'auto' || stored === 'high' || stored === 'balanced' || stored === 'performance') return stored;
+    if (stored === 'auto' || stored === 'high' || stored === 'balanced' || stored === 'performance' || stored === 'battery') return stored;
   } catch {
     // ignore
   }
@@ -368,11 +391,28 @@ function createMarkerMaterial() {
       varying float vFlag;
       void main() {
         vec2 p = gl_PointCoord - vec2(0.5);
-        float dist = length(p);
-        if (dist > 0.5) discard;
-        float core = smoothstep(0.5, 0.08, dist);
-        float halo = smoothstep(0.5, 0.22, dist) * 0.42;
-        float clusterBoost = mix(1.0, 1.28, step(0.5, vFlag));
+        float flag = floor(vFlag + 0.5);
+        float core = 0.0;
+        float halo = 0.0;
+        if (flag == 2.0) {
+          float edge = max(abs(p.x), abs(p.y));
+          if (edge > 0.46) discard;
+          core = smoothstep(0.46, 0.26, edge);
+          halo = smoothstep(0.5, 0.39, edge) * 0.18;
+        } else if (flag == 3.0) {
+          float y = p.y + 0.46;
+          float width = 0.48 - clamp(y, 0.0, 0.92) * 0.46;
+          if (p.y < -0.42 || p.y > 0.46 || abs(p.x) > width) discard;
+          float edge = max(abs(p.x) / max(width, 0.01), abs(p.y) / 0.46);
+          core = smoothstep(1.0, 0.42, edge);
+          halo = smoothstep(1.06, 0.82, edge) * 0.16;
+        } else {
+          float dist = length(p);
+          if (dist > 0.5) discard;
+          core = smoothstep(0.48, 0.1, dist);
+          halo = smoothstep(0.5, 0.26, dist) * (flag == 1.0 ? 0.24 : 0.12);
+        }
+        float clusterBoost = mix(1.0, 1.22, step(0.5, flag) * step(flag, 1.5));
         vec3 color = vColor * clusterBoost;
         float alpha = (core + halo) * vOpacity;
         gl_FragColor = vec4(color, alpha);
@@ -392,9 +432,10 @@ function createMarkerGeometry(capacity: number) {
   return geometry;
 }
 
-export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle, contentItems, ucdpEvents, region, zoomLevel, enabledLayerIds }: WorldGlobeProps) {
+export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle, contentItems, ucdpEvents, region, zoomLevel, enabledLayerIds, onMetricsChange }: WorldGlobeProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const hoverCardRef = useRef<HTMLDivElement | null>(null);
   const globeRef = useRef<any>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -407,6 +448,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
   const latestWorkerResultRef = useRef<GlobeMarkerWorkerResult | null>(null);
   const htmlMarkersRef = useRef<GlobeHtmlMarker[]>([]);
   const raycasterRef = useRef(new THREE.Raycaster());
+  const hoveredMarkerIdRef = useRef<string | null>(null);
   const lastRaycastAtRef = useRef(0);
   const flushTimerRef = useRef<number | null>(null);
   const flushMaxTimerRef = useRef<number | null>(null);
@@ -427,15 +469,22 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
     zoomLevel: number;
   } | null>(null);
   const onMarkerSelectRef = useRef<(marker: GlobeHtmlMarker) => void>(() => undefined);
+  const onMetricsChangeRef = useRef<WorldGlobeProps['onMetricsChange']>(onMetricsChange);
+  const currentPixelRatioRef = useRef(1);
   const [qualitySetting, setQualitySetting] = useState<GlobeQualitySetting>(() => getInitialQualitySetting());
   const [adaptiveQualityLevel, setAdaptiveQualityLevel] = useState<GlobeQualityLevel>('high');
   const qualityLevel = qualitySettingToLevel(qualitySetting, adaptiveQualityLevel);
-  const showPerfOverlay = import.meta.env.DEV
-    || (typeof localStorage !== 'undefined' && localStorage.getItem(GLOBE_PERF_OVERLAY_STORAGE_KEY) === '1');
-  const [perfMetrics, setPerfMetrics] = useState<GlobePerfMetrics>({ ...DEFAULT_PERF_METRICS, qualityLevel });
+  const [showPerfOverlay, setShowPerfOverlay] = useState(() => {
+    if (typeof window === 'undefined') return import.meta.env.DEV;
+    return import.meta.env.DEV
+      || window.localStorage.getItem(GLOBE_PERF_OVERLAY_STORAGE_KEY) === '1'
+      || new URLSearchParams(window.location.search).get('globePerf') === '1';
+  });
+  const [perfMetrics, setPerfMetrics] = useState<GlobePerfMetrics>({ ...DEFAULT_PERF_METRICS, qualityLevel, qualitySetting });
   const [selectedMarker, setSelectedMarker] = useState<GlobeHtmlMarker | null>(null);
-  const [hoveredMarker, setHoveredMarker] = useState<(GlobeHtmlMarker & { screenX: number; screenY: number }) | null>(null);
+  const [activeViolenceFilter, setActiveViolenceFilter] = useState<string | null>(null);
   onMarkerSelectRef.current = (marker: GlobeHtmlMarker) => setSelectedMarker(marker);
+  onMetricsChangeRef.current = onMetricsChange;
 
   const globeData = useMemo(
     () => buildPoints(markets, selectedMarket, recentTrades, recentOracle, contentItems, enabledLayerIds),
@@ -443,14 +492,31 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
   );
 
   const updatePerfMetrics = (patch: Partial<GlobePerfMetrics>) => {
-    if (!showPerfOverlay && qualitySetting !== 'auto') return;
-    setPerfMetrics((current) => ({ ...current, ...patch, qualityLevel }));
+    setPerfMetrics((current) => {
+      const next = {
+        ...current,
+        ...patch,
+        qualityLevel,
+        qualitySetting,
+        dpr: currentPixelRatioRef.current,
+      };
+      onMetricsChangeRef.current?.({
+        fps: next.fps,
+        markerTotal: next.markerTotal,
+        markerVisible: next.markerVisible,
+        qualitySetting,
+        qualityLevel,
+        dpr: next.dpr,
+      });
+      return next;
+    });
   };
 
   const applyRendererQuality = (nextLevel = qualityLevel) => {
     const globe = globeRef.current;
     if (!globe) return;
     const pixelRatio = Math.min(GLOBE_MAX_PIXEL_RATIO, QUALITY_PIXEL_RATIO[nextLevel], window.devicePixelRatio || 1);
+    currentPixelRatioRef.current = pixelRatio;
     try {
       globe.renderer().setPixelRatio(pixelRatio);
       globe.showAtmosphere(nextLevel !== 'low');
@@ -464,6 +530,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
     rootRef.current?.classList.toggle('globe-quality-low', nextLevel === 'low');
     rootRef.current?.classList.toggle('globe-quality-medium', nextLevel === 'medium');
     rootRef.current?.classList.toggle('globe-quality-high', nextLevel === 'high' || nextLevel === 'ultra');
+    rootRef.current?.classList.toggle('globe-quality-battery', qualitySetting === 'battery');
   };
 
   const disposeMarkerLayer = () => {
@@ -550,16 +617,19 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
     if (!workerRef.current) return;
     const requestId = workerRequestIdRef.current + 1;
     workerRequestIdRef.current = requestId;
+    const events = activeViolenceFilter
+      ? ucdpEvents.filter((event) => markerViolenceLabelForFilter(event.violenceType) === activeViolenceFilter)
+      : ucdpEvents;
     workerRef.current.postMessage({
       type: messageType,
       requestId,
-      events: ucdpEvents,
+      events,
       region,
       zoomLevel,
       qualityLevel,
       idle: idleRef.current,
       selectedId: selectedMarker?.id || null,
-      hoveredId: hoveredMarker?.id || null,
+      hoveredId: hoveredMarkerIdRef.current,
     });
   };
 
@@ -591,6 +661,30 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
       return;
     }
     setSelectedMarker(marker);
+  };
+
+  const focusMarkerOnGlobe = (marker: GlobeMarkerMeta) => {
+    const globe = globeRef.current;
+    if (!globe) return;
+    globe.pointOfView({ lat: marker.lat, lng: marker.lng, altitude: marker.kind === 'cluster' ? 0.72 : 0.46 }, 760);
+    wakeGlobe();
+  };
+
+  const showHoverMarker = (marker: GlobeMarkerMeta | null, event?: MouseEvent) => {
+    const card = hoverCardRef.current;
+    if (!card) return;
+    hoveredMarkerIdRef.current = marker?.id || null;
+    if (!marker || !event) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    card.className = `wm-globe-hover-card tone-${marker.tone}`;
+    card.style.left = `${Math.min(window.innerWidth - 280, event.clientX + 14)}px`;
+    card.style.top = `${Math.max(70, event.clientY - 20)}px`;
+    card.querySelector('[data-field="kind"]')!.textContent = marker.kind === 'cluster' ? `${marker.count} EVENTS` : marker.violenceType;
+    card.querySelector('[data-field="country"]')!.textContent = marker.country;
+    card.querySelector('[data-field="severity"]')!.textContent = marker.deaths ? `${marker.deaths} deaths` : marker.severity.toUpperCase();
   };
 
   const setAnimationPaused = (paused: boolean) => {
@@ -694,6 +788,23 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
   }, [qualitySetting, qualityLevel]);
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || !event.shiftKey || event.key.toLowerCase() !== 'g') return;
+      setShowPerfOverlay((current) => {
+        const next = !current;
+        try {
+          window.localStorage.setItem(GLOBE_PERF_OVERLAY_STORAGE_KEY, next ? '1' : '0');
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
     const worker = new Worker(new URL('../workers/worldGlobeMarkers.worker.ts', import.meta.url), { type: 'module' });
     workerRef.current = worker;
     worker.onmessage = (event: MessageEvent<GlobeMarkerWorkerResult>) => {
@@ -710,7 +821,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
 
   useEffect(() => {
     requestMarkerBuild('BUILD_MARKERS');
-  }, [ucdpEvents, region, zoomLevel, qualityLevel]);
+  }, [ucdpEvents, region, zoomLevel, qualityLevel, activeViolenceFilter]);
 
   useEffect(() => {
     if (!showPerfOverlay && qualitySetting !== 'auto') return undefined;
@@ -834,7 +945,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
           lastRaycastAtRef.current = now;
           const marker = pickGpuMarker(event);
           canvas.style.cursor = marker ? 'pointer' : '';
-          setHoveredMarker(marker ? { ...marker, screenX: event.clientX, screenY: event.clientY } : null);
+          showHoverMarker(marker, event);
         };
         const handleMarkerClick = (event: MouseEvent) => {
           const marker = pickGpuMarker(event);
@@ -849,7 +960,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
         canvas.addEventListener('mousemove', handleMarkerMove, { passive: true });
         canvas.addEventListener('mouseleave', () => {
           canvas.style.cursor = '';
-          setHoveredMarker(null);
+          showHoverMarker(null);
         }, { passive: true });
         canvas.addEventListener('click', handleMarkerClick);
       }
@@ -903,7 +1014,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
       <div ref={containerRef} className="wm-globe-runtime" />
       <div className="wm-globe-shade" />
       <label className="wm-globe-quality-control">
-        <span>Quality</span>
+        <span>Quality · {QUALITY_LABELS[qualitySetting]}</span>
         <select
           value={qualitySetting}
           onChange={(event) => setQualitySetting((event.currentTarget as HTMLSelectElement).value as GlobeQualitySetting)}
@@ -928,47 +1039,42 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
           <span>Flush <b>{perfMetrics.flushMs.toFixed(1)}ms</b></span>
           <span>Worker <b>{perfMetrics.workerMs.toFixed(1)}ms</b></span>
           <span>Render <b>{perfMetrics.renderUpdateMs.toFixed(1)}ms</b></span>
-          <span>Quality <b>{perfMetrics.qualityLevel}</b></span>
+          <span>Quality <b>{perfMetrics.qualitySetting}/{perfMetrics.qualityLevel}</b></span>
+          <span>DPR <b>{perfMetrics.dpr.toFixed(2)}</b></span>
           <em>{perfMetrics.lastRefreshAt ? new Date(perfMetrics.lastRefreshAt).toLocaleTimeString() : '--'}</em>
         </div>
       ) : null}
-      {hoveredMarker ? (
-        <div
-          className={`wm-globe-hover-card tone-${hoveredMarker.tone}`}
-          style={{
-            left: `${Math.min(window.innerWidth - 280, hoveredMarker.screenX + 14)}px`,
-            top: `${Math.max(70, hoveredMarker.screenY - 20)}px`,
-          }}
-        >
-          <span>{hoveredMarker.kind === 'cluster' ? `${hoveredMarker.count} EVENTS` : hoveredMarker.violenceType}</span>
-          <strong>{hoveredMarker.country}</strong>
-          <em>{hoveredMarker.deaths ? `${hoveredMarker.deaths} deaths` : hoveredMarker.severity.toUpperCase()}</em>
-        </div>
-      ) : null}
+      <div ref={hoverCardRef} className="wm-globe-hover-card" hidden>
+        <span data-field="kind" />
+        <strong data-field="country" />
+        <em data-field="severity" />
+      </div>
       {selectedMarker ? (
         <div className={`wm-globe-marker-card tone-${selectedMarker.tone}`}>
           <button type="button" className="wm-globe-marker-close" aria-label="Close conflict detail" onClick={() => setSelectedMarker(null)}>
-            x
+            ×
           </button>
+          <div className="wm-globe-marker-card-header">
+            <div>
+              <span className="wm-globe-marker-eyebrow">Selected Risk Event</span>
+              <h3>{selectedMarker.country}</h3>
+            </div>
+            <span className={`wm-globe-marker-severity severity-${selectedMarker.visualKind}`}>
+              {selectedMarker.visualKind.toUpperCase()}
+            </span>
+          </div>
           <div className="wm-globe-marker-card-kicker">
             <span>{selectedMarker.violenceType}</span>
+            <span>{selectedMarker.source}</span>
             <em>{markerDateLabel(selectedMarker.occurredAt)}</em>
           </div>
-          <h3>{selectedMarker.country}</h3>
-          <p>{selectedMarker.location}</p>
-          <div className="wm-globe-marker-card-grid">
-            <span>
-              <b>{selectedMarker.deaths}</b>
-              <em>DEATHS</em>
-            </span>
-            <span>
-              <b>{selectedMarker.severity.toUpperCase()}</b>
-              <em>SEVERITY</em>
-            </span>
-            <span>
-              <b>{selectedMarker.source}</b>
-              <em>SOURCE</em>
-            </span>
+          <p className="wm-globe-marker-location">{selectedMarker.location}</p>
+          <div className="wm-globe-marker-card-body">
+            <div className="wm-globe-marker-deaths">
+              <b>{selectedMarker.deaths || '—'}</b>
+              <em>reported fatalities</em>
+            </div>
+            <p>{selectedMarker.summary}</p>
           </div>
           {(selectedMarker.sideA || selectedMarker.sideB) ? (
             <div className="wm-globe-marker-actors">
@@ -977,11 +1083,22 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
               <span>{selectedMarker.sideB || 'UNKNOWN'}</span>
             </div>
           ) : null}
-          {selectedMarker.sourceUrl ? (
-            <a href={selectedMarker.sourceUrl} target="_blank" rel="noreferrer" className="wm-globe-marker-link">
-              OPEN SOURCE
-            </a>
+          {activeViolenceFilter ? (
+            <button type="button" className="wm-globe-marker-filter-note" onClick={() => setActiveViolenceFilter(null)}>
+              Showing {activeViolenceFilter} · clear filter
+            </button>
           ) : null}
+          <div className="wm-globe-marker-actions">
+            <button type="button" onClick={() => focusMarkerOnGlobe(selectedMarker)}>Focus region</button>
+            <button type="button" onClick={() => setActiveViolenceFilter(selectedMarker.violenceType)}>
+              Filter similar
+            </button>
+            {selectedMarker.sourceUrl ? (
+              <a href={selectedMarker.sourceUrl} target="_blank" rel="noreferrer">View details</a>
+            ) : (
+              <button type="button" disabled>View details</button>
+            )}
+          </div>
         </div>
       ) : null}
     </div>
