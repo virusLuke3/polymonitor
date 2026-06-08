@@ -671,10 +671,10 @@ def _group_category_bucket(group: Dict[str, Any]) -> str:
         return "tech"
     if any(token in text for token in ("weather", "temperature", "hurricane", "rain", "snow")):
         return "weather"
-    if any(token in text for token in ("sports", "tennis", "soccer", "nba", "nfl", "mlb", "nhl", "fifa", "formula1", "ufc", "valorant")):
-        return "sports"
-    if any(token in text for token in ("esports", "games", "gaming", "counter-strike", "league of legends", "dota")):
+    if any(token in text for token in ("esports", "games", "gaming", "counter-strike", "league of legends", "dota", "valorant", "rainbow six", "lol:")):
         return "games"
+    if any(token in text for token in ("sports", "tennis", "soccer", "nba", "nfl", "mlb", "nhl", "fifa", "formula1", "ufc")):
+        return "sports"
     if any(token in text for token in ("pop-culture", "awards", "movie", "music", "celebrity", "oscars", "grammy")):
         return "culture"
     return category or "market"
@@ -861,13 +861,13 @@ def _serving_market_groups_payload(
     active_order_sql = """
         CASE
           WHEN COALESCE(trade_count_24h, 0) > 0 THEN 0
-          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '24 hours') THEN 1
-          WHEN created_at >= (CURRENT_TIMESTAMP - INTERVAL '48 hours') THEN 2
-          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '3 days') THEN 3
-          WHEN created_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 4
-          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 5
-          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '14 days') THEN 6
-          WHEN COALESCE(volume_24h, 0) >= 100000 THEN 7
+          WHEN COALESCE(volume_24h, 0) > 0 AND last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 1
+          WHEN COALESCE(volume_24h, 0) > 0 AND created_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 2
+          WHEN COALESCE(volume_24h, 0) >= 100000 THEN 3
+          WHEN COALESCE(volume_24h, 0) > 0 AND last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '14 days') THEN 4
+          WHEN created_at >= (CURRENT_TIMESTAMP - INTERVAL '48 hours') THEN 5
+          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '3 days') THEN 6
+          WHEN created_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 7
           ELSE 8
         END ASC,
         active_rank DESC,
@@ -980,7 +980,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 13}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 14}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)

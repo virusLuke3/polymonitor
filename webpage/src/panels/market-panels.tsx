@@ -48,6 +48,7 @@ function marketTopic(market: MarketListItem) {
   const category = String(market.category || '').trim().toLowerCase();
   const title = `${market.title || ''} ${market.slug || ''}`.toLowerCase();
   if (category === 'crypto' || tags.includes('crypto') || tags.includes('crypto-prices')) return 'crypto';
+  if (/esports|counter-strike|league of legends|lol:|dota|valorant|rainbow six/.test(title) || tags.some((tag) => ['esports', 'gaming', 'games'].includes(tag))) return 'games';
   if (category === 'sports' || tags.includes('sports') || tags.includes('soccer') || tags.includes('games')) return 'sports';
   if (category.includes('politic') || tags.some((tag) => tag.includes('election') || tag.includes('politic'))) return 'politics';
   if (category.includes('economic') || category.includes('finance') || tags.some((tag) => ['fed', 'macro', 'economy', 'finance'].includes(tag))) return 'macro';
@@ -63,6 +64,7 @@ function groupTopic(group: MarketGroupItem) {
   const category = String(group.category || '').trim().toLowerCase();
   const title = `${group.title || ''} ${group.slug || ''}`.toLowerCase();
   if (category === 'crypto' || tags.includes('crypto') || tags.includes('crypto-prices')) return 'crypto';
+  if (/esports|counter-strike|league of legends|lol:|dota|valorant|rainbow six/.test(title) || tags.some((tag) => ['esports', 'gaming', 'games'].includes(tag))) return 'games';
   if (category === 'sports' || tags.includes('sports') || tags.includes('soccer') || tags.includes('games')) return 'sports';
   if (category.includes('politic') || tags.some((tag) => tag.includes('election') || tag.includes('politic'))) return 'politics';
   if (category.includes('economic') || category.includes('finance') || tags.some((tag) => ['fed', 'macro', 'economy', 'finance'].includes(tag))) return 'macro';
@@ -102,6 +104,7 @@ function groupOutcomeLabel(group: MarketGroupItem) {
 function marketAccent(market: MarketListItem) {
   const topic = marketTopic(market);
   if (topic.includes('crypto')) return '#f59e0b';
+  if (topic.includes('game') || topic.includes('esport')) return '#8b5cf6';
   if (topic.includes('sport')) return '#22c55e';
   if (topic.includes('politic') || topic.includes('election')) return '#60a5fa';
   if (topic.includes('finance') || topic.includes('fed') || topic.includes('macro')) return '#eab308';
@@ -112,6 +115,7 @@ function marketAccent(market: MarketListItem) {
 function groupAccent(group: MarketGroupItem) {
   const topic = groupTopic(group);
   if (topic.includes('crypto')) return '#f59e0b';
+  if (topic.includes('game') || topic.includes('esport')) return '#8b5cf6';
   if (topic.includes('sport')) return '#22c55e';
   if (topic.includes('politic') || topic.includes('election')) return '#60a5fa';
   if (topic.includes('finance') || topic.includes('fed') || topic.includes('macro')) return '#eab308';
@@ -210,13 +214,13 @@ function groupActiveRank(group: MarketGroupItem) {
   const tradableSignal = Number.isFinite(price) && price > 0.01 && price < 0.99 ? 1 : 0;
   const freshness =
     trades > 0 ? 700 :
-    activityAgeHours <= 24 ? 620 :
-    createdAgeHours <= 48 ? 580 :
-    activityAgeHours <= 72 ? 520 :
-    createdAgeHours <= 168 ? 460 :
-    activityAgeHours <= 168 ? 420 :
-    activityAgeHours <= 336 ? 220 :
-    createdAgeHours <= 336 ? 180 :
+    volume > 0 && activityAgeHours <= 168 ? 620 :
+    volume > 0 && createdAgeHours <= 168 ? 580 :
+    volume >= 100000 ? 520 :
+    volume > 0 && activityAgeHours <= 336 ? 460 :
+    createdAgeHours <= 48 ? 280 :
+    activityAgeHours <= 72 ? 240 :
+    createdAgeHours <= 168 ? 180 :
     0;
   const impact = Math.log10(Math.max(volume, 0) + 1) * 38 + Math.log10(Math.max(trades, 0) + 1) * 62;
   const multiOutcomeBonus = Number(group.outcomeCount || group.outcomes?.length || 0) > 2 ? 18 : 0;
