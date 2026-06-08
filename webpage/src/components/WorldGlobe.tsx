@@ -135,12 +135,12 @@ function numberValue(value?: string | number | null) {
 function ucdpColor(item: RuntimeGeoSanctionsShockItem) {
   const type = String(item.violenceType || '').trim();
   if (type === '1') return '#ff4d4d';
-  if (type === '2') return '#ff9f1c';
-  if (type === '3') return '#ffd400';
+  if (type === '2') return '#ff8a1f';
+  if (type === '3') return '#ffe12b';
   const severity = String(item.severity || '').toLowerCase();
   if (severity === 'critical') return '#ff4d4d';
-  if (severity === 'warning') return '#ff9f1c';
-  return '#ffd400';
+  if (severity === 'warning') return '#ff8a1f';
+  return '#ffe12b';
 }
 
 function ucdpTone(item: RuntimeGeoSanctionsShockItem): GlobeHtmlMarker['tone'] {
@@ -184,7 +184,7 @@ function buildUcdpMarkers(events: RuntimeGeoSanctionsShockItem[]) {
     const lng = numberValue(item.longitude);
     if (lat == null || lng == null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return [];
     const deaths = Math.max(0, numberValue(item.deathsBest) ?? 0);
-    const size = Math.min(14, 5 + Math.log10(deaths + 1) * 4);
+    const size = Math.min(10, 4 + Math.log10(deaths + 1) * 2.4);
     return [{
       layer: 'ucdp',
       id: String(item.id || `${lat}:${lng}:${item.occurredAt || ''}`),
@@ -210,7 +210,7 @@ function buildUcdpMarkers(events: RuntimeGeoSanctionsShockItem[]) {
 
 function createUcdpMarkerElement(marker: GlobeHtmlMarker, onSelect: (marker: GlobeHtmlMarker) => void) {
   const el = document.createElement('div');
-  el.className = `wm-globe-html-marker wm-globe-html-marker-${marker.tone} ${marker.deaths >= 20 ? 'is-major' : ''}`;
+  el.className = `wm-globe-html-marker wm-globe-html-marker-${marker.tone} ${marker.deaths >= 50 ? 'is-major' : ''}`;
   el.title = marker.label;
   el.setAttribute('role', 'button');
   el.setAttribute('tabindex', '0');
@@ -236,7 +236,7 @@ function createUcdpMarkerElement(marker: GlobeHtmlMarker, onSelect: (marker: Glo
   dot.className = 'wm-globe-html-dot';
   hit.appendChild(dot);
 
-  if (marker.deaths >= 20) {
+  if (marker.deaths >= 50) {
     const pulse = document.createElement('span');
     pulse.className = 'wm-globe-html-pulse';
     hit.appendChild(pulse);
@@ -266,9 +266,9 @@ function buildPoints(
       layer: 'markets',
       lat: geo.lat,
       lng: geo.lng,
-      size: market.id === selectedMarket?.id ? 0.45 : 0.2 + (index % 3) * 0.05,
-      altitude: market.id === selectedMarket?.id ? 0.19 : 0.12,
-      color: market.id === selectedMarket?.id ? '#ffcf4b' : '#58a6ff',
+      size: market.id === selectedMarket?.id ? 0.14 : 0.065 + (index % 3) * 0.015,
+      altitude: market.id === selectedMarket?.id ? 0.04 : 0.018,
+      color: market.id === selectedMarket?.id ? 'rgba(255,207,75,0.86)' : 'rgba(88,166,255,0.58)',
       label: market.title,
     };
   });
@@ -279,9 +279,9 @@ function buildPoints(
       layer: 'oracle',
       lat: geo.lat,
       lng: geo.lng,
-      size: 0.26,
-      altitude: 0.16,
-      color: '#ff5c5c',
+      size: 0.075,
+      altitude: 0.024,
+      color: 'rgba(255,92,92,0.62)',
       label: event.marketTitle || event.eventStatus || 'Oracle event',
     };
   });
@@ -292,9 +292,9 @@ function buildPoints(
       layer: 'intel',
       lat: geo.lat,
       lng: geo.lng,
-      size: 0.18,
-      altitude: 0.09,
-      color: '#39ff73',
+      size: 0.06,
+      altitude: 0.018,
+      color: 'rgba(57,255,115,0.58)',
       label: item.title || item.source || 'Intel',
     };
   });
@@ -305,9 +305,9 @@ function buildPoints(
       layer: 'trade',
       lat: (selectedGeo.lat + geo.lat) / 2,
       lng: (selectedGeo.lng + geo.lng) / 2,
-      size: 0.16,
-      altitude: 0.08,
-      color: String(trade.side).toLowerCase() === 'buy' ? '#ff8f24' : '#ffd166',
+      size: 0.055,
+      altitude: 0.016,
+      color: String(trade.side).toLowerCase() === 'buy' ? 'rgba(255,143,36,0.5)' : 'rgba(255,209,102,0.46)',
       label: trade.txHash || 'Trade',
     };
   });
@@ -320,8 +320,8 @@ function buildPoints(
     endLat: point.lat,
     endLng: point.lng,
     color: index % 2 === 0
-      ? ['rgba(255,140,36,0.05)', 'rgba(255,140,36,0.78)', 'rgba(255,140,36,0.05)']
-      : ['rgba(88,166,255,0.05)', 'rgba(88,166,255,0.72)', 'rgba(88,166,255,0.05)'],
+      ? ['rgba(255,140,36,0.02)', 'rgba(255,140,36,0.34)', 'rgba(255,140,36,0.02)']
+      : ['rgba(88,166,255,0.02)', 'rgba(88,166,255,0.32)', 'rgba(88,166,255,0.02)'],
   }));
 
   const rings: GlobeRing[] = [
@@ -367,27 +367,27 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
         .globeImageUrl('/textures/earth-topo-bathy.jpg')
         .backgroundImageUrl('')
         .showAtmosphere(true)
-        .atmosphereColor('#5a8dff')
-        .atmosphereAltitude(0.2)
+        .atmosphereColor('#ff9b42')
+        .atmosphereAltitude(0.14)
         .pointAltitude(((point: object) => (point as GlobePoint).altitude) as any)
         .pointRadius(((point: object) => (point as GlobePoint).size) as any)
         .pointColor(((point: object) => (point as GlobePoint).color) as any)
         .pointLabel(((point: object) => (point as GlobePoint).label) as any)
         .pointResolution(18)
         .pointsMerge(false)
-        .arcStroke(0.58)
-        .arcAltitudeAutoScale(0.36)
-        .arcDashLength(0.85)
-        .arcDashGap(3.5)
-        .arcDashAnimateTime(5000)
+        .arcStroke(0.26)
+        .arcAltitudeAutoScale(0.22)
+        .arcDashLength(0.62)
+        .arcDashGap(5.2)
+        .arcDashAnimateTime(6800)
         .arcColor(((arc: object) => (arc as GlobeArc).color) as any)
         .ringColor(((ring: object) => {
           const color = (ring as GlobeRing).color || '#ffba21';
           return (t: number) => `${color}${Math.round(Math.max(0, 1 - t) * 255).toString(16).padStart(2, '0')}`;
         }) as any)
-        .ringMaxRadius(5.4)
-        .ringPropagationSpeed(1.9)
-        .ringRepeatPeriod(1280)
+        .ringMaxRadius(3.5)
+        .ringPropagationSpeed(1.35)
+        .ringRepeatPeriod(2100)
         .htmlElementsData([])
         .htmlLat(((marker: object) => (marker as GlobeHtmlMarker).lat) as any)
         .htmlLng(((marker: object) => (marker as GlobeHtmlMarker).lng) as any)
