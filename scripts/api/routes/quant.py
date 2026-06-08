@@ -20,6 +20,7 @@ from quant.api.read_api import (  # noqa: E402
     get_backtest_run,
     get_backtest_trades,
     get_block_close_prices,
+    get_event_price_tile,
     get_event_price_series,
     get_frontend_prices,
     get_market_price_series,
@@ -182,6 +183,9 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "x_axis": "xAxis",
         "yes_probability_close": "yesProbabilityClose",
         "yes_probability_vwap": "yesProbabilityVwap",
+        "top_n": "topN",
+        "max_points": "maxPoints",
+        "source_limit": "sourceLimit",
     }
     return {mapping.get(key, key): _camel_value(value, mapping) for key, value in row.items()}
 
@@ -341,6 +345,42 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             return _camel_row(_apply_point_payload_format(payload, point_format))
 
         return jsonify(_cached_quant_payload("quant-event-series", cache_key, 12, build_payload))
+
+    @bp.route("/event-price-tile", methods=["GET"])
+    def api_quant_event_price_tile():
+        event_slug = (request.args.get("event_slug") or request.args.get("market_slug") or "").strip()
+        if not event_slug:
+            return jsonify({"error": "event_slug is required"}), 400
+        limit = min(max(_parse_int_arg("limit", 2500) or 2500, 1), 25000)
+        max_outcomes = min(max(_parse_int_arg("max_outcomes", 100) or 100, 1), 200)
+        max_points = min(max(_parse_int_arg("max_points", 600) or 600, 50), 2500)
+        top_n = min(max(_parse_int_arg("top_n", 12) or 12, 1), max_outcomes)
+        price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
+        point_format = (request.args.get("point_format") or "lite").strip().lower()
+        tile_range = (request.args.get("range") or "latest").strip().lower()
+        resolution = (request.args.get("resolution") or "auto").strip().lower()
+        cache_key = _cache_key("event-price-tile", version=1)
+
+        def build_payload() -> dict[str, Any]:
+            with postgres_connection(PostgresSettings(), readonly=True) as conn:
+                payload = get_event_price_tile(
+                    conn,
+                    event_slug=event_slug,
+                    price_source=price_source,
+                    from_ts=_parse_time_arg("from"),
+                    to_ts=_parse_time_arg("to"),
+                    from_block=_parse_int_arg("from_block"),
+                    to_block=_parse_int_arg("to_block"),
+                    limit=limit,
+                    max_outcomes=max_outcomes,
+                    top_n=top_n,
+                    max_points=max_points,
+                    tile_range=tile_range,
+                    resolution=resolution,
+                )
+            return _camel_row(_apply_point_payload_format(payload, point_format))
+
+        return jsonify(_cached_quant_payload("quant-event-tile", cache_key, 10, build_payload))
 
     @bp.route("/price-build-status", methods=["GET"])
     def api_quant_price_build_status():

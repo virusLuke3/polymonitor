@@ -272,6 +272,10 @@ export type QuantPriceQuery = {
   toBlock?: string;
   limit?: number;
   pointFormat?: 'lite' | 'full';
+  topN?: number;
+  maxPoints?: number;
+  range?: string;
+  resolution?: string;
 };
 
 export function fetchQuantPriceMarkets(query = '', limit = 40) {
@@ -343,8 +347,12 @@ export function fetchQuantEventPriceSeries(query: QuantPriceQuery & { eventSlug?
   if (query.toBlock?.trim()) params.set('to_block', query.toBlock.trim());
   params.set('limit', String(query.limit || 2500));
   params.set('max_outcomes', String(query.maxOutcomes || 100));
+  params.set('top_n', String(query.topN || 12));
+  params.set('max_points', String(query.maxPoints || 600));
+  params.set('range', query.range || 'latest');
+  params.set('resolution', query.resolution || 'auto');
   params.set('point_format', query.pointFormat || 'lite');
-  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-series?${params.toString()}`, 25000);
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-tile?${params.toString()}`, 18000);
 }
 
 export function fetchQuantBuildStatus(source = '', limit = 24) {

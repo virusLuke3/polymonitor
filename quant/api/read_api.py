@@ -492,6 +492,84 @@ def _fetch_token_price_points(
     ]
 
 
+def _point_x(point: dict[str, Any]) -> int:
+    value = point.get("x") or point.get("block_number") or point.get("timestamp") or 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _point_price(point: dict[str, Any]) -> float:
+    try:
+        return float(point.get("price") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _minmax_downsample(points: list[dict[str, Any]], max_points: int) -> list[dict[str, Any]]:
+    max_points = max(2, int(max_points or 600))
+    if len(points) <= max_points:
+        return points
+    bucket_count = max(1, (max_points - 2) // 2)
+    middle = points[1:-1]
+    bucket_size = max(1, (len(middle) + bucket_count - 1) // bucket_count)
+    selected: dict[int, dict[str, Any]] = {_point_x(points[0]): points[0], _point_x(points[-1]): points[-1]}
+    for start in range(0, len(middle), bucket_size):
+        bucket = middle[start:start + bucket_size]
+        if not bucket:
+            continue
+        lo = min(bucket, key=_point_price)
+        hi = max(bucket, key=_point_price)
+        selected[_point_x(lo)] = lo
+        selected[_point_x(hi)] = hi
+    return sorted(selected.values(), key=_point_x)[:max_points]
+
+
+def _event_outcome_payload(
+    *,
+    member: dict[str, Any],
+    event: dict[str, Any],
+    label: str,
+    no_label: str,
+    yes_points: list[dict[str, Any]],
+    no_points: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "market_id": member.get("market_id"),
+        "market_slug": member.get("market_slug"),
+        "market_title": member.get("question"),
+        "condition_id": member.get("condition_id"),
+        "end_date": event.get("end_date"),
+        "event_slug": member.get("event_slug"),
+        "event_id": member.get("event_id"),
+        "token_id": member.get("token_yes_id"),
+        "token_side": "YES",
+        "outcome_index": member.get("outcome_order"),
+        "outcome_label": label,
+        "outcome_key": member.get("outcome_key"),
+        "coverage_status": member.get("coverage_status"),
+        "buy_yes_token_id": member.get("token_yes_id"),
+        "buy_yes_token_side": "YES",
+        "buy_yes_label": label,
+        "buy_yes_price": yes_points[-1]["price"] if yes_points else None,
+        "buy_no_token_id": member.get("token_no_id"),
+        "buy_no_token_side": "NO",
+        "buy_no_label": no_label,
+        "buy_no_price": no_points[-1]["price"] if no_points else None,
+        "rows": len(yes_points),
+        "first_x": yes_points[0]["x"] if yes_points else None,
+        "last_x": yes_points[-1]["x"] if yes_points else None,
+        "latest_price": yes_points[-1]["price"] if yes_points else None,
+        "points": yes_points,
+        "complement_rows": len(no_points),
+        "complement_first_x": no_points[0]["x"] if no_points else None,
+        "complement_last_x": no_points[-1]["x"] if no_points else None,
+        "complement_latest_price": no_points[-1]["price"] if no_points else None,
+        "complement_points": no_points,
+    }
+
+
 def get_event_price_series(
     conn: Any,
     *,
@@ -565,41 +643,14 @@ def get_event_price_series(
             )
             label = _clean_label(member.get("outcome_label")) or _clean_label(member.get("question"))
             no_label = _no_label_from_member(member.get("question"), label)
-            outcomes.append(
-                {
-                    "market_id": member.get("market_id"),
-                    "market_slug": member.get("market_slug"),
-                    "market_title": member.get("question"),
-                    "condition_id": member.get("condition_id"),
-                    "end_date": event.get("end_date"),
-                    "event_slug": member.get("event_slug"),
-                    "event_id": member.get("event_id"),
-                    "token_id": member.get("token_yes_id"),
-                    "token_side": "YES",
-                    "outcome_index": member.get("outcome_order"),
-                    "outcome_label": label,
-                    "outcome_key": member.get("outcome_key"),
-                    "coverage_status": member.get("coverage_status"),
-                    "buy_yes_token_id": member.get("token_yes_id"),
-                    "buy_yes_token_side": "YES",
-                    "buy_yes_label": label,
-                    "buy_yes_price": yes_points[-1]["price"] if yes_points else None,
-                    "buy_no_token_id": member.get("token_no_id"),
-                    "buy_no_token_side": "NO",
-                    "buy_no_label": no_label,
-                    "buy_no_price": no_points[-1]["price"] if no_points else None,
-                    "rows": len(yes_points),
-                    "first_x": yes_points[0]["x"] if yes_points else None,
-                    "last_x": yes_points[-1]["x"] if yes_points else None,
-                    "latest_price": yes_points[-1]["price"] if yes_points else None,
-                    "points": yes_points,
-                    "complement_rows": len(no_points),
-                    "complement_first_x": no_points[0]["x"] if no_points else None,
-                    "complement_last_x": no_points[-1]["x"] if no_points else None,
-                    "complement_latest_price": no_points[-1]["price"] if no_points else None,
-                    "complement_points": no_points,
-                }
-            )
+            outcomes.append(_event_outcome_payload(
+                member=member,
+                event=event,
+                label=label,
+                no_label=no_label,
+                yes_points=yes_points,
+                no_points=no_points,
+            ))
 
     return {
         "event": {
@@ -611,6 +662,149 @@ def get_event_price_series(
         "members": members,
         "outcomes": outcomes,
         "count": len(outcomes),
+    }
+
+
+def get_event_price_tile(
+    conn: Any,
+    *,
+    event_slug: str,
+    price_source: str,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    from_block: int | None = None,
+    to_block: int | None = None,
+    limit: int = 2500,
+    max_outcomes: int = 100,
+    top_n: int = 12,
+    max_points: int = 600,
+    tile_range: str = "latest",
+    resolution: str = "auto",
+) -> dict[str, Any]:
+    source = "orderfilled_block_close" if price_source == "orderfilled_block_close" else "frontend"
+    top_n = max(1, min(int(top_n or 12), int(max_outcomes or 100)))
+    max_points = max(50, min(int(max_points or 600), 2500))
+    source_limit = min(int(limit or 2500), max(250, max_points * 2))
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM quant.market_event_metadata WHERE event_slug = %s", (event_slug,))
+        event = dict(cur.fetchone() or {})
+        if not event:
+            return {
+                "event": {
+                    "event_slug": event_slug,
+                    "event_title": event_slug,
+                    "source": source,
+                    "scope": "event_tile",
+                    "x_axis": "block_number" if source == "orderfilled_block_close" else "timestamp",
+                },
+                "members": [],
+                "outcomes": [],
+                "count": 0,
+                "tile": {"range": tile_range, "resolution": resolution, "top_n": top_n, "max_points": max_points},
+            }
+
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.market_event_members
+            WHERE event_slug = %s
+            ORDER BY outcome_order ASC, outcome_label ASC, market_id ASC
+            LIMIT %s
+            """,
+            (event_slug, int(max_outcomes)),
+        )
+        members = [dict(row) for row in cur.fetchall()]
+        latest_rows: list[dict[str, Any]] = []
+        for index, member in enumerate(members):
+            yes_latest = _fetch_token_price_points(
+                cur,
+                token_id=member.get("token_yes_id"),
+                source=source,
+                from_ts=from_ts,
+                to_ts=to_ts,
+                from_block=from_block,
+                to_block=to_block,
+                limit=1,
+            )
+            no_latest = _fetch_token_price_points(
+                cur,
+                token_id=member.get("token_no_id"),
+                source=source,
+                from_ts=from_ts,
+                to_ts=to_ts,
+                from_block=from_block,
+                to_block=to_block,
+                limit=1,
+            )
+            latest_rows.append({
+                "index": index,
+                "member": member,
+                "yes_latest": yes_latest,
+                "no_latest": no_latest,
+                "score": _point_price(yes_latest[-1]) if yes_latest else 0.0,
+                "latest_x": max(_point_x(yes_latest[-1]) if yes_latest else 0, _point_x(no_latest[-1]) if no_latest else 0),
+            })
+
+        ranked = sorted(latest_rows, key=lambda row: (row["score"], row["latest_x"]), reverse=True)
+        keep_indexes = {row["index"] for row in ranked[:top_n]}
+
+        outcomes: list[dict[str, Any]] = []
+        for item in latest_rows:
+            member = item["member"]
+            label = _clean_label(member.get("outcome_label")) or _clean_label(member.get("question"))
+            no_label = _no_label_from_member(member.get("question"), label)
+            if item["index"] in keep_indexes:
+                yes_points = _fetch_token_price_points(
+                    cur,
+                    token_id=member.get("token_yes_id"),
+                    source=source,
+                    from_ts=from_ts,
+                    to_ts=to_ts,
+                    from_block=from_block,
+                    to_block=to_block,
+                    limit=source_limit,
+                )
+                no_points = _fetch_token_price_points(
+                    cur,
+                    token_id=member.get("token_no_id"),
+                    source=source,
+                    from_ts=from_ts,
+                    to_ts=to_ts,
+                    from_block=from_block,
+                    to_block=to_block,
+                    limit=source_limit,
+                )
+                yes_points = _minmax_downsample(yes_points, max_points)
+                no_points = _minmax_downsample(no_points, max_points)
+            else:
+                yes_points = item["yes_latest"]
+                no_points = item["no_latest"]
+            outcomes.append(_event_outcome_payload(
+                member=member,
+                event=event,
+                label=label,
+                no_label=no_label,
+                yes_points=yes_points,
+                no_points=no_points,
+            ))
+
+    return {
+        "event": {
+            **event,
+            "source": source,
+            "scope": "event_tile",
+            "x_axis": "block_number" if source == "orderfilled_block_close" else "timestamp",
+        },
+        "members": members,
+        "outcomes": outcomes,
+        "count": len(outcomes),
+        "tile": {
+            "range": tile_range,
+            "resolution": resolution,
+            "top_n": top_n,
+            "max_points": max_points,
+            "source_limit": source_limit,
+        },
     }
 
 
