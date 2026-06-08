@@ -58,7 +58,8 @@ function defaultEntityKind() {
 function defaultPriceSource(): PriceSource {
   const params = new URLSearchParams(window.location.search);
   const source = `${params.get('source') || params.get('price_source') || ''}`.toLowerCase();
-  return source.includes('orderfilled') || source.includes('block') ? 'orderfilled' : 'frontend';
+  if (source.includes('frontend')) return 'frontend';
+  return 'orderfilled';
 }
 
 function sleep(ms: number) {
