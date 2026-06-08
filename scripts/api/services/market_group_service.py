@@ -653,6 +653,79 @@ def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int
     return (bucket, multi_penalty, -volume, -trade_count, -recency, -created_ts)
 
 
+def _group_category_bucket(group: Dict[str, Any]) -> str:
+    category = str(group.get("category") or "").strip().lower()
+    tags = " ".join(str(tag or "").strip().lower() for tag in _as_list(group.get("tags")))
+    title = str(group.get("title") or "").strip().lower()
+    slug = str(group.get("slug") or "").strip().lower()
+    text = " ".join((category, tags, title, slug))
+    if "orderfilled-placeholder" in text or title.startswith("trade indexer placeholder market"):
+        return "placeholder"
+    if any(token in text for token in ("politic", "election", "trump", "biden", "congress", "iran", "ceasefire", "war", "president")):
+        return "politics"
+    if any(token in text for token in ("crypto", "bitcoin", "ethereum", "solana", "xrp", "token", "btc", "eth")):
+        return "crypto"
+    if any(token in text for token in ("finance", "business", "econom", "fed", "rate", "inflation", "ipo", "valuation", "stock", "macro")):
+        return "macro"
+    if any(token in text for token in ("tech", "ai", "openai", "spacex", "tesla", "apple", "google", "nvidia")):
+        return "tech"
+    if any(token in text for token in ("weather", "temperature", "hurricane", "rain", "snow")):
+        return "weather"
+    if any(token in text for token in ("sports", "tennis", "soccer", "nba", "nfl", "mlb", "nhl", "fifa", "formula1", "ufc", "valorant")):
+        return "sports"
+    if any(token in text for token in ("esports", "games", "gaming", "counter-strike", "league of legends", "dota")):
+        return "games"
+    if any(token in text for token in ("pop-culture", "awards", "movie", "music", "celebrity", "oscars", "grammy")):
+        return "culture"
+    return category or "market"
+
+
+def _interleave_group_categories(groups: List[Dict[str, Any]], page_size: int) -> List[Dict[str, Any]]:
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    order: List[str] = []
+    for group in groups:
+        bucket = _group_category_bucket(group)
+        if bucket == "placeholder":
+            continue
+        if bucket not in buckets:
+            buckets[bucket] = []
+            order.append(bucket)
+        buckets[bucket].append(group)
+    if len(order) <= 1:
+        return [group for group in groups if _group_category_bucket(group) != "placeholder"]
+    selected: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    limit = max(1, int(page_size))
+    while len(selected) < limit:
+        added = False
+        for bucket in order:
+            bucket_rows = buckets.get(bucket) or []
+            while bucket_rows:
+                group = bucket_rows.pop(0)
+                key = str(group.get("eventId") or group.get("groupId") or group.get("slug") or "")
+                if key and key in seen:
+                    continue
+                selected.append(group)
+                if key:
+                    seen.add(key)
+                added = True
+                break
+            if len(selected) >= limit:
+                break
+        if not added:
+            break
+    for group in groups:
+        key = str(group.get("eventId") or group.get("groupId") or group.get("slug") or "")
+        if _group_category_bucket(group) == "placeholder":
+            continue
+        if key and key in seen:
+            continue
+        selected.append(group)
+        if key:
+            seen.add(key)
+    return selected
+
+
 def _serving_table_ready(ctx: dict) -> bool:
     backend_getter = ctx.get("get_backend")
     if callable(backend_getter):
@@ -732,7 +805,13 @@ def _serving_market_groups_payload(
 ) -> Optional[Dict[str, Any]]:
     if not _serving_table_ready(ctx):
         return None
-    where = ["outcome_count > 0"]
+    where = [
+        "outcome_count > 0",
+        "LOWER(COALESCE(category, '')) NOT LIKE '%%orderfilled-placeholder%%'",
+        "LOWER(COALESCE(event_slug, '')) NOT LIKE '%%trade-indexer-placeholder%%'",
+        "LOWER(COALESCE(title, '')) NOT LIKE 'trade indexer placeholder market%%'",
+        "LOWER(COALESCE(CAST(tags AS TEXT), '')) NOT LIKE '%%orderfilled-placeholder%%'",
+    ]
     params: List[Any] = []
     if sort == "active":
         where.append("is_trading_closed = FALSE")
@@ -750,6 +829,7 @@ def _serving_market_groups_payload(
         "volume": "volume_24h DESC, last_activity_at DESC NULLS LAST, active_rank DESC",
     }.get(sort, "active_rank DESC, volume_24h DESC, last_activity_at DESC NULLS LAST")
     offset = (page - 1) * page_size
+    fetch_limit = max(page_size, page_size * 4) if sort == "active" and not query else page_size
     rows = ctx["query_all"](
         f"""
         SELECT
@@ -762,21 +842,25 @@ def _serving_market_groups_payload(
         ORDER BY {order_sql}
         LIMIT ? OFFSET ?
         """,
-        [*params, page_size, offset],
+        [*params, fetch_limit, offset],
     )
     total_row = ctx["query_all"](
         f"SELECT COUNT(*) AS total FROM event_market_serving WHERE {where_sql}",
         params,
     )
     total = int((total_row[0] or {}).get("total") or 0) if total_row else 0
+    items = [_serving_group_from_row(ctx, row) for row in rows]
+    if sort == "active" and not query:
+        items = _interleave_group_categories(items, page_size)
+    items = items[:page_size]
     return {
-        "items": [_serving_group_from_row(ctx, row) for row in rows],
+        "items": items,
         "pagination": {
             "page": page,
             "pageSize": page_size,
             "total": total,
             "totalPages": max(1, (total + page_size - 1) // page_size),
-            "hasMore": offset + len(rows) < total,
+            "hasMore": offset + len(items) < total,
         },
         "generatedAt": ctx["utc_now_iso"](),
         "sourceMode": "postgres-serving",
@@ -844,7 +928,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 10}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 11}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)

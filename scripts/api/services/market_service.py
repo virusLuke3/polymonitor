@@ -24,6 +24,10 @@ DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%onchain-registry%%'
+    AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%orderfilled-placeholder%%'
+    AND LOWER(COALESCE(CAST(m.category AS TEXT), '')) NOT LIKE '%%orderfilled-placeholder%%'
+    AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%trade-indexer-placeholder%%'
+    AND LOWER(COALESCE(CAST(m.title AS TEXT), '')) NOT LIKE 'trade indexer placeholder market%%'
     AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%updown-5m%%'
     AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%updown-15m%%'
     AND LOWER(COALESCE(CAST(m.title AS TEXT), '')) NOT LIKE '%% up or down - %%'
@@ -102,6 +106,10 @@ def markets_runtime_prices_enabled() -> bool:
 
 def markets_latest_snapshot_fallback_enabled() -> bool:
     return _env_flag("POLYDATA_MARKETS_LATEST_SNAPSHOT_FALLBACK", True)
+
+
+def active_market_clickhouse_primary_enabled() -> bool:
+    return _env_flag("POLYDATA_ACTIVE_MARKET_CLICKHOUSE_PRIMARY", False)
 
 
 def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Optional[Dict[str, Any]]:
@@ -464,6 +472,83 @@ def _market_family_key(row: Dict[str, Any]) -> str:
     prefix = " ".join(words[:5]) if words else str(row.get("slug") or row.get("condition_id") or row.get("id"))
     category = str(row.get("category") or "").strip().lower()
     return f"{category}:{prefix}"
+
+
+def _market_category_bucket(row: Dict[str, Any]) -> str:
+    category = str(row.get("category") or "").strip().lower()
+    tags = str(row.get("tags") or "").strip().lower()
+    title = str(row.get("title") or "").strip().lower()
+    slug = str(row.get("slug") or "").strip().lower()
+    text = " ".join((category, tags, title, slug))
+    if "orderfilled-placeholder" in text or title.startswith("trade indexer placeholder market"):
+        return "placeholder"
+    if any(token in text for token in ("politic", "election", "trump", "biden", "congress", "iran", "ceasefire", "war", "president")):
+        return "politics"
+    if any(token in text for token in ("crypto", "bitcoin", "ethereum", "solana", "xrp", "token", "btc", "eth")):
+        return "crypto"
+    if any(token in text for token in ("finance", "business", "econom", "fed", "rate", "inflation", "ipo", "valuation", "stock", "macro")):
+        return "macro"
+    if any(token in text for token in ("tech", "ai", "openai", "spacex", "tesla", "apple", "google", "nvidia")):
+        return "tech"
+    if any(token in text for token in ("weather", "temperature", "hurricane", "rain", "snow")):
+        return "weather"
+    if any(token in text for token in ("sports", "tennis", "soccer", "nba", "nfl", "mlb", "nhl", "fifa", "formula1", "ufc", "valorant")):
+        return "sports"
+    if any(token in text for token in ("esports", "games", "gaming", "counter-strike", "league of legends")):
+        return "games"
+    if any(token in text for token in ("pop-culture", "awards", "movie", "music", "celebrity", "oscars", "grammy")):
+        return "culture"
+    return category or "market"
+
+
+def _interleave_market_category_rows(rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+    if len(rows) <= 2:
+        return rows
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    order: List[str] = []
+    for row in rows:
+        bucket = _market_category_bucket(row)
+        if bucket == "placeholder":
+            continue
+        if bucket not in buckets:
+            buckets[bucket] = []
+            order.append(bucket)
+        buckets[bucket].append(row)
+    if len(order) <= 1:
+        return [row for row in rows if _market_category_bucket(row) != "placeholder"]
+
+    selected: List[Dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    limit = max(1, min(len(rows), int(target_count)))
+    while len(selected) < limit:
+        added = False
+        for bucket in order:
+            bucket_rows = buckets.get(bucket) or []
+            while bucket_rows:
+                row = bucket_rows.pop(0)
+                market_id = row.get("id")
+                if market_id is not None and int(market_id) in seen_ids:
+                    continue
+                selected.append(row)
+                if market_id is not None:
+                    seen_ids.add(int(market_id))
+                added = True
+                break
+            if len(selected) >= limit:
+                break
+        if not added:
+            break
+
+    for row in rows:
+        market_id = row.get("id")
+        if _market_category_bucket(row) == "placeholder":
+            continue
+        if market_id is not None and int(market_id) in seen_ids:
+            continue
+        selected.append(row)
+        if market_id is not None:
+            seen_ids.add(int(market_id))
+    return selected
 
 
 def _rank_default_market_rows(rows: List[Dict[str, Any]], now_value: Any = None) -> List[Dict[str, Any]]:
@@ -2152,7 +2237,7 @@ def get_markets_payload(
         params.extend([pattern, pattern, pattern, pattern])
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 6}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 7}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
         return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=markets_runtime_prices_enabled())
@@ -2163,7 +2248,7 @@ def get_markets_payload(
         raw_limit = min(5000, max((offset + page_size + 1) * 6, 180))
         clickhouse_candidate_rows = (
             _clickhouse_active_market_candidate_rows(ctx, now_iso, raw_limit)
-            if status == "active" and not query
+            if status == "active" and not query and active_market_clickhouse_primary_enabled()
             else []
         )
         if clickhouse_candidate_rows:
@@ -2272,6 +2357,8 @@ def get_markets_payload(
         if status == "active":
             visible_rows = _prefer_tradeable_market_rows(visible_rows, page_size + 1)
             if not query:
+                visible_rows = _rank_default_market_rows(visible_rows, now_iso)
+                visible_rows = _interleave_market_category_rows(visible_rows, page_size + 1)
                 visible_rows = _coalesce_native_market_rows(visible_rows)
                 visible_rows = _diversify_market_rows(visible_rows, page_size + 1, now_iso)
         has_more = len(visible_rows) > page_size
@@ -2300,7 +2387,11 @@ def build_active_markets_payload(
     now_iso = ctx["utc_now_iso"]()
     created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
     raw_limit = max(page_size * 5, 100)
-    clickhouse_candidate_rows = _clickhouse_active_market_candidate_rows(ctx, now_iso, raw_limit)
+    clickhouse_candidate_rows = (
+        _clickhouse_active_market_candidate_rows(ctx, now_iso, raw_limit)
+        if active_market_clickhouse_primary_enabled()
+        else []
+    )
     if clickhouse_candidate_rows:
         candidate_rows = clickhouse_candidate_rows
     elif _market_list_serving_has_rows(ctx, min_rows=max(page_size * 10, 1000)):
@@ -2380,6 +2471,7 @@ def build_active_markets_payload(
     rows = _merge_clickhouse_stats(ctx, rows)
     rows = _prefer_tradeable_market_rows(rows, max(page_size * 3, page_size))
     rows = _rank_default_market_rows(rows, now_iso)
+    rows = _interleave_market_category_rows(rows, max(page_size * 3, page_size))
     rows = _coalesce_native_market_rows(rows)
     rows = _prefer_lob_ready_market_rows(ctx, rows, page_size)
     rows = _diversify_market_rows(rows, page_size, now_iso)
@@ -2422,7 +2514,7 @@ def get_active_markets_snapshot(
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": should_include_change_24h,
             "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
-            "v": 21,
+            "v": 22,
         },
         sort_keys=True,
         ensure_ascii=True,

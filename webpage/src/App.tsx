@@ -1564,7 +1564,7 @@ function WorldMonitorApp() {
     }
 
     function refreshTradeSnapshot() {
-      fetchMarketTrades(currentMarketId, 24, 2200)
+      fetchMarketTrades(currentMarketId, 48, 5000)
         .then((trades) => applyLoadedBundle({ ...emptyWorkspaceBundle(), trades }))
         .catch(() => undefined);
     }

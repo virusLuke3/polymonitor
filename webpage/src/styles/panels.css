@@ -13924,6 +13924,20 @@ a.wm-orderfilled-row {
   background: #030405 !important;
 }
 
+.wm-weather-deck-map > .wm-weather-deck-basemap.maplibregl-map {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.wm-weather-deck-map .maplibregl-canvas-container,
+.wm-weather-deck-map .maplibregl-canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .wm-weather-deck-map .maplibregl-control-container {
   display: none;
 }
@@ -21789,6 +21803,58 @@ a.wm-orderfilled-row {
   border-radius: 4px !important;
   background: #0b1017 !important;
   box-shadow: none !important;
+}
+
+.wm-focused-market-row .wm-focus-book-imbalance {
+  display: grid !important;
+  grid-template-columns: auto minmax(72px, 1fr) auto !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-height: 22px !important;
+  padding: 0 6px !important;
+  border: 1px solid rgba(255, 255, 255, 0.055) !important;
+  border-radius: 6px !important;
+  background: #090e14 !important;
+  color: var(--wm-terminal-muted) !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+  font-weight: 720 !important;
+}
+
+.wm-focused-market-row .wm-focus-book-imbalance > div {
+  display: flex !important;
+  height: 6px !important;
+  overflow: hidden !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.wm-focused-market-row .wm-focus-book-imbalance i {
+  display: block !important;
+  height: 100% !important;
+}
+
+.wm-focused-market-row .wm-focus-book-imbalance i.bid {
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.28), rgba(34, 197, 94, 0.78)) !important;
+}
+
+.wm-focused-market-row .wm-focus-book-imbalance i.ask {
+  background: linear-gradient(90deg, rgba(244, 63, 94, 0.78), rgba(244, 63, 94, 0.28)) !important;
+}
+
+.wm-focused-market-row .wm-focus-book-ladder {
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.wm-focused-market-row .wm-focus-book-rows {
+  min-height: 0 !important;
+  overflow: auto !important;
+}
+
+.wm-focused-market-row .wm-focus-book-row {
+  grid-template-columns: 52px minmax(64px, 1fr) minmax(72px, 0.95fr) !important;
+  height: 19px !important;
 }
 
 @media (max-width: 1400px) {

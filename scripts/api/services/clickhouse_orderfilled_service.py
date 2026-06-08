@@ -432,6 +432,7 @@ def get_market_trades(ctx: dict, market_id: int, *, limit: int = 100, offset: in
         LIMIT {int(offset)}, {int(limit)}
         FORMAT JSONEachRow
         """,
+        timeout_seconds=5.0,
     )
     if rows is None:
         return None
@@ -459,6 +460,7 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
         LIMIT {int(limit)}
         FORMAT JSONEachRow
         """,
+        timeout_seconds=5.0,
     )
     if rows is None:
         return None
@@ -802,20 +804,40 @@ def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional
         LIMIT {int(limit)}
         FORMAT JSONEachRow
         """,
+        timeout_seconds=5.0,
     )
     if rows is None:
         return None
     rows = _repair_block_timestamps(rows)
     rows.reverse()
-    yes_price = None
-    no_price = None
+    compacted: Dict[str, Dict[str, Any]] = {}
     points: List[Dict[str, Any]] = []
     for row in rows:
-        if row.get("outcome") == "YES":
-            yes_price = row.get("price")
-        elif row.get("outcome") == "NO":
-            no_price = row.get("price")
-        points.append({"timestamp": row.get("timestamp"), "yesPrice": yes_price, "noPrice": no_price})
+        price = _float_or_none(row.get("price"))
+        timestamp = str(row.get("timestamp") or "").strip()
+        if price is None or not timestamp:
+            continue
+        outcome = str(row.get("outcome") or "").upper()
+        if outcome == "YES":
+            yes_price = price
+        elif outcome == "NO":
+            yes_price = 1.0 - price
+        else:
+            continue
+        yes_price = max(0.0, min(1.0, yes_price))
+        block = int(row.get("block_number") or 0)
+        log_index = int(row.get("log_index") or 0)
+        compacted[timestamp] = {
+            "timestamp": timestamp,
+            "yesPrice": f"{yes_price:.10f}",
+            "noPrice": f"{1.0 - yes_price:.10f}",
+            "_sort": (block, log_index),
+        }
+    for point in sorted(compacted.values(), key=lambda item: item.get("_sort") or (0, 0)):
+        point.pop("_sort", None)
+        if points and points[-1].get("yesPrice") == point.get("yesPrice") and points[-1].get("timestamp") == point.get("timestamp"):
+            continue
+        points.append(point)
     return points
 
 

@@ -38,6 +38,7 @@ const FOCUS_CHART = {
   bottom: 48,
   left: 10,
 };
+const BOOK_LEVEL_LIMIT = 12;
 
 const POLYMARKET_SERIES_COLORS = ['#7cb6ff', '#4377ff', '#f5b800', '#ff7a1a', '#7f56d9', '#12b76a', '#f04438', '#06aed4'];
 
@@ -71,7 +72,7 @@ function formatBookTotal(value?: number | null) {
 }
 
 function bookDepthTotal(levels?: L2Level[]) {
-  return (levels || []).slice(0, 6).reduce((total, level) => {
+  return (levels || []).slice(0, BOOK_LEVEL_LIMIT).reduce((total, level) => {
     const price = Number(level.price);
     const size = Number(level.size);
     if (!Number.isFinite(price) || !Number.isFinite(size)) return total;
@@ -103,7 +104,7 @@ function safeLiveProbability(value: string | number | null | undefined, isLive: 
 }
 
 function accumulateNotional(levels: L2Level[]) {
-  const working = levels.slice(0, 6).map((level) => ({
+  const working = levels.slice(0, BOOK_LEVEL_LIMIT).map((level) => ({
     price: Number(level.price) || 0,
     size: Number(level.size) || 0,
   }));
@@ -142,6 +143,12 @@ function orderBookRows(levels: L2Level[], tone: 'bid' | 'ask') {
       </div>
     );
   });
+}
+
+function bookImbalancePercent(bidTotal: number, askTotal: number) {
+  const total = bidTotal + askTotal;
+  if (!Number.isFinite(total) || total <= 0) return 50;
+  return Math.max(0, Math.min(100, (bidTotal / total) * 100));
 }
 
 function marketLookup(markets: MarketListItem[], marketId: number | null) {
@@ -710,6 +717,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const bidLevels = activeBook?.bids || [];
   const askDepthTotal = bookDepthTotal(askLevels);
   const bidDepthTotal = bookDepthTotal(bidLevels);
+  const bidImbalance = bookImbalancePercent(bidDepthTotal, askDepthTotal);
   const hasAnyBookLevels = hasBookLevels(lob);
   const hasActiveBookLevels = hasSideBookLevels(activeBook);
   const eventOutcomes = detail ? eventOutcomeCards(detail) : [];
@@ -979,6 +987,14 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               <div className="wm-focus-book-depth-strip">
                 <span>Spread <strong>{formatBookPrice(spreadValue)}</strong></span>
                 <span>Depth <strong>{formatBookTotal(askDepthTotal + bidDepthTotal)}</strong></span>
+              </div>
+              <div className="wm-focus-book-imbalance" aria-label="book depth imbalance">
+                <span>Bid {Math.round(bidImbalance)}%</span>
+                <div>
+                  <i className="bid" style={{ width: `${bidImbalance}%` }} />
+                  <i className="ask" style={{ width: `${100 - bidImbalance}%` }} />
+                </div>
+                <span>Ask {Math.round(100 - bidImbalance)}%</span>
               </div>
               <div className="wm-focus-book-ladder">
                 <div className="wm-focus-book-side ask">
