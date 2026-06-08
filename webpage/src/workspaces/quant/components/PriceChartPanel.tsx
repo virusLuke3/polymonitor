@@ -255,6 +255,28 @@ function markerPosition(signal: Signal, points: PricePoint[]) {
   };
 }
 
+function blockAxisTicks(points: PricePoint[], maxTicks = 8) {
+  if (!points.length) return [];
+  const count = Math.min(maxTicks, Math.max(2, points.length));
+  const seen = new Set<number>();
+  return Array.from({ length: count })
+    .map((_, index) => {
+      const pointIndex = count === 1 ? 0 : Math.round((index / (count - 1)) * (points.length - 1));
+      const point = points[pointIndex];
+      if (!point) return null;
+      const key = Math.floor(point.timestamp);
+      if (seen.has(key)) return null;
+      seen.add(key);
+      return {
+        key,
+        label: blockLabel(point.timestamp),
+        left: `${(pointIndex / Math.max(1, points.length - 1)) * 100}%`,
+        edge: index === 0 ? 'start' : index === count - 1 ? 'end' : 'middle',
+      };
+    })
+    .filter(Boolean) as Array<{ key: number; label: string; left: string; edge: 'start' | 'middle' | 'end' }>;
+}
+
 function clampProbability(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -417,8 +439,6 @@ export function PriceChartPanel({
   const primaryPoints = selectedGroup?.points || visibleOutcomeGroups[0]?.points || allPoints;
   const latestPoint = primaryPoints[primaryPoints.length - 1] || null;
   const latest = hover || latestPoint;
-  const firstPrimaryPoint = primaryPoints[0] || null;
-  const lastPrimaryPoint = primaryPoints[primaryPoints.length - 1] || null;
   const previous = primaryPoints[Math.max(0, primaryPoints.length - 2)];
   const delta = latest && previous ? latest.close - previous.close : 0;
   const deltaPct = latest && previous?.close ? (delta / previous.close) * 100 : 0;
@@ -434,12 +454,13 @@ export function PriceChartPanel({
     const ma = movingAverage(closes, Math.min(40, Math.max(3, Math.floor(primaryPoints.length / 20))));
     return primaryPoints.map((point, index) => ({ ...point, close: ma[index] ?? point.close }));
   }, [primaryPoints]);
-  const dataWindowPoint = pinnedPoint || latestPoint;
+  const dataWindowPoint = pinnedPoint || hover || latestPoint;
   const dataWindowMaPoint = dataWindowPoint ? nearestPoint(maPoints, dataWindowPoint.timestamp) : null;
   const dataWindowInspect = pointSnapshot(dataWindowPoint, latestPoint, dataWindowMaPoint);
   const hoverMaPoint = hover ? nearestPoint(maPoints, hover.timestamp) : null;
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
   const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints) : null;
+  const blockTicks = useMemo(() => blockAxisTicks(primaryPoints), [primaryPoints]);
   const markers = useMemo(() => signals.map((signal) => markerPosition(signal, primaryPoints)).filter(Boolean), [primaryPoints, signals]);
   const focusedMarkers = markers.filter((marker) => marker?.signal.tradeId === selectedTradeId);
 
@@ -663,7 +684,7 @@ export function PriceChartPanel({
           priceLineVisible: showPriceLine,
           priceLineColor: baseColor,
           priceLineWidth: 1,
-          title: group.label,
+          title: group.fullLabel,
           ...(autoscaleInfoProvider ? { autoscaleInfoProvider } : {}),
         });
         series.lines.set(group.key, line);
@@ -673,7 +694,7 @@ export function PriceChartPanel({
         lineWidth,
         priceLineVisible: showPriceLine,
         priceLineColor: baseColor,
-        title: `${group.label} ${Math.round(latestClose(group) * 100)}%`,
+        title: `${group.fullLabel} ${Math.round(latestClose(group) * 100)}%`,
         ...(autoscaleInfoProvider ? { autoscaleInfoProvider } : {}),
       });
       line.setData(lineData(group.points));
@@ -784,7 +805,7 @@ export function PriceChartPanel({
       : dataStatus === 'empty'
         ? 'No price rows'
         : '--';
-  const selectedText = hasLoadedPrices && selectedGroup ? `${selectedGroup.label} ${fmtPrice(selectedLatest)}` : '--';
+  const selectedText = hasLoadedPrices && selectedGroup ? `${selectedGroup.fullLabel} ${fmtPrice(selectedLatest)}` : '--';
   const sumText = eventMode && hasLoadedPrices ? fmtPrice(normalizedView ? 1 : allYesSum) : '--';
   const visibleSumText = eventMode && hasLoadedPrices ? fmtPrice(visibleYesSum) : '--';
   const latestPriceText = latest && hasLoadedPrices ? fmtPrice(latest.close) : '--';
@@ -955,7 +976,7 @@ export function PriceChartPanel({
                     }}
                   >
                     <i style={{ backgroundColor: SERIES_COLORS[group.order % SERIES_COLORS.length] }} />
-                    {group.label} <b>{fmtPrice(point?.close || 0)}</b>
+                    <span>{group.fullLabel}</span> <b>{fmtPrice(point?.close || 0)}</b>
                   </button>
                 );
               })}
@@ -1004,13 +1025,18 @@ export function PriceChartPanel({
           >
             <header onPointerDown={(event) => startDataWindowDrag(event as unknown as PointerEvent)}>
               <strong>{dataWindowSettings.mode === 'compact' ? 'Compact Tooltip' : 'Data Window'}</strong>
-              <i>{pinnedPoint ? 'Pinned' : 'Latest'}</i>
+              <i>{pinnedPoint ? 'Pinned' : hover ? 'Hover' : 'Latest'}</i>
               <button type="button" title="Minimize" onClick={() => updateDataWindow({ minimized: true })}>_</button>
               {pinnedPoint ? <button type="button" title="Clear pinned point" onClick={() => setPinnedPoint(null)}>Clear</button> : null}
               <button type="button" title="Close" onClick={() => updateDataWindow({ visible: false, minimized: false })}>×</button>
             </header>
             <div><span>Block</span><b>{blockLabel(dataWindowInspect.point.timestamp)}</b></div>
-            <div><span>Outcome</span><b>{dataWindowInspect.point.outcomeShortLabel || dataWindowInspect.point.outcomeLabel || selectedGroup?.label || 'Outcome'}</b></div>
+            <div>
+              <span>Outcome</span>
+              <b title={dataWindowInspect.point.outcomeFullLabel || dataWindowInspect.point.outcomeLabel || selectedGroup?.fullLabel}>
+                {dataWindowInspect.point.outcomeFullLabel || dataWindowInspect.point.outcomeLabel || selectedGroup?.fullLabel || 'Outcome'}
+              </b>
+            </div>
             <div><span>YES</span><b>{fmtPrice(dataWindowInspect.yes)} <em>{dataWindowInspect.yesKind}</em></b></div>
             <div><span>NO</span><b>{fmtPrice(dataWindowInspect.no)} <em>{dataWindowInspect.noKind}</em></b></div>
             <div><span>Source</span><b>{priceSource}</b></div>
@@ -1018,7 +1044,7 @@ export function PriceChartPanel({
               const point = nearestPoint(group.points, dataWindowInspect.point.timestamp);
               return (
                 <div key={group.key} title={group.fullLabel}>
-                  <span>{group.label}</span>
+                  <span>{group.fullLabel}</span>
                   <b>{fmtPrice(point?.close ?? latestClose(group))}</b>
                 </div>
               );
@@ -1104,16 +1130,30 @@ export function PriceChartPanel({
           ) : null}
           {hoverInspect && hoverScreen && (!pinnedPoint || Math.floor(pinnedPoint.timestamp) !== Math.floor(hoverInspect.point.timestamp)) ? (
             <div className={`qtv-hover-tooltip ${tooltipMode}`} style={{ left: hoverScreen.x, top: hoverScreen.y }}>
-              <strong>{hoverInspect.point.outcomeShortLabel || hoverInspect.point.outcomeLabel || selectedGroup?.label || 'Outcome'}</strong>
+              <strong>{hoverInspect.point.outcomeFullLabel || hoverInspect.point.outcomeLabel || selectedGroup?.fullLabel || 'Outcome'}</strong>
               <span>Block {blockLabel(hoverInspect.point.timestamp)}</span>
               <b>YES {fmtPrice(hoverInspect.yes)} · NO {fmtPrice(hoverInspect.no)}</b>
+              {visibleOutcomeGroups.slice(0, tooltipMode === 'full' ? 8 : 5).map((group) => {
+                const point = nearestPoint(group.points, hoverInspect.point.timestamp);
+                return (
+                  <em key={group.key} title={group.fullLabel}>
+                    <i style={{ backgroundColor: SERIES_COLORS[group.order % SERIES_COLORS.length] }} />
+                    <span>{group.fullLabel}</span>
+                    <b>{fmtPrice(point?.close ?? latestClose(group))}</b>
+                  </em>
+                );
+              })}
             </div>
           ) : null}
           {priceSource.includes('block') && hasLoadedPrices ? (
-            <div className="qtv-block-axis-readout" aria-label="Visible block number range">
-              <span>{firstPrimaryPoint ? blockLabel(firstPrimaryPoint.timestamp) : '--'}</span>
-              <b>{hover ? `hover ${blockLabel(hover.timestamp)}` : lastPrimaryPoint ? `latest ${blockLabel(lastPrimaryPoint.timestamp)}` : '--'}</b>
-              <span>{lastPrimaryPoint ? blockLabel(lastPrimaryPoint.timestamp) : '--'}</span>
+            <div className="qtv-block-tick-axis" aria-label="Visible block number axis">
+              {blockTicks.map((tick) => (
+                <span key={tick.key} className={tick.edge} style={{ left: tick.left }}>
+                  <i />
+                  <b>{tick.label}</b>
+                </span>
+              ))}
+              {hover ? <strong style={{ left: pointToScreenSafe(hover, primaryPoints).x }}>hover {blockLabel(hover.timestamp)}</strong> : null}
             </div>
           ) : null}
         </div>
