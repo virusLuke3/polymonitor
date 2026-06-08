@@ -8,6 +8,7 @@ from urllib.parse import quote_plus
 from .models import MessageCandidate
 
 RELATED_NEWS_GROUP_LIMIT = 2
+WORLDCUP_WORKSPACE_URL = "https://www.polymonitor.club/?workspace=worldcup"
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -212,6 +213,97 @@ def format_nba_predictor(payload: Dict[str, Any]) -> List[MessageCandidate]:
         dedupe = _short_hash("nba-predictor", event_id, round(away_prob or -1), round(home_prob or -1), status)
         messages.append(MessageCandidate(topic="nba", dedupe_key=dedupe, text=text, priority="normal", metadata={"panel": "espn-matchup-predictor"}))
     return messages
+
+
+def _iter_list(payload: Dict[str, Any], key: str) -> Iterable[Dict[str, Any]]:
+    for item in payload.get(key) or []:
+        if isinstance(item, dict):
+            yield item
+
+
+def _weather_risk(row: Dict[str, Any]) -> int:
+    current = row.get("current") if isinstance(row.get("current"), dict) else {}
+    forecast = row.get("forecast") if isinstance(row.get("forecast"), list) else []
+    probs = [_number(current.get("precipitationProbability")) or 0]
+    for day in forecast[:3]:
+        if isinstance(day, dict):
+            probs.append(_number(day.get("precipitationProbability")) or 0)
+    return int(max(probs or [0]))
+
+
+def format_worldcup_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
+    signals = list(_iter_list(payload, "signals"))
+    news = list(_iter_list(payload, "news"))
+    weather = list(_iter_list(payload, "weather"))
+    if not signals and not news and not weather:
+        return []
+
+    lines: List[str] = []
+    summary = _text(payload.get("summary"))
+    if summary:
+        lines.append(summary[:240])
+    lines.append(f"Signals {len(signals)} | News {len(news)} | Weather {len(weather)}")
+
+    signal_lines = []
+    for item in signals[:3]:
+        title = _text(item.get("title"))
+        source = _text(item.get("source") or item.get("provider"), "signal")
+        if title:
+            signal_lines.append(f"- {source} | {title[:130]}")
+    if signal_lines:
+        lines.append("Signals:")
+        lines.extend(signal_lines)
+
+    news_lines = []
+    for item in news[:3]:
+        title = _text(item.get("title"))
+        source = _text(item.get("source"), "news")
+        if title:
+            news_lines.append(f"- {source} | {title[:130]}")
+    if news_lines:
+        lines.append("News:")
+        lines.extend(news_lines)
+
+    weather_lines = []
+    for item in sorted(weather, key=_weather_risk, reverse=True)[:2]:
+        city = _text(item.get("cityId"), "venue")
+        current = item.get("current") if isinstance(item.get("current"), dict) else {}
+        temp = _text(current.get("tempC"))
+        condition = _text(current.get("condition"))
+        rain = _weather_risk(item)
+        detail = " | ".join(part for part in (condition, f"{temp}C" if temp else "", f"rain {rain}%") if part)
+        weather_lines.append(f"- {city}: {detail}" if detail else f"- {city}")
+    if weather_lines:
+        lines.append("Weather:")
+        lines.extend(weather_lines)
+
+    first_url = _first_url(
+        *(item.get("url") for item in signals[:3]),
+        *(item.get("url") for item in news[:3]),
+        payload.get("sourceUrl"),
+    )
+    text = _compose_post(
+        header="World Cup Intel",
+        title="FIFA World Cup 2026 workspace",
+        lines=lines,
+        tags=_hashtags("WorldCup", "Polymonitor", "Football"),
+        url=_source_link(WORLDCUP_WORKSPACE_URL, "Workspace"),
+    )
+    version = "|".join(
+        str(item.get("id") or item.get("url") or item.get("title") or "")
+        for item in [*signals[:3], *news[:3], *sorted(weather, key=_weather_risk, reverse=True)[:2]]
+    )
+    dedupe = _short_hash("worldcup-intel", payload.get("generatedAt"), version, len(signals), len(news), len(weather))
+    return [
+        MessageCandidate(
+            topic="worldcup",
+            dedupe_key=dedupe,
+            text=text,
+            priority="normal",
+            metadata={"panel": "worldcup-intel"},
+            link_preview=bool(first_url or WORLDCUP_WORKSPACE_URL),
+        )
+    ]
 
 
 def format_weather_map(payload: Dict[str, Any]) -> List[MessageCandidate]:
@@ -490,6 +582,8 @@ def format_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> List[Messag
         return format_nba_intel(payload)
     if panel_id == "espn-matchup-predictor":
         return format_nba_predictor(payload)
+    if panel_id in {"worldcup-intel", "worldcup-dashboard"}:
+        return format_worldcup_intel(payload)
     if panel_id == "global-weather-map":
         return format_weather_map(payload)
     if panel_id == "weather-news":

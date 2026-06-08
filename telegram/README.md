@@ -24,17 +24,21 @@ POLYDATA_TELEGRAM_CHANNEL_INTEL=-1001234567890
 POLYDATA_TELEGRAM_CHANNEL_ALPHA=-1001234567890
 POLYDATA_TELEGRAM_CHANNEL_MACRO=-1001234567890
 POLYDATA_TELEGRAM_CHANNEL_NBA=@your_nba_channel
+POLYDATA_TELEGRAM_CHANNEL_WORLDCUP=-1001234567890
 POLYDATA_TELEGRAM_CHANNEL_WEATHER=@your_weather_channel
 POLYDATA_TELEGRAM_CHANNEL_MONITOR=@your_main_channel
 POLYDATA_TELEGRAM_THREAD_NEWS=12
 POLYDATA_TELEGRAM_THREAD_INTEL=14
 POLYDATA_TELEGRAM_THREAD_ALPHA=10
 POLYDATA_TELEGRAM_THREAD_MACRO=8
+POLYDATA_TELEGRAM_THREAD_WORLDCUP=16
 ```
 
 `latest-content` publishes to the News topic. Market-scoped `related-news`
 publishes one compact summary to the Intel topic so the News topic stays focused
-on global headlines.
+on global headlines. `worldcup-intel` publishes a compact Signals / News /
+Weather summary to the World Cup topic and links to
+`https://www.polymonitor.club/?workspace=worldcup`.
 
 Dry run:
 

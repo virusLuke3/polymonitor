@@ -84,6 +84,7 @@ class TelegramSettings:
     alpha: TopicConfig
     macro: TopicConfig
     nba: TopicConfig
+    worldcup: TopicConfig
     weather: TopicConfig
     monitor: TopicConfig
 
@@ -98,6 +99,8 @@ class TelegramSettings:
             return self.macro
         if topic == "nba":
             return self.nba
+        if topic == "worldcup":
+            return self.worldcup
         if topic == "weather":
             return self.weather
         if topic == "monitor":
@@ -166,6 +169,7 @@ def load_settings() -> TelegramSettings:
         alpha=_topic("alpha", "POLYDATA_TELEGRAM_CHANNEL_ALPHA", "POLYDATA_TELEGRAM_THREAD_ALPHA"),
         macro=_topic("macro", "POLYDATA_TELEGRAM_CHANNEL_MACRO", "POLYDATA_TELEGRAM_THREAD_MACRO"),
         nba=_topic("nba", "POLYDATA_TELEGRAM_CHANNEL_NBA", "POLYDATA_TELEGRAM_THREAD_NBA"),
+        worldcup=_topic("worldcup", "POLYDATA_TELEGRAM_CHANNEL_WORLDCUP", "POLYDATA_TELEGRAM_THREAD_WORLDCUP"),
         weather=_topic("weather", "POLYDATA_TELEGRAM_CHANNEL_WEATHER", "POLYDATA_TELEGRAM_THREAD_WEATHER"),
         monitor=_topic_from_candidates(
             "monitor",
