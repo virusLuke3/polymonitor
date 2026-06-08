@@ -3,7 +3,7 @@ import type { QuantBlockClosePoint, QuantFrontendPricePoint } from '@/types';
 export type TesterTab = 'overview' | 'performance' | 'trades' | 'properties';
 export type PriceSource = 'frontend' | 'orderfilled' | 'orderbook' | 'conservative';
 export type BacktestEngine = 'builtin' | 'backtrader' | 'nautilus_trader';
-export type DataStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
+export type DataStatus = 'idle' | 'loading' | 'metadata_loading' | 'price_loading' | 'partial' | 'ready' | 'empty' | 'error';
 export type MetricStatus = 'positive' | 'negative' | 'neutral';
 export type TradeFilter = 'profitable' | 'losing' | 'yes' | 'no' | 'longHolding' | 'shortHolding';
 export type PerformanceSortKey = 'metric' | 'all' | 'long' | 'short' | 'description';
@@ -33,6 +33,11 @@ export type PricePoint = {
   tokenId?: string;
   tokenSide?: string;
   outcomeLabel?: string;
+  yesPrice?: number;
+  noPrice?: number;
+  yesPriceKind?: 'direct' | 'implied';
+  noPriceKind?: 'direct' | 'implied';
+  ma?: number;
 };
 
 export type CandlePoint = PricePoint & {

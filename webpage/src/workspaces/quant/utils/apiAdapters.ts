@@ -33,15 +33,33 @@ export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | 
   if (!payload) return [];
   const source = payload.market?.source || 'quant_market_series';
   return (payload.outcomes || []).flatMap((outcome) => (
-    (outcome.points || []).map((point) => ({
-      timestamp: Number(point.x ?? point.blockNumber ?? point.timestamp),
-      close: toNumber(point.price),
-      volume: toNumber(point.volume),
-      source,
-      tokenId: outcome.tokenId,
-      tokenSide: outcome.tokenSide,
-      outcomeLabel: outcome.outcomeLabel || outcome.tokenSide,
-    }))
+    (() => {
+      const complementByX = new Map<string, number>();
+      (outcome.complementPoints || []).forEach((point) => {
+        const x = String(point.x ?? point.blockNumber ?? point.timestamp ?? '');
+        if (x) complementByX.set(x, toNumber(point.price));
+      });
+      return (outcome.points || []).map((point) => {
+        const x = String(point.x ?? point.blockNumber ?? point.timestamp ?? '');
+        const yesPrice = toNumber(point.price);
+        const directNo = complementByX.get(x);
+        const hasDirectNo = typeof directNo === 'number' && Number.isFinite(directNo);
+        const noPrice = hasDirectNo ? directNo : Math.max(0, Math.min(1, 1 - yesPrice));
+        return {
+          timestamp: Number(point.x ?? point.blockNumber ?? point.timestamp),
+          close: yesPrice,
+          volume: toNumber(point.volume),
+          source,
+          tokenId: outcome.tokenId,
+          tokenSide: outcome.tokenSide,
+          outcomeLabel: outcome.outcomeLabel || outcome.tokenSide,
+          yesPrice,
+          noPrice,
+          yesPriceKind: 'direct' as const,
+          noPriceKind: hasDirectNo ? 'direct' as const : 'implied' as const,
+        };
+      });
+    })()
   )).filter((row) => row.timestamp && Number.isFinite(row.close));
 }
 

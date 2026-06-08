@@ -157,6 +157,7 @@ export function QuantWorkspace() {
   const [marketSearchStatus, setMarketSearchStatus] = useState<DataStatus>('idle');
   const [selectedMarketMeta, setSelectedMarketMeta] = useState<QuantPriceMarket | null>(null);
   const [dataStatus, setDataStatus] = useState<DataStatus>('idle');
+  const [loadingMessage, setLoadingMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [timeframe, setTimeframe] = useState('2500');
@@ -176,6 +177,8 @@ export function QuantWorkspace() {
   const [workspaceNotice, setWorkspaceNotice] = useState('');
   const marketSearchSeq = useRef(0);
   const priceLoadSeq = useRef(0);
+  const priceSeriesCacheRef = useRef(new Map<string, QuantMarketSeriesPayload>());
+  const pricePrefetchingRef = useRef(new Set<string>());
 
   const activePrices = useMemo(() => {
     const semanticPrices = marketSeriesToPrices(marketSeries);
@@ -202,6 +205,7 @@ export function QuantWorkspace() {
     [marketSlug, quantMarkets, selectedMarketMeta],
   );
   const marketInfo = useMemo(() => marketInfoFromSelection(marketSlug, selectedMarket), [marketSlug, selectedMarket]);
+  const marketCoverageRows = toNumber(selectedMarket?.blockRows || selectedMarket?.frontendRows || marketSeries?.outcomes?.reduce((sum, outcome) => sum + toNumber(outcome.rows), 0));
   const chartLimit = useMemo(() => {
     const parsed = Number(timeframe);
     return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
@@ -213,25 +217,71 @@ export function QuantWorkspace() {
     limit: chartLimit,
     maxOutcomes: 24,
   };
+  const priceRequestKey = [
+    marketSlug.trim(),
+    backendPriceSource(priceSource),
+    timeframe,
+    selectedOutcomeTokenId || 'all-outcomes',
+    selectedBacktestAction,
+  ].join('|');
 
-  const refreshQuantRows = async () => {
+  const seriesKeyForSlug = (slug: string) => [
+    slug.trim(),
+    backendPriceSource(priceSource),
+    timeframe,
+    'all-outcomes',
+    'YES',
+  ].join('|');
+
+  const refreshQuantRows = async (requestSeq = priceLoadSeq.current) => {
     const hasMarketSlug = Boolean(marketSlug.trim());
-    if (hasMarketSlug) setDataStatus('loading');
+    const cacheKey = priceRequestKey;
+    if (hasMarketSlug) {
+      const cached = priceSeriesCacheRef.current.get(cacheKey);
+      if (cached) {
+        setMarketSeries(cached);
+        setDataStatus('partial');
+        setLoadingMessage('Refreshing cached price series...');
+      } else {
+        setDataStatus(selectedMarket ? 'price_loading' : 'metadata_loading');
+        setLoadingMessage(selectedMarket ? 'Loading price series...' : 'Loading market metadata...');
+      }
+      if (import.meta.env.DEV) {
+        console.debug('[quant] price load start', { cacheKey, cached: Boolean(cached), marketSlug, priceSource, timeframe });
+      }
+    }
     const [seriesResult, statusResult] = await Promise.allSettled([
       hasMarketSlug ? fetchQuantMarketPriceSeries(semanticChartQuery) : Promise.resolve(null),
       fetchQuantBuildStatus('', 12),
     ]);
+    if (requestSeq !== priceLoadSeq.current) {
+      if (import.meta.env.DEV) console.debug('[quant] stale price response ignored', { cacheKey });
+      return {
+        frontendRows,
+        blockRows,
+        marketSeries,
+      };
+    }
     const nextMarketSeries = seriesResult.status === 'fulfilled' ? seriesResult.value : marketSeries;
     const nextFrontendRows = priceSource === 'frontend' ? frontendRows : [];
     const nextBlockRows = priceSource === 'orderfilled' ? blockRows : [];
-    if (seriesResult.status === 'fulfilled') setMarketSeries(nextMarketSeries);
+    if (seriesResult.status === 'fulfilled') {
+      if (nextMarketSeries) priceSeriesCacheRef.current.set(cacheKey, nextMarketSeries);
+      setMarketSeries(nextMarketSeries);
+    }
     if (priceSource !== 'frontend') setFrontendRows([]);
     if (priceSource !== 'orderfilled') setBlockRows([]);
     if (statusResult.status === 'fulfilled') setRuns(statusResult.value.items || []);
     const activeRowCount = marketSeriesToPrices(nextMarketSeries).length || (priceSource === 'orderfilled' ? nextBlockRows.length : nextFrontendRows.length);
-    if (hasMarketSlug) setDataStatus(activeRowCount ? 'ready' : 'empty');
+    if (hasMarketSlug) {
+      setDataStatus(activeRowCount ? 'ready' : 'empty');
+      setLoadingMessage(activeRowCount ? '' : 'No price rows found for this source/window');
+      if (import.meta.env.DEV) console.debug('[quant] price load complete', { cacheKey, activeRowCount });
+    }
     if (hasMarketSlug && seriesResult.status === 'rejected') {
-      setDataStatus('error');
+      const hasCached = priceSeriesCacheRef.current.has(cacheKey);
+      setDataStatus(hasCached ? 'partial' : 'error');
+      setLoadingMessage(hasCached ? 'Showing cached data; refresh failed.' : 'Price request failed.');
       throw seriesResult.reason instanceof Error ? seriesResult.reason : new Error('Quant API unavailable');
     }
     return {
@@ -336,15 +386,43 @@ export function QuantWorkspace() {
     setMarketSearchQuery('');
     setMarketReloadKey((current) => current + 1);
     setSelectedMarketMeta(nextMarket);
+    const cached = nextSlug ? priceSeriesCacheRef.current.get(seriesKeyForSlug(nextSlug)) : null;
     setFrontendRows([]);
     setBlockRows([]);
-    setMarketSeries(null);
+    setMarketSeries(cached || null);
     setSelectedOutcomeTokenId('');
     setSelectedBacktestAction('YES');
     setBacktestResult(emptyBacktestResult());
     setSelectedTradeId(null);
     setError('');
-    if (nextSlug) setDataStatus('loading');
+    if (nextSlug) {
+      setDataStatus(cached ? 'partial' : 'metadata_loading');
+      setLoadingMessage(cached ? 'Rendering cached data...' : 'Loading market metadata...');
+    }
+  };
+
+  const prefetchMarketSlug = (slug: string) => {
+    const nextSlug = slug.trim();
+    const cacheKey = seriesKeyForSlug(nextSlug);
+    if (!nextSlug || priceSeriesCacheRef.current.has(cacheKey) || pricePrefetchingRef.current.has(cacheKey)) return;
+    pricePrefetchingRef.current.add(cacheKey);
+    void fetchQuantMarketPriceSeries({
+      marketSlug: nextSlug,
+      priceSource: backendPriceSource(priceSource),
+      scope: 'auto',
+      limit: chartLimit,
+      maxOutcomes: 24,
+    })
+      .then((payload) => {
+        priceSeriesCacheRef.current.set(cacheKey, payload);
+        if (import.meta.env.DEV) console.debug('[quant] prefetched price series', { cacheKey });
+      })
+      .catch((prefetchError) => {
+        if (import.meta.env.DEV && !isAbortLikeError(prefetchError)) console.debug('[quant] prefetch failed', { cacheKey, prefetchError });
+      })
+      .finally(() => {
+        pricePrefetchingRef.current.delete(cacheKey);
+      });
   };
 
   useEffect(() => {
@@ -381,13 +459,13 @@ export function QuantWorkspace() {
     const seq = priceLoadSeq.current + 1;
     priceLoadSeq.current = seq;
     const timer = window.setTimeout(() => {
-      void refreshQuantRows().catch((loadError) => {
+      void refreshQuantRows(seq).catch((loadError) => {
         if (seq !== priceLoadSeq.current) return;
         setError(loadError instanceof Error ? loadError.message : 'Quant API unavailable');
       });
-    }, 350);
+    }, 60);
     return () => window.clearTimeout(timer);
-  }, [marketReloadKey, marketSlug, priceSource, timeframe]);
+  }, [marketReloadKey, marketSlug, priceSource, timeframe, selectedOutcomeTokenId, selectedBacktestAction]);
 
   useEffect(() => {
     const outcomes = marketSeries?.outcomes || [];
@@ -492,6 +570,7 @@ export function QuantWorkspace() {
         onRunBacktest={() => void runBacktest()}
         onSave={saveWorkspace}
         onExport={exportBacktest}
+        onMarketPreview={prefetchMarketSlug}
       />
 
       {error ? <div className="qtv-error">{error}</div> : null}
@@ -504,6 +583,13 @@ export function QuantWorkspace() {
           signals={strategySignals}
           priceSource={backendPriceSource(priceSource)}
           dataStatus={dataStatus}
+          loadingMessage={loadingMessage}
+          marketCoverageRows={marketCoverageRows}
+          loadedPriceRows={displayedPriceRows}
+          backtestRows={displayedPriceRows}
+          onRetry={() => {
+            setMarketReloadKey((current) => current + 1);
+          }}
         />
 
         {marketSeries?.outcomes?.length ? (

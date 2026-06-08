@@ -21,6 +21,7 @@ type WorkspaceHeaderProps = {
   onRunBacktest: () => void;
   onSave: () => void;
   onExport: (format: 'csv' | 'json') => void;
+  onMarketPreview?: (slug: string) => void;
 };
 
 export function WorkspaceHeader({
@@ -41,6 +42,7 @@ export function WorkspaceHeader({
   onRunBacktest,
   onSave,
   onExport,
+  onMarketPreview,
 }: WorkspaceHeaderProps) {
   const [marketMenuOpen, setMarketMenuOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -184,7 +186,10 @@ export function WorkspaceHeader({
                   aria-selected={market.marketSlug === marketSlug}
                   id={`quant-market-option-${index}`}
                   onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onMouseEnter={() => {
+                    setHighlightedIndex(index);
+                    onMarketPreview?.(market.marketSlug);
+                  }}
                   onClick={() => chooseMarket(market.marketSlug)}
                 >
                   <i aria-hidden="true">{market.marketSlug === marketSlug ? '✓' : ''}</i>
