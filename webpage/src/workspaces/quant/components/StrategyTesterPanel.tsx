@@ -69,6 +69,12 @@ export function StrategyTesterPanel({
   const summaryRows = useMemo(() => result.metrics.slice(0, 6), [result.metrics]);
   const latestTrade = result.trades[result.trades.length - 1];
   const selectedTrade = result.trades.find((trade) => trade.id === selectedTradeId) || latestTrade;
+  const propertyValue = (label: string) => {
+    const target = label.toLowerCase();
+    return result.propertyGroups
+      .flatMap((group) => group.rows)
+      .find((row) => row.label.toLowerCase() === target)?.value || '-';
+  };
 
   return (
     <section className="qtv-bottom-panel">
@@ -118,9 +124,9 @@ export function StrategyTesterPanel({
 
       {settingsOpen ? (
         <div className="qtv-settings-strip">
-          <span>entry threshold <b>{result.propertyGroups[1]?.rows.find((row) => row.label === 'Entry Threshold')?.value || '-'}</b></span>
-          <span>exit threshold <b>{result.propertyGroups[1]?.rows.find((row) => row.label === 'Exit Threshold')?.value || '-'}</b></span>
-          <span>framework <b>{result.propertyGroups[1]?.rows.find((row) => row.label === 'Backtest Engine')?.value || '-'}</b></span>
+          <span>entry threshold <b>{propertyValue('entry threshold')}</b></span>
+          <span>exit threshold <b>{propertyValue('exit threshold')}</b></span>
+          <span>framework <b>{propertyValue('engine')}</b></span>
           <span>run <b>{result.runId ? `#${result.runId}` : '-'}</b></span>
         </div>
       ) : null}

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'preact/hooks';
 import type { QuantPriceMarket } from '@/types';
-import type { BacktestEngine, PriceSource } from '../types';
+import type { BacktestEngine, DataStatus, PriceSource } from '../types';
 import './WorkspaceHeader.css';
 
 type WorkspaceHeaderProps = {
@@ -11,12 +11,14 @@ type WorkspaceHeaderProps = {
   backtestEngine: BacktestEngine;
   loading: boolean;
   marketOptions: QuantPriceMarket[];
+  marketSearchStatus: DataStatus;
   onMarketSlugChange: (value: string) => void;
   onMarketQueryChange: (value: string) => void;
   onTimeframeChange: (value: string) => void;
   onPriceSourceChange: (value: PriceSource) => void;
   onBacktestEngineChange: (value: BacktestEngine) => void;
   onRunBacktest: () => void;
+  onSave: () => void;
   onExport: (format: 'csv' | 'json') => void;
 };
 
@@ -28,12 +30,14 @@ export function WorkspaceHeader({
   backtestEngine,
   loading,
   marketOptions,
+  marketSearchStatus,
   onMarketSlugChange,
   onMarketQueryChange,
   onTimeframeChange,
   onPriceSourceChange,
   onBacktestEngineChange,
   onRunBacktest,
+  onSave,
   onExport,
 }: WorkspaceHeaderProps) {
   const [marketMenuOpen, setMarketMenuOpen] = useState(false);
@@ -49,6 +53,9 @@ export function WorkspaceHeader({
     () => marketChoices.find((market) => market.marketSlug === marketSlug),
     [marketChoices, marketSlug],
   );
+  const activeSearchText = marketQuery.trim();
+  const isSearchingNewText = marketSearchStatus === 'loading' && Boolean(activeSearchText) && activeSearchText !== marketSlug;
+  const hasSearchError = marketSearchStatus === 'error' && Boolean(activeSearchText) && activeSearchText !== marketSlug;
 
   const chooseMarket = (slug: string) => {
     onMarketSlugChange(slug);
@@ -57,6 +64,7 @@ export function WorkspaceHeader({
   };
 
   const chooseFirstMarket = () => {
+    if (isSearchingNewText) return;
     const firstSlug = marketChoices[0]?.marketSlug;
     if (firstSlug) chooseMarket(firstSlug);
   };
@@ -97,7 +105,17 @@ export function WorkspaceHeader({
           </button>
           {marketMenuOpen ? (
             <div className="qtv-market-menu" role="listbox">
-              {marketChoices.length ? marketChoices.map((market) => (
+              {isSearchingNewText ? (
+                <div className="qtv-market-menu-empty">
+                  <strong>Searching markets</strong>
+                  <span>{activeSearchText}</span>
+                </div>
+              ) : hasSearchError ? (
+                <div className="qtv-market-menu-empty">
+                  <strong>Search unavailable</strong>
+                  <span>Try again or select an existing market.</span>
+                </div>
+              ) : marketChoices.length ? marketChoices.map((market) => (
                 <button
                   key={market.marketSlug}
                   className={market.marketSlug === marketSlug ? 'active' : ''}
@@ -112,7 +130,10 @@ export function WorkspaceHeader({
                   <em>{Number(market.blockRows || 0).toLocaleString('en-US')} block rows</em>
                 </button>
               )) : (
-                <div className="qtv-market-menu-empty">No matching markets</div>
+                <div className="qtv-market-menu-empty">
+                  <strong>No matching markets</strong>
+                  <span>{activeSearchText || 'Only markets with quant rows are listed.'}</span>
+                </div>
               )}
             </div>
           ) : null}
@@ -149,7 +170,7 @@ export function WorkspaceHeader({
           <option value="backtrader">Backtrader</option>
           <option value="nautilus_trader">Nautilus Trader</option>
         </select>
-        <button type="button">Save</button>
+        <button type="button" onClick={onSave}>Save</button>
         <button type="button" onClick={() => onExport('json')}>Snapshot</button>
         <button type="button" onClick={() => onExport('csv')}>CSV</button>
         <button className="primary" type="button" onClick={onRunBacktest}>{loading ? 'Running...' : 'Run Backtest'}</button>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   createQuantBacktestRun,
   fetchQuantBacktestEquity,
@@ -9,6 +9,7 @@ import {
   fetchQuantBuildStatus,
   fetchQuantFrontendPrices,
   fetchQuantPriceMarkets,
+  isAbortLikeError,
   type QuantPriceQuery,
 } from '@/services/api';
 import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantPriceMarket } from '@/types';
@@ -131,6 +132,8 @@ export function QuantWorkspace() {
   const [blockRows, setBlockRows] = useState<QuantBlockClosePoint[]>([]);
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
   const [quantMarkets, setQuantMarkets] = useState<QuantPriceMarket[]>([]);
+  const [marketSearchStatus, setMarketSearchStatus] = useState<DataStatus>('idle');
+  const [selectedMarketMeta, setSelectedMarketMeta] = useState<QuantPriceMarket | null>(null);
   const [dataStatus, setDataStatus] = useState<DataStatus>('idle');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -147,6 +150,9 @@ export function QuantWorkspace() {
   const [performanceSortKey, setPerformanceSortKey] = useState<PerformanceSortKey>('metric');
   const [performanceSortDirection, setPerformanceSortDirection] = useState<SortDirection>('asc');
   const [tradeFilters, setTradeFilters] = useState<Set<TradeFilter>>(new Set());
+  const [workspaceNotice, setWorkspaceNotice] = useState('');
+  const marketSearchSeq = useRef(0);
+  const priceLoadSeq = useRef(0);
 
   const activePrices = useMemo(() => {
     if (priceSource === 'orderfilled') return blockToPrices(blockRows);
@@ -157,8 +163,12 @@ export function QuantWorkspace() {
   const strategySignals = useMemo(() => signalsFromTrades(backtestResult), [backtestResult]);
   const latestPrice = activePrices[activePrices.length - 1]?.close || 0;
   const selectedMarket = useMemo(
-    () => quantMarkets.find((market) => market.marketSlug === marketSlug && market.tokenSide === 'YES') || quantMarkets.find((market) => market.marketSlug === marketSlug),
-    [marketSlug, quantMarkets],
+    () => (
+      quantMarkets.find((market) => market.marketSlug === marketSlug && market.tokenSide === 'YES')
+      || quantMarkets.find((market) => market.marketSlug === marketSlug)
+      || (selectedMarketMeta?.marketSlug === marketSlug ? selectedMarketMeta : undefined)
+    ),
+    [marketSlug, quantMarkets, selectedMarketMeta],
   );
   const marketInfo = useMemo(() => marketInfoFromSelection(marketSlug, selectedMarket), [marketSlug, selectedMarket]);
   const chartLimit = useMemo(() => {
@@ -183,10 +193,10 @@ export function QuantWorkspace() {
     if (statusResult.status === 'fulfilled') setRuns(statusResult.value.items || []);
     const activeRowCount = priceSource === 'orderfilled' ? nextBlockRows.length : nextFrontendRows.length;
     if (hasMarketSlug) setDataStatus(activeRowCount ? 'ready' : 'empty');
-    const rejected = [frontendResult, blockResult, statusResult].find((result) => result.status === 'rejected');
-    if (hasMarketSlug && rejected?.status === 'rejected') {
+    const criticalResult = priceSource === 'orderfilled' ? blockResult : frontendResult;
+    if (hasMarketSlug && criticalResult.status === 'rejected') {
       setDataStatus('error');
-      throw rejected.reason instanceof Error ? rejected.reason : new Error('Quant API unavailable');
+      throw criticalResult.reason instanceof Error ? criticalResult.reason : new Error('Quant API unavailable');
     }
     return {
       frontendRows: nextFrontendRows,
@@ -256,36 +266,59 @@ export function QuantWorkspace() {
     }
   };
 
-  useEffect(() => {
-    void fetchQuantPriceMarkets('', 40)
-      .then((payload) => {
-        const items = payload.items || [];
-        setQuantMarkets(items);
-        if (!marketSlug.trim() && items[0]?.marketSlug) {
-          setMarketSlug(items[0].marketSlug);
-          setMarketSearchQuery(items[0].marketSlug);
-        }
-      })
-      .catch(() => setQuantMarkets([]));
-  }, []);
+  const selectMarketSlug = (slug: string) => {
+    const nextSlug = slug.trim();
+    const nextMarket = quantMarkets.find((market) => market.marketSlug === nextSlug && market.tokenSide === 'YES')
+      || quantMarkets.find((market) => market.marketSlug === nextSlug)
+      || null;
+    setMarketSlug(nextSlug);
+    setMarketSearchQuery(nextSlug);
+    setSelectedMarketMeta(nextMarket);
+    setFrontendRows([]);
+    setBlockRows([]);
+    setBacktestResult(emptyBacktestResult());
+    setSelectedTradeId(null);
+    setError('');
+    if (nextSlug) setDataStatus('loading');
+  };
 
   useEffect(() => {
     const text = marketSearchQuery.trim();
+    const seq = marketSearchSeq.current + 1;
+    marketSearchSeq.current = seq;
+    setMarketSearchStatus('loading');
     const timer = window.setTimeout(() => {
       void fetchQuantPriceMarkets(text, 40)
         .then((payload) => {
+          if (seq !== marketSearchSeq.current) return;
           const items = payload.items || [];
           setQuantMarkets(items);
+          setMarketSearchStatus(items.length ? 'ready' : 'empty');
+          if (!marketSlug.trim() && !text && items[0]?.marketSlug) {
+            setMarketSlug(items[0].marketSlug);
+            setMarketSearchQuery(items[0].marketSlug);
+            setSelectedMarketMeta(items[0]);
+          }
         })
-        .catch(() => undefined);
-    }, 300);
+        .catch((searchError) => {
+          if (seq !== marketSearchSeq.current) return;
+          setMarketSearchStatus('error');
+          if (text) setQuantMarkets([]);
+          if (!isAbortLikeError(searchError)) {
+            console.warn('quant market search failed', searchError);
+          }
+        });
+    }, text ? 180 : 0);
     return () => window.clearTimeout(timer);
-  }, [marketSearchQuery]);
+  }, [marketSearchQuery, marketSlug]);
 
   useEffect(() => {
     if (!marketSlug.trim()) return;
+    const seq = priceLoadSeq.current + 1;
+    priceLoadSeq.current = seq;
     const timer = window.setTimeout(() => {
       void refreshQuantRows().catch((loadError) => {
+        if (seq !== priceLoadSeq.current) return;
         setError(loadError instanceof Error ? loadError.message : 'Quant API unavailable');
       });
     }, 350);
@@ -347,6 +380,23 @@ export function QuantWorkspace() {
     );
   };
 
+  const saveWorkspace = () => {
+    const payload = {
+      marketSlug,
+      marketTitle: marketInfo.title,
+      marketSearchQuery,
+      timeframe,
+      priceSource,
+      backtestEngine,
+      testerTab,
+      deepBacktest,
+      savedAt: new Date().toISOString(),
+    };
+    window.localStorage.setItem('polydata.quant.workspace', JSON.stringify(payload));
+    setWorkspaceNotice(`workspace saved ${new Date().toLocaleTimeString()}`);
+    window.setTimeout(() => setWorkspaceNotice(''), 2400);
+  };
+
   return (
     <div className="qtv-shell">
       <WorkspaceHeader
@@ -357,12 +407,14 @@ export function QuantWorkspace() {
         backtestEngine={backtestEngine}
         loading={loading}
         marketOptions={quantMarkets}
-        onMarketSlugChange={setMarketSlug}
+        marketSearchStatus={marketSearchStatus}
+        onMarketSlugChange={selectMarketSlug}
         onMarketQueryChange={setMarketSearchQuery}
         onTimeframeChange={setTimeframe}
         onPriceSourceChange={setPriceSource}
         onBacktestEngineChange={setBacktestEngine}
         onRunBacktest={() => void runBacktest()}
+        onSave={saveWorkspace}
         onExport={exportBacktest}
       />
 
@@ -411,6 +463,7 @@ export function QuantWorkspace() {
         <span>engine {backtestEngine}</span>
         <span>build runs {runs.length}</span>
         <span>backtest {backtestStatus}</span>
+        {workspaceNotice ? <span>{workspaceNotice}</span> : null}
         <span>UTC+0</span>
         <span>%</span>
         <span>log</span>

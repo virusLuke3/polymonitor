@@ -79,13 +79,36 @@ type AgentCacheEntry<T> = {
 const agentResponseCache = new Map<string, AgentCacheEntry<unknown>>();
 const agentInflight = new Map<string, Promise<unknown>>();
 
+export class ApiTimeoutError extends Error {
+  constructor(path: string, timeoutMs: number) {
+    super(`API timeout after ${(timeoutMs / 1000).toFixed(1)}s for ${path}`);
+    this.name = 'ApiTimeoutError';
+  }
+}
+
+export function isAbortLikeError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const maybe = error as { name?: string; message?: string };
+  return maybe.name === 'AbortError'
+    || maybe.name === 'ApiTimeoutError'
+    || String(maybe.message || '').toLowerCase().includes('signal is aborted');
+}
+
 async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { Accept: 'application/json' },
-    signal: controller.signal,
-  }).finally(() => window.clearTimeout(timer));
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (isAbortLikeError(error)) throw new ApiTimeoutError(path, timeoutMs);
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
   if (!response.ok) {
     throw new Error(`API ${response.status} for ${path}`);
   }
@@ -99,15 +122,23 @@ async function apiGet<T>(path: string): Promise<T> {
 async function apiPostWithTimeout<T>(path: string, body: unknown, timeoutMs = 18000): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal: controller.signal,
-  }).finally(() => window.clearTimeout(timer));
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (isAbortLikeError(error)) throw new ApiTimeoutError(path, timeoutMs);
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
   if (!response.ok) {
     throw new Error(`API ${response.status} for ${path}`);
   }
@@ -243,7 +274,7 @@ export type QuantPriceQuery = {
 export function fetchQuantPriceMarkets(query = '', limit = 40) {
   const params = new URLSearchParams({ limit: String(limit), token_side: 'YES' });
   if (query.trim()) params.set('q', query.trim());
-  return apiGetWithTimeout<QuantListPayload<QuantPriceMarket>>(`/quant/markets?${params.toString()}`, 8000);
+  return apiGetWithTimeout<QuantListPayload<QuantPriceMarket>>(`/quant/markets?${params.toString()}`, 15000);
 }
 
 function appendQuantParams(query: QuantPriceQuery, mode: 'frontend' | 'block') {
@@ -265,14 +296,14 @@ function appendQuantParams(query: QuantPriceQuery, mode: 'frontend' | 'block') {
 export function fetchQuantFrontendPrices(query: QuantPriceQuery = {}) {
   return apiGetWithTimeout<QuantListPayload<QuantFrontendPricePoint>>(
     `/quant/frontend-prices?${appendQuantParams(query, 'frontend')}`,
-    8000,
+    15000,
   );
 }
 
 export function fetchQuantBlockClosePrices(query: QuantPriceQuery = {}) {
   return apiGetWithTimeout<QuantListPayload<QuantBlockClosePoint>>(
     `/quant/block-close-prices?${appendQuantParams(query, 'block')}`,
-    8000,
+    15000,
   );
 }
 

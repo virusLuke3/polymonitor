@@ -140,6 +140,22 @@
   padding: 18px;
 }
 
+.qtv-market-menu-empty strong,
+.qtv-market-menu-empty span {
+  display: block;
+}
+
+.qtv-market-menu-empty strong {
+  color: #e5e7eb;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.qtv-market-menu-empty span {
+  color: #93a4bd;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 760px) {
   .qtv-market-combobox {
     grid-template-columns: minmax(0, 1fr) 28px;
