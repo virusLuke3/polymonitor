@@ -384,7 +384,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
         point_format = (request.args.get("point_format") or "lite").strip().lower()
         resolution = (request.args.get("resolution") or "auto").strip().lower()
-        cache_key = _cache_key("event-price-tile", version=3)
+        cache_key = _cache_key("event-price-tile", version=4)
 
         def build_payload() -> dict[str, Any]:
             persisted = _load_persistent_tile(cache_key)

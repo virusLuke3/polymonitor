@@ -455,6 +455,16 @@ def _fetch_token_price_points(
     if to_block is not None:
         filters.append("block_number <= %s")
         params.append(int(to_block))
+    filters.append(
+        """
+        NOT (
+            COALESCE(anomaly_flags, '[]'::jsonb) ? 'extreme_price_trade_present'
+            AND COALESCE(trade_count, 0) <= 3
+            AND COALESCE(volume, 0) <= 250
+            AND (close_price >= 0.95 OR close_price <= 0.002)
+        )
+        """
+    )
     params.append(int(limit))
     cur.execute(
         f"""
@@ -566,6 +576,16 @@ def _fetch_token_price_points_sampled(
     if to_block is not None:
         filters.append("block_number <= %s")
         params.append(int(to_block))
+    filters.append(
+        """
+        NOT (
+            COALESCE(anomaly_flags, '[]'::jsonb) ? 'extreme_price_trade_present'
+            AND COALESCE(trade_count, 0) <= 3
+            AND COALESCE(volume, 0) <= 250
+            AND (close_price >= 0.95 OR close_price <= 0.002)
+        )
+        """
+    )
     params.extend([bucket_count, int(max_points)])
     cur.execute(
         f"""

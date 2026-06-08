@@ -282,6 +282,13 @@ function clampProbability(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
+function percentile(values: number[], ratio: number) {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((left, right) => left - right);
+  const index = Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio)));
+  return sorted[index] ?? 0;
+}
+
 function nearestPoint(points: PricePoint[], timestamp: number) {
   if (!points.length) return null;
   return points.reduce<PricePoint | null>((best, candidate) => {
@@ -318,8 +325,24 @@ function pointToScreenSafe(point: PricePoint, points: PricePoint[]) {
   };
 }
 
-function scaleProvider(mode: ScaleMode, points: PricePoint[]) {
-  if (mode === 'auto') return undefined;
+function robustPriceRange(points: PricePoint[], paddingRatio: number) {
+  const values = points
+    .map((point) => point.close)
+    .filter((value) => Number.isFinite(value) && value >= 0 && value <= 1);
+  if (!values.length) return { minValue: 0, maxValue: 1 };
+  const min = values.length >= 20 ? percentile(values, 0.01) : Math.min(...values);
+  const max = values.length >= 20 ? percentile(values, 0.99) : Math.max(...values);
+  const spread = Math.max(0.025, max - min);
+  return {
+    minValue: Math.max(0, min - spread * paddingRatio),
+    maxValue: Math.min(1, max + spread * paddingRatio),
+  };
+}
+
+function scaleProvider(mode: ScaleMode, points: PricePoint[], visiblePoints: PricePoint[] = points) {
+  if (mode === 'auto') {
+    return () => ({ priceRange: robustPriceRange(visiblePoints, 0.28) });
+  }
   if (mode === 'full' || !points.length) {
     return () => ({ priceRange: { minValue: 0, maxValue: 1 } });
   }
@@ -331,8 +354,8 @@ function scaleProvider(mode: ScaleMode, points: PricePoint[]) {
   const spread = Math.max(0.01, max - min);
   return () => ({
     priceRange: {
-      minValue: Math.max(0, min - spread * 0.35),
-      maxValue: Math.min(1, max + spread * 0.35),
+      minValue: Math.max(0, min - spread * 0.3),
+      maxValue: Math.min(1, max + spread * 0.3),
     },
   });
 }
@@ -375,7 +398,7 @@ export function PriceChartPanel({
   const [pinnedPoint, setPinnedPoint] = useState<PricePoint | null>(null);
   const [dataWindowSettings, setDataWindowSettings] = useState<DataWindowSettings>(persistedDataWindowSettings);
   const [dataWindowMenuOpen, setDataWindowMenuOpen] = useState(false);
-  const [scaleMode, setScaleMode] = useState<ScaleMode>('full');
+  const [scaleMode, setScaleMode] = useState<ScaleMode>('auto');
   const [activeTool, setActiveTool] = useState('cursor');
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [pendingDrawing, setPendingDrawing] = useState<Drawing | null>(null);
@@ -666,7 +689,7 @@ export function PriceChartPanel({
       }
     });
     visibleOutcomeGroups.forEach((group, index) => {
-      const autoscaleInfoProvider = scaleProvider(scaleMode, group.points);
+      const autoscaleInfoProvider = scaleProvider(scaleMode, group.points, allPoints);
       const baseColor = SERIES_COLORS[group.order % SERIES_COLORS.length] || '#3b82f6';
       const isSelected = selectedGroup?.key === group.key;
       const isTopLabel = index < 3;
@@ -685,7 +708,7 @@ export function PriceChartPanel({
           priceLineColor: baseColor,
           priceLineWidth: 1,
           title: group.fullLabel,
-          ...(autoscaleInfoProvider ? { autoscaleInfoProvider } : {}),
+          autoscaleInfoProvider,
         });
         series.lines.set(group.key, line);
       }
@@ -695,7 +718,7 @@ export function PriceChartPanel({
         priceLineVisible: showPriceLine,
         priceLineColor: baseColor,
         title: `${group.fullLabel} ${Math.round(latestClose(group) * 100)}%`,
-        ...(autoscaleInfoProvider ? { autoscaleInfoProvider } : {}),
+        autoscaleInfoProvider,
       });
       line.setData(lineData(group.points));
     });
@@ -1018,7 +1041,7 @@ export function PriceChartPanel({
           </div>
         </div>
 
-        {dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'partial' || dataStatus === 'loading' ? (
+        {(!hasLoadedPrices && (dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'partial' || dataStatus === 'loading')) ? (
           <div className="qtv-chart-loading-ribbon">
             <b>{loadingMessage || loadingTitle}</b>
             <span>Outcomes {eventMode ? displayedOutcomeCount.toLocaleString('en-US') : '--'} · Source {priceSource}</span>
