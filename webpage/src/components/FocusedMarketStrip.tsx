@@ -814,8 +814,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     <section className="wm-focus-strip">
       {wrapPanel('price-chart', 'wm-focus-panel-slot wm-focus-detail-slot', (
         <Panel
-          title="MARKET DETAIL"
-          badge="selected ×"
+          title="Market Detail"
+          badge="Selected"
           status="live"
           className="wm-focus-panel wm-focus-detail-panel"
         >
@@ -946,8 +946,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
 
       {wrapPanel('lob-depth', 'wm-focus-panel-slot wm-focus-book-slot', (
         <Panel
-          title="ORDER BOOK"
-          badge="live"
+          title="Order Book"
+          badge={hasAnyBookLevels ? 'Live' : tokenLobLoading ? 'Loading' : 'Stale'}
           status="live"
           className="wm-focus-panel wm-focus-book-panel"
           controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{orderbookOutcomeLabel(ctx, bookSide, selectedOutcome)}</span> : undefined}
@@ -1022,8 +1022,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
 
       {wrapPanel('global-orderfilled', 'wm-focus-panel-slot wm-focus-trades-slot', (
         <Panel
-          title="ORDERFILLED FLOW"
-          badge="FOCUSED"
+          title="OrderFilled Flow"
+          badge={trades.length ? 'Live' : 'Focused'}
           status="live"
           count={trades.length}
           className="wm-focus-panel wm-focus-trades-panel wm-orderfilled-panel"

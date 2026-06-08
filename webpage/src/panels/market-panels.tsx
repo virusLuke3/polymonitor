@@ -478,8 +478,8 @@ function ActiveMarketsPanel({
 
   return (
     <Panel
-      title="MARKETS"
-      badge={marketGroupSort === 'new' ? 'NEW' : marketGroupSort === 'volume' ? 'VOLUME' : marketGroupSort === 'close' ? 'CLOSE' : marketGroupSort === 'move' ? 'MOVE' : marketGroupSort === 'trades' ? 'TX' : 'LIVE'}
+      title="Markets"
+      badge={marketGroupSort === 'new' ? 'Newest' : marketGroupSort === 'volume' ? 'Volume' : marketGroupSort === 'close' ? 'Close' : marketGroupSort === 'move' ? 'Move' : marketGroupSort === 'trades' ? 'Tx' : 'Live'}
       status="live"
       count={panelCount}
       className="wm-market-panel"

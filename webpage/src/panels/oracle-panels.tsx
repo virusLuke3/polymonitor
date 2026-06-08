@@ -50,6 +50,18 @@ function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload) {
   const outcome = payload.settlementOutcome && payload.settlementOutcome !== 'UNKNOWN' ? payload.settlementOutcome : 'Awaiting oracle';
   const bound = payload.questionId || payload.conditionId || payload.gammaMarketId ? 'Yes' : 'No';
   const updatedAt = ctx.selectedMarket?.endDate || ctx.bundle?.market?.endDate || null;
+  const createdAt = ctx.bundle?.market?.createdAt || ctx.selectedMarket?.createdAt || ctx.bundle?.group?.createdAt || ctx.selectedMarketGroupDetail?.createdAt || ctx.selectedMarketGroup?.createdAt || null;
+  const closedAt = ctx.bundle?.market?.endDate || ctx.selectedMarket?.endDate || ctx.bundle?.group?.endDate || ctx.selectedMarketGroupDetail?.endDate || ctx.selectedMarketGroup?.endDate || null;
+  const proposedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('propose'));
+  const finalizedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('settle') || event.isFinal);
+  const lifecycle = [
+    { label: 'Created', time: createdAt, active: true, done: Boolean(createdAt) },
+    { label: 'Trading open', time: createdAt, active: !payload.isTradingClosed && !payload.isResolved, done: !payload.isTradingClosed && !payload.isResolved },
+    { label: 'Closed', time: closedAt, active: payload.isTradingClosed && !payload.isResolved, done: payload.isTradingClosed || payload.isResolved },
+    { label: 'Awaiting oracle', time: closedAt, active: payload.isTradingClosed && !payload.isResolved, done: Boolean(proposedEvent || payload.isResolved) },
+    { label: 'Submitted', time: proposedEvent?.eventTime || null, active: Boolean(proposedEvent && !payload.isFinal), done: Boolean(proposedEvent) },
+    { label: 'Finalized', time: finalizedEvent?.eventTime || null, active: Boolean(payload.isFinal), done: Boolean(payload.isFinal) },
+  ];
   return (
     <div className="wm-oracle-shell focused">
       <div className="wm-oracle-focused-status-list" aria-label="oracle status summary">
@@ -57,6 +69,15 @@ function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload) {
         <div><span>Resolution</span><strong>{payload.isResolved ? outcome : 'Unresolved'}</strong></div>
         <div><span>Bound</span><strong>{bound}</strong></div>
         <div><span>Events</span><strong>{payload.timeline?.length || 0}</strong></div>
+      </div>
+      <div className="wm-oracle-lifecycle" aria-label="oracle lifecycle">
+        {lifecycle.map((step) => (
+          <div className={`wm-oracle-lifecycle-step${step.done ? ' done' : ''}${step.active ? ' active' : ''}`} key={step.label}>
+            <span aria-hidden="true" />
+            <strong>{step.label}</strong>
+            <em>{step.time ? formatRelative(step.time) : 'pending'}</em>
+          </div>
+        ))}
       </div>
       <article className="wm-oracle-focused-card">
         <div className="wm-oracle-focused-heading">
@@ -83,7 +104,7 @@ export const oraclePanelRenderers: PanelRenderMap = {
       const focused = focusedOraclePayload(ctx);
       const events = focused?.timeline?.length ? focused.timeline : globalOracle(ctx);
       return (
-        <Panel title={focused ? "ORACLE STATUS" : "ORACLE FEED"} badge={focused ? "BOUND" : "LIVE"} status="live" count={focused ? (focused.timeline?.length || 0) : globalOracle(ctx).length} className="wm-oracle-feed-panel">
+        <Panel title={focused ? 'Oracle Status' : 'Oracle Feed'} badge={focused ? 'Bound' : 'Live'} status="live" count={focused ? (focused.timeline?.length || 0) : globalOracle(ctx).length} className="wm-oracle-feed-panel">
           {focused
             ? (focused.timeline?.length ? oracleList(focused.timeline, 10, 'timeline') : focusedOracleStatus(ctx, focused))
             : oracleList(events, 10)}
