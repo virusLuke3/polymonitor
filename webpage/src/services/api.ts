@@ -271,6 +271,7 @@ export type QuantPriceQuery = {
   fromBlock?: string;
   toBlock?: string;
   limit?: number;
+  pointFormat?: 'lite' | 'full';
 };
 
 export function fetchQuantPriceMarkets(query = '', limit = 40) {
@@ -327,6 +328,7 @@ export function fetchQuantMarketPriceSeries(query: QuantPriceQuery & { priceSour
   if (query.toBlock?.trim()) params.set('to_block', query.toBlock.trim());
   params.set('limit', String(query.limit || 2500));
   params.set('max_outcomes', String(query.maxOutcomes || 24));
+  params.set('point_format', query.pointFormat || 'lite');
   return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/market-price-series?${params.toString()}`, 20000);
 }
 
@@ -341,6 +343,7 @@ export function fetchQuantEventPriceSeries(query: QuantPriceQuery & { eventSlug?
   if (query.toBlock?.trim()) params.set('to_block', query.toBlock.trim());
   params.set('limit', String(query.limit || 2500));
   params.set('max_outcomes', String(query.maxOutcomes || 100));
+  params.set('point_format', query.pointFormat || 'lite');
   return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-series?${params.toString()}`, 25000);
 }
 

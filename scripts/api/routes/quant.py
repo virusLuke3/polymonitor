@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 from pathlib import Path
 import sys
 from typing import Any
@@ -193,8 +194,41 @@ def _camel_value(value: Any, mapping: dict[str, str]) -> Any:
     return _json_value(value)
 
 
-def create_quant_blueprint(_: dict) -> Blueprint:
+def _lite_point(point: dict[str, Any]) -> dict[str, Any]:
+    keys = ("x", "timestamp", "block_number", "price", "volume", "is_implied")
+    return {key: point[key] for key in keys if point.get(key) is not None}
+
+
+def _apply_point_payload_format(payload: dict[str, Any], point_format: str) -> dict[str, Any]:
+    if point_format != "lite":
+        return payload
+    for outcome in payload.get("outcomes") or []:
+        if isinstance(outcome, dict):
+            outcome["points"] = [_lite_point(point) for point in outcome.get("points") or [] if isinstance(point, dict)]
+            outcome["complement_points"] = [
+                _lite_point(point) for point in outcome.get("complement_points") or [] if isinstance(point, dict)
+            ]
+    return payload
+
+
+def create_quant_blueprint(helpers: dict) -> Blueprint:
     bp = Blueprint("quant_routes", __name__, url_prefix="/quant")
+    get_cached_json = helpers.get("get_cached_json")
+    set_cached_json = helpers.get("set_cached_json")
+
+    def _cache_key(name: str, *, version: int = 1) -> str:
+        args = {key: request.args.getlist(key) for key in sorted(request.args.keys())}
+        return json.dumps({"name": name, "v": version, "args": args}, sort_keys=True, ensure_ascii=True)
+
+    def _cached_quant_payload(namespace: str, cache_key: str, ttl_seconds: int, builder):
+        if callable(get_cached_json):
+            cached = get_cached_json(namespace, cache_key)
+            if isinstance(cached, dict):
+                return cached
+        payload = builder()
+        if callable(set_cached_json):
+            set_cached_json(namespace, cache_key, payload, ttl_seconds)
+        return payload
 
     @bp.route("/markets", methods=["GET"])
     def api_quant_price_markets():
@@ -257,22 +291,28 @@ def create_quant_blueprint(_: dict) -> Blueprint:
         limit = min(max(_parse_int_arg("limit", 2500) or 2500, 1), 25000)
         max_outcomes = min(max(_parse_int_arg("max_outcomes", 24) or 24, 1), 100)
         price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
+        point_format = (request.args.get("point_format") or "lite").strip().lower()
         scope = (request.args.get("scope") or "auto").strip().lower()
-        with postgres_connection(PostgresSettings(), readonly=True) as conn:
-            payload = get_market_price_series(
-                conn,
-                market_slug=market_slug,
-                price_source=price_source,
-                scope=scope,
-                token_side=(request.args.get("token_side") or "").strip() or None,
-                from_ts=_parse_time_arg("from"),
-                to_ts=_parse_time_arg("to"),
-                from_block=_parse_int_arg("from_block"),
-                to_block=_parse_int_arg("to_block"),
-                limit=limit,
-                max_outcomes=max_outcomes,
-            )
-        return jsonify(_camel_row(payload))
+        cache_key = _cache_key("market-price-series", version=2)
+
+        def build_payload() -> dict[str, Any]:
+            with postgres_connection(PostgresSettings(), readonly=True) as conn:
+                payload = get_market_price_series(
+                    conn,
+                    market_slug=market_slug,
+                    price_source=price_source,
+                    scope=scope,
+                    token_side=(request.args.get("token_side") or "").strip() or None,
+                    from_ts=_parse_time_arg("from"),
+                    to_ts=_parse_time_arg("to"),
+                    from_block=_parse_int_arg("from_block"),
+                    to_block=_parse_int_arg("to_block"),
+                    limit=limit,
+                    max_outcomes=max_outcomes,
+                )
+            return _camel_row(_apply_point_payload_format(payload, point_format))
+
+        return jsonify(_cached_quant_payload("quant-market-series", cache_key, 12, build_payload))
 
     @bp.route("/event-price-series", methods=["GET"])
     def api_quant_event_price_series():
@@ -282,19 +322,25 @@ def create_quant_blueprint(_: dict) -> Blueprint:
         limit = min(max(_parse_int_arg("limit", 2500) or 2500, 1), 25000)
         max_outcomes = min(max(_parse_int_arg("max_outcomes", 100) or 100, 1), 200)
         price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
-        with postgres_connection(PostgresSettings(), readonly=True) as conn:
-            payload = get_event_price_series(
-                conn,
-                event_slug=event_slug,
-                price_source=price_source,
-                from_ts=_parse_time_arg("from"),
-                to_ts=_parse_time_arg("to"),
-                from_block=_parse_int_arg("from_block"),
-                to_block=_parse_int_arg("to_block"),
-                limit=limit,
-                max_outcomes=max_outcomes,
-            )
-        return jsonify(_camel_row(payload))
+        point_format = (request.args.get("point_format") or "lite").strip().lower()
+        cache_key = _cache_key("event-price-series", version=2)
+
+        def build_payload() -> dict[str, Any]:
+            with postgres_connection(PostgresSettings(), readonly=True) as conn:
+                payload = get_event_price_series(
+                    conn,
+                    event_slug=event_slug,
+                    price_source=price_source,
+                    from_ts=_parse_time_arg("from"),
+                    to_ts=_parse_time_arg("to"),
+                    from_block=_parse_int_arg("from_block"),
+                    to_block=_parse_int_arg("to_block"),
+                    limit=limit,
+                    max_outcomes=max_outcomes,
+                )
+            return _camel_row(_apply_point_payload_format(payload, point_format))
+
+        return jsonify(_cached_quant_payload("quant-event-series", cache_key, 12, build_payload))
 
     @bp.route("/price-build-status", methods=["GET"])
     def api_quant_price_build_status():
