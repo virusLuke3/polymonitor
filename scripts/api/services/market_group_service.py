@@ -980,7 +980,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 12}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 13}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
