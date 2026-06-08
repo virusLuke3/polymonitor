@@ -861,25 +861,26 @@ export function PriceChartPanel({
 
       <div className="qtv-chart-stack">
         <div className="qtv-advanced-toolbar" aria-label="Advanced chart controls">
-          <select value={chartType} onChange={(event) => setChartType(event.currentTarget.value)}>
-            <option>Block-close line</option>
-            <option>Line</option>
-            <option>Step line</option>
-            <option>Area</option>
-            <option disabled>Candles requires OHLC</option>
-          </select>
-          <button className={indicatorMode.ma ? 'active' : ''} type="button" title="Moving average" onClick={() => setIndicatorMode((current) => ({ ...current, ma: !current.ma }))}>MA</button>
-          <button className={indicatorMode.ema ? 'active' : ''} type="button" title="EMA scaffold" onClick={() => setIndicatorMode((current) => ({ ...current, ema: !current.ema }))}>EMA</button>
-          <button className={indicatorMode.bands ? 'active' : ''} type="button" title="Bollinger band scaffold" onClick={() => setIndicatorMode((current) => ({ ...current, bands: !current.bands }))}>BB</button>
-          <button className={indicatorMode.volume ? 'active' : ''} type="button" title="Volume" onClick={() => setIndicatorMode((current) => ({ ...current, volume: !current.volume }))}>Vol</button>
-          <select value={compareMode} onChange={(event) => setCompareMode(event.currentTarget.value as EventSideMode)}>
-            <option value="auto">Auto side</option>
-            <option value="yes">YES</option>
-            <option value="no">NO</option>
-            <option value="both">YES + NO</option>
-          </select>
+          <div className="qtv-toolbar-group">
+            <span>Chart</span>
+            <select value={chartType} onChange={(event) => setChartType(event.currentTarget.value)}>
+              <option>Block-close line</option>
+              <option>Line</option>
+              <option>Step line</option>
+              <option>Area</option>
+              <option disabled>Candles requires OHLC</option>
+            </select>
+          </div>
+          <div className="qtv-toolbar-group">
+            <span>Indicators</span>
+            <button className={indicatorMode.ma ? 'active' : ''} type="button" title="Moving average" onClick={() => setIndicatorMode((current) => ({ ...current, ma: !current.ma }))}>MA</button>
+            <button className={indicatorMode.ema ? 'active' : ''} type="button" title="EMA scaffold" onClick={() => setIndicatorMode((current) => ({ ...current, ema: !current.ema }))}>EMA</button>
+            <button className={indicatorMode.bands ? 'active' : ''} type="button" title="Bollinger band scaffold" onClick={() => setIndicatorMode((current) => ({ ...current, bands: !current.bands }))}>BB</button>
+            <button className={indicatorMode.volume ? 'active' : ''} type="button" title="Volume" onClick={() => setIndicatorMode((current) => ({ ...current, volume: !current.volume }))}>Vol</button>
+          </div>
           {eventMode ? (
-            <>
+            <div className="qtv-toolbar-group">
+              <span>Outcomes</span>
               <select value={displayMode} onChange={(event) => setDisplayMode(event.currentTarget.value as EventDisplayMode)} title="Visible outcomes">
                 <option value="top3">Top 3</option>
                 <option value="top5">Top 5</option>
@@ -893,55 +894,73 @@ export function PriceChartPanel({
                 <option value="volume">Volume</option>
                 <option value="change">Change</option>
               </select>
-              <select value={labelMode} onChange={(event) => setLabelMode(event.currentTarget.value as EventLabelMode)} title="Right labels">
-                <option value="selected">Selected labels</option>
-                <option value="top">Top labels</option>
-                <option value="all">All labels</option>
-              </select>
-              <select value={tooltipMode} onChange={(event) => setTooltipMode(event.currentTarget.value as TooltipMode)} title="Tooltip mode">
-                <option value="compact">Compact tip</option>
-                <option value="full">Full window</option>
-              </select>
-              <button className={showLowProbability ? 'active' : ''} type="button" title="Show low-probability outcomes" onClick={() => setShowLowProbability((current) => !current)}>Low</button>
-              <button className={normalizedView ? 'active' : ''} type="button" title="Toggle normalized view indicator" onClick={() => setNormalizedView((current) => !current)}>{normalizedView ? 'Norm' : 'Raw'}</button>
-            </>
+            </div>
           ) : null}
-          <select value={layoutMode} onChange={(event) => setLayoutMode(event.currentTarget.value)} title="Layout">
-            <option value="1">1 chart</option>
-            <option value="2v">2 vertical</option>
-            <option value="2h">2 horizontal</option>
-            <option value="4">4 grid</option>
-          </select>
-          <button className={replayEnabled ? 'active' : ''} type="button" title="Replay" onClick={() => setReplayEnabled((current) => !current)}>Replay</button>
-          <button type="button" title="Alert scaffold">Alert</button>
-          <button type="button" title="Snapshot PNG" onClick={exportSnapshot}>Snapshot</button>
-          <button type="button" title="Export loaded CSV" onClick={exportLoadedCsv}>CSV</button>
-          <span className="qtv-data-control">
-            <button
-              className={dataWindowSettings.visible ? 'active' : ''}
-              type="button"
-              title="Data Window"
-              onClick={() => {
-                updateDataWindow({ visible: !dataWindowSettings.visible, minimized: false });
-                setDataWindowMenuOpen(false);
-              }}
-            >
-              Data{pinnedPoint ? ' •' : ''}
-            </button>
-            <button className={dataWindowMenuOpen ? 'active' : ''} type="button" title="Data Window menu" onClick={() => setDataWindowMenuOpen((current) => !current)}>▾</button>
-            {dataWindowMenuOpen ? (
-              <div className="qtv-data-menu">
-                <button type="button" onClick={() => updateDataWindow({ visible: true, minimized: false })}>Show Data Window</button>
-                <button type="button" onClick={() => updateDataWindow({ visible: false, minimized: false })}>Hide Data Window</button>
-                <button type="button" onClick={() => updateDataWindow({ mode: 'compact', visible: true, minimized: false })}>Compact</button>
-                <button type="button" onClick={() => updateDataWindow({ mode: 'expanded', visible: true, minimized: false })}>Expanded</button>
-                <button type="button" onClick={() => updateDataWindow({ dock: 'floating', visible: true, minimized: false })}>Floating</button>
-                <button type="button" onClick={() => updateDataWindow({ dock: 'left', visible: true, minimized: false })}>Dock left</button>
-                <button type="button" onClick={() => updateDataWindow({ dock: 'right', visible: true, minimized: false })}>Dock right</button>
-                <button type="button" onClick={() => setPinnedPoint(null)}>Clear pinned point</button>
-              </div>
-            ) : null}
-          </span>
+          <details className="qtv-toolbar-group qtv-display-menu">
+            <summary>Display</summary>
+            <div>
+              <label>Side<select value={compareMode} onChange={(event) => setCompareMode(event.currentTarget.value as EventSideMode)}>
+                <option value="auto">Auto side</option>
+                <option value="yes">YES</option>
+                <option value="no">NO</option>
+                <option value="both">YES + NO</option>
+              </select></label>
+              {eventMode ? (
+                <>
+                  <label>Labels<select value={labelMode} onChange={(event) => setLabelMode(event.currentTarget.value as EventLabelMode)} title="Right labels">
+                    <option value="selected">Selected labels</option>
+                    <option value="top">Top labels</option>
+                    <option value="all">All labels</option>
+                  </select></label>
+                  <label>Tooltip<select value={tooltipMode} onChange={(event) => setTooltipMode(event.currentTarget.value as TooltipMode)} title="Tooltip mode">
+                    <option value="compact">Compact</option>
+                    <option value="full">Full</option>
+                  </select></label>
+                  <button className={showLowProbability ? 'active' : ''} type="button" title="Show low-probability outcomes" onClick={() => setShowLowProbability((current) => !current)}>Low probability</button>
+                  <button className={normalizedView ? 'active' : ''} type="button" title="Toggle normalized view indicator" onClick={() => setNormalizedView((current) => !current)}>{normalizedView ? 'Normalized' : 'Raw data'}</button>
+                </>
+              ) : null}
+              <label>Layout<select value={layoutMode} onChange={(event) => setLayoutMode(event.currentTarget.value)} title="Layout">
+                <option value="1">Single chart</option>
+                <option value="2v">2 vertical</option>
+                <option value="2h">2 horizontal</option>
+                <option value="4">4 grid</option>
+              </select></label>
+            </div>
+          </details>
+          <div className="qtv-toolbar-group">
+            <span>Actions</span>
+            <button className={replayEnabled ? 'active' : ''} type="button" title="Replay" onClick={() => setReplayEnabled((current) => !current)}>Replay</button>
+            <button type="button" title="Alert scaffold">Alert</button>
+            <button type="button" title="Snapshot PNG" onClick={exportSnapshot}>Snapshot</button>
+            <button type="button" title="Export loaded CSV" onClick={exportLoadedCsv}>CSV</button>
+            <span className="qtv-data-control">
+              <button
+                className={dataWindowSettings.visible ? 'active' : ''}
+                type="button"
+                title="Data Window"
+                onClick={() => {
+                  updateDataWindow({ visible: !dataWindowSettings.visible, minimized: false });
+                  setDataWindowMenuOpen(false);
+                }}
+              >
+                Data{pinnedPoint ? ' •' : ''}
+              </button>
+              <button className={dataWindowMenuOpen ? 'active' : ''} type="button" title="Data Window menu" onClick={() => setDataWindowMenuOpen((current) => !current)}>▾</button>
+              {dataWindowMenuOpen ? (
+                <div className="qtv-data-menu">
+                  <button type="button" onClick={() => updateDataWindow({ visible: true, minimized: false })}>Show Data Window</button>
+                  <button type="button" onClick={() => updateDataWindow({ visible: false, minimized: false })}>Hide Data Window</button>
+                  <button type="button" onClick={() => updateDataWindow({ mode: 'compact', visible: true, minimized: false })}>Compact</button>
+                  <button type="button" onClick={() => updateDataWindow({ mode: 'expanded', visible: true, minimized: false })}>Expanded</button>
+                  <button type="button" onClick={() => updateDataWindow({ dock: 'floating', visible: true, minimized: false })}>Floating</button>
+                  <button type="button" onClick={() => updateDataWindow({ dock: 'left', visible: true, minimized: false })}>Dock left</button>
+                  <button type="button" onClick={() => updateDataWindow({ dock: 'right', visible: true, minimized: false })}>Dock right</button>
+                  <button type="button" onClick={() => setPinnedPoint(null)}>Clear pinned point</button>
+                </div>
+              ) : null}
+            </span>
+          </div>
         </div>
 
         <div className="qtv-chart-info">
@@ -1024,7 +1043,7 @@ export function PriceChartPanel({
             tabIndex={0}
           >
             <header onPointerDown={(event) => startDataWindowDrag(event as unknown as PointerEvent)}>
-              <strong>{dataWindowSettings.mode === 'compact' ? 'Compact Tooltip' : 'Data Window'}</strong>
+              <strong>{dataWindowSettings.mode === 'compact' ? 'Data Window' : 'Expanded Data Window'}</strong>
               <i>{pinnedPoint ? 'Pinned' : hover ? 'Hover' : 'Latest'}</i>
               <button type="button" title="Minimize" onClick={() => updateDataWindow({ minimized: true })}>_</button>
               {pinnedPoint ? <button type="button" title="Clear pinned point" onClick={() => setPinnedPoint(null)}>Clear</button> : null}

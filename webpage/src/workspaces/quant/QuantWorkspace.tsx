@@ -117,6 +117,34 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function persistedBoolean(key: string, fallback: boolean) {
+  try {
+    const value = window.localStorage.getItem(key);
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+  } catch {
+    // Keep the workspace usable when browser storage is blocked.
+  }
+  return fallback;
+}
+
+function persistedInspectorTab() {
+  try {
+    const value = window.localStorage.getItem('polydata.quant.inspectorTab') as InspectorTab | null;
+    if (value && ['watchlist', 'market', 'outcomes', 'book', 'trades'].includes(value)) return value;
+  } catch {
+    // Keep the default tab.
+  }
+  return 'market';
+}
+
+function blockRangeLabel(prices: Array<{ timestamp: number }>) {
+  const first = prices[0]?.timestamp;
+  const last = prices[prices.length - 1]?.timestamp;
+  if (typeof first !== 'number' || typeof last !== 'number' || !Number.isFinite(first) || !Number.isFinite(last)) return '--';
+  return `${Math.floor(first).toLocaleString('en-US')} -> ${Math.floor(last).toLocaleString('en-US')}`;
+}
+
 function quantile(values: number[], ratio: number) {
   if (!values.length) return 0;
   const sorted = values.slice().sort((left, right) => left - right);
@@ -137,6 +165,7 @@ function strategyDefaults(prices: Array<{ close: number }>) {
 
 type BacktestAction = 'YES' | 'NO';
 type OutcomeSortKey = 'order' | 'probability' | 'rows' | 'volume';
+type InspectorTab = 'watchlist' | 'market' | 'outcomes' | 'book' | 'trades';
 type RefreshQuantRowsOptions = {
   silent?: boolean;
 };
@@ -308,6 +337,9 @@ export function QuantWorkspace() {
   const [workspaceNotice, setWorkspaceNotice] = useState('');
   const [outcomeSortKey, setOutcomeSortKey] = useState<OutcomeSortKey>('probability');
   const [lastPriceRefreshAt, setLastPriceRefreshAt] = useState('');
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>(persistedInspectorTab);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(() => persistedBoolean('polydata.quant.inspectorCollapsed', false));
+  const [strategyDrawerCollapsed, setStrategyDrawerCollapsed] = useState(() => persistedBoolean('polydata.quant.strategyDrawerCollapsed', false));
   const marketSearchSeq = useRef(0);
   const priceLoadSeq = useRef(0);
   const marketSlugRef = useRef(marketSlug);
@@ -805,9 +837,19 @@ export function QuantWorkspace() {
     if (selectedEntityKind === 'event' && outcomes.length === 1 && outcomes[0]?.buyNoTokenId) return 2;
     return outcomes.length;
   }, [marketSeries?.outcomes, selectedEntityKind]);
-  const useOutcomeTable = selectedEntityKind === 'event'
-    ? (marketSeries?.outcomes?.length || 0) >= 4
-    : (marketSeries?.outcomes?.length || 0) > 4;
+  const selectedOutcomeRow = useMemo(
+    () => sortedOutcomeRows.find(({ outcome }) => outcome.tokenId === selectedOutcome?.tokenId) || sortedOutcomeRows[0] || null,
+    [selectedOutcome, sortedOutcomeRows],
+  );
+  const watchlistRows = useMemo(() => sortedOutcomeRows.slice(0, 12), [sortedOutcomeRows]);
+  const recentTradeRows = useMemo(() => filteredTrades.slice(-10).reverse(), [filteredTrades]);
+  const priceBlockRange = useMemo(() => blockRangeLabel(activePrices), [activePrices]);
+
+  useEffect(() => {
+    window.localStorage.setItem('polydata.quant.inspectorTab', inspectorTab);
+    window.localStorage.setItem('polydata.quant.inspectorCollapsed', String(inspectorCollapsed));
+    window.localStorage.setItem('polydata.quant.strategyDrawerCollapsed', String(strategyDrawerCollapsed));
+  }, [inspectorCollapsed, inspectorTab, strategyDrawerCollapsed]);
 
   const togglePerformanceSort = (key: PerformanceSortKey) => {
     if (performanceSortKey === key) {
@@ -881,155 +923,196 @@ export function QuantWorkspace() {
 
       {error ? <div className="qtv-error">{error}</div> : null}
 
-      <main className="qtv-workspace">
-        <PriceChartPanel
-          prices={activePrices}
-          market={marketInfo}
-          selectedTradeId={selectedTradeId}
-          signals={strategySignals}
-          priceSource={backendPriceSource(priceSource)}
-          dataStatus={dataStatus}
-          loadingMessage={loadingMessage}
-          marketCoverageRows={marketCoverageRows}
-          loadedPriceRows={displayedPriceRows}
-          backtestRows={displayedPriceRows}
-          eventMode={selectedEntityKind === 'event'}
-          selectedTokenId={selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoTokenId || '' : selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId || ''}
-          selectedOutcomeLabel={selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoLabel || '' : selectedOutcome?.buyYesLabel || selectedOutcome?.outcomeLabel || ''}
-          onOutcomeSelect={(tokenId, side) => {
-            const next = marketSeries?.outcomes?.find((outcome) => (
-              side === 'NO' ? outcome.buyNoTokenId === tokenId : (outcome.buyYesTokenId === tokenId || outcome.tokenId === tokenId)
-            ));
-            if (next) {
-              setSelectedOutcomeTokenId(next.tokenId);
-              setSelectedBacktestAction(side);
-            }
-          }}
-          onRetry={() => {
-            setMarketReloadKey((current) => current + 1);
-          }}
-        />
+      <main className={`qtv-workspace ${inspectorCollapsed ? 'inspector-collapsed' : ''} ${strategyDrawerCollapsed ? 'drawer-collapsed' : ''}`}>
+        <section className="qtv-chart-region" aria-label="Quant chart workspace">
+          <PriceChartPanel
+            prices={activePrices}
+            market={marketInfo}
+            selectedTradeId={selectedTradeId}
+            signals={strategySignals}
+            priceSource={backendPriceSource(priceSource)}
+            dataStatus={dataStatus}
+            loadingMessage={loadingMessage}
+            marketCoverageRows={marketCoverageRows}
+            loadedPriceRows={displayedPriceRows}
+            backtestRows={displayedPriceRows}
+            eventMode={selectedEntityKind === 'event'}
+            selectedTokenId={selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoTokenId || '' : selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId || ''}
+            selectedOutcomeLabel={selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoLabel || '' : selectedOutcome?.buyYesLabel || selectedOutcome?.outcomeLabel || ''}
+            onOutcomeSelect={(tokenId, side) => {
+              const next = marketSeries?.outcomes?.find((outcome) => (
+                side === 'NO' ? outcome.buyNoTokenId === tokenId : (outcome.buyYesTokenId === tokenId || outcome.tokenId === tokenId)
+              ));
+              if (next) {
+                setSelectedOutcomeTokenId(next.tokenId);
+                setSelectedBacktestAction(side);
+              }
+            }}
+            onRetry={() => {
+              setMarketReloadKey((current) => current + 1);
+            }}
+          />
+        </section>
 
-        {marketSeries?.outcomes?.length ? (
-          <section className={`qtv-outcome-board ${useOutcomeTable ? 'table-mode' : 'card-mode'}`} aria-label="Polymarket outcomes">
-            <header className="qtv-outcome-board-head">
-              <strong>{displayedOutcomeCount.toLocaleString('en-US')} outcomes</strong>
-              <div>
-                <span>Sort</span>
-                <select value={outcomeSortKey} onChange={(event) => setOutcomeSortKey(event.currentTarget.value as OutcomeSortKey)}>
-                  <option value="probability">Probability</option>
-                  <option value="order">Outcome order</option>
-                  <option value="rows">Rows</option>
-                  <option value="volume">Volume</option>
-                </select>
-              </div>
-            </header>
-            {useOutcomeTable ? (
-              <div className="qtv-outcome-table" role="table">
-                <div className="qtv-outcome-table-row head" role="row">
-                  <span>Outcome</span><span>YES</span><span>NO</span><span>Rows</span><span>Volume</span><span>Coverage</span><span>Actions</span>
-                </div>
-                {sortedOutcomeRows.map(({ outcome, label, fullLabel, yes, no, rows, volume }) => {
-                  const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
-                  return (
-                    <button
-                      key={outcome.tokenId}
-                      className={`qtv-outcome-table-row ${isSelected ? 'active' : ''}`}
-                      type="button"
-                      role="row"
-                      title={fullLabel}
-                      onClick={() => {
-                        setSelectedOutcomeTokenId(outcome.tokenId);
-                        setSelectedBacktestAction('YES');
-                      }}
-                    >
-                      <strong>{label}</strong>
-                      <b>{fmtPrice(yes)}</b>
-                      <b>{fmtPrice(no)}</b>
-                      <span>{rows.toLocaleString('en-US')}</span>
-                      <span>{volume.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
-                      <em>{outcome.coverageStatus || (rows ? 'ready' : 'none')}</em>
-                      <i>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(event) => {
-                            event.stopPropagation();
+        <aside className="qtv-inspector" aria-label="Market inspector">
+          <header className="qtv-inspector-head">
+            <strong>Inspector</strong>
+            <button type="button" onClick={() => setInspectorCollapsed((current) => !current)}>{inspectorCollapsed ? 'Open' : 'Hide'}</button>
+          </header>
+          {!inspectorCollapsed ? (
+            <>
+              <nav className="qtv-inspector-tabs" aria-label="Inspector tabs">
+                {[
+                  ['watchlist', 'Watchlist'],
+                  ['market', 'Market'],
+                  ['outcomes', 'Outcomes'],
+                  ['book', 'Book'],
+                  ['trades', 'Trades'],
+                ].map(([id, label]) => (
+                  <button key={id} className={inspectorTab === id ? 'active' : ''} type="button" onClick={() => setInspectorTab(id as InspectorTab)}>{label}</button>
+                ))}
+              </nav>
+              <div className="qtv-inspector-body">
+                {inspectorTab === 'watchlist' ? (
+                  <div className="qtv-watchlist">
+                    {watchlistRows.map(({ outcome, label, fullLabel, yes, no, rows }) => {
+                      const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
+                      return (
+                        <button
+                          key={`watch-${outcome.tokenId}`}
+                          className={isSelected ? 'active' : ''}
+                          type="button"
+                          title={fullLabel}
+                          onClick={() => {
                             setSelectedOutcomeTokenId(outcome.tokenId);
                             setSelectedBacktestAction('YES');
                           }}
                         >
-                          Backtest Yes
-                        </span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          className={!outcome.buyNoTokenId ? 'disabled' : ''}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (!outcome.buyNoTokenId) return;
-                            setSelectedOutcomeTokenId(outcome.tokenId);
-                            setSelectedBacktestAction('NO');
-                          }}
-                        >
-                          Backtest No
-                        </span>
-                      </i>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : sortedOutcomeRows.map(({ outcome, label, fullLabel, yes, no, rows }) => {
-              const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
-              return (
-                <div key={outcome.tokenId} className={`qtv-outcome-row ${isSelected ? 'active' : ''}`} title={fullLabel}>
-                  <span>
-                    <strong>{label}</strong>
-                    <em>{rows.toLocaleString('en-US')} rows</em>
-                  </span>
-                  <b>{fmtPrice(yes)}</b>
-                  <div className="qtv-outcome-actions">
-                    <button className={isSelected && selectedBacktestAction === 'YES' ? 'active' : ''} type="button" onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('YES'); }}>
-                      Backtest Yes {fmtPrice(yes)}
-                    </button>
-                    <button className={isSelected && selectedBacktestAction === 'NO' ? 'active no' : 'no'} type="button" disabled={!outcome.buyNoTokenId} onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('NO'); }}>
-                      Backtest No {fmtPrice(no)}
-                    </button>
+                          <span><strong>{label}</strong><em>{rows.toLocaleString('en-US')} rows</em></span>
+                          <b>{fmtPrice(yes)}</b>
+                          <i>{fmtPrice(no)}</i>
+                        </button>
+                      );
+                    })}
+                    {!watchlistRows.length ? <p>No outcomes loaded for the selected market.</p> : null}
                   </div>
-                </div>
-              );
-            })}
-          </section>
-        ) : null}
+                ) : null}
 
-        <StrategyTesterPanel
-          result={backtestResult}
-          testerTab={testerTab}
-          deepBacktest={deepBacktest}
-          selectedTradeId={selectedTradeId}
-          performanceSearch={performanceSearch}
-          performanceSortKey={performanceSortKey}
-          performanceSortDirection={performanceSortDirection}
-          tradeFilters={tradeFilters}
-          filteredPerformanceRows={filteredPerformanceRows}
-          filteredTrades={filteredTrades}
-          onTesterTabChange={setTesterTab}
-          onDeepBacktestChange={() => setDeepBacktest((current) => !current)}
-          onRefresh={() => void runBacktest()}
-          onExport={exportBacktest}
-          onPerformanceSearchChange={setPerformanceSearch}
-          onPerformanceSortChange={togglePerformanceSort}
-          onTradeFilterToggle={toggleTradeFilter}
-          onTradeSelect={(tradeId) => {
-            setSelectedTradeId(tradeId);
-            setTesterTab('trades');
-          }}
-          marketTitle={marketInfo.title}
-          dataSource={backendPriceSource(priceSource)}
-          engine={backtestEngine}
-          rowCount={displayedPriceRows}
-          backtestStatus={backtestStatus}
-        />
+                {inspectorTab === 'market' ? (
+                  <div className="qtv-market-card">
+                    <h3>{marketInfo.title}</h3>
+                    <dl>
+                      <div><dt>Type</dt><dd>{selectedEntityKind === 'event' ? 'Event' : 'Market'}</dd></div>
+                      <div><dt>Source</dt><dd>{backendPriceSource(priceSource)}</dd></div>
+                      <div><dt>Outcomes</dt><dd>{displayedOutcomeCount.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Rows Loaded</dt><dd>{displayedPriceRows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Coverage</dt><dd>{marketCoverageRows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Blocks</dt><dd>{priceBlockRange}</dd></div>
+                      <div><dt>Latest</dt><dd>{fmtPrice(latestPrice)}</dd></div>
+                      <div><dt>Freshness</dt><dd>{lastPriceRefreshAt || '--'}</dd></div>
+                      <div><dt>Slug</dt><dd>{marketSlug}</dd></div>
+                    </dl>
+                  </div>
+                ) : null}
+
+                {inspectorTab === 'outcomes' ? (
+                  <div className="qtv-inspector-outcomes">
+                    <div className="qtv-inspector-sort">
+                      <span>{displayedOutcomeCount.toLocaleString('en-US')} outcomes</span>
+                      <select value={outcomeSortKey} onChange={(event) => setOutcomeSortKey(event.currentTarget.value as OutcomeSortKey)}>
+                        <option value="probability">Probability</option>
+                        <option value="order">Outcome order</option>
+                        <option value="rows">Rows</option>
+                        <option value="volume">Volume</option>
+                      </select>
+                    </div>
+                    {sortedOutcomeRows.map(({ outcome, label, fullLabel, yes, no, rows, volume }) => {
+                      const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
+                      return (
+                        <div key={`side-${outcome.tokenId}`} className={`qtv-inspector-outcome ${isSelected ? 'active' : ''}`} title={fullLabel}>
+                          <button type="button" onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('YES'); }}>
+                            <strong>{label}</strong>
+                            <span>{rows.toLocaleString('en-US')} rows · {volume.toLocaleString('en-US', { maximumFractionDigits: 0 })} vol</span>
+                          </button>
+                          <div>
+                            <button className={isSelected && selectedBacktestAction === 'YES' ? 'active' : ''} type="button" onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('YES'); }}>YES {fmtPrice(yes)}</button>
+                            <button className={isSelected && selectedBacktestAction === 'NO' ? 'active no' : 'no'} type="button" disabled={!outcome.buyNoTokenId} onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('NO'); }}>NO {fmtPrice(no)}</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {inspectorTab === 'book' ? (
+                  <div className="qtv-book-card">
+                    <h3>{selectedOutcomeRow?.fullLabel || selectedOutcome?.outcomeLabel || 'Selected outcome'}</h3>
+                    <div className="qtv-book-ladder">
+                      <span>YES</span><b>{fmtPrice(selectedOutcomeRow?.yes || 0)}</b>
+                      <span>NO</span><b>{fmtPrice(selectedOutcomeRow?.no || 0)}</b>
+                      <span>Rows</span><b>{(selectedOutcomeRow?.rows || 0).toLocaleString('en-US')}</b>
+                      <span>Volume</span><b>{(selectedOutcomeRow?.volume || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</b>
+                    </div>
+                    <p>Order book depth is shown when a live CLOB source is connected. Current panel uses the real block-close outcome prices.</p>
+                  </div>
+                ) : null}
+
+                {inspectorTab === 'trades' ? (
+                  <div className="qtv-inspector-trades">
+                    {recentTradeRows.map((trade) => (
+                      <button key={`inspector-trade-${trade.id}`} className={trade.id === selectedTradeId ? 'active' : ''} type="button" onClick={() => { setSelectedTradeId(trade.id); setTesterTab('trades'); setStrategyDrawerCollapsed(false); }}>
+                        <strong>{trade.outcome}</strong>
+                        <span>{trade.entryTime} to {trade.exitTime}</span>
+                        <b className={trade.pnl >= 0 ? 'positive' : 'negative'}>{trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)} USDC</b>
+                      </button>
+                    ))}
+                    {!recentTradeRows.length ? <p>No completed backtest trades yet. Run a backtest to populate this tab.</p> : null}
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+        </aside>
+
+        <section className="qtv-strategy-drawer" aria-label="Strategy tester drawer">
+          <header className="qtv-drawer-head">
+            <div>
+              <strong>Strategy Tester</strong>
+              <span>{backtestStatus} · {backtestEngine} · {displayedPriceRows.toLocaleString('en-US')} rows</span>
+            </div>
+            <button type="button" onClick={() => setStrategyDrawerCollapsed((current) => !current)}>{strategyDrawerCollapsed ? 'Expand' : 'Collapse'}</button>
+          </header>
+          {!strategyDrawerCollapsed ? (
+            <StrategyTesterPanel
+              result={backtestResult}
+              testerTab={testerTab}
+              deepBacktest={deepBacktest}
+              selectedTradeId={selectedTradeId}
+              performanceSearch={performanceSearch}
+              performanceSortKey={performanceSortKey}
+              performanceSortDirection={performanceSortDirection}
+              tradeFilters={tradeFilters}
+              filteredPerformanceRows={filteredPerformanceRows}
+              filteredTrades={filteredTrades}
+              onTesterTabChange={setTesterTab}
+              onDeepBacktestChange={() => setDeepBacktest((current) => !current)}
+              onRefresh={() => void runBacktest()}
+              onExport={exportBacktest}
+              onPerformanceSearchChange={setPerformanceSearch}
+              onPerformanceSortChange={togglePerformanceSort}
+              onTradeFilterToggle={toggleTradeFilter}
+              onTradeSelect={(tradeId) => {
+                setSelectedTradeId(tradeId);
+                setTesterTab('trades');
+              }}
+              marketTitle={marketInfo.title}
+              dataSource={backendPriceSource(priceSource)}
+              engine={backtestEngine}
+              rowCount={displayedPriceRows}
+              backtestStatus={backtestStatus}
+            />
+          ) : null}
+        </section>
       </main>
 
       <div className="qtv-statusbar">
