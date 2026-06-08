@@ -1386,7 +1386,9 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       }, 110);
     };
     const resizeAndSync = () => {
-      if (!mapRef.current) return;
+      if (!mapRef.current || !rootRef.current) return;
+      const bounds = rootRef.current.getBoundingClientRect();
+      if (bounds.width < 1 || bounds.height < 1) return;
       map.resize();
       map.triggerRepaint();
       ensureCountryLayers(map, countryRisksRef.current);
@@ -1436,7 +1438,6 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     map.on('zoom', beginMapInteraction);
     map.on('moveend', endMapInteraction);
     map.on('zoomend', endMapInteraction);
-    map.on('resize', resizeAndSync);
 
     let tileErrorCount = 0;
     const initialFrame = window.requestAnimationFrame(resizeAndSync);
@@ -1504,7 +1505,6 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       map.off('zoom', beginMapInteraction);
       map.off('moveend', endMapInteraction);
       map.off('zoomend', endMapInteraction);
-      map.off('resize', resizeAndSync);
       if (deckOverlayRef.current) {
         try { map.removeControl(deckOverlayRef.current as unknown as maplibregl.IControl); } catch { /* map can already be tearing down */ }
         deckOverlayRef.current = null;
