@@ -41,6 +41,11 @@ type StrategyTesterPanelProps = {
   onPerformanceSortChange: (key: PerformanceSortKey) => void;
   onTradeFilterToggle: (filter: TradeFilter) => void;
   onTradeSelect: (tradeId: string) => void;
+  marketTitle?: string;
+  dataSource?: string;
+  engine?: string;
+  rowCount?: number;
+  backtestStatus?: string;
 };
 
 export function StrategyTesterPanel({
@@ -62,6 +67,11 @@ export function StrategyTesterPanel({
   onPerformanceSortChange,
   onTradeFilterToggle,
   onTradeSelect,
+  marketTitle = 'No market selected',
+  dataSource = '-',
+  engine = '-',
+  rowCount = 0,
+  backtestStatus = 'idle',
 }: StrategyTesterPanelProps) {
   const [toolTab, setToolTab] = useState<ToolTab>('tester');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -243,8 +253,29 @@ export function StrategyTesterPanel({
           </div>
         ) : (
           <div className="qtv-tester-empty">
-            <strong>No completed real backtest</strong>
-            <span>Select a market with rows, choose a framework, then run backtest.</span>
+            <div className="qtv-empty-terminal">
+              <div>
+                <strong>Strategy Tester idle</strong>
+                <span>Momentum Probability Strategy</span>
+              </div>
+              <dl>
+                <div><dt>Market</dt><dd>{marketTitle}</dd></div>
+                <div><dt>Engine</dt><dd>{engine}</dd></div>
+                <div><dt>Source</dt><dd>{dataSource}</dd></div>
+                <div><dt>Rows</dt><dd>{rowCount.toLocaleString('en-US')}</dd></div>
+                <div><dt>Status</dt><dd>{backtestStatus}</dd></div>
+              </dl>
+              <ul>
+                <li className={marketTitle !== 'No market selected' ? 'ready' : ''}>Market selected</li>
+                <li className={rowCount > 0 ? 'ready' : ''}>Price rows loaded</li>
+                <li className={engine !== '-' ? 'ready' : ''}>Backtest engine ready</li>
+              </ul>
+              <div className="qtv-empty-actions">
+                <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
+                <button type="button" onClick={() => setSettingsOpen(true)}>Settings</button>
+                <button type="button" onClick={onRefresh}>Refresh</button>
+              </div>
+            </div>
           </div>
         )
       ) : null}

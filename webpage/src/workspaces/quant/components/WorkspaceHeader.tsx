@@ -85,12 +85,36 @@ export function WorkspaceHeader({
 
   const selectedRows = Number(selectedMarket?.blockRows || selectedMarket?.frontendRows || 0);
   const selectedSubtitle = selectedMarket?.marketSlug || marketSlug || 'No market selected';
+  const sourceLabel = priceSource === 'orderfilled' ? 'OrderFilled block close' : 'Frontend price-history';
+  const engineLabel = backtestEngine === 'nautilus_trader' ? 'Nautilus Trader' : backtestEngine === 'backtrader' ? 'Backtrader' : 'Built-in';
 
   return (
-    <header className="qtv-topbar">
-      <div className="qtv-left-tools">
+    <header className="qtv-header">
+      <div className="qtv-globalbar">
         <a className="qtv-logo" href="/">POLYDATA</a>
-        <button type="button" title="Menu">Menu</button>
+        <button className="qtv-menu-button" type="button" title="Menu">Menu</button>
+        <nav className="qtv-app-tabs" aria-label="PolyData workspaces">
+          {['Markets', 'Quant', 'Replay', 'Strategies', 'Data'].map((item) => (
+            <button key={item} className={item === 'Quant' ? 'active' : ''} type="button">{item}</button>
+          ))}
+        </nav>
+        <div className="qtv-global-actions">
+          <button type="button" onClick={onSave}>Save</button>
+          <button type="button" onClick={() => onExport('json')}>Snapshot</button>
+          <button type="button" onClick={() => onExport('csv')}>CSV</button>
+        </div>
+      </div>
+
+      <div className="qtv-workbar">
+        <button className="qtv-market-identity" type="button" title={selectedSubtitle} onClick={() => setMarketMenuOpen(true)}>
+          <span>
+            <strong>{selectedMarket?.marketTitle || marketSlug || 'Select market'}</strong>
+            <em>Polymarket · outcome probabilities · {sourceLabel}</em>
+          </span>
+          <b>{selectedRows ? `${selectedRows.toLocaleString('en-US')} rows` : 'No rows'}</b>
+        </button>
+
+        <div className="qtv-workbar-group qtv-search-group">
         <div
           className={`qtv-market-command ${marketMenuOpen ? 'open' : ''}`}
           onBlur={() => window.setTimeout(() => setMarketMenuOpen(false), 120)}
@@ -187,13 +211,10 @@ export function WorkspaceHeader({
             </div>
           ) : null}
         </div>
-        <button className="qtv-selected-market" type="button" title={selectedSubtitle} onClick={() => setMarketMenuOpen(true)}>
-          <strong>{selectedMarket?.marketTitle || marketSlug || 'Select market'}</strong>
-          <span>{selectedSubtitle}</span>
-          {selectedRows ? <em>{selectedRows.toLocaleString('en-US')} rows</em> : null}
-        </button>
-        <button type="button" title="Add market">+</button>
-        <div className="qtv-timeframes">
+        <button className="qtv-icon-button" type="button" title="Add market">+</button>
+        </div>
+
+        <div className="qtv-workbar-group qtv-timeframes" aria-label="Block range">
           {([
             ['500', '500blk'],
             ['1000', '1k'],
@@ -205,26 +226,29 @@ export function WorkspaceHeader({
             <button key={value} className={timeframe === value ? 'active' : ''} type="button" onClick={() => onTimeframeChange(value)}>{label}</button>
           ))}
         </div>
-        <button type="button" title="Line">Line</button>
-        <button type="button" title="Indicators">Indicators</button>
-        <button type="button" title="Compare">Layout</button>
-        <button type="button" title="Undo">Undo</button>
-      </div>
 
-      <div className="qtv-right-tools">
+        <div className="qtv-workbar-group qtv-select-group">
+          <label>
+            <span>Source</span>
         <select value={priceSource} onChange={(event) => onPriceSourceChange(event.currentTarget.value as PriceSource)}>
           <option value="frontend">Frontend price-history</option>
           <option value="orderfilled">OrderFilled block close</option>
         </select>
+          </label>
+          <label>
+            <span>Engine</span>
         <select value={backtestEngine} onChange={(event) => onBacktestEngineChange(event.currentTarget.value as BacktestEngine)}>
           <option value="builtin">Built-in</option>
           <option value="backtrader">Backtrader</option>
           <option value="nautilus_trader">Nautilus Trader</option>
         </select>
-        <button type="button" onClick={onSave}>Save</button>
-        <button type="button" onClick={() => onExport('json')}>Snapshot</button>
-        <button type="button" onClick={() => onExport('csv')}>CSV</button>
-        <button className="primary" type="button" onClick={onRunBacktest}>{loading ? 'Running...' : 'Run Backtest'}</button>
+          </label>
+        </div>
+
+        <div className="qtv-workbar-group qtv-run-group">
+          <span>{engineLabel}</span>
+          <button className="primary" type="button" onClick={onRunBacktest}>{loading ? 'Running...' : 'Run Backtest'}</button>
+        </div>
       </div>
     </header>
   );

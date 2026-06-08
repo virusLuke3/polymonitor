@@ -1,137 +1,263 @@
-.qtv-market-command {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(210px, 340px) 28px;
-  align-items: center;
-  height: 36px;
-  min-width: min(36vw, 420px);
-  border: 1px solid #263244;
-  border-radius: 5px;
-  background: #0b0f17;
-}
-
-.qtv-market-command.open,
-.qtv-market-command:focus-within {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.28);
-}
-
-.qtv-command-label {
-  height: 18px;
-  border-right: 1px solid #263244;
-  color: #8b97aa;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 18px;
-  margin-left: 10px;
-  padding-right: 10px;
-}
-
-.qtv-market-command input {
-  width: 100%;
+.qtv-header {
+  z-index: 8;
   min-width: 0;
-  border: 0 !important;
-  background: transparent !important;
-  color: #e5e7eb !important;
-  font-family: var(--font-mono) !important;
-  padding: 0 8px !important;
+  display: grid;
+  grid-template-rows: 34px 42px;
+  border-bottom: 1px solid #222b3a;
+  background: #0b0e14;
 }
 
-.qtv-market-command input::placeholder {
-  color: #7b8798;
+.qtv-globalbar,
+.qtv-workbar,
+.qtv-workbar-group,
+.qtv-app-tabs,
+.qtv-global-actions,
+.qtv-select-group,
+.qtv-run-group {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
-.qtv-command-toggle {
-  width: 28px;
-  min-width: 28px;
-  border: 0 !important;
-  border-left: 1px solid #263244 !important;
-  border-radius: 0 4px 4px 0 !important;
-  color: #cbd5e1 !important;
-  padding: 0 !important;
+.qtv-globalbar {
+  gap: 10px;
+  border-bottom: 1px solid #1e2633;
+  padding: 0 12px;
 }
 
-.qtv-selected-market {
+.qtv-logo {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  border: 1px solid #2d3a4e;
+  border-radius: 4px;
+  background: #111827;
+  color: #f8fafc;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  padding: 0 10px;
+  text-decoration: none;
+}
+
+.qtv-header button,
+.qtv-header select,
+.qtv-header input {
+  height: 28px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #cbd5e1;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 750;
+  outline: none;
+}
+
+.qtv-header button {
+  cursor: pointer;
+}
+
+.qtv-header button:hover {
+  background: #151b26;
+  color: #f8fafc;
+}
+
+.qtv-menu-button {
+  padding: 0 8px;
+}
+
+.qtv-app-tabs {
+  gap: 2px;
+  margin-left: 6px;
+}
+
+.qtv-app-tabs button {
+  height: 26px;
+  color: #8f9bad;
+  padding: 0 9px;
+}
+
+.qtv-app-tabs button.active {
+  color: #e5e7eb;
+  background: #111827;
+}
+
+.qtv-global-actions {
+  gap: 2px;
+  margin-left: auto;
+}
+
+.qtv-global-actions button {
+  color: #98a4b5;
+  padding: 0 8px;
+}
+
+.qtv-workbar {
+  gap: 10px;
+  padding: 0 12px;
+  overflow: visible;
+}
+
+.qtv-workbar-group {
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 1px solid #222b3a;
+}
+
+.qtv-workbar-group:first-of-type {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.qtv-market-identity {
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "title rows"
-    "slug rows";
   align-items: center;
-  width: clamp(240px, 25vw, 420px);
-  min-width: 220px;
-  max-width: 420px;
-  height: 36px !important;
+  gap: 12px;
+  width: clamp(250px, 27vw, 430px);
+  height: 34px !important;
   border-color: #263244 !important;
   background: #0f1623 !important;
-  color: #e5e7eb !important;
   text-align: left;
   padding: 4px 10px !important;
 }
 
-.qtv-selected-market strong,
-.qtv-selected-market span {
+.qtv-market-identity span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.qtv-market-identity strong,
+.qtv-market-identity em {
   overflow: hidden;
   min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.qtv-selected-market strong {
-  grid-area: title;
+.qtv-market-identity strong {
   color: #f8fafc;
   font-size: 12px;
   line-height: 1.15;
 }
 
-.qtv-selected-market span {
-  grid-area: slug;
-  color: #91a0b6;
+.qtv-market-identity em {
+  color: #8f9bad;
   font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1.15;
+  font-size: 9.5px;
+  font-style: normal;
 }
 
-.qtv-selected-market em {
-  grid-area: rows;
+.qtv-market-identity b {
   color: #60a5fa;
   font-family: var(--font-mono);
   font-size: 10px;
-  font-style: normal;
-  padding-left: 12px;
   white-space: nowrap;
+}
+
+.qtv-search-group {
+  position: relative;
+  flex: 0 1 460px;
+}
+
+.qtv-market-command {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) 26px;
+  align-items: center;
+  width: min(34vw, 420px);
+  min-width: 260px;
+  height: 30px;
+  border: 1px solid #263244;
+  border-radius: 4px;
+  background: #090d14;
+}
+
+.qtv-market-command.open,
+.qtv-market-command:focus-within {
+  border-color: #2563eb;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.24);
+}
+
+.qtv-command-label {
+  height: 18px;
+  border-right: 1px solid #263244;
+  color: #8b97aa;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 18px;
+  margin-left: 9px;
+  padding-right: 9px;
+}
+
+.qtv-market-command input {
+  width: 100%;
+  border: 0 !important;
+  background: transparent !important;
+  color: #e5e7eb !important;
+  font-family: var(--font-mono) !important;
+  font-size: 11px !important;
+  padding: 0 8px !important;
+}
+
+.qtv-market-command input::placeholder {
+  color: #748094;
+}
+
+.qtv-command-toggle,
+.qtv-icon-button {
+  border-color: #263244 !important;
+  background: #0d1420 !important;
+  color: #cbd5e1 !important;
+}
+
+.qtv-command-toggle {
+  width: 26px;
+  min-width: 26px;
+  border-width: 0 0 0 1px !important;
+  border-radius: 0 3px 3px 0 !important;
+  padding: 0 !important;
+}
+
+.qtv-icon-button {
+  width: 28px;
+  min-width: 28px;
+  padding: 0 !important;
 }
 
 .qtv-market-palette {
   position: absolute;
-  z-index: 80;
-  top: 42px;
+  z-index: 90;
+  top: 36px;
   left: 0;
   width: min(760px, calc(100vw - 28px));
-  max-height: min(520px, calc(100vh - 96px));
+  max-height: min(520px, calc(100vh - 112px));
   overflow: auto;
   border: 1px solid #263244;
-  border-radius: 6px;
-  background: #0b0f17;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.42);
-  padding: 6px;
+  border-radius: 5px;
+  background: #090d14;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
+  padding: 5px;
 }
 
 .qtv-palette-head {
   display: flex;
-  align-items: center;
   justify-content: space-between;
   gap: 12px;
   border-bottom: 1px solid rgba(38, 50, 68, 0.75);
   color: #94a3b8;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   padding: 6px 8px 8px;
 }
 
 .qtv-palette-head strong {
   color: #dbeafe;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .qtv-palette-head span {
@@ -145,10 +271,10 @@
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
   width: 100%;
-  min-height: 58px;
+  min-height: 54px;
   border: 1px solid transparent;
   border-left: 2px solid transparent;
-  border-radius: 4px;
+  border-radius: 3px;
   background: transparent;
   color: #e5e7eb;
   text-align: left;
@@ -164,7 +290,7 @@
 
 .qtv-market-palette button[role="option"].selected {
   border-left-color: #22d3ee;
-  background: rgba(14, 116, 144, 0.16);
+  background: rgba(14, 116, 144, 0.14);
 }
 
 .qtv-market-palette button[role="option"] > i {
@@ -251,44 +377,114 @@
   margin-bottom: 6px;
 }
 
-.qtv-market-menu-empty span {
-  color: #93a4bd;
-  overflow-wrap: anywhere;
+.qtv-timeframes {
+  gap: 1px;
 }
 
-@media (max-width: 1760px) {
-  .qtv-left-tools > button[title="Line"],
-  .qtv-left-tools > button[title="Indicators"],
-  .qtv-left-tools > button[title="Compare"],
-  .qtv-left-tools > button[title="Undo"] {
+.qtv-timeframes button {
+  height: 28px;
+  min-width: 34px;
+  border-color: transparent;
+  border-radius: 3px;
+  color: #a8b3c3;
+  padding: 0 8px;
+}
+
+.qtv-timeframes button.active {
+  background: #13233a;
+  color: #60a5fa;
+}
+
+.qtv-select-group {
+  gap: 8px;
+}
+
+.qtv-select-group label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.qtv-select-group label span,
+.qtv-run-group span {
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.qtv-select-group select {
+  width: min(16vw, 210px);
+  min-width: 156px;
+  border-color: #263244;
+  background: #090d14;
+  color: #dbe3ef;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 8px;
+}
+
+.qtv-run-group {
+  gap: 8px;
+  margin-left: auto;
+}
+
+.qtv-run-group .primary {
+  height: 30px;
+  min-width: 116px;
+  border-color: #2f7df4;
+  background: #2f7df4;
+  color: #ffffff;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+@media (max-width: 1440px) {
+  .qtv-app-tabs button:not(.active),
+  .qtv-global-actions button:not(:first-child),
+  .qtv-run-group span,
+  .qtv-select-group label span {
     display: none;
   }
 
-  .qtv-right-tools > button:not(.primary) {
-    display: none;
+  .qtv-market-identity {
+    width: clamp(220px, 24vw, 360px);
   }
 
-  .qtv-right-tools select {
-    min-width: 170px;
+  .qtv-market-command {
+    width: min(32vw, 340px);
+    min-width: 220px;
+  }
+
+  .qtv-select-group select {
+    min-width: 142px;
   }
 }
 
 @media (max-width: 980px) {
+  .qtv-header {
+    grid-template-rows: auto auto;
+  }
+
+  .qtv-globalbar,
+  .qtv-workbar {
+    flex-wrap: wrap;
+    min-height: 38px;
+    padding-block: 4px;
+  }
+
+  .qtv-market-identity,
   .qtv-market-command {
-    min-width: min(100%, 320px);
-    grid-template-columns: minmax(0, 1fr) 28px;
+    width: min(100%, 360px);
   }
 
   .qtv-command-label {
     display: none;
   }
 
-  .qtv-selected-market {
-    width: min(100%, 320px);
-    min-width: min(100%, 220px);
-  }
-
-  .qtv-market-palette {
-    width: min(680px, calc(100vw - 18px));
+  .qtv-market-command {
+    grid-template-columns: minmax(0, 1fr) 26px;
   }
 }

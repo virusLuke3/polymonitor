@@ -570,23 +570,26 @@ export function QuantWorkspace() {
             setSelectedTradeId(tradeId);
             setTesterTab('trades');
           }}
+          marketTitle={marketInfo.title}
+          dataSource={backendPriceSource(priceSource)}
+          engine={backtestEngine}
+          rowCount={displayedPriceRows}
+          backtestStatus={backtestStatus}
         />
       </main>
 
       <div className="qtv-statusbar">
-        <span>source {priceSource}</span>
-        <span>target {selectedOutcome?.outcomeLabel || 'outcome'} {selectedBacktestAction} {fmtPrice(toNumber(selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoPrice : selectedOutcome?.buyYesPrice) || latestPrice)}</span>
-        <span>outcomes {marketSeries?.outcomes?.length || 0}</span>
-        <span>frontend rows {priceSource === 'frontend' ? displayedPriceRows : frontendRows.length}</span>
-        <span>block close rows {priceSource === 'orderfilled' ? displayedPriceRows : blockRows.length}</span>
-        <span>engine {backtestEngine}</span>
-        <span>build runs {runs.length}</span>
-        <span>backtest {backtestStatus}</span>
-        {workspaceNotice ? <span>{workspaceNotice}</span> : null}
-        <span>UTC+0</span>
-        <span>%</span>
-        <span>log</span>
-        <span>auto</span>
+        <span><i>Source</i><b>{priceSource === 'orderfilled' ? 'OrderFilled' : 'Frontend'}</b></span>
+        <span><i>Target</i><b>{selectedOutcome?.outcomeLabel || 'Outcome'} {selectedBacktestAction}</b></span>
+        <span><i>Latest YES</i><b>{fmtPrice(toNumber(selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoPrice : selectedOutcome?.buyYesPrice) || latestPrice)}</b></span>
+        <span><i>Rows</i><b>{displayedPriceRows.toLocaleString('en-US')}</b></span>
+        <span><i>Outcomes</i><b>{marketSeries?.outcomes?.length || 0}</b></span>
+        <span><i>Engine</i><b>{backtestEngine}</b></span>
+        <span><i>Build Runs</i><b>{runs.length}</b></span>
+        <span><i>Backtest</i><b>{backtestStatus}</b></span>
+        {workspaceNotice ? <span className="notice"><b>{workspaceNotice}</b></span> : null}
+        <span><b>UTC+0</b></span>
+        <span><b>Auto</b></span>
       </div>
     </div>
   );

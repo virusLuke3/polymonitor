@@ -14,7 +14,25 @@ import type { DataStatus, MarketInfo, PricePoint, Signal } from '../types';
 import { movingAverage } from '../utils/backtest';
 import { fmtPrice, formatTime } from '../utils/formatters';
 
-const DRAW_TOOLS = ['+', 'T', '/', 'R', 'Fib', 'Br', 'Mag', 'Lock', 'Eye'];
+type ScaleMode = 'full' | 'auto' | 'local';
+
+const DRAW_TOOLS = [
+  ['cursor', 'Cursor', 'M5 4l10 8-5 1.5L8 18 5 4z'],
+  ['trend', 'Trend line', 'M4 17L17 4M6 17h-2v-2M17 6V4h-2'],
+  ['ray', 'Ray', 'M4 15l7-7 4 4 4-8M15 4h4v4'],
+  ['text', 'Text', 'M5 5h14M12 5v14M9 19h6'],
+  ['fib', 'Fib retracement', 'M5 5h14M5 9h14M5 13h14M5 17h14'],
+  ['brush', 'Brush', 'M7 17c1.5 1 4 0 4-2L17 7l-3-3-6 8c-1.5 0-3 1.5-1 5z'],
+  ['magnet', 'Magnet', 'M7 4v7a5 5 0 0010 0V4M7 8h3M14 8h3'],
+  ['lock', 'Lock', 'M7 10V8a5 5 0 0110 0v2M6 10h12v9H6z'],
+  ['eye', 'Visibility', 'M3 12s3-5 9-5 9 5 9 5-3 5-9 5-9-5-9-5zM12 9a3 3 0 100 6 3 3 0 000-6z'],
+] as const;
+
+const SCALE_MODES: Array<[ScaleMode, string]> = [
+  ['full', 'Full'],
+  ['auto', 'Auto'],
+  ['local', 'Local'],
+];
 
 type PriceChartPanelProps = {
   prices: PricePoint[];
@@ -129,6 +147,33 @@ function markerPosition(signal: Signal, points: PricePoint[]) {
   };
 }
 
+function scaleProvider(mode: ScaleMode, points: PricePoint[]) {
+  if (mode === 'auto') return undefined;
+  if (mode === 'full' || !points.length) {
+    return () => ({ priceRange: { minValue: 0, maxValue: 1 } });
+  }
+  const min = points.reduce((value, point) => Math.min(value, point.close), Number.POSITIVE_INFINITY);
+  const max = points.reduce((value, point) => Math.max(value, point.close), Number.NEGATIVE_INFINITY);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return () => ({ priceRange: { minValue: 0, maxValue: 1 } });
+  }
+  const spread = Math.max(0.01, max - min);
+  return () => ({
+    priceRange: {
+      minValue: Math.max(0, min - spread * 0.35),
+      maxValue: Math.min(1, max + spread * 0.35),
+    },
+  });
+}
+
+function ToolIcon({ path }: { path: string }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d={path} />
+    </svg>
+  );
+}
+
 export function PriceChartPanel({
   prices,
   market,
@@ -142,6 +187,8 @@ export function PriceChartPanel({
   const seriesRef = useRef<SeriesRefs>({ lines: new Map(), ma: null, volume: null });
   const pointsRef = useRef<PricePoint[]>([]);
   const [hover, setHover] = useState<PricePoint | null>(null);
+  const [scaleMode, setScaleMode] = useState<ScaleMode>('full');
+  const [activeTool, setActiveTool] = useState('cursor');
 
   const allPoints = useMemo(() => sortUnique(prices), [prices]);
   const groupedOutcomes = useMemo(() => outcomeGroups(prices), [prices]);
@@ -253,7 +300,7 @@ export function PriceChartPanel({
       chartRef.current = null;
       seriesRef.current = { lines: new Map(), ma: null, volume: null };
     };
-  }, [priceSource]);
+  }, [priceSource, scaleMode]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -267,6 +314,7 @@ export function PriceChartPanel({
       }
     });
     groupedOutcomes.forEach((group, index) => {
+      const autoscaleInfoProvider = scaleProvider(scaleMode, group.points);
       let line = series.lines.get(group.label);
       if (!line) {
         line = chart.addSeries(LineSeries, {
@@ -276,9 +324,7 @@ export function PriceChartPanel({
           priceLineColor: SERIES_COLORS[index % SERIES_COLORS.length],
           priceLineWidth: 1,
           title: group.label,
-          autoscaleInfoProvider: () => ({
-            priceRange: { minValue: 0, maxValue: 1 },
-          }),
+          ...(autoscaleInfoProvider ? { autoscaleInfoProvider } : {}),
         });
         series.lines.set(group.label, line);
       }
@@ -286,29 +332,42 @@ export function PriceChartPanel({
         color: SERIES_COLORS[index % SERIES_COLORS.length],
         priceLineVisible: index === 0,
         priceLineColor: SERIES_COLORS[index % SERIES_COLORS.length],
+        ...(autoscaleInfoProvider ? { autoscaleInfoProvider } : {}),
       });
       line.setData(lineData(group.points));
     });
     series.ma.setData(lineData(maPoints));
     series.volume.setData(volumeData(allPoints));
     chart.timeScale().fitContent();
-  }, [allPoints, groupedOutcomes, maPoints]);
+  }, [allPoints, groupedOutcomes, maPoints, scaleMode]);
 
   return (
     <section className="qtv-chart-shell">
       <aside className="qtv-draw-rail" aria-label="Chart drawing tools">
-        {DRAW_TOOLS.map((tool) => <button key={tool} type="button" title={tool}>{tool}</button>)}
+        {DRAW_TOOLS.map(([id, label, path]) => (
+          <button
+            key={id}
+            className={activeTool === id ? 'active' : ''}
+            type="button"
+            title={label}
+            aria-label={label}
+            onClick={() => setActiveTool(id)}
+          >
+            <ToolIcon path={path} />
+          </button>
+        ))}
       </aside>
 
       <div className="qtv-chart-stack">
         <div className="qtv-chart-info">
-          <div>
+          <div className="qtv-chart-meta">
             <strong>{market.title}</strong>
             <span>{market.category} - outcome probabilities - {priceSource}</span>
             <div className="qtv-indicator-legend">
               <span>Rows <b>{allPoints.length.toLocaleString('en-US')}</b></span>
               <span>Range <i>{pointLabel(primaryPoints[0], priceSource)}</i> <em>{pointLabel(primaryPoints[primaryPoints.length - 1], priceSource)}</em></span>
               <span>Volume <b>{volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></span>
+              <span>Latest YES <b>{fmtPrice(latest?.close || 0)}</b></span>
             </div>
             <div className="qtv-outcome-legend">
               {groupedOutcomes.slice(0, 8).map((group, index) => {
@@ -328,6 +387,11 @@ export function PriceChartPanel({
             <span>Min {Number.isFinite(minPrice) ? fmtPrice(minPrice) : '--'}</span>
             <span>Max {Number.isFinite(maxPrice) ? fmtPrice(maxPrice) : '--'}</span>
             <b className={delta >= 0 ? 'positive' : 'negative'}>{formatSigned(delta)} ({formatSigned(deltaPct, 2)}%)</b>
+          </div>
+          <div className="qtv-scale-switch" aria-label="Chart scale mode">
+            {SCALE_MODES.map(([mode, label]) => (
+              <button key={mode} className={scaleMode === mode ? 'active' : ''} type="button" onClick={() => setScaleMode(mode)}>{label}</button>
+            ))}
           </div>
         </div>
 
