@@ -248,6 +248,28 @@ function activeGroupScore(group: MarketGroupItem) {
   );
 }
 
+function timestampOrInfinity(value: string | null | undefined) {
+  const parsed = parseTimestamp(value);
+  return parsed || Number.POSITIVE_INFINITY;
+}
+
+function groupActivityTimestamp(group: MarketGroupItem) {
+  return Math.max(
+    parseTimestamp((group as MarketGroupItem & { lastActivityAt?: string | null }).lastActivityAt),
+    ...[...(group.outcomes || []), ...(group.topOutcomes || [])].map((outcome) => parseTimestamp(outcome.lastTradeAt)),
+    parseTimestamp(group.createdAt),
+  );
+}
+
+function groupMoveScore(group: MarketGroupItem) {
+  return Math.max(
+    0,
+    ...[...(group.outcomes || []), ...(group.topOutcomes || [])]
+      .map((outcome) => Math.abs(Number(outcome.change24h || 0)))
+      .filter(Number.isFinite),
+  );
+}
+
 function activeMarketScore(market: MarketListItem) {
   const now = Date.now();
   const createdAt = parseTimestamp(market.createdAt);
@@ -414,15 +436,13 @@ function ActiveMarketsPanel({
           return haystack.includes(query);
         })
       : [...marketGroups];
-    if (marketGroupSort === 'new') {
-      return filtered.sort((a, b) => parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt));
-    }
-    if (marketGroupSort === 'volume') {
-      return filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
-    }
-    return filtered
-      .filter((group) => query || !groupIsExpired(group))
-      .sort((a, b) => activeGroupScore(b) - activeGroupScore(a));
+    const liveFiltered = filtered.filter((group) => query || !groupIsExpired(group));
+    if (marketGroupSort === 'new') return liveFiltered.sort((a, b) => parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt));
+    if (marketGroupSort === 'volume') return liveFiltered.sort((a, b) => Number(groupDisplayVolume(b) || 0) - Number(groupDisplayVolume(a) || 0));
+    if (marketGroupSort === 'close') return liveFiltered.sort((a, b) => timestampOrInfinity(a.endDate) - timestampOrInfinity(b.endDate));
+    if (marketGroupSort === 'move') return liveFiltered.sort((a, b) => groupMoveScore(b) - groupMoveScore(a));
+    if (marketGroupSort === 'trades') return liveFiltered.sort((a, b) => Number(groupDisplayTradeCount(b) || 0) - Number(groupDisplayTradeCount(a) || 0));
+    return liveFiltered.sort((a, b) => groupActivityTimestamp(b) - groupActivityTimestamp(a) || activeGroupScore(b) - activeGroupScore(a));
   }, [marketGroupSort, marketGroups, search]);
 
   const visibleMarkets = useMemo(() => {
@@ -442,13 +462,14 @@ function ActiveMarketsPanel({
           return haystack.includes(query);
         })
       : markets.filter((market) => !isDefaultSuppressedMarket(market));
-    const ranked = filtered.sort((a, b) => (
-      marketGroupSort === 'new'
-        ? parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt)
-        : marketGroupSort === 'volume'
-          ? Number(b.volume24h || 0) - Number(a.volume24h || 0)
-          : activeMarketScore(b) - activeMarketScore(a)
-    ));
+    const ranked = filtered.sort((a, b) => {
+      if (marketGroupSort === 'new') return parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt);
+      if (marketGroupSort === 'volume') return Number(b.volume24h || 0) - Number(a.volume24h || 0);
+      if (marketGroupSort === 'close') return timestampOrInfinity(a.endDate) - timestampOrInfinity(b.endDate);
+      if (marketGroupSort === 'move') return Math.abs(Number(b.change24h || 0)) - Math.abs(Number(a.change24h || 0));
+      if (marketGroupSort === 'trades') return Number(b.tradeCount24h || 0) - Number(a.tradeCount24h || 0);
+      return parseTimestamp(b.lastTradeAt) - parseTimestamp(a.lastTradeAt) || activeMarketScore(b) - activeMarketScore(a);
+    });
     return query ? ranked : ranked;
   }, [marketGroupSort, markets, search]);
 
@@ -458,7 +479,7 @@ function ActiveMarketsPanel({
   return (
     <Panel
       title="MARKETS"
-      badge={marketGroupSort === 'new' ? 'NEW' : marketGroupSort === 'volume' ? 'VOLUME' : 'LIVE'}
+      badge={marketGroupSort === 'new' ? 'NEW' : marketGroupSort === 'volume' ? 'VOLUME' : marketGroupSort === 'close' ? 'CLOSE' : marketGroupSort === 'move' ? 'MOVE' : marketGroupSort === 'trades' ? 'TX' : 'LIVE'}
       status="live"
       count={panelCount}
       className="wm-market-panel"
@@ -470,9 +491,12 @@ function ActiveMarketsPanel({
             onInput={(event) => setMarketGroupSort(event.currentTarget.value as MarketGroupSort)}
             aria-label="Sort markets"
           >
-            <option value="active">Active</option>
-            <option value="new">Newest</option>
+            <option value="active">Recent activity</option>
             <option value="volume">Volume</option>
+            <option value="close">Close time</option>
+            <option value="move">Probability move</option>
+            <option value="trades">Transactions</option>
+            <option value="new">Newest</option>
           </select>
         </div>
       }

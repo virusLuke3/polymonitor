@@ -5900,12 +5900,24 @@ body {
     --wm-book-row-size: 10px;
     --wm-book-mid-size: 9px;
     --wm-outcome-rail-width: 136px;
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(310px, auto) minmax(220px, auto);
+    display: flex;
+    flex-direction: column;
+    height: auto;
   }
 
   .wm-focus-detail-slot {
     grid-row: auto;
+    min-height: 430px;
+  }
+
+  .wm-focus-book-slot {
+    grid-row: auto;
+    min-height: 270px;
+  }
+
+  .wm-focus-trades-slot {
+    grid-row: auto;
+    min-height: 230px;
   }
 
   .wm-focus-event-head {
@@ -6025,6 +6037,10 @@ body {
   .wm-focused-oracle-feed {
     grid-column: 2;
     height: 320px;
+  }
+
+  .wm-focused-market-right {
+    height: auto;
   }
 
   .wm-focus-frontline {
