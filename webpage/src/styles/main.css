@@ -4164,6 +4164,22 @@ body {
   filter: saturate(0.8) brightness(0.92);
 }
 
+.wm-globe-area-flat {
+  background: #111416;
+}
+
+.wm-globe-area-flat::before {
+  opacity: 0.08;
+  mask-image: none;
+}
+
+.wm-globe-area-flat::after {
+  opacity: 0.16;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 18%),
+    linear-gradient(180deg, transparent 56%, rgba(0, 0, 0, 0.16));
+}
+
 .wm-globe-area::before {
   content: '';
   position: absolute;
