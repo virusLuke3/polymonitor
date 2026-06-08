@@ -14,7 +14,7 @@ from api.services import clickhouse_orderfilled_service
 from api.services import market_group_service
 from market.market_identity import MarketIdentity, oracle_event_lookup_clause, oracle_event_lookup_terms
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v12"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v13"
 DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_AGE_HOURS", "336"))
 DEFAULT_ACTIVE_MARKET_ACTIVITY_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_ACTIVITY_HOURS", "72"))
 DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT = int(os.environ.get("POLYDATA_ACTIVE_MARKET_LOB_PREFETCH_LIMIT", "0"))
@@ -578,7 +578,8 @@ def _rank_default_market_rows(rows: List[Dict[str, Any]], now_value: Any = None)
         volume = min(1.0, float(_decimal_from_any(row.get("volume_24h")) or 0) / 50000.0)
         trades = min(1.0, int(row.get("trade_count_24h") or 0) / 250.0)
         balance = _balanced_probability_score(row.get("latest_price"))
-        return recency * 35 + trade_recency * 25 + balance * 25 + volume * 10 + trades * 5
+        active_rank = min(1.0, max(0.0, float(row.get("active_rank") or 0) / 160.0))
+        return active_rank * 45 + volume * 25 + trade_recency * 15 + balance * 10 + trades * 5 + recency * 4
 
     return sorted(rows, key=score, reverse=True)
 
@@ -2025,6 +2026,96 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
         """
 
 
+def _event_serving_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) -> List[Dict[str, Any]]:
+    table_exists = ctx.get("table_exists")
+    if callable(table_exists) and not table_exists("event_market_serving"):
+        return []
+    try:
+        rows = ctx["query_all"](
+            f"""
+            WITH ranked_events AS (
+                SELECT
+                    ems.default_market_id AS market_id,
+                    ems.active_rank,
+                    ems.volume_24h AS event_volume_24h,
+                    ems.trade_count_24h AS event_trade_count_24h,
+                    ems.last_activity_at AS event_last_activity_at,
+                    row_number() OVER (
+                        PARTITION BY COALESCE(NULLIF(LOWER(ems.category), ''), 'market')
+                        ORDER BY ems.active_rank DESC, ems.volume_24h DESC, ems.last_activity_at DESC NULLS LAST
+                    ) AS category_rank
+                FROM event_market_serving ems
+                WHERE ems.default_market_id IS NOT NULL
+                  AND ems.outcome_count > 0
+                  AND ems.is_trading_closed = FALSE
+                  AND ems.completion_status NOT IN ('SETTLED', 'CANCELLED', 'CLOSED_UNRESOLVED')
+                  AND (ems.end_date IS NULL OR ems.end_date >= ?)
+                  AND LOWER(COALESCE(ems.category, '')) NOT LIKE '%%orderfilled-placeholder%%'
+                  AND LOWER(COALESCE(ems.event_slug, '')) NOT LIKE '%%trade-indexer-placeholder%%'
+                  AND LOWER(COALESCE(ems.title, '')) NOT LIKE 'trade indexer placeholder market%%'
+                  AND LOWER(COALESCE(CAST(ems.tags AS TEXT), '')) NOT LIKE '%%orderfilled-placeholder%%'
+            )
+            SELECT
+                m.id,
+                m.slug,
+                m.condition_id,
+                m.end_date,
+                m.created_at,
+                CASE WHEN COALESCE(mss.has_settle, FALSE) THEN 1 ELSE 0 END AS has_settle,
+                CASE WHEN COALESCE(mss.has_propose, FALSE) THEN 1 ELSE 0 END AS has_propose,
+                COALESCE(mss.settlement_code, 0) AS settlement_code,
+                COALESCE(mss.settlement_outcome, 'UNKNOWN') AS settlement_outcome,
+                mss.settlement_source,
+                mss.settlement_event_id,
+                mss.settlement_event_time,
+                mss.settlement_transaction,
+                COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+                COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+                COALESCE(mss.is_final, FALSE) AS is_final,
+                COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+                mss.completion_source,
+                mss.completion_time,
+                COALESCE(mss.gamma_closed, FALSE) AS gamma_closed,
+                mss.gamma_closed_time,
+                COALESCE(mls.trade_count_24h, re.event_trade_count_24h) AS trade_count_24h,
+                COALESCE(mls.volume_24h, re.event_volume_24h) AS volume_24h,
+                mls.latest_price,
+                COALESCE(mls.last_trade_at, re.event_last_activity_at) AS last_trade_at,
+                mls.latest_trade_at,
+                mls.price_24h_ago,
+                re.active_rank,
+                re.category_rank
+            FROM ranked_events re
+            JOIN markets m ON m.id = re.market_id
+            LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+            LEFT JOIN market_list_serving mls ON mls.market_id = m.id
+            WHERE COALESCE(mss.has_settle, FALSE) = FALSE
+              AND COALESCE(mss.has_propose, FALSE) = FALSE
+              AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
+              AND COALESCE(mss.settlement_code, 0) = 0
+              AND (m.end_date IS NULL OR m.end_date >= ?)
+              AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
+              AND {_default_active_market_price_sql("mls")}
+            ORDER BY
+                CASE
+                    WHEN LOWER(COALESCE(m.category, '')) IN ('sports', 'esports') AND re.category_rank > 4 THEN 1
+                    ELSE 0
+                END ASC,
+                re.active_rank DESC,
+                COALESCE(re.event_volume_24h, mls.volume_24h, 0) DESC,
+                COALESCE(re.event_last_activity_at, mls.last_trade_at, mls.latest_trade_at, m.created_at) DESC NULLS LAST
+            LIMIT ?
+            """,
+            (now_iso, now_iso, int(limit)),
+        )
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger:
+            logger.exception("event-serving active market candidate query failed")
+        return []
+    return rows
+
+
 def _market_list_serving_has_rows(ctx: dict, min_rows: int = 1) -> bool:
     table_exists = ctx.get("table_exists")
     if not callable(table_exists):
@@ -2386,14 +2477,17 @@ def build_active_markets_payload(
 ) -> Dict[str, Any]:
     now_iso = ctx["utc_now_iso"]()
     created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
-    raw_limit = max(page_size * 5, 100)
+    raw_limit = min(2500, max(page_size * 20, 300))
     clickhouse_candidate_rows = (
         _clickhouse_active_market_candidate_rows(ctx, now_iso, raw_limit)
         if active_market_clickhouse_primary_enabled()
         else []
     )
+    event_candidate_rows = _event_serving_active_market_candidate_rows(ctx, now_iso, raw_limit)
     if clickhouse_candidate_rows:
         candidate_rows = clickhouse_candidate_rows
+    elif event_candidate_rows:
+        candidate_rows = event_candidate_rows
     elif _market_list_serving_has_rows(ctx, min_rows=max(page_size * 10, 1000)):
         volume_candidate_rows = ctx["query_all"](
             f"""
@@ -2437,6 +2531,8 @@ def build_active_markets_payload(
             "completion_time": row.get("completion_time"),
             "gamma_closed": row.get("gamma_closed"),
             "gamma_closed_time": row.get("gamma_closed_time"),
+            "active_rank": row.get("active_rank"),
+            "category_rank": row.get("category_rank"),
         }
         for row in candidate_rows
         if row.get("id") is not None
@@ -2514,7 +2610,7 @@ def get_active_markets_snapshot(
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": should_include_change_24h,
             "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
-            "v": 22,
+            "v": 23,
         },
         sort_keys=True,
         ensure_ascii=True,

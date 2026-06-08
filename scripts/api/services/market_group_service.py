@@ -726,6 +726,42 @@ def _interleave_group_categories(groups: List[Dict[str, Any]], page_size: int) -
     return selected
 
 
+def _limit_group_category_dominance(groups: List[Dict[str, Any]], page_size: int) -> List[Dict[str, Any]]:
+    """Preserve DB impact rank while preventing high-frequency sports/games from owning the first screen."""
+    if not groups:
+        return groups
+    page_size = max(1, int(page_size))
+    noisy_buckets = {"sports", "games"}
+    noisy_limit = max(2, min(4, page_size // 5))
+    selected: List[Dict[str, Any]] = []
+    deferred: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    noisy_count = 0
+    for group in groups:
+        bucket = _group_category_bucket(group)
+        if bucket == "placeholder":
+            continue
+        key = str(group.get("eventId") or group.get("groupId") or group.get("slug") or "")
+        if key and key in seen:
+            continue
+        if bucket in noisy_buckets and noisy_count >= noisy_limit and len(selected) < page_size:
+            deferred.append(group)
+            continue
+        selected.append(group)
+        if key:
+            seen.add(key)
+        if bucket in noisy_buckets:
+            noisy_count += 1
+    for group in deferred:
+        key = str(group.get("eventId") or group.get("groupId") or group.get("slug") or "")
+        if key and key in seen:
+            continue
+        selected.append(group)
+        if key:
+            seen.add(key)
+    return selected
+
+
 def _serving_table_ready(ctx: dict) -> bool:
     backend_getter = ctx.get("get_backend")
     if callable(backend_getter):
@@ -851,7 +887,7 @@ def _serving_market_groups_payload(
     total = int((total_row[0] or {}).get("total") or 0) if total_row else 0
     items = [_serving_group_from_row(ctx, row) for row in rows]
     if sort == "active" and not query:
-        items = _interleave_group_categories(items, page_size)
+        items = _limit_group_category_dominance(items, page_size)
     items = items[:page_size]
     return {
         "items": items,
@@ -928,7 +964,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 11}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 12}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)

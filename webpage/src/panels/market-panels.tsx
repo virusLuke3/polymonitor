@@ -173,6 +173,21 @@ function groupDisplayTradeCount(group: MarketGroupItem) {
   );
 }
 
+function groupHasMarketCoverage(group: MarketGroupItem) {
+  if (defaultGroupMarketId(group)) return true;
+  if (Number(groupDisplayVolume(group) || 0) > 0) return true;
+  if (Number(groupDisplayTradeCount(group) || 0) > 0) return true;
+  if (Number(group.outcomeCount || group.outcomes?.length || group.topOutcomes?.length || 0) > 0) return true;
+  return false;
+}
+
+function groupActivityLabel(group: MarketGroupItem) {
+  const tradeCount = Number(groupDisplayTradeCount(group) || 0);
+  if (tradeCount > 0) return `${formatCompact(tradeCount)} tx`;
+  if (Number(groupDisplayVolume(group) || 0) > 0) return 'impact';
+  return groupOutcomeLabel(group);
+}
+
 function groupBestLivePrice(group: MarketGroupItem) {
   const candidates = [...(group.outcomes || []), ...(group.topOutcomes || [])]
     .map((outcome) => Number(outcome.yesPrice))
@@ -262,7 +277,7 @@ function activeMarketGroupsList(
               <div className="wm-poly-market-bottom">
                 <span className="wm-poly-market-prob">{formatPercent(groupBestLivePrice(group))}</span>
                 <span className="wm-poly-market-volume">Vol {formatCurrencyCompact(groupDisplayVolume(group))}</span>
-                <span className="wm-poly-market-trades">{formatCompact(groupDisplayTradeCount(group))} tx</span>
+                <span className="wm-poly-market-trades">{groupActivityLabel(group)}</span>
               </div>
             </div>
             <span className="wm-poly-market-star" aria-hidden="true">☆</span>
@@ -385,7 +400,7 @@ function ActiveMarketsPanel({
     return query ? ranked : ranked;
   }, [marketGroupSort, markets, search]);
 
-  const hasGroups = marketGroups.length > 0 && visibleGroups.some((group) => Number(groupDisplayTradeCount(group) || 0) > 0);
+  const hasGroups = marketGroups.length > 0 && visibleGroups.some(groupHasMarketCoverage);
   const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;
 
   return (
@@ -403,7 +418,7 @@ function ActiveMarketsPanel({
             onInput={(event) => setMarketGroupSort(event.currentTarget.value as MarketGroupSort)}
             aria-label="Sort markets"
           >
-            <option value="active">Recent activity</option>
+            <option value="active">Active impact</option>
             <option value="volume">Volume</option>
             <option value="close">Close time</option>
             <option value="move">Probability move</option>
