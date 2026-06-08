@@ -19,7 +19,7 @@ import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
 import type { BacktestEngine, BacktestResult, DataStatus, MarketInfo, PerformanceSortKey, PriceSource, Signal, SortDirection, TesterTab, TradeFilter } from './types';
 import { backtestApiToResult, blockToPrices, emptyBacktestResult, frontendToPrices, marketSeriesToPrices } from './utils/apiAdapters';
-import { downloadText, fmtPrice } from './utils/formatters';
+import { deriveEventOutcomeLabel, downloadText, fmtPrice } from './utils/formatters';
 
 function rowSortValue(value: string) {
   const numeric = Number(value.replace(/[^0-9.-]/g, ''));
@@ -38,7 +38,12 @@ function backendPriceSource(priceSource: PriceSource) {
 
 function defaultMarketSlug() {
   const params = new URLSearchParams(window.location.search);
-  return params.get('market') || params.get('market_slug') || params.get('slug') || '';
+  return params.get('event_slug') || params.get('event') || params.get('market') || params.get('market_slug') || params.get('slug') || '';
+}
+
+function defaultEntityKind() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('event_slug') || params.get('event') || params.get('kind') === 'event' ? 'event' : 'market';
 }
 
 function sleep(ms: number) {
@@ -111,6 +116,7 @@ function strategyDefaults(prices: Array<{ close: number }>) {
 }
 
 type BacktestAction = 'YES' | 'NO';
+type OutcomeSortKey = 'order' | 'probability' | 'rows' | 'volume';
 
 function outcomePricePoints(outcome: QuantMarketSeriesOutcome | null | undefined, action: BacktestAction = 'YES') {
   const points = action === 'NO' ? outcome?.complementPoints || [] : outcome?.points || [];
@@ -172,6 +178,7 @@ export function QuantWorkspace() {
   const [deepBacktest, setDeepBacktest] = useState(false);
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const [marketSlug, setMarketSlug] = useState(defaultMarketSlug);
+  const [selectedEntityKindHint, setSelectedEntityKindHint] = useState<'market' | 'event'>(defaultEntityKind);
   const [marketSearchQuery, setMarketSearchQuery] = useState('');
   const [marketReloadKey, setMarketReloadKey] = useState(0);
   const [backtestStatus, setBacktestStatus] = useState('idle');
@@ -180,8 +187,10 @@ export function QuantWorkspace() {
   const [performanceSortDirection, setPerformanceSortDirection] = useState<SortDirection>('asc');
   const [tradeFilters, setTradeFilters] = useState<Set<TradeFilter>>(new Set());
   const [workspaceNotice, setWorkspaceNotice] = useState('');
+  const [outcomeSortKey, setOutcomeSortKey] = useState<OutcomeSortKey>('probability');
   const marketSearchSeq = useRef(0);
   const priceLoadSeq = useRef(0);
+  const marketSearchCacheRef = useRef(new Map<string, QuantPriceMarket[]>());
   const priceSeriesCacheRef = useRef(new Map<string, QuantMarketSeriesPayload>());
   const pricePrefetchingRef = useRef(new Set<string>());
 
@@ -210,7 +219,7 @@ export function QuantWorkspace() {
     ),
     [marketSlug, quantMarkets, selectedMarketMeta],
   );
-  const selectedEntityKind = selectedMarket?.itemKind === 'event' ? 'event' : 'market';
+  const selectedEntityKind = selectedMarket?.itemKind === 'event' || selectedEntityKindHint === 'event' ? 'event' : 'market';
   const marketInfo = useMemo(() => marketInfoFromSelection(marketSlug, selectedMarket), [marketSlug, selectedMarket]);
   const marketCoverageRows = toNumber(selectedMarket?.blockRows || selectedMarket?.frontendRows || marketSeries?.outcomes?.reduce((sum, outcome) => sum + toNumber(outcome.rows), 0));
   const chartLimit = useMemo(() => {
@@ -400,6 +409,7 @@ export function QuantWorkspace() {
     setMarketSearchQuery('');
     setMarketReloadKey((current) => current + 1);
     setSelectedMarketMeta(nextMarket);
+    setSelectedEntityKindHint(nextMarket?.itemKind === 'event' ? 'event' : 'market');
     const cached = nextSlug ? priceSeriesCacheRef.current.get(seriesKeyForSlug(nextSlug, nextMarket?.itemKind === 'event' ? 'event' : 'market')) : null;
     setFrontendRows([]);
     setBlockRows([]);
@@ -445,37 +455,68 @@ export function QuantWorkspace() {
 
   useEffect(() => {
     const text = marketSearchQuery.trim();
+    const cacheKey = text.toLowerCase();
+    const cached = marketSearchCacheRef.current.get(cacheKey);
     const seq = marketSearchSeq.current + 1;
     marketSearchSeq.current = seq;
-    setMarketSearchStatus('loading');
+    if (cached) {
+      setQuantMarkets(cached);
+      setMarketSearchStatus(cached.length ? 'ready' : 'empty');
+    } else {
+      setMarketSearchStatus('loading');
+    }
     const timer = window.setTimeout(() => {
-      void Promise.allSettled([fetchQuantPriceEvents(text, 24), fetchQuantPriceMarkets(text, 40)])
-        .then(([eventResult, marketResult]) => {
-          if (seq !== marketSearchSeq.current) return;
-          const events = eventResult.status === 'fulfilled' ? eventResult.value.items || [] : [];
-          const markets = marketResult.status === 'fulfilled' ? marketResult.value.items || [] : [];
-          const seen = new Set<string>();
-          const items = [...events, ...markets].filter((item) => {
-            const key = `${item.itemKind || 'market'}:${item.marketSlug}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            if (item.itemKind !== 'event' && events.some((event) => event.marketSlug === item.marketSlug)) return false;
-            return true;
-          });
+      let events: QuantPriceMarket[] | null = null;
+      let markets: QuantPriceMarket[] | null = null;
+      let failures = 0;
+      const publish = () => {
+        if (seq !== marketSearchSeq.current) return;
+        const eventItems = events || [];
+        const marketItems = markets || [];
+        const seen = new Set<string>();
+        const items = [...eventItems, ...marketItems].filter((item) => {
+          const key = `${item.itemKind || 'market'}:${item.marketSlug}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          if (item.itemKind !== 'event' && eventItems.some((event) => event.marketSlug === item.marketSlug)) return false;
+          return true;
+        });
+        if (items.length) {
           setQuantMarkets(items);
-          setMarketSearchStatus(items.length ? 'ready' : 'empty');
+          setMarketSearchStatus(events !== null && markets !== null ? 'ready' : 'partial');
+          marketSearchCacheRef.current.set(cacheKey, items);
           if (!marketSlug.trim() && !text && items[0]?.marketSlug) {
             setMarketSlug(items[0].marketSlug);
             setSelectedMarketMeta(items[0]);
           }
+          return;
+        }
+        if (events !== null && markets !== null) {
+          setQuantMarkets([]);
+          setMarketSearchStatus(failures >= 2 ? 'error' : 'empty');
+        }
+      };
+      void fetchQuantPriceMarkets(text, 40)
+        .then((payload) => {
+          markets = payload.items || [];
+          publish();
         })
         .catch((searchError) => {
-          if (seq !== marketSearchSeq.current) return;
-          setMarketSearchStatus('error');
-          if (text) setQuantMarkets([]);
-          if (!isAbortLikeError(searchError)) {
-            console.warn('quant market search failed', searchError);
-          }
+          markets = [];
+          failures += 1;
+          publish();
+          if (!isAbortLikeError(searchError)) console.warn('quant market search failed', searchError);
+        });
+      void fetchQuantPriceEvents(text, 24)
+        .then((payload) => {
+          events = payload.items || [];
+          publish();
+        })
+        .catch((searchError) => {
+          events = [];
+          failures += 1;
+          publish();
+          if (!isAbortLikeError(searchError)) console.warn('quant event search failed', searchError);
         });
     }, text ? 180 : 0);
     return () => window.clearTimeout(timer);
@@ -529,6 +570,33 @@ export function QuantWorkspace() {
       return true;
     });
   }, [backtestResult.trades, tradeFilters]);
+
+  const sortedOutcomeRows = useMemo(() => {
+    const eventTitle = marketSeries?.event?.eventTitle || marketSeries?.market?.marketTitle || '';
+    return (marketSeries?.outcomes || []).map((outcome, index) => ({
+      outcome,
+      index,
+      label: deriveEventOutcomeLabel(eventTitle, outcome.marketTitle, outcome.outcomeLabel),
+      fullLabel: outcome.marketTitle || outcome.outcomeLabel,
+      yes: toNumber(outcome.buyYesPrice ?? outcome.latestPrice),
+      no: toNumber(outcome.buyNoPrice ?? outcome.complementLatestPrice),
+      rows: toNumber(outcome.rows) + toNumber(outcome.complementRows),
+      volume: [...(outcome.points || []), ...(outcome.complementPoints || [])].reduce((sum, point) => sum + toNumber(point.volume), 0),
+    })).sort((left, right) => {
+      if (outcomeSortKey === 'order') return left.index - right.index;
+      if (outcomeSortKey === 'rows') return right.rows - left.rows;
+      if (outcomeSortKey === 'volume') return right.volume - left.volume;
+      return right.yes - left.yes;
+    });
+  }, [marketSeries, outcomeSortKey]);
+  const displayedOutcomeCount = useMemo(() => {
+    const outcomes = marketSeries?.outcomes || [];
+    if (selectedEntityKind === 'event' && outcomes.length === 1 && outcomes[0]?.buyNoTokenId) return 2;
+    return outcomes.length;
+  }, [marketSeries?.outcomes, selectedEntityKind]);
+  const useOutcomeTable = selectedEntityKind === 'event'
+    ? (marketSeries?.outcomes?.length || 0) >= 4
+    : (marketSeries?.outcomes?.length || 0) > 4;
 
   const togglePerformanceSort = (key: PerformanceSortKey) => {
     if (performanceSortKey === key) {
@@ -614,50 +682,112 @@ export function QuantWorkspace() {
           marketCoverageRows={marketCoverageRows}
           loadedPriceRows={displayedPriceRows}
           backtestRows={displayedPriceRows}
+          eventMode={selectedEntityKind === 'event'}
+          selectedTokenId={selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoTokenId || '' : selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId || ''}
+          selectedOutcomeLabel={selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoLabel || '' : selectedOutcome?.buyYesLabel || selectedOutcome?.outcomeLabel || ''}
+          onOutcomeSelect={(tokenId, side) => {
+            const next = marketSeries?.outcomes?.find((outcome) => (
+              side === 'NO' ? outcome.buyNoTokenId === tokenId : (outcome.buyYesTokenId === tokenId || outcome.tokenId === tokenId)
+            ));
+            if (next) {
+              setSelectedOutcomeTokenId(next.tokenId);
+              setSelectedBacktestAction(side);
+            }
+          }}
           onRetry={() => {
             setMarketReloadKey((current) => current + 1);
           }}
         />
 
         {marketSeries?.outcomes?.length ? (
-          <section className="qtv-outcome-board" aria-label="Polymarket outcomes">
-            {marketSeries.outcomes.map((outcome) => {
+          <section className={`qtv-outcome-board ${useOutcomeTable ? 'table-mode' : 'card-mode'}`} aria-label="Polymarket outcomes">
+            <header className="qtv-outcome-board-head">
+              <strong>{displayedOutcomeCount.toLocaleString('en-US')} outcomes</strong>
+              <div>
+                <span>Sort</span>
+                <select value={outcomeSortKey} onChange={(event) => setOutcomeSortKey(event.currentTarget.value as OutcomeSortKey)}>
+                  <option value="probability">Probability</option>
+                  <option value="order">Outcome order</option>
+                  <option value="rows">Rows</option>
+                  <option value="volume">Volume</option>
+                </select>
+              </div>
+            </header>
+            {useOutcomeTable ? (
+              <div className="qtv-outcome-table" role="table">
+                <div className="qtv-outcome-table-row head" role="row">
+                  <span>Outcome</span><span>YES</span><span>NO</span><span>Rows</span><span>Volume</span><span>Coverage</span><span>Actions</span>
+                </div>
+                {sortedOutcomeRows.map(({ outcome, label, fullLabel, yes, no, rows, volume }) => {
+                  const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
+                  return (
+                    <button
+                      key={outcome.tokenId}
+                      className={`qtv-outcome-table-row ${isSelected ? 'active' : ''}`}
+                      type="button"
+                      role="row"
+                      title={fullLabel}
+                      onClick={() => {
+                        setSelectedOutcomeTokenId(outcome.tokenId);
+                        setSelectedBacktestAction('YES');
+                      }}
+                    >
+                      <strong>{label}</strong>
+                      <b>{fmtPrice(yes)}</b>
+                      <b>{fmtPrice(no)}</b>
+                      <span>{rows.toLocaleString('en-US')}</span>
+                      <span>{volume.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+                      <em>{outcome.coverageStatus || (rows ? 'ready' : 'none')}</em>
+                      <i>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedOutcomeTokenId(outcome.tokenId);
+                            setSelectedBacktestAction('YES');
+                          }}
+                        >
+                          Backtest Yes
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className={!outcome.buyNoTokenId ? 'disabled' : ''}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (!outcome.buyNoTokenId) return;
+                            setSelectedOutcomeTokenId(outcome.tokenId);
+                            setSelectedBacktestAction('NO');
+                          }}
+                        >
+                          Backtest No
+                        </span>
+                      </i>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : sortedOutcomeRows.map(({ outcome, label, fullLabel, yes, no, rows }) => {
               const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
               return (
-              <div
-                key={outcome.tokenId}
-                className={`qtv-outcome-row ${isSelected ? 'active' : ''}`}
-              >
-                <span>
-                  <strong>{outcome.outcomeLabel}</strong>
-                  <em>{Number(outcome.rows || 0).toLocaleString('en-US')} rows</em>
-                </span>
-                <b>{fmtPrice(toNumber(outcome.latestPrice))}</b>
-                <div className="qtv-outcome-actions">
-                  <button
-                    className={isSelected && selectedBacktestAction === 'YES' ? 'active' : ''}
-                    type="button"
-                    onClick={() => {
-                      setSelectedOutcomeTokenId(outcome.tokenId);
-                      setSelectedBacktestAction('YES');
-                    }}
-                  >
-                    Buy Yes {fmtPrice(toNumber(outcome.buyYesPrice ?? outcome.latestPrice))}
-                  </button>
-                  <button
-                    className={isSelected && selectedBacktestAction === 'NO' ? 'active no' : 'no'}
-                    type="button"
-                    disabled={!outcome.buyNoTokenId}
-                    onClick={() => {
-                      setSelectedOutcomeTokenId(outcome.tokenId);
-                      setSelectedBacktestAction('NO');
-                    }}
-                  >
-                    Buy No {fmtPrice(toNumber(outcome.buyNoPrice ?? outcome.complementLatestPrice))}
-                  </button>
+                <div key={outcome.tokenId} className={`qtv-outcome-row ${isSelected ? 'active' : ''}`} title={fullLabel}>
+                  <span>
+                    <strong>{label}</strong>
+                    <em>{rows.toLocaleString('en-US')} rows</em>
+                  </span>
+                  <b>{fmtPrice(yes)}</b>
+                  <div className="qtv-outcome-actions">
+                    <button className={isSelected && selectedBacktestAction === 'YES' ? 'active' : ''} type="button" onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('YES'); }}>
+                      Backtest Yes {fmtPrice(yes)}
+                    </button>
+                    <button className={isSelected && selectedBacktestAction === 'NO' ? 'active no' : 'no'} type="button" disabled={!outcome.buyNoTokenId} onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('NO'); }}>
+                      Backtest No {fmtPrice(no)}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            );})}
+              );
+            })}
           </section>
         ) : null}
 
@@ -696,7 +826,7 @@ export function QuantWorkspace() {
         <span><i>Target</i><b>{selectedOutcome?.outcomeLabel || 'Outcome'} {selectedBacktestAction}</b></span>
         <span><i>Latest YES</i><b>{fmtPrice(toNumber(selectedBacktestAction === 'NO' ? selectedOutcome?.buyNoPrice : selectedOutcome?.buyYesPrice) || latestPrice)}</b></span>
         <span><i>Rows</i><b>{displayedPriceRows.toLocaleString('en-US')}</b></span>
-        <span><i>Outcomes</i><b>{marketSeries?.outcomes?.length || 0}</b></span>
+        <span><i>Outcomes</i><b>{displayedOutcomeCount}</b></span>
         <span><i>Engine</i><b>{backtestEngine}</b></span>
         <span><i>Build Runs</i><b>{runs.length}</b></span>
         <span><i>Backtest</i><b>{backtestStatus}</b></span>

@@ -33,6 +33,9 @@ export type PricePoint = {
   tokenId?: string;
   tokenSide?: string;
   outcomeLabel?: string;
+  outcomeShortLabel?: string;
+  outcomeFullLabel?: string;
+  outcomeKey?: string;
   yesPrice?: number;
   noPrice?: number;
   yesPriceKind?: 'direct' | 'implied';

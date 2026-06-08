@@ -15,6 +15,11 @@ import { movingAverage } from '../utils/backtest';
 import { fmtPrice, formatTime } from '../utils/formatters';
 
 type ScaleMode = 'full' | 'auto' | 'local';
+type EventDisplayMode = 'top3' | 'top5' | 'top10' | 'all' | 'selected';
+type EventSortMode = 'probability' | 'outcome' | 'volume' | 'change';
+type EventSideMode = 'auto' | 'yes' | 'no' | 'both';
+type EventLabelMode = 'selected' | 'top' | 'all';
+type TooltipMode = 'compact' | 'full';
 
 const DRAW_TOOLS = [
   ['cursor', 'Cursor', 'M5 4l10 8-5 1.5L8 18 5 4z'],
@@ -50,6 +55,10 @@ type PriceChartPanelProps = {
   marketCoverageRows?: number;
   loadedPriceRows?: number;
   backtestRows?: number;
+  eventMode?: boolean;
+  selectedTokenId?: string;
+  selectedOutcomeLabel?: string;
+  onOutcomeSelect?: (tokenId: string, side: 'YES' | 'NO') => void;
   onRetry?: () => void;
 };
 
@@ -66,7 +75,7 @@ type Drawing = {
   text?: string;
 };
 
-const SERIES_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#06b6d4', '#ef4444', '#a855f7', '#f97316', '#84cc16'];
+const SERIES_COLORS = ['#3b82f6', '#f59e0b', '#22c55e', '#ef4444', '#06b6d4', '#a855f7', '#f97316', '#84cc16', '#ec4899', '#14b8a6', '#eab308', '#94a3b8', '#60a5fa', '#fb7185'];
 
 function chartTime(point: PricePoint): Time {
   return Math.floor(point.timestamp) as Time;
@@ -96,13 +105,8 @@ function sortUnique(points: PricePoint[]) {
     });
 }
 
-function sidePoints(points: PricePoint[], side: string) {
-  const sideRows = points.filter((point) => (point.tokenSide || 'YES').toUpperCase() === side);
-  return sortUnique(sideRows.length ? sideRows : points);
-}
-
 function outcomeKey(point: PricePoint) {
-  return point.outcomeLabel || point.tokenSide || point.tokenId || 'YES';
+  return point.outcomeKey || point.outcomeShortLabel || point.outcomeLabel || point.tokenSide || point.tokenId || 'YES';
 }
 
 function outcomeGroups(points: PricePoint[]) {
@@ -114,7 +118,19 @@ function outcomeGroups(points: PricePoint[]) {
     groups.set(key, rows);
   });
   return Array.from(groups.entries())
-    .map(([label, rows]) => ({ label, points: sortUnique(rows) }))
+    .map(([key, rows], index) => {
+      const sorted = sortUnique(rows);
+      const sample = sorted[sorted.length - 1] || rows[0];
+      return {
+        key,
+        label: sample?.outcomeShortLabel || sample?.outcomeLabel || key,
+        fullLabel: sample?.outcomeFullLabel || sample?.outcomeLabel || key,
+        tokenId: sample?.tokenId,
+        tokenSide: (sample?.tokenSide || 'YES').toUpperCase(),
+        order: index,
+        points: sorted,
+      };
+    })
     .filter((group) => group.points.length)
     .sort((left, right) => {
       const leftLatest = left.points[left.points.length - 1]?.close ?? 0;
@@ -131,16 +147,54 @@ function lineData(points: PricePoint[]): LineData<Time>[] {
 }
 
 function volumeData(points: PricePoint[]): HistogramData<Time>[] {
-  return points.map((point) => ({
-    time: chartTime(point),
-    value: Math.max(0, point.volume),
-    color: 'rgba(148,163,184,0.24)',
-  }));
+  const byTime = new Map<number, number>();
+  points
+    .filter((point) => Number.isFinite(point.timestamp))
+    .forEach((point) => {
+      const key = Math.floor(point.timestamp);
+      byTime.set(key, (byTime.get(key) || 0) + Math.max(0, point.volume));
+    });
+  return Array.from(byTime.entries())
+    .sort(([left], [right]) => left - right)
+    .map(([timestamp, volume]) => ({
+      time: timestamp as Time,
+      value: volume,
+      color: 'rgba(148,163,184,0.24)',
+    }));
 }
 
 function formatSigned(value: number, digits = 3) {
   const sign = value > 0 ? '+' : '';
   return `${sign}${value.toFixed(digits)}`;
+}
+
+function latestClose(group: { points: PricePoint[] }) {
+  return group.points[group.points.length - 1]?.close ?? 0;
+}
+
+function latestVolume(group: { points: PricePoint[] }) {
+  return group.points[group.points.length - 1]?.volume ?? 0;
+}
+
+function latestChange(group: { points: PricePoint[] }) {
+  const latest = group.points[group.points.length - 1]?.close ?? 0;
+  const previous = group.points[Math.max(0, group.points.length - 2)]?.close ?? latest;
+  return latest - previous;
+}
+
+function colorWithOpacity(hex: string, opacity: number) {
+  const clean = hex.replace('#', '');
+  const value = Number.parseInt(clean.length === 3 ? clean.split('').map((ch) => ch + ch).join('') : clean, 16);
+  if (!Number.isFinite(value)) return hex;
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${opacity})`;
+}
+
+function persistedState<T extends string>(key: string, fallback: T): T {
+  try {
+    return (window.localStorage.getItem(key) as T) || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function markerPosition(signal: Signal, points: PricePoint[]) {
@@ -239,6 +293,10 @@ export function PriceChartPanel({
   marketCoverageRows = 0,
   loadedPriceRows,
   backtestRows = 0,
+  eventMode = false,
+  selectedTokenId = '',
+  selectedOutcomeLabel = '',
+  onOutcomeSelect,
   onRetry,
 }: PriceChartPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -256,7 +314,13 @@ export function PriceChartPanel({
   const [drawingsHidden, setDrawingsHidden] = useState(false);
   const [chartType, setChartType] = useState('Block-close line');
   const [indicatorMode, setIndicatorMode] = useState({ ma: true, ema: false, bands: false, rsi: false, volume: true });
-  const [compareMode, setCompareMode] = useState('YES + NO');
+  const [displayMode, setDisplayMode] = useState<EventDisplayMode>(() => persistedState('polydata.quant.event.displayMode', 'top5'));
+  const [eventSortMode, setEventSortMode] = useState<EventSortMode>(() => persistedState('polydata.quant.event.sortMode', 'probability'));
+  const [compareMode, setCompareMode] = useState<EventSideMode>(() => persistedState('polydata.quant.event.sideMode', 'auto'));
+  const [labelMode, setLabelMode] = useState<EventLabelMode>(() => persistedState('polydata.quant.event.labelMode', 'top'));
+  const [tooltipMode, setTooltipMode] = useState<TooltipMode>(() => persistedState('polydata.quant.event.tooltipMode', 'compact'));
+  const [showLowProbability, setShowLowProbability] = useState(false);
+  const [normalizedView, setNormalizedView] = useState(false);
   const [layoutMode, setLayoutMode] = useState('1');
   const [replayEnabled, setReplayEnabled] = useState(false);
   const [replayPlaying, setReplayPlaying] = useState(false);
@@ -267,10 +331,43 @@ export function PriceChartPanel({
   const replayPrices = useMemo(() => (
     replayCutoff ? prices.filter((point) => point.timestamp <= replayCutoff) : prices
   ), [prices, replayCutoff]);
-  const allPoints = useMemo(() => sortUnique(replayPrices), [replayPrices]);
-  const groupedOutcomes = useMemo(() => outcomeGroups(replayPrices), [replayPrices]);
-  const yesPoints = useMemo(() => sidePoints(replayPrices, 'YES'), [replayPrices]);
-  const primaryPoints = groupedOutcomes[0]?.points || yesPoints || allPoints;
+  const rawGroupedOutcomes = useMemo(() => outcomeGroups(replayPrices), [replayPrices]);
+  const yesOutcomeCount = useMemo(() => rawGroupedOutcomes.filter((group) => group.tokenSide === 'YES').length, [rawGroupedOutcomes]);
+  const effectiveSideMode = compareMode === 'auto' ? (eventMode && yesOutcomeCount > 1 ? 'yes' : 'both') : compareMode;
+  const sideFilteredOutcomes = useMemo(() => rawGroupedOutcomes.filter((group) => {
+    if (effectiveSideMode === 'both') return true;
+    if (effectiveSideMode === 'yes') return group.tokenSide === 'YES';
+    if (effectiveSideMode === 'no') return group.tokenSide === 'NO';
+    return true;
+  }), [effectiveSideMode, rawGroupedOutcomes]);
+  const displayedOutcomeCount = eventMode ? sideFilteredOutcomes.length : (yesOutcomeCount || sideFilteredOutcomes.length);
+  const selectedGroup = useMemo(() => sideFilteredOutcomes.find((group) => (
+    (selectedTokenId && group.tokenId === selectedTokenId)
+    || (selectedOutcomeLabel && group.label === selectedOutcomeLabel)
+  )) || sideFilteredOutcomes[0] || null, [selectedOutcomeLabel, selectedTokenId, sideFilteredOutcomes]);
+  const sortedOutcomes = useMemo(() => sideFilteredOutcomes.slice().sort((left, right) => {
+    if (eventSortMode === 'outcome') return left.order - right.order;
+    if (eventSortMode === 'volume') return latestVolume(right) - latestVolume(left);
+    if (eventSortMode === 'change') return Math.abs(latestChange(right)) - Math.abs(latestChange(left));
+    return latestClose(right) - latestClose(left);
+  }), [eventSortMode, sideFilteredOutcomes]);
+  const visibleOutcomeGroups = useMemo(() => {
+    if (!eventMode) return sortedOutcomes;
+    if (displayMode === 'selected') return selectedGroup ? [selectedGroup] : sortedOutcomes.slice(0, 1);
+    const topLimit = displayMode === 'top3' ? 3 : displayMode === 'top10' ? 10 : displayMode === 'all' ? sortedOutcomes.length : 5;
+    const visible = new Map<string, (typeof sortedOutcomes)[number]>();
+    sortedOutcomes.slice(0, topLimit).forEach((group) => visible.set(group.key, group));
+    if (showLowProbability) {
+      sortedOutcomes.filter((group) => latestClose(group) >= 0.05).forEach((group) => visible.set(group.key, group));
+    }
+    if (selectedGroup) visible.set(selectedGroup.key, selectedGroup);
+    return Array.from(visible.values()).sort((left, right) => {
+      if (eventSortMode === 'outcome') return left.order - right.order;
+      return latestClose(right) - latestClose(left);
+    });
+  }, [displayMode, eventMode, eventSortMode, selectedGroup, showLowProbability, sortedOutcomes]);
+  const allPoints = useMemo(() => visibleOutcomeGroups.flatMap((group) => group.points).sort((left, right) => left.timestamp - right.timestamp), [visibleOutcomeGroups]);
+  const primaryPoints = selectedGroup?.points || visibleOutcomeGroups[0]?.points || allPoints;
   const latestPoint = primaryPoints[primaryPoints.length - 1] || null;
   const latest = hover || latestPoint;
   const previous = primaryPoints[Math.max(0, primaryPoints.length - 2)];
@@ -279,6 +376,10 @@ export function PriceChartPanel({
   const minPrice = primaryPoints.reduce((min, point) => Math.min(min, point.close), Number.POSITIVE_INFINITY);
   const maxPrice = primaryPoints.reduce((max, point) => Math.max(max, point.close), Number.NEGATIVE_INFINITY);
   const volumeTotal = allPoints.reduce((sum, point) => sum + (Number.isFinite(point.volume) ? point.volume : 0), 0);
+  const selectedLatest = selectedGroup ? latestClose(selectedGroup) : latest?.close || 0;
+  const allYesSum = rawGroupedOutcomes.filter((group) => group.tokenSide === 'YES').reduce((sum, group) => sum + latestClose(group), 0);
+  const visibleYesSum = visibleOutcomeGroups.filter((group) => group.tokenSide === 'YES').reduce((sum, group) => sum + latestClose(group), 0);
+  const sumWarning = eventMode && Math.abs(allYesSum - 1) > 0.08;
   const maPoints = useMemo(() => {
     const closes = primaryPoints.map((point) => point.close);
     const ma = movingAverage(closes, Math.min(40, Math.max(3, Math.floor(primaryPoints.length / 20))));
@@ -289,6 +390,14 @@ export function PriceChartPanel({
   const inspect = pointSnapshot(inspectPoint, latestPoint, inspectMaPoint);
   const markers = useMemo(() => signals.map((signal) => markerPosition(signal, primaryPoints)).filter(Boolean), [primaryPoints, signals]);
   const focusedMarkers = markers.filter((marker) => marker?.signal.tradeId === selectedTradeId);
+
+  useEffect(() => {
+    window.localStorage.setItem('polydata.quant.event.displayMode', displayMode);
+    window.localStorage.setItem('polydata.quant.event.sortMode', eventSortMode);
+    window.localStorage.setItem('polydata.quant.event.sideMode', compareMode);
+    window.localStorage.setItem('polydata.quant.event.labelMode', labelMode);
+    window.localStorage.setItem('polydata.quant.event.tooltipMode', tooltipMode);
+  }, [compareMode, displayMode, eventSortMode, labelMode, tooltipMode]);
 
   useEffect(() => {
     pointsRef.current = primaryPoints;
@@ -432,32 +541,43 @@ export function PriceChartPanel({
     const chart = chartRef.current;
     const series = seriesRef.current;
     if (!chart || !series.ma || !series.volume) return;
-    const activeLabels = new Set(groupedOutcomes.map((group) => group.label));
-    Array.from(series.lines.entries()).forEach(([label, line]) => {
-      if (!activeLabels.has(label)) {
+    const activeKeys = new Set(visibleOutcomeGroups.map((group) => group.key));
+    Array.from(series.lines.entries()).forEach(([key, line]) => {
+      if (!activeKeys.has(key)) {
         chart.removeSeries(line);
-        series.lines.delete(label);
+        series.lines.delete(key);
       }
     });
-    groupedOutcomes.forEach((group, index) => {
+    visibleOutcomeGroups.forEach((group, index) => {
       const autoscaleInfoProvider = scaleProvider(scaleMode, group.points);
-      let line = series.lines.get(group.label);
+      const baseColor = SERIES_COLORS[group.order % SERIES_COLORS.length] || '#3b82f6';
+      const isSelected = selectedGroup?.key === group.key;
+      const isTopLabel = index < 3;
+      const opacity = !eventMode || isSelected ? 1 : displayMode === 'all' && index >= 5 ? 0.32 : 0.82;
+      const lineWidth = !eventMode ? 2 : isSelected ? 3 : displayMode === 'all' && index >= 5 ? 1 : 2;
+      const showPriceLine = !eventMode
+        || isSelected
+        || labelMode === 'all'
+        || (labelMode === 'top' && isTopLabel);
+      let line = series.lines.get(group.key);
       if (!line) {
         line = chart.addSeries(LineSeries, {
-          color: SERIES_COLORS[index % SERIES_COLORS.length],
-          lineWidth: 2,
-          priceLineVisible: index === 0,
-          priceLineColor: SERIES_COLORS[index % SERIES_COLORS.length],
+          color: colorWithOpacity(baseColor, opacity),
+          lineWidth,
+          priceLineVisible: showPriceLine,
+          priceLineColor: baseColor,
           priceLineWidth: 1,
           title: group.label,
           ...(autoscaleInfoProvider ? { autoscaleInfoProvider } : {}),
         });
-        series.lines.set(group.label, line);
+        series.lines.set(group.key, line);
       }
       line.applyOptions({
-        color: SERIES_COLORS[index % SERIES_COLORS.length],
-        priceLineVisible: index === 0,
-        priceLineColor: SERIES_COLORS[index % SERIES_COLORS.length],
+        color: colorWithOpacity(baseColor, opacity),
+        lineWidth,
+        priceLineVisible: showPriceLine,
+        priceLineColor: baseColor,
+        title: `${group.label} ${Math.round(latestClose(group) * 100)}%`,
         ...(autoscaleInfoProvider ? { autoscaleInfoProvider } : {}),
       });
       line.setData(lineData(group.points));
@@ -465,7 +585,7 @@ export function PriceChartPanel({
     series.ma.setData(lineData(maPoints));
     series.volume.setData(volumeData(allPoints));
     chart.timeScale().fitContent();
-  }, [allPoints, groupedOutcomes, maPoints, scaleMode]);
+  }, [allPoints, displayMode, eventMode, labelMode, maPoints, scaleMode, selectedGroup, visibleOutcomeGroups]);
 
   const drawingPointFromEvent = (event: MouseEvent) => {
     const box = containerRef.current?.getBoundingClientRect();
@@ -588,11 +708,40 @@ export function PriceChartPanel({
           <button className={indicatorMode.ema ? 'active' : ''} type="button" title="EMA scaffold" onClick={() => setIndicatorMode((current) => ({ ...current, ema: !current.ema }))}>EMA</button>
           <button className={indicatorMode.bands ? 'active' : ''} type="button" title="Bollinger band scaffold" onClick={() => setIndicatorMode((current) => ({ ...current, bands: !current.bands }))}>BB</button>
           <button className={indicatorMode.volume ? 'active' : ''} type="button" title="Volume" onClick={() => setIndicatorMode((current) => ({ ...current, volume: !current.volume }))}>Vol</button>
-          <select value={compareMode} onChange={(event) => setCompareMode(event.currentTarget.value)}>
-            <option>YES + NO</option>
-            <option>YES only</option>
-            <option>Implied NO</option>
+          <select value={compareMode} onChange={(event) => setCompareMode(event.currentTarget.value as EventSideMode)}>
+            <option value="auto">Auto side</option>
+            <option value="yes">YES</option>
+            <option value="no">NO</option>
+            <option value="both">YES + NO</option>
           </select>
+          {eventMode ? (
+            <>
+              <select value={displayMode} onChange={(event) => setDisplayMode(event.currentTarget.value as EventDisplayMode)} title="Visible outcomes">
+                <option value="top3">Top 3</option>
+                <option value="top5">Top 5</option>
+                <option value="top10">Top 10</option>
+                <option value="all">All</option>
+                <option value="selected">Selected</option>
+              </select>
+              <select value={eventSortMode} onChange={(event) => setEventSortMode(event.currentTarget.value as EventSortMode)} title="Outcome sort">
+                <option value="probability">Probability</option>
+                <option value="outcome">Outcome order</option>
+                <option value="volume">Volume</option>
+                <option value="change">Change</option>
+              </select>
+              <select value={labelMode} onChange={(event) => setLabelMode(event.currentTarget.value as EventLabelMode)} title="Right labels">
+                <option value="selected">Selected labels</option>
+                <option value="top">Top labels</option>
+                <option value="all">All labels</option>
+              </select>
+              <select value={tooltipMode} onChange={(event) => setTooltipMode(event.currentTarget.value as TooltipMode)} title="Tooltip mode">
+                <option value="compact">Compact tip</option>
+                <option value="full">Full window</option>
+              </select>
+              <button className={showLowProbability ? 'active' : ''} type="button" title="Show low-probability outcomes" onClick={() => setShowLowProbability((current) => !current)}>Low</button>
+              <button className={normalizedView ? 'active' : ''} type="button" title="Toggle normalized view indicator" onClick={() => setNormalizedView((current) => !current)}>{normalizedView ? 'Norm' : 'Raw'}</button>
+            </>
+          ) : null}
           <select value={layoutMode} onChange={(event) => setLayoutMode(event.currentTarget.value)} title="Layout">
             <option value="1">1 chart</option>
             <option value="2v">2 vertical</option>
@@ -609,23 +758,42 @@ export function PriceChartPanel({
         <div className="qtv-chart-info">
           <div className="qtv-chart-meta">
             <strong>{market.title}</strong>
-            <span>{market.category} - outcome probabilities - {priceSource}</span>
+            <span>{market.category} · {eventMode ? `${displayedOutcomeCount} outcomes` : 'outcome probability'} · {priceSource}</span>
             <div className="qtv-indicator-legend">
               <span>Rows <b>{allPoints.length.toLocaleString('en-US')}</b></span>
               <span>Range <i>{pointLabel(primaryPoints[0], priceSource)}</i> <em>{pointLabel(primaryPoints[primaryPoints.length - 1], priceSource)}</em></span>
               <span>Volume <b>{volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></span>
-              <span>Latest YES <b>{fmtPrice(latest?.close || 0)}</b></span>
+              <span>Selected <b title={selectedGroup?.fullLabel}>{selectedGroup?.label || 'Outcome'} {fmtPrice(selectedLatest)}</b></span>
+              {eventMode ? (
+                <span title="Binary market prices may not sum exactly to 100% due to spread, stale data, independent markets, fees, or direct/implied price differences.">
+                  Sum <b className={sumWarning ? 'negative' : ''}>{fmtPrice(normalizedView ? 1 : allYesSum)}</b>
+                  <em>visible {fmtPrice(visibleYesSum)}</em>
+                </span>
+              ) : null}
             </div>
             <div className="qtv-outcome-legend">
-              {groupedOutcomes.slice(0, 8).map((group, index) => {
+              {visibleOutcomeGroups.slice(0, 8).map((group) => {
                 const point = group.points[group.points.length - 1];
+                const isSelected = selectedGroup?.key === group.key;
                 return (
-                  <span key={group.label}>
-                    <i style={{ backgroundColor: SERIES_COLORS[index % SERIES_COLORS.length] }} />
+                  <button
+                    key={group.key}
+                    className={isSelected ? 'active' : ''}
+                    type="button"
+                    title={group.fullLabel}
+                    onClick={(event) => {
+                      if (event.shiftKey) return;
+                      if (group.tokenId) onOutcomeSelect?.(group.tokenId, group.tokenSide === 'NO' ? 'NO' : 'YES');
+                    }}
+                  >
+                    <i style={{ backgroundColor: SERIES_COLORS[group.order % SERIES_COLORS.length] }} />
                     {group.label} <b>{fmtPrice(point?.close || 0)}</b>
-                  </span>
+                  </button>
                 );
               })}
+              {eventMode && sortedOutcomes.length > visibleOutcomeGroups.length ? (
+                <button type="button" onClick={() => setDisplayMode('all')}>+{sortedOutcomes.length - visibleOutcomeGroups.length} more</button>
+              ) : null}
             </div>
           </div>
           <div className="qtv-ohlc">
@@ -650,23 +818,35 @@ export function PriceChartPanel({
         ) : null}
 
         {dataWindowOpen && inspect ? (
-          <div className={`qtv-data-window ${pinnedPoint ? 'pinned' : ''}`}>
+          <div className={`qtv-data-window ${pinnedPoint ? 'pinned' : ''} ${tooltipMode === 'compact' ? 'compact' : 'full'}`}>
             <header>
-              <strong>{pinnedPoint ? 'Pinned Data Window' : hover ? 'Crosshair Data Window' : 'Latest Data Window'}</strong>
+              <strong>{pinnedPoint ? 'Pinned Data Window' : tooltipMode === 'compact' ? 'Compact Tooltip' : hover ? 'Crosshair Data Window' : 'Latest Data Window'}</strong>
               {pinnedPoint ? <button type="button" onClick={() => setPinnedPoint(null)}>Clear</button> : null}
             </header>
-            <div><span>Market</span><b>{market.title}</b></div>
             <div><span>Block</span><b>{blockLabel(inspect.point.timestamp)}</b></div>
-            <div><span>YES</span><b>{fmtPrice(inspect.yes)} <em>{inspect.yesKind}</em></b></div>
-            <div><span>NO</span><b>{fmtPrice(inspect.no)} <em>{inspect.noKind}</em></b></div>
-            <div><span>MA</span><b>{inspect.ma === undefined ? '--' : fmtPrice(inspect.ma)}</b></div>
-            <div><span>Volume</span><b>{inspect.point.volume.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></div>
+            <div><span>{inspect.point.outcomeShortLabel || inspect.point.outcomeLabel || selectedGroup?.label || 'Outcome'}</span><b>YES {fmtPrice(inspect.yes)} / NO {fmtPrice(inspect.no)}</b></div>
+            {visibleOutcomeGroups.slice(0, 3).map((group) => {
+              const point = nearestPoint(group.points, inspect.point.timestamp);
+              return (
+                <div key={group.key} title={group.fullLabel}>
+                  <span>{group.label}</span>
+                  <b>{fmtPrice(point?.close ?? latestClose(group))}</b>
+                </div>
+              );
+            })}
+            {tooltipMode === 'full' ? (
+              <>
+                <div><span>Market</span><b>{market.title}</b></div>
+                <div><span>MA</span><b>{inspect.ma === undefined ? '--' : fmtPrice(inspect.ma)}</b></div>
+                <div><span>Volume</span><b>{inspect.point.volume.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></div>
+                <div><span>Window</span><b>{allPoints.length.toLocaleString('en-US')} rows · {scaleMode}</b></div>
+                <footer>
+                  <span className={inspect.deltaYes >= 0 ? 'positive' : 'negative'}>Δ YES {formatSigned(inspect.deltaYes)} ({formatSigned(inspect.deltaYesPct, 2)}%)</span>
+                  <span className={inspect.deltaNo >= 0 ? 'positive' : 'negative'}>Δ NO {formatSigned(inspect.deltaNo)} ({formatSigned(inspect.deltaNoPct, 2)}%)</span>
+                </footer>
+              </>
+            ) : null}
             <div><span>Source</span><b>{priceSource}</b></div>
-            <div><span>Window</span><b>{allPoints.length.toLocaleString('en-US')} rows · {scaleMode}</b></div>
-            <footer>
-              <span className={inspect.deltaYes >= 0 ? 'positive' : 'negative'}>Δ YES {formatSigned(inspect.deltaYes)} ({formatSigned(inspect.deltaYesPct, 2)}%)</span>
-              <span className={inspect.deltaNo >= 0 ? 'positive' : 'negative'}>Δ NO {formatSigned(inspect.deltaNo)} ({formatSigned(inspect.deltaNoPct, 2)}%)</span>
-            </footer>
           </div>
         ) : null}
 

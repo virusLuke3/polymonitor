@@ -8,7 +8,7 @@ import type {
   QuantMarketSeriesPayload,
 } from '@/types';
 import type { BacktestMetric, BacktestResult, EquityPoint, PerformanceRow, PricePoint, PriceSource, PropertyGroup, Trade } from '../types';
-import { toNumber } from './formatters';
+import { deriveEventOutcomeLabel, toNumber } from './formatters';
 
 export function frontendToPrices(rows: QuantFrontendPricePoint[]): PricePoint[] {
   return rows.map((row) => ({
@@ -32,8 +32,12 @@ export function blockToPrices(rows: QuantBlockClosePoint[]): PricePoint[] {
 export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | undefined): PricePoint[] {
   if (!payload) return [];
   const source = payload.event?.source || payload.market?.source || 'quant_market_series';
+  const eventTitle = payload.event?.eventTitle || payload.market?.marketTitle || '';
   return (payload.outcomes || []).flatMap((outcome) => (
     (() => {
+      const fullLabel = outcome.marketTitle || outcome.outcomeLabel || outcome.marketSlug || 'Outcome';
+      const shortLabel = deriveEventOutcomeLabel(eventTitle, fullLabel, outcome.outcomeLabel);
+      const outcomeKey = outcome.outcomeKey || `${outcome.marketSlug || outcome.marketId || shortLabel}`;
       const complementByX = new Map<string, number>();
       (outcome.complementPoints || []).forEach((point) => {
         const x = String(point.x ?? point.blockNumber ?? point.timestamp ?? '');
@@ -52,7 +56,10 @@ export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | 
           source,
           tokenId: outcome.buyYesTokenId || outcome.tokenId,
           tokenSide: outcome.buyYesTokenSide || 'YES',
-          outcomeLabel: outcome.buyYesLabel || outcome.outcomeLabel || outcome.tokenSide,
+          outcomeLabel: shortLabel,
+          outcomeShortLabel: shortLabel,
+          outcomeFullLabel: fullLabel,
+          outcomeKey: `${outcomeKey}:YES`,
           yesPrice,
           noPrice,
           yesPriceKind: 'direct' as const,
@@ -70,7 +77,10 @@ export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | 
             source,
             tokenId: outcome.buyNoTokenId || point.tokenId || undefined,
             tokenSide: outcome.buyNoTokenSide || 'NO',
-            outcomeLabel: outcome.buyNoLabel || `${outcome.outcomeLabel || 'Outcome'} No`,
+            outcomeLabel: deriveEventOutcomeLabel(eventTitle, outcome.buyNoLabel || '', outcome.buyNoLabel || `${shortLabel} No`),
+            outcomeShortLabel: deriveEventOutcomeLabel(eventTitle, outcome.buyNoLabel || '', outcome.buyNoLabel || `${shortLabel} No`),
+            outcomeFullLabel: outcome.buyNoLabel || fullLabel,
+            outcomeKey: `${outcomeKey}:NO`,
             yesPrice: Math.max(0, Math.min(1, 1 - noPrice)),
             noPrice,
             yesPriceKind: 'implied' as const,

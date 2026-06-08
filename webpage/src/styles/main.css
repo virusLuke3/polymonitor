@@ -225,6 +225,139 @@
   background: #162033;
 }
 
+.qtv-outcome-board.table-mode {
+  grid-template-columns: minmax(0, 1fr);
+  max-height: 188px;
+  overflow: hidden;
+  background: #0c111b;
+}
+
+.qtv-outcome-board-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  border-bottom: 1px solid #222b3a;
+  background: #0b111d;
+  padding: 0 12px;
+}
+
+.qtv-outcome-board-head div {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #8f9bad;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.qtv-outcome-board-head select {
+  height: 24px;
+  border: 1px solid #263244;
+  border-radius: 4px;
+  background: #090d14;
+  color: #dbeafe;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.qtv-outcome-table {
+  display: grid;
+  min-width: 0;
+  overflow: auto;
+}
+
+.qtv-outcome-table-row {
+  display: grid;
+  grid-template-columns: minmax(128px, 1.15fr) 76px 76px 86px 94px 82px minmax(170px, 0.9fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid rgba(34, 43, 58, 0.78);
+  border-left: 3px solid transparent;
+  background: #0c111b;
+  color: #cbd5e1;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  padding: 0 10px;
+  text-align: left;
+}
+
+.qtv-outcome-table-row.head {
+  position: sticky;
+  top: 34px;
+  z-index: 1;
+  min-height: 28px;
+  background: #111827;
+  color: #7f8a9d;
+  cursor: default;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-outcome-table-row:hover,
+.qtv-outcome-table-row.active {
+  border-left-color: #2f7df4;
+  background: #111c33;
+}
+
+.qtv-outcome-table-row strong,
+.qtv-outcome-table-row span,
+.qtv-outcome-table-row em {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-outcome-table-row strong {
+  color: #f8fafc;
+  font-size: 12px;
+}
+
+.qtv-outcome-table-row b {
+  color: #e5e7eb;
+  font-size: 12px;
+}
+
+.qtv-outcome-table-row em {
+  color: #94a3b8;
+  font-style: normal;
+  font-size: 10px;
+}
+
+.qtv-outcome-table-row i {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  font-style: normal;
+}
+
+.qtv-outcome-table-row i span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  border: 1px solid rgba(47, 125, 244, 0.26);
+  border-radius: 4px;
+  background: rgba(47, 125, 244, 0.13);
+  color: #dbeafe;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 0 7px;
+}
+
+.qtv-outcome-table-row i span.disabled {
+  opacity: 0.4;
+}
+
 .qtv-outcome-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(210px, auto);
@@ -425,6 +558,8 @@
   align-items: center;
   gap: 4px;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
   pointer-events: auto;
 }
 
@@ -464,6 +599,8 @@
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: flex-start;
   gap: 12px;
+  max-height: 112px;
+  overflow: hidden;
   pointer-events: none;
 }
 
@@ -536,16 +673,35 @@
   font-size: 10px;
 }
 
-.qtv-outcome-legend span {
+.qtv-outcome-legend span,
+.qtv-outcome-legend button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
+  max-width: 150px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: rgba(9, 13, 20, 0.58);
   color: #d1d5db;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.qtv-outcome-legend button.active,
+.qtv-outcome-legend button:hover {
+  border-color: rgba(47, 125, 244, 0.4);
+  background: rgba(19, 35, 58, 0.86);
+  color: #f8fafc;
+}
+
 .qtv-outcome-legend i {
+  flex: 0 0 auto;
   width: 8px;
   height: 8px;
   border-radius: 999px;
@@ -627,7 +783,8 @@
   left: 12px;
   display: grid;
   gap: 5px;
-  width: 250px;
+  width: min(270px, 25vw);
+  min-width: 220px;
   border: 1px solid #263244;
   border-left: 2px solid #3b82f6;
   border-radius: 4px;
@@ -637,6 +794,17 @@
   font-size: 10px;
   padding: 9px;
   pointer-events: auto;
+}
+
+.qtv-data-window.compact {
+  gap: 4px;
+  width: min(260px, 24vw);
+}
+
+.qtv-data-window.full {
+  width: min(340px, 30vw);
+  max-height: calc(100% - 150px);
+  overflow: auto;
 }
 
 .qtv-data-window.pinned {
