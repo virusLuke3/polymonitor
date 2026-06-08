@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { QuantPriceMarket } from '@/types';
 import type { BacktestEngine, DataStatus, PriceSource } from '../types';
 import './WorkspaceHeader.css';
@@ -24,6 +24,141 @@ type WorkspaceHeaderProps = {
   onMarketPreview?: (slug: string) => void;
 };
 
+type SearchFilter = 'all' | 'events' | 'markets' | 'tokens' | 'ready' | 'active' | 'recent' | 'official';
+type SearchSort = 'relevance' | 'volume' | 'coverage' | 'outcomes' | 'updated';
+type SearchResultKind = 'event' | 'market' | 'token';
+
+type SearchResult = {
+  key: string;
+  kind: SearchResultKind;
+  market: QuantPriceMarket;
+  title: string;
+  slug: string;
+  subtitle: string;
+  coverage: string;
+  price: string;
+  status: 'ready' | 'partial' | 'stale' | 'none';
+  confidence: string;
+  count: string;
+  rows: number;
+  outcomes: number;
+  volume: number;
+  updated: number;
+  priority: number;
+};
+
+const FILTERS: Array<{ value: SearchFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'events', label: 'Events' },
+  { value: 'markets', label: 'Markets' },
+  { value: 'tokens', label: 'Tokens' },
+  { value: 'ready', label: 'Ready' },
+  { value: 'active', label: 'Active' },
+  { value: 'recent', label: 'Recent' },
+  { value: 'official', label: 'Official only' },
+];
+
+const SORTS: Array<{ value: SearchSort; label: string }> = [
+  { value: 'relevance', label: 'Relevance' },
+  { value: 'volume', label: 'Volume' },
+  { value: 'coverage', label: 'Coverage' },
+  { value: 'outcomes', label: 'Outcomes' },
+  { value: 'updated', label: 'Recently updated' },
+];
+
+function toNumber(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function extraString(market: QuantPriceMarket, key: string) {
+  const value = (market as unknown as Record<string, unknown>)[key];
+  return value == null ? '' : String(value);
+}
+
+function isActiveMarket(market: QuantPriceMarket) {
+  if (!market.endDate) return true;
+  const time = Date.parse(String(market.endDate));
+  return !Number.isFinite(time) || time > Date.now();
+}
+
+function rowsForMarket(market: QuantPriceMarket) {
+  return toNumber(market.orderfilledRows) || toNumber(market.blockRows) || toNumber(market.frontendRows);
+}
+
+function coverageStatus(market: QuantPriceMarket): SearchResult['status'] {
+  if (market.itemKind === 'event') {
+    const ready = toNumber(market.readyMembers);
+    const total = toNumber(market.totalMembers || market.outcomeCount);
+    if (total > 0 && ready >= total) return 'ready';
+    if (ready > 0) return 'partial';
+    return rowsForMarket(market) > 0 ? 'partial' : 'none';
+  }
+  const rows = rowsForMarket(market);
+  if (rows > 0) return 'ready';
+  return market.marketSlug ? 'none' : 'stale';
+}
+
+function latestPrice(market: QuantPriceMarket) {
+  const yes = toNumber(market.latestBlockPrice ?? market.latestFrontendPrice);
+  if (!yes) return '';
+  return `YES ${yes.toFixed(3)} · NO ${Math.max(0, 1 - yes).toFixed(3)}`;
+}
+
+function titleForMarket(market: QuantPriceMarket) {
+  return market.marketTitle || market.eventTitle || market.marketSlug || 'Untitled market';
+}
+
+function tokenLike(query: string) {
+  const text = query.trim();
+  return text.length >= 10 && (/^[0-9]+$/.test(text) || /^0x[0-9a-f]+$/i.test(text) || /^[a-z0-9_-]{16,}$/i.test(text));
+}
+
+function storedFilter(): SearchFilter {
+  try {
+    const value = window.localStorage.getItem('polydata.quant.search.filter') as SearchFilter | null;
+    if (value && FILTERS.some((filter) => filter.value === value)) return value;
+    return 'all';
+  } catch {
+    return 'all';
+  }
+}
+
+function buildResult(market: QuantPriceMarket, kind: SearchResultKind, index: number): SearchResult {
+  const isEvent = kind === 'event';
+  const rows = rowsForMarket(market);
+  const outcomes = toNumber(market.outcomeCount || market.totalMembers);
+  const ready = toNumber(market.readyMembers);
+  const total = toNumber(market.totalMembers || market.outcomeCount);
+  const volume = toNumber(extraString(market, 'volume') || extraString(market, 'volume24h'));
+  const first = toNumber(market.firstBlock || market.firstTs);
+  const last = toNumber(market.lastBlock || market.lastTs);
+  const title = titleForMarket(market);
+  const condition = market.conditionId || extraString(market, 'tokenId');
+  return {
+    key: `${kind}:${market.marketSlug}:${condition || index}`,
+    kind,
+    market,
+    title: kind === 'token' ? (condition || market.marketSlug) : title,
+    slug: market.marketSlug,
+    subtitle: kind === 'token'
+      ? `${title} · ${market.tokenSide || 'YES'} side`
+      : (isEvent ? market.eventSlug || market.marketSlug : market.eventTitle || market.eventSlug || 'Individual market'),
+    coverage: isEvent
+      ? `${ready.toLocaleString('en-US')} ready / ${Math.max(total, outcomes).toLocaleString('en-US')} members`
+      : rows ? `${rows.toLocaleString('en-US')} rows` : 'No block-close rows',
+    price: latestPrice(market),
+    status: coverageStatus(market),
+    confidence: isEvent ? market.groupingConfidence || 'inferred' : extraString(market, 'source') || 'quant',
+    count: isEvent ? `${outcomes.toLocaleString('en-US')} outcomes` : (kind === 'token' ? 'Token/condition' : 'Market'),
+    rows,
+    outcomes,
+    volume,
+    updated: last || first || index,
+    priority: (isEvent ? 0 : kind === 'token' ? 2 : 1) + (coverageStatus(market) === 'ready' ? -0.25 : 0),
+  };
+}
+
 export function WorkspaceHeader({
   marketSlug,
   marketQuery,
@@ -46,6 +181,10 @@ export function WorkspaceHeader({
 }: WorkspaceHeaderProps) {
   const [marketMenuOpen, setMarketMenuOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [searchFilter, setSearchFilter] = useState<SearchFilter>(storedFilter);
+  const [sortMode, setSortMode] = useState<SearchSort>('relevance');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const previousQueryRef = useRef('');
   const marketChoices = useMemo(() => {
     const choices = new Map<string, QuantPriceMarket>();
     if (selectedMarketProp?.marketSlug) choices.set(selectedMarketProp.marketSlug, selectedMarketProp);
@@ -62,12 +201,101 @@ export function WorkspaceHeader({
     [marketChoices, marketSlug, selectedMarketProp],
   );
   const activeSearchText = marketQuery.trim();
+  const queryIsTokenLike = tokenLike(activeSearchText);
   const isSearching = marketSearchStatus === 'loading';
+  const isRefining = marketSearchStatus === 'partial';
   const hasSearchError = marketSearchStatus === 'error';
+  const activeFilter = !activeSearchText && searchFilter === 'all' ? 'recent' : searchFilter;
+
+  const searchResults = useMemo(() => {
+    const query = activeSearchText.toLowerCase();
+    const base = marketChoices.flatMap((market, index) => {
+      const isEvent = market.itemKind === 'event';
+      const results: SearchResult[] = [buildResult(market, isEvent ? 'event' : 'market', index)];
+      const tokenText = `${market.conditionId || ''} ${extraString(market, 'tokenId')}`.trim();
+      if (tokenText && (!query || tokenText.toLowerCase().includes(query) || queryIsTokenLike)) {
+        results.push(buildResult(market, 'token', index));
+      }
+      return results;
+    });
+    const filtered = base.filter((result) => {
+      if (activeFilter === 'events' && result.kind !== 'event') return false;
+      if (activeFilter === 'markets' && result.kind !== 'market') return false;
+      if (activeFilter === 'tokens' && result.kind !== 'token') return false;
+      if (activeFilter === 'ready' && result.status !== 'ready') return false;
+      if (activeFilter === 'active' && !isActiveMarket(result.market)) return false;
+      if (activeFilter === 'official' && result.confidence !== 'official') return false;
+      if (activeFilter === 'recent' && result.kind === 'token') return false;
+      return true;
+    });
+    const sorted = filtered.slice().sort((left, right) => {
+      if (queryIsTokenLike && left.kind !== right.kind) return left.kind === 'token' ? -1 : right.kind === 'token' ? 1 : 0;
+      if (sortMode === 'volume') return right.volume - left.volume || left.priority - right.priority;
+      if (sortMode === 'coverage') return right.rows - left.rows || left.priority - right.priority;
+      if (sortMode === 'outcomes') return right.outcomes - left.outcomes || left.priority - right.priority;
+      if (sortMode === 'updated') return right.updated - left.updated || left.priority - right.priority;
+      return left.priority - right.priority || right.rows - left.rows || left.title.localeCompare(right.title);
+    });
+    return activeFilter === 'recent' ? sorted.slice(0, 18) : sorted.slice(0, 48);
+  }, [activeFilter, activeSearchText, marketChoices, queryIsTokenLike, sortMode]);
+
+  const sections = useMemo(() => {
+    const visibleKinds: SearchResultKind[] = queryIsTokenLike ? ['token', 'event', 'market'] : ['event', 'market', 'token'];
+    return visibleKinds.map((kind) => ({
+      kind,
+      title: kind === 'event' ? 'Events' : kind === 'market' ? 'Markets' : 'Tokens / Condition IDs',
+      items: searchResults.filter((result) => result.kind === kind),
+    })).filter((section) => section.items.length);
+  }, [queryIsTokenLike, searchResults]);
+
+  const flatResults = useMemo(() => sections.flatMap((section) => section.items), [sections]);
+  const activeResult = flatResults[Math.min(highlightedIndex, Math.max(0, flatResults.length - 1))] || null;
+  const relatedPreviewMarkets = useMemo(() => {
+    if (!activeResult) return [];
+    const eventId = activeResult.market.eventId;
+    const eventSlug = activeResult.kind === 'event' ? activeResult.market.marketSlug : activeResult.market.eventSlug;
+    return marketChoices
+      .filter((market) => market.itemKind !== 'event')
+      .filter((market) => (
+        (eventId && market.eventId === eventId)
+        || (eventSlug && (market.eventSlug === eventSlug || market.marketSlug.includes(eventSlug)))
+      ))
+      .slice(0, 3);
+  }, [activeResult, marketChoices]);
 
   useEffect(() => {
     setHighlightedIndex(0);
-  }, [marketQuery, marketOptions]);
+  }, [marketQuery, marketOptions, searchFilter, sortMode]);
+
+  useEffect(() => {
+    const previous = previousQueryRef.current;
+    if (!previous && activeSearchText) {
+      setSearchFilter('all');
+      setSortMode('relevance');
+    }
+    previousQueryRef.current = activeSearchText;
+  }, [activeSearchText]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('polydata.quant.search.filter', searchFilter);
+    } catch {
+      // localStorage can be blocked in private browsing; the palette still works.
+    }
+  }, [searchFilter]);
+
+  useEffect(() => {
+    const onGlobalKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setMarketMenuOpen(true);
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  }, []);
 
   const chooseMarket = (slug: string) => {
     onMarketSlugChange(slug);
@@ -75,15 +303,25 @@ export function WorkspaceHeader({
     setMarketMenuOpen(false);
   };
 
-  const chooseHighlightedMarket = () => {
-    const highlightedSlug = marketChoices[Math.min(highlightedIndex, marketChoices.length - 1)]?.marketSlug;
-    if (highlightedSlug) chooseMarket(highlightedSlug);
+  const chooseResult = (result: SearchResult | null) => {
+    if (result?.market.marketSlug) chooseMarket(result.market.marketSlug);
+  };
+
+  const chooseHighlightedResult = () => {
+    chooseResult(activeResult);
   };
 
   const moveHighlight = (delta: number) => {
     setHighlightedIndex((current) => {
-      if (!marketChoices.length) return 0;
-      return (current + delta + marketChoices.length) % marketChoices.length;
+      if (!flatResults.length) return 0;
+      return (current + delta + flatResults.length) % flatResults.length;
+    });
+  };
+
+  const cycleFilter = () => {
+    setSearchFilter((current) => {
+      const index = FILTERS.findIndex((filter) => filter.value === current);
+      return FILTERS[(index + 1) % FILTERS.length]?.value || 'all';
     });
   };
 
@@ -130,6 +368,7 @@ export function WorkspaceHeader({
           <span className="qtv-command-label">Search</span>
           <input
             value={marketQuery}
+            ref={inputRef}
             onFocus={() => setMarketMenuOpen(true)}
             onInput={(event) => {
               onMarketQueryChange(event.currentTarget.value);
@@ -148,11 +387,15 @@ export function WorkspaceHeader({
               }
               if (event.key === 'Enter') {
                 event.preventDefault();
-                chooseHighlightedMarket();
+                chooseHighlightedResult();
               }
               if (event.key === 'Escape') setMarketMenuOpen(false);
+              if (event.key === 'Tab' && marketMenuOpen) {
+                event.preventDefault();
+                cycleFilter();
+              }
             }}
-            placeholder="Search markets, slugs, token IDs..."
+            placeholder="Search events, markets, slugs, token IDs..."
             aria-autocomplete="list"
             aria-controls="quant-market-search-results"
           />
@@ -167,56 +410,131 @@ export function WorkspaceHeader({
           {marketMenuOpen ? (
             <div id="quant-market-search-results" className="qtv-market-palette" role="listbox">
               <div className="qtv-palette-head">
-                <strong>{activeSearchText ? 'Search events and markets' : 'Recent quant coverage'}</strong>
-                <span>{activeSearchText || 'Events first, then individual markets'}</span>
+                <div>
+                  <strong>Search Polymarket events and markets</strong>
+                  <span>{activeSearchText ? 'Search results' : 'Recent quant coverage'}</span>
+                </div>
+                <em>Events first, then individual markets</em>
               </div>
-              {isSearching ? (
-                <div className="qtv-market-menu-empty">
-                  <strong>Searching markets...</strong>
-                  <span>{activeSearchText || 'Loading recent markets'}</span>
+              <div className="qtv-palette-tools" onMouseDown={(event) => event.preventDefault()}>
+                <div className="qtv-filter-chips" aria-label="Search filters">
+                  {FILTERS.map((filter) => (
+                    <button
+                      key={filter.value}
+                      className={activeFilter === filter.value ? 'active' : ''}
+                      type="button"
+                      onClick={() => setSearchFilter(filter.value)}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
                 </div>
-              ) : hasSearchError ? (
-                <div className="qtv-market-menu-empty">
-                  <strong>Failed to load markets</strong>
-                  <span>Retry by editing the query.</span>
+                <label className="qtv-sort-select" onMouseDown={(event) => event.stopPropagation()}>
+                  {isRefining ? <em>Updating events...</em> : null}
+                  <span>Sort</span>
+                  <select value={sortMode} onChange={(event) => setSortMode(event.currentTarget.value as SearchSort)}>
+                    {SORTS.map((sort) => <option key={sort.value} value={sort.value}>{sort.label}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="qtv-palette-body">
+                <div className="qtv-results-list">
+                  {isSearching ? (
+                    <div className="qtv-skeleton-stack" aria-label="Searching events and markets">
+                      <strong>Searching events and markets...</strong>
+                      {Array.from({ length: 6 }).map((_, index) => <span key={index} />)}
+                    </div>
+                  ) : hasSearchError ? (
+                    <div className="qtv-market-menu-empty">
+                      <strong>Search failed</strong>
+                      <span>Retry by editing the query. Debug: {activeSearchText || 'recent'}</span>
+                    </div>
+                  ) : sections.length ? (
+                    sections.map((section) => (
+                      <section key={section.kind} className="qtv-result-section">
+                        <h3>{section.title}</h3>
+                        {section.items.map((result) => {
+                          const index = flatResults.findIndex((item) => item.key === result.key);
+                          const selected = result.market.marketSlug === marketSlug;
+                          return (
+                            <button
+                              key={result.key}
+                              className={`qtv-result-row ${selected ? 'selected' : ''} ${index === highlightedIndex ? 'highlighted' : ''}`}
+                              type="button"
+                              role="option"
+                              aria-selected={selected}
+                              id={`quant-market-option-${index}`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onMouseEnter={() => {
+                                setHighlightedIndex(index);
+                                onMarketPreview?.(result.market.marketSlug);
+                              }}
+                              onClick={() => chooseResult(result)}
+                            >
+                              <span className={`qtv-type-badge ${result.kind}`}>{result.kind === 'event' ? 'Event' : result.kind === 'market' ? 'Market' : 'Token'}</span>
+                              <span className="qtv-result-main">
+                                <strong>{result.title}</strong>
+                                <small>{result.kind === 'token' ? result.subtitle : result.slug}</small>
+                                <em>{result.coverage}{result.price ? ` · ${result.price}` : ''}</em>
+                              </span>
+                              <span className="qtv-result-badges">
+                                <b>{result.count}</b>
+                                <small className={`coverage ${result.status}`}>{result.status === 'none' ? 'no rows' : result.status}</small>
+                                <small>{result.confidence}</small>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </section>
+                    ))
+                  ) : (
+                    <div className="qtv-market-menu-empty">
+                      <strong>No events or markets found</strong>
+                      <span>Try title, slug, token ID, or condition ID.</span>
+                      <div>
+                        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setSearchFilter('all')}>Clear filters</button>
+                        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setSearchFilter('recent')}>Show recent coverage</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ) : marketChoices.length ? marketChoices.map((market, index) => (
-                <button
-                  key={market.marketSlug}
-                  className={`${market.marketSlug === marketSlug ? 'selected' : ''} ${index === highlightedIndex ? 'highlighted' : ''}`}
-                  type="button"
-                  role="option"
-                  aria-selected={market.marketSlug === marketSlug}
-                  id={`quant-market-option-${index}`}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => {
-                    setHighlightedIndex(index);
-                    onMarketPreview?.(market.marketSlug);
-                  }}
-                  onClick={() => chooseMarket(market.marketSlug)}
-                >
-                  <i aria-hidden="true">{market.marketSlug === marketSlug ? '✓' : ''}</i>
-                  <span className="qtv-result-main">
-                    <strong>{market.marketTitle || market.marketSlug}</strong>
-                    <small>{market.marketSlug}</small>
-                    <em>
-                      {market.itemKind === 'event' ? `${Number(market.readyMembers || 0).toLocaleString('en-US')} ready / ${Number(market.totalMembers || market.outcomeCount || 0).toLocaleString('en-US')} members` : 'Range'}
-                      {market.itemKind !== 'event' && market.firstBlock ? ` block ${Number(market.firstBlock).toLocaleString('en-US')}` : ''}
-                      {market.lastBlock ? ` - ${Number(market.lastBlock).toLocaleString('en-US')}` : ''}
-                      {' · outcome probabilities'}
-                    </em>
-                  </span>
-                  <span className="qtv-result-meta">
-                    <b>{market.itemKind === 'event' ? `${Number(market.outcomeCount || 0).toLocaleString('en-US')} outcomes` : `${Number(market.blockRows || market.frontendRows || 0).toLocaleString('en-US')} rows`}</b>
-                    <small>{market.itemKind === 'event' ? market.groupingConfidence || 'event' : market.endDate ? 'Active/dated' : 'Quant'}</small>
-                  </span>
-                </button>
-              )) : (
-                <div className="qtv-market-menu-empty">
-                  <strong>No matching markets</strong>
-                  <span>{activeSearchText ? `No markets found for ${activeSearchText}` : 'Only markets with quant rows are listed.'}</span>
+                <aside className="qtv-search-preview" aria-label="Selected search result preview">
+                  {activeResult ? (
+                    <>
+                      <span className={`qtv-type-badge ${activeResult.kind}`}>{activeResult.kind === 'event' ? 'Event' : activeResult.kind === 'market' ? 'Market' : 'Token'}</span>
+                      <strong>{activeResult.kind === 'token' ? activeResult.subtitle : activeResult.title}</strong>
+                      <small>{activeResult.slug}</small>
+                      <dl>
+                        <div><dt>Coverage</dt><dd>{activeResult.coverage}</dd></div>
+                        <div><dt>Status</dt><dd>{activeResult.status}</dd></div>
+                        <div><dt>Price</dt><dd>{activeResult.price || '--'}</dd></div>
+                        <div><dt>Source</dt><dd>{sourceLabel}</dd></div>
+                      </dl>
+                      {activeResult.kind === 'event' && relatedPreviewMarkets.length ? (
+                        <div className="qtv-preview-outcomes">
+                          {relatedPreviewMarkets.map((market) => (
+                            <span key={market.marketSlug}>
+                              <b>{titleForMarket(market)}</b>
+                              <em>{latestPrice(market) || `${rowsForMarket(market).toLocaleString('en-US')} rows`}</em>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <p>Enter to open {activeResult.kind === 'event' ? 'event chart' : 'market chart'}</p>
+                    </>
+                  ) : (
+                    <>
+                      <strong>Ready when you are</strong>
+                      <small>Use arrows to preview, Enter to open.</small>
+                    </>
+                  )}
+                </aside>
+              </div>
+              {activeSearchText ? (
+                <div className="qtv-palette-foot">
+                  <span>Ctrl/Cmd+K</span><span>Arrow keys</span><span>Enter open</span><span>Esc close</span><span>Tab filter</span>
                 </div>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
