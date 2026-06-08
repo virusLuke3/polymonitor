@@ -38,6 +38,8 @@ function backendPriceSource(priceSource: PriceSource) {
 
 const DEFAULT_QUANT_EVENT_SLUG = '2026-fifa-world-cup-winner-595';
 const DEFAULT_QUANT_EVENT_TITLE = '2026 FIFA World Cup Winner';
+const EVENT_TILE_OUTCOME_LIMIT = 12;
+const EVENT_TILE_MAX_POINTS = 240;
 
 function defaultMarketSlug() {
   const params = new URLSearchParams(window.location.search);
@@ -277,12 +279,14 @@ export function QuantWorkspace() {
     const parsed = Number(timeframe);
     return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
   }, [timeframe]);
-  const semanticChartQuery: QuantPriceQuery & { priceSource: string; scope: string; maxOutcomes: number } = {
+  const semanticChartQuery: QuantPriceQuery & { priceSource: string; scope: string; maxOutcomes: number; topN?: number; maxPoints?: number } = {
     marketSlug,
     priceSource: backendPriceSource(priceSource),
     scope: 'auto',
     limit: chartLimit,
-    maxOutcomes: selectedEntityKind === 'event' ? 100 : 24,
+    maxOutcomes: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
+    topN: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
+    maxPoints: selectedEntityKind === 'event' ? EVENT_TILE_MAX_POINTS : undefined,
   };
   const priceRequestKey = [
     selectedEntityKind,
@@ -327,7 +331,7 @@ export function QuantWorkspace() {
     const [seriesResult, statusResult] = await Promise.allSettled([
       hasMarketSlug
         ? (selectedEntityKind === 'event'
-          ? fetchQuantEventPriceSeries({ ...semanticChartQuery, eventSlug: marketSlug, maxOutcomes: 100 })
+          ? fetchQuantEventPriceSeries({ ...semanticChartQuery, eventSlug: marketSlug })
           : fetchQuantMarketPriceSeries(semanticChartQuery))
         : Promise.resolve(null),
       fetchQuantBuildStatus('', 12),
@@ -506,7 +510,9 @@ export function QuantWorkspace() {
       priceSource: backendPriceSource(priceSource),
       scope: 'auto',
       limit: chartLimit,
-      maxOutcomes: nextKind === 'event' ? 100 : 24,
+      maxOutcomes: nextKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
+      topN: nextKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
+      maxPoints: nextKind === 'event' ? EVENT_TILE_MAX_POINTS : undefined,
     };
     void (nextKind === 'event' ? fetchQuantEventPriceSeries({ ...request, eventSlug: nextSlug }) : fetchQuantMarketPriceSeries(request))
       .then((payload) => {

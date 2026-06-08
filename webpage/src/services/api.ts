@@ -352,7 +352,7 @@ export function fetchQuantEventPriceSeries(query: QuantPriceQuery & { eventSlug?
   params.set('range', query.range || 'latest');
   params.set('resolution', query.resolution || 'auto');
   params.set('point_format', query.pointFormat || 'lite');
-  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-tile?${params.toString()}`, 18000);
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-tile?${params.toString()}`, 45000);
 }
 
 export function fetchQuantBuildStatus(source = '', limit = 24) {
