@@ -782,7 +782,18 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       && chartStatus !== 'missing'
       && chartStatus !== 'snapshot',
   );
-  const preferEventChart = Boolean(detail && shouldShowOutcomeRail && hasSelectedEventHistory);
+  const focusedMarketSourceIsHistorical = Boolean(
+    chartSource.includes('orderfilled')
+      || chartSource.includes('trade-history')
+      || chartSource.includes('serving-history'),
+  );
+  const hasFocusedHistoricalCurve = hasFocusedMarketCurve && focusedMarketSourceIsHistorical;
+  const preferEventChart = Boolean(
+    detail
+      && shouldShowOutcomeRail
+      && hasSelectedEventHistory
+      && !hasFocusedHistoricalCurve,
+  );
   const chartSourceText = preferEventChart || (!hasFocusedMarketCurve && hasEventHistory)
     ? chartSourceLabel(eventChartSource || 'clob-history', eventChartStatus)
     : hasFocusedMarketCurve || hasFocusedMarketHistory
