@@ -2065,7 +2065,6 @@ function WorldMonitorApp() {
               <div className="wm-globe-hero">
                 {viewMode === '3d' ? (
                   <WorldGlobe
-                    key={`globe:${region}`}
                     markets={displayMarkets}
                     selectedMarket={selectedMarket}
                     recentTrades={currentGlobalTrades}
