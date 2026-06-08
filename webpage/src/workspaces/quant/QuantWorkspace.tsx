@@ -290,7 +290,7 @@ export function QuantWorkspace() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [timeframe, setTimeframe] = useState('25000');
+  const [timeframe, setTimeframe] = useState('2500');
   const [priceSource, setPriceSource] = useState<PriceSource>(defaultPriceSource);
   const [backtestEngine, setBacktestEngine] = useState<BacktestEngine>('backtrader');
   const [testerTab, setTesterTab] = useState<TesterTab>('overview');

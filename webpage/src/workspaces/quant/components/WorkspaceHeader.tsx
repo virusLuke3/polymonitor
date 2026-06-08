@@ -630,8 +630,8 @@ export function WorkspaceHeader({
           <label>
             <span>Source</span>
         <select value={priceSource} onChange={(event) => onPriceSourceChange(event.currentTarget.value as PriceSource)}>
-          <option value="frontend">Frontend price-history</option>
           <option value="orderfilled">OrderFilled block close</option>
+          <option value="frontend">Frontend price-history</option>
         </select>
           </label>
           <label>
