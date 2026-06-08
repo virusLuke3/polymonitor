@@ -117,6 +117,9 @@ function strategyDefaults(prices: Array<{ close: number }>) {
 
 type BacktestAction = 'YES' | 'NO';
 type OutcomeSortKey = 'order' | 'probability' | 'rows' | 'volume';
+type RefreshQuantRowsOptions = {
+  silent?: boolean;
+};
 
 function outcomePricePoints(outcome: QuantMarketSeriesOutcome | null | undefined, action: BacktestAction = 'YES') {
   const points = action === 'NO' ? outcome?.complementPoints || [] : outcome?.points || [];
@@ -134,6 +137,21 @@ function outcomePricePoints(outcome: QuantMarketSeriesOutcome | null | undefined
 function defaultOutcomeTokenId(outcomes: QuantMarketSeriesOutcome[]) {
   const sorted = outcomes.slice().sort((left, right) => toNumber(right.latestPrice) - toNumber(left.latestPrice));
   return sorted[0]?.tokenId || outcomes[0]?.tokenId || '';
+}
+
+function isClosedStatus(status: unknown) {
+  const text = String(status || '').toLowerCase();
+  return Boolean(text) && ['closed', 'resolved', 'settled', 'finalized', 'ended', 'archived'].some((word) => text.includes(word));
+}
+
+function isSelectionLive(market: QuantPriceMarket | null | undefined, series: QuantMarketSeriesPayload | null | undefined) {
+  const status = (market as (QuantPriceMarket & { status?: string | null }) | null | undefined)?.status || series?.event?.status;
+  if (isClosedStatus(status)) return false;
+  const endDate = market?.endDate || series?.market?.endDate;
+  if (!endDate) return true;
+  const endTs = Date.parse(String(endDate));
+  if (!Number.isFinite(endTs)) return true;
+  return endTs > Date.now() - 12 * 60 * 60 * 1000;
 }
 
 function marketInfoFromSelection(slug: string, market?: QuantPriceMarket): MarketInfo {
@@ -188,6 +206,7 @@ export function QuantWorkspace() {
   const [tradeFilters, setTradeFilters] = useState<Set<TradeFilter>>(new Set());
   const [workspaceNotice, setWorkspaceNotice] = useState('');
   const [outcomeSortKey, setOutcomeSortKey] = useState<OutcomeSortKey>('probability');
+  const [lastPriceRefreshAt, setLastPriceRefreshAt] = useState('');
   const marketSearchSeq = useRef(0);
   const priceLoadSeq = useRef(0);
   const marketSlugRef = useRef(marketSlug);
@@ -195,6 +214,7 @@ export function QuantWorkspace() {
   const marketSearchCacheRef = useRef(new Map<string, QuantPriceMarket[]>());
   const priceSeriesCacheRef = useRef(new Map<string, QuantMarketSeriesPayload>());
   const pricePrefetchingRef = useRef(new Set<string>());
+  const liveRefreshInFlightRef = useRef(false);
 
   const activePrices = useMemo(() => {
     const semanticPrices = marketSeriesToPrices(marketSeries);
@@ -223,6 +243,10 @@ export function QuantWorkspace() {
   );
   const selectedEntityKind = selectedMarket?.itemKind === 'event' || selectedEntityKindHint === 'event' ? 'event' : 'market';
   const marketInfo = useMemo(() => marketInfoFromSelection(marketSlug, selectedMarket), [marketSlug, selectedMarket]);
+  const livePriceRefreshEnabled = useMemo(
+    () => Boolean(marketSlug.trim()) && isSelectionLive(selectedMarket, marketSeries),
+    [marketSeries, marketSlug, selectedMarket],
+  );
   const marketCoverageRows = toNumber(selectedMarket?.blockRows || selectedMarket?.frontendRows || marketSeries?.outcomes?.reduce((sum, outcome) => sum + toNumber(outcome.rows), 0));
   const chartLimit = useMemo(() => {
     const parsed = Number(timeframe);
@@ -253,21 +277,26 @@ export function QuantWorkspace() {
     'YES',
   ].join('|');
 
-  const refreshQuantRows = async (requestSeq = priceLoadSeq.current) => {
+  const refreshQuantRows = async (requestSeq = priceLoadSeq.current, options: RefreshQuantRowsOptions = {}) => {
+    const silent = Boolean(options.silent);
     const hasMarketSlug = Boolean(marketSlug.trim());
     const cacheKey = priceRequestKey;
     if (hasMarketSlug) {
       const cached = priceSeriesCacheRef.current.get(cacheKey);
       if (cached) {
         setMarketSeries(cached);
-        setDataStatus('partial');
-        setLoadingMessage('Refreshing cached price series...');
+        if (!silent) {
+          setDataStatus('partial');
+          setLoadingMessage('Refreshing cached price series...');
+        }
       } else {
-        setDataStatus(selectedMarket ? 'price_loading' : 'metadata_loading');
-        setLoadingMessage(selectedMarket ? 'Loading price series...' : 'Loading market metadata...');
+        if (!silent) {
+          setDataStatus(selectedMarket ? 'price_loading' : 'metadata_loading');
+          setLoadingMessage(selectedMarket ? 'Loading price series...' : 'Loading market metadata...');
+        }
       }
       if (import.meta.env.DEV) {
-        console.debug('[quant] price load start', { cacheKey, cached: Boolean(cached), marketSlug, priceSource, timeframe });
+        console.debug('[quant] price load start', { cacheKey, cached: Boolean(cached), marketSlug, priceSource, timeframe, silent });
       }
     }
     const [seriesResult, statusResult] = await Promise.allSettled([
@@ -292,20 +321,27 @@ export function QuantWorkspace() {
     if (seriesResult.status === 'fulfilled') {
       if (nextMarketSeries) priceSeriesCacheRef.current.set(cacheKey, nextMarketSeries);
       setMarketSeries(nextMarketSeries);
+      setLastPriceRefreshAt(new Date().toLocaleTimeString());
     }
     if (priceSource !== 'frontend') setFrontendRows([]);
     if (priceSource !== 'orderfilled') setBlockRows([]);
     if (statusResult.status === 'fulfilled') setRuns(statusResult.value.items || []);
     const activeRowCount = marketSeriesToPrices(nextMarketSeries).length || (priceSource === 'orderfilled' ? nextBlockRows.length : nextFrontendRows.length);
     if (hasMarketSlug) {
-      setDataStatus(activeRowCount ? 'ready' : 'empty');
-      setLoadingMessage(activeRowCount ? '' : 'No price rows found for this source/window');
+      if (!silent) {
+        setDataStatus(activeRowCount ? 'ready' : 'empty');
+        setLoadingMessage(activeRowCount ? '' : 'No price rows found for this source/window');
+      } else if (activeRowCount) {
+        setDataStatus('ready');
+      }
       if (import.meta.env.DEV) console.debug('[quant] price load complete', { cacheKey, activeRowCount });
     }
     if (hasMarketSlug && seriesResult.status === 'rejected') {
       const hasCached = priceSeriesCacheRef.current.has(cacheKey);
-      setDataStatus(hasCached ? 'partial' : 'error');
-      setLoadingMessage(hasCached ? 'Showing cached data; refresh failed.' : 'Price request failed.');
+      if (!silent) {
+        setDataStatus(hasCached ? 'partial' : 'error');
+        setLoadingMessage(hasCached ? 'Showing cached data; refresh failed.' : 'Price request failed.');
+      }
       throw seriesResult.reason instanceof Error ? seriesResult.reason : new Error('Quant API unavailable');
     }
     return {
@@ -550,6 +586,25 @@ export function QuantWorkspace() {
     }, 60);
     return () => window.clearTimeout(timer);
   }, [marketReloadKey, marketSlug, priceSource, timeframe, selectedOutcomeTokenId, selectedBacktestAction, selectedEntityKind]);
+
+  useEffect(() => {
+    if (!livePriceRefreshEnabled) return undefined;
+    const intervalMs = priceSource === 'frontend' ? 60000 : 30000;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible' || liveRefreshInFlightRef.current) return;
+      const seq = priceLoadSeq.current + 1;
+      priceLoadSeq.current = seq;
+      liveRefreshInFlightRef.current = true;
+      void refreshQuantRows(seq, { silent: true })
+        .catch((loadError) => {
+          if (import.meta.env.DEV && !isAbortLikeError(loadError)) console.debug('[quant] live price refresh failed', loadError);
+        })
+        .finally(() => {
+          liveRefreshInFlightRef.current = false;
+        });
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [livePriceRefreshEnabled, marketSlug, priceSource, timeframe, selectedOutcomeTokenId, selectedBacktestAction, selectedEntityKind]);
 
   useEffect(() => {
     const outcomes = marketSeries?.outcomes || [];
@@ -845,6 +900,7 @@ export function QuantWorkspace() {
         <span><i>Outcomes</i><b>{displayedOutcomeCount}</b></span>
         <span><i>Engine</i><b>{backtestEngine}</b></span>
         <span><i>Build Runs</i><b>{runs.length}</b></span>
+        <span><i>Live</i><b>{livePriceRefreshEnabled ? `ON ${lastPriceRefreshAt || 'waiting'}` : 'OFF'}</b></span>
         <span><i>Backtest</i><b>{backtestStatus}</b></span>
         {workspaceNotice ? <span className="notice"><b>{workspaceNotice}</b></span> : null}
         <span><b>UTC+0</b></span>
