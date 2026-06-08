@@ -116,7 +116,7 @@ class QuantEventTileWatcher:
         }
 
     def cache_key(self, event_slug: str) -> str:
-        return _cache_key("event-price-tile", self.query_args(event_slug), version=2)
+        return _cache_key("event-price-tile", self.query_args(event_slug), version=3)
 
     def redis_key(self, event_slug: str) -> str:
         return _redis_key(self.redis_prefix, NAMESPACE, self.cache_key(event_slug))
@@ -192,9 +192,22 @@ class QuantEventTileWatcher:
             for outcome in payload.get("outcomes") or []
             for series_name in ("points", "complementPoints")
             for point in outcome.get(series_name) or []
-            if isinstance(point, dict)
+            if isinstance(point, (dict, list, tuple))
         ]
-        x_values = [int(point.get("x") or point.get("blockNumber") or point.get("timestamp") or 0) for point in points]
+
+        def point_x(point: Any) -> int:
+            if isinstance(point, dict):
+                value = point.get("x") or point.get("blockNumber") or point.get("timestamp") or 0
+            elif isinstance(point, (list, tuple)) and point:
+                value = point[0]
+            else:
+                value = 0
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+
+        x_values = [point_x(point) for point in points]
         with postgres_connection(PostgresSettings(), readonly=False) as conn:
             with conn.cursor() as cur:
                 cur.execute(

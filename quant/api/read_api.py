@@ -492,6 +492,133 @@ def _fetch_token_price_points(
     ]
 
 
+def _fetch_token_price_points_sampled(
+    cur: Any,
+    *,
+    token_id: str | None,
+    source: str,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    from_block: int | None = None,
+    to_block: int | None = None,
+    max_points: int = 900,
+) -> list[dict[str, Any]]:
+    if not token_id:
+        return []
+    bucket_count = max(1, (int(max_points or 900) - 2) // 2)
+    params: list[Any] = [str(token_id)]
+    if source == "frontend":
+        filters = ["token_id = %s"]
+        if from_ts is not None:
+            filters.append("timestamp >= %s")
+            params.append(int(from_ts))
+        if to_ts is not None:
+            filters.append("timestamp <= %s")
+            params.append(int(to_ts))
+        params.extend([bucket_count, int(max_points)])
+        cur.execute(
+            f"""
+            WITH ordered AS (
+                SELECT
+                    token_id, market_id, market_slug, token_side, ts_minute,
+                    timestamp, price,
+                    row_number() OVER (ORDER BY ts_minute ASC) AS rn,
+                    count(*) OVER () AS total_rows
+                FROM quant.market_token_frontend_price_1m
+                WHERE {" AND ".join(filters)}
+            ),
+            bucketed AS (
+                SELECT *,
+                    floor((rn - 1)::numeric / GREATEST(1, ceil(total_rows::numeric / %s)::int)) AS bucket_id
+                FROM ordered
+            ),
+            ranked AS (
+                SELECT *,
+                    row_number() OVER (PARTITION BY bucket_id ORDER BY price ASC, ts_minute ASC) AS lo_rank,
+                    row_number() OVER (PARTITION BY bucket_id ORDER BY price DESC, ts_minute ASC) AS hi_rank
+                FROM bucketed
+            )
+            SELECT token_id, market_id, market_slug, token_side, ts_minute, timestamp, price
+            FROM ranked
+            WHERE rn = 1 OR rn = total_rows OR lo_rank = 1 OR hi_rank = 1
+            ORDER BY ts_minute ASC
+            LIMIT %s
+            """,
+            params,
+        )
+        return [
+            {
+                "x": row["timestamp"],
+                "timestamp": row["timestamp"],
+                "token_id": row["token_id"],
+                "token_side": row["token_side"],
+                "price": row["price"],
+                "volume": 0,
+                "is_implied": False,
+            }
+            for row in cur.fetchall()
+        ]
+
+    filters = ["token_id = %s"]
+    if from_block is not None:
+        filters.append("block_number >= %s")
+        params.append(int(from_block))
+    if to_block is not None:
+        filters.append("block_number <= %s")
+        params.append(int(to_block))
+    params.extend([bucket_count, int(max_points)])
+    cur.execute(
+        f"""
+        WITH ordered AS (
+            SELECT
+                token_id, market_id, market_slug, token_side, block_number,
+                close_price, yes_probability_close, vwap_price, yes_probability_vwap,
+                volume, trade_count,
+                row_number() OVER (ORDER BY block_number ASC) AS rn,
+                count(*) OVER () AS total_rows
+            FROM quant.market_token_block_close
+            WHERE {" AND ".join(filters)}
+        ),
+        bucketed AS (
+            SELECT *,
+                floor((rn - 1)::numeric / GREATEST(1, ceil(total_rows::numeric / %s)::int)) AS bucket_id
+            FROM ordered
+        ),
+        ranked AS (
+            SELECT *,
+                row_number() OVER (PARTITION BY bucket_id ORDER BY close_price ASC, block_number ASC) AS lo_rank,
+                row_number() OVER (PARTITION BY bucket_id ORDER BY close_price DESC, block_number ASC) AS hi_rank
+            FROM bucketed
+        )
+        SELECT
+            token_id, market_id, market_slug, token_side, block_number,
+            close_price, yes_probability_close, vwap_price, yes_probability_vwap,
+            volume, trade_count
+        FROM ranked
+        WHERE rn = 1 OR rn = total_rows OR lo_rank = 1 OR hi_rank = 1
+        ORDER BY block_number ASC
+        LIMIT %s
+        """,
+        params,
+    )
+    return [
+        {
+            "x": row["block_number"],
+            "block_number": row["block_number"],
+            "token_id": row["token_id"],
+            "token_side": row["token_side"],
+            "price": row["close_price"],
+            "yes_probability_close": row["yes_probability_close"],
+            "vwap_price": row["vwap_price"],
+            "yes_probability_vwap": row["yes_probability_vwap"],
+            "volume": row["volume"],
+            "trade_count": row["trade_count"],
+            "is_implied": False,
+        }
+        for row in cur.fetchall()
+    ]
+
+
 def _point_x(point: dict[str, Any]) -> int:
     value = point.get("x") or point.get("block_number") or point.get("timestamp") or 0
     try:
@@ -753,33 +880,56 @@ def get_event_price_tile(
         keep_indexes = {row["index"] for row in ranked[:top_n]}
 
         outcomes: list[dict[str, Any]] = []
+        use_sampled_points = normalized_range in {"all", "full"}
         for item in latest_rows:
             member = item["member"]
             label = _clean_label(member.get("outcome_label")) or _clean_label(member.get("question"))
             no_label = _no_label_from_member(member.get("question"), label)
             if item["index"] in keep_indexes:
-                yes_points = _fetch_token_price_points(
-                    cur,
-                    token_id=member.get("token_yes_id"),
-                    source=source,
-                    from_ts=from_ts,
-                    to_ts=to_ts,
-                    from_block=from_block,
-                    to_block=to_block,
-                    limit=source_limit,
-                )
-                no_points = _fetch_token_price_points(
-                    cur,
-                    token_id=member.get("token_no_id"),
-                    source=source,
-                    from_ts=from_ts,
-                    to_ts=to_ts,
-                    from_block=from_block,
-                    to_block=to_block,
-                    limit=source_limit,
-                )
-                yes_points = _minmax_downsample(yes_points, max_points)
-                no_points = _minmax_downsample(no_points, max_points)
+                if use_sampled_points:
+                    yes_points = _fetch_token_price_points_sampled(
+                        cur,
+                        token_id=member.get("token_yes_id"),
+                        source=source,
+                        from_ts=from_ts,
+                        to_ts=to_ts,
+                        from_block=from_block,
+                        to_block=to_block,
+                        max_points=max_points,
+                    )
+                    no_points = _fetch_token_price_points_sampled(
+                        cur,
+                        token_id=member.get("token_no_id"),
+                        source=source,
+                        from_ts=from_ts,
+                        to_ts=to_ts,
+                        from_block=from_block,
+                        to_block=to_block,
+                        max_points=max_points,
+                    )
+                else:
+                    yes_points = _fetch_token_price_points(
+                        cur,
+                        token_id=member.get("token_yes_id"),
+                        source=source,
+                        from_ts=from_ts,
+                        to_ts=to_ts,
+                        from_block=from_block,
+                        to_block=to_block,
+                        limit=source_limit,
+                    )
+                    no_points = _fetch_token_price_points(
+                        cur,
+                        token_id=member.get("token_no_id"),
+                        source=source,
+                        from_ts=from_ts,
+                        to_ts=to_ts,
+                        from_block=from_block,
+                        to_block=to_block,
+                        limit=source_limit,
+                    )
+                    yes_points = _minmax_downsample(yes_points, max_points)
+                    no_points = _minmax_downsample(no_points, max_points)
             else:
                 yes_points = item["yes_latest"]
                 no_points = item["no_latest"]
