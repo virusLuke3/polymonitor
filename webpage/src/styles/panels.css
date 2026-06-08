@@ -21773,7 +21773,86 @@ a.wm-orderfilled-row {
 }
 
 .wm-focus-trades .wm-orderfilled-row {
-  min-height: 36px !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: minmax(22px, auto) minmax(15px, auto) !important;
+  align-content: center !important;
+  gap: 3px !important;
+  min-height: 52px !important;
+  padding: 6px 8px 6px 10px !important;
+}
+
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-top {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 58px !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+}
+
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-headline {
+  display: grid !important;
+  grid-template-columns: 40px 32px 35px minmax(38px, 1fr) !important;
+  align-items: center !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+}
+
+.wm-focused-market-row .wm-focus-trades .wm-chip,
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-outcome {
+  justify-content: center !important;
+  min-width: 0 !important;
+  min-height: 20px !important;
+  padding: 0 4px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-headline strong,
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-headline em {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-align: right !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-link {
+  justify-self: end !important;
+  width: 58px !important;
+  min-width: 0 !important;
+  min-height: 20px !important;
+  padding: 0 3px !important;
+  overflow: hidden !important;
+  text-align: center !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-meta {
+  display: grid !important;
+  grid-template-columns: 44px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  font-size: 10px !important;
+  line-height: 1.1 !important;
+}
+
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-meta span {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-meta span + span::before {
+  content: none !important;
+}
+
+.wm-focused-market-row .wm-focus-trades .wm-orderfilled-hash {
+  text-align: right !important;
 }
 
 .wm-focused-oracle-feed .wm-oracle-focused-status-list {
