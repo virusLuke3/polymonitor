@@ -799,13 +799,15 @@ function jitteredDensityPoint(
   tone: SignalDensityPoint['tone'],
   weight: number,
 ): SignalDensityPoint {
-  const angle = hashUnit(`${id}:a`) * Math.PI * 2;
-  const distance = Math.sqrt(hashUnit(`${id}:d`));
+  const rawX = hashUnit(`${id}:x`) * 2 - 1;
+  const rawY = hashUnit(`${id}:y`) * 2 - 1;
+  const x = Math.sign(rawX) * Math.pow(Math.abs(rawX), 0.68);
+  const y = Math.sign(rawY) * Math.pow(Math.abs(rawY), 0.72);
   const latScale = Math.max(0.34, Math.cos((lat * Math.PI) / 180));
   return {
     id,
-    lon: Math.max(-179.8, Math.min(179.8, lon + Math.cos(angle) * distance * radiusLon / latScale)),
-    lat: Math.max(-84, Math.min(84, lat + Math.sin(angle) * distance * radiusLat)),
+    lon: Math.max(-179.8, Math.min(179.8, lon + x * radiusLon / latScale)),
+    lat: Math.max(-84, Math.min(84, lat + y * radiusLat)),
     tone,
     weight,
   };
