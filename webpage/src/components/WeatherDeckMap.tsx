@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
+import { MapboxOverlay } from '@deck.gl/mapbox';
+import { ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import type { Layer, LayersList, PickingInfo } from '@deck.gl/core';
 import { getWeatherMapFallbackStyle, getWeatherMapStyle } from '@/config/weatherBasemap';
 import type { RuntimeGeoSanctionsShockItem, RuntimeGlobalWeatherCity } from '@/types';
 
@@ -61,12 +64,6 @@ const IMPORTANT_CITY_IDS = new Set([
   'sydney',
 ]);
 
-type WeatherScreenPoint = WeatherMapPoint & {
-  x: number;
-  y: number;
-  visible: boolean;
-};
-
 type ConflictMapPoint = {
   id: string;
   lon: number;
@@ -90,12 +87,6 @@ type ConflictMapPoint = {
   color: string;
   size: number;
   label: string;
-};
-
-type ConflictScreenPoint = ConflictMapPoint & {
-  x: number;
-  y: number;
-  visible: boolean;
 };
 
 type CountryRisk = {
@@ -122,11 +113,36 @@ type CountryHoverState = {
   risk: CountryRisk;
 };
 
+type ConflictClusterPoint = {
+  id: string;
+  kind: 'conflict-cluster';
+  lon: number;
+  lat: number;
+  count: number;
+  deaths: number;
+  maxDeaths: number;
+  tone: ConflictTone;
+  color: string;
+  bounds: [number, number, number, number];
+  sample: ConflictMapPoint;
+};
+
+type DeckTooltipState = {
+  kind: 'city' | 'conflict' | 'cluster';
+  x: number;
+  y: number;
+  city?: WeatherMapPoint;
+  conflict?: ConflictMapPoint;
+  cluster?: ConflictClusterPoint;
+} | null;
+
+type DeckHoverObject = WeatherMapPoint | ConflictMapPoint | ConflictClusterPoint;
+
 const LOCAL_WORLD_COUNTRIES_GEOJSON_URL = '/map-data/world-countries.geojson';
 const WEATHER_COUNTRY_SOURCE_ID = 'wm-weather-country-boundaries';
 const WEATHER_COUNTRY_NO_MATCH = '__weather_country_no_match__';
-const WEATHER_LABEL_BUDGET = 42;
-const CONFLICT_POINT_BUDGET_INTERACTING = 0;
+const WEATHER_DECK_POINT_NOTE = 'Perf note: before refactor WeatherDeckMap rendered up to 42 weather label buttons and 520 UCDP event buttons, driven by map.project() screen-state updates. Cities and UCDP markers now render as deck.gl GPU layers; only one tooltip plus selected detail panels remain as DOM.';
+void WEATHER_DECK_POINT_NOTE;
 
 const COUNTRY_ISO2_ALIASES: Record<string, string> = {
   afghanistan: 'AF',
@@ -644,93 +660,264 @@ function ensureCountryLayers(map: MapLibreMap, risks: CountryRisk[]) {
   updateCountryRiskPaint(map, risks);
 }
 
-function projectScreenPoints(map: MapLibreMap | null, points: WeatherMapPoint[]): WeatherScreenPoint[] {
-  if (!map) return [];
-  const canvas = map.getCanvas();
-  const width = canvas.clientWidth || canvas.width;
-  const height = canvas.clientHeight || canvas.height;
-  return points.map((point) => {
-    const projected = map.project([point.lon, point.lat]);
-    return {
-      ...point,
-      x: projected.x,
-      y: projected.y,
-      visible: projected.x > -90 && projected.x < width + 90 && projected.y > -60 && projected.y < height + 60,
-    };
-  });
-}
-
-function projectConflictScreenPoints(map: MapLibreMap | null, points: ConflictMapPoint[]): ConflictScreenPoint[] {
-  if (!map) return [];
-  const canvas = map.getCanvas();
-  const width = canvas.clientWidth || canvas.width;
-  const height = canvas.clientHeight || canvas.height;
-  return points.map((point) => {
-    const projected = map.project([point.lon, point.lat]);
-    return {
-      ...point,
-      x: projected.x,
-      y: projected.y,
-      visible: projected.x > -40 && projected.x < width + 40 && projected.y > -40 && projected.y < height + 40,
-    };
-  });
-}
-
-function conflictPriority(point: ConflictScreenPoint, selectedId?: string | null) {
+function conflictPriority(point: ConflictMapPoint, selectedId?: string | null) {
   return (point.id === selectedId ? 1_000_000 : 0)
     + (point.deaths >= 50 ? 120_000 : 0)
     + Math.log10(point.deaths + 1) * 10_000
     + parseDateMs(point.occurredAt) / 1000 / 60 / 60 / 24 / 30;
 }
 
-function conflictPointBudget(zoom: number, interacting: boolean) {
-  if (interacting) return CONFLICT_POINT_BUDGET_INTERACTING;
-  if (zoom < 1.8) return 120;
-  if (zoom < 2.6) return 220;
-  if (zoom < 3.6) return 340;
-  return 520;
+function hexToRgba(hex: string, alpha = 255): [number, number, number, number] {
+  const normalized = hex.replace('#', '').trim();
+  const full = normalized.length === 3
+    ? normalized.split('').map((char) => char + char).join('')
+    : normalized;
+  const value = Number.parseInt(full, 16);
+  if (!Number.isFinite(value)) return [255, 255, 255, alpha];
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255, alpha];
 }
 
-function WeatherHtmlLabels({
-  points,
-  selectedCityId,
-  onSelectCity,
-  disabled = false,
-}: {
-  points: WeatherScreenPoint[];
-  selectedCityId?: string | null;
-  onSelectCity?: (cityId: string) => void;
-  disabled?: boolean;
-}) {
-  if (disabled) return null;
-  const visiblePoints = points
-    .filter((point) => point.visible && shouldShowLabel(point, selectedCityId))
+function weatherColor(point: WeatherMapPoint, alpha = 220): [number, number, number, number] {
+  if (point.temperatureTone === 'hot') return [255, 121, 72, alpha];
+  if (point.temperatureTone === 'cool') return [72, 215, 190, alpha];
+  if (point.marketTone === 'market') return [255, 166, 32, alpha];
+  return [115, 216, 255, alpha];
+}
+
+function paddedBounds(map: MapLibreMap | null, padRatio = 0.18): [number, number, number, number] | null {
+  if (!map) return null;
+  const bounds = map.getBounds();
+  const west = bounds.getWest();
+  const south = bounds.getSouth();
+  const east = bounds.getEast();
+  const north = bounds.getNorth();
+  const padLon = Math.max(1, (east - west) * padRatio);
+  const padLat = Math.max(1, (north - south) * padRatio);
+  return [
+    Math.max(-180, west - padLon),
+    Math.max(-90, south - padLat),
+    Math.min(180, east + padLon),
+    Math.min(90, north + padLat),
+  ];
+}
+
+function pointInBounds(point: { lon: number; lat: number }, bounds: [number, number, number, number] | null) {
+  if (!bounds) return true;
+  const [west, south, east, north] = bounds;
+  return point.lon >= west && point.lon <= east && point.lat >= south && point.lat <= north;
+}
+
+function pickCityLabels(points: WeatherMapPoint[], zoom: number, selectedCityId?: string | null) {
+  if (zoom < 2.2 && !selectedCityId) {
+    return points
+      .filter((point) => IMPORTANT_CITY_IDS.has(point.id))
+      .slice(0, 18);
+  }
+  const budget = zoom < 3.6 ? 24 : zoom < 5.2 ? 42 : 72;
+  return points
+    .filter((point) => shouldShowLabel(point, selectedCityId))
     .sort((a, b) => (
       (b.id === selectedCityId ? 1 : 0) - (a.id === selectedCityId ? 1 : 0)
       || (IMPORTANT_CITY_IDS.has(b.id) ? 1 : 0) - (IMPORTANT_CITY_IDS.has(a.id) ? 1 : 0)
       || (b.topBinPrice ?? -1) - (a.topBinPrice ?? -1)
     ))
-    .slice(0, WEATHER_LABEL_BUDGET);
-  return (
-    <div className="wm-weather-html-label-layer">
-      {visiblePoints.map((point) => (
-        <button
-          type="button"
-          key={`weather-label-${point.id}`}
-          className={`wm-weather-html-label ${point.temperatureTone} ${point.marketTone} ${point.id === selectedCityId ? 'selected' : ''}`}
-          title={`${point.city} ${point.condition} ${point.sublabel}`}
-          style={{
-            transform: `translate(${Math.round(point.x + point.labelDx)}px, ${Math.round(point.y + point.labelDy)}px)`,
-          }}
-          onClick={() => onSelectCity?.(point.id)}
-        >
-          <i aria-hidden="true" />
-          <strong>{point.city}</strong>
-          <span>{point.sublabel}</span>
-        </button>
-      ))}
-    </div>
-  );
+    .slice(0, budget);
+}
+
+function visibleConflictSingles(points: ConflictMapPoint[], zoom: number, bounds: [number, number, number, number] | null, selectedId?: string | null) {
+  if (zoom < 3) {
+    return selectedId ? points.filter((point) => point.id === selectedId) : [];
+  }
+  const budget = zoom < 4.5 ? 180 : zoom < 6.5 ? 420 : 900;
+  return points
+    .filter((point) => pointInBounds(point, bounds))
+    .sort((a, b) => conflictPriority(b, selectedId) - conflictPriority(a, selectedId))
+    .slice(0, budget);
+}
+
+function clusterConflictPoints(points: ConflictMapPoint[], zoom: number, bounds: [number, number, number, number] | null): ConflictClusterPoint[] {
+  if (zoom >= 5 || points.length === 0) return [];
+  const visible = points.filter((point) => pointInBounds(point, bounds));
+  const cellSize = zoom < 2 ? 10 : zoom < 3 ? 6 : 3.2;
+  const buckets = new Map<string, ConflictMapPoint[]>();
+  for (const point of visible) {
+    const key = `${Math.floor(point.lon / cellSize)}:${Math.floor(point.lat / cellSize)}`;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(point);
+    else buckets.set(key, [point]);
+  }
+
+  const clusters: ConflictClusterPoint[] = [];
+  for (const bucket of buckets.values()) {
+    if (bucket.length < 3) continue;
+    let lon = 0;
+    let lat = 0;
+    let deaths = 0;
+    let maxDeaths = -1;
+    let sample = bucket[0]!;
+    let west = 180;
+    let south = 90;
+    let east = -180;
+    let north = -90;
+    const toneCounts: Record<ConflictTone, number> = { state: 0, nonstate: 0, onesided: 0, unknown: 0 };
+    for (const point of bucket) {
+      lon += point.lon;
+      lat += point.lat;
+      deaths += point.deaths;
+      toneCounts[point.tone] += 1;
+      if (point.deaths > maxDeaths) {
+        maxDeaths = point.deaths;
+        sample = point;
+      }
+      west = Math.min(west, point.lon);
+      south = Math.min(south, point.lat);
+      east = Math.max(east, point.lon);
+      north = Math.max(north, point.lat);
+    }
+    const dominantTone = (Object.entries(toneCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'unknown') as ConflictTone;
+    const color = dominantTone === 'state'
+      ? '#ff4d4d'
+      : dominantTone === 'nonstate'
+        ? '#ff9f1c'
+        : dominantTone === 'onesided'
+          ? '#ffd400'
+          : '#ff735d';
+    clusters.push({
+      id: `ucdp-cluster-${Math.round(lon / bucket.length * 100)}-${Math.round(lat / bucket.length * 100)}-${bucket.length}`,
+      kind: 'conflict-cluster',
+      lon: lon / bucket.length,
+      lat: lat / bucket.length,
+      count: bucket.length,
+      deaths,
+      maxDeaths,
+      tone: dominantTone,
+      color,
+      bounds: [west, south, east, north],
+      sample,
+    });
+  }
+  return clusters;
+}
+
+function buildWeatherDeckLayers({
+  cities,
+  conflicts,
+  selectedCityId,
+  selectedConflictId,
+  zoom,
+  bounds,
+  showLabels,
+}: {
+  cities: WeatherMapPoint[];
+  conflicts: ConflictMapPoint[];
+  selectedCityId?: string | null;
+  selectedConflictId?: string | null;
+  zoom: number;
+  bounds: [number, number, number, number] | null;
+  showLabels: boolean;
+}): LayersList {
+  const layers: (Layer | null)[] = [];
+  const cityLabels = showLabels ? pickCityLabels(cities, zoom, selectedCityId) : [];
+  const conflictClusters = clusterConflictPoints(conflicts, zoom, bounds);
+  const clusterMemberIds = zoom < 5
+    ? new Set(conflictClusters.flatMap((cluster) => cluster.count >= 3 ? [cluster.sample.id] : []))
+    : new Set<string>();
+  const conflictSingles = visibleConflictSingles(conflicts, zoom, bounds, selectedConflictId)
+    .filter((point) => !clusterMemberIds.has(point.id) || point.id === selectedConflictId);
+
+  if (cities.length) {
+    layers.push(new ScatterplotLayer<WeatherMapPoint>({
+      id: 'weather-city-points',
+      data: cities,
+      getPosition: (point) => [point.lon, point.lat],
+      getRadius: (point) => point.id === selectedCityId ? 52000 : IMPORTANT_CITY_IDS.has(point.id) ? 38000 : 26000,
+      getFillColor: (point) => weatherColor(point, point.id === selectedCityId ? 245 : 205),
+      getLineColor: [255, 241, 190, 210],
+      getLineWidth: (point) => point.id === selectedCityId ? 2 : 1,
+      lineWidthMinPixels: 1,
+      radiusMinPixels: 4,
+      radiusMaxPixels: 15,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 245, 190, 120],
+    }));
+  }
+
+  if (cityLabels.length) {
+    layers.push(new TextLayer<WeatherMapPoint>({
+      id: 'weather-city-labels',
+      data: cityLabels,
+      getPosition: (point) => [point.lon, point.lat],
+      getText: (point) => `${point.city}\n${point.sublabel}`,
+      getPixelOffset: (point) => [point.labelDx + 8, point.labelDy - 2],
+      getSize: (point) => point.id === selectedCityId ? 13 : 11,
+      getColor: (point) => point.temperatureTone === 'hot'
+        ? [255, 176, 115, 235]
+        : point.temperatureTone === 'cool'
+          ? [128, 234, 220, 235]
+          : [115, 216, 255, 228],
+      getTextAnchor: 'start',
+      getAlignmentBaseline: 'center',
+      fontFamily: 'monospace',
+      fontWeight: 900,
+      outlineWidth: 3,
+      outlineColor: [0, 0, 0, 210],
+      pickable: true,
+    }));
+  }
+
+  if (conflictClusters.length) {
+    layers.push(new ScatterplotLayer<ConflictClusterPoint>({
+      id: 'ucdp-conflict-clusters',
+      data: conflictClusters,
+      getPosition: (cluster) => [cluster.lon, cluster.lat],
+      getRadius: (cluster) => Math.max(75000, Math.log2(cluster.count + 1) * 65000),
+      getFillColor: (cluster) => hexToRgba(cluster.color, 145),
+      getLineColor: (cluster) => hexToRgba(cluster.color, 235),
+      getLineWidth: 2,
+      radiusMinPixels: 9,
+      radiusMaxPixels: 34,
+      lineWidthMinPixels: 1,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 255, 180, 80],
+    }));
+    layers.push(new TextLayer<ConflictClusterPoint>({
+      id: 'ucdp-conflict-cluster-counts',
+      data: conflictClusters,
+      getPosition: (cluster) => [cluster.lon, cluster.lat],
+      getText: (cluster) => String(cluster.count),
+      getSize: 12,
+      getColor: [255, 246, 210, 235],
+      getTextAnchor: 'middle',
+      getAlignmentBaseline: 'center',
+      fontFamily: 'monospace',
+      fontWeight: 900,
+      outlineWidth: 2,
+      outlineColor: [0, 0, 0, 210],
+      pickable: false,
+    }));
+  }
+
+  if (conflictSingles.length) {
+    layers.push(new ScatterplotLayer<ConflictMapPoint>({
+      id: 'ucdp-conflict-events',
+      data: conflictSingles,
+      getPosition: (point) => [point.lon, point.lat],
+      getRadius: (point) => Math.max(12000, Math.sqrt(point.deaths + 1) * 9000),
+      getFillColor: (point) => hexToRgba(point.color, point.id === selectedConflictId ? 245 : 195),
+      getLineColor: (point) => point.id === selectedConflictId ? [255, 246, 210, 245] : hexToRgba(point.color, 235),
+      getLineWidth: (point) => point.id === selectedConflictId ? 2 : 1,
+      radiusMinPixels: 4,
+      radiusMaxPixels: 18,
+      lineWidthMinPixels: 1,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 255, 180, 90],
+    }));
+  }
+
+  return layers.filter(Boolean) as LayersList;
 }
 
 function countryFeatureMeta(props?: Record<string, unknown>) {
@@ -810,51 +997,6 @@ function setupCountryInteractions(
   });
 }
 
-function UcdpConflictLayer({
-  points,
-  selectedId,
-  onSelect,
-  zoom,
-  interacting,
-}: {
-  points: ConflictScreenPoint[];
-  selectedId?: string | null;
-  onSelect: (point: ConflictScreenPoint) => void;
-  zoom: number;
-  interacting: boolean;
-}) {
-  const budget = conflictPointBudget(zoom, interacting);
-  const visiblePoints = budget <= 0
-    ? []
-    : points
-      .filter((point) => point.visible)
-      .sort((a, b) => conflictPriority(b, selectedId) - conflictPriority(a, selectedId))
-      .slice(0, budget);
-  if (!visiblePoints.length) return null;
-  return (
-    <div className="wm-ucdp-map-layer" aria-label="UCDP conflict event overlay">
-      {visiblePoints.map((point) => (
-        <button
-          type="button"
-          key={`ucdp-map-${point.id}`}
-          className={`wm-ucdp-map-point type-${point.violenceType || 'unknown'} tone-${point.tone} ${point.deaths >= 50 ? 'major' : ''} ${point.id === selectedId ? 'selected' : ''}`}
-          aria-label={point.label}
-          title={point.label}
-          style={{
-            transform: `translate(${Math.round(point.x)}px, ${Math.round(point.y)}px)`,
-            '--ucdp-color': point.color,
-            '--ucdp-size': `${point.size}px`,
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSelect(point);
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
 function CountryHoverTooltip({ hover }: { hover: CountryHoverState | null }) {
   if (!hover) return null;
   return (
@@ -866,6 +1008,38 @@ function CountryHoverTooltip({ hover }: { hover: CountryHoverState | null }) {
       <span>{hover.risk.score}/100 · {hover.risk.eventCount} events · {hover.risk.deaths} deaths</span>
     </div>
   );
+}
+
+function DeckMapTooltip({ tooltip }: { tooltip: DeckTooltipState }) {
+  if (!tooltip) return null;
+  if (tooltip.kind === 'city' && tooltip.city) {
+    const city = tooltip.city;
+    return (
+      <div className={`wm-map-country-tooltip wm-map-deck-tooltip city ${city.temperatureTone}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
+        <strong>{city.city}</strong>
+        <span>{city.condition} · {city.sublabel}</span>
+      </div>
+    );
+  }
+  if (tooltip.kind === 'cluster' && tooltip.cluster) {
+    const cluster = tooltip.cluster;
+    return (
+      <div className={`wm-map-country-tooltip wm-map-deck-tooltip cluster tone-${cluster.tone}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
+        <strong>{cluster.count} UCDP events</strong>
+        <span>{cluster.deaths} deaths · click to zoom</span>
+      </div>
+    );
+  }
+  if (tooltip.kind === 'conflict' && tooltip.conflict) {
+    const point = tooltip.conflict;
+    return (
+      <div className={`wm-map-country-tooltip wm-map-deck-tooltip conflict tone-${point.tone}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
+        <strong>{point.country}</strong>
+        <span>{point.violenceLabel} · {point.deaths} deaths</span>
+      </div>
+    );
+  }
+  return null;
 }
 
 function RiskBar({ label, value, max, tone }: { label: string; value: number; max: number; tone: string }) {
@@ -919,7 +1093,7 @@ function CountryRiskInspector({ risk, onClose }: { risk: CountryRisk; onClose: (
   );
 }
 
-function ConflictInspector({ point, onClose }: { point: ConflictScreenPoint; onClose: () => void }) {
+function ConflictInspector({ point, onClose }: { point: ConflictMapPoint; onClose: () => void }) {
   return (
     <aside className={`wm-map-risk-inspector wm-map-conflict-inspector tone-${point.tone}`}>
       <button type="button" className="wm-map-risk-close" onClick={onClose} aria-label="Close conflict detail">×</button>
@@ -953,33 +1127,129 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mapHostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const deckOverlayRef = useRef<MapboxOverlay | null>(null);
   const onSelectRef = useRef(onSelectCity);
   const countryRiskByIsoRef = useRef<Map<string, CountryRisk>>(new Map());
   const onCountrySelectRef = useRef<(risk: CountryRisk) => void>(() => undefined);
   const countryPulseRafRef = useRef<number | null>(null);
-  const projectionRafRef = useRef<number | null>(null);
+  const deckRafRef = useRef<number | null>(null);
+  const deckSettleTimerRef = useRef<number | null>(null);
   const interactionEndTimerRef = useRef<number | null>(null);
+  const tooltipRafRef = useRef<number | null>(null);
+  const pendingTooltipRef = useRef<DeckTooltipState>(null);
   const mapInteractingRef = useRef(false);
   const pointsRef = useRef<WeatherMapPoint[]>([]);
   const conflictPointsRef = useRef<ConflictMapPoint[]>([]);
   const countryRisksRef = useRef<CountryRisk[]>([]);
+  const selectedCityIdRef = useRef<string | null>(selectedCityId);
+  const selectedConflictIdRef = useRef<string | null>(null);
+  const showLabelsRef = useRef(showLabels);
   const fallbackAppliedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapDegraded, setMapDegraded] = useState(false);
   const [mapInteracting, setMapInteracting] = useState(false);
-  const [mapZoom, setMapZoom] = useState(1.25);
-  const [screenPoints, setScreenPoints] = useState<WeatherScreenPoint[]>([]);
-  const [conflictScreenPoints, setConflictScreenPoints] = useState<ConflictScreenPoint[]>([]);
+  const [deckTooltip, setDeckTooltip] = useState<DeckTooltipState>(null);
   const [countryHover, setCountryHover] = useState<CountryHoverState | null>(null);
   const [selectedCountryRisk, setSelectedCountryRisk] = useState<CountryRisk | null>(null);
-  const [selectedConflict, setSelectedConflict] = useState<ConflictScreenPoint | null>(null);
+  const [selectedConflict, setSelectedConflict] = useState<ConflictMapPoint | null>(null);
   const points = useMemo(() => normalizePoints(items), [items]);
   const conflictPoints = useMemo(() => normalizeConflictPoints(ucdpEvents), [ucdpEvents]);
   const countryRisks = useMemo(() => buildCountryRisks(conflictPoints), [conflictPoints]);
   const countryRiskByIso = useMemo(() => new Map(countryRisks.map((risk) => [risk.iso2, risk])), [countryRisks]);
-  const hasProjectedPoints = screenPoints.some((point) => point.visible);
-  const hasProjectedConflicts = conflictScreenPoints.some((point) => point.visible);
-  const showHtmlLayer = showLabels && hasProjectedPoints;
+
+  const updateDeckLayers = () => {
+    const map = mapRef.current;
+    const overlay = deckOverlayRef.current;
+    if (!map || !overlay) return;
+    const zoom = map.getZoom();
+    const layers = buildWeatherDeckLayers({
+      cities: pointsRef.current,
+      conflicts: conflictPointsRef.current,
+      selectedCityId: selectedCityIdRef.current,
+      selectedConflictId: selectedConflictIdRef.current,
+      zoom,
+      bounds: paddedBounds(map),
+      showLabels: showLabelsRef.current,
+    });
+    overlay.setProps({ layers });
+    map.triggerRepaint();
+  };
+
+  const scheduleDeckUpdate = (delay = 0) => {
+    if (deckSettleTimerRef.current) {
+      window.clearTimeout(deckSettleTimerRef.current);
+      deckSettleTimerRef.current = null;
+    }
+    if (delay > 0) {
+      deckSettleTimerRef.current = window.setTimeout(() => {
+        deckSettleTimerRef.current = null;
+        scheduleDeckUpdate();
+      }, delay);
+      return;
+    }
+    if (deckRafRef.current) return;
+    deckRafRef.current = window.requestAnimationFrame(() => {
+      deckRafRef.current = null;
+      updateDeckLayers();
+    });
+  };
+
+  const updateDeckTooltip = (next: DeckTooltipState) => {
+    pendingTooltipRef.current = next;
+    if (tooltipRafRef.current) return;
+    tooltipRafRef.current = window.requestAnimationFrame(() => {
+      tooltipRafRef.current = null;
+      setDeckTooltip(pendingTooltipRef.current);
+    });
+  };
+
+  const handleDeckHover = (info: PickingInfo<DeckHoverObject>) => {
+    const map = mapRef.current;
+    if (map) map.getCanvas().style.cursor = info.object ? 'pointer' : '';
+    if (!info.object) {
+      updateDeckTooltip(null);
+      return;
+    }
+    const object = info.object;
+    if ('kind' in object && object.kind === 'conflict-cluster') {
+      updateDeckTooltip({ kind: 'cluster', x: info.x, y: info.y, cluster: object });
+      return;
+    }
+    if ('city' in object) {
+      updateDeckTooltip({ kind: 'city', x: info.x, y: info.y, city: object as WeatherMapPoint });
+      return;
+    }
+    updateDeckTooltip({ kind: 'conflict', x: info.x, y: info.y, conflict: object as ConflictMapPoint });
+  };
+
+  const handleDeckClick = (info: PickingInfo<DeckHoverObject>) => {
+    const object = info.object;
+    if (!object) return;
+    if ('kind' in object && object.kind === 'conflict-cluster') {
+      const map = mapRef.current;
+      const [west, south, east, north] = object.bounds;
+      if (map) {
+        map.fitBounds([[west, south], [east, north]], {
+          padding: 70,
+          maxZoom: 5.8,
+          duration: 520,
+        });
+      }
+      return;
+    }
+    if ('city' in object) {
+      onSelectRef.current?.((object as WeatherMapPoint).id);
+      selectedCityIdRef.current = (object as WeatherMapPoint).id;
+      scheduleDeckUpdate();
+      return;
+    }
+    const point = object as ConflictMapPoint;
+    selectedConflictIdRef.current = point.id;
+    setSelectedCountryRisk(null);
+    setSelectedConflict(point);
+    highlightCountry(point.iso2, point.tone === 'state' ? 'critical' : point.tone === 'nonstate' ? 'elevated' : 'watch');
+    scheduleDeckUpdate();
+  };
 
   const highlightCountry = (iso2: string | null, level: CountryRiskLevel = 'quiet') => {
     const map = mapRef.current;
@@ -1032,19 +1302,37 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
   }, [onSelectCity]);
 
   useEffect(() => {
+    selectedCityIdRef.current = selectedCityId;
+    scheduleDeckUpdate();
+  }, [selectedCityId]);
+
+  useEffect(() => {
+    showLabelsRef.current = showLabels;
+    scheduleDeckUpdate();
+  }, [showLabels]);
+
+  useEffect(() => {
     onCountrySelectRef.current = (risk: CountryRisk) => {
       setSelectedConflict(null);
+      selectedConflictIdRef.current = null;
       setSelectedCountryRisk(risk);
       highlightCountry(risk.iso2, risk.level);
+      scheduleDeckUpdate();
     };
   });
 
   useEffect(() => {
     pointsRef.current = points;
+    scheduleDeckUpdate();
   }, [points]);
 
   useEffect(() => {
     conflictPointsRef.current = conflictPoints;
+    if (selectedConflictIdRef.current && !conflictPoints.some((point) => point.id === selectedConflictIdRef.current)) {
+      selectedConflictIdRef.current = null;
+      setSelectedConflict(null);
+    }
+    scheduleDeckUpdate();
   }, [conflictPoints]);
 
   useEffect(() => {
@@ -1076,21 +1364,6 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       canvasContextAttributes: { powerPreference: 'high-performance' },
     });
     mapRef.current = map;
-    const syncScreenPoints = () => {
-      setScreenPoints(projectScreenPoints(map, pointsRef.current));
-      setConflictScreenPoints(projectConflictScreenPoints(map, conflictPointsRef.current));
-      setMapZoom((current) => {
-        const next = map.getZoom();
-        return Math.abs(next - current) > 0.12 ? next : current;
-      });
-    };
-    const scheduleScreenSync = () => {
-      if (projectionRafRef.current) return;
-      projectionRafRef.current = window.requestAnimationFrame(() => {
-        projectionRafRef.current = null;
-        syncScreenPoints();
-      });
-    };
     const beginMapInteraction = () => {
       if (interactionEndTimerRef.current) {
         window.clearTimeout(interactionEndTimerRef.current);
@@ -1099,6 +1372,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       if (mapInteractingRef.current) return;
       mapInteractingRef.current = true;
       setMapInteracting(true);
+      updateDeckTooltip(null);
     };
     const endMapInteraction = () => {
       if (interactionEndTimerRef.current) window.clearTimeout(interactionEndTimerRef.current);
@@ -1106,8 +1380,8 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
         interactionEndTimerRef.current = null;
         mapInteractingRef.current = false;
         setMapInteracting(false);
-        scheduleScreenSync();
-      }, 90);
+        scheduleDeckUpdate(120);
+      }, 110);
     };
     const resizeAndSync = () => {
       if (!mapRef.current) return;
@@ -1115,11 +1389,29 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       map.triggerRepaint();
       ensureCountryLayers(map, countryRisksRef.current);
       setupCountryInteractions(map, countryRiskByIsoRef, setCountryHover, onCountrySelectRef);
-      scheduleScreenSync();
+      scheduleDeckUpdate(80);
+    };
+    const ensureDeckOverlay = () => {
+      if (deckOverlayRef.current) {
+        scheduleDeckUpdate();
+        return;
+      }
+      const overlay = new MapboxOverlay({
+        interleaved: true,
+        layers: [],
+        onHover: handleDeckHover,
+        onClick: handleDeckClick,
+        pickingRadius: 8,
+        useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
+      });
+      deckOverlayRef.current = overlay;
+      map.addControl(overlay as unknown as maplibregl.IControl);
+      scheduleDeckUpdate();
     };
 
     map.on('load', () => {
       setMapReady(true);
+      ensureDeckOverlay();
       ensureCountryLayers(map, countryRisksRef.current);
       setupCountryInteractions(map, countryRiskByIsoRef, setCountryHover, onCountrySelectRef);
       resizeAndSync();
@@ -1137,7 +1429,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     map.on('zoom', beginMapInteraction);
     map.on('moveend', endMapInteraction);
     map.on('zoomend', endMapInteraction);
-    map.on('resize', scheduleScreenSync);
+    map.on('resize', resizeAndSync);
 
     let tileErrorCount = 0;
     const initialFrame = window.requestAnimationFrame(resizeAndSync);
@@ -1167,9 +1459,17 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
         window.cancelAnimationFrame(countryPulseRafRef.current);
         countryPulseRafRef.current = null;
       }
-      if (projectionRafRef.current) {
-        window.cancelAnimationFrame(projectionRafRef.current);
-        projectionRafRef.current = null;
+      if (deckRafRef.current) {
+        window.cancelAnimationFrame(deckRafRef.current);
+        deckRafRef.current = null;
+      }
+      if (deckSettleTimerRef.current) {
+        window.clearTimeout(deckSettleTimerRef.current);
+        deckSettleTimerRef.current = null;
+      }
+      if (tooltipRafRef.current) {
+        window.cancelAnimationFrame(tooltipRafRef.current);
+        tooltipRafRef.current = null;
       }
       if (interactionEndTimerRef.current) {
         window.clearTimeout(interactionEndTimerRef.current);
@@ -1187,54 +1487,40 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       map.off('zoom', beginMapInteraction);
       map.off('moveend', endMapInteraction);
       map.off('zoomend', endMapInteraction);
-      map.off('resize', scheduleScreenSync);
+      map.off('resize', resizeAndSync);
+      if (deckOverlayRef.current) {
+        try { map.removeControl(deckOverlayRef.current as unknown as maplibregl.IControl); } catch { /* map can already be tearing down */ }
+        deckOverlayRef.current = null;
+      }
       map.remove();
       mapRef.current = null;
     };
   }, [interactive]);
 
   useEffect(() => {
-    setScreenPoints(projectScreenPoints(mapRef.current, points));
-    setConflictScreenPoints(projectConflictScreenPoints(mapRef.current, conflictPoints));
-  }, [conflictPoints, points, selectedCityId]);
-
-  useEffect(() => {
     if (!selectedConflict) return;
-    const refreshed = conflictScreenPoints.find((point) => point.id === selectedConflict.id);
+    const refreshed = conflictPoints.find((point) => point.id === selectedConflict.id);
     if (refreshed && refreshed !== selectedConflict) setSelectedConflict(refreshed);
-  }, [conflictScreenPoints, selectedConflict]);
+  }, [conflictPoints, selectedConflict]);
 
   return (
     <div
       ref={rootRef}
-      className={`wm-weather-deck-map map-ready ${hasProjectedPoints ? 'has-screen-points' : 'no-screen-points'} ${mapDegraded ? 'map-degraded' : ''} ${mapInteracting ? 'map-interacting' : ''}`}
+      className={`wm-weather-deck-map map-ready ${points.length ? 'has-screen-points' : 'no-screen-points'} ${mapDegraded ? 'map-degraded' : ''} ${mapInteracting ? 'map-interacting' : ''}`}
       style={{ height: `${height}px` }}
     >
-      <div ref={mapHostRef} className={`wm-weather-deck-basemap ${mapReady || hasProjectedPoints ? 'ready' : ''}`} />
-      {hasProjectedConflicts ? (
-        <UcdpConflictLayer
-          points={conflictScreenPoints}
-          selectedId={selectedConflict?.id || null}
-          zoom={mapZoom}
-          interacting={mapInteracting}
-          onSelect={(point) => {
-            setSelectedCountryRisk(null);
-            setSelectedConflict(point);
-            highlightCountry(point.iso2, point.tone === 'state' ? 'critical' : point.tone === 'nonstate' ? 'elevated' : 'watch');
-          }}
-        />
-      ) : null}
-      {showHtmlLayer ? <WeatherHtmlLabels points={screenPoints} selectedCityId={selectedCityId} onSelectCity={onSelectCity} disabled={mapInteracting} /> : null}
+      <div ref={mapHostRef} className={`wm-weather-deck-basemap ${mapReady || points.length ? 'ready' : ''}`} />
       <CountryHoverTooltip hover={countryHover} />
+      <DeckMapTooltip tooltip={deckTooltip} />
       {selectedCountryRisk ? <CountryRiskInspector risk={selectedCountryRisk} onClose={() => { setSelectedCountryRisk(null); highlightCountry(null); }} /> : null}
-      {selectedConflict ? <ConflictInspector point={selectedConflict} onClose={() => { setSelectedConflict(null); highlightCountry(null); }} /> : null}
+      {selectedConflict ? <ConflictInspector point={selectedConflict} onClose={() => { setSelectedConflict(null); selectedConflictIdRef.current = null; highlightCountry(null); scheduleDeckUpdate(); }} /> : null}
       <div className="wm-weather-deck-legend" aria-hidden="true">
         <span><i className="hot" />HOT</span>
         <span><i className="cool" />COOL</span>
         {conflictPoints.length ? <span><i className="ucdp" />UCDP</span> : null}
         {countryRisks.length ? <span><i className="country" />COUNTRY RISK</span> : null}
       </div>
-      <div className="wm-weather-deck-status">{mapDegraded ? 'Fallback tiles' : 'MapLibre'}</div>
+      <div className="wm-weather-deck-status">{mapDegraded ? 'Fallback tiles' : 'DeckGL'}</div>
     </div>
   );
 }
