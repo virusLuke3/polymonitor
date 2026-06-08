@@ -314,23 +314,23 @@ export function fetchQuantBuildStatus(source = '', limit = 24) {
 }
 
 export function createQuantBacktestRun(payload: QuantBacktestCreatePayload) {
-  return apiPostWithTimeout<{ item: QuantBacktestRun; runId: number; status: string }>('/quant/backtest-runs', payload, 8000);
+  return apiPostWithTimeout<{ item: QuantBacktestRun; runId: number; status: string }>('/quant/backtest-runs', payload, 30000);
 }
 
 export function fetchQuantBacktestRun(runId: number) {
-  return apiGetWithTimeout<{ item: QuantBacktestRun }>(`/quant/backtest-runs/${runId}`, 8000);
+  return apiGetWithTimeout<{ item: QuantBacktestRun }>(`/quant/backtest-runs/${runId}`, 15000);
 }
 
 export function fetchQuantBacktestTrades(runId: number, limit = 10000) {
-  return apiGetWithTimeout<QuantListPayload<QuantBacktestTrade>>(`/quant/backtest-runs/${runId}/trades?limit=${limit}`, 10000);
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestTrade>>(`/quant/backtest-runs/${runId}/trades?limit=${limit}`, 20000);
 }
 
 export function fetchQuantBacktestEquity(runId: number, limit = 25000) {
-  return apiGetWithTimeout<QuantListPayload<QuantBacktestEquityPoint>>(`/quant/backtest-runs/${runId}/equity?limit=${limit}`, 10000);
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestEquityPoint>>(`/quant/backtest-runs/${runId}/equity?limit=${limit}`, 20000);
 }
 
 export function fetchQuantBacktestMetrics(runId: number) {
-  return apiGetWithTimeout<QuantListPayload<QuantBacktestMetric>>(`/quant/backtest-runs/${runId}/metrics`, 8000);
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestMetric>>(`/quant/backtest-runs/${runId}/metrics`, 15000);
 }
 
 export function fetchLatestContent(limit = 8) {

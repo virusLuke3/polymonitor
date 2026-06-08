@@ -209,10 +209,14 @@ export function QuantWorkspace() {
     setError('');
     setBacktestStatus('submitting');
     try {
-      const nextRows = await refreshQuantRows();
       if (!marketSlug.trim()) {
         throw new Error('market_slug is required for real backtest');
       }
+      const loadedBlockRows = blockRows.filter((row) => String(row.tokenSide || '').toUpperCase() === 'YES');
+      const hasLoadedRows = priceSource === 'orderfilled' ? loadedBlockRows.length > 0 : frontendRows.length > 0;
+      const nextRows = hasLoadedRows
+        ? { frontendRows, blockRows }
+        : await refreshQuantRows();
       const backtestBlockRows = nextRows.blockRows.filter((row) => String(row.tokenSide || '').toUpperCase() === 'YES');
       const sourceRows = priceSource === 'orderfilled' ? backtestBlockRows : nextRows.frontendRows;
       if (!sourceRows.length) {
