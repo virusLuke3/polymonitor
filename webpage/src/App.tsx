@@ -338,13 +338,10 @@ function WeatherInlineMap({
         {mappedCount}/{cityCount}
       </div>
       {error ? <div className="wm-inline-weather-map-error">{error}</div> : null}
-      {!items.length && loading ? (
-        <div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>LOADING WEATHER MAP</span></div>
+      <WeatherDeckMap items={items} ucdpEvents={ucdpEvents} selectedCityId={selected?.cityId || null} onSelectCity={selectCity} height={620} />
+      {!items.length ? (
+        <div className="wm-weather-map-data-loading"><span>{loading ? 'LOADING WEATHER DATA' : 'WEATHER DATA WARMING'}</span></div>
       ) : null}
-      {!items.length && !loading ? (
-        <div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>WEATHER MAP WARMING</span></div>
-      ) : null}
-      {items.length ? <WeatherDeckMap items={items} ucdpEvents={ucdpEvents} selectedCityId={selected?.cityId || null} onSelectCity={selectCity} height={620} /> : null}
       {detailOpen && selected ? <WeatherMapCityInspector city={selected} onClose={() => setDetailOpen(false)} /> : null}
     </div>
   );

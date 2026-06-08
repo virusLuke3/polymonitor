@@ -1350,6 +1350,8 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     if (!host || mapRef.current) return undefined;
     setMapReady(false);
     setMapDegraded(false);
+    fallbackAppliedRef.current = false;
+    let styleSettled = false;
     const map = new maplibregl.Map({
       container: host,
       style: getWeatherMapStyle('dark'),
@@ -1409,19 +1411,24 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       scheduleDeckUpdate();
     };
 
-    map.on('load', () => {
+    const handleStyleReady = () => {
+      styleSettled = true;
       setMapReady(true);
       ensureDeckOverlay();
       ensureCountryLayers(map, countryRisksRef.current);
       setupCountryInteractions(map, countryRiskByIsoRef, setCountryHover, onCountrySelectRef);
       resizeAndSync();
-    });
+    };
+
+    map.on('load', handleStyleReady);
 
     map.on('idle', () => {
+      styleSettled = true;
       setMapReady(true);
       resizeAndSync();
     });
 
+    map.on('style.load', handleStyleReady);
     map.on('styledata', resizeAndSync);
     map.on('movestart', beginMapInteraction);
     map.on('zoomstart', beginMapInteraction);
@@ -1434,6 +1441,13 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     let tileErrorCount = 0;
     const initialFrame = window.requestAnimationFrame(resizeAndSync);
     const settleTimer = window.setTimeout(resizeAndSync, 250);
+    const styleFallbackTimer = window.setTimeout(() => {
+      if (styleSettled || fallbackAppliedRef.current) return;
+      fallbackAppliedRef.current = true;
+      setMapDegraded(true);
+      map.setStyle(getWeatherMapFallbackStyle('dark'), { diff: false });
+      window.requestAnimationFrame(resizeAndSync);
+    }, 2200);
     const onError = (event: { error?: Error; message?: string }) => {
       const message = event.error?.message || event.message || '';
       if (!message || fallbackAppliedRef.current) return;
@@ -1478,8 +1492,11 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       mapInteractingRef.current = false;
       window.cancelAnimationFrame(initialFrame);
       window.clearTimeout(settleTimer);
+      window.clearTimeout(styleFallbackTimer);
       resizeObserver.disconnect();
       map.off('error', onError);
+      map.off('load', handleStyleReady);
+      map.off('style.load', handleStyleReady);
       map.off('styledata', resizeAndSync);
       map.off('movestart', beginMapInteraction);
       map.off('zoomstart', beginMapInteraction);

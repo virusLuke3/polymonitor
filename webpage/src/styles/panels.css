@@ -13856,6 +13856,10 @@ a.wm-orderfilled-row {
   transform: translateY(-50%);
 }
 
+.wm-inline-weather-map {
+  position: relative;
+}
+
 .wm-weather-deck-map {
   position: relative;
   height: 320px;
@@ -13890,6 +13894,24 @@ a.wm-orderfilled-row {
     linear-gradient(90deg, rgba(31, 132, 255, 0.08) 1px, transparent 1px),
     #030405;
   background-size: 34px 34px;
+}
+
+.wm-weather-map-data-loading {
+  position: absolute;
+  left: 50%;
+  bottom: 44px;
+  z-index: 9;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 168, 0, 0.22);
+  background: rgba(4, 5, 5, 0.76);
+  color: rgba(255, 196, 80, 0.9);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .wm-weather-deck-map .maplibregl-map,
