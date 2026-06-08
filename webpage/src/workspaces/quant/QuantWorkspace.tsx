@@ -5,19 +5,18 @@ import {
   fetchQuantBacktestMetrics,
   fetchQuantBacktestRun,
   fetchQuantBacktestTrades,
-  fetchQuantBlockClosePrices,
   fetchQuantBuildStatus,
-  fetchQuantFrontendPrices,
+  fetchQuantMarketPriceSeries,
   fetchQuantPriceMarkets,
   isAbortLikeError,
   type QuantPriceQuery,
 } from '@/services/api';
-import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantPriceMarket } from '@/types';
+import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesPayload, QuantPriceMarket } from '@/types';
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
 import type { BacktestEngine, BacktestResult, DataStatus, MarketInfo, PerformanceSortKey, PriceSource, Signal, SortDirection, TesterTab, TradeFilter } from './types';
-import { backtestApiToResult, blockToPrices, emptyBacktestResult, frontendToPrices } from './utils/apiAdapters';
+import { backtestApiToResult, blockToPrices, emptyBacktestResult, frontendToPrices, marketSeriesToPrices } from './utils/apiAdapters';
 import { downloadText, fmtPrice } from './utils/formatters';
 
 function rowSortValue(value: string) {
@@ -130,6 +129,7 @@ function marketInfoFromSelection(slug: string, market?: QuantPriceMarket): Marke
 export function QuantWorkspace() {
   const [frontendRows, setFrontendRows] = useState<QuantFrontendPricePoint[]>([]);
   const [blockRows, setBlockRows] = useState<QuantBlockClosePoint[]>([]);
+  const [marketSeries, setMarketSeries] = useState<QuantMarketSeriesPayload | null>(null);
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
   const [quantMarkets, setQuantMarkets] = useState<QuantPriceMarket[]>([]);
   const [marketSearchStatus, setMarketSearchStatus] = useState<DataStatus>('idle');
@@ -155,13 +155,16 @@ export function QuantWorkspace() {
   const priceLoadSeq = useRef(0);
 
   const activePrices = useMemo(() => {
+    const semanticPrices = marketSeriesToPrices(marketSeries);
+    if (semanticPrices.length) return semanticPrices;
     if (priceSource === 'orderfilled') return blockToPrices(blockRows);
     if (priceSource === 'frontend') return frontendToPrices(frontendRows);
     return [];
-  }, [blockRows, frontendRows, priceSource]);
+  }, [blockRows, frontendRows, marketSeries, priceSource]);
   const [backtestResult, setBacktestResult] = useState<BacktestResult>(() => emptyBacktestResult());
   const strategySignals = useMemo(() => signalsFromTrades(backtestResult), [backtestResult]);
   const latestPrice = activePrices[activePrices.length - 1]?.close || 0;
+  const displayedPriceRows = activePrices.length;
   const selectedMarket = useMemo(
     () => (
       quantMarkets.find((market) => market.marketSlug === marketSlug && market.tokenSide === 'YES')
@@ -175,32 +178,39 @@ export function QuantWorkspace() {
     const parsed = Number(timeframe);
     return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
   }, [timeframe]);
-  const query: QuantPriceQuery = { marketSlug, tokenSide: 'YES', limit: chartLimit };
-  const blockChartQuery: QuantPriceQuery = { marketSlug, limit: chartLimit };
+  const semanticChartQuery: QuantPriceQuery & { priceSource: string; scope: string; maxOutcomes: number } = {
+    marketSlug,
+    tokenSide: 'YES',
+    priceSource: backendPriceSource(priceSource),
+    scope: 'auto',
+    limit: chartLimit,
+    maxOutcomes: 24,
+  };
 
   const refreshQuantRows = async () => {
     const hasMarketSlug = Boolean(marketSlug.trim());
     if (hasMarketSlug) setDataStatus('loading');
-    const [frontendResult, blockResult, statusResult] = await Promise.allSettled([
-      hasMarketSlug ? fetchQuantFrontendPrices(query) : Promise.resolve({ count: 0, items: [] }),
-      hasMarketSlug ? fetchQuantBlockClosePrices(blockChartQuery) : Promise.resolve({ count: 0, items: [] }),
+    const [seriesResult, statusResult] = await Promise.allSettled([
+      hasMarketSlug ? fetchQuantMarketPriceSeries(semanticChartQuery) : Promise.resolve(null),
       fetchQuantBuildStatus('', 12),
     ]);
-    const nextFrontendRows = frontendResult.status === 'fulfilled' ? frontendResult.value.items || [] : frontendRows;
-    const nextBlockRows = blockResult.status === 'fulfilled' ? blockResult.value.items || [] : blockRows;
-    if (frontendResult.status === 'fulfilled') setFrontendRows(nextFrontendRows);
-    if (blockResult.status === 'fulfilled') setBlockRows(nextBlockRows);
+    const nextMarketSeries = seriesResult.status === 'fulfilled' ? seriesResult.value : marketSeries;
+    const nextFrontendRows = priceSource === 'frontend' ? frontendRows : [];
+    const nextBlockRows = priceSource === 'orderfilled' ? blockRows : [];
+    if (seriesResult.status === 'fulfilled') setMarketSeries(nextMarketSeries);
+    if (priceSource !== 'frontend') setFrontendRows([]);
+    if (priceSource !== 'orderfilled') setBlockRows([]);
     if (statusResult.status === 'fulfilled') setRuns(statusResult.value.items || []);
-    const activeRowCount = priceSource === 'orderfilled' ? nextBlockRows.length : nextFrontendRows.length;
+    const activeRowCount = marketSeriesToPrices(nextMarketSeries).length || (priceSource === 'orderfilled' ? nextBlockRows.length : nextFrontendRows.length);
     if (hasMarketSlug) setDataStatus(activeRowCount ? 'ready' : 'empty');
-    const criticalResult = priceSource === 'orderfilled' ? blockResult : frontendResult;
-    if (hasMarketSlug && criticalResult.status === 'rejected') {
+    if (hasMarketSlug && seriesResult.status === 'rejected') {
       setDataStatus('error');
-      throw criticalResult.reason instanceof Error ? criticalResult.reason : new Error('Quant API unavailable');
+      throw seriesResult.reason instanceof Error ? seriesResult.reason : new Error('Quant API unavailable');
     }
     return {
       frontendRows: nextFrontendRows,
       blockRows: nextBlockRows,
+      marketSeries: nextMarketSeries,
     };
   };
 
@@ -212,21 +222,25 @@ export function QuantWorkspace() {
       if (!marketSlug.trim()) {
         throw new Error('market_slug is required for real backtest');
       }
+      const loadedSeriesPrices = marketSeriesToPrices(marketSeries);
       const loadedBlockRows = blockRows.filter((row) => String(row.tokenSide || '').toUpperCase() === 'YES');
-      const hasLoadedRows = priceSource === 'orderfilled' ? loadedBlockRows.length > 0 : frontendRows.length > 0;
+      const hasLoadedRows = loadedSeriesPrices.length > 0 || (priceSource === 'orderfilled' ? loadedBlockRows.length > 0 : frontendRows.length > 0);
       const nextRows = hasLoadedRows
-        ? { frontendRows, blockRows }
+        ? { frontendRows, blockRows, marketSeries }
         : await refreshQuantRows();
+      const seriesPrices = marketSeriesToPrices(nextRows.marketSeries);
       const backtestBlockRows = nextRows.blockRows.filter((row) => String(row.tokenSide || '').toUpperCase() === 'YES');
-      const sourceRows = priceSource === 'orderfilled' ? backtestBlockRows : nextRows.frontendRows;
+      const sourceRows = seriesPrices.length ? seriesPrices : (priceSource === 'orderfilled' ? blockToPrices(backtestBlockRows) : frontendToPrices(nextRows.frontendRows));
       if (!sourceRows.length) {
         throw new Error(`No ${backendPriceSource(priceSource)} rows for ${marketSlug.trim()}`);
       }
-      const firstBlock = backtestBlockRows[0]?.blockNumber;
-      const lastBlock = backtestBlockRows[backtestBlockRows.length - 1]?.blockNumber;
-      const firstTs = nextRows.frontendRows[0]?.timestamp;
-      const lastTs = nextRows.frontendRows[nextRows.frontendRows.length - 1]?.timestamp;
-      const strategy = strategyDefaults(priceSource === 'orderfilled' ? blockToPrices(backtestBlockRows) : frontendToPrices(nextRows.frontendRows));
+      const firstX = sourceRows[0]?.timestamp;
+      const lastX = sourceRows[sourceRows.length - 1]?.timestamp;
+      const firstBlock = priceSource === 'orderfilled' ? firstX : backtestBlockRows[0]?.blockNumber;
+      const lastBlock = priceSource === 'orderfilled' ? lastX : backtestBlockRows[backtestBlockRows.length - 1]?.blockNumber;
+      const firstTs = priceSource === 'frontend' ? firstX : nextRows.frontendRows[0]?.timestamp;
+      const lastTs = priceSource === 'frontend' ? lastX : nextRows.frontendRows[nextRows.frontendRows.length - 1]?.timestamp;
+      const strategy = strategyDefaults(sourceRows);
       const created = await createQuantBacktestRun({
         marketSlug: marketSlug.trim(),
         tokenSide: 'YES',
@@ -280,6 +294,7 @@ export function QuantWorkspace() {
     setSelectedMarketMeta(nextMarket);
     setFrontendRows([]);
     setBlockRows([]);
+    setMarketSeries(null);
     setBacktestResult(emptyBacktestResult());
     setSelectedTradeId(null);
     setError('');
@@ -462,8 +477,9 @@ export function QuantWorkspace() {
       <div className="qtv-statusbar">
         <span>source {priceSource}</span>
         <span>latest YES {fmtPrice(latestPrice)}</span>
-        <span>frontend rows {frontendRows.length}</span>
-        <span>block close rows {blockRows.length}</span>
+        <span>outcomes {marketSeries?.outcomes?.length || 0}</span>
+        <span>frontend rows {priceSource === 'frontend' ? displayedPriceRows : frontendRows.length}</span>
+        <span>block close rows {priceSource === 'orderfilled' ? displayedPriceRows : blockRows.length}</span>
         <span>engine {backtestEngine}</span>
         <span>build runs {runs.length}</span>
         <span>backtest {backtestStatus}</span>

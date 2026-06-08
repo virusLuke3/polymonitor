@@ -30,7 +30,9 @@ export type PricePoint = {
   close: number;
   volume: number;
   source: string;
+  tokenId?: string;
   tokenSide?: string;
+  outcomeLabel?: string;
 };
 
 export type CandlePoint = PricePoint & {

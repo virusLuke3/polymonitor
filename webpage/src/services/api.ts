@@ -26,6 +26,7 @@ import type {
   QuantBuildRun,
   QuantFrontendPricePoint,
   QuantListPayload,
+  QuantMarketSeriesPayload,
   QuantPriceMarket,
   RuntimeMarketGroup,
   RuntimeCryptoFundingPayload,
@@ -305,6 +306,21 @@ export function fetchQuantBlockClosePrices(query: QuantPriceQuery = {}) {
     `/quant/block-close-prices?${appendQuantParams(query, 'block')}`,
     15000,
   );
+}
+
+export function fetchQuantMarketPriceSeries(query: QuantPriceQuery & { priceSource?: string; scope?: string; maxOutcomes?: number } = {}) {
+  const params = new URLSearchParams();
+  if (query.marketSlug?.trim()) params.set('market_slug', query.marketSlug.trim());
+  if (query.tokenSide?.trim()) params.set('token_side', query.tokenSide.trim());
+  if (query.priceSource?.trim()) params.set('price_source', query.priceSource.trim());
+  if (query.scope?.trim()) params.set('scope', query.scope.trim());
+  if (query.from?.trim()) params.set('from', query.from.trim());
+  if (query.to?.trim()) params.set('to', query.to.trim());
+  if (query.fromBlock?.trim()) params.set('from_block', query.fromBlock.trim());
+  if (query.toBlock?.trim()) params.set('to_block', query.toBlock.trim());
+  params.set('limit', String(query.limit || 2500));
+  params.set('max_outcomes', String(query.maxOutcomes || 24));
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/market-price-series?${params.toString()}`, 20000);
 }
 
 export function fetchQuantBuildStatus(source = '', limit = 24) {

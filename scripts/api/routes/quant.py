@@ -20,6 +20,7 @@ from quant.api.read_api import (  # noqa: E402
     get_backtest_trades,
     get_block_close_prices,
     get_frontend_prices,
+    get_market_price_series,
     get_price_build_status,
     get_quant_price_markets,
 )
@@ -140,8 +141,24 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "market_title": "marketTitle",
         "condition_id": "conditionId",
         "end_date": "endDate",
+        "outcome_index": "outcomeIndex",
+        "outcome_label": "outcomeLabel",
+        "first_x": "firstX",
+        "last_x": "lastX",
+        "latest_price": "latestPrice",
+        "x_axis": "xAxis",
+        "yes_probability_close": "yesProbabilityClose",
+        "yes_probability_vwap": "yesProbabilityVwap",
     }
-    return {mapping.get(key, key): _json_value(value) for key, value in row.items()}
+    return {mapping.get(key, key): _camel_value(value, mapping) for key, value in row.items()}
+
+
+def _camel_value(value: Any, mapping: dict[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {mapping.get(key, key): _camel_value(inner, mapping) for key, inner in value.items()}
+    if isinstance(value, list):
+        return [_camel_value(item, mapping) for item in value]
+    return _json_value(value)
 
 
 def create_quant_blueprint(_: dict) -> Blueprint:
@@ -188,6 +205,31 @@ def create_quant_blueprint(_: dict) -> Blueprint:
                 limit=limit,
             )
         return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows), "source": "orderfilled_block_close"})
+
+    @bp.route("/market-price-series", methods=["GET"])
+    def api_quant_market_price_series():
+        market_slug = (request.args.get("market_slug") or "").strip()
+        if not market_slug:
+            return jsonify({"error": "market_slug is required"}), 400
+        limit = min(max(_parse_int_arg("limit", 2500) or 2500, 1), 25000)
+        max_outcomes = min(max(_parse_int_arg("max_outcomes", 24) or 24, 1), 100)
+        price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
+        scope = (request.args.get("scope") or "auto").strip().lower()
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            payload = get_market_price_series(
+                conn,
+                market_slug=market_slug,
+                price_source=price_source,
+                scope=scope,
+                token_side=(request.args.get("token_side") or "").strip() or None,
+                from_ts=_parse_time_arg("from"),
+                to_ts=_parse_time_arg("to"),
+                from_block=_parse_int_arg("from_block"),
+                to_block=_parse_int_arg("to_block"),
+                limit=limit,
+                max_outcomes=max_outcomes,
+            )
+        return jsonify(_camel_row(payload))
 
     @bp.route("/price-build-status", methods=["GET"])
     def api_quant_price_build_status():

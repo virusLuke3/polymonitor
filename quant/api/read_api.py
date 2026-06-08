@@ -2,7 +2,72 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+
+MATCHUP_RE = re.compile(r"\s+(?:vs\.?|v\.?)\s+", re.IGNORECASE)
+NON_EVENT_TITLE_PREFIXES = {"spread", "total", "moneyline", "winner", "will"}
+
+
+def _clean_label(value: str | None) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text.removesuffix("?").strip()
+
+
+def _title_event_prefix(title: str | None) -> str | None:
+    text = _clean_label(title)
+    if ":" not in text:
+        return None
+    prefix = _clean_label(text.split(":", 1)[0])
+    if not prefix:
+        return None
+    first_word = prefix.split(" ", 1)[0].lower()
+    if first_word in NON_EVENT_TITLE_PREFIXES:
+        return None
+    return prefix
+
+
+def _label_from_title_suffix(title: str | None) -> str | None:
+    text = _clean_label(title)
+    if ":" not in text:
+        return None
+    suffix = _clean_label(text.split(":", 1)[1])
+    return suffix or None
+
+
+def infer_outcome_label(market_title: str | None, token_side: str | None, *, event_scope: bool = False) -> str:
+    """Return a display label for a token/outcome without changing stored prices."""
+
+    side = str(token_side or "").upper()
+    title = _clean_label(market_title)
+    if event_scope:
+        suffix = _label_from_title_suffix(title)
+        if suffix:
+            return suffix
+    parts = [part.strip() for part in MATCHUP_RE.split(title, maxsplit=1) if part.strip()]
+    if len(parts) == 2:
+        return parts[0] if side == "YES" else parts[1]
+    suffix = _label_from_title_suffix(title)
+    if suffix:
+        return suffix if side == "YES" else f"Not {suffix}"
+    if title and side == "YES" and not title.lower().startswith("will "):
+        return title
+    return "Yes" if side == "YES" else "No"
+
+
+def _market_payload(rows: list[dict[str, Any]], *, market_slug: str, source: str, scope: str, x_axis: str) -> dict[str, Any]:
+    first = next((row for row in rows if row.get("market_slug") == market_slug), rows[0] if rows else {})
+    return {
+        "market_id": first.get("market_id"),
+        "market_slug": first.get("market_slug") or market_slug,
+        "market_title": first.get("market_title"),
+        "condition_id": first.get("condition_id"),
+        "end_date": first.get("end_date"),
+        "source": source,
+        "scope": scope,
+        "x_axis": x_axis,
+    }
 
 
 def get_quant_price_markets(
@@ -21,77 +86,53 @@ def get_quant_price_markets(
         prefix_text = f"{search_text}%"
         slug_prefix_text = f"{search_text}-%"
         slug_token_text = f"%-{search_text}-%"
-        title_word_text = f"% {search_text} %"
         with conn.cursor() as cur:
             cur.execute(
                 """
-                WITH candidates AS (
-                    SELECT DISTINCT
-                        md.market_id,
-                        md.market_slug,
-                        md.market_title,
-                        md.condition_id,
-                        md.end_date,
+                WITH titled AS (
+                    SELECT
+                        p.market_id,
+                        p.market_slug,
+                        COALESCE(md.token_side, 'YES') AS token_side,
+                        COALESCE(p.block_rows_written, 0) AS block_rows,
+                        p.first_orderfilled_block AS first_block,
+                        COALESCE(p.max_block_complete, p.last_orderfilled_block) AS last_block,
+                        NULL::numeric AS latest_block_price,
+                        p.updated_at AS latest_block_at,
+                        COALESCE(p.frontend_rows_written, 0) AS frontend_rows,
+                        extract(epoch FROM p.min_frontend_complete_ts)::bigint AS first_ts,
+                        extract(epoch FROM p.max_frontend_complete_ts)::bigint AS last_ts,
+                        NULL::numeric AS latest_frontend_price,
+                        p.updated_at AS latest_frontend_at,
+                        max(md.market_title) AS market_title,
+                        max(md.condition_id) AS condition_id,
+                        max(md.end_date) AS end_date,
                         CASE
-                            WHEN lower(md.market_slug) = %s THEN 0
-                            WHEN lower(md.market_slug) LIKE %s THEN 1
-                            WHEN lower(md.market_slug) LIKE %s THEN 2
-                            WHEN lower(md.market_slug) LIKE %s THEN 3
-                            WHEN lower(md.market_title) = %s THEN 4
-                            WHEN lower(md.market_title) LIKE %s THEN 5
-                            WHEN lower(md.market_title) LIKE %s THEN 6
+                            WHEN lower(p.market_slug) = %s THEN 0
+                            WHEN lower(p.market_slug) LIKE %s THEN 1
+                            WHEN lower(p.market_slug) LIKE %s THEN 2
+                            WHEN lower(p.market_slug) LIKE %s THEN 3
+                            WHEN lower(max(md.market_title)) = %s THEN 4
+                            WHEN lower(max(md.market_title)) LIKE %s THEN 5
                             ELSE 9
                         END AS search_rank
-                    FROM quant.market_token_metadata md
-                    WHERE md.market_slug IS NOT NULL
-                      AND (lower(md.market_slug) LIKE %s OR lower(md.market_title) LIKE %s)
-                    ORDER BY search_rank ASC, md.market_slug
-                    LIMIT 200
+                    FROM quant.market_price_build_market_progress p
+                    LEFT JOIN quant.market_token_metadata md
+                        ON md.market_id = p.market_id AND md.token_side = COALESCE(%s, 'YES')
+                    WHERE p.market_slug IS NOT NULL
+                      AND (COALESCE(p.block_rows_written, 0) > 0 OR COALESCE(p.frontend_rows_written, 0) > 0)
+                      AND (lower(p.market_slug) LIKE %s OR lower(md.market_title) LIKE %s)
+                    GROUP BY
+                        p.market_id, p.market_slug, md.token_side, p.block_rows_written,
+                        p.first_orderfilled_block, p.max_block_complete, p.last_orderfilled_block,
+                        p.frontend_rows_written, p.min_frontend_complete_ts, p.max_frontend_complete_ts,
+                        p.updated_at
                 )
-                SELECT
-                    c.market_id,
-                    c.market_slug,
-                    COALESCE(%s, 'YES') AS token_side,
-                    COALESCE(b.block_rows, 0) AS block_rows,
-                    b.first_block,
-                    b.last_block,
-                    b.latest_block_price,
-                    b.latest_block_at,
-                    COALESCE(f.frontend_rows, 0) AS frontend_rows,
-                    f.first_ts,
-                    f.last_ts,
-                    f.latest_frontend_price,
-                    f.latest_frontend_at,
-                    c.market_title,
-                    c.condition_id,
-                    c.end_date
-                FROM candidates c
-                LEFT JOIN LATERAL (
-                    SELECT
-                        count(*) AS block_rows,
-                        min(block_number) AS first_block,
-                        max(block_number) AS last_block,
-                        (array_agg(COALESCE(yes_probability_close, close_price) ORDER BY block_number DESC))[1] AS latest_block_price,
-                        max(built_at) AS latest_block_at
-                    FROM quant.market_token_block_close b
-                    WHERE b.market_slug = c.market_slug
-                      AND (%s::text IS NULL OR b.token_side = %s::text)
-                ) b ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT
-                        count(*) AS frontend_rows,
-                        min(timestamp) AS first_ts,
-                        max(timestamp) AS last_ts,
-                        (array_agg(price ORDER BY timestamp DESC))[1] AS latest_frontend_price,
-                        max(fetched_at) AS latest_frontend_at
-                    FROM quant.market_token_frontend_price_1m f
-                    WHERE f.market_slug = c.market_slug
-                      AND (%s::text IS NULL OR f.token_side = %s::text)
-                ) f ON TRUE
-                WHERE COALESCE(b.block_rows, 0) > 0 OR COALESCE(f.frontend_rows, 0) > 0
-                ORDER BY c.search_rank ASC,
-                         (COALESCE(b.block_rows, 0) + COALESCE(f.frontend_rows, 0)) DESC,
-                         c.market_slug ASC
+                SELECT *
+                FROM titled
+                ORDER BY search_rank ASC,
+                         (block_rows + frontend_rows) DESC,
+                         market_slug ASC
                 LIMIT %s
                 """,
                 [
@@ -101,14 +142,9 @@ def get_quant_price_markets(
                     slug_token_text,
                     search_text,
                     prefix_text,
-                    title_word_text,
+                    token_side.upper() if token_side else None,
                     text,
                     text,
-                    token_side.upper() if token_side else None,
-                    token_side.upper() if token_side else None,
-                    token_side.upper() if token_side else None,
-                    token_side.upper() if token_side else None,
-                    token_side.upper() if token_side else None,
                     int(limit),
                 ],
             )
@@ -167,6 +203,199 @@ def get_quant_price_markets(
             params,
         )
         return [dict(row) for row in cur.fetchall()]
+
+
+def _fetch_market_tokens(conn: Any, *, market_slug: str, scope: str, max_outcomes: int) -> tuple[list[dict[str, Any]], str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                market_id, market_slug, market_title, condition_id, end_date,
+                token_id, token_side, outcome_index
+            FROM quant.market_token_metadata
+            WHERE market_slug = %s
+            ORDER BY market_id, outcome_index NULLS LAST, token_side, token_id
+            """,
+            (market_slug,),
+        )
+        base_rows = [dict(row) for row in cur.fetchall()]
+        if not base_rows:
+            return [], "market"
+        event_prefix = _title_event_prefix(base_rows[0].get("market_title"))
+        effective_scope = "event" if scope == "event" or (scope == "auto" and event_prefix) else "market"
+        if effective_scope != "event" or not event_prefix:
+            return base_rows[: int(max_outcomes)], "market"
+        cur.execute(
+            """
+            WITH markets AS (
+                SELECT DISTINCT market_id, market_slug, market_title, condition_id, end_date
+                FROM quant.market_token_metadata
+                WHERE market_title ILIKE %s
+                ORDER BY market_title ASC, market_id ASC
+                LIMIT %s
+            )
+            SELECT
+                m.market_id, m.market_slug, m.market_title, m.condition_id, m.end_date,
+                md.token_id, md.token_side, md.outcome_index
+            FROM markets m
+            JOIN quant.market_token_metadata md
+                ON md.market_id = m.market_id AND md.token_side = 'YES'
+            ORDER BY m.market_title ASC, md.outcome_index NULLS LAST, md.token_id
+            """,
+            (f"{event_prefix}:%", int(max_outcomes)),
+        )
+        return [dict(row) for row in cur.fetchall()], "event"
+
+
+def get_market_price_series(
+    conn: Any,
+    *,
+    market_slug: str,
+    price_source: str,
+    scope: str = "auto",
+    token_side: str | None = None,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    from_block: int | None = None,
+    to_block: int | None = None,
+    limit: int = 2500,
+    max_outcomes: int = 24,
+) -> dict[str, Any]:
+    """Return semantic market/event series grouped by outcome token.
+
+    Raw price tables stay token-granular. This read model packages those token
+    rows into user-facing outcomes, so sports matchups and selection markets can
+    render multiple lines without forcing the backtest engine to guess meaning.
+    """
+
+    source = "orderfilled_block_close" if price_source == "orderfilled_block_close" else "frontend"
+    requested_scope = scope if scope in {"auto", "market", "event"} else "auto"
+    tokens, effective_scope = _fetch_market_tokens(
+        conn,
+        market_slug=market_slug,
+        scope=requested_scope,
+        max_outcomes=max_outcomes,
+    )
+    if token_side and effective_scope == "market":
+        wanted = token_side.upper()
+        tokens = [token for token in tokens if str(token.get("token_side") or "").upper() == wanted]
+
+    outcomes: list[dict[str, Any]] = []
+    with conn.cursor() as cur:
+        for token in tokens:
+            params: list[Any] = [token["token_id"]]
+            if source == "frontend":
+                filters = ["token_id = %s"]
+                if from_ts is not None:
+                    filters.append("timestamp >= %s")
+                    params.append(int(from_ts))
+                if to_ts is not None:
+                    filters.append("timestamp <= %s")
+                    params.append(int(to_ts))
+                params.append(int(limit))
+                cur.execute(
+                    f"""
+                    WITH limited AS (
+                        SELECT
+                            token_id, market_id, market_slug, token_side,
+                            ts_minute, timestamp, price, 0::numeric AS volume
+                        FROM quant.market_token_frontend_price_1m
+                        WHERE {" AND ".join(filters)}
+                        ORDER BY ts_minute DESC
+                        LIMIT %s
+                    )
+                    SELECT *
+                    FROM limited
+                    ORDER BY ts_minute ASC
+                    """,
+                    params,
+                )
+                points = [
+                    {
+                        "x": row["timestamp"],
+                        "timestamp": row["timestamp"],
+                        "price": row["price"],
+                        "volume": row["volume"],
+                    }
+                    for row in cur.fetchall()
+                ]
+                x_axis = "timestamp"
+            else:
+                filters = ["token_id = %s"]
+                if from_block is not None:
+                    filters.append("block_number >= %s")
+                    params.append(int(from_block))
+                if to_block is not None:
+                    filters.append("block_number <= %s")
+                    params.append(int(to_block))
+                params.append(int(limit))
+                cur.execute(
+                    f"""
+                    WITH limited AS (
+                        SELECT
+                            token_id, market_id, market_slug, token_side, block_number,
+                            close_price, yes_probability_close, vwap_price, yes_probability_vwap,
+                            volume, trade_count
+                        FROM quant.market_token_block_close
+                        WHERE {" AND ".join(filters)}
+                        ORDER BY block_number DESC
+                        LIMIT %s
+                    )
+                    SELECT *
+                    FROM limited
+                    ORDER BY block_number ASC
+                    """,
+                    params,
+                )
+                points = [
+                    {
+                        "x": row["block_number"],
+                        "block_number": row["block_number"],
+                        "price": row["close_price"],
+                        "yes_probability_close": row["yes_probability_close"],
+                        "vwap_price": row["vwap_price"],
+                        "yes_probability_vwap": row["yes_probability_vwap"],
+                        "volume": row["volume"],
+                        "trade_count": row["trade_count"],
+                    }
+                    for row in cur.fetchall()
+                ]
+                x_axis = "block_number"
+            label = infer_outcome_label(
+                token.get("market_title"),
+                token.get("token_side"),
+                event_scope=effective_scope == "event",
+            )
+            outcomes.append(
+                {
+                    "market_id": token.get("market_id"),
+                    "market_slug": token.get("market_slug"),
+                    "market_title": token.get("market_title"),
+                    "condition_id": token.get("condition_id"),
+                    "end_date": token.get("end_date"),
+                    "token_id": token.get("token_id"),
+                    "token_side": token.get("token_side"),
+                    "outcome_index": token.get("outcome_index"),
+                    "outcome_label": label,
+                    "rows": len(points),
+                    "first_x": points[0]["x"] if points else None,
+                    "last_x": points[-1]["x"] if points else None,
+                    "latest_price": points[-1]["price"] if points else None,
+                    "points": points,
+                }
+            )
+
+    return {
+        "market": _market_payload(
+            tokens,
+            market_slug=market_slug,
+            source=source,
+            scope=effective_scope,
+            x_axis="block_number" if source == "orderfilled_block_close" else "timestamp",
+        ),
+        "outcomes": outcomes,
+        "count": len(outcomes),
+    }
 
 
 def get_frontend_prices(

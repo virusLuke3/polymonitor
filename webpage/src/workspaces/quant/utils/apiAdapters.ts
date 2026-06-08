@@ -5,6 +5,7 @@ import type {
   QuantBacktestTrade,
   QuantBlockClosePoint,
   QuantFrontendPricePoint,
+  QuantMarketSeriesPayload,
 } from '@/types';
 import type { BacktestMetric, BacktestResult, EquityPoint, PerformanceRow, PricePoint, PriceSource, PropertyGroup, Trade } from '../types';
 import { toNumber } from './formatters';
@@ -26,6 +27,22 @@ export function blockToPrices(rows: QuantBlockClosePoint[]): PricePoint[] {
     tokenSide: row.tokenSide,
     source: 'orderfilled_block_close',
   })).filter((row) => row.timestamp && Number.isFinite(row.close));
+}
+
+export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | undefined): PricePoint[] {
+  if (!payload) return [];
+  const source = payload.market?.source || 'quant_market_series';
+  return (payload.outcomes || []).flatMap((outcome) => (
+    (outcome.points || []).map((point) => ({
+      timestamp: Number(point.x ?? point.blockNumber ?? point.timestamp),
+      close: toNumber(point.price),
+      volume: toNumber(point.volume),
+      source,
+      tokenId: outcome.tokenId,
+      tokenSide: outcome.tokenSide,
+      outcomeLabel: outcome.outcomeLabel || outcome.tokenSide,
+    }))
+  )).filter((row) => row.timestamp && Number.isFinite(row.close));
 }
 
 function formatAxisValue(value: unknown, axis: string) {

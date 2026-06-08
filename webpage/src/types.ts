@@ -299,6 +299,50 @@ export type QuantBlockClosePoint = {
   volume?: string | number | null;
 };
 
+export type QuantMarketSeriesPoint = {
+  x: number | string;
+  timestamp?: number | string | null;
+  blockNumber?: number | string | null;
+  price: string | number;
+  yesProbabilityClose?: string | number | null;
+  vwapPrice?: string | number | null;
+  yesProbabilityVwap?: string | number | null;
+  volume?: string | number | null;
+  tradeCount?: number | string | null;
+};
+
+export type QuantMarketSeriesOutcome = {
+  marketId?: number | string | null;
+  marketSlug?: string | null;
+  marketTitle?: string | null;
+  conditionId?: string | null;
+  endDate?: string | null;
+  tokenId: string;
+  tokenSide: string;
+  outcomeIndex?: number | string | null;
+  outcomeLabel: string;
+  rows: number;
+  firstX?: number | string | null;
+  lastX?: number | string | null;
+  latestPrice?: string | number | null;
+  points: QuantMarketSeriesPoint[];
+};
+
+export type QuantMarketSeriesPayload = {
+  market: {
+    marketId?: number | string | null;
+    marketSlug?: string | null;
+    marketTitle?: string | null;
+    conditionId?: string | null;
+    endDate?: string | null;
+    source: string;
+    scope: string;
+    xAxis: 'timestamp' | 'block_number' | string;
+  };
+  outcomes: QuantMarketSeriesOutcome[];
+  count: number;
+};
+
 export type QuantPriceMarket = {
   marketId?: number | string | null;
   marketSlug: string;
