@@ -13933,17 +13933,17 @@ a.wm-orderfilled-row {
   background: var(--ucdp-color);
   cursor: pointer;
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--ucdp-color) 26%, transparent),
-    0 0 16px color-mix(in srgb, var(--ucdp-color) 54%, transparent);
-  opacity: 0.88;
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 6px color-mix(in srgb, var(--ucdp-color) 28%, transparent);
+  opacity: 0.82;
   pointer-events: auto;
   transform-origin: center;
   transition: border-color 140ms ease, opacity 140ms ease, box-shadow 140ms ease;
-  animation: wm-ucdp-breathe 2.8s ease-in-out infinite;
 }
 
 .wm-ucdp-map-point::before {
   content: '';
+  display: none;
   position: absolute;
   inset: -5px;
   border: 1px solid color-mix(in srgb, var(--ucdp-color) 54%, transparent);
@@ -13968,14 +13968,19 @@ a.wm-orderfilled-row {
   opacity: 1;
   z-index: 6;
   box-shadow:
-    0 0 0 5px color-mix(in srgb, var(--ucdp-color) 32%, transparent),
-    0 0 26px color-mix(in srgb, var(--ucdp-color) 70%, transparent);
+    0 0 0 3px color-mix(in srgb, var(--ucdp-color) 24%, transparent),
+    0 0 16px color-mix(in srgb, var(--ucdp-color) 52%, transparent);
 }
 
 .wm-ucdp-map-point.major {
   box-shadow:
-    0 0 0 5px color-mix(in srgb, var(--ucdp-color) 25%, transparent),
-    0 0 24px color-mix(in srgb, var(--ucdp-color) 68%, transparent);
+    0 0 0 3px color-mix(in srgb, var(--ucdp-color) 22%, transparent),
+    0 0 14px color-mix(in srgb, var(--ucdp-color) 48%, transparent);
+}
+
+.wm-ucdp-map-point.major::before,
+.wm-ucdp-map-point.selected::before {
+  display: block;
 }
 
 .wm-ucdp-map-point.type-1 {
@@ -13999,6 +14004,12 @@ a.wm-orderfilled-row {
   50% {
     filter: brightness(1.22);
   }
+}
+
+.wm-weather-deck-map.map-interacting .wm-weather-html-label-layer,
+.wm-weather-deck-map.map-interacting .wm-ucdp-map-layer,
+.wm-weather-deck-map.map-interacting .wm-map-country-tooltip {
+  display: none;
 }
 
 @keyframes wm-ucdp-pulse {

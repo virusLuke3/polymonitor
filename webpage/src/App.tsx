@@ -245,6 +245,15 @@ function currentUtcClock(now: Date) {
   }).replace(',', '').toUpperCase() + ' UTC';
 }
 
+function LiveUtcClock() {
+  const [clockNow, setClockNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <div className="wm-map-clock">{currentUtcClock(clockNow)}</div>;
+}
+
 function commandMarketStatus(market: MarketListItem) {
   const status = String(market.status || 'market').trim();
   return status ? status.replace(/[_-]+/g, ' ').toUpperCase() : 'MARKET';
@@ -276,7 +285,6 @@ function WeatherInlineMap({
   selectedCityId,
   onSelectCity,
   onRefresh,
-  now,
 }: {
   payload?: RuntimeGlobalWeatherMapPayload | null;
   ucdpEvents: RuntimeGeoSanctionsShockItem[];
@@ -285,9 +293,9 @@ function WeatherInlineMap({
   selectedCityId: string | null;
   onSelectCity: (cityId: string) => void;
   onRefresh: () => void;
-  now: Date;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const [clockNow, setClockNow] = useState(() => new Date());
   const items = payload?.items || [];
   const selected = items.find((item) => item.cityId === selectedCityId) || items[0] || null;
   const mappedCount = payload?.summary?.mappedCount ?? items.length;
@@ -302,11 +310,15 @@ function WeatherInlineMap({
     ? { id: `map-selected-${selected.cityId || selected.city}`, city: String(selected.city || 'Selected'), venue: 'LOCAL', timezone: selectedTimezone, market: 'generic' }
     : null;
   const mapClocks = buildWorldClockRows(
-    now,
+    clockNow,
     selectedClock && !CORE_WORLD_CLOCKS.some((row) => row.timezone === selectedClock.timezone)
       ? [selectedClock, ...CORE_WORLD_CLOCKS.slice(0, 3)]
       : CORE_WORLD_CLOCKS.slice(0, 3),
   );
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   return (
     <div className="wm-inline-weather-map">
       <div className="wm-inline-weather-map-hint">Use the mouse wheel to zoom and drag to pan the map.</div>
@@ -1135,9 +1147,10 @@ function WorldMonitorApp() {
   }
 
   useEffect(() => {
+    if (workspaceMode !== 'worldcup') return undefined;
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [workspaceMode]);
 
   useEffect(() => {
     const savedPanelIds = sanitizePanelIds(readJsonStorage<string[]>(PANEL_STORAGE_KEY, []));
@@ -2048,7 +2061,7 @@ function WorldMonitorApp() {
             </div>
             <div className="wm-map-status-strip" aria-label="Global map status">
               <span className="wm-status-chip">POLYDATA MONITOR · LIVE</span>
-              <div className="wm-map-clock">{currentUtcClock(now)}</div>
+              <LiveUtcClock />
               <span className="wm-map-status-metric">Events <b>{ucdpMapEvents.length}</b></span>
               <span className="wm-map-status-metric">Visible <b>{mapVisibleEventCount}</b></span>
               <span className="wm-map-status-metric">Quality <b>{mapQualityLabel}</b></span>
@@ -2131,7 +2144,6 @@ function WorldMonitorApp() {
                     selectedCityId={selectedWeatherCityId}
                     onSelectCity={setSelectedWeatherCityId}
                     onRefresh={() => void loadWeatherMap(true)}
-                    now={now}
                   />
                 )}
 
