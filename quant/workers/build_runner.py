@@ -11,6 +11,7 @@ backtest API:
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import re
 import time
@@ -2001,6 +2002,7 @@ def run_market_price_incremental(
 
 def run_daemon(args: argparse.Namespace) -> None:
     metadata_next = 0.0
+    event_membership_next = 0.0
     eligibility_next = 0.0
     orderfilled_stats_next = 0.0
     schema_ready = False
@@ -2023,10 +2025,14 @@ def run_daemon(args: argparse.Namespace) -> None:
                 print(json.dumps({"event": "orderfilled_market_stats_refreshed", "count": count}, sort_keys=True), flush=True)
             if not args.skip_maintenance and cycle_started >= metadata_next:
                 count = refresh_market_token_metadata(conn, since_ts=args.since_ts)
-                event_result = refresh_market_event_memberships(conn, since_ts=args.since_ts)
                 metadata_next = cycle_started + args.metadata_interval_seconds
                 print(json.dumps({"event": "metadata_refreshed", "count": count}, sort_keys=True), flush=True)
+                gc.collect()
+            if not args.skip_maintenance and cycle_started >= event_membership_next:
+                event_result = refresh_market_event_memberships(conn, since_ts=args.since_ts)
+                event_membership_next = cycle_started + args.event_membership_interval_seconds
                 print(json.dumps({"event": "event_memberships_refreshed", **event_result}, sort_keys=True), flush=True)
+                gc.collect()
             if not args.skip_maintenance and cycle_started >= eligibility_next:
                 count = refresh_since_eligibility(
                     conn,
@@ -2273,6 +2279,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sleep-seconds", type=float, default=30.0)
     parser.add_argument("--skip-maintenance", action="store_true")
     parser.add_argument("--metadata-interval-seconds", type=float, default=3600.0)
+    parser.add_argument("--event-membership-interval-seconds", type=float, default=3600.0)
     parser.add_argument("--eligibility-interval-seconds", type=float, default=900.0)
     parser.add_argument("--skip-orderfilled-market-stats-refresh", action="store_true")
     parser.add_argument("--orderfilled-market-stats-interval-seconds", type=float, default=3600.0)
