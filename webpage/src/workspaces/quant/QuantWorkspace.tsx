@@ -190,6 +190,8 @@ export function QuantWorkspace() {
   const [outcomeSortKey, setOutcomeSortKey] = useState<OutcomeSortKey>('probability');
   const marketSearchSeq = useRef(0);
   const priceLoadSeq = useRef(0);
+  const marketSlugRef = useRef(marketSlug);
+  const autoSelectedDefaultRef = useRef(Boolean(defaultMarketSlug()));
   const marketSearchCacheRef = useRef(new Map<string, QuantPriceMarket[]>());
   const priceSeriesCacheRef = useRef(new Map<string, QuantMarketSeriesPayload>());
   const pricePrefetchingRef = useRef(new Set<string>());
@@ -419,11 +421,16 @@ export function QuantWorkspace() {
     setBacktestResult(emptyBacktestResult());
     setSelectedTradeId(null);
     setError('');
+    autoSelectedDefaultRef.current = true;
     if (nextSlug) {
       setDataStatus(cached ? 'partial' : 'metadata_loading');
       setLoadingMessage(cached ? 'Rendering cached data...' : 'Loading market metadata...');
     }
   };
+
+  useEffect(() => {
+    marketSlugRef.current = marketSlug;
+  }, [marketSlug]);
 
   const prefetchMarketSlug = (slug: string) => {
     const nextSlug = slug.trim();
@@ -473,6 +480,7 @@ export function QuantWorkspace() {
         if (seq !== marketSearchSeq.current) return;
         const eventItems = events || [];
         const marketItems = markets || [];
+        const bothSearchesComplete = events !== null && markets !== null;
         const seen = new Set<string>();
         const items = [...eventItems, ...marketItems].filter((item) => {
           const key = `${item.itemKind || 'market'}:${item.marketSlug}`;
@@ -483,11 +491,19 @@ export function QuantWorkspace() {
         });
         if (items.length) {
           setQuantMarkets(items);
-          setMarketSearchStatus(events !== null && markets !== null ? 'ready' : 'partial');
+          setMarketSearchStatus(bothSearchesComplete ? 'ready' : 'partial');
           marketSearchCacheRef.current.set(cacheKey, items);
-          if (!marketSlug.trim() && !text && items[0]?.marketSlug) {
+          if (
+            bothSearchesComplete
+            && !autoSelectedDefaultRef.current
+            && !marketSlugRef.current.trim()
+            && !text
+            && items[0]?.marketSlug
+          ) {
+            autoSelectedDefaultRef.current = true;
             setMarketSlug(items[0].marketSlug);
             setSelectedMarketMeta(items[0]);
+            setSelectedEntityKindHint(items[0].itemKind === 'event' ? 'event' : 'market');
           }
           return;
         }
