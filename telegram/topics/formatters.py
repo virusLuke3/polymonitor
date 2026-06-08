@@ -283,7 +283,7 @@ def format_worldcup_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
         payload.get("sourceUrl"),
     )
     text = _compose_post(
-        header="World Cup Intel",
+        header="⚽ worldcup",
         title="FIFA World Cup 2026 workspace",
         lines=lines,
         tags=_hashtags("WorldCup", "Polymonitor", "Football"),

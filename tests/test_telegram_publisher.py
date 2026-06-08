@@ -285,6 +285,7 @@ def test_worldcup_intel_formatter_routes_to_worldcup_topic():
     )[0]
 
     assert message.topic == "worldcup"
+    assert "⚽ worldcup" in message.text
     assert "FIFA World Cup 2026 workspace" in message.text
     assert "Signals 1 | News 1 | Weather 1" in message.text
     assert "Signals:" in message.text
