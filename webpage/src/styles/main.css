@@ -4269,6 +4269,75 @@
   color: #fde68a;
 }
 
+.qtv-hover-axis-stack {
+  position: absolute;
+  z-index: 29;
+  top: 0;
+  right: 68px;
+  bottom: 42px;
+  width: 220px;
+  pointer-events: none;
+}
+
+.qtv-hover-axis-stack > div {
+  position: absolute;
+  right: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  width: min(220px, 20vw);
+  min-height: 20px;
+  transform: translateY(-50%);
+  border: 1px solid color-mix(in srgb, var(--qtv-axis-color, #3b82f6) 58%, transparent);
+  border-right: 3px solid var(--qtv-axis-color, #3b82f6);
+  border-radius: 4px 0 0 4px;
+  background: rgba(7, 12, 20, 0.86);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+  color: #dbeafe;
+  font-family: var(--font-mono);
+  padding: 3px 7px;
+  backdrop-filter: blur(7px);
+}
+
+.qtv-hover-axis-stack > div.active {
+  background: color-mix(in srgb, var(--qtv-axis-color, #3b82f6) 28%, rgba(7, 12, 20, 0.92));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--qtv-axis-color, #3b82f6) 30%, transparent), 0 12px 28px rgba(0, 0, 0, 0.32);
+}
+
+.qtv-hover-axis-stack span,
+.qtv-hover-axis-stack b,
+.qtv-hover-axis-stack small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-hover-axis-stack span {
+  color: #e5e7eb;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.qtv-hover-axis-stack b {
+  color: #f8fafc;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.qtv-hover-axis-stack small {
+  font-size: 8px;
+  font-weight: 950;
+}
+
+.qtv-hover-axis-stack small.positive {
+  color: #86efac;
+}
+
+.qtv-hover-axis-stack small.negative {
+  color: #fecaca;
+}
+
 .qtv-replay-controls {
   position: absolute;
   z-index: 8;

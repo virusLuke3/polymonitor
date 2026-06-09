@@ -464,6 +464,10 @@ function percentNumber(value: string | undefined) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function percentFromPrice(value: number) {
+  return Math.max(5, Math.min(90, (1 - clampProbability(value)) * 100));
+}
+
 function robustPriceRange(points: PricePoint[], paddingRatio: number) {
   const values = points
     .map((point) => point.close)
@@ -744,6 +748,42 @@ export function PriceChartPanel({
   const readoutInspect = hoverInspect || pinnedInspect || latestInspect;
   const readoutMode = hoverInspect ? 'Hover' : pinnedInspect ? 'Pinned' : 'Latest';
   const readoutPoint = readoutInspect?.point || latestPoint;
+  const hoverOutcomeStack = useMemo(() => {
+    if (!hoverInspect || !visibleOutcomeGroups.length) return [];
+    const hoverBlock = hoverInspect.point.timestamp;
+    const maxRows = tooltipMode === 'full' ? 12 : 8;
+    return visibleOutcomeGroups
+      .map((group) => {
+        const point = nearestPoint(group.points, hoverBlock);
+        if (!point) return null;
+        const price = clampProbability(point.close);
+        const latestGroupPoint = group.points[group.points.length - 1];
+        const latestPrice = clampProbability(latestGroupPoint?.close ?? price);
+        const y = percentFromPrice(price);
+        return {
+          key: group.key,
+          label: group.label,
+          fullLabel: group.fullLabel,
+          price,
+          delta: price - latestPrice,
+          top: `${y}%`,
+          color: SERIES_COLORS[group.order % SERIES_COLORS.length] || '#3b82f6',
+          active: group.key === hoveredOutcomeKey || group.key === selectedGroup?.key,
+        };
+      })
+      .filter((row): row is {
+        key: string;
+        label: string;
+        fullLabel: string;
+        price: number;
+        delta: number;
+        top: string;
+        color: string;
+        active: boolean;
+      } => Boolean(row))
+      .sort((left, right) => Number.parseFloat(left.top) - Number.parseFloat(right.top))
+      .slice(0, maxRows);
+  }, [hoverInspect, hoveredOutcomeKey, selectedGroup?.key, tooltipMode, visibleOutcomeGroups]);
   const managerOutcomes = useMemo(() => {
     const query = outcomeManagerQuery.trim().toLowerCase();
     return sortedOutcomes.filter((group) => {
@@ -2160,6 +2200,22 @@ export function PriceChartPanel({
                   {formatSigned(hoverInspect.deltaYes)} from latest
                 </small>
               </div>
+              {hoverOutcomeStack.length ? (
+                <div className="qtv-hover-axis-stack" aria-label="Hovered outcome prices">
+                  {hoverOutcomeStack.map((row) => (
+                    <div
+                      key={`hover-axis-${row.key}`}
+                      className={row.active ? 'active' : ''}
+                      style={`top: ${row.top}; --qtv-axis-color: ${row.color};`}
+                      title={`${row.fullLabel}: ${fmtPrice(row.price)} at block ${blockLabel(hoverInspect.point.timestamp)}`}
+                    >
+                      <span>{row.label}</span>
+                      <b>{fmtProbabilityPercent(row.price)}</b>
+                      <small className={row.delta >= 0 ? 'positive' : 'negative'}>{formatSigned(row.delta)}</small>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </>
           ) : null}
           {pinnedInspect && pinnedScreen ? (
