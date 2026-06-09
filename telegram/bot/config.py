@@ -106,6 +106,8 @@ def load_settings() -> BotSettings:
     _load_dotenv_files()
     api_port = _get_int("POLYDATA_API_PORT", 18500)
     local_api_base = f"http://127.0.0.1:{api_port}"
+    query_bot_token = _get_str("POLYDATA_TELEGRAM_QUERY_BOT_TOKEN", "")
+    default_state_path = str(PROJECT_ROOT / "data" / "telegram_query_bot_state.json") if query_bot_token else _get_str("POLYDATA_TELEGRAM_BOT_STATE_PATH", str(PROJECT_ROOT / "data" / "telegram_bot_state.json"))
     polydata_api_candidates = _unique_urls(
         (
             _get_str("POLYDATA_TELEGRAM_BOT_POLYDATA_API_BASE", ""),
@@ -125,8 +127,8 @@ def load_settings() -> BotSettings:
         polydata_api_base=polydata_api_base.rstrip("/"),
         polydata_api_candidates=polydata_api_candidates,
         state_path=_get_first(
-            ("POLYDATA_TELEGRAM_QUERY_BOT_STATE_PATH", "POLYDATA_TELEGRAM_BOT_STATE_PATH"),
-            str(PROJECT_ROOT / "data" / "telegram_query_bot_state.json"),
+            ("POLYDATA_TELEGRAM_QUERY_BOT_STATE_PATH",),
+            default_state_path,
         ),
         request_timeout_seconds=max(3, _get_int("POLYDATA_TELEGRAM_QUERY_BOT_TIMEOUT_SECONDS", _get_int("POLYDATA_TELEGRAM_BOT_TIMEOUT_SECONDS", _get_int("POLYDATA_TELEGRAM_TIMEOUT_SECONDS", 12)))),
         poll_interval_seconds=max(1, _get_int("POLYDATA_TELEGRAM_QUERY_BOT_POLL_INTERVAL_SECONDS", _get_int("POLYDATA_TELEGRAM_BOT_POLL_INTERVAL_SECONDS", 2))),

@@ -199,6 +199,17 @@ def test_query_bot_token_takes_priority(monkeypatch, tmp_path: Path):
     assert settings.state_path.endswith("query_state.json")
 
 
+def test_query_bot_uses_query_state_path_when_legacy_state_is_set(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("POLYDATA_TELEGRAM_QUERY_BOT_TOKEN", "query-token")
+    monkeypatch.setenv("POLYDATA_TELEGRAM_BOT_STATE_PATH", str(tmp_path / "legacy_state.json"))
+    monkeypatch.delenv("POLYDATA_TELEGRAM_QUERY_BOT_STATE_PATH", raising=False)
+
+    settings = load_settings()
+
+    assert settings.bot_token == "query-token"
+    assert settings.state_path.endswith("telegram_query_bot_state.json")
+
+
 def test_parse_update_supports_bot_mentions_and_args():
     request = parse_update(
         {
