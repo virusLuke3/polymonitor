@@ -914,6 +914,28 @@
   white-space: nowrap;
 }
 
+.qtv-preview-outcome-search {
+  width: 100%;
+  height: 27px !important;
+  border: 1px solid rgba(38, 50, 68, 0.92) !important;
+  border-radius: 3px !important;
+  background: #080d15 !important;
+  color: #dbeafe !important;
+  font-family: var(--font-mono) !important;
+  font-size: 9.5px !important;
+  font-weight: 850 !important;
+  padding: 0 8px !important;
+}
+
+.qtv-preview-outcome-search:focus {
+  border-color: rgba(47, 129, 247, 0.72) !important;
+  box-shadow: inset 0 0 0 1px rgba(47, 129, 247, 0.24);
+}
+
+.qtv-preview-outcome-search::placeholder {
+  color: #64748b;
+}
+
 .qtv-preview-outcomes button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

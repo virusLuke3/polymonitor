@@ -354,6 +354,7 @@ export function WorkspaceHeader({
   const [recentMarkets, setRecentMarkets] = useState<QuantPriceMarket[]>(() => persistedMarkets('polydata.quant.search.recentMarkets'));
   const [favoriteMarketSlugs, setFavoriteMarketSlugs] = useState<string[]>(() => persistedSlugs('polydata.quant.search.favoriteSlugs'));
   const [previewOutcomesExpanded, setPreviewOutcomesExpanded] = useState(false);
+  const [previewOutcomeQuery, setPreviewOutcomeQuery] = useState('');
   const [eventOutcomeCache, setEventOutcomeCache] = useState<Record<string, EventOutcomeCacheEntry>>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const commandRef = useRef<HTMLDivElement>(null);
@@ -495,9 +496,19 @@ export function WorkspaceHeader({
       })
       .sort((left, right) => rowsForMarket(right) - rowsForMarket(left) || titleForMarket(left).localeCompare(titleForMarket(right)));
   }, [activeEventOutcomeCache?.items, activeResult, marketChoices]);
+  const filteredRelatedOutcomeMarkets = useMemo(() => {
+    const query = previewOutcomeQuery.trim().toLowerCase();
+    if (!query) return relatedOutcomeMarkets;
+    return relatedOutcomeMarkets.filter((market) => (
+      titleForMarket(market).toLowerCase().includes(query)
+      || market.marketSlug.toLowerCase().includes(query)
+      || String(market.tokenSide || '').toLowerCase().includes(query)
+      || String(market.conditionId || '').toLowerCase().includes(query)
+    ));
+  }, [previewOutcomeQuery, relatedOutcomeMarkets]);
   const visibleRelatedOutcomeMarkets = useMemo(
-    () => relatedOutcomeMarkets.slice(0, previewOutcomesExpanded ? 24 : 6),
-    [previewOutcomesExpanded, relatedOutcomeMarkets],
+    () => filteredRelatedOutcomeMarkets.slice(0, previewOutcomesExpanded ? filteredRelatedOutcomeMarkets.length : 6),
+    [filteredRelatedOutcomeMarkets, previewOutcomesExpanded],
   );
 
   useEffect(() => {
@@ -506,6 +517,7 @@ export function WorkspaceHeader({
 
   useEffect(() => {
     setPreviewOutcomesExpanded(false);
+    setPreviewOutcomeQuery('');
   }, [activeResult?.key]);
 
   useEffect(() => {
@@ -665,7 +677,7 @@ export function WorkspaceHeader({
       chooseResult(activeResult);
       return;
     }
-    const firstOutcome = relatedOutcomeMarkets[0] || visibleRelatedOutcomeMarkets[0] || null;
+    const firstOutcome = filteredRelatedOutcomeMarkets[0] || relatedOutcomeMarkets[0] || visibleRelatedOutcomeMarkets[0] || null;
     if (firstOutcome?.marketSlug) {
       chooseMarket(firstOutcome.marketSlug, firstOutcome);
       return;
@@ -905,9 +917,9 @@ export function WorkspaceHeader({
                         {section.items.map((result) => {
                           const index = flatResults.findIndex((item) => item.key === result.key);
                           const selected = result.market.marketSlug === marketSlug;
-                          const inlineOutcomeLimit = previewOutcomesExpanded ? 14 : 5;
+                          const inlineOutcomeLimit = previewOutcomesExpanded ? 24 : 5;
                           const inlineOutcomes = result.kind === 'event' && index === highlightedIndex ? visibleRelatedOutcomeMarkets.slice(0, inlineOutcomeLimit) : [];
-                          const inlineOutcomeRemainder = Math.max(0, relatedOutcomeMarkets.length - inlineOutcomes.length);
+                          const inlineOutcomeRemainder = Math.max(0, filteredRelatedOutcomeMarkets.length - inlineOutcomes.length);
                           return (
                             <div key={result.key} className="qtv-result-entry">
                               <button
@@ -967,7 +979,7 @@ export function WorkspaceHeader({
                                     </button>
                                   ))}
                                   {!inlineOutcomes.length ? <span>Loading event outcomes...</span> : null}
-                                  {relatedOutcomeMarkets.length > inlineOutcomes.length || previewOutcomesExpanded ? (
+                                  {filteredRelatedOutcomeMarkets.length > inlineOutcomes.length || previewOutcomesExpanded ? (
                                     <button
                                       className="more"
                                       type="button"
@@ -1006,7 +1018,7 @@ export function WorkspaceHeader({
                         {activeResult.kind === 'event' ? (
                           <button
                             type="button"
-                            disabled={!relatedOutcomeMarkets.length}
+                            disabled={!filteredRelatedOutcomeMarkets.length && !relatedOutcomeMarkets.length}
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={chooseFirstOutcomeForActiveResult}
                           >
@@ -1032,14 +1044,23 @@ export function WorkspaceHeader({
                                 ? 'loading event head...'
                                 : activeEventOutcomeCache?.status === 'error'
                                   ? 'event head unavailable'
-                                  : `${relatedOutcomeMarkets.length.toLocaleString('en-US')} loaded`}
+                                  : `${filteredRelatedOutcomeMarkets.length.toLocaleString('en-US')} / ${relatedOutcomeMarkets.length.toLocaleString('en-US')} outcomes`}
                             </em>
                           </header>
+                          <input
+                            className="qtv-preview-outcome-search"
+                            value={previewOutcomeQuery}
+                            placeholder="Filter outcomes in this event..."
+                            onInput={(event) => setPreviewOutcomeQuery(event.currentTarget.value)}
+                          />
                           {activeEventOutcomeCache?.status === 'loading' && !visibleRelatedOutcomeMarkets.length ? (
                             <span className="qtv-preview-outcome-loading">Loading real outcome prices...</span>
                           ) : null}
                           {activeEventOutcomeCache?.status === 'error' && !visibleRelatedOutcomeMarkets.length ? (
                             <span className="qtv-preview-outcome-loading error">Could not load outcome members for this event.</span>
+                          ) : null}
+                          {!visibleRelatedOutcomeMarkets.length && relatedOutcomeMarkets.length && previewOutcomeQuery.trim() ? (
+                            <span className="qtv-preview-outcome-loading">No outcomes match this event filter.</span>
                           ) : null}
                           {visibleRelatedOutcomeMarkets.map((market) => (
                             <button
@@ -1056,14 +1077,14 @@ export function WorkspaceHeader({
                               <em>{latestPrice(market) || `${rowsForMarket(market).toLocaleString('en-US')} rows`}</em>
                             </button>
                           ))}
-                          {relatedOutcomeMarkets.length > visibleRelatedOutcomeMarkets.length || previewOutcomesExpanded ? (
+                          {filteredRelatedOutcomeMarkets.length > visibleRelatedOutcomeMarkets.length || previewOutcomesExpanded ? (
                             <button
                               className="qtv-preview-more"
                               type="button"
                               onMouseDown={(event) => event.preventDefault()}
                               onClick={() => setPreviewOutcomesExpanded((current) => !current)}
                             >
-                              {previewOutcomesExpanded ? 'Show fewer outcomes' : `Show ${Math.min(24, relatedOutcomeMarkets.length).toLocaleString('en-US')} outcomes`}
+                              {previewOutcomesExpanded ? 'Show fewer outcomes' : `Show all ${filteredRelatedOutcomeMarkets.length.toLocaleString('en-US')} outcomes`}
                             </button>
                           ) : null}
                         </div>
