@@ -265,7 +265,7 @@ function markerPosition(signal: Signal, points: PricePoint[]) {
   };
 }
 
-function blockAxisTicks(points: PricePoint[], maxTicks = 8) {
+function blockAxisTicks(points: PricePoint[], maxTicks = 7) {
   if (!points.length) return [];
   const count = Math.min(maxTicks, Math.max(2, points.length));
   const seen = new Set<number>();
@@ -442,7 +442,7 @@ export function PriceChartPanel({
   ), [prices, replayCutoff]);
   const rawGroupedOutcomes = useMemo(() => outcomeGroups(replayPrices), [replayPrices]);
   const yesOutcomeCount = useMemo(() => rawGroupedOutcomes.filter((group) => group.tokenSide === 'YES').length, [rawGroupedOutcomes]);
-  const effectiveSideMode = compareMode === 'auto' ? (eventMode && yesOutcomeCount > 1 ? 'yes' : 'both') : compareMode;
+  const effectiveSideMode = compareMode === 'auto' ? 'yes' : compareMode;
   const sideFilteredOutcomes = useMemo(() => rawGroupedOutcomes.filter((group) => {
     if (effectiveSideMode === 'both') return true;
     if (effectiveSideMode === 'yes') return group.tokenSide === 'YES';
@@ -713,6 +713,7 @@ export function PriceChartPanel({
         scaleMargins: { top: 0.08, bottom: 0.22 },
       },
       timeScale: {
+        visible: false,
         borderColor: 'rgba(148,163,184,0.18)',
         fixLeftEdge: true,
         fixRightEdge: true,
@@ -1334,18 +1335,20 @@ export function PriceChartPanel({
               })}
             </div>
           ) : null}
-          {priceSource.includes('block') && hasLoadedPrices ? (
-            <div className="qtv-block-tick-axis" aria-label="Visible block number axis">
-              {blockTicks.map((tick) => (
-                <span key={tick.key} className={tick.edge} style={{ left: tick.left }}>
-                  <i />
-                  <b>{tick.label}</b>
-                </span>
-              ))}
-              {hover ? <strong style={{ left: pointToScreenSafe(hover, primaryPoints).x }}>hover {blockLabel(hover.timestamp)}</strong> : null}
-            </div>
-          ) : null}
         </div>
+        {priceSource.includes('block') && hasLoadedPrices ? (
+          <div className="qtv-block-tick-axis" aria-label="Visible block number axis">
+            {blockTicks.map((tick) => (
+              <span key={tick.key} className={tick.edge} style={{ left: tick.left }}>
+                <i />
+                <b>{tick.label}</b>
+              </span>
+            ))}
+            {hover ? <strong style={{ left: pointToScreenSafe(hover, primaryPoints).x }}>hover {blockLabel(hover.timestamp)}</strong> : null}
+          </div>
+        ) : (
+          <div className="qtv-block-tick-axis empty" aria-hidden="true" />
+        )}
         {layoutMode !== '1' ? (
           <div className={`qtv-layout-scaffold layout-${layoutMode}`}>
             {Array.from({ length: layoutMode === '4' ? 3 : 1 }).map((_, index) => (
