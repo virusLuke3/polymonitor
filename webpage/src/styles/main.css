@@ -510,6 +510,7 @@
   opacity: 0.45;
 }
 
+.qtv-watchlist-row,
 .qtv-watchlist button,
 .qtv-inspector-trades button {
   display: grid;
@@ -529,16 +530,72 @@
   text-align: left;
 }
 
+.qtv-watchlist-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+
+.qtv-watchlist-row.pinned {
+  border-left-color: #22c55e;
+}
+
+.qtv-watchlist-row.solo {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.28);
+}
+
+.qtv-watchlist .qtv-watchlist-main {
+  min-height: 38px;
+  border-bottom: 0;
+  border-left: 0;
+  padding: 7px 10px 3px;
+}
+
+.qtv-watchlist-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 10px 7px;
+}
+
+.qtv-watchlist .qtv-watchlist-actions button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  width: 100%;
+  justify-content: center;
+  border: 1px solid rgba(38, 50, 68, 0.7);
+  border-left: 1px solid rgba(38, 50, 68, 0.7);
+  border-bottom: 1px solid rgba(38, 50, 68, 0.7);
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.72);
+  color: #8390a3;
+  font-size: 9px;
+  font-weight: 900;
+  text-align: center;
+  padding: 0 6px;
+}
+
+.qtv-watchlist .qtv-watchlist-actions button.active {
+  border-color: rgba(96, 165, 250, 0.48);
+  background: rgba(37, 99, 235, 0.14);
+  color: #dbeafe;
+}
+
 .qtv-watchlist button:hover,
 .qtv-watchlist button.active,
 .qtv-watchlist button.saved,
+.qtv-watchlist-row:hover,
+.qtv-watchlist-row.active,
+.qtv-watchlist-row.saved,
 .qtv-inspector-trades button:hover,
 .qtv-inspector-trades button.active {
   border-left-color: #3b82f6;
   background: #101a2c;
 }
 
-.qtv-watchlist button.saved:not(.active) {
+.qtv-watchlist button.saved:not(.active),
+.qtv-watchlist-row.saved:not(.active) {
   border-left-color: #22c55e;
 }
 

@@ -1607,6 +1607,32 @@ export function QuantWorkspace() {
     ));
   };
 
+  const watchKeyForOutcome = (outcome: QuantMarketSeriesOutcome) => (
+    outcome.buyYesTokenId || outcome.tokenId || outcome.marketSlug || outcome.conditionId || ''
+  );
+
+  const toggleOutcomeWatchlist = (outcome: QuantMarketSeriesOutcome) => {
+    const key = watchKeyForOutcome(outcome);
+    if (!key) return;
+    setWatchlistKeys((current) => (
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [key, ...current].slice(0, 48)
+    ));
+  };
+
+  const selectOutcomeSide = (outcome: QuantMarketSeriesOutcome, side: BacktestAction) => {
+    setSelectedOutcomeTokenId(outcome.tokenId);
+    setSelectedBacktestAction(side);
+  };
+
+  const pinTopOutcomes = () => {
+    const topKeys = sortedOutcomeRows.slice(0, 5).map((row) => row.yesKey).filter(Boolean);
+    setChartPinnedOutcomeKeys((current) => Array.from(new Set([...topKeys, ...current])).slice(0, 24));
+    setChartHiddenOutcomeKeys((current) => current.filter((key) => !topKeys.includes(key)));
+    setChartSoloOutcomeKey('');
+  };
+
   const toggleChartPinnedOutcome = (key: string) => {
     setChartPinnedOutcomeKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [key, ...current].slice(0, 24)));
     setChartHiddenOutcomeKeys((current) => current.filter((item) => item !== key));
@@ -1766,24 +1792,33 @@ export function QuantWorkspace() {
                         {selectedIsWatched ? 'Remove selected' : 'Add selected'}
                       </button>
                     </div>
-                    {watchlistRows.map(({ outcome, label, fullLabel, yes, no, rows }) => {
+                    {watchlistRows.map(({ outcome, label, fullLabel, yes, no, rows, yesKey }) => {
                       const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
-                      const isSaved = watchlistKeys.includes(outcome.tokenId);
+                      const watchKey = watchKeyForOutcome(outcome);
+                      const isSaved = watchKey ? watchlistKeys.includes(watchKey) : false;
+                      const isPinned = chartPinnedOutcomeKeys.includes(yesKey);
+                      const isSolo = chartSoloOutcomeKey === yesKey;
                       return (
-                        <button
+                        <div
                           key={`watch-${outcome.tokenId}`}
-                          className={`${isSelected ? 'active' : ''} ${isSaved ? 'saved' : ''}`}
-                          type="button"
+                          className={`qtv-watchlist-row ${isSelected ? 'active' : ''} ${isSaved ? 'saved' : ''} ${isPinned ? 'pinned' : ''} ${isSolo ? 'solo' : ''}`}
                           title={fullLabel}
-                          onClick={() => {
-                            setSelectedOutcomeTokenId(outcome.tokenId);
-                            setSelectedBacktestAction('YES');
-                          }}
                         >
-                          <span><strong>{label}</strong><em>{rows.toLocaleString('en-US')} rows</em></span>
-                          <b>{fmtPrice(yes)}</b>
-                          <i>{fmtPrice(no)}</i>
-                        </button>
+                          <button
+                            className="qtv-watchlist-main"
+                            type="button"
+                            onClick={() => selectOutcomeSide(outcome, 'YES')}
+                          >
+                            <span><strong>{label}</strong><em>{rows.toLocaleString('en-US')} rows</em></span>
+                            <b>{fmtPrice(yes)}</b>
+                            <i>{fmtPrice(no)}</i>
+                          </button>
+                          <div className="qtv-watchlist-actions">
+                            <button type="button" onClick={() => toggleOutcomeWatchlist(outcome)}>{isSaved ? 'Remove' : 'Save'}</button>
+                            <button className={isPinned ? 'active' : ''} type="button" onClick={() => toggleChartPinnedOutcome(yesKey)}>{isPinned ? 'Pinned' : 'Pin'}</button>
+                            <button className={isSolo ? 'active' : ''} type="button" onClick={() => setChartSoloOutcomeKey(isSolo ? '' : yesKey)}>{isSolo ? 'Solo on' : 'Solo'}</button>
+                          </div>
+                        </div>
                       );
                     })}
                     {!watchlistRows.length ? <p>No outcomes loaded for the selected market.</p> : null}
@@ -1826,6 +1861,9 @@ export function QuantWorkspace() {
                         <option value="rows">Rows</option>
                         <option value="volume">Volume</option>
                       </select>
+                      <button type="button" disabled={!sortedOutcomeRows.length} onClick={pinTopOutcomes}>Pin Top 5</button>
+                      <button type="button" disabled={!selectedOutcomeRow} onClick={() => selectedOutcomeRow && setChartSoloOutcomeKey(selectedBacktestAction === 'NO' ? selectedOutcomeRow.noKey : selectedOutcomeRow.yesKey)}>Solo selected</button>
+                      <button type="button" disabled={!selectedOutcome} onClick={() => selectedOutcome && toggleOutcomeWatchlist(selectedOutcome)}>{selectedIsWatched ? 'Unwatch' : 'Watch'}</button>
                       <button type="button" disabled={!chartPinnedOutcomeKeys.length && !chartHiddenOutcomeKeys.length && !chartSoloOutcomeKey} onClick={resetChartOutcomeVisibility}>Reset lines</button>
                     </div>
                     {sortedOutcomeRows.map(({ outcome, label, fullLabel, yes, no, rows, volume, yesKey, noKey }) => {
@@ -1836,13 +1874,13 @@ export function QuantWorkspace() {
                       const isSolo = chartSoloOutcomeKey === yesKey || chartSoloOutcomeKey === noKey;
                       return (
                         <div key={`side-${outcome.tokenId}`} className={`qtv-inspector-outcome ${isSelected ? 'active' : ''} ${isPinned ? 'pinned' : ''} ${isHidden ? 'hidden' : ''} ${isSolo ? 'solo' : ''}`} title={fullLabel}>
-                          <button type="button" onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('YES'); }}>
+                          <button type="button" onClick={() => selectOutcomeSide(outcome, 'YES')}>
                             <strong>{label}</strong>
                             <span>{rows.toLocaleString('en-US')} rows · {volume.toLocaleString('en-US', { maximumFractionDigits: 0 })} vol</span>
                           </button>
                           <div>
-                            <button className={isSelected && selectedBacktestAction === 'YES' ? 'active' : ''} type="button" onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('YES'); }}>YES {fmtPrice(yes)}</button>
-                            <button className={isSelected && selectedBacktestAction === 'NO' ? 'active no' : 'no'} type="button" disabled={!outcome.buyNoTokenId} onClick={() => { setSelectedOutcomeTokenId(outcome.tokenId); setSelectedBacktestAction('NO'); }}>NO {fmtPrice(no)}</button>
+                            <button className={isSelected && selectedBacktestAction === 'YES' ? 'active' : ''} type="button" onClick={() => selectOutcomeSide(outcome, 'YES')}>YES {fmtPrice(yes)}</button>
+                            <button className={isSelected && selectedBacktestAction === 'NO' ? 'active no' : 'no'} type="button" disabled={!outcome.buyNoTokenId} onClick={() => selectOutcomeSide(outcome, 'NO')}>NO {fmtPrice(no)}</button>
                           </div>
                           <div className="qtv-outcome-line-actions">
                             <button className={chartPinnedOutcomeKeys.includes(activeKey) ? 'active' : ''} type="button" onClick={() => toggleChartPinnedOutcome(activeKey)}>Pin</button>
