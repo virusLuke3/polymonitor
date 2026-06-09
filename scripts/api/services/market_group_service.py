@@ -10,8 +10,8 @@ MARKET_GROUPS_DETAIL_NAMESPACE = "snapshot:market-groups:detail"
 MARKET_GROUPS_CHART_NAMESPACE = "snapshot:market-groups:chart"
 MARKET_GROUPS_LIST_TTL_SECONDS = 120
 MARKET_GROUPS_DETAIL_TTL_SECONDS = 180
-TERMINAL_PROBABILITY_LOW = 0.02
-TERMINAL_PROBABILITY_HIGH = 0.98
+TERMINAL_PROBABILITY_LOW = 0.03
+TERMINAL_PROBABILITY_HIGH = 0.97
 
 CHART_RANGE_INTERVALS: Dict[str, str] = {
     "1h": "5m",
@@ -1163,7 +1163,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 26}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 27}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)

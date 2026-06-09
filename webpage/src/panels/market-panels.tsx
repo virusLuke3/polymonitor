@@ -145,7 +145,7 @@ function complementPrice(value?: string | number | null) {
 function isTerminalProbability(value?: string | number | null) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return false;
-  return numeric <= 0.02 || numeric >= 0.98;
+  return numeric <= 0.03 || numeric >= 0.97;
 }
 
 function firstFiniteValue(...values: Array<string | number | null | undefined>) {
@@ -217,7 +217,7 @@ function groupActiveRank(group: MarketGroupItem) {
   const volume = Number(groupDisplayVolume(group) || 0);
   const trades = Number(groupDisplayTradeCount(group) || 0);
   const price = Number(groupBestLivePrice(group));
-  const tradableSignal = Number.isFinite(price) && price > 0.02 && price < 0.98 ? 1 : 0;
+  const tradableSignal = Number.isFinite(price) && price > 0.03 && price < 0.97 ? 1 : 0;
   const freshness =
     trades > 0 ? 700 :
     volume > 0 && activityAgeHours <= 168 ? 620 :
