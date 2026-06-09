@@ -385,6 +385,13 @@ function nearestPointIndex(points: PricePoint[], timestamp: number) {
   return bestIndex;
 }
 
+function previousPointFor(points: PricePoint[], point: PricePoint | null | undefined) {
+  if (!point || points.length < 2) return null;
+  const index = nearestPointIndex(points, point.timestamp);
+  if (index <= 0) return null;
+  return points[index - 1] || null;
+}
+
 function normalizeLogicalRange(range: { from: number; to: number } | null): LogicalRangeState {
   if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to)) return null;
   return { from: range.from, to: range.to };
@@ -430,12 +437,19 @@ function nearestPoint(points: PricePoint[], timestamp: number) {
   }, null);
 }
 
-function pointSnapshot(point: PricePoint | null | undefined, latestPoint: PricePoint | null | undefined, maPoint: PricePoint | null | undefined) {
+function pointSnapshot(
+  point: PricePoint | null | undefined,
+  latestPoint: PricePoint | null | undefined,
+  maPoint: PricePoint | null | undefined,
+  previousPoint?: PricePoint | null,
+) {
   if (!point) return null;
   const yes = clampProbability(point.yesPrice ?? point.close);
   const no = clampProbability(point.noPrice ?? (1 - yes));
   const latestYes = clampProbability(latestPoint?.yesPrice ?? latestPoint?.close ?? yes);
   const latestNo = clampProbability(latestPoint?.noPrice ?? (1 - latestYes));
+  const previousYes = previousPoint ? clampProbability(previousPoint.yesPrice ?? previousPoint.close) : yes;
+  const previousNo = previousPoint ? clampProbability(previousPoint.noPrice ?? (1 - previousYes)) : no;
   return {
     point,
     yes,
@@ -447,6 +461,10 @@ function pointSnapshot(point: PricePoint | null | undefined, latestPoint: PriceP
     deltaNo: no - latestNo,
     deltaYesPct: latestYes ? ((yes - latestYes) / latestYes) * 100 : 0,
     deltaNoPct: latestNo ? ((no - latestNo) / latestNo) * 100 : 0,
+    barDeltaYes: yes - previousYes,
+    barDeltaNo: no - previousNo,
+    barDeltaYesPct: previousYes ? ((yes - previousYes) / previousYes) * 100 : 0,
+    barDeltaNoPct: previousNo ? ((no - previousNo) / previousNo) * 100 : 0,
   };
 }
 
@@ -658,9 +676,10 @@ export function PriceChartPanel({
   const primaryPoints = selectedGroup?.points || visibleOutcomeGroups[0]?.points || allPoints;
   const latestPoint = primaryPoints[primaryPoints.length - 1] || null;
   const latest = hover || latestPoint;
-  const previous = primaryPoints[Math.max(0, primaryPoints.length - 2)];
-  const delta = latest && previous ? latest.close - previous.close : 0;
-  const deltaPct = latest && previous?.close ? (delta / previous.close) * 100 : 0;
+  const readoutCandidatePoint = hover || pinnedPoint || latestPoint;
+  const readoutPreviousPoint = previousPointFor(primaryPoints, readoutCandidatePoint);
+  const delta = readoutCandidatePoint && readoutPreviousPoint ? readoutCandidatePoint.close - readoutPreviousPoint.close : 0;
+  const deltaPct = readoutCandidatePoint && readoutPreviousPoint?.close ? (delta / readoutPreviousPoint.close) * 100 : 0;
   const minPrice = primaryPoints.reduce((min, point) => Math.min(min, point.close), Number.POSITIVE_INFINITY);
   const maxPrice = primaryPoints.reduce((max, point) => Math.max(max, point.close), Number.NEGATIVE_INFINITY);
   const volumeTotal = allPoints.reduce((sum, point) => sum + (Number.isFinite(point.volume) ? point.volume : 0), 0);
@@ -732,19 +751,19 @@ export function PriceChartPanel({
   const latestMaPoint = latestPoint ? nearestPoint(maPoints, latestPoint.timestamp) : null;
   const dataWindowPoint = pinnedPoint || hover || latestPoint;
   const dataWindowMaPoint = dataWindowPoint ? nearestPoint(maPoints, dataWindowPoint.timestamp) : null;
-  const dataWindowInspect = pointSnapshot(dataWindowPoint, latestPoint, dataWindowMaPoint);
+  const dataWindowInspect = pointSnapshot(dataWindowPoint, latestPoint, dataWindowMaPoint, previousPointFor(primaryPoints, dataWindowPoint));
   const hoverMaPoint = hover ? nearestPoint(maPoints, hover.timestamp) : null;
-  const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
   const hoverGroup = useMemo(
     () => visibleOutcomeGroups.find((group) => group.key === hoveredOutcomeKey) || null,
     [hoveredOutcomeKey, visibleOutcomeGroups],
   );
+  const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint, previousPointFor(hoverGroup?.points || primaryPoints, hover));
   const hoverScreen = hover ? pointToScreenSafe(hover, hoverGroup?.points || primaryPoints, visibleLogicalRange) : null;
   const hoverTooltipSide = percentNumber(hoverScreen?.x) > 68 ? 'left-side' : '';
   const pinnedMaPoint = pinnedPoint ? nearestPoint(maPoints, pinnedPoint.timestamp) : null;
-  const pinnedInspect = pointSnapshot(pinnedPoint, latestPoint, pinnedMaPoint);
+  const pinnedInspect = pointSnapshot(pinnedPoint, latestPoint, pinnedMaPoint, previousPointFor(primaryPoints, pinnedPoint));
   const pinnedScreen = pinnedPoint ? pointToScreenSafe(pinnedPoint, primaryPoints, visibleLogicalRange) : null;
-  const latestInspect = pointSnapshot(latestPoint, latestPoint, latestMaPoint);
+  const latestInspect = pointSnapshot(latestPoint, latestPoint, latestMaPoint, previousPointFor(primaryPoints, latestPoint));
   const readoutInspect = hoverInspect || pinnedInspect || latestInspect;
   const readoutMode = hoverInspect ? 'Hover' : pinnedInspect ? 'Pinned' : 'Latest';
   const readoutPoint = readoutInspect?.point || latestPoint;
@@ -1945,6 +1964,7 @@ export function PriceChartPanel({
             <span>NO {readoutInspect ? fmtPrice(readoutInspect.no) : '--'}<em>{readoutInspect?.noKind || 'implied'}</em></span>
             <span>Min {Number.isFinite(minPrice) ? fmtPrice(minPrice) : '--'}</span>
             <span>Max {Number.isFinite(maxPrice) ? fmtPrice(maxPrice) : '--'}</span>
+            <span>{readoutMode === 'Latest' ? 'Latest Δ' : 'Bar Δ'}</span>
             <b className={delta >= 0 ? 'positive' : 'negative'}>{hasLoadedPrices ? `${formatSigned(delta)} (${formatSigned(deltaPct, 2)}%)` : '--'}</b>
           </div>
           <div className="qtv-scale-switch" aria-label="Chart scale mode">
@@ -2072,8 +2092,8 @@ export function PriceChartPanel({
                 <div><span>Volume</span><b>{dataWindowInspect.point.volume.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b></div>
                 <div><span>Window</span><b>{allPoints.length.toLocaleString('en-US')} rows · {scaleMode}</b></div>
                 <footer>
-                  <span className={dataWindowInspect.deltaYes >= 0 ? 'positive' : 'negative'}>Δ YES {formatSigned(dataWindowInspect.deltaYes)} ({formatSigned(dataWindowInspect.deltaYesPct, 2)}%)</span>
-                  <span className={dataWindowInspect.deltaNo >= 0 ? 'positive' : 'negative'}>Δ NO {formatSigned(dataWindowInspect.deltaNo)} ({formatSigned(dataWindowInspect.deltaNoPct, 2)}%)</span>
+                  <span className={dataWindowInspect.barDeltaYes >= 0 ? 'positive' : 'negative'}>Bar Δ YES {formatSigned(dataWindowInspect.barDeltaYes)} ({formatSigned(dataWindowInspect.barDeltaYesPct, 2)}%)</span>
+                  <span className={dataWindowInspect.deltaYes >= 0 ? 'positive' : 'negative'}>vs latest {formatSigned(dataWindowInspect.deltaYes)} ({formatSigned(dataWindowInspect.deltaYesPct, 2)}%)</span>
                 </footer>
               </>
             ) : null}
@@ -2222,8 +2242,11 @@ export function PriceChartPanel({
                 <span><i>YES</i>{fmtPrice(hoverInspect.yes)}</span>
                 <span><i>NO</i>{fmtPrice(hoverInspect.no)}</span>
                 <b>{blockLabel(hoverInspect.point.timestamp)}</b>
+                <small className={hoverInspect.barDeltaYes >= 0 ? 'positive' : 'negative'}>
+                  bar {formatSigned(hoverInspect.barDeltaYes)} ({formatSigned(hoverInspect.barDeltaYesPct, 2)}%)
+                </small>
                 <small className={hoverInspect.deltaYes >= 0 ? 'positive' : 'negative'}>
-                  {formatSigned(hoverInspect.deltaYes)} from latest
+                  latest {formatSigned(hoverInspect.deltaYes)}
                 </small>
               </div>
               {hoverOutcomeStack.length ? (
@@ -2254,8 +2277,11 @@ export function PriceChartPanel({
                 <span><i>YES</i>{fmtPrice(pinnedInspect.yes)}</span>
                 <span><i>NO</i>{fmtPrice(pinnedInspect.no)}</span>
                 <b>{blockLabel(pinnedInspect.point.timestamp)}</b>
+                <small className={pinnedInspect.barDeltaYes >= 0 ? 'positive' : 'negative'}>
+                  bar {formatSigned(pinnedInspect.barDeltaYes)} ({formatSigned(pinnedInspect.barDeltaYesPct, 2)}%)
+                </small>
                 <small className={pinnedInspect.deltaYes >= 0 ? 'positive' : 'negative'}>
-                  {formatSigned(pinnedInspect.deltaYes)} from latest
+                  latest {formatSigned(pinnedInspect.deltaYes)}
                 </small>
               </div>
             </>
