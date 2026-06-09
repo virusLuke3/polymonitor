@@ -1709,6 +1709,181 @@
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) auto;
 }
 
+.qtv-inspector-trade-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border-bottom: 1px solid rgba(32, 41, 56, 0.9);
+  background: #080c13;
+}
+
+.qtv-inspector-trade-head div {
+  display: grid;
+  gap: 3px;
+  background: rgba(15, 23, 42, 0.48);
+  padding: 8px 10px;
+}
+
+.qtv-inspector-trade-head span,
+.qtv-inspector-trade-focus span {
+  color: #66758b;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.qtv-inspector-trade-head strong {
+  color: #f8fafc;
+  font-size: 12px;
+}
+
+.qtv-inspector-trade-focus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid rgba(32, 41, 56, 0.9);
+  background: rgba(10, 16, 27, 0.9);
+  padding: 9px 10px;
+}
+
+.qtv-inspector-trade-focus div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.qtv-inspector-trade-focus strong {
+  overflow: hidden;
+  color: #e5eefb;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-inspector-trade-focus em {
+  color: #7d8ba2;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.qtv-inspector-trade-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qtv-inspector-trades .qtv-inspector-trade-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  width: auto;
+  border: 1px solid rgba(38, 50, 68, 0.78);
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.84);
+  color: #cbd5e1;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 0 9px;
+}
+
+.qtv-inspector-trades .qtv-inspector-trade-toolbar button:hover:not(:disabled) {
+  border-color: rgba(96, 165, 250, 0.54);
+  background: rgba(37, 99, 235, 0.16);
+  color: #f8fafc;
+}
+
+.qtv-inspector-trades .qtv-inspector-trade-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.qtv-inspector-trades .qtv-inspector-trade {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-height: 112px;
+  border-left-color: transparent;
+  background: linear-gradient(180deg, rgba(8, 13, 22, 0.94), rgba(7, 11, 18, 0.94));
+  padding: 9px 10px;
+}
+
+.qtv-inspector-trades .qtv-inspector-trade.win {
+  border-left-color: rgba(34, 197, 94, 0.28);
+}
+
+.qtv-inspector-trades .qtv-inspector-trade.loss {
+  border-left-color: rgba(248, 113, 113, 0.28);
+}
+
+.qtv-inspector-trades .qtv-inspector-trade:hover,
+.qtv-inspector-trades .qtv-inspector-trade.active {
+  border-left-color: #3b82f6;
+  background: #101a2c;
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
+}
+
+.qtv-inspector-trade header,
+.qtv-inspector-trade footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.qtv-inspector-trade header i {
+  color: #94a3b8;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.qtv-inspector-trade-blocks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.qtv-inspector-trade-blocks span {
+  min-width: 0;
+  border: 1px solid rgba(32, 41, 56, 0.88);
+  border-radius: 4px;
+  background: rgba(2, 6, 23, 0.32);
+  padding: 6px;
+}
+
+.qtv-inspector-trade-blocks em {
+  color: #6f819a;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-inspector-trade-blocks b {
+  overflow: hidden;
+  color: #e2e8f0;
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+
+.qtv-inspector-trade-blocks small {
+  color: #60a5fa;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.qtv-inspector-trade footer span {
+  color: #7f8a9d;
+  font-size: 9px;
+}
+
 .qtv-inspector-trades b {
   font-size: 10px;
   font-weight: 900;

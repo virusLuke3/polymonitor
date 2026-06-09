@@ -1725,6 +1725,21 @@ export function QuantWorkspace() {
     [currentWatchKeySet, watchlistKeys],
   );
   const recentTradeRows = useMemo(() => filteredTrades.slice(-10).reverse(), [filteredTrades]);
+  const selectedTradeRow = useMemo(() => (
+    selectedTradeId ? backtestResult.trades.find((trade) => trade.id === selectedTradeId) || null : null
+  ), [backtestResult.trades, selectedTradeId]);
+  const inspectorTradeStats = useMemo(() => {
+    const netPnl = filteredTrades.reduce((sum, trade) => sum + trade.pnl, 0);
+    const winners = filteredTrades.filter((trade) => trade.pnl > 0).length;
+    const selectedIndex = selectedTradeRow ? filteredTrades.findIndex((trade) => trade.id === selectedTradeRow.id) : -1;
+    return {
+      count: filteredTrades.length,
+      netPnl,
+      winners,
+      winRate: filteredTrades.length ? winners / filteredTrades.length : 0,
+      selectedIndex,
+    };
+  }, [filteredTrades, selectedTradeRow]);
   const priceBlockRange = useMemo(() => blockRangeLabel(activePrices), [activePrices]);
   const selectedWatchKey = selectedOutcome ? watchKeyForOutcome(selectedOutcome) : selectedOutcomeRow ? watchKeyForOutcome(selectedOutcomeRow.outcome) : '';
   const selectedIsWatched = selectedWatchKey ? watchlistKeys.includes(selectedWatchKey) : false;
@@ -2311,23 +2326,72 @@ export function QuantWorkspace() {
 
                 {inspectorTab === 'trades' ? (
                   <div className="qtv-inspector-trades">
+                    <section className="qtv-inspector-trade-head">
+                      <div>
+                        <span>Trades</span>
+                        <strong>{inspectorTradeStats.count.toLocaleString('en-US')}</strong>
+                      </div>
+                      <div>
+                        <span>Net PnL</span>
+                        <strong className={inspectorTradeStats.netPnl >= 0 ? 'positive' : 'negative'}>
+                          {inspectorTradeStats.netPnl >= 0 ? '+' : ''}{inspectorTradeStats.netPnl.toFixed(2)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Win rate</span>
+                        <strong>{(inspectorTradeStats.winRate * 100).toFixed(1)}%</strong>
+                      </div>
+                    </section>
+                    <section className="qtv-inspector-trade-focus">
+                      <div>
+                        <span>Selected</span>
+                        <strong>{selectedTradeRow ? `${selectedTradeRow.id} · ${selectedTradeRow.side} ${selectedTradeRow.outcome}` : 'None'}</strong>
+                        <em>{selectedTradeRow && inspectorTradeStats.selectedIndex >= 0 ? `${inspectorTradeStats.selectedIndex + 1} / ${filteredTrades.length}` : 'Click a trade to focus entry / exit'}</em>
+                      </div>
+                      <div className="qtv-inspector-trade-toolbar">
+                        <button
+                          type="button"
+                          disabled={!selectedTradeRow}
+                          onClick={() => {
+                            if (!selectedTradeRow) return;
+                            setSelectedTradeId(selectedTradeRow.id);
+                            setTesterTab('trades');
+                            setStrategyDrawerCollapsed(false);
+                          }}
+                        >
+                          Focus
+                        </button>
+                        <button type="button" disabled={!selectedTradeRow} onClick={() => setSelectedTradeId(null)}>Clear</button>
+                      </div>
+                    </section>
                     {recentTradeRows.map((trade) => (
                       <button
                         key={`inspector-trade-${trade.id}`}
-                        className={trade.id === selectedTradeId ? 'active' : ''}
+                        className={`qtv-inspector-trade ${trade.id === selectedTradeId ? 'active' : ''} ${trade.pnl >= 0 ? 'win' : 'loss'}`}
                         type="button"
                         title="Open this trade in Strategy Tester and focus the chart"
                         onClick={() => { setSelectedTradeId(trade.id); setTesterTab('trades'); setStrategyDrawerCollapsed(false); }}
                       >
-                        <strong>{trade.id} · {trade.outcome}</strong>
-                        <span>
-                          {trade.entryX ? `b${Math.floor(trade.entryX).toLocaleString('en-US')}` : trade.entryTime}
-                          {' → '}
-                          {trade.exitX ? `b${Math.floor(trade.exitX).toLocaleString('en-US')}` : trade.exitTime}
-                          {' · '}
-                          {trade.holdingBars.toLocaleString('en-US')} bars
-                        </span>
-                        <b className={trade.pnl >= 0 ? 'positive' : 'negative'}>{trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)} USDC</b>
+                        <header>
+                          <strong>{trade.id}</strong>
+                          <i>{trade.side} {trade.outcome}</i>
+                        </header>
+                        <div className="qtv-inspector-trade-blocks">
+                          <span>
+                            <em>Entry</em>
+                            <b>{trade.entryX ? Math.floor(trade.entryX).toLocaleString('en-US') : trade.entryTime}</b>
+                            <small>{fmtPrice(trade.entryPrice)}</small>
+                          </span>
+                          <span>
+                            <em>Exit</em>
+                            <b>{trade.exitX ? Math.floor(trade.exitX).toLocaleString('en-US') : trade.exitTime}</b>
+                            <small>{fmtPrice(trade.exitPrice)}</small>
+                          </span>
+                        </div>
+                        <footer>
+                          <span>{trade.holdingBars.toLocaleString('en-US')} bars · {trade.exitReason}</span>
+                          <b className={trade.pnl >= 0 ? 'positive' : 'negative'}>{trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)} USDC</b>
+                        </footer>
                       </button>
                     ))}
                     {!recentTradeRows.length ? <p>No completed backtest trades yet. Run a backtest to populate this tab.</p> : null}
