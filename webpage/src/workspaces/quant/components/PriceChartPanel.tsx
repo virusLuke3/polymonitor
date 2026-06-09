@@ -22,6 +22,7 @@ type EventLabelMode = 'selected' | 'top' | 'all';
 type TooltipMode = 'compact' | 'full';
 type DataWindowMode = 'compact' | 'expanded';
 type DataWindowDock = 'floating' | 'left' | 'right';
+type ChartViewMode = 'raw' | 'normalized' | 'direct' | 'implied';
 type RangeSelection = { startX: number; currentX: number } | null;
 
 const DRAW_TOOLS = [
@@ -61,6 +62,12 @@ type PriceChartPanelProps = {
   eventMode?: boolean;
   selectedTokenId?: string;
   selectedOutcomeLabel?: string;
+  pinnedOutcomeKeys?: string[];
+  hiddenOutcomeKeys?: string[];
+  soloOutcomeKey?: string;
+  onPinnedOutcomeKeysChange?: (keys: string[]) => void;
+  onHiddenOutcomeKeysChange?: (keys: string[]) => void;
+  onSoloOutcomeKeyChange?: (key: string) => void;
   onOutcomeSelect?: (tokenId: string, side: 'YES' | 'NO') => void;
   onRetry?: () => void;
 };
@@ -85,6 +92,16 @@ type DataWindowSettings = {
   dock: DataWindowDock;
   x?: number;
   y?: number;
+};
+
+type OutcomeGroup = {
+  key: string;
+  label: string;
+  fullLabel: string;
+  tokenId?: string;
+  tokenSide: string;
+  order: number;
+  points: PricePoint[];
 };
 
 const SERIES_COLORS = ['#3b82f6', '#f59e0b', '#22c55e', '#ef4444', '#06b6d4', '#a855f7', '#f97316', '#84cc16', '#ec4899', '#14b8a6', '#eab308', '#94a3b8', '#60a5fa', '#fb7185'];
@@ -121,7 +138,7 @@ function outcomeKey(point: PricePoint) {
   return point.outcomeKey || point.outcomeShortLabel || point.outcomeLabel || point.tokenSide || point.tokenId || 'YES';
 }
 
-function outcomeGroups(points: PricePoint[]) {
+function outcomeGroups(points: PricePoint[]): OutcomeGroup[] {
   const groups = new Map<string, PricePoint[]>();
   points.forEach((point) => {
     const key = outcomeKey(point);
@@ -182,6 +199,47 @@ function formatSigned(value: number, digits = 3) {
 
 function latestClose(group: { points: PricePoint[] }) {
   return group.points[group.points.length - 1]?.close ?? 0;
+}
+
+function priceKindForPoint(point: PricePoint, tokenSide: string) {
+  return tokenSide === 'NO' ? point.noPriceKind || 'direct' : point.yesPriceKind || 'direct';
+}
+
+function applyChartViewMode(groups: OutcomeGroup[], viewMode: ChartViewMode): OutcomeGroup[] {
+  if (viewMode === 'raw') return groups;
+  if (viewMode === 'direct' || viewMode === 'implied') {
+    return groups
+      .map((group) => ({
+        ...group,
+        points: group.points.filter((point) => priceKindForPoint(point, group.tokenSide) === viewMode),
+      }))
+      .filter((group) => group.points.length);
+  }
+  const sumsByBlock = new Map<number, number>();
+  groups
+    .filter((group) => group.tokenSide === 'YES')
+    .forEach((group) => {
+      group.points.forEach((point) => {
+        const key = Math.floor(point.timestamp);
+        sumsByBlock.set(key, (sumsByBlock.get(key) || 0) + Math.max(0, point.close));
+      });
+    });
+  return groups
+    .map((group) => ({
+      ...group,
+      points: group.points.map((point) => {
+        const sum = sumsByBlock.get(Math.floor(point.timestamp)) || 0;
+        if (group.tokenSide !== 'YES' || sum <= 0) return point;
+        const close = Math.max(0, Math.min(1, point.close / sum));
+        return {
+          ...point,
+          close,
+          yesPrice: close,
+          noPrice: Math.max(0, Math.min(1, 1 - close)),
+        };
+      }),
+    }))
+    .filter((group) => group.points.length);
 }
 
 function latestVolume(group: { points: PricePoint[] }) {
@@ -265,26 +323,39 @@ function markerPosition(signal: Signal, points: PricePoint[]) {
   };
 }
 
+function niceBlockStep(rawStep: number) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const unit = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return Math.max(1, Math.floor(unit * magnitude));
+}
+
 function blockAxisTicks(points: PricePoint[], maxTicks = 7) {
   if (!points.length) return [];
-  const count = Math.min(maxTicks, Math.max(2, points.length));
-  const seen = new Set<number>();
-  return Array.from({ length: count })
-    .map((_, index) => {
-      const pointIndex = count === 1 ? 0 : Math.round((index / (count - 1)) * (points.length - 1));
-      const point = points[pointIndex];
-      if (!point) return null;
-      const key = Math.floor(point.timestamp);
-      if (seen.has(key)) return null;
-      seen.add(key);
-      return {
-        key,
-        label: blockLabel(point.timestamp),
-        left: `${(pointIndex / Math.max(1, points.length - 1)) * 100}%`,
-        edge: index === 0 ? 'start' : index === count - 1 ? 'end' : 'middle',
-      };
-    })
-    .filter(Boolean) as Array<{ key: number; label: string; left: string; edge: 'start' | 'middle' | 'end' }>;
+  const first = Math.floor(points[0]?.timestamp || 0);
+  const last = Math.floor(points[points.length - 1]?.timestamp || first);
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return [];
+  if (first === last) {
+    return [{ key: first, label: blockLabel(first), left: '0%', edge: 'start' as const }];
+  }
+  const range = Math.max(1, last - first);
+  const step = niceBlockStep(range / Math.max(1, maxTicks - 1));
+  const ticks: number[] = [first];
+  for (let value = Math.ceil(first / step) * step; value < last; value += step) {
+    if (value > first) ticks.push(value);
+  }
+  ticks.push(last);
+  const unique = Array.from(new Set(ticks)).slice(0, maxTicks + 2);
+  return unique.map((value, index) => {
+    const left = ((value - first) / range) * 100;
+    return {
+      key: value,
+      label: blockLabel(value),
+      left: `${Math.max(0, Math.min(100, left))}%`,
+      edge: index === 0 ? 'start' : index === unique.length - 1 ? 'end' : 'middle',
+    };
+  });
 }
 
 function clampProbability(value: number) {
@@ -398,6 +469,12 @@ export function PriceChartPanel({
   eventMode = false,
   selectedTokenId = '',
   selectedOutcomeLabel = '',
+  pinnedOutcomeKeys,
+  hiddenOutcomeKeys,
+  soloOutcomeKey,
+  onPinnedOutcomeKeysChange,
+  onHiddenOutcomeKeysChange,
+  onSoloOutcomeKeyChange,
   onOutcomeSelect,
   onRetry,
 }: PriceChartPanelProps) {
@@ -423,12 +500,12 @@ export function PriceChartPanel({
   const [compareMode, setCompareMode] = useState<EventSideMode>(() => persistedState('polydata.quant.event.sideMode', 'auto'));
   const [labelMode, setLabelMode] = useState<EventLabelMode>(() => persistedState('polydata.quant.event.labelMode', 'top'));
   const [tooltipMode, setTooltipMode] = useState<TooltipMode>(() => persistedState('polydata.quant.event.tooltipMode', 'compact'));
+  const [chartViewMode, setChartViewMode] = useState<ChartViewMode>(() => persistedState('polydata.quant.chart.viewMode', 'raw'));
   const [showLowProbability, setShowLowProbability] = useState(false);
-  const [normalizedView, setNormalizedView] = useState(false);
   const [layoutMode, setLayoutMode] = useState('1');
-  const [pinnedOutcomeKeys, setPinnedOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.pinnedOutcomes'));
-  const [hiddenOutcomeKeys, setHiddenOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.hiddenOutcomes'));
-  const [soloOutcomeKey, setSoloOutcomeKey] = useState<string>('');
+  const [internalPinnedOutcomeKeys, setInternalPinnedOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.pinnedOutcomes'));
+  const [internalHiddenOutcomeKeys, setInternalHiddenOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.hiddenOutcomes'));
+  const [internalSoloOutcomeKey, setInternalSoloOutcomeKey] = useState<string>('');
   const [rangeZoomEnabled, setRangeZoomEnabled] = useState(false);
   const [rangeSelection, setRangeSelection] = useState<RangeSelection>(null);
   const [replayEnabled, setReplayEnabled] = useState(false);
@@ -449,23 +526,27 @@ export function PriceChartPanel({
     if (effectiveSideMode === 'no') return group.tokenSide === 'NO';
     return true;
   }), [effectiveSideMode, rawGroupedOutcomes]);
+  const viewFilteredOutcomes = useMemo(() => applyChartViewMode(sideFilteredOutcomes, chartViewMode), [chartViewMode, sideFilteredOutcomes]);
+  const effectivePinnedOutcomeKeys = pinnedOutcomeKeys ?? internalPinnedOutcomeKeys;
+  const effectiveHiddenOutcomeKeys = hiddenOutcomeKeys ?? internalHiddenOutcomeKeys;
+  const effectiveSoloOutcomeKey = soloOutcomeKey ?? internalSoloOutcomeKey;
   const displayedOutcomeCount = eventMode ? sideFilteredOutcomes.length : (yesOutcomeCount || sideFilteredOutcomes.length);
-  const selectedGroup = useMemo(() => sideFilteredOutcomes.find((group) => (
+  const selectedGroup = useMemo(() => viewFilteredOutcomes.find((group) => (
     (selectedTokenId && group.tokenId === selectedTokenId)
     || (selectedOutcomeLabel && group.label === selectedOutcomeLabel)
-  )) || sideFilteredOutcomes[0] || null, [selectedOutcomeLabel, selectedTokenId, sideFilteredOutcomes]);
-  const sortedOutcomes = useMemo(() => sideFilteredOutcomes.slice().sort((left, right) => {
+  )) || viewFilteredOutcomes[0] || null, [selectedOutcomeLabel, selectedTokenId, viewFilteredOutcomes]);
+  const sortedOutcomes = useMemo(() => viewFilteredOutcomes.slice().sort((left, right) => {
     if (eventSortMode === 'outcome') return left.order - right.order;
     if (eventSortMode === 'volume') return latestVolume(right) - latestVolume(left);
     if (eventSortMode === 'change') return Math.abs(latestChange(right)) - Math.abs(latestChange(left));
     return latestClose(right) - latestClose(left);
-  }), [eventSortMode, sideFilteredOutcomes]);
+  }), [eventSortMode, viewFilteredOutcomes]);
   const visibleOutcomeGroups = useMemo(() => {
-    const hidden = new Set(hiddenOutcomeKeys);
-    const pinned = new Set(pinnedOutcomeKeys);
+    const hidden = new Set(effectiveHiddenOutcomeKeys);
+    const pinned = new Set(effectivePinnedOutcomeKeys);
     const available = sortedOutcomes.filter((group) => !hidden.has(group.key));
-    if (soloOutcomeKey) {
-      const solo = available.find((group) => group.key === soloOutcomeKey);
+    if (effectiveSoloOutcomeKey) {
+      const solo = available.find((group) => group.key === effectiveSoloOutcomeKey);
       return solo ? [solo] : available.slice(0, 1);
     }
     if (!eventMode) return available;
@@ -482,7 +563,7 @@ export function PriceChartPanel({
       if (eventSortMode === 'outcome') return left.order - right.order;
       return latestClose(right) - latestClose(left);
     });
-  }, [displayMode, eventMode, eventSortMode, hiddenOutcomeKeys, pinnedOutcomeKeys, selectedGroup, showLowProbability, soloOutcomeKey, sortedOutcomes]);
+  }, [displayMode, effectiveHiddenOutcomeKeys, effectivePinnedOutcomeKeys, effectiveSoloOutcomeKey, eventMode, eventSortMode, selectedGroup, showLowProbability, sortedOutcomes]);
   const allPoints = useMemo(() => visibleOutcomeGroups.flatMap((group) => group.points).sort((left, right) => left.timestamp - right.timestamp), [visibleOutcomeGroups]);
   const primaryPoints = selectedGroup?.points || visibleOutcomeGroups[0]?.points || allPoints;
   const latestPoint = primaryPoints[primaryPoints.length - 1] || null;
@@ -548,21 +629,39 @@ export function PriceChartPanel({
     });
   }
 
+  const updatePinnedOutcomeKeys = (next: string[] | ((current: string[]) => string[])) => {
+    const value = typeof next === 'function' ? next(effectivePinnedOutcomeKeys) : next;
+    setInternalPinnedOutcomeKeys(value);
+    onPinnedOutcomeKeysChange?.(value);
+  };
+
+  const updateHiddenOutcomeKeys = (next: string[] | ((current: string[]) => string[])) => {
+    const value = typeof next === 'function' ? next(effectiveHiddenOutcomeKeys) : next;
+    setInternalHiddenOutcomeKeys(value);
+    onHiddenOutcomeKeysChange?.(value);
+  };
+
+  const updateSoloOutcomeKey = (next: string | ((current: string) => string)) => {
+    const value = typeof next === 'function' ? next(effectiveSoloOutcomeKey) : next;
+    setInternalSoloOutcomeKey(value);
+    onSoloOutcomeKeyChange?.(value);
+  };
+
   const togglePinnedOutcome = (key: string) => {
-    setPinnedOutcomeKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
-    setHiddenOutcomeKeys((current) => current.filter((item) => item !== key));
+    updatePinnedOutcomeKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+    updateHiddenOutcomeKeys((current) => current.filter((item) => item !== key));
   };
 
   const toggleHiddenOutcome = (key: string) => {
-    setHiddenOutcomeKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
-    setPinnedOutcomeKeys((current) => current.filter((item) => item !== key));
-    if (soloOutcomeKey === key) setSoloOutcomeKey('');
+    updateHiddenOutcomeKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+    updatePinnedOutcomeKeys((current) => current.filter((item) => item !== key));
+    if (effectiveSoloOutcomeKey === key) updateSoloOutcomeKey('');
   };
 
   const resetOutcomeVisibility = () => {
-    setHiddenOutcomeKeys([]);
-    setPinnedOutcomeKeys([]);
-    setSoloOutcomeKey('');
+    updateHiddenOutcomeKeys([]);
+    updatePinnedOutcomeKeys([]);
+    updateSoloOutcomeKey('');
     setShowLowProbability(false);
   };
 
@@ -572,12 +671,13 @@ export function PriceChartPanel({
     window.localStorage.setItem('polydata.quant.event.sideMode', compareMode);
     window.localStorage.setItem('polydata.quant.event.labelMode', labelMode);
     window.localStorage.setItem('polydata.quant.event.tooltipMode', tooltipMode);
-  }, [compareMode, displayMode, eventSortMode, labelMode, tooltipMode]);
+    window.localStorage.setItem('polydata.quant.chart.viewMode', chartViewMode);
+  }, [chartViewMode, compareMode, displayMode, eventSortMode, labelMode, tooltipMode]);
 
   useEffect(() => {
-    window.localStorage.setItem('polydata.quant.chart.pinnedOutcomes', JSON.stringify(pinnedOutcomeKeys));
-    window.localStorage.setItem('polydata.quant.chart.hiddenOutcomes', JSON.stringify(hiddenOutcomeKeys));
-  }, [hiddenOutcomeKeys, pinnedOutcomeKeys]);
+    window.localStorage.setItem('polydata.quant.chart.pinnedOutcomes', JSON.stringify(effectivePinnedOutcomeKeys));
+    window.localStorage.setItem('polydata.quant.chart.hiddenOutcomes', JSON.stringify(effectiveHiddenOutcomeKeys));
+  }, [effectiveHiddenOutcomeKeys, effectivePinnedOutcomeKeys]);
 
   useEffect(() => {
     window.localStorage.setItem('polymonitor.quant.dataWindowSettings', JSON.stringify(dataWindowSettings));
@@ -824,10 +924,10 @@ export function PriceChartPanel({
       });
       line.setData(lineData(group.points));
     });
-    series.ma.setData(lineData(maPoints));
-    series.volume.setData(volumeData(allPoints));
+    series.ma.setData(indicatorMode.ma ? lineData(maPoints) : []);
+    series.volume.setData(indicatorMode.volume ? volumeData(allPoints) : []);
     chart.timeScale().fitContent();
-  }, [allPoints, displayMode, eventMode, labelMode, maPoints, scaleMode, selectedGroup, visibleOutcomeGroups]);
+  }, [allPoints, displayMode, eventMode, indicatorMode.ma, indicatorMode.volume, labelMode, maPoints, scaleMode, selectedGroup, visibleOutcomeGroups]);
 
   const drawingPointFromEvent = (event: MouseEvent) => {
     const box = containerRef.current?.getBoundingClientRect();
@@ -931,7 +1031,7 @@ export function PriceChartPanel({
         ? 'No price rows'
         : '--';
   const selectedText = hasLoadedPrices && selectedGroup ? `${selectedGroup.fullLabel} ${fmtPrice(selectedLatest)}` : '--';
-  const sumText = eventMode && hasLoadedPrices ? fmtPrice(normalizedView ? 1 : allYesSum) : '--';
+  const sumText = eventMode && hasLoadedPrices ? fmtPrice(chartViewMode === 'normalized' ? 1 : allYesSum) : '--';
   const visibleSumText = eventMode && hasLoadedPrices ? fmtPrice(visibleYesSum) : '--';
   const latestPriceText = latest && hasLoadedPrices ? fmtPrice(latest.close) : '--';
   const loadingTitle = dataStatus === 'metadata_loading'
@@ -1013,8 +1113,8 @@ export function PriceChartPanel({
           <div className="qtv-toolbar-group">
             <span>Indicators</span>
             <button className={indicatorMode.ma ? 'active' : ''} type="button" title="Moving average" onClick={() => setIndicatorMode((current) => ({ ...current, ma: !current.ma }))}>MA</button>
-            <button className={indicatorMode.ema ? 'active' : ''} type="button" title="EMA scaffold" onClick={() => setIndicatorMode((current) => ({ ...current, ema: !current.ema }))}>EMA</button>
-            <button className={indicatorMode.bands ? 'active' : ''} type="button" title="Bollinger band scaffold" onClick={() => setIndicatorMode((current) => ({ ...current, bands: !current.bands }))}>BB</button>
+            <button className={indicatorMode.ema ? 'active' : ''} type="button" title="EMA is queued for the next indicator pass" disabled>EMA</button>
+            <button className={indicatorMode.bands ? 'active' : ''} type="button" title="Bollinger bands are queued for the next indicator pass" disabled>BB</button>
             <button className={indicatorMode.volume ? 'active' : ''} type="button" title="Volume" onClick={() => setIndicatorMode((current) => ({ ...current, volume: !current.volume }))}>Vol</button>
           </div>
           {eventMode ? (
@@ -1055,8 +1155,13 @@ export function PriceChartPanel({
                     <option value="compact">Compact</option>
                     <option value="full">Full</option>
                   </select></label>
+                  <label>View<select value={chartViewMode} onChange={(event) => setChartViewMode(event.currentTarget.value as ChartViewMode)} title="Price view mode">
+                    <option value="raw">Raw probability</option>
+                    <option value="normalized">Normalized event share</option>
+                    <option value="direct">Direct only</option>
+                    <option value="implied">Implied only</option>
+                  </select></label>
                   <button className={showLowProbability ? 'active' : ''} type="button" title="Show low-probability outcomes" onClick={() => setShowLowProbability((current) => !current)}>Low probability</button>
-                  <button className={normalizedView ? 'active' : ''} type="button" title="Toggle normalized view indicator" onClick={() => setNormalizedView((current) => !current)}>{normalizedView ? 'Normalized' : 'Raw data'}</button>
                   <button type="button" title="Reset pinned, hidden, and solo outcome lines" onClick={resetOutcomeVisibility}>Reset lines</button>
                 </>
               ) : null}
@@ -1109,6 +1214,7 @@ export function PriceChartPanel({
             <span>{market.category} · {eventMode ? `${displayedOutcomeCount} outcomes` : 'outcome probability'} · {priceSource}</span>
             <div className="qtv-indicator-legend">
               <span>Rows <b>{rowsText}</b></span>
+              <span>View <b>{chartViewMode}</b></span>
               <span>Range <i>{hasLoadedPrices ? pointLabel(primaryPoints[0], priceSource) : '--'}</i> <em>{hasLoadedPrices ? pointLabel(primaryPoints[primaryPoints.length - 1], priceSource) : '--'}</em></span>
               <span>Volume <b>{hasLoadedPrices ? volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</b></span>
               <span>Selected <b title={selectedGroup?.fullLabel}>{selectedText}</b></span>
@@ -1123,8 +1229,8 @@ export function PriceChartPanel({
               {visibleOutcomeGroups.slice(0, 8).map((group) => {
                 const point = group.points[group.points.length - 1];
                 const isSelected = selectedGroup?.key === group.key;
-                const isPinned = pinnedOutcomeKeys.includes(group.key);
-                const isSolo = soloOutcomeKey === group.key;
+                const isPinned = effectivePinnedOutcomeKeys.includes(group.key);
+                const isSolo = effectiveSoloOutcomeKey === group.key;
                 return (
                   <span
                     key={group.key}
@@ -1141,7 +1247,7 @@ export function PriceChartPanel({
                       <span>{group.fullLabel}</span> <b>{fmtPrice(point?.close || 0)}</b>
                     </button>
                     <button className={isPinned ? 'active micro' : 'micro'} type="button" title={isPinned ? 'Unpin outcome line' : 'Pin outcome line'} onClick={() => togglePinnedOutcome(group.key)}>P</button>
-                    <button className={isSolo ? 'active micro' : 'micro'} type="button" title={isSolo ? 'Clear solo outcome' : 'Solo outcome'} onClick={() => setSoloOutcomeKey(isSolo ? '' : group.key)}>S</button>
+                    <button className={isSolo ? 'active micro' : 'micro'} type="button" title={isSolo ? 'Clear solo outcome' : 'Solo outcome'} onClick={() => updateSoloOutcomeKey(isSolo ? '' : group.key)}>S</button>
                     <button className="micro danger" type="button" title="Hide outcome line" onClick={() => toggleHiddenOutcome(group.key)}>H</button>
                   </span>
                 );

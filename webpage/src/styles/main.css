@@ -710,12 +710,23 @@
 }
 
 .qtv-inspector-sort span {
+  display: grid;
+  gap: 2px;
   color: #f8fafc;
   font-size: 11px;
   font-weight: 900;
 }
 
-.qtv-inspector-sort select {
+.qtv-inspector-sort span em {
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.qtv-inspector-sort select,
+.qtv-inspector-sort button {
   height: 26px;
   border: 1px solid #273245;
   border-radius: 4px;
@@ -723,6 +734,17 @@
   color: #dbeafe;
   font-family: var(--font-mono);
   font-size: 10px;
+}
+
+.qtv-inspector-sort button {
+  cursor: pointer;
+  font-weight: 850;
+  padding: 0 8px;
+}
+
+.qtv-inspector-sort button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .qtv-inspector-outcome {
@@ -737,6 +759,18 @@
 .qtv-inspector-outcome:hover {
   border-left-color: #3b82f6;
   background: #101a2c;
+}
+
+.qtv-inspector-outcome.pinned {
+  border-left-color: #22c55e;
+}
+
+.qtv-inspector-outcome.solo {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.36);
+}
+
+.qtv-inspector-outcome.hidden {
+  opacity: 0.52;
 }
 
 .qtv-inspector-outcome > button {
@@ -768,6 +802,31 @@
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 900;
+}
+
+.qtv-inspector-outcome > .qtv-outcome-line-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.qtv-inspector-outcome > .qtv-outcome-line-actions button {
+  height: 24px;
+  border-color: rgba(38, 50, 68, 0.64);
+  background: rgba(8, 12, 19, 0.72);
+  color: #8390a3;
+  font-size: 9px;
+}
+
+.qtv-inspector-outcome > .qtv-outcome-line-actions button.active {
+  border-color: rgba(96, 165, 250, 0.48);
+  background: rgba(37, 99, 235, 0.14);
+  color: #dbeafe;
+}
+
+.qtv-inspector-outcome > .qtv-outcome-line-actions button.danger.active,
+.qtv-inspector-outcome > .qtv-outcome-line-actions button.danger:hover {
+  border-color: rgba(244, 63, 94, 0.48);
+  background: rgba(244, 63, 94, 0.1);
+  color: #fecdd3;
 }
 
 .qtv-inspector-outcome > div button.active {
@@ -1237,6 +1296,17 @@
   border-color: rgba(47, 125, 244, 0.44);
   color: #dbeafe;
   background: rgba(47, 125, 244, 0.13);
+}
+
+.qtv-advanced-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.qtv-advanced-toolbar button:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+  color: #a8b3c3;
 }
 
 .qtv-display-menu {
