@@ -135,6 +135,11 @@ function compactRows(value?: string | number | null) {
   return numeric.toLocaleString('en-US');
 }
 
+function numericFromMetric(value: string) {
+  const numeric = Number(String(value).replace(/[^0-9.+-]/g, ''));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
 async function copyText(value: string) {
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -370,6 +375,44 @@ export function StrategyTesterPanel({
       isCurrent: Boolean(currentRunId && run.runId === currentRunId),
     }));
   }, [recentBacktestRuns, result.runId]);
+  const batchLeaderboard = useMemo(() => (
+    [...batchRows, ...splitRows]
+      .filter((row) => row.status === 'succeeded' || row.status === 'failed' || row.runId)
+      .sort((left, right) => numericFromMetric(right.netProfit) - numericFromMetric(left.netProfit))
+      .slice(0, 8)
+  ), [batchRows, splitRows]);
+  const runControlRows = useMemo(() => ([
+    {
+      key: 'single',
+      label: 'Single Outcome',
+      status: hasCompletedRun ? backtestStatus || 'loaded' : backtestStatus || 'idle',
+      detail: hasCompletedRun ? `#${result.runId} · ${result.trades.length.toLocaleString('en-US')} trades` : 'current selected outcome',
+      rows: rowCount,
+      actionLabel: hasCompletedRun ? 'Rerun' : 'Run',
+      action: onRefresh,
+      disabled: rowCount <= 0 || backtestStatus === 'running',
+    },
+    {
+      key: 'split',
+      label: 'Train/Test Split',
+      status: splitStatus,
+      detail: splitRows.length ? `${splitRows.length.toLocaleString('en-US')} segments · ${splitRows.filter((row) => row.status === 'succeeded').length.toLocaleString('en-US')} complete` : '70/30 block split',
+      rows: splitRows.reduce((sum, row) => sum + row.rows, 0),
+      actionLabel: splitStatus === 'running' ? 'Running' : 'Run 70/30',
+      action: onSplitBacktest,
+      disabled: rowCount <= 0 || splitStatus === 'running',
+    },
+    {
+      key: 'batch',
+      label: 'Batch Outcomes',
+      status: batchStatus,
+      detail: batchRows.length ? `${batchRows.length.toLocaleString('en-US')} outcomes · ${batchRows.filter((row) => row.status === 'succeeded').length.toLocaleString('en-US')} complete` : 'top 5 visible outcomes',
+      rows: batchRows.reduce((sum, row) => sum + row.rows, 0),
+      actionLabel: batchStatus === 'running' ? 'Running' : 'Run Top 5',
+      action: onBatchBacktest,
+      disabled: rowCount <= 0 || batchStatus === 'running',
+    },
+  ]), [backtestStatus, batchRows, batchStatus, hasCompletedRun, onBatchBacktest, onRefresh, onSplitBacktest, result.runId, result.trades.length, rowCount, splitRows, splitStatus]);
 
   return (
     <section className="qtv-bottom-panel">
@@ -432,13 +475,44 @@ export function StrategyTesterPanel({
 
       {toolTab === 'screener' ? (
         <div className="qtv-tool-panel">
-          <div className="qtv-tool-grid">
-            {summaryRows.length ? summaryRows.map((metric) => <MetricCard key={`screener-${metric.name}`} metric={metric} />) : (
-              <div className="qtv-tool-empty">
-                <strong>No screened backtest</strong>
-                <span>Run a real backtest to populate market screening metrics.</span>
-              </div>
-            )}
+          <div className="qtv-screener-workbench">
+            <section className="qtv-run-control-board" aria-label="Backtest run controls">
+              {runControlRows.map((row) => (
+                <article key={row.key} className={`qtv-run-lane ${row.status}`}>
+                  <header>
+                    <span>{row.label}</span>
+                    <b>{row.status}</b>
+                  </header>
+                  <strong>{row.detail}</strong>
+                  <em>{row.rows ? `${row.rows.toLocaleString('en-US')} rows` : rowCount ? `${rowCount.toLocaleString('en-US')} source rows` : 'waiting for rows'}</em>
+                  <button type="button" disabled={row.disabled} onClick={row.action}>{row.actionLabel}</button>
+                </article>
+              ))}
+            </section>
+            {batchLeaderboard.length ? (
+              <section className="qtv-screener-leaderboard">
+                <header>
+                  <strong>Backtest leaderboard</strong>
+                  <span>{batchLeaderboard.length.toLocaleString('en-US')} recent batch/split rows</span>
+                </header>
+                {batchLeaderboard.map((row) => (
+                  <button key={`leader-${row.key}-${row.runId || row.status}`} type="button" title={row.marketSlug}>
+                    <span>{row.outcome}</span>
+                    <b className={numericFromMetric(row.netProfit) >= 0 ? 'positive' : 'negative'}>{row.netProfit}</b>
+                    <em>{row.totalReturn} · {row.trades.toLocaleString('en-US')} trades</em>
+                    <small>{row.status}{row.runId ? ` · #${row.runId}` : ''}</small>
+                  </button>
+                ))}
+              </section>
+            ) : null}
+            <div className="qtv-tool-grid">
+              {summaryRows.length ? summaryRows.map((metric) => <MetricCard key={`screener-${metric.name}`} metric={metric} />) : (
+                <div className="qtv-tool-empty">
+                  <strong>No screened backtest</strong>
+                  <span>Run a real backtest to populate market screening metrics.</span>
+                </div>
+              )}
+            </div>
           </div>
           <div className="qtv-mini-table qtv-tool-mini">
             <strong>Market Screener</strong>
@@ -501,6 +575,7 @@ export function StrategyTesterPanel({
 
       {toolTab === 'trading' ? (
         <div className="qtv-tool-panel qtv-tool-panel-single">
+          <div className="qtv-trading-workbench">
           <div className="qtv-properties">
             <section>
               <h3>Trading Panel</h3>
@@ -511,6 +586,26 @@ export function StrategyTesterPanel({
               <div><span>Notional</span><strong>{selectedTrade ? `${selectedTrade.notional.toFixed(2)} USDC` : '-'}</strong></div>
               <div><span>Last PnL</span><strong className={selectedTrade && selectedTrade.pnl >= 0 ? 'positive' : 'negative'}>{selectedTrade ? `${selectedTrade.pnl.toFixed(2)} USDC` : '-'}</strong></div>
             </section>
+          </div>
+          <section className="qtv-execution-model-card">
+            <header>
+              <strong>Execution Model</strong>
+              <span>{engine} · {dataSource}</span>
+            </header>
+            <div>
+              <span>Fee</span><b>{strategyParameters.feeBps} bps</b>
+              <span>Slippage</span><b>{strategyParameters.slippageBps} bps</b>
+              <span>Liquidity cap</span><b>{strategyParameters.liquidityCapPct}%</b>
+              <span>Position size</span><b>{strategyParameters.positionSize.toLocaleString('en-US')} USDC</b>
+              <span>Round trip</span><b>{formatNumber(parameterDiagnostics.roundTripCostBps, 2)} bps</b>
+              <span>Capacity</span><b>{formatNumber(parameterDiagnostics.capacity, 0)} USDC</b>
+            </div>
+            <footer>
+              <button type="button" onClick={() => setToolTab('tester')}>Open tester</button>
+              <button type="button" onClick={() => setSettingsOpen(true)}>Edit settings</button>
+              <button type="button" onClick={onRefresh}>Run simulation</button>
+            </footer>
+          </section>
           </div>
         </div>
       ) : null}
