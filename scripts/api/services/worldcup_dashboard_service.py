@@ -217,6 +217,16 @@ def _market_text(row: Dict[str, Any]) -> str:
     return " ".join(str(value or "") for value in values).lower()
 
 
+def _market_primary_text(row: Dict[str, Any]) -> str:
+    values = [
+        row.get("title"),
+        row.get("question"),
+        row.get("marketTitle"),
+        row.get("slug"),
+    ]
+    return " ".join(str(value or "") for value in values).lower()
+
+
 def _safe_list(value: Any) -> List[Any]:
     if isinstance(value, list):
         return value
@@ -243,11 +253,12 @@ def _polymarket_url(row: Dict[str, Any]) -> str:
 
 def _worldcup_market_score(match: Dict[str, Any], row: Dict[str, Any]) -> int:
     text = _market_text(row)
-    tokens = set(_tokenize(text))
+    primary_text = _market_primary_text(row)
+    tokens = set(_tokenize(primary_text))
     home_tokens = _team_tokens(match.get("homeTeam"))
     away_tokens = _team_tokens(match.get("awayTeam"))
-    home_hit = bool(home_tokens & tokens) or str(match.get("homeTeam") or "").lower() in text
-    away_hit = bool(away_tokens & tokens) or str(match.get("awayTeam") or "").lower() in text
+    home_hit = bool(home_tokens & tokens) or str(match.get("homeTeam") or "").lower() in primary_text
+    away_hit = bool(away_tokens & tokens) or str(match.get("awayTeam") or "").lower() in primary_text
     if not home_hit or not away_hit:
         return 0
     worldcup_hit = any(term in text for term in ("world cup", "fifa", "wc2026", "2026"))

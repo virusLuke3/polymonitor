@@ -74,3 +74,59 @@ def test_worldcup_dashboard_links_strict_polymarket_market():
     assert odds["matchId"] == "wc2026-001"
     assert odds["probabilities"][0] == {"outcome": "Mexico", "price": "0.52"}
     assert "rihanna" not in odds["marketTitle"].lower()
+
+
+def test_worldcup_dashboard_rejects_event_level_false_positive_market():
+    source_schedule = {
+        "matches": [
+            {
+                "num": 2,
+                "date": "2026-06-12",
+                "time": "02:00 UTC+0",
+                "team1": "South Korea",
+                "team2": "Czech Republic",
+                "group": "Group A",
+                "round": "Matchday 1",
+                "ground": "Guadalajara (Zapopan)",
+            }
+        ]
+    }
+    noisy_gamma_event = {
+        "data": [
+            {
+                "title": "South Korea vs Czech Republic - FIFA World Cup 2026",
+                "slug": "south-korea-czech-republic-world-cup-2026",
+                "markets": [
+                    {
+                        "question": "Will China invades Taiwan before GTA VI?",
+                        "slug": "will-china-invades-taiwan-before-gta-vi",
+                        "outcomes": '["Yes","No"]',
+                        "outcomePrices": '["0.505","0.495"]',
+                    }
+                ],
+            }
+        ]
+    }
+
+    def http_json_get(url, *, params=None, timeout=12, headers=None):
+        if "openfootball" in url:
+            return source_schedule
+        if "gamma-api.polymarket.com" in url:
+            return noisy_gamma_event
+        raise AssertionError(url)
+
+    ctx = {
+        "http_json_get": http_json_get,
+        "SETTINGS": SimpleNamespace(worldcup_market_link_scan_limit=4),
+    }
+
+    with patch.object(
+        worldcup_dashboard_service.worldcup_intel_service,
+        "get_worldcup_intel_snapshot",
+        return_value={"status": "ok", "weather": [], "news": [], "signals": []},
+    ):
+        payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(ctx)
+
+    assert payload["providerStates"]["odds"] == "empty"
+    assert payload["odds"] == []
+    assert payload["matches"][0]["marketLinked"] is False
