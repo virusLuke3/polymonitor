@@ -139,6 +139,34 @@ function searchTextForMarket(market: QuantPriceMarket, result?: SearchResult) {
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
+function normalizedQueryTerms(query: string) {
+  const normalized = query
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ');
+  if (!normalized) return [];
+  const terms = normalized.split(' ').filter(Boolean);
+  const extras: string[] = [];
+  const compact = normalized.replace(/\s+/g, '');
+  if (terms.includes('nba')) extras.push('basketball');
+  if (terms.includes('fifa') || compact.includes('worldcup')) extras.push('world cup', 'soccer');
+  if (terms.includes('nfl')) extras.push('football');
+  if (terms.includes('trump')) extras.push('donald trump');
+  if (terms.includes('btc') || terms.includes('bitcoin')) extras.push('crypto');
+  return [...terms, ...extras];
+}
+
+function marketMatchesQuery(haystack: string, query: string) {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return true;
+  if (haystack.includes(trimmed)) return true;
+  const terms = normalizedQueryTerms(trimmed);
+  if (!terms.length) return true;
+  return terms.every((term) => haystack.includes(term));
+}
+
 function storedFilter(): SearchFilter {
   try {
     const value = window.localStorage.getItem('polydata.quant.search.filter') as SearchFilter | null;
@@ -343,7 +371,7 @@ export function WorkspaceHeader({
       return results;
     });
     const filtered = base.filter((result) => {
-      if (query && !searchTextForMarket(result.market, result).includes(query)) return false;
+      if (query && !marketMatchesQuery(searchTextForMarket(result.market, result), query)) return false;
       if (activeFilter === 'events' && result.kind !== 'event') return false;
       if (activeFilter === 'markets' && result.kind !== 'market') return false;
       if (activeFilter === 'tokens' && result.kind !== 'token') return false;
@@ -739,49 +767,70 @@ export function WorkspaceHeader({
                         {section.items.map((result) => {
                           const index = flatResults.findIndex((item) => item.key === result.key);
                           const selected = result.market.marketSlug === marketSlug;
+                          const inlineOutcomes = result.kind === 'event' && index === highlightedIndex ? visibleRelatedOutcomeMarkets.slice(0, 5) : [];
                           return (
-                            <button
-                              key={result.key}
-                              className={`qtv-result-row ${selected ? 'selected' : ''} ${index === highlightedIndex ? 'highlighted' : ''}`}
-                              type="button"
-                              role="option"
-                              aria-selected={selected}
-                              id={`quant-market-option-${index}`}
-                              onMouseDown={(event) => event.preventDefault()}
-                              onMouseEnter={() => {
-                                setHighlightedIndex(index);
-                                onMarketPreview?.(result.market.marketSlug);
-                              }}
-                              onClick={() => chooseResult(result)}
-                            >
-                              <span className={`qtv-type-badge ${result.kind}`}>{result.kind === 'event' ? 'Event' : result.kind === 'market' ? 'Market' : 'Token'}</span>
-                              <span className="qtv-result-main">
-                                <strong>{result.title}</strong>
-                                <small>{result.kind === 'token' ? result.subtitle : result.slug}</small>
-                                <em>{result.coverage}{result.price ? ` · ${result.price}` : ''}</em>
-                              </span>
-                              <span className="qtv-result-badges">
-                                <span
-                                  className={`qtv-favorite-toggle ${favoriteSlugSet.has(result.market.marketSlug) ? 'active' : ''}`}
-                                  role="button"
-                                  tabIndex={-1}
-                                  title={favoriteSlugSet.has(result.market.marketSlug) ? 'Remove from favorites' : 'Add to favorites'}
-                                  onMouseDown={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                  }}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    toggleFavorite(result.market);
-                                  }}
-                                >
-                                  ★
+                            <div key={result.key} className="qtv-result-entry">
+                              <button
+                                className={`qtv-result-row ${selected ? 'selected' : ''} ${index === highlightedIndex ? 'highlighted' : ''}`}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                id={`quant-market-option-${index}`}
+                                onMouseDown={(event) => event.preventDefault()}
+                                onMouseEnter={() => {
+                                  setHighlightedIndex(index);
+                                  onMarketPreview?.(result.market.marketSlug);
+                                }}
+                                onClick={() => chooseResult(result)}
+                              >
+                                <span className={`qtv-type-badge ${result.kind}`}>{result.kind === 'event' ? 'Event' : result.kind === 'market' ? 'Market' : 'Token'}</span>
+                                <span className="qtv-result-main">
+                                  <strong>{result.title}</strong>
+                                  <small>{result.kind === 'token' ? result.subtitle : result.slug}</small>
+                                  <em>{result.coverage}{result.price ? ` · ${result.price}` : ''}</em>
                                 </span>
-                                <b>{result.count}</b>
-                                <small className={`coverage ${result.status}`}>{result.status === 'none' ? 'no rows' : result.status}</small>
-                                <small>{result.confidence}</small>
-                              </span>
-                            </button>
+                                <span className="qtv-result-badges">
+                                  <span
+                                    className={`qtv-favorite-toggle ${favoriteSlugSet.has(result.market.marketSlug) ? 'active' : ''}`}
+                                    role="button"
+                                    tabIndex={-1}
+                                    title={favoriteSlugSet.has(result.market.marketSlug) ? 'Remove from favorites' : 'Add to favorites'}
+                                    onMouseDown={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                    }}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      toggleFavorite(result.market);
+                                    }}
+                                  >
+                                    ★
+                                  </span>
+                                  <b>{result.count}</b>
+                                  <small className={`coverage ${result.status}`}>{result.status === 'none' ? 'no rows' : result.status}</small>
+                                  <small>{result.confidence}</small>
+                                </span>
+                              </button>
+                              {inlineOutcomes.length || (result.kind === 'event' && index === highlightedIndex && activeEventOutcomeCache?.status === 'loading') ? (
+                                <div className="qtv-inline-outcomes" onMouseDown={(event) => event.preventDefault()}>
+                                  {inlineOutcomes.map((market) => (
+                                    <button
+                                      key={`inline-${market.marketSlug}`}
+                                      type="button"
+                                      title={`${titleForMarket(market)}\n${market.marketSlug}`}
+                                      onClick={() => chooseMarket(market.marketSlug, market)}
+                                    >
+                                      <span>{titleForMarket(market)}</span>
+                                      <b>{latestPrice(market) || `${rowsForMarket(market).toLocaleString('en-US')} rows`}</b>
+                                    </button>
+                                  ))}
+                                  {!inlineOutcomes.length ? <span>Loading event outcomes...</span> : null}
+                                  {relatedOutcomeMarkets.length > inlineOutcomes.length ? (
+                                    <button className="more" type="button" onClick={() => setExplicitPaletteMode('full')}>+{relatedOutcomeMarkets.length - inlineOutcomes.length} more</button>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
                           );
                         })}
                       </section>

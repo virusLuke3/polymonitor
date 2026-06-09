@@ -1009,9 +1009,9 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid #202938;
   background: #0b111c;
@@ -1056,6 +1056,81 @@
   opacity: 0.42;
 }
 
+.qtv-inspector-outcome-manager {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid rgba(32, 41, 56, 0.86);
+  background:
+    linear-gradient(180deg, rgba(13, 20, 32, 0.98), rgba(8, 13, 21, 0.98));
+  padding: 9px 10px 10px;
+}
+
+.qtv-inspector-outcome-manager label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #263245;
+  border-radius: 5px;
+  background: #060a11;
+  padding: 0 9px;
+}
+
+.qtv-inspector-outcome-manager label span {
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-inspector-outcome-manager input {
+  min-width: 0;
+  height: 30px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #eef4ff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.qtv-outcome-filter-row,
+.qtv-outcome-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.qtv-outcome-filter-row button,
+.qtv-outcome-bulk-actions button {
+  height: 24px;
+  border: 1px solid rgba(39, 50, 69, 0.92);
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.72);
+  color: #98a5b8;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  padding: 0 8px;
+}
+
+.qtv-outcome-filter-row button.active,
+.qtv-outcome-bulk-actions button:hover:not(:disabled) {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(37, 99, 235, 0.15);
+  color: #dbeafe;
+}
+
+.qtv-outcome-bulk-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .qtv-inspector-outcome {
   display: grid;
   gap: 7px;
@@ -1076,6 +1151,10 @@
 
 .qtv-inspector-outcome.solo {
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.36);
+}
+
+.qtv-inspector-outcome.watched:not(.active) {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.08), transparent 68%);
 }
 
 .qtv-inspector-outcome.hidden {
@@ -1101,6 +1180,48 @@
   gap: 6px;
 }
 
+.qtv-inspector-outcome > button em {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-inspector-outcome > .qtv-outcome-quality-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.qtv-outcome-quality-tags span {
+  border: 1px solid rgba(39, 50, 69, 0.82);
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.7);
+  color: #8c98aa;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 850;
+  padding: 3px 6px;
+}
+
+.qtv-outcome-quality-tags span.ready {
+  border-color: rgba(34, 197, 94, 0.32);
+  color: #86efac;
+}
+
+.qtv-outcome-quality-tags span.review {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fcd34d;
+}
+
+.qtv-outcome-quality-tags span.empty {
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #94a3b8;
+}
+
 .qtv-inspector-outcome > div button {
   height: 26px;
   border: 1px solid #273245;
@@ -1114,7 +1235,7 @@
 }
 
 .qtv-inspector-outcome > .qtv-outcome-line-actions {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .qtv-inspector-outcome > .qtv-outcome-line-actions button {
@@ -1639,13 +1760,17 @@
 }
 
 .qtv-block-tick-axis {
-  position: relative;
-  z-index: 4;
-  grid-row: 3;
-  height: 22px;
-  margin: 0 66px 0 10px;
-  border-top: 1px solid rgba(148, 163, 184, 0.08);
-  background: linear-gradient(180deg, rgba(7, 10, 15, 0.8), #070a0f);
+  position: absolute;
+  z-index: 28;
+  right: 74px;
+  bottom: 0;
+  left: 16px;
+  height: 42px;
+  margin: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px) 0 0 / 12.5% 100%,
+    linear-gradient(180deg, rgba(7, 10, 15, 0.9), #070a0f);
   color: #7f8a9d;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1654,17 +1779,13 @@
   text-shadow: 0 1px 2px #05070b, 0 0 8px #05070b;
 }
 
-.qtv-block-tick-axis.hover-only span {
-  display: none;
-}
-
 .qtv-block-tick-axis.empty {
   opacity: 0;
 }
 
 .qtv-block-tick-axis span {
   position: absolute;
-  bottom: 5px;
+  bottom: 7px;
   display: grid;
   justify-items: center;
   gap: 2px;
@@ -1683,7 +1804,7 @@
 }
 
 .qtv-block-tick-axis span.level-1 {
-  bottom: 20px;
+  bottom: 24px;
   opacity: 0.82;
 }
 
@@ -1711,7 +1832,7 @@
 
 .qtv-block-tick-axis strong {
   position: absolute;
-  top: -28px;
+  top: -34px;
   transform: translateX(-50%);
   border: 1px solid rgba(47, 125, 244, 0.36);
   border-radius: 4px;
@@ -2046,6 +2167,15 @@
   padding: 0 6px;
 }
 
+.qtv-indicator-legend span.qtv-scale-pill {
+  max-width: min(720px, 58vw);
+  overflow: hidden;
+}
+
+.qtv-indicator-legend span.qtv-scale-pill em {
+  color: #a8b3c3;
+}
+
 .qtv-outcome-manager {
   position: absolute;
   z-index: 18;
@@ -2236,6 +2366,38 @@
   color: #60a5fa;
   font-style: normal;
   font-weight: 900;
+}
+
+.qtv-block-scale-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-width: min(880px, 62vw);
+  margin-top: 6px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  color: #8fa3bd;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 850;
+  pointer-events: none;
+}
+
+.qtv-block-scale-inline span {
+  position: relative;
+  padding-top: 7px;
+  color: #a8b3c3;
+  white-space: nowrap;
+}
+
+.qtv-block-scale-inline span::before {
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  width: 1px;
+  height: 5px;
+  background: rgba(148, 163, 184, 0.45);
+  content: '';
 }
 
 .qtv-outcome-legend {

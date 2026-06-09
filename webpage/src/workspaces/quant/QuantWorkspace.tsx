@@ -56,6 +56,10 @@ const DEFAULT_QUANT_EVENT_TITLE = '2026 FIFA World Cup Winner';
 const EVENT_TILE_OUTCOME_LIMIT = 12;
 const EVENT_TILE_MAX_POINTS = 240;
 const EVENT_TILE_FULL_MAX_POINTS = 900;
+const EVENT_TILE_SEEDED_MAX_OUTCOMES = 100;
+const EVENT_TILE_SEEDED_LATEST_LIMIT = 2500;
+const EVENT_TILE_SEEDED_LATEST_MAX_POINTS = 600;
+const EVENT_TILE_SEEDED_FULL_LIMIT = 250000;
 const MIN_WINDOW_TILE_POINTS = 240;
 const MAX_WINDOW_TILE_POINTS = 1800;
 
@@ -107,6 +111,26 @@ function sleep(ms: number) {
 
 function chartRangeFromTimeframe(timeframe: string) {
   return timeframe === '25000' ? 'full' : 'latest';
+}
+
+function eventTileRequestShape(chartRange: string, timeframe: string, chartLimit: number) {
+  if (chartRange === 'full') {
+    return {
+      limit: EVENT_TILE_SEEDED_FULL_LIMIT,
+      maxOutcomes: EVENT_TILE_SEEDED_MAX_OUTCOMES,
+      topN: EVENT_TILE_OUTCOME_LIMIT,
+      maxPoints: EVENT_TILE_FULL_MAX_POINTS,
+    };
+  }
+  const prefersSeededLatest = chartLimit <= EVENT_TILE_SEEDED_LATEST_LIMIT;
+  return {
+    limit: prefersSeededLatest ? EVENT_TILE_SEEDED_LATEST_LIMIT : chartLimit,
+    maxOutcomes: prefersSeededLatest ? EVENT_TILE_SEEDED_MAX_OUTCOMES : EVENT_TILE_OUTCOME_LIMIT,
+    topN: EVENT_TILE_OUTCOME_LIMIT,
+    maxPoints: prefersSeededLatest
+      ? EVENT_TILE_SEEDED_LATEST_MAX_POINTS
+      : Math.max(EVENT_TILE_MAX_POINTS, Math.min(900, tilePointBudget(timeframe))),
+  };
 }
 
 function isSeriesWarming(payload: QuantMarketSeriesPayload | null | undefined) {
@@ -362,6 +386,7 @@ function strategyDefaults(prices: Array<{ close: number }>) {
 
 type BacktestAction = 'YES' | 'NO';
 type OutcomeSortKey = 'order' | 'probability' | 'rows' | 'volume';
+type OutcomeVisibilityFilter = 'all' | 'visible' | 'pinned' | 'hidden' | 'watched' | 'issues';
 type InspectorTab = 'watchlist' | 'market' | 'outcomes' | 'book' | 'trades' | 'dataQuality';
 type RefreshQuantRowsOptions = {
   silent?: boolean;
@@ -618,6 +643,8 @@ export function QuantWorkspace() {
   const [tradeFilters, setTradeFilters] = useState<Set<TradeFilter>>(new Set());
   const [workspaceNotice, setWorkspaceNotice] = useState('');
   const [outcomeSortKey, setOutcomeSortKey] = useState<OutcomeSortKey>('probability');
+  const [outcomeSearch, setOutcomeSearch] = useState('');
+  const [outcomeVisibilityFilter, setOutcomeVisibilityFilter] = useState<OutcomeVisibilityFilter>('all');
   const [lastPriceRefreshAt, setLastPriceRefreshAt] = useState('');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(persistedInspectorTab);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() => persistedBoolean('polydata.quant.inspectorCollapsed', false));
@@ -677,19 +704,16 @@ export function QuantWorkspace() {
     return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
   }, [timeframe]);
   const chartRange = chartRangeFromTimeframe(timeframe);
-  const chartRequestLimit = selectedEntityKind === 'event' && chartRange === 'full' ? 250000 : chartLimit;
+  const eventTileShape = selectedEntityKind === 'event' ? eventTileRequestShape(chartRange, timeframe, chartLimit) : null;
+  const chartRequestLimit = eventTileShape?.limit || chartLimit;
   const semanticChartQuery: QuantPriceQuery & { priceSource: string; scope: string; maxOutcomes: number; topN?: number; maxPoints?: number } = {
     marketSlug,
     priceSource: backendPriceSource(priceSource),
     scope: 'auto',
     limit: chartRequestLimit,
-    maxOutcomes: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
-    topN: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
-    maxPoints: selectedEntityKind === 'event'
-      ? (chartRange === 'full'
-        ? Math.min(EVENT_TILE_FULL_MAX_POINTS, tilePointBudget(timeframe))
-        : Math.max(EVENT_TILE_MAX_POINTS, Math.min(900, tilePointBudget(timeframe))))
-      : tilePointBudget(timeframe),
+    maxOutcomes: eventTileShape?.maxOutcomes || 24,
+    topN: eventTileShape?.topN,
+    maxPoints: eventTileShape?.maxPoints || tilePointBudget(timeframe),
     range: selectedEntityKind === 'event' ? chartRange : undefined,
     resolution: selectedEntityKind === 'event' ? 'auto' : undefined,
     live: false,
@@ -772,11 +796,13 @@ export function QuantWorkspace() {
       live: livePriceRefreshEnabled && silent && selectedEntityKind !== 'event',
     };
     void fetchQuantBuildStatus('', 12)
-      .then((statusPayload) => setRuns(statusPayload.items || []))
+      .then((status) => {
+        if (requestSeq === priceLoadSeq.current) setRuns(status.items || []);
+      })
       .catch((statusError) => {
-        if (import.meta.env.DEV && !isAbortLikeError(statusError)) console.debug('[quant] build status failed', statusError);
+        if (import.meta.env.DEV && !isAbortLikeError(statusError)) console.debug('[quant] build status refresh failed', statusError);
       });
-    const seriesResult = await Promise.resolve(
+    const seriesResult = await (
       hasMarketSlug
         ? (selectedEntityKind === 'event'
           ? fetchQuantEventPriceSeries({
@@ -792,11 +818,10 @@ export function QuantWorkspace() {
             viewportWidth: chartViewportWidth(),
             timeoutMs: chartRange === 'full' ? 16000 : 10000,
           }))
-        : Promise.resolve(null),
-    ).then(
-      (value) => ({ status: 'fulfilled' as const, value }),
-      (reason) => ({ status: 'rejected' as const, reason }),
-    );
+        : Promise.resolve(null)
+    )
+      .then((value) => ({ status: 'fulfilled' as const, value }))
+      .catch((reason) => ({ status: 'rejected' as const, reason }));
     if (requestSeq !== priceLoadSeq.current) {
       if (import.meta.env.DEV) console.debug('[quant] stale price response ignored', { cacheKey });
       return {
@@ -1232,10 +1257,7 @@ export function QuantWorkspace() {
       ? fetchQuantEventPriceSeries({
         eventSlug: nextSlug,
         priceSource: backendPriceSource(priceSource),
-        limit: Math.max(2500, EVENT_TILE_MAX_POINTS * 8),
-        maxOutcomes: EVENT_TILE_OUTCOME_LIMIT,
-        topN: EVENT_TILE_OUTCOME_LIMIT,
-        maxPoints: EVENT_TILE_MAX_POINTS,
+        ...eventTileRequestShape('latest', timeframe, chartLimit),
         range: 'latest',
         resolution: 'auto',
         pointFormat: 'lite',
@@ -1454,18 +1476,38 @@ export function QuantWorkspace() {
     });
   }, [backtestResult.trades, tradeFilters]);
 
+  const watchKeyForOutcome = (outcome: QuantMarketSeriesOutcome) => (
+    outcome.buyYesTokenId || outcome.tokenId || outcome.marketSlug || outcome.conditionId || ''
+  );
+
   const sortedOutcomeRows = useMemo(() => {
     const eventTitle = marketSeries?.event?.eventTitle || marketSeries?.market?.marketTitle || '';
-    return (marketSeries?.outcomes || []).map((outcome, index) => ({
-      outcome,
-      index,
-      label: deriveEventOutcomeLabel(eventTitle, outcome.marketTitle, outcome.outcomeLabel),
-      fullLabel: outcome.marketTitle || outcome.outcomeLabel,
-      yes: toNumber(outcome.buyYesPrice ?? outcome.latestPrice),
-      no: toNumber(outcome.buyNoPrice ?? outcome.complementLatestPrice),
-      rows: toNumber(outcome.rows) + toNumber(outcome.complementRows),
-      volume: [...(outcome.points || []), ...(outcome.complementPoints || [])].reduce((sum, point) => sum + toNumber(point.volume), 0),
-    })).map((row) => ({
+    return (marketSeries?.outcomes || []).map((outcome, index) => {
+      const label = deriveEventOutcomeLabel(eventTitle, outcome.marketTitle, outcome.outcomeLabel);
+      const yesStats = outcomePointStats(outcome.points);
+      const noStats = outcomePointStats(outcome.complementPoints);
+      const firstBlocks = [yesStats.firstBlock, noStats.firstBlock].filter((value) => value > 0);
+      const rows = yesStats.rows + noStats.rows;
+      const gaps = yesStats.gaps + noStats.gaps;
+      const spikes = yesStats.spikes + noStats.spikes;
+      const qualityStatus = !rows ? 'empty' : gaps || spikes ? 'review' : 'ready';
+      return {
+        outcome,
+        index,
+        label,
+        fullLabel: outcome.marketTitle || outcome.outcomeLabel,
+        yes: toNumber(outcome.buyYesPrice ?? outcome.latestPrice),
+        no: toNumber(outcome.buyNoPrice ?? outcome.complementLatestPrice),
+        rows,
+        volume: [...(outcome.points || []), ...(outcome.complementPoints || [])].reduce((sum, point) => sum + toNumber(point.volume), 0),
+        firstBlock: firstBlocks.length ? Math.min(...firstBlocks) : 0,
+        lastBlock: Math.max(yesStats.lastBlock, noStats.lastBlock),
+        gaps,
+        spikes,
+        impliedNoRows: noStats.impliedRows,
+        qualityStatus,
+      };
+    }).map((row) => ({
       ...row,
       yesKey: chartOutcomeKey(row.outcome, row.label, 'YES'),
       noKey: chartOutcomeKey(row.outcome, row.label, 'NO'),
@@ -1476,6 +1518,44 @@ export function QuantWorkspace() {
       return right.yes - left.yes;
     });
   }, [marketSeries, outcomeSortKey]);
+  const filteredOutcomeRows = useMemo(() => {
+    const query = outcomeSearch.trim().toLowerCase();
+    const tokens = query.split(/\s+/).filter(Boolean);
+    return sortedOutcomeRows.filter((row) => {
+      const activeKey = selectedBacktestAction === 'NO' ? row.noKey : row.yesKey;
+      const isPinned = chartPinnedOutcomeKeys.includes(row.yesKey) || chartPinnedOutcomeKeys.includes(row.noKey);
+      const isHidden = chartHiddenOutcomeKeys.includes(row.yesKey) || chartHiddenOutcomeKeys.includes(row.noKey);
+      const isSolo = chartSoloOutcomeKey === row.yesKey || chartSoloOutcomeKey === row.noKey;
+      const watchKey = watchKeyForOutcome(row.outcome);
+      const isWatched = watchKey ? watchlistKeys.includes(watchKey) : false;
+      const visible = chartSoloOutcomeKey ? isSolo : !chartHiddenOutcomeKeys.includes(activeKey);
+      if (outcomeVisibilityFilter === 'visible' && !visible) return false;
+      if (outcomeVisibilityFilter === 'pinned' && !isPinned) return false;
+      if (outcomeVisibilityFilter === 'hidden' && !isHidden) return false;
+      if (outcomeVisibilityFilter === 'watched' && !isWatched) return false;
+      if (outcomeVisibilityFilter === 'issues' && row.qualityStatus === 'ready') return false;
+      if (!tokens.length) return true;
+      const haystack = [
+        row.label,
+        row.fullLabel,
+        row.outcome.marketSlug,
+        row.outcome.outcomeLabel,
+        row.outcome.tokenId,
+        row.outcome.buyYesTokenId,
+        row.outcome.buyNoTokenId,
+      ].join(' ').toLowerCase();
+      return tokens.every((token) => haystack.includes(token));
+    });
+  }, [
+    chartHiddenOutcomeKeys,
+    chartPinnedOutcomeKeys,
+    chartSoloOutcomeKey,
+    outcomeSearch,
+    outcomeVisibilityFilter,
+    selectedBacktestAction,
+    sortedOutcomeRows,
+    watchlistKeys,
+  ]);
   const displayedOutcomeCount = useMemo(() => {
     const outcomes = marketSeries?.outcomes || [];
     if (selectedEntityKind === 'event' && outcomes.length === 1 && outcomes[0]?.buyNoTokenId) return 2;
@@ -1649,10 +1729,6 @@ export function QuantWorkspace() {
     ));
   };
 
-  const watchKeyForOutcome = (outcome: QuantMarketSeriesOutcome) => (
-    outcome.buyYesTokenId || outcome.tokenId || outcome.marketSlug || outcome.conditionId || ''
-  );
-
   const toggleOutcomeWatchlist = (outcome: QuantMarketSeriesOutcome) => {
     const key = watchKeyForOutcome(outcome);
     if (!key) return;
@@ -1690,6 +1766,40 @@ export function QuantWorkspace() {
     setChartPinnedOutcomeKeys([]);
     setChartHiddenOutcomeKeys([]);
     setChartSoloOutcomeKey('');
+  };
+
+  const filteredActiveOutcomeKeys = (limit = 80) => (
+    filteredOutcomeRows
+      .slice(0, limit)
+      .map((row) => (selectedBacktestAction === 'NO' ? row.noKey : row.yesKey))
+      .filter(Boolean)
+  );
+
+  const pinFilteredOutcomes = () => {
+    const keys = filteredActiveOutcomeKeys(24);
+    if (!keys.length) return;
+    setChartPinnedOutcomeKeys((current) => Array.from(new Set([...keys, ...current])).slice(0, 24));
+    setChartHiddenOutcomeKeys((current) => current.filter((key) => !keys.includes(key)));
+    setChartSoloOutcomeKey('');
+  };
+
+  const hideFilteredOutcomes = () => {
+    const keys = filteredActiveOutcomeKeys();
+    if (!keys.length) return;
+    setChartHiddenOutcomeKeys((current) => Array.from(new Set([...keys, ...current])).slice(0, 80));
+    setChartPinnedOutcomeKeys((current) => current.filter((key) => !keys.includes(key)));
+    if (keys.includes(chartSoloOutcomeKey)) setChartSoloOutcomeKey('');
+  };
+
+  const showFilteredOutcomes = () => {
+    const keys = filteredActiveOutcomeKeys();
+    if (!keys.length) return;
+    setChartHiddenOutcomeKeys((current) => current.filter((key) => !keys.includes(key)));
+  };
+
+  const soloFirstFilteredOutcome = () => {
+    const key = filteredActiveOutcomeKeys(1)[0] || '';
+    setChartSoloOutcomeKey((current) => (current === key ? '' : key));
   };
 
   const togglePerformanceSort = (key: PerformanceSortKey) => {
@@ -1892,7 +2002,7 @@ export function QuantWorkspace() {
                   <div className="qtv-inspector-outcomes">
                     <div className="qtv-inspector-sort">
                       <span>
-                        {displayedOutcomeCount.toLocaleString('en-US')} outcomes
+                        {filteredOutcomeRows.length.toLocaleString('en-US')} / {displayedOutcomeCount.toLocaleString('en-US')} outcomes
                         {chartPinnedOutcomeKeys.length || chartHiddenOutcomeKeys.length || chartSoloOutcomeKey ? (
                           <em>{chartPinnedOutcomeKeys.length} pinned · {chartHiddenOutcomeKeys.length} hidden</em>
                         ) : null}
@@ -1908,30 +2018,78 @@ export function QuantWorkspace() {
                       <button type="button" disabled={!selectedOutcome} onClick={() => selectedOutcome && toggleOutcomeWatchlist(selectedOutcome)}>{selectedIsWatched ? 'Unwatch' : 'Watch'}</button>
                       <button type="button" disabled={!chartPinnedOutcomeKeys.length && !chartHiddenOutcomeKeys.length && !chartSoloOutcomeKey} onClick={resetChartOutcomeVisibility}>Reset lines</button>
                     </div>
-                    {sortedOutcomeRows.map(({ outcome, label, fullLabel, yes, no, rows, volume, yesKey, noKey }) => {
+                    <div className="qtv-inspector-outcome-manager">
+                      <label>
+                        <span>Find</span>
+                        <input
+                          value={outcomeSearch}
+                          onInput={(event) => setOutcomeSearch(event.currentTarget.value)}
+                          placeholder="Outcome, slug, token"
+                        />
+                      </label>
+                      <div className="qtv-outcome-filter-row" role="group" aria-label="Outcome visibility filters">
+                        {([
+                          ['all', 'All'],
+                          ['visible', 'Visible'],
+                          ['pinned', 'Pinned'],
+                          ['hidden', 'Hidden'],
+                          ['watched', 'Watchlist'],
+                          ['issues', 'Issues'],
+                        ] as Array<[OutcomeVisibilityFilter, string]>).map(([id, label]) => (
+                          <button
+                            key={id}
+                            className={outcomeVisibilityFilter === id ? 'active' : ''}
+                            type="button"
+                            onClick={() => setOutcomeVisibilityFilter(id)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="qtv-outcome-bulk-actions">
+                        <button type="button" disabled={!filteredOutcomeRows.length} onClick={pinFilteredOutcomes}>Pin filtered</button>
+                        <button type="button" disabled={!filteredOutcomeRows.length} onClick={soloFirstFilteredOutcome}>Solo first</button>
+                        <button type="button" disabled={!filteredOutcomeRows.length} onClick={hideFilteredOutcomes}>Hide filtered</button>
+                        <button type="button" disabled={!filteredOutcomeRows.length} onClick={showFilteredOutcomes}>Show filtered</button>
+                      </div>
+                    </div>
+                    {filteredOutcomeRows.map(({ outcome, label, fullLabel, yes, no, rows, volume, yesKey, noKey, firstBlock, lastBlock, gaps, spikes, impliedNoRows, qualityStatus }) => {
                       const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
                       const activeKey = selectedBacktestAction === 'NO' ? noKey : yesKey;
                       const isPinned = chartPinnedOutcomeKeys.includes(yesKey) || chartPinnedOutcomeKeys.includes(noKey);
                       const isHidden = chartHiddenOutcomeKeys.includes(yesKey) || chartHiddenOutcomeKeys.includes(noKey);
                       const isSolo = chartSoloOutcomeKey === yesKey || chartSoloOutcomeKey === noKey;
+                      const watchKey = watchKeyForOutcome(outcome);
+                      const isWatched = watchKey ? watchlistKeys.includes(watchKey) : false;
                       return (
-                        <div key={`side-${outcome.tokenId}`} className={`qtv-inspector-outcome ${isSelected ? 'active' : ''} ${isPinned ? 'pinned' : ''} ${isHidden ? 'hidden' : ''} ${isSolo ? 'solo' : ''}`} title={fullLabel}>
+                        <div key={`side-${outcome.tokenId}`} className={`qtv-inspector-outcome ${isSelected ? 'active' : ''} ${isPinned ? 'pinned' : ''} ${isHidden ? 'hidden' : ''} ${isSolo ? 'solo' : ''} ${isWatched ? 'watched' : ''}`} title={fullLabel}>
                           <button type="button" onClick={() => selectOutcomeSide(outcome, 'YES')}>
                             <strong>{label}</strong>
                             <span>{rows.toLocaleString('en-US')} rows · {volume.toLocaleString('en-US', { maximumFractionDigits: 0 })} vol</span>
+                            <em>
+                              {firstBlock ? Math.floor(firstBlock).toLocaleString('en-US') : '--'} → {lastBlock ? Math.floor(lastBlock).toLocaleString('en-US') : '--'}
+                            </em>
                           </button>
                           <div>
                             <button className={isSelected && selectedBacktestAction === 'YES' ? 'active' : ''} type="button" onClick={() => selectOutcomeSide(outcome, 'YES')}>YES {fmtPrice(yes)}</button>
                             <button className={isSelected && selectedBacktestAction === 'NO' ? 'active no' : 'no'} type="button" disabled={!outcome.buyNoTokenId} onClick={() => selectOutcomeSide(outcome, 'NO')}>NO {fmtPrice(no)}</button>
                           </div>
+                          <div className="qtv-outcome-quality-tags">
+                            <span className={qualityStatus}>{qualityStatus}</span>
+                            <span>{gaps} gaps</span>
+                            <span>{spikes} jumps</span>
+                            <span>{impliedNoRows.toLocaleString('en-US')} implied NO</span>
+                          </div>
                           <div className="qtv-outcome-line-actions">
                             <button className={chartPinnedOutcomeKeys.includes(activeKey) ? 'active' : ''} type="button" onClick={() => toggleChartPinnedOutcome(activeKey)}>Pin</button>
                             <button className={chartSoloOutcomeKey === activeKey ? 'active' : ''} type="button" onClick={() => setChartSoloOutcomeKey(chartSoloOutcomeKey === activeKey ? '' : activeKey)}>Solo</button>
                             <button className={chartHiddenOutcomeKeys.includes(activeKey) ? 'active danger' : 'danger'} type="button" onClick={() => toggleChartHiddenOutcome(activeKey)}>{chartHiddenOutcomeKeys.includes(activeKey) ? 'Show' : 'Hide'}</button>
+                            <button className={isWatched ? 'active' : ''} type="button" onClick={() => toggleOutcomeWatchlist(outcome)}>{isWatched ? 'Watching' : 'Watch'}</button>
                           </div>
                         </div>
                       );
                     })}
+                    {!filteredOutcomeRows.length ? <p>No outcomes match the current filter.</p> : null}
                   </div>
                 ) : null}
 
