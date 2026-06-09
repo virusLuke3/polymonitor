@@ -877,26 +877,21 @@ def _latest_block_close_by_market_id(ctx: dict, market_ids: Iterable[int]) -> Di
         placeholders = ",".join("?" for _ in ids)
         rows = ctx["query_all"](
             f"""
-            WITH ranked AS (
-                SELECT
-                    market_id,
-                    block_number,
-                    close_price,
-                    yes_probability_close,
-                    row_number() OVER (PARTITION BY market_id ORDER BY block_number DESC) AS rn
-                FROM quant.market_token_block_close
-                WHERE market_id IN ({placeholders})
-                  AND UPPER(token_side) = 'YES'
-                  AND NOT (
-                      jsonb_exists(COALESCE(anomaly_flags, '[]'::jsonb), 'extreme_price_trade_present')
-                      AND COALESCE(trade_count, 0) <= 3
-                      AND COALESCE(volume, 0) <= 250
-                      AND (close_price >= 0.95 OR close_price <= 0.002)
-                  )
+            SELECT DISTINCT ON (market_id)
+                market_id,
+                block_number,
+                close_price,
+                yes_probability_close
+            FROM quant.market_token_block_close
+            WHERE market_id IN ({placeholders})
+              AND token_side = 'YES'
+              AND NOT (
+                  jsonb_exists(COALESCE(anomaly_flags, '[]'::jsonb), 'extreme_price_trade_present')
+                  AND COALESCE(trade_count, 0) <= 3
+                  AND COALESCE(volume, 0) <= 250
+                  AND (close_price >= 0.95 OR close_price <= 0.002)
             )
-            SELECT market_id, block_number, close_price, yes_probability_close
-            FROM ranked
-            WHERE rn = 1
+            ORDER BY market_id, block_number DESC
             """,
             ids,
         )
@@ -1016,7 +1011,7 @@ def _serving_market_groups_payload(
         "volume": "volume_24h DESC, last_activity_at DESC NULLS LAST, active_rank DESC",
     }.get(sort, "active_rank DESC, volume_24h DESC, last_activity_at DESC NULLS LAST")
     offset = (page - 1) * page_size
-    fetch_limit = max(page_size, page_size * 8) if sort == "active" and not query else page_size
+    fetch_limit = max(page_size, page_size * 4) if sort == "active" and not query else page_size
     rows = ctx["query_all"](
         f"""
         SELECT
