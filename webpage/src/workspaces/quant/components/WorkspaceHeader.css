@@ -692,6 +692,12 @@
   color: #94a3b8;
 }
 
+.qtv-result-badges small.match {
+  border-color: rgba(34, 211, 238, 0.28);
+  background: rgba(8, 145, 178, 0.1);
+  color: #67e8f9;
+}
+
 .qtv-result-badges .coverage.ready {
   border-color: rgba(34, 197, 94, 0.28);
   color: #22c55e;

@@ -52,6 +52,8 @@ type SearchResult = {
   volume: number;
   updated: number;
   priority: number;
+  matchScore?: number;
+  matchReason?: string;
 };
 
 const DEFAULT_QUANT_EVENT_SLUG = '2026-fifa-world-cup-winner-595';
@@ -139,7 +141,7 @@ function searchTextForMarket(market: QuantPriceMarket, result?: SearchResult) {
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
-function normalizedQueryTerms(query: string) {
+function normalizedQueryTermGroups(query: string) {
   const normalized = query
     .trim()
     .toLowerCase()
@@ -148,23 +150,47 @@ function normalizedQueryTerms(query: string) {
     .replace(/\s+/g, ' ');
   if (!normalized) return [];
   const terms = normalized.split(' ').filter(Boolean);
-  const extras: string[] = [];
   const compact = normalized.replace(/\s+/g, '');
-  if (terms.includes('nba')) extras.push('basketball');
-  if (terms.includes('fifa') || compact.includes('worldcup')) extras.push('world cup', 'soccer');
-  if (terms.includes('nfl')) extras.push('football');
-  if (terms.includes('trump')) extras.push('donald trump');
-  if (terms.includes('btc') || terms.includes('bitcoin')) extras.push('crypto');
-  return [...terms, ...extras];
+  const groups = terms.map((term) => {
+    if (term === 'nba') return ['nba', 'basketball'];
+    if (term === 'fifa') return ['fifa', 'world cup', 'soccer'];
+    if (term === 'nfl') return ['nfl', 'football'];
+    if (term === 'trump') return ['trump', 'donald trump'];
+    if (term === 'btc' || term === 'bitcoin') return ['btc', 'bitcoin', 'crypto'];
+    return [term];
+  });
+  if (compact.includes('worldcup') && !groups.some((group) => group.includes('world cup'))) {
+    groups.push(['world cup', 'worldcup', 'fifa', 'soccer']);
+  }
+  return groups;
 }
 
-function marketMatchesQuery(haystack: string, query: string) {
+function marketQueryMatch(haystack: string, query: string) {
   const trimmed = query.trim().toLowerCase();
-  if (!trimmed) return true;
-  if (haystack.includes(trimmed)) return true;
-  const terms = normalizedQueryTerms(trimmed);
-  if (!terms.length) return true;
-  return terms.every((term) => haystack.includes(term));
+  if (!trimmed) return { matched: true, score: 0, reason: '' };
+  const normalizedHaystack = haystack
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+  if (haystack.includes(trimmed) || normalizedHaystack.includes(trimmed)) {
+    return { matched: true, score: 0, reason: 'exact phrase' };
+  }
+  const groups = normalizedQueryTermGroups(trimmed);
+  if (!groups.length) return { matched: true, score: 0, reason: '' };
+  const matchedTerms: string[] = [];
+  let score = 0;
+  const matched = groups.every((group) => {
+    const hit = group.find((term) => normalizedHaystack.includes(term) || haystack.includes(term));
+    if (!hit) return false;
+    matchedTerms.push(hit);
+    score += hit === group[0] ? 0.18 : 0.32;
+    return true;
+  });
+  return {
+    matched,
+    score: matched ? score : Number.POSITIVE_INFINITY,
+    reason: matched ? `matched ${matchedTerms.slice(0, 3).join(' + ')}` : '',
+  };
 }
 
 function storedFilter(): SearchFilter {
@@ -332,6 +358,7 @@ export function WorkspaceHeader({
   const inputRef = useRef<HTMLInputElement>(null);
   const commandRef = useRef<HTMLDivElement>(null);
   const previousQueryRef = useRef('');
+  const autoOpenedQueryRef = useRef('');
   const marketChoices = useMemo(() => {
     const choices = new Map<string, QuantPriceMarket>();
     if (selectedMarketProp?.marketSlug) choices.set(selectedMarketProp.marketSlug, selectedMarketProp);
@@ -377,8 +404,15 @@ export function WorkspaceHeader({
       }
       return results;
     });
-    const filtered = base.filter((result) => {
-      if (query && !marketMatchesQuery(searchTextForMarket(result.market, result), query)) return false;
+    const filtered = base.map((result) => {
+      const match = marketQueryMatch(searchTextForMarket(result.market, result), query);
+      return {
+        ...result,
+        matchScore: match.score,
+        matchReason: match.reason,
+      };
+    }).filter((result) => {
+      if (query && !marketQueryMatch(searchTextForMarket(result.market, result), query).matched) return false;
       if (activeFilter === 'events' && result.kind !== 'event') return false;
       if (activeFilter === 'markets' && result.kind !== 'market') return false;
       if (activeFilter === 'tokens' && result.kind !== 'token') return false;
@@ -392,6 +426,7 @@ export function WorkspaceHeader({
     });
     const priorityFor = (result: SearchResult) => (
       result.priority
+      + (query ? (result.matchScore || 0) : 0)
       + (!query && result.market.marketSlug === DEFAULT_QUANT_EVENT_SLUG ? -0.75 : 0)
       + (favoriteSlugSet.has(result.market.marketSlug) ? -0.35 : 0)
       + (recentMarkets.findIndex((market) => market.marketSlug === result.market.marketSlug) >= 0
@@ -502,6 +537,13 @@ export function WorkspaceHeader({
       setSortMode('relevance');
     }
     previousQueryRef.current = activeSearchText;
+  }, [activeSearchText]);
+
+  useEffect(() => {
+    if (!activeSearchText || autoOpenedQueryRef.current === activeSearchText) return;
+    autoOpenedQueryRef.current = activeSearchText;
+    setPaletteMode('full');
+    setMarketMenuOpen(true);
   }, [activeSearchText]);
 
   useEffect(() => {
@@ -850,6 +892,7 @@ export function WorkspaceHeader({
                                     ★
                                   </span>
                                   <b>{result.count}</b>
+                                  {activeSearchText && result.matchReason ? <small className="match">{result.matchReason}</small> : null}
                                   <small className={`coverage ${result.status}`}>{result.status === 'none' ? 'no rows' : result.status}</small>
                                   <small>{result.confidence}</small>
                                 </span>

@@ -109,6 +109,11 @@ function defaultPriceSource(): PriceSource {
   return 'orderfilled';
 }
 
+function defaultMarketSearchQuery() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('q') || params.get('search') || params.get('query') || '';
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -654,7 +659,7 @@ export function QuantWorkspace() {
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const [marketSlug, setMarketSlug] = useState(defaultMarketSlug);
   const [selectedEntityKindHint, setSelectedEntityKindHint] = useState<'market' | 'event'>(defaultEntityKind);
-  const [marketSearchQuery, setMarketSearchQuery] = useState('');
+  const [marketSearchQuery, setMarketSearchQuery] = useState(defaultMarketSearchQuery);
   const [marketReloadKey, setMarketReloadKey] = useState(0);
   const [backtestStatus, setBacktestStatus] = useState('idle');
   const [performanceSearch, setPerformanceSearch] = useState('');
