@@ -349,6 +349,14 @@ export function StrategyTesterPanel({
     ['slippage bps', propertyValue('slippage bps')],
     ['liquidity cap', propertyValue('liquidity cap')],
   ];
+  const runProvenanceRows = [
+    ['Run', result.runId ? `#${result.runId}` : '-'],
+    ['Fingerprint', runFingerprint],
+    ['Engine', engine],
+    ['Source', dataSource],
+    ['Rows', rowCount.toLocaleString('en-US')],
+    ['Generated', compactRunTime(result.generatedAt)],
+  ];
   const recentRunsForDisplay = useMemo(() => {
     const currentRunId = result.runId || 0;
     return recentBacktestRuns.slice(0, 10).map((run) => ({
@@ -503,6 +511,19 @@ export function StrategyTesterPanel({
       {toolTab === 'tester' && testerTab === 'overview' ? (
         hasCompletedRun ? (
           <div className="qtv-overview">
+            <section className="qtv-run-provenance-strip" aria-label="Backtest run reproducibility snapshot">
+              <div>
+                <strong>Reproducibility</strong>
+                <span>{marketTitle}</span>
+              </div>
+              {runProvenanceRows.map(([label, value]) => (
+                <span key={label}>
+                  <em>{label}</em>
+                  <b>{value}</b>
+                </span>
+              ))}
+              <button type="button" onClick={copyRunPayload}>{copyNotice || 'Copy payload'}</button>
+            </section>
             <div className="qtv-metrics-row">
               {result.metrics.map((metric) => <MetricCard key={metric.name} metric={metric} />)}
             </div>

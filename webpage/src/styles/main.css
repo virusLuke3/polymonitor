@@ -5006,8 +5006,79 @@
 .qtv-overview {
   min-height: 0;
   display: grid;
-  grid-template-rows: 68px minmax(0, 1fr);
+  grid-template-rows: auto 68px minmax(0, 1fr);
   overflow: hidden;
+}
+
+.qtv-run-provenance-strip {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) repeat(6, minmax(72px, 1fr)) auto;
+  align-items: center;
+  gap: 1px;
+  overflow: hidden;
+  border-bottom: 1px solid #222b3a;
+  background: #1d2a3d;
+  color: #dbeafe;
+  font-family: var(--font-mono);
+}
+
+.qtv-run-provenance-strip > div,
+.qtv-run-provenance-strip > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  min-height: 42px;
+  align-content: center;
+  background: #0b111c;
+  padding: 0 10px;
+}
+
+.qtv-run-provenance-strip strong,
+.qtv-run-provenance-strip span,
+.qtv-run-provenance-strip b,
+.qtv-run-provenance-strip em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-run-provenance-strip strong {
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.qtv-run-provenance-strip > div span,
+.qtv-run-provenance-strip em {
+  color: #64748b;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-run-provenance-strip b {
+  color: #e5e7eb;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.qtv-run-provenance-strip button {
+  height: 42px;
+  min-width: 104px;
+  border: 0;
+  border-left: 1px solid #222b3a;
+  background: #101827;
+  color: #bfdbfe;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 0 12px;
+}
+
+.qtv-run-provenance-strip button:hover {
+  background: #10213a;
+  color: #f8fafc;
 }
 
 .qtv-tester-empty {
