@@ -10489,3 +10489,144 @@
   color: var(--wc-ref-text-dim) !important;
   background: transparent !important;
 }
+
+/* v27: exact WorldMonitor typography scale. Reference source values:
+   panel-title 11px, count 10px, item-title/news-link 12px/1.4,
+   source/meta 9px, category tags 8px. */
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-title {
+  margin: 0 !important;
+  font-family: var(--wc-font-mono) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 1px !important;
+  line-height: 1 !important;
+  text-transform: uppercase !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-count {
+  min-width: 26px !important;
+  height: 26px !important;
+  padding: 2px 6px !important;
+  border-radius: 2px !important;
+  font: 600 10px/1 var(--wc-font-mono) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-body {
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-main strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-row > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-signal-row > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-card > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-impact-list article > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-model-table strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-status-table strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-load-list strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-venue-card strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-group-match-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list b,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-advance-table div strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-prob-table div strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-standings-row strong {
+  color: var(--wc-ref-text) !important;
+  font-family: var(--wc-font-body) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.4 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-row > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-signal-row > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-impact-list article > strong {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required > p,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-main em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-row > em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-signal-row > em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-row em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-model-table em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-empty,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-venue-card em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-group-match-row em {
+  color: var(--wc-ref-text-secondary) !important;
+  font-family: var(--wc-font-body) !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.4 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-kicker,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-meta,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-card-head,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-detail-strip span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-control-grid span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-board-stats em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-liquidity-strip em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-risk-grid em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-ops-metrics em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-prob-headline em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-prob-table header span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-advance-table header span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-standings-head span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list small {
+  color: var(--wc-ref-text-dim) !important;
+  font-family: var(--wc-font-mono) !important;
+  font-size: 9px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.5px !important;
+  line-height: 1.25 !important;
+  text-transform: uppercase !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-status,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-tag,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-card-head b,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-control-ticker i,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-panel-badge {
+  padding: 1px 5px !important;
+  border-radius: 3px !important;
+  font: 700 8px/1.35 var(--wc-font-mono) !important;
+  letter-spacing: 0.3px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-time strong {
+  font: 700 13px/1.1 var(--wc-font-mono) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-time em {
+  font: 500 9px/1.25 var(--wc-font-mono) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-scoreboard strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-control-score strong {
+  font-family: var(--wc-font-body) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1.2 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-scoreboard b,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-control-score b {
+  font: 800 17px/1 var(--wc-font-mono) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-board-stats strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-liquidity-strip strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-risk-score strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-risk-grid strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-ops-metrics strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-prob-headline strong {
+  font: 700 14px/1.1 var(--wc-font-mono) !important;
+}
