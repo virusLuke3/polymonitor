@@ -173,6 +173,33 @@ class SportsOddsWatcherTestCase(unittest.TestCase):
         self.assertEqual("ok", meta["status"])
         self.assertEqual("polydata-sports-odds-seed.service", meta["serviceName"])
 
+    def test_watcher_injects_market_search_when_pm_matching_enabled(self):
+        watcher, _, _ = self.make_watcher()
+        seen_queries: list[str] = []
+
+        def fake_search(query: str, limit: int = 10) -> dict:
+            seen_queries.append(query)
+            return {"items": [{"id": 9, "title": query, "latestPrice": "0.58"}]}
+
+        def fake_fetch(ctx: dict, limit: int = 8) -> dict:
+            self.assertIn("search_markets", ctx)
+            result = ctx["search_markets"]("Knicks @ Celtics", limit=3)
+            return {
+                "generatedAt": "2026-05-12T18:00:00Z",
+                "status": "ok",
+                "sources": {"theOddsApi": "ok"},
+                "items": [{"id": "event-1", "pm": result["items"][0]}],
+            }
+
+        with (
+            patch.object(sports_odds_watcher, "build_market_search", return_value=fake_search),
+            patch.object(sports_odds_service, "fetch_live_sports_odds_payload", side_effect=fake_fetch),
+        ):
+            result = watcher.run_once()
+
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(["Knicks @ Celtics"], seen_queries)
+
     def test_watcher_preserves_previous_snapshot_when_new_payload_is_empty(self):
         watcher, fake_redis, _ = self.make_watcher()
         previous = {"generatedAt": "2026-05-12T18:00:00Z", "status": "ok", "items": [{"id": "old-event"}], "cacheMode": "seeded"}

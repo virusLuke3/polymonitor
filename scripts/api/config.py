@@ -361,7 +361,7 @@ def load_api_settings() -> ApiSettings:
         grid_esports_lookahead_days=_get_int("POLYDATA_GRID_ESPORTS_LOOKAHEAD_DAYS", 14),
         grid_esports_pm_search_enabled=_get_bool("POLYDATA_GRID_ESPORTS_PM_SEARCH_ENABLED", False),
         the_odds_api_base_url=_get_str("POLYDATA_THE_ODDS_API_BASE_URL", THE_ODDS_API_BASE_URL or "https://api.the-odds-api.com"),
-        the_odds_api_key=_get_str("POLYDATA_THE_ODDS_API_KEY", _get_str("THE_ODDS_API_KEY", "")),
+        the_odds_api_key=_get_str("POLYDATA_THE_ODDS_API_KEY", _get_str("the_odds_api_key", _get_str("THE_ODDS_API_KEY", ""))),
         the_odds_source_url=_get_str("POLYDATA_THE_ODDS_SOURCE_URL", THE_ODDS_SOURCE_URL or "https://the-odds-api.com/"),
         sports_odds_ttl_seconds=_get_int("POLYDATA_SPORTS_ODDS_TTL_SECONDS", 180),
         sports_odds_sport_key=_get_str("POLYDATA_SPORTS_ODDS_SPORT_KEY", "upcoming"),

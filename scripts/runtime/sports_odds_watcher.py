@@ -29,6 +29,7 @@ except ImportError:
 
 from api.config import load_api_settings
 from api.services import sports_odds_service
+from runtime.market_search import build_market_search
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
@@ -107,7 +108,10 @@ class SportsOddsWatcher:
         return response.json()
 
     def service_context(self) -> Dict[str, Any]:
-        return {"SETTINGS": self.settings, "app": _AppAdapter(), "http_json_get": self.http_json_get, "utc_now_iso": utc_now_iso}
+        context = {"SETTINGS": self.settings, "app": _AppAdapter(), "http_json_get": self.http_json_get, "utc_now_iso": utc_now_iso}
+        if bool(getattr(self.settings, "sports_odds_pm_search_enabled", False)):
+            context["search_markets"] = build_market_search(self.settings)
+        return context
 
     def load_previous_payload(self) -> Dict[str, Any]:
         try:
