@@ -605,6 +605,17 @@ export function WorkspaceHeader({
     chooseResult(activeResult);
   };
 
+  const toggleActiveEventOutcomes = () => {
+    if (activeResult?.kind !== 'event') return;
+    setPreviewOutcomesExpanded((current) => !current);
+    setExplicitPaletteMode('full');
+  };
+
+  const toggleActiveFavorite = () => {
+    if (!activeResult) return;
+    toggleFavorite(activeResult.market);
+  };
+
   const moveHighlight = (delta: number) => {
     setHighlightedIndex((current) => {
       if (!flatResults.length) return 0;
@@ -700,6 +711,14 @@ export function WorkspaceHeader({
                 if (event.shiftKey) chooseFirstOutcomeForActiveResult();
                 else chooseHighlightedResult();
               }
+              if (event.altKey && event.key.toLowerCase() === 'e') {
+                event.preventDefault();
+                toggleActiveEventOutcomes();
+              }
+              if (event.altKey && event.key.toLowerCase() === 'f') {
+                event.preventDefault();
+                toggleActiveFavorite();
+              }
               if (event.key === 'Escape') {
                 event.preventDefault();
                 setMarketMenuOpen(false);
@@ -781,7 +800,9 @@ export function WorkspaceHeader({
                         {section.items.map((result) => {
                           const index = flatResults.findIndex((item) => item.key === result.key);
                           const selected = result.market.marketSlug === marketSlug;
-                          const inlineOutcomes = result.kind === 'event' && index === highlightedIndex ? visibleRelatedOutcomeMarkets.slice(0, 5) : [];
+                          const inlineOutcomeLimit = previewOutcomesExpanded ? 14 : 5;
+                          const inlineOutcomes = result.kind === 'event' && index === highlightedIndex ? visibleRelatedOutcomeMarkets.slice(0, inlineOutcomeLimit) : [];
+                          const inlineOutcomeRemainder = Math.max(0, relatedOutcomeMarkets.length - inlineOutcomes.length);
                           return (
                             <div key={result.key} className="qtv-result-entry">
                               <button
@@ -840,8 +861,15 @@ export function WorkspaceHeader({
                                     </button>
                                   ))}
                                   {!inlineOutcomes.length ? <span>Loading event outcomes...</span> : null}
-                                  {relatedOutcomeMarkets.length > inlineOutcomes.length ? (
-                                    <button className="more" type="button" onClick={() => setExplicitPaletteMode('full')}>+{relatedOutcomeMarkets.length - inlineOutcomes.length} more</button>
+                                  {relatedOutcomeMarkets.length > inlineOutcomes.length || previewOutcomesExpanded ? (
+                                    <button
+                                      className="more"
+                                      type="button"
+                                      title={previewOutcomesExpanded ? 'Collapse event outcomes' : 'Expand event outcomes inline'}
+                                      onClick={() => setPreviewOutcomesExpanded((current) => !current)}
+                                    >
+                                      {previewOutcomesExpanded ? 'Show fewer' : `+${inlineOutcomeRemainder.toLocaleString('en-US')} more`}
+                                    </button>
                                   ) : null}
                                 </div>
                               ) : null}
@@ -945,7 +973,7 @@ export function WorkspaceHeader({
                 </aside>
               </div>
               <div className="qtv-palette-foot">
-                <span>Ctrl/Cmd+K</span><span>Arrow keys</span><span>Enter open</span><span>Shift+Enter first outcome</span><span>Esc close</span><span>Tab filter</span>
+                <span>Ctrl/Cmd+K</span><span>Arrow keys</span><span>Enter open</span><span>Shift+Enter first outcome</span><span>Alt+E outcomes</span><span>Alt+F favorite</span><span>Esc close</span><span>Tab filter</span>
               </div>
             </div>
             </>
