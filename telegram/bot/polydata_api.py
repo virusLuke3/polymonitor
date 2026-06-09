@@ -6,6 +6,25 @@ from typing import Any, Dict, Iterable, Optional
 import requests
 
 
+WORLDCUP_QUERY_ALIASES = {
+    "墨西哥": "Mexico",
+    "南非": "South Africa",
+    "韩国": "South Korea",
+    "捷克": "Czech Republic",
+    "美国": "USA",
+    "加拿大": "Canada",
+    "巴西": "Brazil",
+    "摩洛哥": "Morocco",
+    "德国": "Germany",
+    "荷兰": "Netherlands",
+    "日本": "Japan",
+    "英格兰": "England",
+    "法国": "France",
+    "西班牙": "Spain",
+    "葡萄牙": "Portugal",
+}
+
+
 def _unique_urls(values: Iterable[str]) -> tuple[str, ...]:
     urls: list[str] = []
     seen: set[str] = set()
@@ -16,6 +35,17 @@ def _unique_urls(values: Iterable[str]) -> tuple[str, ...]:
         seen.add(url)
         urls.append(url)
     return tuple(urls)
+
+
+def _contains_cjk(value: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in str(value or ""))
+
+
+def _expand_worldcup_query(query: str) -> str:
+    expanded = str(query or "").strip()
+    for alias, value in WORLDCUP_QUERY_ALIASES.items():
+        expanded = expanded.replace(alias, value)
+    return " ".join(expanded.split())
 
 
 class PolyDataBotApi:
@@ -100,15 +130,19 @@ class PolyDataBotApi:
         variants = []
         cleaned = str(query or "").strip()
         if cleaned:
-            variants.extend([cleaned, f"world cup {cleaned}", f"fifa world cup {cleaned}", f"{cleaned} winner"])
+            expanded = _expand_worldcup_query(cleaned)
+            for base in (expanded, cleaned):
+                if base and base not in variants:
+                    variants.extend([base, f"world cup {base}", f"fifa world cup {base}", f"{base} winner"])
         rows: list[Dict[str, Any]] = []
         seen: set[str] = set()
         for variant in variants:
             payloads: list[Dict[str, Any]] = []
-            try:
-                payloads.append(self.search_markets(variant, limit=limit))
-            except requests.RequestException:
-                pass
+            if not _contains_cjk(variant):
+                try:
+                    payloads.append(self.search_markets(variant, limit=limit))
+                except requests.RequestException:
+                    pass
             try:
                 payloads.append(self.gamma_search_markets(variant, limit=limit))
             except requests.RequestException:
