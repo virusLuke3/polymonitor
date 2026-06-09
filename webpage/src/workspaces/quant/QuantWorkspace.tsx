@@ -2146,6 +2146,61 @@ export function QuantWorkspace() {
       worst,
     };
   }, [outcomeQualityAllRows]);
+  const dataTrustDecision = useMemo(() => {
+    const issueCount = outcomeQualitySummary.issueCount;
+    const total = Math.max(0, outcomeQualitySummary.total);
+    const readyPct = total ? outcomeQualitySummary.ready / total : 0;
+    const buildHasErrors = buildRunSummary.errors > 0;
+    const noRows = dataQuality.rows <= 0;
+    const status = noRows
+      ? 'blocked'
+      : buildHasErrors || outcomeQualitySummary.empty > 0 || outcomeQualitySummary.stale > 0 || outcomeQualitySummary.review > Math.max(2, total * 0.18) || dataQuality.gapCount > 0 || dataQuality.spikeCount > 0
+        ? 'review'
+        : 'ready';
+    const title = status === 'ready'
+      ? 'Backtest-ready data'
+      : status === 'review'
+        ? 'Usable with caveats'
+        : 'Not enough data';
+    const confidence = noRows
+      ? 0
+      : Math.max(0, Math.min(100, Math.round(
+        100
+        - (issueCount / Math.max(1, total)) * 42
+        - Math.min(25, dataQuality.gapCount * 2.8)
+        - Math.min(22, dataQuality.spikeCount * 2.4)
+        - (buildHasErrors ? 12 : 0),
+      )));
+    const evidence = [
+      noRows ? 'No loaded block-close rows for the selected source/window.' : `${dataQuality.rows.toLocaleString('en-US')} plotted rows loaded.`,
+      total ? `${outcomeQualitySummary.ready.toLocaleString('en-US')} / ${total.toLocaleString('en-US')} outcomes are ready.` : 'No event outcomes loaded.',
+      dataQuality.medianDelta ? `Median spacing is ${Math.floor(dataQuality.medianDelta).toLocaleString('en-US')} blocks.` : '',
+      dataQuality.directNoRows ? `${dataQuality.directNoRows.toLocaleString('en-US')} direct NO rows available.` : dataQuality.impliedNoRows ? 'NO prices are currently implied from YES.' : '',
+      buildRunSummary.latest?.runId ? `Latest build #${buildRunSummary.latest.runId} is ${buildRunSummary.latest.status}.` : 'No recent build status rows loaded.',
+      lastPriceRefreshAt ? `Last live refresh ${lastPriceRefreshAt}.` : livePriceRefreshEnabled ? 'Live refresh enabled; waiting for next tick.' : 'Live refresh is not active for this selection.',
+    ].filter(Boolean);
+    const caveats = [
+      ...dataQuality.warnings,
+      outcomeQualitySummary.worst && outcomeQualitySummary.worst.status !== 'ready' ? `${outcomeQualitySummary.worst.label}: ${outcomeQualitySummary.worst.reason}` : '',
+      buildHasErrors ? `${buildRunSummary.errors.toLocaleString('en-US')} build errors in recent runs.` : '',
+      outcomeQualitySummary.stale ? `${outcomeQualitySummary.stale.toLocaleString('en-US')} stale outcomes.` : '',
+      outcomeQualitySummary.empty ? `${outcomeQualitySummary.empty.toLocaleString('en-US')} outcomes have no rows.` : '',
+    ].filter(Boolean).slice(0, 5);
+    const nextAction = noRows
+      ? 'Refresh market data or choose a covered source before running a backtest.'
+      : status === 'review'
+        ? 'Review affected outcomes, then run split/walk-forward before trusting aggregate metrics.'
+        : 'Run or replay the strategy; data quality does not show major blockers.';
+    return {
+      status,
+      title,
+      confidence,
+      readyPct,
+      evidence,
+      caveats,
+      nextAction,
+    };
+  }, [buildRunSummary.errors, buildRunSummary.latest, dataQuality, lastPriceRefreshAt, livePriceRefreshEnabled, outcomeQualitySummary]);
 
   useEffect(() => {
     window.localStorage.setItem('polydata.quant.inspectorTab', inspectorTab);
@@ -2806,6 +2861,40 @@ export function QuantWorkspace() {
                       <strong>{dataQuality.health === 'ready' ? 'Ready' : dataQuality.health === 'review' ? 'Review suggested' : 'No rows'}</strong>
                       <span>{dataQuality.source}</span>
                     </header>
+                    <section className={`qtv-data-trust-card ${dataTrustDecision.status}`}>
+                      <div>
+                        <span>Trust verdict</span>
+                        <strong>{dataTrustDecision.title}</strong>
+                        <em>{dataTrustDecision.nextAction}</em>
+                      </div>
+                      <b>{dataTrustDecision.confidence}%</b>
+                      <div className="qtv-data-trust-meter" aria-label="Data confidence">
+                        <i style={{ width: `${Math.max(3, dataTrustDecision.confidence)}%` }} />
+                      </div>
+                      <ul>
+                        {dataTrustDecision.evidence.slice(0, 4).map((item) => <li key={item}>{item}</li>)}
+                      </ul>
+                      {dataTrustDecision.caveats.length ? (
+                        <div className="qtv-data-trust-caveats">
+                          {dataTrustDecision.caveats.map((item) => <span key={item}>{item}</span>)}
+                        </div>
+                      ) : null}
+                      <footer>
+                        <button type="button" onClick={() => setMarketReloadKey((current) => current + 1)}>Refresh data</button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOutcomeVisibilityFilter('issues');
+                            setInspectorTab('outcomes');
+                          }}
+                        >
+                          Review issues
+                        </button>
+                        <button type="button" disabled={dataTrustDecision.status === 'blocked'} onClick={() => void runBacktest()}>
+                          Run backtest
+                        </button>
+                      </footer>
+                    </section>
                     <section className="qtv-quality-summary-strip">
                       <div className="ready">
                         <span>Ready</span>
