@@ -75,7 +75,8 @@ type CommandPaletteTab = 'markets' | 'panels' | 'commands';
 const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
 const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v4';
 const MARKET_GROUP_SORT_STORAGE_KEY = 'wm:marketGroupSort:v1';
-const VIEW_STORAGE_KEY = 'polydata:map-view:v2';
+const DEFAULT_MAP_VIEW_MODE: MapViewMode = '2d';
+const VIEW_STORAGE_KEY = 'polydata:map-view:v3';
 const WORKSPACE_MODE_STORAGE_KEY = 'polydata:workspace-mode:v1';
 const REGION_STORAGE_KEY = 'polydata:region:v1';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
@@ -118,8 +119,8 @@ const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
   { value: 'oceania', label: 'Oceania' },
 ];
 const MAP_VIEW_OPTIONS: Array<{ value: MapViewMode; label: string }> = [
-  { value: '3d', label: '3D Globe' },
   { value: '2d', label: '2D Map' },
+  { value: '3d', label: '3D Globe' },
   { value: 'heatmap', label: 'Heatmap' },
   { value: 'density', label: 'Risk Density' },
 ];
@@ -986,8 +987,8 @@ function WorldMonitorApp() {
   const [viewMode, setViewMode] = useState<MapViewMode>(() => {
     const override = readSearchParam('view');
     if (isMapViewMode(override)) return override;
-    const stored = readStringStorage(VIEW_STORAGE_KEY, '3d');
-    return isMapViewMode(stored) ? stored : '3d';
+    const stored = readStringStorage(VIEW_STORAGE_KEY, DEFAULT_MAP_VIEW_MODE);
+    return isMapViewMode(stored) ? stored : DEFAULT_MAP_VIEW_MODE;
   });
   const [globeStatus, setGlobeStatus] = useState<WorldGlobeStatusMetrics>({
     fps: 0,
