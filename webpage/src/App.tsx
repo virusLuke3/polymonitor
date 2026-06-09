@@ -131,16 +131,6 @@ function isMapViewMode(value: unknown): value is MapViewMode {
 
 const MAP_BOTTOM_PANEL_IDS: string[] = [];
 const FOCUSED_STRIP_PANEL_IDS = new Set(['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled', 'oracle-feed']);
-const MARKET_WORKSPACE_PANEL_IDS = new Set([
-  'market-summary',
-  'featured-market',
-  'price-implications',
-  'price-chart',
-  'sample-chain-trades',
-  'lob-depth',
-  'oracle-timeline',
-  'related-news',
-]);
 const PANEL_ROW_RESIZE_STEP = 200;
 const PANEL_COL_RESIZE_STEP = 260;
 const PANEL_DRAG_THRESHOLD = 8;
@@ -551,6 +541,84 @@ function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
             { timestamp: new Date().toISOString(), yesPrice: latest, noPrice: latestNo },
           ],
         },
+    content: null,
+    lob: null,
+  };
+}
+
+function optimisticBundleFromGroup(group: MarketGroupItem, marketId: number | null, outcomeKey?: string | null): WorkspaceBundle {
+  const outcomes = [...(group.outcomes || []), ...(group.topOutcomes || [])];
+  const selectedOutcome = (
+    outcomes.find((outcome) => marketId != null && Number(outcome.marketId) === marketId)
+    || outcomes.find((outcome) => outcomeKey && outcome.outcomeKey === outcomeKey)
+    || outcomes.find((outcome) => group.defaultOutcomeKey && outcome.outcomeKey === group.defaultOutcomeKey)
+    || outcomes[0]
+    || null
+  );
+  const selectedMarketId = Number(selectedOutcome?.marketId ?? marketId ?? group.defaultMarketId ?? 0);
+  const price = selectedOutcome?.blockCloseYesPrice ?? selectedOutcome?.yesPrice ?? group.latestBlockClosePrice ?? null;
+  const numericPrice = Number(price);
+  const noPrice = selectedOutcome?.noPrice ?? (Number.isFinite(numericPrice) ? String(1 - numericPrice) : null);
+  const timestamp = selectedOutcome?.lastTradeAt || group.lastActivityAt || group.createdAt || new Date().toISOString();
+  const marketSlug = selectedOutcome?.slug || group.slug || `market-${selectedMarketId || group.groupId}`;
+  const optimisticGroup: MarketGroupDetail = {
+    ...group,
+    generatedAt: group.generatedAt || new Date().toISOString(),
+    status: 'optimistic',
+  };
+  return {
+    market: selectedMarketId ? {
+      id: selectedMarketId,
+      slug: marketSlug,
+      title: selectedOutcome?.title || selectedOutcome?.label || group.title,
+      status: 'OPEN',
+      latestPrice: price == null ? null : String(price),
+      latestYesPrice: price == null ? null : String(price),
+      latestNoPrice: noPrice == null ? null : String(noPrice),
+      endDate: group.endDate || null,
+      createdAt: group.createdAt || null,
+      category: group.category || undefined,
+      tags: group.tags || [],
+    } : null,
+    identity: {
+      localMarketId: selectedMarketId || null,
+      marketId: selectedMarketId || null,
+      gammaMarketId: selectedOutcome?.gammaMarketId ?? null,
+      slug: marketSlug,
+      conditionId: selectedOutcome?.conditionId ?? null,
+      eventId: group.eventId == null ? null : String(group.eventId),
+      selectedOutcomeKey: selectedOutcome?.outcomeKey ?? outcomeKey ?? group.defaultOutcomeKey ?? null,
+    },
+    diagnostics: null,
+    health: null,
+    group: optimisticGroup,
+    selectedOutcome,
+    trades: [],
+    oracle: null,
+    price: {
+      marketId: selectedMarketId || 0,
+      latestPrice: price == null ? null : String(price),
+      latestYesPrice: price == null ? null : String(price),
+      latestNoPrice: noPrice == null ? null : String(noPrice),
+      change24h: selectedOutcome?.change24h == null ? null : String(selectedOutcome.change24h),
+      volume24h: selectedOutcome?.volume24h == null
+        ? (group.volume24h == null ? null : String(group.volume24h))
+        : String(selectedOutcome.volume24h),
+      tradeCount24h: Number(selectedOutcome?.tradeCount24h ?? group.tradeCount24h ?? 0),
+      updatedAt: timestamp,
+    },
+    chart: Number.isFinite(numericPrice) && selectedMarketId
+      ? {
+          marketId: selectedMarketId,
+          range: 'snapshot',
+          interval: 'snapshot',
+          kind: 'probability',
+          points: [
+            { timestamp, yesPrice: String(price), noPrice },
+            { timestamp: new Date().toISOString(), yesPrice: String(price), noPrice },
+          ],
+        }
+      : null,
     content: null,
     lob: null,
   };
@@ -1534,9 +1602,16 @@ function WorldMonitorApp() {
     const listMarket = markets.find((market) => market.id === currentMarketId)
       || bootstrapRef.current?.activeMarketsPreview?.find((market) => market.id === currentMarketId)
       || null;
-    const initialBundle = cachedBundle || (listMarket ? optimisticBundleFromMarket(listMarket) : emptyWorkspaceBundle());
+    const listGroup = marketGroups.find((group) => {
+      if (selectedMarketGroupId && String(group.eventId ?? '') === selectedMarketGroupId) return true;
+      return [...(group.outcomes || []), ...(group.topOutcomes || [])].some((outcome) => Number(outcome.marketId) === currentMarketId);
+    }) || null;
+    const initialBundle = cachedBundle
+      || (listMarket ? optimisticBundleFromMarket(listMarket) : null)
+      || (listGroup ? optimisticBundleFromGroup(listGroup, currentMarketId, selectedMarketGroupOutcomeKey) : null)
+      || emptyWorkspaceBundle();
     setBundle(initialBundle);
-    setBundleLoading(!cachedBundle && !listMarket);
+    setBundleLoading(!cachedBundle && !listMarket && !listGroup);
     if (!cachedBundle) {
       bundleCacheRef.current.set(currentMarketId, initialBundle);
     }
@@ -1598,7 +1673,7 @@ function WorldMonitorApp() {
     fetchWorkspaceBundle(currentMarketId)
       .then((loadedBundle) => applyLoadedBundle(loadedBundle))
       .catch((loadError) => {
-        if (!cancelled && bundleRequestSeqRef.current === requestSeq && !listMarket && !cachedBundle) {
+        if (!cancelled && bundleRequestSeqRef.current === requestSeq && !listMarket && !listGroup && !cachedBundle) {
           setError(loadError instanceof Error ? loadError.message : 'Failed to load market.');
         }
       })
@@ -1772,7 +1847,6 @@ function WorldMonitorApp() {
   const panelShouldShowLoading = (panelId: string) => {
     if (loading && !bootstrap) return true;
     if (panelLoadingIds.has(panelId) && !runtimePayloadLoaded(panelId)) return true;
-    if (bundleLoading && selectedMarketId != null && MARKET_WORKSPACE_PANEL_IDS.has(panelId) && !bundle?.market && !selectedMarket) return true;
     return false;
   };
 

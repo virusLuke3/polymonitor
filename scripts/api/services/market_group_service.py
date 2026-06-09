@@ -10,8 +10,8 @@ MARKET_GROUPS_DETAIL_NAMESPACE = "snapshot:market-groups:detail"
 MARKET_GROUPS_CHART_NAMESPACE = "snapshot:market-groups:chart"
 MARKET_GROUPS_LIST_TTL_SECONDS = 120
 MARKET_GROUPS_DETAIL_TTL_SECONDS = 180
-TERMINAL_PROBABILITY_LOW = 0.001
-TERMINAL_PROBABILITY_HIGH = 0.999
+TERMINAL_PROBABILITY_LOW = 0.02
+TERMINAL_PROBABILITY_HIGH = 0.98
 
 CHART_RANGE_INTERVALS: Dict[str, str] = {
     "1h": "5m",
@@ -200,7 +200,7 @@ def _terminal_event(active_markets: List[Dict[str, Any]]) -> bool:
     ]
     if not prices:
         return False
-    return all(price <= 0.01 or price >= 0.99 for price in prices)
+    return all(price <= TERMINAL_PROBABILITY_LOW or price >= TERMINAL_PROBABILITY_HIGH for price in prices)
 
 
 def _category_for_event(event: Dict[str, Any]) -> str:
@@ -514,7 +514,7 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
         if price is not None:
             if 0.02 < price < 0.98:
                 score += 40.0
-            if price <= 0.01 or price >= 0.99:
+            if price <= TERMINAL_PROBABILITY_LOW or price >= TERMINAL_PROBABILITY_HIGH:
                 score -= 60.0
         if "completed match" in label or label.strip() in {"completed", "match completed"}:
             score -= 30.0
@@ -632,7 +632,7 @@ def _group_has_live_price_signal(group: Dict[str, Any]) -> bool:
         price = _float_value((outcome or {}).get("yesPrice"))
         if price is None:
             continue
-        if 0.01 < price < 0.99 and (outcome or {}).get("yesTokenId"):
+        if TERMINAL_PROBABILITY_LOW < price < TERMINAL_PROBABILITY_HIGH and (outcome or {}).get("yesTokenId"):
             return True
     return False
 
@@ -802,10 +802,11 @@ def _serving_active_rows(
     page_size: int,
     offset: int,
 ) -> List[Dict[str, Any]]:
+    query_limit = max(page_size, min(500, max(page_size * 5, page_size + 120))) if offset == 0 else page_size
     try:
         rows = ctx["query_all"](
             _serving_select_sql(where_sql, order_sql),
-            [*params, page_size, offset],
+            [*params, query_limit, offset],
         )
     except Exception:
         logger = getattr(ctx.get("app"), "logger", None)
@@ -813,7 +814,7 @@ def _serving_active_rows(
             logger.exception("market group active base query failed; retrying compact active-rank query")
         rows = ctx["query_all"](
             _serving_select_sql(where_sql, "active_rank DESC NULLS LAST, last_activity_at DESC NULLS LAST, volume_24h DESC"),
-            [*params, page_size, offset],
+            [*params, query_limit, offset],
         )
     if offset > 0:
         return rows
@@ -1039,7 +1040,7 @@ def _serving_market_groups_payload(
         where.append("(title ILIKE ? OR COALESCE(event_slug, '') ILIKE ? OR COALESCE(category, '') ILIKE ? OR tags::text ILIKE ?)")
         params.extend([like, like, like, like])
     where_sql = " AND ".join(where)
-    active_order_sql = ""
+    active_order_sql = "active_rank DESC NULLS LAST, volume_24h DESC, last_activity_at DESC NULLS LAST"
     order_sql = {
         "active": active_order_sql,
         "new": "created_at DESC NULLS LAST, last_activity_at DESC NULLS LAST, volume_24h DESC",
@@ -1070,7 +1071,9 @@ def _serving_market_groups_payload(
     if sort == "active":
         items = [item for item in items if not _group_has_terminal_probability(item)]
     if sort == "active" and not query:
-        items = _interleave_group_categories(items, page_size)
+        now_ts = _parse_timestamp(ctx["utc_now_iso"]())
+        items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
+        items = _limit_group_category_dominance(items, page_size)
     items = items[:page_size]
     return {
         "items": items,
@@ -1147,7 +1150,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 23}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 24}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)

@@ -145,7 +145,7 @@ function complementPrice(value?: string | number | null) {
 function isTerminalProbability(value?: string | number | null) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return false;
-  return numeric <= 0.001 || numeric >= 0.999;
+  return numeric <= 0.02 || numeric >= 0.98;
 }
 
 function firstFiniteValue(...values: Array<string | number | null | undefined>) {
@@ -217,7 +217,7 @@ function groupActiveRank(group: MarketGroupItem) {
   const volume = Number(groupDisplayVolume(group) || 0);
   const trades = Number(groupDisplayTradeCount(group) || 0);
   const price = Number(groupBestLivePrice(group));
-  const tradableSignal = Number.isFinite(price) && price > 0.01 && price < 0.99 ? 1 : 0;
+  const tradableSignal = Number.isFinite(price) && price > 0.02 && price < 0.98 ? 1 : 0;
   const freshness =
     trades > 0 ? 700 :
     volume > 0 && activityAgeHours <= 168 ? 620 :
@@ -252,6 +252,34 @@ function groupHasTerminalProbability(group: MarketGroupItem) {
     || isTerminalProbability(outcome.yesPrice)
     || isTerminalProbability(outcome.noPrice)
   ));
+}
+
+function diversifyActiveGroups(groups: MarketGroupItem[]) {
+  const firstScreenLimit = Math.min(groups.length, 24);
+  const categoryLimit = Math.max(2, Math.min(4, Math.floor(firstScreenLimit / 6) || 1));
+  const selected: MarketGroupItem[] = [];
+  const deferred: MarketGroupItem[] = [];
+  const topicCounts = new Map<string, number>();
+  const seen = new Set<string>();
+  for (const group of groups) {
+    const key = String(group.eventId ?? group.groupId ?? group.slug ?? '');
+    if (key && seen.has(key)) continue;
+    const topic = groupTopic(group);
+    if (selected.length < firstScreenLimit && (topicCounts.get(topic) || 0) >= categoryLimit) {
+      deferred.push(group);
+      continue;
+    }
+    selected.push(group);
+    if (key) seen.add(key);
+    topicCounts.set(topic, (topicCounts.get(topic) || 0) + 1);
+  }
+  for (const group of deferred) {
+    const key = String(group.eventId ?? group.groupId ?? group.slug ?? '');
+    if (key && seen.has(key)) continue;
+    selected.push(group);
+    if (key) seen.add(key);
+  }
+  return selected;
 }
 
 function groupIsExpired(group: MarketGroupItem) {
@@ -425,7 +453,7 @@ function ActiveMarketsPanel({
     if (marketGroupSort === 'close') return liveFiltered.sort((a, b) => timestampOrInfinity(a.endDate) - timestampOrInfinity(b.endDate));
     if (marketGroupSort === 'move') return liveFiltered.sort((a, b) => groupMoveScore(b) - groupMoveScore(a));
     if (marketGroupSort === 'trades') return liveFiltered.sort((a, b) => Number(groupDisplayTradeCount(b) || 0) - Number(groupDisplayTradeCount(a) || 0));
-    return liveFiltered.sort((a, b) => groupActiveRank(b) - groupActiveRank(a));
+    return diversifyActiveGroups(liveFiltered.sort((a, b) => groupActiveRank(b) - groupActiveRank(a)));
   }, [marketGroupSort, marketGroups, search]);
 
   const visibleMarkets = useMemo(() => {

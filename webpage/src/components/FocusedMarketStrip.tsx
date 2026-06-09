@@ -40,7 +40,8 @@ const FOCUS_CHART = {
   left: 10,
 };
 const BOOK_LEVEL_LIMIT = 4;
-const BLOCK_CLOSE_POINT_LIMIT = 25000;
+const BLOCK_CLOSE_POINT_LIMIT = 3000;
+const LOB_REFRESH_INTERVAL_MS = 15_000;
 
 const POLYMARKET_SERIES_COLORS = ['#7cb6ff', '#4377ff', '#f5b800', '#ff7a1a', '#7f56d9', '#12b76a', '#f04438', '#06aed4'];
 
@@ -98,7 +99,7 @@ function hasSideBookLevels(side?: { asks?: L2Level[]; bids?: L2Level[] } | null)
 
 function isTerminalProbability(value?: string | number | null) {
   const numeric = Number(value);
-  return Number.isFinite(numeric) && (numeric <= 0.001 || numeric >= 0.999);
+  return Number.isFinite(numeric) && (numeric <= 0.02 || numeric >= 0.98);
 }
 
 function safeLiveProbability(value: string | number | null | undefined, isLive: boolean) {
@@ -1146,17 +1147,39 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       return;
     }
     let cancelled = false;
+    let interval: number | undefined;
     const key = selectedTokenKey;
-    setTokenLobState({ key, lob: null, loading: true });
-    fetchMarketLobByToken(selectedTokenId, selectedOutcome?.label || detail?.title || '', selectedNoTokenId, 1800)
-      .then((lobPayload) => {
-        if (!cancelled) setTokenLobState({ key, lob: lobPayload, loading: false });
-      })
-      .catch(() => {
-        if (!cancelled) setTokenLobState({ key, lob: null, loading: false });
-      });
+    const title = selectedOutcome?.label || detail?.title || '';
+
+    const loadBook = () => {
+      setTokenLobState((current) => ({
+        key,
+        lob: current.key === key ? current.lob : null,
+        loading: true,
+      }));
+      fetchMarketLobByToken(selectedTokenId, title, selectedNoTokenId, 1800)
+        .then((lobPayload) => {
+          if (!cancelled) setTokenLobState({ key, lob: lobPayload, loading: false });
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setTokenLobState((current) => ({
+              key,
+              lob: current.key === key ? current.lob : null,
+              loading: false,
+            }));
+          }
+        });
+    };
+
+    loadBook();
+    interval = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      loadBook();
+    }, LOB_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
+      if (interval !== undefined) window.clearInterval(interval);
     };
   }, [detail?.title, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
 
@@ -1174,11 +1197,12 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       priceSource: 'orderfilled_block_close',
       scope: 'market',
       tokenSide: 'YES',
-      limit: selectedTokenId ? 5000 : BLOCK_CLOSE_POINT_LIMIT,
-      maxPoints: 720,
+      limit: selectedTokenId ? 1600 : BLOCK_CLOSE_POINT_LIMIT,
+      maxPoints: 360,
       pointFormat: 'lite',
       maxOutcomes: selectedTokenId ? 1 : 4,
       live: true,
+      timeoutMs: 3200,
     })
       .then((payload) => {
         if (!cancelled) setBlockCloseState({ key, payload, loading: false });
@@ -1348,14 +1372,14 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       {wrapPanel('lob-depth', 'wm-focus-panel-slot wm-focus-book-slot', (
         <Panel
           title="Order Book"
-          badge={hasAnyBookLevels ? 'Live' : tokenLobLoading ? 'Loading' : 'Stale'}
+          badge={hasAnyBookLevels ? (tokenLobLoading ? 'Refreshing' : 'Live') : tokenLobLoading ? 'Loading' : 'Stale'}
           status="live"
           className="wm-focus-panel wm-focus-book-panel"
           controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{orderbookOutcomeLabel(ctx, bookSide, selectedOutcome)}</span> : undefined}
         >
           {!executionAvailable && detail ? (
             emptyState('Select an outcome with CLOB token data to inspect the order book.')
-          ) : tokenLobLoading ? (
+          ) : tokenLobLoading && !lob ? (
             emptyState('Loading live CLOB order book.')
           ) : !lob || !activeBook ? (
             emptyState('No CLOB order book snapshot is available for this market.')
