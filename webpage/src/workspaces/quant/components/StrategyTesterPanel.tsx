@@ -74,6 +74,7 @@ type StrategyTesterPanelProps = {
   onDeepBacktestChange: () => void;
   onRefresh: () => void;
   onBatchBacktest: () => void;
+  onSplitBacktest: () => void;
   onExport: (format: 'csv' | 'json') => void;
   onPerformanceSearchChange: (value: string) => void;
   onPerformanceSortChange: (key: PerformanceSortKey) => void;
@@ -89,6 +90,8 @@ type StrategyTesterPanelProps = {
   backtestStatus?: string;
   batchRows?: BatchBacktestRow[];
   batchStatus?: string;
+  splitRows?: BatchBacktestRow[];
+  splitStatus?: string;
   recentBacktestRuns?: QuantBacktestRun[];
   backtestRunsStatus?: string;
   onRunLoad?: (runId: number) => void;
@@ -164,6 +167,7 @@ export function StrategyTesterPanel({
   onDeepBacktestChange,
   onRefresh,
   onBatchBacktest,
+  onSplitBacktest,
   onExport,
   onPerformanceSearchChange,
   onPerformanceSortChange,
@@ -179,6 +183,8 @@ export function StrategyTesterPanel({
   backtestStatus = 'idle',
   batchRows = [],
   batchStatus = 'idle',
+  splitRows = [],
+  splitStatus = 'idle',
   recentBacktestRuns = [],
   backtestRunsStatus = 'idle',
   onRunLoad,
@@ -390,6 +396,7 @@ export function StrategyTesterPanel({
         <div className="qtv-tester-actions">
           <label><input type="checkbox" checked readOnly /> Backtest mode</label>
           <label><input type="checkbox" checked={deepBacktest} onChange={onDeepBacktestChange} /> Deep Backtest</label>
+          <button type="button" onClick={onSplitBacktest}>{splitStatus === 'running' ? 'Split running' : 'Split 70/30'}</button>
           <button type="button" onClick={onBatchBacktest}>{batchStatus === 'running' ? 'Batch running' : 'Batch Top 5'}</button>
           <button type="button" onClick={() => onExport('json')}>Export JSON</button>
         </div>
@@ -567,6 +574,7 @@ export function StrategyTesterPanel({
               </ul>
               <div className="qtv-empty-actions">
                 <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
+                <button type="button" onClick={onSplitBacktest}>Split</button>
                 <button type="button" onClick={onBatchBacktest}>Batch Top 5</button>
                 <button type="button" onClick={() => setSettingsOpen(true)}>Settings</button>
                 <button type="button" onClick={onRefresh}>Refresh</button>
@@ -650,6 +658,7 @@ export function StrategyTesterPanel({
               <button type="button" onClick={onStrategyAutoTune}>Auto tune from loaded prices</button>
               <button type="button" onClick={() => applyPreset('Backend defaults')}>Reset defaults</button>
               <button type="button" onClick={copyStrategyParameters}>Copy params</button>
+              <button type="button" onClick={onSplitBacktest}>Split 70/30</button>
               <button type="button" onClick={onBatchBacktest}>Batch Top 5</button>
               <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
             </div>
@@ -788,6 +797,43 @@ export function StrategyTesterPanel({
               <div><dt>PnL</dt><dd className={selectedTrade && selectedTrade.pnl >= 0 ? 'positive' : 'negative'}>{selectedTrade ? `${selectedTrade.pnl.toFixed(2)} USDC` : '-'}</dd></div>
               <div><dt>Exit</dt><dd>{selectedTrade?.exitReason || '-'}</dd></div>
             </dl>
+          </section>
+          <section className="qtv-batch-runs-card">
+            <div className="qtv-run-config-head">
+              <strong>Train/Test Split</strong>
+              <button type="button" onClick={onSplitBacktest}>{splitStatus === 'running' ? 'Running...' : 'Run 70/30'}</button>
+            </div>
+            {splitRows.length ? (
+              <div className="qtv-batch-table">
+                <div className="head">
+                  <span>Segment</span>
+                  <span>Run</span>
+                  <span>Status</span>
+                  <span>Rows</span>
+                  <span>Trades</span>
+                  <span>Net</span>
+                  <span>Return</span>
+                  <span>Drawdown</span>
+                </div>
+                {splitRows.map((row) => (
+                  <div key={`split-${row.key}`} className={row.status === 'failed' ? 'failed' : row.status === 'succeeded' ? 'succeeded' : ''} title={row.error || row.marketSlug}>
+                    <span>{row.outcome}</span>
+                    <span>{row.runId ? `#${row.runId}` : '-'}</span>
+                    <span>{row.status}</span>
+                    <span>{row.rows.toLocaleString('en-US')}</span>
+                    <span>{row.trades.toLocaleString('en-US')}</span>
+                    <span>{row.netProfit}</span>
+                    <span>{row.totalReturn}</span>
+                    <span>{row.maxDrawdown}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="qtv-tool-empty">
+                <strong>No split run</strong>
+                <span>Run 70/30 to submit real train and test backtests over the selected outcome block range.</span>
+              </div>
+            )}
           </section>
           <section className="qtv-batch-runs-card">
             <div className="qtv-run-config-head">
