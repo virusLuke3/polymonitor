@@ -46,9 +46,14 @@ export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | 
     return side !== 'NO' || !canonicalKeys.has(key);
   });
 
+  const optionalProbability = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 && numeric <= 1 ? numeric : null;
+  };
   const canonicalYes = (point: QuantMarketSeriesPoint, fallbackSide?: string | null) => {
-    const direct = toNumber(point.yesProbabilityClose);
-    if (Number.isFinite(direct) && direct >= 0 && direct <= 1) return direct;
+    const direct = optionalProbability(point.yesProbabilityClose);
+    if (direct !== null) return direct;
     const raw = toNumber(point.price);
     const side = String(point.tokenSide || fallbackSide || '').toUpperCase();
     return side === 'NO' ? Math.max(0, Math.min(1, 1 - raw)) : raw;

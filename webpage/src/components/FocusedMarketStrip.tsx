@@ -757,7 +757,7 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
 
       return (
         <div className="wm-focus-chart-shell wm-polymarket-prob-chart wm-block-close-chart">
-          <div className="wm-focus-qtv-chart-info" aria-label={`${options.title || 'selected market'} block close chart metrics`}>
+          <div className="wm-focus-qtv-chart-info" aria-label={`${_options.title || 'selected market'} block close chart metrics`}>
             <div className="wm-focus-block-chart-hud">
               <span>Rows <b>{rowCount.toLocaleString('en-US')}</b></span>
               <span>Vol <b>{formatQuantVolume(volumeTotal)}</b></span>
