@@ -8,7 +8,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from telegram.bot.commands import handle_command
-from telegram.bot.config import BotSettings
+from telegram.bot.config import BotSettings, load_settings
 from telegram.bot.formatters import format_market_search, format_pnl_coverage, format_wallet
 from telegram.bot.models import CommandRequest
 from telegram.bot.poller import check_alerts, run_once
@@ -18,6 +18,65 @@ from telegram.bot.state import BotState
 
 
 class FakeApi:
+    def worldcup_dashboard(self):
+        return {
+            "tournament": {"name": "FIFA World Cup 2026"},
+            "matches": [
+                {
+                    "id": "wc2026-001",
+                    "homeTeam": "Mexico",
+                    "awayTeam": "South Africa",
+                    "kickoffUtc": "2026-06-11T19:00:00Z",
+                    "city": "Mexico City",
+                    "cityId": "mexico-city",
+                    "venue": "Estadio Azteca",
+                    "group": "Group A",
+                },
+                {
+                    "id": "wc2026-002",
+                    "homeTeam": "South Korea",
+                    "awayTeam": "Czech Republic",
+                    "kickoffUtc": "2026-06-12T02:00:00Z",
+                    "city": "Guadalajara / Zapopan",
+                    "cityId": "guadalajara",
+                    "venue": "Estadio Akron",
+                    "group": "Group A",
+                },
+            ],
+            "news": [
+                {
+                    "id": "n1",
+                    "source": "ESPN",
+                    "title": "Mexico World Cup opener team news",
+                    "summary": "Mexico prepares for South Africa.",
+                    "url": "https://www.espn.com/soccer/story/world-cup-opener",
+                }
+            ],
+            "weather": [
+                {
+                    "cityId": "mexico-city",
+                    "current": {"condition": "Sunny", "tempC": 24, "windKph": 8, "precipitationProbability": 4},
+                    "forecast": [{"precipitationProbability": 18}],
+                }
+            ],
+            "odds": [],
+        }
+
+    def worldcup_intel(self, *, limit: int = 24):
+        return {
+            "providerStates": {"espnNews": "ok", "espnScoreboard": "ok", "wttr": "ok", "fbref": "restricted"},
+            "signals": [
+                {
+                    "id": "s1",
+                    "source": "ESPN SCOREBOARD",
+                    "title": "South Africa at Mexico: Scheduled",
+                    "summary": "2026-06-11T19:00Z · Estadio Azteca",
+                }
+            ],
+            "news": self.worldcup_dashboard()["news"],
+            "weather": self.worldcup_dashboard()["weather"],
+        }
+
     def search_markets(self, query: str, *, limit: int = 5):
         return {
             "items": [
@@ -128,6 +187,17 @@ def make_settings(state_path: str) -> BotSettings:
     )
 
 
+def test_query_bot_token_takes_priority(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("POLYDATA_TELEGRAM_QUERY_BOT_TOKEN", "query-token")
+    monkeypatch.setenv("POLYDATA_TELEGRAM_BOT_TOKEN", "push-token")
+    monkeypatch.setenv("POLYDATA_TELEGRAM_QUERY_BOT_STATE_PATH", str(tmp_path / "query_state.json"))
+
+    settings = load_settings()
+
+    assert settings.bot_token == "query-token"
+    assert settings.state_path.endswith("query_state.json")
+
+
 def test_parse_update_supports_bot_mentions_and_args():
     request = parse_update(
         {
@@ -192,6 +262,13 @@ def test_handle_command_routes_first_version_commands():
     assert "PolyMonitorBot" in handle_command(CommandRequest(command="start", args="", **base), api).text
     assert "Market:" in handle_command(CommandRequest(command="help", args="", **base), api).text
     assert "Spurs vs. Thunder" in handle_command(CommandRequest(command="market", args="nba", **base), api).text
+    assert "FIFA World Cup 2026" in handle_command(CommandRequest(command="worldcup", args="", **base), api).text
+    assert "Mexico vs South Africa" in handle_command(CommandRequest(command="matches", args="", **base), api).text
+    assert "Kickoff" in handle_command(CommandRequest(command="match", args="mexico south africa", **base), api).text
+    assert "Mexico World Cup opener" in handle_command(CommandRequest(command="team", args="mexico", **base), api).text
+    assert "Sunny" in handle_command(CommandRequest(command="venue", args="mexico", **base), api).text
+    assert "Mexico World Cup opener" in handle_command(CommandRequest(command="news", args="mexico", **base), api).text
+    assert "Polymarket search" in handle_command(CommandRequest(command="odds", args="mexico south africa", **base), api).text
     assert "Alpha Signals" in handle_command(CommandRequest(command="signal", args="polymarket", **base), api).text
     assert "Wallet" in handle_command(
         CommandRequest(command="wallet", args="0x1234567890abcdef1234567890abcdef12345678", **base),

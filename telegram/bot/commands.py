@@ -14,6 +14,13 @@ from .formatters import (
     format_pnl_coverage,
     format_signals,
     format_wallet,
+    format_worldcup_match,
+    format_worldcup_matches,
+    format_worldcup_news,
+    format_worldcup_odds,
+    format_worldcup_overview,
+    format_worldcup_team,
+    format_worldcup_venue,
     help_text,
     is_address,
     start_text,
@@ -29,6 +36,8 @@ class BotApi(Protocol):
     def wallet_trades(self, address: str, *, limit: int = 5): ...
     def pnl(self, address: str): ...
     def crypto_markets(self): ...
+    def worldcup_dashboard(self): ...
+    def worldcup_intel(self, *, limit: int = 24): ...
 
 
 def _usage(command: str) -> BotReply:
@@ -38,6 +47,11 @@ def _usage(command: str) -> BotReply:
         "pnl": "请使用：/pnl 0x...",
         "signal": "请使用：/signal polymarket",
         "alert": "请使用：/alert BTC 95000",
+        "match": "请使用：/match mexico south africa",
+        "team": "请使用：/team mexico",
+        "venue": "请使用：/venue dallas",
+        "weather": "请使用：/weather dallas",
+        "odds": "请使用：/odds mexico south africa",
     }
     return BotReply(f"⚠️ {command}\n{usages.get(command, '请使用 /help 查看命令')}")
 
@@ -74,6 +88,59 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
             return BotReply(format_market_search(args, api.search_markets(args, limit=5)), link_preview=False)
         except requests.RequestException:
             return _service_error("Market")
+    if command == "worldcup":
+        try:
+            dashboard = api.worldcup_dashboard()
+            intel = api.worldcup_intel(limit=24)
+            return BotReply(format_worldcup_overview(dashboard, intel), link_preview=False)
+        except requests.RequestException:
+            return _service_error("worldcup")
+    if command == "matches":
+        try:
+            return BotReply(format_worldcup_matches(api.worldcup_dashboard(), args), link_preview=False)
+        except requests.RequestException:
+            return _service_error("worldcup matches")
+    if command == "match":
+        if not args:
+            return _usage("match")
+        try:
+            dashboard = api.worldcup_dashboard()
+            intel = api.worldcup_intel(limit=36)
+            return BotReply(format_worldcup_match(args, dashboard, intel), link_preview=False)
+        except requests.RequestException:
+            return _service_error("worldcup match")
+    if command == "team":
+        if not args:
+            return _usage("team")
+        try:
+            dashboard = api.worldcup_dashboard()
+            intel = api.worldcup_intel(limit=36)
+            return BotReply(format_worldcup_team(args, dashboard, intel), link_preview=False)
+        except requests.RequestException:
+            return _service_error("worldcup team")
+    if command in {"venue", "weather"}:
+        if not args:
+            return _usage(command)
+        try:
+            return BotReply(format_worldcup_venue(args, api.worldcup_dashboard()), link_preview=False)
+        except requests.RequestException:
+            return _service_error("worldcup weather")
+    if command == "news":
+        try:
+            dashboard = api.worldcup_dashboard()
+            intel = api.worldcup_intel(limit=36)
+            return BotReply(format_worldcup_news(args, intel, dashboard), link_preview=True)
+        except requests.RequestException:
+            return _service_error("worldcup news")
+    if command == "odds":
+        if not args:
+            return _usage("odds")
+        try:
+            dashboard = api.worldcup_dashboard()
+            markets = api.search_markets(f"world cup {args}", limit=5)
+            return BotReply(format_worldcup_odds(args, dashboard, markets), link_preview=False)
+        except requests.RequestException:
+            return _service_error("worldcup odds")
     if command == "signal":
         topic = args or "polymarket"
         try:

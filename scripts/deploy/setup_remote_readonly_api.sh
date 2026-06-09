@@ -233,6 +233,7 @@ GCP_UNITS=(
   polydata-sports-odds-seed.service
   polydata-suspicious-trades-seed.service
   polydata-tech-panels-seed.service
+  polydata-telegram-query-bot.service
   polydata-weather-news-seed.service
   polydata-whale-trades-seed.service
   polydata-worldcup-dashboard-seed.service

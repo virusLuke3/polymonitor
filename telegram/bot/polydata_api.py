@@ -69,3 +69,9 @@ class PolyDataBotApi:
 
     def pnl(self, address: str) -> Dict[str, Any]:
         return self.get_json(f"/bot/pnl/{address}")
+
+    def worldcup_dashboard(self) -> Dict[str, Any]:
+        return self.get_json("/runtime/worldcup/dashboard")
+
+    def worldcup_intel(self, *, limit: int = 24) -> Dict[str, Any]:
+        return self.get_json("/runtime/sports/worldcup-intel", params={"limit": limit})

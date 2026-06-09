@@ -35,6 +35,7 @@ Wants=polydata-tech-panels-seed.service
 Wants=polydata-weather-news-seed.service
 Wants=polydata-whale-trades-seed.service
 Wants=polydata-worldcup-dashboard-seed.service
+Wants=polydata-telegram-query-bot.service
 After=network-online.target
 
 [Install]
