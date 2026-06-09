@@ -114,15 +114,19 @@
 }
 
 .qtv-timeframes {
-  gap: 1px;
+  flex: 0 0 auto;
+  gap: 6px;
   border-left: 1px solid #2c2c2c;
   border-right: 1px solid #2c2c2c;
   padding: 0 8px;
 }
 
 .qtv-timeframes button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 34px;
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .qtv-timeframes button.active {
@@ -1948,12 +1952,21 @@
   padding-bottom: 5px;
 }
 
+.qtv-advanced-toolbar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.qtv-advanced-toolbar::-webkit-scrollbar-thumb {
+  border-radius: 99px;
+  background: rgba(96, 165, 250, 0.34);
+}
+
 .qtv-toolbar-group {
   position: relative;
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 3px;
-  min-width: 0;
   border: 1px solid rgba(38, 50, 68, 0.72);
   border-radius: 5px;
   background: rgba(7, 11, 18, 0.76);
@@ -4599,6 +4612,101 @@
   border-color: #3b82f6;
   background: rgba(59, 130, 246, 0.18);
   color: #bfdbfe;
+}
+
+.qtv-trades-table-wrap .qtv-filter-strip {
+  z-index: 5;
+}
+
+.qtv-trades-focus-strip {
+  position: sticky;
+  z-index: 4;
+  top: 37px;
+  display: grid;
+  grid-template-columns: minmax(150px, 1.1fr) repeat(3, minmax(110px, 0.75fr)) auto;
+  align-items: center;
+  gap: 1px;
+  border-bottom: 1px solid #293140;
+  background: rgba(12, 18, 30, 0.98);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.qtv-trades-focus-strip > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  border-right: 1px solid rgba(41, 49, 64, 0.82);
+  padding: 8px 10px;
+}
+
+.qtv-trades-focus-strip span {
+  overflow: hidden;
+  color: #738198;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.qtv-trades-focus-strip strong {
+  overflow: hidden;
+  color: #e5edf8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-trades-focus-actions {
+  display: flex !important;
+  flex-wrap: nowrap;
+  gap: 6px !important;
+  justify-content: flex-end;
+}
+
+.qtv-trades-focus-actions button {
+  height: 26px;
+  border: 1px solid rgba(55, 70, 94, 0.9);
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #cbd5e1;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  padding: 0 9px;
+}
+
+.qtv-trades-focus-actions button:hover:not(:disabled) {
+  border-color: rgba(96, 165, 250, 0.75);
+  background: rgba(37, 99, 235, 0.2);
+  color: #dbeafe;
+}
+
+.qtv-trades-focus-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.qtv-trades-table-wrap .qtv-table th {
+  top: 84px;
+}
+
+.qtv-trades-table-wrap .qtv-table tbody tr.selected td:first-child {
+  box-shadow: inset 3px 0 0 #facc15;
+}
+
+@media (max-width: 1180px) {
+  .qtv-trades-focus-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qtv-trades-focus-actions {
+    justify-content: flex-start;
+  }
 }
 
 .qtv-properties {

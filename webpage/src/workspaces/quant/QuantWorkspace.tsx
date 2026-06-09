@@ -2233,9 +2233,21 @@ export function QuantWorkspace() {
                 {inspectorTab === 'trades' ? (
                   <div className="qtv-inspector-trades">
                     {recentTradeRows.map((trade) => (
-                      <button key={`inspector-trade-${trade.id}`} className={trade.id === selectedTradeId ? 'active' : ''} type="button" onClick={() => { setSelectedTradeId(trade.id); setTesterTab('trades'); setStrategyDrawerCollapsed(false); }}>
-                        <strong>{trade.outcome}</strong>
-                        <span>{trade.entryTime} to {trade.exitTime}</span>
+                      <button
+                        key={`inspector-trade-${trade.id}`}
+                        className={trade.id === selectedTradeId ? 'active' : ''}
+                        type="button"
+                        title="Open this trade in Strategy Tester and focus the chart"
+                        onClick={() => { setSelectedTradeId(trade.id); setTesterTab('trades'); setStrategyDrawerCollapsed(false); }}
+                      >
+                        <strong>{trade.id} · {trade.outcome}</strong>
+                        <span>
+                          {trade.entryX ? `b${Math.floor(trade.entryX).toLocaleString('en-US')}` : trade.entryTime}
+                          {' → '}
+                          {trade.exitX ? `b${Math.floor(trade.exitX).toLocaleString('en-US')}` : trade.exitTime}
+                          {' · '}
+                          {trade.holdingBars.toLocaleString('en-US')} bars
+                        </span>
                         <b className={trade.pnl >= 0 ? 'positive' : 'negative'}>{trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)} USDC</b>
                       </button>
                     ))}

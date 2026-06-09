@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef } from 'preact/hooks';
 import type { Trade, TradeFilter } from '../types';
 import { fmtCurrency, fmtPrice, statusClass } from '../utils/formatters';
 
@@ -19,24 +20,75 @@ const FILTERS: Array<[TradeFilter, string]> = [
 ];
 
 export function TradesTableTab({ trades, filters, selectedTradeId, onToggleFilter, onSelectTrade }: TradesTableTabProps) {
+  const selectedTrade = useMemo(() => (
+    trades.find((trade) => trade.id === selectedTradeId) || trades[0] || null
+  ), [selectedTradeId, trades]);
+  const selectedIndex = useMemo(() => (
+    selectedTrade ? trades.findIndex((trade) => trade.id === selectedTrade.id) : -1
+  ), [selectedTrade, trades]);
+  const selectedRowRef = useRef<HTMLTableRowElement | null>(null);
+
+  useEffect(() => {
+    selectedRowRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [selectedTradeId]);
+
+  const selectOffset = (offset: number) => {
+    if (!trades.length) return;
+    const base = selectedIndex >= 0 ? selectedIndex : 0;
+    const nextIndex = Math.min(trades.length - 1, Math.max(0, base + offset));
+    const nextTrade = trades[nextIndex];
+    if (nextTrade) onSelectTrade(nextTrade.id);
+  };
+
   return (
-    <div className="qtv-table-wrap">
+    <div className="qtv-table-wrap qtv-trades-table-wrap">
       <div className="qtv-filter-strip">
         {FILTERS.map(([id, label]) => (
           <button key={id} className={filters.has(id) ? 'active' : ''} type="button" onClick={() => onToggleFilter(id)}>{label}</button>
         ))}
         <span>{trades.length} trades</span>
       </div>
+      <div className="qtv-trades-focus-strip">
+        <div>
+          <span>Selected trade</span>
+          <strong>{selectedTrade ? `${selectedTrade.id} · ${selectedTrade.outcome}` : 'No trade selected'}</strong>
+        </div>
+        <div>
+          <span>Entry block</span>
+          <strong>{selectedTrade?.entryX ? selectedTrade.entryX.toLocaleString('en-US') : selectedTrade?.entryTime || '-'}</strong>
+        </div>
+        <div>
+          <span>Exit block</span>
+          <strong>{selectedTrade?.exitX ? selectedTrade.exitX.toLocaleString('en-US') : selectedTrade?.exitTime || '-'}</strong>
+        </div>
+        <div>
+          <span>PnL / holding</span>
+          <strong className={selectedTrade && selectedTrade.pnl >= 0 ? 'positive' : 'negative'}>
+            {selectedTrade ? `${selectedTrade.pnl >= 0 ? '+' : ''}${selectedTrade.pnl.toFixed(2)} · ${selectedTrade.holdingBars} bars` : '-'}
+          </strong>
+        </div>
+        <div className="qtv-trades-focus-actions">
+          <button type="button" disabled={selectedIndex <= 0} onClick={() => selectOffset(-1)}>Prev</button>
+          <button type="button" disabled={!selectedTrade} onClick={() => selectedTrade && onSelectTrade(selectedTrade.id)}>Focus chart</button>
+          <button type="button" disabled={selectedIndex < 0 || selectedIndex >= trades.length - 1} onClick={() => selectOffset(1)}>Next</button>
+        </div>
+      </div>
       <table className="qtv-table">
         <thead>
-          <tr><th>Trade #</th><th>Entry Time</th><th>Exit Time</th><th>Market</th><th>Outcome</th><th>Side</th><th>Entry</th><th>Exit</th><th>Size</th><th>Notional</th><th>PnL</th><th>PnL %</th><th>Holding</th><th>Exit Reason</th></tr>
+          <tr><th>Trade #</th><th>Entry Block</th><th>Exit Block</th><th>Market</th><th>Outcome</th><th>Side</th><th>Entry</th><th>Exit</th><th>Size</th><th>Notional</th><th>PnL</th><th>PnL %</th><th>Holding</th><th>Exit Reason</th></tr>
         </thead>
         <tbody>
           {trades.map((trade) => (
-            <tr key={trade.id} className={selectedTradeId === trade.id ? 'selected' : ''} onClick={() => onSelectTrade(trade.id)}>
+            <tr
+              key={trade.id}
+              ref={selectedTradeId === trade.id ? selectedRowRef : null}
+              className={selectedTradeId === trade.id ? 'selected' : ''}
+              title="Select and focus chart on this trade"
+              onClick={() => onSelectTrade(trade.id)}
+            >
               <td>{trade.id}</td>
-              <td>{trade.entryTime}</td>
-              <td>{trade.exitTime}</td>
+              <td>{trade.entryX ? trade.entryX.toLocaleString('en-US') : trade.entryTime}</td>
+              <td>{trade.exitX ? trade.exitX.toLocaleString('en-US') : trade.exitTime}</td>
               <td>{trade.market}</td>
               <td>{trade.outcome}</td>
               <td>{trade.side}</td>
