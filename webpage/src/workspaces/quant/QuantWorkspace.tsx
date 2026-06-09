@@ -2728,6 +2728,40 @@ export function QuantWorkspace() {
                           <strong>{hoveredOutcomeRow?.label || '--'}</strong>
                         </div>
                       </section>
+                      {selectedOutcomeRow ? (
+                        <section className="qtv-selected-outcome-linebar">
+                          <header>
+                            <span>Selected outcome</span>
+                            <strong title={selectedOutcomeRow.fullLabel}>{selectedOutcomeRow.fullLabel}</strong>
+                          </header>
+                          <div>
+                            {([
+                              ['YES', selectedOutcomeRow.yesKey, selectedOutcomeRow.yes, selectedOutcomeRow.yesRows],
+                              ['NO', selectedOutcomeRow.noKey, selectedOutcomeRow.no, selectedOutcomeRow.noRows],
+                            ] as Array<['YES' | 'NO', string, number, number]>).map(([side, key, price, rows]) => {
+                              const isTarget = selectedBacktestAction === side;
+                              const isPinned = chartPinnedOutcomeKeys.includes(key);
+                              const isHidden = chartHiddenOutcomeKeys.includes(key);
+                              const isSolo = chartSoloOutcomeKey === key;
+                              return (
+                                <article key={`selected-line-${side}`} className={`${isTarget ? 'target' : ''} ${isPinned ? 'pinned' : ''} ${isHidden ? 'hidden' : ''} ${isSolo ? 'solo' : ''}`}>
+                                  <div>
+                                    <b>{side}</b>
+                                    <strong>{fmtPrice(price)}</strong>
+                                    <span>{rows.toLocaleString('en-US')} rows</span>
+                                  </div>
+                                  <nav aria-label={`${side} line controls`}>
+                                    <button className={isTarget ? 'active' : ''} type="button" onClick={() => selectOutcomeSide(selectedOutcomeRow.outcome, side)}>Target</button>
+                                    <button className={isPinned ? 'active' : ''} type="button" onClick={() => toggleChartPinnedOutcome(key)}>{isPinned ? 'Pinned' : 'Pin'}</button>
+                                    <button className={isSolo ? 'active' : ''} type="button" onClick={() => setChartSoloOutcomeKey(isSolo ? '' : key)}>{isSolo ? 'Solo on' : 'Solo'}</button>
+                                    <button className={isHidden ? 'active danger' : 'danger'} type="button" onClick={() => toggleChartHiddenOutcome(key)}>{isHidden ? 'Show' : 'Hide'}</button>
+                                  </nav>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ) : null}
                       <label>
                         <span>Find</span>
                         <input

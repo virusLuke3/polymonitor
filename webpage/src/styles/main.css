@@ -1593,6 +1593,134 @@
   white-space: nowrap;
 }
 
+.qtv-selected-outcome-linebar {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(38, 50, 68, 0.88);
+  border-radius: 5px;
+  background: linear-gradient(180deg, rgba(10, 16, 27, 0.92), rgba(7, 11, 18, 0.92));
+  padding: 8px;
+}
+
+.qtv-selected-outcome-linebar header {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.qtv-selected-outcome-linebar header span,
+.qtv-selected-outcome-linebar article span {
+  overflow: hidden;
+  color: #6b7c95;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.qtv-selected-outcome-linebar header strong {
+  overflow: hidden;
+  color: #f8fafc;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-selected-outcome-linebar > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.qtv-selected-outcome-linebar article {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  border: 1px solid rgba(32, 41, 56, 0.9);
+  border-left: 3px solid transparent;
+  border-radius: 5px;
+  background: rgba(2, 6, 23, 0.36);
+  padding: 7px;
+}
+
+.qtv-selected-outcome-linebar article.target {
+  border-left-color: #3b82f6;
+}
+
+.qtv-selected-outcome-linebar article.pinned {
+  border-left-color: #22c55e;
+}
+
+.qtv-selected-outcome-linebar article.solo {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.32);
+}
+
+.qtv-selected-outcome-linebar article.hidden {
+  opacity: 0.56;
+}
+
+.qtv-selected-outcome-linebar article div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.qtv-selected-outcome-linebar article b,
+.qtv-selected-outcome-linebar article strong {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-selected-outcome-linebar article b {
+  color: #93c5fd;
+  font-size: 10px;
+}
+
+.qtv-selected-outcome-linebar article strong {
+  color: #e5eefb;
+  font-size: 13px;
+}
+
+.qtv-selected-outcome-linebar nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.qtv-selected-outcome-linebar nav button {
+  min-width: 0;
+  height: 23px;
+  border: 1px solid rgba(38, 50, 68, 0.78);
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.78);
+  color: #94a3b8;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  padding: 0 5px;
+}
+
+.qtv-selected-outcome-linebar nav button:hover,
+.qtv-selected-outcome-linebar nav button.active {
+  border-color: rgba(96, 165, 250, 0.58);
+  background: rgba(37, 99, 235, 0.16);
+  color: #dbeafe;
+}
+
+.qtv-selected-outcome-linebar nav button.danger.active {
+  border-color: rgba(248, 113, 113, 0.54);
+  background: rgba(127, 29, 29, 0.24);
+  color: #fecaca;
+}
+
 .qtv-outcome-filter-row,
 .qtv-outcome-bulk-actions {
   display: flex;
