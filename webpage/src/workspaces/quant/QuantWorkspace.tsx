@@ -2169,6 +2169,100 @@ export function QuantWorkspace() {
     () => dataQualitySummary(activePrices, backendPriceSource(priceSource), marketSeries?.outcomes || [], dataStatus),
     [activePrices, dataStatus, marketSeries, priceSource],
   );
+  const selectedTargetTrust = useMemo(() => {
+    const activeStats = selectedBacktestAction === 'NO' ? selectedBookQuality.no : selectedBookQuality.yes;
+    const activeRows = activeStats.rows;
+    const sidePrice = finiteNumber(selectedBacktestAction === 'NO' ? selectedOutcomeRow?.no : selectedOutcomeRow?.yes);
+    const firstBlock = activeStats.firstBlock || selectedBookQuality.firstBlock;
+    const lastBlock = activeStats.lastBlock || selectedBookQuality.lastBlock;
+    const staleBlocks = dataQuality.latestBlock && lastBlock ? Math.max(0, dataQuality.latestBlock - lastBlock) : 0;
+    const staleLimit = Math.max(1000, (dataQuality.medianDelta || activeStats.medianDelta || 0) * 8);
+    const stale = staleBlocks > staleLimit;
+    const coverageRatio = statsCoverageRatio(activeStats);
+    const directRows = selectedBacktestAction === 'NO'
+      ? selectedBookQuality.directNoRows
+      : Math.max(0, activeRows - activeStats.impliedRows);
+    const impliedRows = selectedBacktestAction === 'NO' ? selectedBookQuality.impliedNoRows : activeStats.impliedRows;
+    const directRatio = activeRows ? directRows / activeRows : 0;
+    const caveats = [
+      !selectedOutcomeRow ? 'No selected outcome row is available.' : '',
+      !activeRows ? `No ${selectedBacktestAction} block-close rows for the selected target.` : '',
+      activeStats.gaps ? `${activeStats.gaps.toLocaleString('en-US')} spacing gaps on the selected ${selectedBacktestAction} side.` : '',
+      activeStats.spikes ? `${activeStats.spikes.toLocaleString('en-US')} large jumps on the selected ${selectedBacktestAction} side.` : '',
+      stale ? `Selected target is ${staleBlocks.toLocaleString('en-US')} blocks behind the event latest block.` : '',
+      selectedBacktestAction === 'NO' && activeRows && directRatio < 0.25 ? 'NO history is mostly implied from YES rather than direct NO closes.' : '',
+      liveLobStatus === 'error' ? liveLobError || 'Live CLOB context failed to load.' : '',
+      liveLobStatus === 'empty' ? 'No live CLOB levels are available for the selected target.' : '',
+      bookExecutionQuality.status === 'review' ? 'Live execution context needs review before trusting fills.' : '',
+    ].filter(Boolean).slice(0, 6);
+    const status = !activeRows || !selectedOutcomeRow
+      ? 'blocked'
+      : stale || activeStats.gaps > 0 || activeStats.spikes > 0 || directRatio < 0.25 || bookExecutionQuality.status === 'review'
+        ? 'review'
+        : 'ready';
+    const confidence = status === 'blocked'
+      ? 0
+      : Math.max(5, Math.min(99, Math.round(
+        94
+        - Math.min(24, activeStats.gaps * 5)
+        - Math.min(22, activeStats.spikes * 4)
+        - (stale ? Math.min(18, staleBlocks / Math.max(1, staleLimit) * 8) : 0)
+        - (selectedBacktestAction === 'NO' ? Math.max(0, 1 - directRatio) * 16 : 0)
+        - Math.max(0, 1 - coverageRatio) * 18
+        - (bookExecutionQuality.status === 'review' ? 8 : 0)
+      )));
+    const title = status === 'ready'
+      ? 'Selected target is backtest-ready'
+      : status === 'review'
+        ? 'Selected target needs review'
+        : 'Selected target is blocked';
+    const nextAction = status === 'ready'
+      ? 'Run target backtest'
+      : status === 'review'
+        ? 'Inspect outcome, CLOB, and gaps first'
+        : 'Choose a covered outcome';
+    const evidence = [
+      activeRows ? `${activeRows.toLocaleString('en-US')} ${selectedBacktestAction} rows` : `0 ${selectedBacktestAction} rows`,
+      firstBlock && lastBlock ? `block ${Math.floor(firstBlock).toLocaleString('en-US')} to ${Math.floor(lastBlock).toLocaleString('en-US')}` : 'no block range',
+      sidePrice !== null ? `latest ${selectedBacktestAction} ${fmtPrice(sidePrice)}` : '',
+      `${formatCoverageRatio(coverageRatio)} coverage`,
+      selectedBacktestAction === 'NO' ? `${directRows.toLocaleString('en-US')} direct / ${impliedRows.toLocaleString('en-US')} implied NO` : `${directRows.toLocaleString('en-US')} direct YES rows`,
+      liveLobStatus === 'ready' ? `live CLOB ${bookExecutionQuality.status}` : `live CLOB ${liveLobStatus}`,
+    ].filter(Boolean);
+    return {
+      activeRows,
+      caveats,
+      confidence,
+      coverageRatio,
+      directRows,
+      directRatio,
+      evidence,
+      firstBlock,
+      impliedRows,
+      label: selectedOutcomeRow?.fullLabel || selectedOutcome?.outcomeLabel || 'No target selected',
+      lastBlock,
+      nextAction,
+      price: sidePrice,
+      staleBlocks,
+      status,
+      title,
+    };
+  }, [
+    bookExecutionQuality.status,
+    dataQuality.latestBlock,
+    dataQuality.medianDelta,
+    liveLobError,
+    liveLobStatus,
+    selectedBacktestAction,
+    selectedBookQuality.directNoRows,
+    selectedBookQuality.firstBlock,
+    selectedBookQuality.impliedNoRows,
+    selectedBookQuality.lastBlock,
+    selectedBookQuality.no,
+    selectedBookQuality.yes,
+    selectedOutcome,
+    selectedOutcomeRow,
+  ]);
   const recentBuildRuns = useMemo(() => runs.slice(0, 6), [runs]);
   const buildRunSummary = useMemo(() => {
     const latest = recentBuildRuns[0];
@@ -3079,6 +3173,50 @@ export function QuantWorkspace() {
                         </button>
                         <button type="button" disabled={dataTrustDecision.status === 'blocked'} onClick={() => void runBacktest()}>
                           Run backtest
+                        </button>
+                      </footer>
+                    </section>
+                    <section className={`qtv-selected-target-trust ${selectedTargetTrust.status}`}>
+                      <div>
+                        <span>Selected target</span>
+                        <strong title={selectedTargetTrust.label}>{selectedTargetTrust.label}</strong>
+                        <em>{selectedBacktestAction} · {selectedTargetTrust.nextAction}</em>
+                      </div>
+                      <b>{selectedTargetTrust.confidence}%</b>
+                      <div className="qtv-selected-target-meter" aria-label="Selected target confidence">
+                        <i style={{ width: `${Math.max(3, selectedTargetTrust.confidence)}%` }} />
+                      </div>
+                      <dl>
+                        <div><dt>Side rows</dt><dd>{selectedTargetTrust.activeRows.toLocaleString('en-US')}</dd></div>
+                        <div><dt>Price</dt><dd>{selectedTargetTrust.price !== null ? fmtPrice(selectedTargetTrust.price) : '--'}</dd></div>
+                        <div><dt>First block</dt><dd>{selectedTargetTrust.firstBlock ? Math.floor(selectedTargetTrust.firstBlock).toLocaleString('en-US') : '--'}</dd></div>
+                        <div><dt>Latest block</dt><dd>{selectedTargetTrust.lastBlock ? Math.floor(selectedTargetTrust.lastBlock).toLocaleString('en-US') : '--'}</dd></div>
+                        <div><dt>Coverage</dt><dd>{formatCoverageRatio(selectedTargetTrust.coverageRatio)}</dd></div>
+                        <div><dt>Stale</dt><dd>{selectedTargetTrust.staleBlocks ? `${Math.floor(selectedTargetTrust.staleBlocks).toLocaleString('en-US')} blocks` : '0 blocks'}</dd></div>
+                        <div><dt>Direct rows</dt><dd>{selectedTargetTrust.directRows.toLocaleString('en-US')}</dd></div>
+                        <div><dt>Implied rows</dt><dd>{selectedTargetTrust.impliedRows.toLocaleString('en-US')}</dd></div>
+                      </dl>
+                      <ul>
+                        {selectedTargetTrust.evidence.slice(0, 4).map((item) => <li key={item}>{item}</li>)}
+                      </ul>
+                      {selectedTargetTrust.caveats.length ? (
+                        <div className="qtv-selected-target-caveats">
+                          {selectedTargetTrust.caveats.map((item) => <span key={item}>{item}</span>)}
+                        </div>
+                      ) : null}
+                      <footer>
+                        <button type="button" onClick={() => setInspectorTab('book')}>Open book</button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOutcomeVisibilityFilter('all');
+                            setInspectorTab('outcomes');
+                          }}
+                        >
+                          Open outcome
+                        </button>
+                        <button type="button" disabled={selectedTargetTrust.status === 'blocked'} onClick={() => void runBacktest()}>
+                          Run target
                         </button>
                       </footer>
                     </section>
