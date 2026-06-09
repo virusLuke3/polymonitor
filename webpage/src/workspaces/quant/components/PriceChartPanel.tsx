@@ -366,16 +366,20 @@ function niceBlockStep(rawStep: number) {
   return Math.max(1, Math.floor(unit * magnitude));
 }
 
-function blockAxisTicks(points: PricePoint[], maxTicks = 6, visibleRange?: LogicalRangeLike) {
+function blockAxisTicks(points: PricePoint[], maxTicks = 8, visibleRange?: LogicalRangeLike) {
   if (!points.length) return [];
-  const fromIndex = visibleRange ? Math.max(0, Math.min(points.length - 1, Math.floor(visibleRange.from))) : 0;
-  const toIndex = visibleRange ? Math.max(fromIndex, Math.min(points.length - 1, Math.ceil(visibleRange.to))) : points.length - 1;
+  const rawFromIndex = visibleRange ? Math.max(0, Math.min(points.length - 1, Math.floor(visibleRange.from))) : 0;
+  const rawToIndex = visibleRange ? Math.max(rawFromIndex, Math.min(points.length - 1, Math.ceil(visibleRange.to))) : points.length - 1;
+  const visibleSpan = rawToIndex - rawFromIndex;
+  const rangeLooksUsable = !visibleRange || visibleSpan >= Math.min(8, Math.max(1, points.length - 1));
+  const fromIndex = rangeLooksUsable ? rawFromIndex : 0;
+  const toIndex = rangeLooksUsable ? rawToIndex : points.length - 1;
   const visible = points.slice(fromIndex, toIndex + 1);
   const first = Math.floor(visible[0]?.timestamp || points[0]?.timestamp || 0);
   const last = Math.floor(visible[visible.length - 1]?.timestamp || first);
   if (!Number.isFinite(first) || !Number.isFinite(last)) return [];
   if (first === last) {
-    return [{ key: first, label: blockLabel(first), left: '0%', edge: 'start' as const }];
+    return [{ key: first, label: blockLabel(first), left: '0%', edge: 'start' as const, level: 0, major: true }];
   }
   const blockRange = Math.max(1, last - first);
   const step = niceBlockStep(blockRange / Math.max(1, maxTicks - 1));
@@ -418,6 +422,8 @@ function blockAxisTicks(points: PricePoint[], maxTicks = 6, visibleRange?: Logic
       label: blockLabel(value),
       left: `${Math.max(0, Math.min(100, left))}%`,
       edge: index === 0 ? 'start' : index === filtered.length - 1 ? 'end' : 'middle',
+      level: index % 2,
+      major: index === 0 || index === filtered.length - 1 || index % 2 === 0,
     };
   });
 }
@@ -494,6 +500,11 @@ function pointToScreenSafe(point: PricePoint, points: PricePoint[], range?: Logi
     x: left,
     y: `${Math.max(8, Math.min(86, (1 - clampProbability(point.close)) * 100))}%`,
   };
+}
+
+function percentNumber(value: string | undefined) {
+  const numeric = Number(String(value || '').replace('%', ''));
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function robustPriceRange(points: PricePoint[], paddingRatio: number) {
@@ -700,7 +711,9 @@ export function PriceChartPanel({
   const hoverMaPoint = hover ? nearestPoint(maPoints, hover.timestamp) : null;
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
   const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints, visibleLogicalRange) : null;
-  const blockTicks = useMemo(() => blockAxisTicks(primaryPoints, 6, visibleLogicalRange), [primaryPoints, visibleLogicalRange]);
+  const hoverTooltipSide = percentNumber(hoverScreen?.x) > 68 ? 'left-side' : '';
+  const hoverBlockAxisLeft = hoverScreen?.x || '0%';
+  const blockTicks = useMemo(() => blockAxisTicks(primaryPoints, 8, visibleLogicalRange), [primaryPoints, visibleLogicalRange]);
   const managerOutcomes = useMemo(() => {
     const query = outcomeManagerQuery.trim().toLowerCase();
     return sortedOutcomes.filter((group) => {
@@ -1714,7 +1727,8 @@ export function PriceChartPanel({
           ref={containerRef}
           onWheel={(event) => handleChartWheel(event as unknown as WheelEvent)}
           onPointerDown={(event) => {
-            if (!rangeZoomEnabled) return;
+            const shouldRangeZoom = rangeZoomEnabled || event.shiftKey || event.altKey;
+            if (!shouldRangeZoom) return;
             event.preventDefault();
             setRangeSelection({ startX: event.clientX, currentX: event.clientX });
           }}
@@ -1818,7 +1832,7 @@ export function PriceChartPanel({
             </>
           ) : null}
           {hoverInspect && hoverScreen && (!pinnedPoint || Math.floor(pinnedPoint.timestamp) !== Math.floor(hoverInspect.point.timestamp)) ? (
-            <div className={`qtv-hover-tooltip ${tooltipMode}`} style={{ left: hoverScreen.x, top: hoverScreen.y }}>
+            <div className={`qtv-hover-tooltip ${tooltipMode} ${hoverTooltipSide}`} style={{ left: hoverScreen.x, top: hoverScreen.y }}>
               <strong>{hoverInspect.point.outcomeFullLabel || hoverInspect.point.outcomeLabel || selectedGroup?.fullLabel || 'Outcome'}</strong>
               <span>Block {blockLabel(hoverInspect.point.timestamp)}</span>
               <b>YES {fmtPrice(hoverInspect.yes)} · NO {fmtPrice(hoverInspect.no)}</b>
@@ -1838,12 +1852,12 @@ export function PriceChartPanel({
         {priceSource.includes('block') && hasLoadedPrices ? (
           <div className="qtv-block-tick-axis" aria-label="Visible block number axis">
             {blockTicks.map((tick) => (
-              <span key={tick.key} className={tick.edge} style={{ left: tick.left }}>
+              <span key={tick.key} className={`${tick.edge} ${tick.major ? 'major' : 'minor'} level-${tick.level}`} style={{ left: tick.left }}>
                 <i />
                 <b>{tick.label}</b>
               </span>
             ))}
-            {hover ? <strong style={{ left: pointToScreenSafe(hover, primaryPoints, visibleLogicalRange).x }}>hover {blockLabel(hover.timestamp)}</strong> : null}
+            {hover ? <strong style={{ left: hoverBlockAxisLeft }}>Block {blockLabel(hover.timestamp)}</strong> : null}
           </div>
         ) : (
           <div className="qtv-block-tick-axis empty" aria-hidden="true" />

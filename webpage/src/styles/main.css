@@ -1556,7 +1556,7 @@
 .qtv-chart-stack {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) 34px;
+  grid-template-rows: auto auto minmax(0, 1fr) 44px;
   overflow: hidden;
   position: relative;
   background: #070a0f;
@@ -1564,7 +1564,7 @@
 
 .qtv-tv-chart {
   position: relative;
-  grid-row: 2;
+  grid-row: 3;
   min-height: 0;
   width: 100%;
   height: 100%;
@@ -1584,11 +1584,13 @@
 .qtv-block-tick-axis {
   position: relative;
   z-index: 4;
-  grid-row: 3;
-  height: 34px;
-  margin: 0 66px 0 10px;
+  grid-row: 4;
+  height: 44px;
+  margin: 0 74px 0 18px;
   border-top: 1px solid rgba(148, 163, 184, 0.14);
-  background: linear-gradient(180deg, rgba(7, 10, 15, 0.96), #070a0f);
+  background:
+    linear-gradient(180deg, rgba(7, 10, 15, 0.98), #070a0f),
+    repeating-linear-gradient(90deg, transparent 0 79px, rgba(148, 163, 184, 0.04) 80px 81px);
   color: #7f8a9d;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1603,7 +1605,7 @@
 
 .qtv-block-tick-axis span {
   position: absolute;
-  bottom: 3px;
+  bottom: 5px;
   display: grid;
   justify-items: center;
   gap: 2px;
@@ -1621,10 +1623,26 @@
   transform: translateX(-100%);
 }
 
+.qtv-block-tick-axis span.level-1 {
+  bottom: 20px;
+  opacity: 0.82;
+}
+
+.qtv-block-tick-axis span.minor b {
+  color: #8fa3bd;
+  font-size: 9px;
+  font-weight: 800;
+}
+
 .qtv-block-tick-axis i {
   width: 1px;
-  height: 9px;
+  height: 8px;
   background: rgba(148, 163, 184, 0.24);
+}
+
+.qtv-block-tick-axis span.major i {
+  height: 14px;
+  background: rgba(219, 234, 254, 0.34);
 }
 
 .qtv-block-tick-axis b {
@@ -1634,7 +1652,7 @@
 
 .qtv-block-tick-axis strong {
   position: absolute;
-  top: -24px;
+  top: -28px;
   transform: translateX(-50%);
   border: 1px solid rgba(47, 125, 244, 0.36);
   border-radius: 4px;
@@ -1911,17 +1929,19 @@
 }
 
 .qtv-chart-info {
-  position: absolute;
-  z-index: 3;
-  top: 52px;
-  left: 12px;
-  right: clamp(112px, 13vw, 220px);
+  position: relative;
+  z-index: 5;
+  grid-row: 2;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: flex-start;
   gap: 12px;
-  max-height: 112px;
+  min-height: 70px;
+  max-height: 124px;
   overflow: hidden;
+  border-bottom: 1px solid rgba(38, 50, 68, 0.7);
+  background: linear-gradient(180deg, rgba(7, 10, 15, 0.98), rgba(7, 10, 15, 0.9));
+  padding: 8px 12px 7px 14px;
   pointer-events: none;
 }
 
@@ -2167,6 +2187,7 @@
   max-width: min(1180px, calc(100vw - 360px));
   font-family: var(--font-mono);
   font-size: 10px;
+  pointer-events: auto;
 }
 
 .qtv-legend-item {
@@ -2535,6 +2556,10 @@
   font-size: 10px;
   padding: 7px 8px;
   pointer-events: none;
+}
+
+.qtv-hover-tooltip.left-side {
+  transform: translate(calc(-100% - 12px), -50%);
 }
 
 .qtv-hover-tooltip strong,
