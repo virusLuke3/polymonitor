@@ -1777,7 +1777,7 @@ export function QuantWorkspace() {
       health: !recentBuildRuns.length ? 'empty' : errors > 0 ? 'review' : 'ready',
     };
   }, [recentBuildRuns]);
-  const outcomeQualityRows = useMemo(() => {
+  const outcomeQualityAllRows = useMemo(() => {
     const eventTitle = marketSeries?.event?.eventTitle || marketSeries?.market?.marketTitle || '';
     const latestGlobalBlock = dataQuality.latestBlock || 0;
     return (marketSeries?.outcomes || []).map((outcome) => {
@@ -1811,8 +1811,25 @@ export function QuantWorkspace() {
         row.status === 'empty' ? 4 : row.status === 'stale' ? 3 : row.status === 'review' ? 2 : 1
       ) * 100000 + row.gaps * 1000 + row.spikes * 100 + Math.min(row.staleBlocks, 99);
       return severity(right) - severity(left) || right.rows - left.rows;
-    }).slice(0, 18);
+    });
   }, [dataQuality.latestBlock, dataQuality.medianDelta, marketSeries]);
+  const outcomeQualityRows = useMemo(() => outcomeQualityAllRows.slice(0, 18), [outcomeQualityAllRows]);
+  const outcomeQualitySummary = useMemo(() => {
+    const counts = outcomeQualityAllRows.reduce((acc, row) => {
+      acc[row.status as keyof typeof acc] = (acc[row.status as keyof typeof acc] || 0) + 1;
+      return acc;
+    }, { ready: 0, review: 0, stale: 0, empty: 0 });
+    const total = outcomeQualityAllRows.length;
+    const issueCount = counts.review + counts.stale + counts.empty;
+    const worst = outcomeQualityAllRows[0] || null;
+    return {
+      ...counts,
+      total,
+      issueCount,
+      readyPct: total ? (counts.ready / total) * 100 : 0,
+      worst,
+    };
+  }, [outcomeQualityAllRows]);
 
   useEffect(() => {
     window.localStorage.setItem('polydata.quant.inspectorTab', inspectorTab);
@@ -2459,6 +2476,38 @@ export function QuantWorkspace() {
                       <strong>{dataQuality.health === 'ready' ? 'Ready' : dataQuality.health === 'review' ? 'Review suggested' : 'No rows'}</strong>
                       <span>{dataQuality.source}</span>
                     </header>
+                    <section className="qtv-quality-summary-strip">
+                      <div className="ready">
+                        <span>Ready</span>
+                        <strong>{outcomeQualitySummary.ready.toLocaleString('en-US')}</strong>
+                        <em>{outcomeQualitySummary.readyPct.toFixed(0)}% outcomes</em>
+                      </div>
+                      <div className={outcomeQualitySummary.review ? 'review' : 'ready'}>
+                        <span>Review</span>
+                        <strong>{outcomeQualitySummary.review.toLocaleString('en-US')}</strong>
+                        <em>gaps or jumps</em>
+                      </div>
+                      <div className={outcomeQualitySummary.stale ? 'stale' : 'ready'}>
+                        <span>Stale</span>
+                        <strong>{outcomeQualitySummary.stale.toLocaleString('en-US')}</strong>
+                        <em>behind latest block</em>
+                      </div>
+                      <div className={outcomeQualitySummary.empty ? 'empty' : 'ready'}>
+                        <span>Empty</span>
+                        <strong>{outcomeQualitySummary.empty.toLocaleString('en-US')}</strong>
+                        <em>no rows loaded</em>
+                      </div>
+                    </section>
+                    {outcomeQualitySummary.worst ? (
+                      <section className={`qtv-quality-worst-card ${outcomeQualitySummary.worst.status}`}>
+                        <span>Highest risk outcome</span>
+                        <strong>{outcomeQualitySummary.worst.label}</strong>
+                        <em>
+                          {outcomeQualitySummary.worst.status} · {outcomeQualitySummary.worst.rows.toLocaleString('en-US')} rows · {outcomeQualitySummary.worst.gaps.toLocaleString('en-US')} gaps · {outcomeQualitySummary.worst.spikes.toLocaleString('en-US')} jumps
+                          {outcomeQualitySummary.worst.staleBlocks ? ` · ${outcomeQualitySummary.worst.staleBlocks.toLocaleString('en-US')} stale blocks` : ''}
+                        </em>
+                      </section>
+                    ) : null}
                     <dl>
                       <div><dt>Loaded rows</dt><dd>{dataQuality.rows.toLocaleString('en-US')}</dd></div>
                       <div><dt>Outcome rows</dt><dd>{dataQuality.outcomeRows.toLocaleString('en-US')}</dd></div>

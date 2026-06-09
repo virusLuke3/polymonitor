@@ -824,6 +824,90 @@
   white-space: nowrap;
 }
 
+.qtv-quality-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid rgba(32, 41, 56, 0.96);
+  border-radius: 5px;
+  background: #202938;
+}
+
+.qtv-quality-summary-strip div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  background: #0b111c;
+  padding: 8px 9px;
+}
+
+.qtv-quality-summary-strip span,
+.qtv-quality-summary-strip em,
+.qtv-quality-worst-card span,
+.qtv-quality-worst-card em {
+  overflow: hidden;
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.qtv-quality-summary-strip strong,
+.qtv-quality-worst-card strong {
+  overflow: hidden;
+  color: #f8fafc;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-quality-summary-strip .ready strong {
+  color: #86efac;
+}
+
+.qtv-quality-summary-strip .review strong {
+  color: #fbbf24;
+}
+
+.qtv-quality-summary-strip .stale strong,
+.qtv-quality-summary-strip .empty strong {
+  color: #fca5a5;
+}
+
+.qtv-quality-worst-card {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(38, 50, 68, 0.86);
+  border-left: 3px solid #334155;
+  border-radius: 5px;
+  background: rgba(8, 13, 22, 0.86);
+  padding: 9px 10px;
+}
+
+.qtv-quality-worst-card.ready {
+  border-left-color: #22c55e;
+}
+
+.qtv-quality-worst-card.review {
+  border-left-color: #f59e0b;
+}
+
+.qtv-quality-worst-card.stale,
+.qtv-quality-worst-card.empty {
+  border-left-color: #ef4444;
+}
+
+.qtv-quality-worst-card em {
+  text-transform: none;
+}
+
 .qtv-market-card dl,
 .qtv-data-quality dl,
 .qtv-book-ladder {
