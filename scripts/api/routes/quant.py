@@ -29,6 +29,7 @@ from quant.api.read_api import (  # noqa: E402
     get_frontend_prices,
     get_market_price_series,
     get_price_build_status,
+    get_quant_event_members,
     get_quant_price_events,
     get_quant_price_markets,
 )
@@ -39,11 +40,40 @@ from quant.core.schema import create_schema  # noqa: E402
 LOGGER = logging.getLogger(__name__)
 QUANT_EVENT_TILE_NAMESPACE = "quant-event-tile"
 QUANT_EVENT_TILE_WARM_KEY = "quant-event-tile-warm:events"
+QUANT_PRICE_TILE_NAMESPACE = "quant-price-series-tiles"
+QUANT_ENTITY_SNAPSHOT_NAMESPACE = "quant-entity-snapshot"
+QUANT_EVENT_MEMBERS_NAMESPACE = "quant-event-members"
+QUANT_PRICE_TILE_KEY_VERSION = 1
 
 
 def _canonical_tile_range(value: str | None) -> str:
     normalized = str(value or "latest").strip().lower()
     return "full" if normalized in {"all", "full"} else "latest"
+
+
+def _canonical_price_range(value: str | None) -> str:
+    normalized = str(value or "latest").strip().lower()
+    if normalized in {"all", "full"}:
+        return "full"
+    if normalized in {"window", "viewport", "custom"}:
+        return "window"
+    if normalized in {"1h", "6h", "1d", "1w", "1m", "500blk", "2.5k", "5k", "15k"}:
+        return normalized
+    return "latest"
+
+
+def _clamp_int(value: int | None, default: int, low: int, high: int) -> int:
+    if value is None:
+        value = default
+    return min(max(int(value), low), high)
+
+
+def _viewport_max_points(default: int = 900, *, full: bool = False) -> int:
+    width = _parse_int_arg("viewport_width")
+    if width is None:
+        return default
+    multiplier = 1.05 if full else 1.35
+    return _clamp_int(int(width * multiplier), default, 180, 2500)
 
 
 def _parse_int_arg(name: str, default: int | None = None) -> int | None:
@@ -309,6 +339,156 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             return persisted, "postgres"
         return None, "miss"
 
+    def _price_tile_cache_key(name: str, args: dict[str, Any]) -> str:
+        normalized = {key: str(value) for key, value in args.items() if value is not None}
+        route_args = {key: [normalized[key]] for key in sorted(normalized.keys())}
+        return json.dumps(
+            {"name": name, "v": QUANT_PRICE_TILE_KEY_VERSION, "args": route_args},
+            sort_keys=True,
+            ensure_ascii=True,
+        )
+
+    def _load_price_tile(cache_key: str) -> tuple[dict[str, Any] | None, str]:
+        if callable(get_cached_json):
+            cached = get_cached_json(QUANT_PRICE_TILE_NAMESPACE, cache_key)
+            if isinstance(cached, dict):
+                return cached, "redis"
+        snapshot_store = helpers.get("SNAPSHOT_STORE")
+        if snapshot_store is not None:
+            try:
+                cached = snapshot_store.get(QUANT_PRICE_TILE_NAMESPACE, cache_key)
+                if isinstance(cached, dict):
+                    return cached, "snapshot"
+                stale = snapshot_store.get_stale(QUANT_PRICE_TILE_NAMESPACE, cache_key)
+                if isinstance(stale, dict):
+                    stale_payload = dict(stale)
+                    stale_payload["stale"] = True
+                    stale_payload["cacheStatus"] = "stale"
+                    return stale_payload, "snapshot-stale"
+            except Exception:
+                route_logger.exception("quant price tile snapshot lookup failed")
+        persisted = _load_persistent_tile(cache_key)
+        if isinstance(persisted, dict):
+            return persisted, "postgres"
+        return None, "miss"
+
+    def _payload_bounds(payload: dict[str, Any]) -> tuple[int, int, int]:
+        xs: list[int] = []
+        point_count = 0
+        for outcome in payload.get("outcomes") or []:
+            if not isinstance(outcome, dict):
+                continue
+            for point_list_name in ("points", "complementPoints", "complement_points"):
+                for point in outcome.get(point_list_name) or []:
+                    if not isinstance(point, dict):
+                        continue
+                    raw_x = point.get("x") or point.get("blockNumber") or point.get("block_number") or point.get("timestamp")
+                    try:
+                        x_value = int(raw_x)
+                    except (TypeError, ValueError):
+                        continue
+                    xs.append(x_value)
+                    point_count += 1
+        if not xs:
+            return 0, 0, 0
+        return min(xs), max(xs), point_count
+
+    def _store_price_tile(
+        cache_key: str,
+        payload: dict[str, Any],
+        *,
+        entity_type: str,
+        entity_slug: str,
+        price_source: str,
+        range_name: str,
+        resolution: str,
+        top_n: int,
+        max_points: int,
+        window_from_x: int | None,
+        window_to_x: int | None,
+        point_format: str,
+        ttl_seconds: int,
+        reason: str,
+    ) -> None:
+        if callable(set_cached_json):
+            try:
+                set_cached_json(QUANT_PRICE_TILE_NAMESPACE, cache_key, payload, ttl_seconds)
+            except Exception:
+                route_logger.exception("quant price tile redis store failed slug=%s", entity_slug)
+        try:
+            payload_json = json.dumps(payload, ensure_ascii=True, default=str)
+            data_min_x, data_max_x, row_count = _payload_bounds(payload)
+            with postgres_connection(PostgresSettings(), readonly=False) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO quant.quant_price_series_tiles (
+                            tile_key, key_version, entity_type, tile_kind, scope, entity_slug,
+                            price_source, range_name, resolution, point_format, top_n, max_points,
+                            window_from_x, window_to_x, payload, payload_bytes, row_count,
+                            data_min_x, data_max_x, cache_ttl_seconds, updated_reason,
+                            expires_at, updated_at
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s::jsonb, %s, %s,
+                            %s, %s, %s, %s,
+                            now() + (%s || ' seconds')::interval, now()
+                        )
+                        ON CONFLICT (tile_key) DO UPDATE SET
+                            key_version = EXCLUDED.key_version,
+                            entity_type = EXCLUDED.entity_type,
+                            tile_kind = EXCLUDED.tile_kind,
+                            scope = EXCLUDED.scope,
+                            entity_slug = EXCLUDED.entity_slug,
+                            price_source = EXCLUDED.price_source,
+                            range_name = EXCLUDED.range_name,
+                            resolution = EXCLUDED.resolution,
+                            point_format = EXCLUDED.point_format,
+                            top_n = EXCLUDED.top_n,
+                            max_points = EXCLUDED.max_points,
+                            window_from_x = EXCLUDED.window_from_x,
+                            window_to_x = EXCLUDED.window_to_x,
+                            payload = EXCLUDED.payload,
+                            payload_bytes = EXCLUDED.payload_bytes,
+                            row_count = EXCLUDED.row_count,
+                            data_min_x = EXCLUDED.data_min_x,
+                            data_max_x = EXCLUDED.data_max_x,
+                            cache_ttl_seconds = EXCLUDED.cache_ttl_seconds,
+                            updated_reason = EXCLUDED.updated_reason,
+                            expires_at = EXCLUDED.expires_at,
+                            updated_at = now()
+                        """,
+                        (
+                            cache_key,
+                            QUANT_PRICE_TILE_KEY_VERSION,
+                            entity_type,
+                            "series",
+                            entity_type,
+                            entity_slug,
+                            price_source,
+                            range_name,
+                            resolution,
+                            point_format,
+                            top_n,
+                            max_points,
+                            window_from_x,
+                            window_to_x,
+                            payload_json,
+                            len(payload_json),
+                            row_count,
+                            data_min_x or None,
+                            data_max_x or None,
+                            ttl_seconds,
+                            reason,
+                            ttl_seconds,
+                        ),
+                    )
+                conn.commit()
+        except Exception:
+            route_logger.exception("quant price tile persistent store failed slug=%s", entity_slug)
+
     def _redis_prefix() -> str:
         app_obj = helpers.get("app")
         settings = getattr(app_obj, "config", {}).get("POLYDATA_SETTINGS") if app_obj is not None else None
@@ -386,6 +566,27 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                 limit=limit,
             )
         return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
+
+    @bp.route("/event-members", methods=["GET"])
+    def api_quant_event_members():
+        event_slug = (request.args.get("event_slug") or request.args.get("market_slug") or "").strip()
+        if not event_slug:
+            return jsonify({"error": "event_slug is required"}), 400
+        limit = min(max(_parse_int_arg("limit", 200) or 200, 1), 500)
+        cache_key = _price_tile_cache_key("event-members", {"event_slug": event_slug, "limit": limit})
+
+        def build_payload() -> dict[str, Any]:
+            with postgres_connection(PostgresSettings(), readonly=True) as conn:
+                rows = get_quant_event_members(conn, event_slug=event_slug, limit=limit)
+            return {
+                "eventSlug": event_slug,
+                "items": [_camel_row(row) for row in rows],
+                "count": len(rows),
+                "cacheKey": cache_key,
+            }
+
+        payload = _cached_quant_payload(QUANT_EVENT_MEMBERS_NAMESPACE, cache_key, 300, build_payload, snapshot=True)
+        return _json_response(payload, headers={"X-Quant-Cache": "event-members"})
 
     @bp.route("/frontend-prices", methods=["GET"])
     def api_quant_frontend_prices():
@@ -659,6 +860,207 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             "X-Quant-Elapsed-Ms": str(elapsed_ms),
         })
 
+    @bp.route("/entity-snapshot", methods=["GET"])
+    def api_quant_entity_snapshot():
+        started = time.perf_counter()
+        request_id = uuid.uuid4().hex[:12]
+        entity_type = (request.args.get("entity_type") or request.args.get("kind") or "auto").strip().lower()
+        event_slug = (request.args.get("event_slug") or "").strip()
+        market_slug = (request.args.get("market_slug") or request.args.get("slug") or "").strip()
+        if entity_type not in {"event", "market"}:
+            entity_type = "event" if event_slug else "market"
+        entity_slug = event_slug if entity_type == "event" else market_slug
+        if not entity_slug:
+            return jsonify({"error": "slug is required"}), 400
+        max_outcomes = min(max(_parse_int_arg("max_outcomes", 100) or 100, 1), 200)
+        top_n = min(max(_parse_int_arg("top_n", 12) or 12, 1), max_outcomes)
+        price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
+        point_format = (request.args.get("point_format") or "lite").strip().lower()
+        cache_key = _price_tile_cache_key(
+            "entity-snapshot",
+            {
+                "entity_type": entity_type,
+                "entity_slug": entity_slug,
+                "price_source": price_source,
+                "max_outcomes": max_outcomes,
+                "top_n": top_n,
+                "point_format": point_format,
+            },
+        )
+
+        def build_payload() -> dict[str, Any]:
+            with postgres_connection(PostgresSettings(), readonly=True) as conn:
+                if entity_type == "event":
+                    payload = get_event_price_head(
+                        conn,
+                        event_slug=entity_slug,
+                        price_source=price_source,
+                        max_outcomes=max_outcomes,
+                        top_n=top_n,
+                    )
+                else:
+                    payload = get_market_price_series(
+                        conn,
+                        market_slug=entity_slug,
+                        price_source=price_source,
+                        scope="auto",
+                        limit=1,
+                        max_outcomes=min(max_outcomes, 24),
+                        max_points=50,
+                    )
+            payload = _camel_row(_apply_point_payload_format(payload, point_format))
+            payload["snapshot"] = True
+            payload["cacheKey"] = cache_key
+            payload["requestId"] = request_id
+            return payload
+
+        ttl = 3 if _parse_bool_arg("live") else 20
+        payload = _cached_quant_payload(QUANT_ENTITY_SNAPSHOT_NAMESPACE, cache_key, ttl, build_payload, snapshot=True)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        payload = dict(payload)
+        payload.setdefault("requestId", request_id)
+        payload.setdefault("snapshot", True)
+        return _json_response(payload, headers={
+            "X-Quant-Cache": "snapshot",
+            "X-Quant-Request-Id": request_id,
+            "X-Quant-Elapsed-Ms": str(elapsed_ms),
+        })
+
+    @bp.route("/price-window", methods=["GET"])
+    def api_quant_price_window():
+        started = time.perf_counter()
+        request_id = uuid.uuid4().hex[:12]
+        entity_type = (request.args.get("entity_type") or request.args.get("kind") or "auto").strip().lower()
+        event_slug = (request.args.get("event_slug") or "").strip()
+        market_slug = (request.args.get("market_slug") or request.args.get("slug") or "").strip()
+        if entity_type not in {"event", "market"}:
+            entity_type = "event" if event_slug else "market"
+        entity_slug = event_slug if entity_type == "event" else market_slug
+        if not entity_slug:
+            return jsonify({"error": "slug is required"}), 400
+        price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
+        range_name = _canonical_price_range(request.args.get("range"))
+        resolution = (request.args.get("resolution") or "auto").strip().lower()
+        point_format = (request.args.get("point_format") or "lite").strip().lower()
+        from_block = _parse_int_arg("from_block")
+        to_block = _parse_int_arg("to_block")
+        from_ts = _parse_time_arg("from")
+        to_ts = _parse_time_arg("to")
+        if from_block is not None or to_block is not None or from_ts is not None or to_ts is not None:
+            range_name = "window"
+        max_outcomes = min(max(_parse_int_arg("max_outcomes", 100) or 100, 1), 200)
+        top_n = min(max(_parse_int_arg("top_n", 12) or 12, 1), max_outcomes)
+        full_window = range_name == "full"
+        max_points_default = _viewport_max_points(1200 if full_window else 600, full=full_window)
+        max_points = min(max(_parse_int_arg("max_points", max_points_default) or max_points_default, 80), 2500)
+        limit_default = 250000 if full_window else max(2500, max_points * 8)
+        limit_cap = 250000 if full_window else 50000
+        limit = min(max(_parse_int_arg("limit", limit_default) or limit_default, 1), limit_cap)
+        cache_ttl = 12 if range_name in {"latest", "window"} else 900
+        if _parse_bool_arg("live"):
+            cache_ttl = 2
+        window_from_x = from_block if price_source == "orderfilled_block_close" else from_ts
+        window_to_x = to_block if price_source == "orderfilled_block_close" else to_ts
+        key_args = {
+            "entity_type": entity_type,
+            "entity_slug": entity_slug,
+            "price_source": price_source,
+            "range": range_name,
+            "resolution": resolution,
+            "top_n": top_n,
+            "max_outcomes": max_outcomes,
+            "max_points": max_points,
+            "from_block": from_block,
+            "to_block": to_block,
+            "from": from_ts,
+            "to": to_ts,
+            "point_format": point_format,
+        }
+        cache_key = _price_tile_cache_key("price-window", key_args)
+        live_request = _parse_bool_arg("live")
+        cached, cache_layer = (None, "live") if live_request else _load_price_tile(cache_key)
+        if cached is not None:
+            payload = dict(cached)
+            payload["cacheHit"] = True
+            payload["cacheLayer"] = cache_layer
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            return _json_response(payload, headers={
+                "X-Quant-Cache": cache_layer,
+                "X-Quant-Request-Id": request_id,
+                "X-Quant-Elapsed-Ms": str(elapsed_ms),
+            })
+
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            if entity_type == "event":
+                payload = get_event_price_tile(
+                    conn,
+                    event_slug=entity_slug,
+                    price_source=price_source,
+                    from_ts=from_ts,
+                    to_ts=to_ts,
+                    from_block=from_block,
+                    to_block=to_block,
+                    limit=limit,
+                    max_outcomes=max_outcomes,
+                    top_n=top_n,
+                    max_points=max_points,
+                    tile_range="full" if full_window else "latest",
+                    resolution=resolution,
+                )
+            else:
+                payload = get_market_price_series(
+                    conn,
+                    market_slug=entity_slug,
+                    price_source=price_source,
+                    scope="auto",
+                    from_ts=from_ts,
+                    to_ts=to_ts,
+                    from_block=from_block,
+                    to_block=to_block,
+                    limit=limit,
+                    max_outcomes=min(max_outcomes, 24),
+                    max_points=max_points,
+                )
+        payload = _camel_row(_apply_point_payload_format(payload, point_format))
+        payload["cacheHit"] = False
+        payload["cacheLayer"] = "miss"
+        payload["requestId"] = request_id
+        payload.setdefault("tile", {})
+        if isinstance(payload["tile"], dict):
+            payload["tile"].update({
+                "cacheKey": cache_key,
+                "entityType": entity_type,
+                "entitySlug": entity_slug,
+                "range": range_name,
+                "resolution": resolution,
+                "topN": top_n,
+                "maxPoints": max_points,
+                "fromX": window_from_x,
+                "toX": window_to_x,
+            })
+        _store_price_tile(
+            cache_key,
+            payload,
+            entity_type=entity_type,
+            entity_slug=entity_slug,
+            price_source=price_source,
+            range_name=range_name,
+            resolution=resolution,
+            top_n=top_n,
+            max_points=max_points,
+            window_from_x=window_from_x,
+            window_to_x=window_to_x,
+            point_format=point_format,
+            ttl_seconds=cache_ttl,
+            reason="api-price-window",
+        )
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        return _json_response(payload, headers={
+            "X-Quant-Cache": "miss",
+            "X-Quant-Request-Id": request_id,
+            "X-Quant-Elapsed-Ms": str(elapsed_ms),
+        })
+
     @bp.route("/event-price-stream", methods=["GET"])
     def api_quant_event_price_stream():
         event_slug = (request.args.get("event_slug") or request.args.get("market_slug") or "").strip()
@@ -715,6 +1117,87 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                     return
                 except Exception as exc:
                     serialized_error = json.dumps({"error": str(exc), "eventSlug": event_slug}, ensure_ascii=True)
+                    yield f"event: error\\ndata: {serialized_error}\\n\\n"
+                time.sleep(interval_seconds)
+
+        return Response(generate(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @bp.route("/price-stream", methods=["GET"])
+    def api_quant_price_stream():
+        entity_type = (request.args.get("entity_type") or request.args.get("kind") or "auto").strip().lower()
+        event_slug = (request.args.get("event_slug") or "").strip()
+        market_slug = (request.args.get("market_slug") or request.args.get("slug") or "").strip()
+        if entity_type not in {"event", "market"}:
+            entity_type = "event" if event_slug else "market"
+        entity_slug = event_slug if entity_type == "event" else market_slug
+        if not entity_slug:
+            return jsonify({"error": "slug is required"}), 400
+        price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
+        interval_seconds = min(max(_parse_int_arg("interval", 2) or 2, 1), 60)
+        max_outcomes = min(max(_parse_int_arg("max_outcomes", 24) or 24, 1), 100)
+
+        def build_latest_payload() -> dict[str, Any]:
+            with postgres_connection(PostgresSettings(), readonly=True) as conn:
+                if entity_type == "event":
+                    payload = get_event_price_tile(
+                        conn,
+                        event_slug=entity_slug,
+                        price_source=price_source,
+                        limit=1,
+                        max_outcomes=max_outcomes,
+                        top_n=max_outcomes,
+                        max_points=50,
+                        tile_range="latest",
+                        resolution="latest",
+                    )
+                else:
+                    payload = get_market_price_series(
+                        conn,
+                        market_slug=entity_slug,
+                        price_source=price_source,
+                        scope="auto",
+                        limit=1,
+                        max_outcomes=min(max_outcomes, 24),
+                        max_points=50,
+                    )
+            payload = _camel_row(_apply_point_payload_format(payload, "lite"))
+            return {
+                "entityType": entity_type,
+                "eventSlug": entity_slug if entity_type == "event" else None,
+                "marketSlug": entity_slug if entity_type == "market" else None,
+                "priceSource": price_source,
+                "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "outcomes": [
+                    {
+                        "tokenId": outcome.get("tokenId"),
+                        "outcomeLabel": outcome.get("outcomeLabel"),
+                        "buyYesTokenId": outcome.get("buyYesTokenId"),
+                        "buyNoTokenId": outcome.get("buyNoTokenId"),
+                        "buyYesPrice": outcome.get("buyYesPrice"),
+                        "buyNoPrice": outcome.get("buyNoPrice"),
+                        "latestPrice": outcome.get("latestPrice"),
+                        "lastX": outcome.get("lastX"),
+                        "rows": outcome.get("rows"),
+                    }
+                    for outcome in payload.get("outcomes") or []
+                ],
+            }
+
+        @stream_with_context
+        def generate():
+            last_serialized = ""
+            while True:
+                try:
+                    serialized = json.dumps(build_latest_payload(), ensure_ascii=True, default=str)
+                    if serialized != last_serialized:
+                        last_serialized = serialized
+                        yield f"event: price\\ndata: {serialized}\\n\\n"
+                    else:
+                        yield ": keepalive\\n\\n"
+                except GeneratorExit:
+                    return
+                except Exception as exc:
+                    serialized_error = json.dumps({"error": str(exc), "slug": entity_slug}, ensure_ascii=True)
                     yield f"event: error\\ndata: {serialized_error}\\n\\n"
                 time.sleep(interval_seconds)
 

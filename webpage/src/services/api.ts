@@ -264,7 +264,9 @@ export function fetchRecentOracle(limit = 24) {
 }
 
 export type QuantPriceQuery = {
+  entityType?: 'market' | 'event' | string;
   marketSlug?: string;
+  eventSlug?: string;
   tokenSide?: string;
   tokenId?: string;
   from?: string;
@@ -277,6 +279,7 @@ export type QuantPriceQuery = {
   maxPoints?: number;
   range?: string;
   resolution?: string;
+  viewportWidth?: number;
   live?: boolean;
   timeoutMs?: number;
 };
@@ -380,6 +383,51 @@ export function fetchQuantEventPriceHead(query: QuantPriceQuery & { eventSlug?: 
   return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-head?${params.toString()}`, 8000);
 }
 
+export function fetchQuantEntitySnapshot(query: QuantPriceQuery & { priceSource?: string; maxOutcomes?: number } = {}) {
+  const params = new URLSearchParams();
+  if (query.entityType?.trim()) params.set('entity_type', query.entityType.trim());
+  if (query.marketSlug?.trim()) params.set('market_slug', query.marketSlug.trim());
+  if (query.eventSlug?.trim()) params.set('event_slug', query.eventSlug.trim());
+  if (query.priceSource?.trim()) params.set('price_source', query.priceSource.trim());
+  params.set('max_outcomes', String(query.maxOutcomes || 100));
+  params.set('top_n', String(query.topN || 12));
+  params.set('point_format', query.pointFormat || 'lite');
+  if (query.live) params.set('live', '1');
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/entity-snapshot?${params.toString()}`, query.timeoutMs || 3500);
+}
+
+export function fetchQuantPriceWindow(query: QuantPriceQuery & { priceSource?: string; maxOutcomes?: number } = {}) {
+  const params = new URLSearchParams();
+  if (query.entityType?.trim()) params.set('entity_type', query.entityType.trim());
+  if (query.marketSlug?.trim()) params.set('market_slug', query.marketSlug.trim());
+  if (query.eventSlug?.trim()) params.set('event_slug', query.eventSlug.trim());
+  if (query.tokenSide?.trim()) params.set('token_side', query.tokenSide.trim());
+  if (query.tokenId?.trim()) params.set('token_id', query.tokenId.trim());
+  if (query.priceSource?.trim()) params.set('price_source', query.priceSource.trim());
+  if (query.from?.trim()) params.set('from', query.from.trim());
+  if (query.to?.trim()) params.set('to', query.to.trim());
+  if (query.fromBlock?.trim()) params.set('from_block', query.fromBlock.trim());
+  if (query.toBlock?.trim()) params.set('to_block', query.toBlock.trim());
+  params.set('limit', String(query.limit || 25000));
+  params.set('max_outcomes', String(query.maxOutcomes || 100));
+  params.set('top_n', String(query.topN || 12));
+  params.set('max_points', String(query.maxPoints || 900));
+  params.set('range', query.range || 'window');
+  params.set('resolution', query.resolution || 'auto');
+  params.set('point_format', query.pointFormat || 'lite');
+  if (query.viewportWidth) params.set('viewport_width', String(Math.max(320, Math.floor(query.viewportWidth))));
+  if (query.live) params.set('live', '1');
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/price-window?${params.toString()}`, query.timeoutMs || 12000);
+}
+
+export function fetchQuantEventMembers(eventSlug: string, limit = 200) {
+  const params = new URLSearchParams({ event_slug: eventSlug.trim(), limit: String(limit) });
+  return apiGetWithTimeout<{ eventSlug: string; items: Array<Record<string, unknown>>; count: number }>(
+    `/quant/event-members?${params.toString()}`,
+    5000,
+  );
+}
+
 export function quantEventPriceStreamUrl(query: QuantPriceQuery & { eventSlug?: string; priceSource?: string; maxOutcomes?: number; interval?: number } = {}) {
   const params = new URLSearchParams();
   const eventSlug = query.eventSlug || query.marketSlug;
@@ -388,6 +436,17 @@ export function quantEventPriceStreamUrl(query: QuantPriceQuery & { eventSlug?: 
   params.set('max_outcomes', String(query.maxOutcomes || 24));
   params.set('interval', String(query.interval || 5));
   return `${API_BASE}/quant/event-price-stream?${params.toString()}`;
+}
+
+export function quantPriceStreamUrl(query: QuantPriceQuery & { priceSource?: string; maxOutcomes?: number; interval?: number } = {}) {
+  const params = new URLSearchParams();
+  if (query.entityType?.trim()) params.set('entity_type', query.entityType.trim());
+  if (query.eventSlug?.trim()) params.set('event_slug', query.eventSlug.trim());
+  if (query.marketSlug?.trim()) params.set('market_slug', query.marketSlug.trim());
+  if (query.priceSource?.trim()) params.set('price_source', query.priceSource.trim());
+  params.set('max_outcomes', String(query.maxOutcomes || 24));
+  params.set('interval', String(query.interval || 2));
+  return `${API_BASE}/quant/price-stream?${params.toString()}`;
 }
 
 export function fetchQuantBuildStatus(source = '', limit = 24) {

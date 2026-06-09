@@ -74,6 +74,7 @@ type PriceChartPanelProps = {
   onRetry?: () => void;
   viewportResetKey?: string;
   onViewportModeChange?: (mode: 'preset' | 'custom') => void;
+  onVisibleWindowChange?: (windowRange: { fromX: number; toX: number; pointCount: number; viewportWidth: number }) => void;
 };
 
 type SeriesRefs = {
@@ -365,7 +366,7 @@ function niceBlockStep(rawStep: number) {
   return Math.max(1, Math.floor(unit * magnitude));
 }
 
-function blockAxisTicks(points: PricePoint[], maxTicks = 7, visibleRange?: LogicalRangeLike) {
+function blockAxisTicks(points: PricePoint[], maxTicks = 6, visibleRange?: LogicalRangeLike) {
   if (!points.length) return [];
   const fromIndex = visibleRange ? Math.max(0, Math.min(points.length - 1, Math.floor(visibleRange.from))) : 0;
   const toIndex = visibleRange ? Math.max(fromIndex, Math.min(points.length - 1, Math.ceil(visibleRange.to))) : points.length - 1;
@@ -383,15 +384,40 @@ function blockAxisTicks(points: PricePoint[], maxTicks = 7, visibleRange?: Logic
     if (value > first) ticks.push(value);
   }
   ticks.push(last);
-  const unique = Array.from(new Set(ticks)).slice(0, maxTicks + 2);
-  return unique.map((value, index) => {
-    const nearestIndex = fromIndex + nearestPointIndex(visible, value);
-    const left = axisPercentFromIndex(nearestIndex, points, visibleRange) ?? ((value - first) / blockRange) * 100;
+  const sorted = Array.from(new Set(ticks)).sort((left, right) => left - right);
+  const minGapPercent = maxTicks <= 5 ? 14 : 11;
+  const filtered: number[] = [];
+  sorted.forEach((value, index) => {
+    if (index === 0) {
+      filtered.push(value);
+      return;
+    }
+    if (index === sorted.length - 1) {
+      const previous = filtered[filtered.length - 1];
+      if (previous !== undefined && ((value - first) / blockRange) * 100 - ((previous - first) / blockRange) * 100 < minGapPercent) {
+        filtered[filtered.length - 1] = value;
+      } else {
+        filtered.push(value);
+      }
+      return;
+    }
+    const left = ((value - first) / blockRange) * 100;
+    const previous = filtered[filtered.length - 1];
+    const previousLeft = previous !== undefined ? ((previous - first) / blockRange) * 100 : -100;
+    if (filtered.length < maxTicks && left - previousLeft >= minGapPercent && left <= 100 - minGapPercent) {
+      filtered.push(value);
+    }
+  });
+  if (filtered[filtered.length - 1] !== last) {
+    filtered[filtered.length - 1] = last;
+  }
+  return filtered.map((value, index) => {
+    const left = ((value - first) / blockRange) * 100;
     return {
       key: value,
       label: blockLabel(value),
       left: `${Math.max(0, Math.min(100, left))}%`,
-      edge: index === 0 ? 'start' : index === unique.length - 1 ? 'end' : 'middle',
+      edge: index === 0 ? 'start' : index === filtered.length - 1 ? 'end' : 'middle',
     };
   });
 }
@@ -550,6 +576,7 @@ export function PriceChartPanel({
   onRetry,
   viewportResetKey = '',
   onViewportModeChange,
+  onVisibleWindowChange,
 }: PriceChartPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -557,6 +584,8 @@ export function PriceChartPanel({
   const pointsRef = useRef<PricePoint[]>([]);
   const dataWindowDragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const suppressViewportModeRef = useRef(false);
+  const onVisibleWindowChangeRef = useRef<typeof onVisibleWindowChange>(onVisibleWindowChange);
+  const lastWindowNotifyRef = useRef('');
   const visibleLogicalRangeRef = useRef<LogicalRangeState>(null);
   const lastFitRequestKeyRef = useRef('');
   const lastTradeFocusKeyRef = useRef('');
@@ -671,7 +700,7 @@ export function PriceChartPanel({
   const hoverMaPoint = hover ? nearestPoint(maPoints, hover.timestamp) : null;
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
   const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints, visibleLogicalRange) : null;
-  const blockTicks = useMemo(() => blockAxisTicks(primaryPoints, 8, visibleLogicalRange), [primaryPoints, visibleLogicalRange]);
+  const blockTicks = useMemo(() => blockAxisTicks(primaryPoints, 6, visibleLogicalRange), [primaryPoints, visibleLogicalRange]);
   const managerOutcomes = useMemo(() => {
     const query = outcomeManagerQuery.trim().toLowerCase();
     return sortedOutcomes.filter((group) => {
@@ -899,6 +928,10 @@ export function PriceChartPanel({
   }, [onViewportModeChange]);
 
   useEffect(() => {
+    onVisibleWindowChangeRef.current = onVisibleWindowChange;
+  }, [onVisibleWindowChange]);
+
+  useEffect(() => {
     if (!selectedTradeFocus || !chartRef.current || !primaryPoints.length) return;
     const focusKey = `${selectedTradeFocus.id}|${selectedTradeFocus.startIndex}|${selectedTradeFocus.endIndex}|${primaryPoints.length}`;
     if (lastTradeFocusKeyRef.current === focusKey) return;
@@ -1095,6 +1128,28 @@ export function PriceChartPanel({
       const fullSpan = Math.max(1, pointsRef.current.length - 1);
       const coversFullDataset = normalized.from <= 1.5 && normalized.to >= fullSpan - 1.5 && span >= fullSpan - 3;
       onViewportModeChange?.(coversFullDataset ? 'preset' : 'custom');
+      if (!coversFullDataset && onVisibleWindowChangeRef.current) {
+        const currentPoints = pointsRef.current;
+        const fromIndex = Math.max(0, Math.min(currentPoints.length - 1, Math.floor(normalized.from)));
+        const toIndex = Math.max(0, Math.min(currentPoints.length - 1, Math.ceil(normalized.to)));
+        const fromPoint = currentPoints[fromIndex];
+        const toPoint = currentPoints[toIndex];
+        const fromX = Number(fromPoint?.timestamp);
+        const toX = Number(toPoint?.timestamp);
+        if (Number.isFinite(fromX) && Number.isFinite(toX)) {
+          const nextKey = `${Math.floor(fromX)}:${Math.ceil(toX)}:${toIndex - fromIndex}`;
+          if (nextKey !== lastWindowNotifyRef.current) {
+            lastWindowNotifyRef.current = nextKey;
+            const width = Math.max(360, Math.floor(containerRef.current?.clientWidth || 1200));
+            onVisibleWindowChangeRef.current({
+              fromX,
+              toX,
+              pointCount: Math.max(1, toIndex - fromIndex + 1),
+              viewportWidth: width,
+            });
+          }
+        }
+      }
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleLogicalRange);
 
@@ -1579,7 +1634,7 @@ export function PriceChartPanel({
         ) : null}
 
         {((!hasLoadedPrices && (dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'warming' || dataStatus === 'partial' || dataStatus === 'loading'))
-          || (hasLoadedPrices && dataStatus === 'warming')) ? (
+          || (hasLoadedPrices && (dataStatus === 'warming' || dataStatus === 'partial' || dataStatus === 'price_loading'))) ? (
           <div className="qtv-chart-loading-ribbon">
             <b>{loadingMessage || loadingTitle}</b>
             <span>Outcomes {eventMode ? displayedOutcomeCount.toLocaleString('en-US') : '--'} · Source {priceSource}</span>

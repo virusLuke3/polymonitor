@@ -809,6 +809,55 @@ def _event_outcome_payload(
     }
 
 
+def get_quant_event_members(
+    conn: Any,
+    *,
+    event_slug: str,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                event_slug,
+                event_id,
+                market_id,
+                market_slug,
+                question,
+                outcome_key,
+                outcome_label,
+                outcome_order,
+                token_yes_id,
+                token_no_id,
+                condition_id,
+                clob_token_ids,
+                status,
+                active,
+                closed,
+                resolved,
+                coverage_status,
+                block_rows,
+                frontend_rows,
+                orderfilled_rows,
+                latest_yes,
+                latest_no,
+                latest_block,
+                latest_timestamp,
+                volume,
+                liquidity,
+                grouping_confidence,
+                source,
+                updated_at
+            FROM quant.market_event_members
+            WHERE event_slug = %s
+            ORDER BY outcome_order ASC, outcome_label ASC, market_id ASC
+            LIMIT %s
+            """,
+            (event_slug, int(limit)),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
 def get_event_price_head(
     conn: Any,
     *,

@@ -7,13 +7,13 @@ import {
   fetchQuantBacktestRun,
   fetchQuantBacktestTrades,
   fetchQuantBuildStatus,
-  fetchQuantEventPriceHead,
-  fetchQuantEventPriceSeries,
-  fetchQuantMarketPriceSeries,
+  fetchQuantEntitySnapshot,
+  fetchQuantEventMembers,
+  fetchQuantPriceWindow,
   fetchQuantPriceEvents,
   fetchQuantPriceMarkets,
   isAbortLikeError,
-  quantEventPriceStreamUrl,
+  quantPriceStreamUrl,
   type QuantPriceQuery,
 } from '@/services/api';
 import type { LobPayload, LobSide, QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
@@ -44,6 +44,19 @@ const DEFAULT_QUANT_EVENT_TITLE = '2026 FIFA World Cup Winner';
 const EVENT_TILE_OUTCOME_LIMIT = 12;
 const EVENT_TILE_MAX_POINTS = 240;
 const EVENT_TILE_FULL_MAX_POINTS = 900;
+const MIN_WINDOW_TILE_POINTS = 240;
+const MAX_WINDOW_TILE_POINTS = 1800;
+
+function chartViewportWidth() {
+  if (typeof window === 'undefined') return 1200;
+  return Math.max(360, Math.floor(window.innerWidth - 120));
+}
+
+function tilePointBudget(range: string, width = chartViewportWidth()) {
+  const full = chartRangeFromTimeframe(range) === 'full' || range === 'full' || range === 'all';
+  const multiplier = full ? 0.85 : 1.25;
+  return Math.max(MIN_WINDOW_TILE_POINTS, Math.min(MAX_WINDOW_TILE_POINTS, Math.floor(width * multiplier)));
+}
 const DEFAULT_STRATEGY_PARAMETERS: StrategyParameters = {
   entryThreshold: 0.58,
   exitThreshold: 0.44,
@@ -539,6 +552,9 @@ export function QuantWorkspace() {
   const marketSearchCacheRef = useRef(new Map<string, QuantPriceMarket[]>());
   const priceSeriesCacheRef = useRef(new Map<string, QuantMarketSeriesPayload>());
   const pricePrefetchingRef = useRef(new Set<string>());
+  const viewportFetchTimerRef = useRef<number | null>(null);
+  const viewportFetchSeq = useRef(0);
+  const eventMembersPrefetchRef = useRef(new Set<string>());
   const liveRefreshInFlightRef = useRef(false);
   const priceRetryTimerRef = useRef<number | null>(null);
 
@@ -587,7 +603,11 @@ export function QuantWorkspace() {
     limit: chartRequestLimit,
     maxOutcomes: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
     topN: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
-    maxPoints: selectedEntityKind === 'event' ? (chartRange === 'full' ? EVENT_TILE_FULL_MAX_POINTS : EVENT_TILE_MAX_POINTS) : undefined,
+    maxPoints: selectedEntityKind === 'event'
+      ? (chartRange === 'full'
+        ? Math.min(EVENT_TILE_FULL_MAX_POINTS, tilePointBudget(timeframe))
+        : Math.max(EVENT_TILE_MAX_POINTS, Math.min(900, tilePointBudget(timeframe))))
+      : tilePointBudget(timeframe),
     range: selectedEntityKind === 'event' ? chartRange : undefined,
     resolution: selectedEntityKind === 'event' ? 'auto' : undefined,
     live: false,
@@ -621,12 +641,34 @@ export function QuantWorkspace() {
       } else {
         if (!silent) {
           setDataStatus(selectedMarket ? 'price_loading' : 'metadata_loading');
-          setLoadingMessage(selectedMarket ? 'Loading price series...' : 'Loading market metadata...');
+          setLoadingMessage(selectedMarket ? 'Loading new price window; keeping the previous chart visible...' : 'Loading market metadata...');
         }
       }
       if (import.meta.env.DEV) {
         console.debug('[quant] price load start', { cacheKey, cached: Boolean(cached), marketSlug, priceSource, timeframe, silent });
       }
+    }
+    if (hasMarketSlug && !silent && !priceSeriesCacheRef.current.has(cacheKey)) {
+      void fetchQuantEntitySnapshot({
+        entityType: selectedEntityKind,
+        marketSlug: selectedEntityKind === 'market' ? marketSlug : undefined,
+        eventSlug: selectedEntityKind === 'event' ? marketSlug : undefined,
+        priceSource: backendPriceSource(priceSource),
+        maxOutcomes: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
+        topN: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
+        pointFormat: 'lite',
+        timeoutMs: 3500,
+      })
+        .then((snapshot) => {
+          if (requestSeq !== priceLoadSeq.current) return;
+          if (!snapshot?.outcomes?.length) return;
+          setMarketSeries(snapshot);
+          setDataStatus('partial');
+          setLoadingMessage('Latest snapshot loaded; historical tile is still warming...');
+        })
+        .catch((snapshotError) => {
+          if (import.meta.env.DEV && !isAbortLikeError(snapshotError)) console.debug('[quant] snapshot load failed', snapshotError);
+        });
     }
     const priceQuery = {
       ...semanticChartQuery,
@@ -634,9 +676,14 @@ export function QuantWorkspace() {
     };
     const [seriesResult, statusResult] = await Promise.allSettled([
       hasMarketSlug
-        ? (selectedEntityKind === 'event'
-          ? fetchQuantEventPriceSeries({ ...priceQuery, eventSlug: marketSlug })
-          : fetchQuantMarketPriceSeries(priceQuery))
+        ? fetchQuantPriceWindow({
+          ...priceQuery,
+          entityType: selectedEntityKind,
+          eventSlug: selectedEntityKind === 'event' ? marketSlug : undefined,
+          marketSlug: selectedEntityKind === 'market' ? marketSlug : undefined,
+          viewportWidth: chartViewportWidth(),
+          timeoutMs: chartRange === 'full' ? 16000 : 10000,
+        })
         : Promise.resolve(null),
       fetchQuantBuildStatus('', 12),
     ]);
@@ -810,7 +857,7 @@ export function QuantWorkspace() {
     const cached = nextSlug ? priceSeriesCacheRef.current.get(seriesKeyForSlug(nextSlug, nextMarket?.itemKind === 'event' ? 'event' : 'market')) : null;
     setFrontendRows([]);
     setBlockRows([]);
-    setMarketSeries(cached || null);
+    if (cached) setMarketSeries(cached);
     setSelectedOutcomeTokenId('');
     setSelectedBacktestAction('YES');
     setBacktestResult(emptyBacktestResult());
@@ -819,7 +866,7 @@ export function QuantWorkspace() {
     autoSelectedDefaultRef.current = true;
     if (nextSlug) {
       setDataStatus(cached ? 'partial' : 'metadata_loading');
-      setLoadingMessage(cached ? 'Rendering cached data...' : 'Loading market metadata...');
+      setLoadingMessage(cached ? 'Rendering cached data...' : 'Switching market; keeping stale chart while snapshot loads...');
     }
   };
 
@@ -839,6 +886,74 @@ export function QuantWorkspace() {
     setViewportMode((current) => (current === mode ? current : mode));
   };
 
+  const requestViewportWindow = (windowRange: { fromX: number; toX: number; pointCount: number; viewportWidth?: number }) => {
+    if (!marketSlug.trim()) return;
+    if (!Number.isFinite(windowRange.fromX) || !Number.isFinite(windowRange.toX)) return;
+    const fromX = Math.floor(Math.min(windowRange.fromX, windowRange.toX));
+    const toX = Math.ceil(Math.max(windowRange.fromX, windowRange.toX));
+    if (toX <= fromX) return;
+    if (viewportFetchTimerRef.current) window.clearTimeout(viewportFetchTimerRef.current);
+    const nextSeq = viewportFetchSeq.current + 1;
+    viewportFetchSeq.current = nextSeq;
+    const entityType = selectedEntityKind;
+    const slug = marketSlug.trim();
+    const source = backendPriceSource(priceSource);
+    const maxPoints = tilePointBudget('window', windowRange.viewportWidth || chartViewportWidth());
+    const cacheKey = [
+      'window',
+      entityType,
+      slug,
+      source,
+      fromX,
+      toX,
+      maxPoints,
+      EVENT_TILE_OUTCOME_LIMIT,
+    ].join('|');
+    const cached = priceSeriesCacheRef.current.get(cacheKey);
+    if (cached) {
+      setMarketSeries(cached);
+      setDataStatus('ready');
+      setViewportMode('custom');
+      return;
+    }
+    viewportFetchTimerRef.current = window.setTimeout(() => {
+      setViewportMode('custom');
+      setDataStatus((current) => (current === 'ready' ? 'partial' : current));
+      setLoadingMessage('Loading viewport tile...');
+      void fetchQuantPriceWindow({
+        entityType,
+        marketSlug: entityType === 'market' ? slug : undefined,
+        eventSlug: entityType === 'event' ? slug : undefined,
+        priceSource: source,
+        ...(source === 'orderfilled_block_close' ? { fromBlock: String(fromX), toBlock: String(toX) } : { from: String(fromX), to: String(toX) }),
+        limit: Math.max(2500, maxPoints * 8),
+        maxOutcomes: entityType === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
+        topN: entityType === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
+        maxPoints,
+        range: 'window',
+        resolution: 'auto',
+        pointFormat: 'lite',
+        viewportWidth: windowRange.viewportWidth || chartViewportWidth(),
+        timeoutMs: 10000,
+      })
+        .then((payload) => {
+          if (nextSeq !== viewportFetchSeq.current) return;
+          if (!payload?.outcomes?.length) return;
+          priceSeriesCacheRef.current.set(cacheKey, payload);
+          setMarketSeries(payload);
+          setDataStatus('ready');
+          setLoadingMessage('');
+          setLastPriceRefreshAt(new Date().toLocaleTimeString());
+        })
+        .catch((viewportError) => {
+          if (nextSeq !== viewportFetchSeq.current) return;
+          if (import.meta.env.DEV && !isAbortLikeError(viewportError)) console.debug('[quant] viewport tile failed', viewportError);
+          setDataStatus((current) => (current === 'partial' ? 'ready' : current));
+          setLoadingMessage('');
+        });
+    }, 220);
+  };
+
   useEffect(() => {
     marketSlugRef.current = marketSlug;
   }, [marketSlug]);
@@ -851,16 +966,20 @@ export function QuantWorkspace() {
     const cacheKey = seriesKeyForSlug(nextSlug, nextKind);
     if (!nextSlug || priceSeriesCacheRef.current.has(cacheKey) || pricePrefetchingRef.current.has(cacheKey)) return;
     pricePrefetchingRef.current.add(cacheKey);
-    const request = {
-      marketSlug: nextSlug,
+    if (nextKind === 'event' && !eventMembersPrefetchRef.current.has(nextSlug)) {
+      eventMembersPrefetchRef.current.add(nextSlug);
+      void fetchQuantEventMembers(nextSlug, 200).catch(() => undefined);
+    }
+    void fetchQuantEntitySnapshot({
+      entityType: nextKind,
+      marketSlug: nextKind === 'market' ? nextSlug : undefined,
+      eventSlug: nextKind === 'event' ? nextSlug : undefined,
       priceSource: backendPriceSource(priceSource),
-      scope: 'auto',
-      limit: chartLimit,
       maxOutcomes: nextKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
       topN: nextKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
-      maxPoints: nextKind === 'event' ? EVENT_TILE_MAX_POINTS : undefined,
-    };
-    void (nextKind === 'event' ? fetchQuantEventPriceHead({ ...request, eventSlug: nextSlug }) : fetchQuantMarketPriceSeries(request))
+      pointFormat: 'lite',
+      timeoutMs: 3500,
+    })
       .then((payload) => {
         priceSeriesCacheRef.current.set(cacheKey, payload);
         if (import.meta.env.DEV) console.debug('[quant] prefetched price series', { cacheKey });
@@ -871,6 +990,21 @@ export function QuantWorkspace() {
       .finally(() => {
         pricePrefetchingRef.current.delete(cacheKey);
       });
+    void fetchQuantPriceWindow({
+      entityType: nextKind,
+      marketSlug: nextKind === 'market' ? nextSlug : undefined,
+      eventSlug: nextKind === 'event' ? nextSlug : undefined,
+      priceSource: backendPriceSource(priceSource),
+      limit: Math.max(2500, EVENT_TILE_MAX_POINTS * 8),
+      maxOutcomes: nextKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
+      topN: nextKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
+      maxPoints: EVENT_TILE_MAX_POINTS,
+      range: 'latest',
+      resolution: 'auto',
+      pointFormat: 'lite',
+      viewportWidth: chartViewportWidth(),
+      timeoutMs: 6000,
+    }).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -952,6 +1086,16 @@ export function QuantWorkspace() {
   }, [marketSearchQuery]);
 
   useEffect(() => {
+    if (!quantMarkets.length) return undefined;
+    const timer = window.setTimeout(() => {
+      quantMarkets.slice(0, 6).forEach((market) => {
+        if (market.marketSlug && market.marketSlug !== marketSlugRef.current) prefetchMarketSlug(market.marketSlug);
+      });
+    }, 240);
+    return () => window.clearTimeout(timer);
+  }, [quantMarkets, priceSource, timeframe]);
+
+  useEffect(() => {
     if (!marketSlug.trim()) return;
     const seq = priceLoadSeq.current + 1;
     priceLoadSeq.current = seq;
@@ -967,6 +1111,7 @@ export function QuantWorkspace() {
   useEffect(() => {
     return () => {
       if (priceRetryTimerRef.current) window.clearTimeout(priceRetryTimerRef.current);
+      if (viewportFetchTimerRef.current) window.clearTimeout(viewportFetchTimerRef.current);
     };
   }, []);
 
@@ -990,11 +1135,13 @@ export function QuantWorkspace() {
   }, [livePriceRefreshEnabled, marketSlug, priceSource, timeframe, selectedEntityKind]);
 
   useEffect(() => {
-    if (!livePriceRefreshEnabled || selectedEntityKind !== 'event' || !marketSlug.trim() || typeof EventSource === 'undefined') return undefined;
-    const stream = new EventSource(quantEventPriceStreamUrl({
-      eventSlug: marketSlug,
+    if (!livePriceRefreshEnabled || !marketSlug.trim() || typeof EventSource === 'undefined') return undefined;
+    const stream = new EventSource(quantPriceStreamUrl({
+      entityType: selectedEntityKind,
+      eventSlug: selectedEntityKind === 'event' ? marketSlug : undefined,
+      marketSlug: selectedEntityKind === 'market' ? marketSlug : undefined,
       priceSource: backendPriceSource(priceSource),
-      maxOutcomes: EVENT_TILE_OUTCOME_LIMIT,
+      maxOutcomes: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
       interval: priceSource === 'frontend' ? 10 : 2,
     }));
     const onPrice = (event: MessageEvent) => {
@@ -1378,6 +1525,7 @@ export function QuantWorkspace() {
             }}
             viewportResetKey={`${marketSlug}|${priceSource}|${timeframe}|${viewportResetSeq}`}
             onViewportModeChange={updateViewportMode}
+            onVisibleWindowChange={requestViewportWindow}
           />
         </section>
 
