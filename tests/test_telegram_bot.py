@@ -551,7 +551,7 @@ def test_polydata_api_falls_back_to_next_base_url():
     assert api.session.calls[1][0] == "http://good.local/wm-api/markets"
 
 
-def test_worldcup_market_search_survives_local_market_timeout(monkeypatch):
+def test_worldcup_market_search_skips_local_search_by_default(monkeypatch):
     api = PolyDataBotApi(base_url="http://bad.local/wm-api", timeout_seconds=1)
     api.session = FakeApiSession()
     monkeypatch.setattr(
@@ -563,6 +563,23 @@ def test_worldcup_market_search_survives_local_market_timeout(monkeypatch):
     payload = api.worldcup_market_search("mexico south africa", limit=2)
 
     assert payload["items"][0]["title"] == "Mexico vs South Africa - FIFA World Cup 2026 winner"
+    assert api.session.calls == []
+
+
+def test_worldcup_market_search_survives_enabled_local_market_timeout(monkeypatch):
+    monkeypatch.setenv("POLYDATA_TELEGRAM_WORLDCUP_LOCAL_MARKET_SEARCH", "1")
+    api = PolyDataBotApi(base_url="http://bad.local/wm-api", timeout_seconds=1)
+    api.session = FakeApiSession()
+    monkeypatch.setattr(
+        api,
+        "gamma_search_markets",
+        lambda query, limit=8: {"items": [{"title": "Mexico vs South Africa - FIFA World Cup 2026 winner"}]},
+    )
+
+    payload = api.worldcup_market_search("mexico south africa", limit=2)
+
+    assert payload["items"][0]["title"] == "Mexico vs South Africa - FIFA World Cup 2026 winner"
+    assert api.session.calls[0][0] == "http://bad.local/wm-api/markets"
 
 
 def test_worldcup_market_search_expands_chinese_query_and_skips_local_timeout(monkeypatch):
@@ -580,4 +597,4 @@ def test_worldcup_market_search_expands_chinese_query_and_skips_local_timeout(mo
 
     assert payload["items"][0]["title"] == "Mexico vs South Africa - FIFA World Cup 2026 winner"
     assert gamma_queries[0] == "Mexico South Africa"
-    assert api.session.calls[0][1]["q"] == "Mexico South Africa"
+    assert api.session.calls == []

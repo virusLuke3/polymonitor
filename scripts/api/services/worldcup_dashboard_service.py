@@ -251,7 +251,7 @@ def _polymarket_url(row: Dict[str, Any]) -> str:
     return f"https://polymarket.com/search?query={quote_plus(title)}" if title else ""
 
 
-def _worldcup_market_score(match: Dict[str, Any], row: Dict[str, Any]) -> int:
+def _worldcup_market_reject_reason(match: Dict[str, Any], row: Dict[str, Any]) -> str:
     text = _market_text(row)
     primary_text = _market_primary_text(row)
     tokens = set(_tokenize(primary_text))
@@ -260,10 +260,17 @@ def _worldcup_market_score(match: Dict[str, Any], row: Dict[str, Any]) -> int:
     home_hit = bool(home_tokens & tokens) or str(match.get("homeTeam") or "").lower() in primary_text
     away_hit = bool(away_tokens & tokens) or str(match.get("awayTeam") or "").lower() in primary_text
     if not home_hit or not away_hit:
-        return 0
+        return "missing-team"
     worldcup_hit = any(term in text for term in ("world cup", "fifa", "wc2026", "2026"))
     if not worldcup_hit:
+        return "not-worldcup"
+    return ""
+
+
+def _worldcup_market_score(match: Dict[str, Any], row: Dict[str, Any]) -> int:
+    if _worldcup_market_reject_reason(match, row):
         return 0
+    text = _market_text(row)
     score = 80
     if "draw" in text or "winner" in text or "moneyline" in text:
         score += 8
@@ -359,6 +366,25 @@ def _search_market_sources(ctx: Dict[str, Any], query: str, *, limit: int = 8) -
     return rows
 
 
+def _new_market_linker_stats(*, scan_limit: int, scheduled_count: int) -> Dict[str, Any]:
+    return {
+        "version": "worldcup-market-linker-v2",
+        "scanLimit": scan_limit,
+        "scheduledMatches": scheduled_count,
+        "matchesScanned": 0,
+        "queries": 0,
+        "candidates": 0,
+        "matched": 0,
+        "sources": {},
+        "rejections": {
+            "no-candidates": 0,
+            "missing-team": 0,
+            "not-worldcup": 0,
+            "duplicate": 0,
+        },
+    }
+
+
 def _clob_snapshot(ctx: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any]:
     getter = ctx.get("get_market_clob_price_snapshot")
     if not callable(getter):
@@ -370,15 +396,17 @@ def _clob_snapshot(ctx: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any
     return snapshot if isinstance(snapshot, dict) else {}
 
 
-def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
+def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
     if not matches:
-        return [], "empty"
+        return [], "empty", _new_market_linker_stats(scan_limit=0, scheduled_count=0)
     settings = ctx.get("SETTINGS")
     scan_limit = int(getattr(settings, "worldcup_market_link_scan_limit", 36) or 36)
     scheduled = [match for match in matches if str(match.get("status") or "") != "finished"][: max(1, scan_limit)]
+    stats = _new_market_linker_stats(scan_limit=scan_limit, scheduled_count=len(scheduled))
     rows: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for match in scheduled:
+        stats["matchesScanned"] += 1
         home = str(match.get("homeTeam") or "").strip()
         away = str(match.get("awayTeam") or "").strip()
         if not home or not away or home == "TBD" or away == "TBD":
@@ -390,16 +418,30 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
         ]
         best: Optional[Dict[str, Any]] = None
         best_score = 0
+        match_candidates = 0
         for query in queries:
-            for candidate in _search_market_sources(ctx, query, limit=8):
+            stats["queries"] += 1
+            candidates = _search_market_sources(ctx, query, limit=8)
+            match_candidates += len(candidates)
+            stats["candidates"] += len(candidates)
+            for candidate in candidates:
+                source = str(candidate.get("source") or "unknown")
+                stats["sources"][source] = int(stats["sources"].get(source) or 0) + 1
+                reason = _worldcup_market_reject_reason(match, candidate)
+                if reason:
+                    stats["rejections"][reason] = int(stats["rejections"].get(reason) or 0) + 1
+                    continue
                 score = _worldcup_market_score(match, candidate)
                 if score > best_score:
                     best = candidate
                     best_score = score
         if not best or best_score <= 0:
+            if match_candidates <= 0:
+                stats["rejections"]["no-candidates"] = int(stats["rejections"].get("no-candidates") or 0) + 1
             continue
         key = str(best.get("slug") or best.get("marketTitle") or match.get("id"))
         if key in seen:
+            stats["rejections"]["duplicate"] = int(stats["rejections"].get("duplicate") or 0) + 1
             continue
         seen.add(key)
         outcomes = _safe_list(best.get("outcomes"))
@@ -434,9 +476,10 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
                 "confidence": min(99, best_score),
             }
         )
+        stats["matched"] += 1
         match["marketLinked"] = True
         match["oddsLinked"] = bool(outcome_prices)
-    return rows, "ok" if rows else "empty"
+    return rows, "ok" if rows else "empty", stats
 
 
 def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -446,6 +489,7 @@ def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     news = payload.get("news") if isinstance(payload.get("news"), list) else []
     rosters = payload.get("rosters") if isinstance(payload.get("rosters"), list) else []
     odds = payload.get("odds") if isinstance(payload.get("odds"), list) else []
+    market_linker = payload.get("marketLinker") if isinstance(payload.get("marketLinker"), dict) else {}
     return {
         "generatedAt": str(payload.get("generatedAt") or _utc_now_iso()),
         "cacheMode": str(payload.get("cacheMode") or "remote"),
@@ -466,6 +510,7 @@ def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "source": str(payload.get("source") or "World Cup verified dashboard"),
         "sourceUrl": str(payload.get("sourceUrl") or OPENFOOTBALL_2026_URL),
         "providerStates": payload.get("providerStates") if isinstance(payload.get("providerStates"), dict) else {},
+        "marketLinker": market_linker,
         "summary": {
             "cities": len(cities),
             "matches": len(matches),
@@ -473,6 +518,8 @@ def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "weatherCities": len(weather),
             "rosters": len(rosters),
             "odds": len(odds),
+            "oddsCandidates": int(market_linker.get("candidates") or 0),
+            "oddsMatched": int(market_linker.get("matched") or len(odds)),
         },
     }
 
@@ -505,7 +552,7 @@ def build_worldcup_dashboard_payload(ctx: Dict[str, Any]) -> Dict[str, Any]:
     weather = intel.get("weather") if isinstance(intel, dict) and isinstance(intel.get("weather"), list) else []
     intel_news = intel.get("news") if isinstance(intel, dict) and isinstance(intel.get("news"), list) else []
     news = intel_news[:24]
-    odds, odds_state = _link_worldcup_markets(ctx, matches)
+    odds, odds_state, market_linker = _link_worldcup_markets(ctx, matches)
     starts_at = matches[0]["kickoffUtc"] if matches else "2026-06-11T19:00:00Z"
     ends_at = matches[-1]["kickoffUtc"] if matches else "2026-07-19T19:00:00Z"
     return _normalize_payload(
@@ -525,6 +572,7 @@ def build_worldcup_dashboard_payload(ctx: Dict[str, Any]) -> Dict[str, Any]:
             "weather": weather,
             "rosters": [],
             "odds": odds,
+            "marketLinker": market_linker,
             "intelligence": intel,
             "source": f"{schedule_source} / {intel.get('source') if isinstance(intel, dict) else 'runtime intel'}",
             "sourceUrl": OPENFOOTBALL_2026_URL,

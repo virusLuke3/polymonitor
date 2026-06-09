@@ -12,6 +12,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import worldcup_dashboard_service
+from runtime import worldcup_dashboard_watcher
 
 
 def test_worldcup_dashboard_links_strict_polymarket_market():
@@ -68,6 +69,9 @@ def test_worldcup_dashboard_links_strict_polymarket_market():
 
     assert payload["providerStates"]["odds"] == "ok"
     assert payload["summary"]["odds"] == 1
+    assert payload["summary"]["oddsMatched"] == 1
+    assert payload["marketLinker"]["matched"] == 1
+    assert payload["marketLinker"]["candidates"] >= 1
     assert payload["matches"][0]["marketLinked"] is True
     assert payload["matches"][0]["oddsLinked"] is True
     odds = payload["odds"][0]
@@ -130,3 +134,32 @@ def test_worldcup_dashboard_rejects_event_level_false_positive_market():
     assert payload["providerStates"]["odds"] == "empty"
     assert payload["odds"] == []
     assert payload["matches"][0]["marketLinked"] is False
+    assert payload["marketLinker"]["matched"] == 0
+    assert payload["marketLinker"]["rejections"]["missing-team"] >= 1
+
+
+def test_worldcup_dashboard_watcher_builds_new_odds_alert_candidate():
+    previous = {"odds": [{"matchId": "wc2026-001"}]}
+    current = {
+        "odds": [
+            {"matchId": "wc2026-001"},
+            {
+                "matchId": "wc2026-002",
+                "homeTeam": "South Korea",
+                "awayTeam": "Czech Republic",
+                "marketTitle": "South Korea vs Czech Republic - FIFA World Cup 2026 winner",
+                "marketUrl": "https://polymarket.com/event/south-korea-czech-republic",
+                "probabilities": [{"outcome": "South Korea", "price": "0.42"}],
+            },
+        ]
+    }
+
+    new_rows = worldcup_dashboard_watcher._new_odds(previous, current)
+    candidate = worldcup_dashboard_watcher._odds_alert_candidate(new_rows[0])
+
+    assert len(new_rows) == 1
+    assert candidate.topic == "worldcup"
+    assert candidate.priority == "normal"
+    assert "World Cup odds listed" in candidate.text
+    assert "South Korea vs Czech Republic" in candidate.text
+    assert candidate.reply_markup

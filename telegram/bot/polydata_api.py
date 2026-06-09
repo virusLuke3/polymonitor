@@ -48,6 +48,13 @@ def _expand_worldcup_query(query: str) -> str:
     return " ".join(expanded.split())
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 class PolyDataBotApi:
     def __init__(self, *, base_url: str, timeout_seconds: int = 12, base_urls: Optional[Iterable[str]] = None) -> None:
         self.base_url = str(base_url or "").rstrip("/")
@@ -56,6 +63,7 @@ class PolyDataBotApi:
         self.session = requests.Session()
         self.session.trust_env = False
         self.session.headers.update({"Accept": "application/json", "User-Agent": "polydata-telegram-bot/1.0"})
+        self.worldcup_local_market_search_enabled = _env_bool("POLYDATA_TELEGRAM_WORLDCUP_LOCAL_MARKET_SEARCH", False)
 
     def get_json(self, path: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not self.base_urls:
@@ -138,7 +146,7 @@ class PolyDataBotApi:
         seen: set[str] = set()
         for variant in variants:
             payloads: list[Dict[str, Any]] = []
-            if not _contains_cjk(variant):
+            if self.worldcup_local_market_search_enabled and not _contains_cjk(variant):
                 try:
                     payloads.append(self.search_markets(variant, limit=limit))
                 except requests.RequestException:

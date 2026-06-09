@@ -36,12 +36,18 @@ from api.config import load_api_settings
 from api.services import worldcup_dashboard_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
+from telegram.topics.client import TelegramClient
+from telegram.topics.config import load_settings as load_telegram_settings
+from telegram.topics.models import MessageCandidate
+from telegram.topics.publisher import publish_candidates
+from telegram.topics.state import PublishState
 
 
 DEFAULT_INTERVAL_SECONDS = 300
 SEED_META_NAMESPACE = "seed-meta:sports"
 SEED_META_CACHE_KEY = "worldcup-dashboard"
 SEED_META_SERVICE_NAME = "polydata-worldcup-dashboard-seed.service"
+WORLDCUP_WORKSPACE_URL = "https://www.polymonitor.club/?workspace=worldcup"
 
 
 class _LoggerAdapter:
@@ -65,6 +71,66 @@ def _record_count(payload: Dict[str, Any]) -> int:
     return sum(
         len(payload.get(key) if isinstance(payload.get(key), list) else [])
         for key in ("cities", "matches", "news", "weather", "odds")
+    )
+
+
+def _odds_key(row: Dict[str, Any]) -> str:
+    return str(row.get("matchId") or row.get("slug") or row.get("marketTitle") or row.get("title") or "").strip()
+
+
+def _new_odds(previous: Dict[str, Any], current: Dict[str, Any]) -> list[Dict[str, Any]]:
+    previous_keys = {
+        _odds_key(row)
+        for row in previous.get("odds", [])
+        if isinstance(row, dict) and _odds_key(row)
+    }
+    rows: list[Dict[str, Any]] = []
+    for row in current.get("odds", []):
+        if not isinstance(row, dict):
+            continue
+        key = _odds_key(row)
+        if key and key not in previous_keys:
+            rows.append(row)
+    return rows
+
+
+def _odds_alert_candidate(row: Dict[str, Any]) -> MessageCandidate:
+    home = str(row.get("homeTeam") or "Home").strip()
+    away = str(row.get("awayTeam") or "Away").strip()
+    title = str(row.get("marketTitle") or row.get("title") or f"{home} vs {away}").strip()
+    market_url = str(row.get("marketUrl") or "").strip()
+    probabilities = row.get("probabilities") if isinstance(row.get("probabilities"), list) else []
+    lines = [
+        f"{home} vs {away}",
+        title[:180],
+    ]
+    if probabilities:
+        pairs = []
+        for item in probabilities[:4]:
+            if not isinstance(item, dict):
+                continue
+            outcome = str(item.get("outcome") or "").strip()
+            price = str(item.get("price") or "").strip()
+            if outcome and price:
+                pairs.append(f"{outcome} {price}")
+        if pairs:
+            lines.append(" | ".join(pairs))
+    if market_url:
+        lines.append(f"Market: {market_url}")
+    lines.append(f"Workspace: {WORLDCUP_WORKSPACE_URL}")
+    return MessageCandidate(
+        topic="worldcup",
+        dedupe_key=f"worldcup-odds-listed:{_odds_key(row)}",
+        text="\n".join(["⚽ World Cup odds listed", "", *lines]),
+        priority="normal",
+        metadata={"panel": "worldcup-dashboard", "kind": "odds-listed"},
+        link_preview=bool(market_url or WORLDCUP_WORKSPACE_URL),
+        reply_markup={
+            "inline_keyboard": [
+                [{"text": "Odds", "url": "https://t.me/PolyMonitorQuery_bot?start=odds"}, {"text": "Match", "url": "https://t.me/PolyMonitorQuery_bot?start=worldcup"}],
+                [{"text": "Open Workspace", "url": WORLDCUP_WORKSPACE_URL}],
+            ]
+        },
     )
 
 
@@ -165,6 +231,29 @@ class WorldCupDashboardWatcher:
         )
         self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
 
+    def publish_new_odds_alerts(self, previous: Dict[str, Any], payload: Dict[str, Any]) -> int:
+        rows = _new_odds(previous, payload)
+        if not rows:
+            return 0
+        try:
+            settings = load_telegram_settings()
+        except Exception as exc:
+            print(f"[worldcup-dashboard] WARN telegram settings unavailable for odds alert: {exc}", file=sys.stderr)
+            return 0
+        if not settings.bot_token and not settings.dry_run:
+            return 0
+        candidates = [_odds_alert_candidate(row) for row in rows[:8]]
+        state = PublishState(settings.state_path)
+        telegram = TelegramClient(
+            bot_token=settings.bot_token,
+            api_base=settings.telegram_api_base,
+            timeout_seconds=settings.request_timeout_seconds,
+        )
+        result = publish_candidates(candidates, settings=settings, state=state, telegram=telegram, dry_run=settings.dry_run)
+        if result.sent:
+            print(f"[worldcup-dashboard] odds-alert sent={result.sent} candidates={len(candidates)}", file=sys.stderr)
+        return result.sent
+
     def store_seed_meta(
         self,
         *,
@@ -237,6 +326,7 @@ class WorldCupDashboardWatcher:
 
         payload = {**payload, "cacheMode": "remote"}
         self.store_payload(payload)
+        odds_alerts_sent = self.publish_new_odds_alerts(previous, payload)
         status = "ok" if record_count > 0 and len(payload.get("matches") or []) >= 64 else "degraded"
         self.store_seed_meta(
             status=status,
@@ -244,7 +334,7 @@ class WorldCupDashboardWatcher:
             source_states=payload.get("providerStates") if isinstance(payload.get("providerStates"), dict) else {},
             error_summary=None if status == "ok" else "World Cup dashboard snapshot is degraded",
         )
-        return {"status": status, "payload": payload}
+        return {"status": status, "payload": payload, "oddsAlertsSent": odds_alerts_sent}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
