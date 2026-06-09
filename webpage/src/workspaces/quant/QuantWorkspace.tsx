@@ -2089,7 +2089,7 @@ export function QuantWorkspace() {
   ]);
 
   useEffect(() => {
-    if (inspectorTab !== 'book') return undefined;
+    if (inspectorTab !== 'book' && inspectorTab !== 'dataQuality') return undefined;
     if (!selectedBookYesTokenId) {
       setLiveLob(null);
       setLiveLobStatus('empty');
