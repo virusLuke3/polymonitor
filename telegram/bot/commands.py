@@ -24,6 +24,7 @@ from .formatters import (
     help_text,
     is_address,
     start_text,
+    worldcup_matches_page_info,
 )
 from .models import BotReply, CommandRequest
 from .state import BotState
@@ -64,6 +65,48 @@ def _worldcup_keyboard() -> dict:
     )
 
 
+def _onboarding_keyboard() -> dict:
+    return _keyboard(
+        [
+            [("World Cup", "/worldcup"), ("Matches", "/matches")],
+            [("Odds", "/odds mexico south africa"), ("Help", "/help")],
+        ]
+    )
+
+
+def _matches_keyboard(dashboard: dict, args: str) -> dict:
+    info = worldcup_matches_page_info(dashboard, args)
+    page = int(info.get("page") or 1)
+    total_pages = int(info.get("totalPages") or 1)
+    rows: list[list[tuple[str, str]]] = [
+        [("Today", "/matches today"), ("Tomorrow", "/matches tomorrow")],
+        [("Group A", "/matches group a"), ("Group B", "/matches group b"), ("Group C", "/matches group c")],
+    ]
+    pager: list[tuple[str, str]] = []
+    if page > 1:
+        pager.append(("Prev", f"/matches page {page - 1}"))
+    if page < total_pages:
+        pager.append(("Next", f"/matches page {page + 1}"))
+    if pager:
+        rows.append(pager)
+    rows.append([("Overview", "/worldcup"), ("Open Workspace", "https://www.polymonitor.club/?workspace=worldcup")])
+    return _keyboard(rows)
+
+
+COMMAND_ALIASES = {
+    "世界杯": "worldcup",
+    "赛程": "matches",
+    "比赛": "match",
+    "球队": "team",
+    "场馆": "venue",
+    "天气": "weather",
+    "新闻": "news",
+    "赔率": "odds",
+    "胜率": "odds",
+    "帮助": "help",
+}
+
+
 def _usage(command: str) -> BotReply:
     usages = {
         "market": "请使用：/market nba 或 /market bitcoin",
@@ -80,8 +123,17 @@ def _usage(command: str) -> BotReply:
     return BotReply(f"⚠️ {command}\n{usages.get(command, '请使用 /help 查看命令')}")
 
 
-def _service_error(label: str) -> BotReply:
-    return BotReply(f"⚠️ {label}\n服务暂时不可用，稍后再试。")
+def _service_error(label: str, detail: str = "") -> BotReply:
+    hints = {
+        "worldcup": "赛程缓存可能仍可用；如果连续失败，说明 World Cup runtime API 正在恢复。",
+        "worldcup matches": "赛程缓存暂时读不到，稍后再试。",
+        "worldcup weather": "天气 provider 可能为空，比赛/场馆数据通常不受影响。",
+        "worldcup odds": "Polymarket 搜索或市场 linker 暂时超时，避免返回不确定胜率。",
+    }
+    lines = [f"⚠️ {label}", detail or "服务暂时不可用，稍后再试。"]
+    if label in hints:
+        lines.append(hints[label])
+    return BotReply("\n".join(lines))
 
 
 def _parse_alert_args(args: str) -> tuple[str, float] | None:
@@ -99,10 +151,22 @@ def _parse_alert_args(args: str) -> tuple[str, float] | None:
 
 
 def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotState] = None) -> BotReply:
-    command = request.command
+    command = COMMAND_ALIASES.get(request.command, request.command)
     args = request.args.strip()
     if command == "start":
-        return BotReply(start_text())
+        if state is not None:
+            state.record_user(chat_id=request.chat_id, user_id=request.user_id)
+            state.save()
+        if args.lower() == "worldcup":
+            try:
+                dashboard = api.worldcup_dashboard()
+                intel = api.worldcup_intel(limit=24)
+                return BotReply(format_worldcup_overview(dashboard, intel), link_preview=False, reply_markup=_worldcup_keyboard())
+            except requests.RequestException:
+                return _service_error("worldcup")
+        if args.lower() == "odds":
+            return BotReply("⚽ worldcup odds\n请选择一场比赛，或输入：/odds mexico south africa", reply_markup=_worldcup_keyboard())
+        return BotReply(start_text(), link_preview=False, reply_markup=_onboarding_keyboard())
     if command == "help":
         return BotReply(help_text())
     if command == "market":
@@ -121,10 +185,11 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
             return _service_error("worldcup")
     if command == "matches":
         try:
+            dashboard = api.worldcup_dashboard()
             return BotReply(
-                format_worldcup_matches(api.worldcup_dashboard(), args),
+                format_worldcup_matches(dashboard, args),
                 link_preview=False,
-                reply_markup=_keyboard([[("Page 2", "/matches page 2"), ("Group A", "/matches group a")], [("Overview", "/worldcup")]]),
+                reply_markup=_matches_keyboard(dashboard, args),
             )
         except requests.RequestException:
             return _service_error("worldcup matches")

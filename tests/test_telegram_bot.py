@@ -188,6 +188,10 @@ class FakeTelegram:
         self.sent.append(kwargs)
         return [{"ok": True}]
 
+    def answer_callback_query(self, **kwargs):
+        self.last_callback_answer = kwargs
+        return {"ok": True}
+
 
 class FakeApiResponse:
     def __init__(self, payload, *, status_code=200):
@@ -292,6 +296,24 @@ def test_parse_update_supports_callback_query_commands():
     assert request.callback_query_id == "callback-1"
 
 
+def test_parse_update_supports_chinese_commands():
+    request = parse_update(
+        {
+            "update_id": 9,
+            "message": {
+                "message_id": 13,
+                "text": "/比赛 墨西哥 南非",
+                "chat": {"id": -100},
+                "from": {"id": 42},
+            },
+        }
+    )
+
+    assert request is not None
+    assert request.command == "比赛"
+    assert request.args == "墨西哥 南非"
+
+
 def test_market_formatter_adds_price_tags_and_polymarket_link():
     text = format_market_search("nba", FakeApi().search_markets("nba"))
 
@@ -343,8 +365,11 @@ def test_handle_command_routes_first_version_commands():
     assert "Page 1/" in handle_command(CommandRequest(command="matches", args="", **base), api).text
     assert "没有找到比赛" in handle_command(CommandRequest(command="matches", args="today", **base), api).text
     assert "Group A" in handle_command(CommandRequest(command="matches", args="group a", **base), api).text
+    assert "Next" in str(handle_command(CommandRequest(command="matches", args="", **base), api).reply_markup)
+    assert "Prev" in str(handle_command(CommandRequest(command="matches", args="page 2", **base), api).reply_markup)
     assert "Kickoff" in handle_command(CommandRequest(command="match", args="mexico south africa", **base), api).text
     assert "Kickoff" in handle_command(CommandRequest(command="match", args="mex 南非", **base), api).text
+    assert "Kickoff" in handle_command(CommandRequest(command="比赛", args="墨西哥 南非", **base), api).text
     assert "Mexico World Cup opener" in handle_command(CommandRequest(command="team", args="mexico", **base), api).text
     assert "Sunny" in handle_command(CommandRequest(command="venue", args="mexico", **base), api).text
     assert "Mexico World Cup opener" in handle_command(CommandRequest(command="news", args="mexico", **base), api).text
@@ -462,6 +487,9 @@ def test_run_once_sends_and_persists_offset(tmp_path: Path):
     assert handled == 1
     assert state.offset == 11
     assert "Spurs vs. Thunder" in telegram.sent[0]["text"]
+    assert state.data["queryAnalytics"]["commands"]["market"] == 1
+    assert state.data["queryAnalytics"]["queries"]["nba"] == 1
+    assert state.data["users"]["456"]["chatId"] == "123"
 
 
 def test_run_once_rejects_unauthorized_chat(tmp_path: Path):

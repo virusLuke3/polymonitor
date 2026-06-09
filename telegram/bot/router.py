@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from .models import CommandRequest
 
 
-COMMAND_RE = re.compile(r"^/([A-Za-z0-9_]+)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$", re.DOTALL)
+COMMAND_RE = re.compile(r"^/([A-Za-z0-9_\u4e00-\u9fff]+)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$", re.DOTALL)
 
 
 def parse_update(update: Dict[str, Any]) -> Optional[CommandRequest]:

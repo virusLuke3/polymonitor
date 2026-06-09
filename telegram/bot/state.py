@@ -49,6 +49,66 @@ class BotState:
         buckets[key] = fresh
         return False
 
+    def record_user(self, *, chat_id: int | str, user_id: int | None) -> None:
+        if user_id is None:
+            return
+        users = self.data.get("users")
+        if not isinstance(users, dict):
+            users = {}
+            self.data["users"] = users
+        key = str(user_id)
+        now = int(time.time())
+        existing = users.get(key) if isinstance(users.get(key), dict) else {}
+        users[key] = {
+            **existing,
+            "userId": int(user_id),
+            "chatId": str(chat_id),
+            "firstSeenTs": int(existing.get("firstSeenTs") or now),
+            "lastSeenTs": now,
+        }
+
+    def record_query(
+        self,
+        *,
+        chat_id: int | str,
+        user_id: int | None,
+        command: str,
+        args: str = "",
+        matched: bool = True,
+    ) -> None:
+        analytics = self.data.get("queryAnalytics")
+        if not isinstance(analytics, dict):
+            analytics = {}
+            self.data["queryAnalytics"] = analytics
+        commands = analytics.get("commands")
+        if not isinstance(commands, dict):
+            commands = {}
+            analytics["commands"] = commands
+        command_key = str(command or "unknown").lower()
+        commands[command_key] = int(commands.get(command_key) or 0) + 1
+        clean_args = " ".join(str(args or "").strip().lower().split())[:96]
+        if clean_args:
+            queries = analytics.get("queries")
+            if not isinstance(queries, dict):
+                queries = {}
+                analytics["queries"] = queries
+            queries[clean_args] = int(queries.get(clean_args) or 0) + 1
+        if not matched:
+            misses = analytics.get("misses")
+            if not isinstance(misses, list):
+                misses = []
+                analytics["misses"] = misses
+            misses.append({"command": command_key, "args": clean_args, "chatId": str(chat_id), "userId": user_id, "ts": int(time.time())})
+            analytics["misses"] = misses[-100:]
+        analytics["lastQuery"] = {
+            "command": command_key,
+            "args": clean_args,
+            "chatId": str(chat_id),
+            "userId": user_id,
+            "matched": bool(matched),
+            "ts": int(time.time()),
+        }
+
     @property
     def last_alert_check_ts(self) -> float:
         try:

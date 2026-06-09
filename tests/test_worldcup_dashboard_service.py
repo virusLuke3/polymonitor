@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_ROOT = REPO_ROOT / "scripts"
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+from api.services import worldcup_dashboard_service
+
+
+def test_worldcup_dashboard_links_strict_polymarket_market():
+    source_schedule = {
+        "matches": [
+            {
+                "num": 1,
+                "date": "2026-06-11",
+                "time": "13:00 UTC-6",
+                "team1": "Mexico",
+                "team2": "South Africa",
+                "group": "Group A",
+                "round": "Matchday 1",
+                "ground": "Mexico City",
+            }
+        ]
+    }
+    gamma_market = {
+        "data": [
+            {
+                "title": "FIFA World Cup 2026",
+                "slug": "fifa-world-cup-2026",
+                "markets": [
+                    {
+                        "question": "Mexico vs South Africa - FIFA World Cup 2026 winner",
+                        "slug": "mexico-south-africa-world-cup-2026-winner",
+                        "outcomes": '["Mexico","Draw","South Africa"]',
+                        "outcomePrices": '["0.52","0.26","0.22"]',
+                    }
+                ],
+            },
+            {"title": "Rihanna album 2026", "slug": "rihanna-album-2026"},
+        ]
+    }
+
+    def http_json_get(url, *, params=None, timeout=12, headers=None):
+        if "openfootball" in url:
+            return source_schedule
+        if "gamma-api.polymarket.com" in url:
+            return gamma_market
+        raise AssertionError(url)
+
+    ctx = {
+        "http_json_get": http_json_get,
+        "SETTINGS": SimpleNamespace(worldcup_market_link_scan_limit=4),
+    }
+
+    with patch.object(
+        worldcup_dashboard_service.worldcup_intel_service,
+        "get_worldcup_intel_snapshot",
+        return_value={"status": "ok", "weather": [], "news": [], "signals": []},
+    ):
+        payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(ctx)
+
+    assert payload["providerStates"]["odds"] == "ok"
+    assert payload["summary"]["odds"] == 1
+    assert payload["matches"][0]["marketLinked"] is True
+    assert payload["matches"][0]["oddsLinked"] is True
+    odds = payload["odds"][0]
+    assert odds["matchId"] == "wc2026-001"
+    assert odds["probabilities"][0] == {"outcome": "Mexico", "price": "0.52"}
+    assert "rihanna" not in odds["marketTitle"].lower()

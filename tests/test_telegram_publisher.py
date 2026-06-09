@@ -296,6 +296,8 @@ def test_worldcup_intel_formatter_routes_to_worldcup_topic():
     assert "- dallas: Partly cloudy | 26C | rain 40%" in message.text
     assert "Workspace: https://www.polymonitor.club/?workspace=worldcup" in message.text
     assert message.link_preview is True
+    assert message.reply_markup
+    assert "PolyMonitorQuery_bot" in str(message.reply_markup)
 
 
 def test_publish_state_dedupes_and_dry_run_does_not_mark(tmp_path: Path):
@@ -303,7 +305,12 @@ def test_publish_state_dedupes_and_dry_run_does_not_mark(tmp_path: Path):
     settings = make_settings(state_path)
     state = PublishState(state_path)
     telegram = FakeTelegram()
-    candidate = MessageCandidate(topic="nba", dedupe_key="same", text="hello")
+    candidate = MessageCandidate(
+        topic="nba",
+        dedupe_key="same",
+        text="hello",
+        reply_markup={"inline_keyboard": [[{"text": "Open", "url": "https://example.test"}]]},
+    )
 
     dry_result = publish_candidates([candidate], settings=settings, state=state, telegram=telegram, dry_run=True)
     assert dry_result.sent == 1
@@ -317,6 +324,7 @@ def test_publish_state_dedupes_and_dry_run_does_not_mark(tmp_path: Path):
     assert second.sent == 0
     assert second.skipped_seen == 1
     assert telegram.calls[0]["chat_id"] == "@nba"
+    assert telegram.calls[0]["reply_markup"]["inline_keyboard"][0][0]["text"] == "Open"
 
 
 def test_telegram_client_retries_429_and_redacts_token(monkeypatch):

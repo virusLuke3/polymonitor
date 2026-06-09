@@ -42,6 +42,92 @@ TEAM_ALIASES = {
     "西班牙": "Spain",
     "portugal": "Portugal 葡萄牙",
     "葡萄牙": "Portugal",
+    "australia": "Australia 澳大利亚",
+    "澳大利亚": "Australia",
+    "belgium": "Belgium 比利时",
+    "比利时": "Belgium",
+    "bosnia": "Bosnia Herzegovina Bosnia & Herzegovina 波黑 波斯尼亚",
+    "bosnia & herzegovina": "Bosnia Herzegovina Bosnia & Herzegovina 波黑 波斯尼亚",
+    "波黑": "Bosnia Herzegovina Bosnia & Herzegovina",
+    "波斯尼亚": "Bosnia Herzegovina Bosnia & Herzegovina",
+    "colombia": "Colombia 哥伦比亚",
+    "哥伦比亚": "Colombia",
+    "croatia": "Croatia 克罗地亚",
+    "克罗地亚": "Croatia",
+    "denmark": "Denmark 丹麦",
+    "丹麦": "Denmark",
+    "ecuador": "Ecuador 厄瓜多尔",
+    "厄瓜多尔": "Ecuador",
+    "egypt": "Egypt 埃及",
+    "埃及": "Egypt",
+    "ghana": "Ghana 加纳",
+    "加纳": "Ghana",
+    "haiti": "Haiti 海地",
+    "海地": "Haiti",
+    "iran": "Iran 伊朗",
+    "伊朗": "Iran",
+    "italy": "Italy 意大利",
+    "意大利": "Italy",
+    "japan": "Japan 日本",
+    "日本": "Japan",
+    "morocco": "Morocco 摩洛哥",
+    "摩洛哥": "Morocco",
+    "netherlands": "Netherlands Holland 荷兰",
+    "holland": "Netherlands Holland 荷兰",
+    "荷兰": "Netherlands Holland",
+    "new zealand": "New Zealand 新西兰",
+    "新西兰": "New Zealand",
+    "norway": "Norway 挪威",
+    "挪威": "Norway",
+    "paraguay": "Paraguay 巴拉圭",
+    "巴拉圭": "Paraguay",
+    "poland": "Poland 波兰",
+    "波兰": "Poland",
+    "qatar": "Qatar 卡塔尔",
+    "卡塔尔": "Qatar",
+    "saudi arabia": "Saudi Arabia 沙特 沙特阿拉伯",
+    "沙特": "Saudi Arabia",
+    "沙特阿拉伯": "Saudi Arabia",
+    "senegal": "Senegal 塞内加尔",
+    "塞内加尔": "Senegal",
+    "serbia": "Serbia 塞尔维亚",
+    "塞尔维亚": "Serbia",
+    "switzerland": "Switzerland 瑞士",
+    "瑞士": "Switzerland",
+    "tunisia": "Tunisia 突尼斯",
+    "突尼斯": "Tunisia",
+    "uruguay": "Uruguay 乌拉圭",
+    "乌拉圭": "Uruguay",
+    "mexico city": "Mexico City mexico-city Estadio Azteca 墨西哥城 阿兹特克",
+    "墨西哥城": "Mexico City mexico-city Estadio Azteca",
+    "dallas": "Dallas Arlington AT&T Stadium 达拉斯 阿灵顿",
+    "达拉斯": "Dallas Arlington AT&T Stadium",
+    "los angeles": "Los Angeles Inglewood SoFi Stadium 洛杉矶",
+    "洛杉矶": "Los Angeles Inglewood SoFi Stadium",
+    "toronto": "Toronto BMO Field 多伦多",
+    "多伦多": "Toronto BMO Field",
+    "seattle": "Seattle Lumen Field 西雅图",
+    "西雅图": "Seattle Lumen Field",
+    "atlanta": "Atlanta Mercedes-Benz Stadium 亚特兰大",
+    "亚特兰大": "Atlanta Mercedes-Benz Stadium",
+    "vancouver": "Vancouver BC Place 温哥华",
+    "温哥华": "Vancouver BC Place",
+    "miami": "Miami Gardens Hard Rock Stadium 迈阿密",
+    "迈阿密": "Miami Gardens Hard Rock Stadium",
+    "boston": "Boston Foxborough Gillette Stadium 波士顿",
+    "波士顿": "Boston Foxborough Gillette Stadium",
+    "san francisco": "San Francisco Bay Area Levi's Stadium 旧金山",
+    "旧金山": "San Francisco Bay Area Levi's Stadium",
+    "houston": "Houston NRG Stadium 休斯顿",
+    "休斯顿": "Houston NRG Stadium",
+    "kansas city": "Kansas City Arrowhead Stadium 堪萨斯城",
+    "堪萨斯城": "Kansas City Arrowhead Stadium",
+    "philadelphia": "Philadelphia Lincoln Financial Field 费城",
+    "费城": "Philadelphia Lincoln Financial Field",
+    "monterrey": "Monterrey Guadalupe Estadio BBVA 蒙特雷",
+    "蒙特雷": "Monterrey Guadalupe Estadio BBVA",
+    "guadalajara": "Guadalajara Zapopan Estadio Akron 瓜达拉哈拉",
+    "瓜达拉哈拉": "Guadalajara Zapopan Estadio Akron",
 }
 
 
@@ -234,6 +320,17 @@ def _parse_matches_args(query: str) -> Dict[str, Any]:
     return {"query": text, "page": page, "group": group, "date": date_filter}
 
 
+def worldcup_matches_page_info(dashboard: Dict[str, Any], query: str = "") -> Dict[str, Any]:
+    parsed = _parse_matches_args(query)
+    raw_matches = _items(dashboard, "matches")
+    filtered = _filter_matches(raw_matches, group=parsed["group"], date_filter=parsed["date"])
+    if parsed["query"]:
+        filtered = _find_matches(parsed["query"], {**dashboard, "matches": filtered}, limit=200)
+    total_pages = max(1, (len(filtered) + MATCHES_PAGE_SIZE - 1) // MATCHES_PAGE_SIZE)
+    page = min(max(1, int(parsed["page"])), total_pages)
+    return {**parsed, "page": page, "totalPages": total_pages, "totalMatches": len(filtered)}
+
+
 def _filter_matches(matches: List[Dict[str, Any]], *, group: str = "", date_filter: str = "") -> List[Dict[str, Any]]:
     rows = matches
     if group:
@@ -269,11 +366,13 @@ def start_text() -> str:
             "World Cup:",
             "/worldcup - 世界杯总览",
             "/matches - 最近比赛",
+            "/matches today / tomorrow / group a / page 2",
             "/match mexico south africa - 查比赛时间/地点/情报",
             "/team mexico - 查球队新闻和赛程",
             "/venue dallas - 查场馆天气",
             "/news mexico - 查相关新闻",
             "/odds mexico south africa - 查 Polymarket 市场/胜率",
+            "/比赛 墨西哥 南非 - 中文查询也支持",
             "",
             "可用命令：",
             "/market bitcoin - 搜索 Polymarket 市场",
@@ -295,12 +394,18 @@ def help_text() -> str:
             "World Cup:",
             "  /worldcup",
             "  /matches",
+            "  /matches today",
+            "  /matches tomorrow",
+            "  /matches group a",
+            "  /matches page 2",
             "  /match mexico south africa",
             "  /team mexico",
             "  /venue dallas",
             "  /weather dallas",
             "  /news mexico",
             "  /odds mexico south africa",
+            "  /比赛 墨西哥 南非",
+            "  /赔率 墨西哥 南非",
             "",
             "Market:",
             "  /market nba",
@@ -639,6 +744,24 @@ def format_worldcup_odds(query: str, dashboard: Dict[str, Any], market_payload: 
         lines.append("Matched odds:")
         for item in relevant_odds:
             lines.append(f"- {_truncate(item.get('title') or item.get('marketTitle'), 120)}")
+            probabilities = item.get("probabilities") if isinstance(item.get("probabilities"), list) else []
+            if probabilities:
+                pairs = []
+                for row in probabilities[:4]:
+                    if isinstance(row, dict):
+                        pairs.append(f"{_truncate(row.get('outcome'), 24)} {_pct(row.get('price'))}")
+                if pairs:
+                    lines.append("  " + " | ".join(pairs))
+            else:
+                outcomes = item.get("outcomes")
+                outcome_prices = item.get("outcomePrices")
+                if isinstance(outcomes, list) and isinstance(outcome_prices, list) and outcomes:
+                    pairs = [f"{_truncate(label, 24)} {_pct(value)}" for label, value in zip(outcomes[:4], outcome_prices[:4])]
+                    if pairs:
+                        lines.append("  " + " | ".join(pairs))
+            url = _polymarket_url(item)
+            if url:
+                lines.append(f"  {url}")
         lines.append("")
     else:
         lines.append("当前 World Cup dashboard 暂未直接匹配到该场 Polymarket 胜率。")

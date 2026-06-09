@@ -100,6 +100,7 @@ def publish_candidates(
                     message_thread_id=config.message_thread_id,
                     disable_web_page_preview=not candidate.link_preview,
                     disable_notification=settings.disable_notification,
+                    reply_markup=candidate.reply_markup,
                 )
             state.mark(target, candidate.dedupe_key)
             result.sent += 1

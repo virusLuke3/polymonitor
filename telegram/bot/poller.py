@@ -43,6 +43,15 @@ def _iter_replies(updates: Iterable[dict], *, settings: BotSettings, state: BotS
             yield request.update_id, request.chat_id, BotReply("⚠️ 查询太频繁了，请稍后再试。")
             continue
         reply = handle_command(request, api, state=state)
+        state.record_user(chat_id=request.chat_id, user_id=request.user_id)
+        missed = any(marker in reply.text for marker in ("没有找到", "暂未直接匹配", "no listed match market", "服务暂时不可用"))
+        state.record_query(
+            chat_id=request.chat_id,
+            user_id=request.user_id,
+            command=request.command,
+            args=request.args,
+            matched=not missed,
+        )
         if request.callback_query_id:
             reply = replace(reply, callback_query_id=request.callback_query_id)
         yield request.update_id, request.chat_id, reply

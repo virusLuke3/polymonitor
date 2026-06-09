@@ -9,6 +9,7 @@ from .models import MessageCandidate
 
 RELATED_NEWS_GROUP_LIMIT = 2
 WORLDCUP_WORKSPACE_URL = "https://www.polymonitor.club/?workspace=worldcup"
+QUERY_BOT_URL = "https://t.me/PolyMonitorQuery_bot"
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -302,6 +303,12 @@ def format_worldcup_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
             priority="normal",
             metadata={"panel": "worldcup-intel"},
             link_preview=bool(first_url or WORLDCUP_WORKSPACE_URL),
+            reply_markup={
+                "inline_keyboard": [
+                    [{"text": "Ask bot", "url": QUERY_BOT_URL}, {"text": "Matches", "url": f"{QUERY_BOT_URL}?start=worldcup"}],
+                    [{"text": "Odds", "url": f"{QUERY_BOT_URL}?start=odds"}, {"text": "Open Workspace", "url": WORLDCUP_WORKSPACE_URL}],
+                ]
+            },
         )
     ]
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
 from api.services import worldcup_intel_service
@@ -12,6 +14,7 @@ WORLDCUP_DASHBOARD_NAMESPACE = "snapshot:sports:worldcup-dashboard"
 WORLDCUP_DASHBOARD_CACHE_KEY = "dashboard-v1"
 DEFAULT_TTL_SECONDS = 900
 OPENFOOTBALL_2026_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
+POLYMARKET_GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 MS_PER_MINUTE = 60 * 1000
 
 WORLD_CUP_CITIES: List[Dict[str, Any]] = [
@@ -180,6 +183,251 @@ def _normalize_matches(source_matches: List[Dict[str, Any]]) -> List[Dict[str, A
     return sorted(rows, key=lambda row: str(row.get("kickoffUtc") or ""))
 
 
+def _tokenize(value: Any) -> List[str]:
+    return [part for part in re.split(r"[^0-9a-z]+", str(value or "").lower()) if part]
+
+
+def _team_tokens(value: Any) -> set[str]:
+    text = str(value or "").lower().replace("&", " and ")
+    aliases = {
+        "usa": "united states america us",
+        "us": "united states america usa",
+        "south korea": "korea republic korea",
+        "czechia": "czech republic czech",
+        "bosnia herzegovina": "bosnia herzogovina",
+        "bosnia and herzegovina": "bosnia herzegovina",
+    }
+    expanded = text
+    for alias, extra in aliases.items():
+        if alias in text:
+            expanded += " " + extra
+    return {token for token in _tokenize(expanded) if len(token) > 1}
+
+
+def _market_text(row: Dict[str, Any]) -> str:
+    values = [
+        row.get("title"),
+        row.get("question"),
+        row.get("marketTitle"),
+        row.get("eventTitle"),
+        row.get("slug"),
+        row.get("eventSlug"),
+        row.get("description"),
+    ]
+    return " ".join(str(value or "") for value in values).lower()
+
+
+def _safe_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip().startswith("["):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _polymarket_url(row: Dict[str, Any]) -> str:
+    for key in ("marketUrl", "eventUrl", "url"):
+        value = str(row.get(key) or "").strip()
+        if value.startswith("http"):
+            return value
+    slug = str(row.get("slug") or row.get("eventSlug") or "").strip()
+    if slug:
+        return f"https://polymarket.com/event/{slug}"
+    title = str(row.get("title") or row.get("question") or "").strip()
+    return f"https://polymarket.com/search?query={quote_plus(title)}" if title else ""
+
+
+def _worldcup_market_score(match: Dict[str, Any], row: Dict[str, Any]) -> int:
+    text = _market_text(row)
+    tokens = set(_tokenize(text))
+    home_tokens = _team_tokens(match.get("homeTeam"))
+    away_tokens = _team_tokens(match.get("awayTeam"))
+    home_hit = bool(home_tokens & tokens) or str(match.get("homeTeam") or "").lower() in text
+    away_hit = bool(away_tokens & tokens) or str(match.get("awayTeam") or "").lower() in text
+    if not home_hit or not away_hit:
+        return 0
+    worldcup_hit = any(term in text for term in ("world cup", "fifa", "wc2026", "2026"))
+    if not worldcup_hit:
+        return 0
+    score = 80
+    if "draw" in text or "winner" in text or "moneyline" in text:
+        score += 8
+    kickoff = str(match.get("kickoffUtc") or "")[:10]
+    if kickoff and kickoff in text:
+        score += 5
+    return score
+
+
+def _normalize_market_candidate(item: Dict[str, Any], event: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    event = event or {}
+    title = str(item.get("question") or item.get("title") or event.get("title") or "").strip()
+    slug = str(item.get("slug") or event.get("slug") or "").strip()
+    event_slug = str(event.get("slug") or item.get("eventSlug") or "").strip()
+    token_ids = _safe_list(item.get("clobTokenIds") or item.get("clob_token_ids"))
+    return {
+        **item,
+        "title": title,
+        "marketTitle": title,
+        "slug": slug,
+        "eventTitle": event.get("title") or item.get("eventTitle"),
+        "eventSlug": event_slug,
+        "clobTokenIds": token_ids,
+        "yes_token_id": item.get("yes_token_id") or item.get("yesTokenId") or (token_ids[0] if token_ids else ""),
+        "no_token_id": item.get("no_token_id") or item.get("noTokenId") or (token_ids[1] if len(token_ids) > 1 else ""),
+        "marketUrl": _polymarket_url({**event, **item, "slug": slug or event_slug}),
+        "source": "gamma",
+    }
+
+
+def _gamma_search(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> List[Dict[str, Any]]:
+    getter = ctx.get("http_json_get")
+    if not callable(getter):
+        return []
+    settings = ctx.get("SETTINGS")
+    base_url = str(getattr(settings, "gamma_api_base", "") or POLYMARKET_GAMMA_API_BASE).rstrip("/")
+    rows: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in ("/markets", "/events"):
+        try:
+            payload = getter(f"{base_url}{path}", params={"q": query, "limit": limit}, timeout=8, headers=_headers())
+        except Exception:
+            continue
+        items = payload if isinstance(payload, list) else payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            nested_markets = item.get("markets") if isinstance(item.get("markets"), list) else []
+            candidates = nested_markets if nested_markets else [item]
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                normalized = _normalize_market_candidate(candidate, item if nested_markets else None)
+                key = str(normalized.get("slug") or normalized.get("marketTitle") or "")
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                rows.append(normalized)
+                if len(rows) >= limit:
+                    return rows
+    return rows
+
+
+def _local_market_search(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> List[Dict[str, Any]]:
+    getter = ctx.get("get_markets_payload")
+    if not callable(getter):
+        return []
+    try:
+        payload = getter(status="active", query=query, page=1, page_size=limit)
+    except Exception:
+        return []
+    items = payload.get("items") if isinstance(payload, dict) and isinstance(payload.get("items"), list) else []
+    rows: List[Dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict):
+            rows.append({**_normalize_market_candidate(item), "source": "local-markets"})
+    return rows[:limit]
+
+
+def _search_market_sources(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in [*_local_market_search(ctx, query, limit=limit), *_gamma_search(ctx, query, limit=limit)]:
+        key = str(candidate.get("slug") or candidate.get("id") or candidate.get("marketTitle") or "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        rows.append(candidate)
+        if len(rows) >= limit:
+            return rows
+    return rows
+
+
+def _clob_snapshot(ctx: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any]:
+    getter = ctx.get("get_market_clob_price_snapshot")
+    if not callable(getter):
+        return {}
+    try:
+        snapshot = getter(market)
+    except Exception:
+        return {}
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
+def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
+    if not matches:
+        return [], "empty"
+    settings = ctx.get("SETTINGS")
+    scan_limit = int(getattr(settings, "worldcup_market_link_scan_limit", 36) or 36)
+    scheduled = [match for match in matches if str(match.get("status") or "") != "finished"][: max(1, scan_limit)]
+    rows: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for match in scheduled:
+        home = str(match.get("homeTeam") or "").strip()
+        away = str(match.get("awayTeam") or "").strip()
+        if not home or not away or home == "TBD" or away == "TBD":
+            continue
+        queries = [
+            f"{home} {away} world cup",
+            f"{home} vs {away} fifa world cup",
+            f"{away} {home} world cup",
+        ]
+        best: Optional[Dict[str, Any]] = None
+        best_score = 0
+        for query in queries:
+            for candidate in _search_market_sources(ctx, query, limit=8):
+                score = _worldcup_market_score(match, candidate)
+                if score > best_score:
+                    best = candidate
+                    best_score = score
+        if not best or best_score <= 0:
+            continue
+        key = str(best.get("slug") or best.get("marketTitle") or match.get("id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        outcomes = _safe_list(best.get("outcomes"))
+        outcome_prices = _safe_list(best.get("outcomePrices"))
+        clob = _clob_snapshot(ctx, best)
+        if not outcome_prices and clob.get("latestYesPrice") is not None:
+            outcome_prices = [clob.get("latestYesPrice")]
+            outcomes = outcomes or ["YES"]
+        rows.append(
+            {
+                "id": f"{match.get('id')}:polymarket",
+                "matchId": match.get("id"),
+                "homeTeam": home,
+                "awayTeam": away,
+                "kickoffUtc": match.get("kickoffUtc"),
+                "title": best.get("marketTitle") or best.get("title"),
+                "marketTitle": best.get("marketTitle") or best.get("title"),
+                "slug": best.get("slug"),
+                "eventTitle": best.get("eventTitle"),
+                "eventSlug": best.get("eventSlug"),
+                "marketUrl": _polymarket_url(best),
+                "outcomes": outcomes,
+                "outcomePrices": outcome_prices,
+                "probabilities": [
+                    {"outcome": str(label), "price": price}
+                    for label, price in zip(outcomes, outcome_prices)
+                ],
+                "clobTokenIds": best.get("clobTokenIds"),
+                "clob": clob or None,
+                "source": best.get("source") or "polymarket-gamma",
+                "provider": "Polymarket local/Gamma/CLOB",
+                "confidence": min(99, best_score),
+            }
+        )
+        match["marketLinked"] = True
+        match["oddsLinked"] = bool(outcome_prices)
+    return rows, "ok" if rows else "empty"
+
+
 def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     matches = payload.get("matches") if isinstance(payload.get("matches"), list) else []
     cities = payload.get("cities") if isinstance(payload.get("cities"), list) else WORLD_CUP_CITIES
@@ -246,6 +494,7 @@ def build_worldcup_dashboard_payload(ctx: Dict[str, Any]) -> Dict[str, Any]:
     weather = intel.get("weather") if isinstance(intel, dict) and isinstance(intel.get("weather"), list) else []
     intel_news = intel.get("news") if isinstance(intel, dict) and isinstance(intel.get("news"), list) else []
     news = intel_news[:24]
+    odds, odds_state = _link_worldcup_markets(ctx, matches)
     starts_at = matches[0]["kickoffUtc"] if matches else "2026-06-11T19:00:00Z"
     ends_at = matches[-1]["kickoffUtc"] if matches else "2026-07-19T19:00:00Z"
     return _normalize_payload(
@@ -264,7 +513,7 @@ def build_worldcup_dashboard_payload(ctx: Dict[str, Any]) -> Dict[str, Any]:
             "news": news,
             "weather": weather,
             "rosters": [],
-            "odds": [],
+            "odds": odds,
             "intelligence": intel,
             "source": f"{schedule_source} / {intel.get('source') if isinstance(intel, dict) else 'runtime intel'}",
             "sourceUrl": OPENFOOTBALL_2026_URL,
@@ -272,7 +521,7 @@ def build_worldcup_dashboard_payload(ctx: Dict[str, Any]) -> Dict[str, Any]:
                 "schedule": "ok" if len(matches) >= 100 else "source-required",
                 "worldcupIntel": str((intel or {}).get("status") or "unknown"),
                 "weather": "ok" if weather else "empty",
-                "odds": "source-required",
+                "odds": odds_state,
                 "rosters": "source-required",
             },
         }
