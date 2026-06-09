@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 GRID_ESPORTS_NAMESPACE = "snapshot:esports:esports-intel"
 DEFAULT_GRID_ESPORTS_LIMIT = 10
+DEFAULT_GRID_PM_SEARCH_LIMIT = 12
 
 ALL_SERIES_QUERY = """
 query EsportsIntelSeries($gte: String!, $lte: String!) {
@@ -302,7 +303,7 @@ def _pm_context(ctx: dict, team_names: List[str]) -> Dict[str, Any]:
         return {"status": "not-matched", "probability": None, "delta": None, "signal": "NO PM MATCH", "matchQuality": "none"}
     try:
         query = f"{team_names[0]} {team_names[1]}"
-        matches = search(query, limit=3)
+        matches = search(query, limit=DEFAULT_GRID_PM_SEARCH_LIMIT)
     except Exception:
         return {"status": "error", "probability": None, "delta": None, "signal": "PM SEARCH ERR", "matchQuality": "low"}
     if isinstance(matches, dict):

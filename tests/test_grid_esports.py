@@ -163,18 +163,28 @@ class GridEsportsServiceTestCase(unittest.TestCase):
 
     def test_pm_context_prefers_match_winner_over_handicap_market(self):
         ctx = self.make_context()
-        ctx["search_markets"] = lambda query, limit=3: {
-            "items": [
-                {"id": 1877091, "title": "Map 1 Rounds Handicap: Legacy (-9.5) vs Monte (+9.5)", "latestPrice": "0.45"},
-                {"id": 1871323, "title": "Counter-Strike: Monte vs Legacy (BO1) - IEM Cologne Major Stage 2", "latestPrice": "0.58"},
-            ]
-        }
+        limits = []
+
+        def search_markets(query, limit=3):
+            limits.append(limit)
+            return {
+                "items": [
+                    {"id": 1877091, "title": "Map 1 Rounds Handicap: Legacy (-9.5) vs Monte (+9.5)", "latestPrice": "0.45"},
+                    {"id": 1876693, "title": "Map 1 Rounds Handicap: Monte (-3.5) vs Legacy (+3.5)", "latestPrice": "0.52"},
+                    {"id": 1876760, "title": "Map 1 Rounds Handicap: Legacy (-6.5) vs Monte (+6.5)", "latestPrice": "0.49"},
+                    {"id": 1871322, "title": "Map 1 Rounds Handicap: Legacy (-3.5) vs Monte (+3.5)", "latestPrice": "0.47"},
+                    {"id": 1871323, "title": "Counter-Strike: Monte vs Legacy (BO1) - IEM Cologne Major Stage 2", "latestPrice": "0.58"},
+                ][:limit]
+            }
+
+        ctx["search_markets"] = search_markets
 
         payload = grid_esports_service.get_grid_esports_snapshot(ctx, limit=1)
 
         self.assertEqual("matched", payload["items"][0]["pm"]["status"])
         self.assertEqual(1871323, payload["items"][0]["pm"]["marketId"])
         self.assertEqual(0.58, payload["items"][0]["pm"]["probability"])
+        self.assertEqual([grid_esports_service.DEFAULT_GRID_PM_SEARCH_LIMIT], limits)
 
     def test_live_payload_is_degraded_when_series_state_errors(self):
         payload = grid_esports_service.get_grid_esports_snapshot(self.make_context(state_errors=True), limit=2)
