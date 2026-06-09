@@ -35,6 +35,14 @@ const TESTER_TABS: Array<[TesterTab, string]> = [
   ['properties', 'Properties'],
 ];
 
+const STRATEGY_PRESETS_KEY = 'polydata.quant.strategyPresets';
+
+type SavedStrategyPreset = {
+  name: string;
+  parameters: StrategyParameters;
+  savedAt: string;
+};
+
 type StrategyTesterPanelProps = {
   result: BacktestResult;
   testerTab: TesterTab;
@@ -63,6 +71,48 @@ type StrategyTesterPanelProps = {
   rowCount?: number;
   backtestStatus?: string;
 };
+
+function loadSavedPresets(): SavedStrategyPreset[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(STRATEGY_PRESETS_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) => item && typeof item.name === 'string' && item.parameters);
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedPresets(presets: SavedStrategyPreset[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(STRATEGY_PRESETS_KEY, JSON.stringify(presets));
+}
+
+function hashText(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+async function copyText(value: string) {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  if (typeof document === 'undefined') return;
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
 
 export function StrategyTesterPanel({
   result,
@@ -95,6 +145,9 @@ export function StrategyTesterPanel({
   const [toolTab, setToolTab] = useState<ToolTab>('tester');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [parameterPreset, setParameterPreset] = useState('Custom live config');
+  const [savedPresets, setSavedPresets] = useState<SavedStrategyPreset[]>(loadSavedPresets);
+  const [presetDraftName, setPresetDraftName] = useState('Momentum live');
+  const [copyNotice, setCopyNotice] = useState('');
   const hasCompletedRun = result.runId > 0 && result.metrics.length > 0;
   const summaryRows = useMemo(() => result.metrics.slice(0, 6), [result.metrics]);
   const latestTrade = result.trades[result.trades.length - 1];
@@ -104,6 +157,53 @@ export function StrategyTesterPanel({
     return result.propertyGroups
       .flatMap((group) => group.rows)
       .find((row) => row.label.toLowerCase() === target)?.value || '-';
+  };
+  const runPayload = useMemo(() => ({
+    runId: result.runId || null,
+    market: marketTitle,
+    source: dataSource,
+    engine,
+    rows: rowCount,
+    status: backtestStatus,
+    generatedAt: result.generatedAt,
+    strategy: strategyParameters,
+    lastRun: {
+      marketSlug: propertyValue('market slug'),
+      tokenSide: propertyValue('token side'),
+      outcome: propertyValue('outcome'),
+      fromBlock: propertyValue('from block'),
+      toBlock: propertyValue('to block'),
+      rowsProcessed: propertyValue('rows processed'),
+    },
+  }), [backtestStatus, dataSource, engine, marketTitle, result.generatedAt, result.runId, rowCount, strategyParameters]);
+  const runPayloadText = useMemo(() => JSON.stringify(runPayload, null, 2), [runPayload]);
+  const runFingerprint = useMemo(() => hashText(runPayloadText), [runPayloadText]);
+  const copied = (message: string) => {
+    setCopyNotice(message);
+    window.setTimeout(() => setCopyNotice(''), 1800);
+  };
+  const copyRunPayload = async () => {
+    await copyText(runPayloadText);
+    copied('Run payload copied');
+  };
+  const copyStrategyParameters = async () => {
+    await copyText(JSON.stringify(strategyParameters, null, 2));
+    copied('Strategy parameters copied');
+  };
+  const savePreset = () => {
+    const name = presetDraftName.trim() || `Preset ${savedPresets.length + 1}`;
+    const nextPreset = { name, parameters: strategyParameters, savedAt: new Date().toISOString() };
+    const nextPresets = [nextPreset, ...savedPresets.filter((preset) => preset.name !== name)].slice(0, 12);
+    setSavedPresets(nextPresets);
+    persistSavedPresets(nextPresets);
+    setParameterPreset(`saved:${name}`);
+    copied(`Saved ${name}`);
+  };
+  const deletePreset = (name: string) => {
+    const nextPresets = savedPresets.filter((preset) => preset.name !== name);
+    setSavedPresets(nextPresets);
+    persistSavedPresets(nextPresets);
+    if (parameterPreset === `saved:${name}`) setParameterPreset('Custom live config');
   };
   const updateParameter = (key: keyof StrategyParameters, value: string) => {
     const numeric = Number(value);
@@ -115,6 +215,15 @@ export function StrategyTesterPanel({
   };
   const applyPreset = (preset: string) => {
     setParameterPreset(preset);
+    if (preset.startsWith('saved:')) {
+      const name = preset.slice('saved:'.length);
+      const saved = savedPresets.find((item) => item.name === name);
+      if (saved) {
+        onStrategyParametersChange(saved.parameters);
+        setPresetDraftName(saved.name);
+      }
+      return;
+    }
     if (preset === 'Conservative') {
       onStrategyParametersChange({
         entryThreshold: 0.62,
@@ -379,6 +488,13 @@ export function StrategyTesterPanel({
                 <option>Backend defaults</option>
                 <option>Conservative</option>
                 <option>Aggressive</option>
+                {savedPresets.length ? (
+                  <optgroup label="Saved presets">
+                    {savedPresets.map((preset) => (
+                      <option key={preset.name} value={`saved:${preset.name}`}>{preset.name}</option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </select>
             </header>
             <div className="qtv-parameter-grid">
@@ -400,7 +516,18 @@ export function StrategyTesterPanel({
             <div className="qtv-parameter-actions">
               <button type="button" onClick={onStrategyAutoTune}>Auto tune from loaded prices</button>
               <button type="button" onClick={() => applyPreset('Backend defaults')}>Reset defaults</button>
+              <button type="button" onClick={copyStrategyParameters}>Copy params</button>
               <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
+            </div>
+            <div className="qtv-preset-save-row">
+              <input
+                value={presetDraftName}
+                aria-label="Preset name"
+                onInput={(event) => setPresetDraftName(event.currentTarget.value)}
+              />
+              <button type="button" onClick={savePreset}>Save preset</button>
+              <button type="button" onClick={copyRunPayload}>Copy run payload</button>
+              {copyNotice ? <span>{copyNotice}</span> : null}
             </div>
             <p>These controls are bound to the real backtest request. Fee bps, slippage bps, and liquidity cap are applied by the execution model; walk-forward controls still need backend support.</p>
           </section>
@@ -415,6 +542,16 @@ export function StrategyTesterPanel({
               {runSnapshotRows.map(([label, value]) => (
                 <div key={label}><span>{label}</span><b>{value}</b></div>
               ))}
+            </div>
+            <div className="qtv-saved-presets">
+              <strong>Saved Presets</strong>
+              {savedPresets.length ? savedPresets.slice(0, 5).map((preset) => (
+                <div key={`saved-${preset.name}`}>
+                  <button type="button" onClick={() => applyPreset(`saved:${preset.name}`)}>{preset.name}</button>
+                  <span>{new Date(preset.savedAt).toLocaleDateString()}</span>
+                  <button type="button" title={`Delete ${preset.name}`} onClick={() => deletePreset(preset.name)}>Delete</button>
+                </div>
+              )) : <em>No saved parameter sets yet</em>}
             </div>
             <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
           </aside>
@@ -462,6 +599,7 @@ export function StrategyTesterPanel({
             <strong>Current Run</strong>
             <dl>
               <div><dt>Run</dt><dd>{result.runId ? `#${result.runId}` : '-'}</dd></div>
+              <div><dt>Fingerprint</dt><dd>{runFingerprint}</dd></div>
               <div><dt>Status</dt><dd>{backtestStatus}</dd></div>
               <div><dt>Engine</dt><dd>{engine}</dd></div>
               <div><dt>Rows</dt><dd>{rowCount.toLocaleString('en-US')}</dd></div>
@@ -477,6 +615,20 @@ export function StrategyTesterPanel({
               <div><dt>PnL</dt><dd className={selectedTrade && selectedTrade.pnl >= 0 ? 'positive' : 'negative'}>{selectedTrade ? `${selectedTrade.pnl.toFixed(2)} USDC` : '-'}</dd></div>
               <div><dt>Exit</dt><dd>{selectedTrade?.exitReason || '-'}</dd></div>
             </dl>
+          </section>
+          <section className="qtv-run-config-card">
+            <div className="qtv-run-config-head">
+              <strong>Reproducibility Snapshot</strong>
+              <button type="button" onClick={copyRunPayload}>{copyNotice || 'Copy JSON'}</button>
+            </div>
+            <dl>
+              <div><dt>Market slug</dt><dd>{propertyValue('market slug')}</dd></div>
+              <div><dt>Outcome</dt><dd>{propertyValue('outcome')}</dd></div>
+              <div><dt>Block range</dt><dd>{propertyValue('from block')} → {propertyValue('to block')}</dd></div>
+              <div><dt>Rows processed</dt><dd>{propertyValue('rows processed')}</dd></div>
+              <div><dt>Generated</dt><dd>{result.generatedAt || '-'}</dd></div>
+            </dl>
+            <pre>{runPayloadText}</pre>
           </section>
         </div>
       ) : null}

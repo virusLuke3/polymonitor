@@ -3049,7 +3049,8 @@
 }
 
 .qtv-parameters-panel select,
-.qtv-parameter-grid input {
+.qtv-parameter-grid input,
+.qtv-preset-save-row input {
   height: 30px;
   min-width: 0;
   border: 1px solid #263244;
@@ -3102,6 +3103,22 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
+}
+
+.qtv-preset-save-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto auto minmax(120px, auto);
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  border-top: 1px solid #182235;
+  padding-top: 10px;
+}
+
+.qtv-preset-save-row span {
+  color: #7dd3fc;
+  font-size: 10px;
+  font-weight: 900;
 }
 
 .qtv-run-health {
@@ -3175,6 +3192,63 @@
   font-weight: 900;
 }
 
+.qtv-saved-presets {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #1d2a3d;
+  border-radius: 5px;
+  background: #070b12;
+}
+
+.qtv-saved-presets strong {
+  padding: 10px;
+  border-bottom: 1px solid #1d2a3d;
+}
+
+.qtv-saved-presets div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+  border-bottom: 1px solid #141e2d;
+  padding: 0 8px;
+}
+
+.qtv-saved-presets div:last-child {
+  border-bottom: 0;
+}
+
+.qtv-saved-presets button {
+  overflow: hidden;
+  height: 24px;
+  border-color: #1d2a3d;
+  background: transparent;
+  color: #dbeafe;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-saved-presets button:last-child {
+  color: #94a3b8;
+  font-size: 9px;
+  text-align: center;
+}
+
+.qtv-saved-presets span,
+.qtv-saved-presets em {
+  color: #64748b;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.qtv-saved-presets em {
+  padding: 10px;
+}
+
 .qtv-run-health button,
 .qtv-parameters-panel button {
   height: 30px;
@@ -3191,6 +3265,24 @@
   border-color: #263244;
   background: #101827;
   color: #cbd5e1;
+}
+
+.qtv-run-health .qtv-saved-presets button {
+  overflow: hidden;
+  height: 24px;
+  border-color: #1d2a3d;
+  background: transparent;
+  color: #dbeafe;
+  font-size: 10px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-run-health .qtv-saved-presets button:last-child {
+  color: #94a3b8;
+  font-size: 9px;
+  text-align: center;
 }
 
 .qtv-chart-tab {
@@ -3245,6 +3337,46 @@
   font-size: 11px;
   font-weight: 850;
   text-align: right;
+}
+
+.qtv-run-config-card {
+  grid-column: 1 / -1;
+  min-height: 0;
+}
+
+.qtv-run-config-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.qtv-run-config-head button {
+  height: 28px;
+  border: 1px solid #263244;
+  border-radius: 4px;
+  background: #101827;
+  color: #cbd5e1;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 850;
+  padding: 0 10px;
+}
+
+.qtv-run-config-card pre {
+  max-height: 180px;
+  margin: 12px 0 0;
+  overflow: auto;
+  border: 1px solid #1d2a3d;
+  border-radius: 5px;
+  background: #050810;
+  color: #8fb7e8;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.55;
+  padding: 10px;
+  white-space: pre-wrap;
 }
 
 .qtv-logs-panel {
