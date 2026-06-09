@@ -32,7 +32,7 @@ from quant.api.read_api import (  # noqa: E402
     get_quant_price_events,
     get_quant_price_markets,
 )
-from quant.backtest.backtest_engine import create_backtest_run  # noqa: E402
+from quant.backtest.backtest_engine import create_and_execute_backtest  # noqa: E402
 from quant.core.db import PostgresSettings, postgres_connection  # noqa: E402
 from quant.core.schema import create_schema  # noqa: E402
 
@@ -734,8 +734,9 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         try:
             with postgres_connection(PostgresSettings(), readonly=False) as conn:
                 create_schema(conn)
-                run_id = create_backtest_run(conn, payload)
-            with postgres_connection(PostgresSettings(), readonly=True) as conn:
+                created = create_and_execute_backtest(conn, payload)
+                conn.commit()
+                run_id = int(created["run_id"])
                 row = get_backtest_run(conn, run_id=run_id)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
