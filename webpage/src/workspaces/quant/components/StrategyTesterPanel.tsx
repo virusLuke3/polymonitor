@@ -22,6 +22,18 @@ const TOOL_TABS: Array<[ToolTab, string]> = [
   ['trading', 'Trading Panel'],
 ];
 
+const TESTER_TABS: Array<[TesterTab, string]> = [
+  ['overview', 'Overview'],
+  ['parameters', 'Parameters'],
+  ['performance', 'Performance'],
+  ['trades', 'Trades'],
+  ['equity', 'Equity Curve'],
+  ['drawdown', 'Drawdown'],
+  ['runs', 'Runs'],
+  ['logs', 'Logs'],
+  ['properties', 'Properties'],
+];
+
 type StrategyTesterPanelProps = {
   result: BacktestResult;
   testerTab: TesterTab;
@@ -75,6 +87,7 @@ export function StrategyTesterPanel({
 }: StrategyTesterPanelProps) {
   const [toolTab, setToolTab] = useState<ToolTab>('tester');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [parameterPreset, setParameterPreset] = useState('Current backend run');
   const hasCompletedRun = result.runId > 0 && result.metrics.length > 0;
   const summaryRows = useMemo(() => result.metrics.slice(0, 6), [result.metrics]);
   const latestTrade = result.trades[result.trades.length - 1];
@@ -117,13 +130,8 @@ export function StrategyTesterPanel({
 
       {toolTab === 'tester' ? (
         <nav className="qtv-subtabs" aria-label="Strategy tester tabs">
-          {[
-            ['overview', 'Overview'],
-            ['performance', 'Performance Summary'],
-            ['trades', 'List of Trades'],
-            ['properties', 'Properties'],
-          ].map(([id, label]) => (
-            <button key={id} className={testerTab === id ? 'active' : ''} type="button" onClick={() => onTesterTabChange(id as TesterTab)}>{label}</button>
+          {TESTER_TABS.map(([id, label]) => (
+            <button key={id} className={testerTab === id ? 'active' : ''} type="button" onClick={() => onTesterTabChange(id)}>{label}</button>
           ))}
         </nav>
       ) : (
@@ -280,6 +288,37 @@ export function StrategyTesterPanel({
         )
       ) : null}
 
+      {toolTab === 'tester' && testerTab === 'parameters' ? (
+        <div className="qtv-parameters-panel">
+          <section>
+            <header>
+              <strong>Strategy Parameters</strong>
+              <select value={parameterPreset} onChange={(event) => setParameterPreset(event.currentTarget.value)}>
+                <option>Current backend run</option>
+                <option>Conservative review</option>
+                <option>Aggressive review</option>
+              </select>
+            </header>
+            <div className="qtv-parameter-grid">
+              <label><span>Entry threshold</span><input readOnly value={propertyValue('entry threshold')} /></label>
+              <label><span>Exit threshold</span><input readOnly value={propertyValue('exit threshold')} /></label>
+              <label><span>Engine</span><input readOnly value={engine} /></label>
+              <label><span>Source rows</span><input readOnly value={rowCount.toLocaleString('en-US')} /></label>
+              <label><span>Market</span><input readOnly value={marketTitle} /></label>
+              <label><span>Status</span><input readOnly value={backtestStatus} /></label>
+            </div>
+            <p>Editable risk, fee, and execution parameters need backend binding before they can affect a real run. This panel shows the actual submitted/run metadata instead of pretending local-only controls are live.</p>
+          </section>
+          <aside className="qtv-run-health">
+            <strong>Readiness</strong>
+            <span className={marketTitle !== 'No market selected' ? 'ready' : ''}>Market selected</span>
+            <span className={rowCount > 0 ? 'ready' : ''}>Price rows loaded</span>
+            <span className={engine !== '-' ? 'ready' : ''}>Engine configured</span>
+            <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
+          </aside>
+        </div>
+      ) : null}
+
       {toolTab === 'tester' && testerTab === 'performance' ? (
         <PerformanceSummaryTab
           rows={filteredPerformanceRows}
@@ -299,6 +338,54 @@ export function StrategyTesterPanel({
           onToggleFilter={onTradeFilterToggle}
           onSelectTrade={onTradeSelect}
         />
+      ) : null}
+
+      {toolTab === 'tester' && testerTab === 'equity' ? (
+        <div className="qtv-chart-tab">
+          <header><strong>Equity Curve</strong><span>{hasCompletedRun ? `Run #${result.runId}` : 'Run a backtest to populate equity.'}</span></header>
+          {result.equity.length ? <EquityDrawdownChart points={result.equity} /> : <div className="qtv-tool-empty"><strong>No equity points</strong><span>Completed backtest equity is not available yet.</span></div>}
+        </div>
+      ) : null}
+
+      {toolTab === 'tester' && testerTab === 'drawdown' ? (
+        <div className="qtv-chart-tab">
+          <header><strong>Drawdown</strong><span>{propertyValue('max drawdown') || 'Real drawdown appears after a completed run.'}</span></header>
+          {result.equity.length ? <EquityDrawdownChart points={result.equity} /> : <div className="qtv-tool-empty"><strong>No drawdown curve</strong><span>Run a backtest with equity output first.</span></div>}
+        </div>
+      ) : null}
+
+      {toolTab === 'tester' && testerTab === 'runs' ? (
+        <div className="qtv-runs-panel">
+          <section>
+            <strong>Current Run</strong>
+            <dl>
+              <div><dt>Run</dt><dd>{result.runId ? `#${result.runId}` : '-'}</dd></div>
+              <div><dt>Status</dt><dd>{backtestStatus}</dd></div>
+              <div><dt>Engine</dt><dd>{engine}</dd></div>
+              <div><dt>Rows</dt><dd>{rowCount.toLocaleString('en-US')}</dd></div>
+              <div><dt>Trades</dt><dd>{result.trades.length.toLocaleString('en-US')}</dd></div>
+              <div><dt>Metrics</dt><dd>{result.metrics.length.toLocaleString('en-US')}</dd></div>
+            </dl>
+          </section>
+          <section>
+            <strong>Latest Trade</strong>
+            <dl>
+              <div><dt>ID</dt><dd>{selectedTrade?.id || '-'}</dd></div>
+              <div><dt>Outcome</dt><dd>{selectedTrade?.outcome || '-'}</dd></div>
+              <div><dt>PnL</dt><dd className={selectedTrade && selectedTrade.pnl >= 0 ? 'positive' : 'negative'}>{selectedTrade ? `${selectedTrade.pnl.toFixed(2)} USDC` : '-'}</dd></div>
+              <div><dt>Exit</dt><dd>{selectedTrade?.exitReason || '-'}</dd></div>
+            </dl>
+          </section>
+        </div>
+      ) : null}
+
+      {toolTab === 'tester' && testerTab === 'logs' ? (
+        <div className="qtv-logs-panel">
+          <strong>Run Log</strong>
+          <span>{new Date().toLocaleTimeString()} · status {backtestStatus}</span>
+          <span>source {dataSource} · engine {engine} · rows {rowCount.toLocaleString('en-US')}</span>
+          <span>{hasCompletedRun ? `loaded ${result.metrics.length} metrics, ${result.trades.length} trades, ${result.equity.length} equity points` : 'no completed real backtest in this panel yet'}</span>
+        </div>
       ) : null}
 
       {toolTab === 'tester' && testerTab === 'properties' ? <PropertiesTab groups={result.propertyGroups} /> : null}
