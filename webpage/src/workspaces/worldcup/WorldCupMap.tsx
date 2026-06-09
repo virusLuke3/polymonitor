@@ -1779,7 +1779,11 @@ function MapControls({ map, onPreset }: { map: MapLibreMap | null; onPreset: (pr
       <button type="button" onClick={() => map?.zoomIn()} aria-label="Zoom in">+</button>
       <button type="button" onClick={() => map?.zoomOut()} aria-label="Zoom out">−</button>
       <button type="button" onClick={() => onPreset('north-america')} aria-label="North America hosts">NA</button>
+      <button type="button" onClick={() => onPreset('usa')} aria-label="USA hosts">US</button>
+      <button type="button" onClick={() => onPreset('mexico')} aria-label="Mexico hosts">MX</button>
+      <button type="button" onClick={() => onPreset('canada')} aria-label="Canada hosts">CA</button>
       <button type="button" onClick={() => onPreset('next')} aria-label="Zoom to next match">NX</button>
+      <button type="button" onClick={() => onPreset('global-risk')} aria-label="Global risk view">GR</button>
       <button type="button" onClick={() => map?.easeTo({ center: WORLDCUP_ATLAS_CENTER, zoom: WORLDCUP_ATLAS_ZOOM, pitch: 0, bearing: 0 })} aria-label="Reset view">⌂</button>
     </div>
   );
