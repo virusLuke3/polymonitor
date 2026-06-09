@@ -39,6 +39,20 @@ const TESTER_TABS: Array<[TesterTab, string]> = [
 
 const STRATEGY_PRESETS_KEY = 'polydata.quant.strategyPresets';
 
+function formatPct(value: number, digits = 2) {
+  if (!Number.isFinite(value)) return '--';
+  return `${value.toFixed(digits)}%`;
+}
+
+function formatNumber(value: number, digits = 2) {
+  if (!Number.isFinite(value)) return '--';
+  return value.toLocaleString('en-US', { maximumFractionDigits: digits });
+}
+
+function statusForRisk(value: boolean) {
+  return value ? 'ready' : 'review';
+}
+
 type SavedStrategyPreset = {
   name: string;
   parameters: StrategyParameters;
@@ -205,6 +219,33 @@ export function StrategyTesterPanel({
   }), [backtestStatus, dataSource, engine, marketTitle, result.generatedAt, result.runId, rowCount, strategyParameters]);
   const runPayloadText = useMemo(() => JSON.stringify(runPayload, null, 2), [runPayload]);
   const runFingerprint = useMemo(() => hashText(runPayloadText), [runPayloadText]);
+  const parameterDiagnostics = useMemo(() => {
+    const spread = strategyParameters.entryThreshold - strategyParameters.exitThreshold;
+    const roundTripCostBps = (strategyParameters.feeBps * 2) + (strategyParameters.slippageBps * 2);
+    const roundTripCost = roundTripCostBps / 10000;
+    const breakEvenMove = Math.max(0, roundTripCost);
+    const exposurePct = strategyParameters.initialCapital > 0
+      ? (strategyParameters.positionSize / strategyParameters.initialCapital) * 100
+      : 0;
+    const capacity = (strategyParameters.positionSize * strategyParameters.liquidityCapPct) / 100;
+    const warnings = [
+      spread <= 0 ? 'Entry threshold must stay above exit threshold.' : '',
+      spread <= breakEvenMove ? 'Entry/exit spread is tighter than estimated round-trip cost.' : '',
+      exposurePct > 20 ? 'Position size uses more than 20% of initial capital.' : '',
+      strategyParameters.liquidityCapPct < 5 ? 'Liquidity cap is very low; fills may be sparse.' : '',
+      rowCount < 100 ? 'Loaded rows are thin for a stable backtest.' : '',
+    ].filter(Boolean);
+    const health = warnings.length ? 'review' : 'ready';
+    return {
+      spread,
+      roundTripCostBps,
+      breakEvenMove,
+      exposurePct,
+      capacity,
+      health,
+      warnings,
+    };
+  }, [rowCount, strategyParameters]);
   const copied = (message: string) => {
     setCopyNotice(message);
     window.setTimeout(() => setCopyNotice(''), 1800);
@@ -519,6 +560,9 @@ export function StrategyTesterPanel({
           <section>
             <header>
               <strong>Strategy Parameters</strong>
+              <span className={`qtv-parameter-health ${parameterDiagnostics.health}`}>
+                {parameterDiagnostics.health === 'ready' ? 'Ready to run' : 'Review parameters'}
+              </span>
               <select value={parameterPreset} onChange={(event) => applyPreset(event.currentTarget.value)}>
                 <option>Custom live config</option>
                 <option>Backend defaults</option>
@@ -533,6 +577,38 @@ export function StrategyTesterPanel({
                 ) : null}
               </select>
             </header>
+            <div className="qtv-parameter-summary">
+              <div>
+                <span>Signal spread</span>
+                <strong>{parameterDiagnostics.spread.toFixed(4)}</strong>
+                <em>{strategyParameters.entryThreshold.toFixed(3)} entry / {strategyParameters.exitThreshold.toFixed(3)} exit</em>
+              </div>
+              <div>
+                <span>Round-trip cost</span>
+                <strong>{formatNumber(parameterDiagnostics.roundTripCostBps, 2)} bps</strong>
+                <em>fee + slippage model</em>
+              </div>
+              <div>
+                <span>Capital at risk</span>
+                <strong>{formatPct(parameterDiagnostics.exposurePct, 2)}</strong>
+                <em>{formatNumber(strategyParameters.positionSize, 0)} / {formatNumber(strategyParameters.initialCapital, 0)} USDC</em>
+              </div>
+              <div>
+                <span>Fill capacity</span>
+                <strong>{formatNumber(parameterDiagnostics.capacity, 0)} USDC</strong>
+                <em>{strategyParameters.liquidityCapPct}% liquidity cap</em>
+              </div>
+              <div>
+                <span>Run fingerprint</span>
+                <strong>{runFingerprint}</strong>
+                <em>{engine} · {dataSource}</em>
+              </div>
+            </div>
+            {parameterDiagnostics.warnings.length ? (
+              <div className="qtv-parameter-warnings">
+                {parameterDiagnostics.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+              </div>
+            ) : null}
             <div className="qtv-parameter-grid">
               <label><span>Entry threshold</span><input type="number" min="0.001" max="0.999" step="0.001" value={strategyParameters.entryThreshold} onInput={(event) => updateParameter('entryThreshold', event.currentTarget.value)} /></label>
               <label><span>Exit threshold</span><input type="number" min="0.001" max="0.999" step="0.001" value={strategyParameters.exitThreshold} onInput={(event) => updateParameter('exitThreshold', event.currentTarget.value)} /></label>
@@ -573,7 +649,9 @@ export function StrategyTesterPanel({
             <span className={marketTitle !== 'No market selected' ? 'ready' : ''}>Market selected</span>
             <span className={rowCount > 0 ? 'ready' : ''}>Price rows loaded</span>
             <span className={engine !== '-' ? 'ready' : ''}>Engine configured</span>
-            <span className={strategyParameters.entryThreshold > strategyParameters.exitThreshold ? 'ready' : ''}>Entry above exit</span>
+            <span className={strategyParameters.entryThreshold > strategyParameters.exitThreshold ? 'ready' : 'review'}>Entry above exit</span>
+            <span className={statusForRisk(parameterDiagnostics.spread > parameterDiagnostics.breakEvenMove)}>Spread covers cost</span>
+            <span className={statusForRisk(parameterDiagnostics.exposurePct <= 20)}>Capital risk under 20%</span>
             <div className="qtv-run-snapshot">
               <strong>Latest run snapshot</strong>
               {runSnapshotRows.map(([label, value]) => (
