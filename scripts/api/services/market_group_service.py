@@ -1040,7 +1040,7 @@ def _serving_market_groups_payload(
         where.append("(title ILIKE ? OR COALESCE(event_slug, '') ILIKE ? OR COALESCE(category, '') ILIKE ? OR tags::text ILIKE ?)")
         params.extend([like, like, like, like])
     where_sql = " AND ".join(where)
-    active_order_sql = "active_rank DESC NULLS LAST, volume_24h DESC, last_activity_at DESC NULLS LAST"
+    active_order_sql = ""
     order_sql = {
         "active": active_order_sql,
         "new": "created_at DESC NULLS LAST, last_activity_at DESC NULLS LAST, volume_24h DESC",
@@ -1150,7 +1150,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 24}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 25}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
