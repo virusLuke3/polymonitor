@@ -463,6 +463,9 @@ export type QuantBacktestRun = {
   maxHoldingBars?: number | string | null;
   initialCapital?: string | number | null;
   positionSize?: string | number | null;
+  feeBps?: string | number | null;
+  slippageBps?: string | number | null;
+  liquidityCapPct?: string | number | null;
   meta?: Record<string, unknown> | null;
 };
 
@@ -527,6 +530,9 @@ export type QuantBacktestCreatePayload = {
   maxHoldingBars?: number;
   initialCapital?: number;
   positionSize?: number;
+  feeBps?: number;
+  slippageBps?: number;
+  liquidityCapPct?: number;
 };
 
 export type QuantListPayload<T> = {

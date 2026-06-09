@@ -124,6 +124,9 @@ export function StrategyTesterPanel({
         maxHoldingBars: 72,
         initialCapital: strategyParameters.initialCapital,
         positionSize: Math.max(1, Math.round(strategyParameters.positionSize * 0.75)),
+        feeBps: strategyParameters.feeBps,
+        slippageBps: Math.max(strategyParameters.slippageBps, 2),
+        liquidityCapPct: Math.min(strategyParameters.liquidityCapPct, 25),
       });
       return;
     }
@@ -136,6 +139,9 @@ export function StrategyTesterPanel({
         maxHoldingBars: 160,
         initialCapital: strategyParameters.initialCapital,
         positionSize: Math.max(1, Math.round(strategyParameters.positionSize * 1.25)),
+        feeBps: strategyParameters.feeBps,
+        slippageBps: strategyParameters.slippageBps,
+        liquidityCapPct: Math.min(strategyParameters.liquidityCapPct, 60),
       });
       return;
     }
@@ -148,6 +154,9 @@ export function StrategyTesterPanel({
         maxHoldingBars: 96,
         initialCapital: 100000,
         positionSize: 100,
+        feeBps: 0,
+        slippageBps: 0,
+        liquidityCapPct: 100,
       });
     }
   };
@@ -159,6 +168,9 @@ export function StrategyTesterPanel({
     ['max hold', propertyValue('max hold')],
     ['position size', propertyValue('position size')],
     ['initial capital', propertyValue('initial capital')],
+    ['fee bps', propertyValue('fee bps')],
+    ['slippage bps', propertyValue('slippage bps')],
+    ['liquidity cap', propertyValue('liquidity cap')],
   ];
 
   return (
@@ -210,6 +222,9 @@ export function StrategyTesterPanel({
           <span>take <b>{strategyParameters.takeProfit.toFixed(4)}</b></span>
           <span>hold <b>{strategyParameters.maxHoldingBars} bars</b></span>
           <span>size <b>{strategyParameters.positionSize.toLocaleString('en-US')}</b></span>
+          <span>fee <b>{strategyParameters.feeBps} bps</b></span>
+          <span>slip <b>{strategyParameters.slippageBps} bps</b></span>
+          <span>liq <b>{strategyParameters.liquidityCapPct}%</b></span>
           <span>framework <b>{propertyValue('engine')}</b></span>
           <span>run <b>{result.runId ? `#${result.runId}` : '-'}</b></span>
         </div>
@@ -374,6 +389,9 @@ export function StrategyTesterPanel({
               <label><span>Max holding bars</span><input type="number" min="1" max="10000" step="1" value={strategyParameters.maxHoldingBars} onInput={(event) => updateParameter('maxHoldingBars', event.currentTarget.value)} /></label>
               <label><span>Position size</span><input type="number" min="1" step="1" value={strategyParameters.positionSize} onInput={(event) => updateParameter('positionSize', event.currentTarget.value)} /></label>
               <label><span>Initial capital</span><input type="number" min="1" step="100" value={strategyParameters.initialCapital} onInput={(event) => updateParameter('initialCapital', event.currentTarget.value)} /></label>
+              <label><span>Fee bps</span><input type="number" min="0" max="1000" step="0.1" value={strategyParameters.feeBps} onInput={(event) => updateParameter('feeBps', event.currentTarget.value)} /></label>
+              <label><span>Slippage bps</span><input type="number" min="0" max="1000" step="0.1" value={strategyParameters.slippageBps} onInput={(event) => updateParameter('slippageBps', event.currentTarget.value)} /></label>
+              <label><span>Liquidity cap %</span><input type="number" min="0" max="100" step="1" value={strategyParameters.liquidityCapPct} onInput={(event) => updateParameter('liquidityCapPct', event.currentTarget.value)} /></label>
               <label><span>Engine</span><input readOnly value={engine} /></label>
               <label><span>Source rows</span><input readOnly value={rowCount.toLocaleString('en-US')} /></label>
               <label><span>Market</span><input readOnly value={marketTitle} /></label>
@@ -384,7 +402,7 @@ export function StrategyTesterPanel({
               <button type="button" onClick={() => applyPreset('Backend defaults')}>Reset defaults</button>
               <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
             </div>
-            <p>These controls are bound to the real backtest request. Fees, slippage, liquidity caps, and walk-forward controls remain disabled until the backend consumes those fields.</p>
+            <p>These controls are bound to the real backtest request. Fee bps, slippage bps, and liquidity cap are applied by the execution model; walk-forward controls still need backend support.</p>
           </section>
           <aside className="qtv-run-health">
             <strong>Readiness</strong>

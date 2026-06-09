@@ -127,18 +127,22 @@ def _run_backtrader(
             x_value = int(self.p.x_values[index])
             price = Decimal(str(self.data.close[0]))
             if self.open_position is None and price >= self.p.quant_params.entry_threshold:
+                size = _size_for_liquidity(self.p.quant_params, Decimal(str(self.data.volume[0])))
+                if size <= 0:
+                    self._record_equity(index, x_value, price)
+                    return
                 self.open_position = AdapterPosition(
                     trade_index=len(self.trades) + 1,
                     entry_index=index,
                     entry_x=x_value,
-                    entry_price=price,
-                    size=self.p.quant_params.position_size,
+                    entry_price=_execution_price(price, self.p.quant_params, "entry"),
+                    size=size,
                 )
                 self.events.append(_event("open", self.p.x_axis, x_value, f"T-{self.open_position.trade_index:04d}", price, "entry threshold reached"))
             elif self.open_position is not None:
                 exit_reason = _exit_reason(price, self.open_position.entry_price, index - self.open_position.entry_index, self.p.quant_params)
                 if exit_reason:
-                    trade = _close_trade(self.p.run_row, self.p.x_axis, self.open_position, x_value, price, index, exit_reason)
+                    trade = _close_trade(self.p.run_row, self.p.x_axis, self.open_position, x_value, price, index, exit_reason, self.p.quant_params)
                     self.trades.append(trade)
                     self.realized_equity += trade["pnl"]
                     self.events.append(_event("close", self.p.x_axis, x_value, trade["trade_id"], price, exit_reason))
@@ -149,7 +153,7 @@ def _run_backtrader(
             if self.open_position is not None:
                 index = len(self.p.price_points) - 1
                 point = self.p.price_points[index]
-                trade = _close_trade(self.p.run_row, self.p.x_axis, self.open_position, int(point.x_value), point.price, index, "end_of_data")
+                trade = _close_trade(self.p.run_row, self.p.x_axis, self.open_position, int(point.x_value), point.price, index, "end_of_data", self.p.quant_params)
                 self.trades.append(trade)
                 self.realized_equity += trade["pnl"]
                 self.events.append(_event("close", self.p.x_axis, int(point.x_value), trade["trade_id"], point.price, "end_of_data"))
@@ -164,7 +168,7 @@ def _run_backtrader(
         def _record_equity(self, index: int, x_value: int, price: Decimal) -> None:
             mark_equity = self.realized_equity
             if self.open_position is not None:
-                mark_equity += (price - self.open_position.entry_price) * self.open_position.size
+                mark_equity += (_execution_price(price, self.p.quant_params, "exit") - self.open_position.entry_price) * self.open_position.size
             self.peak_equity = max(self.peak_equity, mark_equity)
             drawdown = mark_equity - self.peak_equity
             self.equity_rows.append(
@@ -270,12 +274,17 @@ def _run_nautilus_trader(
             x_value = int(self.config.x_values[self.index])
             price = Decimal(str(bar.close))
             if self.open_position is None and price >= self.config.quant_params.entry_threshold:
-                self.open_position = AdapterPosition(len(self.trades) + 1, self.index, x_value, price, self.config.quant_params.position_size)
+                volume = Decimal(str(getattr(bar, "volume", 0) or 0))
+                size = _size_for_liquidity(self.config.quant_params, volume)
+                if size <= 0:
+                    self._record_equity(x_value, price)
+                    return
+                self.open_position = AdapterPosition(len(self.trades) + 1, self.index, x_value, _execution_price(price, self.config.quant_params, "entry"), size)
                 self.events.append(_event("open", self.config.x_axis, x_value, f"T-{self.open_position.trade_index:04d}", price, "entry threshold reached"))
             elif self.open_position is not None:
                 exit_reason = _exit_reason(price, self.open_position.entry_price, self.index - self.open_position.entry_index, self.config.quant_params)
                 if exit_reason:
-                    trade = _close_trade(self.config.run_row, self.config.x_axis, self.open_position, x_value, price, self.index, exit_reason)
+                    trade = _close_trade(self.config.run_row, self.config.x_axis, self.open_position, x_value, price, self.index, exit_reason, self.config.quant_params)
                     self.trades.append(trade)
                     self.realized_equity += trade["pnl"]
                     self.events.append(_event("close", self.config.x_axis, x_value, trade["trade_id"], price, exit_reason))
@@ -285,7 +294,7 @@ def _run_nautilus_trader(
         def on_stop(self) -> None:
             if self.open_position is not None:
                 point = self.config.price_points[-1]
-                trade = _close_trade(self.config.run_row, self.config.x_axis, self.open_position, int(point.x_value), point.price, len(self.config.price_points) - 1, "end_of_data")
+                trade = _close_trade(self.config.run_row, self.config.x_axis, self.open_position, int(point.x_value), point.price, len(self.config.price_points) - 1, "end_of_data", self.config.quant_params)
                 self.trades.append(trade)
                 self.realized_equity += trade["pnl"]
                 self.events.append(_event("close", self.config.x_axis, int(point.x_value), trade["trade_id"], point.price, "end_of_data"))
@@ -300,7 +309,7 @@ def _run_nautilus_trader(
         def _record_equity(self, x_value: int, price: Decimal) -> None:
             mark_equity = self.realized_equity
             if self.open_position is not None:
-                mark_equity += (price - self.open_position.entry_price) * self.open_position.size
+                mark_equity += (_execution_price(price, self.config.quant_params, "exit") - self.open_position.entry_price) * self.open_position.size
             self.peak_equity = max(self.peak_equity, mark_equity)
             drawdown = mark_equity - self.peak_equity
             self.equity_rows.append(
@@ -365,6 +374,9 @@ def _run_nautilus_trader_subprocess(points: list[Any], run: dict[str, Any], para
             "max_holding_bars": int(params.max_holding_bars),
             "initial_capital": str(params.initial_capital),
             "position_size": str(params.position_size),
+            "fee_bps": str(getattr(params, "fee_bps", "0")),
+            "slippage_bps": str(getattr(params, "slippage_bps", "0")),
+            "liquidity_cap_pct": str(getattr(params, "liquidity_cap_pct", "100")),
         },
     }
     project_root = Path(__file__).resolve().parents[2]
@@ -516,9 +528,16 @@ def _close_trade(
     exit_price: Decimal,
     point_index: int,
     exit_reason: str,
+    params: Any,
 ) -> dict[str, Any]:
-    pnl = (exit_price - position.entry_price) * position.size
+    fill_exit_price = _execution_price(exit_price, params, "exit")
     notional = position.entry_price * position.size
+    exit_notional = fill_exit_price * position.size
+    fee_cost = (notional + exit_notional) * _bps_fraction(getattr(params, "fee_bps", Decimal("0")))
+    slippage_cost = ((position.entry_price - _execution_price(position.entry_price, params, "raw_entry")) * position.size).copy_abs()
+    slippage_cost += ((exit_price - fill_exit_price) * position.size).copy_abs()
+    execution_cost = fee_cost + slippage_cost
+    pnl = (fill_exit_price - position.entry_price) * position.size - fee_cost
     return {
         "trade_id": f"T-{position.trade_index:04d}",
         "market_slug": run["market_slug"],
@@ -528,13 +547,16 @@ def _close_trade(
         "entry_x": position.entry_x,
         "exit_x": exit_x,
         "entry_price": position.entry_price,
-        "exit_price": exit_price,
+        "exit_price": fill_exit_price,
         "size": position.size,
         "notional": notional,
         "pnl": pnl.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
         "pnl_pct": _pct(pnl, notional),
         "holding_bars": max(1, point_index - position.entry_index),
         "exit_reason": exit_reason,
+        "fee_cost": fee_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "slippage_cost": slippage_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "execution_cost": execution_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
     }
 
 
@@ -554,3 +576,28 @@ def _pct(numerator: Decimal, denominator: Decimal) -> Decimal:
     if not denominator:
         return Decimal("0")
     return (numerator / denominator * Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+
+
+def _bps_fraction(value: Any) -> Decimal:
+    return max(Decimal("0"), Decimal(str(value or "0"))) / Decimal("10000")
+
+
+def _execution_price(price: Decimal, params: Any, side: str) -> Decimal:
+    fraction = _bps_fraction(getattr(params, "slippage_bps", Decimal("0")))
+    if side == "raw_entry":
+        if fraction <= 0:
+            return price
+        return (price / (Decimal("1") + fraction)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    if side == "entry":
+        return min(Decimal("0.9999999999"), price * (Decimal("1") + fraction)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    return max(Decimal("0"), price * (Decimal("1") - fraction)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+
+
+def _size_for_liquidity(params: Any, volume: Decimal) -> Decimal:
+    cap_pct = max(Decimal("0"), Decimal(str(getattr(params, "liquidity_cap_pct", "100"))))
+    if cap_pct <= 0:
+        return Decimal("0")
+    position_size = Decimal(str(getattr(params, "position_size", "0")))
+    if volume <= 0:
+        return position_size
+    return min(position_size, volume * cap_pct / Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)

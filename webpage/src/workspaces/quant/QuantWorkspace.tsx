@@ -51,6 +51,9 @@ const DEFAULT_STRATEGY_PARAMETERS: StrategyParameters = {
   maxHoldingBars: 96,
   initialCapital: 100000,
   positionSize: 100,
+  feeBps: 0,
+  slippageBps: 0,
+  liquidityCapPct: 100,
 };
 
 function defaultMarketSlug() {
@@ -172,6 +175,9 @@ function normalizeStrategyParameters(value: Partial<StrategyParameters> | null |
     maxHoldingBars: Math.round(clampNumber(value?.maxHoldingBars, DEFAULT_STRATEGY_PARAMETERS.maxHoldingBars, 1, 10000)),
     initialCapital: clampNumber(value?.initialCapital, DEFAULT_STRATEGY_PARAMETERS.initialCapital, 1, 1000000000),
     positionSize: clampNumber(value?.positionSize, DEFAULT_STRATEGY_PARAMETERS.positionSize, 1, 1000000000),
+    feeBps: clampNumber(value?.feeBps, DEFAULT_STRATEGY_PARAMETERS.feeBps, 0, 1000),
+    slippageBps: clampNumber(value?.slippageBps, DEFAULT_STRATEGY_PARAMETERS.slippageBps, 0, 1000),
+    liquidityCapPct: clampNumber(value?.liquidityCapPct, DEFAULT_STRATEGY_PARAMETERS.liquidityCapPct, 0, 100),
   };
 }
 
@@ -724,6 +730,9 @@ export function QuantWorkspace() {
         maxHoldingBars: strategyParameters.maxHoldingBars,
         initialCapital: strategyParameters.initialCapital,
         positionSize: strategyParameters.positionSize,
+        feeBps: strategyParameters.feeBps,
+        slippageBps: strategyParameters.slippageBps,
+        liquidityCapPct: strategyParameters.liquidityCapPct,
       });
       setBacktestStatus(created.item.status);
       const completedRun = ['queued', 'running'].includes(created.item.status)

@@ -17,6 +17,9 @@ export type StrategyParameters = {
   maxHoldingBars: number;
   initialCapital: number;
   positionSize: number;
+  feeBps: number;
+  slippageBps: number;
+  liquidityCapPct: number;
 };
 
 export type MarketInfo = {

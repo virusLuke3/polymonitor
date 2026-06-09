@@ -61,6 +61,47 @@ def test_builtin_framework_runs_and_annotates_result():
     assert engine_metric["formatted_value"] == "builtin"
 
 
+def test_builtin_framework_applies_execution_costs_and_liquidity_cap():
+    points = [
+        PricePoint(x_value=1, price=Decimal("0.60"), volume=Decimal("40")),
+        PricePoint(x_value=2, price=Decimal("0.70"), volume=Decimal("40")),
+        PricePoint(x_value=3, price=Decimal("0.50"), volume=Decimal("40")),
+    ]
+    run = {
+        "market_slug": "demo-market",
+        "token_side": "YES",
+        "price_source": "orderfilled_block_close",
+    }
+    params = BacktestParameters(
+        entry_threshold=Decimal("0.58"),
+        exit_threshold=Decimal("0.55"),
+        stop_loss=Decimal("0.50"),
+        take_profit=Decimal("0.50"),
+        max_holding_bars=10,
+        initial_capital=Decimal("1000"),
+        position_size=Decimal("100"),
+        fee_bps=Decimal("10"),
+        slippage_bps=Decimal("20"),
+        liquidity_cap_pct=Decimal("50"),
+    )
+
+    result = run_framework_backtest(
+        "builtin",
+        points,
+        run,
+        params,
+        builtin_simulator=simulate_strategy,
+        metrics_builder=lambda trades, equity, price_points, parameters: [],
+    )
+
+    trade = result["trades"][0]
+    assert trade["size"] == Decimal("20.0000000000")
+    assert trade["entry_price"] > Decimal("0.60")
+    assert trade["exit_price"] < Decimal("0.50")
+    assert trade["execution_cost"] > Decimal("0")
+    assert trade["pnl"] < Decimal("-2")
+
+
 def test_nautilus_framework_runs_through_python312_worker_when_available():
     if sys.version_info >= (3, 12):
         pytest.importorskip("nautilus_trader")

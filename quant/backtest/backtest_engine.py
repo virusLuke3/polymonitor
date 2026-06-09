@@ -27,6 +27,9 @@ class BacktestParameters:
     max_holding_bars: int = 96
     initial_capital: Decimal = Decimal("100000")
     position_size: Decimal = Decimal("100")
+    fee_bps: Decimal = Decimal("0")
+    slippage_bps: Decimal = Decimal("0")
+    liquidity_cap_pct: Decimal = Decimal("100")
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,9 @@ def parse_parameters(payload: dict[str, Any]) -> BacktestParameters:
         max_holding_bars=int_or_default(payload.get("max_holding_bars", payload.get("maxHoldingBars")), 96),
         initial_capital=decimal_or_default(payload.get("initial_capital", payload.get("initialCapital")), Decimal("100000")),
         position_size=decimal_or_default(payload.get("position_size", payload.get("positionSize")), Decimal("100")),
+        fee_bps=decimal_or_default(payload.get("fee_bps", payload.get("feeBps")), Decimal("0")),
+        slippage_bps=decimal_or_default(payload.get("slippage_bps", payload.get("slippageBps")), Decimal("0")),
+        liquidity_cap_pct=decimal_or_default(payload.get("liquidity_cap_pct", payload.get("liquidityCapPct")), Decimal("100")),
     )
 
 
@@ -183,9 +189,10 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
             """
             INSERT INTO quant.quant_backtest_parameters (
                 run_id, entry_threshold, exit_threshold, stop_loss, take_profit,
-                max_holding_bars, initial_capital, position_size
+                max_holding_bars, initial_capital, position_size,
+                fee_bps, slippage_bps, liquidity_cap_pct
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 run_id,
@@ -196,6 +203,9 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                 params.max_holding_bars,
                 params.initial_capital,
                 params.position_size,
+                params.fee_bps,
+                params.slippage_bps,
+                params.liquidity_cap_pct,
             ),
         )
     upsert_price_build_targets_for_market(
@@ -330,18 +340,21 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
 
     for index, point in enumerate(points):
         if open_position is None and point.price >= params.entry_threshold:
+            size = _size_for_liquidity(params, point.volume)
+            if size <= 0:
+                continue
             open_position = OpenPosition(
                 trade_index=len(trades) + 1,
                 entry_index=index,
                 entry_x=point.x_value,
-                entry_price=point.price,
-                size=params.position_size,
+                entry_price=_execution_price(point.price, params, "entry"),
+                size=size,
             )
             events.append(_event("open", x_axis, point.x_value, f"T-{open_position.trade_index:04d}", point.price, "entry threshold reached"))
         elif open_position is not None:
             exit_reason = _exit_reason(point.price, open_position.entry_price, index - open_position.entry_index, params)
             if exit_reason:
-                trade = _close_trade(run, x_axis, open_position, point, index, exit_reason)
+                trade = _close_trade(run, x_axis, open_position, point, index, exit_reason, params)
                 trades.append(trade)
                 equity += trade["pnl"]
                 events.append(_event("close", x_axis, point.x_value, trade["trade_id"], point.price, exit_reason))
@@ -349,7 +362,7 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
 
         mark_equity = equity
         if open_position is not None:
-            mark_equity += (point.price - open_position.entry_price) * open_position.size
+            mark_equity += (_execution_price(point.price, params, "exit") - open_position.entry_price) * open_position.size
         peak = max(peak, mark_equity)
         drawdown = mark_equity - peak
         equity_rows.append(
@@ -366,7 +379,7 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
 
     if open_position is not None:
         last = points[-1]
-        trade = _close_trade(run, x_axis, open_position, last, len(points) - 1, "end_of_data")
+        trade = _close_trade(run, x_axis, open_position, last, len(points) - 1, "end_of_data", params)
         trades.append(trade)
         equity += trade["pnl"]
         events.append(_event("close", x_axis, last.x_value, trade["trade_id"], last.price, "end_of_data"))
@@ -392,7 +405,7 @@ def build_metrics(
     profit_factor = gross_profit / abs(gross_loss) if gross_loss else Decimal("0")
     fill_coverage = Decimal(len(points)) / Decimal(max(1, len(points))) * Decimal("100")
     stale_ratio = Decimal("0")
-    slippage_cost = abs(net) * Decimal("-0.004")
+    execution_cost = sum((trade.get("execution_cost", Decimal("0")) for trade in trades), Decimal("0"))
     settlement_pnl = net if points[-1].price in (Decimal("0"), Decimal("1")) else Decimal("0")
     resolved_pnl = settlement_pnl
     unrealized_pnl = net - resolved_pnl
@@ -408,7 +421,7 @@ def build_metrics(
         ("resolved_pnl", "Resolved PnL", "prediction", resolved_pnl, _money(resolved_pnl), "settled", _status(resolved_pnl), "PnL from resolved markets"),
         ("unrealized_pnl", "Unrealized PnL", "prediction", unrealized_pnl, _money(unrealized_pnl), "pending", _status(unrealized_pnl), "Mark-to-market PnL for unresolved exposure"),
         ("settlement_pnl", "Settlement PnL", "prediction", settlement_pnl, _money(settlement_pnl), "resolution payoff", _status(settlement_pnl), "PnL attributable to final payoff"),
-        ("slippage_cost", "Slippage Cost", "prediction", slippage_cost, _money(slippage_cost), "0.4% model", "negative", "Estimated execution cost placeholder"),
+        ("slippage_cost", "Execution Cost", "prediction", -execution_cost, _money(-execution_cost), f"{params.fee_bps} fee bps / {params.slippage_bps} slip bps", "negative" if execution_cost else "neutral", "Modeled fees plus entry/exit slippage"),
         ("fill_coverage", "Fill Coverage", "prediction", fill_coverage, f"{fill_coverage:.1f}%", "price rows", "positive", "Usable fill price coverage"),
         ("stale_price_ratio", "Stale Price Ratio", "prediction", stale_ratio, f"{stale_ratio:.2f}%", "exact rows", "neutral", "Share of stale/forward-filled prices"),
     ]
@@ -563,6 +576,9 @@ def _get_parameters(conn: Any, run_id: int) -> BacktestParameters:
         max_holding_bars=int(row["max_holding_bars"]),
         initial_capital=row["initial_capital"],
         position_size=row["position_size"],
+        fee_bps=row.get("fee_bps", Decimal("0")),
+        slippage_bps=row.get("slippage_bps", Decimal("0")),
+        liquidity_cap_pct=row.get("liquidity_cap_pct", Decimal("100")),
     )
 
 
@@ -606,9 +622,16 @@ def _close_trade(
     point: PricePoint,
     point_index: int,
     exit_reason: str,
+    params: BacktestParameters,
 ) -> dict[str, Any]:
-    pnl = (point.price - position.entry_price) * position.size
+    exit_price = _execution_price(point.price, params, "exit")
     notional = position.entry_price * position.size
+    exit_notional = exit_price * position.size
+    fee_cost = (notional + exit_notional) * _bps_fraction(params.fee_bps)
+    slippage_cost = ((position.entry_price - _execution_price(position.entry_price, params, "raw_entry")) * position.size).copy_abs()
+    slippage_cost += ((point.price - exit_price) * position.size).copy_abs()
+    execution_cost = fee_cost + slippage_cost
+    pnl = (exit_price - position.entry_price) * position.size - fee_cost
     return {
         "trade_id": f"T-{position.trade_index:04d}",
         "market_slug": run["market_slug"],
@@ -618,13 +641,16 @@ def _close_trade(
         "entry_x": position.entry_x,
         "exit_x": point.x_value,
         "entry_price": position.entry_price,
-        "exit_price": point.price,
+        "exit_price": exit_price,
         "size": position.size,
         "notional": notional,
         "pnl": pnl.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
         "pnl_pct": _pct(pnl, notional),
         "holding_bars": max(1, point_index - position.entry_index),
         "exit_reason": exit_reason,
+        "fee_cost": fee_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "slippage_cost": slippage_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "execution_cost": execution_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
     }
 
 
@@ -653,6 +679,31 @@ def _pct(numerator: Decimal, denominator: Decimal) -> Decimal:
     if not denominator:
         return Decimal("0")
     return (numerator / denominator * Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+
+
+def _bps_fraction(value: Decimal) -> Decimal:
+    return max(Decimal("0"), Decimal(str(value))) / Decimal("10000")
+
+
+def _execution_price(price: Decimal, params: BacktestParameters, side: str) -> Decimal:
+    if side == "raw_entry":
+        fraction = _bps_fraction(params.slippage_bps)
+        if fraction <= 0:
+            return price
+        return (price / (Decimal("1") + fraction)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    fraction = _bps_fraction(params.slippage_bps)
+    if side == "entry":
+        return min(Decimal("0.9999999999"), price * (Decimal("1") + fraction)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    return max(Decimal("0"), price * (Decimal("1") - fraction)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+
+
+def _size_for_liquidity(params: BacktestParameters, volume: Decimal) -> Decimal:
+    cap_pct = max(Decimal("0"), Decimal(str(params.liquidity_cap_pct)))
+    if cap_pct <= 0:
+        return Decimal("0")
+    if volume <= 0:
+        return params.position_size
+    return min(params.position_size, volume * cap_pct / Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
 
 
 def _ratio(numerator: int, denominator: int) -> Decimal:

@@ -304,6 +304,9 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
         max_holding_bars INTEGER NOT NULL,
         initial_capital NUMERIC(38, 10) NOT NULL DEFAULT 100000,
         position_size NUMERIC(38, 10) NOT NULL DEFAULT 100,
+        fee_bps NUMERIC(20, 10) NOT NULL DEFAULT 0,
+        slippage_bps NUMERIC(20, 10) NOT NULL DEFAULT 0,
+        liquidity_cap_pct NUMERIC(20, 10) NOT NULL DEFAULT 100,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
@@ -394,6 +397,9 @@ ALTER_TABLE_SQL: tuple[str, ...] = (
     "ALTER TABLE quant.market_token_block_close ADD COLUMN IF NOT EXISTS anomaly_flags JSONB NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE quant.market_token_block_close ALTER COLUMN source SET DEFAULT 'clean_orderfilled_fact'",
     "ALTER TABLE quant.quant_backtest_runs ADD COLUMN IF NOT EXISTS backtest_engine TEXT NOT NULL DEFAULT 'builtin'",
+    "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS fee_bps NUMERIC(20, 10) NOT NULL DEFAULT 0",
+    "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS slippage_bps NUMERIC(20, 10) NOT NULL DEFAULT 0",
+    "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS liquidity_cap_pct NUMERIC(20, 10) NOT NULL DEFAULT 100",
     "ALTER TABLE quant.market_event_members ADD COLUMN IF NOT EXISTS grouping_confidence TEXT NOT NULL DEFAULT 'official'",
     "ALTER TABLE quant.market_event_metadata ADD COLUMN IF NOT EXISTS grouping_confidence TEXT NOT NULL DEFAULT 'official'",
 )

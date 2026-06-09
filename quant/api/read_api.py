@@ -1531,7 +1531,8 @@ def get_backtest_run(conn: Any, *, run_id: int) -> dict[str, Any] | None:
         cur.execute(
             """
             SELECT r.*, p.entry_threshold, p.exit_threshold, p.stop_loss, p.take_profit,
-                   p.max_holding_bars, p.initial_capital, p.position_size
+                   p.max_holding_bars, p.initial_capital, p.position_size,
+                   p.fee_bps, p.slippage_bps, p.liquidity_cap_pct
             FROM quant.quant_backtest_runs r
             LEFT JOIN quant.quant_backtest_parameters p ON p.run_id = r.run_id
             WHERE r.run_id = %s

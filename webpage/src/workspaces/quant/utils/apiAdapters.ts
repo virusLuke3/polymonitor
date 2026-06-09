@@ -221,6 +221,9 @@ function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): Proper
         { label: 'take profit', value: String(run.takeProfit ?? '0.16') },
         { label: 'max hold', value: `${run.maxHoldingBars ?? 96} bars` },
         { label: 'position size', value: `${run.positionSize ?? 100} shares` },
+        { label: 'fee bps', value: `${run.feeBps ?? 0}` },
+        { label: 'slippage bps', value: `${run.slippageBps ?? 0}` },
+        { label: 'liquidity cap', value: `${run.liquidityCapPct ?? 100}%` },
       ],
     },
     {
