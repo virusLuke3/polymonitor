@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -257,6 +258,41 @@ def _series_state(ctx: dict, series_id: str) -> Tuple[Optional[Dict[str, Any]], 
         return None, "error"
 
 
+def _market_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _market_score(market: Dict[str, Any], team_names: List[str]) -> int:
+    title = _market_text(market.get("title") or market.get("question") or market.get("name"))
+    if not title:
+        return -100
+
+    teams = [_market_text(name) for name in team_names[:2]]
+    score = 0
+    if len(teams) >= 2:
+        forward = f"{teams[0]} vs {teams[1]}"
+        reverse = f"{teams[1]} vs {teams[0]}"
+        if forward in title or reverse in title:
+            score += 100
+        if all(team and team in title for team in teams):
+            score += 40
+
+    if "counter strike" in title or "cs2" in title:
+        score += 15
+    if "bo1" in title or "bo3" in title or "bo5" in title or "winner" in title:
+        score += 25
+    if any(term in title for term in ("handicap", "total rounds", "rounds handicap", "over under", "odd even", "kills")):
+        score -= 90
+    return score
+
+
+def _best_market(candidate_items: List[Any], team_names: List[str]) -> Dict[str, Any]:
+    markets = [item for item in candidate_items if isinstance(item, dict)]
+    if not markets:
+        return {}
+    return max(enumerate(markets), key=lambda row: (_market_score(row[1], team_names), -row[0]))[1]
+
+
 def _pm_context(ctx: dict, team_names: List[str]) -> Dict[str, Any]:
     settings = ctx.get("SETTINGS")
     if not bool(getattr(settings, "grid_esports_pm_search_enabled", False)):
@@ -277,7 +313,7 @@ def _pm_context(ctx: dict, team_names: List[str]) -> Dict[str, Any]:
         candidate_items = []
     if not candidate_items:
         return {"status": "not-matched", "probability": None, "delta": None, "signal": "NO PM MATCH", "matchQuality": "none"}
-    market = candidate_items[0] if isinstance(candidate_items[0], dict) else {}
+    market = _best_market(candidate_items, team_names)
     price = _safe_float(market.get("latestYesPrice") or market.get("latestPrice"))
     return {
         "status": "matched",
