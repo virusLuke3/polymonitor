@@ -2156,6 +2156,11 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPa
     [geoShockPayload],
   );
   const linkedMarketCount = payload.matches.filter((match) => match.marketLinked).length + selectedMarkets.length;
+  const weatherWatchCount = payload.weather.filter((item) => {
+    const rain = item.current.precipitationProbability ?? 0;
+    const wind = item.current.windKph ?? 0;
+    return rain >= 35 || wind >= 22 || /storm|thunder|rain|humid|watch/i.test(item.current.condition);
+  }).length;
   const selectedCityMatchCount = Math.max(
     WORLD_CUP_HOST_MATCH_COUNTS[selectedCity.id] || 0,
     payload.matches.filter((match) => match.cityId === selectedCity.id).length,
@@ -2254,8 +2259,8 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPa
             <span>UPDATED {formatUpdatedAgo(payload.generatedAt, now)}</span>
             <span>{formatBjtClock(now)} BJT</span>
           </div>
-          <h1>World Cup Trading Desk</h1>
-          <p>Schedule, host-city weather, match status, Polymarket markets, squads and odds in one football workspace.</p>
+          <h1>World Cup Host Atlas</h1>
+          <p>Venue schedule, match markets, weather watch and host-city intelligence in one premium World Cup workspace.</p>
           <div className="wm-worldcup-next-context">
             <span>NEXT MATCH CONTEXT</span>
             <strong>{nextMatch ? `${nextMatch.homeTeam} / ${nextMatch.awayTeam}` : 'Tournament window complete'}</strong>
@@ -2280,6 +2285,10 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPa
             <div className="wm-map-title">World Cup Host Atlas</div>
           </div>
           <div className="wm-map-status-strip">
+            <span className="wm-map-kpi-chip"><b>{payload.cities.length}</b> Host Cities</span>
+            <span className="wm-map-kpi-chip"><b>{Math.max(payload.matches.length, plannedMatchTotal)}</b> Matches</span>
+            <span className="wm-map-kpi-chip"><b>{linkedMarketCount}</b> Market-linked</span>
+            <span className="wm-map-kpi-chip"><b>{weatherWatchCount}</b> Weather watch</span>
             <span className="wm-status-chip">WORLD CUP · PRE-TOURNAMENT</span>
             <div className="wm-map-clock">{formatBjtClock(now)} BJT</div>
             <span className="wm-map-next-chip">
@@ -2295,12 +2304,12 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPa
           weather={payload.weather}
           marketGroups={marketGroups}
           odds={payload.odds}
-          rosters={payload.rosters}
           conflicts={geoConflictEvents}
           nextMatch={nextMatch}
           selectedCityId={selectedCityId}
           selectedMatchId={selectedMatch?.id || null}
           onSelectCity={setSelectedCityId}
+          onSelectMatch={setSelectedMatchId}
         />
       </section>
 
