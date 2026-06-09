@@ -1009,9 +1009,9 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid #202938;
   background: #0b111c;
@@ -1056,6 +1056,81 @@
   opacity: 0.42;
 }
 
+.qtv-inspector-outcome-manager {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid rgba(32, 41, 56, 0.86);
+  background:
+    linear-gradient(180deg, rgba(13, 20, 32, 0.98), rgba(8, 13, 21, 0.98));
+  padding: 9px 10px 10px;
+}
+
+.qtv-inspector-outcome-manager label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #263245;
+  border-radius: 5px;
+  background: #060a11;
+  padding: 0 9px;
+}
+
+.qtv-inspector-outcome-manager label span {
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-inspector-outcome-manager input {
+  min-width: 0;
+  height: 30px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #eef4ff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.qtv-outcome-filter-row,
+.qtv-outcome-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.qtv-outcome-filter-row button,
+.qtv-outcome-bulk-actions button {
+  height: 24px;
+  border: 1px solid rgba(39, 50, 69, 0.92);
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.72);
+  color: #98a5b8;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  padding: 0 8px;
+}
+
+.qtv-outcome-filter-row button.active,
+.qtv-outcome-bulk-actions button:hover:not(:disabled) {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(37, 99, 235, 0.15);
+  color: #dbeafe;
+}
+
+.qtv-outcome-bulk-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .qtv-inspector-outcome {
   display: grid;
   gap: 7px;
@@ -1076,6 +1151,10 @@
 
 .qtv-inspector-outcome.solo {
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.36);
+}
+
+.qtv-inspector-outcome.watched:not(.active) {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.08), transparent 68%);
 }
 
 .qtv-inspector-outcome.hidden {
@@ -1101,6 +1180,48 @@
   gap: 6px;
 }
 
+.qtv-inspector-outcome > button em {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-inspector-outcome > .qtv-outcome-quality-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.qtv-outcome-quality-tags span {
+  border: 1px solid rgba(39, 50, 69, 0.82);
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.7);
+  color: #8c98aa;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 850;
+  padding: 3px 6px;
+}
+
+.qtv-outcome-quality-tags span.ready {
+  border-color: rgba(34, 197, 94, 0.32);
+  color: #86efac;
+}
+
+.qtv-outcome-quality-tags span.review {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fcd34d;
+}
+
+.qtv-outcome-quality-tags span.empty {
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #94a3b8;
+}
+
 .qtv-inspector-outcome > div button {
   height: 26px;
   border: 1px solid #273245;
@@ -1114,7 +1235,7 @@
 }
 
 .qtv-inspector-outcome > .qtv-outcome-line-actions {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .qtv-inspector-outcome > .qtv-outcome-line-actions button {
