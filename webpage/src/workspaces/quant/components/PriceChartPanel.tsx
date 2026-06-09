@@ -720,6 +720,7 @@ export function PriceChartPanel({
     const ma = movingAverage(closes, Math.min(40, Math.max(3, Math.floor(primaryPoints.length / 20))));
     return primaryPoints.map((point, index) => ({ ...point, close: ma[index] ?? point.close }));
   }, [primaryPoints]);
+  const latestMaPoint = latestPoint ? nearestPoint(maPoints, latestPoint.timestamp) : null;
   const dataWindowPoint = pinnedPoint || hover || latestPoint;
   const dataWindowMaPoint = dataWindowPoint ? nearestPoint(maPoints, dataWindowPoint.timestamp) : null;
   const dataWindowInspect = pointSnapshot(dataWindowPoint, latestPoint, dataWindowMaPoint);
@@ -730,6 +731,10 @@ export function PriceChartPanel({
   const pinnedMaPoint = pinnedPoint ? nearestPoint(maPoints, pinnedPoint.timestamp) : null;
   const pinnedInspect = pointSnapshot(pinnedPoint, latestPoint, pinnedMaPoint);
   const pinnedScreen = pinnedPoint ? pointToScreenSafe(pinnedPoint, primaryPoints, visibleLogicalRange) : null;
+  const latestInspect = pointSnapshot(latestPoint, latestPoint, latestMaPoint);
+  const readoutInspect = hoverInspect || pinnedInspect || latestInspect;
+  const readoutMode = hoverInspect ? 'Hover' : pinnedInspect ? 'Pinned' : 'Latest';
+  const readoutPoint = readoutInspect?.point || latestPoint;
   const managerOutcomes = useMemo(() => {
     const query = outcomeManagerQuery.trim().toLowerCase();
     return sortedOutcomes.filter((group) => {
@@ -1821,8 +1826,10 @@ export function PriceChartPanel({
             </div>
           </div>
           <div className="qtv-ohlc">
-            <span>Block {latest ? blockLabel(latest.timestamp) : '--'}</span>
-            <span>Price {latestPriceText}</span>
+            <span className={`mode ${readoutMode.toLowerCase()}`}>{readoutMode}</span>
+            <span>Block {readoutPoint ? blockLabel(readoutPoint.timestamp) : '--'}</span>
+            <span>YES {readoutInspect ? fmtPrice(readoutInspect.yes) : latestPriceText}<em>{readoutInspect?.yesKind || 'direct'}</em></span>
+            <span>NO {readoutInspect ? fmtPrice(readoutInspect.no) : '--'}<em>{readoutInspect?.noKind || 'implied'}</em></span>
             <span>Min {Number.isFinite(minPrice) ? fmtPrice(minPrice) : '--'}</span>
             <span>Max {Number.isFinite(maxPrice) ? fmtPrice(maxPrice) : '--'}</span>
             <b className={delta >= 0 ? 'positive' : 'negative'}>{hasLoadedPrices ? `${formatSigned(delta)} (${formatSigned(deltaPct, 2)}%)` : '--'}</b>
@@ -2150,8 +2157,12 @@ export function PriceChartPanel({
             {!blockAxisTicks.length ? (
               <em>{priceSource.includes('block') ? 'Loading block scale' : 'Time scale'}</em>
             ) : null}
-            {priceSource.includes('block') && hover ? (
-              <strong style={{ left: pointToScreenSafe(hover, primaryPoints, visibleLogicalRange).x }}>block {blockLabel(hover.timestamp)}</strong>
+            {priceSource.includes('block') && hoverInspect && hoverScreen ? (
+              <strong className="qtv-block-hover-label" style={{ left: hoverScreen.x }}>
+                <span>block</span>
+                <b>{blockLabel(hoverInspect.point.timestamp)}</b>
+                <em>YES {fmtPrice(hoverInspect.yes)} · NO {fmtPrice(hoverInspect.no)}</em>
+              </strong>
             ) : null}
           </div>
         </div>

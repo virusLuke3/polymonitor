@@ -2416,6 +2416,44 @@
   white-space: nowrap;
 }
 
+.qtv-block-tick-axis .qtv-block-hover-label {
+  top: -48px;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px 7px;
+  min-width: 176px;
+  border-color: rgba(47, 129, 247, 0.56);
+  background: rgba(7, 12, 20, 0.96);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.36);
+  line-height: 1.25;
+  padding: 5px 7px;
+}
+
+.qtv-block-tick-axis .qtv-block-hover-label span,
+.qtv-block-tick-axis .qtv-block-hover-label em {
+  color: #7f8a9d;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-block-tick-axis .qtv-block-hover-label b {
+  color: #dbeafe;
+  font-size: 11px;
+  text-align: right;
+}
+
+.qtv-block-tick-axis .qtv-block-hover-label em {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  max-width: 220px;
+  color: #58a6ff;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .qtv-block-tick-axis > em {
   position: absolute;
   right: 10px;
@@ -3203,12 +3241,53 @@
   position: absolute;
   top: 8px;
   right: 150px;
+  left: clamp(280px, 24vw, 420px);
   flex-wrap: nowrap;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 5px;
+  overflow: hidden;
   font-family: var(--font-mono);
   font-size: 10.5px;
   white-space: nowrap;
+}
+
+.qtv-ohlc span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.qtv-ohlc span.mode {
+  min-width: 46px;
+  justify-content: center;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 3px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #93c5fd;
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 18px;
+  text-transform: uppercase;
+}
+
+.qtv-ohlc span.mode.pinned {
+  border-color: rgba(250, 204, 21, 0.42);
+  background: rgba(180, 83, 9, 0.18);
+  color: #fde68a;
+}
+
+.qtv-ohlc span.mode.latest {
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.42);
+  color: #9ca3af;
+}
+
+.qtv-ohlc em {
+  color: #64748b;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .qtv-ohlc b {
