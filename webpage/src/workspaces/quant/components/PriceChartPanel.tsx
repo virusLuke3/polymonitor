@@ -24,6 +24,7 @@ type DataWindowMode = 'compact' | 'expanded';
 type DataWindowDock = 'floating' | 'left' | 'right';
 type ChartViewMode = 'raw' | 'normalized' | 'direct' | 'implied';
 type RangeSelection = { startX: number; currentX: number } | null;
+type LogicalRangeState = { from: number; to: number } | null;
 
 const DRAW_TOOLS = [
   ['cursor', 'Cursor', 'M5 4l10 8-5 1.5L8 18 5 4z'],
@@ -360,6 +361,49 @@ function blockAxisTicks(points: PricePoint[], maxTicks = 7) {
   });
 }
 
+function normalizeLogicalRange(range: { from: number; to: number } | null): LogicalRangeState {
+  if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to)) return null;
+  return { from: range.from, to: range.to };
+}
+
+function logicalRangesClose(left: LogicalRangeState, right: LogicalRangeState) {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return Math.abs(left.from - right.from) < 0.02 && Math.abs(left.to - right.to) < 0.02;
+}
+
+function clampLogicalRange(range: { from: number; to: number }, totalPoints: number) {
+  const fullSpan = Math.max(1, totalPoints - 1);
+  const minSpan = Math.min(fullSpan, 8);
+  const maxSpan = Math.max(minSpan, fullSpan + 4);
+  const rawSpan = Math.max(0.01, range.to - range.from);
+  const span = Math.max(minSpan, Math.min(maxSpan, rawSpan));
+  const maxRight = fullSpan + 2;
+  const minLeft = -2;
+  let from = range.from;
+  let to = from + span;
+  if (from < minLeft) {
+    from = minLeft;
+    to = from + span;
+  }
+  if (to > maxRight) {
+    to = maxRight;
+    from = to - span;
+  }
+  return { from, to };
+}
+
+function visiblePointsForLogicalRange(points: PricePoint[], referencePoints: PricePoint[], range: LogicalRangeState) {
+  if (!points.length || !referencePoints.length || !range) return points;
+  const startIndex = Math.max(0, Math.min(referencePoints.length - 1, Math.floor(range.from)));
+  const endIndex = Math.max(startIndex, Math.min(referencePoints.length - 1, Math.ceil(range.to)));
+  const start = referencePoints[startIndex]?.timestamp ?? referencePoints[0]?.timestamp ?? 0;
+  const end = referencePoints[endIndex]?.timestamp ?? referencePoints[referencePoints.length - 1]?.timestamp ?? start;
+  const min = Math.min(start, end);
+  const max = Math.max(start, end);
+  return points.filter((point) => point.timestamp >= min && point.timestamp <= max);
+}
+
 function clampProbability(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -488,9 +532,11 @@ export function PriceChartPanel({
   const pointsRef = useRef<PricePoint[]>([]);
   const dataWindowDragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const suppressViewportModeRef = useRef(false);
+  const visibleLogicalRangeRef = useRef<LogicalRangeState>(null);
   const lastFitRequestKeyRef = useRef('');
   const [hover, setHover] = useState<PricePoint | null>(null);
   const [pinnedPoint, setPinnedPoint] = useState<PricePoint | null>(null);
+  const [visibleLogicalRange, setVisibleLogicalRange] = useState<LogicalRangeState>(null);
   const [dataWindowSettings, setDataWindowSettings] = useState<DataWindowSettings>(persistedDataWindowSettings);
   const [dataWindowMenuOpen, setDataWindowMenuOpen] = useState(false);
   const [scaleMode, setScaleMode] = useState<ScaleMode>('auto');
@@ -596,7 +642,12 @@ export function PriceChartPanel({
   const hoverMaPoint = hover ? nearestPoint(maPoints, hover.timestamp) : null;
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
   const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints) : null;
-  const blockTicks = useMemo(() => blockAxisTicks(primaryPoints), [primaryPoints]);
+  const visiblePrimaryPoints = useMemo(
+    () => visiblePointsForLogicalRange(primaryPoints, primaryPoints, visibleLogicalRange),
+    [primaryPoints, visibleLogicalRange],
+  );
+  const visibleAxisPoints = visiblePrimaryPoints.length ? visiblePrimaryPoints : primaryPoints;
+  const blockTicks = useMemo(() => blockAxisTicks(visibleAxisPoints), [visibleAxisPoints]);
   const markers = useMemo(() => signals.map((signal) => markerPosition(signal, primaryPoints)).filter(Boolean), [primaryPoints, signals]);
   const focusedMarkers = markers.filter((marker) => marker?.signal.tradeId === selectedTradeId);
   const rangeSelectionStyle = rangeSelection && containerRef.current ? {
@@ -604,9 +655,19 @@ export function PriceChartPanel({
     width: `${Math.abs(rangeSelection.currentX - rangeSelection.startX)}px`,
   } : undefined;
 
+  function setChartVisibleRange(range: { from: number; to: number }, viewportMode: 'preset' | 'custom' = 'custom') {
+    const next = clampLogicalRange(range, primaryPoints.length);
+    chartRef.current?.timeScale().setVisibleLogicalRange(next);
+    visibleLogicalRangeRef.current = next;
+    setVisibleLogicalRange((current) => (logicalRangesClose(current, next) ? current : next));
+    onViewportModeChange?.(viewportMode);
+  }
+
   function fitData() {
     suppressViewportModeRef.current = true;
     chartRef.current?.timeScale().fitContent();
+    visibleLogicalRangeRef.current = null;
+    setVisibleLogicalRange(null);
     onViewportModeChange?.('preset');
     window.setTimeout(() => {
       suppressViewportModeRef.current = false;
@@ -620,15 +681,17 @@ export function PriceChartPanel({
     if (!range) return;
     const center = (range.from + range.to) / 2;
     const half = ((range.to - range.from) * factor) / 2;
-    scale.setVisibleLogicalRange({ from: center - half, to: center + half });
-    onViewportModeChange?.('custom');
+    setChartVisibleRange({ from: center - half, to: center + half });
   }
 
   function logicalIndexFromClientX(clientX: number) {
     const box = containerRef.current?.getBoundingClientRect();
     if (!box) return 0;
     const ratio = Math.max(0, Math.min(1, (clientX - box.left) / box.width));
-    return ratio * Math.max(1, primaryPoints.length - 1);
+    const range = normalizeLogicalRange(chartRef.current?.timeScale().getVisibleLogicalRange() || null)
+      || visibleLogicalRangeRef.current
+      || { from: 0, to: Math.max(1, primaryPoints.length - 1) };
+    return range.from + ratio * Math.max(1, range.to - range.from);
   }
 
   function commitRangeZoom(selection: RangeSelection) {
@@ -636,11 +699,40 @@ export function PriceChartPanel({
     const left = Math.min(selection.startX, selection.currentX);
     const right = Math.max(selection.startX, selection.currentX);
     if (Math.abs(right - left) < 18) return;
-    chartRef.current?.timeScale().setVisibleLogicalRange({
+    setChartVisibleRange({
       from: logicalIndexFromClientX(left),
       to: logicalIndexFromClientX(right),
     });
-    onViewportModeChange?.('custom');
+  }
+
+  function handleChartWheel(event: WheelEvent) {
+    if (rangeZoomEnabled || primaryPoints.length < 2) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const scale = chartRef.current?.timeScale();
+    const box = containerRef.current?.getBoundingClientRect();
+    if (!scale || !box) return;
+    const current = normalizeLogicalRange(scale.getVisibleLogicalRange()) || { from: 0, to: Math.max(1, primaryPoints.length - 1) };
+    const span = Math.max(1, current.to - current.from);
+    const isTrackpadPan = Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.shiftKey;
+
+    if (isTrackpadPan) {
+      const delta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.deltaY;
+      const shift = (delta / Math.max(260, box.width)) * span;
+      setChartVisibleRange({ from: current.from + shift, to: current.to + shift });
+      return;
+    }
+
+    const cursorRatio = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
+    const anchor = current.from + span * cursorRatio;
+    const wheelMagnitude = Math.min(3, Math.max(0.25, Math.abs(event.deltaY) / 120));
+    const zoomFactor = (event.deltaY > 0 ? 1.18 : 0.84) ** wheelMagnitude;
+    const nextSpan = span * zoomFactor;
+    setChartVisibleRange({
+      from: anchor - nextSpan * cursorRatio,
+      to: anchor + nextSpan * (1 - cursorRatio),
+    });
   }
 
   const updatePinnedOutcomeKeys = (next: string[] | ((current: string[]) => string[])) => {
@@ -845,6 +937,17 @@ export function PriceChartPanel({
         horzLine: { color: 'rgba(148,163,184,0.42)', labelBackgroundColor: '#1f2937' },
         vertLine: { color: 'rgba(148,163,184,0.28)', labelBackgroundColor: '#1f2937' },
       },
+      handleScroll: {
+        mouseWheel: false,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        axisPressedMouseMove: true,
+        mouseWheel: false,
+        pinch: true,
+      },
     });
     const ma = chart.addSeries(LineSeries, {
       color: '#f59e0b',
@@ -885,10 +988,13 @@ export function PriceChartPanel({
     observer.observe(container);
 
     const handleVisibleLogicalRange = (range: { from: number; to: number } | null) => {
-      if (suppressViewportModeRef.current || !range || pointsRef.current.length < 2) return;
-      const span = Math.max(0, range.to - range.from);
+      const normalized = normalizeLogicalRange(range);
+      visibleLogicalRangeRef.current = normalized;
+      setVisibleLogicalRange((current) => (logicalRangesClose(current, normalized) ? current : normalized));
+      if (suppressViewportModeRef.current || !normalized || pointsRef.current.length < 2) return;
+      const span = Math.max(0, normalized.to - normalized.from);
       const fullSpan = Math.max(1, pointsRef.current.length - 1);
-      const coversFullDataset = range.from <= 1.5 && range.to >= fullSpan - 1.5 && span >= fullSpan - 3;
+      const coversFullDataset = normalized.from <= 1.5 && normalized.to >= fullSpan - 1.5 && span >= fullSpan - 3;
       onViewportModeChange?.(coversFullDataset ? 'preset' : 'custom');
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleLogicalRange);
@@ -952,6 +1058,8 @@ export function PriceChartPanel({
     if (allPoints.length && lastFitRequestKeyRef.current !== fitRequestKey) {
       suppressViewportModeRef.current = true;
       chart.timeScale().fitContent();
+      visibleLogicalRangeRef.current = null;
+      setVisibleLogicalRange(null);
       lastFitRequestKeyRef.current = fitRequestKey;
       onViewportModeChange?.('preset');
       window.setTimeout(() => {
@@ -1383,6 +1491,7 @@ export function PriceChartPanel({
         <div
           className={`qtv-tv-chart ${rangeZoomEnabled ? 'range-enabled' : ''}`}
           ref={containerRef}
+          onWheel={(event) => handleChartWheel(event as unknown as WheelEvent)}
           onPointerDown={(event) => {
             if (!rangeZoomEnabled) return;
             event.preventDefault();
@@ -1484,7 +1593,7 @@ export function PriceChartPanel({
                 <b>{tick.label}</b>
               </span>
             ))}
-            {hover ? <strong style={{ left: pointToScreenSafe(hover, primaryPoints).x }}>hover {blockLabel(hover.timestamp)}</strong> : null}
+            {hover ? <strong style={{ left: pointToScreenSafe(hover, visibleAxisPoints).x }}>hover {blockLabel(hover.timestamp)}</strong> : null}
           </div>
         ) : (
           <div className="qtv-block-tick-axis empty" aria-hidden="true" />

@@ -600,7 +600,7 @@ export function QuantWorkspace() {
     }
     const priceQuery = {
       ...semanticChartQuery,
-      live: livePriceRefreshEnabled && silent && !(selectedEntityKind === 'event' && chartRange === 'full'),
+      live: livePriceRefreshEnabled && silent && selectedEntityKind !== 'event',
     };
     const [seriesResult, statusResult] = await Promise.allSettled([
       hasMarketSlug
