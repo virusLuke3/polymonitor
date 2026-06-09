@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
@@ -16,6 +17,9 @@ DEFAULT_TTL_SECONDS = 900
 OPENFOOTBALL_2026_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
 POLYMARKET_GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 MS_PER_MINUTE = 60 * 1000
+
+_REFRESH_LOCK = threading.Lock()
+_REFRESHING: set[str] = set()
 
 WORLD_CUP_CITIES: List[Dict[str, Any]] = [
     {"id": "atlanta", "city": "Atlanta", "country": "US", "countryName": "United States", "venue": "Mercedes-Benz Stadium", "latitude": 33.7554, "longitude": -84.4008, "timezone": "America/New_York", "capacity": 71000},
@@ -749,19 +753,34 @@ def _has_generated_fallback_artifacts(payload: Dict[str, Any]) -> bool:
     )
 
 
-def build_worldcup_dashboard_payload(ctx: Dict[str, Any]) -> Dict[str, Any]:
+def build_worldcup_dashboard_payload(
+    ctx: Dict[str, Any],
+    *,
+    include_intel: bool = True,
+    include_live_market_links: bool = True,
+) -> Dict[str, Any]:
     generated_at = _utc_now_iso()
     source_matches, schedule_source = _fetch_schedule_source(ctx)
     matches = _normalize_matches(source_matches)
     intel: Optional[Dict[str, Any]] = None
-    try:
-        intel = worldcup_intel_service.get_worldcup_intel_snapshot(ctx, limit=120)
-    except Exception as exc:
-        intel = {"status": "error", "cacheMode": "source-required", "error": exc.__class__.__name__, "news": [], "weather": [], "signals": []}
+    if include_intel:
+        try:
+            intel = worldcup_intel_service.get_worldcup_intel_snapshot(ctx, limit=120)
+        except Exception as exc:
+            intel = {"status": "error", "cacheMode": "source-required", "error": exc.__class__.__name__, "news": [], "weather": [], "signals": []}
     weather = intel.get("weather") if isinstance(intel, dict) and isinstance(intel.get("weather"), list) else []
     intel_news = intel.get("news") if isinstance(intel, dict) and isinstance(intel.get("news"), list) else []
     news = intel_news[:24]
-    odds, odds_state, market_linker = _link_worldcup_markets(ctx, matches)
+    if include_live_market_links:
+        odds, odds_state, market_linker = _link_worldcup_markets(ctx, matches)
+    else:
+        odds = []
+        odds_state = "deferred"
+        market_linker = {
+            **_new_market_linker_stats(scan_limit=0, scheduled_count=sum(1 for match in matches if str(match.get("status") or "") != "finished")),
+            "mode": "deferred",
+            "reason": "live-market-linking-disabled-for-request",
+        }
     starts_at = matches[0]["kickoffUtc"] if matches else "2026-06-11T19:00:00Z"
     ends_at = matches[-1]["kickoffUtc"] if matches else "2026-07-19T19:00:00Z"
     return _normalize_payload(
@@ -783,7 +802,7 @@ def build_worldcup_dashboard_payload(ctx: Dict[str, Any]) -> Dict[str, Any]:
             "odds": odds,
             "marketLinker": market_linker,
             "intelligence": intel,
-            "source": f"{schedule_source} / {intel.get('source') if isinstance(intel, dict) else 'runtime intel'}",
+            "source": f"{schedule_source} / {intel.get('source') if isinstance(intel, dict) else 'runtime intel deferred'}",
             "sourceUrl": OPENFOOTBALL_2026_URL,
             "providerStates": {
                 "schedule": "ok" if len(matches) >= 100 else "source-required",
@@ -828,14 +847,79 @@ def _store(ctx: Dict[str, Any], payload: Dict[str, Any], ttl_seconds: int) -> No
         setter(WORLDCUP_DASHBOARD_NAMESPACE, WORLDCUP_DASHBOARD_CACHE_KEY, payload, ttl_seconds)
 
 
+def _log_exception(ctx: Dict[str, Any], message: str, *args: Any) -> None:
+    app = ctx.get("app")
+    logger = getattr(app, "logger", None)
+    if logger is not None:
+        logger.exception(message, *args)
+
+
+def _preserve_stale_sections(payload: Dict[str, Any], stale_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not stale_payload:
+        return payload
+    next_payload = dict(payload)
+    if not next_payload.get("odds") and isinstance(stale_payload.get("odds"), list):
+        next_payload["odds"] = stale_payload.get("odds")
+        if isinstance(stale_payload.get("marketLinker"), dict):
+            next_payload["marketLinker"] = stale_payload.get("marketLinker")
+    if not next_payload.get("news") and isinstance(stale_payload.get("news"), list):
+        next_payload["news"] = stale_payload.get("news")
+    if not next_payload.get("weather") and isinstance(stale_payload.get("weather"), list):
+        next_payload["weather"] = stale_payload.get("weather")
+    return next_payload
+
+
+def _refresh_async(
+    ctx: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+    builder: Callable[[], Dict[str, Any]],
+    stale_payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    refresh_key = f"{WORLDCUP_DASHBOARD_NAMESPACE}:{WORLDCUP_DASHBOARD_CACHE_KEY}"
+    with _REFRESH_LOCK:
+        if refresh_key in _REFRESHING:
+            return
+        _REFRESHING.add(refresh_key)
+
+    def refresh() -> None:
+        try:
+            payload = builder()
+            if isinstance(payload, dict) and not _has_generated_fallback_artifacts(payload):
+                payload = _preserve_stale_sections(payload, stale_payload)
+                _store(ctx, payload, ttl_seconds)
+        except Exception:
+            _log_exception(ctx, "worldcup-dashboard async refresh failed key=%s", refresh_key)
+        finally:
+            with _REFRESH_LOCK:
+                _REFRESHING.discard(refresh_key)
+
+    thread = threading.Thread(target=refresh, name="worldcup-dashboard-refresh", daemon=True)
+    thread.start()
+
+
 def get_worldcup_dashboard_snapshot(ctx: Dict[str, Any]) -> Dict[str, Any]:
     ttl_seconds = max(300, int(getattr(ctx.get("SETTINGS"), "sports_runtime_ttl_seconds", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
     cached = _read_cached(ctx)
-    if cached and cached.get("cacheMode") != "stale":
+    if cached:
+        if cached.get("cacheMode") == "stale":
+            _refresh_async(
+                ctx,
+                ttl_seconds=ttl_seconds,
+                builder=lambda: build_worldcup_dashboard_payload(ctx, include_intel=True, include_live_market_links=False),
+                stale_payload=cached,
+            )
+            return {**cached, "status": "stale"}
         return cached
     try:
-        payload = build_worldcup_dashboard_payload(ctx)
+        payload = build_worldcup_dashboard_payload(ctx, include_intel=False, include_live_market_links=False)
         _store(ctx, payload, ttl_seconds)
+        _refresh_async(
+            ctx,
+            ttl_seconds=ttl_seconds,
+            builder=lambda: build_worldcup_dashboard_payload(ctx, include_intel=True, include_live_market_links=False),
+            stale_payload=payload,
+        )
         return payload
     except Exception as exc:
         if cached:

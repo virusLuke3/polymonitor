@@ -12,6 +12,21 @@ import type {
 
 const DATA_URL = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
 const MS_PER_MINUTE = 60 * 1000;
+const DASHBOARD_CACHE_TTL_MS = 5 * MS_PER_MINUTE;
+const INITIAL_RUNTIME_TIMEOUT_MS = 3500;
+const SCHEDULE_TIMEOUT_MS = 3500;
+const BACKGROUND_RUNTIME_TIMEOUT_MS = 12000;
+
+type DashboardCacheEntry = {
+  expiresAt: number;
+  payload: WorldCupDashboardPayload;
+};
+
+let dashboardCache: DashboardCacheEntry | null = null;
+let dashboardInflight: Promise<WorldCupDashboardPayload> | null = null;
+let scheduleInflight: Promise<WorldCupDashboardPayload> | null = null;
+let runtimeDashboardInflight: Promise<WorldCupDashboardPayload> | null = null;
+let runtimeIntelInflight: Promise<WorldCupDashboardPayload['intelligence']> | null = null;
 
 export const WORLD_CUP_CITIES: WorldCupVenueCity[] = [
   { id: 'atlanta', city: 'Atlanta', country: 'US', countryName: 'United States', venue: 'Mercedes-Benz Stadium', latitude: 33.7554, longitude: -84.4008, timezone: 'America/New_York', capacity: 71000 },
@@ -160,25 +175,132 @@ export function normalizeWorldCupMatches(matches: any[], marketGroups: MarketGro
     .sort((a, b) => new Date(a.kickoffUtc).getTime() - new Date(b.kickoffUtc).getTime());
 }
 
-export async function loadWorldCupDashboard(marketGroups: MarketGroupItem[] = []): Promise<WorldCupDashboardPayload> {
-  try {
-    const runtimeDashboard = await fetchRuntimeWorldCupDashboard();
-    if (runtimeDashboard?.cities?.length && runtimeDashboard?.matches?.length) {
-      return mergeWorldCupMarketLinks(runtimeDashboard, marketGroups);
+function isUsableDashboard(payload: WorldCupDashboardPayload | null | undefined): payload is WorldCupDashboardPayload {
+  return Boolean(payload?.cities?.length && payload?.matches?.length);
+}
+
+function writeDashboardCache(payload: WorldCupDashboardPayload) {
+  dashboardCache = { payload, expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS };
+  return payload;
+}
+
+function readDashboardCache() {
+  return dashboardCache && dashboardCache.expiresAt > Date.now() ? dashboardCache.payload : null;
+}
+
+async function loadWorldCupScheduleDashboard(): Promise<WorldCupDashboardPayload> {
+  if (scheduleInflight) return scheduleInflight;
+  scheduleInflight = (async () => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), SCHEDULE_TIMEOUT_MS);
+    try {
+      const response = await fetch(DATA_URL, { cache: 'force-cache', signal: controller.signal });
+      if (!response.ok) throw new Error(`world cup schedule ${response.status}`);
+      const data = await response.json();
+      const matches = normalizeWorldCupMatches(data.matches || []);
+      return buildWorldCupDashboard(matches, 'remote');
+    } catch {
+      return buildWorldCupDashboard([], 'source-required');
+    } finally {
+      window.clearTimeout(timer);
+      scheduleInflight = null;
     }
-  } catch {
-    // Fall through to the browser-side schedule loader when the runtime API is unavailable.
+  })();
+  return scheduleInflight;
+}
+
+async function loadRuntimeDashboard(timeoutMs: number): Promise<WorldCupDashboardPayload> {
+  if (timeoutMs >= BACKGROUND_RUNTIME_TIMEOUT_MS && runtimeDashboardInflight) return runtimeDashboardInflight;
+  const request = fetchRuntimeWorldCupDashboard(timeoutMs)
+    .then((payload) => {
+      if (!isUsableDashboard(payload)) throw new Error('World Cup runtime dashboard missing schedule rows');
+      return payload;
+    });
+  if (timeoutMs >= BACKGROUND_RUNTIME_TIMEOUT_MS) {
+    runtimeDashboardInflight = request.finally(() => {
+      runtimeDashboardInflight = null;
+    });
+    return runtimeDashboardInflight;
   }
-  const runtimeIntelPromise = fetchRuntimeWorldCupIntel(120).catch(() => null);
-  try {
-    const response = await fetch(DATA_URL, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`world cup schedule ${response.status}`);
-    const data = await response.json();
-    const matches = normalizeWorldCupMatches(data.matches || [], marketGroups);
-    return mergeWorldCupRuntimeIntel(buildWorldCupDashboard(matches, 'remote'), await runtimeIntelPromise);
-  } catch {
-    return mergeWorldCupRuntimeIntel(buildWorldCupDashboard([], 'source-required'), await runtimeIntelPromise);
+  return request;
+}
+
+async function loadRuntimeIntel(): Promise<WorldCupDashboardPayload['intelligence']> {
+  if (runtimeIntelInflight) return runtimeIntelInflight;
+  runtimeIntelInflight = fetchRuntimeWorldCupIntel(120, BACKGROUND_RUNTIME_TIMEOUT_MS)
+    .catch(() => null)
+    .finally(() => {
+      runtimeIntelInflight = null;
+    });
+  return runtimeIntelInflight;
+}
+
+function firstUsableDashboard(promises: Array<Promise<WorldCupDashboardPayload | null>>): Promise<WorldCupDashboardPayload> {
+  return new Promise((resolve, reject) => {
+    let pending = promises.length;
+    promises.forEach((promise) => {
+      promise
+        .then((payload) => {
+          if (isUsableDashboard(payload)) {
+            resolve(payload);
+            return;
+          }
+          pending -= 1;
+          if (pending <= 0) reject(new Error('World Cup dashboard unavailable'));
+        })
+        .catch(() => {
+          pending -= 1;
+          if (pending <= 0) reject(new Error('World Cup dashboard unavailable'));
+        });
+    });
+  });
+}
+
+export async function loadWorldCupDashboard(): Promise<WorldCupDashboardPayload> {
+  const cached = readDashboardCache();
+  if (cached) return cached;
+  if (dashboardInflight) return dashboardInflight;
+
+  const runtimePromise = loadRuntimeDashboard(INITIAL_RUNTIME_TIMEOUT_MS).catch(() => null);
+  const schedulePromise = loadWorldCupScheduleDashboard().catch(() => null);
+  dashboardInflight = firstUsableDashboard([runtimePromise, schedulePromise])
+    .then(writeDashboardCache)
+    .catch(() => writeDashboardCache(buildWorldCupDashboard([], 'source-required')))
+    .finally(() => {
+      dashboardInflight = null;
+    });
+
+  runtimePromise.then((payload) => {
+    if (isUsableDashboard(payload)) writeDashboardCache(payload);
+  }).catch(() => {
+    // The browser-side schedule payload remains the first-paint fallback.
+  });
+
+  return dashboardInflight;
+}
+
+export async function refreshWorldCupDashboard(current?: WorldCupDashboardPayload | null): Promise<WorldCupDashboardPayload> {
+  const base = current || readDashboardCache() || await loadWorldCupScheduleDashboard();
+  const [dashboardResult, intelResult] = await Promise.allSettled([
+    loadRuntimeDashboard(BACKGROUND_RUNTIME_TIMEOUT_MS),
+    loadRuntimeIntel(),
+  ]);
+  let next = base;
+  if (dashboardResult.status === 'fulfilled' && isUsableDashboard(dashboardResult.value)) {
+    next = dashboardResult.value;
   }
+  if (intelResult.status === 'fulfilled' && intelResult.value) {
+    next = mergeWorldCupRuntimeIntel(next, intelResult.value);
+  }
+  return writeDashboardCache(next);
+}
+
+export function applyWorldCupMarketLinks(payload: WorldCupDashboardPayload, marketGroups: MarketGroupItem[]): WorldCupDashboardPayload {
+  return mergeWorldCupMarketLinks(payload, marketGroups);
+}
+
+export async function loadWorldCupDashboardWithMarketLinks(marketGroups: MarketGroupItem[] = []): Promise<WorldCupDashboardPayload> {
+  return mergeWorldCupMarketLinks(await loadWorldCupDashboard(), marketGroups);
 }
 
 function mergeWorldCupMarketLinks(payload: WorldCupDashboardPayload, marketGroups: MarketGroupItem[]): WorldCupDashboardPayload {

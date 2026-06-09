@@ -4,9 +4,11 @@ import { Panel, PanelLoading } from '@/components/Panel';
 import {
   filterWorldCupNews,
   getNextWorldCupMatch,
+  applyWorldCupMarketLinks,
   loadWorldCupDashboard,
   matchCity,
   matchPolymarketMarkets,
+  refreshWorldCupDashboard,
   WORLD_CUP_HOST_MATCH_COUNTS,
 } from './data';
 import { WorldCupMap } from './WorldCupMap';
@@ -599,18 +601,25 @@ function runtimeSignalItems(payload: WorldCupDashboardPayload, category: string,
 }
 
 function useWorldCupDashboard(marketGroups: WorldCupWorkspaceProps['marketGroups']) {
-  const [payload, setPayload] = useState<WorldCupDashboardPayload | null>(null);
+  const [basePayload, setBasePayload] = useState<WorldCupDashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    loadWorldCupDashboard(marketGroups)
+    loadWorldCupDashboard()
       .then((nextPayload) => {
         if (cancelled) return;
-        setPayload(nextPayload);
+        setBasePayload(nextPayload);
         setError(null);
+        void refreshWorldCupDashboard(nextPayload)
+          .then((refreshedPayload) => {
+            if (!cancelled) setBasePayload(refreshedPayload);
+          })
+          .catch(() => {
+            // Keep the first-paint schedule visible when runtime enrichment is slow.
+          });
       })
       .catch((loadError) => {
         if (cancelled) return;
@@ -622,8 +631,12 @@ function useWorldCupDashboard(marketGroups: WorldCupWorkspaceProps['marketGroups
     return () => {
       cancelled = true;
     };
-  }, [marketGroups]);
+  }, []);
 
+  const payload = useMemo(
+    () => (basePayload ? applyWorldCupMarketLinks(basePayload, marketGroups) : null),
+    [basePayload, marketGroups],
+  );
   return { payload, loading, error };
 }
 

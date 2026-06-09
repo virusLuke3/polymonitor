@@ -489,12 +489,12 @@ export function fetchRuntimeSportsOdds(limit = 8) {
   return apiGet<RuntimeSportsOddsPayload>(`/runtime/sports/odds-monitor?limit=${limit}`);
 }
 
-export function fetchRuntimeWorldCupIntel(limit = 96) {
-  return apiGet<WorldCupIntelPayload>(`/runtime/sports/worldcup-intel?limit=${limit}`);
+export function fetchRuntimeWorldCupIntel(limit = 96, timeoutMs = 12000) {
+  return apiGetWithTimeout<WorldCupIntelPayload>(`/runtime/sports/worldcup-intel?limit=${limit}`, timeoutMs);
 }
 
-export function fetchRuntimeWorldCupDashboard() {
-  return apiGet<WorldCupDashboardPayload>('/runtime/worldcup/dashboard');
+export function fetchRuntimeWorldCupDashboard(timeoutMs = 12000) {
+  return apiGetWithTimeout<WorldCupDashboardPayload>('/runtime/worldcup/dashboard', timeoutMs);
 }
 
 export function fetchRuntimeInflationNowcast() {
