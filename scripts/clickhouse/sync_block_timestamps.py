@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONTAINER = "polydata_clickhouse_orderfilled"
 DEFAULT_DATABASE = "poly_orderfilled"
 DEFAULT_USER = "poly_user"
-DEFAULT_PASSWORD = "PolyUserPass_007!"
+DEFAULT_PASSWORD = ""
 
 
 def load_dotenv(path: Path) -> None:
@@ -354,6 +354,8 @@ def main() -> None:
     parser.add_argument("--clickhouse-password", default=os.environ.get("CLICKHOUSE_PASSWORD", DEFAULT_PASSWORD))
     args = parser.parse_args()
     day_delta_one(args)
+    if not args.clickhouse_password:
+        raise SystemExit("--clickhouse-password or CLICKHOUSE_PASSWORD is required")
 
     ch = ClickHouse(args.clickhouse_container, args.clickhouse_database, args.clickhouse_user, args.clickhouse_password)
     rpc_url = get_rpc_url(args)

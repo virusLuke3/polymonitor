@@ -6,7 +6,8 @@ cd "$(dirname "$0")/../.."
 mkdir -p logs/backfill
 
 export PYTHONUNBUFFERED=1
-export POLY_MYSQL_PASSWORD="${POLY_MYSQL_PASSWORD:-$(docker exec jiahuaiyu_mysql sh -lc 'printf %s "$MYSQL_PASSWORD"')}"
+: "${POLY_MYSQL_PASSWORD:?POLY_MYSQL_PASSWORD is required}"
+: "${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}"
 
 COMMON_ARGS=(
   --backend mysql
@@ -30,7 +31,7 @@ COMMON_ARGS=(
   --clickhouse-container "${POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER:-polydata_clickhouse_orderfilled}"
   --clickhouse-database "${POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE:-poly_orderfilled}"
   --clickhouse-user "${POLYDATA_ORDERFILLED_CLICKHOUSE_USER:-poly_user}"
-  --clickhouse-password "${CLICKHOUSE_PASSWORD:-PolyUserPass_007!}"
+  --clickhouse-password "$CLICKHOUSE_PASSWORD"
   --clickhouse-orderfilled-insert-table "${POLYDATA_ORDERFILLED_CLICKHOUSE_INSERT_TABLE:-orderfilled_fact_buffer}"
 )
 

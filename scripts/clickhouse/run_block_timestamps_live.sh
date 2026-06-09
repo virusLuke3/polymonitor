@@ -6,6 +6,7 @@ cd "$(dirname "$0")/../.."
 mkdir -p logs/clickhouse
 
 export PYTHONUNBUFFERED=1
+: "${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD is required}"
 
 env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
   python -u scripts/clickhouse/sync_block_timestamps.py continue-sync \
@@ -20,4 +21,4 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u al
     --clickhouse-container "${POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER:-polydata_clickhouse_orderfilled}" \
     --clickhouse-database "${POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE:-poly_orderfilled}" \
     --clickhouse-user "${POLYDATA_ORDERFILLED_CLICKHOUSE_USER:-poly_user}" \
-    --clickhouse-password "${CLICKHOUSE_PASSWORD:-PolyUserPass_007!}"
+    --clickhouse-password "$CLICKHOUSE_PASSWORD"

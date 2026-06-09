@@ -21,7 +21,7 @@ from db.trade_v2 import normalize_outcome_code, normalize_side_code
 DEFAULT_CLICKHOUSE_CONTAINER = "polydata_clickhouse_orderfilled"
 DEFAULT_CLICKHOUSE_DATABASE = "poly_orderfilled"
 DEFAULT_CLICKHOUSE_USER = "poly_user"
-DEFAULT_CLICKHOUSE_PASSWORD = "PolyUserPass_007!"
+DEFAULT_CLICKHOUSE_PASSWORD = ""
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,8 @@ def add_clickhouse_orderfilled_cli_args(parser: argparse.ArgumentParser) -> None
 
 
 def settings_from_args(args: argparse.Namespace) -> ClickHouseOrderFilledSettings:
+    if args.clickhouse_write_mode != "none" and not args.clickhouse_password:
+        raise SystemExit("--clickhouse-password or CLICKHOUSE_PASSWORD is required when ClickHouse writes are enabled")
     return ClickHouseOrderFilledSettings(
         container=args.clickhouse_container,
         database=args.clickhouse_database,
