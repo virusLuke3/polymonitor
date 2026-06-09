@@ -21,6 +21,7 @@ from quant.api.read_api import (  # noqa: E402
     get_backtest_equity,
     get_backtest_metrics,
     get_backtest_run,
+    get_backtest_runs,
     get_backtest_trades,
     get_block_close_prices,
     get_event_price_head,
@@ -1228,6 +1229,14 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         if not row:
             return jsonify({"error": "backtest run not found"}), 500
         return jsonify({"item": _camel_row(row), "runId": row.get("run_id"), "status": row.get("status")}), 202
+
+    @bp.route("/backtest-runs", methods=["GET"])
+    def api_quant_list_backtest_runs():
+        limit = min(max(_parse_int_arg("limit", 25) or 25, 1), 100)
+        market_slug = (request.args.get("market_slug") or request.args.get("marketSlug") or "").strip() or None
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            rows = get_backtest_runs(conn, market_slug=market_slug, limit=limit)
+        return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
 
     @bp.route("/backtest-runs/<int:run_id>", methods=["GET"])
     def api_quant_get_backtest_run(run_id: int):

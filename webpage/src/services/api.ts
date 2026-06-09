@@ -459,6 +459,12 @@ export function createQuantBacktestRun(payload: QuantBacktestCreatePayload) {
   return apiPostWithTimeout<{ item: QuantBacktestRun; runId: number; status: string }>('/quant/backtest-runs', payload, 30000);
 }
 
+export function fetchQuantBacktestRuns(marketSlug = '', limit = 25) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (marketSlug.trim()) params.set('market_slug', marketSlug.trim());
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestRun>>(`/quant/backtest-runs?${params.toString()}`, 15000);
+}
+
 export function fetchQuantBacktestRun(runId: number) {
   return apiGetWithTimeout<{ item: QuantBacktestRun }>(`/quant/backtest-runs/${runId}`, 15000);
 }

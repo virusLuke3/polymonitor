@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'preact/hooks';
+import type { QuantBacktestRun } from '@/types';
 import type {
   BacktestResult,
   BatchBacktestRow,
@@ -74,6 +75,8 @@ type StrategyTesterPanelProps = {
   backtestStatus?: string;
   batchRows?: BatchBacktestRow[];
   batchStatus?: string;
+  recentBacktestRuns?: QuantBacktestRun[];
+  backtestRunsStatus?: string;
 };
 
 function loadSavedPresets(): SavedStrategyPreset[] {
@@ -99,6 +102,19 @@ function hashText(value: string) {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function compactRunTime(value?: string | null) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function compactRows(value?: string | number | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '-';
+  return numeric.toLocaleString('en-US');
 }
 
 async function copyText(value: string) {
@@ -148,6 +164,8 @@ export function StrategyTesterPanel({
   backtestStatus = 'idle',
   batchRows = [],
   batchStatus = 'idle',
+  recentBacktestRuns = [],
+  backtestRunsStatus = 'idle',
 }: StrategyTesterPanelProps) {
   const [toolTab, setToolTab] = useState<ToolTab>('tester');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -288,6 +306,13 @@ export function StrategyTesterPanel({
     ['slippage bps', propertyValue('slippage bps')],
     ['liquidity cap', propertyValue('liquidity cap')],
   ];
+  const recentRunsForDisplay = useMemo(() => {
+    const currentRunId = result.runId || 0;
+    return recentBacktestRuns.slice(0, 10).map((run) => ({
+      ...run,
+      isCurrent: Boolean(currentRunId && run.runId === currentRunId),
+    }));
+  }, [recentBacktestRuns, result.runId]);
 
   return (
     <section className="qtv-bottom-panel">
@@ -616,6 +641,39 @@ export function StrategyTesterPanel({
               <div><dt>Trades</dt><dd>{result.trades.length.toLocaleString('en-US')}</dd></div>
               <div><dt>Metrics</dt><dd>{result.metrics.length.toLocaleString('en-US')}</dd></div>
             </dl>
+          </section>
+          <section className="qtv-run-history-card">
+            <div className="qtv-run-config-head">
+              <strong>Recent Real Runs</strong>
+              <span>{backtestRunsStatus}</span>
+            </div>
+            {recentRunsForDisplay.length ? (
+              <div className="qtv-run-history-table">
+                <div className="head">
+                  <span>Run</span>
+                  <span>Status</span>
+                  <span>Market</span>
+                  <span>Engine</span>
+                  <span>Rows</span>
+                  <span>Created</span>
+                </div>
+                {recentRunsForDisplay.map((run) => (
+                  <div key={`history-${run.runId}`} className={`${run.status} ${run.isCurrent ? 'current' : ''}`} title={run.error || run.marketSlug}>
+                    <span>#{run.runId}{run.isCurrent ? ' current' : ''}</span>
+                    <span>{run.status}</span>
+                    <span>{run.marketSlug}</span>
+                    <span>{run.backtestEngine || '-'}</span>
+                    <span>{compactRows(run.rowsProcessed)}</span>
+                    <span>{compactRunTime(run.createdAt)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="qtv-tool-empty">
+                <strong>No run history loaded</strong>
+                <span>Run a backtest or refresh once the API returns recent quant_backtest_runs.</span>
+              </div>
+            )}
           </section>
           <section>
             <strong>Latest Trade</strong>

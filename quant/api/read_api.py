@@ -1592,6 +1592,30 @@ def get_backtest_run(conn: Any, *, run_id: int) -> dict[str, Any] | None:
         return dict(row) if row else None
 
 
+def get_backtest_runs(conn: Any, *, market_slug: str | None = None, limit: int = 25) -> list[dict[str, Any]]:
+    where_sql = ""
+    params: list[Any] = []
+    if market_slug:
+        where_sql = "WHERE r.market_slug = %s"
+        params.append(market_slug)
+    params.append(int(limit))
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT r.*, p.entry_threshold, p.exit_threshold, p.stop_loss, p.take_profit,
+                   p.max_holding_bars, p.initial_capital, p.position_size,
+                   p.fee_bps, p.slippage_bps, p.liquidity_cap_pct
+            FROM quant.quant_backtest_runs r
+            LEFT JOIN quant.quant_backtest_parameters p ON p.run_id = r.run_id
+            {where_sql}
+            ORDER BY r.created_at DESC, r.run_id DESC
+            LIMIT %s
+            """,
+            params,
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
 def get_backtest_metrics(conn: Any, *, run_id: int) -> list[dict[str, Any]]:
     with conn.cursor() as cur:
         cur.execute(

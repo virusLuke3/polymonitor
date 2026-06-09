@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   createQuantBacktestRun,
+  fetchQuantBacktestRuns,
   fetchMarketLobByToken,
   fetchQuantBacktestEquity,
   fetchQuantBacktestMetrics,
@@ -9,7 +10,6 @@ import {
   fetchQuantBuildStatus,
   fetchQuantEntitySnapshot,
   fetchQuantEventMembers,
-  fetchQuantEventPriceHead,
   fetchQuantEventPriceSeries,
   fetchQuantPriceWindow,
   fetchQuantPriceEvents,
@@ -588,6 +588,8 @@ export function QuantWorkspace() {
   const [batchBacktestRows, setBatchBacktestRows] = useState<BatchBacktestRow[]>([]);
   const [batchBacktestStatus, setBatchBacktestStatus] = useState('idle');
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
+  const [recentBacktestRuns, setRecentBacktestRuns] = useState<QuantBacktestRun[]>([]);
+  const [backtestRunsStatus, setBacktestRunsStatus] = useState<DataStatus>('idle');
   const [quantMarkets, setQuantMarkets] = useState<QuantPriceMarket[]>([]);
   const [marketSearchStatus, setMarketSearchStatus] = useState<DataStatus>('idle');
   const [selectedMarketMeta, setSelectedMarketMeta] = useState<QuantPriceMarket | null>(() => (
@@ -730,13 +732,17 @@ export function QuantWorkspace() {
     }
     if (hasMarketSlug && !silent && !priceSeriesCacheRef.current.has(cacheKey)) {
       const snapshotRequest = selectedEntityKind === 'event'
-        ? fetchQuantEventPriceHead({
+        ? fetchQuantEventPriceSeries({
           eventSlug: marketSlug,
           priceSource: backendPriceSource(priceSource),
-          maxOutcomes: EVENT_TILE_OUTCOME_LIMIT,
+          limit: 2500,
+          maxOutcomes: 100,
           topN: EVENT_TILE_OUTCOME_LIMIT,
+          maxPoints: EVENT_TILE_MAX_POINTS,
+          range: 'latest',
+          resolution: 'auto',
           pointFormat: 'lite',
-          timeoutMs: 4500,
+          timeoutMs: 5000,
         })
         : fetchQuantEntitySnapshot({
           entityType: selectedEntityKind,
@@ -750,6 +756,7 @@ export function QuantWorkspace() {
         .then((snapshot) => {
           if (requestSeq !== priceLoadSeq.current) return;
           if (!snapshot?.outcomes?.length) return;
+          priceSeriesCacheRef.current.set(cacheKey, snapshot);
           setMarketSeries(snapshot);
           setDataStatus('partial');
           setLoadingMessage(selectedEntityKind === 'event'
@@ -764,7 +771,12 @@ export function QuantWorkspace() {
       ...semanticChartQuery,
       live: livePriceRefreshEnabled && silent && selectedEntityKind !== 'event',
     };
-    const [seriesResult, statusResult] = await Promise.allSettled([
+    void fetchQuantBuildStatus('', 12)
+      .then((statusPayload) => setRuns(statusPayload.items || []))
+      .catch((statusError) => {
+        if (import.meta.env.DEV && !isAbortLikeError(statusError)) console.debug('[quant] build status failed', statusError);
+      });
+    const seriesResult = await Promise.resolve(
       hasMarketSlug
         ? (selectedEntityKind === 'event'
           ? fetchQuantEventPriceSeries({
@@ -781,8 +793,10 @@ export function QuantWorkspace() {
             timeoutMs: chartRange === 'full' ? 16000 : 10000,
           }))
         : Promise.resolve(null),
-      fetchQuantBuildStatus('', 12),
-    ]);
+    ).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason) => ({ status: 'rejected' as const, reason }),
+    );
     if (requestSeq !== priceLoadSeq.current) {
       if (import.meta.env.DEV) console.debug('[quant] stale price response ignored', { cacheKey });
       return {
@@ -815,7 +829,6 @@ export function QuantWorkspace() {
     }
     if (priceSource !== 'frontend') setFrontendRows([]);
     if (priceSource !== 'orderfilled') setBlockRows([]);
-    if (statusResult.status === 'fulfilled') setRuns(statusResult.value.items || []);
     const activeRowCount = marketSeriesToPrices(nextMarketSeries).length || (priceSource === 'orderfilled' ? nextBlockRows.length : nextFrontendRows.length);
     if (hasMarketSlug) {
       if (!silent) {
@@ -843,6 +856,18 @@ export function QuantWorkspace() {
       blockRows: nextBlockRows,
       marketSeries: nextMarketSeries,
     };
+  };
+
+  const refreshBacktestRuns = async () => {
+    setBacktestRunsStatus('loading');
+    try {
+      const payload = await fetchQuantBacktestRuns('', 25);
+      setRecentBacktestRuns(payload.items || []);
+      setBacktestRunsStatus((payload.items || []).length ? 'ready' : 'empty');
+    } catch (runsError) {
+      if (import.meta.env.DEV && !isAbortLikeError(runsError)) console.debug('[quant] backtest run history failed', runsError);
+      setBacktestRunsStatus('error');
+    }
   };
 
   const runBacktest = async () => {
@@ -924,6 +949,7 @@ export function QuantWorkspace() {
       setBacktestResult(result);
       setSelectedTradeId(result.trades[0]?.id ?? null);
       setBacktestStatus(completedRun.status);
+      void refreshBacktestRuns();
       if (!nextRows.frontendRows.length && !nextRows.blockRows.length) setError('');
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Quant API unavailable');
@@ -1033,6 +1059,7 @@ export function QuantWorkspace() {
       }
       setBatchBacktestStatus('complete');
       setBacktestStatus('batch complete');
+      void refreshBacktestRuns();
     } catch (batchError) {
       setBatchBacktestStatus('failed');
       setBacktestStatus('failed');
@@ -1164,6 +1191,10 @@ export function QuantWorkspace() {
   useEffect(() => {
     marketSlugRef.current = marketSlug;
   }, [marketSlug]);
+
+  useEffect(() => {
+    void refreshBacktestRuns();
+  }, []);
 
   const prefetchMarketSlug = (slug: string) => {
     const nextSlug = slug.trim();
@@ -2126,6 +2157,8 @@ export function QuantWorkspace() {
               backtestStatus={backtestStatus}
               batchRows={batchBacktestRows}
               batchStatus={batchBacktestStatus}
+              recentBacktestRuns={recentBacktestRuns}
+              backtestRunsStatus={backtestRunsStatus}
             />
           ) : null}
         </section>
