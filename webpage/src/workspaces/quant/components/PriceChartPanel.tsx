@@ -1674,6 +1674,16 @@ export function PriceChartPanel({
               <button type="button" onClick={exportLoadedCsv}>Export window</button>
             </div>
           ) : null}
+          {hoverInspect && hoverScreen ? (
+            <>
+              <div className="qtv-hover-crosshair-x" style={{ left: hoverScreen.x }} />
+              <div className="qtv-hover-crosshair-y" style={{ top: hoverScreen.y }} />
+              <div className="qtv-hover-price-tag" style={{ top: hoverScreen.y }}>
+                <span>{fmtPrice(hoverInspect.yes)}</span>
+                <b>{blockLabel(hoverInspect.point.timestamp)}</b>
+              </div>
+            </>
+          ) : null}
           {hoverInspect && hoverScreen && (!pinnedPoint || Math.floor(pinnedPoint.timestamp) !== Math.floor(hoverInspect.point.timestamp)) ? (
             <div className={`qtv-hover-tooltip ${tooltipMode}`} style={{ left: hoverScreen.x, top: hoverScreen.y }}>
               <strong>{hoverInspect.point.outcomeFullLabel || hoverInspect.point.outcomeLabel || selectedGroup?.fullLabel || 'Outcome'}</strong>

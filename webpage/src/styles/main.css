@@ -1996,6 +1996,64 @@
   border-radius: 999px;
 }
 
+.qtv-hover-crosshair-x,
+.qtv-hover-crosshair-y {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.qtv-hover-crosshair-x {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  border-left: 1px dashed rgba(148, 163, 184, 0.34);
+}
+
+.qtv-hover-crosshair-y {
+  right: 0;
+  left: 0;
+  height: 1px;
+  transform: translateY(-50%);
+  border-top: 1px dashed rgba(148, 163, 184, 0.34);
+}
+
+.qtv-hover-price-tag {
+  position: absolute;
+  right: 0;
+  z-index: 31;
+  display: grid;
+  min-width: 74px;
+  transform: translateY(-50%);
+  border: 1px solid rgba(96, 165, 250, 0.48);
+  border-radius: 3px 0 0 3px;
+  background: rgba(37, 99, 235, 0.94);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.38);
+  color: #f8fafc;
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+
+.qtv-hover-price-tag span,
+.qtv-hover-price-tag b {
+  padding: 1px 7px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.qtv-hover-price-tag span {
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.qtv-hover-price-tag b {
+  border-top: 1px solid rgba(219, 234, 254, 0.18);
+  color: #bfdbfe;
+  font-size: 8px;
+  font-weight: 900;
+}
+
 .qtv-replay-controls {
   position: absolute;
   z-index: 8;
