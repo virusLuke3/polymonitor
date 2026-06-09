@@ -811,10 +811,19 @@ def _serving_active_rows(
     page_size: int,
     offset: int,
 ) -> List[Dict[str, Any]]:
-    rows = ctx["query_all"](
-        _serving_select_sql(where_sql, order_sql),
-        [*params, max(page_size, page_size * 4), offset],
-    )
+    try:
+        rows = ctx["query_all"](
+            _serving_select_sql(where_sql, order_sql),
+            [*params, max(page_size, page_size * 2), offset],
+        )
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger:
+            logger.exception("market group active base query failed; retrying compact active-rank query")
+        rows = ctx["query_all"](
+            _serving_select_sql(where_sql, "active_rank DESC NULLS LAST, last_activity_at DESC NULLS LAST, volume_24h DESC"),
+            [*params, page_size, offset],
+        )
     if offset > 0:
         return rows
 
@@ -822,10 +831,16 @@ def _serving_active_rows(
     supplemental_limit = max(8, min(18, page_size // 4))
     seen = {_serving_row_identity(row) for row in rows}
     for _, pattern in ACTIVE_GROUP_TOPIC_FILTERS:
-        extra_rows = ctx["query_all"](
-            _serving_select_sql(f"{where_sql} AND ({text_sql} ~ ?)", order_sql),
-            [*params, pattern, supplemental_limit, 0],
-        )
+        try:
+            extra_rows = ctx["query_all"](
+                _serving_select_sql(f"{where_sql} AND ({text_sql} ~ ?)", order_sql),
+                [*params, pattern, supplemental_limit, 0],
+            )
+        except Exception:
+            logger = getattr(ctx.get("app"), "logger", None)
+            if logger:
+                logger.exception("market group active topic query failed pattern=%s", pattern)
+            continue
         for row in extra_rows:
             key = _serving_row_identity(row)
             if key and key in seen:
@@ -1051,20 +1066,10 @@ def _serving_market_groups_payload(
         params.extend([like, like, like, like])
     where_sql = " AND ".join(where)
     active_order_sql = """
-        CASE
-          WHEN COALESCE(trade_count_24h, 0) > 0 THEN 0
-          WHEN COALESCE(volume_24h, 0) > 0 AND last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 1
-          WHEN COALESCE(volume_24h, 0) > 0 AND created_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 2
-          WHEN COALESCE(volume_24h, 0) >= 100000 THEN 3
-          WHEN COALESCE(volume_24h, 0) > 0 AND last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '14 days') THEN 4
-          WHEN created_at >= (CURRENT_TIMESTAMP - INTERVAL '48 hours') THEN 5
-          WHEN last_activity_at >= (CURRENT_TIMESTAMP - INTERVAL '3 days') THEN 6
-          WHEN created_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days') THEN 7
-          ELSE 8
-        END ASC,
-        active_rank DESC,
-        volume_24h DESC,
+        active_rank DESC NULLS LAST,
         last_activity_at DESC NULLS LAST,
+        volume_24h DESC,
+        trade_count_24h DESC,
         created_at DESC NULLS LAST
     """
     order_sql = {
@@ -1174,7 +1179,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 16}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 17}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
