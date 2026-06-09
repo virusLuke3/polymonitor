@@ -22395,6 +22395,76 @@ a.wm-orderfilled-row {
   color: #f8fafc !important;
 }
 
+.wm-focus-block-placeholder {
+  position: relative !important;
+  display: grid !important;
+  align-content: start !important;
+  min-height: clamp(190px, 24vh, 252px) !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(34, 43, 58, 0.9) !important;
+  border-radius: 4px !important;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.032) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.032) 1px, transparent 1px),
+    #090d12 !important;
+  background-size: 78px 42px !important;
+  padding: 14px 16px !important;
+}
+
+.wm-focus-block-placeholder > div {
+  position: relative !important;
+  z-index: 2 !important;
+  display: grid !important;
+  gap: 5px !important;
+  width: min(520px, 82%) !important;
+  max-width: 100% !important;
+  padding: 10px 12px !important;
+  border: 1px solid rgba(38, 50, 68, 0.74) !important;
+  border-radius: 5px !important;
+  background: rgba(7, 12, 18, 0.82) !important;
+}
+
+.wm-focus-block-placeholder span,
+.wm-focus-block-placeholder em {
+  color: var(--wm-terminal-muted) !important;
+  font-family: var(--font-body) !important;
+  font-size: 11px !important;
+  font-style: normal !important;
+  font-weight: 560 !important;
+  letter-spacing: 0 !important;
+}
+
+.wm-focus-block-placeholder strong {
+  color: var(--wm-terminal-primary) !important;
+  font-family: var(--font-body) !important;
+  font-size: 13px !important;
+  font-weight: 720 !important;
+  line-height: 1.25 !important;
+}
+
+.wm-focus-block-placeholder > i {
+  position: absolute !important;
+  left: 22px !important;
+  right: 64px !important;
+  height: 2px !important;
+  border-radius: 999px !important;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.12), rgba(56, 189, 248, 0.58), rgba(244, 63, 94, 0.18)) !important;
+  opacity: 0.42 !important;
+}
+
+.wm-focus-block-placeholder > i:nth-of-type(1) { bottom: 42px !important; width: 78% !important; }
+.wm-focus-block-placeholder > i:nth-of-type(2) { bottom: 82px !important; width: 64% !important; }
+.wm-focus-block-placeholder > i:nth-of-type(3) { bottom: 122px !important; width: 86% !important; }
+
+.wm-focus-block-placeholder.loading > i {
+  animation: wmBlockPlaceholderPulse 1.3s ease-in-out infinite alternate !important;
+}
+
+@keyframes wmBlockPlaceholderPulse {
+  from { opacity: 0.18; transform: translateX(-2px); }
+  to { opacity: 0.58; transform: translateX(6px); }
+}
+
 .wm-focus-qtv-chart-meta {
   display: flex !important;
   align-items: center !important;

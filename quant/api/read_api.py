@@ -988,6 +988,7 @@ def get_market_price_series(
     market_slug: str,
     price_source: str,
     scope: str = "auto",
+    token_id: str | None = None,
     token_side: str | None = None,
     from_ts: int | None = None,
     to_ts: int | None = None,
@@ -995,6 +996,7 @@ def get_market_price_series(
     to_block: int | None = None,
     limit: int = 2500,
     max_outcomes: int = 24,
+    max_points: int = 900,
 ) -> dict[str, Any]:
     """Return semantic market/event series grouped by outcome token.
 
@@ -1011,6 +1013,26 @@ def get_market_price_series(
         scope=requested_scope,
         max_outcomes=max_outcomes,
     )
+    selected_token_id = str(token_id or "").strip()
+    if selected_token_id:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    market_id, market_slug, market_title, condition_id, end_date,
+                    token_id, token_side, outcome_index
+                FROM quant.market_token_metadata
+                WHERE token_id = %s
+                LIMIT 1
+                """,
+                (selected_token_id,),
+            )
+            selected_row = cur.fetchone()
+        if selected_row:
+            tokens = [dict(selected_row)]
+            effective_scope = "market"
+        else:
+            tokens = [token for token in tokens if str(token.get("token_id") or "") == selected_token_id]
     if token_side and effective_scope == "market":
         wanted = token_side.upper()
         tokens = [token for token in tokens if str(token.get("token_side") or "").upper() == wanted]
@@ -1042,6 +1064,19 @@ def get_market_price_series(
             cache_key = str(token_id)
             if cache_key in points_cache:
                 return points_cache[cache_key]
+            if max_points and int(limit or 0) > int(max_points):
+                rows = _fetch_token_price_points_sampled(
+                    cur,
+                    token_id=cache_key,
+                    source=source,
+                    from_ts=from_ts,
+                    to_ts=to_ts,
+                    from_block=from_block,
+                    to_block=to_block,
+                    max_points=max_points,
+                )
+                points_cache[cache_key] = rows
+                return rows
             params: list[Any] = [cache_key]
             if source == "frontend":
                 filters = ["token_id = %s"]

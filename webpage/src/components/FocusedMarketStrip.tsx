@@ -238,6 +238,21 @@ function formatQuantVolume(value: number) {
   return value.toLocaleString('en-US', { maximumFractionDigits: value >= 1000 ? 0 : 2 });
 }
 
+function blockClosePlaceholder(message: string, loading = false) {
+  return (
+    <div className={`wm-focus-block-placeholder${loading ? ' loading' : ''}`}>
+      <div>
+        <span>{loading ? 'Index query' : 'Block close'}</span>
+        <strong>{message}</strong>
+        <em>{loading ? 'Using token-level sampled quant series.' : 'No sampled rows returned for the selected outcome.'}</em>
+      </div>
+      <i />
+      <i />
+      <i />
+    </div>
+  );
+}
+
 function movingAverageBlockPoints(points: Array<{ blockNumber: number; price: number }>, windowSize: number) {
   if (points.length < 4) return [];
   const size = Math.max(3, Math.min(windowSize, points.length));
@@ -1094,6 +1109,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       : hasServingTradeActivity
         ? 'Price history is still loading for this market.'
         : 'No local price history is available for this market.';
+  const focusedHistoryFallback = isBlockCloseView
+    ? blockClosePlaceholder(focusedHistoryEmptyText, blockCloseLoading)
+    : emptyState(focusedHistoryEmptyText);
   const liveQuoteAvailable = Boolean(
     hasAnyBookLevels
       || hasServingTradeActivity
@@ -1152,12 +1170,15 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     setBlockCloseState({ key, payload: null, loading: true });
     fetchQuantMarketPriceSeries({
       marketSlug: selectedMarketSlug,
+      tokenId: selectedTokenId || undefined,
       priceSource: 'orderfilled_block_close',
       scope: 'market',
       tokenSide: 'YES',
-      limit: BLOCK_CLOSE_POINT_LIMIT,
+      limit: selectedTokenId ? 5000 : BLOCK_CLOSE_POINT_LIMIT,
+      maxPoints: 720,
       pointFormat: 'lite',
-      maxOutcomes: 8,
+      maxOutcomes: selectedTokenId ? 1 : 4,
+      live: true,
     })
       .then((payload) => {
         if (!cancelled) setBlockCloseState({ key, payload, loading: false });
@@ -1168,7 +1189,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     return () => {
       cancelled = true;
     };
-  }, [blockCloseKey, executionAvailable, selectedMarketSlug]);
+  }, [blockCloseKey, executionAvailable, selectedMarketSlug, selectedTokenId]);
 
   useEffect(() => {
     setBookSide('yes');
@@ -1256,9 +1277,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                               ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions)
                             : hasEventHistory && !isBlockCloseView
                               ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
-                              : emptyState(focusedHistoryEmptyText)
+                              : focusedHistoryFallback
                       )
-                    : (canRenderFocusedHistory ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions) : emptyState(focusedHistoryEmptyText))}
+                    : (canRenderFocusedHistory ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions) : focusedHistoryFallback)}
                 </div>
                 {showFocusedEventLegend ? eventChartLegend(detail, eventChart, activeOutcomeKey, (outcome) => {
                   ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);

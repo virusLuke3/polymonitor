@@ -326,6 +326,7 @@ export function fetchQuantMarketPriceSeries(query: QuantPriceQuery & { priceSour
   const params = new URLSearchParams();
   if (query.marketSlug?.trim()) params.set('market_slug', query.marketSlug.trim());
   if (query.tokenSide?.trim()) params.set('token_side', query.tokenSide.trim());
+  if (query.tokenId?.trim()) params.set('token_id', query.tokenId.trim());
   if (query.priceSource?.trim()) params.set('price_source', query.priceSource.trim());
   if (query.scope?.trim()) params.set('scope', query.scope.trim());
   if (query.from?.trim()) params.set('from', query.from.trim());
@@ -334,6 +335,7 @@ export function fetchQuantMarketPriceSeries(query: QuantPriceQuery & { priceSour
   if (query.toBlock?.trim()) params.set('to_block', query.toBlock.trim());
   params.set('limit', String(query.limit || 2500));
   params.set('max_outcomes', String(query.maxOutcomes || 24));
+  if (query.maxPoints) params.set('max_points', String(query.maxPoints));
   params.set('point_format', query.pointFormat || 'lite');
   if (query.live) params.set('live', '1');
   return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/market-price-series?${params.toString()}`, 20000);

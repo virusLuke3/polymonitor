@@ -325,9 +325,11 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             return jsonify({"error": "market_slug is required"}), 400
         limit = min(max(_parse_int_arg("limit", 2500) or 2500, 1), 25000)
         max_outcomes = min(max(_parse_int_arg("max_outcomes", 24) or 24, 1), 100)
+        max_points = min(max(_parse_int_arg("max_points", 900) or 900, 50), 2500)
         price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
         point_format = (request.args.get("point_format") or "lite").strip().lower()
         scope = (request.args.get("scope") or "auto").strip().lower()
+        token_id = (request.args.get("token_id") or "").strip() or None
         cache_key = _cache_key("market-price-series", version=2)
         live_request = _parse_bool_arg("live")
 
@@ -338,6 +340,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                     market_slug=market_slug,
                     price_source=price_source,
                     scope=scope,
+                    token_id=token_id,
                     token_side=(request.args.get("token_side") or "").strip() or None,
                     from_ts=_parse_time_arg("from"),
                     to_ts=_parse_time_arg("to"),
@@ -345,6 +348,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                     to_block=_parse_int_arg("to_block"),
                     limit=limit,
                     max_outcomes=max_outcomes,
+                    max_points=max_points,
                 )
             return _camel_row(_apply_point_payload_format(payload, point_format))
 
