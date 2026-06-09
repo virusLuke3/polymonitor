@@ -857,6 +857,7 @@ export function PriceChartPanel({
   }, [primaryPoints, rangeSelection, visibleLogicalRange]);
   const blockAxisTicks = useMemo(() => {
     if (!priceSource.includes('block') || !primaryPoints.length) return [];
+    const axisWidth = Math.max(720, Math.floor(containerRef.current?.clientWidth || 1100));
     const logicalRangeLooksValid = Boolean(
       visibleLogicalRange
       && visibleLogicalRange.to > visibleLogicalRange.from
@@ -869,7 +870,8 @@ export function PriceChartPanel({
     const fromIndex = Math.max(0, Math.min(primaryPoints.length - 1, Math.floor(range.from)));
     const toIndex = Math.max(fromIndex, Math.min(primaryPoints.length - 1, Math.ceil(range.to)));
     const span = Math.max(1, toIndex - fromIndex);
-    const count = Math.min(9, Math.max(4, Math.floor(span / 85) + 4));
+    const targetLabelCount = Math.floor(axisWidth / 142);
+    const count = Math.min(13, Math.max(5, targetLabelCount));
     const seen = new Set<number>();
     return Array.from({ length: count }, (_, tickIndex) => {
       const index = Math.round(fromIndex + (span * tickIndex) / Math.max(1, count - 1));
@@ -882,13 +884,37 @@ export function PriceChartPanel({
       return {
         key: `${block}-${tickIndex}`,
         block,
+        index,
         left: logicalRangeLooksValid
           ? axisPercentStyle(axisPercentFromIndex(index, primaryPoints, visibleLogicalRange)) || fallbackLeft
           : fallbackLeft,
         className: `${tickIndex === 0 ? 'start ' : ''}${tickIndex === count - 1 ? 'end ' : ''}${tickIndex % 2 ? 'level-1 ' : ''}major`,
       };
-    }).filter((tick): tick is { key: string; block: number; left: string; className: string } => Boolean(tick?.left));
+    }).filter((tick): tick is { key: string; block: number; index: number; left: string; className: string } => Boolean(tick?.left));
   }, [priceSource, primaryPoints, visibleLogicalRange]);
+  const blockAxisMinorTicks = useMemo(() => {
+    if (!blockAxisTicks.length || !priceSource.includes('block')) return [];
+    const minorTicks: Array<{ key: string; left: string; level: string }> = [];
+    blockAxisTicks.slice(0, -1).forEach((tick, tickIndex) => {
+      const next = blockAxisTicks[tickIndex + 1];
+      if (!next) return;
+      const span = next.index - tick.index;
+      if (span <= 1) return;
+      const divisions = span > 260 ? 5 : span > 120 ? 4 : 3;
+      for (let division = 1; division < divisions; division += 1) {
+        const index = Math.round(tick.index + (span * division) / divisions);
+        if (index <= tick.index || index >= next.index) continue;
+        const left = axisPercentStyle(axisPercentFromIndex(index, primaryPoints, visibleLogicalRange));
+        if (!left) continue;
+        minorTicks.push({
+          key: `${tick.key}-minor-${division}`,
+          left,
+          level: division === Math.floor(divisions / 2) ? 'mid' : 'minor',
+        });
+      }
+    });
+    return minorTicks;
+  }, [blockAxisTicks, priceSource, primaryPoints, visibleLogicalRange]);
   const blockScaleSummaryTicks = useMemo(() => {
     if (!priceSource.includes('block') || !primaryPoints.length) return [];
     const count = Math.min(8, Math.max(4, Math.floor(primaryPoints.length / 140) + 4));
@@ -2252,6 +2278,11 @@ export function PriceChartPanel({
             </div>
           ) : null}
           <div className="qtv-block-tick-axis" style={blockAxisStyle} aria-label="Visible block axis">
+            {blockAxisMinorTicks.map((tick) => (
+              <span key={tick.key} className={`minor ${tick.level}`} style={{ left: tick.left }}>
+                <i />
+              </span>
+            ))}
             {blockAxisTicks.map((tick) => (
               <span key={tick.key} className={tick.className} style={{ left: tick.left }}>
                 <i />
