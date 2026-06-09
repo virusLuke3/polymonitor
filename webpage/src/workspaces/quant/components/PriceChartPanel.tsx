@@ -847,6 +847,36 @@ export function PriceChartPanel({
       return block;
     }).filter((block): block is number => Boolean(block));
   }, [priceSource, primaryPoints]);
+  const visibleWindowMeta = useMemo(() => {
+    if (!primaryPoints.length) return null;
+    const tickBlocks = blockAxisTicks.map((tick) => tick.block).filter((block) => Number.isFinite(block));
+    const range = visibleLogicalRange && visibleLogicalRange.to > visibleLogicalRange.from
+      ? visibleLogicalRange
+      : { from: 0, to: Math.max(0, primaryPoints.length - 1) };
+    const fromIndex = Math.max(0, Math.min(primaryPoints.length - 1, Math.floor(range.from)));
+    const toIndex = Math.max(fromIndex, Math.min(primaryPoints.length - 1, Math.ceil(range.to)));
+    const fromPoint = primaryPoints[fromIndex];
+    const toPoint = primaryPoints[toIndex];
+    const fromBlock = tickBlocks.length ? Math.min(...tickBlocks) : Math.floor(fromPoint?.timestamp || 0);
+    const toBlock = tickBlocks.length ? Math.max(...tickBlocks) : Math.floor(toPoint?.timestamp || 0);
+    const rowCount = primaryPoints.filter((point) => point.timestamp >= fromBlock && point.timestamp <= toBlock).length || Math.max(1, toIndex - fromIndex + 1);
+    const coverage = primaryPoints.length ? rowCount / primaryPoints.length : 0;
+    const latestBlock = Math.floor(primaryPoints[primaryPoints.length - 1]?.timestamp || 0);
+    const firstBlock = Math.floor(primaryPoints[0]?.timestamp || 0);
+    const latestVisible = toBlock >= latestBlock;
+    const firstVisible = fromBlock <= firstBlock;
+    return {
+      fromIndex,
+      toIndex,
+      fromBlock,
+      toBlock,
+      rowCount,
+      coverage,
+      latestVisible,
+      firstVisible,
+      span: Math.max(1, range.to - range.from),
+    };
+  }, [blockAxisTicks, primaryPoints, visibleLogicalRange]);
 
   function setChartVisibleRange(range: { from: number; to: number }, viewportMode: 'preset' | 'custom' = 'custom') {
     const next = clampLogicalRange(range, primaryPoints.length);
@@ -875,6 +905,29 @@ export function PriceChartPanel({
     const center = (range.from + range.to) / 2;
     const half = ((range.to - range.from) * factor) / 2;
     setChartVisibleRange({ from: center - half, to: center + half });
+  }
+
+  function panLogicalRange(direction: -1 | 1, ratio = 0.5) {
+    const range = normalizeLogicalRange(chartRef.current?.timeScale().getVisibleLogicalRange() || null)
+      || visibleLogicalRangeRef.current
+      || { from: 0, to: Math.max(1, primaryPoints.length - 1) };
+    const span = Math.max(1, range.to - range.from);
+    const shift = span * ratio * direction;
+    setChartVisibleRange({ from: range.from + shift, to: range.to + shift });
+  }
+
+  function jumpToChartEdge(edge: 'start' | 'latest') {
+    if (!primaryPoints.length) return;
+    const range = normalizeLogicalRange(chartRef.current?.timeScale().getVisibleLogicalRange() || null)
+      || visibleLogicalRangeRef.current
+      || { from: 0, to: Math.max(1, primaryPoints.length - 1) };
+    const span = Math.max(8, Math.min(Math.max(1, primaryPoints.length - 1), range.to - range.from));
+    if (edge === 'start') {
+      setChartVisibleRange({ from: 0, to: span });
+      return;
+    }
+    const last = Math.max(1, primaryPoints.length - 1);
+    setChartVisibleRange({ from: last - span, to: last });
   }
 
   function logicalIndexFromClientX(clientX: number) {
@@ -1148,6 +1201,14 @@ export function PriceChartPanel({
       if (event.key === '-' && !(event.target instanceof HTMLInputElement)) {
         event.preventDefault();
         zoomLogicalRange(1.35);
+      }
+      if (event.key === 'ArrowLeft' && !(event.target instanceof HTMLInputElement)) {
+        event.preventDefault();
+        panLogicalRange(-1, event.shiftKey ? 0.9 : 0.45);
+      }
+      if (event.key === 'ArrowRight' && !(event.target instanceof HTMLInputElement)) {
+        event.preventDefault();
+        panLogicalRange(1, event.shiftKey ? 0.9 : 0.45);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -1673,6 +1734,27 @@ export function PriceChartPanel({
                 {blockScaleSummaryTicks.map((block) => (
                   <span key={`inline-${block}`}>{blockLabel(block)}</span>
                 ))}
+              </div>
+            ) : null}
+            {visibleWindowMeta ? (
+              <div className="qtv-visible-window-control" aria-label="Visible block window">
+                <button type="button" disabled={visibleWindowMeta.firstVisible} onClick={() => jumpToChartEdge('start')}>Start</button>
+                <button type="button" onClick={() => panLogicalRange(-1, 0.42)}>Prev</button>
+                <span>
+                  <em>Window</em>
+                  <b>{blockLabel(visibleWindowMeta.fromBlock)} to {blockLabel(visibleWindowMeta.toBlock)}</b>
+                </span>
+                <span>
+                  <em>Rows</em>
+                  <b>{visibleWindowMeta.rowCount.toLocaleString('en-US')} / {primaryPoints.length.toLocaleString('en-US')}</b>
+                </span>
+                <span className="meter">
+                  <i style={{ width: `${Math.max(3, Math.round(visibleWindowMeta.coverage * 100))}%` }} />
+                  <b>{Math.round(visibleWindowMeta.coverage * 100)}%</b>
+                </span>
+                <button type="button" onClick={() => panLogicalRange(1, 0.42)}>Next</button>
+                <button type="button" disabled={visibleWindowMeta.latestVisible} onClick={() => jumpToChartEdge('latest')}>Latest</button>
+                <button type="button" onClick={fitData}>Fit</button>
               </div>
             ) : null}
             {eventMode ? (

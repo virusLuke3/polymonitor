@@ -2246,6 +2246,91 @@
   font-variant-numeric: tabular-nums;
 }
 
+.qtv-visible-window-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 26px;
+  margin-top: 5px;
+  overflow-x: auto;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.qtv-visible-window-control::-webkit-scrollbar {
+  display: none;
+}
+
+.qtv-visible-window-control button,
+.qtv-visible-window-control span {
+  flex: 0 0 auto;
+  min-height: 24px;
+  border: 1px solid rgba(38, 50, 68, 0.74);
+  border-radius: 4px;
+  background: rgba(7, 12, 20, 0.78);
+  color: #a8b3c3;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(6px);
+}
+
+.qtv-visible-window-control button {
+  padding: 0 7px;
+  cursor: pointer;
+}
+
+.qtv-visible-window-control button:hover:not(:disabled) {
+  border-color: rgba(47, 125, 244, 0.48);
+  background: rgba(47, 125, 244, 0.13);
+  color: #dbeafe;
+}
+
+.qtv-visible-window-control button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.qtv-visible-window-control span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+}
+
+.qtv-visible-window-control em {
+  color: #6f7b8e;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.qtv-visible-window-control b {
+  color: #e5edf8;
+  white-space: nowrap;
+}
+
+.qtv-visible-window-control span.meter {
+  position: relative;
+  min-width: 68px;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.qtv-visible-window-control span.meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 3px;
+  background: linear-gradient(90deg, rgba(47, 125, 244, 0.26), rgba(34, 211, 238, 0.12));
+}
+
+.qtv-visible-window-control span.meter b {
+  position: relative;
+  z-index: 1;
+}
+
 .qtv-block-tick-axis {
   position: absolute;
   z-index: 80;
