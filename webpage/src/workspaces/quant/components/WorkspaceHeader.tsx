@@ -392,6 +392,21 @@ export function WorkspaceHeader({
     : '';
   const recentSlugSet = useMemo(() => new Set(recentMarkets.map((market) => market.marketSlug)), [recentMarkets]);
   const favoriteSlugSet = useMemo(() => new Set(favoriteMarketSlugs), [favoriteMarketSlugs]);
+  const marketBySlug = useMemo(() => {
+    const values = new Map<string, QuantPriceMarket>();
+    for (const market of [...marketChoices, ...recentMarkets]) {
+      if (market.marketSlug && !values.has(market.marketSlug)) values.set(market.marketSlug, market);
+    }
+    return values;
+  }, [marketChoices, recentMarkets]);
+  const favoriteMarkets = useMemo(
+    () => favoriteMarketSlugs.map((slug) => marketBySlug.get(slug)).filter((market): market is QuantPriceMarket => Boolean(market)).slice(0, 8),
+    [favoriteMarketSlugs, marketBySlug],
+  );
+  const memoryRecentMarkets = useMemo(
+    () => recentMarkets.filter((market) => market.marketSlug).slice(0, 8),
+    [recentMarkets],
+  );
 
   const searchResults = useMemo(() => {
     const query = activeSearchText.toLowerCase();
@@ -637,6 +652,10 @@ export function WorkspaceHeader({
     ));
   };
 
+  const clearRecentMarkets = () => {
+    setRecentMarkets([]);
+  };
+
   const chooseHighlightedResult = () => {
     chooseResult(activeResult);
   };
@@ -830,6 +849,43 @@ export function WorkspaceHeader({
                   </select>
                 </label>
               </div>
+              {(favoriteMarkets.length || memoryRecentMarkets.length) ? (
+                <div className="qtv-palette-memory-rail" onMouseDown={(event) => event.preventDefault()}>
+                  {favoriteMarkets.length ? (
+                    <section>
+                      <strong>Favorites</strong>
+                      {favoriteMarkets.map((market) => (
+                        <button
+                          key={`fav-${market.marketSlug}`}
+                          type="button"
+                          title={market.marketSlug}
+                          onClick={() => chooseMarket(market.marketSlug, market)}
+                        >
+                          <span>{titleForMarket(market)}</span>
+                          <b>{market.itemKind === 'event' ? `${toNumber(market.outcomeCount || market.totalMembers).toLocaleString('en-US')} outcomes` : `${rowsForMarket(market).toLocaleString('en-US')} rows`}</b>
+                        </button>
+                      ))}
+                    </section>
+                  ) : null}
+                  {memoryRecentMarkets.length ? (
+                    <section>
+                      <strong>Recent</strong>
+                      {memoryRecentMarkets.map((market) => (
+                        <button
+                          key={`recent-${market.marketSlug}`}
+                          type="button"
+                          title={market.marketSlug}
+                          onClick={() => chooseMarket(market.marketSlug, market)}
+                        >
+                          <span>{titleForMarket(market)}</span>
+                          <b>{market.itemKind === 'event' ? `${toNumber(market.outcomeCount || market.totalMembers).toLocaleString('en-US')} outcomes` : `${rowsForMarket(market).toLocaleString('en-US')} rows`}</b>
+                        </button>
+                      ))}
+                      <button className="clear" type="button" onClick={clearRecentMarkets}>Clear</button>
+                    </section>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="qtv-palette-body">
                 <div className="qtv-results-list">
                   {isSearching ? (
