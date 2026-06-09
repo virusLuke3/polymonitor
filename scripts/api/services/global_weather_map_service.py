@@ -363,6 +363,21 @@ def _matched_date_iso(text: str, dates: List[Dict[str, str]]) -> Optional[str]:
     return None
 
 
+def _weather_market_date_rank(ctx: dict, date_iso: str, date_order: Dict[str, int]) -> Tuple[int, int]:
+    base_rank = date_order.get(date_iso, 999)
+    try:
+        market_date = datetime.fromisoformat(str(date_iso)).date()
+        today = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00")).date()
+    except Exception:
+        return 3, base_rank
+    delta = (market_date - today).days
+    if delta > 0:
+        return 0, delta
+    if delta == 0:
+        return 1, 0
+    return 2, abs(delta)
+
+
 def _date_window_bounds(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[str, str]:
     now = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00"))
     first = datetime.fromisoformat(dates[0]["iso"]).replace(tzinfo=timezone.utc) if dates else now
@@ -1230,15 +1245,16 @@ def _db_markets_by_city(ctx: dict, cities: List[Dict[str, Any]], dates: List[Dic
     source_states: Dict[str, str] = {}
     selected_groups: Dict[str, List[Tuple[Dict[str, Any], str, str, List[Dict[str, Any]]]]] = {}
     for city_id, city in city_by_id.items():
-        candidate_groups: List[Tuple[int, int, int, float, str, str, List[Dict[str, Any]]]] = []
+        candidate_groups: List[Tuple[int, int, int, int, float, str, str, List[Dict[str, Any]]]] = []
         for (group_city_id, date_iso, family), group_rows in grouped.items():
             if group_city_id != city_id:
                 continue
             newest = max((_parse_ts(row.get("serving_latest_trade_at") or row.get("latest_trade_at") or row.get("end_date") or row.get("created_at")) for row in group_rows), default=0.0)
-            candidate_groups.append((WEATHER_FAMILY_PRIORITY.get(family, 99), date_order.get(date_iso, 999), -len(group_rows), -newest, date_iso, family, group_rows))
-        candidate_groups.sort(key=lambda item: (item[0], item[1], item[2]))
+            date_rank, date_distance = _weather_market_date_rank(ctx, date_iso, date_order)
+            candidate_groups.append((WEATHER_FAMILY_PRIORITY.get(family, 99), date_rank, date_distance, -len(group_rows), -newest, date_iso, family, group_rows))
+        candidate_groups.sort(key=lambda item: (item[0], item[1], item[2], item[3], item[4]))
         if candidate_groups:
-            selected_groups[city_id] = [(city, date_iso, family, group_rows) for _, _, _, _, date_iso, family, group_rows in candidate_groups[:6]]
+            selected_groups[city_id] = [(city, date_iso, family, group_rows) for _, _, _, _, _, date_iso, family, group_rows in candidate_groups[:6]]
         else:
             source_states[city_id] = "empty" if db_status == "ok" else db_status
 
