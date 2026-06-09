@@ -192,7 +192,7 @@ function stageLabel(stage: string) {
     third_place: '3RD',
     final: 'FINAL',
   };
-  return labels[stage] || stage.toUpperCase();
+  return labels[stage] || String(stage || 'stage').toUpperCase();
 }
 
 function scoreText(match: WorldCupMatch) {
@@ -303,12 +303,12 @@ function cleanSignalSource(source?: string | null) {
   if (/^(seed|rss|primary|inferred|manual|fallback)$/i.test(value)) return 'WORLD CUP DESK';
   if (/local\s*db/i.test(value)) return 'MARKET DESK';
   if (/remote/i.test(value)) return 'DATA DESK';
-  return value.replace(/[-_]/g, ' ').toUpperCase();
+  return String(value || 'source').replace(/[-_]/g, ' ').toUpperCase();
 }
 
 function cleanSignalTags(tags: WorldCupSignalItem['tags']) {
   return tags.filter((tag) => {
-    const label = tag.label.trim().toUpperCase();
+    const label = String(tag.label || '').trim().toUpperCase();
     return label && !HIDDEN_SIGNAL_LABELS.has(label) && !/(^|\s)(SEED|RSS|PRIMARY|LIVE|WATCH)(\s|$)/i.test(label);
   });
 }
@@ -692,7 +692,7 @@ function SchedulePanel({
               <strong>{match.homeTeam} <i>{scoreText(match)}</i> {match.awayTeam}</strong>
               <em>{match.kickoffBeijing} · {match.city} · {match.venue}</em>
             </span>
-            <span className={`wm-worldcup-status ${match.status}`}>{match.marketLinked ? 'MKT' : match.status === 'scheduled' ? 'FIX' : match.status.toUpperCase()}</span>
+            <span className={`wm-worldcup-status ${match.status || 'scheduled'}`}>{match.marketLinked ? 'MKT' : match.status === 'scheduled' ? 'FIX' : String(match.status || 'scheduled').toUpperCase()}</span>
           </button>
         ))}
       </div>
@@ -748,7 +748,7 @@ function MatchPanel({
         <div><span>VENUE</span><strong>{match.venue}</strong></div>
         <div><span>WEATHER</span><strong>{weather ? `${weather.current.tempC}C · ${weather.current.condition}` : 'Host weather watch'}</strong></div>
         <div><span>CAPACITY</span><strong>{city?.capacity ? `${city.capacity.toLocaleString()} seats` : 'Host venue'}</strong></div>
-        <div><span>STATE</span><strong>{match.status.toUpperCase()}{match.minute ? ` · ${match.minute}` : ''}</strong></div>
+        <div><span>STATE</span><strong>{String(match.status || 'scheduled').toUpperCase()}{match.minute ? ` · ${match.minute}` : ''}</strong></div>
       </div>
     </Panel>
   );
@@ -978,7 +978,7 @@ function MatchControlPanel({
         <span><em>AWAY</em><strong>{match.awayTeam}</strong></span>
       </div>
       <div className="wm-worldcup-control-ticker">
-        <i>{match.status.toUpperCase()}</i>
+        <i>{String(match.status || 'scheduled').toUpperCase()}</i>
         <i>{markets.length} markets</i>
         <i>{odds.length} odds feeds</i>
         <i>{match.city}</i>
@@ -1091,7 +1091,7 @@ function MarketBoardPanel({
         <article className="wm-worldcup-market-card" key={`${market.eventId || market.title}`}>
           <div className="wm-worldcup-card-head">
             <span>{formatCompact(market.volume24h)} · {Math.round(market.confidence * 100)} conf</span>
-            <b>{index === 0 ? 'VERIFIED' : market.source.toUpperCase()}</b>
+            <b>{index === 0 ? 'VERIFIED' : String(market.source || 'market').toUpperCase()}</b>
           </div>
           <strong>{market.title}</strong>
           <div className="wm-worldcup-prob-grid">
@@ -1772,7 +1772,7 @@ function buildMatchSignals(match: WorldCupMatch | null, markets: WorldCupPolymar
       id: 'match-clock',
       source: 'MATCH DESK',
       title: `${match.homeTeam} vs ${match.awayTeam}: kickoff control and match state`,
-      summary: `${match.kickoffBeijing} Beijing · ${match.kickoffLocal} local · ${match.status.toUpperCase()}`,
+      summary: `${match.kickoffBeijing || match.kickoffUtc || 'Kickoff pending'} Beijing · ${match.kickoffLocal || 'local pending'} local · ${String(match.status || 'scheduled').toUpperCase()}`,
       age: '',
       tags: [{ label: 'SCHEDULE', tone: 'green' }, { label: group, tone: 'gold' }],
       accent: 'green',
@@ -1814,7 +1814,7 @@ function buildHostOpsSignals(payload: WorldCupDashboardPayload, selectedCityId: 
       age: weather.generatedAt,
       tags: [
         { label: active ? 'ACTIVE' : 'WEATHER', tone: active ? 'green' : 'blue' },
-        { label: weather.current.condition.toUpperCase(), tone: /storm|rain/i.test(weather.current.condition) ? 'red' : 'gold' },
+        { label: String(weather.current.condition || 'WEATHER').toUpperCase(), tone: /storm|rain/i.test(weather.current.condition || '') ? 'red' : 'gold' },
       ],
       accent: active ? 'green' : index % 3 === 0 ? 'blue' : 'gold',
     } satisfies WorldCupSignalItem;
@@ -1826,7 +1826,7 @@ function buildMarketSignals(markets: WorldCupPolymarketMarket[], match: WorldCup
   return markets.flatMap<WorldCupSignalItem>((market, marketIndex) => [
     {
       id: `market-${marketIndex}-headline`,
-      source: market.source.toUpperCase(),
+      source: String(market.source || 'market').toUpperCase(),
       title: market.title,
       summary: `${Math.round(market.confidence * 100)} confidence · 24h volume ${formatCompact(market.volume24h)} · ${market.outcomes.length} outcomes`,
       age: '',
@@ -1870,7 +1870,7 @@ function buildOddsSignals(odds: WorldCupOddsSnapshot[], match: WorldCupMatch | n
     title: snapshot.provider,
     summary: snapshot.outcomes.map((outcome) => `${outcome.name} ${formatNumber(outcome.decimalOdds, 2)} / ${formatNumber(outcome.impliedProbability, 1)}%`).join(' · '),
     age: snapshot.generatedAt || (match ? match.kickoffBeijing : ''),
-    tags: [{ label: snapshot.marketType.toUpperCase(), tone: 'purple' }],
+    tags: [{ label: String(snapshot.marketType || 'odds').toUpperCase(), tone: 'purple' }],
     accent: index % 2 ? 'purple' : 'blue',
   }));
 }
@@ -1987,10 +1987,10 @@ function buildOfficialFactSignals(payload: WorldCupDashboardPayload, match: Worl
     {
       id: 'facts-status-rules',
       source: 'MATCH STATE',
-      title: `Current state: ${match.status.toUpperCase()}${match.minute ? ` · ${match.minute}` : ''}`,
+      title: `Current state: ${String(match.status || 'scheduled').toUpperCase()}${match.minute ? ` · ${match.minute}` : ''}`,
       summary: 'Scheduled, live, finished and postponed states drive calendar filters, match detail and group table updates.',
       age: '',
-      tags: [{ label: 'STATE', tone: 'green' }, { label: match.status.toUpperCase(), tone: match.status === 'postponed' ? 'red' : 'gold' }],
+      tags: [{ label: 'STATE', tone: 'green' }, { label: String(match.status || 'scheduled').toUpperCase(), tone: match.status === 'postponed' ? 'red' : 'gold' }],
       accent: match.status === 'postponed' ? 'red' : 'green',
     },
     ...cityMatches.map((cityMatch) => ({
