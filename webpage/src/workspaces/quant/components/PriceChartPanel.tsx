@@ -26,6 +26,14 @@ type ChartViewMode = 'raw' | 'normalized' | 'direct' | 'implied';
 type RangeSelection = { startX: number; currentX: number } | null;
 type LogicalRangeState = { from: number; to: number } | null;
 type LogicalRangeLike = LogicalRangeState | undefined;
+type RangeZoomMeta = {
+  fromIndex: number;
+  toIndex: number;
+  fromBlock: number;
+  toBlock: number;
+  pointCount: number;
+  spanBlocks: number;
+};
 
 const DRAW_TOOLS = [
   ['cursor', 'Cursor', 'M5 4l10 8-5 1.5L8 18 5 4z'],
@@ -559,6 +567,7 @@ export function PriceChartPanel({
   const [internalSoloOutcomeKey, setInternalSoloOutcomeKey] = useState<string>('');
   const [rangeZoomEnabled, setRangeZoomEnabled] = useState(false);
   const [rangeSelection, setRangeSelection] = useState<RangeSelection>(null);
+  const [rangeZoomNotice, setRangeZoomNotice] = useState<RangeZoomMeta | null>(null);
   const [replayEnabled, setReplayEnabled] = useState(false);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayIndex, setReplayIndex] = useState<number | null>(null);
@@ -703,6 +712,18 @@ export function PriceChartPanel({
     left: `${Math.min(rangeSelection.startX, rangeSelection.currentX) - containerRef.current.getBoundingClientRect().left}px`,
     width: `${Math.abs(rangeSelection.currentX - rangeSelection.startX)}px`,
   } : undefined;
+  const rangeSelectionHudStyle = rangeSelection && containerRef.current ? {
+    left: `${Math.min(
+      Math.max(142, Math.min(rangeSelection.startX, rangeSelection.currentX) - containerRef.current.getBoundingClientRect().left + (Math.abs(rangeSelection.currentX - rangeSelection.startX) / 2)),
+      Math.max(142, containerRef.current.getBoundingClientRect().width - 142),
+    )}px`,
+  } : undefined;
+  const rangeSelectionMeta = useMemo(() => {
+    if (!rangeSelection || !primaryPoints.length) return null;
+    const from = logicalIndexFromClientX(Math.min(rangeSelection.startX, rangeSelection.currentX));
+    const to = logicalIndexFromClientX(Math.max(rangeSelection.startX, rangeSelection.currentX));
+    return rangeMetaFromLogical(from, to);
+  }, [primaryPoints, rangeSelection, visibleLogicalRange]);
   const blockAxisTicks = useMemo(() => {
     if (!priceSource.includes('block') || !primaryPoints.length) return [];
     const logicalRangeLooksValid = Boolean(
@@ -789,15 +810,33 @@ export function PriceChartPanel({
     return range.from + ratio * Math.max(1, range.to - range.from);
   }
 
+  function rangeMetaFromLogical(from: number, to: number): RangeZoomMeta | null {
+    if (!primaryPoints.length) return null;
+    const fromIndex = Math.max(0, Math.min(primaryPoints.length - 1, Math.floor(Math.min(from, to))));
+    const toIndex = Math.max(fromIndex, Math.min(primaryPoints.length - 1, Math.ceil(Math.max(from, to))));
+    const fromBlock = Math.floor(primaryPoints[fromIndex]?.timestamp || 0);
+    const toBlock = Math.floor(primaryPoints[toIndex]?.timestamp || fromBlock);
+    return {
+      fromIndex,
+      toIndex,
+      fromBlock,
+      toBlock,
+      pointCount: Math.max(1, toIndex - fromIndex + 1),
+      spanBlocks: Math.max(0, toBlock - fromBlock),
+    };
+  }
+
   function commitRangeZoom(selection: RangeSelection) {
-    if (!selection) return;
+    if (!selection) return null;
     const left = Math.min(selection.startX, selection.currentX);
     const right = Math.max(selection.startX, selection.currentX);
-    if (Math.abs(right - left) < 18) return;
-    setChartVisibleRange({
-      from: logicalIndexFromClientX(left),
-      to: logicalIndexFromClientX(right),
-    });
+    if (Math.abs(right - left) < 18) return null;
+    const from = logicalIndexFromClientX(left);
+    const to = logicalIndexFromClientX(right);
+    const meta = rangeMetaFromLogical(from, to);
+    setChartVisibleRange({ from, to });
+    setRangeZoomNotice(meta);
+    return meta;
   }
 
   function handleChartWheel(event: WheelEvent) {
@@ -961,9 +1000,10 @@ export function PriceChartPanel({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (rangeSelection || rangeZoomEnabled) {
+        if (rangeSelection || rangeZoomEnabled || rangeZoomNotice) {
           setRangeSelection(null);
           setRangeZoomEnabled(false);
+          setRangeZoomNotice(null);
           return;
         }
         if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.qtv-data-window')) {
@@ -991,6 +1031,12 @@ export function PriceChartPanel({
         event.preventDefault();
         fitData();
       }
+      if (event.key.toLowerCase() === 'z' && !(event.target instanceof HTMLInputElement)) {
+        event.preventDefault();
+        setRangeSelection(null);
+        setRangeZoomNotice(null);
+        setRangeZoomEnabled((current) => !current);
+      }
       if ((event.key === '+' || event.key === '=') && !(event.target instanceof HTMLInputElement)) {
         event.preventDefault();
         zoomLogicalRange(0.72);
@@ -1002,7 +1048,7 @@ export function PriceChartPanel({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [rangeSelection, rangeZoomEnabled]);
+  }, [rangeSelection, rangeZoomEnabled, rangeZoomNotice]);
 
   useEffect(() => {
     if (!replayPlaying || !replayEnabled || !rawAllPoints.length) return undefined;
@@ -1391,13 +1437,14 @@ export function PriceChartPanel({
             <button
               className={rangeZoomEnabled ? 'active' : ''}
               type="button"
-              title="Drag on chart to box zoom"
+              title="Box zoom (Z). Drag across the chart or hold Shift/Alt while dragging."
               onClick={() => {
                 setRangeZoomEnabled((current) => !current);
                 setRangeSelection(null);
+                setRangeZoomNotice(null);
               }}
             >
-              Range
+              Box
             </button>
           </div>
           <div className="qtv-toolbar-group">
@@ -1718,18 +1765,18 @@ export function PriceChartPanel({
         ) : null}
 
         <div
-          className={`qtv-tv-chart ${rangeZoomEnabled ? 'range-enabled' : ''}`}
-          ref={containerRef}
+          className={`qtv-chart-surface ${rangeZoomEnabled ? 'range-enabled' : ''}`}
           onWheel={(event) => handleChartWheel(event as unknown as WheelEvent)}
           onPointerDown={(event) => {
             const shouldRangeZoom = rangeZoomEnabled || event.shiftKey || event.altKey;
             if (!shouldRangeZoom) return;
             event.preventDefault();
+            setRangeZoomNotice(null);
             setRangeSelection({ startX: event.clientX, currentX: event.clientX });
           }}
           onPointerMove={(event) => {
             if (!rangeSelection) return;
-            setRangeSelection({ ...rangeSelection, currentX: event.clientX });
+            setRangeSelection((current) => (current ? { ...current, currentX: event.clientX } : current));
           }}
           onPointerUp={() => {
             if (!rangeSelection) return;
@@ -1743,6 +1790,7 @@ export function PriceChartPanel({
             handleChartClick(event as unknown as MouseEvent);
           }}
         >
+          <div className="qtv-tv-chart" ref={containerRef} />
           {!allPoints.length ? (
             <div className="qtv-chart-empty">
               <strong>{loadingTitle}</strong>
@@ -1805,7 +1853,29 @@ export function PriceChartPanel({
             </div>
           ) : null)}
           {focusedMarkers.length && !selectedTradeFocus ? <div className="qtv-trade-focus-pill">{selectedTradeId} entry / exit located</div> : null}
+          {rangeZoomEnabled && !rangeSelection ? (
+            <div className="qtv-range-armed">
+              <strong>Box zoom armed</strong>
+              <span>Drag horizontally across blocks · Esc cancels · Z toggles</span>
+            </div>
+          ) : null}
+          {rangeZoomNotice ? (
+            <div className="qtv-range-notice">
+              <span>Zoomed</span>
+              <b>{blockLabel(rangeZoomNotice.fromBlock)} → {blockLabel(rangeZoomNotice.toBlock)}</b>
+              <em>{rangeZoomNotice.pointCount.toLocaleString('en-US')} rows · {rangeZoomNotice.spanBlocks.toLocaleString('en-US')} blocks</em>
+              <button type="button" onClick={() => { setRangeZoomNotice(null); setRangeZoomEnabled(true); }}>Box again</button>
+              <button type="button" onClick={() => { setRangeZoomNotice(null); fitData(); }}>Fit</button>
+            </div>
+          ) : null}
           {rangeSelectionStyle ? <div className="qtv-range-selection" style={rangeSelectionStyle} /> : null}
+          {rangeSelectionMeta && rangeSelectionHudStyle ? (
+            <div className="qtv-range-hud" style={rangeSelectionHudStyle}>
+              <strong>{blockLabel(rangeSelectionMeta.fromBlock)} → {blockLabel(rangeSelectionMeta.toBlock)}</strong>
+              <span>{rangeSelectionMeta.pointCount.toLocaleString('en-US')} rows · {rangeSelectionMeta.spanBlocks.toLocaleString('en-US')} blocks</span>
+              <em>release to zoom</em>
+            </div>
+          ) : null}
           {replayEnabled && replayCutoff ? (
             <div className="qtv-replay-cursor" style={{ left: `${(Math.max(0, primaryPoints.length - 1) / Math.max(1, rawAllPoints.length - 1)) * 100}%` }} />
           ) : null}
@@ -1857,13 +1927,16 @@ export function PriceChartPanel({
             </div>
           ) : null}
         </div>
-        <div className={`qtv-block-tick-axis ${priceSource.includes('block') && hasLoadedPrices ? '' : 'empty'}`} aria-label="Visible block axis">
+        <div className="qtv-block-tick-axis" aria-label="Visible block axis">
           {blockAxisTicks.map((tick) => (
             <span key={tick.key} className={tick.className} style={{ left: tick.left }}>
               <i />
               <b>{blockLabel(tick.block)}</b>
             </span>
           ))}
+          {!blockAxisTicks.length ? (
+            <em>{priceSource.includes('block') ? 'Loading block scale' : 'Time scale'}</em>
+          ) : null}
           {priceSource.includes('block') && hover ? (
             <strong style={{ left: pointToScreenSafe(hover, primaryPoints, visibleLogicalRange).x }}>block {blockLabel(hover.timestamp)}</strong>
           ) : null}
