@@ -391,6 +391,17 @@ function outcomePointStats(points: QuantMarketSeriesPoint[] | undefined) {
   };
 }
 
+function statsCoverageRatio(stats: ReturnType<typeof outcomePointStats>) {
+  if (!stats.rows) return 0;
+  if (!stats.firstBlock || !stats.lastBlock || !stats.medianDelta) return 1;
+  const expectedRows = Math.max(1, Math.floor((stats.lastBlock - stats.firstBlock) / stats.medianDelta) + 1);
+  return Math.max(0, Math.min(1, stats.rows / expectedRows));
+}
+
+function formatCoverageRatio(value: number) {
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+}
+
 function quantile(values: number[], ratio: number) {
   if (!values.length) return 0;
   const sorted = values.slice().sort((left, right) => left - right);
@@ -1574,7 +1585,7 @@ export function QuantWorkspace() {
 
   const sortedOutcomeRows = useMemo(() => {
     const eventTitle = marketSeries?.event?.eventTitle || marketSeries?.market?.marketTitle || '';
-    return (marketSeries?.outcomes || []).map((outcome, index) => {
+    const baseRows = (marketSeries?.outcomes || []).map((outcome, index) => {
       const label = deriveEventOutcomeLabel(eventTitle, outcome.marketTitle, outcome.outcomeLabel);
       const yesStats = outcomePointStats(outcome.points);
       const noStats = outcomePointStats(outcome.complementPoints);
@@ -1582,7 +1593,8 @@ export function QuantWorkspace() {
       const rows = yesStats.rows + noStats.rows;
       const gaps = yesStats.gaps + noStats.gaps;
       const spikes = yesStats.spikes + noStats.spikes;
-      const qualityStatus = !rows ? 'empty' : gaps || spikes ? 'review' : 'ready';
+      const directNoRows = noStats.rows - noStats.impliedRows;
+      const coverageRatio = Math.min(1, Math.max(statsCoverageRatio(yesStats), statsCoverageRatio(noStats)));
       return {
         outcome,
         index,
@@ -1590,20 +1602,38 @@ export function QuantWorkspace() {
         fullLabel: outcome.marketTitle || outcome.outcomeLabel,
         yes: toNumber(outcome.buyYesPrice ?? outcome.latestPrice),
         no: toNumber(outcome.buyNoPrice ?? outcome.complementLatestPrice),
+        yesRows: yesStats.rows,
+        noRows: noStats.rows,
+        medianDelta: Math.max(yesStats.medianDelta, noStats.medianDelta),
         rows,
         volume: [...(outcome.points || []), ...(outcome.complementPoints || [])].reduce((sum, point) => sum + toNumber(point.volume), 0),
         firstBlock: firstBlocks.length ? Math.min(...firstBlocks) : 0,
         lastBlock: Math.max(yesStats.lastBlock, noStats.lastBlock),
         gaps,
         spikes,
+        directNoRows,
         impliedNoRows: noStats.impliedRows,
-        qualityStatus,
+        coverageRatio,
       };
-    }).map((row) => ({
-      ...row,
-      yesKey: chartOutcomeKey(row.outcome, row.label, 'YES'),
-      noKey: chartOutcomeKey(row.outcome, row.label, 'NO'),
-    })).sort((left, right) => {
+    });
+    const latestBlock = baseRows.reduce((max, row) => Math.max(max, row.lastBlock), 0);
+    return baseRows.map((row) => {
+      const reasons: string[] = [];
+      if (!row.rows) reasons.push('no rows');
+      if (row.gaps) reasons.push(`${row.gaps} gaps`);
+      if (row.spikes) reasons.push(`${row.spikes} jumps`);
+      if (row.noRows && row.impliedNoRows / row.noRows > 0.8) reasons.push('NO mostly implied');
+      if (row.coverageRatio > 0 && row.coverageRatio < 0.72) reasons.push('sparse coverage');
+      if (latestBlock && row.lastBlock && row.medianDelta && row.lastBlock < latestBlock - row.medianDelta * 8) reasons.push('stale');
+      const qualityStatus = !row.rows ? 'empty' : reasons.length ? 'review' : 'ready';
+      return {
+        ...row,
+        qualityStatus,
+        qualityReason: reasons.slice(0, 2).join(' · ') || 'continuous block-close coverage',
+        yesKey: chartOutcomeKey(row.outcome, row.label, 'YES'),
+        noKey: chartOutcomeKey(row.outcome, row.label, 'NO'),
+      };
+    }).sort((left, right) => {
       if (outcomeSortKey === 'order') return left.index - right.index;
       if (outcomeSortKey === 'rows') return right.rows - left.rows;
       if (outcomeSortKey === 'volume') return right.volume - left.volume;
@@ -2288,7 +2318,7 @@ export function QuantWorkspace() {
                         <button type="button" disabled={!filteredOutcomeRows.length} onClick={showFilteredOutcomes}>Show filtered</button>
                       </div>
                     </div>
-                    {filteredOutcomeRows.map(({ outcome, label, fullLabel, yes, no, rows, volume, yesKey, noKey, firstBlock, lastBlock, gaps, spikes, impliedNoRows, qualityStatus }) => {
+                    {filteredOutcomeRows.map(({ outcome, label, fullLabel, yes, no, yesRows, noRows, rows, volume, yesKey, noKey, firstBlock, lastBlock, gaps, spikes, directNoRows, impliedNoRows, coverageRatio, qualityStatus, qualityReason }) => {
                       const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
                       const activeKey = selectedBacktestAction === 'NO' ? noKey : yesKey;
                       const isPinned = chartPinnedOutcomeKeys.includes(yesKey) || chartPinnedOutcomeKeys.includes(noKey);
@@ -2311,8 +2341,16 @@ export function QuantWorkspace() {
                           </div>
                           <div className="qtv-outcome-quality-tags">
                             <span className={qualityStatus}>{qualityStatus}</span>
+                            <span className="reason" title={qualityReason}>{qualityReason}</span>
+                            <span className="coverage">
+                              <i style={{ width: `${Math.max(4, Math.round(coverageRatio * 100))}%` }} />
+                              {formatCoverageRatio(coverageRatio)} coverage
+                            </span>
+                            <span>YES {yesRows.toLocaleString('en-US')}</span>
+                            <span>NO {noRows.toLocaleString('en-US')}</span>
                             <span>{gaps} gaps</span>
                             <span>{spikes} jumps</span>
+                            <span>{directNoRows.toLocaleString('en-US')} direct NO</span>
                             <span>{impliedNoRows.toLocaleString('en-US')} implied NO</span>
                           </div>
                           <div className="qtv-outcome-line-actions">
