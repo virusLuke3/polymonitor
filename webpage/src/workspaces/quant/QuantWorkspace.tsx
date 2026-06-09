@@ -288,6 +288,17 @@ function formatBuildTime(value: string | null | undefined) {
   return new Date(time).toLocaleString();
 }
 
+function formatMarketTime(value: string | number | null | undefined) {
+  if (!value || value === '-') return '--';
+  const time = typeof value === 'number' ? value : Date.parse(String(value));
+  if (!Number.isFinite(time)) return String(value);
+  return new Date(time).toLocaleString();
+}
+
+function metadataScalar(value: unknown): string | number | null {
+  return typeof value === 'string' || typeof value === 'number' ? value : null;
+}
+
 function buildRunStatusClass(run: QuantBuildRun) {
   const status = String(run.status || '').toLowerCase();
   if (status.includes('success') || status.includes('complete') || status === 'ready') return 'ready';
@@ -708,6 +719,18 @@ export function QuantWorkspace() {
     [marketSeries, marketSlug, selectedMarket],
   );
   const marketCoverageRows = toNumber(selectedMarket?.blockRows || selectedMarket?.frontendRows || marketSeries?.outcomes?.reduce((sum, outcome) => sum + toNumber(outcome.rows), 0));
+  const marketReadyMembers = toNumber(selectedMarket?.readyMembers || marketSeries?.members?.filter((member) => toNumber(member.blockRows || member.frontendRows || member.orderfilledRows) > 0).length);
+  const marketTotalMembers = toNumber(selectedMarket?.totalMembers || selectedMarket?.outcomeCount || marketSeries?.members?.length || marketSeries?.outcomes?.length);
+  const marketCoveragePct = marketTotalMembers ? Math.min(100, Math.max(0, (marketReadyMembers / marketTotalMembers) * 100)) : 0;
+  const marketDataSourceLabel = selectedMarket?.source || marketSeries?.event?.source || marketSeries?.market?.source || backendPriceSource(priceSource);
+  const marketSourceDisplay = marketDataSourceLabel === 'default' ? backendPriceSource(priceSource) : marketDataSourceLabel;
+  const marketStatusLabel = selectedMarket?.status || marketSeries?.event?.status || marketSeries?.market?.status || '--';
+  const eventMeta = (marketSeries?.event || {}) as Record<string, unknown>;
+  const marketMeta = (marketSeries?.market || {}) as Record<string, unknown>;
+  const marketEndValue = selectedMarket?.endDate || metadataScalar(eventMeta.endDate) || marketSeries?.market?.endDate || marketInfo.endTime;
+  const marketUpdatedValue = selectedMarket?.latestBlockAt || selectedMarket?.latestFrontendAt || metadataScalar(eventMeta.updated_at) || metadataScalar(eventMeta.updatedAt) || metadataScalar(marketMeta.updated_at) || metadataScalar(marketMeta.updatedAt);
+  const marketEndLabel = formatMarketTime(marketEndValue);
+  const marketUpdatedLabel = formatMarketTime(marketUpdatedValue);
   const chartLimit = useMemo(() => {
     const parsed = Number(timeframe);
     return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
@@ -2044,6 +2067,25 @@ export function QuantWorkspace() {
                 {inspectorTab === 'market' ? (
                   <div className="qtv-market-card">
                     <h3>{marketInfo.title}</h3>
+                    <div className="qtv-market-readiness">
+                      <span className={marketStatusLabel === 'active' ? 'ready' : 'review'}>
+                        <b>{marketStatusLabel}</b>
+                        <em>Status</em>
+                      </span>
+                      <span className={marketCoveragePct >= 80 ? 'ready' : marketCoveragePct > 0 ? 'review' : 'empty'}>
+                        <b>{marketTotalMembers ? `${marketCoveragePct.toFixed(0)}%` : '--'}</b>
+                        <em>{marketReadyMembers.toLocaleString('en-US')} / {marketTotalMembers.toLocaleString('en-US')} ready</em>
+                      </span>
+                      <span className={dataQuality.health}>
+                        <b>{dataQuality.health}</b>
+                        <em>{dataQuality.gapCount.toLocaleString('en-US')} gaps · {dataQuality.spikeCount.toLocaleString('en-US')} jumps</em>
+                      </span>
+                    </div>
+                    <div className="qtv-market-source-card">
+                      <strong>{marketSourceDisplay}</strong>
+                      <span>Backtest source {backendPriceSource(priceSource)} · visible rows {displayedPriceRows.toLocaleString('en-US')} · coverage rows {marketCoverageRows.toLocaleString('en-US')}</span>
+                      <small>End {marketEndLabel} · Updated {marketUpdatedLabel}</small>
+                    </div>
                     <dl>
                       <div><dt>Type</dt><dd>{selectedEntityKind === 'event' ? 'Event' : 'Market'}</dd></div>
                       <div><dt>Source</dt><dd>{backendPriceSource(priceSource)}</dd></div>
@@ -2053,7 +2095,9 @@ export function QuantWorkspace() {
                       <div><dt>Blocks</dt><dd>{priceBlockRange}</dd></div>
                       <div><dt>Latest</dt><dd>{fmtPrice(latestPrice)}</dd></div>
                       <div><dt>Freshness</dt><dd>{lastPriceRefreshAt || '--'}</dd></div>
-                      <div><dt>Status</dt><dd>{selectedMarket?.status || marketSeries?.event?.status || marketSeries?.market?.status || '--'}</dd></div>
+                      <div><dt>Status</dt><dd>{marketStatusLabel}</dd></div>
+                      <div><dt>End</dt><dd>{marketEndLabel}</dd></div>
+                      <div><dt>Updated</dt><dd>{marketUpdatedLabel}</dd></div>
                       <div><dt>Selected</dt><dd>{selectedOutcomeRow?.fullLabel || selectedOutcome?.outcomeLabel || '--'}</dd></div>
                       <div><dt>YES Token</dt><dd>{selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId || '--'}</dd></div>
                       <div><dt>NO Token</dt><dd>{selectedOutcome?.buyNoTokenId || '--'}</dd></div>

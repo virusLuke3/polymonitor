@@ -664,6 +664,108 @@
   line-height: 1.25;
 }
 
+.qtv-market-readiness {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.qtv-market-readiness span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  border: 1px solid rgba(39, 48, 64, 0.92);
+  border-radius: 5px;
+  background: rgba(8, 13, 22, 0.92);
+  padding: 8px 9px;
+}
+
+.qtv-market-readiness b,
+.qtv-market-readiness em {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-market-readiness b {
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.qtv-market-readiness em {
+  color: #7f8a9d;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.qtv-market-readiness span.ready {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(20, 83, 45, 0.12);
+}
+
+.qtv-market-readiness span.ready b {
+  color: #86efac;
+}
+
+.qtv-market-readiness span.review {
+  border-color: rgba(250, 204, 21, 0.28);
+  background: rgba(113, 63, 18, 0.13);
+}
+
+.qtv-market-readiness span.review b {
+  color: #fde68a;
+}
+
+.qtv-market-readiness span.empty {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(127, 29, 29, 0.13);
+}
+
+.qtv-market-readiness span.empty b {
+  color: #fca5a5;
+}
+
+.qtv-market-source-card {
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(38, 50, 68, 0.86);
+  border-left: 3px solid rgba(96, 165, 250, 0.72);
+  border-radius: 5px;
+  background: rgba(8, 13, 22, 0.86);
+  padding: 10px;
+}
+
+.qtv-market-source-card strong,
+.qtv-market-source-card span,
+.qtv-market-source-card small {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-market-source-card strong {
+  color: #dbeafe;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.qtv-market-source-card span {
+  color: #9aa7ba;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.qtv-market-source-card small {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 850;
+}
+
 .qtv-data-quality header {
   display: flex;
   align-items: center;
