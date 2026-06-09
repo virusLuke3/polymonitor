@@ -29,11 +29,17 @@ class ApiConfigKeyAliasTestCase(unittest.TestCase):
 
         self.assertEqual("fixture-odds-key", settings.the_odds_api_key)
 
+    def test_the_odds_api_key_accepts_short_local_alias(self):
+        settings = self.load_settings_with_env({"odds_api_key": "fixture-short-odds-key"})
+
+        self.assertEqual("fixture-short-odds-key", settings.the_odds_api_key)
+
     def test_canonical_the_odds_api_key_overrides_aliases(self):
         settings = self.load_settings_with_env(
             {
                 "POLYDATA_THE_ODDS_API_KEY": "canonical-odds-key",
                 "the_odds_api_key": "lowercase-odds-key",
+                "odds_api_key": "short-odds-key",
                 "THE_ODDS_API_KEY": "legacy-odds-key",
             }
         )
