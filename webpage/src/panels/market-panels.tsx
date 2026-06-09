@@ -190,13 +190,29 @@ function groupDefaultOutcome(group: MarketGroupItem) {
     .sort((left, right) => {
       const leftPrice = Number(groupOutcomePrice(left));
       const rightPrice = Number(groupOutcomePrice(right));
-      const leftBalance = Number.isFinite(leftPrice) ? Math.abs(leftPrice - 0.5) : 1;
-      const rightBalance = Number.isFinite(rightPrice) ? Math.abs(rightPrice - 0.5) : 1;
       const leftVolume = Number(left.volume24h || 0);
       const rightVolume = Number(right.volume24h || 0);
       const leftTrades = Number(left.tradeCount24h || 0);
       const rightTrades = Number(right.tradeCount24h || 0);
-      return leftBalance - rightBalance || rightVolume - leftVolume || rightTrades - leftTrades;
+      const leftDistance = Number.isFinite(leftPrice) ? Math.min(1, Math.abs(leftPrice - 0.5) * 2) : 0;
+      const rightDistance = Number.isFinite(rightPrice) ? Math.min(1, Math.abs(rightPrice - 0.5) * 2) : 0;
+      const leftBlockClose = left.blockCloseYesPrice == null || left.blockCloseYesPrice === '' ? 0 : 1;
+      const rightBlockClose = right.blockCloseYesPrice == null || right.blockCloseYesPrice === '' ? 0 : 1;
+      const leftScore = Math.min(70, Math.pow(Math.max(leftVolume, 0), 0.35))
+        + Math.min(70, Math.max(leftTrades, 0) * 3)
+        + leftDistance * 24
+        + leftBlockClose * 28
+        + (left.marketId ? 12 : 0)
+        + (left.yesTokenId ? 8 : 0)
+        - (Number.isFinite(leftPrice) && Math.abs(leftPrice - 0.5) < 0.0001 && leftTrades <= 0 && leftVolume < 25 ? 45 : 0);
+      const rightScore = Math.min(70, Math.pow(Math.max(rightVolume, 0), 0.35))
+        + Math.min(70, Math.max(rightTrades, 0) * 3)
+        + rightDistance * 24
+        + rightBlockClose * 28
+        + (right.marketId ? 12 : 0)
+        + (right.yesTokenId ? 8 : 0)
+        - (Number.isFinite(rightPrice) && Math.abs(rightPrice - 0.5) < 0.0001 && rightTrades <= 0 && rightVolume < 25 ? 45 : 0);
+      return rightScore - leftScore || rightVolume - leftVolume || rightTrades - leftTrades;
     })[0] || null;
 }
 
@@ -245,6 +261,7 @@ function groupActiveRank(group: MarketGroupItem) {
   const trades = Number(groupDisplayTradeCount(group) || 0);
   const price = Number(groupBestLivePrice(group));
   const tradableSignal = Number.isFinite(price) && price > 0.03 && price < 0.97 ? 1 : 0;
+  const staleMidPenalty = Number.isFinite(price) && Math.abs(price - 0.5) < 0.0001 && trades <= 0 && volume < 25 ? 180 : 0;
   const freshness =
     trades > 0 ? 700 :
     volume > 0 && activityAgeHours <= 168 ? 620 :
@@ -257,7 +274,7 @@ function groupActiveRank(group: MarketGroupItem) {
     0;
   const impact = Math.log10(Math.max(volume, 0) + 1) * 38 + Math.log10(Math.max(trades, 0) + 1) * 62;
   const multiOutcomeBonus = Number(group.outcomeCount || group.outcomes?.length || 0) > 2 ? 18 : 0;
-  return freshness + impact + multiOutcomeBonus + tradableSignal * 24;
+  return freshness + impact + multiOutcomeBonus + tradableSignal * 24 - staleMidPenalty;
 }
 
 function groupBestLivePrice(group: MarketGroupItem) {

@@ -265,13 +265,29 @@ function pickDefaultGroupOutcome(group: MarketGroupItem, outcomeKey?: string | n
     .sort((left, right) => {
       const leftPrice = groupOutcomePrice(left);
       const rightPrice = groupOutcomePrice(right);
-      const leftBalance = leftPrice == null ? 1 : Math.abs(leftPrice - 0.5);
-      const rightBalance = rightPrice == null ? 1 : Math.abs(rightPrice - 0.5);
       const leftVolume = Number(left.volume24h || 0);
       const rightVolume = Number(right.volume24h || 0);
       const leftTrades = Number(left.tradeCount24h || 0);
       const rightTrades = Number(right.tradeCount24h || 0);
-      return leftBalance - rightBalance || rightVolume - leftVolume || rightTrades - leftTrades;
+      const leftDistance = leftPrice == null ? 0 : Math.min(1, Math.abs(leftPrice - 0.5) * 2);
+      const rightDistance = rightPrice == null ? 0 : Math.min(1, Math.abs(rightPrice - 0.5) * 2);
+      const leftBlockClose = left.blockCloseYesPrice == null || left.blockCloseYesPrice === '' ? 0 : 1;
+      const rightBlockClose = right.blockCloseYesPrice == null || right.blockCloseYesPrice === '' ? 0 : 1;
+      const leftScore = Math.min(70, Math.pow(Math.max(leftVolume, 0), 0.35))
+        + Math.min(70, Math.max(leftTrades, 0) * 3)
+        + leftDistance * 24
+        + leftBlockClose * 28
+        + (left.marketId ? 12 : 0)
+        + (left.yesTokenId ? 8 : 0)
+        - (leftPrice != null && Math.abs(leftPrice - 0.5) < 0.0001 && leftTrades <= 0 && leftVolume < 25 ? 45 : 0);
+      const rightScore = Math.min(70, Math.pow(Math.max(rightVolume, 0), 0.35))
+        + Math.min(70, Math.max(rightTrades, 0) * 3)
+        + rightDistance * 24
+        + rightBlockClose * 28
+        + (right.marketId ? 12 : 0)
+        + (right.yesTokenId ? 8 : 0)
+        - (rightPrice != null && Math.abs(rightPrice - 0.5) < 0.0001 && rightTrades <= 0 && rightVolume < 25 ? 45 : 0);
+      return rightScore - leftScore || rightVolume - leftVolume || rightTrades - leftTrades;
     })[0] || null;
 }
 

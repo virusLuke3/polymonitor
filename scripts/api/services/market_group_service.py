@@ -658,6 +658,7 @@ def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int
     last_activity_ts = raw_last_activity_ts or created_ts
     volume = _float_value(group.get("volume24h")) or 0.0
     trade_count = _float_value(group.get("tradeCount24h")) or 0.0
+    price = _float_value(group.get("latestBlockClosePrice"))
     ready_signal = _group_has_ready_signal(group)
     live_price_signal = _group_has_live_price_signal(group)
     multi_penalty = 0 if int(group.get("outcomeCount") or 0) > 2 else 1
@@ -678,6 +679,8 @@ def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int
     else:
         bucket = 4
         recency = max(created_ts, last_activity_ts)
+    if price is not None and abs(price - 0.5) < 0.0001 and trade_count <= 0 and volume < 25:
+        bucket += 2
     return (bucket, multi_penalty, -volume, -trade_count, -recency, -created_ts)
 
 
@@ -1047,13 +1050,18 @@ def _default_outcome_runtime_score(outcome: Dict[str, Any]) -> Tuple[float, floa
     price = _outcome_probability(outcome)
     volume = _float_value(outcome.get("volume24h")) or 0.0
     trades = _float_value(outcome.get("tradeCount24h")) or 0.0
-    balance = 0.0 if price is None else 1.0 - min(1.0, abs(price - 0.5) * 2.0)
-    score = balance * 80.0 + min(40.0, volume ** 0.25) + min(25.0, trades)
+    has_block_close = outcome.get("blockCloseYesPrice") not in (None, "")
+    distance_from_mid = 0.0 if price is None else min(1.0, abs(price - 0.5) * 2.0)
+    score = min(70.0, volume ** 0.35) + min(70.0, trades * 3.0) + distance_from_mid * 24.0
+    if has_block_close:
+        score += 28.0
     if outcome.get("marketId") is not None:
         score += 12.0
     if outcome.get("yesTokenId"):
         score += 8.0
-    return (score, volume, trades, balance)
+    if price is not None and abs(price - 0.5) < 0.0001 and trades <= 0 and volume < 25:
+        score -= 45.0
+    return (score, volume, trades, distance_from_mid)
 
 
 def _retarget_group_default_outcome(group: Dict[str, Any]) -> bool:
@@ -1220,7 +1228,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 28}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 29}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
