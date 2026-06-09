@@ -22296,16 +22296,21 @@ a.wm-orderfilled-row {
 .wm-focus-qtv-chart-info {
   position: absolute !important;
   z-index: 4 !important;
-  top: 10px !important;
+  top: 8px !important;
   right: 66px !important;
   left: 12px !important;
   display: grid !important;
-  max-height: 104px !important;
+  max-height: 58px !important;
   overflow: hidden !important;
   pointer-events: none !important;
 }
 
 .wm-focus-qtv-chart-meta {
+  display: flex !important;
+  align-items: center !important;
+  align-content: flex-start !important;
+  flex-wrap: wrap !important;
+  gap: 5px !important;
   min-width: 0 !important;
 }
 
@@ -22323,22 +22328,33 @@ a.wm-orderfilled-row {
 }
 
 .wm-focus-qtv-chart-meta > span {
-  display: block !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  flex: 0 1 auto !important;
+  min-height: 20px !important;
+  max-width: 286px !important;
   overflow: hidden !important;
+  border: 1px solid rgba(38, 50, 68, 0.88) !important;
+  border-radius: 3px !important;
+  background: rgba(9, 13, 20, 0.76) !important;
   color: #8f9bad !important;
   font-family: var(--font-mono) !important;
-  font-size: 10.5px !important;
+  font-size: 10px !important;
   font-weight: 700 !important;
   letter-spacing: 0 !important;
+  padding: 0 6px !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
 }
 
 .wm-focus-qtv-indicator-legend {
   display: flex !important;
-  flex-wrap: wrap !important;
+  flex: 1 1 320px !important;
+  flex-wrap: nowrap !important;
   gap: 5px !important;
-  margin-top: 7px !important;
+  min-width: 0 !important;
+  margin-top: 0 !important;
+  overflow: hidden !important;
   font-family: var(--font-mono) !important;
   font-size: 10px !important;
   letter-spacing: 0 !important;
@@ -22350,12 +22366,19 @@ a.wm-orderfilled-row {
   gap: 5px !important;
   min-width: 0 !important;
   min-height: 20px !important;
+  max-width: 170px !important;
+  overflow: hidden !important;
   border: 1px solid rgba(38, 50, 68, 0.88) !important;
   border-radius: 3px !important;
   background: rgba(9, 13, 20, 0.76) !important;
   color: #8f9bad !important;
   padding: 0 6px !important;
+  text-overflow: ellipsis !important;
   white-space: nowrap !important;
+}
+
+.wm-focus-qtv-indicator-legend span:nth-child(2) {
+  max-width: 238px !important;
 }
 
 .wm-focus-qtv-indicator-legend b {
@@ -22377,9 +22400,12 @@ a.wm-orderfilled-row {
 
 .wm-focus-qtv-outcome-legend {
   display: flex !important;
-  flex-wrap: wrap !important;
-  gap: 6px !important;
-  margin-top: 6px !important;
+  flex: 1 1 100% !important;
+  flex-wrap: nowrap !important;
+  gap: 5px !important;
+  min-width: 0 !important;
+  margin-top: 0 !important;
+  overflow: hidden !important;
   font-family: var(--font-mono) !important;
   font-size: 10px !important;
 }
@@ -22388,8 +22414,8 @@ a.wm-orderfilled-row {
   display: inline-flex !important;
   align-items: center !important;
   gap: 5px !important;
-  min-height: 19px !important;
-  max-width: 220px !important;
+  min-height: 18px !important;
+  max-width: 112px !important;
   overflow: hidden !important;
   border: 1px solid rgba(38, 50, 68, 0.86) !important;
   border-radius: 3px !important;
@@ -22425,10 +22451,10 @@ a.wm-orderfilled-row {
   right: 58px !important;
   bottom: 3px !important;
   left: 10px !important;
-  height: 31px !important;
+  height: 28px !important;
   color: #7f8a9d !important;
   font-family: var(--font-mono) !important;
-  font-size: 10px !important;
+  font-size: 9.5px !important;
   font-weight: 850 !important;
   line-height: 1 !important;
   pointer-events: none !important;
@@ -22440,7 +22466,7 @@ a.wm-orderfilled-row {
   bottom: 0 !important;
   display: grid !important;
   justify-items: center !important;
-  gap: 3px !important;
+  gap: 2px !important;
   transform: translateX(-50%) !important;
   white-space: nowrap !important;
 }
@@ -22464,4 +22490,9 @@ a.wm-orderfilled-row {
 .wm-focus-block-tick-axis b {
   color: #dbeafe !important;
   font-weight: 900 !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart + .wm-focus-event-legend,
+.wm-focused-market-row .wm-block-close-chart ~ .wm-focus-outcome-rail {
+  display: none !important;
 }
