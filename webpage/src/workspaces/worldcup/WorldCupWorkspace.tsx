@@ -201,7 +201,9 @@ function scoreText(match: WorldCupMatch) {
 }
 
 function kickoffDay(match: WorldCupMatch) {
-  return match.kickoffBeijing.replace(`, ${match.kickoffBeijing.split(',').pop()?.trim()}`, '');
+  const kickoff = match.kickoffBeijing || match.kickoffUtc || '';
+  const suffix = kickoff.split(',').pop()?.trim();
+  return suffix ? kickoff.replace(`, ${suffix}`, '') : kickoff || 'Kickoff pending';
 }
 
 function kickoffTime(match: WorldCupMatch) {
@@ -905,7 +907,7 @@ function OddsPanel({ odds, polymarket }: { odds: WorldCupOddsSnapshot[]; polymar
         {odds.slice(0, 8).map((snapshot) => (
           <article className="wm-worldcup-odds-row" key={`${snapshot.matchId}-${snapshot.provider}`}>
             <div>
-              <span>{snapshot.providerType.replace('_', ' ')}</span>
+              <span>{String(snapshot.providerType || 'provider').replace('_', ' ')}</span>
               <strong>{snapshot.provider}</strong>
             </div>
             <div className="wm-worldcup-odds-cells">
@@ -1288,7 +1290,7 @@ function OddsLiquidityPanel({
       <div className="wm-worldcup-odds-table">
         {odds.slice(0, 5).map((snapshot) => (
           <article key={`${snapshot.matchId}-${snapshot.provider}`}>
-            <header><strong>{snapshot.provider}</strong><span>{snapshot.providerType.replace('_', ' ')}</span></header>
+            <header><strong>{snapshot.provider}</strong><span>{String(snapshot.providerType || 'provider').replace('_', ' ')}</span></header>
             <div>
               {snapshot.outcomes.slice(0, 3).map((outcome) => (
                 <span key={outcome.name}>
@@ -1448,7 +1450,7 @@ function GroupAdvancePanel({
       <div className="wm-worldcup-mini-tabs">
         {groups.slice(0, 8).map((item) => (
           <button className={item === group ? 'active' : ''} key={item} type="button" onClick={() => onGroupChange(item)}>
-            {item.replace('Group ', '')}
+            {String(item || 'Group').replace('Group ', '')}
           </button>
         ))}
       </div>
@@ -1732,7 +1734,7 @@ function GroupTablePanel({
       <div className="wm-worldcup-group-tabs">
         {groups.slice(0, 12).map((item) => (
           <button className={item === group ? 'active' : ''} key={item} type="button" onClick={() => onGroupChange(item)}>
-            {item.replace('Group ', '')}
+            {String(item || 'Group').replace('Group ', '')}
           </button>
         ))}
       </div>
@@ -1864,7 +1866,7 @@ function buildOddsSignals(odds: WorldCupOddsSnapshot[], match: WorldCupMatch | n
   const snapshots = odds.length ? odds : [];
   return snapshots.slice(0, 8).map((snapshot, index) => ({
     id: `odds-${snapshot.matchId}-${snapshot.provider}-${index}`,
-    source: snapshot.providerType.replace('_', ' ').toUpperCase(),
+    source: String(snapshot.providerType || 'provider').replace('_', ' ').toUpperCase(),
     title: snapshot.provider,
     summary: snapshot.outcomes.map((outcome) => `${outcome.name} ${formatNumber(outcome.decimalOdds, 2)} / ${formatNumber(outcome.impliedProbability, 1)}%`).join(' · '),
     age: snapshot.generatedAt || (match ? match.kickoffBeijing : ''),
