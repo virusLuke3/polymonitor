@@ -581,6 +581,8 @@ export function PriceChartPanel({
   const [tooltipMode, setTooltipMode] = useState<TooltipMode>(() => persistedState('polydata.quant.event.tooltipMode', 'compact'));
   const [chartViewMode, setChartViewMode] = useState<ChartViewMode>(() => persistedState('polydata.quant.chart.viewMode', 'raw'));
   const [showLowProbability, setShowLowProbability] = useState(false);
+  const [outcomeManagerOpen, setOutcomeManagerOpen] = useState(false);
+  const [outcomeManagerQuery, setOutcomeManagerQuery] = useState('');
   const [layoutMode, setLayoutMode] = useState('1');
   const [internalPinnedOutcomeKeys, setInternalPinnedOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.pinnedOutcomes'));
   const [internalHiddenOutcomeKeys, setInternalHiddenOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.hiddenOutcomes'));
@@ -670,6 +672,15 @@ export function PriceChartPanel({
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
   const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints, visibleLogicalRange) : null;
   const blockTicks = useMemo(() => blockAxisTicks(primaryPoints, 8, visibleLogicalRange), [primaryPoints, visibleLogicalRange]);
+  const managerOutcomes = useMemo(() => {
+    const query = outcomeManagerQuery.trim().toLowerCase();
+    return sortedOutcomes.filter((group) => {
+      if (!query) return true;
+      return `${group.fullLabel} ${group.label} ${group.tokenId || ''} ${group.tokenSide}`.toLowerCase().includes(query);
+    });
+  }, [outcomeManagerQuery, sortedOutcomes]);
+  const hiddenOutcomeCount = effectiveHiddenOutcomeKeys.length;
+  const pinnedOutcomeCount = effectivePinnedOutcomeKeys.length;
   const markers = useMemo(() => signals.map((signal) => markerPosition(signal, primaryPoints, visibleLogicalRange)).filter(Boolean), [primaryPoints, signals, visibleLogicalRange]);
   const focusedMarkers = markers.filter((marker) => marker?.signal.tradeId === selectedTradeId);
   const selectedTradeSignals = useMemo(() => (
@@ -1362,6 +1373,14 @@ export function PriceChartPanel({
                 <option value="volume">Volume</option>
                 <option value="change">Change</option>
               </select>
+              <button
+                className={outcomeManagerOpen ? 'active' : ''}
+                type="button"
+                title="Manage outcome lines"
+                onClick={() => setOutcomeManagerOpen((current) => !current)}
+              >
+                Manage
+              </button>
             </div>
           ) : null}
           <details className="qtv-toolbar-group qtv-display-menu">
@@ -1499,6 +1518,65 @@ export function PriceChartPanel({
             ))}
           </div>
         </div>
+
+        {eventMode && outcomeManagerOpen ? (
+          <div className="qtv-outcome-manager">
+            <header>
+              <div>
+                <strong>Outcome Manager</strong>
+                <span>{visibleOutcomeGroups.length.toLocaleString('en-US')} visible · {pinnedOutcomeCount.toLocaleString('en-US')} pinned · {hiddenOutcomeCount.toLocaleString('en-US')} hidden</span>
+              </div>
+              <button type="button" title="Close outcome manager" onClick={() => setOutcomeManagerOpen(false)}>Close</button>
+            </header>
+            <div className="qtv-outcome-manager-search">
+              <input
+                value={outcomeManagerQuery}
+                placeholder="Search outcomes, token IDs, sides"
+                onInput={(event) => setOutcomeManagerQuery(event.currentTarget.value)}
+              />
+              <button type="button" onClick={() => setDisplayMode('all')}>Show all</button>
+              <button type="button" onClick={resetOutcomeVisibility}>Reset</button>
+            </div>
+            <div className="qtv-outcome-manager-list">
+              {managerOutcomes.map((group) => {
+                const latestGroupPoint = group.points[group.points.length - 1];
+                const isSelected = selectedGroup?.key === group.key;
+                const isVisible = visibleOutcomeGroups.some((visibleGroup) => visibleGroup.key === group.key);
+                const isPinned = effectivePinnedOutcomeKeys.includes(group.key);
+                const isHidden = effectiveHiddenOutcomeKeys.includes(group.key);
+                const isSolo = effectiveSoloOutcomeKey === group.key;
+                return (
+                  <div
+                    key={`manager-${group.key}`}
+                    className={`${isSelected ? 'selected' : ''} ${isVisible ? 'visible' : ''} ${isHidden ? 'hidden' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      title={group.fullLabel}
+                      onClick={() => {
+                        if (group.tokenId) onOutcomeSelect?.(group.tokenId, group.tokenSide === 'NO' ? 'NO' : 'YES');
+                      }}
+                    >
+                      <i style={{ backgroundColor: SERIES_COLORS[group.order % SERIES_COLORS.length] }} />
+                      <span>{group.fullLabel}</span>
+                      <b>{fmtPrice(latestGroupPoint?.close || 0)}</b>
+                    </button>
+                    <em>{group.tokenSide}</em>
+                    <button className={isPinned ? 'active' : ''} type="button" onClick={() => togglePinnedOutcome(group.key)}>{isPinned ? 'Pinned' : 'Pin'}</button>
+                    <button className={isSolo ? 'active' : ''} type="button" onClick={() => updateSoloOutcomeKey(isSolo ? '' : group.key)}>{isSolo ? 'Solo on' : 'Solo'}</button>
+                    <button className={isHidden ? 'danger active' : 'danger'} type="button" onClick={() => toggleHiddenOutcome(group.key)}>{isHidden ? 'Hidden' : 'Hide'}</button>
+                  </div>
+                );
+              })}
+              {!managerOutcomes.length ? (
+                <div className="empty">
+                  <strong>No outcomes matched</strong>
+                  <span>Clear the search query or switch side/view filters.</span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {((!hasLoadedPrices && (dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'warming' || dataStatus === 'partial' || dataStatus === 'loading'))
           || (hasLoadedPrices && dataStatus === 'warming')) ? (
