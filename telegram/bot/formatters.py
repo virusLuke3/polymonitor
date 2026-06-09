@@ -309,13 +309,15 @@ def _find_matches(query: str, dashboard: Dict[str, Any], *, limit: int = 6) -> L
 
 def _odds_for_match(match: Dict[str, Any], dashboard: Dict[str, Any], *, limit: int = 3) -> List[Dict[str, Any]]:
     match_id = _text(match.get("id"))
-    label = _worldcup_match_label(match)
+    home = _text(match.get("homeTeam")).lower()
+    away = _text(match.get("awayTeam")).lower()
     rows = []
     for item in _items(dashboard, "odds"):
         if match_id and _text(item.get("matchId")) == match_id:
             rows.append(item)
             continue
-        if _match_score(label, item, ("title", "marketTitle", "homeTeam", "awayTeam", "eventTitle")) > 0:
+        text = " ".join(_text(item.get(field)) for field in ("title", "marketTitle", "homeTeam", "awayTeam", "eventTitle", "slug", "eventSlug")).lower()
+        if home and away and home in text and away in text:
             rows.append(item)
     return rows[:limit]
 

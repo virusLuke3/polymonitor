@@ -175,7 +175,7 @@ def test_worldcup_dashboard_links_match_result_market_group():
                     {
                         "id": "m2",
                         "question": "Draw",
-                        "groupItemTitle": "Draw",
+                        "groupItemTitle": "Draw (Mexico vs South Africa)",
                         "slug": "mexico-vs-south-africa-draw",
                         "active": True,
                         "closed": False,

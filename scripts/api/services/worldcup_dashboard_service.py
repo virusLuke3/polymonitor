@@ -282,7 +282,7 @@ def _canonical_outcome_label(match: Dict[str, Any], label: Any, *, allow_yes_no:
     lower = text.lower()
     home = str(match.get("homeTeam") or "").strip()
     away = str(match.get("awayTeam") or "").strip()
-    if lower in {"draw", "tie", "x"}:
+    if lower in {"draw", "tie", "x"} or "draw" in lower:
         return "Draw"
     if allow_yes_no and lower == "yes":
         return text
