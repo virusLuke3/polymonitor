@@ -8,6 +8,7 @@ import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '../w
 
 type TrendPoint = {
   label: string;
+  time: number;
   avg: number;
   high: number;
 };
@@ -26,25 +27,28 @@ function oneDayPoints(city?: RuntimeGlobalWeatherCity | null): TrendPoint[] {
   return hourly.map((point, index) => {
     const value = num(point.temp) || 0;
     const date = String(point.time || '');
+    const parsed = Date.parse(date);
     return {
       label: date.slice(11, 16) || date.slice(5, 10) || '--',
+      time: Number.isFinite(parsed) ? Math.floor(parsed / 1000) : index + 1,
       avg: movingAverage(values, index),
       high: value,
     };
-  });
+  }).sort((left, right) => left.time - right.time);
 }
 
 function sevenDayPoints(city?: RuntimeGlobalWeatherCity | null): TrendPoint[] {
   const days = (city?.daily || [])
     .filter((point) => num(point.high) !== null || num(point.low) !== null)
     .slice(0, 7);
-  return days.map((day) => {
+  return days.map((day, index) => {
     const high = num(day.high) ?? num(day.low) ?? 0;
     const low = num(day.low) ?? high;
     const avg = (high + low) / 2;
     const label = String(day.date || '').slice(5) || '--';
-    return { label, avg, high };
-  });
+    const parsed = Date.parse(`${day.date}T00:00:00Z`);
+    return { label, time: Number.isFinite(parsed) ? Math.floor(parsed / 1000) : index + 1, avg, high };
+  }).sort((left, right) => left.time - right.time);
 }
 
 function TrendChart({
@@ -58,29 +62,18 @@ function TrendChart({
 }) {
   const unit = city?.unit || '';
   const chartSeries = useMemo<WeatherLiveChartSeries[]>(() => {
-    const currentYear = new Date().getUTCFullYear();
-    const isOneDay = title.toLowerCase().includes('1 day');
-    const dataTime = (point: TrendPoint, index: number) => {
-      if (isOneDay) {
-        const [hour = '0', minute = '0'] = point.label.split(':');
-        const parsed = Date.UTC(currentYear, 0, 1, Number(hour), Number(minute));
-        return numericTime(Math.floor(parsed / 1000) + index);
-      }
-      const parsed = Date.parse(`${currentYear}-${point.label}T00:00:00Z`);
-      return numericTime(Number.isFinite(parsed) ? Math.floor(parsed / 1000) : index + 1);
-    };
     return [
       {
         id: `${title}-avg`,
         type: 'line',
         color: '#ff9900',
-        data: points.map((point, index) => ({ time: dataTime(point, index), value: point.avg })),
+        data: points.map((point, index) => ({ time: numericTime(point.time || index + 1), value: point.avg })),
       },
       {
         id: `${title}-high`,
         type: 'line',
         color: '#7edcff',
-        data: points.map((point, index) => ({ time: dataTime(point, index), value: point.high })),
+        data: points.map((point, index) => ({ time: numericTime(point.time || index + 1), value: point.high })),
       },
     ];
   }, [points, title]);

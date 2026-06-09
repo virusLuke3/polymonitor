@@ -5,8 +5,9 @@ import { panelFromRenderer } from '../helpers';
 import {
   bestBookQuoteBin,
   bestQuoteBin,
+  bookMidCoverage,
+  bookMidPrice,
   bookCoverage,
-  bookPrice,
   marketSourceLabel,
   midCoverage,
   num,
@@ -34,7 +35,8 @@ function bookLabel(value?: string | null) {
 }
 
 function quoteState(bin: RuntimeWeatherQuoteBin) {
-  if (num(bin.bestBidYes) !== null || num(bin.bestAskYes) !== null) return 'CLOB';
+  if (bookMidPrice(bin) !== null) return 'CLOB MID';
+  if (num(bin.bestBidYes) !== null || num(bin.bestAskYes) !== null) return 'CLOB 1-SIDED';
   if (num(bin.midPriceYes) !== null) return sourceLabel(bin.priceSource) === '--' ? 'QUOTED' : sourceLabel(bin.priceSource);
   return 'MISSING';
 }
@@ -65,7 +67,7 @@ function WeatherQuoteTablePanel({
   const liveCity = city ? { ...city, bins } : null;
   const topBookBin = bestBookQuoteBin(liveCity);
   const topBin = topBookBin || bestQuoteBin(liveCity);
-  const topBookPrice = bookPrice(topBin);
+  const topBookPrice = bookMidPrice(topBookBin);
   const topLabel = topBin?.label || bins[Math.floor(bins.length / 2)]?.label || '--';
   return (
     <Panel
@@ -82,14 +84,15 @@ function WeatherQuoteTablePanel({
               <span>{city.city || '--'} Quote Table</span>
               <strong>{topLabel}</strong>
             </div>
-            <b>{priceLabel(topBookPrice ?? topBin?.midPriceYes)}</b>
+            <b>{priceLabel(topBookPrice)}</b>
           </div>
           <div className="wm-weather-quote-meta">
             <span><i>Book</i><strong>{bookCoverage(liveCity)}</strong></span>
-            <span><i>Mid/Last</i><strong>{midCoverage(liveCity)}</strong></span>
+            <span><i>Bid/Ask Mid</i><strong>{bookMidCoverage(liveCity)}</strong></span>
+            <span><i>Last</i><strong>{midCoverage(liveCity)}</strong></span>
             <span><i>Market</i><strong>{marketSourceLabel(city)}</strong></span>
-            <span><i>Bid</i><strong>{priceLabel(topBin?.bestBidYes)}</strong></span>
-            <span><i>Ask</i><strong>{priceLabel(topBin?.bestAskYes)}</strong></span>
+            <span><i>Bid</i><strong>{priceLabel(topBookBin?.bestBidYes)}</strong></span>
+            <span><i>Ask</i><strong>{priceLabel(topBookBin?.bestAskYes)}</strong></span>
           </div>
           <div className="wm-weather-quote-table-wrap">
             <table className="wm-weather-quote-table">

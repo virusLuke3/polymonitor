@@ -36,6 +36,13 @@ export function bookPrice(bin?: RuntimeWeatherQuoteBin | null) {
   return bid ?? ask ?? null;
 }
 
+export function bookMidPrice(bin?: RuntimeWeatherQuoteBin | null) {
+  const bid = num(bin?.bestBidYes);
+  const ask = num(bin?.bestAskYes);
+  if (bid === null || ask === null) return null;
+  return (bid + ask) / 2;
+}
+
 type LiveWeatherQuote = Pick<RuntimeWeatherQuoteBin, 'bestBidYes' | 'bestAskYes' | 'bookStatus' | 'priceSource'>;
 
 const LIVE_WEATHER_BOOK_TTL_MS = 10_000;
@@ -164,8 +171,8 @@ export function bestQuoteBin(city?: RuntimeGlobalWeatherCity | null): RuntimeWea
 export function bestBookQuoteBin(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin | null {
   let best: RuntimeWeatherQuoteBin | null = null;
   for (const bin of city?.bins || []) {
-    const value = bookPrice(bin);
-    if (value !== null && value > (bookPrice(best) ?? -1)) best = bin;
+    const value = bookMidPrice(bin);
+    if (value !== null && value > (bookMidPrice(best) ?? -1)) best = bin;
   }
   return best;
 }
@@ -173,7 +180,13 @@ export function bestBookQuoteBin(city?: RuntimeGlobalWeatherCity | null): Runtim
 export function bookCoverage(city?: RuntimeGlobalWeatherCity | null) {
   const bins = city?.bins || [];
   if (!bins.length) return '0/0';
-  return `${bins.filter((bin) => bookPrice(bin) !== null).length}/${bins.length}`;
+  return `${bins.filter((bin) => num(bin.bestBidYes) !== null || num(bin.bestAskYes) !== null).length}/${bins.length}`;
+}
+
+export function bookMidCoverage(city?: RuntimeGlobalWeatherCity | null) {
+  const bins = city?.bins || [];
+  if (!bins.length) return '0/0';
+  return `${bins.filter((bin) => bookMidPrice(bin) !== null).length}/${bins.length}`;
 }
 
 export function midCoverage(city?: RuntimeGlobalWeatherCity | null) {
@@ -203,7 +216,7 @@ export function expectedQuoteBins(city?: RuntimeGlobalWeatherCity | null): Runti
       maxTemp: value,
       unit,
       bestBidYes: null,
-      bestAskYes: 0.001,
+      bestAskYes: null,
       midPriceYes: null,
       marketStatus: 'Missing Quote',
     };

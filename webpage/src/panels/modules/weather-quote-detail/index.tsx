@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
-import { bookPrice, panelStatus, selectedWeatherCity, statusBadge, useLiveWeatherQuoteBins } from '../weather-detail-utils';
+import { bookMidPrice, panelStatus, selectedWeatherCity, statusBadge, useLiveWeatherQuoteBins } from '../weather-detail-utils';
 import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '../weather-live-chart';
 
 function percentAxisLabel(value: number) {
@@ -11,9 +11,9 @@ function percentAxisLabel(value: number) {
 }
 
 function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityName?: string | null }) {
-  const values = bins.map((bin) => bookPrice(bin));
+  const values = bins.map((bin) => bookMidPrice(bin));
   const hasBookQuote = values.some((value) => value !== null);
-  const hasLastOnly = bins.some((bin) => bookPrice(bin) === null && bin.midPriceYes !== null);
+  const hasLastOnly = bins.some((bin) => bookMidPrice(bin) === null && bin.midPriceYes !== null);
   const chartSeries = useMemo<WeatherLiveChartSeries[]>(() => [{
     id: 'book-mid',
     type: 'area',
@@ -31,7 +31,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
     <div className="wm-weather-quote-curve-panel">
       <div className="wm-weather-chart-title">
         <strong>{cityName || 'Selected city'} Book Price Curve</strong>
-        <span>YES Book %</span>
+        <span>YES Bid/Ask Mid %</span>
       </div>
       {hasBookQuote ? (
         <WeatherLiveChart
@@ -41,7 +41,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
           valueFormatter={percentAxisLabel}
         />
       ) : (
-        <div className="wm-weather-detail-empty-line wm-weather-quote-curve-large">No live CLOB book quotes for this market.</div>
+        <div className="wm-weather-detail-empty-line wm-weather-quote-curve-large">No two-sided CLOB book mid for this market.</div>
       )}
       <div className="wm-weather-quote-history-strip">
         <button type="button">Play History</button>
@@ -51,7 +51,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
         <span className="cyan">1h ago</span>
         <span className="yellow">30m ago</span>
       </div>
-      {hasLastOnly ? <p>LAST prices are kept in the table but are not plotted as live book quotes.</p> : null}
+      {hasLastOnly ? <p>LAST and one-sided book quotes stay in the table but are not plotted as live bid/ask mid.</p> : null}
     </div>
   );
 }
