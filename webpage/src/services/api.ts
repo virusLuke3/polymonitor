@@ -68,9 +68,7 @@ import type {
 } from '@/types';
 import type { WorldCupDashboardPayload, WorldCupIntelPayload } from '@/workspaces/worldcup/types';
 
-const RAW_BASE = import.meta.env.DEV
-  ? '/wm-api'
-  : (import.meta.env.VITE_POLYDATA_API_BASE_URL || '/wm-api');
+const RAW_BASE = import.meta.env.VITE_POLYDATA_API_BASE_URL || '/wm-api';
 const API_BASE = RAW_BASE.endsWith('/') ? RAW_BASE.slice(0, -1) : RAW_BASE;
 const AGENT_RESPONSE_TTL_MS = 5 * 60 * 1000;
 

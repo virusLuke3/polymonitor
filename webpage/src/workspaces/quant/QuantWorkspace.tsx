@@ -56,6 +56,10 @@ const DEFAULT_QUANT_EVENT_TITLE = '2026 FIFA World Cup Winner';
 const EVENT_TILE_OUTCOME_LIMIT = 12;
 const EVENT_TILE_MAX_POINTS = 240;
 const EVENT_TILE_FULL_MAX_POINTS = 900;
+const EVENT_TILE_SEEDED_MAX_OUTCOMES = 100;
+const EVENT_TILE_SEEDED_LATEST_LIMIT = 2500;
+const EVENT_TILE_SEEDED_LATEST_MAX_POINTS = 600;
+const EVENT_TILE_SEEDED_FULL_LIMIT = 250000;
 const MIN_WINDOW_TILE_POINTS = 240;
 const MAX_WINDOW_TILE_POINTS = 1800;
 
@@ -107,6 +111,26 @@ function sleep(ms: number) {
 
 function chartRangeFromTimeframe(timeframe: string) {
   return timeframe === '25000' ? 'full' : 'latest';
+}
+
+function eventTileRequestShape(chartRange: string, timeframe: string, chartLimit: number) {
+  if (chartRange === 'full') {
+    return {
+      limit: EVENT_TILE_SEEDED_FULL_LIMIT,
+      maxOutcomes: EVENT_TILE_SEEDED_MAX_OUTCOMES,
+      topN: EVENT_TILE_OUTCOME_LIMIT,
+      maxPoints: EVENT_TILE_FULL_MAX_POINTS,
+    };
+  }
+  const prefersSeededLatest = chartLimit <= EVENT_TILE_SEEDED_LATEST_LIMIT;
+  return {
+    limit: prefersSeededLatest ? EVENT_TILE_SEEDED_LATEST_LIMIT : chartLimit,
+    maxOutcomes: prefersSeededLatest ? EVENT_TILE_SEEDED_MAX_OUTCOMES : EVENT_TILE_OUTCOME_LIMIT,
+    topN: EVENT_TILE_OUTCOME_LIMIT,
+    maxPoints: prefersSeededLatest
+      ? EVENT_TILE_SEEDED_LATEST_MAX_POINTS
+      : Math.max(EVENT_TILE_MAX_POINTS, Math.min(900, tilePointBudget(timeframe))),
+  };
 }
 
 function isSeriesWarming(payload: QuantMarketSeriesPayload | null | undefined) {
@@ -675,19 +699,16 @@ export function QuantWorkspace() {
     return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
   }, [timeframe]);
   const chartRange = chartRangeFromTimeframe(timeframe);
-  const chartRequestLimit = selectedEntityKind === 'event' && chartRange === 'full' ? 250000 : chartLimit;
+  const eventTileShape = selectedEntityKind === 'event' ? eventTileRequestShape(chartRange, timeframe, chartLimit) : null;
+  const chartRequestLimit = eventTileShape?.limit || chartLimit;
   const semanticChartQuery: QuantPriceQuery & { priceSource: string; scope: string; maxOutcomes: number; topN?: number; maxPoints?: number } = {
     marketSlug,
     priceSource: backendPriceSource(priceSource),
     scope: 'auto',
     limit: chartRequestLimit,
-    maxOutcomes: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
-    topN: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
-    maxPoints: selectedEntityKind === 'event'
-      ? (chartRange === 'full'
-        ? Math.min(EVENT_TILE_FULL_MAX_POINTS, tilePointBudget(timeframe))
-        : Math.max(EVENT_TILE_MAX_POINTS, Math.min(900, tilePointBudget(timeframe))))
-      : tilePointBudget(timeframe),
+    maxOutcomes: eventTileShape?.maxOutcomes || 24,
+    topN: eventTileShape?.topN,
+    maxPoints: eventTileShape?.maxPoints || tilePointBudget(timeframe),
     range: selectedEntityKind === 'event' ? chartRange : undefined,
     resolution: selectedEntityKind === 'event' ? 'auto' : undefined,
     live: false,
@@ -764,7 +785,14 @@ export function QuantWorkspace() {
       ...semanticChartQuery,
       live: livePriceRefreshEnabled && silent && selectedEntityKind !== 'event',
     };
-    const [seriesResult, statusResult] = await Promise.allSettled([
+    void fetchQuantBuildStatus('', 12)
+      .then((status) => {
+        if (requestSeq === priceLoadSeq.current) setRuns(status.items || []);
+      })
+      .catch((statusError) => {
+        if (import.meta.env.DEV && !isAbortLikeError(statusError)) console.debug('[quant] build status refresh failed', statusError);
+      });
+    const seriesResult = await (
       hasMarketSlug
         ? (selectedEntityKind === 'event'
           ? fetchQuantEventPriceSeries({
@@ -780,9 +808,10 @@ export function QuantWorkspace() {
             viewportWidth: chartViewportWidth(),
             timeoutMs: chartRange === 'full' ? 16000 : 10000,
           }))
-        : Promise.resolve(null),
-      fetchQuantBuildStatus('', 12),
-    ]);
+        : Promise.resolve(null)
+    )
+      .then((value) => ({ status: 'fulfilled' as const, value }))
+      .catch((reason) => ({ status: 'rejected' as const, reason }));
     if (requestSeq !== priceLoadSeq.current) {
       if (import.meta.env.DEV) console.debug('[quant] stale price response ignored', { cacheKey });
       return {
@@ -815,7 +844,6 @@ export function QuantWorkspace() {
     }
     if (priceSource !== 'frontend') setFrontendRows([]);
     if (priceSource !== 'orderfilled') setBlockRows([]);
-    if (statusResult.status === 'fulfilled') setRuns(statusResult.value.items || []);
     const activeRowCount = marketSeriesToPrices(nextMarketSeries).length || (priceSource === 'orderfilled' ? nextBlockRows.length : nextFrontendRows.length);
     if (hasMarketSlug) {
       if (!silent) {
@@ -1201,10 +1229,7 @@ export function QuantWorkspace() {
       ? fetchQuantEventPriceSeries({
         eventSlug: nextSlug,
         priceSource: backendPriceSource(priceSource),
-        limit: Math.max(2500, EVENT_TILE_MAX_POINTS * 8),
-        maxOutcomes: EVENT_TILE_OUTCOME_LIMIT,
-        topN: EVENT_TILE_OUTCOME_LIMIT,
-        maxPoints: EVENT_TILE_MAX_POINTS,
+        ...eventTileRequestShape('latest', timeframe, chartLimit),
         range: 'latest',
         resolution: 'auto',
         pointFormat: 'lite',

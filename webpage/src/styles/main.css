@@ -1639,13 +1639,17 @@
 }
 
 .qtv-block-tick-axis {
-  position: relative;
-  z-index: 4;
-  grid-row: 3;
-  height: 22px;
-  margin: 0 66px 0 10px;
-  border-top: 1px solid rgba(148, 163, 184, 0.08);
-  background: linear-gradient(180deg, rgba(7, 10, 15, 0.8), #070a0f);
+  position: absolute;
+  z-index: 28;
+  right: 74px;
+  bottom: 0;
+  left: 16px;
+  height: 42px;
+  margin: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px) 0 0 / 12.5% 100%,
+    linear-gradient(180deg, rgba(7, 10, 15, 0.9), #070a0f);
   color: #7f8a9d;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1654,17 +1658,13 @@
   text-shadow: 0 1px 2px #05070b, 0 0 8px #05070b;
 }
 
-.qtv-block-tick-axis.hover-only span {
-  display: none;
-}
-
 .qtv-block-tick-axis.empty {
   opacity: 0;
 }
 
 .qtv-block-tick-axis span {
   position: absolute;
-  bottom: 5px;
+  bottom: 7px;
   display: grid;
   justify-items: center;
   gap: 2px;
@@ -1683,7 +1683,7 @@
 }
 
 .qtv-block-tick-axis span.level-1 {
-  bottom: 20px;
+  bottom: 24px;
   opacity: 0.82;
 }
 
@@ -1711,7 +1711,7 @@
 
 .qtv-block-tick-axis strong {
   position: absolute;
-  top: -28px;
+  top: -34px;
   transform: translateX(-50%);
   border: 1px solid rgba(47, 125, 244, 0.36);
   border-radius: 4px;
@@ -2046,6 +2046,15 @@
   padding: 0 6px;
 }
 
+.qtv-indicator-legend span.qtv-scale-pill {
+  max-width: min(720px, 58vw);
+  overflow: hidden;
+}
+
+.qtv-indicator-legend span.qtv-scale-pill em {
+  color: #a8b3c3;
+}
+
 .qtv-outcome-manager {
   position: absolute;
   z-index: 18;
@@ -2236,6 +2245,38 @@
   color: #60a5fa;
   font-style: normal;
   font-weight: 900;
+}
+
+.qtv-block-scale-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-width: min(880px, 62vw);
+  margin-top: 6px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  color: #8fa3bd;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 850;
+  pointer-events: none;
+}
+
+.qtv-block-scale-inline span {
+  position: relative;
+  padding-top: 7px;
+  color: #a8b3c3;
+  white-space: nowrap;
+}
+
+.qtv-block-scale-inline span::before {
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  width: 1px;
+  height: 5px;
+  background: rgba(148, 163, 184, 0.45);
+  content: '';
 }
 
 .qtv-outcome-legend {

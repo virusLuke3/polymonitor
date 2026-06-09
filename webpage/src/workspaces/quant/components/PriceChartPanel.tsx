@@ -700,6 +700,52 @@ export function PriceChartPanel({
     left: `${Math.min(rangeSelection.startX, rangeSelection.currentX) - containerRef.current.getBoundingClientRect().left}px`,
     width: `${Math.abs(rangeSelection.currentX - rangeSelection.startX)}px`,
   } : undefined;
+  const blockAxisTicks = useMemo(() => {
+    if (!priceSource.includes('block') || !primaryPoints.length) return [];
+    const logicalRangeLooksValid = Boolean(
+      visibleLogicalRange
+      && visibleLogicalRange.to > visibleLogicalRange.from
+      && visibleLogicalRange.from >= -primaryPoints.length * 0.1
+      && visibleLogicalRange.to <= primaryPoints.length * 1.15,
+    );
+    const range = logicalRangeLooksValid && visibleLogicalRange
+      ? visibleLogicalRange
+      : { from: 0, to: Math.max(0, primaryPoints.length - 1) };
+    const fromIndex = Math.max(0, Math.min(primaryPoints.length - 1, Math.floor(range.from)));
+    const toIndex = Math.max(fromIndex, Math.min(primaryPoints.length - 1, Math.ceil(range.to)));
+    const span = Math.max(1, toIndex - fromIndex);
+    const count = Math.min(9, Math.max(4, Math.floor(span / 85) + 4));
+    const seen = new Set<number>();
+    return Array.from({ length: count }, (_, tickIndex) => {
+      const index = Math.round(fromIndex + (span * tickIndex) / Math.max(1, count - 1));
+      const point = primaryPoints[index];
+      if (!point) return null;
+      const block = Math.floor(point.timestamp);
+      if (seen.has(block)) return null;
+      seen.add(block);
+      const fallbackLeft = `${(tickIndex / Math.max(1, count - 1)) * 100}%`;
+      return {
+        key: `${block}-${tickIndex}`,
+        block,
+        left: logicalRangeLooksValid
+          ? axisPercentStyle(axisPercentFromIndex(index, primaryPoints, visibleLogicalRange)) || fallbackLeft
+          : fallbackLeft,
+        className: `${tickIndex === 0 ? 'start ' : ''}${tickIndex === count - 1 ? 'end ' : ''}${tickIndex % 2 ? 'level-1 ' : ''}major`,
+      };
+    }).filter((tick): tick is { key: string; block: number; left: string; className: string } => Boolean(tick?.left));
+  }, [priceSource, primaryPoints, visibleLogicalRange]);
+  const blockScaleSummaryTicks = useMemo(() => {
+    if (!priceSource.includes('block') || !primaryPoints.length) return [];
+    const count = Math.min(8, Math.max(4, Math.floor(primaryPoints.length / 140) + 4));
+    const seen = new Set<number>();
+    return Array.from({ length: count }, (_, tickIndex) => {
+      const index = Math.round((Math.max(0, primaryPoints.length - 1) * tickIndex) / Math.max(1, count - 1));
+      const block = Math.floor(primaryPoints[index]?.timestamp || 0);
+      if (!block || seen.has(block)) return null;
+      seen.add(block);
+      return block;
+    }).filter((block): block is number => Boolean(block));
+  }, [priceSource, primaryPoints]);
 
   function setChartVisibleRange(range: { from: number; to: number }, viewportMode: 'preset' | 'custom' = 'custom') {
     const next = clampLogicalRange(range, primaryPoints.length);
@@ -1268,6 +1314,11 @@ export function PriceChartPanel({
   const sumText = eventMode && hasLoadedPrices ? fmtPrice(chartViewMode === 'normalized' ? 1 : allYesSum) : '--';
   const visibleSumText = eventMode && hasLoadedPrices ? fmtPrice(visibleYesSum) : '--';
   const latestPriceText = latest && hasLoadedPrices ? fmtPrice(latest.close) : '--';
+  const visibleScaleBlocks = hasLoadedPrices && priceSource.includes('block') && primaryPoints.length
+    ? [0, 0.33, 0.66, 1]
+      .map((ratio) => Math.floor(primaryPoints[Math.round((primaryPoints.length - 1) * ratio)]?.timestamp || 0))
+      .filter((block, index, blocks) => block > 0 && blocks.indexOf(block) === index)
+    : [];
   const loadingTitle = dataStatus === 'metadata_loading'
     ? 'Loading market metadata'
     : dataStatus === 'price_loading'
@@ -1458,6 +1509,12 @@ export function PriceChartPanel({
             <span>{market.category} · {eventMode ? `${displayedOutcomeCount} outcomes` : 'outcome probability'} · {priceSource}</span>
             <div className="qtv-indicator-legend">
               <span>Rows <b>{rowsText}</b></span>
+              {visibleScaleBlocks.length ? (
+                <span className="qtv-scale-pill">
+                  Scale
+                  {visibleScaleBlocks.map((block) => <em key={`scale-${block}`}>{blockLabel(block)}</em>)}
+                </span>
+              ) : null}
               <span>View <b>{chartViewMode}</b></span>
               <span>Range <i>{hasLoadedPrices ? pointLabel(primaryPoints[0], priceSource) : '--'}</i> <em>{hasLoadedPrices ? pointLabel(primaryPoints[primaryPoints.length - 1], priceSource) : '--'}</em></span>
               <span>Volume <b>{hasLoadedPrices ? volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</b></span>
@@ -1469,6 +1526,13 @@ export function PriceChartPanel({
                 </span>
               ) : null}
             </div>
+            {blockScaleSummaryTicks.length ? (
+              <div className="qtv-block-scale-inline" aria-label="Visible block scale summary">
+                {blockScaleSummaryTicks.map((block) => (
+                  <span key={`inline-${block}`}>{blockLabel(block)}</span>
+                ))}
+              </div>
+            ) : null}
             <div className="qtv-outcome-legend">
               {visibleOutcomeGroups.slice(0, 8).map((group) => {
                 const point = group.points[group.points.length - 1];
@@ -1777,7 +1841,13 @@ export function PriceChartPanel({
             </div>
           ) : null}
         </div>
-        <div className={`qtv-block-tick-axis hover-only ${priceSource.includes('block') && hasLoadedPrices ? '' : 'empty'}`} aria-label="Visible block hover axis">
+        <div className={`qtv-block-tick-axis ${priceSource.includes('block') && hasLoadedPrices ? '' : 'empty'}`} aria-label="Visible block axis">
+          {blockAxisTicks.map((tick) => (
+            <span key={tick.key} className={tick.className} style={{ left: tick.left }}>
+              <i />
+              <b>{blockLabel(tick.block)}</b>
+            </span>
+          ))}
           {priceSource.includes('block') && hover ? (
             <strong style={{ left: pointToScreenSafe(hover, primaryPoints, visibleLogicalRange).x }}>block {blockLabel(hover.timestamp)}</strong>
           ) : null}
