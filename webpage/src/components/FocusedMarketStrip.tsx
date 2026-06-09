@@ -999,6 +999,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const blockCloseKey = selectedMarketSlug
     ? `${selectedMarketSlug}:${ctx.selectedMarketId || ''}:${selectedTokenId || activeOutcomeKey || ''}`
     : '';
+  const prefersBlockCloseChart = Boolean(blockCloseKey && executionAvailable);
+  const blockCloseLoading = blockCloseState.key === blockCloseKey && blockCloseState.loading;
   const blockCloseChart = blockCloseState.key === blockCloseKey
     ? blockCloseSeriesToChart(blockCloseState.payload, ctx.selectedMarketId, selectedOutcome, 'blocks')
     : null;
@@ -1033,8 +1035,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   ).toLowerCase();
   const chartSource = String(chart?.priceSource || '').toLowerCase();
   const isBlockCloseChart = Boolean(chartSource.includes('block_close') || String(chart?.interval || '').toLowerCase() === 'block');
-  const showFocusedOutcomeRail = shouldShowOutcomeRail && !isBlockCloseChart;
-  const showFocusedEventLegend = Boolean(detail && !isBlockCloseChart);
+  const isBlockCloseView = Boolean(prefersBlockCloseChart || isBlockCloseChart);
+  const showFocusedOutcomeRail = shouldShowOutcomeRail && !isBlockCloseView;
+  const showFocusedEventLegend = Boolean(detail && !isBlockCloseView);
   const eventChartStatus = String(eventChart?.historyStatus || '').toLowerCase();
   const eventChartSource = String(eventChart?.priceSource || '').toLowerCase();
   const chartPointCount = chart?.points?.length || 0;
@@ -1084,7 +1087,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     detail
       && shouldShowOutcomeRail
       && hasSelectedEventHistory
-      && !canRenderFocusedHistory,
+      && !canRenderFocusedHistory
+      && !isBlockCloseView,
   );
   const chartSourceText = preferEventChart || (!canRenderFocusedHistory && hasEventHistory)
     ? chartSourceLabel(eventChartSource || 'clob-history', eventChartStatus)
@@ -1092,6 +1096,13 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       ? chartSourceLabel(chartSource, chartStatus)
       : chartSourceLabel(chartSource, chartStatus);
   const hasServingTradeActivity = Number(displayedTrades || 0) > 0 || Number(displayedVolume || 0) > 0;
+  const focusedHistoryEmptyText = isBlockCloseView
+    ? (blockCloseLoading ? 'Loading OrderFilled block-close history...' : 'No local OrderFilled block-close history is available for this market yet.')
+    : chartStatus === 'snapshot'
+      ? 'Only a latest-price snapshot is available for this market.'
+      : hasServingTradeActivity
+        ? 'Price history is still loading for this market.'
+        : 'No local price history is available for this market.';
   const liveQuoteAvailable = Boolean(
     hasAnyBookLevels
       || hasServingTradeActivity
@@ -1196,7 +1207,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <div className="wm-focus-kicker wm-focus-market-meta-line">
                   <span>{eventCategory}</span>
                   <i>{outcomeCount ? `${outcomeCount} outcomes` : 'event'}</i>
-                  <i>24h Vol {formatCurrencyCompact(displayedVolume)}</i>
+                  <i>{isBlockCloseView ? 'Vol' : '24h Vol'} {formatCurrencyCompact(displayedVolume)}</i>
                   <i>{formatCompact(displayedTrades)} tx</i>
                 </div>
               </div>
@@ -1215,7 +1226,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <span><em>Spread</em> <strong>{formatBookPrice(spreadValue)}</strong></span>
               </div>
               <div className="wm-focus-chart-topline">
-                {isBlockCloseChart ? (
+                {isBlockCloseView ? (
                   <div className="wm-focus-chart-block-axis" aria-label="block close range">
                     <span>OrderFilled block close</span>
                     {chartBlockRangeText ? <strong>{chartBlockRangeText}</strong> : null}
@@ -1237,7 +1248,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   </div>
                 )}
                 <div className="wm-focus-chart-summary">
-                  {!isBlockCloseChart ? <span>{chartSourceText}</span> : null}
+                  {!isBlockCloseView ? <span>{chartSourceText}</span> : null}
                   <span>{marketTimeSubtitle(
                     detail?.endDate || selectedGroup?.endDate || focusedMarket?.endDate || null,
                     detail?.createdAt || selectedGroup?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null,
@@ -1252,11 +1263,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                             ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
                             : canRenderFocusedHistory
                               ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions)
-                            : hasEventHistory
+                            : hasEventHistory && !isBlockCloseView
                               ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
-                              : emptyState(chartStatus === 'snapshot' ? 'Only a latest-price snapshot is available for this outcome.' : hasServingTradeActivity ? 'Price history is still loading for this market.' : 'No event price history is available for this market yet.')
+                              : emptyState(focusedHistoryEmptyText)
                       )
-                    : (canRenderFocusedHistory ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions) : emptyState(chartStatus === 'snapshot' ? 'Only a latest-price snapshot is available for this market.' : hasServingTradeActivity ? 'Price history is still loading for this market.' : 'No local price history is available for this market.'))}
+                    : (canRenderFocusedHistory ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions) : emptyState(focusedHistoryEmptyText))}
                 </div>
                 {showFocusedEventLegend ? eventChartLegend(detail, eventChart, activeOutcomeKey, (outcome) => {
                   ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
@@ -1314,7 +1325,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
 
             <div className="wm-focus-inline-stats">
               <span><em>Vol</em> {formatCurrencyCompact(displayedVolume)}</span>
-              <span><em>24h</em> {formatCompact(displayedTrades)} trades</span>
+              <span><em>{isBlockCloseView ? 'Trades' : '24h'}</em> {formatCompact(displayedTrades)} trades</span>
               <span><em>Yes</em> {formatPercent(liveDisplayedYesPrice)}</span>
               <span><em>No</em> {formatPercent(liveDisplayedNoPrice)}</span>
             </div>
