@@ -693,6 +693,7 @@ export function QuantWorkspace() {
   const [chartPinnedOutcomeKeys, setChartPinnedOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.pinnedOutcomes'));
   const [chartHiddenOutcomeKeys, setChartHiddenOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.hiddenOutcomes'));
   const [chartSoloOutcomeKey, setChartSoloOutcomeKey] = useState('');
+  const [hoveredChartOutcomeKey, setHoveredChartOutcomeKey] = useState('');
   const [strategyParameters, setStrategyParameters] = useState<StrategyParameters>(persistedStrategyParameters);
   const marketSearchSeq = useRef(0);
   const priceLoadSeq = useRef(0);
@@ -1947,6 +1948,10 @@ export function QuantWorkspace() {
     () => sortedOutcomeRows.find(({ outcome }) => outcome.tokenId === selectedOutcome?.tokenId) || sortedOutcomeRows[0] || null,
     [selectedOutcome, sortedOutcomeRows],
   );
+  const hoveredOutcomeRow = useMemo(
+    () => sortedOutcomeRows.find((row) => row.yesKey === hoveredChartOutcomeKey || row.noKey === hoveredChartOutcomeKey) || null,
+    [hoveredChartOutcomeKey, sortedOutcomeRows],
+  );
   const outcomeVisibilitySummary = useMemo(() => {
     const activeKeys = sortedOutcomeRows
       .map((row) => (selectedBacktestAction === 'NO' ? row.noKey : row.yesKey))
@@ -2390,6 +2395,7 @@ export function QuantWorkspace() {
             onPinnedOutcomeKeysChange={setChartPinnedOutcomeKeys}
             onHiddenOutcomeKeysChange={setChartHiddenOutcomeKeys}
             onSoloOutcomeKeyChange={setChartSoloOutcomeKey}
+            onOutcomeHover={setHoveredChartOutcomeKey}
             onOutcomeSelect={(tokenId, side) => {
               const next = marketSeries?.outcomes?.find((outcome) => (
                 side === 'NO' ? outcome.buyNoTokenId === tokenId : (outcome.buyYesTokenId === tokenId || outcome.tokenId === tokenId)
@@ -2558,6 +2564,10 @@ export function QuantWorkspace() {
                           <span>Mode</span>
                           <strong>{chartSoloOutcomeKey ? `Solo · ${outcomeVisibilitySummary.soloLabel || 'outcome'}` : selectedBacktestAction}</strong>
                         </div>
+                        <div>
+                          <span>Hover</span>
+                          <strong>{hoveredOutcomeRow?.label || '--'}</strong>
+                        </div>
                       </section>
                       <label>
                         <span>Find</span>
@@ -2600,10 +2610,11 @@ export function QuantWorkspace() {
                       const isPinned = chartPinnedOutcomeKeys.includes(yesKey) || chartPinnedOutcomeKeys.includes(noKey);
                       const isHidden = chartHiddenOutcomeKeys.includes(yesKey) || chartHiddenOutcomeKeys.includes(noKey);
                       const isSolo = chartSoloOutcomeKey === yesKey || chartSoloOutcomeKey === noKey;
+                      const isHovered = hoveredChartOutcomeKey === yesKey || hoveredChartOutcomeKey === noKey;
                       const watchKey = watchKeyForOutcome(outcome);
                       const isWatched = watchKey ? watchlistKeys.includes(watchKey) : false;
                       return (
-                        <div key={`side-${outcome.tokenId}`} className={`qtv-inspector-outcome ${isSelected ? 'active' : ''} ${isPinned ? 'pinned' : ''} ${isHidden ? 'hidden' : ''} ${isSolo ? 'solo' : ''} ${isWatched ? 'watched' : ''}`} title={fullLabel}>
+                        <div key={`side-${outcome.tokenId}`} className={`qtv-inspector-outcome ${isSelected ? 'active' : ''} ${isHovered ? 'hovered' : ''} ${isPinned ? 'pinned' : ''} ${isHidden ? 'hidden' : ''} ${isSolo ? 'solo' : ''} ${isWatched ? 'watched' : ''}`} title={fullLabel}>
                           <button type="button" onClick={() => selectOutcomeSide(outcome, 'YES')}>
                             <strong>{label}</strong>
                             <span>{rows.toLocaleString('en-US')} rows · {volume.toLocaleString('en-US', { maximumFractionDigits: 0 })} vol</span>

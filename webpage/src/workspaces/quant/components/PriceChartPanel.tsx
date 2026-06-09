@@ -79,6 +79,7 @@ type PriceChartPanelProps = {
   onHiddenOutcomeKeysChange?: (keys: string[]) => void;
   onSoloOutcomeKeyChange?: (key: string) => void;
   onOutcomeSelect?: (tokenId: string, side: 'YES' | 'NO') => void;
+  onOutcomeHover?: (key: string) => void;
   onRetry?: () => void;
   viewportResetKey?: string;
   onViewportModeChange?: (mode: 'preset' | 'custom') => void;
@@ -540,6 +541,7 @@ export function PriceChartPanel({
   onHiddenOutcomeKeysChange,
   onSoloOutcomeKeyChange,
   onOutcomeSelect,
+  onOutcomeHover,
   onRetry,
   viewportResetKey = '',
   onViewportModeChange,
@@ -550,6 +552,7 @@ export function PriceChartPanel({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<SeriesRefs>({ lines: new Map(), ma: null, volume: null });
   const pointsRef = useRef<PricePoint[]>([]);
+  const visibleOutcomeGroupsRef = useRef<OutcomeGroup[]>([]);
   const dataWindowDragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const suppressViewportModeRef = useRef(false);
   const onVisibleWindowChangeRef = useRef<typeof onVisibleWindowChange>(onVisibleWindowChange);
@@ -558,7 +561,9 @@ export function PriceChartPanel({
   const lastFitRequestKeyRef = useRef('');
   const lastTradeFocusKeyRef = useRef('');
   const onViewportModeChangeRef = useRef(onViewportModeChange);
+  const onOutcomeHoverRef = useRef(onOutcomeHover);
   const [hover, setHover] = useState<PricePoint | null>(null);
+  const [hoveredOutcomeKey, setHoveredOutcomeKey] = useState('');
   const [pinnedPoint, setPinnedPoint] = useState<PricePoint | null>(null);
   const [visibleLogicalRange, setVisibleLogicalRange] = useState<LogicalRangeState>(null);
   const [dataWindowSettings, setDataWindowSettings] = useState<DataWindowSettings>(persistedDataWindowSettings);
@@ -726,7 +731,11 @@ export function PriceChartPanel({
   const dataWindowInspect = pointSnapshot(dataWindowPoint, latestPoint, dataWindowMaPoint);
   const hoverMaPoint = hover ? nearestPoint(maPoints, hover.timestamp) : null;
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
-  const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints, visibleLogicalRange) : null;
+  const hoverGroup = useMemo(
+    () => visibleOutcomeGroups.find((group) => group.key === hoveredOutcomeKey) || null,
+    [hoveredOutcomeKey, visibleOutcomeGroups],
+  );
+  const hoverScreen = hover ? pointToScreenSafe(hover, hoverGroup?.points || primaryPoints, visibleLogicalRange) : null;
   const hoverTooltipSide = percentNumber(hoverScreen?.x) > 68 ? 'left-side' : '';
   const pinnedMaPoint = pinnedPoint ? nearestPoint(maPoints, pinnedPoint.timestamp) : null;
   const pinnedInspect = pointSnapshot(pinnedPoint, latestPoint, pinnedMaPoint);
@@ -1115,8 +1124,16 @@ export function PriceChartPanel({
   }, [primaryPoints]);
 
   useEffect(() => {
+    visibleOutcomeGroupsRef.current = visibleOutcomeGroups;
+  }, [visibleOutcomeGroups]);
+
+  useEffect(() => {
     onViewportModeChangeRef.current = onViewportModeChange;
   }, [onViewportModeChange]);
+
+  useEffect(() => {
+    onOutcomeHoverRef.current = onOutcomeHover;
+  }, [onOutcomeHover]);
 
   useEffect(() => {
     onVisibleWindowChangeRef.current = onVisibleWindowChange;
@@ -1309,14 +1326,39 @@ export function PriceChartPanel({
       const time = Number(param.time);
       if (!Number.isFinite(time)) {
         setHover(null);
+        setHoveredOutcomeKey('');
+        onOutcomeHoverRef.current?.('');
+        return;
+      }
+      const groups = visibleOutcomeGroupsRef.current;
+      const pointerY = Number(param.point?.y);
+      const match = groups.reduce<{ group: OutcomeGroup; point: PricePoint; score: number } | null>((best, group) => {
+        const line = seriesRef.current.lines.get(group.key);
+        const exactPoint = group.points.find((candidate) => Math.floor(candidate.timestamp) === Math.floor(time));
+        const point = exactPoint || nearestPoint(group.points, time);
+        if (!point) return best;
+        const lineWithCoordinate = line as unknown as { priceToCoordinate?: (price: number) => number | null };
+        const y = lineWithCoordinate.priceToCoordinate?.(point.close);
+        const timestampPenalty = Math.min(30, Math.abs(point.timestamp - time) / 250);
+        const exactBonus = exactPoint ? -4 : 0;
+        const yScore = Number.isFinite(pointerY) && typeof y === 'number' && Number.isFinite(y)
+          ? Math.abs(y - pointerY)
+          : Math.abs(point.timestamp - time) / 1000;
+        const score = yScore + timestampPenalty + exactBonus;
+        if (!best || score < best.score) return { group, point, score };
+        return best;
+      }, null);
+      if (match) {
+        setHover(match.point);
+        setHoveredOutcomeKey(match.group.key);
+        onOutcomeHoverRef.current?.(match.group.key);
         return;
       }
       const currentPoints = pointsRef.current;
-      const point = currentPoints.reduce<PricePoint | null>((best, candidate) => {
-        if (!best) return candidate;
-        return Math.abs(candidate.timestamp - time) < Math.abs(best.timestamp - time) ? candidate : best;
-      }, null);
+      const point = nearestPoint(currentPoints, time);
       setHover(point);
+      setHoveredOutcomeKey('');
+      onOutcomeHoverRef.current?.('');
     });
 
     const observer = new ResizeObserver(([entry]) => {
@@ -1466,6 +1508,10 @@ export function PriceChartPanel({
     const point = drawingPointFromEvent(event);
     if (!point) return;
     if (activeTool === 'cursor' || activeTool === 'crosshair') {
+      const hoveredGroup = visibleOutcomeGroups.find((group) => group.key === hoveredOutcomeKey);
+      if (hoveredGroup?.tokenId) {
+        onOutcomeSelect?.(hoveredGroup.tokenId, hoveredGroup.tokenSide === 'NO' ? 'NO' : 'YES');
+      }
       setPinnedPoint(hover || nearestPoint(primaryPoints, point.timestamp));
       setDataWindowSettings((current) => ({ ...current, visible: true, minimized: false, mode: current.mode || 'compact' }));
       return;
@@ -1799,10 +1845,11 @@ export function PriceChartPanel({
                 const isSelected = selectedGroup?.key === group.key;
                 const isPinned = effectivePinnedOutcomeKeys.includes(group.key);
                 const isSolo = effectiveSoloOutcomeKey === group.key;
+                const isHovered = hoveredOutcomeKey === group.key;
                 return (
                   <span
                     key={group.key}
-                    className={`qtv-legend-item ${isSelected ? 'active' : ''} ${isPinned ? 'pinned' : ''} ${isSolo ? 'solo' : ''}`}
+                    className={`qtv-legend-item ${isSelected ? 'active' : ''} ${isHovered ? 'hovered' : ''} ${isPinned ? 'pinned' : ''} ${isSolo ? 'solo' : ''}`}
                     title={group.fullLabel}
                   >
                     <button
@@ -1867,10 +1914,11 @@ export function PriceChartPanel({
                 const isPinned = effectivePinnedOutcomeKeys.includes(group.key);
                 const isHidden = effectiveHiddenOutcomeKeys.includes(group.key);
                 const isSolo = effectiveSoloOutcomeKey === group.key;
+                const isHovered = hoveredOutcomeKey === group.key;
                 return (
                   <div
                     key={`manager-${group.key}`}
-                    className={`${isSelected ? 'selected' : ''} ${isVisible ? 'visible' : ''} ${isHidden ? 'hidden' : ''}`}
+                    className={`${isSelected ? 'selected' : ''} ${isHovered ? 'hovered' : ''} ${isVisible ? 'visible' : ''} ${isHidden ? 'hidden' : ''}`}
                   >
                     <button
                       type="button"
@@ -2104,7 +2152,7 @@ export function PriceChartPanel({
               <div className="qtv-hover-crosshair-x" style={{ left: hoverScreen.x }} />
               <div className="qtv-hover-crosshair-y" style={{ top: hoverScreen.y }} />
               <div className="qtv-hover-price-tag" style={{ top: hoverScreen.y }}>
-                <em>Hover</em>
+                <em title={hoverGroup?.fullLabel}>{hoverGroup?.label || 'Hover'}</em>
                 <span><i>YES</i>{fmtPrice(hoverInspect.yes)}</span>
                 <span><i>NO</i>{fmtPrice(hoverInspect.no)}</span>
                 <b>{blockLabel(hoverInspect.point.timestamp)}</b>
