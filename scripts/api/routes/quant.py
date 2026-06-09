@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import logging
 from pathlib import Path
 import sys
 import time
 from typing import Any
+import uuid
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
@@ -21,6 +23,7 @@ from quant.api.read_api import (  # noqa: E402
     get_backtest_run,
     get_backtest_trades,
     get_block_close_prices,
+    get_event_price_head,
     get_event_price_tile,
     get_event_price_series,
     get_frontend_prices,
@@ -32,6 +35,10 @@ from quant.api.read_api import (  # noqa: E402
 from quant.backtest.backtest_engine import create_backtest_run  # noqa: E402
 from quant.core.db import PostgresSettings, postgres_connection  # noqa: E402
 from quant.core.schema import create_schema  # noqa: E402
+
+LOGGER = logging.getLogger(__name__)
+QUANT_EVENT_TILE_NAMESPACE = "quant-event-tile"
+QUANT_EVENT_TILE_WARM_KEY = "quant-event-tile-warm:events"
 
 
 def _parse_int_arg(name: str, default: int | None = None) -> int | None:
@@ -225,6 +232,7 @@ def _apply_point_payload_format(payload: dict[str, Any], point_format: str) -> d
 
 def create_quant_blueprint(helpers: dict) -> Blueprint:
     bp = Blueprint("quant_routes", __name__, url_prefix="/quant")
+    route_logger = getattr(helpers.get("app"), "logger", LOGGER)
     get_cached_json = helpers.get("get_cached_json")
     set_cached_json = helpers.get("set_cached_json")
     get_snapshot_payload = helpers.get("get_snapshot_payload")
@@ -264,6 +272,85 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             return None
         payload = row.get("payload") if row else None
         return payload if isinstance(payload, dict) else None
+
+    def _load_seeded_tile(cache_key: str) -> tuple[dict[str, Any] | None, str]:
+        if callable(get_cached_json):
+            cached = get_cached_json(QUANT_EVENT_TILE_NAMESPACE, cache_key)
+            if isinstance(cached, dict):
+                return cached, "redis"
+        snapshot_store = helpers.get("SNAPSHOT_STORE")
+        if snapshot_store is not None:
+            try:
+                cached = snapshot_store.get(QUANT_EVENT_TILE_NAMESPACE, cache_key)
+                if isinstance(cached, dict):
+                    return cached, "snapshot"
+                stale = snapshot_store.get_stale(QUANT_EVENT_TILE_NAMESPACE, cache_key)
+                if isinstance(stale, dict):
+                    stale_payload = dict(stale)
+                    stale_payload["stale"] = True
+                    stale_payload["cacheStatus"] = "stale"
+                    return stale_payload, "snapshot-stale"
+            except Exception:
+                route_logger.exception("quant-event-tile snapshot lookup failed")
+        persisted = _load_persistent_tile(cache_key)
+        if isinstance(persisted, dict):
+            return persisted, "postgres"
+        return None, "miss"
+
+    def _redis_prefix() -> str:
+        app_obj = helpers.get("app")
+        settings = getattr(app_obj, "config", {}).get("POLYDATA_SETTINGS") if app_obj is not None else None
+        return str(getattr(settings, "redis_prefix", "polydata:") or "")
+
+    def _enqueue_event_tile_warm(args: dict[str, str]) -> bool:
+        getter = helpers.get("get_redis_client")
+        if not callable(getter):
+            return False
+        try:
+            client = getter()
+            if client is None:
+                return False
+            payload = {
+                **args,
+                "requested_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+            client.sadd(f"{_redis_prefix()}{QUANT_EVENT_TILE_WARM_KEY}", json.dumps(payload, sort_keys=True, ensure_ascii=True))
+            client.expire(f"{_redis_prefix()}{QUANT_EVENT_TILE_WARM_KEY}", 3600)
+            return True
+        except Exception:
+            route_logger.exception("quant-event-tile warm enqueue failed event_slug=%s", args.get("event_slug"))
+            return False
+
+    def _event_tile_args(
+        *,
+        event_slug: str,
+        price_source: str,
+        limit: int,
+        max_outcomes: int,
+        top_n: int,
+        max_points: int,
+        tile_range: str,
+        resolution: str,
+        point_format: str,
+    ) -> dict[str, str]:
+        return {
+            "event_slug": event_slug,
+            "price_source": price_source,
+            "limit": str(limit),
+            "max_outcomes": str(max_outcomes),
+            "top_n": str(top_n),
+            "max_points": str(max_points),
+            "range": tile_range,
+            "resolution": resolution,
+            "point_format": point_format,
+        }
+
+    def _json_response(payload: dict[str, Any], *, status_code: int = 200, headers: dict[str, str] | None = None):
+        response = jsonify(payload)
+        response.status_code = status_code
+        for key, value in (headers or {}).items():
+            response.headers[key] = value
+        return response
 
     @bp.route("/markets", methods=["GET"])
     def api_quant_price_markets():
@@ -385,6 +472,8 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
 
     @bp.route("/event-price-tile", methods=["GET"])
     def api_quant_event_price_tile():
+        started = time.perf_counter()
+        request_id = uuid.uuid4().hex[:12]
         event_slug = (request.args.get("event_slug") or request.args.get("market_slug") or "").strip()
         if not event_slug:
             return jsonify({"error": "event_slug is required"}), 400
@@ -399,14 +488,52 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         resolution = (request.args.get("resolution") or "auto").strip().lower()
         cache_key = _cache_key("event-price-tile", version=4)
         live_request = _parse_bool_arg("live")
+        request_args = _event_tile_args(
+            event_slug=event_slug,
+            price_source=price_source,
+            limit=limit,
+            max_outcomes=max_outcomes,
+            top_n=top_n,
+            max_points=max_points,
+            tile_range=tile_range,
+            resolution=resolution,
+            point_format=point_format,
+        )
+        lookup_started = time.perf_counter()
+        persisted, cache_layer = (None, "live") if live_request else _load_seeded_tile(cache_key)
+        lookup_ms = int((time.perf_counter() - lookup_started) * 1000)
+        if persisted is not None:
+            payload = dict(persisted)
+            payload["cacheHit"] = True
+            payload["cacheLayer"] = cache_layer
+            payload.setdefault("status", "ok")
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            route_logger.info(
+                "quant-event-tile request_id=%s status=hit cache_layer=%s event_slug=%s source=%s range=%s resolution=%s top_n=%s max_outcomes=%s max_points=%s lookup_ms=%s total_ms=%s bytes=%s",
+                request_id,
+                cache_layer,
+                event_slug,
+                price_source,
+                tile_range,
+                resolution,
+                top_n,
+                max_outcomes,
+                max_points,
+                lookup_ms,
+                elapsed_ms,
+                len(json.dumps(payload, ensure_ascii=True, default=str)),
+            )
+            return _json_response(payload, headers={
+                "X-Quant-Cache": cache_layer,
+                "X-Quant-Request-Id": request_id,
+                "X-Quant-Elapsed-Ms": str(elapsed_ms),
+            })
 
-        def build_payload() -> dict[str, Any]:
-            if not live_request:
-                persisted = _load_persistent_tile(cache_key)
-                if persisted is not None:
-                    return persisted
+        warm_enqueued = _enqueue_event_tile_warm(request_args)
+        head_started = time.perf_counter()
+        try:
             with postgres_connection(PostgresSettings(), readonly=True) as conn:
-                payload = get_event_price_tile(
+                payload = get_event_price_head(
                     conn,
                     event_slug=event_slug,
                     price_source=price_source,
@@ -414,16 +541,111 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                     to_ts=_parse_time_arg("to"),
                     from_block=_parse_int_arg("from_block"),
                     to_block=_parse_int_arg("to_block"),
-                    limit=limit,
                     max_outcomes=max_outcomes,
                     top_n=top_n,
-                    max_points=max_points,
-                    tile_range=tile_range,
-                    resolution=resolution,
                 )
-            return _camel_row(_apply_point_payload_format(payload, point_format))
+            payload = _camel_row(_apply_point_payload_format(payload, point_format))
+        except Exception as exc:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            route_logger.exception(
+                "quant-event-tile request_id=%s status=error event_slug=%s source=%s lookup_ms=%s total_ms=%s",
+                request_id,
+                event_slug,
+                price_source,
+                lookup_ms,
+                elapsed_ms,
+            )
+            return _json_response({
+                "status": "warming",
+                "cacheHit": False,
+                "cacheStatus": "warming",
+                "warming": True,
+                "eventSlug": event_slug,
+                "priceSource": price_source,
+                "message": "Price tile is warming. Retry shortly.",
+                "error": str(exc),
+                "retryAfterMs": 1500,
+                "requestId": request_id,
+            }, status_code=200, headers={
+                "X-Quant-Cache": "warming",
+                "X-Quant-Request-Id": request_id,
+                "X-Quant-Elapsed-Ms": str(elapsed_ms),
+            })
+        head_ms = int((time.perf_counter() - head_started) * 1000)
+        payload["status"] = "warming" if not (payload.get("outcomes") or []) else "partial"
+        payload["cacheHit"] = False
+        payload["cacheStatus"] = "warming"
+        payload["warming"] = True
+        payload["retryAfterMs"] = 1500
+        payload["requestId"] = request_id
+        payload["message"] = "Historical price tile is warming; latest outcome snapshot is returned."
+        payload.setdefault("tile", {})
+        if isinstance(payload["tile"], dict):
+            payload["tile"].update({
+                "cache_key": cache_key,
+                "status": "warming",
+                "warm_enqueued": warm_enqueued,
+                "range": tile_range,
+                "resolution": resolution,
+                "top_n": top_n,
+                "max_points": max_points,
+            })
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        route_logger.info(
+            "quant-event-tile request_id=%s status=warming event_slug=%s source=%s range=%s resolution=%s top_n=%s max_outcomes=%s max_points=%s lookup_ms=%s head_ms=%s total_ms=%s warm_enqueued=%s outcomes=%s bytes=%s",
+            request_id,
+            event_slug,
+            price_source,
+            tile_range,
+            resolution,
+            top_n,
+            max_outcomes,
+            max_points,
+            lookup_ms,
+            head_ms,
+            elapsed_ms,
+            warm_enqueued,
+            len(payload.get("outcomes") or []),
+            len(json.dumps(payload, ensure_ascii=True, default=str)),
+        )
+        return _json_response(payload, headers={
+            "X-Quant-Cache": "warming",
+            "X-Quant-Request-Id": request_id,
+            "X-Quant-Elapsed-Ms": str(elapsed_ms),
+            "Retry-After": "2",
+        })
 
-        return jsonify(_cached_quant_payload("quant-event-tile", cache_key, 2 if live_request else 45, build_payload, snapshot=not live_request))
+    @bp.route("/event-price-head", methods=["GET"])
+    def api_quant_event_price_head():
+        started = time.perf_counter()
+        request_id = uuid.uuid4().hex[:12]
+        event_slug = (request.args.get("event_slug") or request.args.get("market_slug") or "").strip()
+        if not event_slug:
+            return jsonify({"error": "event_slug is required"}), 400
+        max_outcomes = min(max(_parse_int_arg("max_outcomes", 100) or 100, 1), 200)
+        top_n = min(max(_parse_int_arg("top_n", 12) or 12, 1), max_outcomes)
+        price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
+        point_format = (request.args.get("point_format") or "lite").strip().lower()
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            payload = get_event_price_head(
+                conn,
+                event_slug=event_slug,
+                price_source=price_source,
+                from_ts=_parse_time_arg("from"),
+                to_ts=_parse_time_arg("to"),
+                from_block=_parse_int_arg("from_block"),
+                to_block=_parse_int_arg("to_block"),
+                max_outcomes=max_outcomes,
+                top_n=top_n,
+            )
+        payload = _camel_row(_apply_point_payload_format(payload, point_format))
+        payload["requestId"] = request_id
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        return _json_response(payload, headers={
+            "X-Quant-Cache": "head",
+            "X-Quant-Request-Id": request_id,
+            "X-Quant-Elapsed-Ms": str(elapsed_ms),
+        })
 
     @bp.route("/event-price-stream", methods=["GET"])
     def api_quant_event_price_stream():

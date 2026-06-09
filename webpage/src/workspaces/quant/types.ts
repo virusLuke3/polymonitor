@@ -3,7 +3,7 @@ import type { QuantBlockClosePoint, QuantFrontendPricePoint } from '@/types';
 export type TesterTab = 'overview' | 'parameters' | 'performance' | 'trades' | 'equity' | 'drawdown' | 'runs' | 'logs' | 'properties';
 export type PriceSource = 'frontend' | 'orderfilled' | 'orderbook' | 'conservative';
 export type BacktestEngine = 'builtin' | 'backtrader' | 'nautilus_trader';
-export type DataStatus = 'idle' | 'loading' | 'metadata_loading' | 'price_loading' | 'partial' | 'ready' | 'empty' | 'error';
+export type DataStatus = 'idle' | 'loading' | 'metadata_loading' | 'price_loading' | 'warming' | 'partial' | 'ready' | 'empty' | 'error';
 export type MetricStatus = 'positive' | 'negative' | 'neutral';
 export type TradeFilter = 'profitable' | 'losing' | 'yes' | 'no' | 'longHolding' | 'shortHolding';
 export type PerformanceSortKey = 'metric' | 'all' | 'long' | 'short' | 'description';

@@ -386,6 +386,14 @@ export type QuantMarketSeriesPayload = {
   members?: Array<Record<string, unknown>>;
   outcomes: QuantMarketSeriesOutcome[];
   count: number;
+  status?: string | null;
+  cacheHit?: boolean | null;
+  cacheStatus?: string | null;
+  warming?: boolean | null;
+  retryAfterMs?: number | string | null;
+  requestId?: string | null;
+  message?: string | null;
+  tile?: Record<string, unknown> | null;
 };
 
 export type QuantPriceMarket = {

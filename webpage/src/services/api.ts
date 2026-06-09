@@ -358,7 +358,22 @@ export function fetchQuantEventPriceSeries(query: QuantPriceQuery & { eventSlug?
   params.set('resolution', query.resolution || 'auto');
   params.set('point_format', query.pointFormat || 'lite');
   if (query.live) params.set('live', '1');
-  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-tile?${params.toString()}`, 45000);
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-tile?${params.toString()}`, 12000);
+}
+
+export function fetchQuantEventPriceHead(query: QuantPriceQuery & { eventSlug?: string; priceSource?: string; maxOutcomes?: number } = {}) {
+  const params = new URLSearchParams();
+  const eventSlug = query.eventSlug || query.marketSlug;
+  if (eventSlug?.trim()) params.set('event_slug', eventSlug.trim());
+  if (query.priceSource?.trim()) params.set('price_source', query.priceSource.trim());
+  if (query.from?.trim()) params.set('from', query.from.trim());
+  if (query.to?.trim()) params.set('to', query.to.trim());
+  if (query.fromBlock?.trim()) params.set('from_block', query.fromBlock.trim());
+  if (query.toBlock?.trim()) params.set('to_block', query.toBlock.trim());
+  params.set('max_outcomes', String(query.maxOutcomes || 100));
+  params.set('top_n', String(query.topN || 12));
+  params.set('point_format', query.pointFormat || 'lite');
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-head?${params.toString()}`, 8000);
 }
 
 export function quantEventPriceStreamUrl(query: QuantPriceQuery & { eventSlug?: string; priceSource?: string; maxOutcomes?: number; interval?: number } = {}) {

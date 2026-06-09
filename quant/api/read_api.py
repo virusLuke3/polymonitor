@@ -639,6 +639,98 @@ def _fetch_token_price_points_sampled(
     ]
 
 
+def _fetch_latest_points_for_tokens(
+    cur: Any,
+    *,
+    token_ids: list[str | None],
+    source: str,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    from_block: int | None = None,
+    to_block: int | None = None,
+) -> dict[str, dict[str, Any]]:
+    tokens = [str(token_id) for token_id in token_ids if token_id]
+    if not tokens:
+        return {}
+    params: list[Any] = [tokens]
+    if source == "frontend":
+        filters = ["token_id = ANY(%s)"]
+        if from_ts is not None:
+            filters.append("timestamp >= %s")
+            params.append(int(from_ts))
+        if to_ts is not None:
+            filters.append("timestamp <= %s")
+            params.append(int(to_ts))
+        cur.execute(
+            f"""
+            SELECT DISTINCT ON (token_id)
+                token_id, market_id, market_slug, token_side, ts_minute, timestamp, price
+            FROM quant.market_token_frontend_price_1m
+            WHERE {" AND ".join(filters)}
+            ORDER BY token_id, ts_minute DESC
+            """,
+            params,
+        )
+        return {
+            str(row["token_id"]): {
+                "x": row["timestamp"],
+                "timestamp": row["timestamp"],
+                "token_id": row["token_id"],
+                "token_side": row["token_side"],
+                "price": row["price"],
+                "volume": 0,
+                "is_implied": False,
+            }
+            for row in cur.fetchall()
+        }
+
+    filters = ["token_id = ANY(%s)"]
+    if from_block is not None:
+        filters.append("block_number >= %s")
+        params.append(int(from_block))
+    if to_block is not None:
+        filters.append("block_number <= %s")
+        params.append(int(to_block))
+    filters.append(
+        """
+        NOT (
+            COALESCE(anomaly_flags, '[]'::jsonb) ? 'extreme_price_trade_present'
+            AND COALESCE(trade_count, 0) <= 3
+            AND COALESCE(volume, 0) <= 250
+            AND (close_price >= 0.95 OR close_price <= 0.002)
+        )
+        """
+    )
+    cur.execute(
+        f"""
+        SELECT DISTINCT ON (token_id)
+            token_id, market_id, market_slug, token_side, block_number,
+            close_price, yes_probability_close, vwap_price, yes_probability_vwap,
+            volume, trade_count
+        FROM quant.market_token_block_close
+        WHERE {" AND ".join(filters)}
+        ORDER BY token_id, block_number DESC
+        """,
+        params,
+    )
+    return {
+        str(row["token_id"]): {
+            "x": row["block_number"],
+            "block_number": row["block_number"],
+            "token_id": row["token_id"],
+            "token_side": row["token_side"],
+            "price": row["close_price"],
+            "yes_probability_close": row["yes_probability_close"],
+            "vwap_price": row["vwap_price"],
+            "yes_probability_vwap": row["yes_probability_vwap"],
+            "volume": row["volume"],
+            "trade_count": row["trade_count"],
+            "is_implied": False,
+        }
+        for row in cur.fetchall()
+    }
+
+
 def _point_x(point: dict[str, Any]) -> int:
     value = point.get("x") or point.get("block_number") or point.get("timestamp") or 0
     try:
@@ -714,6 +806,114 @@ def _event_outcome_payload(
         "complement_last_x": no_points[-1]["x"] if no_points else None,
         "complement_latest_price": no_points[-1]["price"] if no_points else None,
         "complement_points": no_points,
+    }
+
+
+def get_event_price_head(
+    conn: Any,
+    *,
+    event_slug: str,
+    price_source: str,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    from_block: int | None = None,
+    to_block: int | None = None,
+    max_outcomes: int = 100,
+    top_n: int = 12,
+) -> dict[str, Any]:
+    """Return fast event metadata plus latest outcome prices only."""
+
+    source = "orderfilled_block_close" if price_source == "orderfilled_block_close" else "frontend"
+    top_n = max(1, min(int(top_n or 12), int(max_outcomes or 100)))
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM quant.market_event_metadata WHERE event_slug = %s", (event_slug,))
+        event = dict(cur.fetchone() or {})
+        if not event:
+            return {
+                "event": {
+                    "event_slug": event_slug,
+                    "event_title": event_slug,
+                    "source": source,
+                    "scope": "event_head",
+                    "x_axis": "block_number" if source == "orderfilled_block_close" else "timestamp",
+                },
+                "members": [],
+                "outcomes": [],
+                "count": 0,
+                "status": "missing",
+                "cache_status": "missing",
+            }
+
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.market_event_members
+            WHERE event_slug = %s
+            ORDER BY outcome_order ASC, outcome_label ASC, market_id ASC
+            LIMIT %s
+            """,
+            (event_slug, int(max_outcomes)),
+        )
+        members = [dict(row) for row in cur.fetchall()]
+        latest_by_token = _fetch_latest_points_for_tokens(
+            cur,
+            token_ids=[token_id for member in members for token_id in (member.get("token_yes_id"), member.get("token_no_id"))],
+            source=source,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            from_block=from_block,
+            to_block=to_block,
+        )
+
+    latest_items: list[dict[str, Any]] = []
+    for index, member in enumerate(members):
+        yes_latest = latest_by_token.get(str(member.get("token_yes_id") or ""))
+        no_latest = latest_by_token.get(str(member.get("token_no_id") or ""))
+        latest_items.append({
+            "index": index,
+            "member": member,
+            "yes_latest": [yes_latest] if yes_latest else [],
+            "no_latest": [no_latest] if no_latest else [],
+            "score": _point_price(yes_latest) if yes_latest else 0.0,
+            "latest_x": max(_point_x(yes_latest) if yes_latest else 0, _point_x(no_latest) if no_latest else 0),
+        })
+
+    ranked = sorted(latest_items, key=lambda row: (row["score"], row["latest_x"]), reverse=True)
+    keep_indexes = {row["index"] for row in ranked[:top_n]}
+    outcomes: list[dict[str, Any]] = []
+    for item in latest_items:
+        if item["index"] not in keep_indexes:
+            continue
+        member = item["member"]
+        label = _clean_label(member.get("outcome_label")) or _clean_label(member.get("question"))
+        no_label = _no_label_from_member(member.get("question"), label)
+        outcomes.append(_event_outcome_payload(
+            member=member,
+            event=event,
+            label=label,
+            no_label=no_label,
+            yes_points=item["yes_latest"],
+            no_points=item["no_latest"],
+        ))
+
+    return {
+        "event": {
+            **event,
+            "source": source,
+            "scope": "event_head",
+            "x_axis": "block_number" if source == "orderfilled_block_close" else "timestamp",
+        },
+        "members": members,
+        "outcomes": outcomes,
+        "count": len(outcomes),
+        "status": "partial" if outcomes else "empty",
+        "cache_status": "head",
+        "tile": {
+            "range": "head",
+            "resolution": "latest",
+            "top_n": top_n,
+            "max_points": 1,
+        },
     }
 
 

@@ -1022,7 +1022,7 @@ export function PriceChartPanel({
   };
 
   const hasLoadedPrices = allPoints.length > 0;
-  const isLoadingPrices = ['loading', 'metadata_loading', 'price_loading', 'partial'].includes(dataStatus) && !hasLoadedPrices;
+  const isLoadingPrices = ['loading', 'metadata_loading', 'price_loading', 'warming', 'partial'].includes(dataStatus) && !hasLoadedPrices;
   const rowsText = isLoadingPrices
     ? 'Loading...'
     : hasLoadedPrices
@@ -1038,6 +1038,8 @@ export function PriceChartPanel({
     ? 'Loading market metadata'
     : dataStatus === 'price_loading'
       ? eventMode ? 'Loading event price series' : 'Loading market price series'
+      : dataStatus === 'warming'
+        ? 'Building historical price tile'
       : dataStatus === 'partial'
         ? 'Partial coverage loaded'
         : dataStatus === 'error'
@@ -1271,7 +1273,7 @@ export function PriceChartPanel({
           </div>
         </div>
 
-        {(!hasLoadedPrices && (dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'partial' || dataStatus === 'loading')) ? (
+        {(!hasLoadedPrices && (dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'warming' || dataStatus === 'partial' || dataStatus === 'loading')) ? (
           <div className="qtv-chart-loading-ribbon">
             <b>{loadingMessage || loadingTitle}</b>
             <span>Outcomes {eventMode ? displayedOutcomeCount.toLocaleString('en-US') : '--'} · Source {priceSource}</span>

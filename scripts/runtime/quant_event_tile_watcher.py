@@ -48,6 +48,7 @@ NAMESPACE = "quant-event-tile"
 SEED_META_NAMESPACE = "seed-meta:quant"
 SEED_META_CACHE_KEY = "event-price-tile"
 SEED_META_SERVICE_NAME = "polydata-quant-event-tile-seed.service"
+WARM_REQUESTS_KEY = "quant-event-tile-warm:events"
 
 
 def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
@@ -115,8 +116,25 @@ class QuantEventTileWatcher:
             "point_format": self.point_format,
         }
 
+    def normalize_job_args(self, job: dict[str, Any]) -> dict[str, str]:
+        event_slug = str(job.get("event_slug") or "").strip()
+        return {
+            "event_slug": event_slug,
+            "price_source": str(job.get("price_source") or self.price_source).strip() or self.price_source,
+            "limit": str(max(250, int(job.get("limit") or self.limit))),
+            "max_outcomes": str(max(1, int(job.get("max_outcomes") or self.max_outcomes))),
+            "top_n": str(max(1, int(job.get("top_n") or self.top_n))),
+            "max_points": str(max(50, int(job.get("max_points") or self.max_points))),
+            "range": str(job.get("range") or self.tile_range).strip() or self.tile_range,
+            "resolution": str(job.get("resolution") or self.resolution).strip() or self.resolution,
+            "point_format": str(job.get("point_format") or self.point_format).strip().lower() or self.point_format,
+        }
+
     def cache_key(self, event_slug: str) -> str:
         return _cache_key("event-price-tile", self.query_args(event_slug), version=4)
+
+    def cache_key_for_args(self, args: dict[str, str]) -> str:
+        return _cache_key("event-price-tile", args, version=4)
 
     def redis_key(self, event_slug: str) -> str:
         return _redis_key(self.redis_prefix, NAMESPACE, self.cache_key(event_slug))
@@ -165,25 +183,35 @@ class QuantEventTileWatcher:
                 return [dict(row) for row in cur.fetchall()]
 
     def build_payload(self, event_slug: str) -> dict[str, Any]:
+        return self.build_payload_for_args(self.query_args(event_slug))
+
+    def build_payload_for_args(self, args: dict[str, str]) -> dict[str, Any]:
         with postgres_connection(PostgresSettings(), readonly=True) as conn:
             payload = get_event_price_tile(
                 conn,
-                event_slug=event_slug,
-                price_source=self.price_source,
-                limit=self.limit,
-                max_outcomes=self.max_outcomes,
-                top_n=self.top_n,
-                max_points=self.max_points,
-                tile_range=self.tile_range,
-                resolution=self.resolution,
+                event_slug=args["event_slug"],
+                price_source=args["price_source"],
+                limit=int(args["limit"]),
+                max_outcomes=int(args["max_outcomes"]),
+                top_n=int(args["top_n"]),
+                max_points=int(args["max_points"]),
+                tile_range=args["range"],
+                resolution=args["resolution"],
             )
-        payload = _camel_row(_apply_point_payload_format(payload, self.point_format))
+        payload = _camel_row(_apply_point_payload_format(payload, args["point_format"]))
         payload["cacheMode"] = "seeded"
         payload["seededAt"] = utc_now_iso()
+        payload["status"] = "ok"
+        payload["cacheHit"] = True
+        payload["cacheStatus"] = "hot"
         return payload
 
     def store_payload(self, event_slug: str, payload: dict[str, Any]) -> None:
-        cache_key = self.cache_key(event_slug)
+        self.store_payload_for_args(self.query_args(event_slug), payload)
+
+    def store_payload_for_args(self, args: dict[str, str], payload: dict[str, Any]) -> None:
+        event_slug = args["event_slug"]
+        cache_key = self.cache_key_for_args(args)
         serialized = json.dumps(payload, ensure_ascii=True, default=str)
         self.snapshot_store.set(NAMESPACE, cache_key, payload, self.ttl_seconds)
         self.redis_client.set(_redis_key(self.redis_prefix, NAMESPACE, cache_key), serialized, ex=self.ttl_seconds)
@@ -255,11 +283,11 @@ class QuantEventTileWatcher:
                         cache_key,
                         "event",
                         event_slug,
-                        self.price_source,
-                        self.tile_range,
-                        self.resolution,
-                        self.top_n,
-                        self.max_points,
+                        args["price_source"],
+                        args["range"],
+                        args["resolution"],
+                        int(args["top_n"]),
+                        int(args["max_points"]),
                         serialized,
                         len(serialized),
                         len(points),
@@ -268,6 +296,34 @@ class QuantEventTileWatcher:
                         self.ttl_seconds,
                     ),
                 )
+
+    def claim_warm_jobs(self) -> list[dict[str, str]]:
+        key = f"{self.redis_prefix}{WARM_REQUESTS_KEY}"
+        try:
+            raw_jobs = list(self.redis_client.smembers(key) or [])
+        except Exception as exc:
+            print(f"[quant-event-tile] warm job read failed: {exc}", file=sys.stderr)
+            return []
+        jobs: list[dict[str, str]] = []
+        for raw in raw_jobs[: max(1, self.max_events)]:
+            try:
+                parsed = json.loads(raw)
+                if not isinstance(parsed, dict):
+                    continue
+                args = self.normalize_job_args(parsed)
+                if args["event_slug"]:
+                    jobs.append(args)
+            except Exception:
+                continue
+            finally:
+                try:
+                    self.redis_client.srem(key, raw)
+                except Exception:
+                    pass
+        deduped: dict[str, dict[str, str]] = {}
+        for args in jobs:
+            deduped[self.cache_key_for_args(args)] = args
+        return list(deduped.values())
 
     def store_seed_meta(self, *, status: str, record_count: int, error_summary: str | None, metadata: dict[str, Any]) -> None:
         attempted_at = utc_now_iso()
@@ -295,13 +351,27 @@ class QuantEventTileWatcher:
 
     def run_once(self) -> dict[str, Any]:
         started_at = time.perf_counter()
+        warm_jobs = self.claim_warm_jobs()
         events = self.discover_events()
         seeded = 0
+        warmed = 0
         errors: list[str] = []
         total_bytes = 0
+        for args in warm_jobs:
+            event_slug = args["event_slug"]
+            try:
+                payload = self.build_payload_for_args(args)
+                self.store_payload_for_args(args, payload)
+                warmed += 1
+                seeded += 1
+                total_bytes += len(json.dumps(payload, ensure_ascii=True, default=str))
+            except Exception as exc:
+                errors.append(f"{event_slug}: {exc}")
         for event in events:
             event_slug = str(event.get("event_slug") or "").strip()
             if not event_slug:
+                continue
+            if any(job["event_slug"] == event_slug for job in warm_jobs):
                 continue
             try:
                 payload = self.build_payload(event_slug)
@@ -318,6 +388,8 @@ class QuantEventTileWatcher:
             error_summary="; ".join(errors[:5]) if errors else None,
             metadata={
                 "candidateEvents": len(events),
+                "warmJobs": len(warm_jobs),
+                "warmedEvents": warmed,
                 "seededEvents": seeded,
                 "errors": len(errors),
                 "durationMs": duration_ms,
@@ -330,6 +402,8 @@ class QuantEventTileWatcher:
         return {
             "status": status,
             "candidateEvents": len(events),
+            "warmJobs": len(warm_jobs),
+            "warmedEvents": warmed,
             "seededEvents": seeded,
             "errors": len(errors),
             "durationMs": duration_ms,

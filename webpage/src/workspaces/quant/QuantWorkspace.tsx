@@ -6,6 +6,7 @@ import {
   fetchQuantBacktestRun,
   fetchQuantBacktestTrades,
   fetchQuantBuildStatus,
+  fetchQuantEventPriceHead,
   fetchQuantEventPriceSeries,
   fetchQuantMarketPriceSeries,
   fetchQuantPriceEvents,
@@ -68,6 +69,16 @@ function sleep(ms: number) {
 
 function chartRangeFromTimeframe(timeframe: string) {
   return timeframe === '25000' ? 'full' : 'latest';
+}
+
+function isSeriesWarming(payload: QuantMarketSeriesPayload | null | undefined) {
+  const status = String(payload?.status || payload?.cacheStatus || '').toLowerCase();
+  return Boolean(payload?.warming) || ['warming', 'partial'].includes(status);
+}
+
+function retryDelayFromSeries(payload: QuantMarketSeriesPayload | null | undefined) {
+  const value = Number(payload?.retryAfterMs);
+  return Number.isFinite(value) && value > 0 ? Math.max(750, Math.min(8000, value)) : 1800;
 }
 
 async function waitForRun(runId: number, onStatus: (run: QuantBacktestRun) => void) {
@@ -454,6 +465,7 @@ export function QuantWorkspace() {
   const priceSeriesCacheRef = useRef(new Map<string, QuantMarketSeriesPayload>());
   const pricePrefetchingRef = useRef(new Set<string>());
   const liveRefreshInFlightRef = useRef(false);
+  const priceRetryTimerRef = useRef<number | null>(null);
 
   const activePrices = useMemo(() => {
     const semanticPrices = marketSeriesToPrices(marketSeries);
@@ -565,13 +577,24 @@ export function QuantWorkspace() {
         marketSeries,
       };
     }
-    const nextMarketSeries = seriesResult.status === 'fulfilled' ? seriesResult.value : marketSeries;
+    const fulfilledSeries = seriesResult.status === 'fulfilled' ? seriesResult.value : null;
+    const warmingSeries = isSeriesWarming(fulfilledSeries);
+    const nextMarketSeries = fulfilledSeries && !(silent && warmingSeries && marketSeries) ? fulfilledSeries : marketSeries;
     const nextFrontendRows = priceSource === 'frontend' ? frontendRows : [];
     const nextBlockRows = priceSource === 'orderfilled' ? blockRows : [];
     if (seriesResult.status === 'fulfilled') {
-      if (nextMarketSeries) priceSeriesCacheRef.current.set(cacheKey, nextMarketSeries);
+      if (fulfilledSeries && (!warmingSeries || !marketSeries)) priceSeriesCacheRef.current.set(cacheKey, fulfilledSeries);
+      if (nextMarketSeries && nextMarketSeries !== marketSeries) priceSeriesCacheRef.current.set(cacheKey, nextMarketSeries);
       setMarketSeries(nextMarketSeries);
       setLastPriceRefreshAt(new Date().toLocaleTimeString());
+      if (warmingSeries && !silent && selectedEntityKind === 'event') {
+        if (priceRetryTimerRef.current) window.clearTimeout(priceRetryTimerRef.current);
+        const retryMs = retryDelayFromSeries(fulfilledSeries);
+        priceRetryTimerRef.current = window.setTimeout(() => {
+          if (requestSeq !== priceLoadSeq.current) return;
+          setMarketReloadKey((current) => current + 1);
+        }, retryMs);
+      }
     }
     if (priceSource !== 'frontend') setFrontendRows([]);
     if (priceSource !== 'orderfilled') setBlockRows([]);
@@ -579,8 +602,10 @@ export function QuantWorkspace() {
     const activeRowCount = marketSeriesToPrices(nextMarketSeries).length || (priceSource === 'orderfilled' ? nextBlockRows.length : nextFrontendRows.length);
     if (hasMarketSlug) {
       if (!silent) {
-        setDataStatus(activeRowCount ? 'ready' : 'empty');
-        setLoadingMessage(activeRowCount ? '' : 'No price rows found for this source/window');
+        setDataStatus(warmingSeries ? 'warming' : activeRowCount ? 'ready' : 'empty');
+        setLoadingMessage(warmingSeries
+          ? (fulfilledSeries?.message || 'Historical price tile is warming; showing latest outcome snapshot.')
+          : activeRowCount ? '' : 'No price rows found for this source/window');
       } else if (activeRowCount) {
         setDataStatus('ready');
       }
@@ -689,6 +714,10 @@ export function QuantWorkspace() {
 
   const selectMarketSlug = (slug: string) => {
     const nextSlug = slug.trim();
+    if (priceRetryTimerRef.current) {
+      window.clearTimeout(priceRetryTimerRef.current);
+      priceRetryTimerRef.current = null;
+    }
     const nextMarket = quantMarkets.find((market) => market.marketSlug === nextSlug && market.itemKind === 'event')
       || quantMarkets.find((market) => market.marketSlug === nextSlug && market.tokenSide === 'YES')
       || quantMarkets.find((market) => market.marketSlug === nextSlug)
@@ -735,7 +764,7 @@ export function QuantWorkspace() {
       topN: nextKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
       maxPoints: nextKind === 'event' ? EVENT_TILE_MAX_POINTS : undefined,
     };
-    void (nextKind === 'event' ? fetchQuantEventPriceSeries({ ...request, eventSlug: nextSlug }) : fetchQuantMarketPriceSeries(request))
+    void (nextKind === 'event' ? fetchQuantEventPriceHead({ ...request, eventSlug: nextSlug }) : fetchQuantMarketPriceSeries(request))
       .then((payload) => {
         priceSeriesCacheRef.current.set(cacheKey, payload);
         if (import.meta.env.DEV) console.debug('[quant] prefetched price series', { cacheKey });
@@ -838,6 +867,12 @@ export function QuantWorkspace() {
     }, 60);
     return () => window.clearTimeout(timer);
   }, [marketReloadKey, marketSlug, priceSource, timeframe, selectedOutcomeTokenId, selectedBacktestAction, selectedEntityKind]);
+
+  useEffect(() => {
+    return () => {
+      if (priceRetryTimerRef.current) window.clearTimeout(priceRetryTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!livePriceRefreshEnabled) return undefined;
