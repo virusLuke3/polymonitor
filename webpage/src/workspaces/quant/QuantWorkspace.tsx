@@ -51,6 +51,10 @@ function backendPriceSource(priceSource: PriceSource) {
   return priceSource === 'orderfilled' ? 'orderfilled_block_close' : 'frontend';
 }
 
+function uiPriceSource(value: string | null | undefined): PriceSource {
+  return String(value || '').toLowerCase().includes('frontend') ? 'frontend' : 'orderfilled';
+}
+
 const DEFAULT_QUANT_EVENT_SLUG = '2026-fifa-world-cup-winner-595';
 const DEFAULT_QUANT_EVENT_TITLE = '2026 FIFA World Cup Winner';
 const EVENT_TILE_OUTCOME_LIMIT = 12;
@@ -224,6 +228,11 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.max(min, Math.min(max, numeric));
+}
+
+function strategyNumber(value: unknown, fallback: number) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
 }
 
 function normalizeStrategyParameters(value: Partial<StrategyParameters> | null | undefined): StrategyParameters {
@@ -892,6 +901,61 @@ export function QuantWorkspace() {
     } catch (runsError) {
       if (import.meta.env.DEV && !isAbortLikeError(runsError)) console.debug('[quant] backtest run history failed', runsError);
       setBacktestRunsStatus('error');
+    }
+  };
+
+  const loadBacktestRun = async (runId: number) => {
+    if (!runId) return;
+    setLoading(true);
+    setError('');
+    setBacktestStatus(`loading #${runId}`);
+    try {
+      const runResponse = await fetchQuantBacktestRun(runId);
+      const run = runResponse.item;
+      const [metricsResult, equityResult, tradesResult] = await Promise.all([
+        fetchQuantBacktestMetrics(run.runId),
+        fetchQuantBacktestEquity(run.runId),
+        fetchQuantBacktestTrades(run.runId),
+      ]);
+      const runPriceSource = uiPriceSource(run.priceSource);
+      const result = backtestApiToResult(run, metricsResult.items || [], equityResult.items || [], tradesResult.items || [], runPriceSource);
+      setBacktestResult(result);
+      setSelectedTradeId(result.trades[0]?.id ?? null);
+      setBacktestStatus(run.status || 'loaded');
+      setTesterTab('runs');
+      if (run.backtestEngine && ['builtin', 'backtrader', 'nautilus_trader'].includes(run.backtestEngine)) {
+        setBacktestEngine(run.backtestEngine as BacktestEngine);
+      }
+      setPriceSource(runPriceSource);
+      if (run.marketSlug) {
+        setMarketSlug(run.marketSlug);
+        setSelectedEntityKindHint('market');
+        setSelectedMarketMeta(null);
+        setMarketSearchQuery('');
+        setViewportMode('preset');
+        setViewportResetSeq((current) => current + 1);
+        setMarketReloadKey((current) => current + 1);
+      }
+      setSelectedBacktestAction(String(run.tokenSide || 'YES').toUpperCase() === 'NO' ? 'NO' : 'YES');
+      setStrategyParameters((current) => normalizeStrategyParameters({
+        ...current,
+        entryThreshold: strategyNumber(run.entryThreshold, current.entryThreshold),
+        exitThreshold: strategyNumber(run.exitThreshold, current.exitThreshold),
+        stopLoss: strategyNumber(run.stopLoss, current.stopLoss),
+        takeProfit: strategyNumber(run.takeProfit, current.takeProfit),
+        maxHoldingBars: strategyNumber(run.maxHoldingBars, current.maxHoldingBars),
+        initialCapital: strategyNumber(run.initialCapital, current.initialCapital),
+        positionSize: strategyNumber(run.positionSize, current.positionSize),
+        feeBps: strategyNumber(run.feeBps, current.feeBps),
+        slippageBps: strategyNumber(run.slippageBps, current.slippageBps),
+        liquidityCapPct: strategyNumber(run.liquidityCapPct, current.liquidityCapPct),
+      }));
+      void refreshBacktestRuns();
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : `Backtest run #${runId} unavailable`);
+      setBacktestStatus('failed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -2317,6 +2381,7 @@ export function QuantWorkspace() {
               batchStatus={batchBacktestStatus}
               recentBacktestRuns={recentBacktestRuns}
               backtestRunsStatus={backtestRunsStatus}
+              onRunLoad={(runId) => void loadBacktestRun(runId)}
             />
           ) : null}
         </section>

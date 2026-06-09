@@ -77,6 +77,7 @@ type StrategyTesterPanelProps = {
   batchStatus?: string;
   recentBacktestRuns?: QuantBacktestRun[];
   backtestRunsStatus?: string;
+  onRunLoad?: (runId: number) => void;
 };
 
 function loadSavedPresets(): SavedStrategyPreset[] {
@@ -166,6 +167,7 @@ export function StrategyTesterPanel({
   batchStatus = 'idle',
   recentBacktestRuns = [],
   backtestRunsStatus = 'idle',
+  onRunLoad,
 }: StrategyTesterPanelProps) {
   const [toolTab, setToolTab] = useState<ToolTab>('tester');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -656,6 +658,7 @@ export function StrategyTesterPanel({
                   <span>Engine</span>
                   <span>Rows</span>
                   <span>Created</span>
+                  <span>Action</span>
                 </div>
                 {recentRunsForDisplay.map((run) => (
                   <div key={`history-${run.runId}`} className={`${run.status} ${run.isCurrent ? 'current' : ''}`} title={run.error || run.marketSlug}>
@@ -665,6 +668,9 @@ export function StrategyTesterPanel({
                     <span>{run.backtestEngine || '-'}</span>
                     <span>{compactRows(run.rowsProcessed)}</span>
                     <span>{compactRunTime(run.createdAt)}</span>
+                    <span>
+                      <button type="button" onClick={() => onRunLoad?.(run.runId)}>{run.isCurrent ? 'Reload' : 'Load'}</button>
+                    </span>
                   </div>
                 ))}
               </div>
