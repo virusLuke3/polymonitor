@@ -22227,3 +22227,241 @@ a.wm-orderfilled-row {
     grid-template-areas: "markets detail book trades oracle" !important;
   }
 }
+
+.wm-focused-market-row .wm-block-close-chart {
+  position: relative !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(34, 43, 58, 0.92) !important;
+  border-radius: 4px !important;
+  background: #070a0f !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-svg {
+  display: block !important;
+  height: clamp(280px, 34vh, 360px) !important;
+  min-height: 270px !important;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.036) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.036) 1px, transparent 1px),
+    #0f0f0f !important;
+  background-size: 78px 42px !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-grid {
+  stroke: rgba(255, 255, 255, 0.088) !important;
+  stroke-dasharray: none !important;
+  stroke-width: 1 !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-grid.v {
+  stroke: rgba(148, 163, 184, 0.105) !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-axis-text {
+  fill: #7f8a9d !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+  font-weight: 850 !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-line.yes {
+  stroke: #00c8ff !important;
+  stroke-width: 2.2 !important;
+  filter: drop-shadow(0 0 7px rgba(0, 200, 255, 0.22)) !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-line.no {
+  stroke: #d83b65 !important;
+  stroke-width: 2 !important;
+  opacity: 0.88 !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-line.ma {
+  fill: none !important;
+  stroke: #f59e0b !important;
+  stroke-width: 1.35 !important;
+  opacity: 0.92 !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-timeline-line {
+  stroke: rgba(148, 163, 184, 0.2) !important;
+}
+
+.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-timeline-handle {
+  fill: rgba(59, 70, 83, 0.72) !important;
+  stroke: rgba(148, 163, 184, 0.22) !important;
+}
+
+.wm-focus-qtv-chart-info {
+  position: absolute !important;
+  z-index: 4 !important;
+  top: 10px !important;
+  right: 66px !important;
+  left: 12px !important;
+  display: grid !important;
+  max-height: 104px !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+
+.wm-focus-qtv-chart-meta {
+  min-width: 0 !important;
+}
+
+.wm-focus-qtv-chart-meta > strong {
+  display: block !important;
+  max-width: min(720px, 62vw) !important;
+  overflow: hidden !important;
+  color: #f8fafc !important;
+  font-family: var(--font-body) !important;
+  font-size: 13px !important;
+  font-weight: 850 !important;
+  letter-spacing: 0 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-focus-qtv-chart-meta > span {
+  display: block !important;
+  overflow: hidden !important;
+  color: #8f9bad !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-focus-qtv-indicator-legend {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 5px !important;
+  margin-top: 7px !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+  letter-spacing: 0 !important;
+}
+
+.wm-focus-qtv-indicator-legend span {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  min-width: 0 !important;
+  min-height: 20px !important;
+  border: 1px solid rgba(38, 50, 68, 0.88) !important;
+  border-radius: 3px !important;
+  background: rgba(9, 13, 20, 0.76) !important;
+  color: #8f9bad !important;
+  padding: 0 6px !important;
+  white-space: nowrap !important;
+}
+
+.wm-focus-qtv-indicator-legend b {
+  color: #dbeafe !important;
+  font-weight: 900 !important;
+}
+
+.wm-focus-qtv-indicator-legend i {
+  color: #f59e0b !important;
+  font-style: normal !important;
+  font-weight: 900 !important;
+}
+
+.wm-focus-qtv-indicator-legend em {
+  color: #60a5fa !important;
+  font-style: normal !important;
+  font-weight: 900 !important;
+}
+
+.wm-focus-qtv-outcome-legend {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  margin-top: 6px !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+}
+
+.wm-focus-qtv-outcome-legend span {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  min-height: 19px !important;
+  max-width: 220px !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(38, 50, 68, 0.86) !important;
+  border-radius: 3px !important;
+  background: rgba(9, 13, 20, 0.72) !important;
+  color: #a8b3c4 !important;
+  padding: 0 6px !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-focus-qtv-outcome-legend span.active {
+  border-color: rgba(56, 189, 248, 0.42) !important;
+  background: rgba(14, 54, 76, 0.72) !important;
+  color: #e0f2fe !important;
+}
+
+.wm-focus-qtv-outcome-legend i {
+  width: 8px !important;
+  height: 8px !important;
+  flex: 0 0 auto !important;
+  border-radius: 999px !important;
+  box-shadow: 0 0 8px currentColor !important;
+}
+
+.wm-focus-qtv-outcome-legend b {
+  color: #f8fafc !important;
+  font-weight: 900 !important;
+}
+
+.wm-focus-block-tick-axis {
+  position: absolute !important;
+  z-index: 5 !important;
+  right: 58px !important;
+  bottom: 3px !important;
+  left: 10px !important;
+  height: 31px !important;
+  color: #7f8a9d !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+  font-weight: 850 !important;
+  line-height: 1 !important;
+  pointer-events: none !important;
+  text-shadow: 0 1px 2px #05070b, 0 0 8px #05070b !important;
+}
+
+.wm-focus-block-tick-axis span {
+  position: absolute !important;
+  bottom: 0 !important;
+  display: grid !important;
+  justify-items: center !important;
+  gap: 3px !important;
+  transform: translateX(-50%) !important;
+  white-space: nowrap !important;
+}
+
+.wm-focus-block-tick-axis span.start {
+  justify-items: start !important;
+  transform: translateX(0) !important;
+}
+
+.wm-focus-block-tick-axis span.end {
+  justify-items: end !important;
+  transform: translateX(-100%) !important;
+}
+
+.wm-focus-block-tick-axis i {
+  width: 1px !important;
+  height: 7px !important;
+  background: rgba(148, 163, 184, 0.24) !important;
+}
+
+.wm-focus-block-tick-axis b {
+  color: #dbeafe !important;
+  font-weight: 900 !important;
+}

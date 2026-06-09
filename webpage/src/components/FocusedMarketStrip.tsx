@@ -233,6 +233,22 @@ function blockRangeLabel(points: Array<{ blockNumber?: number | string | null; x
   return `${compactBlockLabel(first)} - ${compactBlockLabel(last)}`;
 }
 
+function formatQuantVolume(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '--';
+  return value.toLocaleString('en-US', { maximumFractionDigits: value >= 1000 ? 0 : 2 });
+}
+
+function movingAverageBlockPoints(points: Array<{ blockNumber: number; price: number }>, windowSize: number) {
+  if (points.length < 4) return [];
+  const size = Math.max(3, Math.min(windowSize, points.length));
+  return points.map((point, index) => {
+    const start = Math.max(0, index - size + 1);
+    const slice = points.slice(start, index + 1);
+    const average = slice.reduce((total, item) => total + item.price, 0) / Math.max(slice.length, 1);
+    return { blockNumber: point.blockNumber, price: average };
+  });
+}
+
 function buildLinePath(
   points: number[],
   {
@@ -639,7 +655,12 @@ function blockCloseSeriesToChart(
     .map((point) => {
       const blockNumber = Number(point.blockNumber ?? point.x);
       const yesPrice = Number(point.price);
-      return { blockNumber, yesPrice };
+      return {
+        blockNumber,
+        yesPrice,
+        volume: point.volume ?? null,
+        tradeCount: point.tradeCount ?? null,
+      };
     })
     .filter((point) => Number.isFinite(point.blockNumber) && Number.isFinite(point.yesPrice));
   if (yesPoints.length < 2) return null;
@@ -664,11 +685,20 @@ function blockCloseSeriesToChart(
       x: point.blockNumber,
       yesPrice: point.yesPrice,
       noPrice: noByBlock.get(point.blockNumber) ?? Math.max(0, Math.min(1, 1 - point.yesPrice)),
+      volume: point.volume,
+      tradeCount: point.tradeCount,
     })),
   };
 }
 
-function renderDetailChart(chart: ChartPayload | null, activeRange?: string | null) {
+type DetailChartOptions = {
+  title?: string | null;
+  category?: string | null;
+  outcomeCount?: number | string | null;
+  selectedLabel?: string | null;
+};
+
+function renderDetailChart(chart: ChartPayload | null, activeRange?: string | null, options: DetailChartOptions = {}) {
   const points = chart?.points || [];
   if (!points.length) return emptyState('No market history loaded yet.');
   const { width, height, left, right, top, bottom } = FOCUS_CHART;
@@ -705,10 +735,44 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
       const projectY = (value: number) => top + (1 - (value - min) / span) * plotHeight;
       const blockTicks = chartBlockTicks(points, 5);
       const plotWidth = width - left - right;
+      const rowCount = yesBlock.length;
+      const volumeTotal = points.reduce((total, point) => {
+        const value = Number(point.volume);
+        return Number.isFinite(value) ? total + value : total;
+      }, 0);
+      const tradeCount = points.reduce((total, point) => {
+        const value = Number(point.tradeCount);
+        return Number.isFinite(value) ? total + value : total;
+      }, 0);
+      const overlayTitle = options.title || 'Selected market';
+      const overlayMeta = `${options.category || 'market'} · ${options.outcomeCount ? `${options.outcomeCount} outcomes` : 'outcome probability'} · orderfilled_block_close`;
+      const selectedLegend = `${options.selectedLabel || 'YES'} ${formatPercent(lastYes)}`;
+      const maWindow = Math.max(4, Math.min(28, Math.floor(yesBlock.length / 36) || 4));
+      const maPoints = movingAverageBlockPoints(yesBlock, maWindow);
+      const maPath = maPoints.length > 1
+        ? buildBlockLinePath(maPoints, { width, height, left, right, top, bottom, min, max, minBlock: domainMinBlock, maxBlock: domainMaxBlock })
+        : '';
 
       return (
         <div className="wm-focus-chart-shell wm-polymarket-prob-chart wm-block-close-chart">
-          <div className="wm-focus-chart-watermark" aria-hidden="true">Block Close</div>
+          <div className="wm-focus-qtv-chart-info">
+            <div className="wm-focus-qtv-chart-meta">
+              <strong>{overlayTitle}</strong>
+              <span>{overlayMeta}</span>
+              <div className="wm-focus-qtv-indicator-legend">
+                <span>Rows <b>{rowCount.toLocaleString('en-US')}</b></span>
+                <span>Range <i>{blockTicks[0]?.label || '--'}</i> <em>{blockTicks[blockTicks.length - 1]?.label || '--'}</em></span>
+                <span>Volume <b>{formatQuantVolume(volumeTotal)}</b></span>
+                {tradeCount > 0 ? <span>Trades <b>{tradeCount.toLocaleString('en-US', { maximumFractionDigits: 0 })}</b></span> : null}
+                <span>Selected <b>{selectedLegend}</b></span>
+              </div>
+              <div className="wm-focus-qtv-outcome-legend">
+                <span className="active"><i style={{ backgroundColor: '#38bdf8' }} />YES <b>{formatPercent(lastYes)}</b></span>
+                <span><i style={{ backgroundColor: '#f43f5e' }} />NO <b>{formatPercent(lastNo)}</b></span>
+                {maPath ? <span><i style={{ backgroundColor: '#f59e0b' }} />MA <b>{maWindow}</b></span> : null}
+              </div>
+            </div>
+          </div>
           <svg viewBox={`0 0 ${width} ${height}`} className="wm-focus-chart-svg" preserveAspectRatio="none">
             {ticks.map((tick) => {
               const y = projectY(tick);
@@ -723,17 +787,30 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
               const x = left + tick.ratio * plotWidth;
               return (
                 <g key={`${tick.block}-${tick.label}`}>
+                  <line x1={x} y1={top} x2={x} y2={height - bottom} className="wm-focus-chart-grid v" />
                   <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
-                  <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactBlockLabel(tick.block)}</text>
                 </g>
               );
             })}
             <line x1={left} y1={height - 25} x2={width - right} y2={height - 25} className="wm-focus-chart-timeline-line" />
+            {maPath ? <path d={maPath} className="wm-focus-chart-line ma" /> : null}
             <path d={yesPath} className="wm-focus-chart-line yes" />
             {noPath ? <path d={noPath} className="wm-focus-chart-line no" /> : null}
             <circle cx={width - right} cy={projectY(lastYes)} r="4.4" className="wm-focus-chart-endpoint selected" style={{ fill: '#4377ff' }} />
             {noPath ? <circle cx={width - right} cy={projectY(lastNo)} r="3.8" className="wm-focus-chart-endpoint no-dot" /> : null}
           </svg>
+          <div className="wm-focus-block-tick-axis" aria-hidden="true">
+            {blockTicks.map((tick, index) => (
+              <span
+                key={`axis-${tick.block}-${index}`}
+                className={index === 0 ? 'start' : index === blockTicks.length - 1 ? 'end' : ''}
+                style={{ left: `${Math.max(0, Math.min(100, tick.ratio * 100))}%` }}
+              >
+                <i />
+                <b>{tick.label}</b>
+              </span>
+            ))}
+          </div>
         </div>
       );
     }
@@ -1028,6 +1105,12 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const outcomeCount = detail?.outcomeCount ?? selectedGroup?.outcomeCount ?? detail?.outcomes?.length ?? marketStats?.outcomeCount ?? null;
   const marketTitle = detail?.title || selectedGroup?.title || focusedMarket?.title || 'No market selected.';
   const selectedOutcomeLabel = selectedOutcome?.label || focusedMarket?.title || 'Selected outcome';
+  const detailChartOptions: DetailChartOptions = {
+    title: marketTitle,
+    category: eventCategory,
+    outcomeCount,
+    selectedLabel: selectedOutcome?.label || 'YES',
+  };
   const wrapPanel = (panelId: string, className: string, panel: ComponentChildren) => (
     renderPanelSlot ? renderPanelSlot(panelId, className, panel) : panel
   );
@@ -1163,12 +1246,12 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                         preferEventChart
                             ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
                             : canRenderFocusedHistory
-                              ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange)
+                              ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions)
                             : hasEventHistory
                               ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
                               : emptyState(chartStatus === 'snapshot' ? 'Only a latest-price snapshot is available for this outcome.' : hasServingTradeActivity ? 'Price history is still loading for this market.' : 'No event price history is available for this market yet.')
                       )
-                    : (canRenderFocusedHistory ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange) : emptyState(chartStatus === 'snapshot' ? 'Only a latest-price snapshot is available for this market.' : hasServingTradeActivity ? 'Price history is still loading for this market.' : 'No local price history is available for this market.'))}
+                    : (canRenderFocusedHistory ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions) : emptyState(chartStatus === 'snapshot' ? 'Only a latest-price snapshot is available for this market.' : hasServingTradeActivity ? 'Price history is still loading for this market.' : 'No local price history is available for this market.'))}
                 </div>
                 {detail ? eventChartLegend(detail, eventChart, activeOutcomeKey, (outcome) => {
                   ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);

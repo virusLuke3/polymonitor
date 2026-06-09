@@ -255,6 +255,8 @@ export type ChartPoint = {
   yesPrice?: string | number | null;
   noPrice?: string | number | null;
   value?: string | number | null;
+  volume?: string | number | null;
+  tradeCount?: number | string | null;
 };
 
 export type ChartPayload = {
