@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   createQuantBacktestRun,
+  fetchMarketLobByToken,
   fetchQuantBacktestEquity,
   fetchQuantBacktestMetrics,
   fetchQuantBacktestRun,
@@ -15,7 +16,7 @@ import {
   quantEventPriceStreamUrl,
   type QuantPriceQuery,
 } from '@/services/api';
-import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
+import type { LobPayload, LobSide, QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
@@ -138,6 +139,16 @@ function signalsFromTrades(result: BacktestResult): Signal[] {
 function toNumber(value: unknown) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function formatBookValue(value: unknown, digits = 3) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  return numeric.toLocaleString('en-US', { maximumFractionDigits: digits });
+}
+
+function bookSideHasLevels(side: LobSide | null | undefined) {
+  return Boolean(side?.bids?.length || side?.asks?.length);
 }
 
 function persistedBoolean(key: string, fallback: boolean) {
@@ -479,6 +490,10 @@ export function QuantWorkspace() {
   const [marketSeries, setMarketSeries] = useState<QuantMarketSeriesPayload | null>(null);
   const [selectedOutcomeTokenId, setSelectedOutcomeTokenId] = useState('');
   const [selectedBacktestAction, setSelectedBacktestAction] = useState<BacktestAction>('YES');
+  const [liveLob, setLiveLob] = useState<LobPayload | null>(null);
+  const [liveLobStatus, setLiveLobStatus] = useState<DataStatus>('idle');
+  const [liveLobError, setLiveLobError] = useState('');
+  const [liveLobRefreshSeq, setLiveLobRefreshSeq] = useState(0);
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
   const [quantMarkets, setQuantMarkets] = useState<QuantPriceMarket[]>([]);
   const [marketSearchStatus, setMarketSearchStatus] = useState<DataStatus>('idle');
@@ -1094,6 +1109,40 @@ export function QuantWorkspace() {
       status: !yes.rows && !no.rows ? 'empty' : yes.gaps + no.gaps || yes.spikes + no.spikes ? 'review' : 'ready',
     };
   }, [selectedOutcome]);
+  const selectedBookYesTokenId = selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId || '';
+  const selectedBookNoTokenId = selectedOutcome?.buyNoTokenId || '';
+  const selectedBookTitle = selectedOutcomeRow?.fullLabel || selectedOutcome?.outcomeLabel || marketInfo.title || '';
+  const liveBookSide = selectedBacktestAction === 'NO' ? liveLob?.no : liveLob?.yes;
+  const liveBookHasLevels = bookSideHasLevels(liveLob?.yes) || bookSideHasLevels(liveLob?.no);
+
+  useEffect(() => {
+    if (inspectorTab !== 'book') return undefined;
+    if (!selectedBookYesTokenId) {
+      setLiveLob(null);
+      setLiveLobStatus('empty');
+      setLiveLobError('Missing selected YES token id');
+      return undefined;
+    }
+    let cancelled = false;
+    setLiveLobStatus('loading');
+    setLiveLobError('');
+    void fetchMarketLobByToken(selectedBookYesTokenId, selectedBookTitle, selectedBookNoTokenId, 3500)
+      .then((payload) => {
+        if (cancelled) return;
+        setLiveLob(payload);
+        setLiveLobStatus(bookSideHasLevels(payload.yes) || bookSideHasLevels(payload.no) ? 'ready' : 'empty');
+      })
+      .catch((lobError) => {
+        if (cancelled) return;
+        setLiveLob(null);
+        setLiveLobStatus('error');
+        setLiveLobError(lobError instanceof Error ? lobError.message : 'Live CLOB book unavailable');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inspectorTab, liveLobRefreshSeq, selectedBookNoTokenId, selectedBookTitle, selectedBookYesTokenId]);
+
   const watchlistRows = useMemo(() => {
     const savedRows = watchlistKeys
       .map((key) => sortedOutcomeRows.find(({ outcome }) => outcome.tokenId === key || outcome.buyYesTokenId === key || outcome.buyNoTokenId === key))
@@ -1461,8 +1510,48 @@ export function QuantWorkspace() {
                     <div className="qtv-book-actions">
                       <button className={selectedBacktestAction === 'YES' ? 'active' : ''} type="button" onClick={() => setSelectedBacktestAction('YES')}>Target YES</button>
                       <button className={selectedBacktestAction === 'NO' ? 'active no' : 'no'} type="button" disabled={!selectedOutcome?.buyNoTokenId} onClick={() => setSelectedBacktestAction('NO')}>Target NO</button>
+                      <button type="button" onClick={() => setLiveLobRefreshSeq((current) => current + 1)}>{liveLobStatus === 'loading' ? 'Loading book' : 'Refresh CLOB'}</button>
                       <button type="button" onClick={() => setInspectorTab('dataQuality')}>Data quality</button>
                     </div>
+                    <section className={`qtv-live-book ${liveLobStatus}`}>
+                      <header>
+                        <div>
+                          <strong>Live CLOB Depth</strong>
+                          <span>{liveLobStatus === 'ready' ? `${liveLob?.source || 'clob-book'} · ${liveLob?.bookStatus || 'ok'}` : liveLobStatus === 'loading' ? 'loading live /book...' : liveLobStatus === 'error' ? liveLobError || 'CLOB unavailable' : 'no live levels returned'}</span>
+                        </div>
+                        <em>{liveLob?.fetchedAt ? new Date(liveLob.fetchedAt).toLocaleTimeString() : '--'}</em>
+                      </header>
+                      <div className="qtv-live-book-summary">
+                        <span>Target</span><b>{selectedBacktestAction}</b>
+                        <span>Bid</span><b>{formatBookValue(liveBookSide?.bestBid)}</b>
+                        <span>Ask</span><b>{formatBookValue(liveBookSide?.bestAsk)}</b>
+                        <span>Spread</span><b>{formatBookValue(liveBookSide?.spread)}</b>
+                      </div>
+                      <div className="qtv-live-book-depth">
+                        {(['yes', 'no'] as const).map((sideName) => {
+                          const side = liveLob?.[sideName];
+                          return (
+                            <section key={sideName}>
+                              <h4>{sideName.toUpperCase()} Book</h4>
+                              <div className="qtv-book-depth-head"><span>Bid</span><span>Size</span><span>Ask</span><span>Size</span></div>
+                              {Array.from({ length: 6 }).map((_, index) => {
+                                const bid = side?.bids?.[index];
+                                const ask = side?.asks?.[index];
+                                return (
+                                  <div key={`${sideName}-${index}`} className="qtv-book-depth-row">
+                                    <b>{formatBookValue(bid?.price)}</b>
+                                    <span>{formatBookValue(bid?.size, 0)}</span>
+                                    <b>{formatBookValue(ask?.price)}</b>
+                                    <span>{formatBookValue(ask?.size, 0)}</span>
+                                  </div>
+                                );
+                              })}
+                            </section>
+                          );
+                        })}
+                      </div>
+                      {!liveBookHasLevels ? <p>{liveLobStatus === 'loading' ? 'Fetching Polymarket CLOB /book through the API server.' : 'Live CLOB depth is empty for this token pair right now.'}</p> : null}
+                    </section>
                     <dl className="qtv-book-metadata">
                       <div><dt>YES token</dt><dd>{selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId || '--'}</dd></div>
                       <div><dt>NO token</dt><dd>{selectedOutcome?.buyNoTokenId || '--'}</dd></div>
@@ -1477,7 +1566,7 @@ export function QuantWorkspace() {
                     </dl>
                     <div className={`qtv-book-status ${selectedBookQuality.status}`}>
                       <strong>{selectedBookQuality.status === 'ready' ? 'Block-close book proxy ready' : selectedBookQuality.status === 'review' ? 'Review gaps or jumps' : 'No selected outcome rows'}</strong>
-                      <span>Live CLOB depth is not connected to this Quant route yet; this panel shows real block-close execution prices and source quality for the selected YES/NO tokens.</span>
+                      <span>Backtest execution still uses block-close rows. Live CLOB depth above is the current order book context for the selected YES/NO tokens.</span>
                     </div>
                   </div>
                 ) : null}

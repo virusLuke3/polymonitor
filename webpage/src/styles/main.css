@@ -1195,6 +1195,147 @@
   text-align: right;
 }
 
+.qtv-live-book {
+  display: grid;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid #1f2a3d;
+  border-radius: 5px;
+  background: #070b12;
+}
+
+.qtv-live-book.ready {
+  border-color: rgba(34, 197, 94, 0.34);
+}
+
+.qtv-live-book.error {
+  border-color: rgba(244, 63, 94, 0.36);
+}
+
+.qtv-live-book.loading {
+  border-color: rgba(96, 165, 250, 0.35);
+}
+
+.qtv-live-book header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid #141e2d;
+  padding: 10px;
+}
+
+.qtv-live-book header div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.qtv-live-book header strong {
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.qtv-live-book header span,
+.qtv-live-book header em {
+  overflow: hidden;
+  color: #8ea0b8;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-live-book-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0 8px;
+  background: #1d2a3d;
+}
+
+.qtv-live-book-summary span,
+.qtv-live-book-summary b {
+  overflow: hidden;
+  background: #0b111c;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 7px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-live-book-summary span {
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.qtv-live-book-summary b {
+  color: #f8fafc;
+  text-align: right;
+}
+
+.qtv-live-book-depth {
+  display: grid;
+  gap: 8px;
+  padding: 0 8px 8px;
+}
+
+.qtv-live-book-depth section {
+  overflow: hidden;
+  border: 1px solid #182235;
+  border-radius: 4px;
+  background: #060a10;
+}
+
+.qtv-live-book-depth h4 {
+  margin: 0;
+  border-bottom: 1px solid #182235;
+  color: #cbd5e1;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 7px 8px;
+}
+
+.qtv-book-depth-head,
+.qtv-book-depth-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+}
+
+.qtv-book-depth-head span,
+.qtv-book-depth-row span,
+.qtv-book-depth-row b {
+  overflow: hidden;
+  border-bottom: 1px solid rgba(20, 30, 45, 0.72);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 24px;
+  padding: 0 6px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-book-depth-head span {
+  color: #64748b;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-book-depth-row b {
+  color: #f8fafc;
+  font-weight: 900;
+}
+
+.qtv-book-depth-row span {
+  color: #8ea0b8;
+}
+
 .qtv-book-status {
   display: grid;
   gap: 5px;
