@@ -1072,6 +1072,28 @@ export function QuantWorkspace() {
     () => sortedOutcomeRows.find(({ outcome }) => outcome.tokenId === selectedOutcome?.tokenId) || sortedOutcomeRows[0] || null,
     [selectedOutcome, sortedOutcomeRows],
   );
+  const selectedBookQuality = useMemo(() => {
+    const yesPoints = selectedOutcome?.points || [];
+    const noPoints = selectedOutcome?.complementPoints || [];
+    const yes = outcomePointStats(yesPoints);
+    const no = outcomePointStats(noPoints);
+    const directNoRows = noPoints.filter((point) => !point.isImplied).length;
+    const impliedNoRows = noPoints.filter((point) => point.isImplied).length;
+    const lastBlock = Math.max(yes.lastBlock, no.lastBlock);
+    const firstBlocks = [yes.firstBlock, no.firstBlock].filter((value) => value > 0);
+    return {
+      yes,
+      no,
+      firstBlock: firstBlocks.length ? Math.min(...firstBlocks) : 0,
+      lastBlock,
+      directNoRows,
+      impliedNoRows,
+      totalRows: yes.rows + no.rows,
+      gaps: yes.gaps + no.gaps,
+      spikes: yes.spikes + no.spikes,
+      status: !yes.rows && !no.rows ? 'empty' : yes.gaps + no.gaps || yes.spikes + no.spikes ? 'review' : 'ready',
+    };
+  }, [selectedOutcome]);
   const watchlistRows = useMemo(() => {
     const savedRows = watchlistKeys
       .map((key) => sortedOutcomeRows.find(({ outcome }) => outcome.tokenId === key || outcome.buyYesTokenId === key || outcome.buyNoTokenId === key))
@@ -1436,8 +1458,27 @@ export function QuantWorkspace() {
                       <span>Rows</span><b>{(selectedOutcomeRow?.rows || 0).toLocaleString('en-US')}</b>
                       <span>Volume</span><b>{(selectedOutcomeRow?.volume || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</b>
                     </div>
-                    <p>Order book depth is shown when a live CLOB source is connected. Current panel uses the real block-close outcome prices.</p>
-                    <button type="button" onClick={() => setInspectorTab('dataQuality')}>Inspect data quality</button>
+                    <div className="qtv-book-actions">
+                      <button className={selectedBacktestAction === 'YES' ? 'active' : ''} type="button" onClick={() => setSelectedBacktestAction('YES')}>Target YES</button>
+                      <button className={selectedBacktestAction === 'NO' ? 'active no' : 'no'} type="button" disabled={!selectedOutcome?.buyNoTokenId} onClick={() => setSelectedBacktestAction('NO')}>Target NO</button>
+                      <button type="button" onClick={() => setInspectorTab('dataQuality')}>Data quality</button>
+                    </div>
+                    <dl className="qtv-book-metadata">
+                      <div><dt>YES token</dt><dd>{selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId || '--'}</dd></div>
+                      <div><dt>NO token</dt><dd>{selectedOutcome?.buyNoTokenId || '--'}</dd></div>
+                      <div><dt>Condition</dt><dd>{selectedOutcome?.conditionId || '--'}</dd></div>
+                      <div><dt>Block range</dt><dd>{selectedBookQuality.firstBlock ? Math.floor(selectedBookQuality.firstBlock).toLocaleString('en-US') : '--'} → {selectedBookQuality.lastBlock ? Math.floor(selectedBookQuality.lastBlock).toLocaleString('en-US') : '--'}</dd></div>
+                      <div><dt>YES rows</dt><dd>{selectedBookQuality.yes.rows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>NO rows</dt><dd>{selectedBookQuality.no.rows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Direct NO</dt><dd>{selectedBookQuality.directNoRows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Implied NO</dt><dd>{selectedBookQuality.impliedNoRows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Gaps</dt><dd>{selectedBookQuality.gaps.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Jumps</dt><dd>{selectedBookQuality.spikes.toLocaleString('en-US')}</dd></div>
+                    </dl>
+                    <div className={`qtv-book-status ${selectedBookQuality.status}`}>
+                      <strong>{selectedBookQuality.status === 'ready' ? 'Block-close book proxy ready' : selectedBookQuality.status === 'review' ? 'Review gaps or jumps' : 'No selected outcome rows'}</strong>
+                      <span>Live CLOB depth is not connected to this Quant route yet; this panel shows real block-close execution prices and source quality for the selected YES/NO tokens.</span>
+                    </div>
                   </div>
                 ) : null}
 

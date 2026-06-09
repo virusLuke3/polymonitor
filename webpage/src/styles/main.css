@@ -1120,6 +1120,114 @@
   text-align: right;
 }
 
+.qtv-book-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.qtv-book-actions button {
+  height: 28px;
+  border: 1px solid #263244;
+  border-radius: 4px;
+  background: #101827;
+  color: #dbeafe;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+  padding: 0 10px;
+}
+
+.qtv-book-actions button.active {
+  border-color: rgba(47, 125, 244, 0.55);
+  background: rgba(47, 125, 244, 0.16);
+  color: #f8fafc;
+}
+
+.qtv-book-actions button.no.active {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(96, 165, 250, 0.14);
+}
+
+.qtv-book-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.qtv-book-metadata {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #202938;
+  border-radius: 4px;
+  background: #202938;
+}
+
+.qtv-book-metadata div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 8px;
+  background: #0b111c;
+  padding: 8px 9px;
+}
+
+.qtv-book-metadata dt,
+.qtv-book-metadata dd {
+  overflow: hidden;
+  margin: 0;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-book-metadata dt {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-book-metadata dd {
+  color: #dbeafe;
+  font-size: 10px;
+  font-weight: 850;
+  text-align: right;
+}
+
+.qtv-book-status {
+  display: grid;
+  gap: 5px;
+  border-left: 2px solid #334155;
+  background: rgba(15, 23, 42, 0.58);
+  padding: 10px;
+}
+
+.qtv-book-status.ready {
+  border-left-color: #22c55e;
+}
+
+.qtv-book-status.review {
+  border-left-color: #f59e0b;
+}
+
+.qtv-book-status.empty {
+  border-left-color: #64748b;
+}
+
+.qtv-book-status strong {
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.qtv-book-status span {
+  color: #8ea0b8;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
 .qtv-book-card p,
 .qtv-watchlist p,
 .qtv-inspector-trades p {
