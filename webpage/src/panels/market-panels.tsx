@@ -48,8 +48,8 @@ function marketTopic(market: MarketListItem) {
   const category = String(market.category || '').trim().toLowerCase();
   const title = `${market.title || ''} ${market.slug || ''}`.toLowerCase();
   if (category === 'crypto' || tags.includes('crypto') || tags.includes('crypto-prices')) return 'crypto';
-  if (/esports|counter-strike|league of legends|lol:|dota|valorant|rainbow six/.test(title) || tags.some((tag) => ['esports', 'gaming', 'games'].includes(tag))) return 'games';
-  if (category === 'sports' || tags.includes('sports') || tags.includes('soccer') || tags.includes('games')) return 'sports';
+  if (category === 'sports' || /tennis|wta|atp|itf|soccer|nba|nfl|mlb|nhl|fifa|ufc/.test(title) || tags.includes('sports') || tags.includes('soccer')) return 'sports';
+  if (/esports|counter-strike|league of legends|lol:|dota|valorant|rainbow six/.test(title) || tags.some((tag) => ['esports', 'gaming'].includes(tag))) return 'games';
   if (category.includes('politic') || tags.some((tag) => tag.includes('election') || tag.includes('politic'))) return 'politics';
   if (category.includes('economic') || category.includes('finance') || tags.some((tag) => ['fed', 'macro', 'economy', 'finance'].includes(tag))) return 'macro';
   if (category.includes('tech') || tags.some((tag) => ['ai', 'tech'].includes(tag))) return 'tech';
@@ -64,8 +64,8 @@ function groupTopic(group: MarketGroupItem) {
   const category = String(group.category || '').trim().toLowerCase();
   const title = `${group.title || ''} ${group.slug || ''}`.toLowerCase();
   if (category === 'crypto' || tags.includes('crypto') || tags.includes('crypto-prices')) return 'crypto';
-  if (/esports|counter-strike|league of legends|lol:|dota|valorant|rainbow six/.test(title) || tags.some((tag) => ['esports', 'gaming', 'games'].includes(tag))) return 'games';
-  if (category === 'sports' || tags.includes('sports') || tags.includes('soccer') || tags.includes('games')) return 'sports';
+  if (category === 'sports' || /tennis|wta|atp|itf|soccer|nba|nfl|mlb|nhl|fifa|ufc/.test(title) || tags.includes('sports') || tags.includes('soccer')) return 'sports';
+  if (/esports|counter-strike|league of legends|lol:|dota|valorant|rainbow six/.test(title) || tags.some((tag) => ['esports', 'gaming'].includes(tag))) return 'games';
   if (category.includes('politic') || tags.some((tag) => tag.includes('election') || tag.includes('politic'))) return 'politics';
   if (category.includes('economic') || category.includes('finance') || tags.some((tag) => ['fed', 'macro', 'economy', 'finance'].includes(tag))) return 'macro';
   if (category.includes('tech') || tags.some((tag) => ['ai', 'tech'].includes(tag))) return 'tech';

@@ -61,6 +61,16 @@ GENERIC_TAGS = {
     "15m",
 }
 
+ACTIVE_GROUP_TOPIC_FILTERS: Tuple[Tuple[str, str], ...] = (
+    ("politics", "politic|election|trump|biden|congress|iran|ceasefire|war|president|senate|house"),
+    ("macro", "finance|business|econom|fed|rate|inflation|ipo|valuation|stock|macro|openai"),
+    ("tech", "tech|ai|openai|spacex|tesla|apple|google|nvidia|grok"),
+    ("crypto", "crypto|bitcoin|ethereum|solana|xrp|token|btc|eth|doge"),
+    ("sports", "sports|tennis|soccer|nba|nfl|mlb|nhl|fifa|formula1|ufc|wta|atp|itf"),
+    ("games", "esports|gaming|counter-strike|league of legends|dota|valorant|rainbow six|lol:"),
+    ("culture", "pop-culture|awards|movie|music|celebrity|oscars|grammy"),
+)
+
 
 def _as_list(value: Any) -> List[Any]:
     if value is None:
@@ -684,10 +694,10 @@ def _group_category_bucket(group: Dict[str, Any]) -> str:
         return "tech"
     if any(token in text for token in ("weather", "temperature", "hurricane", "rain", "snow")):
         return "weather"
-    if any(token in text for token in ("esports", "games", "gaming", "counter-strike", "league of legends", "dota", "valorant", "rainbow six", "lol:")):
-        return "games"
-    if any(token in text for token in ("sports", "tennis", "soccer", "nba", "nfl", "mlb", "nhl", "fifa", "formula1", "ufc")):
+    if any(token in text for token in ("sports", "tennis", "soccer", "nba", "nfl", "mlb", "nhl", "fifa", "formula1", "ufc", "wta", "atp", "itf")):
         return "sports"
+    if any(token in text for token in ("esports", "gaming", "counter-strike", "league of legends", "dota", "valorant", "rainbow six", "lol:")):
+        return "games"
     if any(token in text for token in ("pop-culture", "awards", "movie", "music", "celebrity", "oscars", "grammy")):
         return "culture"
     return category or "market"
@@ -772,6 +782,58 @@ def _limit_group_category_dominance(groups: List[Dict[str, Any]], page_size: int
         if key:
             seen.add(key)
     return selected
+
+
+def _serving_row_identity(row: Dict[str, Any]) -> str:
+    return str(row.get("serving_key") or row.get("group_id") or row.get("event_id") or row.get("event_slug") or "")
+
+
+def _serving_select_sql(where_sql: str, order_sql: str) -> str:
+    return f"""
+        SELECT
+          serving_key, group_id, event_id, event_slug, event_title, title, category, tags,
+          created_at, end_date, volume_24h, trade_count_24h, last_activity_at, outcome_count,
+          default_market_id, default_condition_id, default_gamma_market_id, default_outcome_key,
+          top_outcomes, outcomes, completion_status, is_trading_closed, active_rank, updated_at
+        FROM event_market_serving
+        WHERE {where_sql}
+        ORDER BY {order_sql}
+        LIMIT ? OFFSET ?
+        """
+
+
+def _serving_active_rows(
+    ctx: dict,
+    *,
+    where_sql: str,
+    order_sql: str,
+    params: List[Any],
+    page_size: int,
+    offset: int,
+) -> List[Dict[str, Any]]:
+    rows = ctx["query_all"](
+        _serving_select_sql(where_sql, order_sql),
+        [*params, max(page_size, page_size * 4), offset],
+    )
+    if offset > 0:
+        return rows
+
+    text_sql = "LOWER(CONCAT_WS(' ', COALESCE(category, ''), COALESCE(CAST(tags AS TEXT), ''), COALESCE(title, ''), COALESCE(event_slug, '')))"
+    supplemental_limit = max(8, min(18, page_size // 4))
+    seen = {_serving_row_identity(row) for row in rows}
+    for _, pattern in ACTIVE_GROUP_TOPIC_FILTERS:
+        extra_rows = ctx["query_all"](
+            _serving_select_sql(f"{where_sql} AND ({text_sql} ~ ?)", order_sql),
+            [*params, pattern, supplemental_limit, 0],
+        )
+        for row in extra_rows:
+            key = _serving_row_identity(row)
+            if key and key in seen:
+                continue
+            rows.append(row)
+            if key:
+                seen.add(key)
+    return rows
 
 
 def _serving_table_ready(ctx: dict) -> bool:
@@ -1011,21 +1073,20 @@ def _serving_market_groups_payload(
         "volume": "volume_24h DESC, last_activity_at DESC NULLS LAST, active_rank DESC",
     }.get(sort, "active_rank DESC, volume_24h DESC, last_activity_at DESC NULLS LAST")
     offset = (page - 1) * page_size
-    fetch_limit = max(page_size, page_size * 4) if sort == "active" and not query else page_size
-    rows = ctx["query_all"](
-        f"""
-        SELECT
-          serving_key, group_id, event_id, event_slug, event_title, title, category, tags,
-          created_at, end_date, volume_24h, trade_count_24h, last_activity_at, outcome_count,
-          default_market_id, default_condition_id, default_gamma_market_id, default_outcome_key,
-          top_outcomes, outcomes, completion_status, is_trading_closed, active_rank, updated_at
-        FROM event_market_serving
-        WHERE {where_sql}
-        ORDER BY {order_sql}
-        LIMIT ? OFFSET ?
-        """,
-        [*params, fetch_limit, offset],
-    )
+    if sort == "active" and not query:
+        rows = _serving_active_rows(
+            ctx,
+            where_sql=where_sql,
+            order_sql=order_sql,
+            params=params,
+            page_size=page_size,
+            offset=offset,
+        )
+    else:
+        rows = ctx["query_all"](
+            _serving_select_sql(where_sql, order_sql),
+            [*params, page_size, offset],
+        )
     total_row = ctx["query_all"](
         f"SELECT COUNT(*) AS total FROM event_market_serving WHERE {where_sql}",
         params,
@@ -1036,7 +1097,7 @@ def _serving_market_groups_payload(
     if sort == "active":
         items = [item for item in items if not _group_has_terminal_probability(item)]
     if sort == "active" and not query:
-        items = _limit_group_category_dominance(items, page_size)
+        items = _interleave_group_categories(items, page_size)
     items = items[:page_size]
     return {
         "items": items,
@@ -1113,7 +1174,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 15}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 16}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
