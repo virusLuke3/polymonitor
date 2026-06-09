@@ -9,6 +9,7 @@ import {
   fetchQuantBuildStatus,
   fetchQuantEntitySnapshot,
   fetchQuantEventMembers,
+  fetchQuantEventPriceHead,
   fetchQuantEventPriceSeries,
   fetchQuantPriceWindow,
   fetchQuantPriceEvents,
@@ -728,22 +729,32 @@ export function QuantWorkspace() {
       }
     }
     if (hasMarketSlug && !silent && !priceSeriesCacheRef.current.has(cacheKey)) {
-      void fetchQuantEntitySnapshot({
-        entityType: selectedEntityKind,
-        marketSlug: selectedEntityKind === 'market' ? marketSlug : undefined,
-        eventSlug: selectedEntityKind === 'event' ? marketSlug : undefined,
-        priceSource: backendPriceSource(priceSource),
-        maxOutcomes: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
-        topN: selectedEntityKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
-        pointFormat: 'lite',
-        timeoutMs: 3500,
-      })
+      const snapshotRequest = selectedEntityKind === 'event'
+        ? fetchQuantEventPriceHead({
+          eventSlug: marketSlug,
+          priceSource: backendPriceSource(priceSource),
+          maxOutcomes: EVENT_TILE_OUTCOME_LIMIT,
+          topN: EVENT_TILE_OUTCOME_LIMIT,
+          pointFormat: 'lite',
+          timeoutMs: 4500,
+        })
+        : fetchQuantEntitySnapshot({
+          entityType: selectedEntityKind,
+          marketSlug,
+          priceSource: backendPriceSource(priceSource),
+          maxOutcomes: 24,
+          pointFormat: 'lite',
+          timeoutMs: 3500,
+        });
+      void snapshotRequest
         .then((snapshot) => {
           if (requestSeq !== priceLoadSeq.current) return;
           if (!snapshot?.outcomes?.length) return;
           setMarketSeries(snapshot);
           setDataStatus('partial');
-          setLoadingMessage('Latest snapshot loaded; historical tile is still warming...');
+          setLoadingMessage(selectedEntityKind === 'event'
+            ? 'Latest outcome prices loaded; historical tile is warming...'
+            : 'Latest snapshot loaded; historical tile is still warming...');
         })
         .catch((snapshotError) => {
           if (import.meta.env.DEV && !isAbortLikeError(snapshotError)) console.debug('[quant] snapshot load failed', snapshotError);

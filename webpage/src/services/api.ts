@@ -380,7 +380,7 @@ export function fetchQuantEventPriceHead(query: QuantPriceQuery & { eventSlug?: 
   params.set('max_outcomes', String(query.maxOutcomes || 100));
   params.set('top_n', String(query.topN || 12));
   params.set('point_format', query.pointFormat || 'lite');
-  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-head?${params.toString()}`, 8000);
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/event-price-head?${params.toString()}`, query.timeoutMs || 8000);
 }
 
 export function fetchQuantEntitySnapshot(query: QuantPriceQuery & { priceSource?: string; maxOutcomes?: number } = {}) {
