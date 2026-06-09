@@ -61,14 +61,6 @@ GENERIC_TAGS = {
     "15m",
 }
 
-ACTIVE_GROUP_TOPIC_SQL_FILTERS: Tuple[Tuple[str, str], ...] = (
-    ("politics", "LOWER(COALESCE(category, '')) LIKE '%%politic%%'"),
-    ("macro", "LOWER(COALESCE(category, '')) IN ('macro', 'finance', 'economics', 'business') OR LOWER(COALESCE(category, '')) LIKE '%%econom%%'"),
-    ("tech", "LOWER(COALESCE(category, '')) LIKE '%%tech%%'"),
-    ("crypto", "LOWER(COALESCE(category, '')) LIKE '%%crypto%%'"),
-    ("culture", "LOWER(COALESCE(category, '')) IN ('culture', 'pop-culture', 'entertainment')"),
-)
-
 
 def _as_list(value: Any) -> List[Any]:
     if value is None:
@@ -824,27 +816,6 @@ def _serving_active_rows(
         )
     if offset > 0:
         return rows
-
-    supplemental_limit = max(6, min(12, page_size // 6))
-    seen = {_serving_row_identity(row) for row in rows}
-    for _, topic_sql in ACTIVE_GROUP_TOPIC_SQL_FILTERS:
-        try:
-            extra_rows = ctx["query_all"](
-                _serving_select_sql(f"{where_sql} AND ({topic_sql})", order_sql),
-                [*params, supplemental_limit, 0],
-            )
-        except Exception:
-            logger = getattr(ctx.get("app"), "logger", None)
-            if logger:
-                logger.exception("market group active topic query failed filter=%s", topic_sql)
-            continue
-        for row in extra_rows:
-            key = _serving_row_identity(row)
-            if key and key in seen:
-                continue
-            rows.append(row)
-            if key:
-                seen.add(key)
     return rows
 
 
@@ -1176,7 +1147,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 19}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 20}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
