@@ -804,7 +804,7 @@ def _serving_active_rows(
     try:
         rows = ctx["query_all"](
             _serving_select_sql(where_sql, order_sql),
-            [*params, max(page_size, page_size * 2), offset],
+            [*params, page_size, offset],
         )
     except Exception:
         logger = getattr(ctx.get("app"), "logger", None)
@@ -1039,11 +1039,7 @@ def _serving_market_groups_payload(
         params.extend([like, like, like, like])
     where_sql = " AND ".join(where)
     active_order_sql = """
-        active_rank DESC NULLS LAST,
-        last_activity_at DESC NULLS LAST,
-        volume_24h DESC,
-        trade_count_24h DESC,
-        created_at DESC NULLS LAST
+        active_rank DESC NULLS LAST
     """
     order_sql = {
         "active": active_order_sql,
@@ -1152,7 +1148,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 21}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 22}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
