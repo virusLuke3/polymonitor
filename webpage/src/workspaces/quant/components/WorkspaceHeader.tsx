@@ -355,7 +355,14 @@ export function WorkspaceHeader({
   const isSearching = marketSearchStatus === 'loading';
   const isRefining = marketSearchStatus === 'partial';
   const hasSearchError = marketSearchStatus === 'error';
-  const activeFilter = !activeSearchText && searchFilter === 'all' ? 'recent' : searchFilter;
+  const activeFilter = activeSearchText && (searchFilter === 'recent' || searchFilter === 'favorites')
+    ? 'all'
+    : !activeSearchText && searchFilter === 'all'
+      ? 'recent'
+      : searchFilter;
+  const searchScopeNotice = activeSearchText && searchFilter !== activeFilter
+    ? `Searching all results; ${searchFilter} is for empty queries.`
+    : '';
   const recentSlugSet = useMemo(() => new Set(recentMarkets.map((market) => market.marketSlug)), [recentMarkets]);
   const favoriteSlugSet = useMemo(() => new Set(favoriteMarketSlugs), [favoriteMarketSlugs]);
 
@@ -751,7 +758,7 @@ export function WorkspaceHeader({
               <div className="qtv-palette-head">
                 <div>
                   <strong>{activeSearchText ? 'Search results' : activeFilter === 'favorites' ? 'Favorite markets' : 'Recent coverage'}</strong>
-                  <span>{activeSearchText ? 'Events · Markets · Tokens · Conditions' : 'Recents and favorites stay local to this browser'}</span>
+                  <span>{searchScopeNotice || (activeSearchText ? 'Events · Markets · Tokens · Conditions' : 'Recents and favorites stay local to this browser')}</span>
                 </div>
                 <div className="qtv-palette-head-actions" onMouseDown={(event) => event.preventDefault()}>
                   {isRefining ? <em>Updating events...</em> : null}
