@@ -220,12 +220,63 @@ function groupHasTerminalProbability(group: MarketGroupItem) {
   ];
   return values.some((value) => {
     const numeric = Number(value);
-    return Number.isFinite(numeric) && (numeric <= 0.001 || numeric >= 0.999);
+    return Number.isFinite(numeric) && (numeric <= 0.03 || numeric >= 0.97);
   });
 }
 
+function groupOutcomePrice(outcome: { blockCloseYesPrice?: string | number | null; yesPrice?: string | number | null }) {
+  const blockClose = Number(outcome.blockCloseYesPrice);
+  if (Number.isFinite(blockClose)) return blockClose;
+  const yes = Number(outcome.yesPrice);
+  return Number.isFinite(yes) ? yes : null;
+}
+
+function groupOutcomeIsTerminal(outcome: { blockCloseYesPrice?: string | number | null; yesPrice?: string | number | null }) {
+  const price = groupOutcomePrice(outcome);
+  return price != null && (price <= 0.03 || price >= 0.97);
+}
+
+function pickDefaultGroupOutcome(group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) {
+  const seen = new Set<string>();
+  const candidates = [...(group.outcomes || []), ...(group.topOutcomes || [])].filter((outcome, index) => {
+    if (!outcome.marketId && !outcome.yesTokenId) return false;
+    const key = String(outcome.marketId ?? outcome.outcomeKey ?? outcome.gammaMarketId ?? index);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const liveCandidates = candidates.filter((outcome) => !groupOutcomeIsTerminal(outcome));
+  const eligible = liveCandidates.length ? liveCandidates : candidates;
+  const requestedMarketId = marketId != null ? Number(marketId) : null;
+  if (requestedMarketId != null && Number.isFinite(requestedMarketId)) {
+    const matched = eligible.find((outcome) => Number(outcome.marketId) === requestedMarketId);
+    if (matched) return matched;
+  }
+  if (outcomeKey) {
+    const matched = eligible.find((outcome) => outcome.outcomeKey === outcomeKey);
+    if (matched) return matched;
+  }
+  if (group.defaultOutcomeKey) {
+    const matched = eligible.find((outcome) => outcome.outcomeKey === group.defaultOutcomeKey);
+    if (matched) return matched;
+  }
+  return eligible
+    .slice()
+    .sort((left, right) => {
+      const leftPrice = groupOutcomePrice(left);
+      const rightPrice = groupOutcomePrice(right);
+      const leftBalance = leftPrice == null ? 1 : Math.abs(leftPrice - 0.5);
+      const rightBalance = rightPrice == null ? 1 : Math.abs(rightPrice - 0.5);
+      const leftVolume = Number(left.volume24h || 0);
+      const rightVolume = Number(right.volume24h || 0);
+      const leftTrades = Number(left.tradeCount24h || 0);
+      const rightTrades = Number(right.tradeCount24h || 0);
+      return leftBalance - rightBalance || rightVolume - leftVolume || rightTrades - leftTrades;
+    })[0] || null;
+}
+
 function pickDefaultMarketGroup(groups: MarketGroupItem[]) {
-  const eligibleGroups = groups.filter((group) => !groupHasTerminalProbability(group));
+  const eligibleGroups = groups.filter((group) => !groupHasTerminalProbability(group) || pickDefaultGroupOutcome(group));
   const liveGroups = eligibleGroups.filter((group) => Number(group.tradeCount24h || 0) > 0);
   return (
     liveGroups.find((group) => Number(group.volume24h || 0) > 0 && Number(group.outcomeCount || 0) > 1)
@@ -547,14 +598,7 @@ function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
 }
 
 function optimisticBundleFromGroup(group: MarketGroupItem, marketId: number | null, outcomeKey?: string | null): WorkspaceBundle {
-  const outcomes = [...(group.outcomes || []), ...(group.topOutcomes || [])];
-  const selectedOutcome = (
-    outcomes.find((outcome) => marketId != null && Number(outcome.marketId) === marketId)
-    || outcomes.find((outcome) => outcomeKey && outcome.outcomeKey === outcomeKey)
-    || outcomes.find((outcome) => group.defaultOutcomeKey && outcome.outcomeKey === group.defaultOutcomeKey)
-    || outcomes[0]
-    || null
-  );
+  const selectedOutcome = pickDefaultGroupOutcome(group, outcomeKey, marketId);
   const selectedMarketId = Number(selectedOutcome?.marketId ?? marketId ?? group.defaultMarketId ?? 0);
   const price = selectedOutcome?.blockCloseYesPrice ?? selectedOutcome?.yesPrice ?? group.latestBlockClosePrice ?? null;
   const numericPrice = Number(price);
@@ -1116,8 +1160,9 @@ function WorldMonitorApp() {
 
   const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
     const eventId = group.eventId != null ? String(group.eventId) : null;
-    const nextMarketId = marketId != null ? Number(marketId) : null;
-    const nextOutcomeKey = outcomeKeyForGroupMarket(group, nextMarketId, outcomeKey);
+    const selectedOutcome = pickDefaultGroupOutcome(group, outcomeKey, marketId);
+    const nextMarketId = selectedOutcome?.marketId != null ? Number(selectedOutcome.marketId) : (marketId != null ? Number(marketId) : null);
+    const nextOutcomeKey = selectedOutcome?.outcomeKey || outcomeKeyForGroupMarket(group, nextMarketId, outcomeKey);
     selectedMarketGroupIdRef.current = eventId;
     selectedMarketIdRef.current = nextMarketId;
     setSelectedMarketGroupId(eventId);
@@ -1536,7 +1581,12 @@ function WorldMonitorApp() {
       .then((detailPayload) => {
         if (cancelled) return;
         setSelectedMarketGroupDetail(detailPayload);
-        setSelectedMarketGroupOutcomeKey((current) => current || detailPayload.defaultOutcomeKey || null);
+        const liveDetailOutcome = pickDefaultGroupOutcome(detailPayload, selectedMarketGroupOutcomeKey, selectedMarketIdRef.current);
+        if (liveDetailOutcome?.marketId != null && Number(liveDetailOutcome.marketId) !== selectedMarketIdRef.current) {
+          selectedMarketIdRef.current = Number(liveDetailOutcome.marketId);
+          setSelectedMarketId(Number(liveDetailOutcome.marketId));
+        }
+        setSelectedMarketGroupOutcomeKey(liveDetailOutcome?.outcomeKey || detailPayload.defaultOutcomeKey || null);
       })
       .catch(() => {
         if (!cancelled) setSelectedMarketGroupDetail(null);
@@ -1626,7 +1676,13 @@ function WorldMonitorApp() {
         selectedMarketGroupIdRef.current = eventId;
         setSelectedMarketGroupId(eventId);
         setSelectedMarketGroupDetail(loadedGroup);
-        const nextOutcomeKey = loadedBundle.selectedOutcome?.outcomeKey
+        const liveLoadedOutcome = pickDefaultGroupOutcome(
+          loadedGroup,
+          loadedBundle.selectedOutcome?.outcomeKey || loadedBundle.identity?.selectedOutcomeKey || loadedGroup.defaultOutcomeKey || null,
+          currentMarketId,
+        );
+        const nextOutcomeKey = liveLoadedOutcome?.outcomeKey
+          || loadedBundle.selectedOutcome?.outcomeKey
           || loadedBundle.identity?.selectedOutcomeKey
           || outcomeKeyForGroupMarket(loadedGroup, currentMarketId, loadedGroup.defaultOutcomeKey || null);
         if (nextOutcomeKey) {

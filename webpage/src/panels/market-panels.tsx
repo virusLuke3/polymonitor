@@ -129,11 +129,9 @@ function topicClassName(topic: string) {
 }
 
 function defaultGroupMarketId(group: MarketGroupItem) {
-  if (group.defaultMarketId) return group.defaultMarketId;
-  const topWithMarket = (group.topOutcomes || []).find((outcome) => outcome.marketId);
-  if (topWithMarket?.marketId) return Number(topWithMarket.marketId);
-  const firstWithMarket = (group.outcomes || []).find((outcome) => outcome.marketId);
-  return firstWithMarket?.marketId ? Number(firstWithMarket.marketId) : null;
+  const defaultOutcome = groupDefaultOutcome(group);
+  if (defaultOutcome?.marketId) return Number(defaultOutcome.marketId);
+  return group.defaultMarketId || null;
 }
 
 function complementPrice(value?: string | number | null) {
@@ -146,6 +144,15 @@ function isTerminalProbability(value?: string | number | null) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return false;
   return numeric <= 0.03 || numeric >= 0.97;
+}
+
+function groupOutcomePrice(outcome: MarketGroupOutcome) {
+  return firstFiniteValue(outcome.blockCloseYesPrice, outcome.yesPrice);
+}
+
+function groupOutcomeIsTerminal(outcome: MarketGroupOutcome) {
+  const price = groupOutcomePrice(outcome);
+  return price !== null && price !== undefined && isTerminalProbability(price);
 }
 
 function firstFiniteValue(...values: Array<string | number | null | undefined>) {
@@ -173,6 +180,26 @@ function uniqueGroupOutcomes(outcomes: MarketGroupOutcome[]) {
   });
 }
 
+function groupDefaultOutcome(group: MarketGroupItem) {
+  const outcomes = uniqueGroupOutcomes([...(group.outcomes || []), ...(group.topOutcomes || [])])
+    .filter((outcome) => outcome.marketId || outcome.yesTokenId);
+  const liveOutcomes = outcomes.filter((outcome) => !groupOutcomeIsTerminal(outcome));
+  const candidates = liveOutcomes.length ? liveOutcomes : outcomes;
+  return candidates
+    .slice()
+    .sort((left, right) => {
+      const leftPrice = Number(groupOutcomePrice(left));
+      const rightPrice = Number(groupOutcomePrice(right));
+      const leftBalance = Number.isFinite(leftPrice) ? Math.abs(leftPrice - 0.5) : 1;
+      const rightBalance = Number.isFinite(rightPrice) ? Math.abs(rightPrice - 0.5) : 1;
+      const leftVolume = Number(left.volume24h || 0);
+      const rightVolume = Number(right.volume24h || 0);
+      const leftTrades = Number(left.tradeCount24h || 0);
+      const rightTrades = Number(right.tradeCount24h || 0);
+      return leftBalance - rightBalance || rightVolume - leftVolume || rightTrades - leftTrades;
+    })[0] || null;
+}
+
 function groupDisplayVolume(group: MarketGroupItem) {
   return firstFiniteValue(
     group.volume24h,
@@ -190,7 +217,7 @@ function groupDisplayTradeCount(group: MarketGroupItem) {
 }
 
 function groupHasMarketCoverage(group: MarketGroupItem) {
-  if (defaultGroupMarketId(group)) return true;
+  if (groupDefaultOutcome(group)) return true;
   if (Number(groupDisplayVolume(group) || 0) > 0) return true;
   if (Number(groupDisplayTradeCount(group) || 0) > 0) return true;
   if (Number(group.outcomeCount || group.outcomes?.length || group.topOutcomes?.length || 0) > 0) return true;
@@ -234,6 +261,9 @@ function groupActiveRank(group: MarketGroupItem) {
 }
 
 function groupBestLivePrice(group: MarketGroupItem) {
+  const selectedOutcome = groupDefaultOutcome(group);
+  const selectedPrice = selectedOutcome ? Number(groupOutcomePrice(selectedOutcome)) : NaN;
+  if (Number.isFinite(selectedPrice)) return selectedPrice;
   const blockClosePrice = Number(group.latestBlockClosePrice);
   if (Number.isFinite(blockClosePrice)) return blockClosePrice;
   const candidates = [...(group.outcomes || []), ...(group.topOutcomes || [])]
@@ -333,7 +363,8 @@ function activeMarketGroupsList(
   return (
     <div className="wm-poly-market-list">
       {groups.map((group) => {
-        const defaultMarketId = defaultGroupMarketId(group);
+        const defaultOutcome = groupDefaultOutcome(group);
+        const defaultMarketId = defaultOutcome?.marketId ? Number(defaultOutcome.marketId) : defaultGroupMarketId(group);
         const groupEventId = group.eventId != null ? String(group.eventId) : null;
         const selected = (groupEventId != null && selectedMarketGroupId === groupEventId) || (defaultMarketId != null && selectedMarketId === defaultMarketId);
         return (
@@ -342,7 +373,7 @@ function activeMarketGroupsList(
             type="button"
             className={`wm-poly-market-card ${topicClassName(groupTopic(group))} ${selected ? 'active' : ''}`}
             onClick={() => {
-              focusMarketGroup(group, group.defaultOutcomeKey || null, defaultMarketId);
+              focusMarketGroup(group, defaultOutcome?.outcomeKey || group.defaultOutcomeKey || null, defaultMarketId);
             }}
             aria-pressed={selected}
             title={group.title}

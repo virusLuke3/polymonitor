@@ -100,6 +100,18 @@ def _is_terminal_probability(value: Any) -> bool:
     return numeric <= TERMINAL_PROBABILITY_LOW or numeric >= TERMINAL_PROBABILITY_HIGH
 
 
+def _outcome_probability(outcome: Dict[str, Any]) -> Optional[float]:
+    price = _float_value((outcome or {}).get("blockCloseYesPrice"))
+    if price is None:
+        price = _float_value((outcome or {}).get("yesPrice"))
+    return price
+
+
+def _outcome_is_terminal(outcome: Dict[str, Any]) -> bool:
+    price = _outcome_probability(outcome)
+    return price is not None and _is_terminal_probability(price)
+
+
 def _clamp_probability(value: float) -> float:
     return max(0.0, min(1.0, value))
 
@@ -521,6 +533,9 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
         return (score, volume, trades)
 
     default_candidates = [outcome for outcome in outcomes if outcome.get("marketId") is not None or outcome.get("yesTokenId")]
+    live_default_candidates = [outcome for outcome in default_candidates if not _outcome_is_terminal(outcome)]
+    if live_default_candidates:
+        default_candidates = live_default_candidates
     default_outcome = max(default_candidates, key=_default_outcome_score, default=None)
     if default_outcome is None and top_outcomes:
         default_outcome = top_outcomes[0]
@@ -1012,6 +1027,48 @@ def _group_has_terminal_probability(group: Dict[str, Any]) -> bool:
     return False
 
 
+def _group_outcome_candidates(group: Dict[str, Any]) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for outcome in [*(group.get("outcomes") or []), *(group.get("topOutcomes") or [])]:
+        if not isinstance(outcome, dict):
+            continue
+        if outcome.get("marketId") is None and not outcome.get("yesTokenId"):
+            continue
+        key = str(outcome.get("marketId") or outcome.get("outcomeKey") or outcome.get("gammaMarketId") or len(candidates))
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(outcome)
+    return candidates
+
+
+def _default_outcome_runtime_score(outcome: Dict[str, Any]) -> Tuple[float, float, float, float]:
+    price = _outcome_probability(outcome)
+    volume = _float_value(outcome.get("volume24h")) or 0.0
+    trades = _float_value(outcome.get("tradeCount24h")) or 0.0
+    balance = 0.0 if price is None else 1.0 - min(1.0, abs(price - 0.5) * 2.0)
+    score = balance * 80.0 + min(40.0, volume ** 0.25) + min(25.0, trades)
+    if outcome.get("marketId") is not None:
+        score += 12.0
+    if outcome.get("yesTokenId"):
+        score += 8.0
+    return (score, volume, trades, balance)
+
+
+def _retarget_group_default_outcome(group: Dict[str, Any]) -> bool:
+    candidates = [outcome for outcome in _group_outcome_candidates(group) if not _outcome_is_terminal(outcome)]
+    if not candidates:
+        return False
+    selected = max(candidates, key=_default_outcome_runtime_score)
+    group["defaultOutcomeKey"] = selected.get("outcomeKey")
+    group["defaultMarketId"] = selected.get("marketId") or selected.get("localMarketId")
+    selected_price = _outcome_probability(selected)
+    if selected_price is not None:
+        group["latestBlockClosePrice"] = selected_price
+    return True
+
+
 def _serving_market_groups_payload(
     ctx: dict,
     *,
@@ -1073,7 +1130,7 @@ def _serving_market_groups_payload(
         total = int((total_row[0] or {}).get("total") or 0) if total_row else 0
     items = [_serving_group_from_row(ctx, row) for row in rows]
     if sort == "active":
-        items = [item for item in items if not _group_has_terminal_probability(item)]
+        items = [item for item in items if _retarget_group_default_outcome(item)]
     if sort == "active" and not query:
         now_ts = _parse_timestamp(ctx["utc_now_iso"]())
         items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
@@ -1081,7 +1138,7 @@ def _serving_market_groups_payload(
         items = items[: max(page_size * 2, page_size)]
     _apply_latest_block_close_prices(ctx, items)
     if sort == "active":
-        items = [item for item in items if not _group_has_terminal_probability(item)]
+        items = [item for item in items if _retarget_group_default_outcome(item)]
     if sort == "active" and not query:
         now_ts = _parse_timestamp(ctx["utc_now_iso"]())
         items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
@@ -1163,7 +1220,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 27}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 28}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
