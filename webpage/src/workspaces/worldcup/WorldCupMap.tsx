@@ -1,6 +1,6 @@
 import type { PickingInfo } from '@deck.gl/core';
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import { feature } from 'topojson-client';
@@ -31,10 +31,21 @@ type WorldCupMapProps = {
 };
 
 type HostCountryKey = 'us' | 'canada' | 'mexico';
-type WorldCupLayerKey = 'cities' | 'schedule' | 'weather' | 'markets' | 'odds' | 'transit' | 'teams' | 'conflicts';
+type WorldCupLayerKey =
+  | 'cities'
+  | 'schedule'
+  | 'weather'
+  | 'markets'
+  | 'odds'
+  | 'transit'
+  | 'teams'
+  | 'conflicts'
+  | 'countryRisk'
+  | 'globalRisk';
 type WorldCupMapMode = 'schedule' | 'weather' | 'market' | 'travel' | 'risk';
 type WorldCupTimeFilter = 'now' | '24h' | '7d' | 'group' | 'knockout' | 'all';
 type WorldCupDetailTab = 'matches' | 'weather' | 'markets' | 'venue' | 'teams';
+type WorldCupViewportPreset = 'north-america' | 'usa' | 'mexico' | 'canada' | 'next' | 'global-risk';
 
 type MapRegionHover = {
   region: string;
@@ -160,6 +171,7 @@ const WORLDCUP_ATLAS_CENTER: [number, number] = [-96, 34.8];
 const WORLDCUP_ATLAS_ZOOM = 3;
 const PMTILES_STYLE_URL = import.meta.env.VITE_WORLDCUP_PMTILES_STYLE_URL || import.meta.env.VITE_PMTILES_STYLE_URL || '';
 const NO_COUNTRY_MATCH = '__worldcup_no_country__';
+const WORLD_CUP_LAYER_PANEL_COLLAPSED_STORAGE_KEY = 'polydata:worldcup-layer-panel-collapsed:v1';
 
 const HOST_COUNTRY_META: Record<string, { key: HostCountryKey; iso2: string; label: string }> = {
   '840': { key: 'us', iso2: 'US', label: 'UNITED STATES' },
@@ -167,6 +179,10 @@ const HOST_COUNTRY_META: Record<string, { key: HostCountryKey; iso2: string; lab
   '484': { key: 'mexico', iso2: 'MX', label: 'MEXICO' },
 };
 const HOST_COUNTRY_ISO2 = new Set(Object.values(HOST_COUNTRY_META).map((item) => item.iso2));
+const HOST_REGION_RISK_ISO2 = new Set([
+  'US', 'CA', 'MX', 'GT', 'BZ', 'SV', 'HN', 'NI', 'CR', 'PA', 'CU', 'DO', 'HT', 'JM',
+]);
+const NORTH_AMERICA_BOUNDS: [[number, number], [number, number]] = [[-129, 14], [-52, 58]];
 const COUNTRY_NAME_TO_ISO2 = new Map<string, string>(
   (COUNTRIES_GEOJSON.features || []).flatMap((item: any) => {
     const props = item.properties || {};
@@ -199,21 +215,23 @@ const COUNTRY_ISO2_ALIASES: Record<string, string> = {
 
 const DEFAULT_ENABLED_LAYERS: EnabledLayers = {
   cities: true,
-  schedule: false,
-  weather: false,
+  schedule: true,
+  weather: true,
   markets: false,
   odds: false,
   transit: false,
   teams: false,
-  conflicts: true,
+  conflicts: false,
+  countryRisk: false,
+  globalRisk: false,
 };
 
 const MODE_LAYER_PRESETS: Record<WorldCupMapMode, EnabledLayers> = {
-  schedule: { cities: true, schedule: true, weather: false, markets: false, odds: false, transit: false, teams: false, conflicts: true },
-  weather: { cities: true, schedule: false, weather: true, markets: false, odds: false, transit: false, teams: false, conflicts: true },
-  market: { cities: true, schedule: false, weather: false, markets: true, odds: true, transit: false, teams: false, conflicts: true },
-  travel: { cities: true, schedule: false, weather: false, markets: false, odds: false, transit: true, teams: true, conflicts: true },
-  risk: { cities: true, schedule: true, weather: true, markets: true, odds: false, transit: true, teams: false, conflicts: true },
+  schedule: { cities: true, schedule: true, weather: true, markets: false, odds: false, transit: false, teams: false, conflicts: false, countryRisk: false, globalRisk: false },
+  weather: { cities: true, schedule: true, weather: true, markets: false, odds: false, transit: false, teams: false, conflicts: false, countryRisk: false, globalRisk: false },
+  market: { cities: true, schedule: true, weather: true, markets: true, odds: true, transit: false, teams: false, conflicts: false, countryRisk: false, globalRisk: false },
+  travel: { cities: true, schedule: true, weather: true, markets: false, odds: false, transit: false, teams: false, conflicts: false, countryRisk: false, globalRisk: false },
+  risk: { cities: true, schedule: true, weather: true, markets: false, odds: false, transit: false, teams: false, conflicts: true, countryRisk: true, globalRisk: false },
 };
 
 const COLORS = {
@@ -398,6 +416,99 @@ function updateCountryRiskPaint(map: MapLibreMap | null, risks: CountryConflictR
   }
 }
 
+function visibleCountryRisksForLayers(risks: CountryConflictRisk[], enabledLayers: EnabledLayers) {
+  if (!enabledLayers.countryRisk) return [];
+  if (enabledLayers.globalRisk) return risks;
+  return risks.filter((risk) => HOST_REGION_RISK_ISO2.has(risk.iso2));
+}
+
+function nextMatchFeatureCollection(cities: WorldCupVenueCity[], nextMatch: WorldCupMatch | null) {
+  const city = nextMatch ? cities.find((item) => item.id === nextMatch.cityId) : null;
+  return {
+    type: 'FeatureCollection',
+    features: city ? [{
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [city.longitude, city.latitude] },
+      properties: {
+        cityId: city.id,
+        city: city.city,
+        matchNumber: nextMatch?.fifaMatchNumber || null,
+      },
+    }] : [],
+  } as any;
+}
+
+function updateNextMatchPulseSource(map: MapLibreMap | null, cities: WorldCupVenueCity[], nextMatch: WorldCupMatch | null) {
+  if (!map || !map.getStyle() || !map.getSource('wc-next-match-source')) return;
+  try {
+    (map.getSource('wc-next-match-source') as any).setData(nextMatchFeatureCollection(cities, nextMatch));
+  } catch {
+    // Style/source may be transient while fallback basemap loads.
+  }
+}
+
+function ensureNextMatchPulseLayer(map: MapLibreMap, cities: WorldCupVenueCity[], nextMatch: WorldCupMatch | null) {
+  if (!map.getStyle()) return;
+  if (!map.getSource('wc-next-match-source')) {
+    map.addSource('wc-next-match-source', {
+      type: 'geojson',
+      data: nextMatchFeatureCollection(cities, nextMatch),
+    });
+  } else {
+    updateNextMatchPulseSource(map, cities, nextMatch);
+  }
+  const beforeId = firstSymbolLayerId(map);
+  addLayerSafe(map, {
+    id: 'wc-next-match-pulse',
+    type: 'circle',
+    source: 'wc-next-match-source',
+    paint: {
+      'circle-radius': 20,
+      'circle-color': '#ffb02d',
+      'circle-opacity': 0.16,
+      'circle-stroke-color': '#fff1b8',
+      'circle-stroke-opacity': 0.2,
+      'circle-stroke-width': 1,
+    },
+  }, beforeId);
+  addLayerSafe(map, {
+    id: 'wc-next-match-core',
+    type: 'circle',
+    source: 'wc-next-match-source',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 6, 4, 9, 6, 12],
+      'circle-color': '#ffb02d',
+      'circle-opacity': 0.92,
+      'circle-stroke-color': '#fff3cb',
+      'circle-stroke-opacity': 0.92,
+      'circle-stroke-width': 1.8,
+    },
+  }, beforeId);
+}
+
+function startNextMatchPulse(map: MapLibreMap, rafRef: { current: number | null }) {
+  if (rafRef.current) return;
+  const start = performance.now();
+  const step = (now: number) => {
+    if (!map.getLayer('wc-next-match-pulse')) {
+      rafRef.current = null;
+      return;
+    }
+    const t = ((now - start) % 1800) / 1800;
+    const ease = 1 - (1 - t) * (1 - t);
+    try {
+      map.setPaintProperty('wc-next-match-pulse', 'circle-radius', 14 + ease * 24);
+      map.setPaintProperty('wc-next-match-pulse', 'circle-opacity', Math.max(0, 0.22 * (1 - ease)));
+      map.setPaintProperty('wc-next-match-pulse', 'circle-stroke-opacity', Math.max(0, 0.26 * (1 - ease)));
+    } catch {
+      rafRef.current = null;
+      return;
+    }
+    rafRef.current = requestAnimationFrame(step);
+  };
+  rafRef.current = requestAnimationFrame(step);
+}
+
 function ensureCountryRiskLayers(map: MapLibreMap, risks: CountryConflictRisk[]) {
   if (!map.getStyle()) return;
   const beforeId = firstSymbolLayerId(map);
@@ -553,8 +664,8 @@ async function loadMapSupportLayers(
       type: 'fill',
       source: 'wc-host-countries',
       paint: {
-        'fill-color': '#ffffff',
-        'fill-opacity': 0.006,
+        'fill-color': '#5f7880',
+        'fill-opacity': 0.035,
       },
     }, beforeId);
     addLayerSafe(map, {
@@ -562,9 +673,9 @@ async function loadMapSupportLayers(
       type: 'line',
       source: 'wc-host-countries',
       paint: {
-        'line-color': '#ffffff',
-        'line-opacity': 0.07,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.62, 4, 0.9, 6, 1.16],
+        'line-color': '#c2ccd0',
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.16, 4, 0.24, 6, 0.34],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.72, 4, 1.05, 6, 1.28],
       },
     }, beforeId);
 
@@ -594,6 +705,90 @@ async function loadMapSupportLayers(
 
 function compactCityName(city: string) {
   return city.replace(' / ', '/').replace(' Bay Area', '').replace(' Gardens', '');
+}
+
+function shortCityName(city: WorldCupVenueCity) {
+  const names: Record<string, string> = {
+    boston: 'Boston/Foxboro',
+    'los-angeles': 'LA/Inglewood',
+    'new-york-new-jersey': 'NY/NJ',
+    'san-francisco': 'San Francisco',
+    guadalajara: 'Guadalajara',
+    monterrey: 'Monterrey',
+    'mexico-city': 'Mexico City',
+  };
+  return names[city.id] || compactCityName(city.city);
+}
+
+function labelPriority(signal: CitySignal) {
+  if (signal.next) return 100;
+  if (signal.selected) return 95;
+  if (OPENING_CITY_IDS.has(signal.city.id)) return 88;
+  if (FINAL_CITY_IDS.has(signal.city.id)) return 86;
+  if (IMPORTANT_CITY_IDS.has(signal.city.id)) return 74;
+  return Math.min(68, 42 + signal.plannedMatchCount * 3 + knockoutSlotCount(signal));
+}
+
+const CITY_LABEL_OFFSETS: Record<string, [number, number]> = {
+  boston: [16, -22],
+  'new-york-new-jersey': [18, 4],
+  philadelphia: [14, 24],
+  toronto: [12, -18],
+  'mexico-city': [17, 5],
+  guadalajara: [-118, -14],
+  monterrey: [12, -22],
+  dallas: [14, -20],
+  houston: [14, 16],
+  'los-angeles': [14, -22],
+  'san-francisco': [14, -12],
+  seattle: [14, -14],
+  vancouver: [14, -20],
+};
+
+function visibleCityLabels(citySignals: CitySignal[], zoom: number) {
+  const budget = zoom < 3.1 ? 6 : zoom < 3.85 ? 10 : citySignals.length;
+  return citySignals
+    .slice()
+    .sort((a, b) => labelPriority(b) - labelPriority(a) || b.plannedMatchCount - a.plannedMatchCount)
+    .slice(0, budget);
+}
+
+function formatKickoffUtcShort(match: WorldCupMatch | null) {
+  if (!match) return 'kickoff pending';
+  const parsed = new Date(match.kickoffUtc);
+  if (!Number.isFinite(parsed.getTime())) return shortBeijingKickoff(match);
+  const monthDay = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: '2-digit',
+  }).format(parsed);
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(parsed);
+  return `${monthDay} · ${time} UTC`;
+}
+
+function hostCityLabel(signal: CitySignal, zoom: number) {
+  if (signal.next) {
+    return `NEXT · ${shortCityName(signal.city)}\nM#${signal.nextMatch?.fifaMatchNumber || '--'} · ${formatKickoffUtcShort(signal.nextMatch)}`;
+  }
+  const name = zoom >= 4.45 ? compactCityName(signal.city.city) : shortCityName(signal.city);
+  if (zoom >= 4.55) return `${name}\n${signal.city.venue}\n${signal.plannedMatchCount} matches`;
+  if (zoom >= 3.65) return `${name}\n${cityRoleShort(signal)} · ${signal.plannedMatchCount} matches`;
+  return `${name}\n${cityRoleShort(signal)}`;
+}
+
+function isHostRegionConflict(signal: ConflictSignal) {
+  if (signal.iso2 && HOST_REGION_RISK_ISO2.has(signal.iso2)) return true;
+  return signal.lon >= -130 && signal.lon <= -48 && signal.lat >= 6 && signal.lat <= 72;
+}
+
+function visibleConflictsForLayers(conflicts: ConflictSignal[], enabledLayers: EnabledLayers) {
+  if (!enabledLayers.conflicts) return [];
+  return enabledLayers.globalRisk ? conflicts : conflicts.filter(isHostRegionConflict);
 }
 
 function plannedMatchCount(cityId: string, matches: WorldCupMatch[]) {
@@ -666,13 +861,6 @@ function riskColor(level: WorldCupRiskLevel) {
   if (level === 'elevated') return '#ff7a1a';
   if (level === 'watch') return '#f4c400';
   return '#3b82f6';
-}
-
-function hexToRgb(hex: string): [number, number, number] {
-  const value = hex.replace('#', '');
-  const numeric = Number.parseInt(value.length === 3 ? value.split('').map((char) => `${char}${char}`).join('') : value, 16);
-  if (!Number.isFinite(numeric)) return [115, 216, 255];
-  return [(numeric >> 16) & 255, (numeric >> 8) & 255, numeric & 255];
 }
 
 function riskOpacity(level: WorldCupRiskLevel) {
@@ -1120,57 +1308,19 @@ function buildDeckLayers(
   conflicts: ConflictSignal[],
   enabledLayers: EnabledLayers,
   zoom: number,
-  pulsePhase = 0,
-  countryRiskByIso: Map<string, CountryConflictRisk> = new Map(),
 ) {
   const layers = [];
-  const showDenseLabels = zoom >= 2.85;
-
-  layers.push(new GeoJsonLayer<any>({
-    id: 'wc-country-risk-deck-layer',
-    data: COUNTRIES_GEOJSON,
-    pickable: true,
-    stroked: true,
-    filled: true,
-    autoHighlight: true,
-    getFillColor: (featureItem: any) => {
-      const iso2 = String(featureItem.properties?.['ISO3166-1-Alpha-2'] || '');
-      const risk = countryRiskByIso.get(iso2);
-      if (!risk) return [115, 216, 255, 1];
-      const [r, g, b] = hexToRgb(riskColor(risk.level));
-      return [r, g, b, Math.round(riskOpacity(risk.level) * 255)];
-    },
-    getLineColor: (featureItem: any) => {
-      const iso2 = String(featureItem.properties?.['ISO3166-1-Alpha-2'] || '');
-      const risk = countryRiskByIso.get(iso2);
-      if (!risk) return [255, 255, 255, 8];
-      const [r, g, b] = hexToRgb(riskColor(risk.level));
-      return [r, g, b, risk.level === 'quiet' ? 44 : 150];
-    },
-    getLineWidth: (featureItem: any) => {
-      const iso2 = String(featureItem.properties?.['ISO3166-1-Alpha-2'] || '');
-      return countryRiskByIso.has(iso2) ? 1.25 : 0.4;
-    },
-    lineWidthMinPixels: 0.5,
-    lineWidthMaxPixels: 2.4,
-    highlightColor: [75, 210, 255, 58],
-    updateTriggers: {
-      getFillColor: [conflicts.length, pulsePhase],
-      getLineColor: [conflicts.length],
-      getLineWidth: [conflicts.length],
-    },
-  }));
 
   if (enabledLayers.conflicts) {
     layers.push(new ScatterplotLayer<ConflictSignal>({
       id: 'wc-ucdp-conflict-ring-layer',
-      data: conflicts.filter((signal) => signal.deaths >= 20).slice(0, 320),
+      data: conflicts.filter((signal) => signal.deaths >= 20).slice(0, enabledLayers.globalRisk ? 320 : 120),
       getPosition: (d) => [d.lon, d.lat],
-      getRadius: (d) => 17000 + Math.min(120000, Math.log10(d.deaths + 1) * 31000) + pulsePhase * 16000,
-      getFillColor: (d) => [d.color[0], d.color[1], d.color[2], Math.max(18, 62 - Math.round(pulsePhase * 32))],
-      getLineColor: (d) => d.color,
+      getRadius: (d) => 15000 + Math.min(96000, Math.log10(d.deaths + 1) * 25000),
+      getFillColor: (d) => [d.color[0], d.color[1], d.color[2], 34],
+      getLineColor: (d) => [d.color[0], d.color[1], d.color[2], 90],
       radiusMinPixels: 8,
-      radiusMaxPixels: 34,
+      radiusMaxPixels: 26,
       lineWidthMinPixels: 1,
       stroked: true,
       pickable: false,
@@ -1179,11 +1329,11 @@ function buildDeckLayers(
       id: 'wc-ucdp-conflict-layer',
       data: conflicts,
       getPosition: (d) => [d.lon, d.lat],
-      getRadius: (d) => 6000 + Math.min(64000, Math.log10(d.deaths + 1) * 15000) + pulsePhase * 2800,
-      getFillColor: (d) => d.color,
-      getLineColor: [255, 245, 190, 214],
+      getRadius: (d) => 5600 + Math.min(54000, Math.log10(d.deaths + 1) * 12500),
+      getFillColor: (d) => [d.color[0], d.color[1], d.color[2], Math.min(d.color[3], enabledLayers.globalRisk ? 150 : 118)],
+      getLineColor: [255, 245, 190, 130],
       radiusMinPixels: 3,
-      radiusMaxPixels: 18,
+      radiusMaxPixels: enabledLayers.globalRisk ? 16 : 12,
       lineWidthMinPixels: 0.75,
       stroked: true,
       pickable: true,
@@ -1286,19 +1436,6 @@ function buildDeckLayers(
 
   if (enabledLayers.cities) {
     layers.push(new ScatterplotLayer<CitySignal>({
-      id: 'wc-next-host-city-pulse-layer',
-      data: citySignals.filter((signal) => signal.next),
-      getPosition: (d) => [d.city.longitude, d.city.latitude],
-      getRadius: 62000,
-      getFillColor: COLORS.nextOuter,
-      getLineColor: [255, 96, 54, 96],
-      radiusMinPixels: 18,
-      radiusMaxPixels: 38,
-      lineWidthMinPixels: 1.5,
-      stroked: true,
-      pickable: false,
-    }));
-    layers.push(new ScatterplotLayer<CitySignal>({
       id: 'wc-host-city-halo-layer',
       data: citySignals.filter((signal) => signal.selected || signal.next || signal.important),
       getPosition: (d) => [d.city.longitude, d.city.latitude],
@@ -1330,17 +1467,17 @@ function buildDeckLayers(
     }));
     layers.push(new TextLayer<CitySignal>({
       id: 'wc-host-city-label-layer',
-      data: citySignals.filter((signal) => signal.selected || signal.next || signal.important || showDenseLabels),
+      data: visibleCityLabels(citySignals, zoom),
       getPosition: (d) => [d.city.longitude, d.city.latitude],
-      getText: (d) => `${compactCityName(d.city.city)}\n${d.next ? `NEXT - M#${d.nextMatch?.fifaMatchNumber || 1}` : cityRoleShort(d)}\n${d.plannedMatchCount} matches`,
-      getSize: (d) => d.selected || d.next ? 14 : d.important ? 11.5 : 10,
+      getText: (d) => hostCityLabel(d, zoom),
+      getSize: (d) => d.selected || d.next ? 13 : d.important ? 10.8 : 9.6,
       getColor: (d) => d.next ? [255, 235, 188, 246] : d.selected ? [225, 250, 255, 244] : [230, 234, 234, 205],
       getTextAnchor: 'start',
       getAlignmentBaseline: 'center',
-      getPixelOffset: [14, 4],
+      getPixelOffset: (d) => CITY_LABEL_OFFSETS[d.city.id] || [14, 4],
       fontFamily: '"SF Mono", "Monaco", "Cascadia Code", "Fira Code", "DejaVu Sans Mono", "Liberation Mono", monospace',
       fontWeight: 900,
-      lineHeight: 0.92,
+      lineHeight: 0.96,
       background: false,
       pickable: false,
     }));
@@ -1495,53 +1632,87 @@ function LayerPanel({
   ];
   const layerGroups: Array<{
     title: string;
+    defaultOpen: boolean;
     rows: Array<{
       key?: WorldCupLayerKey;
       icon: string;
       label: string;
       status: string;
       disabled?: boolean;
+      sourcePending?: boolean;
+      help?: string;
       tone: 'core' | 'match' | 'weather' | 'market' | 'risk' | 'ops';
     }>;
   }> = [
     {
       title: 'Core',
+      defaultOpen: true,
       rows: [
         { key: 'cities', icon: '⚽', label: 'Host Cities', status: '16', tone: 'core' },
         { key: 'schedule', icon: '🗓️', label: 'Match Schedule', status: '104', tone: 'match' },
-        { icon: '🏟️', label: 'Venues', status: 'Active', disabled: true, tone: 'core' },
-      ],
-    },
-    {
-      title: 'Risk',
-      rows: [
-        { key: 'conflicts', icon: '!', label: 'UCDP Conflicts', status: 'Live', tone: 'risk' },
         { key: 'weather', icon: '🌦️', label: 'Weather Risk', status: 'Forecast', tone: 'weather' },
-        { key: 'transit', icon: '✈️', label: 'Airport / Transit', status: 'Ops', tone: 'ops' },
-        { key: 'teams', icon: '🏨', label: 'Team Bases', status: 'Squads', tone: 'core' },
       ],
     },
     {
       title: 'Markets',
+      defaultOpen: false,
       rows: [
-        { key: 'markets', icon: '🎯', label: 'Polymarket Markets', status: 'Markets', tone: 'market' },
-        { key: 'odds', icon: '💵', label: 'Sportsbook Odds', status: 'Odds', tone: 'market' },
-        { icon: '💧', label: 'Liquidity', status: 'Volume', disabled: true, tone: 'market' },
+        { key: 'markets', icon: '🎯', label: 'Polymarket Markets', status: 'Market-linked', tone: 'market' },
+        { key: 'odds', icon: '💵', label: 'Sportsbook Odds', status: 'Source optional', tone: 'market' },
+      ],
+    },
+    {
+      title: 'Risk',
+      defaultOpen: false,
+      rows: [
+        { key: 'conflicts', icon: '!', label: 'UCDP Conflicts', status: enabledLayers.globalRisk ? 'Global' : 'Host region', tone: 'risk' },
+        { key: 'countryRisk', icon: '▧', label: 'Country Risk', status: enabledLayers.globalRisk ? 'Global' : 'Host region', tone: 'risk' },
+        { key: 'globalRisk', icon: '◎', label: 'Global Risk Scope', status: enabledLayers.globalRisk ? 'On' : 'Off', tone: 'risk' },
       ],
     },
     {
       title: 'Operations',
+      defaultOpen: false,
       rows: [
-        { icon: '🕘', label: 'Broadcast Time', status: 'BJT', tone: 'ops' },
-        { icon: '🛠️', label: 'Local Ops', status: 'Ops', tone: 'ops' },
+        { icon: '🏟️', label: 'Venues', status: 'Source-backed', disabled: true, tone: 'core' },
+        {
+          key: 'transit',
+          icon: '✈️',
+          label: 'Airport / Transit',
+          status: 'Source required',
+          sourcePending: true,
+          tone: 'ops',
+          help: 'This layer needs source-backed coordinates before it should be used for analysis.',
+        },
+        {
+          key: 'teams',
+          icon: '🏨',
+          label: 'Team Bases',
+          status: 'Source required',
+          sourcePending: true,
+          tone: 'ops',
+          help: 'This layer needs source-backed coordinates before it should be used for analysis.',
+        },
       ],
     },
   ];
-  const layerRows = layerGroups.flatMap((group) => group.rows.map((row) => ({ ...row, group: group.title })));
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(WORLD_CUP_LAYER_PANEL_COLLAPSED_STORAGE_KEY) === '1';
+  });
+  const toggleCollapsed = () => {
+    setCollapsed((current) => {
+      const next = !current;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(WORLD_CUP_LAYER_PANEL_COLLAPSED_STORAGE_KEY, next ? '1' : '0');
+      }
+      return next;
+    });
+  };
 
   return (
     <aside
-      className="wm-worldcup-map-layer-panel deckgl-layer-toggles"
+      className={`wm-worldcup-map-layer-panel deckgl-layer-toggles ${collapsed ? 'collapsed' : ''}`}
       data-active-mode={activeMode}
       data-time-filter={timeFilter}
       data-summary={summary}
@@ -1549,9 +1720,11 @@ function LayerPanel({
       <div className="wm-worldcup-map-layer-head toggle-header">
         <span>LAYERS</span>
         <button type="button" className="layer-help-btn" aria-label="Layer help">?</button>
-        <button type="button" className="toggle-collapse" aria-label="Collapse layers">▼</button>
+        <button type="button" className="toggle-collapse" aria-label={collapsed ? 'Expand layers' : 'Collapse layers'} onClick={toggleCollapsed}>
+          {collapsed ? '▶' : '▼'}
+        </button>
       </div>
-      <input className="layer-search" aria-label="Search World Cup map layers" placeholder="Search layers..." />
+      {!collapsed ? <input className="layer-search" aria-label="Search World Cup map layers" placeholder="Search layers..." /> : null}
       <div className="wm-worldcup-map-hidden-presets" hidden aria-hidden="true">
         {modes.map(([mode, label]) => (
           <button type="button" className={activeMode === mode ? 'active' : ''} key={mode} onClick={() => onModeChange(mode)}>
@@ -1565,39 +1738,48 @@ function LayerPanel({
         ))}
       </div>
       <div className="wm-worldcup-map-layer-list toggle-list">
-        {layerRows.map((row) => {
-          const active = row.key ? enabledLayers[row.key] : false;
-          const layerKey = row.key || row.label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-          return (
-            <label
-              className={`wm-worldcup-map-layer-row layer-toggle ${active ? 'active has-data' : ''} ${row.disabled ? 'disabled layer-toggle-locked' : ''}`}
-              data-layer-key={layerKey}
-              data-layer-tone={row.tone}
-              data-layer-group={row.group}
-              key={`${row.group}-${row.label}`}
-            >
-              <input
-                type="checkbox"
-                checked={active}
-                disabled={row.disabled || !row.key}
-                onChange={() => row.key && !row.disabled ? onToggle(row.key) : undefined}
-              />
-              <span className="toggle-icon">{row.icon}</span>
-              <span className="toggle-label">{row.label}</span>
-            </label>
-          );
-        })}
+        {layerGroups.map((group) => (
+          <details className="wm-worldcup-map-layer-group" open={!collapsed && group.defaultOpen} key={group.title}>
+            <summary>{group.title}</summary>
+            {group.rows.map((row) => {
+              const active = row.key ? enabledLayers[row.key] : false;
+              const layerKey = row.key || row.label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+              return (
+                <label
+                  className={`wm-worldcup-map-layer-row layer-toggle ${active ? 'active has-data' : ''} ${row.disabled ? 'disabled layer-toggle-locked' : ''} ${row.sourcePending ? 'source-pending' : ''}`}
+                  data-layer-key={layerKey}
+                  data-layer-tone={row.tone}
+                  data-layer-group={group.title}
+                  title={row.help || row.status}
+                  key={`${group.title}-${row.label}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    disabled={row.disabled || !row.key}
+                    onChange={() => row.key && !row.disabled ? onToggle(row.key) : undefined}
+                  />
+                  <span className="toggle-icon">{row.icon}</span>
+                  <span className="toggle-label">{row.label}</span>
+                  {!collapsed ? <span className="toggle-status">{row.status}</span> : null}
+                </label>
+              );
+            })}
+          </details>
+        ))}
       </div>
-      <footer className="map-author-badge">© PolyMonitor · WorldCup™</footer>
+      {!collapsed ? <footer className="map-author-badge">© PolyMonitor · WorldCup™</footer> : null}
     </aside>
   );
 }
 
-function MapControls({ map }: { map: MapLibreMap | null }) {
+function MapControls({ map, onPreset }: { map: MapLibreMap | null; onPreset: (preset: WorldCupViewportPreset) => void }) {
   return (
     <div className="wm-worldcup-map-controls">
       <button type="button" onClick={() => map?.zoomIn()} aria-label="Zoom in">+</button>
       <button type="button" onClick={() => map?.zoomOut()} aria-label="Zoom out">−</button>
+      <button type="button" onClick={() => onPreset('north-america')} aria-label="North America hosts">NA</button>
+      <button type="button" onClick={() => onPreset('next')} aria-label="Zoom to next match">NX</button>
       <button type="button" onClick={() => map?.easeTo({ center: WORLDCUP_ATLAS_CENTER, zoom: WORLDCUP_ATLAS_ZOOM, pitch: 0, bearing: 0 })} aria-label="Reset view">⌂</button>
     </div>
   );
@@ -1621,10 +1803,11 @@ export function WorldCupMap({
   const mapRef = useRef<MapLibreMap | null>(null);
   const deckOverlayRef = useRef<MapboxOverlay | null>(null);
   const pulseRafRef = useRef<number | null>(null);
-  const riskPulseTimerRef = useRef<number | null>(null);
+  const nextPulseRafRef = useRef<number | null>(null);
   const styleTimeoutRef = useRef<number | null>(null);
   const explicitSelectedCityRef = useRef<string | null>(null);
   const fallbackAppliedRef = useRef(false);
+  const initialViewportAppliedRef = useRef(false);
   const dataRef = useRef({ cities, matches, weather, conflicts, nextMatch, selectedCityId, selectedMatchId });
   const countryRisksRef = useRef<CountryConflictRisk[]>([]);
   const countryRiskByIsoRef = useRef<Map<string, CountryConflictRisk>>(new Map());
@@ -1638,7 +1821,7 @@ export function WorldCupMap({
   const [mapReady, setMapReady] = useState(false);
   const [mapDegraded, setMapDegraded] = useState(false);
   const [regionHover, setRegionHover] = useState<MapRegionHover | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [selectedRiskIntel, setSelectedRiskIntel] = useState<SelectedRiskIntel | null>(null);
 
   const weatherByCity = useMemo(() => {
@@ -1654,6 +1837,8 @@ export function WorldCupMap({
   const conflictSignals = useMemo(() => buildConflictSignals(conflicts), [conflicts]);
   const countryRisks = useMemo(() => buildCountryConflictRisks(conflictSignals), [conflictSignals]);
   const countryRiskByIso = useMemo(() => new Map(countryRisks.map((risk) => [risk.iso2, risk])), [countryRisks]);
+  const visibleConflictSignals = useMemo(() => visibleConflictsForLayers(conflictSignals, enabledLayers), [conflictSignals, enabledLayers]);
+  const visibleCountryRisks = useMemo(() => visibleCountryRisksForLayers(countryRisks, enabledLayers), [countryRisks, enabledLayers]);
   const filteredMatches = useMemo(() => filterMatchesForTime(matches, nextMatch, timeFilter), [matches, nextMatch, timeFilter]);
   const visibleCitySignals = useMemo(
     () => visibleCitySignalsForFilter(citySignals, filteredMatches, timeFilter),
@@ -1684,8 +1869,13 @@ export function WorldCupMap({
   const mapSummary = useMemo(() => {
     const enabledCount = Object.values(enabledLayers).filter(Boolean).length;
     const visibleMatches = timeFilter === 'all' ? matches.length : filteredMatches.length;
-    return `Showing ${visibleCitySignals.length} cities · ${visibleMatches} matches · ${conflicts.length} conflicts · ${enabledCount} layers · ${timeFilter.toUpperCase()}`;
-  }, [conflicts.length, enabledLayers, filteredMatches.length, matches.length, timeFilter, visibleCitySignals.length]);
+    const riskScope = enabledLayers.globalRisk ? 'GLOBAL RISK' : 'HOST REGION';
+    return `Showing ${visibleCitySignals.length} cities · ${visibleMatches} matches · ${visibleConflictSignals.length} ${riskScope} conflicts · ${enabledCount} layers · ${timeFilter.toUpperCase()}`;
+  }, [enabledLayers, filteredMatches.length, matches.length, timeFilter, visibleCitySignals.length, visibleConflictSignals.length]);
+
+  const applyCountryRiskPaintForLayers = (layers = enabledLayersRef.current) => {
+    updateCountryRiskPaint(mapRef.current, visibleCountryRisksForLayers(countryRisksRef.current, layers));
+  };
 
   const updateDeckLayers = () => {
     const map = mapRef.current;
@@ -1708,13 +1898,44 @@ export function WorldCupMap({
       layers: buildDeckLayers(
         currentVisibleCitySignals,
         buildDeckSignals(currentVisibleCitySignals, currentFilteredMatches),
-        buildConflictSignals(current.conflicts),
+        visibleConflictsForLayers(buildConflictSignals(current.conflicts), enabledLayersRef.current),
         enabledLayersRef.current,
         map.getZoom(),
-        (Math.sin(performance.now() / 680) + 1) / 2,
-        countryRiskByIsoRef.current,
       ),
     });
+  };
+
+  const focusViewport = (preset: WorldCupViewportPreset) => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (preset === 'global-risk') {
+      map.easeTo({ center: [18, 22], zoom: 1.72, duration: 420, bearing: 0, pitch: 0 });
+      return;
+    }
+    const current = dataRef.current;
+    const nextCity = current.nextMatch ? current.cities.find((city) => city.id === current.nextMatch?.cityId) : null;
+    if (preset === 'next' && nextCity) {
+      map.easeTo({ center: [nextCity.longitude, nextCity.latitude], zoom: Math.max(map.getZoom(), 4.05), duration: 420, offset: [-180, 0] });
+      return;
+    }
+    const countries: Record<WorldCupViewportPreset, string[]> = {
+      'north-america': ['US', 'CA', 'MX'],
+      usa: ['US'],
+      mexico: ['MX'],
+      canada: ['CA'],
+      next: [],
+      'global-risk': [],
+    };
+    const selected = current.cities.filter((city) => countries[preset]?.includes(city.country));
+    if (!selected.length) {
+      map.fitBounds(NORTH_AMERICA_BOUNDS, { padding: { top: 64, right: 96, bottom: 58, left: 310 }, duration: 420 });
+      return;
+    }
+    const bounds = selected.reduce((next, city) => next.extend([city.longitude, city.latitude]), new maplibregl.LngLatBounds(
+      [selected[0]!.longitude, selected[0]!.latitude],
+      [selected[0]!.longitude, selected[0]!.latitude],
+    ));
+    map.fitBounds(bounds, { padding: { top: 86, right: 110, bottom: 78, left: 290 }, maxZoom: preset === 'north-america' ? 3.25 : 4.45, duration: 420 });
   };
 
   const highlightCountry = (iso2: string | null) => {
@@ -1773,7 +1994,15 @@ export function WorldCupMap({
     if (key !== 'cities') setInspectorOpen(true);
     setEnabledLayers((current) => {
       const next = { ...current, [key]: !current[key] };
+      if (key === 'globalRisk' && !current.globalRisk) {
+        next.countryRisk = true;
+        next.conflicts = true;
+      }
+      if (key === 'countryRisk' && current.countryRisk) {
+        next.globalRisk = false;
+      }
       enabledLayersRef.current = next;
+      applyCountryRiskPaintForLayers(next);
       window.requestAnimationFrame(updateDeckLayers);
       return next;
     });
@@ -1784,6 +2013,7 @@ export function WorldCupMap({
     const next = MODE_LAYER_PRESETS[mode];
     enabledLayersRef.current = next;
     setEnabledLayers(next);
+    applyCountryRiskPaintForLayers(next);
     setActiveDetailTab(mode === 'weather' || mode === 'risk' ? 'weather' : mode === 'market' ? 'markets' : mode === 'travel' ? 'venue' : 'matches');
     setInspectorOpen(true);
     window.requestAnimationFrame(updateDeckLayers);
@@ -1811,14 +2041,14 @@ export function WorldCupMap({
   useEffect(() => {
     countryRisksRef.current = countryRisks;
     countryRiskByIsoRef.current = countryRiskByIso;
-    updateCountryRiskPaint(mapRef.current, countryRisks);
+    updateCountryRiskPaint(mapRef.current, visibleCountryRisks);
     if (selectedRiskIntel?.kind === 'country') {
       const refreshed = countryRiskByIso.get(selectedRiskIntel.risk.iso2);
       if (refreshed && refreshed !== selectedRiskIntel.risk) {
         setSelectedRiskIntel({ kind: 'country', risk: refreshed });
       }
     }
-  }, [countryRiskByIso, countryRisks, selectedRiskIntel]);
+  }, [countryRiskByIso, countryRisks, selectedRiskIntel, visibleCountryRisks]);
 
   useEffect(() => {
     onCountrySelectRef.current = (risk: CountryConflictRisk) => {
@@ -1830,6 +2060,7 @@ export function WorldCupMap({
 
   useEffect(() => {
     dataRef.current = { cities, matches, weather, conflicts, nextMatch, selectedCityId, selectedMatchId };
+    updateNextMatchPulseSource(mapRef.current, cities, nextMatch);
     updateDeckLayers();
     const signal = getActiveSignal(
       buildCitySignals(cities, matches, weatherByCity, nextMatch, selectedMatchId, explicitSelectedCityRef.current),
@@ -1839,7 +2070,7 @@ export function WorldCupMap({
       nextMatch,
     );
     highlightCountry(signal ? selectedCountryCode(cities, matches, selectedCityId, selectedMatchId, nextMatch, explicitSelectedCityRef.current) : null);
-  }, [cities, conflicts, matches, weather, nextMatch, selectedCityId, selectedMatchId, weatherByCity]);
+  }, [cities, conflicts, matches, weather, nextMatch, selectedCityId, selectedMatchId, weatherByCity, enabledLayers]);
 
   useEffect(() => {
     const host = mapHostRef.current;
@@ -1927,10 +2158,17 @@ export function WorldCupMap({
       setMapReady(true);
       localizeBasemapLabels(map);
       applyWorldMonitorMapPaint(map);
-      ensureCountryRiskLayers(map, countryRisksRef.current);
+      ensureCountryRiskLayers(map, visibleCountryRisksForLayers(countryRisksRef.current, enabledLayersRef.current));
+      ensureNextMatchPulseLayer(map, dataRef.current.cities, dataRef.current.nextMatch);
+      startNextMatchPulse(map, nextPulseRafRef);
+      if (!initialViewportAppliedRef.current) {
+        initialViewportAppliedRef.current = true;
+        map.fitBounds(NORTH_AMERICA_BOUNDS, { padding: { top: 72, right: 120, bottom: 66, left: 320 }, duration: 0, maxZoom: 3.18 });
+      }
       loadMapSupportLayers(map, setRegionHover, countryRisksRef.current, countryRiskByIsoRef, onCountrySelectRef)
         .then(() => {
-          updateCountryRiskPaint(map, countryRisksRef.current);
+          updateCountryRiskPaint(map, visibleCountryRisksForLayers(countryRisksRef.current, enabledLayersRef.current));
+          ensureNextMatchPulseLayer(map, dataRef.current.cities, dataRef.current.nextMatch);
           highlightCountry(selectedCountryCode(
             dataRef.current.cities,
             dataRef.current.matches,
@@ -1952,6 +2190,10 @@ export function WorldCupMap({
       if (pulseRafRef.current) {
         cancelAnimationFrame(pulseRafRef.current);
         pulseRafRef.current = null;
+      }
+      if (nextPulseRafRef.current) {
+        cancelAnimationFrame(nextPulseRafRef.current);
+        nextPulseRafRef.current = null;
       }
       map.setStyle(WORLDCUP_REMOTE_FALLBACK_STYLE_URL, { diff: false });
       map.once('style.load', loadSupport);
@@ -1978,13 +2220,11 @@ export function WorldCupMap({
     map.on('load', loadSupport);
     map.on('style.load', loadSupport);
     map.on('idle', onIdle);
-    map.on('move', updateDeckLayers);
-    map.on('zoom', updateDeckLayers);
+    map.on('moveend', updateDeckLayers);
+    map.on('zoomend', updateDeckLayers);
     map.on('resize', updateDeckLayers);
     map.on('error', onError);
     map.on('data', onData);
-
-    riskPulseTimerRef.current = window.setInterval(updateDeckLayers, 900);
 
     styleTimeoutRef.current = window.setTimeout(() => {
       if (!tileLoadOk) switchToLocalFallback();
@@ -2001,7 +2241,7 @@ export function WorldCupMap({
     return () => {
       if (styleTimeoutRef.current) window.clearTimeout(styleTimeoutRef.current);
       if (pulseRafRef.current) cancelAnimationFrame(pulseRafRef.current);
-      if (riskPulseTimerRef.current) window.clearInterval(riskPulseTimerRef.current);
+      if (nextPulseRafRef.current) cancelAnimationFrame(nextPulseRafRef.current);
       resizeObserver.disconnect();
       setRegionHover(null);
       deckOverlayRef.current?.finalize();
@@ -2049,7 +2289,7 @@ export function WorldCupMap({
       {activeSignal ? (
         <aside className={`wm-worldcup-map-inspector ${inspectorOpen ? 'open' : 'collapsed'}`}>
           <div className="wm-worldcup-map-inspector-head">
-            <span>{activeSignal.next ? 'NEXT MATCH CITY' : 'CITY INTELLIGENCE'}</span>
+            <span>{activeSignal.next ? 'NEXT MATCH' : 'CITY INTELLIGENCE'}</span>
             <button type="button" onClick={() => setInspectorOpen((value) => !value)} aria-label="Toggle city inspector">
               {inspectorOpen ? '−' : '+'}
             </button>
@@ -2058,6 +2298,11 @@ export function WorldCupMap({
             <span>{cityRole(activeSignal)}</span>
             <strong>{activeSignal.city.city}</strong>
             <em>{activeSignal.city.venue} · {activeSignal.city.countryName} · {activeSignal.plannedMatchCount} matches</em>
+            {activeSignal.next ? (
+              <button type="button" className="wm-worldcup-map-zoom-city" onClick={() => focusViewport('next')}>
+                Zoom to city
+              </button>
+            ) : null}
             <div className={`wm-worldcup-map-risk-score ${activeRisk?.level.toLowerCase() || 'low'}`}>
               <b>Risk {activeRisk?.level || 'LOW'}</b>
               <small>{activeRisk?.score || 0}/100</small>
@@ -2069,6 +2314,12 @@ export function WorldCupMap({
                 <span>{nextCityMatch.id === nextMatch?.id ? 'NEXT MATCH' : 'NEXT CITY MATCH'}</span>
                 <strong>{matchTitle(nextCityMatch)}</strong>
                 <em>M#{nextCityMatch.fifaMatchNumber || '--'} · {shortKickoff(nextCityMatch)} local · {shortBeijingKickoff(nextCityMatch)} BJT</em>
+                <div className="wm-worldcup-map-next-match-meta">
+                  <span><small>City</small><b>{activeSignal.city.city}</b></span>
+                  <span><small>Venue</small><b>{activeSignal.city.venue}</b></span>
+                  <span><small>UTC kickoff</small><b>{formatKickoffUtcShort(nextCityMatch)}</b></span>
+                  <span><small>Markets</small><b>{activeSignal.marketCount || activeMarkets.length}</b></span>
+                </div>
                 {activeOdds.length ? (
                   <div className="wm-worldcup-map-odds-strip">
                     {activeOdds[0]?.outcomes.slice(0, 3).map((odd) => (
@@ -2267,17 +2518,17 @@ export function WorldCupMap({
           </div>
         </aside>
       ) : null}
-      <MapControls map={mapRef.current} />
+      <MapControls map={mapRef.current} onPreset={focusViewport} />
       <div className="wm-worldcup-maplibre-legend">
-        <span>LEGEND</span>
-        <b className="admin" /> <em>Admin lines</em>
-        <b className="host" /> <em>Host city</em>
-        <b className="next" /> <em>Next match</em>
-        <b className="selected" /> <em>Selected</em>
-        <b className="weather" /> <em>Weather</em>
-        <b className="market" /> <em>Markets</em>
-        <b className="risk" /> <em>Risk</em>
-        <b className="unavailable" /> <em>Unavailable</em>
+        <span>WORLD CUP LEGEND</span>
+        {enabledLayers.schedule ? <><b className="admin" /> <em>Match path</em></> : null}
+        {enabledLayers.cities ? <><b className="host" /> <em>Host city</em></> : null}
+        {enabledLayers.cities ? <><b className="next" /> <em>Next match</em></> : null}
+        {selectedCityId ? <><b className="selected" /> <em>Selected city</em></> : null}
+        {enabledLayers.weather ? <><b className="weather" /> <em>Weather risk</em></> : null}
+        {enabledLayers.markets || enabledLayers.odds ? <><b className="market" /> <em>Market-linked</em></> : null}
+        {enabledLayers.conflicts || enabledLayers.countryRisk ? <><b className="risk" /> <em>{enabledLayers.globalRisk ? 'Global conflict risk' : 'Host-region conflict risk'}</em></> : null}
+        {enabledLayers.transit || enabledLayers.teams ? <><b className="unavailable" /> <em>Source pending</em></> : null}
       </div>
       <div className="wm-worldcup-maplibre-status">{mapDegraded ? 'WEBGL FALLBACK' : 'WEBGL'}</div>
     </div>
