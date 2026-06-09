@@ -297,6 +297,26 @@ export function StrategyTesterPanel({
       warnings,
     };
   }, [rowCount, strategyParameters]);
+  const executionAssumptionRows = useMemo(() => {
+    const base = strategyParameters;
+    const scenarios = [
+      { key: 'current', label: 'Current', feeBps: base.feeBps, slippageBps: base.slippageBps, liquidityCapPct: base.liquidityCapPct },
+      { key: 'live', label: 'Live CLOB', feeBps: Math.max(base.feeBps, 0), slippageBps: Math.max(base.slippageBps, 2), liquidityCapPct: Math.min(base.liquidityCapPct, 25) },
+      { key: 'stress', label: 'Stress', feeBps: Math.max(base.feeBps, 5), slippageBps: Math.max(base.slippageBps, 10), liquidityCapPct: Math.min(base.liquidityCapPct, 10) },
+      { key: 'zero', label: 'Zero cost', feeBps: 0, slippageBps: 0, liquidityCapPct: 100 },
+    ];
+    return scenarios.map((scenario) => {
+      const roundTripBps = (scenario.feeBps * 2) + (scenario.slippageBps * 2);
+      const costUsdc = strategyParameters.positionSize * (roundTripBps / 10000);
+      const capacityUsdc = strategyParameters.positionSize * (scenario.liquidityCapPct / 100);
+      return {
+        ...scenario,
+        capacityUsdc,
+        costUsdc,
+        roundTripBps,
+      };
+    });
+  }, [strategyParameters]);
   const copied = (message: string) => {
     setCopyNotice(message);
     window.setTimeout(() => setCopyNotice(''), 1800);
@@ -331,6 +351,17 @@ export function StrategyTesterPanel({
       ...strategyParameters,
       [key]: key === 'maxHoldingBars' ? Math.round(numeric) : numeric,
     });
+  };
+  const applyExecutionAssumption = (key: string) => {
+    const scenario = executionAssumptionRows.find((row) => row.key === key);
+    if (!scenario) return;
+    onStrategyParametersChange({
+      ...strategyParameters,
+      feeBps: scenario.feeBps,
+      slippageBps: scenario.slippageBps,
+      liquidityCapPct: scenario.liquidityCapPct,
+    });
+    copied(`Applied ${scenario.label} execution`);
   };
   const applyRunParameters = (run: QuantBacktestRun) => {
     const next = strategyParametersFromRun(run, strategyParameters);
@@ -793,6 +824,21 @@ export function StrategyTesterPanel({
                 {parameterDiagnostics.warnings.map((warning) => <span key={warning}>{warning}</span>)}
               </div>
             ) : null}
+            <div className="qtv-execution-assumption-grid" aria-label="Execution assumption scenarios">
+              {executionAssumptionRows.map((scenario) => (
+                <button
+                  key={scenario.key}
+                  className={scenario.key === 'current' ? 'active' : ''}
+                  type="button"
+                  onClick={() => applyExecutionAssumption(scenario.key)}
+                >
+                  <span>{scenario.label}</span>
+                  <strong>{formatNumber(scenario.roundTripBps, 2)} bps</strong>
+                  <em>{formatNumber(scenario.costUsdc, 2)} USDC cost · {formatNumber(scenario.capacityUsdc, 0)} cap</em>
+                  <small>{scenario.feeBps} fee / {scenario.slippageBps} slip / {scenario.liquidityCapPct}% liq</small>
+                </button>
+              ))}
+            </div>
             <div className="qtv-parameter-grid">
               <label><span>Entry threshold</span><input type="number" min="0.001" max="0.999" step="0.001" value={strategyParameters.entryThreshold} onInput={(event) => updateParameter('entryThreshold', event.currentTarget.value)} /></label>
               <label><span>Exit threshold</span><input type="number" min="0.001" max="0.999" step="0.001" value={strategyParameters.exitThreshold} onInput={(event) => updateParameter('exitThreshold', event.currentTarget.value)} /></label>

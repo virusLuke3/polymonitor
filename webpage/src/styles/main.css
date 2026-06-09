@@ -5533,6 +5533,64 @@
   padding: 7px 9px;
 }
 
+.qtv-execution-assumption-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.qtv-execution-assumption-grid button {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  min-height: 92px;
+  border: 1px solid #263244;
+  border-radius: 5px;
+  background: #0b111c;
+  color: #dbeafe;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  padding: 10px;
+  text-align: left;
+}
+
+.qtv-execution-assumption-grid button:hover,
+.qtv-execution-assumption-grid button.active {
+  border-color: rgba(47, 125, 244, 0.62);
+  background: linear-gradient(180deg, rgba(47, 125, 244, 0.13), rgba(11, 17, 28, 0.96));
+}
+
+.qtv-execution-assumption-grid span,
+.qtv-execution-assumption-grid strong,
+.qtv-execution-assumption-grid em,
+.qtv-execution-assumption-grid small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-execution-assumption-grid span {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.qtv-execution-assumption-grid strong {
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.qtv-execution-assumption-grid em,
+.qtv-execution-assumption-grid small {
+  color: #7f8a9d;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 850;
+}
+
 .qtv-parameter-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(150px, 1fr));
