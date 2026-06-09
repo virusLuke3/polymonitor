@@ -6,6 +6,7 @@ import type {
   QuantBlockClosePoint,
   QuantFrontendPricePoint,
   QuantMarketSeriesPayload,
+  QuantMarketSeriesPoint,
 } from '@/types';
 import type { BacktestMetric, BacktestResult, EquityPoint, PerformanceRow, PricePoint, PriceSource, PropertyGroup, Trade } from '../types';
 import { deriveEventOutcomeLabel, toNumber } from './formatters';
@@ -33,7 +34,28 @@ export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | 
   if (!payload) return [];
   const source = payload.event?.source || payload.market?.source || 'quant_market_series';
   const eventTitle = payload.event?.eventTitle || payload.market?.marketTitle || '';
-  return (payload.outcomes || []).flatMap((outcome) => (
+  const rawOutcomes = payload.outcomes || [];
+  const canonicalKeys = new Set(
+    rawOutcomes
+      .filter((outcome) => String(outcome.buyYesTokenSide || outcome.tokenSide || '').toUpperCase() === 'YES')
+      .map((outcome) => `${outcome.marketId || outcome.marketSlug || outcome.outcomeKey || outcome.outcomeLabel}`),
+  );
+  const canonicalOutcomes = rawOutcomes.filter((outcome) => {
+    const side = String(outcome.buyYesTokenSide || outcome.tokenSide || '').toUpperCase();
+    const key = `${outcome.marketId || outcome.marketSlug || outcome.outcomeKey || outcome.outcomeLabel}`;
+    return side !== 'NO' || !canonicalKeys.has(key);
+  });
+
+  const canonicalYes = (point: QuantMarketSeriesPoint, fallbackSide?: string | null) => {
+    const direct = toNumber(point.yesProbabilityClose);
+    if (Number.isFinite(direct) && direct >= 0 && direct <= 1) return direct;
+    const raw = toNumber(point.price);
+    const side = String(point.tokenSide || fallbackSide || '').toUpperCase();
+    return side === 'NO' ? Math.max(0, Math.min(1, 1 - raw)) : raw;
+  };
+  const directTokenPrice = (point: QuantMarketSeriesPoint) => toNumber(point.price);
+
+  return canonicalOutcomes.flatMap((outcome) => (
     (() => {
       const fullLabel = outcome.marketTitle || outcome.outcomeLabel || outcome.marketSlug || 'Outcome';
       const shortLabel = deriveEventOutcomeLabel(eventTitle, fullLabel, outcome.outcomeLabel);
@@ -41,11 +63,11 @@ export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | 
       const complementByX = new Map<string, number>();
       (outcome.complementPoints || []).forEach((point) => {
         const x = String(point.x ?? point.blockNumber ?? point.timestamp ?? '');
-        if (x) complementByX.set(x, toNumber(point.price));
+        if (x) complementByX.set(x, directTokenPrice(point));
       });
       const yesRows = (outcome.points || []).map((point) => {
         const x = String(point.x ?? point.blockNumber ?? point.timestamp ?? '');
-        const yesPrice = toNumber(point.price);
+        const yesPrice = canonicalYes(point, outcome.buyYesTokenSide || outcome.tokenSide);
         const directNo = complementByX.get(x);
         const hasDirectNo = typeof directNo === 'number' && Number.isFinite(directNo);
         const noPrice = hasDirectNo ? directNo : Math.max(0, Math.min(1, 1 - yesPrice));
@@ -69,7 +91,7 @@ export function marketSeriesToPrices(payload: QuantMarketSeriesPayload | null | 
       const noRows = (outcome.complementPoints || [])
         .filter((point) => !point.isImplied)
         .map((point) => {
-          const noPrice = toNumber(point.price);
+          const noPrice = directTokenPrice(point);
           return {
             timestamp: Number(point.x ?? point.blockNumber ?? point.timestamp),
             close: noPrice,
