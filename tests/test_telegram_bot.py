@@ -549,3 +549,17 @@ def test_polydata_api_falls_back_to_next_base_url():
     assert payload["items"][0]["title"] == "Fallback market"
     assert api.session.calls[0][0] == "http://bad.local/wm-api/markets"
     assert api.session.calls[1][0] == "http://good.local/wm-api/markets"
+
+
+def test_worldcup_market_search_survives_local_market_timeout(monkeypatch):
+    api = PolyDataBotApi(base_url="http://bad.local/wm-api", timeout_seconds=1)
+    api.session = FakeApiSession()
+    monkeypatch.setattr(
+        api,
+        "gamma_search_markets",
+        lambda query, limit=8: {"items": [{"title": "Mexico vs South Africa - FIFA World Cup 2026 winner"}]},
+    )
+
+    payload = api.worldcup_market_search("mexico south africa", limit=2)
+
+    assert payload["items"][0]["title"] == "Mexico vs South Africa - FIFA World Cup 2026 winner"

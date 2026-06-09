@@ -104,7 +104,16 @@ class PolyDataBotApi:
         rows: list[Dict[str, Any]] = []
         seen: set[str] = set()
         for variant in variants:
-            for payload in (self.search_markets(variant, limit=limit), self.gamma_search_markets(variant, limit=limit)):
+            payloads: list[Dict[str, Any]] = []
+            try:
+                payloads.append(self.search_markets(variant, limit=limit))
+            except requests.RequestException:
+                pass
+            try:
+                payloads.append(self.gamma_search_markets(variant, limit=limit))
+            except requests.RequestException:
+                pass
+            for payload in payloads:
                 for item in payload.get("items") if isinstance(payload.get("items"), list) else []:
                     if not isinstance(item, dict):
                         continue
