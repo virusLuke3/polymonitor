@@ -779,6 +779,7 @@ def _serving_row_identity(row: Dict[str, Any]) -> str:
 
 
 def _serving_select_sql(where_sql: str, order_sql: str) -> str:
+    order_clause = f"ORDER BY {order_sql}" if str(order_sql or "").strip() else ""
     return f"""
         SELECT
           serving_key, group_id, event_id, event_slug, event_title, title, category, tags,
@@ -787,7 +788,7 @@ def _serving_select_sql(where_sql: str, order_sql: str) -> str:
           top_outcomes, outcomes, completion_status, is_trading_closed, active_rank, updated_at
         FROM event_market_serving
         WHERE {where_sql}
-        ORDER BY {order_sql}
+        {order_clause}
         LIMIT ? OFFSET ?
         """
 
@@ -1038,9 +1039,7 @@ def _serving_market_groups_payload(
         where.append("(title ILIKE ? OR COALESCE(event_slug, '') ILIKE ? OR COALESCE(category, '') ILIKE ? OR tags::text ILIKE ?)")
         params.extend([like, like, like, like])
     where_sql = " AND ".join(where)
-    active_order_sql = """
-        active_rank DESC NULLS LAST
-    """
+    active_order_sql = ""
     order_sql = {
         "active": active_order_sql,
         "new": "created_at DESC NULLS LAST, last_activity_at DESC NULLS LAST, volume_24h DESC",
@@ -1148,7 +1147,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 22}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 23}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
