@@ -213,6 +213,8 @@ def _market_text(row: Dict[str, Any]) -> str:
         row.get("slug"),
         row.get("eventSlug"),
         row.get("description"),
+        row.get("groupItemTitle"),
+        " ".join(str(value or "") for value in _safe_list(row.get("outcomes"))),
     ]
     return " ".join(str(value or "") for value in values).lower()
 
@@ -244,26 +246,119 @@ def _polymarket_url(row: Dict[str, Any]) -> str:
         value = str(row.get(key) or "").strip()
         if value.startswith("http"):
             return value
+    event_slug = str(row.get("eventSlug") or "").strip()
     slug = str(row.get("slug") or row.get("eventSlug") or "").strip()
+    if event_slug and slug and slug != event_slug:
+        return f"https://polymarket.com/event/{event_slug}/{slug}"
     if slug:
         return f"https://polymarket.com/event/{slug}"
     title = str(row.get("title") or row.get("question") or "").strip()
     return f"https://polymarket.com/search?query={quote_plus(title)}" if title else ""
 
 
+def _candidate_event_payload(item: Dict[str, Any], event: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if isinstance(event, dict) and event:
+        return event
+    events = item.get("events")
+    if isinstance(events, list):
+        for row in events:
+            if isinstance(row, dict):
+                return row
+    return {}
+
+
+def _market_is_inactive(row: Dict[str, Any]) -> bool:
+    if row.get("active") is False:
+        return True
+    if row.get("closed") is True or row.get("archived") is True:
+        return True
+    return False
+
+
+def _canonical_outcome_label(match: Dict[str, Any], label: Any, *, allow_yes_no: bool = False) -> str:
+    text = str(label or "").strip()
+    if not text:
+        return ""
+    lower = text.lower()
+    home = str(match.get("homeTeam") or "").strip()
+    away = str(match.get("awayTeam") or "").strip()
+    if lower in {"draw", "tie", "x"}:
+        return "Draw"
+    if allow_yes_no and lower == "yes":
+        return text
+    if allow_yes_no and lower == "no":
+        return text
+    home_tokens = _team_tokens(home)
+    away_tokens = _team_tokens(away)
+    label_tokens = set(_tokenize(text))
+    if lower == home.lower() or bool(home_tokens & label_tokens):
+        return home
+    if lower == away.lower() or bool(away_tokens & label_tokens):
+        return away
+    return text
+
+
+def _match_outcome_hint(match: Dict[str, Any], row: Dict[str, Any]) -> str:
+    candidates = [
+        row.get("groupItemTitle"),
+        row.get("outcome"),
+        row.get("name"),
+        row.get("title"),
+        row.get("question"),
+        row.get("marketTitle"),
+    ]
+    for value in candidates:
+        label = _canonical_outcome_label(match, value)
+        if label in {str(match.get("homeTeam") or ""), str(match.get("awayTeam") or ""), "Draw"}:
+            return label
+    return ""
+
+
+def _candidate_outcome_text(row: Dict[str, Any]) -> str:
+    values: List[Any] = [
+        row.get("groupItemTitle"),
+        row.get("outcome"),
+        row.get("name"),
+    ]
+    values.extend(_safe_list(row.get("outcomes")))
+    return " ".join(str(value or "") for value in values).lower()
+
+
 def _worldcup_market_reject_reason(match: Dict[str, Any], row: Dict[str, Any]) -> str:
+    if _market_is_inactive(row):
+        return "inactive"
     text = _market_text(row)
     primary_text = _market_primary_text(row)
+    event_match_text = " ".join(
+        str(row.get(key) or "") for key in ("title", "question", "marketTitle", "slug", "eventTitle", "eventSlug")
+    ).lower()
     tokens = set(_tokenize(primary_text))
+    event_tokens = set(_tokenize(event_match_text))
+    outcome_text = _candidate_outcome_text(row)
+    outcome_tokens = set(_tokenize(outcome_text))
     home_tokens = _team_tokens(match.get("homeTeam"))
     away_tokens = _team_tokens(match.get("awayTeam"))
-    home_hit = bool(home_tokens & tokens) or str(match.get("homeTeam") or "").lower() in primary_text
-    away_hit = bool(away_tokens & tokens) or str(match.get("awayTeam") or "").lower() in primary_text
-    if not home_hit or not away_hit:
+    home_text = str(match.get("homeTeam") or "").lower()
+    away_text = str(match.get("awayTeam") or "").lower()
+    primary_home_hit = bool(home_tokens & tokens) or home_text in primary_text
+    primary_away_hit = bool(away_tokens & tokens) or away_text in primary_text
+    event_home_hit = bool(home_tokens & event_tokens) or home_text in event_match_text
+    event_away_hit = bool(away_tokens & event_tokens) or away_text in event_match_text
+    outcome_home_hit = bool(home_tokens & outcome_tokens) or home_text in outcome_text
+    outcome_away_hit = bool(away_tokens & outcome_tokens) or away_text in outcome_text
+    primary_has_match = primary_home_hit and primary_away_hit
+    event_has_match = event_home_hit and event_away_hit
+    outcome_hint = _match_outcome_hint(match, row)
+    outcome_has_match = (outcome_home_hit and outcome_away_hit) or bool(outcome_hint)
+    if not (primary_has_match or (event_has_match and outcome_has_match) or (outcome_home_hit and outcome_away_hit)):
         return "missing-team"
     worldcup_hit = any(term in text for term in ("world cup", "fifa", "wc2026", "2026"))
     if not worldcup_hit:
         return "not-worldcup"
+    if event_has_match and not outcome_has_match:
+        market_terms = ("winner", "winning", "win", "match result", "moneyline", "draw", "beat", "advance")
+        if not any(term in primary_text for term in market_terms):
+            return "not-match-market"
     return ""
 
 
@@ -274,6 +369,10 @@ def _worldcup_market_score(match: Dict[str, Any], row: Dict[str, Any]) -> int:
     score = 80
     if "draw" in text or "winner" in text or "moneyline" in text:
         score += 8
+    if _match_outcome_hint(match, row):
+        score += 6
+    if len(_extract_probability_rows(match, row)) >= 2:
+        score += 10
     kickoff = str(match.get("kickoffUtc") or "")[:10]
     if kickoff and kickoff in text:
         score += 5
@@ -281,7 +380,7 @@ def _worldcup_market_score(match: Dict[str, Any], row: Dict[str, Any]) -> int:
 
 
 def _normalize_market_candidate(item: Dict[str, Any], event: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    event = event or {}
+    event = _candidate_event_payload(item, event)
     title = str(item.get("question") or item.get("title") or event.get("title") or "").strip()
     slug = str(item.get("slug") or event.get("slug") or "").strip()
     event_slug = str(event.get("slug") or item.get("eventSlug") or "").strip()
@@ -293,10 +392,14 @@ def _normalize_market_candidate(item: Dict[str, Any], event: Optional[Dict[str, 
         "slug": slug,
         "eventTitle": event.get("title") or item.get("eventTitle"),
         "eventSlug": event_slug,
+        "eventId": event.get("id") or item.get("eventId"),
+        "gammaMarketId": item.get("id") or item.get("gamma_market_id"),
+        "conditionId": item.get("conditionId") or item.get("condition_id"),
+        "groupItemTitle": item.get("groupItemTitle"),
         "clobTokenIds": token_ids,
         "yes_token_id": item.get("yes_token_id") or item.get("yesTokenId") or (token_ids[0] if token_ids else ""),
         "no_token_id": item.get("no_token_id") or item.get("noTokenId") or (token_ids[1] if len(token_ids) > 1 else ""),
-        "marketUrl": _polymarket_url({**event, **item, "slug": slug or event_slug}),
+        "marketUrl": _polymarket_url({**event, **item, "slug": slug or event_slug, "eventSlug": event_slug}),
         "source": "gamma",
     }
 
@@ -333,6 +436,49 @@ def _gamma_search(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> List[Di
                 rows.append(normalized)
                 if len(rows) >= limit:
                     return rows
+    return rows
+
+
+def _gamma_scan_active(ctx: Dict[str, Any], *, limit: int = 120) -> List[Dict[str, Any]]:
+    getter = ctx.get("http_json_get")
+    if not callable(getter):
+        return []
+    settings = ctx.get("SETTINGS")
+    base_url = str(getattr(settings, "gamma_api_base", "") or POLYMARKET_GAMMA_API_BASE).rstrip("/")
+    rows: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    param_sets = [
+        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "order": "id", "ascending": "false"},
+        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "order": "volume24hr", "ascending": "false"},
+        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "q": "world cup"},
+        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "q": "fifa"},
+        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "q": "soccer"},
+        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "tag_slug": "soccer"},
+        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "tag_slug": "sports"},
+    ]
+    for path in ("/events", "/markets"):
+        for params in param_sets:
+            try:
+                payload = getter(f"{base_url}{path}", params=params, timeout=10, headers=_headers())
+            except Exception:
+                continue
+            items = payload if isinstance(payload, list) else payload.get("data") if isinstance(payload, dict) else []
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                nested_markets = item.get("markets") if isinstance(item.get("markets"), list) else []
+                candidates = nested_markets if nested_markets else [item]
+                for candidate in candidates:
+                    if not isinstance(candidate, dict):
+                        continue
+                    normalized = _normalize_market_candidate(candidate, item if nested_markets else None)
+                    key = str(normalized.get("slug") or normalized.get("gammaMarketId") or normalized.get("marketTitle") or "")
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    rows.append({**normalized, "source": "gamma-scan"})
     return rows
 
 
@@ -379,7 +525,9 @@ def _new_market_linker_stats(*, scan_limit: int, scheduled_count: int) -> Dict[s
         "rejections": {
             "no-candidates": 0,
             "missing-team": 0,
+            "inactive": 0,
             "not-worldcup": 0,
+            "not-match-market": 0,
             "duplicate": 0,
         },
     }
@@ -396,6 +544,54 @@ def _clob_snapshot(ctx: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any
     return snapshot if isinstance(snapshot, dict) else {}
 
 
+def _extract_probability_rows(match: Dict[str, Any], market: Dict[str, Any]) -> List[Dict[str, Any]]:
+    outcomes = _safe_list(market.get("outcomes"))
+    prices = _safe_list(market.get("outcomePrices"))
+    rows: List[Dict[str, Any]] = []
+    if outcomes and prices:
+        if len(outcomes) == 2 and {str(outcome).strip().lower() for outcome in outcomes} <= {"yes", "no"}:
+            hinted = _match_outcome_hint(match, market)
+            if hinted and prices[0] not in (None, ""):
+                rows.append(
+                    {
+                        "outcome": hinted,
+                        "price": prices[0],
+                        "marketTitle": market.get("marketTitle") or market.get("title"),
+                        "marketUrl": _polymarket_url(market),
+                        "clobTokenId": (market.get("clobTokenIds") or [""])[0] if isinstance(market.get("clobTokenIds"), list) else "",
+                    }
+                )
+        else:
+            for label, price in zip(outcomes, prices):
+                if price in (None, ""):
+                    continue
+                rows.append(
+                    {
+                        "outcome": _canonical_outcome_label(match, label, allow_yes_no=True),
+                        "price": price,
+                        "marketTitle": market.get("marketTitle") or market.get("title"),
+                        "marketUrl": _polymarket_url(market),
+                    }
+                )
+    return rows
+
+
+def _best_probability_rows(match: Dict[str, Any], markets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_label: Dict[str, Dict[str, Any]] = {}
+    for market in sorted(markets, key=lambda row: _worldcup_market_score(match, row), reverse=True):
+        for probability in _extract_probability_rows(match, market):
+            label = str(probability.get("outcome") or "").strip()
+            if not label or label in by_label:
+                continue
+            by_label[label] = probability
+    ordered: List[Dict[str, Any]] = []
+    for label in (str(match.get("homeTeam") or ""), "Draw", str(match.get("awayTeam") or "")):
+        if label in by_label:
+            ordered.append(by_label.pop(label))
+    ordered.extend(by_label.values())
+    return ordered[:6]
+
+
 def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
     if not matches:
         return [], "empty", _new_market_linker_stats(scan_limit=0, scheduled_count=0)
@@ -405,6 +601,7 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
     stats = _new_market_linker_stats(scan_limit=scan_limit, scheduled_count=len(scheduled))
     rows: List[Dict[str, Any]] = []
     seen: set[str] = set()
+    scan_candidates = _gamma_scan_active(ctx, limit=int(getattr(settings, "worldcup_market_scan_page_size", 120) or 120))
     for match in scheduled:
         stats["matchesScanned"] += 1
         home = str(match.get("homeTeam") or "").strip()
@@ -418,10 +615,13 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
         ]
         best: Optional[Dict[str, Any]] = None
         best_score = 0
+        accepted: List[Dict[str, Any]] = []
         match_candidates = 0
-        for query in queries:
+        for query_index, query in enumerate(queries):
             stats["queries"] += 1
             candidates = _search_market_sources(ctx, query, limit=8)
+            if query_index == 0 and scan_candidates:
+                candidates = [*candidates, *scan_candidates]
             match_candidates += len(candidates)
             stats["candidates"] += len(candidates)
             for candidate in candidates:
@@ -432,6 +632,7 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
                     stats["rejections"][reason] = int(stats["rejections"].get(reason) or 0) + 1
                     continue
                 score = _worldcup_market_score(match, candidate)
+                accepted.append(candidate)
                 if score > best_score:
                     best = candidate
                     best_score = score
@@ -450,6 +651,13 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
         if not outcome_prices and clob.get("latestYesPrice") is not None:
             outcome_prices = [clob.get("latestYesPrice")]
             outcomes = outcomes or ["YES"]
+        probabilities = _best_probability_rows(match, accepted) or [
+            {"outcome": str(label), "price": price, "marketUrl": _polymarket_url(best)}
+            for label, price in zip(outcomes, outcome_prices)
+        ]
+        market_url = _polymarket_url(best)
+        if len(probabilities) > 1 and str(best.get("eventSlug") or "").strip():
+            market_url = f"https://polymarket.com/event/{str(best.get('eventSlug')).strip()}"
         rows.append(
             {
                 "id": f"{match.get('id')}:polymarket",
@@ -462,13 +670,14 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
                 "slug": best.get("slug"),
                 "eventTitle": best.get("eventTitle"),
                 "eventSlug": best.get("eventSlug"),
-                "marketUrl": _polymarket_url(best),
+                "eventId": best.get("eventId"),
+                "gammaMarketId": best.get("gammaMarketId"),
+                "conditionId": best.get("conditionId"),
+                "marketUrl": market_url,
+                "tradeUrl": market_url,
                 "outcomes": outcomes,
                 "outcomePrices": outcome_prices,
-                "probabilities": [
-                    {"outcome": str(label), "price": price}
-                    for label, price in zip(outcomes, outcome_prices)
-                ],
+                "probabilities": probabilities,
                 "clobTokenIds": best.get("clobTokenIds"),
                 "clob": clob or None,
                 "source": best.get("source") or "polymarket-gamma",

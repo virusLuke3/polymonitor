@@ -213,7 +213,10 @@ def _polymarket_url(item: Dict[str, Any]) -> str:
         value = _text(item.get(key))
         if value.startswith("https://polymarket.com") or value.startswith("http://polymarket.com"):
             return value
+    event_slug = _text(item.get("eventSlug"))
     slug = _text(item.get("slug") or item.get("marketSlug") or item.get("eventSlug"))
+    if event_slug and slug and event_slug != slug:
+        return f"https://polymarket.com/event/{event_slug}/{slug}"
     if slug:
         return f"https://polymarket.com/event/{slug}"
     title = _text(item.get("title") or item.get("marketTitle") or item.get("question"))
@@ -246,6 +249,19 @@ def _beijing_time(value: Any) -> str:
 def _items(payload: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
     rows = payload.get(key) if isinstance(payload.get(key), list) else []
     return [row for row in rows if isinstance(row, dict)]
+
+
+def _json_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip().startswith("["):
+        try:
+            import json
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
 
 
 def _worldcup_match_label(match: Dict[str, Any]) -> str:
@@ -289,6 +305,34 @@ def _find_matches(query: str, dashboard: Dict[str, Any], *, limit: int = 6) -> L
         for match in matches
     ]
     return [match for score, match in sorted(scored, key=lambda row: row[0], reverse=True) if score > 0][:limit]
+
+
+def _odds_for_match(match: Dict[str, Any], dashboard: Dict[str, Any], *, limit: int = 3) -> List[Dict[str, Any]]:
+    match_id = _text(match.get("id"))
+    label = _worldcup_match_label(match)
+    rows = []
+    for item in _items(dashboard, "odds"):
+        if match_id and _text(item.get("matchId")) == match_id:
+            rows.append(item)
+            continue
+        if _match_score(label, item, ("title", "marketTitle", "homeTeam", "awayTeam", "eventTitle")) > 0:
+            rows.append(item)
+    return rows[:limit]
+
+
+def _probability_pairs(item: Dict[str, Any], *, limit: int = 4) -> List[str]:
+    probabilities = item.get("probabilities") if isinstance(item.get("probabilities"), list) else []
+    pairs: List[str] = []
+    for row in probabilities[:limit]:
+        if isinstance(row, dict):
+            pairs.append(f"{_truncate(row.get('outcome'), 24)} {_pct(row.get('price'))}")
+    if pairs:
+        return pairs
+    outcomes = _json_list(item.get("outcomes"))
+    outcome_prices = _json_list(item.get("outcomePrices"))
+    for label, value in zip(outcomes[:limit], outcome_prices[:limit]):
+        pairs.append(f"{_truncate(label, 24)} {_pct(value)}")
+    return pairs
 
 
 def _beijing_date(value: Any) -> str:
@@ -646,6 +690,7 @@ def format_worldcup_match(query: str, dashboard: Dict[str, Any], intel: Dict[str
         if _match_score(terms, item, ("title", "summary", "source")) > 0
     ][:3]
     weather_rows = [row for row in _items(dashboard, "weather") if _text(row.get("cityId")) == _text(match.get("cityId"))]
+    odds_rows = _odds_for_match(match, dashboard, limit=2)
     lines = [
         f"⚽ {label}",
         f"Kickoff: {_beijing_time(match.get('kickoffUtc'))}",
@@ -663,6 +708,20 @@ def format_worldcup_match(query: str, dashboard: Dict[str, Any], intel: Dict[str
         lines.extend(["", "News:"])
         for item in news:
             lines.append(f"- {_text(item.get('source'), 'news')} | {_truncate(item.get('title'), 120)}")
+    if odds_rows:
+        lines.extend(["", "Polymarket:"])
+        for item in odds_rows:
+            lines.append(f"- {_truncate(item.get('marketTitle') or item.get('title'), 120)}")
+            pairs = _probability_pairs(item)
+            if pairs:
+                lines.append("  " + " | ".join(pairs))
+            url = _polymarket_url(item)
+            if url:
+                lines.append(f"  Trade: {url}")
+    else:
+        linker = dashboard.get("marketLinker") if isinstance(dashboard.get("marketLinker"), dict) else {}
+        if linker:
+            lines.extend(["", f"Polymarket: no matched market yet · scanned {int(linker.get('candidates') or 0):,} candidates"])
     lines.extend(["", f"Odds: /odds {query}", f"Workspace: {WORLDCUP_WORKSPACE_URL}"])
     return "\n".join(lines).strip()
 
@@ -732,7 +791,11 @@ def format_worldcup_news(query: str, intel: Dict[str, Any], dashboard: Dict[str,
 def format_worldcup_odds(query: str, dashboard: Dict[str, Any], market_payload: Dict[str, Any]) -> str:
     matches = _find_matches(query, dashboard, limit=1)
     odds = _items(dashboard, "odds")
-    relevant_odds = [row for row in odds if _match_score(query, row, ("title", "marketTitle", "homeTeam", "awayTeam")) > 0][:3]
+    relevant_odds = []
+    if matches:
+        relevant_odds = _odds_for_match(matches[0], dashboard, limit=3)
+    if not relevant_odds:
+        relevant_odds = [row for row in odds if _match_score(query, row, ("title", "marketTitle", "homeTeam", "awayTeam", "eventTitle")) > 0][:3]
     lines = [f"⚽ worldcup odds: {query}", ""]
     market_query = query
     if matches:
@@ -744,27 +807,18 @@ def format_worldcup_odds(query: str, dashboard: Dict[str, Any], market_payload: 
         lines.append("Matched odds:")
         for item in relevant_odds:
             lines.append(f"- {_truncate(item.get('title') or item.get('marketTitle'), 120)}")
-            probabilities = item.get("probabilities") if isinstance(item.get("probabilities"), list) else []
-            if probabilities:
-                pairs = []
-                for row in probabilities[:4]:
-                    if isinstance(row, dict):
-                        pairs.append(f"{_truncate(row.get('outcome'), 24)} {_pct(row.get('price'))}")
-                if pairs:
-                    lines.append("  " + " | ".join(pairs))
-            else:
-                outcomes = item.get("outcomes")
-                outcome_prices = item.get("outcomePrices")
-                if isinstance(outcomes, list) and isinstance(outcome_prices, list) and outcomes:
-                    pairs = [f"{_truncate(label, 24)} {_pct(value)}" for label, value in zip(outcomes[:4], outcome_prices[:4])]
-                    if pairs:
-                        lines.append("  " + " | ".join(pairs))
+            pairs = _probability_pairs(item)
+            if pairs:
+                lines.append("  " + " | ".join(pairs))
             url = _polymarket_url(item)
             if url:
-                lines.append(f"  {url}")
+                lines.append(f"  Trade: {url}")
         lines.append("")
     else:
         lines.append("当前 World Cup dashboard 暂未直接匹配到该场 Polymarket 胜率。")
+        linker = dashboard.get("marketLinker") if isinstance(dashboard.get("marketLinker"), dict) else {}
+        if linker:
+            lines.append(f"Market linker: scanned {int(linker.get('candidates') or 0):,}, matched {int(linker.get('matched') or 0):,}")
         lines.append("")
     raw_markets = market_payload.get("items") if isinstance(market_payload.get("items"), list) else []
     markets = [
@@ -782,30 +836,48 @@ def format_worldcup_odds(query: str, dashboard: Dict[str, Any], market_payload: 
                 lines.append(f"   YES: {_pct(price)}")
             outcomes = item.get("outcomes")
             outcome_prices = item.get("outcomePrices")
-            if isinstance(outcomes, str):
-                try:
-                    import json
-                    outcomes = json.loads(outcomes)
-                except Exception:
-                    outcomes = []
-            if isinstance(outcome_prices, str):
-                try:
-                    import json
-                    outcome_prices = json.loads(outcome_prices)
-                except Exception:
-                    outcome_prices = []
-            if isinstance(outcomes, list) and isinstance(outcome_prices, list) and outcomes:
-                pairs = []
-                for label, value in zip(outcomes[:4], outcome_prices[:4]):
-                    pairs.append(f"{_truncate(label, 24)} {_pct(value)}")
-                if pairs:
-                    lines.append("   " + " | ".join(pairs))
+            pairs = _probability_pairs({**item, "outcomes": outcomes, "outcomePrices": outcome_prices})
+            if pairs:
+                lines.append("   " + " | ".join(pairs))
             if url:
-                lines.append(f"   {url}")
+                lines.append(f"   Trade: {url}")
     else:
         lines.append("Polymarket search: no listed match market found yet.")
     lines.extend(["", f"Workspace: {WORLDCUP_WORKSPACE_URL}"])
     return "\n".join(lines).strip()
+
+
+def worldcup_odds_action_links(query: str, dashboard: Dict[str, Any], market_payload: Dict[str, Any] | None = None) -> List[tuple[str, str]]:
+    matches = _find_matches(query, dashboard, limit=1)
+    rows: List[Dict[str, Any]] = []
+    if matches:
+        rows.extend(_odds_for_match(matches[0], dashboard, limit=2))
+    if market_payload:
+        raw_markets = market_payload.get("items") if isinstance(market_payload.get("items"), list) else []
+        for item in raw_markets:
+            if isinstance(item, dict):
+                rows.append(item)
+    links: List[tuple[str, str]] = []
+    seen: set[str] = set()
+    first_url = ""
+    for item in rows:
+        url = _polymarket_url(item)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        if not first_url:
+            first_url = url
+        label = "查看行情" if not links else "更多行情"
+        links.append((label, url))
+        if len(links) >= 2:
+            break
+    if not links:
+        first_url = f"https://polymarket.com/search?query={quote_plus(query)}"
+        links.append(("Search Polymarket", first_url))
+    if first_url:
+        links.insert(1, ("快速下单", first_url))
+    links.append(("Open Workspace", WORLDCUP_WORKSPACE_URL))
+    return links
 
 
 def crypto_price_map(payload: Dict[str, Any]) -> Dict[str, float]:

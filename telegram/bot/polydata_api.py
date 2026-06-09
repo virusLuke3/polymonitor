@@ -55,6 +55,43 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _safe_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip().startswith("["):
+        try:
+            parsed = __import__("json").loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _event_payload(item: Dict[str, Any]) -> Dict[str, Any]:
+    events = item.get("events")
+    if isinstance(events, list):
+        for row in events:
+            if isinstance(row, dict):
+                return row
+    return {}
+
+
+def _polymarket_url(item: Dict[str, Any], event: Optional[Dict[str, Any]] = None) -> str:
+    event = event or {}
+    for key in ("marketUrl", "eventUrl", "url"):
+        value = str(item.get(key) or event.get(key) or "").strip()
+        if value.startswith("http"):
+            return value
+    slug = str(item.get("slug") or event.get("slug") or "").strip()
+    event_slug = str(event.get("slug") or item.get("eventSlug") or "").strip()
+    if event_slug and slug and slug != event_slug:
+        return f"https://polymarket.com/event/{event_slug}/{slug}"
+    if slug:
+        return f"https://polymarket.com/event/{slug}"
+    title = str(item.get("question") or item.get("title") or event.get("title") or "").strip()
+    return f"https://polymarket.com/search?query={title.replace(' ', '+')}" if title else ""
+
+
 class PolyDataBotApi:
     def __init__(self, *, base_url: str, timeout_seconds: int = 12, base_urls: Optional[Iterable[str]] = None) -> None:
         self.base_url = str(base_url or "").rstrip("/")
@@ -111,13 +148,16 @@ class PolyDataBotApi:
             for item in items:
                 if not isinstance(item, dict):
                     continue
+                event = _event_payload(item)
                 nested_markets = item.get("markets") if isinstance(item.get("markets"), list) else []
                 candidates = nested_markets if nested_markets else [item]
                 for candidate in candidates:
                     if not isinstance(candidate, dict):
                         continue
-                    title = str(candidate.get("question") or candidate.get("title") or item.get("title") or "").strip()
-                    slug = str(candidate.get("slug") or item.get("slug") or "").strip()
+                    event_source = item if nested_markets else event
+                    title = str(candidate.get("question") or candidate.get("title") or event_source.get("title") or "").strip()
+                    slug = str(candidate.get("slug") or event_source.get("slug") or "").strip()
+                    event_slug = str(event_source.get("slug") or candidate.get("eventSlug") or "").strip()
                     key = slug or title
                     if not key or key in seen:
                         continue
@@ -127,11 +167,67 @@ class PolyDataBotApi:
                         "title": title,
                         "marketTitle": title,
                         "slug": slug,
-                        "eventTitle": item.get("title"),
+                        "eventTitle": event_source.get("title"),
+                        "eventSlug": event_slug,
+                        "marketUrl": _polymarket_url(candidate, event_source),
                         "source": "gamma",
                     })
                     if len(rows) >= limit:
                         return {"items": rows}
+        return {"items": rows}
+
+    def gamma_scan_active_markets(self, *, limit: int = 120) -> Dict[str, Any]:
+        base_url = str(os.environ.get("POLYDATA_GAMMA_API_BASE") or "https://gamma-api.polymarket.com").rstrip("/")
+        rows: list[Dict[str, Any]] = []
+        seen: set[str] = set()
+        param_sets = (
+            {"active": "true", "closed": "false", "limit": limit, "offset": 0, "order": "id", "ascending": "false"},
+            {"active": "true", "closed": "false", "limit": limit, "offset": 0, "order": "volume24hr", "ascending": "false"},
+            {"active": "true", "closed": "false", "limit": limit, "offset": 0, "q": "world cup"},
+            {"active": "true", "closed": "false", "limit": limit, "offset": 0, "q": "fifa"},
+            {"active": "true", "closed": "false", "limit": limit, "offset": 0, "q": "soccer"},
+            {"active": "true", "closed": "false", "limit": limit, "offset": 0, "tag_slug": "soccer"},
+            {"active": "true", "closed": "false", "limit": limit, "offset": 0, "tag_slug": "sports"},
+        )
+        for path in ("/events", "/markets"):
+            for params in param_sets:
+                try:
+                    response = self.session.get(f"{base_url}{path}", params=params, timeout=self.timeout_seconds)
+                    response.raise_for_status()
+                    payload = response.json()
+                except requests.RequestException:
+                    continue
+                items = payload if isinstance(payload, list) else payload.get("data") if isinstance(payload, dict) else []
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    event = _event_payload(item)
+                    nested_markets = item.get("markets") if isinstance(item.get("markets"), list) else []
+                    candidates = nested_markets if nested_markets else [item]
+                    for candidate in candidates:
+                        if not isinstance(candidate, dict):
+                            continue
+                        event_source = item if nested_markets else event
+                        title = str(candidate.get("question") or candidate.get("title") or event_source.get("title") or "").strip()
+                        slug = str(candidate.get("slug") or event_source.get("slug") or "").strip()
+                        key = slug or str(candidate.get("id") or "") or title
+                        if not key or key in seen:
+                            continue
+                        seen.add(key)
+                        rows.append(
+                            {
+                                **candidate,
+                                "title": title,
+                                "marketTitle": title,
+                                "slug": slug,
+                                "eventTitle": event_source.get("title"),
+                                "eventSlug": event_source.get("slug") or candidate.get("eventSlug"),
+                                "marketUrl": _polymarket_url(candidate, event_source),
+                                "source": "gamma-scan",
+                            }
+                        )
         return {"items": rows}
 
     def worldcup_market_search(self, query: str, *, limit: int = 8) -> Dict[str, Any]:
@@ -166,6 +262,27 @@ class PolyDataBotApi:
                     rows.append(item)
                     if len(rows) >= limit:
                         return {"items": rows}
+        try:
+            scan_payload = self.gamma_scan_active_markets(limit=120)
+        except requests.RequestException:
+            scan_payload = {"items": []}
+        expanded = _expand_worldcup_query(cleaned)
+        wanted_terms = {part.lower() for part in expanded.replace("vs", " ").split() if part.strip()}
+        for item in scan_payload.get("items") if isinstance(scan_payload.get("items"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            text = " ".join(str(item.get(key) or "") for key in ("title", "marketTitle", "question", "eventTitle", "slug", "eventSlug", "groupItemTitle")).lower()
+            outcomes = " ".join(str(value or "") for value in _safe_json_list(item.get("outcomes"))).lower()
+            hit_count = sum(1 for term in wanted_terms if term in text or term in outcomes)
+            if hit_count < max(1, min(2, len(wanted_terms))):
+                continue
+            key = str(item.get("slug") or item.get("id") or item.get("title") or item.get("marketTitle") or "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            rows.append(item)
+            if len(rows) >= limit:
+                return {"items": rows}
         return {"items": rows}
 
     def alpha_signals(self, *, limit: int = 5) -> Dict[str, Any]:

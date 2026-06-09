@@ -24,6 +24,7 @@ from .formatters import (
     help_text,
     is_address,
     start_text,
+    worldcup_odds_action_links,
     worldcup_matches_page_info,
 )
 from .models import BotReply, CommandRequest
@@ -90,6 +91,17 @@ def _matches_keyboard(dashboard: dict, args: str) -> dict:
     if pager:
         rows.append(pager)
     rows.append([("Overview", "/worldcup"), ("Open Workspace", "https://www.polymonitor.club/?workspace=worldcup")])
+    return _keyboard(rows)
+
+
+def _worldcup_odds_keyboard(args: str, dashboard: dict, markets: dict | None = None) -> dict:
+    links = worldcup_odds_action_links(args, dashboard, markets)
+    rows: list[list[tuple[str, str]]] = []
+    if links:
+        rows.append(links[:2])
+    if len(links) > 2:
+        rows.append(links[2:4])
+    rows.append([("Match", f"/match {args}"), ("Next Matches", "/matches")])
     return _keyboard(rows)
 
 
@@ -202,7 +214,12 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
             return BotReply(
                 format_worldcup_match(args, dashboard, intel),
                 link_preview=False,
-                reply_markup=_keyboard([[("Odds", f"/odds {args}"), ("Team", f"/team {args.split()[0]}")], [("Overview", "/worldcup")]]),
+                reply_markup=_keyboard(
+                    [
+                        [("Odds", f"/odds {args}"), ("查看行情", f"/odds {args}")],
+                        [("Team", f"/team {args.split()[0]}"), ("Overview", "/worldcup")],
+                    ]
+                ),
             )
         except requests.RequestException:
             return _service_error("worldcup match")
@@ -235,7 +252,11 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
         try:
             dashboard = api.worldcup_dashboard()
             markets = api.worldcup_market_search(args, limit=8)
-            return BotReply(format_worldcup_odds(args, dashboard, markets), link_preview=False)
+            return BotReply(
+                format_worldcup_odds(args, dashboard, markets),
+                link_preview=False,
+                reply_markup=_worldcup_odds_keyboard(args, dashboard, markets),
+            )
         except requests.RequestException:
             return _service_error("worldcup odds")
     if command == "signal":

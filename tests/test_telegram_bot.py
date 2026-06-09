@@ -10,6 +10,7 @@ if str(REPO_ROOT) not in sys.path:
 from telegram.bot.commands import handle_command
 from telegram.bot.config import BotSettings, load_settings
 from telegram.bot.formatters import format_market_search, format_pnl_coverage, format_wallet
+from telegram.bot.formatters import format_worldcup_match, format_worldcup_odds, worldcup_odds_action_links
 from telegram.bot.models import CommandRequest
 from telegram.bot.poller import check_alerts, run_once
 from telegram.bot.polydata_api import PolyDataBotApi
@@ -385,6 +386,35 @@ def test_handle_command_routes_first_version_commands():
     ).text
 
 
+def test_worldcup_match_and_odds_include_polymarket_trade_links():
+    dashboard = FakeApi().worldcup_dashboard()
+    dashboard["odds"] = [
+        {
+            "matchId": "wc2026-001",
+            "homeTeam": "Mexico",
+            "awayTeam": "South Africa",
+            "marketTitle": "Mexico vs South Africa - FIFA World Cup 2026 match result",
+            "marketUrl": "https://polymarket.com/event/mexico-vs-south-africa/match-result",
+            "probabilities": [
+                {"outcome": "Mexico", "price": "0.49"},
+                {"outcome": "Draw", "price": "0.29"},
+                {"outcome": "South Africa", "price": "0.22"},
+            ],
+        }
+    ]
+    markets = {"items": dashboard["odds"]}
+
+    match_text = format_worldcup_match("mexico south africa", dashboard, FakeApi().worldcup_intel())
+    odds_text = format_worldcup_odds("mexico south africa", dashboard, markets)
+    links = worldcup_odds_action_links("mexico south africa", dashboard, markets)
+
+    assert "Polymarket:" in match_text
+    assert "Mexico 49.0%" in match_text
+    assert "Trade: https://polymarket.com/event/mexico-vs-south-africa/match-result" in odds_text
+    assert ("查看行情", "https://polymarket.com/event/mexico-vs-south-africa/match-result") in links
+    assert ("快速下单", "https://polymarket.com/event/mexico-vs-south-africa/match-result") in links
+
+
 def test_alert_commands_create_list_and_remove(tmp_path: Path):
     api = FakeApi()
     state = BotState(str(tmp_path / "bot_state.json"))
@@ -560,7 +590,7 @@ def test_worldcup_market_search_skips_local_search_by_default(monkeypatch):
         lambda query, limit=8: {"items": [{"title": "Mexico vs South Africa - FIFA World Cup 2026 winner"}]},
     )
 
-    payload = api.worldcup_market_search("mexico south africa", limit=2)
+    payload = api.worldcup_market_search("mexico south africa", limit=1)
 
     assert payload["items"][0]["title"] == "Mexico vs South Africa - FIFA World Cup 2026 winner"
     assert api.session.calls == []

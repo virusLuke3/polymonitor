@@ -76,7 +76,8 @@ def test_worldcup_dashboard_links_strict_polymarket_market():
     assert payload["matches"][0]["oddsLinked"] is True
     odds = payload["odds"][0]
     assert odds["matchId"] == "wc2026-001"
-    assert odds["probabilities"][0] == {"outcome": "Mexico", "price": "0.52"}
+    assert odds["probabilities"][0]["outcome"] == "Mexico"
+    assert odds["probabilities"][0]["price"] == "0.52"
     assert "rihanna" not in odds["marketTitle"].lower()
 
 
@@ -136,6 +137,112 @@ def test_worldcup_dashboard_rejects_event_level_false_positive_market():
     assert payload["matches"][0]["marketLinked"] is False
     assert payload["marketLinker"]["matched"] == 0
     assert payload["marketLinker"]["rejections"]["missing-team"] >= 1
+
+
+def test_worldcup_dashboard_links_match_result_market_group():
+    source_schedule = {
+        "matches": [
+            {
+                "num": 1,
+                "date": "2026-06-11",
+                "time": "13:00 UTC-6",
+                "team1": "Mexico",
+                "team2": "South Africa",
+                "group": "Group A",
+                "round": "Matchday 1",
+                "ground": "Mexico City",
+            }
+        ]
+    }
+    gamma_event = {
+        "data": [
+            {
+                "title": "Mexico vs South Africa - FIFA World Cup 2026",
+                "slug": "mexico-vs-south-africa-fifa-world-cup-2026",
+                "active": True,
+                "closed": False,
+                "markets": [
+                    {
+                        "id": "m1",
+                        "question": "Mexico",
+                        "groupItemTitle": "Mexico",
+                        "slug": "mexico-vs-south-africa-mexico",
+                        "active": True,
+                        "closed": False,
+                        "outcomes": '["Yes","No"]',
+                        "outcomePrices": '["0.49","0.51"]',
+                    },
+                    {
+                        "id": "m2",
+                        "question": "Draw",
+                        "groupItemTitle": "Draw",
+                        "slug": "mexico-vs-south-africa-draw",
+                        "active": True,
+                        "closed": False,
+                        "outcomes": '["Yes","No"]',
+                        "outcomePrices": '["0.29","0.71"]',
+                    },
+                    {
+                        "id": "m3",
+                        "question": "South Africa",
+                        "groupItemTitle": "South Africa",
+                        "slug": "mexico-vs-south-africa-south-africa",
+                        "active": True,
+                        "closed": False,
+                        "outcomes": '["Yes","No"]',
+                        "outcomePrices": '["0.22","0.78"]',
+                    },
+                ],
+            }
+        ]
+    }
+
+    def http_json_get(url, *, params=None, timeout=12, headers=None):
+        if "openfootball" in url:
+            return source_schedule
+        if "gamma-api.polymarket.com" in url:
+            return gamma_event
+        raise AssertionError(url)
+
+    ctx = {
+        "http_json_get": http_json_get,
+        "SETTINGS": SimpleNamespace(worldcup_market_link_scan_limit=4),
+    }
+
+    with patch.object(
+        worldcup_dashboard_service.worldcup_intel_service,
+        "get_worldcup_intel_snapshot",
+        return_value={"status": "ok", "weather": [], "news": [], "signals": []},
+    ):
+        payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(ctx)
+
+    assert payload["providerStates"]["odds"] == "ok"
+    odds = payload["odds"][0]
+    assert odds["marketUrl"] == "https://polymarket.com/event/mexico-vs-south-africa-fifa-world-cup-2026"
+    assert odds["tradeUrl"] == odds["marketUrl"]
+    assert odds["probabilities"][:3] == [
+        {
+            "outcome": "Mexico",
+            "price": "0.49",
+            "marketTitle": "Mexico",
+            "marketUrl": "https://polymarket.com/event/mexico-vs-south-africa-fifa-world-cup-2026/mexico-vs-south-africa-mexico",
+            "clobTokenId": "",
+        },
+        {
+            "outcome": "Draw",
+            "price": "0.29",
+            "marketTitle": "Draw",
+            "marketUrl": "https://polymarket.com/event/mexico-vs-south-africa-fifa-world-cup-2026/mexico-vs-south-africa-draw",
+            "clobTokenId": "",
+        },
+        {
+            "outcome": "South Africa",
+            "price": "0.22",
+            "marketTitle": "South Africa",
+            "marketUrl": "https://polymarket.com/event/mexico-vs-south-africa-fifa-world-cup-2026/mexico-vs-south-africa-south-africa",
+            "clobTokenId": "",
+        },
+    ]
 
 
 def test_worldcup_dashboard_watcher_builds_new_odds_alert_candidate():
