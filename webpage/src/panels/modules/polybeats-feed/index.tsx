@@ -107,7 +107,7 @@ function PolybeatsRow({
   const trades = metricValue(item, 'tradeCount') || 0;
   return (
     <article className={`wm-polybeats-row ${bias} ${active ? 'active' : ''}`}>
-      <button type="button" className="wm-polybeats-row-main" onClick={onToggle} title={item.marketTitle || item.title || 'PolyBeats signal'}>
+      <button type="button" className="wm-polybeats-row-main" onClick={onToggle} title={item.marketTitle || item.title || 'PolySignal signal'}>
         <span className={`wm-polybeats-glyph ${bias}`}>PB</span>
         <div className="wm-polybeats-copy">
           <div className="wm-polybeats-meta">
@@ -167,12 +167,12 @@ function PolybeatsFeedPanel({
 
   return (
     <Panel
-      title="POLYBEATS"
+      title="POLYSIGNAL"
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain PolyBeats panel"
+          aria-label="Explain PolySignal panel"
           aria-expanded={showHelp}
           onClick={() => setShowHelp((value) => !value)}
         >
@@ -184,7 +184,7 @@ function PolybeatsFeedPanel({
       count={items.length || undefined}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>PolyBeats MVP</strong>
+          <strong>PolySignal MVP</strong>
           <p>Clusters recent Polymarket fills, profiles participating wallets, attaches related intel, and generates a short flow explanation.</p>
         </div>
       ) : null}
@@ -219,7 +219,7 @@ function PolybeatsFeedPanel({
           </div>
         ) : (
           <div className="wm-empty-state">
-            <strong>No PolyBeats clusters yet.</strong>
+            <strong>No PolySignal clusters yet.</strong>
             <em>Recent trade flow, wallet profiles, or snapshot cache may still be warming.</em>
           </div>
         )}
@@ -245,7 +245,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'polybeats-feed',
-  title: 'PolyBeats',
+  title: 'PolySignal',
   eyebrow: 'signal',
   description: 'Smart-money flow, wallet history, and explainable market briefs.',
   defaultEnabled: true,
