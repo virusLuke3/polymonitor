@@ -9,6 +9,16 @@ export type TradeFilter = 'profitable' | 'losing' | 'yes' | 'no' | 'longHolding'
 export type PerformanceSortKey = 'metric' | 'all' | 'long' | 'short' | 'description';
 export type SortDirection = 'asc' | 'desc';
 
+export type StrategyParameters = {
+  entryThreshold: number;
+  exitThreshold: number;
+  stopLoss: number;
+  takeProfit: number;
+  maxHoldingBars: number;
+  initialCapital: number;
+  positionSize: number;
+};
+
 export type MarketInfo = {
   id: string;
   conditionId: string;

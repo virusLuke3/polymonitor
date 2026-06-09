@@ -2560,15 +2560,16 @@
 }
 
 .qtv-settings-strip {
-  position: absolute;
+  position: relative;
   z-index: 6;
-  top: 70px;
-  right: 0;
-  left: 0;
+  top: auto;
+  right: auto;
+  left: auto;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 18px;
-  height: 34px;
+  min-height: 34px;
   border-bottom: 1px solid #222b3a;
   background: #0b1220;
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
@@ -2695,6 +2696,18 @@
   padding: 0 9px;
 }
 
+.qtv-parameter-grid input:not([readonly]) {
+  border-color: #315985;
+  background: #101a2a;
+  color: #f8fafc;
+}
+
+.qtv-parameter-grid input:not([readonly]):focus {
+  outline: 1px solid #3b82f6;
+  outline-offset: 0;
+  border-color: #3b82f6;
+}
+
 .qtv-parameter-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -2716,6 +2729,13 @@
   color: #94a3b8;
   font-size: 11px;
   line-height: 1.55;
+}
+
+.qtv-parameter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
 }
 
 .qtv-run-health {
@@ -2747,6 +2767,48 @@
   background: #22c55e;
 }
 
+.qtv-run-snapshot {
+  display: grid;
+  gap: 0;
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid #1d2a3d;
+  border-radius: 5px;
+  background: #070b12;
+}
+
+.qtv-run-snapshot strong {
+  padding: 10px;
+  border-bottom: 1px solid #1d2a3d;
+}
+
+.qtv-run-snapshot div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 30px;
+  border-bottom: 1px solid #141e2d;
+  padding: 0 10px;
+}
+
+.qtv-run-snapshot div:last-child {
+  border-bottom: 0;
+}
+
+.qtv-run-snapshot span {
+  overflow: hidden;
+  color: #7f8a9d;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-run-snapshot b {
+  color: #e5e7eb;
+  font-size: 11px;
+  font-weight: 900;
+}
+
 .qtv-run-health button,
 .qtv-parameters-panel button {
   height: 30px;
@@ -2756,6 +2818,13 @@
   color: #fff;
   cursor: pointer;
   font-weight: 850;
+  padding: 0 10px;
+}
+
+.qtv-parameters-panel button:not(.primary) {
+  border-color: #263244;
+  background: #101827;
+  color: #cbd5e1;
 }
 
 .qtv-chart-tab {

@@ -3,6 +3,7 @@ import type {
   BacktestResult,
   PerformanceSortKey,
   SortDirection,
+  StrategyParameters,
   TesterTab,
   TradeFilter,
 } from '../types';
@@ -53,6 +54,9 @@ type StrategyTesterPanelProps = {
   onPerformanceSortChange: (key: PerformanceSortKey) => void;
   onTradeFilterToggle: (filter: TradeFilter) => void;
   onTradeSelect: (tradeId: string) => void;
+  strategyParameters: StrategyParameters;
+  onStrategyParametersChange: (parameters: StrategyParameters) => void;
+  onStrategyAutoTune: () => void;
   marketTitle?: string;
   dataSource?: string;
   engine?: string;
@@ -79,6 +83,9 @@ export function StrategyTesterPanel({
   onPerformanceSortChange,
   onTradeFilterToggle,
   onTradeSelect,
+  strategyParameters,
+  onStrategyParametersChange,
+  onStrategyAutoTune,
   marketTitle = 'No market selected',
   dataSource = '-',
   engine = '-',
@@ -87,7 +94,7 @@ export function StrategyTesterPanel({
 }: StrategyTesterPanelProps) {
   const [toolTab, setToolTab] = useState<ToolTab>('tester');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [parameterPreset, setParameterPreset] = useState('Current backend run');
+  const [parameterPreset, setParameterPreset] = useState('Custom live config');
   const hasCompletedRun = result.runId > 0 && result.metrics.length > 0;
   const summaryRows = useMemo(() => result.metrics.slice(0, 6), [result.metrics]);
   const latestTrade = result.trades[result.trades.length - 1];
@@ -98,6 +105,61 @@ export function StrategyTesterPanel({
       .flatMap((group) => group.rows)
       .find((row) => row.label.toLowerCase() === target)?.value || '-';
   };
+  const updateParameter = (key: keyof StrategyParameters, value: string) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return;
+    onStrategyParametersChange({
+      ...strategyParameters,
+      [key]: key === 'maxHoldingBars' ? Math.round(numeric) : numeric,
+    });
+  };
+  const applyPreset = (preset: string) => {
+    setParameterPreset(preset);
+    if (preset === 'Conservative') {
+      onStrategyParametersChange({
+        entryThreshold: 0.62,
+        exitThreshold: 0.48,
+        stopLoss: 0.055,
+        takeProfit: 0.12,
+        maxHoldingBars: 72,
+        initialCapital: strategyParameters.initialCapital,
+        positionSize: Math.max(1, Math.round(strategyParameters.positionSize * 0.75)),
+      });
+      return;
+    }
+    if (preset === 'Aggressive') {
+      onStrategyParametersChange({
+        entryThreshold: 0.54,
+        exitThreshold: 0.4,
+        stopLoss: 0.11,
+        takeProfit: 0.24,
+        maxHoldingBars: 160,
+        initialCapital: strategyParameters.initialCapital,
+        positionSize: Math.max(1, Math.round(strategyParameters.positionSize * 1.25)),
+      });
+      return;
+    }
+    if (preset === 'Backend defaults') {
+      onStrategyParametersChange({
+        entryThreshold: 0.58,
+        exitThreshold: 0.44,
+        stopLoss: 0.075,
+        takeProfit: 0.16,
+        maxHoldingBars: 96,
+        initialCapital: 100000,
+        positionSize: 100,
+      });
+    }
+  };
+  const runSnapshotRows = [
+    ['entry threshold', propertyValue('entry threshold')],
+    ['exit threshold', propertyValue('exit threshold')],
+    ['stop loss', propertyValue('stop loss')],
+    ['take profit', propertyValue('take profit')],
+    ['max hold', propertyValue('max hold')],
+    ['position size', propertyValue('position size')],
+    ['initial capital', propertyValue('initial capital')],
+  ];
 
   return (
     <section className="qtv-bottom-panel">
@@ -142,8 +204,12 @@ export function StrategyTesterPanel({
 
       {settingsOpen ? (
         <div className="qtv-settings-strip">
-          <span>entry threshold <b>{propertyValue('entry threshold')}</b></span>
-          <span>exit threshold <b>{propertyValue('exit threshold')}</b></span>
+          <span>entry <b>{strategyParameters.entryThreshold.toFixed(4)}</b></span>
+          <span>exit <b>{strategyParameters.exitThreshold.toFixed(4)}</b></span>
+          <span>stop <b>{strategyParameters.stopLoss.toFixed(4)}</b></span>
+          <span>take <b>{strategyParameters.takeProfit.toFixed(4)}</b></span>
+          <span>hold <b>{strategyParameters.maxHoldingBars} bars</b></span>
+          <span>size <b>{strategyParameters.positionSize.toLocaleString('en-US')}</b></span>
           <span>framework <b>{propertyValue('engine')}</b></span>
           <span>run <b>{result.runId ? `#${result.runId}` : '-'}</b></span>
         </div>
@@ -293,27 +359,45 @@ export function StrategyTesterPanel({
           <section>
             <header>
               <strong>Strategy Parameters</strong>
-              <select value={parameterPreset} onChange={(event) => setParameterPreset(event.currentTarget.value)}>
-                <option>Current backend run</option>
-                <option>Conservative review</option>
-                <option>Aggressive review</option>
+              <select value={parameterPreset} onChange={(event) => applyPreset(event.currentTarget.value)}>
+                <option>Custom live config</option>
+                <option>Backend defaults</option>
+                <option>Conservative</option>
+                <option>Aggressive</option>
               </select>
             </header>
             <div className="qtv-parameter-grid">
-              <label><span>Entry threshold</span><input readOnly value={propertyValue('entry threshold')} /></label>
-              <label><span>Exit threshold</span><input readOnly value={propertyValue('exit threshold')} /></label>
+              <label><span>Entry threshold</span><input type="number" min="0.001" max="0.999" step="0.001" value={strategyParameters.entryThreshold} onInput={(event) => updateParameter('entryThreshold', event.currentTarget.value)} /></label>
+              <label><span>Exit threshold</span><input type="number" min="0.001" max="0.999" step="0.001" value={strategyParameters.exitThreshold} onInput={(event) => updateParameter('exitThreshold', event.currentTarget.value)} /></label>
+              <label><span>Stop loss</span><input type="number" min="0.001" max="0.95" step="0.001" value={strategyParameters.stopLoss} onInput={(event) => updateParameter('stopLoss', event.currentTarget.value)} /></label>
+              <label><span>Take profit</span><input type="number" min="0.001" max="5" step="0.001" value={strategyParameters.takeProfit} onInput={(event) => updateParameter('takeProfit', event.currentTarget.value)} /></label>
+              <label><span>Max holding bars</span><input type="number" min="1" max="10000" step="1" value={strategyParameters.maxHoldingBars} onInput={(event) => updateParameter('maxHoldingBars', event.currentTarget.value)} /></label>
+              <label><span>Position size</span><input type="number" min="1" step="1" value={strategyParameters.positionSize} onInput={(event) => updateParameter('positionSize', event.currentTarget.value)} /></label>
+              <label><span>Initial capital</span><input type="number" min="1" step="100" value={strategyParameters.initialCapital} onInput={(event) => updateParameter('initialCapital', event.currentTarget.value)} /></label>
               <label><span>Engine</span><input readOnly value={engine} /></label>
               <label><span>Source rows</span><input readOnly value={rowCount.toLocaleString('en-US')} /></label>
               <label><span>Market</span><input readOnly value={marketTitle} /></label>
               <label><span>Status</span><input readOnly value={backtestStatus} /></label>
             </div>
-            <p>Editable risk, fee, and execution parameters need backend binding before they can affect a real run. This panel shows the actual submitted/run metadata instead of pretending local-only controls are live.</p>
+            <div className="qtv-parameter-actions">
+              <button type="button" onClick={onStrategyAutoTune}>Auto tune from loaded prices</button>
+              <button type="button" onClick={() => applyPreset('Backend defaults')}>Reset defaults</button>
+              <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
+            </div>
+            <p>These controls are bound to the real backtest request. Fees, slippage, liquidity caps, and walk-forward controls remain disabled until the backend consumes those fields.</p>
           </section>
           <aside className="qtv-run-health">
             <strong>Readiness</strong>
             <span className={marketTitle !== 'No market selected' ? 'ready' : ''}>Market selected</span>
             <span className={rowCount > 0 ? 'ready' : ''}>Price rows loaded</span>
             <span className={engine !== '-' ? 'ready' : ''}>Engine configured</span>
+            <span className={strategyParameters.entryThreshold > strategyParameters.exitThreshold ? 'ready' : ''}>Entry above exit</span>
+            <div className="qtv-run-snapshot">
+              <strong>Latest run snapshot</strong>
+              {runSnapshotRows.map(([label, value]) => (
+                <div key={label}><span>{label}</span><b>{value}</b></div>
+              ))}
+            </div>
             <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
           </aside>
         </div>

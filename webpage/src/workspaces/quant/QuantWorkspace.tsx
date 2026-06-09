@@ -19,7 +19,7 @@ import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFronte
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
-import type { BacktestEngine, BacktestResult, DataStatus, MarketInfo, PerformanceSortKey, PricePoint, PriceSource, Signal, SortDirection, TesterTab, TradeFilter } from './types';
+import type { BacktestEngine, BacktestResult, DataStatus, MarketInfo, PerformanceSortKey, PricePoint, PriceSource, Signal, SortDirection, StrategyParameters, TesterTab, TradeFilter } from './types';
 import { backtestApiToResult, blockToPrices, emptyBacktestResult, frontendToPrices, marketSeriesToPrices } from './utils/apiAdapters';
 import { deriveEventOutcomeLabel, downloadText, fmtPrice } from './utils/formatters';
 
@@ -43,6 +43,15 @@ const DEFAULT_QUANT_EVENT_TITLE = '2026 FIFA World Cup Winner';
 const EVENT_TILE_OUTCOME_LIMIT = 12;
 const EVENT_TILE_MAX_POINTS = 240;
 const EVENT_TILE_FULL_MAX_POINTS = 900;
+const DEFAULT_STRATEGY_PARAMETERS: StrategyParameters = {
+  entryThreshold: 0.58,
+  exitThreshold: 0.44,
+  stopLoss: 0.075,
+  takeProfit: 0.16,
+  maxHoldingBars: 96,
+  initialCapital: 100000,
+  positionSize: 100,
+};
 
 function defaultMarketSlug() {
   const params = new URLSearchParams(window.location.search);
@@ -145,6 +154,33 @@ function persistedStringArray(key: string) {
     return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
   } catch {
     return [];
+  }
+}
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(min, Math.min(max, numeric));
+}
+
+function normalizeStrategyParameters(value: Partial<StrategyParameters> | null | undefined): StrategyParameters {
+  return {
+    entryThreshold: clampNumber(value?.entryThreshold, DEFAULT_STRATEGY_PARAMETERS.entryThreshold, 0.001, 0.999),
+    exitThreshold: clampNumber(value?.exitThreshold, DEFAULT_STRATEGY_PARAMETERS.exitThreshold, 0.001, 0.999),
+    stopLoss: clampNumber(value?.stopLoss, DEFAULT_STRATEGY_PARAMETERS.stopLoss, 0.001, 0.95),
+    takeProfit: clampNumber(value?.takeProfit, DEFAULT_STRATEGY_PARAMETERS.takeProfit, 0.001, 5),
+    maxHoldingBars: Math.round(clampNumber(value?.maxHoldingBars, DEFAULT_STRATEGY_PARAMETERS.maxHoldingBars, 1, 10000)),
+    initialCapital: clampNumber(value?.initialCapital, DEFAULT_STRATEGY_PARAMETERS.initialCapital, 1, 1000000000),
+    positionSize: clampNumber(value?.positionSize, DEFAULT_STRATEGY_PARAMETERS.positionSize, 1, 1000000000),
+  };
+}
+
+function persistedStrategyParameters() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem('polydata.quant.strategyParameters') || '{}');
+    return normalizeStrategyParameters(parsed);
+  } catch {
+    return DEFAULT_STRATEGY_PARAMETERS;
   }
 }
 
@@ -457,6 +493,7 @@ export function QuantWorkspace() {
   const [chartPinnedOutcomeKeys, setChartPinnedOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.pinnedOutcomes'));
   const [chartHiddenOutcomeKeys, setChartHiddenOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.hiddenOutcomes'));
   const [chartSoloOutcomeKey, setChartSoloOutcomeKey] = useState('');
+  const [strategyParameters, setStrategyParameters] = useState<StrategyParameters>(persistedStrategyParameters);
   const marketSearchSeq = useRef(0);
   const priceLoadSeq = useRef(0);
   const marketSlugRef = useRef(marketSlug);
@@ -657,7 +694,6 @@ export function QuantWorkspace() {
       const lastBlock = priceSource === 'orderfilled' ? lastX : backtestBlockRows[backtestBlockRows.length - 1]?.blockNumber;
       const firstTs = priceSource === 'frontend' ? firstX : nextRows.frontendRows[0]?.timestamp;
       const lastTs = priceSource === 'frontend' ? lastX : nextRows.frontendRows[nextRows.frontendRows.length - 1]?.timestamp;
-      const strategy = strategyDefaults(sourceRows);
       const selectedTokenId = selectedBacktestAction === 'NO'
         ? nextSelectedOutcome?.buyNoTokenId
         : nextSelectedOutcome?.buyYesTokenId || nextSelectedOutcome?.tokenId;
@@ -676,13 +712,13 @@ export function QuantWorkspace() {
         backtestEngine,
         ...(priceSource === 'orderfilled' && firstBlock && lastBlock ? { fromBlock: String(firstBlock), toBlock: String(lastBlock) } : {}),
         ...(priceSource === 'frontend' && firstTs && lastTs ? { from: String(firstTs), to: String(lastTs) } : {}),
-        entryThreshold: strategy.entryThreshold,
-        exitThreshold: strategy.exitThreshold,
-        stopLoss: 0.075,
-        takeProfit: 0.16,
-        maxHoldingBars: Math.max(20, Math.min(240, Math.floor(chartLimit / 30))),
-        initialCapital: 100000,
-        positionSize: 100,
+        entryThreshold: strategyParameters.entryThreshold,
+        exitThreshold: strategyParameters.exitThreshold,
+        stopLoss: strategyParameters.stopLoss,
+        takeProfit: strategyParameters.takeProfit,
+        maxHoldingBars: strategyParameters.maxHoldingBars,
+        initialCapital: strategyParameters.initialCapital,
+        positionSize: strategyParameters.positionSize,
       });
       setBacktestStatus(created.item.status);
       const completedRun = ['queued', 'running'].includes(created.item.status)
@@ -1057,6 +1093,27 @@ export function QuantWorkspace() {
     window.localStorage.setItem('polydata.quant.chart.hiddenOutcomes', JSON.stringify(chartHiddenOutcomeKeys));
   }, [chartHiddenOutcomeKeys, chartPinnedOutcomeKeys]);
 
+  useEffect(() => {
+    window.localStorage.setItem('polydata.quant.strategyParameters', JSON.stringify(strategyParameters));
+  }, [strategyParameters]);
+
+  const updateStrategyParameters = (next: StrategyParameters) => {
+    setStrategyParameters(normalizeStrategyParameters(next));
+  };
+
+  const autoTuneStrategyParameters = () => {
+    const selectedRows = outcomePricePoints(selectedOutcome, selectedBacktestAction);
+    const sourceRows = selectedRows.length ? selectedRows : activePrices;
+    const thresholds = strategyDefaults(sourceRows);
+    setStrategyParameters((current) => normalizeStrategyParameters({
+      ...current,
+      ...thresholds,
+      maxHoldingBars: Math.max(20, Math.min(240, Math.floor(chartLimit / 30))),
+    }));
+    setWorkspaceNotice(`strategy tuned from ${sourceRows.length.toLocaleString('en-US')} rows`);
+    window.setTimeout(() => setWorkspaceNotice(''), 2400);
+  };
+
   const toggleSelectedWatchlist = () => {
     if (!selectedWatchKey) return;
     setWatchlistKeys((current) => (
@@ -1106,9 +1163,9 @@ export function QuantWorkspace() {
       downloadText(`quant-backtest-${backtestResult.runId}.csv`, tradesToCsv(backtestResult.trades), 'text/csv;charset=utf-8');
       return;
     }
-      downloadText(
+    downloadText(
       `quant-backtest-${backtestResult.runId}.json`,
-      JSON.stringify({ market: marketInfo, priceSource, backtestEngine, timeframe, result: backtestResult }, null, 2),
+      JSON.stringify({ market: marketInfo, priceSource, backtestEngine, timeframe, strategyParameters, result: backtestResult }, null, 2),
       'application/json;charset=utf-8',
     );
   };
@@ -1121,6 +1178,7 @@ export function QuantWorkspace() {
       timeframe,
       priceSource,
       backtestEngine,
+      strategyParameters,
       testerTab,
       deepBacktest,
       savedAt: new Date().toISOString(),
@@ -1424,6 +1482,9 @@ export function QuantWorkspace() {
                 setSelectedTradeId(tradeId);
                 setTesterTab('trades');
               }}
+              strategyParameters={strategyParameters}
+              onStrategyParametersChange={updateStrategyParameters}
+              onStrategyAutoTune={autoTuneStrategyParameters}
               marketTitle={marketInfo.title}
               dataSource={backendPriceSource(priceSource)}
               engine={backtestEngine}
