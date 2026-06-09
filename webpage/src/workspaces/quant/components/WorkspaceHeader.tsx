@@ -730,6 +730,28 @@ export function WorkspaceHeader({
     toggleFavorite(activeResult.market);
   };
 
+  useEffect(() => {
+    if (!selectedMarket?.marketSlug) return;
+    const compact = compactMarketForStorage(selectedMarket);
+    setRecentMarkets((current) => {
+      if (current[0]?.marketSlug === compact.marketSlug) return current;
+      return [
+        compact,
+        ...current.filter((item) => item.marketSlug !== compact.marketSlug),
+      ].slice(0, 24);
+    });
+  }, [
+    selectedMarket?.blockRows,
+    selectedMarket?.frontendRows,
+    selectedMarket?.itemKind,
+    selectedMarket?.marketSlug,
+    selectedMarket?.marketTitle,
+    selectedMarket?.orderfilledRows,
+    selectedMarket?.outcomeCount,
+    selectedMarket?.readyMembers,
+    selectedMarket?.totalMembers,
+  ]);
+
   const moveHighlight = (delta: number) => {
     setHighlightedIndex((current) => {
       if (!flatResults.length) return 0;
@@ -747,6 +769,7 @@ export function WorkspaceHeader({
   const selectedRows = selectedMarket ? rowsForMarket(selectedMarket) : 0;
   const selectedKind = selectedMarket?.itemKind === 'event' ? 'Event' : 'Market';
   const selectedSubtitle = selectedMarket?.marketSlug || marketSlug || 'No market selected';
+  const selectedIsFavorite = selectedMarket?.marketSlug ? favoriteSlugSet.has(selectedMarket.marketSlug) : false;
   const sourceLabel = priceSource === 'orderfilled' ? 'OrderFilled block close' : 'Frontend price-history';
   const engineLabel = backtestEngine === 'nautilus_trader' ? 'Nautilus Trader' : backtestEngine === 'backtrader' ? 'Backtrader' : 'Built-in';
 
@@ -783,6 +806,17 @@ export function WorkspaceHeader({
             <em>Polymarket {selectedKind.toLowerCase()} · outcome probabilities · {sourceLabel}</em>
           </span>
           <b>{selectedMarket?.itemKind === 'event' ? `${Number(selectedMarket.outcomeCount || 0).toLocaleString('en-US')} outcomes` : selectedRows ? `${selectedRows.toLocaleString('en-US')} rows` : 'No rows'}</b>
+        </button>
+        <button
+          className={`qtv-current-favorite ${selectedIsFavorite ? 'active' : ''}`}
+          type="button"
+          title={selectedIsFavorite ? 'Remove current market from favorites' : 'Add current market to favorites'}
+          disabled={!selectedMarket?.marketSlug}
+          onClick={() => {
+            if (selectedMarket) toggleFavorite(selectedMarket);
+          }}
+        >
+          ★
         </button>
 
         <div className="qtv-workbar-group qtv-search-group">

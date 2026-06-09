@@ -160,6 +160,36 @@
   white-space: nowrap;
 }
 
+.qtv-current-favorite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border: 1px solid #263244;
+  border-radius: 5px;
+  background: #0f1623;
+  color: #64748b;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.qtv-current-favorite.active,
+.qtv-current-favorite:hover:not(:disabled) {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+}
+
+.qtv-current-favorite:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .qtv-search-group {
   position: relative;
   z-index: 430;
@@ -1263,6 +1293,11 @@
 
   .qtv-market-identity {
     width: clamp(220px, 24vw, 360px);
+  }
+
+  .qtv-current-favorite {
+    width: 28px;
+    min-width: 28px;
   }
 
   .qtv-market-command {
