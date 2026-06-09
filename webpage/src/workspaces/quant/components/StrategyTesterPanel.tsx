@@ -366,6 +366,7 @@ export function StrategyTesterPanel({
     ['Engine', engine],
     ['Source', dataSource],
     ['Rows', rowCount.toLocaleString('en-US')],
+    ['Fallback', 'none'],
     ['Generated', compactRunTime(result.generatedAt)],
   ];
   const recentRunsForDisplay = useMemo(() => {
@@ -616,7 +617,7 @@ export function StrategyTesterPanel({
             <section className="qtv-run-provenance-strip" aria-label="Backtest run reproducibility snapshot">
               <div>
                 <strong>Reproducibility</strong>
-                <span>{marketTitle}</span>
+                <span>{marketTitle} · real API rows only</span>
               </div>
               {runProvenanceRows.map(([label, value]) => (
                 <span key={label}>
