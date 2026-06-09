@@ -5512,9 +5512,9 @@
 
 .qtv-run-history-table > div {
   display: grid;
-  grid-template-columns: 96px 86px minmax(220px, 1.5fr) 110px 84px 128px 72px;
+  grid-template-columns: 96px 86px minmax(220px, 1.5fr) 110px 84px minmax(230px, 1fr) 128px 132px;
   gap: 1px;
-  min-width: 940px;
+  min-width: 1260px;
 }
 
 .qtv-run-history-table span {
@@ -5538,6 +5538,14 @@
 
 .qtv-run-history-table .current span {
   background: #0f1b2d;
+}
+
+.qtv-run-history-table span.ready {
+  color: #86efac;
+}
+
+.qtv-run-history-table span.review {
+  color: #fcd34d;
 }
 
 .qtv-run-history-table .succeeded span:nth-child(2) {
@@ -5564,6 +5572,24 @@
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 900;
+}
+
+.qtv-run-history-table span.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  align-items: center;
+  padding: 3px 5px;
+}
+
+.qtv-run-history-table span.actions button {
+  height: 24px;
+}
+
+.qtv-run-history-table span.actions button:last-child {
+  border-color: rgba(34, 211, 238, 0.36);
+  background: rgba(8, 145, 178, 0.12);
+  color: #a5f3fc;
 }
 
 .qtv-run-history-table button:hover {

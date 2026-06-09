@@ -143,6 +143,40 @@ function numericFromMetric(value: string) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function runNumber(value: unknown, fallback: number) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function strategyParametersFromRun(run: QuantBacktestRun, fallback: StrategyParameters): StrategyParameters {
+  return {
+    entryThreshold: runNumber(run.entryThreshold, fallback.entryThreshold),
+    exitThreshold: runNumber(run.exitThreshold, fallback.exitThreshold),
+    stopLoss: runNumber(run.stopLoss, fallback.stopLoss),
+    takeProfit: runNumber(run.takeProfit, fallback.takeProfit),
+    maxHoldingBars: Math.round(runNumber(run.maxHoldingBars, fallback.maxHoldingBars)),
+    initialCapital: runNumber(run.initialCapital, fallback.initialCapital),
+    positionSize: runNumber(run.positionSize, fallback.positionSize),
+    feeBps: runNumber(run.feeBps, fallback.feeBps),
+    slippageBps: runNumber(run.slippageBps, fallback.slippageBps),
+    liquidityCapPct: runNumber(run.liquidityCapPct, fallback.liquidityCapPct),
+  };
+}
+
+function runParameterSummary(run: QuantBacktestRun, fallback: StrategyParameters) {
+  const params = strategyParametersFromRun(run, fallback);
+  const spread = params.entryThreshold - params.exitThreshold;
+  const costBps = (params.feeBps * 2) + (params.slippageBps * 2);
+  const riskPct = params.initialCapital > 0 ? (params.positionSize / params.initialCapital) * 100 : 0;
+  return {
+    params,
+    spread,
+    costBps,
+    riskPct,
+    label: `${params.entryThreshold.toFixed(3)}→${params.exitThreshold.toFixed(3)} · ${costBps.toFixed(1)}bps · ${riskPct.toFixed(1)}% risk`,
+  };
+}
+
 async function copyText(value: string) {
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -297,6 +331,14 @@ export function StrategyTesterPanel({
       ...strategyParameters,
       [key]: key === 'maxHoldingBars' ? Math.round(numeric) : numeric,
     });
+  };
+  const applyRunParameters = (run: QuantBacktestRun) => {
+    const next = strategyParametersFromRun(run, strategyParameters);
+    onStrategyParametersChange(next);
+    setParameterPreset('Custom live config');
+    setPresetDraftName(`Run ${run.runId} replay`);
+    copied(`Applied params from #${run.runId}`);
+    onTesterTabChange('parameters');
   };
   const applyPreset = (preset: string) => {
     setParameterPreset(preset);
@@ -879,22 +921,28 @@ export function StrategyTesterPanel({
                   <span>Market</span>
                   <span>Engine</span>
                   <span>Rows</span>
+                  <span>Params</span>
                   <span>Created</span>
                   <span>Action</span>
                 </div>
-                {recentRunsForDisplay.map((run) => (
-                  <div key={`history-${run.runId}`} className={`${run.status} ${run.isCurrent ? 'current' : ''}`} title={run.error || run.marketSlug}>
-                    <span>#{run.runId}{run.isCurrent ? ' current' : ''}</span>
-                    <span>{run.status}</span>
-                    <span>{run.marketSlug}</span>
-                    <span>{run.backtestEngine || '-'}</span>
-                    <span>{compactRows(run.rowsProcessed)}</span>
-                    <span>{compactRunTime(run.createdAt)}</span>
-                    <span>
-                      <button type="button" onClick={() => onRunLoad?.(run.runId)}>{run.isCurrent ? 'Reload' : 'Load'}</button>
-                    </span>
-                  </div>
-                ))}
+                {recentRunsForDisplay.map((run) => {
+                  const paramSummary = runParameterSummary(run, strategyParameters);
+                  return (
+                    <div key={`history-${run.runId}`} className={`${run.status} ${run.isCurrent ? 'current' : ''}`} title={run.error || `${run.marketSlug}\n${paramSummary.label}`}>
+                      <span>#{run.runId}{run.isCurrent ? ' current' : ''}</span>
+                      <span>{run.status}</span>
+                      <span>{run.marketSlug}</span>
+                      <span>{run.backtestEngine || '-'}</span>
+                      <span>{compactRows(run.rowsProcessed)}</span>
+                      <span className={paramSummary.spread <= paramSummary.costBps / 10000 ? 'review' : 'ready'}>{paramSummary.label}</span>
+                      <span>{compactRunTime(run.createdAt)}</span>
+                      <span className="actions">
+                        <button type="button" onClick={() => onRunLoad?.(run.runId)}>{run.isCurrent ? 'Reload' : 'Load'}</button>
+                        <button type="button" onClick={() => applyRunParameters(run)}>Params</button>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="qtv-tool-empty">
