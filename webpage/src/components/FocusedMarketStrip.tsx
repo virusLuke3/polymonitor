@@ -698,7 +698,7 @@ type DetailChartOptions = {
   selectedLabel?: string | null;
 };
 
-function renderDetailChart(chart: ChartPayload | null, activeRange?: string | null, options: DetailChartOptions = {}) {
+function renderDetailChart(chart: ChartPayload | null, activeRange?: string | null, _options: DetailChartOptions = {}) {
   const points = chart?.points || [];
   if (!points.length) return emptyState('No market history loaded yet.');
   const { width, height, left, right, top, bottom } = FOCUS_CHART;
@@ -709,7 +709,7 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
       || String(chart?.interval || '').toLowerCase() === 'block'
       || points.some((point) => point.blockNumber != null || point.x != null);
     if (isBlockAxis) {
-      const plotTop = 68;
+      const plotTop = 44;
       const yesBlock = points
         .map((point) => ({ blockNumber: Number(point.blockNumber ?? point.x), price: Number(point.yesPrice) }))
         .filter((point) => Number.isFinite(point.blockNumber) && Number.isFinite(point.price));
@@ -749,8 +749,6 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
         const value = Number(point.tradeCount);
         return Number.isFinite(value) ? total + value : total;
       }, 0);
-      const overlayMeta = `${options.category || 'market'} · ${options.outcomeCount ? `${options.outcomeCount} outcomes` : 'outcome probability'} · orderfilled_block_close`;
-      const selectedLegend = `${options.selectedLabel || 'YES'} ${formatPercent(lastYes)}`;
       const maWindow = Math.max(4, Math.min(28, Math.floor(yesBlock.length / 36) || 4));
       const maPoints = movingAverageBlockPoints(yesBlock, maWindow);
       const maPath = maPoints.length > 1
@@ -759,21 +757,14 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
 
       return (
         <div className="wm-focus-chart-shell wm-polymarket-prob-chart wm-block-close-chart">
-          <div className="wm-focus-qtv-chart-info">
-            <div className="wm-focus-qtv-chart-meta">
-              <span>{overlayMeta}</span>
-              <div className="wm-focus-qtv-indicator-legend">
-                <span>Rows <b>{rowCount.toLocaleString('en-US')}</b></span>
-                <span>Range <i>{axisTicks[0]?.label || '--'}</i> <em>{axisTicks[axisTicks.length - 1]?.label || '--'}</em></span>
-                <span>Volume <b>{formatQuantVolume(volumeTotal)}</b></span>
-                {tradeCount > 0 ? <span>Trades <b>{tradeCount.toLocaleString('en-US', { maximumFractionDigits: 0 })}</b></span> : null}
-                <span>Selected <b>{selectedLegend}</b></span>
-              </div>
-              <div className="wm-focus-qtv-outcome-legend">
-                <span className="active"><i style={{ backgroundColor: '#38bdf8' }} />YES <b>{formatPercent(lastYes)}</b></span>
-                <span><i style={{ backgroundColor: '#f43f5e' }} />NO <b>{formatPercent(lastNo)}</b></span>
-                {maPath ? <span><i style={{ backgroundColor: '#f59e0b' }} />MA <b>{maWindow}</b></span> : null}
-              </div>
+          <div className="wm-focus-qtv-chart-info" aria-label={`${options.title || 'selected market'} block close chart metrics`}>
+            <div className="wm-focus-block-chart-hud">
+              <span>Rows <b>{rowCount.toLocaleString('en-US')}</b></span>
+              <span>Vol <b>{formatQuantVolume(volumeTotal)}</b></span>
+              {tradeCount > 0 ? <span>Trades <b>{tradeCount.toLocaleString('en-US', { maximumFractionDigits: 0 })}</b></span> : null}
+              <span className="yes"><i />YES <b>{formatPercent(lastYes)}</b></span>
+              <span className="no"><i />NO <b>{formatPercent(lastNo)}</b></span>
+              {maPath ? <span className="ma"><i />MA <b>{maWindow}</b></span> : null}
             </div>
           </div>
           <svg viewBox={`0 0 ${width} ${height}`} className="wm-focus-chart-svg" preserveAspectRatio="none">

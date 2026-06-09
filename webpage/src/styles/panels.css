@@ -21886,6 +21886,10 @@ a.wm-orderfilled-row {
   background: transparent !important;
 }
 
+.wm-focused-market-row .wm-focus-detail-panel .wm-panel-body {
+  overflow: hidden !important;
+}
+
 .wm-focused-market-list .wm-panel-body,
 .wm-focused-market-row .wm-focus-panel .wm-panel-body {
   padding: 8px !important;
@@ -21946,6 +21950,15 @@ a.wm-orderfilled-row {
   padding: 2px 0 8px !important;
 }
 
+.wm-focused-market-row .wm-focus-detail {
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  gap: 7px !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
 .wm-focus-title {
   color: var(--wm-terminal-primary) !important;
   font-family: var(--font-body) !important;
@@ -21975,10 +21988,19 @@ a.wm-orderfilled-row {
 }
 
 .wm-focus-chart-card {
+  display: grid !important;
+  grid-template-rows: auto auto minmax(0, 1fr) !important;
+  min-height: 0 !important;
   border: 1px solid var(--wm-terminal-border) !important;
   border-radius: 4px !important;
   background: #080c12 !important;
   box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+.wm-focused-market-row .wm-focus-detail-grid,
+.wm-focused-market-row .wm-focus-chart-wrap {
+  min-height: 0 !important;
   overflow: hidden !important;
 }
 
@@ -22011,6 +22033,8 @@ a.wm-orderfilled-row {
 }
 
 .wm-focus-inline-stats {
+  min-height: 22px !important;
+  overflow: hidden !important;
   padding-top: 4px !important;
   color: var(--wm-terminal-secondary) !important;
   font-size: 11px !important;
@@ -22239,8 +22263,8 @@ a.wm-orderfilled-row {
 
 .wm-focused-market-row .wm-block-close-chart .wm-focus-chart-svg {
   display: block !important;
-  height: clamp(280px, 34vh, 360px) !important;
-  min-height: 270px !important;
+  height: clamp(232px, 28vh, 292px) !important;
+  min-height: 232px !important;
   background:
     linear-gradient(rgba(255, 255, 255, 0.036) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.036) 1px, transparent 1px),
@@ -22296,13 +22320,79 @@ a.wm-orderfilled-row {
 .wm-focus-qtv-chart-info {
   position: absolute !important;
   z-index: 4 !important;
-  top: 8px !important;
-  right: 66px !important;
-  left: 12px !important;
-  display: grid !important;
-  max-height: 58px !important;
+  top: 9px !important;
+  right: 62px !important;
+  left: 14px !important;
+  display: block !important;
+  max-height: 24px !important;
   overflow: hidden !important;
   pointer-events: none !important;
+}
+
+.wm-focus-block-chart-hud {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  color: #8f9bad !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+  font-weight: 820 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap !important;
+}
+
+.wm-focus-block-chart-hud span {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+  height: 22px !important;
+  max-width: 118px !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(38, 50, 68, 0.74) !important;
+  border-radius: 4px !important;
+  background: rgba(7, 12, 18, 0.78) !important;
+  color: #8f9bad !important;
+  padding: 0 7px !important;
+  text-overflow: ellipsis !important;
+}
+
+.wm-focus-block-chart-hud b {
+  color: #e5eef8 !important;
+  font-weight: 900 !important;
+}
+
+.wm-focus-block-chart-hud i {
+  width: 8px !important;
+  height: 8px !important;
+  flex: 0 0 auto !important;
+  border-radius: 999px !important;
+  background: currentColor !important;
+}
+
+.wm-focus-block-chart-hud span.yes {
+  border-color: rgba(56, 189, 248, 0.34) !important;
+  color: #38bdf8 !important;
+}
+
+.wm-focus-block-chart-hud span.no {
+  border-color: rgba(244, 63, 94, 0.34) !important;
+  color: #fb7185 !important;
+}
+
+.wm-focus-block-chart-hud span.ma {
+  border-color: rgba(245, 158, 11, 0.34) !important;
+  color: #fbbf24 !important;
+}
+
+.wm-focus-block-chart-hud span.yes b,
+.wm-focus-block-chart-hud span.no b,
+.wm-focus-block-chart-hud span.ma b {
+  color: #f8fafc !important;
 }
 
 .wm-focus-qtv-chart-meta {
