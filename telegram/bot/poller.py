@@ -25,6 +25,9 @@ def _iter_replies(updates: Iterable[dict], *, settings: BotSettings, state: BotS
         if not settings.chat_allowed(request.chat_id, request.user_id):
             yield request.update_id, request.chat_id, BotReply("⚠️ 当前 chat 未授权使用此 bot。")
             continue
+        if state.rate_limited(chat_id=request.chat_id, user_id=request.user_id, limit=settings.rate_limit_per_minute):
+            yield request.update_id, request.chat_id, BotReply("⚠️ 查询太频繁了，请稍后再试。")
+            continue
         yield request.update_id, request.chat_id, handle_command(request, api, state=state)
 
 

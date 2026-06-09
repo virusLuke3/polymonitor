@@ -92,6 +92,7 @@ class BotSettings:
     dry_run: bool
     allowed_chat_ids: set[str]
     admin_user_ids: set[int]
+    rate_limit_per_minute: int
 
     def chat_allowed(self, chat_id: int | str, user_id: int | None = None) -> bool:
         if user_id is not None and user_id in self.admin_user_ids:
@@ -134,4 +135,5 @@ def load_settings() -> BotSettings:
         dry_run=_get_bool("POLYDATA_TELEGRAM_QUERY_BOT_DRY_RUN", _get_bool("POLYDATA_TELEGRAM_BOT_DRY_RUN", _get_bool("POLYDATA_TELEGRAM_DRY_RUN", False))),
         allowed_chat_ids=_csv_set(_get_first(("POLYDATA_TELEGRAM_QUERY_BOT_ALLOWED_CHAT_IDS", "POLYDATA_TELEGRAM_BOT_ALLOWED_CHAT_IDS"), "")),
         admin_user_ids=_csv_int_set(_get_first(("POLYDATA_TELEGRAM_QUERY_BOT_ADMIN_USER_IDS", "POLYDATA_TELEGRAM_BOT_ADMIN_USER_IDS"), "")),
+        rate_limit_per_minute=max(1, _get_int("POLYDATA_TELEGRAM_QUERY_BOT_RATE_LIMIT_PER_MINUTE", _get_int("POLYDATA_TELEGRAM_BOT_RATE_LIMIT_PER_MINUTE", 20))),
     )

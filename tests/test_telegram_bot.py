@@ -184,6 +184,7 @@ def make_settings(state_path: str) -> BotSettings:
         dry_run=False,
         allowed_chat_ids=set(),
         admin_user_ids=set(),
+        rate_limit_per_minute=20,
     )
 
 
@@ -404,6 +405,32 @@ def test_run_once_rejects_unauthorized_chat(tmp_path: Path):
 
     assert handled == 1
     assert "未授权" in telegram.sent[0]["text"]
+
+
+def test_run_once_rate_limits_user(tmp_path: Path):
+    updates = [
+        {
+            "update_id": update_id,
+            "message": {
+                "message_id": update_id,
+                "text": "/worldcup",
+                "chat": {"id": 123},
+                "from": {"id": 456},
+            },
+        }
+        for update_id in (10, 11)
+    ]
+    state = BotState(str(tmp_path / "bot_state.json"))
+    telegram = FakeTelegram(updates)
+    settings = BotSettings(
+        **{**make_settings(str(tmp_path / "bot_state.json")).__dict__, "rate_limit_per_minute": 1}
+    )
+
+    handled = run_once(settings=settings, state=state, telegram=telegram, api=FakeApi(), dry_run=False)
+
+    assert handled == 2
+    assert "FIFA World Cup 2026" in telegram.sent[0]["text"]
+    assert "查询太频繁" in telegram.sent[1]["text"]
 
 
 def test_polydata_api_falls_back_to_next_base_url():

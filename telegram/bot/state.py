@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -30,6 +31,23 @@ class BotState:
 
     def mark_update(self, update_id: int) -> None:
         self.data["offset"] = int(update_id) + 1
+
+    def rate_limited(self, *, chat_id: int | str, user_id: int | None, limit: int, window_seconds: int = 60) -> bool:
+        now = time.time()
+        key = f"{chat_id}:{user_id or 'anon'}"
+        buckets = self.data.get("rateLimits")
+        if not isinstance(buckets, dict):
+            buckets = {}
+            self.data["rateLimits"] = buckets
+        raw_entries = buckets.get(key)
+        entries = raw_entries if isinstance(raw_entries, list) else []
+        fresh = [float(ts) for ts in entries if isinstance(ts, (int, float)) and now - float(ts) < window_seconds]
+        if len(fresh) >= max(1, int(limit or 1)):
+            buckets[key] = fresh
+            return True
+        fresh.append(now)
+        buckets[key] = fresh
+        return False
 
     @property
     def last_alert_check_ts(self) -> float:
