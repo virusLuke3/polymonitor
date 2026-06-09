@@ -694,6 +694,18 @@ def _preferred_weather_date_iso(ctx: dict, dates: List[Dict[str, str]]) -> Optio
     return str(dates[0]["iso"]) if dates else None
 
 
+def _weather_sync_date_items(ctx: dict, dates: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    preferred = _preferred_weather_date_iso(ctx, dates)
+    ordered: List[Dict[str, str]] = []
+    for item in dates:
+        if str(item.get("iso") or "") == preferred:
+            ordered.append(item)
+    for item in dates:
+        if str(item.get("iso") or "") != preferred:
+            ordered.append(item)
+    return ordered or dates
+
+
 def _date_slug(item: Dict[str, str]) -> str:
     try:
         parsed = datetime.fromisoformat(str(item.get("iso") or ""))
@@ -1225,9 +1237,10 @@ def _sync_weather_markets_from_gamma(ctx: dict, cities: List[Dict[str, Any]], da
         stats["status"] = "disabled"
         return stats
 
+    sync_dates = _weather_sync_date_items(ctx, dates)
     events: List[Dict[str, Any]] = []
     statuses: List[str] = []
-    for params in _weather_gamma_category_params(dates):
+    for params in _weather_gamma_category_params(sync_dates):
         rows, status = _fetch_gamma_events_for_params(ctx, params)
         statuses.append(status)
         events.extend(rows)
@@ -1238,7 +1251,7 @@ def _sync_weather_markets_from_gamma(ctx: dict, cities: List[Dict[str, Any]], da
     rows: List[Dict[str, Any]] = []
     for city in target_cities:
         for city_slug in _weather_city_slug_candidates(city):
-            for item in dates[:GAMMA_SYNC_MAX_DIRECT_DATES]:
+            for item in sync_dates[:GAMMA_SYNC_MAX_DIRECT_DATES]:
                 slug = f"highest-temperature-in-{city_slug}-{_date_slug(item)}"
                 rows, status = _fetch_gamma_event_by_slug(ctx, slug)
                 statuses.append(status)
@@ -1250,7 +1263,7 @@ def _sync_weather_markets_from_gamma(ctx: dict, cities: List[Dict[str, Any]], da
         if GAMMA_QUERY_PAUSE_SECONDS > 0:
             time.sleep(GAMMA_QUERY_PAUSE_SECONDS)
 
-    query_events, query_status = _fetch_gamma_events(ctx, _weather_gamma_sync_queries(target_cities, dates))
+    query_events, query_status = _fetch_gamma_events(ctx, _weather_gamma_sync_queries(target_cities, sync_dates))
     statuses.append(query_status)
     events.extend(query_events)
 
