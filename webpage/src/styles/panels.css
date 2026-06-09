@@ -21045,6 +21045,32 @@ a.wm-orderfilled-row {
   color: var(--wm-terminal-muted) !important;
 }
 
+.wm-focus-chart-block-axis {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  min-width: 0 !important;
+  color: var(--wm-terminal-secondary) !important;
+  font-family: var(--font-mono) !important;
+  font-size: 11px !important;
+  font-weight: 720 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap !important;
+}
+
+.wm-focus-chart-block-axis span {
+  flex: 0 0 auto !important;
+  color: var(--wm-terminal-muted) !important;
+}
+
+.wm-focus-chart-block-axis strong {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: var(--wm-terminal-primary) !important;
+  font-weight: 760 !important;
+  text-overflow: ellipsis !important;
+}
+
 .wm-focus-chart-svg,
 .wm-focus-detail-grid.compact .wm-focus-chart-svg {
   height: min(430px, 48vh) !important;

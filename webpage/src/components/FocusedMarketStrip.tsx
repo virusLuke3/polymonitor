@@ -40,6 +40,7 @@ const FOCUS_CHART = {
   left: 10,
 };
 const BOOK_LEVEL_LIMIT = 4;
+const BLOCK_CLOSE_POINT_LIMIT = 25000;
 
 const POLYMARKET_SERIES_COLORS = ['#7cb6ff', '#4377ff', '#f5b800', '#ff7a1a', '#7f56d9', '#12b76a', '#f04438', '#06aed4'];
 
@@ -182,12 +183,9 @@ function compactTimeLabel(value: number, index: number, total: number) {
   });
 }
 
-function compactBlockLabel(value: number, index: number, total: number) {
+function compactBlockLabel(value: number) {
   if (!Number.isFinite(value)) return '';
-  if (index === total - 1) return 'Latest';
-  if (value >= 1_000_000) return `#${(value / 1_000_000).toFixed(2)}M`;
-  if (value >= 1_000) return `#${Math.round(value / 1_000)}K`;
-  return `#${Math.round(value)}`;
+  return `#${Math.round(value).toLocaleString('en-US')}`;
 }
 
 function chartTimeTicks(points: Array<{ timestamp: string }>, count = 4) {
@@ -214,12 +212,25 @@ function chartBlockTicks(points: Array<{ blockNumber?: number | string | null; x
   if (!blocks.length) return [];
   const minBlock = blocks[0] ?? 0;
   const maxBlock = blocks[blocks.length - 1] ?? minBlock;
-  if (maxBlock <= minBlock) return [{ block: minBlock, ratio: 0, label: compactBlockLabel(minBlock, 0, 1) }];
+  if (maxBlock <= minBlock) return [{ block: minBlock, ratio: 0, label: compactBlockLabel(minBlock) }];
   return Array.from({ length: count }, (_, index) => {
-    const ratio = index / Math.max(count - 1, 1);
-    const block = minBlock + (maxBlock - minBlock) * ratio;
-    return { block, ratio, label: compactBlockLabel(block, index, count) };
+    const sourceIndex = Math.round((index / Math.max(count - 1, 1)) * Math.max(blocks.length - 1, 0));
+    const block = blocks[sourceIndex] ?? minBlock;
+    const ratio = (block - minBlock) / Math.max(maxBlock - minBlock, 1);
+    return { block, ratio, label: compactBlockLabel(block) };
   });
+}
+
+function blockRangeLabel(points: Array<{ blockNumber?: number | string | null; x?: number | string | null }>) {
+  const blocks = points
+    .map((point) => Number(point.blockNumber ?? point.x))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (!blocks.length) return '';
+  const first = blocks[0] ?? 0;
+  const last = blocks[blocks.length - 1] ?? first;
+  if (first === last) return compactBlockLabel(first);
+  return `${compactBlockLabel(first)} - ${compactBlockLabel(last)}`;
 }
 
 function buildLinePath(
@@ -608,21 +619,6 @@ function eventChartLegend(
   );
 }
 
-function blockCloseLimitForRange(range?: string | null) {
-  switch (String(range || '').toLowerCase()) {
-    case '1h':
-      return 1800;
-    case '1d':
-      return 25000;
-    case '1w':
-    case '1m':
-    case 'all':
-      return 25000;
-    default:
-      return 5000;
-  }
-}
-
 function blockCloseSeriesToChart(
   payload: QuantMarketSeriesPayload | null,
   selectedMarketId: number | null,
@@ -723,12 +719,12 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
                 </g>
               );
             })}
-            {blockTicks.map((tick, index) => {
+            {blockTicks.map((tick) => {
               const x = left + tick.ratio * plotWidth;
               return (
                 <g key={`${tick.block}-${tick.label}`}>
                   <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
-                  <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactBlockLabel(tick.block, index, blockTicks.length)}</text>
+                  <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactBlockLabel(tick.block)}</text>
                 </g>
               );
             })}
@@ -921,10 +917,10 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const marketStats = marketLookup(ctx.markets, ctx.selectedMarketId);
   const selectedMarketSlug = String(selectedOutcome?.slug || focusedMarket?.slug || marketStats?.slug || ctx.bundle?.identity?.slug || '').trim();
   const blockCloseKey = selectedMarketSlug
-    ? `${selectedMarketSlug}:${ctx.selectedMarketId || ''}:${selectedTokenId || activeOutcomeKey || ''}:${ctx.selectedMarketGroupChartRange}`
+    ? `${selectedMarketSlug}:${ctx.selectedMarketId || ''}:${selectedTokenId || activeOutcomeKey || ''}`
     : '';
   const blockCloseChart = blockCloseState.key === blockCloseKey
-    ? blockCloseSeriesToChart(blockCloseState.payload, ctx.selectedMarketId, selectedOutcome, ctx.selectedMarketGroupChartRange)
+    ? blockCloseSeriesToChart(blockCloseState.payload, ctx.selectedMarketId, selectedOutcome, 'blocks')
     : null;
   const chart = blockCloseChart || (bundleMatchesSelected ? (ctx.bundle?.chart || null) : null);
   const chartLatestPoint = (chart?.points || []).length ? chart?.points?.[chart.points.length - 1] : null;
@@ -956,6 +952,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       || (chart?.range === 'snapshot' || chart?.interval === 'snapshot' ? 'snapshot' : ''),
   ).toLowerCase();
   const chartSource = String(chart?.priceSource || '').toLowerCase();
+  const isBlockCloseChart = Boolean(chartSource.includes('block_close') || String(chart?.interval || '').toLowerCase() === 'block');
   const eventChartStatus = String(eventChart?.historyStatus || '').toLowerCase();
   const eventChartSource = String(eventChart?.priceSource || '').toLowerCase();
   const chartPointCount = chart?.points?.length || 0;
@@ -966,6 +963,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   );
   const displayChart = chartRenderable ? chart : null;
   const chartPoints = displayChart?.points || [];
+  const chartBlockRangeText = isBlockCloseChart ? blockRangeLabel(chartPoints) : '';
   const focusedMarketDistinctPrices = new Set(
     chartPoints
       .map((point) => Number(point.yesPrice))
@@ -1067,7 +1065,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       priceSource: 'orderfilled_block_close',
       scope: 'market',
       tokenSide: 'YES',
-      limit: blockCloseLimitForRange(ctx.selectedMarketGroupChartRange),
+      limit: BLOCK_CLOSE_POINT_LIMIT,
       pointFormat: 'lite',
       maxOutcomes: 8,
     })
@@ -1080,7 +1078,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     return () => {
       cancelled = true;
     };
-  }, [blockCloseKey, ctx.selectedMarketGroupChartRange, executionAvailable, selectedMarketSlug]);
+  }, [blockCloseKey, executionAvailable, selectedMarketSlug]);
 
   useEffect(() => {
     setBookSide('yes');
@@ -1129,22 +1127,29 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <span><em>Spread</em> <strong>{formatBookPrice(spreadValue)}</strong></span>
               </div>
               <div className="wm-focus-chart-topline">
-                <div className="wm-focus-chart-tabs" aria-label="chart range">
-                  <button type="button" className="ghost">Past</button>
-                  {CHART_RANGE_TABS.map((tab) => (
-                    <button
-                      type="button"
-                      key={tab.value}
-                      className={ctx.selectedMarketGroupChartRange === tab.value ? 'active' : ''}
-                      onClick={() => ctx.setSelectedMarketGroupChartRange(tab.value)}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                  <i>UTC</i>
-                </div>
+                {isBlockCloseChart ? (
+                  <div className="wm-focus-chart-block-axis" aria-label="block close range">
+                    <span>OrderFilled block close</span>
+                    {chartBlockRangeText ? <strong>{chartBlockRangeText}</strong> : null}
+                  </div>
+                ) : (
+                  <div className="wm-focus-chart-tabs" aria-label="chart range">
+                    <button type="button" className="ghost">Past</button>
+                    {CHART_RANGE_TABS.map((tab) => (
+                      <button
+                        type="button"
+                        key={tab.value}
+                        className={ctx.selectedMarketGroupChartRange === tab.value ? 'active' : ''}
+                        onClick={() => ctx.setSelectedMarketGroupChartRange(tab.value)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                    <i>UTC</i>
+                  </div>
+                )}
                 <div className="wm-focus-chart-summary">
-                  <span>{chartSourceText}</span>
+                  {!isBlockCloseChart ? <span>{chartSourceText}</span> : null}
                   <span>{marketTimeSubtitle(
                     detail?.endDate || selectedGroup?.endDate || focusedMarket?.endDate || null,
                     detail?.createdAt || selectedGroup?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null,
