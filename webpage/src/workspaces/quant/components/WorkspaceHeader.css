@@ -1242,9 +1242,9 @@
 }
 
 .qtv-select-group label {
-  display: flex;
+  position: relative;
+  display: block;
   align-items: center;
-  gap: 6px;
   min-width: 0;
 }
 
@@ -1257,6 +1257,21 @@
   text-transform: uppercase;
 }
 
+.qtv-select-group label span {
+  position: absolute;
+  z-index: 1;
+  left: 9px;
+  top: 50%;
+  max-width: 50px;
+  overflow: hidden;
+  color: #64748b;
+  line-height: 1;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
 .qtv-select-group select {
   width: min(16vw, 210px);
   min-width: 156px;
@@ -1265,7 +1280,17 @@
   color: #dbe3ef;
   font-family: var(--font-mono);
   font-size: 11px;
-  padding: 0 8px;
+  padding: 0 8px 0 58px;
+}
+
+.qtv-select-group label:first-child select {
+  width: min(18vw, 232px);
+  min-width: 214px;
+}
+
+.qtv-select-group label:nth-child(2) select {
+  width: min(15vw, 190px);
+  min-width: 174px;
 }
 
 .qtv-run-group {
