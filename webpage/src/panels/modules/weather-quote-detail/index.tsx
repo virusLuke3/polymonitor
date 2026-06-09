@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
-import { bookPrice, displayQuoteBins, panelStatus, selectedWeatherCity, statusBadge } from '../weather-detail-utils';
+import { bookPrice, panelStatus, selectedWeatherCity, statusBadge, useLiveWeatherQuoteBins } from '../weather-detail-utils';
 import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '../weather-live-chart';
 
 function percentAxisLabel(value: number) {
@@ -64,11 +64,11 @@ function WeatherQuoteDetailPanel({
   selectedCityId?: string | null;
 }) {
   const city = selectedWeatherCity(payload, selectedCityId);
-  const bins = displayQuoteBins(city);
+  const { bins, loading } = useLiveWeatherQuoteBins(city);
   return (
     <Panel
       title="WEATHER QUOTE CURVE"
-      badge={statusBadge(payload?.status)}
+      badge={loading ? 'BOOK' : statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
       className="wm-market-panel wm-weather-quote-detail-panel wm-weather-quote-curve-only-panel"
       dataPanelId="weather-quote-detail"

@@ -7,7 +7,6 @@ import {
   bestQuoteBin,
   bookCoverage,
   bookPrice,
-  displayQuoteBins,
   marketSourceLabel,
   midCoverage,
   num,
@@ -16,6 +15,7 @@ import {
   selectedWeatherCity,
   statusBadge,
   tempLabel,
+  useLiveWeatherQuoteBins,
 } from '../weather-detail-utils';
 
 function sourceLabel(value?: string | null) {
@@ -61,15 +61,16 @@ function WeatherQuoteTablePanel({
   selectedCityId?: string | null;
 }) {
   const city = selectedWeatherCity(payload, selectedCityId);
-  const bins = displayQuoteBins(city);
-  const topBookBin = bestBookQuoteBin(city);
-  const topBin = topBookBin || bestQuoteBin(city);
+  const { bins, loading } = useLiveWeatherQuoteBins(city);
+  const liveCity = city ? { ...city, bins } : null;
+  const topBookBin = bestBookQuoteBin(liveCity);
+  const topBin = topBookBin || bestQuoteBin(liveCity);
   const topBookPrice = bookPrice(topBin);
   const topLabel = topBin?.label || bins[Math.floor(bins.length / 2)]?.label || '--';
   return (
     <Panel
       title="WEATHER QUOTE TABLE"
-      badge={statusBadge(payload?.status)}
+      badge={loading ? 'BOOK' : statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
       className="wm-market-panel wm-weather-quote-table-only-panel"
       dataPanelId="weather-quote-table"
@@ -84,8 +85,8 @@ function WeatherQuoteTablePanel({
             <b>{priceLabel(topBookPrice ?? topBin?.midPriceYes)}</b>
           </div>
           <div className="wm-weather-quote-meta">
-            <span><i>Book</i><strong>{bookCoverage(city)}</strong></span>
-            <span><i>Mid/Last</i><strong>{midCoverage(city)}</strong></span>
+            <span><i>Book</i><strong>{bookCoverage(liveCity)}</strong></span>
+            <span><i>Mid/Last</i><strong>{midCoverage(liveCity)}</strong></span>
             <span><i>Market</i><strong>{marketSourceLabel(city)}</strong></span>
             <span><i>Bid</i><strong>{priceLabel(topBin?.bestBidYes)}</strong></span>
             <span><i>Ask</i><strong>{priceLabel(topBin?.bestAskYes)}</strong></span>

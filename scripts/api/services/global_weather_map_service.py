@@ -386,48 +386,58 @@ def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[
     base_url = str(getattr(ctx["SETTINGS"], "open_meteo_api_url", "") or "").strip()
     if not base_url:
         raise RuntimeError("open meteo api url missing")
-    payload = ctx["http_json_get"](
-        base_url,
-        params={
-            "latitude": ",".join(str(city["lat"]) for city in cities),
-            "longitude": ",".join(str(city["lon"]) for city in cities),
-            "current": "temperature_2m,weather_code",
-            "hourly": "temperature_2m",
-            "daily": "temperature_2m_max,temperature_2m_min",
-            "forecast_days": 7,
-            "timezone": "auto",
-        },
-        timeout=18,
-        headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
-    )
-    responses = payload if isinstance(payload, list) else [payload]
     by_city: Dict[str, Dict[str, Any]] = {}
-    for city, row in zip(cities, responses):
-        if not isinstance(row, dict):
+    failed_chunks = 0
+    chunk_size = 20
+    for offset in range(0, len(cities), chunk_size):
+        chunk = cities[offset:offset + chunk_size]
+        try:
+            payload = ctx["http_json_get"](
+                base_url,
+                params={
+                    "latitude": ",".join(str(city["lat"]) for city in chunk),
+                    "longitude": ",".join(str(city["lon"]) for city in chunk),
+                    "current": "temperature_2m,weather_code",
+                    "hourly": "temperature_2m",
+                    "daily": "temperature_2m_max,temperature_2m_min",
+                    "forecast_days": 7,
+                    "timezone": "auto",
+                },
+                timeout=18,
+                headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
+            )
+        except Exception:
+            failed_chunks += 1
             continue
-        unit = str(city.get("unit") or "F").upper()
-        current = row.get("current") if isinstance(row.get("current"), dict) else {}
-        daily = row.get("daily") if isinstance(row.get("daily"), dict) else {}
-        hourly = row.get("hourly") if isinstance(row.get("hourly"), dict) else {}
-        hourly_times = hourly.get("time") if isinstance(hourly.get("time"), list) else []
-        hourly_temps = hourly.get("temperature_2m") if isinstance(hourly.get("temperature_2m"), list) else []
-        daily_dates = daily.get("time") if isinstance(daily.get("time"), list) else []
-        daily_highs = daily.get("temperature_2m_max") if isinstance(daily.get("temperature_2m_max"), list) else []
-        daily_lows = daily.get("temperature_2m_min") if isinstance(daily.get("temperature_2m_min"), list) else []
-        daily_rows = [
-            {"date": day, "high": _c_to_unit(high, unit), "low": _c_to_unit(low, unit)}
-            for day, high, low in zip(daily_dates[:7], daily_highs[:7], daily_lows[:7])
-        ]
-        by_city[str(city["city_id"])] = {
-            "condition": describe_weather_code(current.get("weather_code")),
-            "currentTemp": _c_to_unit(current.get("temperature_2m"), unit),
-            "todayHigh": daily_rows[0]["high"] if daily_rows else None,
-            "todayLow": daily_rows[0]["low"] if daily_rows else None,
-            "forecastHigh": max([row["high"] for row in daily_rows if row.get("high") is not None], default=None),
-            "hourly": [{"time": time_value, "temp": _c_to_unit(temp, unit)} for time_value, temp in zip(hourly_times[:24], hourly_temps[:24])],
-            "daily": daily_rows,
-            "updatedAt": current.get("time") or row.get("generationtime_ms"),
-        }
+        responses = payload if isinstance(payload, list) else [payload]
+        for city, row in zip(chunk, responses):
+            if not isinstance(row, dict):
+                continue
+            unit = str(city.get("unit") or "F").upper()
+            current = row.get("current") if isinstance(row.get("current"), dict) else {}
+            daily = row.get("daily") if isinstance(row.get("daily"), dict) else {}
+            hourly = row.get("hourly") if isinstance(row.get("hourly"), dict) else {}
+            hourly_times = hourly.get("time") if isinstance(hourly.get("time"), list) else []
+            hourly_temps = hourly.get("temperature_2m") if isinstance(hourly.get("temperature_2m"), list) else []
+            daily_dates = daily.get("time") if isinstance(daily.get("time"), list) else []
+            daily_highs = daily.get("temperature_2m_max") if isinstance(daily.get("temperature_2m_max"), list) else []
+            daily_lows = daily.get("temperature_2m_min") if isinstance(daily.get("temperature_2m_min"), list) else []
+            daily_rows = [
+                {"date": day, "high": _c_to_unit(high, unit), "low": _c_to_unit(low, unit)}
+                for day, high, low in zip(daily_dates[:7], daily_highs[:7], daily_lows[:7])
+            ]
+            by_city[str(city["city_id"])] = {
+                "condition": describe_weather_code(current.get("weather_code")),
+                "currentTemp": _c_to_unit(current.get("temperature_2m"), unit),
+                "todayHigh": daily_rows[0]["high"] if daily_rows else None,
+                "todayLow": daily_rows[0]["low"] if daily_rows else None,
+                "forecastHigh": max([row["high"] for row in daily_rows if row.get("high") is not None], default=None),
+                "hourly": [{"time": time_value, "temp": _c_to_unit(temp, unit)} for time_value, temp in zip(hourly_times[:24], hourly_temps[:24])],
+                "daily": daily_rows,
+                "updatedAt": current.get("time") or row.get("generationtime_ms"),
+            }
+    if not by_city and failed_chunks:
+        raise RuntimeError("open meteo fetch failed for all chunks")
     return by_city
 
 
