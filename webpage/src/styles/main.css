@@ -2280,7 +2280,7 @@
   padding: 9px 10px;
 }
 
-.qtv-inspector-trade-focus div:first-child {
+.qtv-inspector-trade-focus-copy {
   display: grid;
   min-width: 0;
   gap: 3px;
@@ -2330,6 +2330,42 @@
 .qtv-inspector-trades .qtv-inspector-trade-toolbar button:disabled {
   cursor: not-allowed;
   opacity: 0.42;
+}
+
+.qtv-inspector-trade-focus-grid {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.qtv-inspector-trade-focus-grid div {
+  min-width: 0;
+  border: 1px solid rgba(32, 41, 56, 0.88);
+  border-radius: 4px;
+  background: rgba(2, 6, 23, 0.34);
+  padding: 7px;
+}
+
+.qtv-inspector-trade-focus-grid b,
+.qtv-inspector-trade-focus-grid small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-inspector-trade-focus-grid b {
+  color: #e5eefb;
+  font-size: 11px;
+}
+
+.qtv-inspector-trade-focus-grid small {
+  margin-top: 2px;
+  color: #6b7c95;
+  font-size: 9px;
+  font-weight: 900;
 }
 
 .qtv-inspector-trades .qtv-inspector-trade {

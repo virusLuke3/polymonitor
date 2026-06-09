@@ -40,8 +40,36 @@ export function TradesTableTab({ trades, filters, selectedTradeId, onToggleFilte
     if (nextTrade) onSelectTrade(nextTrade.id);
   };
 
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (!trades.length) return;
+    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      event.preventDefault();
+      selectOffset(-1);
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      selectOffset(1);
+    }
+    if (event.key === 'Home') {
+      event.preventDefault();
+      const firstTrade = trades[0];
+      if (firstTrade) onSelectTrade(firstTrade.id);
+    }
+    if (event.key === 'End') {
+      event.preventDefault();
+      const lastTrade = trades[trades.length - 1];
+      if (lastTrade) onSelectTrade(lastTrade.id);
+    }
+  };
+
   return (
-    <div className="qtv-table-wrap qtv-trades-table-wrap">
+    <div
+      className="qtv-table-wrap qtv-trades-table-wrap"
+      tabIndex={0}
+      role="region"
+      aria-label="Backtest trades. Use arrow keys to move the focused trade."
+      onKeyDown={handleKeyDown}
+    >
       <div className="qtv-filter-strip">
         {FILTERS.map(([id, label]) => (
           <button key={id} className={filters.has(id) ? 'active' : ''} type="button" onClick={() => onToggleFilter(id)}>{label}</button>

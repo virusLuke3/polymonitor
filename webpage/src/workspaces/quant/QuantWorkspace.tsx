@@ -2148,6 +2148,20 @@ export function QuantWorkspace() {
       selectedIndex,
     };
   }, [filteredTrades, selectedTradeRow]);
+  const selectedTradeBlockSpan = useMemo(() => {
+    if (!selectedTradeRow?.entryX || !selectedTradeRow.exitX) return null;
+    return Math.abs(Math.floor(selectedTradeRow.exitX) - Math.floor(selectedTradeRow.entryX));
+  }, [selectedTradeRow]);
+  const selectInspectorTradeOffset = (offset: number) => {
+    if (!filteredTrades.length) return;
+    const base = inspectorTradeStats.selectedIndex >= 0 ? inspectorTradeStats.selectedIndex : 0;
+    const nextIndex = Math.min(filteredTrades.length - 1, Math.max(0, base + offset));
+    const nextTrade = filteredTrades[nextIndex];
+    if (!nextTrade) return;
+    setSelectedTradeId(nextTrade.id);
+    setTesterTab('trades');
+    setStrategyDrawerCollapsed(false);
+  };
   const priceBlockRange = useMemo(() => blockRangeLabel(activePrices), [activePrices]);
   const selectedWatchKey = selectedOutcome ? watchKeyForOutcome(selectedOutcome) : selectedOutcomeRow ? watchKeyForOutcome(selectedOutcomeRow.outcome) : '';
   const selectedIsWatched = selectedWatchKey ? watchlistKeys.includes(selectedWatchKey) : false;
@@ -2917,12 +2931,19 @@ export function QuantWorkspace() {
                       </div>
                     </section>
                     <section className="qtv-inspector-trade-focus">
-                      <div>
-                        <span>Selected</span>
-                        <strong>{selectedTradeRow ? `${selectedTradeRow.id} · ${selectedTradeRow.side} ${selectedTradeRow.outcome}` : 'None'}</strong>
-                        <em>{selectedTradeRow && inspectorTradeStats.selectedIndex >= 0 ? `${inspectorTradeStats.selectedIndex + 1} / ${filteredTrades.length}` : 'Click a trade to focus entry / exit'}</em>
+                      <div className="qtv-inspector-trade-focus-copy">
+                        <span>Focused trade</span>
+                        <strong>{selectedTradeRow ? `${selectedTradeRow.id} · ${selectedTradeRow.side} ${selectedTradeRow.outcome}` : 'None selected'}</strong>
+                        <em>{selectedTradeRow && inspectorTradeStats.selectedIndex >= 0 ? `${inspectorTradeStats.selectedIndex + 1} of ${filteredTrades.length} · chart zooms to entry / exit` : 'Click a trade, or use the table arrow keys.'}</em>
                       </div>
                       <div className="qtv-inspector-trade-toolbar">
+                        <button
+                          type="button"
+                          disabled={inspectorTradeStats.selectedIndex <= 0}
+                          onClick={() => selectInspectorTradeOffset(-1)}
+                        >
+                          Prev
+                        </button>
                         <button
                           type="button"
                           disabled={!selectedTradeRow}
@@ -2935,8 +2956,23 @@ export function QuantWorkspace() {
                         >
                           Focus
                         </button>
+                        <button
+                          type="button"
+                          disabled={inspectorTradeStats.selectedIndex < 0 || inspectorTradeStats.selectedIndex >= filteredTrades.length - 1}
+                          onClick={() => selectInspectorTradeOffset(1)}
+                        >
+                          Next
+                        </button>
                         <button type="button" disabled={!selectedTradeRow} onClick={() => setSelectedTradeId(null)}>Clear</button>
                       </div>
+                      {selectedTradeRow ? (
+                        <div className="qtv-inspector-trade-focus-grid">
+                          <div><span>Entry</span><b>{selectedTradeRow.entryX ? Math.floor(selectedTradeRow.entryX).toLocaleString('en-US') : selectedTradeRow.entryTime}</b><small>{fmtPrice(selectedTradeRow.entryPrice)}</small></div>
+                          <div><span>Exit</span><b>{selectedTradeRow.exitX ? Math.floor(selectedTradeRow.exitX).toLocaleString('en-US') : selectedTradeRow.exitTime}</b><small>{fmtPrice(selectedTradeRow.exitPrice)}</small></div>
+                          <div><span>Span</span><b>{selectedTradeBlockSpan !== null ? `${selectedTradeBlockSpan.toLocaleString('en-US')} blocks` : selectedTradeRow.holdingTime}</b><small>{selectedTradeRow.exitReason}</small></div>
+                          <div><span>PnL</span><b className={selectedTradeRow.pnl >= 0 ? 'positive' : 'negative'}>{selectedTradeRow.pnl >= 0 ? '+' : ''}{selectedTradeRow.pnl.toFixed(2)} USDC</b><small>{selectedTradeRow.pnlPct.toFixed(2)}%</small></div>
+                        </div>
+                      ) : null}
                     </section>
                     {recentTradeRows.map((trade) => (
                       <button
