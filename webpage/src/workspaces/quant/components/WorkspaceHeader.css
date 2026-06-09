@@ -454,6 +454,11 @@
   text-transform: uppercase;
 }
 
+.qtv-result-entry {
+  display: grid;
+  gap: 3px;
+}
+
 .qtv-result-row {
   display: grid !important;
   grid-template-columns: 52px minmax(0, 1fr) auto !important;
@@ -490,6 +495,68 @@
 .qtv-result-row.selected {
   border-left-color: #22d3ee;
   background: #0b2638 !important;
+}
+
+.qtv-inline-outcomes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px;
+  margin: -1px 0 6px 55px;
+  padding: 5px;
+  border-left: 1px solid rgba(59, 130, 246, 0.36);
+  background: rgba(11, 17, 28, 0.58);
+}
+
+.qtv-market-palette.compact .qtv-inline-outcomes {
+  grid-template-columns: minmax(0, 1fr);
+  margin-left: 50px;
+}
+
+.qtv-inline-outcomes button,
+.qtv-inline-outcomes > span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 27px;
+  border: 1px solid rgba(38, 50, 68, 0.78);
+  border-radius: 3px;
+  background: rgba(8, 13, 21, 0.86);
+  color: #cbd5e1;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 0 7px;
+  text-align: left;
+}
+
+.qtv-inline-outcomes button:hover {
+  border-color: rgba(34, 211, 238, 0.42);
+  background: rgba(14, 26, 44, 0.94);
+}
+
+.qtv-inline-outcomes button span,
+.qtv-inline-outcomes button b {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-inline-outcomes button span {
+  color: #dbe3ef;
+}
+
+.qtv-inline-outcomes button b {
+  color: #60a5fa;
+  font-size: 9px;
+}
+
+.qtv-inline-outcomes button.more {
+  justify-content: center;
+  grid-template-columns: auto;
+  border-style: dashed;
+  color: #93c5fd;
+  text-align: center;
 }
 
 .qtv-type-badge {
