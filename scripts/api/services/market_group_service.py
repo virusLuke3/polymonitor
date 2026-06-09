@@ -965,7 +965,12 @@ def _latest_block_close_by_market_id(ctx: dict, market_ids: Iterable[int]) -> Di
 def _apply_latest_block_close_prices(ctx: dict, items: List[Dict[str, Any]]) -> None:
     latest_by_market_id = _latest_block_close_by_market_id(
         ctx,
-        [market_id for item in items for market_id in _group_market_ids(item)],
+        [
+            int(default_market_id)
+            for item in items
+            for default_market_id in [_float_value(item.get("defaultMarketId"))]
+            if default_market_id is not None
+        ],
     )
     if not latest_by_market_id:
         return
@@ -1147,7 +1152,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 20}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 21}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
