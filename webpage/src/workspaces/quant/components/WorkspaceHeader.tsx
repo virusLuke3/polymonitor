@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { QuantPriceMarket } from '@/types';
+import { fetchQuantEventPriceHead, isAbortLikeError } from '@/services/api';
+import type { QuantMarketSeriesOutcome, QuantPriceMarket } from '@/types';
 import type { BacktestEngine, DataStatus, PriceSource } from '../types';
 import './WorkspaceHeader.css';
 
@@ -29,6 +30,10 @@ type SearchFilter = 'all' | 'events' | 'markets' | 'tokens' | 'ready' | 'active'
 type SearchSort = 'relevance' | 'volume' | 'coverage' | 'outcomes' | 'updated';
 type SearchResultKind = 'event' | 'market' | 'token';
 type SearchPaletteMode = 'compact' | 'full';
+type EventOutcomeCacheEntry = {
+  status: 'loading' | 'ready' | 'error';
+  items: QuantPriceMarket[];
+};
 
 type SearchResult = {
   key: string;
@@ -196,6 +201,41 @@ function compactMarketForStorage(market: QuantPriceMarket): QuantPriceMarket {
   };
 }
 
+function apiPriceSource(priceSource: PriceSource) {
+  return priceSource === 'orderfilled' ? 'orderfilled_block_close' : 'frontend';
+}
+
+function outcomeToMarket(outcome: QuantMarketSeriesOutcome, eventMarket: QuantPriceMarket): QuantPriceMarket | null {
+  const marketSlug = outcome.marketSlug || '';
+  if (!marketSlug) return null;
+  const tokenSide = outcome.buyYesTokenSide || outcome.tokenSide || 'YES';
+  return {
+    itemKind: 'market',
+    eventId: outcome.eventId || eventMarket.eventId,
+    eventSlug: outcome.eventSlug || eventMarket.marketSlug || eventMarket.eventSlug,
+    eventTitle: eventMarket.marketTitle || eventMarket.eventTitle,
+    groupingConfidence: eventMarket.groupingConfidence || 'event-head',
+    source: 'event_price_head',
+    outcomeCount: 1,
+    totalMembers: eventMarket.totalMembers || eventMarket.outcomeCount,
+    readyMembers: outcome.rows ? 1 : 0,
+    orderfilledRows: outcome.rows,
+    marketId: outcome.marketId,
+    marketSlug,
+    marketTitle: outcome.marketTitle || outcome.outcomeLabel,
+    tokenSide,
+    conditionId: outcome.conditionId,
+    status: outcome.coverageStatus || eventMarket.status,
+    endDate: outcome.endDate || eventMarket.endDate,
+    blockRows: outcome.rows,
+    frontendRows: outcome.rows,
+    firstBlock: outcome.firstX,
+    lastBlock: outcome.lastX,
+    latestBlockPrice: outcome.buyYesPrice ?? outcome.latestPrice,
+    latestBlockAt: outcome.lastX == null ? null : String(outcome.lastX),
+  };
+}
+
 function buildResult(market: QuantPriceMarket, kind: SearchResultKind, index: number): SearchResult {
   const isEvent = kind === 'event';
   const rows = rowsForMarket(market);
@@ -259,6 +299,8 @@ export function WorkspaceHeader({
   const [paletteMode, setPaletteMode] = useState<SearchPaletteMode>('compact');
   const [recentMarkets, setRecentMarkets] = useState<QuantPriceMarket[]>(() => persistedMarkets('polydata.quant.search.recentMarkets'));
   const [favoriteMarketSlugs, setFavoriteMarketSlugs] = useState<string[]>(() => persistedSlugs('polydata.quant.search.favoriteSlugs'));
+  const [previewOutcomesExpanded, setPreviewOutcomesExpanded] = useState(false);
+  const [eventOutcomeCache, setEventOutcomeCache] = useState<Record<string, EventOutcomeCacheEntry>>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const commandRef = useRef<HTMLDivElement>(null);
   const previousQueryRef = useRef('');
@@ -343,22 +385,80 @@ export function WorkspaceHeader({
 
   const flatResults = useMemo(() => sections.flatMap((section) => section.items), [sections]);
   const activeResult = flatResults[Math.min(highlightedIndex, Math.max(0, flatResults.length - 1))] || null;
-  const relatedPreviewMarkets = useMemo(() => {
+  const activeEventSlug = activeResult?.kind === 'event' ? activeResult.market.marketSlug : '';
+  const activeEventOutcomeCacheKey = activeEventSlug ? `${activeEventSlug}:${apiPriceSource(priceSource)}` : '';
+  const activeEventOutcomeCache = activeEventOutcomeCacheKey ? eventOutcomeCache[activeEventOutcomeCacheKey] : undefined;
+  const relatedOutcomeMarkets = useMemo(() => {
     if (!activeResult) return [];
     const eventId = activeResult.market.eventId;
     const eventSlug = activeResult.kind === 'event' ? activeResult.market.marketSlug : activeResult.market.eventSlug;
-    return marketChoices
+    const related = [
+      ...marketChoices,
+      ...(activeResult.kind === 'event' ? activeEventOutcomeCache?.items || [] : []),
+    ];
+    const seen = new Set<string>();
+    return related
       .filter((market) => market.itemKind !== 'event')
       .filter((market) => (
         (eventId && market.eventId === eventId)
         || (eventSlug && (market.eventSlug === eventSlug || market.marketSlug.includes(eventSlug)))
       ))
-      .slice(0, 3);
-  }, [activeResult, marketChoices]);
+      .filter((market) => {
+        if (!market.marketSlug || seen.has(market.marketSlug)) return false;
+        seen.add(market.marketSlug);
+        return true;
+      })
+      .sort((left, right) => rowsForMarket(right) - rowsForMarket(left) || titleForMarket(left).localeCompare(titleForMarket(right)));
+  }, [activeEventOutcomeCache?.items, activeResult, marketChoices]);
+  const visibleRelatedOutcomeMarkets = useMemo(
+    () => relatedOutcomeMarkets.slice(0, previewOutcomesExpanded ? 24 : 6),
+    [previewOutcomesExpanded, relatedOutcomeMarkets],
+  );
 
   useEffect(() => {
     setHighlightedIndex(0);
   }, [marketQuery, marketOptions, searchFilter, sortMode]);
+
+  useEffect(() => {
+    setPreviewOutcomesExpanded(false);
+  }, [activeResult?.key]);
+
+  useEffect(() => {
+    if (!activeEventSlug || !activeEventOutcomeCacheKey || eventOutcomeCache[activeEventOutcomeCacheKey]) return undefined;
+    let cancelled = false;
+    setEventOutcomeCache((current) => ({
+      ...current,
+      [activeEventOutcomeCacheKey]: { status: 'loading', items: [] },
+    }));
+    void fetchQuantEventPriceHead({
+      eventSlug: activeEventSlug,
+      priceSource: apiPriceSource(priceSource),
+      maxOutcomes: 80,
+      topN: 80,
+      pointFormat: 'lite',
+    })
+      .then((payload) => {
+        if (cancelled) return;
+        const items = (payload.outcomes || [])
+          .map((outcome) => outcomeToMarket(outcome, activeResult?.market || { marketSlug: activeEventSlug, tokenSide: 'YES' }))
+          .filter((market): market is QuantPriceMarket => Boolean(market));
+        setEventOutcomeCache((current) => ({
+          ...current,
+          [activeEventOutcomeCacheKey]: { status: 'ready', items },
+        }));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (!isAbortLikeError(error)) console.warn('quant event outcome preview failed', error);
+        setEventOutcomeCache((current) => ({
+          ...current,
+          [activeEventOutcomeCacheKey]: { status: 'error', items: [] },
+        }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeEventOutcomeCacheKey, activeEventSlug, activeResult?.market, eventOutcomeCache, priceSource]);
 
   useEffect(() => {
     const previous = previousQueryRef.current;
@@ -715,14 +815,49 @@ export function WorkspaceHeader({
                         <div><dt>Price</dt><dd>{activeResult.price || '--'}</dd></div>
                         <div><dt>Source</dt><dd>{sourceLabel}</dd></div>
                       </dl>
-                      {activeResult.kind === 'event' && relatedPreviewMarkets.length ? (
+                      {activeResult.kind === 'event' && (relatedOutcomeMarkets.length || activeEventOutcomeCache?.status === 'loading' || activeEventOutcomeCache?.status === 'error') ? (
                         <div className="qtv-preview-outcomes">
-                          {relatedPreviewMarkets.map((market) => (
-                            <span key={market.marketSlug}>
-                              <b>{titleForMarket(market)}</b>
+                          <header>
+                            <strong>Outcomes in this event</strong>
+                            <em>
+                              {activeEventOutcomeCache?.status === 'loading'
+                                ? 'loading event head...'
+                                : activeEventOutcomeCache?.status === 'error'
+                                  ? 'event head unavailable'
+                                  : `${relatedOutcomeMarkets.length.toLocaleString('en-US')} loaded`}
+                            </em>
+                          </header>
+                          {activeEventOutcomeCache?.status === 'loading' && !visibleRelatedOutcomeMarkets.length ? (
+                            <span className="qtv-preview-outcome-loading">Loading real outcome prices...</span>
+                          ) : null}
+                          {activeEventOutcomeCache?.status === 'error' && !visibleRelatedOutcomeMarkets.length ? (
+                            <span className="qtv-preview-outcome-loading error">Could not load outcome members for this event.</span>
+                          ) : null}
+                          {visibleRelatedOutcomeMarkets.map((market) => (
+                            <button
+                              key={market.marketSlug}
+                              type="button"
+                              title={`${titleForMarket(market)}\n${market.marketSlug}`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => chooseMarket(market.marketSlug, market)}
+                            >
+                              <span>
+                                <b>{titleForMarket(market)}</b>
+                                <small>{market.marketSlug}</small>
+                              </span>
                               <em>{latestPrice(market) || `${rowsForMarket(market).toLocaleString('en-US')} rows`}</em>
-                            </span>
+                            </button>
                           ))}
+                          {relatedOutcomeMarkets.length > visibleRelatedOutcomeMarkets.length || previewOutcomesExpanded ? (
+                            <button
+                              className="qtv-preview-more"
+                              type="button"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => setPreviewOutcomesExpanded((current) => !current)}
+                            >
+                              {previewOutcomesExpanded ? 'Show fewer outcomes' : `Show ${Math.min(24, relatedOutcomeMarkets.length).toLocaleString('en-US')} outcomes`}
+                            </button>
+                          ) : null}
                         </div>
                       ) : null}
                       <p>Enter to open {activeResult.kind === 'event' ? 'event chart' : 'market chart'}</p>

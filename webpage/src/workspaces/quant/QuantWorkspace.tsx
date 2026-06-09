@@ -895,7 +895,7 @@ export function QuantWorkspace() {
           setMarketSearchStatus(failures >= 2 ? 'error' : 'empty');
         }
       };
-      void fetchQuantPriceMarkets(text, 40)
+      void fetchQuantPriceMarkets(text, text ? 120 : 80)
         .then((payload) => {
           markets = payload.items || [];
           publish();
@@ -906,7 +906,7 @@ export function QuantWorkspace() {
           publish();
           if (!isAbortLikeError(searchError)) console.warn('quant market search failed', searchError);
         });
-      void fetchQuantPriceEvents(text, 24)
+      void fetchQuantPriceEvents(text, text ? 48 : 32)
         .then((payload) => {
           events = payload.items || [];
           publish();
