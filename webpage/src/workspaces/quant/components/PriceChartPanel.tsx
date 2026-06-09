@@ -358,76 +358,6 @@ function nearestPointIndex(points: PricePoint[], timestamp: number) {
   return bestIndex;
 }
 
-function niceBlockStep(rawStep: number) {
-  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
-  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
-  const normalized = rawStep / magnitude;
-  const unit = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-  return Math.max(1, Math.floor(unit * magnitude));
-}
-
-function blockAxisTicks(points: PricePoint[], maxTicks = 8, visibleRange?: LogicalRangeLike) {
-  if (!points.length) return [];
-  const rawFromIndex = visibleRange ? Math.max(0, Math.min(points.length - 1, Math.floor(visibleRange.from))) : 0;
-  const rawToIndex = visibleRange ? Math.max(rawFromIndex, Math.min(points.length - 1, Math.ceil(visibleRange.to))) : points.length - 1;
-  const visibleSpan = rawToIndex - rawFromIndex;
-  const rangeLooksUsable = !visibleRange || visibleSpan >= Math.min(8, Math.max(1, points.length - 1));
-  const fromIndex = rangeLooksUsable ? rawFromIndex : 0;
-  const toIndex = rangeLooksUsable ? rawToIndex : points.length - 1;
-  const visible = points.slice(fromIndex, toIndex + 1);
-  const first = Math.floor(visible[0]?.timestamp || points[0]?.timestamp || 0);
-  const last = Math.floor(visible[visible.length - 1]?.timestamp || first);
-  if (!Number.isFinite(first) || !Number.isFinite(last)) return [];
-  if (first === last) {
-    return [{ key: first, label: blockLabel(first), left: '0%', edge: 'start' as const, level: 0, major: true }];
-  }
-  const blockRange = Math.max(1, last - first);
-  const step = niceBlockStep(blockRange / Math.max(1, maxTicks - 1));
-  const ticks: number[] = [first];
-  for (let value = Math.ceil(first / step) * step; value < last; value += step) {
-    if (value > first) ticks.push(value);
-  }
-  ticks.push(last);
-  const sorted = Array.from(new Set(ticks)).sort((left, right) => left - right);
-  const minGapPercent = maxTicks <= 5 ? 14 : 11;
-  const filtered: number[] = [];
-  sorted.forEach((value, index) => {
-    if (index === 0) {
-      filtered.push(value);
-      return;
-    }
-    if (index === sorted.length - 1) {
-      const previous = filtered[filtered.length - 1];
-      if (previous !== undefined && ((value - first) / blockRange) * 100 - ((previous - first) / blockRange) * 100 < minGapPercent) {
-        filtered[filtered.length - 1] = value;
-      } else {
-        filtered.push(value);
-      }
-      return;
-    }
-    const left = ((value - first) / blockRange) * 100;
-    const previous = filtered[filtered.length - 1];
-    const previousLeft = previous !== undefined ? ((previous - first) / blockRange) * 100 : -100;
-    if (filtered.length < maxTicks && left - previousLeft >= minGapPercent && left <= 100 - minGapPercent) {
-      filtered.push(value);
-    }
-  });
-  if (filtered[filtered.length - 1] !== last) {
-    filtered[filtered.length - 1] = last;
-  }
-  return filtered.map((value, index) => {
-    const left = ((value - first) / blockRange) * 100;
-    return {
-      key: value,
-      label: blockLabel(value),
-      left: `${Math.max(0, Math.min(100, left))}%`,
-      edge: index === 0 ? 'start' : index === filtered.length - 1 ? 'end' : 'middle',
-      level: index % 2,
-      major: index === 0 || index === filtered.length - 1 || index % 2 === 0,
-    };
-  });
-}
-
 function normalizeLogicalRange(range: { from: number; to: number } | null): LogicalRangeState {
   if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to)) return null;
   return { from: range.from, to: range.to };
@@ -712,8 +642,6 @@ export function PriceChartPanel({
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
   const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints, visibleLogicalRange) : null;
   const hoverTooltipSide = percentNumber(hoverScreen?.x) > 68 ? 'left-side' : '';
-  const hoverBlockAxisLeft = hoverScreen?.x || '0%';
-  const blockTicks = useMemo(() => blockAxisTicks(primaryPoints, 8, visibleLogicalRange), [primaryPoints, visibleLogicalRange]);
   const managerOutcomes = useMemo(() => {
     const query = outcomeManagerQuery.trim().toLowerCase();
     return sortedOutcomes.filter((group) => {
@@ -1064,7 +992,7 @@ export function PriceChartPanel({
         scaleMargins: { top: 0.08, bottom: 0.22 },
       },
       timeScale: {
-        visible: false,
+        visible: true,
         borderColor: 'rgba(148,163,184,0.18)',
         fixLeftEdge: true,
         fixRightEdge: true,
@@ -1849,19 +1777,11 @@ export function PriceChartPanel({
             </div>
           ) : null}
         </div>
-        {priceSource.includes('block') && hasLoadedPrices ? (
-          <div className="qtv-block-tick-axis" aria-label="Visible block number axis">
-            {blockTicks.map((tick) => (
-              <span key={tick.key} className={`${tick.edge} ${tick.major ? 'major' : 'minor'} level-${tick.level}`} style={{ left: tick.left }}>
-                <i />
-                <b>{tick.label}</b>
-              </span>
-            ))}
-            {hover ? <strong style={{ left: hoverBlockAxisLeft }}>Block {blockLabel(hover.timestamp)}</strong> : null}
-          </div>
-        ) : (
-          <div className="qtv-block-tick-axis empty" aria-hidden="true" />
-        )}
+        <div className={`qtv-block-tick-axis hover-only ${priceSource.includes('block') && hasLoadedPrices ? '' : 'empty'}`} aria-label="Visible block hover axis">
+          {priceSource.includes('block') && hover ? (
+            <strong style={{ left: pointToScreenSafe(hover, primaryPoints, visibleLogicalRange).x }}>block {blockLabel(hover.timestamp)}</strong>
+          ) : null}
+        </div>
         {layoutMode !== '1' ? (
           <div className={`qtv-layout-scaffold layout-${layoutMode}`}>
             {Array.from({ length: layoutMode === '4' ? 3 : 1 }).map((_, index) => (

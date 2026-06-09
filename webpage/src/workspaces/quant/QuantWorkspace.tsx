@@ -9,6 +9,7 @@ import {
   fetchQuantBuildStatus,
   fetchQuantEntitySnapshot,
   fetchQuantEventMembers,
+  fetchQuantEventPriceSeries,
   fetchQuantPriceWindow,
   fetchQuantPriceEvents,
   fetchQuantPriceMarkets,
@@ -427,6 +428,72 @@ function appendStreamPoint(points: QuantMarketSeriesPoint[] | undefined, x: numb
   ];
 }
 
+function pointX(point: QuantMarketSeriesPoint | null | undefined) {
+  return Number(point?.x ?? point?.blockNumber ?? point?.timestamp);
+}
+
+function mergeSeriesPoints(base: QuantMarketSeriesPoint[] | undefined, patch: QuantMarketSeriesPoint[] | undefined) {
+  const byX = new Map<number, QuantMarketSeriesPoint>();
+  [...(base || []), ...(patch || [])].forEach((point) => {
+    const x = pointX(point);
+    if (!Number.isFinite(x)) return;
+    byX.set(Math.floor(x), { ...byX.get(Math.floor(x)), ...point, x: point.x ?? x });
+  });
+  return Array.from(byX.entries())
+    .sort(([left], [right]) => left - right)
+    .map(([, point]) => point);
+}
+
+function outcomeMergeKey(outcome: QuantMarketSeriesOutcome) {
+  return String(outcome.tokenId || outcome.buyYesTokenId || outcome.marketId || outcome.marketSlug || outcome.outcomeKey || outcome.outcomeLabel || '');
+}
+
+function mergeMarketSeries(base: QuantMarketSeriesPayload | null, patch: QuantMarketSeriesPayload | null | undefined): QuantMarketSeriesPayload | null {
+  if (!patch?.outcomes?.length) return base;
+  if (!base?.outcomes?.length) return patch;
+  const patchByKey = new Map(patch.outcomes.map((outcome) => [outcomeMergeKey(outcome), outcome]));
+  const seen = new Set<string>();
+  const outcomes = base.outcomes.map((outcome) => {
+    const key = outcomeMergeKey(outcome);
+    const next = patchByKey.get(key);
+    seen.add(key);
+    if (!next) return outcome;
+    const points = mergeSeriesPoints(outcome.points, next.points);
+    const complementPoints = mergeSeriesPoints(outcome.complementPoints, next.complementPoints);
+    const latest = points[points.length - 1];
+    const latestNo = complementPoints[complementPoints.length - 1];
+    return {
+      ...outcome,
+      ...next,
+      rows: Math.max(toNumber(outcome.rows), toNumber(next.rows), points.length),
+      firstX: pointX(points[0]) || outcome.firstX || next.firstX,
+      lastX: pointX(latest) || next.lastX || outcome.lastX,
+      latestPrice: latest?.price ?? next.latestPrice ?? outcome.latestPrice,
+      buyYesPrice: latest?.price ?? next.buyYesPrice ?? outcome.buyYesPrice,
+      points,
+      complementRows: Math.max(toNumber(outcome.complementRows), toNumber(next.complementRows), complementPoints.length),
+      complementFirstX: pointX(complementPoints[0]) || outcome.complementFirstX || next.complementFirstX,
+      complementLastX: pointX(latestNo) || next.complementLastX || outcome.complementLastX,
+      complementLatestPrice: latestNo?.price ?? next.complementLatestPrice ?? outcome.complementLatestPrice,
+      buyNoPrice: latestNo?.price ?? next.buyNoPrice ?? outcome.buyNoPrice,
+      complementPoints,
+    };
+  });
+  patch.outcomes.forEach((outcome) => {
+    const key = outcomeMergeKey(outcome);
+    if (!seen.has(key)) outcomes.push(outcome);
+  });
+  return {
+    ...base,
+    ...patch,
+    event: patch.event || base.event,
+    market: patch.market || base.market,
+    members: patch.members?.length ? patch.members : base.members,
+    outcomes,
+    count: Math.max(base.count || 0, patch.count || 0, outcomes.length),
+  };
+}
+
 function mergeEventPriceStream(current: QuantMarketSeriesPayload | null, update: EventPriceStreamPayload): QuantMarketSeriesPayload | null {
   if (!current?.outcomes?.length || !update.outcomes?.length) return current;
   const latestByToken = new Map(update.outcomes.map((outcome) => [String(outcome.tokenId || ''), outcome]));
@@ -688,14 +755,20 @@ export function QuantWorkspace() {
     };
     const [seriesResult, statusResult] = await Promise.allSettled([
       hasMarketSlug
-        ? fetchQuantPriceWindow({
-          ...priceQuery,
-          entityType: selectedEntityKind,
-          eventSlug: selectedEntityKind === 'event' ? marketSlug : undefined,
-          marketSlug: selectedEntityKind === 'market' ? marketSlug : undefined,
-          viewportWidth: chartViewportWidth(),
-          timeoutMs: chartRange === 'full' ? 16000 : 10000,
-        })
+        ? (selectedEntityKind === 'event'
+          ? fetchQuantEventPriceSeries({
+            ...priceQuery,
+            eventSlug: marketSlug,
+            viewportWidth: chartViewportWidth(),
+            timeoutMs: chartRange === 'full' ? 12000 : 8000,
+          })
+          : fetchQuantPriceWindow({
+            ...priceQuery,
+            entityType: selectedEntityKind,
+            marketSlug,
+            viewportWidth: chartViewportWidth(),
+            timeoutMs: chartRange === 'full' ? 16000 : 10000,
+          }))
         : Promise.resolve(null),
       fetchQuantBuildStatus('', 12),
     ]);
@@ -1058,8 +1131,12 @@ export function QuantWorkspace() {
         .then((payload) => {
           if (nextSeq !== viewportFetchSeq.current) return;
           if (!payload?.outcomes?.length) return;
-          priceSeriesCacheRef.current.set(cacheKey, payload);
-          setMarketSeries(payload);
+          setMarketSeries((current) => {
+            const merged = mergeMarketSeries(current, payload) || payload;
+            priceSeriesCacheRef.current.set(cacheKey, merged);
+            priceSeriesCacheRef.current.set(priceRequestKey, merged);
+            return merged;
+          });
           setDataStatus('ready');
           setLoadingMessage('');
           setLastPriceRefreshAt(new Date().toLocaleTimeString());
@@ -1109,21 +1186,34 @@ export function QuantWorkspace() {
       .finally(() => {
         pricePrefetchingRef.current.delete(cacheKey);
       });
-    void fetchQuantPriceWindow({
-      entityType: nextKind,
-      marketSlug: nextKind === 'market' ? nextSlug : undefined,
-      eventSlug: nextKind === 'event' ? nextSlug : undefined,
-      priceSource: backendPriceSource(priceSource),
-      limit: Math.max(2500, EVENT_TILE_MAX_POINTS * 8),
-      maxOutcomes: nextKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : 24,
-      topN: nextKind === 'event' ? EVENT_TILE_OUTCOME_LIMIT : undefined,
-      maxPoints: EVENT_TILE_MAX_POINTS,
-      range: 'latest',
-      resolution: 'auto',
-      pointFormat: 'lite',
-      viewportWidth: chartViewportWidth(),
-      timeoutMs: 6000,
-    }).catch(() => undefined);
+    const prefetchSeries = nextKind === 'event'
+      ? fetchQuantEventPriceSeries({
+        eventSlug: nextSlug,
+        priceSource: backendPriceSource(priceSource),
+        limit: Math.max(2500, EVENT_TILE_MAX_POINTS * 8),
+        maxOutcomes: EVENT_TILE_OUTCOME_LIMIT,
+        topN: EVENT_TILE_OUTCOME_LIMIT,
+        maxPoints: EVENT_TILE_MAX_POINTS,
+        range: 'latest',
+        resolution: 'auto',
+        pointFormat: 'lite',
+        viewportWidth: chartViewportWidth(),
+        timeoutMs: 6000,
+      })
+      : fetchQuantPriceWindow({
+        entityType: nextKind,
+        marketSlug: nextSlug,
+        priceSource: backendPriceSource(priceSource),
+        limit: Math.max(2500, EVENT_TILE_MAX_POINTS * 8),
+        maxOutcomes: 24,
+        maxPoints: EVENT_TILE_MAX_POINTS,
+        range: 'latest',
+        resolution: 'auto',
+        pointFormat: 'lite',
+        viewportWidth: chartViewportWidth(),
+        timeoutMs: 6000,
+      });
+    void prefetchSeries.catch(() => undefined);
   };
 
   useEffect(() => {

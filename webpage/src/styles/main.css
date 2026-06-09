@@ -1584,19 +1584,21 @@
 .qtv-block-tick-axis {
   position: relative;
   z-index: 4;
-  grid-row: 4;
-  height: 44px;
-  margin: 0 74px 0 18px;
-  border-top: 1px solid rgba(148, 163, 184, 0.14);
-  background:
-    linear-gradient(180deg, rgba(7, 10, 15, 0.98), #070a0f),
-    repeating-linear-gradient(90deg, transparent 0 79px, rgba(148, 163, 184, 0.04) 80px 81px);
+  grid-row: 3;
+  height: 22px;
+  margin: 0 66px 0 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.08);
+  background: linear-gradient(180deg, rgba(7, 10, 15, 0.8), #070a0f);
   color: #7f8a9d;
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 850;
   pointer-events: none;
   text-shadow: 0 1px 2px #05070b, 0 0 8px #05070b;
+}
+
+.qtv-block-tick-axis.hover-only span {
+  display: none;
 }
 
 .qtv-block-tick-axis.empty {
