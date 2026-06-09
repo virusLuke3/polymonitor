@@ -528,6 +528,7 @@ export function PriceChartPanel({
   onVisibleWindowChange,
 }: PriceChartPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartSurfaceRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<SeriesRefs>({ lines: new Map(), ma: null, volume: null });
   const pointsRef = useRef<PricePoint[]>([]);
@@ -568,6 +569,7 @@ export function PriceChartPanel({
   const [rangeZoomEnabled, setRangeZoomEnabled] = useState(false);
   const [rangeSelection, setRangeSelection] = useState<RangeSelection>(null);
   const [rangeZoomNotice, setRangeZoomNotice] = useState<RangeZoomMeta | null>(null);
+  const [blockAxisTop, setBlockAxisTop] = useState<number | null>(null);
   const [replayEnabled, setReplayEnabled] = useState(false);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayIndex, setReplayIndex] = useState<number | null>(null);
@@ -712,6 +714,7 @@ export function PriceChartPanel({
     left: `${Math.min(rangeSelection.startX, rangeSelection.currentX) - containerRef.current.getBoundingClientRect().left}px`,
     width: `${Math.abs(rangeSelection.currentX - rangeSelection.startX)}px`,
   } : undefined;
+  const blockAxisStyle = blockAxisTop === null ? undefined : { top: `${blockAxisTop}px` };
   const rangeSelectionHudStyle = rangeSelection && containerRef.current ? {
     left: `${Math.min(
       Math.max(142, Math.min(rangeSelection.startX, rangeSelection.currentX) - containerRef.current.getBoundingClientRect().left + (Math.abs(rangeSelection.currentX - rangeSelection.startX) / 2)),
@@ -922,6 +925,33 @@ export function PriceChartPanel({
   useEffect(() => {
     window.localStorage.setItem('polymonitor.quant.dataWindowSettings', JSON.stringify(dataWindowSettings));
   }, [dataWindowSettings]);
+
+  useEffect(() => {
+    const syncBlockAxisTop = () => {
+      const surface = chartSurfaceRef.current;
+      const region = surface?.closest('.qtv-chart-region');
+      const surfaceBox = surface?.getBoundingClientRect();
+      const regionBox = region?.getBoundingClientRect();
+      if (!surfaceBox || !regionBox) return;
+      const nextTop = Math.max(0, Math.round(regionBox.bottom - surfaceBox.top - 42));
+      setBlockAxisTop((current) => (current === nextTop ? current : nextTop));
+    };
+    syncBlockAxisTop();
+    const surface = chartSurfaceRef.current;
+    const region = surface?.closest('.qtv-chart-region');
+    const surfaceObserver = surface ? new ResizeObserver(syncBlockAxisTop) : null;
+    const regionObserver = region ? new ResizeObserver(syncBlockAxisTop) : null;
+    if (surface) surfaceObserver?.observe(surface);
+    if (region) regionObserver?.observe(region);
+    window.addEventListener('resize', syncBlockAxisTop);
+    const timer = window.setTimeout(syncBlockAxisTop, 300);
+    return () => {
+      surfaceObserver?.disconnect();
+      regionObserver?.disconnect();
+      window.removeEventListener('resize', syncBlockAxisTop);
+      window.clearTimeout(timer);
+    };
+  }, [allPoints.length, market.slug, priceSource]);
 
   useEffect(() => {
     const onPointerMove = (event: PointerEvent) => {
@@ -1766,6 +1796,7 @@ export function PriceChartPanel({
 
         <div
           className={`qtv-chart-surface ${rangeZoomEnabled ? 'range-enabled' : ''}`}
+          ref={chartSurfaceRef}
           onWheel={(event) => handleChartWheel(event as unknown as WheelEvent)}
           onPointerDown={(event) => {
             const shouldRangeZoom = rangeZoomEnabled || event.shiftKey || event.altKey;
@@ -1926,20 +1957,20 @@ export function PriceChartPanel({
               })}
             </div>
           ) : null}
-        </div>
-        <div className="qtv-block-tick-axis" aria-label="Visible block axis">
-          {blockAxisTicks.map((tick) => (
-            <span key={tick.key} className={tick.className} style={{ left: tick.left }}>
-              <i />
-              <b>{blockLabel(tick.block)}</b>
-            </span>
-          ))}
-          {!blockAxisTicks.length ? (
-            <em>{priceSource.includes('block') ? 'Loading block scale' : 'Time scale'}</em>
-          ) : null}
-          {priceSource.includes('block') && hover ? (
-            <strong style={{ left: pointToScreenSafe(hover, primaryPoints, visibleLogicalRange).x }}>block {blockLabel(hover.timestamp)}</strong>
-          ) : null}
+          <div className="qtv-block-tick-axis" style={blockAxisStyle} aria-label="Visible block axis">
+            {blockAxisTicks.map((tick) => (
+              <span key={tick.key} className={tick.className} style={{ left: tick.left }}>
+                <i />
+                <b>{blockLabel(tick.block)}</b>
+              </span>
+            ))}
+            {!blockAxisTicks.length ? (
+              <em>{priceSource.includes('block') ? 'Loading block scale' : 'Time scale'}</em>
+            ) : null}
+            {priceSource.includes('block') && hover ? (
+              <strong style={{ left: pointToScreenSafe(hover, primaryPoints, visibleLogicalRange).x }}>block {blockLabel(hover.timestamp)}</strong>
+            ) : null}
+          </div>
         </div>
         {layoutMode !== '1' ? (
           <div className={`qtv-layout-scaffold layout-${layoutMode}`}>
