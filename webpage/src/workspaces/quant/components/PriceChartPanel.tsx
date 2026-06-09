@@ -25,6 +25,7 @@ type DataWindowDock = 'floating' | 'left' | 'right';
 type ChartViewMode = 'raw' | 'normalized' | 'direct' | 'implied';
 type RangeSelection = { startX: number; currentX: number } | null;
 type LogicalRangeState = { from: number; to: number } | null;
+type LogicalRangeLike = LogicalRangeState | undefined;
 
 const DRAW_TOOLS = [
   ['cursor', 'Cursor', 'M5 4l10 8-5 1.5L8 18 5 4z'],
@@ -305,7 +306,20 @@ function clampDataWindowPosition(x: number, y: number, bounds?: DOMRect | null) 
   };
 }
 
-function markerPosition(signal: Signal, points: PricePoint[]) {
+function axisPercentFromIndex(index: number, points: PricePoint[], range?: LogicalRangeLike) {
+  if (!points.length || index < 0) return null;
+  if (range && Number.isFinite(range.from) && Number.isFinite(range.to) && range.to > range.from) {
+    return ((index - range.from) / (range.to - range.from)) * 100;
+  }
+  return (index / Math.max(1, points.length - 1)) * 100;
+}
+
+function axisPercentStyle(percent: number | null) {
+  if (percent === null || !Number.isFinite(percent) || percent < -6 || percent > 106) return null;
+  return `${Math.max(-3, Math.min(103, percent))}%`;
+}
+
+function markerPosition(signal: Signal, points: PricePoint[], range?: LogicalRangeLike) {
   if (!points.length) return null;
   let bestIndex = 0;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -318,12 +332,29 @@ function markerPosition(signal: Signal, points: PricePoint[]) {
   });
   const point = points[bestIndex];
   if (!point) return null;
+  const left = axisPercentStyle(axisPercentFromIndex(bestIndex, points, range));
+  if (!left) return null;
   return {
     signal,
     point,
-    left: `${(bestIndex / Math.max(1, points.length - 1)) * 100}%`,
+    index: bestIndex,
+    left,
     top: `${Math.max(7, Math.min(84, (1 - point.close) * 100))}%`,
   };
+}
+
+function nearestPointIndex(points: PricePoint[], timestamp: number) {
+  if (!points.length) return -1;
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  points.forEach((point, index) => {
+    const distance = Math.abs(point.timestamp - timestamp);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
 }
 
 function niceBlockStep(rawStep: number) {
@@ -334,16 +365,19 @@ function niceBlockStep(rawStep: number) {
   return Math.max(1, Math.floor(unit * magnitude));
 }
 
-function blockAxisTicks(points: PricePoint[], maxTicks = 7) {
+function blockAxisTicks(points: PricePoint[], maxTicks = 7, visibleRange?: LogicalRangeLike) {
   if (!points.length) return [];
-  const first = Math.floor(points[0]?.timestamp || 0);
-  const last = Math.floor(points[points.length - 1]?.timestamp || first);
+  const fromIndex = visibleRange ? Math.max(0, Math.min(points.length - 1, Math.floor(visibleRange.from))) : 0;
+  const toIndex = visibleRange ? Math.max(fromIndex, Math.min(points.length - 1, Math.ceil(visibleRange.to))) : points.length - 1;
+  const visible = points.slice(fromIndex, toIndex + 1);
+  const first = Math.floor(visible[0]?.timestamp || points[0]?.timestamp || 0);
+  const last = Math.floor(visible[visible.length - 1]?.timestamp || first);
   if (!Number.isFinite(first) || !Number.isFinite(last)) return [];
   if (first === last) {
     return [{ key: first, label: blockLabel(first), left: '0%', edge: 'start' as const }];
   }
-  const range = Math.max(1, last - first);
-  const step = niceBlockStep(range / Math.max(1, maxTicks - 1));
+  const blockRange = Math.max(1, last - first);
+  const step = niceBlockStep(blockRange / Math.max(1, maxTicks - 1));
   const ticks: number[] = [first];
   for (let value = Math.ceil(first / step) * step; value < last; value += step) {
     if (value > first) ticks.push(value);
@@ -351,7 +385,8 @@ function blockAxisTicks(points: PricePoint[], maxTicks = 7) {
   ticks.push(last);
   const unique = Array.from(new Set(ticks)).slice(0, maxTicks + 2);
   return unique.map((value, index) => {
-    const left = ((value - first) / range) * 100;
+    const nearestIndex = fromIndex + nearestPointIndex(visible, value);
+    const left = axisPercentFromIndex(nearestIndex, points, visibleRange) ?? ((value - first) / blockRange) * 100;
     return {
       key: value,
       label: blockLabel(value),
@@ -393,17 +428,6 @@ function clampLogicalRange(range: { from: number; to: number }, totalPoints: num
   return { from, to };
 }
 
-function visiblePointsForLogicalRange(points: PricePoint[], referencePoints: PricePoint[], range: LogicalRangeState) {
-  if (!points.length || !referencePoints.length || !range) return points;
-  const startIndex = Math.max(0, Math.min(referencePoints.length - 1, Math.floor(range.from)));
-  const endIndex = Math.max(startIndex, Math.min(referencePoints.length - 1, Math.ceil(range.to)));
-  const start = referencePoints[startIndex]?.timestamp ?? referencePoints[0]?.timestamp ?? 0;
-  const end = referencePoints[endIndex]?.timestamp ?? referencePoints[referencePoints.length - 1]?.timestamp ?? start;
-  const min = Math.min(start, end);
-  const max = Math.max(start, end);
-  return points.filter((point) => point.timestamp >= min && point.timestamp <= max);
-}
-
 function clampProbability(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -437,10 +461,11 @@ function pointSnapshot(point: PricePoint | null | undefined, latestPoint: PriceP
   };
 }
 
-function pointToScreenSafe(point: PricePoint, points: PricePoint[]) {
+function pointToScreenSafe(point: PricePoint, points: PricePoint[], range?: LogicalRangeLike) {
   const index = points.findIndex((row) => Math.floor(row.timestamp) === Math.floor(point.timestamp));
+  const left = axisPercentStyle(axisPercentFromIndex(index >= 0 ? index : 0, points, range)) || '0%';
   return {
-    x: `${((index >= 0 ? index : 0) / Math.max(1, points.length - 1)) * 100}%`,
+    x: left,
     y: `${Math.max(8, Math.min(86, (1 - clampProbability(point.close)) * 100))}%`,
   };
 }
@@ -534,6 +559,8 @@ export function PriceChartPanel({
   const suppressViewportModeRef = useRef(false);
   const visibleLogicalRangeRef = useRef<LogicalRangeState>(null);
   const lastFitRequestKeyRef = useRef('');
+  const lastTradeFocusKeyRef = useRef('');
+  const onViewportModeChangeRef = useRef(onViewportModeChange);
   const [hover, setHover] = useState<PricePoint | null>(null);
   const [pinnedPoint, setPinnedPoint] = useState<PricePoint | null>(null);
   const [visibleLogicalRange, setVisibleLogicalRange] = useState<LogicalRangeState>(null);
@@ -641,15 +668,53 @@ export function PriceChartPanel({
   const dataWindowInspect = pointSnapshot(dataWindowPoint, latestPoint, dataWindowMaPoint);
   const hoverMaPoint = hover ? nearestPoint(maPoints, hover.timestamp) : null;
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
-  const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints) : null;
-  const visiblePrimaryPoints = useMemo(
-    () => visiblePointsForLogicalRange(primaryPoints, primaryPoints, visibleLogicalRange),
-    [primaryPoints, visibleLogicalRange],
-  );
-  const visibleAxisPoints = visiblePrimaryPoints.length ? visiblePrimaryPoints : primaryPoints;
-  const blockTicks = useMemo(() => blockAxisTicks(visibleAxisPoints), [visibleAxisPoints]);
-  const markers = useMemo(() => signals.map((signal) => markerPosition(signal, primaryPoints)).filter(Boolean), [primaryPoints, signals]);
+  const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints, visibleLogicalRange) : null;
+  const blockTicks = useMemo(() => blockAxisTicks(primaryPoints, 8, visibleLogicalRange), [primaryPoints, visibleLogicalRange]);
+  const markers = useMemo(() => signals.map((signal) => markerPosition(signal, primaryPoints, visibleLogicalRange)).filter(Boolean), [primaryPoints, signals, visibleLogicalRange]);
   const focusedMarkers = markers.filter((marker) => marker?.signal.tradeId === selectedTradeId);
+  const selectedTradeSignals = useMemo(() => (
+    selectedTradeId ? signals.filter((signal) => signal.tradeId === selectedTradeId).sort((left, right) => left.timestamp - right.timestamp) : []
+  ), [selectedTradeId, signals]);
+  const selectedTradeEntrySignal = selectedTradeSignals.find((signal) => signal.action === 'OPEN' || signal.action === 'BUY') || selectedTradeSignals[0] || null;
+  const selectedTradeExitSignal = selectedTradeSignals.find((signal) => signal.action === 'CLOSE' || signal.action === 'SELL') || selectedTradeSignals[selectedTradeSignals.length - 1] || null;
+  const selectedTradeFocus = useMemo(() => {
+    if (!selectedTradeId || !selectedTradeSignals.length || !primaryPoints.length) return null;
+    const startSignal = selectedTradeEntrySignal || selectedTradeSignals[0];
+    const endSignal = selectedTradeExitSignal || selectedTradeSignals[selectedTradeSignals.length - 1];
+    if (!startSignal || !endSignal) return null;
+    const startIndex = nearestPointIndex(primaryPoints, startSignal.timestamp);
+    const endIndex = nearestPointIndex(primaryPoints, endSignal.timestamp);
+    if (startIndex < 0 || endIndex < 0) return null;
+    const leftIndex = Math.min(startIndex, endIndex);
+    const rightIndex = Math.max(startIndex, endIndex);
+    const entryPoint = primaryPoints[startIndex] || null;
+    const exitPoint = primaryPoints[endIndex] || null;
+    const entryLeftPercent = axisPercentFromIndex(startIndex, primaryPoints, visibleLogicalRange);
+    const exitLeftPercent = axisPercentFromIndex(endIndex, primaryPoints, visibleLogicalRange);
+    const left = axisPercentFromIndex(leftIndex, primaryPoints, visibleLogicalRange);
+    const right = axisPercentFromIndex(rightIndex, primaryPoints, visibleLogicalRange);
+    const entryLeft = axisPercentStyle(entryLeftPercent);
+    const exitLeft = axisPercentStyle(exitLeftPercent);
+    const bandLeft = axisPercentStyle(left);
+    const bandRight = axisPercentStyle(right);
+    const pnl = (endSignal.price - startSignal.price) * (startSignal.size || endSignal.size || 0);
+    if (!entryLeft || !exitLeft || !bandLeft || !bandRight || left === null || right === null) return null;
+    return {
+      id: selectedTradeId,
+      startSignal,
+      endSignal,
+      startIndex,
+      endIndex,
+      entryPoint,
+      exitPoint,
+      entryLeft,
+      exitLeft,
+      bandLeft,
+      bandWidth: `${Math.max(0.15, Math.min(100, Math.abs(right - left)))}%`,
+      pnl,
+      bars: Math.abs(endIndex - startIndex),
+    };
+  }, [primaryPoints, selectedTradeEntrySignal, selectedTradeExitSignal, selectedTradeId, selectedTradeSignals, visibleLogicalRange]);
   const rangeSelectionStyle = rangeSelection && containerRef.current ? {
     left: `${Math.min(rangeSelection.startX, rangeSelection.currentX) - containerRef.current.getBoundingClientRect().left}px`,
     width: `${Math.abs(rangeSelection.currentX - rangeSelection.startX)}px`,
@@ -817,6 +882,29 @@ export function PriceChartPanel({
   useEffect(() => {
     pointsRef.current = primaryPoints;
   }, [primaryPoints]);
+
+  useEffect(() => {
+    onViewportModeChangeRef.current = onViewportModeChange;
+  }, [onViewportModeChange]);
+
+  useEffect(() => {
+    if (!selectedTradeFocus || !chartRef.current || !primaryPoints.length) return;
+    const focusKey = `${selectedTradeFocus.id}|${selectedTradeFocus.startIndex}|${selectedTradeFocus.endIndex}|${primaryPoints.length}`;
+    if (lastTradeFocusKeyRef.current === focusKey) return;
+    lastTradeFocusKeyRef.current = focusKey;
+    const span = Math.max(1, Math.abs(selectedTradeFocus.endIndex - selectedTradeFocus.startIndex));
+    const padding = Math.max(8, Math.ceil(span * 0.45), Math.ceil(primaryPoints.length * 0.018));
+    suppressViewportModeRef.current = true;
+    chartRef.current.timeScale().setVisibleLogicalRange({
+      from: Math.max(0, Math.min(selectedTradeFocus.startIndex, selectedTradeFocus.endIndex) - padding),
+      to: Math.min(primaryPoints.length - 1, Math.max(selectedTradeFocus.startIndex, selectedTradeFocus.endIndex) + padding),
+    });
+    setPinnedPoint(selectedTradeFocus.entryPoint || nearestPoint(primaryPoints, selectedTradeFocus.startSignal.timestamp));
+    onViewportModeChangeRef.current?.('custom');
+    window.setTimeout(() => {
+      suppressViewportModeRef.current = false;
+    }, 0);
+  }, [primaryPoints, selectedTradeFocus]);
 
   useEffect(() => {
     const raw = window.localStorage.getItem(drawingStorageKey(market, priceSource));
@@ -1083,7 +1171,7 @@ export function PriceChartPanel({
 
   const pointToScreen = (point: { timestamp: number; price: number }) => {
     const index = primaryPoints.findIndex((row) => Math.floor(row.timestamp) === Math.floor(point.timestamp));
-    const x = `${((index >= 0 ? index : 0) / Math.max(1, primaryPoints.length - 1)) * 100}%`;
+    const x = axisPercentStyle(axisPercentFromIndex(index >= 0 ? index : 0, primaryPoints, visibleLogicalRange)) || '0%';
     const y = `${(1 - clampProbability(point.price)) * 100}%`;
     return { x, y };
   };
@@ -1545,6 +1633,25 @@ export function PriceChartPanel({
               })}
             </svg>
           ) : null}
+          {selectedTradeFocus ? (
+            <>
+              <div className="qtv-trade-focus-band" style={{ left: selectedTradeFocus.bandLeft, width: selectedTradeFocus.bandWidth }} />
+              <div className="qtv-trade-focus-marker-line entry" style={{ left: selectedTradeFocus.entryLeft }} />
+              <div className="qtv-trade-focus-marker-line exit" style={{ left: selectedTradeFocus.exitLeft }} />
+              <div className="qtv-trade-focus-card">
+                <header>
+                  <strong>{selectedTradeFocus.id}</strong>
+                  <button type="button" onClick={fitData}>Reset view</button>
+                </header>
+                <dl>
+                  <div><dt>Entry</dt><dd>{blockLabel(selectedTradeFocus.startSignal.timestamp)} · {fmtPrice(selectedTradeFocus.startSignal.price)}</dd></div>
+                  <div><dt>Exit</dt><dd>{blockLabel(selectedTradeFocus.endSignal.timestamp)} · {fmtPrice(selectedTradeFocus.endSignal.price)}</dd></div>
+                  <div><dt>Bars</dt><dd>{selectedTradeFocus.bars.toLocaleString('en-US')}</dd></div>
+                  <div><dt>Move</dt><dd className={selectedTradeFocus.endSignal.price >= selectedTradeFocus.startSignal.price ? 'positive' : 'negative'}>{formatSigned(selectedTradeFocus.endSignal.price - selectedTradeFocus.startSignal.price)}</dd></div>
+                </dl>
+              </div>
+            </>
+          ) : null}
           {markers.map((marker) => marker ? (
             <div
               key={marker.signal.id}
@@ -1555,7 +1662,7 @@ export function PriceChartPanel({
               {marker.signal.action === 'SELL' ? 'SELL' : marker.signal.action}
             </div>
           ) : null)}
-          {focusedMarkers.length ? <div className="qtv-trade-focus-pill">{selectedTradeId} entry / exit located</div> : null}
+          {focusedMarkers.length && !selectedTradeFocus ? <div className="qtv-trade-focus-pill">{selectedTradeId} entry / exit located</div> : null}
           {rangeSelectionStyle ? <div className="qtv-range-selection" style={rangeSelectionStyle} /> : null}
           {replayEnabled && replayCutoff ? (
             <div className="qtv-replay-cursor" style={{ left: `${(Math.max(0, primaryPoints.length - 1) / Math.max(1, rawAllPoints.length - 1)) * 100}%` }} />
@@ -1593,7 +1700,7 @@ export function PriceChartPanel({
                 <b>{tick.label}</b>
               </span>
             ))}
-            {hover ? <strong style={{ left: pointToScreenSafe(hover, visibleAxisPoints).x }}>hover {blockLabel(hover.timestamp)}</strong> : null}
+            {hover ? <strong style={{ left: pointToScreenSafe(hover, primaryPoints, visibleLogicalRange).x }}>hover {blockLabel(hover.timestamp)}</strong> : null}
           </div>
         ) : (
           <div className="qtv-block-tick-axis empty" aria-hidden="true" />
