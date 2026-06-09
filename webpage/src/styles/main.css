@@ -6153,6 +6153,26 @@ body {
   line-height: 1;
 }
 
+.wm-live-price-tick {
+  transform-origin: right center;
+}
+
+.wm-live-price-tick.up,
+.wm-focus-detail.tick-up .wm-focus-price-strip strong {
+  color: #7dffad;
+}
+
+.wm-live-price-tick.down,
+.wm-focus-detail.tick-down .wm-focus-price-strip strong {
+  color: #ff7f89;
+}
+
+.wm-live-price-tick.up,
+.wm-live-price-tick.down,
+.wm-live-price-tick.flat {
+  animation: wm-live-price-pop 520ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
 .wm-focus-price-hero span {
   display: block;
   margin-top: 4px;
@@ -6409,6 +6429,69 @@ body {
   text-overflow: ellipsis;
 }
 
+.wm-focus-live-rail {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  margin: 7px 10px 0;
+  padding: 5px 8px;
+  border: 1px solid rgba(126, 220, 255, 0.1);
+  background: rgba(8, 12, 13, 0.76);
+  color: #8f989d;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+  overflow: hidden;
+}
+
+.wm-focus-live-rail::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(57, 255, 115, 0), rgba(57, 255, 115, 0.62), rgba(57, 255, 115, 0));
+  transform: translateX(-100%);
+}
+
+.wm-focus-live-rail.syncing::after {
+  animation: wm-live-sync-scan 1300ms linear infinite;
+}
+
+.wm-focus-live-rail i {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #57f294;
+  box-shadow: 0 0 12px rgba(57, 255, 115, 0.35);
+  animation: wm-live-dot-pop 520ms ease;
+}
+
+.wm-focus-live-rail.syncing i {
+  animation: wm-live-dot-breathe 1000ms ease-in-out infinite;
+}
+
+.wm-focus-live-rail.down i {
+  background: #ff6f7b;
+  box-shadow: 0 0 12px rgba(255, 111, 123, 0.36);
+}
+
+.wm-focus-live-rail span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-focus-live-rail b {
+  color: #dce8e6;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
 .wm-focus-chart-marketbar {
   position: relative;
   z-index: 2;
@@ -6460,6 +6543,19 @@ body {
 
 .wm-focus-chart-card::before {
   content: none;
+}
+
+.wm-focus-detail.is-refreshing .wm-focus-chart-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(126, 220, 255, 0), rgba(126, 220, 255, 0.075), rgba(126, 220, 255, 0));
+  mix-blend-mode: screen;
+  transform: translateX(-100%);
+  animation: wm-live-sync-scan 1550ms linear infinite;
 }
 
 .wm-focus-chart-topline {
@@ -7034,17 +7130,56 @@ body {
 }
 
 .wm-focus-book-market strong {
-  margin-left: 3px;
-  font-size: 10px;
+  flex: 0 0 auto;
+  min-width: 38px;
+  padding: 2px 6px;
+  border: 1px solid rgba(57, 255, 115, 0.18);
+  border-radius: 999px;
+  background: rgba(57, 255, 115, 0.08);
+  color: #55f292;
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
   animation: wm-book-ticker-pulse 1800ms ease-in-out infinite;
 }
 
-.wm-focus-book-market strong.ask {
-  color: #ff727d;
+.wm-focus-book-market strong.syncing {
+  border-color: rgba(126, 220, 255, 0.24);
+  background: rgba(126, 220, 255, 0.08);
+  color: #7edcff;
+  animation: wm-book-ticker-pulse 900ms ease-in-out infinite;
 }
 
-.wm-focus-book-market strong.bid {
-  color: #55f292;
+.wm-focus-book-market em {
+  flex: 0 0 auto;
+  color: #657070;
+  font-style: normal;
+  text-transform: none;
+}
+
+.wm-focus-book.is-refreshing .wm-focus-book-ladder::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(126, 220, 255, 0),
+    rgba(126, 220, 255, 0.08),
+    rgba(126, 220, 255, 0)
+  );
+  mix-blend-mode: screen;
+  transform: translateY(-100%);
+  animation: wm-live-panel-scan 1200ms linear infinite;
+}
+
+.wm-focus-book.tick-up .wm-focus-book-quote-strip strong:not(.ask) {
+  color: #7dffad;
+}
+
+.wm-focus-book.tick-down .wm-focus-book-quote-strip strong:not(.bid) {
+  color: #ff7f89;
 }
 
 .wm-focus-book-overview {
@@ -7221,6 +7356,11 @@ body {
   background: #111718;
   box-shadow: inset 0 0 0 1px rgba(126, 220, 255, 0.12);
   transform: translateX(1px);
+}
+
+.wm-focus-book-row.live-updated {
+  animation: wm-book-row-live-flash 760ms ease both;
+  animation-delay: var(--wm-book-row-delay);
 }
 
 .wm-focus-book-row:first-child {
@@ -7472,6 +7612,89 @@ body {
   }
 }
 
+@keyframes wm-live-price-pop {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+
+  36% {
+    transform: scale(1.055);
+    filter: brightness(1.35);
+  }
+
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+@keyframes wm-live-sync-scan {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes wm-live-panel-scan {
+  from {
+    transform: translateY(-100%);
+  }
+
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes wm-live-dot-pop {
+  0% {
+    transform: scale(0.72);
+    opacity: 0.65;
+  }
+
+  55% {
+    transform: scale(1.28);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes wm-live-dot-breathe {
+  0%, 100% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+
+  50% {
+    transform: scale(1.22);
+    opacity: 1;
+  }
+}
+
+@keyframes wm-book-row-live-flash {
+  0% {
+    box-shadow: inset 0 0 0 1px transparent;
+    filter: brightness(1);
+  }
+
+  38% {
+    box-shadow: inset 0 0 0 1px rgba(126, 220, 255, 0.18);
+    filter: brightness(1.28);
+  }
+
+  100% {
+    box-shadow: inset 0 0 0 1px transparent;
+    filter: brightness(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wm-focus-book-tabs button.active,
   .wm-focus-book-market strong,
@@ -7482,7 +7705,12 @@ body {
   .wm-focus-book-row,
   .wm-focus-book-side-fill,
   .wm-focus-book-mid,
-  .wm-focus-book-mid::before {
+  .wm-focus-book-mid::before,
+  .wm-live-price-tick,
+  .wm-focus-live-rail i,
+  .wm-focus-live-rail::after,
+  .wm-focus-detail.is-refreshing .wm-focus-chart-card::after,
+  .wm-focus-book.is-refreshing .wm-focus-book-ladder::after {
     animation: none;
   }
 

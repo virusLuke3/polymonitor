@@ -338,7 +338,10 @@ export function fetchQuantMarketPriceSeries(query: QuantPriceQuery & { priceSour
   params.set('max_outcomes', String(query.maxOutcomes || 24));
   if (query.maxPoints) params.set('max_points', String(query.maxPoints));
   params.set('point_format', query.pointFormat || 'lite');
-  if (query.live) params.set('live', '1');
+  if (query.live) {
+    params.set('live', '1');
+    params.set('_ts', String(Date.now()));
+  }
   return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/market-price-series?${params.toString()}`, query.timeoutMs || 20000);
 }
 
@@ -734,6 +737,7 @@ export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '
   const params = new URLSearchParams();
   if (title.trim()) params.set('title', title.trim());
   if (noTokenId.trim()) params.set('noTokenId', noTokenId.trim());
+  params.set('_ts', String(Date.now()));
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return apiGetWithTimeout<LobPayload>(`/runtime/lob/token/${encodeURIComponent(tokenId)}${suffix}`, timeoutMs);
 }
