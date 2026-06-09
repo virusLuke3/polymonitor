@@ -683,6 +683,160 @@
   padding: 8px;
 }
 
+.qtv-build-quality {
+  display: grid;
+  gap: 6px;
+}
+
+.qtv-build-quality header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid rgba(38, 50, 68, 0.72);
+  padding-top: 8px;
+}
+
+.qtv-build-quality header strong {
+  color: #e5e7eb;
+  font-size: 12px;
+}
+
+.qtv-build-quality header span {
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.qtv-build-quality dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  border: 1px solid #202938;
+  background: #202938;
+}
+
+.qtv-build-quality dl div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  background: #0b111c;
+  padding: 7px 8px;
+}
+
+.qtv-build-quality dt,
+.qtv-build-quality dd {
+  overflow: hidden;
+  margin: 0;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-build-quality dt {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-build-quality dd {
+  color: #dbeafe;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.qtv-build-run-list {
+  display: grid;
+  gap: 5px;
+}
+
+.qtv-build-run-list p {
+  margin: 0;
+  border: 1px dashed rgba(38, 50, 68, 0.86);
+  border-radius: 4px;
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 8px;
+}
+
+.qtv-build-run-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px 68px 76px;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  width: 100%;
+  border: 1px solid rgba(38, 50, 68, 0.78);
+  border-left: 3px solid #334155;
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.58);
+  color: #cbd5e1;
+  cursor: default;
+  font-family: var(--font-mono);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.qtv-build-run-row.ready {
+  border-left-color: #22c55e;
+}
+
+.qtv-build-run-row.running {
+  border-left-color: #60a5fa;
+}
+
+.qtv-build-run-row.review {
+  border-left-color: #f59e0b;
+}
+
+.qtv-build-run-row.error {
+  border-left-color: #ef4444;
+}
+
+.qtv-build-run-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.qtv-build-run-row strong,
+.qtv-build-run-row em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-build-run-row strong {
+  color: #f8fafc;
+  font-size: 10px;
+}
+
+.qtv-build-run-row em,
+.qtv-build-run-row small {
+  color: #7f8a9d;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.qtv-build-run-row b {
+  justify-self: start;
+  overflow: hidden;
+  max-width: 58px;
+  border: 1px solid rgba(51, 65, 85, 0.86);
+  border-radius: 3px;
+  color: #dbeafe;
+  font-size: 9px;
+  line-height: 17px;
+  padding: 0 5px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .qtv-outcome-quality {
   display: grid;
   gap: 6px;

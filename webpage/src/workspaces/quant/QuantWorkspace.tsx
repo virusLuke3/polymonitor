@@ -212,6 +212,21 @@ function blockRangeLabel(prices: Array<{ timestamp: number }>) {
   return `${Math.floor(first).toLocaleString('en-US')} -> ${Math.floor(last).toLocaleString('en-US')}`;
 }
 
+function formatBuildTime(value: string | null | undefined) {
+  if (!value) return '--';
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return value;
+  return new Date(time).toLocaleString();
+}
+
+function buildRunStatusClass(run: QuantBuildRun) {
+  const status = String(run.status || '').toLowerCase();
+  if (status.includes('success') || status.includes('complete') || status === 'ready') return 'ready';
+  if (status.includes('run') || status.includes('queue') || status.includes('warm')) return 'running';
+  if (status.includes('fail') || status.includes('error') || toNumber(run.errorCount) > 0) return 'error';
+  return 'review';
+}
+
 function dataQualitySummary(prices: PricePoint[], source: string, outcomes: QuantMarketSeriesOutcome[], dataStatus: DataStatus) {
   const sorted = prices
     .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.close))
@@ -1071,6 +1086,18 @@ export function QuantWorkspace() {
     () => dataQualitySummary(activePrices, backendPriceSource(priceSource), marketSeries?.outcomes || [], dataStatus),
     [activePrices, dataStatus, marketSeries, priceSource],
   );
+  const recentBuildRuns = useMemo(() => runs.slice(0, 6), [runs]);
+  const buildRunSummary = useMemo(() => {
+    const latest = recentBuildRuns[0];
+    const errors = recentBuildRuns.reduce((sum, run) => sum + toNumber(run.errorCount), 0);
+    const rowsWritten = recentBuildRuns.reduce((sum, run) => sum + toNumber(run.rowsWritten), 0);
+    return {
+      latest,
+      errors,
+      rowsWritten,
+      health: !recentBuildRuns.length ? 'empty' : errors > 0 ? 'review' : 'ready',
+    };
+  }, [recentBuildRuns]);
   const outcomeQualityRows = useMemo(() => {
     const eventTitle = marketSeries?.event?.eventTitle || marketSeries?.market?.marketTitle || '';
     const latestGlobalBlock = dataQuality.latestBlock || 0;
@@ -1448,6 +1475,43 @@ export function QuantWorkspace() {
                     <div className="qtv-quality-notes">
                       {dataQuality.warnings.length ? dataQuality.warnings.map((warning) => <span key={warning}>{warning}</span>) : <span>Block-close coverage looks usable for this visible window.</span>}
                     </div>
+                    <section className="qtv-build-quality">
+                      <header>
+                        <strong>Build and worker status</strong>
+                        <span>{buildRunSummary.health === 'ready' ? 'recent runs clean' : buildRunSummary.health === 'review' ? `${buildRunSummary.errors.toLocaleString('en-US')} errors` : 'no runs loaded'}</span>
+                      </header>
+                      <dl>
+                        <div><dt>Latest run</dt><dd>{buildRunSummary.latest?.runId ? `#${buildRunSummary.latest.runId}` : '--'}</dd></div>
+                        <div><dt>Latest status</dt><dd>{buildRunSummary.latest?.status || '--'}</dd></div>
+                        <div><dt>Rows written</dt><dd>{buildRunSummary.rowsWritten.toLocaleString('en-US')}</dd></div>
+                        <div><dt>Errors</dt><dd>{buildRunSummary.errors.toLocaleString('en-US')}</dd></div>
+                      </dl>
+                      <div className="qtv-build-run-list">
+                        {recentBuildRuns.map((run) => {
+                          const statusClass = buildRunStatusClass(run);
+                          const complete = toNumber(run.marketsComplete);
+                          const total = toNumber(run.marketsTotal);
+                          const progress = total ? `${complete.toLocaleString('en-US')} / ${total.toLocaleString('en-US')}` : '--';
+                          return (
+                            <button
+                              key={`build-run-${run.runId}`}
+                              className={`qtv-build-run-row ${statusClass}`}
+                              type="button"
+                              title={run.lastError || `${run.source} ${run.mode || ''}`}
+                            >
+                              <span>
+                                <strong>#{run.runId} {run.source}</strong>
+                                <em>{run.mode || 'default'} · {formatBuildTime(run.finishedAt || run.startedAt)}</em>
+                              </span>
+                              <b>{run.status}</b>
+                              <small>{progress}</small>
+                              <small>{toNumber(run.rowsWritten).toLocaleString('en-US')} rows</small>
+                            </button>
+                          );
+                        })}
+                        {!recentBuildRuns.length ? <p>No build status rows returned yet.</p> : null}
+                      </div>
+                    </section>
                     <section className="qtv-outcome-quality">
                       <header>
                         <strong>Outcome coverage</strong>
