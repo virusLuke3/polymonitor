@@ -7,6 +7,7 @@ type WorkspaceHeaderProps = {
   marketSlug: string;
   marketQuery: string;
   timeframe: string;
+  viewportMode?: 'preset' | 'custom';
   priceSource: PriceSource;
   backtestEngine: BacktestEngine;
   loading: boolean;
@@ -234,6 +235,7 @@ export function WorkspaceHeader({
   marketSlug,
   marketQuery,
   timeframe,
+  viewportMode = 'preset',
   priceSource,
   backtestEngine,
   loading,
@@ -754,8 +756,9 @@ export function WorkspaceHeader({
             ['15000', '15k'],
             ['25000', 'All'],
           ] as Array<[string, string]>).map(([value, label]) => (
-            <button key={value} className={timeframe === value ? 'active' : ''} type="button" onClick={() => onTimeframeChange(value)}>{label}</button>
+            <button key={value} className={viewportMode !== 'custom' && timeframe === value ? 'active' : ''} type="button" onClick={() => onTimeframeChange(value)}>{label}</button>
           ))}
+          {viewportMode === 'custom' ? <span className="qtv-custom-view">Custom view</span> : null}
         </div>
 
         <div className="qtv-workbar-group qtv-select-group">

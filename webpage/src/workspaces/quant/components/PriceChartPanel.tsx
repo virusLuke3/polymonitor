@@ -70,6 +70,8 @@ type PriceChartPanelProps = {
   onSoloOutcomeKeyChange?: (key: string) => void;
   onOutcomeSelect?: (tokenId: string, side: 'YES' | 'NO') => void;
   onRetry?: () => void;
+  viewportResetKey?: string;
+  onViewportModeChange?: (mode: 'preset' | 'custom') => void;
 };
 
 type SeriesRefs = {
@@ -477,12 +479,16 @@ export function PriceChartPanel({
   onSoloOutcomeKeyChange,
   onOutcomeSelect,
   onRetry,
+  viewportResetKey = '',
+  onViewportModeChange,
 }: PriceChartPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<SeriesRefs>({ lines: new Map(), ma: null, volume: null });
   const pointsRef = useRef<PricePoint[]>([]);
   const dataWindowDragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const suppressViewportModeRef = useRef(false);
+  const lastFitRequestKeyRef = useRef('');
   const [hover, setHover] = useState<PricePoint | null>(null);
   const [pinnedPoint, setPinnedPoint] = useState<PricePoint | null>(null);
   const [dataWindowSettings, setDataWindowSettings] = useState<DataWindowSettings>(persistedDataWindowSettings);
@@ -513,6 +519,7 @@ export function PriceChartPanel({
   const [replayIndex, setReplayIndex] = useState<number | null>(null);
 
   const rawAllPoints = useMemo(() => sortUnique(prices), [prices]);
+  const fitRequestKey = `${market.slug}|${priceSource}|${scaleMode}|${viewportResetKey}`;
   const replayCutoff = replayEnabled && replayIndex !== null ? rawAllPoints[Math.min(replayIndex, rawAllPoints.length - 1)]?.timestamp : null;
   const replayPrices = useMemo(() => (
     replayCutoff ? prices.filter((point) => point.timestamp <= replayCutoff) : prices
@@ -598,7 +605,12 @@ export function PriceChartPanel({
   } : undefined;
 
   function fitData() {
+    suppressViewportModeRef.current = true;
     chartRef.current?.timeScale().fitContent();
+    onViewportModeChange?.('preset');
+    window.setTimeout(() => {
+      suppressViewportModeRef.current = false;
+    }, 0);
   }
 
   function zoomLogicalRange(factor: number) {
@@ -609,6 +621,7 @@ export function PriceChartPanel({
     const center = (range.from + range.to) / 2;
     const half = ((range.to - range.from) * factor) / 2;
     scale.setVisibleLogicalRange({ from: center - half, to: center + half });
+    onViewportModeChange?.('custom');
   }
 
   function logicalIndexFromClientX(clientX: number) {
@@ -627,6 +640,7 @@ export function PriceChartPanel({
       from: logicalIndexFromClientX(left),
       to: logicalIndexFromClientX(right),
     });
+    onViewportModeChange?.('custom');
   }
 
   const updatePinnedOutcomeKeys = (next: string[] | ((current: string[]) => string[])) => {
@@ -867,12 +881,21 @@ export function PriceChartPanel({
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
       chart.resize(Math.max(360, Math.floor(entry.contentRect.width)), Math.max(300, Math.floor(entry.contentRect.height)));
-      chart.timeScale().fitContent();
     });
     observer.observe(container);
 
+    const handleVisibleLogicalRange = (range: { from: number; to: number } | null) => {
+      if (suppressViewportModeRef.current || !range || pointsRef.current.length < 2) return;
+      const span = Math.max(0, range.to - range.from);
+      const fullSpan = Math.max(1, pointsRef.current.length - 1);
+      const coversFullDataset = range.from <= 1.5 && range.to >= fullSpan - 1.5 && span >= fullSpan - 3;
+      onViewportModeChange?.(coversFullDataset ? 'preset' : 'custom');
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleLogicalRange);
+
     return () => {
       observer.disconnect();
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRange);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = { lines: new Map(), ma: null, volume: null };
@@ -926,8 +949,16 @@ export function PriceChartPanel({
     });
     series.ma.setData(indicatorMode.ma ? lineData(maPoints) : []);
     series.volume.setData(indicatorMode.volume ? volumeData(allPoints) : []);
-    chart.timeScale().fitContent();
-  }, [allPoints, displayMode, eventMode, indicatorMode.ma, indicatorMode.volume, labelMode, maPoints, scaleMode, selectedGroup, visibleOutcomeGroups]);
+    if (allPoints.length && lastFitRequestKeyRef.current !== fitRequestKey) {
+      suppressViewportModeRef.current = true;
+      chart.timeScale().fitContent();
+      lastFitRequestKeyRef.current = fitRequestKey;
+      onViewportModeChange?.('preset');
+      window.setTimeout(() => {
+        suppressViewportModeRef.current = false;
+      }, 0);
+    }
+  }, [allPoints, displayMode, eventMode, fitRequestKey, indicatorMode.ma, indicatorMode.volume, labelMode, maPoints, scaleMode, selectedGroup, visibleOutcomeGroups]);
 
   const drawingPointFromEvent = (event: MouseEvent) => {
     const box = containerRef.current?.getBoundingClientRect();

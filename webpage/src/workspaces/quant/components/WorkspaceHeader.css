@@ -831,6 +831,17 @@
   color: #60a5fa;
 }
 
+.qtv-custom-view {
+  align-items: center;
+  border-left: 1px solid rgba(148, 163, 184, 0.18);
+  color: #fbbf24;
+  display: inline-flex;
+  font-size: 11px;
+  height: 28px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
 .qtv-select-group {
   gap: 8px;
 }

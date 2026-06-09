@@ -475,6 +475,8 @@ export function QuantWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [timeframe, setTimeframe] = useState('2500');
+  const [viewportMode, setViewportMode] = useState<'preset' | 'custom'>('preset');
+  const [viewportResetSeq, setViewportResetSeq] = useState(0);
   const [priceSource, setPriceSource] = useState<PriceSource>(defaultPriceSource);
   const [backtestEngine, setBacktestEngine] = useState<BacktestEngine>('backtrader');
   const [testerTab, setTesterTab] = useState<TesterTab>('overview');
@@ -565,8 +567,6 @@ export function QuantWorkspace() {
     marketSlug.trim(),
     backendPriceSource(priceSource),
     timeframe,
-    selectedOutcomeTokenId || 'all-outcomes',
-    selectedBacktestAction,
   ].join('|');
 
   const seriesKeyForSlug = (slug: string, itemKind = selectedEntityKind) => [
@@ -574,8 +574,6 @@ export function QuantWorkspace() {
     slug.trim(),
     backendPriceSource(priceSource),
     timeframe,
-    'all-outcomes',
-    'YES',
   ].join('|');
 
   const refreshQuantRows = async (requestSeq = priceLoadSeq.current, options: RefreshQuantRowsOptions = {}) => {
@@ -775,6 +773,8 @@ export function QuantWorkspace() {
     setMarketSlug(nextSlug);
     setMarketSearchQuery('');
     setMarketReloadKey((current) => current + 1);
+    setViewportMode('preset');
+    setViewportResetSeq((current) => current + 1);
     setSelectedMarketMeta(nextMarket);
     setSelectedEntityKindHint(nextMarket?.itemKind === 'event' ? 'event' : 'market');
     const cached = nextSlug ? priceSeriesCacheRef.current.get(seriesKeyForSlug(nextSlug, nextMarket?.itemKind === 'event' ? 'event' : 'market')) : null;
@@ -791,6 +791,22 @@ export function QuantWorkspace() {
       setDataStatus(cached ? 'partial' : 'metadata_loading');
       setLoadingMessage(cached ? 'Rendering cached data...' : 'Loading market metadata...');
     }
+  };
+
+  const changeTimeframePreset = (value: string) => {
+    setTimeframe(value);
+    setViewportMode('preset');
+    setViewportResetSeq((current) => current + 1);
+  };
+
+  const changePriceSource = (value: PriceSource) => {
+    setPriceSource(value);
+    setViewportMode('preset');
+    setViewportResetSeq((current) => current + 1);
+  };
+
+  const updateViewportMode = (mode: 'preset' | 'custom') => {
+    setViewportMode((current) => (current === mode ? current : mode));
   };
 
   useEffect(() => {
@@ -916,7 +932,7 @@ export function QuantWorkspace() {
       });
     }, 60);
     return () => window.clearTimeout(timer);
-  }, [marketReloadKey, marketSlug, priceSource, timeframe, selectedOutcomeTokenId, selectedBacktestAction, selectedEntityKind]);
+  }, [marketReloadKey, marketSlug, priceSource, timeframe, selectedEntityKind]);
 
   useEffect(() => {
     return () => {
@@ -941,7 +957,7 @@ export function QuantWorkspace() {
         });
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [livePriceRefreshEnabled, marketSlug, priceSource, timeframe, selectedOutcomeTokenId, selectedBacktestAction, selectedEntityKind]);
+  }, [livePriceRefreshEnabled, marketSlug, priceSource, timeframe, selectedEntityKind]);
 
   useEffect(() => {
     if (!livePriceRefreshEnabled || selectedEntityKind !== 'event' || !marketSlug.trim() || typeof EventSource === 'undefined') return undefined;
@@ -1208,6 +1224,7 @@ export function QuantWorkspace() {
         marketSlug={marketSlug}
         marketQuery={marketSearchQuery}
         timeframe={timeframe}
+        viewportMode={viewportMode}
         priceSource={priceSource}
         backtestEngine={backtestEngine}
         loading={loading}
@@ -1216,8 +1233,8 @@ export function QuantWorkspace() {
         marketSearchStatus={marketSearchStatus}
         onMarketSlugChange={selectMarketSlug}
         onMarketQueryChange={setMarketSearchQuery}
-        onTimeframeChange={setTimeframe}
-        onPriceSourceChange={setPriceSource}
+        onTimeframeChange={changeTimeframePreset}
+        onPriceSourceChange={changePriceSource}
         onBacktestEngineChange={setBacktestEngine}
         onRunBacktest={() => void runBacktest()}
         onSave={saveWorkspace}
@@ -1261,6 +1278,8 @@ export function QuantWorkspace() {
             onRetry={() => {
               setMarketReloadKey((current) => current + 1);
             }}
+            viewportResetKey={`${marketSlug}|${priceSource}|${timeframe}|${viewportResetSeq}`}
+            onViewportModeChange={updateViewportMode}
           />
         </section>
 
