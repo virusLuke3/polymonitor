@@ -199,6 +199,11 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function finiteNumber(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function formatBookValue(value: unknown, digits = 3) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
@@ -207,6 +212,10 @@ function formatBookValue(value: unknown, digits = 3) {
 
 function bookSideHasLevels(side: LobSide | null | undefined) {
   return Boolean(side?.bids?.length || side?.asks?.length);
+}
+
+function sumBookDepth(levels: LobSide['bids'], limit = 5) {
+  return (levels || []).slice(0, limit).reduce((total, level) => total + toNumber(level.size), 0);
 }
 
 function persistedBoolean(key: string, fallback: boolean) {
@@ -1997,6 +2006,87 @@ export function QuantWorkspace() {
   const selectedBookTitle = selectedOutcomeRow?.fullLabel || selectedOutcome?.outcomeLabel || marketInfo.title || '';
   const liveBookSide = selectedBacktestAction === 'NO' ? liveLob?.no : liveLob?.yes;
   const liveBookHasLevels = bookSideHasLevels(liveLob?.yes) || bookSideHasLevels(liveLob?.no);
+  const liveSelectedBookHasLevels = bookSideHasLevels(liveBookSide);
+  const bookExecutionQuality = useMemo(() => {
+    const bid = finiteNumber(liveBookSide?.bestBid);
+    const ask = finiteNumber(liveBookSide?.bestAsk);
+    const spread = finiteNumber(liveBookSide?.spread) ?? (bid !== null && ask !== null ? Math.max(0, ask - bid) : null);
+    const mid = bid !== null && ask !== null ? (bid + ask) / 2 : null;
+    const blockClose = finiteNumber(selectedBacktestAction === 'NO' ? selectedOutcomeRow?.no : selectedOutcomeRow?.yes);
+    const bidDepth = sumBookDepth(liveBookSide?.bids, 5);
+    const askDepth = sumBookDepth(liveBookSide?.asks, 5);
+    const topDepth = bidDepth + askDepth;
+    const drift = mid !== null && blockClose !== null ? Math.abs(mid - blockClose) : null;
+    const fetchedAtMs = liveLob?.fetchedAt ? Date.parse(liveLob.fetchedAt) : NaN;
+    const ageSeconds = Number.isFinite(fetchedAtMs) ? Math.max(0, Math.round((Date.now() - fetchedAtMs) / 1000)) : null;
+    const caveats: string[] = [];
+
+    if (liveLobStatus === 'loading') caveats.push('Live CLOB is still loading.');
+    if (liveLobStatus === 'error') caveats.push(liveLobError || 'Live CLOB request failed.');
+    if (!liveSelectedBookHasLevels) caveats.push(`No live ${selectedBacktestAction} bid/ask levels are available for this token.`);
+    if (spread !== null && spread > 0.08) caveats.push('Spread is wide; fills may differ from block-close rows.');
+    if (drift !== null && drift > 0.08) caveats.push('Live midpoint is far from the selected block-close price.');
+    if (topDepth > 0 && topDepth < 100) caveats.push('Top-of-book depth is thin for production-sized backtests.');
+    if (selectedBookQuality.status === 'review') caveats.push('Historical block-close series has gaps or jumps.');
+    if (ageSeconds !== null && ageSeconds > 60) caveats.push('Live book snapshot is stale.');
+
+    const status = liveLobStatus === 'loading'
+      ? 'loading'
+      : !liveSelectedBookHasLevels || liveLobStatus === 'empty'
+        ? 'empty'
+        : liveLobStatus === 'error' || caveats.some((item) => /wide|far|thin|gaps|jumps|stale|failed/i.test(item))
+          ? 'review'
+          : 'ready';
+    const confidence = status === 'ready'
+      ? 92
+      : status === 'review'
+        ? Math.max(45, 82 - caveats.length * 8)
+        : status === 'loading'
+          ? 50
+          : 24;
+    const title = status === 'ready'
+      ? 'Execution assumptions look usable'
+      : status === 'review'
+        ? 'Review before trusting simulated fills'
+        : status === 'loading'
+          ? 'Checking live CLOB execution context'
+          : 'No executable live book context';
+    const nextAction = status === 'ready'
+      ? 'Run a liquidity-aware backtest or compare target size against top depth.'
+      : status === 'review'
+        ? 'Refresh CLOB, lower assumed size, or inspect Data Quality before running.'
+        : status === 'loading'
+          ? 'Wait for the book request to finish.'
+          : 'Use block-close results as historical signal only until CLOB depth returns.';
+
+    return {
+      ageSeconds,
+      ask,
+      askDepth,
+      bid,
+      bidDepth,
+      blockClose,
+      caveats,
+      confidence,
+      drift,
+      mid,
+      nextAction,
+      spread,
+      status,
+      title,
+      topDepth,
+    };
+  }, [
+    liveBookSide,
+    liveSelectedBookHasLevels,
+    liveLob?.fetchedAt,
+    liveLobError,
+    liveLobStatus,
+    selectedBacktestAction,
+    selectedBookQuality.status,
+    selectedOutcomeRow?.no,
+    selectedOutcomeRow?.yes,
+  ]);
 
   useEffect(() => {
     if (inspectorTab !== 'book') return undefined;
@@ -2736,6 +2826,33 @@ export function QuantWorkspace() {
                         <span>Bid</span><b>{formatBookValue(liveBookSide?.bestBid)}</b>
                         <span>Ask</span><b>{formatBookValue(liveBookSide?.bestAsk)}</b>
                         <span>Spread</span><b>{formatBookValue(liveBookSide?.spread)}</b>
+                      </div>
+                      <div className={`qtv-book-execution ${bookExecutionQuality.status}`}>
+                        <header>
+                          <div>
+                            <strong>{bookExecutionQuality.title}</strong>
+                            <span>{bookExecutionQuality.nextAction}</span>
+                          </div>
+                          <b>{bookExecutionQuality.confidence}%</b>
+                        </header>
+                        <div className="qtv-book-execution-meter">
+                          <i style={{ width: `${bookExecutionQuality.confidence}%` }} />
+                        </div>
+                        <dl>
+                          <div><dt>Block close</dt><dd>{formatBookValue(bookExecutionQuality.blockClose)}</dd></div>
+                          <div><dt>Live mid</dt><dd>{formatBookValue(bookExecutionQuality.mid)}</dd></div>
+                          <div><dt>Spread</dt><dd>{formatBookValue(bookExecutionQuality.spread)}</dd></div>
+                          <div><dt>Top depth</dt><dd>{formatBookValue(bookExecutionQuality.topDepth, 0)}</dd></div>
+                          <div><dt>Mid drift</dt><dd>{formatBookValue(bookExecutionQuality.drift)}</dd></div>
+                          <div><dt>Snapshot</dt><dd>{bookExecutionQuality.ageSeconds === null ? '--' : `${bookExecutionQuality.ageSeconds}s ago`}</dd></div>
+                        </dl>
+                        {bookExecutionQuality.caveats.length ? (
+                          <ul>
+                            {bookExecutionQuality.caveats.slice(0, 3).map((caveat) => <li key={caveat}>{caveat}</li>)}
+                          </ul>
+                        ) : (
+                          <p>Live spread, depth, and historical block-close quality are aligned for the selected side.</p>
+                        )}
                       </div>
                       <div className="qtv-live-book-depth">
                         {(['yes', 'no'] as const).map((sideName) => {
