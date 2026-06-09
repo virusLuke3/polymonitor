@@ -819,11 +819,15 @@ function matchTitle(match: WorldCupMatch) {
 }
 
 function shortKickoff(match: WorldCupMatch) {
-  return match.kickoffLocal.replace(',', ' ·');
+  return (match.kickoffLocal || match.kickoffUtc || 'kickoff pending').replace(',', ' ·');
 }
 
 function shortBeijingKickoff(match: WorldCupMatch) {
-  return match.kickoffBeijing.replace(',', ' ·');
+  return (match.kickoffBeijing || match.kickoffUtc || 'kickoff pending').replace(',', ' ·');
+}
+
+function venueTimezoneLabel(city: WorldCupVenueCity) {
+  return (city.timezone || city.country || 'HOST').replace('America/', '');
 }
 
 function stageFilterLabel(stage: WorldCupRoundFilter) {
@@ -2508,7 +2512,7 @@ export function WorldCupMap({
             <section className={`wm-worldcup-drawer-section wm-worldcup-map-venue-card ${weatherToneClass(activeSignal.weather?.current.condition || '')}`}>
               <span>Venue Intelligence</span>
               <strong>{activeSignal.city.venue}</strong>
-              <em>{activeSignal.city.capacity ? `${activeSignal.city.capacity.toLocaleString()} seats` : 'Capacity source pending'} · {activeSignal.city.timezone.replace('America/', '')}</em>
+              <em>{activeSignal.city.capacity ? `${activeSignal.city.capacity.toLocaleString()} seats` : 'Capacity source pending'} · {venueTimezoneLabel(activeSignal.city)}</em>
               <div className="wm-worldcup-map-impact-grid">
                 <span><small>Weather</small><b>{activeSignal.weather?.current.condition || 'Pending'}</b></span>
                 <span><small>Pitch</small><b>{activeImpact?.pitch}</b></span>
