@@ -24,7 +24,7 @@ type WorkspaceHeaderProps = {
   onMarketPreview?: (slug: string) => void;
 };
 
-type SearchFilter = 'all' | 'events' | 'markets' | 'tokens' | 'ready' | 'active' | 'recent' | 'official';
+type SearchFilter = 'all' | 'events' | 'markets' | 'tokens' | 'ready' | 'active' | 'recent' | 'favorites' | 'official';
 type SearchSort = 'relevance' | 'volume' | 'coverage' | 'outcomes' | 'updated';
 type SearchResultKind = 'event' | 'market' | 'token';
 type SearchPaletteMode = 'compact' | 'full';
@@ -58,6 +58,7 @@ const FILTERS: Array<{ value: SearchFilter; label: string }> = [
   { value: 'ready', label: 'Ready' },
   { value: 'active', label: 'Active' },
   { value: 'recent', label: 'Recent' },
+  { value: 'favorites', label: 'Favorites' },
   { value: 'official', label: 'Official only' },
 ];
 
@@ -142,6 +143,58 @@ function storedFilter(): SearchFilter {
   }
 }
 
+function persistedMarkets(key: string): QuantPriceMarket[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter((market): market is QuantPriceMarket => Boolean(market && typeof market.marketSlug === 'string'))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistedSlugs(key: string) {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function compactMarketForStorage(market: QuantPriceMarket): QuantPriceMarket {
+  return {
+    itemKind: market.itemKind,
+    eventId: market.eventId,
+    eventSlug: market.eventSlug,
+    eventTitle: market.eventTitle,
+    groupingConfidence: market.groupingConfidence,
+    source: market.source,
+    outcomeCount: market.outcomeCount,
+    totalMembers: market.totalMembers,
+    readyMembers: market.readyMembers,
+    orderfilledRows: market.orderfilledRows,
+    marketId: market.marketId,
+    marketSlug: market.marketSlug,
+    marketTitle: market.marketTitle,
+    tokenSide: market.tokenSide || 'YES',
+    conditionId: market.conditionId,
+    status: market.status,
+    endDate: market.endDate,
+    blockRows: market.blockRows,
+    frontendRows: market.frontendRows,
+    firstBlock: market.firstBlock,
+    lastBlock: market.lastBlock,
+    latestBlockPrice: market.latestBlockPrice,
+    latestBlockAt: market.latestBlockAt,
+    firstTs: market.firstTs,
+    lastTs: market.lastTs,
+    latestFrontendPrice: market.latestFrontendPrice,
+    latestFrontendAt: market.latestFrontendAt,
+  };
+}
+
 function buildResult(market: QuantPriceMarket, kind: SearchResultKind, index: number): SearchResult {
   const isEvent = kind === 'event';
   const rows = rowsForMarket(market);
@@ -202,12 +255,17 @@ export function WorkspaceHeader({
   const [searchFilter, setSearchFilter] = useState<SearchFilter>(storedFilter);
   const [sortMode, setSortMode] = useState<SearchSort>('relevance');
   const [paletteMode, setPaletteMode] = useState<SearchPaletteMode>('compact');
+  const [recentMarkets, setRecentMarkets] = useState<QuantPriceMarket[]>(() => persistedMarkets('polydata.quant.search.recentMarkets'));
+  const [favoriteMarketSlugs, setFavoriteMarketSlugs] = useState<string[]>(() => persistedSlugs('polydata.quant.search.favoriteSlugs'));
   const inputRef = useRef<HTMLInputElement>(null);
   const commandRef = useRef<HTMLDivElement>(null);
   const previousQueryRef = useRef('');
   const marketChoices = useMemo(() => {
     const choices = new Map<string, QuantPriceMarket>();
     if (selectedMarketProp?.marketSlug) choices.set(selectedMarketProp.marketSlug, selectedMarketProp);
+    for (const market of recentMarkets) {
+      if (market.marketSlug && !choices.has(market.marketSlug)) choices.set(market.marketSlug, market);
+    }
     for (const market of marketOptions) {
       const current = choices.get(market.marketSlug);
       if (!current || (current.itemKind !== 'event' && (market.itemKind === 'event' || market.tokenSide === 'YES'))) {
@@ -215,7 +273,7 @@ export function WorkspaceHeader({
       }
     }
     return Array.from(choices.values()).slice(0, 1500);
-  }, [marketOptions, selectedMarketProp]);
+  }, [marketOptions, recentMarkets, selectedMarketProp]);
   const selectedMarket = useMemo(
     () => selectedMarketProp || marketChoices.find((market) => market.marketSlug === marketSlug),
     [marketChoices, marketSlug, selectedMarketProp],
@@ -226,6 +284,8 @@ export function WorkspaceHeader({
   const isRefining = marketSearchStatus === 'partial';
   const hasSearchError = marketSearchStatus === 'error';
   const activeFilter = !activeSearchText && searchFilter === 'all' ? 'recent' : searchFilter;
+  const recentSlugSet = useMemo(() => new Set(recentMarkets.map((market) => market.marketSlug)), [recentMarkets]);
+  const favoriteSlugSet = useMemo(() => new Set(favoriteMarketSlugs), [favoriteMarketSlugs]);
 
   const searchResults = useMemo(() => {
     const query = activeSearchText.toLowerCase();
@@ -247,10 +307,17 @@ export function WorkspaceHeader({
       if (activeFilter === 'active' && !isActiveMarket(result.market)) return false;
       if (activeFilter === 'official' && result.confidence !== 'official') return false;
       if (activeFilter === 'recent' && result.kind === 'token') return false;
+      if (activeFilter === 'recent' && recentSlugSet.size && !recentSlugSet.has(result.market.marketSlug)) return false;
+      if (activeFilter === 'favorites' && (!favoriteSlugSet.has(result.market.marketSlug) || result.kind === 'token')) return false;
       return true;
     });
     const priorityFor = (result: SearchResult) => (
-      result.priority + (!query && result.market.marketSlug === DEFAULT_QUANT_EVENT_SLUG ? -0.75 : 0)
+      result.priority
+      + (!query && result.market.marketSlug === DEFAULT_QUANT_EVENT_SLUG ? -0.75 : 0)
+      + (favoriteSlugSet.has(result.market.marketSlug) ? -0.35 : 0)
+      + (recentMarkets.findIndex((market) => market.marketSlug === result.market.marketSlug) >= 0
+        ? recentMarkets.findIndex((market) => market.marketSlug === result.market.marketSlug) * 0.015
+        : 0)
     );
     const sorted = filtered.slice().sort((left, right) => {
       if (queryIsTokenLike && left.kind !== right.kind) return left.kind === 'token' ? -1 : right.kind === 'token' ? 1 : 0;
@@ -261,7 +328,7 @@ export function WorkspaceHeader({
       return priorityFor(left) - priorityFor(right) || right.rows - left.rows || left.title.localeCompare(right.title);
     });
     return activeFilter === 'recent' ? sorted.slice(0, 18) : sorted.slice(0, 48);
-  }, [activeFilter, activeSearchText, marketChoices, queryIsTokenLike, sortMode]);
+  }, [activeFilter, activeSearchText, favoriteSlugSet, marketChoices, queryIsTokenLike, recentMarkets, recentSlugSet, sortMode]);
 
   const sections = useMemo(() => {
     const visibleKinds: SearchResultKind[] = queryIsTokenLike ? ['token', 'event', 'market'] : ['event', 'market', 'token'];
@@ -309,6 +376,22 @@ export function WorkspaceHeader({
   }, [searchFilter]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem('polydata.quant.search.recentMarkets', JSON.stringify(recentMarkets.map(compactMarketForStorage)));
+    } catch {
+      // Recent search history is a convenience; the palette should not depend on storage.
+    }
+  }, [recentMarkets]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('polydata.quant.search.favoriteSlugs', JSON.stringify(favoriteMarketSlugs));
+    } catch {
+      // Favorites remain session-local when storage is unavailable.
+    }
+  }, [favoriteMarketSlugs]);
+
+  useEffect(() => {
     const onGlobalKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTyping = Boolean(target?.closest('input, textarea, select, [contenteditable="true"]'));
@@ -341,7 +424,16 @@ export function WorkspaceHeader({
     return () => window.removeEventListener('pointerdown', onPointerDown, true);
   }, [marketMenuOpen]);
 
-  const chooseMarket = (slug: string) => {
+  const rememberMarket = (market: QuantPriceMarket | null | undefined) => {
+    if (!market?.marketSlug) return;
+    setRecentMarkets((current) => [
+      compactMarketForStorage(market),
+      ...current.filter((item) => item.marketSlug !== market.marketSlug),
+    ].slice(0, 24));
+  };
+
+  const chooseMarket = (slug: string, market?: QuantPriceMarket) => {
+    rememberMarket(market || marketChoices.find((choice) => choice.marketSlug === slug));
     onMarketSlugChange(slug);
     onMarketQueryChange('');
     setMarketMenuOpen(false);
@@ -353,7 +445,17 @@ export function WorkspaceHeader({
   };
 
   const chooseResult = (result: SearchResult | null) => {
-    if (result?.market.marketSlug) chooseMarket(result.market.marketSlug);
+    if (result?.market.marketSlug) chooseMarket(result.market.marketSlug, result.market);
+  };
+
+  const toggleFavorite = (market: QuantPriceMarket) => {
+    if (!market.marketSlug) return;
+    rememberMarket(market);
+    setFavoriteMarketSlugs((current) => (
+      current.includes(market.marketSlug)
+        ? current.filter((slug) => slug !== market.marketSlug)
+        : [market.marketSlug, ...current].slice(0, 80)
+    ));
   };
 
   const chooseHighlightedResult = () => {
@@ -485,8 +587,8 @@ export function WorkspaceHeader({
             <div id="quant-market-search-results" className={`qtv-market-palette ${paletteMode}`} role="listbox">
               <div className="qtv-palette-head">
                 <div>
-                  <strong>{activeSearchText ? 'Search results' : 'Recent coverage'}</strong>
-                  <span>{activeSearchText ? 'Events · Markets · Tokens · Conditions' : 'Events first, then individual markets'}</span>
+                  <strong>{activeSearchText ? 'Search results' : activeFilter === 'favorites' ? 'Favorite markets' : 'Recent coverage'}</strong>
+                  <span>{activeSearchText ? 'Events · Markets · Tokens · Conditions' : 'Recents and favorites stay local to this browser'}</span>
                 </div>
                 <div className="qtv-palette-head-actions" onMouseDown={(event) => event.preventDefault()}>
                   {isRefining ? <em>Updating events...</em> : null}
@@ -557,6 +659,22 @@ export function WorkspaceHeader({
                                 <em>{result.coverage}{result.price ? ` · ${result.price}` : ''}</em>
                               </span>
                               <span className="qtv-result-badges">
+                                <span
+                                  className={`qtv-favorite-toggle ${favoriteSlugSet.has(result.market.marketSlug) ? 'active' : ''}`}
+                                  role="button"
+                                  tabIndex={-1}
+                                  title={favoriteSlugSet.has(result.market.marketSlug) ? 'Remove from favorites' : 'Add to favorites'}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                  }}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggleFavorite(result.market);
+                                  }}
+                                >
+                                  ★
+                                </span>
                                 <b>{result.count}</b>
                                 <small className={`coverage ${result.status}`}>{result.status === 'none' ? 'no rows' : result.status}</small>
                                 <small>{result.confidence}</small>
@@ -583,6 +701,12 @@ export function WorkspaceHeader({
                       <span className={`qtv-type-badge ${activeResult.kind}`}>{activeResult.kind === 'event' ? 'Event' : activeResult.kind === 'market' ? 'Market' : 'Token'}</span>
                       <strong>{activeResult.kind === 'token' ? activeResult.subtitle : activeResult.title}</strong>
                       <small>{activeResult.slug}</small>
+                      <div className="qtv-preview-actions">
+                        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseResult(activeResult)}>Open</button>
+                        <button type="button" className={favoriteSlugSet.has(activeResult.market.marketSlug) ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => toggleFavorite(activeResult.market)}>
+                          {favoriteSlugSet.has(activeResult.market.marketSlug) ? 'Favorited' : 'Favorite'}
+                        </button>
+                      </div>
                       <dl>
                         <div><dt>Coverage</dt><dd>{activeResult.coverage}</dd></div>
                         <div><dt>Status</dt><dd>{activeResult.status}</dd></div>

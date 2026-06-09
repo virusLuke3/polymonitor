@@ -683,6 +683,104 @@
   padding: 8px;
 }
 
+.qtv-outcome-quality {
+  display: grid;
+  gap: 6px;
+}
+
+.qtv-outcome-quality header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid rgba(38, 50, 68, 0.72);
+  padding-top: 8px;
+}
+
+.qtv-outcome-quality header strong {
+  color: #e5e7eb;
+  font-size: 12px;
+}
+
+.qtv-outcome-quality header span {
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.qtv-outcome-quality-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px 66px 82px;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  width: 100%;
+  border: 1px solid rgba(38, 50, 68, 0.78);
+  border-left: 3px solid #334155;
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.58);
+  color: #cbd5e1;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.qtv-outcome-quality-row:hover {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(15, 27, 45, 0.78);
+}
+
+.qtv-outcome-quality-row.ready {
+  border-left-color: #22c55e;
+}
+
+.qtv-outcome-quality-row.review {
+  border-left-color: #f59e0b;
+}
+
+.qtv-outcome-quality-row.stale,
+.qtv-outcome-quality-row.empty {
+  border-left-color: #ef4444;
+}
+
+.qtv-outcome-quality-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.qtv-outcome-quality-row strong,
+.qtv-outcome-quality-row em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-outcome-quality-row strong {
+  color: #f8fafc;
+  font-size: 10px;
+}
+
+.qtv-outcome-quality-row em,
+.qtv-outcome-quality-row small {
+  color: #7f8a9d;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.qtv-outcome-quality-row b {
+  justify-self: start;
+  border: 1px solid rgba(51, 65, 85, 0.86);
+  border-radius: 3px;
+  color: #dbeafe;
+  font-size: 9px;
+  line-height: 17px;
+  padding: 0 5px;
+  text-transform: uppercase;
+}
+
 .qtv-book-card button {
   justify-self: start;
   height: 28px;

@@ -204,6 +204,40 @@ function dataQualitySummary(prices: PricePoint[], source: string, outcomes: Quan
   };
 }
 
+function pointBlock(point: QuantMarketSeriesPoint | null | undefined) {
+  return toNumber(point?.x ?? point?.blockNumber ?? point?.timestamp);
+}
+
+function outcomePointStats(points: QuantMarketSeriesPoint[] | undefined) {
+  const sorted = (points || [])
+    .map((point) => ({
+      block: pointBlock(point),
+      price: toNumber(point.price ?? point.yesProbabilityClose),
+      implied: Boolean(point.isImplied),
+    }))
+    .filter((point) => Number.isFinite(point.block) && point.block > 0)
+    .sort((left, right) => left.block - right.block);
+  const deltas = sorted.slice(1).map((point, index) => {
+    const previous = sorted[index];
+    return previous ? point.block - previous.block : 0;
+  }).filter((delta) => delta > 0);
+  const medianDelta = quantile(deltas, 0.5);
+  const gaps = medianDelta > 0 ? deltas.filter((delta) => delta > medianDelta * 4).length : 0;
+  const spikes = sorted.slice(1).filter((point, index) => {
+    const previous = sorted[index];
+    return previous ? Math.abs(point.price - previous.price) > 0.18 : false;
+  }).length;
+  return {
+    rows: sorted.length,
+    firstBlock: sorted[0]?.block || 0,
+    lastBlock: sorted[sorted.length - 1]?.block || 0,
+    medianDelta,
+    gaps,
+    spikes,
+    impliedRows: sorted.filter((point) => point.implied).length,
+  };
+}
+
 function quantile(values: number[], ratio: number) {
   if (!values.length) return 0;
   const sorted = values.slice().sort((left, right) => left - right);
@@ -936,6 +970,42 @@ export function QuantWorkspace() {
     () => dataQualitySummary(activePrices, backendPriceSource(priceSource), marketSeries?.outcomes || [], dataStatus),
     [activePrices, dataStatus, marketSeries, priceSource],
   );
+  const outcomeQualityRows = useMemo(() => {
+    const eventTitle = marketSeries?.event?.eventTitle || marketSeries?.market?.marketTitle || '';
+    const latestGlobalBlock = dataQuality.latestBlock || 0;
+    return (marketSeries?.outcomes || []).map((outcome) => {
+      const label = deriveEventOutcomeLabel(eventTitle, outcome.marketTitle, outcome.outcomeLabel);
+      const yes = outcomePointStats(outcome.points);
+      const no = outcomePointStats(outcome.complementPoints);
+      const lastBlock = Math.max(yes.lastBlock, no.lastBlock);
+      const rows = yes.rows + no.rows;
+      const gaps = yes.gaps + no.gaps;
+      const spikes = yes.spikes + no.spikes;
+      const staleBlocks = latestGlobalBlock && lastBlock ? Math.max(0, latestGlobalBlock - lastBlock) : 0;
+      const stale = staleBlocks > Math.max(1000, (dataQuality.medianDelta || 0) * 8);
+      const status = !rows ? 'empty' : stale ? 'stale' : gaps || spikes ? 'review' : 'ready';
+      const firstBlocks = [yes.firstBlock, no.firstBlock].filter((value) => value > 0);
+      return {
+        key: outcome.tokenId || outcome.marketSlug || label,
+        label,
+        yesRows: yes.rows,
+        noRows: no.rows,
+        rows,
+        firstBlock: firstBlocks.length ? Math.min(...firstBlocks) : 0,
+        lastBlock,
+        gaps,
+        spikes,
+        staleBlocks,
+        impliedNoRows: no.impliedRows,
+        status,
+      };
+    }).sort((left, right) => {
+      const severity = (row: { status: string; gaps: number; spikes: number; staleBlocks: number }) => (
+        row.status === 'empty' ? 4 : row.status === 'stale' ? 3 : row.status === 'review' ? 2 : 1
+      ) * 100000 + row.gaps * 1000 + row.spikes * 100 + Math.min(row.staleBlocks, 99);
+      return severity(right) - severity(left) || right.rows - left.rows;
+    }).slice(0, 18);
+  }, [dataQuality.latestBlock, dataQuality.medianDelta, marketSeries]);
 
   useEffect(() => {
     window.localStorage.setItem('polydata.quant.inspectorTab', inspectorTab);
@@ -1252,6 +1322,35 @@ export function QuantWorkspace() {
                     <div className="qtv-quality-notes">
                       {dataQuality.warnings.length ? dataQuality.warnings.map((warning) => <span key={warning}>{warning}</span>) : <span>Block-close coverage looks usable for this visible window.</span>}
                     </div>
+                    <section className="qtv-outcome-quality">
+                      <header>
+                        <strong>Outcome coverage</strong>
+                        <span>{outcomeQualityRows.length.toLocaleString('en-US')} inspected</span>
+                      </header>
+                      {outcomeQualityRows.map((row) => (
+                        <button
+                          key={row.key}
+                          className={`qtv-outcome-quality-row ${row.status}`}
+                          type="button"
+                          title={`${row.label}\n${row.firstBlock ? Math.floor(row.firstBlock).toLocaleString('en-US') : '--'} -> ${row.lastBlock ? Math.floor(row.lastBlock).toLocaleString('en-US') : '--'}`}
+                          onClick={() => {
+                            const next = marketSeries?.outcomes?.find((outcome) => (outcome.tokenId || outcome.marketSlug || outcome.outcomeLabel) === row.key);
+                            if (next?.tokenId) {
+                              setSelectedOutcomeTokenId(next.tokenId);
+                              setInspectorTab('outcomes');
+                            }
+                          }}
+                        >
+                          <span>
+                            <strong>{row.label}</strong>
+                            <em>{row.firstBlock ? Math.floor(row.firstBlock).toLocaleString('en-US') : '--'} {'->'} {row.lastBlock ? Math.floor(row.lastBlock).toLocaleString('en-US') : '--'}</em>
+                          </span>
+                          <b>{row.status}</b>
+                          <small>{row.yesRows.toLocaleString('en-US')}Y / {row.noRows.toLocaleString('en-US')}N</small>
+                          <small>{row.gaps} gaps · {row.spikes} jumps</small>
+                        </button>
+                      ))}
+                    </section>
                   </div>
                 ) : null}
               </div>
