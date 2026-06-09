@@ -1708,15 +1708,25 @@ export function QuantWorkspace() {
     };
   }, [inspectorTab, liveLobRefreshSeq, selectedBookNoTokenId, selectedBookTitle, selectedBookYesTokenId]);
 
-  const watchlistRows = useMemo(() => {
+  const currentWatchKeySet = useMemo(() => new Set(
+    sortedOutcomeRows.map(({ outcome }) => watchKeyForOutcome(outcome)).filter(Boolean),
+  ), [sortedOutcomeRows]);
+  const watchedOutcomeRows = useMemo(() => {
     const savedRows = watchlistKeys
       .map((key) => sortedOutcomeRows.find(({ outcome }) => outcome.tokenId === key || outcome.buyYesTokenId === key || outcome.buyNoTokenId === key))
       .filter((row): row is (typeof sortedOutcomeRows)[number] => Boolean(row));
-    return savedRows.length ? savedRows : sortedOutcomeRows.slice(0, 12);
+    return savedRows;
   }, [sortedOutcomeRows, watchlistKeys]);
+  const watchlistRows = useMemo(() => (
+    watchedOutcomeRows.length ? watchedOutcomeRows : sortedOutcomeRows.slice(0, 12)
+  ), [sortedOutcomeRows, watchedOutcomeRows]);
+  const externalWatchlistCount = useMemo(
+    () => watchlistKeys.filter((key) => !currentWatchKeySet.has(key)).length,
+    [currentWatchKeySet, watchlistKeys],
+  );
   const recentTradeRows = useMemo(() => filteredTrades.slice(-10).reverse(), [filteredTrades]);
   const priceBlockRange = useMemo(() => blockRangeLabel(activePrices), [activePrices]);
-  const selectedWatchKey = selectedOutcome?.tokenId || selectedOutcomeRow?.outcome.tokenId || '';
+  const selectedWatchKey = selectedOutcome ? watchKeyForOutcome(selectedOutcome) : selectedOutcomeRow ? watchKeyForOutcome(selectedOutcomeRow.outcome) : '';
   const selectedIsWatched = selectedWatchKey ? watchlistKeys.includes(selectedWatchKey) : false;
   const dataQuality = useMemo(
     () => dataQualitySummary(activePrices, backendPriceSource(priceSource), marketSeries?.outcomes || [], dataStatus),
@@ -1824,6 +1834,23 @@ export function QuantWorkspace() {
         ? current.filter((item) => item !== key)
         : [key, ...current].slice(0, 48)
     ));
+  };
+
+  const clearCurrentWatchlist = () => {
+    setWatchlistKeys((current) => current.filter((key) => !currentWatchKeySet.has(key)));
+  };
+
+  const pinWatchedOutcomes = () => {
+    const watchedKeys = watchedOutcomeRows.map((row) => row.yesKey).filter(Boolean);
+    if (!watchedKeys.length) return;
+    setChartPinnedOutcomeKeys((current) => Array.from(new Set([...watchedKeys, ...current])).slice(0, 24));
+    setChartHiddenOutcomeKeys((current) => current.filter((key) => !watchedKeys.includes(key)));
+    setChartSoloOutcomeKey('');
+  };
+
+  const openWatchedOutcomes = () => {
+    setInspectorTab('outcomes');
+    setOutcomeVisibilityFilter('watched');
   };
 
   const selectOutcomeSide = (outcome: QuantMarketSeriesOutcome, side: BacktestAction) => {
@@ -2026,10 +2053,18 @@ export function QuantWorkspace() {
                 {inspectorTab === 'watchlist' ? (
                   <div className="qtv-watchlist">
                     <div className="qtv-watchlist-head">
-                      <span>{watchlistKeys.length ? `${watchlistKeys.length} saved` : 'Top outcomes'}</span>
+                      <span>
+                        {watchedOutcomeRows.length ? `${watchedOutcomeRows.length} watched here` : 'Top outcomes'}
+                        {externalWatchlistCount ? <em>{externalWatchlistCount} saved elsewhere</em> : null}
+                      </span>
                       <button type="button" disabled={!selectedWatchKey} onClick={toggleSelectedWatchlist}>
                         {selectedIsWatched ? 'Remove selected' : 'Add selected'}
                       </button>
+                    </div>
+                    <div className="qtv-watchlist-toolbar">
+                      <button type="button" disabled={!watchedOutcomeRows.length} onClick={pinWatchedOutcomes}>Pin watched</button>
+                      <button type="button" disabled={!watchedOutcomeRows.length} onClick={openWatchedOutcomes}>Open filter</button>
+                      <button type="button" disabled={!watchedOutcomeRows.length} onClick={clearCurrentWatchlist}>Clear here</button>
                     </div>
                     {watchlistRows.map(({ outcome, label, fullLabel, yes, no, rows, yesKey }) => {
                       const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
