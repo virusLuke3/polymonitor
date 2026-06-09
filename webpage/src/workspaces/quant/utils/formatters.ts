@@ -9,6 +9,12 @@ export function fmtPrice(value: unknown) {
   return toNumber(value).toFixed(3);
 }
 
+export function fmtProbabilityPercent(value: unknown, digits = 1) {
+  const numeric = toNumber(value) * 100;
+  if (Math.abs(numeric) < 1 && numeric !== 0) return `${numeric.toFixed(2)}%`;
+  return `${numeric.toFixed(digits)}%`;
+}
+
 export function fmtPercent(value: unknown) {
   const numeric = toNumber(value);
   const sign = numeric > 0 ? '+' : '';

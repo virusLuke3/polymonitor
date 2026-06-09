@@ -18,7 +18,7 @@ import type { QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFronte
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
-import type { BacktestEngine, BacktestResult, DataStatus, MarketInfo, PerformanceSortKey, PriceSource, Signal, SortDirection, TesterTab, TradeFilter } from './types';
+import type { BacktestEngine, BacktestResult, DataStatus, MarketInfo, PerformanceSortKey, PricePoint, PriceSource, Signal, SortDirection, TesterTab, TradeFilter } from './types';
 import { backtestApiToResult, blockToPrices, emptyBacktestResult, frontendToPrices, marketSeriesToPrices } from './utils/apiAdapters';
 import { deriveEventOutcomeLabel, downloadText, fmtPrice } from './utils/formatters';
 
@@ -128,10 +128,19 @@ function persistedBoolean(key: string, fallback: boolean) {
   return fallback;
 }
 
+function persistedStringArray(key: string) {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function persistedInspectorTab() {
   try {
     const value = window.localStorage.getItem('polydata.quant.inspectorTab') as InspectorTab | null;
-    if (value && ['watchlist', 'market', 'outcomes', 'book', 'trades'].includes(value)) return value;
+    if (value && ['watchlist', 'market', 'outcomes', 'book', 'trades', 'dataQuality'].includes(value)) return value;
   } catch {
     // Keep the default tab.
   }
@@ -143,6 +152,51 @@ function blockRangeLabel(prices: Array<{ timestamp: number }>) {
   const last = prices[prices.length - 1]?.timestamp;
   if (typeof first !== 'number' || typeof last !== 'number' || !Number.isFinite(first) || !Number.isFinite(last)) return '--';
   return `${Math.floor(first).toLocaleString('en-US')} -> ${Math.floor(last).toLocaleString('en-US')}`;
+}
+
+function dataQualitySummary(prices: PricePoint[], source: string, outcomes: QuantMarketSeriesOutcome[], dataStatus: DataStatus) {
+  const sorted = prices
+    .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.close))
+    .slice()
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const deltas = sorted.slice(1).map((point, index) => {
+    const previous = sorted[index];
+    return previous ? point.timestamp - previous.timestamp : 0;
+  }).filter((delta) => delta > 0);
+  const medianDelta = quantile(deltas, 0.5);
+  const gapCount = medianDelta > 0 ? deltas.filter((delta) => delta > medianDelta * 4).length : 0;
+  const spikeCount = sorted.slice(1).filter((point, index) => {
+    const previous = sorted[index];
+    return previous ? Math.abs(point.close - previous.close) > 0.18 : false;
+  }).length;
+  const directYesRows = sorted.filter((point) => point.yesPriceKind === 'direct' || !point.yesPriceKind).length;
+  const impliedNoRows = sorted.filter((point) => point.noPriceKind === 'implied').length;
+  const directNoRows = sorted.filter((point) => point.noPriceKind === 'direct').length;
+  const outcomeRows = outcomes.reduce((sum, outcome) => sum + toNumber(outcome.rows) + toNumber(outcome.complementRows), 0);
+  const firstBlock = sorted[0]?.timestamp || 0;
+  const latestBlock = sorted[sorted.length - 1]?.timestamp || 0;
+  const warnings = [
+    !sorted.length ? 'No price rows loaded for the selected source/window.' : '',
+    gapCount ? `${gapCount} block gaps larger than the median spacing.` : '',
+    spikeCount ? `${spikeCount} large adjacent price jumps detected.` : '',
+    impliedNoRows > directNoRows ? 'NO side is mostly implied from YES prices.' : '',
+    dataStatus === 'partial' ? 'Showing cached or partial coverage while refresh continues.' : '',
+  ].filter(Boolean);
+  return {
+    rows: sorted.length,
+    outcomeRows,
+    firstBlock,
+    latestBlock,
+    medianDelta,
+    gapCount,
+    spikeCount,
+    directYesRows,
+    directNoRows,
+    impliedNoRows,
+    source,
+    health: !sorted.length ? 'empty' : warnings.length ? 'review' : 'ready',
+    warnings,
+  };
 }
 
 function quantile(values: number[], ratio: number) {
@@ -165,7 +219,7 @@ function strategyDefaults(prices: Array<{ close: number }>) {
 
 type BacktestAction = 'YES' | 'NO';
 type OutcomeSortKey = 'order' | 'probability' | 'rows' | 'volume';
-type InspectorTab = 'watchlist' | 'market' | 'outcomes' | 'book' | 'trades';
+type InspectorTab = 'watchlist' | 'market' | 'outcomes' | 'book' | 'trades' | 'dataQuality';
 type RefreshQuantRowsOptions = {
   silent?: boolean;
 };
@@ -208,7 +262,16 @@ function appendStreamPoint(points: QuantMarketSeriesPoint[] | undefined, x: numb
   const current = points || [];
   const last = current[current.length - 1];
   const lastX = Number(last?.x ?? last?.blockNumber ?? last?.timestamp);
-  if (Number.isFinite(lastX) && x <= lastX) return current;
+  if (Number.isFinite(lastX) && x < lastX) return current;
+  if (Number.isFinite(lastX) && x === lastX) {
+    return current.map((point, index) => (index === current.length - 1 ? {
+      ...point,
+      price,
+      volume: toNumber(point.volume),
+      tokenId: tokenId || point.tokenId,
+      tokenSide: tokenSide || point.tokenSide,
+    } : point));
+  }
   return [
     ...current,
     {
@@ -340,6 +403,7 @@ export function QuantWorkspace() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(persistedInspectorTab);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() => persistedBoolean('polydata.quant.inspectorCollapsed', false));
   const [strategyDrawerCollapsed, setStrategyDrawerCollapsed] = useState(() => persistedBoolean('polydata.quant.strategyDrawerCollapsed', false));
+  const [watchlistKeys, setWatchlistKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.watchlistKeys'));
   const marketSearchSeq = useRef(0);
   const priceLoadSeq = useRef(0);
   const marketSlugRef = useRef(marketSlug);
@@ -397,12 +461,14 @@ export function QuantWorkspace() {
     maxPoints: selectedEntityKind === 'event' ? (chartRange === 'full' ? EVENT_TILE_FULL_MAX_POINTS : EVENT_TILE_MAX_POINTS) : undefined,
     range: selectedEntityKind === 'event' ? chartRange : undefined,
     resolution: selectedEntityKind === 'event' ? 'auto' : undefined,
+    live: livePriceRefreshEnabled,
   };
   const priceRequestKey = [
     selectedEntityKind,
     marketSlug.trim(),
     backendPriceSource(priceSource),
     timeframe,
+    livePriceRefreshEnabled ? 'live' : 'snapshot',
     selectedOutcomeTokenId || 'all-outcomes',
     selectedBacktestAction,
   ].join('|');
@@ -730,7 +796,7 @@ export function QuantWorkspace() {
 
   useEffect(() => {
     if (!livePriceRefreshEnabled) return undefined;
-    const intervalMs = priceSource === 'frontend' ? 60000 : 30000;
+    const intervalMs = priceSource === 'frontend' ? 30000 : 8000;
     const timer = window.setInterval(() => {
       if (document.visibilityState !== 'visible' || liveRefreshInFlightRef.current) return;
       const seq = priceLoadSeq.current + 1;
@@ -753,7 +819,7 @@ export function QuantWorkspace() {
       eventSlug: marketSlug,
       priceSource: backendPriceSource(priceSource),
       maxOutcomes: EVENT_TILE_OUTCOME_LIMIT,
-      interval: priceSource === 'frontend' ? 15 : 5,
+      interval: priceSource === 'frontend' ? 10 : 2,
     }));
     const onPrice = (event: MessageEvent) => {
       try {
@@ -841,15 +907,39 @@ export function QuantWorkspace() {
     () => sortedOutcomeRows.find(({ outcome }) => outcome.tokenId === selectedOutcome?.tokenId) || sortedOutcomeRows[0] || null,
     [selectedOutcome, sortedOutcomeRows],
   );
-  const watchlistRows = useMemo(() => sortedOutcomeRows.slice(0, 12), [sortedOutcomeRows]);
+  const watchlistRows = useMemo(() => {
+    const savedRows = watchlistKeys
+      .map((key) => sortedOutcomeRows.find(({ outcome }) => outcome.tokenId === key || outcome.buyYesTokenId === key || outcome.buyNoTokenId === key))
+      .filter((row): row is (typeof sortedOutcomeRows)[number] => Boolean(row));
+    return savedRows.length ? savedRows : sortedOutcomeRows.slice(0, 12);
+  }, [sortedOutcomeRows, watchlistKeys]);
   const recentTradeRows = useMemo(() => filteredTrades.slice(-10).reverse(), [filteredTrades]);
   const priceBlockRange = useMemo(() => blockRangeLabel(activePrices), [activePrices]);
+  const selectedWatchKey = selectedOutcome?.tokenId || selectedOutcomeRow?.outcome.tokenId || '';
+  const selectedIsWatched = selectedWatchKey ? watchlistKeys.includes(selectedWatchKey) : false;
+  const dataQuality = useMemo(
+    () => dataQualitySummary(activePrices, backendPriceSource(priceSource), marketSeries?.outcomes || [], dataStatus),
+    [activePrices, dataStatus, marketSeries, priceSource],
+  );
 
   useEffect(() => {
     window.localStorage.setItem('polydata.quant.inspectorTab', inspectorTab);
     window.localStorage.setItem('polydata.quant.inspectorCollapsed', String(inspectorCollapsed));
     window.localStorage.setItem('polydata.quant.strategyDrawerCollapsed', String(strategyDrawerCollapsed));
   }, [inspectorCollapsed, inspectorTab, strategyDrawerCollapsed]);
+
+  useEffect(() => {
+    window.localStorage.setItem('polydata.quant.watchlistKeys', JSON.stringify(watchlistKeys));
+  }, [watchlistKeys]);
+
+  const toggleSelectedWatchlist = () => {
+    if (!selectedWatchKey) return;
+    setWatchlistKeys((current) => (
+      current.includes(selectedWatchKey)
+        ? current.filter((key) => key !== selectedWatchKey)
+        : [selectedWatchKey, ...current].slice(0, 48)
+    ));
+  };
 
   const togglePerformanceSort = (key: PerformanceSortKey) => {
     if (performanceSortKey === key) {
@@ -968,6 +1058,7 @@ export function QuantWorkspace() {
                   ['outcomes', 'Outcomes'],
                   ['book', 'Book'],
                   ['trades', 'Trades'],
+                  ['dataQuality', 'Data'],
                 ].map(([id, label]) => (
                   <button key={id} className={inspectorTab === id ? 'active' : ''} type="button" onClick={() => setInspectorTab(id as InspectorTab)}>{label}</button>
                 ))}
@@ -975,12 +1066,19 @@ export function QuantWorkspace() {
               <div className="qtv-inspector-body">
                 {inspectorTab === 'watchlist' ? (
                   <div className="qtv-watchlist">
+                    <div className="qtv-watchlist-head">
+                      <span>{watchlistKeys.length ? `${watchlistKeys.length} saved` : 'Top outcomes'}</span>
+                      <button type="button" disabled={!selectedWatchKey} onClick={toggleSelectedWatchlist}>
+                        {selectedIsWatched ? 'Remove selected' : 'Add selected'}
+                      </button>
+                    </div>
                     {watchlistRows.map(({ outcome, label, fullLabel, yes, no, rows }) => {
                       const isSelected = outcome.tokenId === selectedOutcome?.tokenId;
+                      const isSaved = watchlistKeys.includes(outcome.tokenId);
                       return (
                         <button
                           key={`watch-${outcome.tokenId}`}
-                          className={isSelected ? 'active' : ''}
+                          className={`${isSelected ? 'active' : ''} ${isSaved ? 'saved' : ''}`}
                           type="button"
                           title={fullLabel}
                           onClick={() => {
@@ -1010,6 +1108,10 @@ export function QuantWorkspace() {
                       <div><dt>Blocks</dt><dd>{priceBlockRange}</dd></div>
                       <div><dt>Latest</dt><dd>{fmtPrice(latestPrice)}</dd></div>
                       <div><dt>Freshness</dt><dd>{lastPriceRefreshAt || '--'}</dd></div>
+                      <div><dt>Status</dt><dd>{selectedMarket?.status || marketSeries?.event?.status || marketSeries?.market?.status || '--'}</dd></div>
+                      <div><dt>Selected</dt><dd>{selectedOutcomeRow?.fullLabel || selectedOutcome?.outcomeLabel || '--'}</dd></div>
+                      <div><dt>YES Token</dt><dd>{selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId || '--'}</dd></div>
+                      <div><dt>NO Token</dt><dd>{selectedOutcome?.buyNoTokenId || '--'}</dd></div>
                       <div><dt>Slug</dt><dd>{marketSlug}</dd></div>
                     </dl>
                   </div>
@@ -1054,6 +1156,7 @@ export function QuantWorkspace() {
                       <span>Volume</span><b>{(selectedOutcomeRow?.volume || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</b>
                     </div>
                     <p>Order book depth is shown when a live CLOB source is connected. Current panel uses the real block-close outcome prices.</p>
+                    <button type="button" onClick={() => setInspectorTab('dataQuality')}>Inspect data quality</button>
                   </div>
                 ) : null}
 
@@ -1067,6 +1170,30 @@ export function QuantWorkspace() {
                       </button>
                     ))}
                     {!recentTradeRows.length ? <p>No completed backtest trades yet. Run a backtest to populate this tab.</p> : null}
+                  </div>
+                ) : null}
+
+                {inspectorTab === 'dataQuality' ? (
+                  <div className="qtv-data-quality">
+                    <header>
+                      <strong>{dataQuality.health === 'ready' ? 'Ready' : dataQuality.health === 'review' ? 'Review suggested' : 'No rows'}</strong>
+                      <span>{dataQuality.source}</span>
+                    </header>
+                    <dl>
+                      <div><dt>Loaded rows</dt><dd>{dataQuality.rows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Outcome rows</dt><dd>{dataQuality.outcomeRows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>First block</dt><dd>{dataQuality.firstBlock ? Math.floor(dataQuality.firstBlock).toLocaleString('en-US') : '--'}</dd></div>
+                      <div><dt>Latest block</dt><dd>{dataQuality.latestBlock ? Math.floor(dataQuality.latestBlock).toLocaleString('en-US') : '--'}</dd></div>
+                      <div><dt>Median spacing</dt><dd>{dataQuality.medianDelta ? `${Math.floor(dataQuality.medianDelta).toLocaleString('en-US')} blocks` : '--'}</dd></div>
+                      <div><dt>Large gaps</dt><dd>{dataQuality.gapCount.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Large jumps</dt><dd>{dataQuality.spikeCount.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Direct YES</dt><dd>{dataQuality.directYesRows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Direct NO</dt><dd>{dataQuality.directNoRows.toLocaleString('en-US')}</dd></div>
+                      <div><dt>Implied NO</dt><dd>{dataQuality.impliedNoRows.toLocaleString('en-US')}</dd></div>
+                    </dl>
+                    <div className="qtv-quality-notes">
+                      {dataQuality.warnings.length ? dataQuality.warnings.map((warning) => <span key={warning}>{warning}</span>) : <span>Block-close coverage looks usable for this visible window.</span>}
+                    </div>
                   </div>
                 ) : null}
               </div>

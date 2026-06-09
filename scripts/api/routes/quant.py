@@ -44,6 +44,13 @@ def _parse_int_arg(name: str, default: int | None = None) -> int | None:
         return default
 
 
+def _parse_bool_arg(name: str, default: bool = False) -> bool:
+    raw = request.args.get(name)
+    if raw in (None, ""):
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _parse_time_arg(name: str) -> int | None:
     raw = request.args.get(name)
     if raw in (None, ""):
@@ -322,6 +329,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         point_format = (request.args.get("point_format") or "lite").strip().lower()
         scope = (request.args.get("scope") or "auto").strip().lower()
         cache_key = _cache_key("market-price-series", version=2)
+        live_request = _parse_bool_arg("live")
 
         def build_payload() -> dict[str, Any]:
             with postgres_connection(PostgresSettings(), readonly=True) as conn:
@@ -340,7 +348,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                 )
             return _camel_row(_apply_point_payload_format(payload, point_format))
 
-        return jsonify(_cached_quant_payload("quant-market-series", cache_key, 12, build_payload))
+        return jsonify(_cached_quant_payload("quant-market-series", cache_key, 2 if live_request else 12, build_payload))
 
     @bp.route("/event-price-series", methods=["GET"])
     def api_quant_event_price_series():
@@ -352,6 +360,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
         point_format = (request.args.get("point_format") or "lite").strip().lower()
         cache_key = _cache_key("event-price-series", version=2)
+        live_request = _parse_bool_arg("live")
 
         def build_payload() -> dict[str, Any]:
             with postgres_connection(PostgresSettings(), readonly=True) as conn:
@@ -368,7 +377,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                 )
             return _camel_row(_apply_point_payload_format(payload, point_format))
 
-        return jsonify(_cached_quant_payload("quant-event-series", cache_key, 12, build_payload))
+        return jsonify(_cached_quant_payload("quant-event-series", cache_key, 2 if live_request else 12, build_payload))
 
     @bp.route("/event-price-tile", methods=["GET"])
     def api_quant_event_price_tile():
@@ -385,11 +394,13 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         point_format = (request.args.get("point_format") or "lite").strip().lower()
         resolution = (request.args.get("resolution") or "auto").strip().lower()
         cache_key = _cache_key("event-price-tile", version=4)
+        live_request = _parse_bool_arg("live")
 
         def build_payload() -> dict[str, Any]:
-            persisted = _load_persistent_tile(cache_key)
-            if persisted is not None:
-                return persisted
+            if not live_request:
+                persisted = _load_persistent_tile(cache_key)
+                if persisted is not None:
+                    return persisted
             with postgres_connection(PostgresSettings(), readonly=True) as conn:
                 payload = get_event_price_tile(
                     conn,
@@ -408,7 +419,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                 )
             return _camel_row(_apply_point_payload_format(payload, point_format))
 
-        return jsonify(_cached_quant_payload("quant-event-tile", cache_key, 45, build_payload, snapshot=True))
+        return jsonify(_cached_quant_payload("quant-event-tile", cache_key, 2 if live_request else 45, build_payload, snapshot=not live_request))
 
     @bp.route("/event-price-stream", methods=["GET"])
     def api_quant_event_price_stream():
@@ -416,7 +427,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         if not event_slug:
             return jsonify({"error": "event_slug is required"}), 400
         price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
-        interval_seconds = min(max(_parse_int_arg("interval", 5) or 5, 2), 60)
+        interval_seconds = min(max(_parse_int_arg("interval", 5) or 5, 1), 60)
         max_outcomes = min(max(_parse_int_arg("max_outcomes", 24) or 24, 1), 100)
 
         def build_latest_payload() -> dict[str, Any]:

@@ -12,7 +12,7 @@ import {
 } from 'lightweight-charts';
 import type { DataStatus, MarketInfo, PricePoint, Signal } from '../types';
 import { movingAverage } from '../utils/backtest';
-import { fmtPrice, formatTime } from '../utils/formatters';
+import { fmtPrice, fmtProbabilityPercent, formatTime } from '../utils/formatters';
 
 type ScaleMode = 'full' | 'auto' | 'local';
 type EventDisplayMode = 'top3' | 'top5' | 'top10' | 'all' | 'selected';
@@ -22,6 +22,7 @@ type EventLabelMode = 'selected' | 'top' | 'all';
 type TooltipMode = 'compact' | 'full';
 type DataWindowMode = 'compact' | 'expanded';
 type DataWindowDock = 'floating' | 'left' | 'right';
+type RangeSelection = { startX: number; currentX: number } | null;
 
 const DRAW_TOOLS = [
   ['cursor', 'Cursor', 'M5 4l10 8-5 1.5L8 18 5 4z'],
@@ -205,6 +206,15 @@ function persistedState<T extends string>(key: string, fallback: T): T {
     return (window.localStorage.getItem(key) as T) || fallback;
   } catch {
     return fallback;
+  }
+}
+
+function persistedStringArray(key: string) {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : [];
+  } catch {
+    return [];
   }
 }
 
@@ -414,6 +424,11 @@ export function PriceChartPanel({
   const [showLowProbability, setShowLowProbability] = useState(false);
   const [normalizedView, setNormalizedView] = useState(false);
   const [layoutMode, setLayoutMode] = useState('1');
+  const [pinnedOutcomeKeys, setPinnedOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.pinnedOutcomes'));
+  const [hiddenOutcomeKeys, setHiddenOutcomeKeys] = useState<string[]>(() => persistedStringArray('polydata.quant.chart.hiddenOutcomes'));
+  const [soloOutcomeKey, setSoloOutcomeKey] = useState<string>('');
+  const [rangeZoomEnabled, setRangeZoomEnabled] = useState(false);
+  const [rangeSelection, setRangeSelection] = useState<RangeSelection>(null);
   const [replayEnabled, setReplayEnabled] = useState(false);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayIndex, setReplayIndex] = useState<number | null>(null);
@@ -444,20 +459,28 @@ export function PriceChartPanel({
     return latestClose(right) - latestClose(left);
   }), [eventSortMode, sideFilteredOutcomes]);
   const visibleOutcomeGroups = useMemo(() => {
-    if (!eventMode) return sortedOutcomes;
-    if (displayMode === 'selected') return selectedGroup ? [selectedGroup] : sortedOutcomes.slice(0, 1);
+    const hidden = new Set(hiddenOutcomeKeys);
+    const pinned = new Set(pinnedOutcomeKeys);
+    const available = sortedOutcomes.filter((group) => !hidden.has(group.key));
+    if (soloOutcomeKey) {
+      const solo = available.find((group) => group.key === soloOutcomeKey);
+      return solo ? [solo] : available.slice(0, 1);
+    }
+    if (!eventMode) return available;
+    if (displayMode === 'selected') return selectedGroup ? [selectedGroup] : available.slice(0, 1);
     const topLimit = displayMode === 'top3' ? 3 : displayMode === 'top10' ? 10 : displayMode === 'all' ? sortedOutcomes.length : 5;
     const visible = new Map<string, (typeof sortedOutcomes)[number]>();
-    sortedOutcomes.slice(0, topLimit).forEach((group) => visible.set(group.key, group));
+    available.slice(0, topLimit).forEach((group) => visible.set(group.key, group));
+    available.filter((group) => pinned.has(group.key)).forEach((group) => visible.set(group.key, group));
     if (showLowProbability) {
-      sortedOutcomes.filter((group) => latestClose(group) >= 0.05).forEach((group) => visible.set(group.key, group));
+      available.filter((group) => latestClose(group) >= 0.05).forEach((group) => visible.set(group.key, group));
     }
     if (selectedGroup) visible.set(selectedGroup.key, selectedGroup);
     return Array.from(visible.values()).sort((left, right) => {
       if (eventSortMode === 'outcome') return left.order - right.order;
       return latestClose(right) - latestClose(left);
     });
-  }, [displayMode, eventMode, eventSortMode, selectedGroup, showLowProbability, sortedOutcomes]);
+  }, [displayMode, eventMode, eventSortMode, hiddenOutcomeKeys, pinnedOutcomeKeys, selectedGroup, showLowProbability, soloOutcomeKey, sortedOutcomes]);
   const allPoints = useMemo(() => visibleOutcomeGroups.flatMap((group) => group.points).sort((left, right) => left.timestamp - right.timestamp), [visibleOutcomeGroups]);
   const primaryPoints = selectedGroup?.points || visibleOutcomeGroups[0]?.points || allPoints;
   const latestPoint = primaryPoints[primaryPoints.length - 1] || null;
@@ -486,6 +509,60 @@ export function PriceChartPanel({
   const blockTicks = useMemo(() => blockAxisTicks(primaryPoints), [primaryPoints]);
   const markers = useMemo(() => signals.map((signal) => markerPosition(signal, primaryPoints)).filter(Boolean), [primaryPoints, signals]);
   const focusedMarkers = markers.filter((marker) => marker?.signal.tradeId === selectedTradeId);
+  const rangeSelectionStyle = rangeSelection && containerRef.current ? {
+    left: `${Math.min(rangeSelection.startX, rangeSelection.currentX) - containerRef.current.getBoundingClientRect().left}px`,
+    width: `${Math.abs(rangeSelection.currentX - rangeSelection.startX)}px`,
+  } : undefined;
+
+  function fitData() {
+    chartRef.current?.timeScale().fitContent();
+  }
+
+  function zoomLogicalRange(factor: number) {
+    const scale = chartRef.current?.timeScale();
+    if (!scale) return;
+    const range = scale.getVisibleLogicalRange();
+    if (!range) return;
+    const center = (range.from + range.to) / 2;
+    const half = ((range.to - range.from) * factor) / 2;
+    scale.setVisibleLogicalRange({ from: center - half, to: center + half });
+  }
+
+  function logicalIndexFromClientX(clientX: number) {
+    const box = containerRef.current?.getBoundingClientRect();
+    if (!box) return 0;
+    const ratio = Math.max(0, Math.min(1, (clientX - box.left) / box.width));
+    return ratio * Math.max(1, primaryPoints.length - 1);
+  }
+
+  function commitRangeZoom(selection: RangeSelection) {
+    if (!selection) return;
+    const left = Math.min(selection.startX, selection.currentX);
+    const right = Math.max(selection.startX, selection.currentX);
+    if (Math.abs(right - left) < 18) return;
+    chartRef.current?.timeScale().setVisibleLogicalRange({
+      from: logicalIndexFromClientX(left),
+      to: logicalIndexFromClientX(right),
+    });
+  }
+
+  const togglePinnedOutcome = (key: string) => {
+    setPinnedOutcomeKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+    setHiddenOutcomeKeys((current) => current.filter((item) => item !== key));
+  };
+
+  const toggleHiddenOutcome = (key: string) => {
+    setHiddenOutcomeKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+    setPinnedOutcomeKeys((current) => current.filter((item) => item !== key));
+    if (soloOutcomeKey === key) setSoloOutcomeKey('');
+  };
+
+  const resetOutcomeVisibility = () => {
+    setHiddenOutcomeKeys([]);
+    setPinnedOutcomeKeys([]);
+    setSoloOutcomeKey('');
+    setShowLowProbability(false);
+  };
 
   useEffect(() => {
     window.localStorage.setItem('polydata.quant.event.displayMode', displayMode);
@@ -494,6 +571,11 @@ export function PriceChartPanel({
     window.localStorage.setItem('polydata.quant.event.labelMode', labelMode);
     window.localStorage.setItem('polydata.quant.event.tooltipMode', tooltipMode);
   }, [compareMode, displayMode, eventSortMode, labelMode, tooltipMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem('polydata.quant.chart.pinnedOutcomes', JSON.stringify(pinnedOutcomeKeys));
+    window.localStorage.setItem('polydata.quant.chart.hiddenOutcomes', JSON.stringify(hiddenOutcomeKeys));
+  }, [hiddenOutcomeKeys, pinnedOutcomeKeys]);
 
   useEffect(() => {
     window.localStorage.setItem('polymonitor.quant.dataWindowSettings', JSON.stringify(dataWindowSettings));
@@ -549,6 +631,11 @@ export function PriceChartPanel({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (rangeSelection || rangeZoomEnabled) {
+          setRangeSelection(null);
+          setRangeZoomEnabled(false);
+          return;
+        }
         if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.qtv-data-window')) {
           setPinnedPoint(null);
           setDataWindowSettings((current) => ({ ...current, visible: false, minimized: false }));
@@ -570,10 +657,22 @@ export function PriceChartPanel({
         }
         setDataWindowSettings((current) => ({ ...current, visible: !current.visible, minimized: false }));
       }
+      if (event.key.toLowerCase() === 'f' && !(event.target instanceof HTMLInputElement)) {
+        event.preventDefault();
+        fitData();
+      }
+      if ((event.key === '+' || event.key === '=') && !(event.target instanceof HTMLInputElement)) {
+        event.preventDefault();
+        zoomLogicalRange(0.72);
+      }
+      if (event.key === '-' && !(event.target instanceof HTMLInputElement)) {
+        event.preventDefault();
+        zoomLogicalRange(1.35);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [rangeSelection, rangeZoomEnabled]);
 
   useEffect(() => {
     if (!replayPlaying || !replayEnabled || !rawAllPoints.length) return undefined;
@@ -622,7 +721,7 @@ export function PriceChartPanel({
         tickMarkFormatter: (time: Time) => priceSource.includes('block') ? blockLabel(Number(time)) : formatTime(Number(time)),
       },
       localization: {
-        priceFormatter: (value: number) => `${Math.round(value * 100)}%`,
+        priceFormatter: (value: number) => fmtProbabilityPercent(value),
         timeFormatter: (time: Time) => priceSource.includes('block') ? `block ${blockLabel(Number(time))}` : formatTime(Number(time)),
       },
       crosshair: {
@@ -717,7 +816,7 @@ export function PriceChartPanel({
         lineWidth,
         priceLineVisible: showPriceLine,
         priceLineColor: baseColor,
-        title: `${group.fullLabel} ${Math.round(latestClose(group) * 100)}%`,
+        title: `${group.fullLabel} ${fmtProbabilityPercent(latestClose(group))}`,
         autoscaleInfoProvider,
       });
       line.setData(lineData(group.points));
@@ -893,6 +992,20 @@ export function PriceChartPanel({
               <option>Area</option>
               <option disabled>Candles requires OHLC</option>
             </select>
+            <button type="button" title="Fit visible data (F)" onClick={fitData}>Fit</button>
+            <button type="button" title="Zoom in (+)" onClick={() => zoomLogicalRange(0.72)}>+</button>
+            <button type="button" title="Zoom out (-)" onClick={() => zoomLogicalRange(1.35)}>-</button>
+            <button
+              className={rangeZoomEnabled ? 'active' : ''}
+              type="button"
+              title="Drag on chart to box zoom"
+              onClick={() => {
+                setRangeZoomEnabled((current) => !current);
+                setRangeSelection(null);
+              }}
+            >
+              Range
+            </button>
           </div>
           <div className="qtv-toolbar-group">
             <span>Indicators</span>
@@ -941,6 +1054,7 @@ export function PriceChartPanel({
                   </select></label>
                   <button className={showLowProbability ? 'active' : ''} type="button" title="Show low-probability outcomes" onClick={() => setShowLowProbability((current) => !current)}>Low probability</button>
                   <button className={normalizedView ? 'active' : ''} type="button" title="Toggle normalized view indicator" onClick={() => setNormalizedView((current) => !current)}>{normalizedView ? 'Normalized' : 'Raw data'}</button>
+                  <button type="button" title="Reset pinned, hidden, and solo outcome lines" onClick={resetOutcomeVisibility}>Reset lines</button>
                 </>
               ) : null}
               <label>Layout<select value={layoutMode} onChange={(event) => setLayoutMode(event.currentTarget.value)} title="Layout">
@@ -1006,20 +1120,27 @@ export function PriceChartPanel({
               {visibleOutcomeGroups.slice(0, 8).map((group) => {
                 const point = group.points[group.points.length - 1];
                 const isSelected = selectedGroup?.key === group.key;
+                const isPinned = pinnedOutcomeKeys.includes(group.key);
+                const isSolo = soloOutcomeKey === group.key;
                 return (
-                  <button
+                  <span
                     key={group.key}
-                    className={isSelected ? 'active' : ''}
-                    type="button"
+                    className={`qtv-legend-item ${isSelected ? 'active' : ''} ${isPinned ? 'pinned' : ''} ${isSolo ? 'solo' : ''}`}
                     title={group.fullLabel}
-                    onClick={(event) => {
-                      if (event.shiftKey) return;
-                      if (group.tokenId) onOutcomeSelect?.(group.tokenId, group.tokenSide === 'NO' ? 'NO' : 'YES');
-                    }}
                   >
-                    <i style={{ backgroundColor: SERIES_COLORS[group.order % SERIES_COLORS.length] }} />
-                    <span>{group.fullLabel}</span> <b>{fmtPrice(point?.close || 0)}</b>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (group.tokenId) onOutcomeSelect?.(group.tokenId, group.tokenSide === 'NO' ? 'NO' : 'YES');
+                      }}
+                    >
+                      <i style={{ backgroundColor: SERIES_COLORS[group.order % SERIES_COLORS.length] }} />
+                      <span>{group.fullLabel}</span> <b>{fmtPrice(point?.close || 0)}</b>
+                    </button>
+                    <button className={isPinned ? 'active micro' : 'micro'} type="button" title={isPinned ? 'Unpin outcome line' : 'Pin outcome line'} onClick={() => togglePinnedOutcome(group.key)}>P</button>
+                    <button className={isSolo ? 'active micro' : 'micro'} type="button" title={isSolo ? 'Clear solo outcome' : 'Solo outcome'} onClick={() => setSoloOutcomeKey(isSolo ? '' : group.key)}>S</button>
+                    <button className="micro danger" type="button" title="Hide outcome line" onClick={() => toggleHiddenOutcome(group.key)}>H</button>
+                  </span>
                 );
               })}
               {eventMode && sortedOutcomes.length > visibleOutcomeGroups.length ? (
@@ -1116,7 +1237,30 @@ export function PriceChartPanel({
           </div>
         ) : null}
 
-        <div className="qtv-tv-chart" ref={containerRef} onClick={(event) => handleChartClick(event as unknown as MouseEvent)}>
+        <div
+          className={`qtv-tv-chart ${rangeZoomEnabled ? 'range-enabled' : ''}`}
+          ref={containerRef}
+          onPointerDown={(event) => {
+            if (!rangeZoomEnabled) return;
+            event.preventDefault();
+            setRangeSelection({ startX: event.clientX, currentX: event.clientX });
+          }}
+          onPointerMove={(event) => {
+            if (!rangeSelection) return;
+            setRangeSelection({ ...rangeSelection, currentX: event.clientX });
+          }}
+          onPointerUp={() => {
+            if (!rangeSelection) return;
+            commitRangeZoom(rangeSelection);
+            setRangeSelection(null);
+            setRangeZoomEnabled(false);
+          }}
+          onPointerCancel={() => setRangeSelection(null)}
+          onClick={(event) => {
+            if (rangeZoomEnabled || rangeSelection) return;
+            handleChartClick(event as unknown as MouseEvent);
+          }}
+        >
           {!allPoints.length ? (
             <div className="qtv-chart-empty">
               <strong>{loadingTitle}</strong>
@@ -1160,6 +1304,7 @@ export function PriceChartPanel({
             </div>
           ) : null)}
           {focusedMarkers.length ? <div className="qtv-trade-focus-pill">{selectedTradeId} entry / exit located</div> : null}
+          {rangeSelectionStyle ? <div className="qtv-range-selection" style={rangeSelectionStyle} /> : null}
           {replayEnabled && replayCutoff ? (
             <div className="qtv-replay-cursor" style={{ left: `${(Math.max(0, primaryPoints.length - 1) / Math.max(1, rawAllPoints.length - 1)) * 100}%` }} />
           ) : null}

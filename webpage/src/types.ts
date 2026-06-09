@@ -363,6 +363,7 @@ export type QuantMarketSeriesPayload = {
     marketTitle?: string | null;
     conditionId?: string | null;
     endDate?: string | null;
+    status?: string | null;
     source: string;
     scope: string;
     xAxis: 'timestamp' | 'block_number' | string;
@@ -398,6 +399,7 @@ export type QuantPriceMarket = {
   marketTitle?: string | null;
   tokenSide: string;
   conditionId?: string | null;
+  status?: string | null;
   endDate?: string | null;
   blockRows?: number | string | null;
   frontendRows?: number | string | null;
