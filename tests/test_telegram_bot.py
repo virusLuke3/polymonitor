@@ -42,6 +42,46 @@ class FakeApi:
                     "venue": "Estadio Akron",
                     "group": "Group A",
                 },
+                {
+                    "id": "wc2026-003",
+                    "homeTeam": "Canada",
+                    "awayTeam": "Bosnia & Herzegovina",
+                    "kickoffUtc": "2026-06-12T19:00:00Z",
+                    "city": "Toronto",
+                    "cityId": "toronto",
+                    "venue": "BMO Field",
+                    "group": "Group B",
+                },
+                {
+                    "id": "wc2026-004",
+                    "homeTeam": "USA",
+                    "awayTeam": "Paraguay",
+                    "kickoffUtc": "2026-06-13T01:00:00Z",
+                    "city": "Los Angeles / Inglewood",
+                    "cityId": "los-angeles",
+                    "venue": "SoFi Stadium",
+                    "group": "Group D",
+                },
+                {
+                    "id": "wc2026-005",
+                    "homeTeam": "Qatar",
+                    "awayTeam": "Switzerland",
+                    "kickoffUtc": "2026-06-13T19:00:00Z",
+                    "city": "San Francisco Bay Area",
+                    "cityId": "san-francisco",
+                    "venue": "Levi's Stadium",
+                    "group": "Group E",
+                },
+                {
+                    "id": "wc2026-006",
+                    "homeTeam": "England",
+                    "awayTeam": "Haiti",
+                    "kickoffUtc": "2026-06-14T19:00:00Z",
+                    "city": "Dallas / Arlington",
+                    "cityId": "dallas",
+                    "venue": "AT&T Stadium",
+                    "group": "Group G",
+                },
             ],
             "news": [
                 {
@@ -76,6 +116,9 @@ class FakeApi:
             "news": self.worldcup_dashboard()["news"],
             "weather": self.worldcup_dashboard()["weather"],
         }
+
+    def worldcup_market_search(self, query: str, *, limit: int = 8):
+        return self.search_markets(f"world cup {query}", limit=limit)
 
     def search_markets(self, query: str, *, limit: int = 5):
         return {
@@ -230,6 +273,25 @@ def test_parse_update_supports_bot_mentions_and_args():
     assert request.user_id == 42
 
 
+def test_parse_update_supports_callback_query_commands():
+    request = parse_update(
+        {
+            "update_id": 8,
+            "callback_query": {
+                "id": "callback-1",
+                "data": "/matches group a",
+                "message": {"message_id": 12, "chat": {"id": -100}},
+                "from": {"id": 42},
+            },
+        }
+    )
+
+    assert request is not None
+    assert request.command == "matches"
+    assert request.args == "group a"
+    assert request.callback_query_id == "callback-1"
+
+
 def test_market_formatter_adds_price_tags_and_polymarket_link():
     text = format_market_search("nba", FakeApi().search_markets("nba"))
 
@@ -274,9 +336,15 @@ def test_handle_command_routes_first_version_commands():
     assert "PolyMonitorBot" in handle_command(CommandRequest(command="start", args="", **base), api).text
     assert "Market:" in handle_command(CommandRequest(command="help", args="", **base), api).text
     assert "Spurs vs. Thunder" in handle_command(CommandRequest(command="market", args="nba", **base), api).text
-    assert "FIFA World Cup 2026" in handle_command(CommandRequest(command="worldcup", args="", **base), api).text
+    worldcup_reply = handle_command(CommandRequest(command="worldcup", args="", **base), api)
+    assert "FIFA World Cup 2026" in worldcup_reply.text
+    assert worldcup_reply.reply_markup
     assert "Mexico vs South Africa" in handle_command(CommandRequest(command="matches", args="", **base), api).text
+    assert "Page 1/" in handle_command(CommandRequest(command="matches", args="", **base), api).text
+    assert "没有找到比赛" in handle_command(CommandRequest(command="matches", args="today", **base), api).text
+    assert "Group A" in handle_command(CommandRequest(command="matches", args="group a", **base), api).text
     assert "Kickoff" in handle_command(CommandRequest(command="match", args="mexico south africa", **base), api).text
+    assert "Kickoff" in handle_command(CommandRequest(command="match", args="mex 南非", **base), api).text
     assert "Mexico World Cup opener" in handle_command(CommandRequest(command="team", args="mexico", **base), api).text
     assert "Sunny" in handle_command(CommandRequest(command="venue", args="mexico", **base), api).text
     assert "Mexico World Cup opener" in handle_command(CommandRequest(command="news", args="mexico", **base), api).text

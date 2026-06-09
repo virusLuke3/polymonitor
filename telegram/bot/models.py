@@ -14,9 +14,12 @@ class CommandRequest:
     command: str
     args: str
     raw: Dict[str, Any]
+    callback_query_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class BotReply:
     text: str
     link_preview: bool = False
+    reply_markup: Optional[Dict[str, Any]] = None
+    callback_query_id: Optional[str] = None

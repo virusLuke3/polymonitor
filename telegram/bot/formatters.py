@@ -9,6 +9,40 @@ from urllib.parse import quote_plus
 
 ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 WORLDCUP_WORKSPACE_URL = "https://www.polymonitor.club/?workspace=worldcup"
+MATCHES_PAGE_SIZE = 5
+TEAM_ALIASES = {
+    "usa": "USA United States America 美国",
+    "us": "USA United States America 美国",
+    "united states": "USA United States America 美国",
+    "美国": "USA United States America",
+    "korea": "South Korea Korea 韩国",
+    "south korea": "South Korea Korea 韩国",
+    "韩国": "South Korea Korea",
+    "mex": "Mexico 墨西哥",
+    "mexico": "Mexico 墨西哥",
+    "墨西哥": "Mexico",
+    "south africa": "South Africa 南非",
+    "南非": "South Africa",
+    "czechia": "Czech Republic Czechia 捷克",
+    "czech republic": "Czech Republic Czechia 捷克",
+    "捷克": "Czech Republic Czechia",
+    "canada": "Canada 加拿大",
+    "加拿大": "Canada",
+    "argentina": "Argentina 阿根廷",
+    "阿根廷": "Argentina",
+    "brazil": "Brazil 巴西",
+    "巴西": "Brazil",
+    "england": "England 英格兰",
+    "英格兰": "England",
+    "france": "France 法国",
+    "法国": "France",
+    "germany": "Germany 德国",
+    "德国": "Germany",
+    "spain": "Spain 西班牙",
+    "西班牙": "Spain",
+    "portugal": "Portugal 葡萄牙",
+    "葡萄牙": "Portugal",
+}
 
 
 def is_address(value: str) -> bool:
@@ -145,7 +179,11 @@ def _worldcup_match_text(match: Dict[str, Any]) -> str:
 
 
 def _query_terms(query: str) -> List[str]:
-    return [part for part in re.split(r"[^0-9A-Za-z\u4e00-\u9fff]+", str(query or "").lower()) if part]
+    expanded = str(query or "").lower()
+    for alias, value in TEAM_ALIASES.items():
+        if alias in expanded:
+            expanded += " " + value.lower()
+    return [part for part in re.split(r"[^0-9A-Za-z\u4e00-\u9fff]+", expanded) if part]
 
 
 def _match_score(query: str, item: Dict[str, Any], fields: Iterable[str]) -> int:
@@ -165,6 +203,44 @@ def _find_matches(query: str, dashboard: Dict[str, Any], *, limit: int = 6) -> L
         for match in matches
     ]
     return [match for score, match in sorted(scored, key=lambda row: row[0], reverse=True) if score > 0][:limit]
+
+
+def _beijing_date(value: Any) -> str:
+    parsed = _parse_time(value)
+    if parsed is None:
+        return ""
+    return parsed.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+
+
+def _parse_matches_args(query: str) -> Dict[str, Any]:
+    text = str(query or "").strip().lower()
+    page = 1
+    page_match = re.search(r"\bpage\s+(\d+)\b", text)
+    if page_match:
+        page = max(1, int(page_match.group(1)))
+        text = re.sub(r"\bpage\s+\d+\b", "", text).strip()
+    group = ""
+    group_match = re.search(r"\bgroup\s+([a-l])\b", text)
+    if group_match:
+        group = f"Group {group_match.group(1).upper()}"
+        text = re.sub(r"\bgroup\s+[a-l]\b", "", text).strip()
+    date_filter = ""
+    if "tomorrow" in text or "明天" in text:
+        date_filter = (datetime.now(timezone(timedelta(hours=8))) + timedelta(days=1)).strftime("%Y-%m-%d")
+        text = text.replace("tomorrow", "").replace("明天", "").strip()
+    elif "today" in text or "今天" in text:
+        date_filter = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+        text = text.replace("today", "").replace("今天", "").strip()
+    return {"query": text, "page": page, "group": group, "date": date_filter}
+
+
+def _filter_matches(matches: List[Dict[str, Any]], *, group: str = "", date_filter: str = "") -> List[Dict[str, Any]]:
+    rows = matches
+    if group:
+        rows = [match for match in rows if _text(match.get("group")).lower() == group.lower()]
+    if date_filter:
+        rows = [match for match in rows if _beijing_date(match.get("kickoffUtc")) == date_filter]
+    return rows
 
 
 def _find_weather(query: str, dashboard: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -412,24 +488,38 @@ def format_worldcup_overview(dashboard: Dict[str, Any], intel: Dict[str, Any] | 
         "Next matches:",
     ]
     for match in matches[:5]:
-        lines.append(f"- {_worldcup_match_text(match)}")
+        lines.append(f"- {_worldcup_match_label(match)}")
+        lines.append(f"  {_beijing_time(match.get('kickoffUtc'))}")
+        lines.append(f"  {_text(match.get('city'))} · {_text(match.get('venue'))}")
     lines.extend(["", f"Workspace: {WORLDCUP_WORKSPACE_URL}"])
     return "\n".join(lines).strip()
 
 
 def format_worldcup_matches(dashboard: Dict[str, Any], query: str = "") -> str:
-    matches = _find_matches(query, dashboard, limit=8)
+    parsed = _parse_matches_args(query)
+    raw_matches = _items(dashboard, "matches")
+    filtered = _filter_matches(raw_matches, group=parsed["group"], date_filter=parsed["date"])
+    if parsed["query"]:
+        filtered = _find_matches(parsed["query"], {**dashboard, "matches": filtered}, limit=200)
+    page = int(parsed["page"])
+    start = (page - 1) * MATCHES_PAGE_SIZE
+    matches = filtered[start:start + MATCHES_PAGE_SIZE]
     if not matches:
-        return f"⚠️ worldcup matches\n没有找到比赛：{query}\n试试：/matches 或 /match mexico"
-    header = f"⚽ worldcup matches: {query}" if query.strip() else "⚽ worldcup next matches"
+        return f"⚠️ worldcup matches\n没有找到比赛：{query or 'next'}\n试试：/matches, /matches group a, /matches tomorrow, /match mexico"
+    label_parts = [part for part in (parsed["query"], parsed["group"], parsed["date"], f"page {page}") if part]
+    header = f"⚽ worldcup matches: {' | '.join(label_parts)}" if label_parts else "⚽ worldcup next matches"
     lines = [header, ""]
     for index, match in enumerate(matches, start=1):
-        lines.append(f"{index}. {_worldcup_match_label(match)}")
-        lines.append(f"   Time: {_beijing_time(match.get('kickoffUtc'))}")
-        lines.append(f"   Venue: {_text(match.get('venue'))}, {_text(match.get('city'))}")
+        lines.append(f"{start + index}. {_worldcup_match_label(match)}")
+        lines.append(f"   {_beijing_time(match.get('kickoffUtc'))}")
+        lines.append(f"   {_text(match.get('city'))} · {_text(match.get('venue'))}")
         group = _text(match.get("group") or match.get("round") or match.get("stage"))
         if group:
-            lines.append(f"   Stage: {group}")
+            lines.append(f"   {group}")
+    total_pages = max(1, (len(filtered) + MATCHES_PAGE_SIZE - 1) // MATCHES_PAGE_SIZE)
+    if total_pages > 1:
+        lines.append("")
+        lines.append(f"Page {page}/{total_pages} · /matches page {min(total_pages, page + 1)}")
     lines.extend(["", f"Workspace: {WORLDCUP_WORKSPACE_URL}"])
     return "\n".join(lines).strip()
 
@@ -539,8 +629,11 @@ def format_worldcup_odds(query: str, dashboard: Dict[str, Any], market_payload: 
     odds = _items(dashboard, "odds")
     relevant_odds = [row for row in odds if _match_score(query, row, ("title", "marketTitle", "homeTeam", "awayTeam")) > 0][:3]
     lines = [f"⚽ worldcup odds: {query}", ""]
+    market_query = query
     if matches:
-        lines.append(_worldcup_match_text(matches[0]))
+        match = matches[0]
+        market_query = f"{_text(match.get('homeTeam'))} {_text(match.get('awayTeam'))} world cup"
+        lines.append(_worldcup_match_text(match))
         lines.append("")
     if relevant_odds:
         lines.append("Matched odds:")
@@ -550,7 +643,11 @@ def format_worldcup_odds(query: str, dashboard: Dict[str, Any], market_payload: 
     else:
         lines.append("当前 World Cup dashboard 暂未直接匹配到该场 Polymarket 胜率。")
         lines.append("")
-    markets = market_payload.get("items") if isinstance(market_payload.get("items"), list) else []
+    raw_markets = market_payload.get("items") if isinstance(market_payload.get("items"), list) else []
+    markets = [
+        item for item in raw_markets
+        if isinstance(item, dict) and _match_score(market_query, item, ("title", "marketTitle", "question", "eventTitle", "slug")) >= 2
+    ]
     if markets:
         lines.append("Polymarket search:")
         for index, item in enumerate(markets[:3], start=1):
@@ -560,10 +657,30 @@ def format_worldcup_odds(query: str, dashboard: Dict[str, Any], market_payload: 
             lines.append(f"{index}. {title}")
             if price not in (None, ""):
                 lines.append(f"   YES: {_pct(price)}")
+            outcomes = item.get("outcomes")
+            outcome_prices = item.get("outcomePrices")
+            if isinstance(outcomes, str):
+                try:
+                    import json
+                    outcomes = json.loads(outcomes)
+                except Exception:
+                    outcomes = []
+            if isinstance(outcome_prices, str):
+                try:
+                    import json
+                    outcome_prices = json.loads(outcome_prices)
+                except Exception:
+                    outcome_prices = []
+            if isinstance(outcomes, list) and isinstance(outcome_prices, list) and outcomes:
+                pairs = []
+                for label, value in zip(outcomes[:4], outcome_prices[:4]):
+                    pairs.append(f"{_truncate(label, 24)} {_pct(value)}")
+                if pairs:
+                    lines.append("   " + " | ".join(pairs))
             if url:
                 lines.append(f"   {url}")
     else:
-        lines.append("Polymarket search: no local market match yet.")
+        lines.append("Polymarket search: no listed match market found yet.")
     lines.extend(["", f"Workspace: {WORLDCUP_WORKSPACE_URL}"])
     return "\n".join(lines).strip()
 

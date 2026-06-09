@@ -66,6 +66,7 @@ class TelegramClient:
         message_thread_id: Optional[int] = None,
         disable_web_page_preview: bool = True,
         disable_notification: bool = False,
+        reply_markup: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         if not self.bot_token:
             raise RuntimeError("POLYDATA_TELEGRAM_BOT_TOKEN is required unless dry-run is enabled")
@@ -79,6 +80,8 @@ class TelegramClient:
             }
             if message_thread_id is not None:
                 payload["message_thread_id"] = message_thread_id
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
             body: Dict[str, Any] = {}
             response: Optional[requests.Response] = None
             for attempt in range(MAX_SEND_ATTEMPTS):

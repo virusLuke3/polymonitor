@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import time
+from dataclasses import replace
 from typing import Iterable
 
 from .alerts import due_alert_replies, utc_now_text
@@ -17,6 +18,19 @@ from .state import BotState
 from telegram.topics.api_client import resolve_polydata_api_base
 
 
+BOT_COMMANDS = [
+    {"command": "worldcup", "description": "World Cup overview"},
+    {"command": "matches", "description": "World Cup matches"},
+    {"command": "match", "description": "Match detail"},
+    {"command": "team", "description": "Team schedule and intel"},
+    {"command": "venue", "description": "Venue and weather"},
+    {"command": "news", "description": "World Cup news"},
+    {"command": "odds", "description": "Polymarket odds"},
+    {"command": "market", "description": "Search Polymarket markets"},
+    {"command": "help", "description": "Command help"},
+]
+
+
 def _iter_replies(updates: Iterable[dict], *, settings: BotSettings, state: BotState, api: PolyDataBotApi) -> Iterable[tuple[int, int | str, BotReply]]:
     for update in updates:
         request = parse_update(update)
@@ -28,7 +42,10 @@ def _iter_replies(updates: Iterable[dict], *, settings: BotSettings, state: BotS
         if state.rate_limited(chat_id=request.chat_id, user_id=request.user_id, limit=settings.rate_limit_per_minute):
             yield request.update_id, request.chat_id, BotReply("⚠️ 查询太频繁了，请稍后再试。")
             continue
-        yield request.update_id, request.chat_id, handle_command(request, api, state=state)
+        reply = handle_command(request, api, state=state)
+        if request.callback_query_id:
+            reply = replace(reply, callback_query_id=request.callback_query_id)
+        yield request.update_id, request.chat_id, reply
 
 
 def run_once(
@@ -46,10 +63,16 @@ def run_once(
         if dry_run:
             print(json.dumps({"chatId": chat_id, "text": reply.text}, ensure_ascii=False))
         else:
+            if reply.callback_query_id:
+                try:
+                    telegram.answer_callback_query(callback_query_id=reply.callback_query_id)
+                except Exception:
+                    pass
             telegram.send_message(
                 chat_id=str(chat_id),
                 text=reply.text,
                 disable_web_page_preview=not reply.link_preview,
+                reply_markup=reply.reply_markup,
             )
         if not dry_run:
             state.mark_update(update_id)
@@ -104,6 +127,11 @@ def main() -> int:
         api_base=settings.telegram_api_base,
         timeout_seconds=settings.request_timeout_seconds,
     )
+    if not dry_run:
+        try:
+            telegram.set_my_commands(BOT_COMMANDS)
+        except Exception as exc:
+            print(f"[telegram-bot] WARN setMyCommands failed: {exc}", file=sys.stderr)
     resolution = resolve_polydata_api_base(settings.polydata_api_candidates, timeout_seconds=min(5, settings.request_timeout_seconds))
     if not resolution.healthy:
         checked = ", ".join(resolution.checked) or "(none)"

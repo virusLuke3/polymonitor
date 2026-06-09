@@ -38,6 +38,30 @@ class BotApi(Protocol):
     def crypto_markets(self): ...
     def worldcup_dashboard(self): ...
     def worldcup_intel(self, *, limit: int = 24): ...
+    def worldcup_market_search(self, query: str, *, limit: int = 8): ...
+
+
+def _keyboard(rows: list[list[tuple[str, str]]]) -> dict:
+    keyboard = []
+    for row in rows:
+        buttons = []
+        for label, target in row:
+            if target.startswith("http"):
+                buttons.append({"text": label, "url": target})
+            else:
+                buttons.append({"text": label, "callback_data": target})
+        keyboard.append(buttons)
+    return {"inline_keyboard": keyboard}
+
+
+def _worldcup_keyboard() -> dict:
+    return _keyboard(
+        [
+            [("Next Matches", "/matches"), ("News", "/news")],
+            [("Weather", "/weather mexico"), ("Odds", "/odds mexico south africa")],
+            [("Open Workspace", "https://www.polymonitor.club/?workspace=worldcup")],
+        ]
+    )
 
 
 def _usage(command: str) -> BotReply:
@@ -92,12 +116,16 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
         try:
             dashboard = api.worldcup_dashboard()
             intel = api.worldcup_intel(limit=24)
-            return BotReply(format_worldcup_overview(dashboard, intel), link_preview=False)
+            return BotReply(format_worldcup_overview(dashboard, intel), link_preview=False, reply_markup=_worldcup_keyboard())
         except requests.RequestException:
             return _service_error("worldcup")
     if command == "matches":
         try:
-            return BotReply(format_worldcup_matches(api.worldcup_dashboard(), args), link_preview=False)
+            return BotReply(
+                format_worldcup_matches(api.worldcup_dashboard(), args),
+                link_preview=False,
+                reply_markup=_keyboard([[("Page 2", "/matches page 2"), ("Group A", "/matches group a")], [("Overview", "/worldcup")]]),
+            )
         except requests.RequestException:
             return _service_error("worldcup matches")
     if command == "match":
@@ -106,7 +134,11 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
         try:
             dashboard = api.worldcup_dashboard()
             intel = api.worldcup_intel(limit=36)
-            return BotReply(format_worldcup_match(args, dashboard, intel), link_preview=False)
+            return BotReply(
+                format_worldcup_match(args, dashboard, intel),
+                link_preview=False,
+                reply_markup=_keyboard([[("Odds", f"/odds {args}"), ("Team", f"/team {args.split()[0]}")], [("Overview", "/worldcup")]]),
+            )
         except requests.RequestException:
             return _service_error("worldcup match")
     if command == "team":
@@ -137,7 +169,7 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
             return _usage("odds")
         try:
             dashboard = api.worldcup_dashboard()
-            markets = api.search_markets(f"world cup {args}", limit=5)
+            markets = api.worldcup_market_search(args, limit=8)
             return BotReply(format_worldcup_odds(args, dashboard, markets), link_preview=False)
         except requests.RequestException:
             return _service_error("worldcup odds")

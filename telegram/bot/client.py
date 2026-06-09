@@ -21,7 +21,7 @@ class TelegramBotClient(TelegramClient):
         payload: Dict[str, Any] = {
             "timeout": max(1, int(timeout_seconds or 25)),
             "limit": min(100, max(1, int(limit or 50))),
-            "allowed_updates": ["message"],
+            "allowed_updates": ["message", "callback_query"],
         }
         if offset is not None:
             payload["offset"] = int(offset)
@@ -49,3 +49,28 @@ class TelegramBotClient(TelegramClient):
             raise RuntimeError(f"Telegram getUpdates failed: {body}")
         result = body.get("result")
         return result if isinstance(result, list) else []
+
+    def answer_callback_query(self, *, callback_query_id: str, text: str = "") -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text[:200]
+        response = self.session.post(
+            f"{self.api_base}/bot{self.bot_token}/answerCallbackQuery",
+            json=payload,
+            timeout=self.timeout_seconds,
+        )
+        body = response.json()
+        if response.status_code >= 400 or not body.get("ok"):
+            raise RuntimeError(_telegram_error_message(response, body))
+        return body
+
+    def set_my_commands(self, commands: List[Dict[str, str]]) -> Dict[str, Any]:
+        response = self.session.post(
+            f"{self.api_base}/bot{self.bot_token}/setMyCommands",
+            json={"commands": commands},
+            timeout=self.timeout_seconds,
+        )
+        body = response.json()
+        if response.status_code >= 400 or not body.get("ok"):
+            raise RuntimeError(_telegram_error_message(response, body))
+        return body

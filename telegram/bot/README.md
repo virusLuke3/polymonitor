@@ -8,6 +8,10 @@ Interactive Telegram bot for user-called polyData queries.
 - `/help`
 - `/worldcup`
 - `/matches`
+- `/matches today`
+- `/matches tomorrow`
+- `/matches group a`
+- `/matches page 2`
 - `/match mexico south africa`
 - `/team mexico`
 - `/venue dallas`
@@ -51,3 +55,7 @@ If `POLYDATA_TELEGRAM_BOT_POLYDATA_API_BASE` is not set, the bot falls back to
 the existing Telegram / polyData API env vars. If
 `POLYDATA_TELEGRAM_QUERY_BOT_TOKEN` is set, it takes priority over the legacy
 push-bot token so query traffic can run on a separate Telegram bot.
+
+The query bot sets the Telegram command menu on startup and attaches inline
+buttons to key World Cup replies. Team queries support common aliases such as
+`USA`, `Korea`, `mex`, `墨西哥`, and `南非`.

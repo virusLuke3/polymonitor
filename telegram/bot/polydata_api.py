@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Iterable, Optional
 
 import requests
@@ -54,6 +55,67 @@ class PolyDataBotApi:
             if not slug_payload.get("error"):
                 return {"items": [slug_payload]}
         return self.get_json("/markets", params={"q": cleaned, "pageSize": limit})
+
+    def gamma_search_markets(self, query: str, *, limit: int = 8) -> Dict[str, Any]:
+        base_url = str(os.environ.get("POLYDATA_GAMMA_API_BASE") or "https://gamma-api.polymarket.com").rstrip("/")
+        rows: list[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for path in ("/markets", "/events"):
+            try:
+                response = self.session.get(f"{base_url}{path}", params={"q": query, "limit": limit}, timeout=self.timeout_seconds)
+                response.raise_for_status()
+                payload = response.json()
+            except requests.RequestException:
+                continue
+            items = payload if isinstance(payload, list) else payload.get("data") if isinstance(payload, dict) else []
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                nested_markets = item.get("markets") if isinstance(item.get("markets"), list) else []
+                candidates = nested_markets if nested_markets else [item]
+                for candidate in candidates:
+                    if not isinstance(candidate, dict):
+                        continue
+                    title = str(candidate.get("question") or candidate.get("title") or item.get("title") or "").strip()
+                    slug = str(candidate.get("slug") or item.get("slug") or "").strip()
+                    key = slug or title
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    rows.append({
+                        **candidate,
+                        "title": title,
+                        "marketTitle": title,
+                        "slug": slug,
+                        "eventTitle": item.get("title"),
+                        "source": "gamma",
+                    })
+                    if len(rows) >= limit:
+                        return {"items": rows}
+        return {"items": rows}
+
+    def worldcup_market_search(self, query: str, *, limit: int = 8) -> Dict[str, Any]:
+        variants = []
+        cleaned = str(query or "").strip()
+        if cleaned:
+            variants.extend([cleaned, f"world cup {cleaned}", f"fifa world cup {cleaned}", f"{cleaned} winner"])
+        rows: list[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for variant in variants:
+            for payload in (self.search_markets(variant, limit=limit), self.gamma_search_markets(variant, limit=limit)):
+                for item in payload.get("items") if isinstance(payload.get("items"), list) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    key = str(item.get("slug") or item.get("id") or item.get("title") or item.get("marketTitle") or "")
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    rows.append(item)
+                    if len(rows) >= limit:
+                        return {"items": rows}
+        return {"items": rows}
 
     def alpha_signals(self, *, limit: int = 5) -> Dict[str, Any]:
         return self.get_json("/runtime/signals/alpha", params={"limit": limit})
