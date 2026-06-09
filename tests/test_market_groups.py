@@ -252,7 +252,52 @@ class MarketGroupServiceTestCase(unittest.TestCase):
 
         payload = market_group_service.get_market_groups_payload(ctx, page_size=20, sort="active")
 
-        self.assertEqual(["event:ready-soon", "event:fresh-empty"], [item["groupId"] for item in payload["items"]])
+        self.assertEqual(["event:ready-soon"], [item["groupId"] for item in payload["items"]])
+
+    def test_active_filter_rejects_default_after_block_close_turns_terminal(self):
+        group = {
+            "groupId": "event:iran-airspace",
+            "eventId": "iran-airspace",
+            "title": "Iran closes its airspace by...?",
+            "defaultOutcomeKey": "june-22",
+            "defaultMarketId": 1,
+            "outcomeCount": 2,
+            "volume24h": 35,
+            "tradeCount24h": 0,
+            "outcomes": [
+                {
+                    "outcomeKey": "june-22",
+                    "marketId": 1,
+                    "yesTokenId": "yes-1",
+                    "yesPrice": 0.42,
+                    "volume24h": 35,
+                    "tradeCount24h": 0,
+                },
+                {
+                    "outcomeKey": "june-29",
+                    "marketId": 2,
+                    "yesTokenId": "yes-2",
+                    "yesPrice": 0.50,
+                    "volume24h": 0,
+                    "tradeCount24h": 0,
+                },
+            ],
+            "topOutcomes": [],
+        }
+        ctx = {
+            "table_exists": lambda name: name == "quant.market_token_block_close",
+            "query_all": lambda _sql, _params: [
+                {"market_id": 1, "block_number": 88000000, "yes_probability_close": 0.999, "close_price": 0.999},
+                {"market_id": 2, "block_number": 88000000, "yes_probability_close": 0.49, "close_price": 0.49},
+            ],
+            "app": FakeApp(),
+        }
+
+        market_group_service._apply_latest_block_close_prices(ctx, [group])
+
+        self.assertTrue(market_group_service._retarget_group_default_outcome(group))
+        self.assertEqual("june-29", group["defaultOutcomeKey"])
+        self.assertEqual([], market_group_service._filter_active_focus_groups([group], require_activity=True))
 
     def test_detail_payload_returns_multi_outcome_group(self):
         ctx = self.make_ctx(

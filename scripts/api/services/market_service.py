@@ -2618,7 +2618,7 @@ def get_active_markets_snapshot(
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": should_include_change_24h,
             "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
-            "v": 23,
+            "v": 24,
         },
         sort_keys=True,
         ensure_ascii=True,

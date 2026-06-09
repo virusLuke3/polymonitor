@@ -155,6 +155,19 @@ function groupOutcomeIsTerminal(outcome: MarketGroupOutcome) {
   return price !== null && price !== undefined && isTerminalProbability(price);
 }
 
+function groupOutcomeHasActivity(outcome: MarketGroupOutcome) {
+  return Number(outcome.tradeCount24h || 0) >= 1 || Number(outcome.volume24h || 0) >= 25;
+}
+
+function groupOutcomeIsFocusable(outcome: MarketGroupOutcome, requireActivity = false) {
+  if (!outcome.marketId && !outcome.yesTokenId) return false;
+  if (groupOutcomeIsTerminal(outcome)) return false;
+  if (requireActivity && !groupOutcomeHasActivity(outcome)) return false;
+  const price = Number(groupOutcomePrice(outcome));
+  if (Number.isFinite(price) && Math.abs(price - 0.5) < 0.0001 && !groupOutcomeHasActivity(outcome)) return false;
+  return true;
+}
+
 function firstFiniteValue(...values: Array<string | number | null | undefined>) {
   return values.find((value) => {
     if (value === null || value === undefined || value === '') return false;
@@ -183,7 +196,7 @@ function uniqueGroupOutcomes(outcomes: MarketGroupOutcome[]) {
 function groupDefaultOutcome(group: MarketGroupItem) {
   const outcomes = uniqueGroupOutcomes([...(group.outcomes || []), ...(group.topOutcomes || [])])
     .filter((outcome) => outcome.marketId || outcome.yesTokenId);
-  const liveOutcomes = outcomes.filter((outcome) => !groupOutcomeIsTerminal(outcome));
+  const liveOutcomes = outcomes.filter((outcome) => groupOutcomeIsFocusable(outcome, false));
   const candidates = liveOutcomes.length ? liveOutcomes : outcomes;
   return candidates
     .slice()
@@ -214,6 +227,28 @@ function groupDefaultOutcome(group: MarketGroupItem) {
         - (Number.isFinite(rightPrice) && Math.abs(rightPrice - 0.5) < 0.0001 && rightTrades <= 0 && rightVolume < 25 ? 45 : 0);
       return rightScore - leftScore || rightVolume - leftVolume || rightTrades - leftTrades;
     })[0] || null;
+}
+
+function groupHasFocusableDefault(group: MarketGroupItem, requireActivity = true) {
+  const selected = groupDefaultOutcome(group);
+  if (!selected || !groupOutcomeIsFocusable(selected, false)) return false;
+  if (!requireActivity || groupOutcomeHasActivity(selected)) return true;
+  const outcomes = uniqueGroupOutcomes([...(group.outcomes || []), ...(group.topOutcomes || [])])
+    .filter((outcome) => outcome.marketId || outcome.yesTokenId);
+  let outcomeVolume = 0;
+  let outcomeTrades = 0;
+  let hasOutcomeActivityFields = false;
+  outcomes.forEach((outcome) => {
+    const volume = Number(outcome.volume24h || 0);
+    const trades = Number(outcome.tradeCount24h || 0);
+    if (volume > 0 || trades > 0) hasOutcomeActivityFields = true;
+    if (groupOutcomeIsTerminal(outcome)) return;
+    outcomeVolume += volume;
+    outcomeTrades += trades;
+  });
+  if (outcomeTrades >= 1 || outcomeVolume >= 25) return true;
+  if (hasOutcomeActivityFields) return false;
+  return Number(group.tradeCount24h || 0) >= 1 || Number(group.volume24h || 0) >= 25;
 }
 
 function groupDisplayVolume(group: MarketGroupItem) {
@@ -294,11 +329,8 @@ function groupBestLivePrice(group: MarketGroupItem) {
 
 function groupHasTerminalProbability(group: MarketGroupItem) {
   if (isTerminalProbability(group.latestBlockClosePrice)) return true;
-  return [...(group.outcomes || []), ...(group.topOutcomes || [])].some((outcome) => (
-    isTerminalProbability(outcome.blockCloseYesPrice)
-    || isTerminalProbability(outcome.yesPrice)
-    || isTerminalProbability(outcome.noPrice)
-  ));
+  const selected = groupDefaultOutcome(group);
+  return selected ? groupOutcomeIsTerminal(selected) : false;
 }
 
 function diversifyActiveGroups(groups: MarketGroupItem[]) {
@@ -495,7 +527,9 @@ function ActiveMarketsPanel({
           return haystack.includes(query);
         })
       : [...marketGroups];
-    const liveFiltered = filtered.filter((group) => query || (!groupIsExpired(group) && !groupHasTerminalProbability(group)));
+    const liveFiltered = filtered.filter((group) => (
+      query || (!groupIsExpired(group) && !groupHasTerminalProbability(group) && groupHasFocusableDefault(group, true))
+    ));
     if (marketGroupSort === 'new') return liveFiltered.sort((a, b) => parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt));
     if (marketGroupSort === 'volume') return liveFiltered.sort((a, b) => Number(groupDisplayVolume(b) || 0) - Number(groupDisplayVolume(a) || 0));
     if (marketGroupSort === 'close') return liveFiltered.sort((a, b) => timestampOrInfinity(a.endDate) - timestampOrInfinity(b.endDate));

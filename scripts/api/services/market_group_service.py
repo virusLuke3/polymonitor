@@ -12,6 +12,9 @@ MARKET_GROUPS_LIST_TTL_SECONDS = 120
 MARKET_GROUPS_DETAIL_TTL_SECONDS = 180
 TERMINAL_PROBABILITY_LOW = 0.03
 TERMINAL_PROBABILITY_HIGH = 0.97
+ACTIVE_DEFAULT_MIN_VOLUME_24H = 25.0
+ACTIVE_DEFAULT_MIN_TRADES_24H = 1.0
+ACTIVE_GROUP_LOOKAHEAD_MULTIPLIER = 5
 
 CHART_RANGE_INTERVALS: Dict[str, str] = {
     "1h": "5m",
@@ -652,6 +655,70 @@ def _group_has_live_price_signal(group: Dict[str, Any]) -> bool:
     return False
 
 
+def _outcome_activity(outcome: Dict[str, Any]) -> Tuple[float, float]:
+    volume = _float_value((outcome or {}).get("volume24h")) or 0.0
+    trades = _float_value((outcome or {}).get("tradeCount24h")) or 0.0
+    return volume, trades
+
+
+def _outcome_has_activity(outcome: Dict[str, Any]) -> bool:
+    volume, trades = _outcome_activity(outcome)
+    return trades >= ACTIVE_DEFAULT_MIN_TRADES_24H or volume >= ACTIVE_DEFAULT_MIN_VOLUME_24H
+
+
+def _outcome_is_focusable(outcome: Dict[str, Any], *, require_activity: bool) -> bool:
+    if not isinstance(outcome, dict):
+        return False
+    if outcome.get("marketId") is None and not outcome.get("yesTokenId"):
+        return False
+    if _outcome_is_terminal(outcome):
+        return False
+    if require_activity and not _outcome_has_activity(outcome):
+        return False
+    price = _outcome_probability(outcome)
+    if price is not None and abs(price - 0.5) < 0.0001 and not _outcome_has_activity(outcome):
+        return False
+    return True
+
+
+def _group_default_outcome(group: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    default_key = str(group.get("defaultOutcomeKey") or "").strip()
+    default_market_id = _float_value(group.get("defaultMarketId"))
+    for outcome in _group_outcome_candidates(group):
+        if default_key and str(outcome.get("outcomeKey") or "").strip() == default_key:
+            return outcome
+        market_id = _outcome_market_id(outcome)
+        if default_market_id is not None and market_id == int(default_market_id):
+            return outcome
+    return None
+
+
+def _group_has_focusable_default(group: Dict[str, Any], *, require_activity: bool = True) -> bool:
+    selected = _group_default_outcome(group)
+    if selected is None or not _outcome_is_focusable(selected, require_activity=False):
+        return False
+    if not require_activity or _outcome_has_activity(selected):
+        return True
+    outcome_volume = 0.0
+    outcome_trades = 0.0
+    has_outcome_activity_fields = False
+    for outcome in _group_outcome_candidates(group):
+        volume, trades = _outcome_activity(outcome)
+        if volume > 0 or trades > 0:
+            has_outcome_activity_fields = True
+        if _outcome_is_terminal(outcome):
+            continue
+        outcome_volume += volume
+        outcome_trades += trades
+    if outcome_trades >= ACTIVE_DEFAULT_MIN_TRADES_24H or outcome_volume >= ACTIVE_DEFAULT_MIN_VOLUME_24H:
+        return True
+    if has_outcome_activity_fields:
+        return False
+    group_volume = _float_value(group.get("volume24h")) or 0.0
+    group_trades = _float_value(group.get("tradeCount24h")) or 0.0
+    return group_trades >= ACTIVE_DEFAULT_MIN_TRADES_24H or group_volume >= ACTIVE_DEFAULT_MIN_VOLUME_24H
+
+
 def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int, int, float, float, float, float]:
     created_ts = _group_created_ts(group)
     raw_last_activity_ts = _parse_timestamp(group.get("lastActivityAt"))
@@ -820,7 +887,7 @@ def _serving_active_rows(
     page_size: int,
     offset: int,
 ) -> List[Dict[str, Any]]:
-    query_limit = max(page_size, min(500, max(page_size * 5, page_size + 120))) if offset == 0 else page_size
+    query_limit = max(page_size, min(500, max(page_size * ACTIVE_GROUP_LOOKAHEAD_MULTIPLIER, page_size + 120))) if offset == 0 else page_size
     try:
         rows = ctx["query_all"](
             _serving_select_sql(where_sql, order_sql),
@@ -985,12 +1052,7 @@ def _latest_block_close_by_market_id(ctx: dict, market_ids: Iterable[int]) -> Di
 def _apply_latest_block_close_prices(ctx: dict, items: List[Dict[str, Any]]) -> None:
     latest_by_market_id = _latest_block_close_by_market_id(
         ctx,
-        [
-            int(default_market_id)
-            for item in items
-            for default_market_id in [_float_value(item.get("defaultMarketId"))]
-            if default_market_id is not None
-        ],
+        [market_id for item in items for market_id in _group_market_ids(item)],
     )
     if not latest_by_market_id:
         return
@@ -1065,7 +1127,11 @@ def _default_outcome_runtime_score(outcome: Dict[str, Any]) -> Tuple[float, floa
 
 
 def _retarget_group_default_outcome(group: Dict[str, Any]) -> bool:
-    candidates = [outcome for outcome in _group_outcome_candidates(group) if not _outcome_is_terminal(outcome)]
+    candidates = [
+        outcome
+        for outcome in _group_outcome_candidates(group)
+        if _outcome_is_focusable(outcome, require_activity=False)
+    ]
     if not candidates:
         return False
     selected = max(candidates, key=_default_outcome_runtime_score)
@@ -1075,6 +1141,14 @@ def _retarget_group_default_outcome(group: Dict[str, Any]) -> bool:
     if selected_price is not None:
         group["latestBlockClosePrice"] = selected_price
     return True
+
+
+def _filter_active_focus_groups(groups: List[Dict[str, Any]], *, require_activity: bool) -> List[Dict[str, Any]]:
+    return [
+        group
+        for group in groups
+        if _group_has_focusable_default(group, require_activity=require_activity)
+    ]
 
 
 def _serving_market_groups_payload(
@@ -1147,6 +1221,8 @@ def _serving_market_groups_payload(
     _apply_latest_block_close_prices(ctx, items)
     if sort == "active":
         items = [item for item in items if _retarget_group_default_outcome(item)]
+        if not query:
+            items = _filter_active_focus_groups(items, require_activity=True)
     if sort == "active" and not query:
         now_ts = _parse_timestamp(ctx["utc_now_iso"]())
         items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
@@ -1228,7 +1304,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 29}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 30}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
@@ -1305,6 +1381,11 @@ def get_market_groups_payload(
             if group is not None and _matches_query(group, query)
         ]
         if sort == "active":
+            groups.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
+            _apply_latest_block_close_prices(ctx, groups)
+            groups = [group for group in groups if _retarget_group_default_outcome(group)]
+            if not query:
+                groups = _filter_active_focus_groups(groups, require_activity=True)
             groups.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
 
         visible = groups[offset: offset + page_size]
