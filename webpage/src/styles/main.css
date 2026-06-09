@@ -6149,9 +6149,9 @@
 
 .qtv-run-history-table > div {
   display: grid;
-  grid-template-columns: 96px 86px minmax(220px, 1.5fr) 110px 84px minmax(230px, 1fr) 128px 132px;
+  grid-template-columns: 96px 86px minmax(220px, 1.4fr) 110px 84px 138px minmax(230px, 1fr) 128px 132px;
   gap: 1px;
-  min-width: 1260px;
+  min-width: 1390px;
 }
 
 .qtv-run-history-table span {

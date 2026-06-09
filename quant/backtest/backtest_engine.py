@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
+import hashlib
 import json
 from typing import Any
 
@@ -96,6 +97,56 @@ def parse_parameters(payload: dict[str, Any]) -> BacktestParameters:
     )
 
 
+def _decimal_text(value: Decimal) -> str:
+    return format(Decimal(str(value)).normalize(), "f")
+
+
+def backtest_parameter_snapshot(
+    *,
+    market_slug: str,
+    token_side: str,
+    token_id: str | None,
+    outcome_label: str | None,
+    price_source: str,
+    backtest_engine: str,
+    from_ts: int | None,
+    to_ts: int | None,
+    from_block: int | None,
+    to_block: int | None,
+    params: BacktestParameters,
+) -> dict[str, Any]:
+    return {
+        "strategy": "fixed_threshold_v1",
+        "market_slug": market_slug,
+        "token_side": token_side,
+        "token_id": token_id,
+        "outcome_label": outcome_label,
+        "price_source": price_source,
+        "backtest_engine": backtest_engine,
+        "from_ts": from_ts,
+        "to_ts": to_ts,
+        "from_block": from_block,
+        "to_block": to_block,
+        "parameters": {
+            "entry_threshold": _decimal_text(params.entry_threshold),
+            "exit_threshold": _decimal_text(params.exit_threshold),
+            "stop_loss": _decimal_text(params.stop_loss),
+            "take_profit": _decimal_text(params.take_profit),
+            "max_holding_bars": int(params.max_holding_bars),
+            "initial_capital": _decimal_text(params.initial_capital),
+            "position_size": _decimal_text(params.position_size),
+            "fee_bps": _decimal_text(params.fee_bps),
+            "slippage_bps": _decimal_text(params.slippage_bps),
+            "liquidity_cap_pct": _decimal_text(params.liquidity_cap_pct),
+        },
+    }
+
+
+def backtest_parameter_fingerprint(snapshot: dict[str, Any]) -> str:
+    payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def create_and_execute_backtest(conn: Any, payload: dict[str, Any]) -> dict[str, Any]:
     run_id = create_backtest_run(conn, payload)
     try:
@@ -155,6 +206,20 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
     to_ts = _optional_int(payload.get("to_ts", payload.get("to")))
     from_block = _optional_int(payload.get("from_block", payload.get("fromBlock")))
     to_block = _optional_int(payload.get("to_block", payload.get("toBlock")))
+    parameter_snapshot = backtest_parameter_snapshot(
+        market_slug=market_slug,
+        token_side=token_side,
+        token_id=token_id,
+        outcome_label=outcome_label,
+        price_source=price_source,
+        backtest_engine=backtest_engine,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        from_block=from_block,
+        to_block=to_block,
+        params=params,
+    )
+    parameter_fingerprint = backtest_parameter_fingerprint(parameter_snapshot)
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -180,6 +245,8 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                         "backtest_engine": backtest_engine,
                         "token_id": token_id,
                         "outcome_label": outcome_label,
+                        "parameter_fingerprint": parameter_fingerprint,
+                        "parameter_snapshot": parameter_snapshot,
                     }
                 ),
             ),

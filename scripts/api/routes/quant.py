@@ -241,7 +241,16 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "max_points": "maxPoints",
         "source_limit": "sourceLimit",
     }
-    return {mapping.get(key, key): _camel_value(value, mapping) for key, value in row.items()}
+    result = {mapping.get(key, key): _camel_value(value, mapping) for key, value in row.items()}
+    meta = result.get("meta")
+    if isinstance(meta, dict):
+        fingerprint = meta.get("parameterFingerprint") or meta.get("parameter_fingerprint")
+        snapshot = meta.get("parameterSnapshot") or meta.get("parameter_snapshot")
+        if fingerprint and "parameterFingerprint" not in result:
+            result["parameterFingerprint"] = fingerprint
+        if snapshot and "parameterSnapshot" not in result:
+            result["parameterSnapshot"] = snapshot
+    return result
 
 
 def _camel_value(value: Any, mapping: dict[str, str]) -> Any:

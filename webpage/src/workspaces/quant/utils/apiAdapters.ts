@@ -198,6 +198,7 @@ function performanceRows(metrics: QuantBacktestMetric[], trades: Trade[]): Perfo
 
 function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): PropertyGroup[] {
   const meta = run.meta || {};
+  const parameterFingerprint = run.parameterFingerprint || (typeof meta.parameter_fingerprint === 'string' ? meta.parameter_fingerprint : typeof meta.parameterFingerprint === 'string' ? meta.parameterFingerprint : '-');
   return [
     {
       title: 'Market Info',
@@ -231,6 +232,7 @@ function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): Proper
       rows: [
         { label: 'initial capital', value: `${run.initialCapital ?? 100000} USDC` },
         { label: 'price source', value: priceSource },
+        { label: 'fingerprint', value: parameterFingerprint },
         { label: 'run status', value: run.status },
         { label: 'rows processed', value: String(run.rowsProcessed ?? 0) },
       ],

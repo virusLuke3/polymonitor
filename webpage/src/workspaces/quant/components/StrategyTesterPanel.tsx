@@ -168,11 +168,14 @@ function runParameterSummary(run: QuantBacktestRun, fallback: StrategyParameters
   const spread = params.entryThreshold - params.exitThreshold;
   const costBps = (params.feeBps * 2) + (params.slippageBps * 2);
   const riskPct = params.initialCapital > 0 ? (params.positionSize / params.initialCapital) * 100 : 0;
+  const meta = run.meta || {};
+  const fingerprint = run.parameterFingerprint || (typeof meta.parameter_fingerprint === 'string' ? meta.parameter_fingerprint : typeof meta.parameterFingerprint === 'string' ? meta.parameterFingerprint : '');
   return {
     params,
     spread,
     costBps,
     riskPct,
+    fingerprint,
     label: `${params.entryThreshold.toFixed(3)}→${params.exitThreshold.toFixed(3)} · ${costBps.toFixed(1)}bps · ${riskPct.toFixed(1)}% risk`,
   };
 }
@@ -269,7 +272,9 @@ export function StrategyTesterPanel({
     },
   }), [backtestStatus, dataSource, engine, marketTitle, result.generatedAt, result.runId, rowCount, strategyParameters]);
   const runPayloadText = useMemo(() => JSON.stringify(runPayload, null, 2), [runPayload]);
-  const runFingerprint = useMemo(() => hashText(runPayloadText), [runPayloadText]);
+  const localRunFingerprint = useMemo(() => hashText(runPayloadText), [runPayloadText]);
+  const serverRunFingerprint = propertyValue('fingerprint');
+  const runFingerprint = serverRunFingerprint && serverRunFingerprint !== '-' ? serverRunFingerprint : localRunFingerprint;
   const parameterDiagnostics = useMemo(() => {
     const spread = strategyParameters.entryThreshold - strategyParameters.exitThreshold;
     const roundTripCostBps = (strategyParameters.feeBps * 2) + (strategyParameters.slippageBps * 2);
@@ -967,6 +972,7 @@ export function StrategyTesterPanel({
                   <span>Market</span>
                   <span>Engine</span>
                   <span>Rows</span>
+                  <span>Fingerprint</span>
                   <span>Params</span>
                   <span>Created</span>
                   <span>Action</span>
@@ -980,6 +986,7 @@ export function StrategyTesterPanel({
                       <span>{run.marketSlug}</span>
                       <span>{run.backtestEngine || '-'}</span>
                       <span>{compactRows(run.rowsProcessed)}</span>
+                      <span>{paramSummary.fingerprint || '-'}</span>
                       <span className={paramSummary.spread <= paramSummary.costBps / 10000 ? 'review' : 'ready'}>{paramSummary.label}</span>
                       <span>{compactRunTime(run.createdAt)}</span>
                       <span className="actions">

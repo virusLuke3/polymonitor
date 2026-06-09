@@ -466,6 +466,8 @@ export type QuantBacktestRun = {
   feeBps?: string | number | null;
   slippageBps?: string | number | null;
   liquidityCapPct?: string | number | null;
+  parameterFingerprint?: string | null;
+  parameterSnapshot?: Record<string, unknown> | null;
   meta?: Record<string, unknown> | null;
 };
 
