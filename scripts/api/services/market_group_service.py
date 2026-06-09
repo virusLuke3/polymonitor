@@ -1061,12 +1061,24 @@ def _serving_market_groups_payload(
             _serving_select_sql(where_sql, order_sql),
             [*params, page_size, offset],
         )
-    total_row = ctx["query_all"](
-        f"SELECT COUNT(*) AS total FROM event_market_serving WHERE {where_sql}",
-        params,
-    )
-    total = int((total_row[0] or {}).get("total") or 0) if total_row else 0
+    total: int
+    fast_active = sort == "active" and not query
+    if fast_active:
+        total = offset + min(len(rows), page_size)
+    else:
+        total_row = ctx["query_all"](
+            f"SELECT COUNT(*) AS total FROM event_market_serving WHERE {where_sql}",
+            params,
+        )
+        total = int((total_row[0] or {}).get("total") or 0) if total_row else 0
     items = [_serving_group_from_row(ctx, row) for row in rows]
+    if sort == "active":
+        items = [item for item in items if not _group_has_terminal_probability(item)]
+    if sort == "active" and not query:
+        now_ts = _parse_timestamp(ctx["utc_now_iso"]())
+        items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
+        items = _limit_group_category_dominance(items, page_size)
+        items = items[: max(page_size * 2, page_size)]
     _apply_latest_block_close_prices(ctx, items)
     if sort == "active":
         items = [item for item in items if not _group_has_terminal_probability(item)]
@@ -1074,6 +1086,7 @@ def _serving_market_groups_payload(
         now_ts = _parse_timestamp(ctx["utc_now_iso"]())
         items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
         items = _limit_group_category_dominance(items, page_size)
+        total = max(total, offset + min(len(items), page_size) + (1 if len(rows) > page_size else 0))
     items = items[:page_size]
     return {
         "items": items,
@@ -1082,7 +1095,7 @@ def _serving_market_groups_payload(
             "pageSize": page_size,
             "total": total,
             "totalPages": max(1, (total + page_size - 1) // page_size),
-            "hasMore": offset + len(items) < total,
+            "hasMore": (len(rows) > page_size) if fast_active else offset + len(items) < total,
         },
         "generatedAt": ctx["utc_now_iso"](),
         "sourceMode": "postgres-serving",
@@ -1150,7 +1163,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 25}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 26}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
