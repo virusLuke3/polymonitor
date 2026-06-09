@@ -503,8 +503,7 @@ function readMarketGroupSortStorage(): MarketGroupSort {
 function readWorkspaceMode(): WorkspaceMode {
   const override = readSearchParam('workspace');
   if (override === 'worldcup') return 'worldcup';
-  const saved = readStringStorage<string>(WORKSPACE_MODE_STORAGE_KEY, 'world');
-  return saved === 'worldcup' ? 'worldcup' : 'world';
+  return 'world';
 }
 
 function findGroupForMarketId(groups: MarketGroupItem[], marketId: number | null) {
@@ -1129,8 +1128,7 @@ function WorldMonitorApp() {
   const [viewMode, setViewMode] = useState<MapViewMode>(() => {
     const override = readSearchParam('view');
     if (isMapViewMode(override)) return override;
-    const stored = readStringStorage(VIEW_STORAGE_KEY, DEFAULT_MAP_VIEW_MODE);
-    return isMapViewMode(stored) ? stored : DEFAULT_MAP_VIEW_MODE;
+    return DEFAULT_MAP_VIEW_MODE;
   });
   const [globeStatus, setGlobeStatus] = useState<WorldGlobeStatusMetrics>({
     fps: 0,
@@ -2053,7 +2051,7 @@ function WorldMonitorApp() {
   const resetWorkspace = () => {
     setRegion('global');
     setMapZoom(1);
-    setViewMode('3d');
+    setViewMode(DEFAULT_MAP_VIEW_MODE);
     const firstGroup = pickDefaultMarketGroup(marketGroups);
     if (firstGroup) {
       focusMarketGroup(firstGroup, firstGroup.defaultOutcomeKey || null, firstGroup.defaultMarketId ?? null);
