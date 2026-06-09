@@ -1245,6 +1245,42 @@
   font-weight: 850;
 }
 
+.qtv-outcome-visibility-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid rgba(38, 50, 68, 0.82);
+  border-radius: 5px;
+  background: rgba(2, 6, 23, 0.62);
+}
+
+.qtv-outcome-visibility-strip div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  background: rgba(15, 23, 42, 0.42);
+  padding: 7px 8px;
+}
+
+.qtv-outcome-visibility-strip span {
+  color: #64748b;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-outcome-visibility-strip strong {
+  overflow: hidden;
+  color: #e2e8f0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .qtv-outcome-filter-row,
 .qtv-outcome-bulk-actions {
   display: flex;

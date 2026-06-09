@@ -1652,6 +1652,24 @@ export function QuantWorkspace() {
     () => sortedOutcomeRows.find(({ outcome }) => outcome.tokenId === selectedOutcome?.tokenId) || sortedOutcomeRows[0] || null,
     [selectedOutcome, sortedOutcomeRows],
   );
+  const outcomeVisibilitySummary = useMemo(() => {
+    const activeKeys = sortedOutcomeRows
+      .map((row) => (selectedBacktestAction === 'NO' ? row.noKey : row.yesKey))
+      .filter(Boolean);
+    const visibleCount = chartSoloOutcomeKey
+      ? activeKeys.filter((key) => key === chartSoloOutcomeKey).length
+      : activeKeys.filter((key) => !chartHiddenOutcomeKeys.includes(key)).length;
+    const soloRow = chartSoloOutcomeKey
+      ? sortedOutcomeRows.find((row) => row.yesKey === chartSoloOutcomeKey || row.noKey === chartSoloOutcomeKey)
+      : null;
+    return {
+      activeTotal: activeKeys.length,
+      visibleCount,
+      pinnedCount: activeKeys.filter((key) => chartPinnedOutcomeKeys.includes(key)).length,
+      hiddenCount: activeKeys.filter((key) => chartHiddenOutcomeKeys.includes(key)).length,
+      soloLabel: soloRow?.label || '',
+    };
+  }, [chartHiddenOutcomeKeys, chartPinnedOutcomeKeys, chartSoloOutcomeKey, selectedBacktestAction, sortedOutcomeRows]);
   const selectedBookQuality = useMemo(() => {
     const yesPoints = selectedOutcome?.points || [];
     const noPoints = selectedOutcome?.complementPoints || [];
@@ -1926,6 +1944,23 @@ export function QuantWorkspace() {
     setChartHiddenOutcomeKeys((current) => current.filter((key) => !keys.includes(key)));
   };
 
+  const focusFilteredOutcomes = () => {
+    const focusKeys = filteredActiveOutcomeKeys(24);
+    if (!focusKeys.length) return;
+    const focusSet = new Set(focusKeys);
+    const activeKeys = sortedOutcomeRows
+      .map((row) => (selectedBacktestAction === 'NO' ? row.noKey : row.yesKey))
+      .filter(Boolean);
+    setChartHiddenOutcomeKeys(Array.from(new Set(activeKeys.filter((key) => !focusSet.has(key)))).slice(0, 120));
+    setChartPinnedOutcomeKeys(focusKeys.slice(0, 24));
+    setChartSoloOutcomeKey('');
+    setOutcomeVisibilityFilter('visible');
+  };
+
+  const unpinChartOutcomes = () => {
+    setChartPinnedOutcomeKeys([]);
+  };
+
   const soloFirstFilteredOutcome = () => {
     const key = filteredActiveOutcomeKeys(1)[0] || '';
     setChartSoloOutcomeKey((current) => (current === key ? '' : key));
@@ -2174,9 +2209,28 @@ export function QuantWorkspace() {
                       <button type="button" disabled={!sortedOutcomeRows.length} onClick={pinTopOutcomes}>Pin Top 5</button>
                       <button type="button" disabled={!selectedOutcomeRow} onClick={() => selectedOutcomeRow && setChartSoloOutcomeKey(selectedBacktestAction === 'NO' ? selectedOutcomeRow.noKey : selectedOutcomeRow.yesKey)}>Solo selected</button>
                       <button type="button" disabled={!selectedOutcome} onClick={() => selectedOutcome && toggleOutcomeWatchlist(selectedOutcome)}>{selectedIsWatched ? 'Unwatch' : 'Watch'}</button>
+                      <button type="button" disabled={!chartPinnedOutcomeKeys.length} onClick={unpinChartOutcomes}>Unpin</button>
                       <button type="button" disabled={!chartPinnedOutcomeKeys.length && !chartHiddenOutcomeKeys.length && !chartSoloOutcomeKey} onClick={resetChartOutcomeVisibility}>Reset lines</button>
                     </div>
                     <div className="qtv-inspector-outcome-manager">
+                      <section className="qtv-outcome-visibility-strip">
+                        <div>
+                          <span>Chart</span>
+                          <strong>{outcomeVisibilitySummary.visibleCount.toLocaleString('en-US')} / {outcomeVisibilitySummary.activeTotal.toLocaleString('en-US')} visible</strong>
+                        </div>
+                        <div>
+                          <span>Pinned</span>
+                          <strong>{outcomeVisibilitySummary.pinnedCount.toLocaleString('en-US')}</strong>
+                        </div>
+                        <div>
+                          <span>Hidden</span>
+                          <strong>{outcomeVisibilitySummary.hiddenCount.toLocaleString('en-US')}</strong>
+                        </div>
+                        <div>
+                          <span>Mode</span>
+                          <strong>{chartSoloOutcomeKey ? `Solo · ${outcomeVisibilitySummary.soloLabel || 'outcome'}` : selectedBacktestAction}</strong>
+                        </div>
+                      </section>
                       <label>
                         <span>Find</span>
                         <input
@@ -2205,6 +2259,7 @@ export function QuantWorkspace() {
                         ))}
                       </div>
                       <div className="qtv-outcome-bulk-actions">
+                        <button type="button" disabled={!filteredOutcomeRows.length} onClick={focusFilteredOutcomes}>Focus filtered</button>
                         <button type="button" disabled={!filteredOutcomeRows.length} onClick={pinFilteredOutcomes}>Pin filtered</button>
                         <button type="button" disabled={!filteredOutcomeRows.length} onClick={soloFirstFilteredOutcome}>Solo first</button>
                         <button type="button" disabled={!filteredOutcomeRows.length} onClick={hideFilteredOutcomes}>Hide filtered</button>
