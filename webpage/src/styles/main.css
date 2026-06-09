@@ -2936,10 +2936,17 @@
 }
 
 .qtv-hover-crosshair-x,
-.qtv-hover-crosshair-y {
+.qtv-hover-crosshair-y,
+.qtv-pinned-crosshair-x,
+.qtv-pinned-crosshair-y,
+.qtv-pinned-point-dot {
   position: absolute;
-  z-index: 4;
   pointer-events: none;
+}
+
+.qtv-hover-crosshair-x,
+.qtv-hover-crosshair-y {
+  z-index: 4;
 }
 
 .qtv-hover-crosshair-x {
@@ -2958,7 +2965,40 @@
   border-top: 1px dashed rgba(148, 163, 184, 0.34);
 }
 
-.qtv-hover-price-tag {
+.qtv-pinned-crosshair-x,
+.qtv-pinned-crosshair-y {
+  z-index: 5;
+}
+
+.qtv-pinned-crosshair-x {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  border-left: 1px solid rgba(250, 204, 21, 0.58);
+}
+
+.qtv-pinned-crosshair-y {
+  right: 0;
+  left: 0;
+  height: 1px;
+  transform: translateY(-50%);
+  border-top: 1px solid rgba(250, 204, 21, 0.52);
+}
+
+.qtv-pinned-point-dot {
+  z-index: 32;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fde68a;
+  border-radius: 999px;
+  background: #0b111c;
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.18), 0 10px 24px rgba(0, 0, 0, 0.42);
+}
+
+.qtv-hover-price-tag,
+.qtv-pinned-price-tag {
   position: absolute;
   right: 0;
   z-index: 31;
@@ -2974,23 +3014,49 @@
   pointer-events: none;
 }
 
+.qtv-pinned-price-tag {
+  z-index: 33;
+  border-color: rgba(250, 204, 21, 0.62);
+  background: rgba(180, 83, 9, 0.96);
+}
+
+.qtv-hover-price-tag em,
 .qtv-hover-price-tag span,
-.qtv-hover-price-tag b {
+.qtv-hover-price-tag b,
+.qtv-pinned-price-tag em,
+.qtv-pinned-price-tag span,
+.qtv-pinned-price-tag b {
   padding: 1px 7px;
+  font-style: normal;
   text-align: right;
   white-space: nowrap;
 }
 
-.qtv-hover-price-tag span {
+.qtv-hover-price-tag em,
+.qtv-pinned-price-tag em {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.qtv-hover-price-tag span,
+.qtv-pinned-price-tag span {
   font-size: 11px;
   font-weight: 950;
 }
 
-.qtv-hover-price-tag b {
+.qtv-hover-price-tag b,
+.qtv-pinned-price-tag b {
   border-top: 1px solid rgba(219, 234, 254, 0.18);
   color: #bfdbfe;
   font-size: 8px;
   font-weight: 900;
+}
+
+.qtv-pinned-price-tag b {
+  color: #fde68a;
 }
 
 .qtv-replay-controls {

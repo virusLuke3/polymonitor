@@ -642,6 +642,9 @@ export function PriceChartPanel({
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint);
   const hoverScreen = hover ? pointToScreenSafe(hover, primaryPoints, visibleLogicalRange) : null;
   const hoverTooltipSide = percentNumber(hoverScreen?.x) > 68 ? 'left-side' : '';
+  const pinnedMaPoint = pinnedPoint ? nearestPoint(maPoints, pinnedPoint.timestamp) : null;
+  const pinnedInspect = pointSnapshot(pinnedPoint, latestPoint, pinnedMaPoint);
+  const pinnedScreen = pinnedPoint ? pointToScreenSafe(pinnedPoint, primaryPoints, visibleLogicalRange) : null;
   const managerOutcomes = useMemo(() => {
     const query = outcomeManagerQuery.trim().toLowerCase();
     return sortedOutcomes.filter((group) => {
@@ -1818,8 +1821,21 @@ export function PriceChartPanel({
               <div className="qtv-hover-crosshair-x" style={{ left: hoverScreen.x }} />
               <div className="qtv-hover-crosshair-y" style={{ top: hoverScreen.y }} />
               <div className="qtv-hover-price-tag" style={{ top: hoverScreen.y }}>
+                <em>Hover</em>
                 <span>{fmtPrice(hoverInspect.yes)}</span>
                 <b>{blockLabel(hoverInspect.point.timestamp)}</b>
+              </div>
+            </>
+          ) : null}
+          {pinnedInspect && pinnedScreen ? (
+            <>
+              <div className="qtv-pinned-crosshair-x" style={{ left: pinnedScreen.x }} />
+              <div className="qtv-pinned-crosshair-y" style={{ top: pinnedScreen.y }} />
+              <div className="qtv-pinned-point-dot" style={{ left: pinnedScreen.x, top: pinnedScreen.y }} />
+              <div className="qtv-pinned-price-tag" style={{ top: pinnedScreen.y }}>
+                <em>Pinned</em>
+                <span>{fmtPrice(pinnedInspect.yes)}</span>
+                <b>{blockLabel(pinnedInspect.point.timestamp)}</b>
               </div>
             </>
           ) : null}
