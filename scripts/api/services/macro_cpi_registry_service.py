@@ -303,10 +303,17 @@ def _enrich_row(row: Dict[str, Any]) -> Dict[str, Any]:
     group = row.get("group")
     row_type = row.get("type")
     label = row.get("label")
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    unit = str(row.get("unit") or metadata.get("unit") or "").strip().lower()
+    raw_change = metadata.get("rawChange")
     enriched = dict(row)
     enriched["tone"] = tone
     enriched["valueLabel"] = str(row.get("valueLabel") or _value_label(row.get("value"), row.get("unit")))
-    enriched["changeLabel"] = str(row.get("changeLabel") or _signed(row.get("change")))
+    if unit == "pp" and _float(raw_change) is not None:
+        enriched["change"] = raw_change
+        enriched["changeLabel"] = _signed(raw_change, suffix="pp")
+    else:
+        enriched["changeLabel"] = str(row.get("changeLabel") or _signed(row.get("change")))
     enriched["sourceLabel"] = str(row.get("sourceLabel") or _source_label(source))
     enriched["domainTag"] = str(row.get("domainTag") or _domain_tag(group, row_type, label))
     enriched["severityLabel"] = str(row.get("severityLabel") or _severity_label(tone))
@@ -696,8 +703,14 @@ def _macro_driver_rows(payload: Dict[str, Any], *, default_group: str, implicati
     for item in payload.get("items") or []:
         if not isinstance(item, dict):
             continue
-        change = item.get("changePct") if _float(item.get("changePct")) is not None else item.get("change")
-        metric = "%" if _float(item.get("changePct")) is not None else ""
+        item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        unit = str(item.get("unit") or "").strip().lower()
+        if unit == "pp":
+            change = item.get("change")
+            metric = "pp"
+        else:
+            change = item.get("changePct") if _float(item.get("changePct")) is not None else item.get("change")
+            metric = "%" if _float(item.get("changePct")) is not None else ""
         rows.append(
             _row(
                 key=f"{default_group.lower()}-{item.get('key') or item.get('seriesId') or item.get('label')}",
@@ -713,6 +726,14 @@ def _macro_driver_rows(payload: Dict[str, Any], *, default_group: str, implicati
                 source=str(item.get("source") or payload.get("source") or "Public macro source"),
                 source_url=str(item.get("sourceUrl") or payload.get("sourceUrl") or ""),
                 implication=implication,
+                metadata={
+                    **item_metadata,
+                    "rawChange": item.get("change"),
+                    "rawChangePct": item.get("changePct"),
+                    "metric": item.get("metric"),
+                    "unit": item.get("unit"),
+                    "seriesId": item.get("seriesId"),
+                },
             )
         )
     return rows
