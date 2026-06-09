@@ -60,6 +60,11 @@ def _cache_key(name: str, args: dict[str, str], *, version: int = 1) -> str:
     return json.dumps({"name": name, "v": version, "args": route_args}, sort_keys=True, ensure_ascii=True)
 
 
+def _canonical_tile_range(value: str | None) -> str:
+    normalized = str(value or DEFAULT_RANGE).strip().lower()
+    return "full" if normalized in {"all", "full"} else "latest"
+
+
 class QuantEventTileWatcher:
     def __init__(
         self,
@@ -99,7 +104,7 @@ class QuantEventTileWatcher:
         self.max_outcomes = max(1, int(max_outcomes or DEFAULT_MAX_OUTCOMES))
         self.top_n = max(1, int(top_n or DEFAULT_TOP_N))
         self.max_points = max(50, int(max_points or DEFAULT_MAX_POINTS))
-        self.tile_range = str(tile_range or DEFAULT_RANGE).strip() or DEFAULT_RANGE
+        self.tile_range = _canonical_tile_range(tile_range)
         self.resolution = str(resolution or DEFAULT_RESOLUTION).strip() or DEFAULT_RESOLUTION
         self.point_format = str(point_format or DEFAULT_POINT_FORMAT).strip().lower() or DEFAULT_POINT_FORMAT
 
@@ -125,7 +130,7 @@ class QuantEventTileWatcher:
             "max_outcomes": str(max(1, int(job.get("max_outcomes") or self.max_outcomes))),
             "top_n": str(max(1, int(job.get("top_n") or self.top_n))),
             "max_points": str(max(50, int(job.get("max_points") or self.max_points))),
-            "range": str(job.get("range") or self.tile_range).strip() or self.tile_range,
+            "range": _canonical_tile_range(str(job.get("range") or self.tile_range)),
             "resolution": str(job.get("resolution") or self.resolution).strip() or self.resolution,
             "point_format": str(job.get("point_format") or self.point_format).strip().lower() or self.point_format,
         }

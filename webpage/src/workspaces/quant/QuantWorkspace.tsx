@@ -596,7 +596,7 @@ export function QuantWorkspace() {
     }
     const priceQuery = {
       ...semanticChartQuery,
-      live: livePriceRefreshEnabled && silent,
+      live: livePriceRefreshEnabled && silent && !(selectedEntityKind === 'event' && chartRange === 'full'),
     };
     const [seriesResult, statusResult] = await Promise.allSettled([
       hasMarketSlug
@@ -616,11 +616,14 @@ export function QuantWorkspace() {
     }
     const fulfilledSeries = seriesResult.status === 'fulfilled' ? seriesResult.value : null;
     const warmingSeries = isSeriesWarming(fulfilledSeries);
-    const nextMarketSeries = fulfilledSeries && !(silent && warmingSeries && marketSeries) ? fulfilledSeries : marketSeries;
+    const fulfilledPointCount = marketSeriesToPrices(fulfilledSeries).length;
+    const currentPointCount = marketSeriesToPrices(marketSeries).length;
+    const keepCurrentWhileWarming = Boolean(warmingSeries && marketSeries && currentPointCount > fulfilledPointCount);
+    const nextMarketSeries = fulfilledSeries && !keepCurrentWhileWarming ? fulfilledSeries : marketSeries;
     const nextFrontendRows = priceSource === 'frontend' ? frontendRows : [];
     const nextBlockRows = priceSource === 'orderfilled' ? blockRows : [];
     if (seriesResult.status === 'fulfilled') {
-      if (fulfilledSeries && (!warmingSeries || !marketSeries)) priceSeriesCacheRef.current.set(cacheKey, fulfilledSeries);
+      if (fulfilledSeries && (!warmingSeries || !keepCurrentWhileWarming)) priceSeriesCacheRef.current.set(cacheKey, fulfilledSeries);
       if (nextMarketSeries && nextMarketSeries !== marketSeries) priceSeriesCacheRef.current.set(cacheKey, nextMarketSeries);
       setMarketSeries(nextMarketSeries);
       setLastPriceRefreshAt(new Date().toLocaleTimeString());
@@ -641,7 +644,9 @@ export function QuantWorkspace() {
       if (!silent) {
         setDataStatus(warmingSeries ? 'warming' : activeRowCount ? 'ready' : 'empty');
         setLoadingMessage(warmingSeries
-          ? (fulfilledSeries?.message || 'Historical price tile is warming; showing latest outcome snapshot.')
+          ? (keepCurrentWhileWarming
+            ? 'Historical price tile is warming; keeping the previous chart until the full series is ready.'
+            : (fulfilledSeries?.message || 'Historical price tile is warming; showing latest outcome snapshot.'))
           : activeRowCount ? '' : 'No price rows found for this source/window');
       } else if (activeRowCount) {
         setDataStatus('ready');

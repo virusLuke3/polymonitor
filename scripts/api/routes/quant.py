@@ -41,6 +41,11 @@ QUANT_EVENT_TILE_NAMESPACE = "quant-event-tile"
 QUANT_EVENT_TILE_WARM_KEY = "quant-event-tile-warm:events"
 
 
+def _canonical_tile_range(value: str | None) -> str:
+    normalized = str(value or "latest").strip().lower()
+    return "full" if normalized in {"all", "full"} else "latest"
+
+
 def _parse_int_arg(name: str, default: int | None = None) -> int | None:
     raw = request.args.get(name)
     if raw in (None, ""):
@@ -240,6 +245,10 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
     def _cache_key(name: str, *, version: int = 1) -> str:
         args = {key: request.args.getlist(key) for key in sorted(request.args.keys())}
         return json.dumps({"name": name, "v": version, "args": args}, sort_keys=True, ensure_ascii=True)
+
+    def _cache_key_for_args(name: str, args: dict[str, str], *, version: int = 1) -> str:
+        route_args = {key: [str(args[key])] for key in sorted(args.keys())}
+        return json.dumps({"name": name, "v": version, "args": route_args}, sort_keys=True, ensure_ascii=True)
 
     def _cached_quant_payload(namespace: str, cache_key: str, ttl_seconds: int, builder, *, snapshot: bool = False):
         if snapshot and callable(get_snapshot_payload):
@@ -477,8 +486,8 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         event_slug = (request.args.get("event_slug") or request.args.get("market_slug") or "").strip()
         if not event_slug:
             return jsonify({"error": "event_slug is required"}), 400
-        tile_range = (request.args.get("range") or "latest").strip().lower()
-        limit_cap = 250000 if tile_range in {"all", "full"} else 25000
+        tile_range = _canonical_tile_range(request.args.get("range"))
+        limit_cap = 250000 if tile_range == "full" else 25000
         limit = min(max(_parse_int_arg("limit", 2500) or 2500, 1), limit_cap)
         max_outcomes = min(max(_parse_int_arg("max_outcomes", 100) or 100, 1), 200)
         max_points = min(max(_parse_int_arg("max_points", 600) or 600, 50), 2500)
@@ -486,7 +495,6 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         price_source = (request.args.get("price_source") or request.args.get("source") or "orderfilled_block_close").strip()
         point_format = (request.args.get("point_format") or "lite").strip().lower()
         resolution = (request.args.get("resolution") or "auto").strip().lower()
-        cache_key = _cache_key("event-price-tile", version=4)
         live_request = _parse_bool_arg("live")
         request_args = _event_tile_args(
             event_slug=event_slug,
@@ -499,6 +507,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             resolution=resolution,
             point_format=point_format,
         )
+        cache_key = _cache_key_for_args("event-price-tile", request_args, version=4)
         lookup_started = time.perf_counter()
         persisted, cache_layer = (None, "live") if live_request else _load_seeded_tile(cache_key)
         lookup_ms = int((time.perf_counter() - lookup_started) * 1000)

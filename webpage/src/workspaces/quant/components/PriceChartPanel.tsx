@@ -1273,7 +1273,8 @@ export function PriceChartPanel({
           </div>
         </div>
 
-        {(!hasLoadedPrices && (dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'warming' || dataStatus === 'partial' || dataStatus === 'loading')) ? (
+        {((!hasLoadedPrices && (dataStatus === 'price_loading' || dataStatus === 'metadata_loading' || dataStatus === 'warming' || dataStatus === 'partial' || dataStatus === 'loading'))
+          || (hasLoadedPrices && dataStatus === 'warming')) ? (
           <div className="qtv-chart-loading-ribbon">
             <b>{loadingMessage || loadingTitle}</b>
             <span>Outcomes {eventMode ? displayedOutcomeCount.toLocaleString('en-US') : '--'} · Source {priceSource}</span>
