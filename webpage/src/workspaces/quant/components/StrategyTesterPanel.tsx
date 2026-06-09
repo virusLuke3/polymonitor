@@ -75,6 +75,7 @@ type StrategyTesterPanelProps = {
   onRefresh: () => void;
   onBatchBacktest: () => void;
   onSplitBacktest: () => void;
+  onWalkForwardBacktest: () => void;
   onExport: (format: 'csv' | 'json') => void;
   onPerformanceSearchChange: (value: string) => void;
   onPerformanceSortChange: (key: PerformanceSortKey) => void;
@@ -92,6 +93,8 @@ type StrategyTesterPanelProps = {
   batchStatus?: string;
   splitRows?: BatchBacktestRow[];
   splitStatus?: string;
+  walkForwardRows?: BatchBacktestRow[];
+  walkForwardStatus?: string;
   recentBacktestRuns?: QuantBacktestRun[];
   backtestRunsStatus?: string;
   onRunLoad?: (runId: number) => void;
@@ -173,6 +176,7 @@ export function StrategyTesterPanel({
   onRefresh,
   onBatchBacktest,
   onSplitBacktest,
+  onWalkForwardBacktest,
   onExport,
   onPerformanceSearchChange,
   onPerformanceSortChange,
@@ -190,6 +194,8 @@ export function StrategyTesterPanel({
   batchStatus = 'idle',
   splitRows = [],
   splitStatus = 'idle',
+  walkForwardRows = [],
+  walkForwardStatus = 'idle',
   recentBacktestRuns = [],
   backtestRunsStatus = 'idle',
   onRunLoad,
@@ -377,11 +383,11 @@ export function StrategyTesterPanel({
     }));
   }, [recentBacktestRuns, result.runId]);
   const batchLeaderboard = useMemo(() => (
-    [...batchRows, ...splitRows]
+    [...batchRows, ...splitRows, ...walkForwardRows]
       .filter((row) => row.status === 'succeeded' || row.status === 'failed' || row.runId)
       .sort((left, right) => numericFromMetric(right.netProfit) - numericFromMetric(left.netProfit))
       .slice(0, 8)
-  ), [batchRows, splitRows]);
+  ), [batchRows, splitRows, walkForwardRows]);
   const runControlRows = useMemo(() => ([
     {
       key: 'single',
@@ -413,7 +419,17 @@ export function StrategyTesterPanel({
       action: onBatchBacktest,
       disabled: rowCount <= 0 || batchStatus === 'running',
     },
-  ]), [backtestStatus, batchRows, batchStatus, hasCompletedRun, onBatchBacktest, onRefresh, onSplitBacktest, result.runId, result.trades.length, rowCount, splitRows, splitStatus]);
+    {
+      key: 'walk-forward',
+      label: 'Walk-forward',
+      status: walkForwardStatus,
+      detail: walkForwardRows.length ? `${walkForwardRows.length.toLocaleString('en-US')} rolling segments · ${walkForwardRows.filter((row) => row.status === 'succeeded').length.toLocaleString('en-US')} complete` : 'rolling train/test windows',
+      rows: walkForwardRows.reduce((sum, row) => sum + row.rows, 0),
+      actionLabel: walkForwardStatus === 'running' ? 'Running' : 'Run WF',
+      action: onWalkForwardBacktest,
+      disabled: rowCount <= 0 || walkForwardStatus === 'running',
+    },
+  ]), [backtestStatus, batchRows, batchStatus, hasCompletedRun, onBatchBacktest, onRefresh, onSplitBacktest, onWalkForwardBacktest, result.runId, result.trades.length, rowCount, splitRows, splitStatus, walkForwardRows, walkForwardStatus]);
 
   return (
     <section className="qtv-bottom-panel">
@@ -441,6 +457,7 @@ export function StrategyTesterPanel({
           <label><input type="checkbox" checked readOnly /> Backtest mode</label>
           <label><input type="checkbox" checked={deepBacktest} onChange={onDeepBacktestChange} /> Deep Backtest</label>
           <button type="button" onClick={onSplitBacktest}>{splitStatus === 'running' ? 'Split running' : 'Split 70/30'}</button>
+          <button type="button" onClick={onWalkForwardBacktest}>{walkForwardStatus === 'running' ? 'WF running' : 'Walk-forward'}</button>
           <button type="button" onClick={onBatchBacktest}>{batchStatus === 'running' ? 'Batch running' : 'Batch Top 5'}</button>
           <button type="button" onClick={() => onExport('json')}>Export JSON</button>
         </div>
@@ -755,6 +772,7 @@ export function StrategyTesterPanel({
               <button type="button" onClick={() => applyPreset('Backend defaults')}>Reset defaults</button>
               <button type="button" onClick={copyStrategyParameters}>Copy params</button>
               <button type="button" onClick={onSplitBacktest}>Split 70/30</button>
+              <button type="button" onClick={onWalkForwardBacktest}>Walk-forward</button>
               <button type="button" onClick={onBatchBacktest}>Batch Top 5</button>
               <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
             </div>
@@ -768,7 +786,7 @@ export function StrategyTesterPanel({
               <button type="button" onClick={copyRunPayload}>Copy run payload</button>
               {copyNotice ? <span>{copyNotice}</span> : null}
             </div>
-            <p>These controls are bound to the real backtest request. Fee bps, slippage bps, and liquidity cap are applied by the execution model; walk-forward controls still need backend support.</p>
+            <p>These controls are bound to the real backtest request. Fee bps, slippage bps, liquidity cap, train/test, batch, and walk-forward runs all submit reproducible API jobs with run ids.</p>
           </section>
           <aside className="qtv-run-health">
             <strong>Readiness</strong>
@@ -965,6 +983,43 @@ export function StrategyTesterPanel({
               <div className="qtv-tool-empty">
                 <strong>No batch runs</strong>
                 <span>Run Top 5 to backtest multiple event outcomes with the current strategy parameters.</span>
+              </div>
+            )}
+          </section>
+          <section className="qtv-batch-runs-card">
+            <div className="qtv-run-config-head">
+              <strong>Walk-forward</strong>
+              <button type="button" onClick={onWalkForwardBacktest}>{walkForwardStatus === 'running' ? 'Running...' : 'Run WF'}</button>
+            </div>
+            {walkForwardRows.length ? (
+              <div className="qtv-batch-table">
+                <div className="head">
+                  <span>Window</span>
+                  <span>Run</span>
+                  <span>Status</span>
+                  <span>Rows</span>
+                  <span>Trades</span>
+                  <span>Net</span>
+                  <span>Return</span>
+                  <span>Drawdown</span>
+                </div>
+                {walkForwardRows.map((row) => (
+                  <div key={`walk-${row.key}`} className={row.status === 'failed' ? 'failed' : row.status === 'succeeded' ? 'succeeded' : ''} title={row.error || row.marketSlug}>
+                    <span>{row.outcome}</span>
+                    <span>{row.runId ? `#${row.runId}` : '-'}</span>
+                    <span>{row.status}</span>
+                    <span>{row.rows.toLocaleString('en-US')}</span>
+                    <span>{row.trades.toLocaleString('en-US')}</span>
+                    <span>{row.netProfit}</span>
+                    <span>{row.totalReturn}</span>
+                    <span>{row.maxDrawdown}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="qtv-tool-empty">
+                <strong>No walk-forward run</strong>
+                <span>Run WF to submit rolling train/test windows across the selected outcome block range.</span>
               </div>
             )}
           </section>

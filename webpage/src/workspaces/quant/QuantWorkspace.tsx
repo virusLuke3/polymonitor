@@ -650,6 +650,8 @@ export function QuantWorkspace() {
   const [batchBacktestStatus, setBatchBacktestStatus] = useState('idle');
   const [splitBacktestRows, setSplitBacktestRows] = useState<BatchBacktestRow[]>([]);
   const [splitBacktestStatus, setSplitBacktestStatus] = useState('idle');
+  const [walkForwardRows, setWalkForwardRows] = useState<BatchBacktestRow[]>([]);
+  const [walkForwardStatus, setWalkForwardStatus] = useState('idle');
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
   const [recentBacktestRuns, setRecentBacktestRuns] = useState<QuantBacktestRun[]>([]);
   const [backtestRunsStatus, setBacktestRunsStatus] = useState<DataStatus>('idle');
@@ -1314,6 +1316,142 @@ export function QuantWorkspace() {
       setSplitBacktestStatus('failed');
       setBacktestStatus('failed');
       setError(splitError instanceof Error ? splitError.message : 'Train/test split failed');
+    }
+  };
+
+  const runWalkForwardBacktest = async () => {
+    setError('');
+    setWalkForwardStatus('running');
+    setBacktestStatus('walk-forward running');
+    setTesterTab('runs');
+    setStrategyDrawerCollapsed(false);
+    try {
+      if (!marketSlug.trim()) throw new Error('market_slug is required for walk-forward backtest');
+      const nextRows = marketSeries?.outcomes?.length
+        ? { frontendRows, blockRows, marketSeries }
+        : await refreshQuantRows();
+      const nextSelectedOutcome = (
+        nextRows.marketSeries?.outcomes?.find((outcome) => outcome.tokenId === selectedOutcomeTokenId)
+        || nextRows.marketSeries?.outcomes?.[0]
+        || selectedOutcome
+      );
+      const seriesPrices = outcomePricePoints(nextSelectedOutcome, selectedBacktestAction);
+      if (seriesPrices.length < 180) throw new Error('Need at least 180 loaded points for walk-forward backtests');
+
+      const selectedTokenId = selectedBacktestAction === 'NO'
+        ? nextSelectedOutcome?.buyNoTokenId
+        : nextSelectedOutcome?.buyYesTokenId || nextSelectedOutcome?.tokenId;
+      const selectedTokenSide = selectedBacktestAction === 'NO'
+        ? nextSelectedOutcome?.buyNoTokenSide
+        : nextSelectedOutcome?.buyYesTokenSide || nextSelectedOutcome?.tokenSide;
+      const walkTokenSide: BacktestAction = selectedTokenSide === 'NO' ? 'NO' : 'YES';
+      const selectedOutcomeLabel = selectedBacktestAction === 'NO'
+        ? nextSelectedOutcome?.buyNoLabel || `${nextSelectedOutcome?.outcomeLabel || 'Outcome'} No`
+        : nextSelectedOutcome?.buyYesLabel || nextSelectedOutcome?.outcomeLabel;
+      const baseMarketSlug = (nextSelectedOutcome?.marketSlug || marketSlug).trim();
+      const trainSize = Math.max(80, Math.floor(seriesPrices.length * 0.45));
+      const testSize = Math.max(40, Math.floor(seriesPrices.length * 0.18));
+      const stepSize = Math.max(testSize, Math.floor(seriesPrices.length * 0.16));
+      const windows: Array<{ key: string; label: string; points: PricePoint[] }> = [];
+
+      for (
+        let startIndex = 0, windowIndex = 1;
+        startIndex + trainSize + testSize <= seriesPrices.length && windowIndex <= 3;
+        startIndex += stepSize, windowIndex += 1
+      ) {
+        const trainPoints = seriesPrices.slice(startIndex, startIndex + trainSize);
+        const testPoints = seriesPrices.slice(startIndex + trainSize, startIndex + trainSize + testSize);
+        windows.push({ key: `wf-${windowIndex}-train`, label: `WF ${windowIndex} Train`, points: trainPoints });
+        windows.push({ key: `wf-${windowIndex}-test`, label: `WF ${windowIndex} Test`, points: testPoints });
+      }
+
+      if (!windows.length) throw new Error('Loaded rows cannot form a valid walk-forward window');
+
+      setWalkForwardRows(windows.map((segment) => ({
+        key: segment.key,
+        outcome: segment.label,
+        marketSlug: baseMarketSlug,
+        tokenSide: walkTokenSide,
+        rows: segment.points.length,
+        trades: 0,
+        netProfit: '-',
+        totalReturn: '-',
+        maxDrawdown: '-',
+        status: 'queued',
+      })));
+      const updateWalkForwardRow = (key: string, patch: Partial<BatchBacktestRow>) => {
+        setWalkForwardRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+      };
+
+      let latestTestResult: BacktestResult | null = null;
+      let completedCount = 0;
+      for (const segment of windows) {
+        const firstX = segment.points[0]?.timestamp;
+        const lastX = segment.points[segment.points.length - 1]?.timestamp;
+        try {
+          updateWalkForwardRow(segment.key, { status: 'submitting' });
+          const created = await createQuantBacktestRun({
+            marketSlug: baseMarketSlug,
+            tokenSide: walkTokenSide,
+            tokenId: selectedTokenId || undefined,
+            outcomeLabel: `${selectedOutcomeLabel || 'Outcome'} · ${segment.label}`,
+            priceSource: backendPriceSource(priceSource),
+            backtestEngine,
+            ...(priceSource === 'orderfilled' && firstX && lastX ? { fromBlock: String(firstX), toBlock: String(lastX) } : {}),
+            ...(priceSource === 'frontend' && firstX && lastX ? { from: String(firstX), to: String(lastX) } : {}),
+            entryThreshold: strategyParameters.entryThreshold,
+            exitThreshold: strategyParameters.exitThreshold,
+            stopLoss: strategyParameters.stopLoss,
+            takeProfit: strategyParameters.takeProfit,
+            maxHoldingBars: strategyParameters.maxHoldingBars,
+            initialCapital: strategyParameters.initialCapital,
+            positionSize: strategyParameters.positionSize,
+            feeBps: strategyParameters.feeBps,
+            slippageBps: strategyParameters.slippageBps,
+            liquidityCapPct: strategyParameters.liquidityCapPct,
+          });
+          updateWalkForwardRow(segment.key, { runId: created.runId, status: created.item.status });
+          const completedRun = ['queued', 'running'].includes(created.item.status)
+            ? await waitForRun(created.runId, (run) => updateWalkForwardRow(segment.key, { status: run.status }))
+            : created.item;
+          if (completedRun.status === 'failed') throw new Error(completedRun.error || 'Backtest failed');
+          const [metricsResult, equityResult, tradesResult] = await Promise.all([
+            fetchQuantBacktestMetrics(completedRun.runId),
+            fetchQuantBacktestEquity(completedRun.runId),
+            fetchQuantBacktestTrades(completedRun.runId, 1000),
+          ]);
+          const segmentResult = backtestApiToResult(completedRun, metricsResult.items || [], equityResult.items || [], tradesResult.items || [], priceSource);
+          if (segment.key.endsWith('-test')) latestTestResult = segmentResult;
+          completedCount += 1;
+          updateWalkForwardRow(segment.key, {
+            runId: completedRun.runId,
+            rows: toNumber(completedRun.rowsProcessed) || segment.points.length,
+            trades: tradesResult.items?.length || 0,
+            netProfit: metricText(metricsResult.items || [], ['net_profit'], '-'),
+            totalReturn: metricText(metricsResult.items || [], ['total_return'], '-'),
+            maxDrawdown: metricText(metricsResult.items || [], ['max_drawdown'], '-'),
+            status: completedRun.status,
+          });
+        } catch (walkError) {
+          updateWalkForwardRow(segment.key, {
+            status: 'failed',
+            error: walkError instanceof Error ? walkError.message : 'Walk-forward backtest failed',
+          });
+        }
+      }
+
+      if (latestTestResult) {
+        setBacktestResult(latestTestResult);
+        setSelectedTradeId(latestTestResult.trades[0]?.id ?? null);
+      }
+      if (!completedCount) throw new Error('All walk-forward segments failed');
+      setWalkForwardStatus('complete');
+      setBacktestStatus('walk-forward complete');
+      void refreshBacktestRuns();
+    } catch (walkError) {
+      setWalkForwardStatus('failed');
+      setBacktestStatus('failed');
+      setError(walkError instanceof Error ? walkError.message : 'Walk-forward backtest failed');
     }
   };
 
@@ -2786,6 +2924,7 @@ export function QuantWorkspace() {
               onRefresh={() => void runBacktest()}
               onBatchBacktest={() => void runBatchBacktest()}
               onSplitBacktest={() => void runSplitBacktest()}
+              onWalkForwardBacktest={() => void runWalkForwardBacktest()}
               onExport={exportBacktest}
               onPerformanceSearchChange={setPerformanceSearch}
               onPerformanceSortChange={togglePerformanceSort}
@@ -2806,6 +2945,8 @@ export function QuantWorkspace() {
               batchStatus={batchBacktestStatus}
               splitRows={splitBacktestRows}
               splitStatus={splitBacktestStatus}
+              walkForwardRows={walkForwardRows}
+              walkForwardStatus={walkForwardStatus}
               recentBacktestRuns={recentBacktestRuns}
               backtestRunsStatus={backtestRunsStatus}
               onRunLoad={(runId) => void loadBacktestRun(runId)}
