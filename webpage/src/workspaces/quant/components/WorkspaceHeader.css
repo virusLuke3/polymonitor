@@ -614,6 +614,13 @@
   background: rgba(14, 26, 44, 0.94);
 }
 
+.qtv-inline-outcomes button.highlighted {
+  border-color: rgba(34, 211, 238, 0.58);
+  background:
+    linear-gradient(90deg, rgba(6, 182, 212, 0.16), rgba(14, 26, 44, 0.96));
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.1);
+}
+
 .qtv-inline-outcomes button span,
 .qtv-inline-outcomes button b {
   overflow: hidden;
@@ -957,6 +964,13 @@
   background: #0e1a2c;
 }
 
+.qtv-preview-outcomes button.highlighted {
+  border-color: rgba(34, 211, 238, 0.58);
+  background:
+    linear-gradient(90deg, rgba(6, 182, 212, 0.18), rgba(14, 26, 44, 0.94));
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.1);
+}
+
 .qtv-preview-outcome-loading {
   display: block;
   border: 1px dashed rgba(38, 50, 68, 0.86);
@@ -1032,6 +1046,12 @@
   font-family: var(--font-mono);
   font-size: 9px;
   padding: 6px 10px;
+}
+
+.qtv-palette-foot.outcome-focus {
+  border-top-color: rgba(34, 211, 238, 0.32);
+  background: linear-gradient(90deg, rgba(8, 145, 178, 0.1), #080d15 42%);
+  color: #93c5fd;
 }
 
 .qtv-skeleton-stack {

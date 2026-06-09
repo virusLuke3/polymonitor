@@ -355,6 +355,8 @@ export function WorkspaceHeader({
   const [favoriteMarketSlugs, setFavoriteMarketSlugs] = useState<string[]>(() => persistedSlugs('polydata.quant.search.favoriteSlugs'));
   const [previewOutcomesExpanded, setPreviewOutcomesExpanded] = useState(false);
   const [previewOutcomeQuery, setPreviewOutcomeQuery] = useState('');
+  const [outcomeFocusMode, setOutcomeFocusMode] = useState(false);
+  const [highlightedOutcomeIndex, setHighlightedOutcomeIndex] = useState(0);
   const [eventOutcomeCache, setEventOutcomeCache] = useState<Record<string, EventOutcomeCacheEntry>>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const commandRef = useRef<HTMLDivElement>(null);
@@ -510,15 +512,24 @@ export function WorkspaceHeader({
     () => filteredRelatedOutcomeMarkets.slice(0, previewOutcomesExpanded ? filteredRelatedOutcomeMarkets.length : 6),
     [filteredRelatedOutcomeMarkets, previewOutcomesExpanded],
   );
+  const activeOutcomeMarket = filteredRelatedOutcomeMarkets[Math.min(highlightedOutcomeIndex, Math.max(0, filteredRelatedOutcomeMarkets.length - 1))] || null;
 
   useEffect(() => {
     setHighlightedIndex(0);
+    setOutcomeFocusMode(false);
+    setHighlightedOutcomeIndex(0);
   }, [marketQuery, marketOptions, searchFilter, sortMode]);
 
   useEffect(() => {
     setPreviewOutcomesExpanded(false);
     setPreviewOutcomeQuery('');
+    setOutcomeFocusMode(false);
+    setHighlightedOutcomeIndex(0);
   }, [activeResult?.key]);
+
+  useEffect(() => {
+    setHighlightedOutcomeIndex((current) => Math.max(0, Math.min(current, Math.max(0, filteredRelatedOutcomeMarkets.length - 1))));
+  }, [filteredRelatedOutcomeMarkets.length]);
 
   useEffect(() => {
     if (!activeEventSlug || !activeEventOutcomeCacheKey || eventOutcomeCache[activeEventOutcomeCacheKey]) return undefined;
@@ -669,6 +680,10 @@ export function WorkspaceHeader({
   };
 
   const chooseHighlightedResult = () => {
+    if (outcomeFocusMode && activeOutcomeMarket?.marketSlug) {
+      chooseMarket(activeOutcomeMarket.marketSlug, activeOutcomeMarket);
+      return;
+    }
     chooseResult(activeResult);
   };
 
@@ -683,6 +698,25 @@ export function WorkspaceHeader({
       return;
     }
     chooseResult(activeResult);
+  };
+
+  const enterOutcomeFocus = () => {
+    if (activeResult?.kind !== 'event') return;
+    setExplicitPaletteMode('full');
+    setPreviewOutcomesExpanded(true);
+    setOutcomeFocusMode(true);
+    setHighlightedOutcomeIndex((current) => Math.max(0, Math.min(current, Math.max(0, filteredRelatedOutcomeMarkets.length - 1))));
+  };
+
+  const leaveOutcomeFocus = () => {
+    setOutcomeFocusMode(false);
+  };
+
+  const moveOutcomeHighlight = (delta: number) => {
+    setHighlightedOutcomeIndex((current) => {
+      if (!filteredRelatedOutcomeMarkets.length) return 0;
+      return (current + delta + filteredRelatedOutcomeMarkets.length) % filteredRelatedOutcomeMarkets.length;
+    });
   };
 
   const toggleActiveEventOutcomes = () => {
@@ -779,12 +813,22 @@ export function WorkspaceHeader({
               if (event.key === 'ArrowDown') {
                 event.preventDefault();
                 setMarketMenuOpen(true);
-                moveHighlight(1);
+                if (outcomeFocusMode) moveOutcomeHighlight(1);
+                else moveHighlight(1);
               }
               if (event.key === 'ArrowUp') {
                 event.preventDefault();
                 setMarketMenuOpen(true);
-                moveHighlight(-1);
+                if (outcomeFocusMode) moveOutcomeHighlight(-1);
+                else moveHighlight(-1);
+              }
+              if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                enterOutcomeFocus();
+              }
+              if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                leaveOutcomeFocus();
               }
               if (event.key === 'Enter') {
                 event.preventDefault();
@@ -831,7 +875,11 @@ export function WorkspaceHeader({
               <div className="qtv-palette-head">
                 <div>
                   <strong>{activeSearchText ? 'Search results' : activeFilter === 'favorites' ? 'Favorite markets' : 'Recent coverage'}</strong>
-                  <span>{searchScopeNotice || (activeSearchText ? 'Events · Markets · Tokens · Conditions' : 'Recents and favorites stay local to this browser')}</span>
+                  <span>
+                    {outcomeFocusMode && activeOutcomeMarket
+                      ? `Outcome focus · ${titleForMarket(activeOutcomeMarket)}`
+                      : searchScopeNotice || (activeSearchText ? 'Events · Markets · Tokens · Conditions' : 'Recents and favorites stay local to this browser')}
+                  </span>
                 </div>
                 <div className="qtv-palette-head-actions" onMouseDown={(event) => event.preventDefault()}>
                   {isRefining ? <em>Updating events...</em> : null}
@@ -970,8 +1018,16 @@ export function WorkspaceHeader({
                                   {inlineOutcomes.map((market) => (
                                     <button
                                       key={`inline-${market.marketSlug}`}
+                                      className={outcomeFocusMode && activeOutcomeMarket?.marketSlug === market.marketSlug ? 'highlighted' : ''}
                                       type="button"
                                       title={`${titleForMarket(market)}\n${market.marketSlug}`}
+                                      onMouseEnter={() => {
+                                        const nextIndex = filteredRelatedOutcomeMarkets.findIndex((item) => item.marketSlug === market.marketSlug);
+                                        if (nextIndex >= 0) {
+                                          setHighlightedOutcomeIndex(nextIndex);
+                                          setOutcomeFocusMode(true);
+                                        }
+                                      }}
                                       onClick={() => chooseMarket(market.marketSlug, market)}
                                     >
                                       <span>{titleForMarket(market)}</span>
@@ -1025,6 +1081,16 @@ export function WorkspaceHeader({
                             Open first outcome
                           </button>
                         ) : null}
+                        {activeResult.kind === 'event' ? (
+                          <button
+                            type="button"
+                            disabled={!activeOutcomeMarket}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => activeOutcomeMarket && chooseMarket(activeOutcomeMarket.marketSlug, activeOutcomeMarket)}
+                          >
+                            Open highlighted
+                          </button>
+                        ) : null}
                         <button type="button" className={favoriteSlugSet.has(activeResult.market.marketSlug) ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => toggleFavorite(activeResult.market)}>
                           {favoriteSlugSet.has(activeResult.market.marketSlug) ? 'Favorited' : 'Favorite'}
                         </button>
@@ -1065,9 +1131,17 @@ export function WorkspaceHeader({
                           {visibleRelatedOutcomeMarkets.map((market) => (
                             <button
                               key={market.marketSlug}
+                              className={outcomeFocusMode && activeOutcomeMarket?.marketSlug === market.marketSlug ? 'highlighted' : ''}
                               type="button"
                               title={`${titleForMarket(market)}\n${market.marketSlug}`}
                               onMouseDown={(event) => event.preventDefault()}
+                              onMouseEnter={() => {
+                                const nextIndex = filteredRelatedOutcomeMarkets.findIndex((item) => item.marketSlug === market.marketSlug);
+                                if (nextIndex >= 0) {
+                                  setHighlightedOutcomeIndex(nextIndex);
+                                  setOutcomeFocusMode(true);
+                                }
+                              }}
                               onClick={() => chooseMarket(market.marketSlug, market)}
                             >
                               <span>
@@ -1099,8 +1173,8 @@ export function WorkspaceHeader({
                   )}
                 </aside>
               </div>
-              <div className="qtv-palette-foot">
-                <span>Ctrl/Cmd+K</span><span>Arrow keys</span><span>Enter open</span><span>Shift+Enter first outcome</span><span>Alt+E outcomes</span><span>Alt+F favorite</span><span>Esc close</span><span>Tab filter</span>
+              <div className={`qtv-palette-foot ${outcomeFocusMode ? 'outcome-focus' : ''}`}>
+                <span>Ctrl/Cmd+K</span><span>{outcomeFocusMode ? '↑↓ outcome' : '↑↓ result'}</span><span>Enter open</span><span>→ outcomes</span><span>← results</span><span>Shift+Enter first outcome</span><span>Alt+E outcomes</span><span>Alt+F favorite</span><span>Esc close</span><span>Tab filter</span>
               </div>
             </div>
             </>
