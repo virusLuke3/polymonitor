@@ -1015,6 +1015,24 @@ export function WorkspaceHeader({
                               </button>
                               {inlineOutcomes.length || (result.kind === 'event' && index === highlightedIndex && activeEventOutcomeCache?.status === 'loading') ? (
                                 <div className="qtv-inline-outcomes" onMouseDown={(event) => event.preventDefault()}>
+                                  <div className="qtv-inline-outcome-head">
+                                    <div>
+                                      <strong>Event drilldown</strong>
+                                      <span>
+                                        {activeEventOutcomeCache?.status === 'loading'
+                                          ? 'Loading outcome members...'
+                                          : `${filteredRelatedOutcomeMarkets.length.toLocaleString('en-US')} outcomes · ${previewOutcomesExpanded ? 'expanded' : 'top matches'}`}
+                                      </span>
+                                    </div>
+                                    <button type="button" onClick={() => chooseResult(result)}>Open event</button>
+                                    <button
+                                      type="button"
+                                      disabled={!filteredRelatedOutcomeMarkets.length}
+                                      onClick={enterOutcomeFocus}
+                                    >
+                                      Focus outcomes
+                                    </button>
+                                  </div>
                                   {inlineOutcomes.map((market) => (
                                     <button
                                       key={`inline-${market.marketSlug}`}
@@ -1030,7 +1048,10 @@ export function WorkspaceHeader({
                                       }}
                                       onClick={() => chooseMarket(market.marketSlug, market)}
                                     >
-                                      <span>{titleForMarket(market)}</span>
+                                      <span>
+                                        <strong>{titleForMarket(market)}</strong>
+                                        <small>{market.marketSlug}</small>
+                                      </span>
                                       <b>{latestPrice(market) || `${rowsForMarket(market).toLocaleString('en-US')} rows`}</b>
                                     </button>
                                   ))}
