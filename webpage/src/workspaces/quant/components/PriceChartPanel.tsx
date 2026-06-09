@@ -1923,8 +1923,12 @@ export function PriceChartPanel({
               <div className="qtv-hover-crosshair-y" style={{ top: hoverScreen.y }} />
               <div className="qtv-hover-price-tag" style={{ top: hoverScreen.y }}>
                 <em>Hover</em>
-                <span>{fmtPrice(hoverInspect.yes)}</span>
+                <span><i>YES</i>{fmtPrice(hoverInspect.yes)}</span>
+                <span><i>NO</i>{fmtPrice(hoverInspect.no)}</span>
                 <b>{blockLabel(hoverInspect.point.timestamp)}</b>
+                <small className={hoverInspect.deltaYes >= 0 ? 'positive' : 'negative'}>
+                  {formatSigned(hoverInspect.deltaYes)} from latest
+                </small>
               </div>
             </>
           ) : null}
@@ -1935,8 +1939,12 @@ export function PriceChartPanel({
               <div className="qtv-pinned-point-dot" style={{ left: pinnedScreen.x, top: pinnedScreen.y }} />
               <div className="qtv-pinned-price-tag" style={{ top: pinnedScreen.y }}>
                 <em>Pinned</em>
-                <span>{fmtPrice(pinnedInspect.yes)}</span>
+                <span><i>YES</i>{fmtPrice(pinnedInspect.yes)}</span>
+                <span><i>NO</i>{fmtPrice(pinnedInspect.no)}</span>
                 <b>{blockLabel(pinnedInspect.point.timestamp)}</b>
+                <small className={pinnedInspect.deltaYes >= 0 ? 'positive' : 'negative'}>
+                  {formatSigned(pinnedInspect.deltaYes)} from latest
+                </small>
               </div>
             </>
           ) : null}

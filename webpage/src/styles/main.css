@@ -3414,7 +3414,7 @@
   right: 0;
   z-index: 31;
   display: grid;
-  min-width: 74px;
+  min-width: 136px;
   transform: translateY(-50%);
   border: 1px solid rgba(96, 165, 250, 0.48);
   border-radius: 3px 0 0 3px;
@@ -3434,9 +3434,11 @@
 .qtv-hover-price-tag em,
 .qtv-hover-price-tag span,
 .qtv-hover-price-tag b,
+.qtv-hover-price-tag small,
 .qtv-pinned-price-tag em,
 .qtv-pinned-price-tag span,
-.qtv-pinned-price-tag b {
+.qtv-pinned-price-tag b,
+.qtv-pinned-price-tag small {
   padding: 1px 7px;
   font-style: normal;
   text-align: right;
@@ -3454,8 +3456,20 @@
 
 .qtv-hover-price-tag span,
 .qtv-pinned-price-tag span {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
   font-size: 11px;
   font-weight: 950;
+}
+
+.qtv-hover-price-tag span i,
+.qtv-pinned-price-tag span i {
+  color: rgba(219, 234, 254, 0.76);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 950;
+  text-align: left;
 }
 
 .qtv-hover-price-tag b,
@@ -3464,6 +3478,23 @@
   color: #bfdbfe;
   font-size: 8px;
   font-weight: 900;
+}
+
+.qtv-hover-price-tag small,
+.qtv-pinned-price-tag small {
+  border-top: 1px solid rgba(219, 234, 254, 0.12);
+  font-size: 8px;
+  font-weight: 950;
+}
+
+.qtv-hover-price-tag small.positive,
+.qtv-pinned-price-tag small.positive {
+  color: #86efac;
+}
+
+.qtv-hover-price-tag small.negative,
+.qtv-pinned-price-tag small.negative {
+  color: #fecaca;
 }
 
 .qtv-pinned-price-tag b {
