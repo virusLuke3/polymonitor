@@ -62,6 +62,9 @@ HURRICANE_SPORTS_FALSE_POSITIVE_TERMS = (
 GAMMA_QUERY_TIMEOUT_SECONDS = 6
 GAMMA_QUERIES_PER_CITY = 2
 GAMMA_QUERY_PAUSE_SECONDS = 0.03
+GAMMA_SYNC_MAX_TARGET_CITIES = 44
+GAMMA_SYNC_MAX_DIRECT_DATES = 1
+GAMMA_SYNC_MAX_QUERY_CITIES = 24
 WEATHER_CLOB_BOOK_CACHE_NAMESPACE = "weather-clob-book"
 WEATHER_CLOB_BOOK_TTL_SECONDS = 10
 
@@ -590,6 +593,56 @@ def _fetch_gamma_events_for_query(ctx: dict, query: str) -> Tuple[List[Dict[str,
     return events, "ok" if events else "empty"
 
 
+def _gamma_event_rows(payload: Any) -> List[Dict[str, Any]]:
+    rows = payload if isinstance(payload, list) else ((payload or {}).get("events") or (payload or {}).get("data") or [])
+    if isinstance(payload, dict) and payload.get("markets") is not None:
+        rows = [payload]
+    return [event for event in rows if isinstance(event, dict)] if isinstance(rows, list) else []
+
+
+def _fetch_gamma_events_for_params(ctx: dict, params: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
+    base_url = str(ctx["SETTINGS"].gamma_api_base or "").rstrip("/")
+    if not base_url:
+        return [], "empty"
+    try:
+        payload = ctx["http_json_get"](
+            f"{base_url}/events",
+            params=params,
+            timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
+            headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
+        )
+    except Exception as exc:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("global weather map gamma params query failed params=%s error=%s", params, exc)
+        return [], "error"
+    events = _gamma_event_rows(payload)
+    return events, "ok" if events else "empty"
+
+
+def _fetch_gamma_event_by_slug(ctx: dict, slug: str) -> Tuple[List[Dict[str, Any]], str]:
+    base_url = str(ctx["SETTINGS"].gamma_api_base or "").rstrip("/")
+    slug = str(slug or "").strip("/")
+    if not base_url or not slug:
+        return [], "empty"
+    statuses: List[str] = []
+    for path in (f"/events/slug/{slug}", f"/events/{slug}"):
+        try:
+            payload = ctx["http_json_get"](
+                f"{base_url}{path}",
+                timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
+                headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
+            )
+        except Exception:
+            statuses.append("error")
+            continue
+        events = _gamma_event_rows(payload)
+        if events:
+            return events, "ok"
+        statuses.append("empty")
+    return [], "error" if statuses and all(status == "error" for status in statuses) else "empty"
+
+
 def _fetch_gamma_events(ctx: dict, queries: Iterable[str]) -> Tuple[List[Dict[str, Any]], str]:
     events: List[Dict[str, Any]] = []
     seen: set[str] = set()
@@ -611,6 +664,90 @@ def _fetch_gamma_events(ctx: dict, queries: Iterable[str]) -> Tuple[List[Dict[st
     if any(status == "error" for status in statuses):
         return [], "partial"
     return [], "empty"
+
+
+def _dedupe_gamma_events(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    result: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for event in events:
+        identity = str(event.get("id") or event.get("slug") or event.get("ticker") or "")
+        if identity and identity in seen:
+            continue
+        if identity:
+            seen.add(identity)
+        result.append(event)
+    return result
+
+
+def _preferred_weather_date_iso(ctx: dict, dates: List[Dict[str, str]]) -> Optional[str]:
+    try:
+        today = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00")).date()
+    except Exception:
+        today = datetime.now(timezone.utc).date()
+    for item in dates:
+        try:
+            market_date = datetime.fromisoformat(str(item.get("iso") or "")).date()
+        except Exception:
+            continue
+        if market_date > today:
+            return str(item["iso"])
+    return str(dates[0]["iso"]) if dates else None
+
+
+def _date_slug(item: Dict[str, str]) -> str:
+    try:
+        parsed = datetime.fromisoformat(str(item.get("iso") or ""))
+        return parsed.strftime("on-%B-%-d-%Y").lower()
+    except Exception:
+        month = str(item.get("month") or "").lower()
+        day = str(item.get("day") or "").strip()
+        year = str(item.get("year") or "").strip()
+        return "-".join(part for part in ("on", month, day, year) if part)
+
+
+def _weather_city_slug_candidates(city: Dict[str, Any]) -> List[str]:
+    candidates: List[str] = []
+    for alias in [city.get("city"), *list(city.get("polymarket_aliases") or [])]:
+        slug = _slugify(alias)
+        if slug and slug not in candidates:
+            candidates.append(slug)
+    return candidates
+
+
+def _weather_gamma_sync_queries(cities: List[Dict[str, Any]], dates: List[Dict[str, str]]) -> List[str]:
+    queries: List[str] = []
+    preferred = dates[:GAMMA_SYNC_MAX_DIRECT_DATES]
+    for item in preferred:
+        month_day = f"{item['month']} {item['day']}"
+        queries.extend(
+            [
+                f"highest temperature {month_day}",
+                f"weather temperature {month_day}",
+            ]
+        )
+    for city in cities[:GAMMA_SYNC_MAX_QUERY_CITIES]:
+        name = str(city.get("city") or "").strip()
+        if not name:
+            continue
+        queries.extend([f"{name} highest temperature", f"{name} weather"])
+    deduped: List[str] = []
+    for query in queries:
+        normalized = query.strip().lower()
+        if normalized and normalized not in deduped:
+            deduped.append(normalized)
+    return deduped
+
+
+def _weather_gamma_category_params(dates: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    params: List[Dict[str, Any]] = [
+        {"active": "true", "closed": "false", "limit": 100, "category": "Weather"},
+        {"active": "true", "closed": "false", "limit": 100, "category": "weather"},
+        {"active": "true", "closed": "false", "limit": 100, "tag_slug": "weather"},
+    ]
+    for item in dates[:GAMMA_SYNC_MAX_DIRECT_DATES]:
+        month_day = f"{item['month']} {item['day']}"
+        params.append({"active": "true", "closed": "false", "limit": 100, "q": f"highest temperature {month_day}"})
+    return params
 
 
 def _market_label(event_title: str, market: Dict[str, Any]) -> str:
@@ -982,6 +1119,176 @@ def _db_price_fallback(row: Dict[str, Any]) -> Optional[float]:
     return None
 
 
+def _event_market_haystack(event: Dict[str, Any], market: Optional[Dict[str, Any]] = None) -> str:
+    market = market or {}
+    return _normalize_text(
+        event.get("title"),
+        event.get("name"),
+        event.get("slug"),
+        event.get("ticker"),
+        market.get("question"),
+        market.get("title"),
+        market.get("groupItemTitle"),
+        market.get("group_item_title"),
+        market.get("slug"),
+    )
+
+
+def _matches_weather_date_window(text: str, event: Dict[str, Any], market: Dict[str, Any], dates: List[Dict[str, str]]) -> bool:
+    if _matches_date(text, dates):
+        return True
+    allowed = {str(item.get("iso") or "") for item in dates}
+    for key in ("endDate", "end_date", "closedTime", "closed_time"):
+        value = market.get(key) or event.get(key)
+        if not value:
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00")).date().isoformat()
+        except Exception:
+            continue
+        if parsed in allowed:
+            return True
+    return False
+
+
+def _event_matches_city(event: Dict[str, Any], market: Dict[str, Any], cities: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    haystack = _event_market_haystack(event, market)
+    for city in cities:
+        if _matches_alias(haystack, city):
+            return city
+    return None
+
+
+def _gamma_latest_prices(market: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+    prices = _as_list(market.get("outcomePrices") or market.get("outcome_prices"))
+    yes = _float(prices[0]) if len(prices) >= 1 else None
+    no = _float(prices[1]) if len(prices) >= 2 else None
+    return yes, no
+
+
+def _normalize_weather_gamma_markets(events: Iterable[Dict[str, Any]], cities: List[Dict[str, Any]], dates: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    try:
+        from market import market_discovery
+    except Exception:
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    seen_conditions: set[str] = set()
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        markets = event.get("markets") if isinstance(event.get("markets"), list) else []
+        for raw_market in markets:
+            if not isinstance(raw_market, dict):
+                continue
+            if raw_market.get("active") is False or raw_market.get("closed") is True:
+                continue
+            haystack = _event_market_haystack(event, raw_market)
+            if not _matches_weather_market(haystack) or _market_family(haystack) == "other":
+                continue
+            if not _matches_weather_date_window(haystack, event, raw_market, dates):
+                continue
+            if _event_matches_city(event, raw_market, cities) is None:
+                continue
+
+            market = dict(raw_market)
+            market_discovery._attach_event_meta_to_market(market, event)
+            yes_price, no_price = _gamma_latest_prices(market)
+            if yes_price is not None:
+                market["_gamma_latest_yes_price"] = yes_price
+            if no_price is not None:
+                market["_gamma_latest_no_price"] = no_price
+            latest_at = market.get("updatedAt") or market.get("lastTradePriceTimestamp") or event.get("updatedAt") or event.get("createdAt")
+            if latest_at:
+                market["_gamma_latest_trade_at"] = latest_at
+            normalized_market = market_discovery.normalize_market_from_gamma(market)
+            if not normalized_market:
+                continue
+            condition_id = str(normalized_market.get("condition_id") or "").strip()
+            if condition_id and condition_id in seen_conditions:
+                continue
+            if condition_id:
+                seen_conditions.add(condition_id)
+            normalized.append(normalized_market)
+    return normalized
+
+
+def _sync_weather_markets_from_gamma(ctx: dict, cities: List[Dict[str, Any]], dates: List[Dict[str, str]]) -> Dict[str, Any]:
+    stats: Dict[str, Any] = {"events": 0, "markets": 0, "upserted": 0, "serving": 0, "status": "empty", "targets": len(cities)}
+    if not cities or not dates:
+        return stats
+    connector = ctx.get("get_connection")
+    if not callable(connector):
+        stats["status"] = "no-db"
+        return stats
+    if getattr(ctx["SETTINGS"], "global_weather_gamma_sync_enabled", True) is False:
+        stats["status"] = "disabled"
+        return stats
+
+    events: List[Dict[str, Any]] = []
+    statuses: List[str] = []
+    for params in _weather_gamma_category_params(dates):
+        rows, status = _fetch_gamma_events_for_params(ctx, params)
+        statuses.append(status)
+        events.extend(rows)
+        if GAMMA_QUERY_PAUSE_SECONDS > 0:
+            time.sleep(GAMMA_QUERY_PAUSE_SECONDS)
+
+    target_cities = cities[:GAMMA_SYNC_MAX_TARGET_CITIES]
+    rows: List[Dict[str, Any]] = []
+    for city in target_cities:
+        for city_slug in _weather_city_slug_candidates(city):
+            for item in dates[:GAMMA_SYNC_MAX_DIRECT_DATES]:
+                slug = f"highest-temperature-in-{city_slug}-{_date_slug(item)}"
+                rows, status = _fetch_gamma_event_by_slug(ctx, slug)
+                statuses.append(status)
+                events.extend(rows)
+                if rows:
+                    break
+            if any(_matches_alias(_event_market_haystack(event), city) for event in rows):
+                break
+        if GAMMA_QUERY_PAUSE_SECONDS > 0:
+            time.sleep(GAMMA_QUERY_PAUSE_SECONDS)
+
+    query_events, query_status = _fetch_gamma_events(ctx, _weather_gamma_sync_queries(target_cities, dates))
+    statuses.append(query_status)
+    events.extend(query_events)
+
+    events = _dedupe_gamma_events(events)
+    stats["events"] = len(events)
+    normalized_markets = _normalize_weather_gamma_markets(events, target_cities, dates)
+    stats["markets"] = len(normalized_markets)
+    if not normalized_markets:
+        stats["status"] = "error" if statuses and all(status == "error" for status in statuses) else "empty"
+        ctx["_weather_gamma_sync_stats"] = stats
+        return stats
+
+    conn = None
+    try:
+        from market import market_discovery
+
+        try:
+            conn = connector(ctx.get("DB_PATH"), readonly=False)
+        except TypeError:
+            conn = connector(ctx.get("DB_PATH"))
+        stats["upserted"] = int(market_discovery.batch_upsert_markets(conn, normalized_markets) or 0)
+        stats["serving"] = int(market_discovery._upsert_market_serving_from_gamma(conn, normalized_markets) or 0)
+        stats["status"] = "ok" if stats["upserted"] else "empty"
+    except Exception as exc:
+        stats["status"] = "error"
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("global weather map gamma sync failed error=%s", exc)
+    finally:
+        if conn is not None and hasattr(conn, "close"):
+            try:
+                conn.close()
+            except Exception:
+                pass
+        ctx["_weather_gamma_sync_stats"] = stats
+    return stats
+
+
 def _fetch_gamma_market_by_id(ctx: dict, market_id: Any) -> Optional[Dict[str, Any]]:
     if not market_id:
         return None
@@ -1292,9 +1599,44 @@ def _market_source_status(stats: Dict[str, Any]) -> str:
     return "empty"
 
 
+def _weather_market_matches_preferred_date(market: Dict[str, Any], preferred_date: Optional[str]) -> bool:
+    if not preferred_date:
+        return True
+    haystack = _normalize_text(
+        market.get("eventTitle"),
+        market.get("eventSlug"),
+        market.get("marketUrl"),
+        " ".join(str((row or {}).get("marketSlug") or "") for row in market.get("bins") or []),
+    )
+    if preferred_date in haystack:
+        return True
+    markets = market.get("markets") if isinstance(market.get("markets"), list) else []
+    return any(_weather_market_matches_preferred_date(item, preferred_date) for item in markets if isinstance(item, dict))
+
+
+def _weather_sync_targets(
+    cities: List[Dict[str, Any]],
+    markets_by_city: Dict[str, Dict[str, Any]],
+    preferred_date: Optional[str],
+) -> List[Dict[str, Any]]:
+    targets: List[Dict[str, Any]] = []
+    for city in cities:
+        city_id = str(city.get("city_id") or "")
+        market = markets_by_city.get(city_id)
+        if not market or not _weather_market_matches_preferred_date(market, preferred_date):
+            targets.append(city)
+    return targets[:GAMMA_SYNC_MAX_TARGET_CITIES]
+
+
 def _markets_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
     dates = _date_labels(ctx, int(getattr(ctx["SETTINGS"], "global_weather_market_days", 4) or 4))
     result, source_states = _db_markets_by_city(ctx, cities, dates)
+    preferred_date = _preferred_weather_date_iso(ctx, dates)
+    sync_targets = _weather_sync_targets(cities, result, preferred_date)
+    if sync_targets:
+        sync_stats = _sync_weather_markets_from_gamma(ctx, sync_targets, dates)
+        if int(sync_stats.get("upserted") or 0) > 0:
+            result, source_states = _db_markets_by_city(ctx, cities, dates)
     missing_cities = [city for city in cities if str(city["city_id"]) not in result]
     for city in missing_cities:
         city_id = str(city["city_id"])
@@ -1487,6 +1829,10 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
     try:
         markets, market_source_states = _markets_by_city(ctx, cities)
         sources["gamma"] = _aggregate_source(market_source_states.values())
+        gamma_sync_stats = ctx.get("_weather_gamma_sync_stats") or {}
+        if gamma_sync_stats:
+            sync_status = str(gamma_sync_stats.get("status") or "empty")
+            sources["gammaSync"] = sync_status if sync_status != "empty" else ("ok" if int(gamma_sync_stats.get("upserted") or 0) > 0 else "empty")
         clob_stats = ctx.get("_weather_clob_stats") or {}
         clob_attempts = int(clob_stats.get("attempts") or 0)
         clob_errors = int(clob_stats.get("errors") or 0)
@@ -1550,6 +1896,8 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
     summary = build_summary(items)
     summary["marketFamilyCounts"] = ctx.get("_weather_family_counts") or summary.get("marketFamilyCounts") or {}
     summary["unmappedMarketCount"] = len(ctx.get("_weather_unmapped_markets") or [])
+    if ctx.get("_weather_gamma_sync_stats"):
+        summary["gammaSync"] = ctx.get("_weather_gamma_sync_stats")
     status = "ok" if summary["mappedCount"] else "warming"
     if status == "ok" and any(value == "error" for value in sources.values()):
         status = "degraded"
