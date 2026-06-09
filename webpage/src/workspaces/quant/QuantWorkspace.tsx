@@ -2085,6 +2085,17 @@ export function QuantWorkspace() {
       const spikes = yes.spikes + no.spikes;
       const staleBlocks = latestGlobalBlock && lastBlock ? Math.max(0, latestGlobalBlock - lastBlock) : 0;
       const stale = staleBlocks > Math.max(1000, (dataQuality.medianDelta || 0) * 8);
+      const directNoRows = Math.max(0, no.rows - no.impliedRows);
+      const impliedNoRatio = no.rows ? no.impliedRows / no.rows : 0;
+      const coverageRatio = Math.min(1, Math.max(statsCoverageRatio(yes), statsCoverageRatio(no)));
+      const reasons = [
+        !rows ? 'no loaded rows' : '',
+        stale ? `${staleBlocks.toLocaleString('en-US')} blocks behind latest` : '',
+        gaps ? `${gaps.toLocaleString('en-US')} large gaps` : '',
+        spikes ? `${spikes.toLocaleString('en-US')} price jumps` : '',
+        no.rows && impliedNoRatio > 0.8 ? 'NO mostly implied' : '',
+        coverageRatio > 0 && coverageRatio < 0.72 ? 'sparse coverage' : '',
+      ].filter(Boolean);
       const status = !rows ? 'empty' : stale ? 'stale' : gaps || spikes ? 'review' : 'ready';
       const firstBlocks = [yes.firstBlock, no.firstBlock].filter((value) => value > 0);
       return {
@@ -2098,7 +2109,12 @@ export function QuantWorkspace() {
         gaps,
         spikes,
         staleBlocks,
+        directNoRows,
         impliedNoRows: no.impliedRows,
+        impliedNoRatio,
+        coverageRatio,
+        medianDelta: Math.max(yes.medianDelta, no.medianDelta),
+        reason: reasons.slice(0, 3).join(' · ') || 'continuous direct block-close coverage',
         status,
       };
     }).sort((left, right) => {
@@ -2889,6 +2905,15 @@ export function QuantWorkspace() {
                           <b>{row.status}</b>
                           <small>{row.yesRows.toLocaleString('en-US')}Y / {row.noRows.toLocaleString('en-US')}N</small>
                           <small>{row.gaps} gaps · {row.spikes} jumps</small>
+                          <div className="qtv-outcome-quality-detail">
+                            <span className="coverage">
+                              <i style={{ width: `${Math.max(3, Math.round(row.coverageRatio * 100))}%` }} />
+                              {formatCoverageRatio(row.coverageRatio)}
+                            </span>
+                            <span title={row.reason}>{row.reason}</span>
+                            <span>{row.staleBlocks ? `${row.staleBlocks.toLocaleString('en-US')} stale blocks` : 'fresh'}</span>
+                            <span>{row.directNoRows.toLocaleString('en-US')} direct NO / {row.impliedNoRows.toLocaleString('en-US')} implied</span>
+                          </div>
                         </button>
                       ))}
                     </section>

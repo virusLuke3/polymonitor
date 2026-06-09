@@ -1155,8 +1155,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 54px 66px 82px;
   align-items: center;
-  gap: 7px;
-  min-height: 38px;
+  gap: 6px 7px;
+  min-height: 58px;
   width: 100%;
   border: 1px solid rgba(38, 50, 68, 0.78);
   border-left: 3px solid #334155;
@@ -1221,6 +1221,54 @@
   line-height: 17px;
   padding: 0 5px;
   text-transform: uppercase;
+}
+
+.qtv-outcome-quality-detail {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.qtv-outcome-quality-detail span {
+  display: block;
+  overflow: hidden;
+  border: 1px solid rgba(38, 50, 68, 0.72);
+  border-radius: 3px;
+  background: rgba(7, 12, 20, 0.72);
+  color: #8fa3bd;
+  font-size: 8.5px;
+  font-weight: 850;
+  line-height: 17px;
+  padding: 0 5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-outcome-quality-detail span.coverage {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+  color: #dbeafe;
+}
+
+.qtv-outcome-quality-detail span.coverage i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 3px;
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.32), rgba(59, 130, 246, 0.1));
+}
+
+.qtv-outcome-quality-detail span.coverage {
+  color: #dbeafe;
+}
+
+.qtv-outcome-quality-detail span.coverage::after {
+  position: relative;
+  z-index: 1;
+  content: '';
 }
 
 .qtv-book-card button {
