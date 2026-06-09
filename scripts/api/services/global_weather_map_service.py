@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote_plus
 
 from weather.cities import load_weather_cities
 from weather.temperature_bins import parse_temperature_bin
@@ -17,6 +18,7 @@ from weather.weather_codes import describe_weather_code
 GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE = "snapshot:weather:global-map"
 GLOBAL_WEATHER_MAP_CACHE_KEY = "panel-v1"
 DEFAULT_ITEM_LIMIT = 60
+WTTR_URL = "https://wttr.in"
 
 WEATHER_MARKET_TERMS = (
     "temperature",
@@ -439,6 +441,87 @@ def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[
     if not by_city and failed_chunks:
         raise RuntimeError("open meteo fetch failed for all chunks")
     return by_city
+
+
+def _clean_weather_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()) or "Weather watch"
+
+
+def _wttr_condition(row: Dict[str, Any], fallback: str = "Weather watch") -> str:
+    desc_rows = row.get("weatherDesc") if isinstance(row, dict) else []
+    if isinstance(desc_rows, list) and desc_rows and isinstance(desc_rows[0], dict):
+        return _clean_weather_text(desc_rows[0].get("value") or fallback)
+    return _clean_weather_text(fallback)
+
+
+def _wttr_time_label(date_value: Any, time_value: Any) -> str:
+    date_text = str(date_value or "").strip()
+    raw_time = str(time_value or "0").strip()
+    padded = raw_time.zfill(4)
+    return f"{date_text}T{padded[:2]}:{padded[2:]}:00" if date_text else padded
+
+
+def _wttr_city_weather(ctx: dict, city: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    query = str(city.get("city") or "").split("/")[0].strip()
+    if not query:
+        return None
+    payload = ctx["http_json_get"](
+        f"{WTTR_URL}/{quote_plus(query)}",
+        params={"format": "j1"},
+        timeout=8,
+        headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
+    )
+    if not isinstance(payload, dict):
+        return None
+    unit = str(city.get("unit") or "F").upper()
+    current_rows = payload.get("current_condition") if isinstance(payload.get("current_condition"), list) else []
+    current = current_rows[0] if current_rows and isinstance(current_rows[0], dict) else {}
+    weather_rows = payload.get("weather") if isinstance(payload.get("weather"), list) else []
+    daily_rows: List[Dict[str, Any]] = []
+    hourly_rows: List[Dict[str, Any]] = []
+    for row in weather_rows[:7]:
+        if not isinstance(row, dict):
+            continue
+        date_value = str(row.get("date") or "")
+        high = row.get("maxtempF") if unit == "F" else row.get("maxtempC")
+        low = row.get("mintempF") if unit == "F" else row.get("mintempC")
+        daily_rows.append({"date": date_value, "high": _float(high), "low": _float(low)})
+        for hourly in (row.get("hourly") or []):
+            if not isinstance(hourly, dict):
+                continue
+            temp = hourly.get("tempF") if unit == "F" else hourly.get("tempC")
+            hourly_rows.append({"time": _wttr_time_label(date_value, hourly.get("time")), "temp": _float(temp)})
+    current_temp = current.get("temp_F") if unit == "F" else current.get("temp_C")
+    return {
+        "condition": _wttr_condition(current),
+        "currentTemp": _float(current_temp),
+        "todayHigh": daily_rows[0]["high"] if daily_rows else None,
+        "todayLow": daily_rows[0]["low"] if daily_rows else None,
+        "forecastHigh": max([row["high"] for row in daily_rows if row.get("high") is not None], default=None),
+        "hourly": [row for row in hourly_rows[:24] if row.get("temp") is not None],
+        "daily": [row for row in daily_rows if row.get("high") is not None or row.get("low") is not None],
+        "updatedAt": _utc_now_iso(ctx),
+        "weatherProvider": "wttr.in",
+    }
+
+
+def _wttr_weather_by_city(ctx: dict, cities: List[Dict[str, Any]], *, missing_ids: Optional[set[str]] = None) -> Dict[str, Dict[str, Any]]:
+    targets = [city for city in cities if missing_ids is None or str(city.get("city_id") or "") in missing_ids]
+    if not targets:
+        return {}
+    result: Dict[str, Dict[str, Any]] = {}
+    max_workers = max(1, min(10, len(targets)))
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="weather-wttr") as executor:
+        futures = {executor.submit(_wttr_city_weather, ctx, city): city for city in targets}
+        for future in as_completed(futures):
+            city = futures[future]
+            try:
+                row = future.result()
+            except Exception:
+                row = None
+            if row:
+                result[str(city["city_id"])] = row
+    return result
 
 
 def _metar_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -1354,15 +1437,28 @@ def merge_weather_series_from_previous(payload: Dict[str, Any], previous: Option
 def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
     cities = load_weather_cities(limit=max(limit or DEFAULT_ITEM_LIMIT, DEFAULT_ITEM_LIMIT))
     sources: Dict[str, str] = {}
+    open_meteo_failed = False
     try:
         weather = _weather_by_city(ctx, cities)
-        sources["openMeteo"] = _source_status(bool(weather))
+        sources["openMeteo"] = "ok" if len(weather) >= len(cities) else ("partial" if weather else "empty")
     except Exception as exc:
         weather = {}
+        open_meteo_failed = True
         sources["openMeteo"] = "error"
         logger = getattr(ctx.get("app"), "logger", None)
         if logger is not None:
             logger.exception("global weather map open-meteo fetch failed error=%s", exc)
+    try:
+        missing_weather_ids = {str(city["city_id"]) for city in cities if str(city["city_id"]) not in weather}
+        wttr = _wttr_weather_by_city(ctx, cities, missing_ids=missing_weather_ids)
+        if wttr:
+            weather.update(wttr)
+        sources["wttr"] = "ok" if wttr and not missing_weather_ids - set(wttr.keys()) else ("partial" if wttr else "empty")
+    except Exception as exc:
+        sources["wttr"] = "error" if open_meteo_failed else "empty"
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("global weather map wttr fallback failed error=%s", exc)
     try:
         metar = _metar_by_city(ctx, cities)
         sources["aviationWeather"] = _source_status(bool(metar))
@@ -1408,6 +1504,7 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         weather_row = weather.get(city_id) or {}
         metar_row = metar.get(city_id) or {}
         market_row = markets.get(city_id) or {}
+        weather_provider = str((weather_row.get("weatherProvider") or "open-meteo") if weather_row else "").lower()
         item = {
             "cityId": city_id,
             "city": city.get("city"),
@@ -1426,7 +1523,8 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
             "markets": market_row.get("markets") or ([] if not market_row else [market_row]),
             "marketFamilies": market_row.get("marketFamilies") or ([] if not market_row.get("marketFamily") else [market_row.get("marketFamily")]),
             "sourceStates": {
-                "openMeteo": "ok" if weather_row else "error",
+                "openMeteo": "ok" if weather_row and weather_provider != "wttr.in" else ("error" if open_meteo_failed else "empty"),
+                "wttr": "ok" if weather_provider == "wttr.in" else "empty",
                 "metar": "ok" if metar_row else "empty",
                 "polymarket": "ok" if market_row else market_source_states.get(city_id, "empty"),
             },
@@ -1441,7 +1539,7 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         status = "degraded"
     return {
         "generatedAt": _utc_now_iso(ctx),
-        "source": "Open-Meteo + AviationWeather + Polymarket Gamma/CLOB",
+        "source": "Open-Meteo/wttr + AviationWeather + Polymarket Gamma/CLOB",
         "sourceUrl": getattr(ctx["SETTINGS"], "weather_source_url", "https://open-meteo.com/"),
         "status": status,
         "sources": sources,
@@ -1473,7 +1571,7 @@ def normalize_global_weather_map_payload(payload: Any, *, ctx: dict, limit: int 
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else build_summary(result["items"])
     result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
-    result["source"] = str(result.get("source") or "Open-Meteo + AviationWeather + Polymarket Gamma/CLOB")
+    result["source"] = str(result.get("source") or "Open-Meteo/wttr + AviationWeather + Polymarket Gamma/CLOB")
     result["sourceUrl"] = str(result.get("sourceUrl") or getattr(ctx["SETTINGS"], "weather_source_url", "https://open-meteo.com/"))
     result["unmappedMarkets"] = [item for item in (result.get("unmappedMarkets") or []) if isinstance(item, dict)][:120]
     return result

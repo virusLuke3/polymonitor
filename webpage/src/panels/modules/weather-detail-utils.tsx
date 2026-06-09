@@ -258,7 +258,9 @@ export function marketSourceLabel(city?: RuntimeGlobalWeatherCity | null) {
 export function weatherSourceLabel(city?: RuntimeGlobalWeatherCity | null, payload?: RuntimeGlobalWeatherMapPayload | null) {
   const states = city?.sourceStates || {};
   const openMeteo = String(states.openMeteo || payload?.sources?.openMeteo || '').toLowerCase();
+  const wttr = String(states.wttr || payload?.sources?.wttr || '').toLowerCase();
   const metar = String(states.metar || states.aviationWeather || payload?.sources?.aviationWeather || '').toLowerCase();
+  if (wttr === 'ok') return 'WTTR LIVE';
   if ((city?.weatherCarryForward || openMeteo === 'stale') && metar === 'ok') return 'METAR LIVE';
   if (city?.weatherCarryForward || openMeteo === 'stale') return 'WX STALE';
   if (openMeteo === 'ok') return 'OPEN-METEO';
@@ -270,6 +272,8 @@ export function weatherSourceLabel(city?: RuntimeGlobalWeatherCity | null, paylo
 export function forecastSourceLabel(city?: RuntimeGlobalWeatherCity | null, payload?: RuntimeGlobalWeatherMapPayload | null) {
   const states = city?.sourceStates || {};
   const openMeteo = String(states.openMeteo || payload?.sources?.openMeteo || '').toLowerCase();
+  const wttr = String(states.wttr || payload?.sources?.wttr || '').toLowerCase();
+  if (wttr === 'ok') return 'WTTR LIVE';
   if (city?.weatherCarryForward || openMeteo === 'stale') return 'WX STALE';
   if (openMeteo === 'ok') return 'OPEN-METEO';
   if (openMeteo === 'error') return 'WX ERROR';
