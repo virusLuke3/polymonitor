@@ -292,13 +292,6 @@ function clampProbability(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
-function percentile(values: number[], ratio: number) {
-  if (!values.length) return 0;
-  const sorted = values.slice().sort((left, right) => left - right);
-  const index = Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio)));
-  return sorted[index] ?? 0;
-}
-
 function nearestPoint(points: PricePoint[], timestamp: number) {
   if (!points.length) return null;
   return points.reduce<PricePoint | null>((best, candidate) => {
@@ -340,12 +333,21 @@ function robustPriceRange(points: PricePoint[], paddingRatio: number) {
     .map((point) => point.close)
     .filter((value) => Number.isFinite(value) && value >= 0 && value <= 1);
   if (!values.length) return { minValue: 0, maxValue: 1 };
-  const min = values.length >= 20 ? percentile(values, 0.01) : Math.min(...values);
-  const max = values.length >= 20 ? percentile(values, 0.99) : Math.max(...values);
-  const spread = Math.max(0.025, max - min);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = Math.max(0.015, max - min);
+  const paddedMin = Math.max(0, min - spread * paddingRatio);
+  const paddedMax = Math.min(1, max + spread * paddingRatio);
+  if (paddedMax - paddedMin < 0.01) {
+    const center = (paddedMin + paddedMax) / 2;
+    return {
+      minValue: Math.max(0, center - 0.005),
+      maxValue: Math.min(1, center + 0.005),
+    };
+  }
   return {
-    minValue: Math.max(0, min - spread * paddingRatio),
-    maxValue: Math.min(1, max + spread * paddingRatio),
+    minValue: paddedMin,
+    maxValue: paddedMax,
   };
 }
 

@@ -461,14 +461,13 @@ export function QuantWorkspace() {
     maxPoints: selectedEntityKind === 'event' ? (chartRange === 'full' ? EVENT_TILE_FULL_MAX_POINTS : EVENT_TILE_MAX_POINTS) : undefined,
     range: selectedEntityKind === 'event' ? chartRange : undefined,
     resolution: selectedEntityKind === 'event' ? 'auto' : undefined,
-    live: livePriceRefreshEnabled,
+    live: false,
   };
   const priceRequestKey = [
     selectedEntityKind,
     marketSlug.trim(),
     backendPriceSource(priceSource),
     timeframe,
-    livePriceRefreshEnabled ? 'live' : 'snapshot',
     selectedOutcomeTokenId || 'all-outcomes',
     selectedBacktestAction,
   ].join('|');
@@ -504,11 +503,15 @@ export function QuantWorkspace() {
         console.debug('[quant] price load start', { cacheKey, cached: Boolean(cached), marketSlug, priceSource, timeframe, silent });
       }
     }
+    const priceQuery = {
+      ...semanticChartQuery,
+      live: livePriceRefreshEnabled && silent,
+    };
     const [seriesResult, statusResult] = await Promise.allSettled([
       hasMarketSlug
         ? (selectedEntityKind === 'event'
-          ? fetchQuantEventPriceSeries({ ...semanticChartQuery, eventSlug: marketSlug })
-          : fetchQuantMarketPriceSeries(semanticChartQuery))
+          ? fetchQuantEventPriceSeries({ ...priceQuery, eventSlug: marketSlug })
+          : fetchQuantMarketPriceSeries(priceQuery))
         : Promise.resolve(null),
       fetchQuantBuildStatus('', 12),
     ]);
