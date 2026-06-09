@@ -59,6 +59,8 @@ export type MarketGroupOutcome = {
   title?: string | null;
   yesPrice?: string | number | null;
   noPrice?: string | number | null;
+  blockCloseYesPrice?: string | number | null;
+  blockCloseBlockNumber?: string | number | null;
   change24h?: string | number | null;
   volume24h?: string | number | null;
   tradeCount24h?: number | string | null;
@@ -85,6 +87,7 @@ export type MarketGroupItem = {
   outcomeCount?: number | null;
   defaultOutcomeKey?: string | null;
   defaultMarketId?: number | null;
+  latestBlockClosePrice?: string | number | null;
   outcomes: MarketGroupOutcome[];
   topOutcomes: MarketGroupOutcome[];
 };

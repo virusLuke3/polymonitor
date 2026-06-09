@@ -10,6 +10,8 @@ MARKET_GROUPS_DETAIL_NAMESPACE = "snapshot:market-groups:detail"
 MARKET_GROUPS_CHART_NAMESPACE = "snapshot:market-groups:chart"
 MARKET_GROUPS_LIST_TTL_SECONDS = 120
 MARKET_GROUPS_DETAIL_TTL_SECONDS = 180
+TERMINAL_PROBABILITY_LOW = 0.001
+TERMINAL_PROBABILITY_HIGH = 0.999
 
 CHART_RANGE_INTERVALS: Dict[str, str] = {
     "1h": "5m",
@@ -89,6 +91,17 @@ def _float_value(value: Any) -> Optional[float]:
     if numeric != numeric:
         return None
     return numeric
+
+
+def _is_terminal_probability(value: Any) -> bool:
+    numeric = _float_value(value)
+    if numeric is None:
+        return False
+    return numeric <= TERMINAL_PROBABILITY_LOW or numeric >= TERMINAL_PROBABILITY_HIGH
+
+
+def _clamp_probability(value: float) -> float:
+    return max(0.0, min(1.0, value))
 
 
 def _parse_timestamp(value: Any) -> float:
@@ -830,6 +843,128 @@ def _serving_group_from_row(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _outcome_market_id(outcome: Dict[str, Any]) -> Optional[int]:
+    market_id = _float_value((outcome or {}).get("marketId") or (outcome or {}).get("localMarketId"))
+    if market_id is None:
+        return None
+    return int(market_id)
+
+
+def _group_market_ids(group: Dict[str, Any]) -> List[int]:
+    ids: List[int] = []
+    default_market_id = _float_value(group.get("defaultMarketId"))
+    if default_market_id is not None:
+        ids.append(int(default_market_id))
+    for outcome in [*(group.get("outcomes") or []), *(group.get("topOutcomes") or [])]:
+        if not isinstance(outcome, dict):
+            continue
+        market_id = _outcome_market_id(outcome)
+        if market_id is not None:
+            ids.append(market_id)
+    return list(dict.fromkeys(ids))
+
+
+def _latest_block_close_by_market_id(ctx: dict, market_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
+    ids = [int(market_id) for market_id in dict.fromkeys(market_ids) if market_id is not None]
+    if not ids:
+        return {}
+    table_exists = ctx.get("table_exists")
+    if not callable(table_exists):
+        return {}
+    try:
+        if not table_exists("quant.market_token_block_close"):
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        rows = ctx["query_all"](
+            f"""
+            WITH ranked AS (
+                SELECT
+                    market_id,
+                    block_number,
+                    close_price,
+                    yes_probability_close,
+                    row_number() OVER (PARTITION BY market_id ORDER BY block_number DESC) AS rn
+                FROM quant.market_token_block_close
+                WHERE market_id IN ({placeholders})
+                  AND UPPER(token_side) = 'YES'
+                  AND NOT (
+                      jsonb_exists(COALESCE(anomaly_flags, '[]'::jsonb), 'extreme_price_trade_present')
+                      AND COALESCE(trade_count, 0) <= 3
+                      AND COALESCE(volume, 0) <= 250
+                      AND (close_price >= 0.95 OR close_price <= 0.002)
+                  )
+            )
+            SELECT market_id, block_number, close_price, yes_probability_close
+            FROM ranked
+            WHERE rn = 1
+            """,
+            ids,
+        )
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger:
+            logger.exception("market group latest block-close lookup failed")
+        return {}
+    latest: Dict[int, Dict[str, Any]] = {}
+    for row in rows:
+        market_id = _float_value(row.get("market_id"))
+        if market_id is None:
+            continue
+        price = _float_value(row.get("yes_probability_close"))
+        if price is None:
+            price = _float_value(row.get("close_price"))
+        if price is None:
+            continue
+        latest[int(market_id)] = {
+            "price": _clamp_probability(price),
+            "blockNumber": row.get("block_number"),
+        }
+    return latest
+
+
+def _apply_latest_block_close_prices(ctx: dict, items: List[Dict[str, Any]]) -> None:
+    latest_by_market_id = _latest_block_close_by_market_id(
+        ctx,
+        [market_id for item in items for market_id in _group_market_ids(item)],
+    )
+    if not latest_by_market_id:
+        return
+    for group in items:
+        default_market_id = _float_value(group.get("defaultMarketId"))
+        default_price: Optional[float] = None
+        for outcome in [*(group.get("outcomes") or []), *(group.get("topOutcomes") or [])]:
+            if not isinstance(outcome, dict):
+                continue
+            market_id = _outcome_market_id(outcome)
+            latest = latest_by_market_id.get(market_id) if market_id is not None else None
+            if not latest:
+                continue
+            yes_price = latest["price"]
+            outcome["blockCloseYesPrice"] = yes_price
+            outcome["blockCloseBlockNumber"] = latest.get("blockNumber")
+            outcome["yesPrice"] = yes_price
+            outcome["noPrice"] = _clamp_probability(1.0 - yes_price)
+            if default_market_id is not None and market_id == int(default_market_id):
+                default_price = yes_price
+        if default_price is not None:
+            group["latestBlockClosePrice"] = default_price
+
+
+def _group_has_terminal_probability(group: Dict[str, Any]) -> bool:
+    if _is_terminal_probability(group.get("latestBlockClosePrice")):
+        return True
+    for outcome in [*(group.get("outcomes") or []), *(group.get("topOutcomes") or [])]:
+        if not isinstance(outcome, dict):
+            continue
+        if (
+            _is_terminal_probability(outcome.get("blockCloseYesPrice"))
+            or _is_terminal_probability(outcome.get("yesPrice"))
+            or _is_terminal_probability(outcome.get("noPrice"))
+        ):
+            return True
+    return False
+
+
 def _serving_market_groups_payload(
     ctx: dict,
     *,
@@ -881,7 +1016,7 @@ def _serving_market_groups_payload(
         "volume": "volume_24h DESC, last_activity_at DESC NULLS LAST, active_rank DESC",
     }.get(sort, "active_rank DESC, volume_24h DESC, last_activity_at DESC NULLS LAST")
     offset = (page - 1) * page_size
-    fetch_limit = max(page_size, page_size * 4) if sort == "active" and not query else page_size
+    fetch_limit = max(page_size, page_size * 8) if sort == "active" and not query else page_size
     rows = ctx["query_all"](
         f"""
         SELECT
@@ -902,6 +1037,9 @@ def _serving_market_groups_payload(
     )
     total = int((total_row[0] or {}).get("total") or 0) if total_row else 0
     items = [_serving_group_from_row(ctx, row) for row in rows]
+    _apply_latest_block_close_prices(ctx, items)
+    if sort == "active":
+        items = [item for item in items if not _group_has_terminal_probability(item)]
     if sort == "active" and not query:
         items = _limit_group_category_dominance(items, page_size)
     items = items[:page_size]
@@ -980,7 +1118,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 14}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 15}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)

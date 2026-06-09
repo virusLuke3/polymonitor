@@ -142,6 +142,12 @@ function complementPrice(value?: string | number | null) {
   return Math.max(0, Math.min(1, 1 - numeric));
 }
 
+function isTerminalProbability(value?: string | number | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return false;
+  return numeric <= 0.001 || numeric >= 0.999;
+}
+
 function firstFiniteValue(...values: Array<string | number | null | undefined>) {
   return values.find((value) => {
     if (value === null || value === undefined || value === '') return false;
@@ -228,13 +234,24 @@ function groupActiveRank(group: MarketGroupItem) {
 }
 
 function groupBestLivePrice(group: MarketGroupItem) {
+  const blockClosePrice = Number(group.latestBlockClosePrice);
+  if (Number.isFinite(blockClosePrice)) return blockClosePrice;
   const candidates = [...(group.outcomes || []), ...(group.topOutcomes || [])]
-    .map((outcome) => Number(outcome.yesPrice))
+    .map((outcome) => Number(outcome.blockCloseYesPrice ?? outcome.yesPrice))
     .filter((value) => Number.isFinite(value));
   if (!candidates.length) return null;
   return candidates
     .slice()
     .sort((left, right) => Math.abs(left - 0.5) - Math.abs(right - 0.5))[0] ?? null;
+}
+
+function groupHasTerminalProbability(group: MarketGroupItem) {
+  if (isTerminalProbability(group.latestBlockClosePrice)) return true;
+  return [...(group.outcomes || []), ...(group.topOutcomes || [])].some((outcome) => (
+    isTerminalProbability(outcome.blockCloseYesPrice)
+    || isTerminalProbability(outcome.yesPrice)
+    || isTerminalProbability(outcome.noPrice)
+  ));
 }
 
 function groupIsExpired(group: MarketGroupItem) {
@@ -402,7 +419,7 @@ function ActiveMarketsPanel({
           return haystack.includes(query);
         })
       : [...marketGroups];
-    const liveFiltered = filtered.filter((group) => query || !groupIsExpired(group));
+    const liveFiltered = filtered.filter((group) => query || (!groupIsExpired(group) && !groupHasTerminalProbability(group)));
     if (marketGroupSort === 'new') return liveFiltered.sort((a, b) => parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt));
     if (marketGroupSort === 'volume') return liveFiltered.sort((a, b) => Number(groupDisplayVolume(b) || 0) - Number(groupDisplayVolume(a) || 0));
     if (marketGroupSort === 'close') return liveFiltered.sort((a, b) => timestampOrInfinity(a.endDate) - timestampOrInfinity(b.endDate));

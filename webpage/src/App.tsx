@@ -222,12 +222,26 @@ function pickDefaultMarketId(markets: MarketListItem[], featured?: MarketSummary
   return markets[0]?.id ?? featured?.id ?? null;
 }
 
+function groupHasTerminalProbability(group: MarketGroupItem) {
+  const values = [
+    group.latestBlockClosePrice,
+    ...(group.outcomes || []).flatMap((outcome) => [outcome.blockCloseYesPrice, outcome.yesPrice, outcome.noPrice]),
+    ...(group.topOutcomes || []).flatMap((outcome) => [outcome.blockCloseYesPrice, outcome.yesPrice, outcome.noPrice]),
+  ];
+  return values.some((value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && (numeric <= 0.001 || numeric >= 0.999);
+  });
+}
+
 function pickDefaultMarketGroup(groups: MarketGroupItem[]) {
-  const liveGroups = groups.filter((group) => Number(group.tradeCount24h || 0) > 0);
+  const eligibleGroups = groups.filter((group) => !groupHasTerminalProbability(group));
+  const liveGroups = eligibleGroups.filter((group) => Number(group.tradeCount24h || 0) > 0);
   return (
     liveGroups.find((group) => Number(group.volume24h || 0) > 0 && Number(group.outcomeCount || 0) > 1)
     || liveGroups.find((group) => Number(group.outcomeCount || 0) > 1)
     || liveGroups[0]
+    || eligibleGroups[0]
     || null
   );
 }
