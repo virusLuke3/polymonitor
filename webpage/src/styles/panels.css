@@ -21881,18 +21881,21 @@ a.wm-orderfilled-row {
 }
 
 .wm-focused-market-list .wm-poly-market-card {
-  min-height: 74px !important;
-  padding: 7px 30px 7px 10px !important;
-  border: 0 !important;
-  border-left: 2px solid transparent !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  min-height: 82px !important;
+  margin: 0 0 8px !important;
+  padding: 9px 30px 9px 12px !important;
+  border: 1px solid rgba(148, 163, 184, 0.14) !important;
+  border-left: 3px solid var(--wm-market-accent, var(--wm-terminal-positive)) !important;
+  border-radius: 7px !important;
+  background: rgba(8, 13, 20, 0.82) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
 }
 
 .wm-focused-market-list .wm-poly-market-card.active {
   border-left-color: var(--wm-market-accent, var(--wm-terminal-positive)) !important;
-  background: color-mix(in srgb, var(--wm-market-accent, #22c55e) 13%, transparent) !important;
+  border-color: color-mix(in srgb, var(--wm-market-accent, #22c55e) 34%, rgba(148, 163, 184, 0.16)) !important;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--wm-market-accent, #22c55e) 14%, transparent), rgba(8, 13, 20, 0.92) 42%) !important;
 }
 
 .wm-focused-market-list .wm-poly-market-card.active .wm-poly-market-dot {
@@ -21905,7 +21908,8 @@ a.wm-orderfilled-row {
 }
 
 .wm-focused-market-list .wm-poly-market-card:hover {
-  background: rgba(255, 255, 255, 0.035) !important;
+  border-color: color-mix(in srgb, var(--wm-market-accent, #22c55e) 24%, rgba(148, 163, 184, 0.18)) !important;
+  background: rgba(14, 21, 31, 0.92) !important;
 }
 
 .wm-focus-event-head {
@@ -21997,8 +22001,16 @@ a.wm-orderfilled-row {
   box-shadow: none !important;
 }
 
+.wm-focused-market-row .wm-focus-book-ladder {
+  grid-template-rows: auto auto auto !important;
+}
+
+.wm-focused-market-row .wm-focus-book-rows {
+  overflow: hidden !important;
+}
+
 .wm-focus-book-row {
-  min-height: 20px !important;
+  min-height: 22px !important;
   padding: 0 8px !important;
   font-size: 10.5px !important;
 }
@@ -22015,24 +22027,21 @@ a.wm-orderfilled-row {
   grid-template-columns: minmax(0, 1fr) !important;
   grid-template-rows: minmax(22px, auto) minmax(15px, auto) !important;
   align-content: center !important;
-  gap: 3px !important;
-  min-height: 52px !important;
-  padding: 6px 8px 6px 10px !important;
+  gap: 5px !important;
+  min-height: 58px !important;
+  padding: 7px 8px 7px 10px !important;
 }
 
 .wm-focused-market-row .wm-focus-trades .wm-orderfilled-top {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) 58px !important;
-  align-items: center !important;
-  gap: 6px !important;
+  display: block !important;
   min-width: 0 !important;
 }
 
 .wm-focused-market-row .wm-focus-trades .wm-orderfilled-headline {
   display: grid !important;
-  grid-template-columns: 40px 32px 35px minmax(38px, 1fr) !important;
+  grid-template-columns: 42px 34px 42px minmax(54px, 1fr) !important;
   align-items: center !important;
-  gap: 4px !important;
+  gap: 5px !important;
   min-width: 0 !important;
 }
 
@@ -22058,19 +22067,19 @@ a.wm-orderfilled-row {
 
 .wm-focused-market-row .wm-focus-trades .wm-orderfilled-link {
   justify-self: end !important;
-  width: 58px !important;
+  width: auto !important;
   min-width: 0 !important;
-  min-height: 20px !important;
-  padding: 0 3px !important;
+  min-height: 16px !important;
+  padding: 0 !important;
   overflow: hidden !important;
-  text-align: center !important;
+  text-align: right !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
 }
 
 .wm-focused-market-row .wm-focus-trades .wm-orderfilled-meta {
   display: grid !important;
-  grid-template-columns: 44px minmax(0, 1fr) !important;
+  grid-template-columns: 44px minmax(0, 1fr) 54px !important;
   align-items: center !important;
   gap: 6px !important;
   min-width: 0 !important;
@@ -22091,7 +22100,7 @@ a.wm-orderfilled-row {
 }
 
 .wm-focused-market-row .wm-focus-trades .wm-orderfilled-hash {
-  text-align: right !important;
+  text-align: left !important;
 }
 
 .wm-focused-oracle-feed .wm-oracle-focused-status-list {
@@ -22167,12 +22176,12 @@ a.wm-orderfilled-row {
 
 .wm-focused-market-row .wm-focus-book-rows {
   min-height: 0 !important;
-  overflow: auto !important;
+  overflow: hidden !important;
 }
 
 .wm-focused-market-row .wm-focus-book-row {
   grid-template-columns: 52px minmax(64px, 1fr) minmax(72px, 0.95fr) !important;
-  height: 19px !important;
+  height: 22px !important;
 }
 
 @media (max-width: 1400px) {

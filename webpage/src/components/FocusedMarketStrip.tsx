@@ -3,7 +3,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { emptyState, orderfilledList } from '@/panels/shared/renderers';
 import { formatCompact, formatCurrencyCompact, formatPercent, formatRelative, formatSignedPercent, signedClass } from '@/panels/shared/formatters';
-import { fetchMarketLobByToken } from '@/services/api';
+import { fetchMarketLobByToken, fetchQuantMarketPriceSeries } from '@/services/api';
 import type {
   ChartPayload,
   L2Level,
@@ -15,6 +15,7 @@ import type {
   MarketListItem,
   PanelRenderContext,
   PriceSummary,
+  QuantMarketSeriesPayload,
   TradeRow,
 } from '@/types';
 
@@ -38,7 +39,7 @@ const FOCUS_CHART = {
   bottom: 48,
   left: 10,
 };
-const BOOK_LEVEL_LIMIT = 12;
+const BOOK_LEVEL_LIMIT = 4;
 
 const POLYMARKET_SERIES_COLORS = ['#7cb6ff', '#4377ff', '#f5b800', '#ff7a1a', '#7f56d9', '#12b76a', '#f04438', '#06aed4'];
 
@@ -181,6 +182,14 @@ function compactTimeLabel(value: number, index: number, total: number) {
   });
 }
 
+function compactBlockLabel(value: number, index: number, total: number) {
+  if (!Number.isFinite(value)) return '';
+  if (index === total - 1) return 'Latest';
+  if (value >= 1_000_000) return `#${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `#${Math.round(value / 1_000)}K`;
+  return `#${Math.round(value)}`;
+}
+
 function chartTimeTicks(points: Array<{ timestamp: string }>, count = 4) {
   const stamps = points
     .map((point) => new Date(point.timestamp).getTime())
@@ -194,6 +203,22 @@ function chartTimeTicks(points: Array<{ timestamp: string }>, count = 4) {
     const ratio = index / Math.max(count - 1, 1);
     const ts = minTs + (maxTs - minTs) * ratio;
     return { ts, ratio, label: compactDateLabel(ts) };
+  });
+}
+
+function chartBlockTicks(points: Array<{ blockNumber?: number | string | null; x?: number | string | null }>, count = 4) {
+  const blocks = points
+    .map((point) => Number(point.blockNumber ?? point.x))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (!blocks.length) return [];
+  const minBlock = blocks[0] ?? 0;
+  const maxBlock = blocks[blocks.length - 1] ?? minBlock;
+  if (maxBlock <= minBlock) return [{ block: minBlock, ratio: 0, label: compactBlockLabel(minBlock, 0, 1) }];
+  return Array.from({ length: count }, (_, index) => {
+    const ratio = index / Math.max(count - 1, 1);
+    const block = minBlock + (maxBlock - minBlock) * ratio;
+    return { block, ratio, label: compactBlockLabel(block, index, count) };
   });
 }
 
@@ -226,6 +251,51 @@ function buildLinePath(
     .map((value, index) => {
       const x = left + (index / Math.max(points.length - 1, 1)) * plotWidth;
       const y = top + (1 - (value - min) / span) * plotHeight;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(' ');
+}
+
+function buildBlockLinePath(
+  points: Array<{ blockNumber: number; price: number }>,
+  {
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+    min,
+    max,
+    minBlock: domainMinBlock,
+    maxBlock: domainMaxBlock,
+  }: {
+    width: number;
+    height: number;
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    min: number;
+    max: number;
+    minBlock?: number;
+    maxBlock?: number;
+  },
+) {
+  const clean = points
+    .filter((point) => Number.isFinite(point.blockNumber) && Number.isFinite(point.price))
+    .sort((leftPoint, rightPoint) => leftPoint.blockNumber - rightPoint.blockNumber);
+  if (clean.length < 2) return '';
+  const minBlock = Number.isFinite(domainMinBlock) ? Number(domainMinBlock) : (clean[0]?.blockNumber ?? 0);
+  const maxBlock = Number.isFinite(domainMaxBlock) ? Number(domainMaxBlock) : (clean[clean.length - 1]?.blockNumber ?? minBlock);
+  const blockSpan = Math.max(maxBlock - minBlock, 1);
+  const valueSpan = max - min || 1;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  return clean
+    .map((point, index) => {
+      const x = left + ((point.blockNumber - minBlock) / blockSpan) * plotWidth;
+      const y = top + (1 - (point.price - min) / valueSpan) * plotHeight;
       return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
     })
     .join(' ');
@@ -538,6 +608,70 @@ function eventChartLegend(
   );
 }
 
+function blockCloseLimitForRange(range?: string | null) {
+  switch (String(range || '').toLowerCase()) {
+    case '1h':
+      return 1800;
+    case '1d':
+      return 25000;
+    case '1w':
+    case '1m':
+    case 'all':
+      return 25000;
+    default:
+      return 5000;
+  }
+}
+
+function blockCloseSeriesToChart(
+  payload: QuantMarketSeriesPayload | null,
+  selectedMarketId: number | null,
+  selectedOutcome: MarketGroupOutcome | null,
+  range?: string | null,
+): ChartPayload | null {
+  const outcomes = payload?.outcomes || [];
+  if (!outcomes.length) return null;
+  const selectedYesToken = String(selectedOutcome?.yesTokenId || '').trim();
+  const selectedSlug = String(selectedOutcome?.slug || '').trim();
+  const selected = outcomes.find((outcome) => (
+    (selectedMarketId != null && Number(outcome.marketId) === Number(selectedMarketId))
+      || (selectedYesToken && String(outcome.buyYesTokenId || outcome.tokenId || '') === selectedYesToken)
+      || (selectedSlug && String(outcome.marketSlug || '') === selectedSlug)
+  )) || outcomes[0];
+  if (!selected) return null;
+  const yesPoints = (selected.points || [])
+    .map((point) => {
+      const blockNumber = Number(point.blockNumber ?? point.x);
+      const yesPrice = Number(point.price);
+      return { blockNumber, yesPrice };
+    })
+    .filter((point) => Number.isFinite(point.blockNumber) && Number.isFinite(point.yesPrice));
+  if (yesPoints.length < 2) return null;
+  const noByBlock = new Map<number, number>();
+  (selected.complementPoints || []).forEach((point) => {
+    const blockNumber = Number(point.blockNumber ?? point.x);
+    const noPrice = Number(point.price);
+    if (Number.isFinite(blockNumber) && Number.isFinite(noPrice)) noByBlock.set(blockNumber, noPrice);
+  });
+  return {
+    marketId: Number(selected.marketId || selectedMarketId || 0),
+    localMarketId: Number(selected.marketId || selectedMarketId || 0),
+    range: String(range || '1d'),
+    interval: 'block',
+    kind: 'probability',
+    historyStatus: yesPoints.length >= 12 ? 'ok' : 'short',
+    priceSource: 'orderfilled_block_close',
+    servingSource: 'quant.market_token_block_close',
+    points: yesPoints.map((point) => ({
+      timestamp: String(point.blockNumber),
+      blockNumber: point.blockNumber,
+      x: point.blockNumber,
+      yesPrice: point.yesPrice,
+      noPrice: noByBlock.get(point.blockNumber) ?? Math.max(0, Math.min(1, 1 - point.yesPrice)),
+    })),
+  };
+}
+
 function renderDetailChart(chart: ChartPayload | null, activeRange?: string | null) {
   const points = chart?.points || [];
   if (!points.length) return emptyState('No market history loaded yet.');
@@ -545,6 +679,68 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
   const tickLabel = (value: number) => (chart?.kind === 'underlying-price' ? formatUnderlyingValue(value) : `${Math.round(value * 100)}.0%`);
 
   if (chart?.kind !== 'underlying-price') {
+    const isBlockAxis = String(chart?.priceSource || '').toLowerCase().includes('block_close')
+      || String(chart?.interval || '').toLowerCase() === 'block'
+      || points.some((point) => point.blockNumber != null || point.x != null);
+    if (isBlockAxis) {
+      const yesBlock = points
+        .map((point) => ({ blockNumber: Number(point.blockNumber ?? point.x), price: Number(point.yesPrice) }))
+        .filter((point) => Number.isFinite(point.blockNumber) && Number.isFinite(point.price));
+      const noBlock = points
+        .map((point) => ({ blockNumber: Number(point.blockNumber ?? point.x), price: Number(point.noPrice) }))
+        .filter((point) => Number.isFinite(point.blockNumber) && Number.isFinite(point.price));
+      if (yesBlock.length < 2) return emptyState('No block-close probability history loaded yet.');
+      const yes = yesBlock.map((point) => point.price);
+      const no = noBlock.map((point) => point.price);
+      const merged = [...yes, ...(no.length === yes.length ? no : [])];
+      const { min, max } = polymarketProbabilityScale(merged);
+      const allBlocks = [...yesBlock, ...noBlock].map((point) => point.blockNumber).filter((value) => Number.isFinite(value));
+      const domainMinBlock = allBlocks.length ? Math.min(...allBlocks) : undefined;
+      const domainMaxBlock = allBlocks.length ? Math.max(...allBlocks) : undefined;
+      const yesPath = buildBlockLinePath(yesBlock, { width, height, left, right, top, bottom, min, max, minBlock: domainMinBlock, maxBlock: domainMaxBlock });
+      const fallbackNoBlock = yesBlock.map((point) => ({ ...point, price: 1 - point.price }));
+      const noSeries = no.length === yes.length ? noBlock : fallbackNoBlock;
+      const noPath = buildBlockLinePath(noSeries, { width, height, left, right, top, bottom, min, max, minBlock: domainMinBlock, maxBlock: domainMaxBlock });
+      const ticks = buildHorizontalTicks(min, max, 5);
+      const lastYes = yes[yes.length - 1] ?? 0;
+      const lastNo = (no.length === yes.length ? no[no.length - 1] : 1 - lastYes) ?? 0;
+      const span = max - min || 1;
+      const plotHeight = height - top - bottom;
+      const projectY = (value: number) => top + (1 - (value - min) / span) * plotHeight;
+      const blockTicks = chartBlockTicks(points, 5);
+      const plotWidth = width - left - right;
+
+      return (
+        <div className="wm-focus-chart-shell wm-polymarket-prob-chart wm-block-close-chart">
+          <div className="wm-focus-chart-watermark" aria-hidden="true">Block Close</div>
+          <svg viewBox={`0 0 ${width} ${height}`} className="wm-focus-chart-svg" preserveAspectRatio="none">
+            {ticks.map((tick) => {
+              const y = projectY(tick);
+              return (
+                <g key={tick}>
+                  <line x1={left} y1={y} x2={width - right} y2={y} className="wm-focus-chart-grid h" />
+                  <text x={width - right + 8} y={y + 4} className="wm-focus-chart-axis-text">{tickLabel(tick)}</text>
+                </g>
+              );
+            })}
+            {blockTicks.map((tick, index) => {
+              const x = left + tick.ratio * plotWidth;
+              return (
+                <g key={`${tick.block}-${tick.label}`}>
+                  <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
+                  <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactBlockLabel(tick.block, index, blockTicks.length)}</text>
+                </g>
+              );
+            })}
+            <line x1={left} y1={height - 25} x2={width - right} y2={height - 25} className="wm-focus-chart-timeline-line" />
+            <path d={yesPath} className="wm-focus-chart-line yes" />
+            {noPath ? <path d={noPath} className="wm-focus-chart-line no" /> : null}
+            <circle cx={width - right} cy={projectY(lastYes)} r="4.4" className="wm-focus-chart-endpoint selected" style={{ fill: '#4377ff' }} />
+            {noPath ? <circle cx={width - right} cy={projectY(lastNo)} r="3.8" className="wm-focus-chart-endpoint no-dot" /> : null}
+          </svg>
+        </div>
+      );
+    }
     const yesTimed = normalizeTimedPointsForRange(
       points
         .map((point) => ({ timestamp: String(point.timestamp || ''), price: Number(point.yesPrice) }))
@@ -673,6 +869,7 @@ function chartSourceLabel(source?: string | null, status?: string | null) {
   const normalizedStatus = String(status || '').toLowerCase();
   if (normalizedStatus === 'snapshot') return 'Snapshot only';
   if (normalizedStatus === 'flat') return 'Flat quote';
+  if (normalizedSource.includes('block_close')) return 'OrderFilled block close';
   if (normalizedSource.includes('orderfilled')) return 'OrderFilled history';
   if (normalizedSource.includes('trade-history')) return 'Trade history';
   if (normalizedSource.includes('clob')) return 'CLOB quote history';
@@ -710,15 +907,27 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     lob: null,
     loading: false,
   });
+  const [blockCloseState, setBlockCloseState] = useState<{ key: string; payload: QuantMarketSeriesPayload | null; loading: boolean }>({
+    key: '',
+    payload: null,
+    loading: false,
+  });
   const tokenLob = tokenLobState.key === selectedTokenKey ? tokenLobState.lob : null;
   const tokenLobLoading = tokenLobState.key === selectedTokenKey && tokenLobState.loading;
   const executionAvailable = bundleMatchesSelected || selectedOutcomeMatches || Boolean(selectedTokenId) || Boolean(ctx.selectedMarketId && !detail);
-  const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
   const price = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.price ?? null) : null;
-  const chartLatestPoint = (chart?.points || []).length ? chart?.points?.[chart.points.length - 1] : null;
   const lob = executionAvailable ? (tokenLob || (bundleMatchesSelected ? ctx.bundle?.lob : null)) : null;
   const trades = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.trades || []) : [];
   const marketStats = marketLookup(ctx.markets, ctx.selectedMarketId);
+  const selectedMarketSlug = String(selectedOutcome?.slug || focusedMarket?.slug || marketStats?.slug || ctx.bundle?.identity?.slug || '').trim();
+  const blockCloseKey = selectedMarketSlug
+    ? `${selectedMarketSlug}:${ctx.selectedMarketId || ''}:${selectedTokenId || activeOutcomeKey || ''}:${ctx.selectedMarketGroupChartRange}`
+    : '';
+  const blockCloseChart = blockCloseState.key === blockCloseKey
+    ? blockCloseSeriesToChart(blockCloseState.payload, ctx.selectedMarketId, selectedOutcome, ctx.selectedMarketGroupChartRange)
+    : null;
+  const chart = blockCloseChart || (bundleMatchesSelected ? (ctx.bundle?.chart || null) : null);
+  const chartLatestPoint = (chart?.points || []).length ? chart?.points?.[chart.points.length - 1] : null;
   const [bookSide, setBookSide] = useState<BookSide>('yes');
   const activeBook = bookSide === 'no' ? lob?.no : lob?.yes;
   const activePrice = bookSide === 'no'
@@ -844,6 +1053,34 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       cancelled = true;
     };
   }, [detail?.title, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
+
+  useEffect(() => {
+    if (!selectedMarketSlug || !executionAvailable || !blockCloseKey) {
+      setBlockCloseState((current) => (current.loading || current.payload ? { key: '', payload: null, loading: false } : current));
+      return;
+    }
+    let cancelled = false;
+    const key = blockCloseKey;
+    setBlockCloseState({ key, payload: null, loading: true });
+    fetchQuantMarketPriceSeries({
+      marketSlug: selectedMarketSlug,
+      priceSource: 'orderfilled_block_close',
+      scope: 'market',
+      tokenSide: 'YES',
+      limit: blockCloseLimitForRange(ctx.selectedMarketGroupChartRange),
+      pointFormat: 'lite',
+      maxOutcomes: 8,
+    })
+      .then((payload) => {
+        if (!cancelled) setBlockCloseState({ key, payload, loading: false });
+      })
+      .catch(() => {
+        if (!cancelled) setBlockCloseState({ key, payload: null, loading: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [blockCloseKey, ctx.selectedMarketGroupChartRange, executionAvailable, selectedMarketSlug]);
 
   useEffect(() => {
     setBookSide('yes');
@@ -1040,7 +1277,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <div className="wm-focus-book-side ask">
                   <div className="wm-focus-book-side-head">
                     <strong>Asks</strong>
-                    <span>{askLevels.length} levels · {formatBookTotal(askDepthTotal)}</span>
+                    <span>top {Math.min(askLevels.length, BOOK_LEVEL_LIMIT)} · {formatBookTotal(askDepthTotal)}</span>
                   </div>
                   <div className="wm-focus-book-header">
                     <span>Price</span>
@@ -1059,7 +1296,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <div className="wm-focus-book-side bid">
                   <div className="wm-focus-book-side-head">
                     <strong>Bids</strong>
-                    <span>{bidLevels.length} levels · {formatBookTotal(bidDepthTotal)}</span>
+                    <span>top {Math.min(bidLevels.length, BOOK_LEVEL_LIMIT)} · {formatBookTotal(bidDepthTotal)}</span>
                   </div>
                   <div className="wm-focus-book-header">
                     <span>Price</span>
@@ -1085,9 +1322,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
           className="wm-focus-panel wm-focus-trades-panel wm-orderfilled-panel"
         >
           <div className="wm-focus-trades">
-            <div className="wm-focus-trades-meta">
-              <strong>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : (hasServingTradeActivity ? 'summary only' : noTradesYet ? 'no trades yet' : 'waiting')}</strong>
-            </div>
             {!executionAvailable && detail
               ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
               : trades.length

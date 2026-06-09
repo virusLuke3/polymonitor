@@ -201,12 +201,12 @@ function orderfilledList(
                 <strong>{tradePriceCents(trade.price)}</strong>
                 <em>{notional ? `$${formatCompact(notional)}` : '$--'}</em>
               </div>
-              <span className={`wm-orderfilled-link ${txUrl ? 'ready' : 'disabled'}`}>{txUrl ? 'Polyscan' : 'No tx'}</span>
             </div>
             {!options.compact ? <div className="wm-orderfilled-title">{marketTitle || 'Untitled market'}</div> : null}
             <div className="wm-orderfilled-meta">
               <span>{formatRelative(trade.timestamp || null)}</span>
               <span className="wm-orderfilled-hash">{txHash ? shortHash(txHash, 8, 6) : actor}</span>
+              <span className={`wm-orderfilled-link ${txUrl ? 'ready' : 'disabled'}`}>{txUrl ? 'Polyscan' : 'No tx'}</span>
             </div>
             <div className="wm-orderfilled-tooltip" role="tooltip" aria-hidden="true">
               <div className="wm-orderfilled-tooltip-title">{marketTitle || `Market #${trade.marketId || '--'}`}</div>
