@@ -592,6 +592,19 @@ export function WorkspaceHeader({
     chooseResult(activeResult);
   };
 
+  const chooseFirstOutcomeForActiveResult = () => {
+    if (activeResult?.kind !== 'event') {
+      chooseResult(activeResult);
+      return;
+    }
+    const firstOutcome = relatedOutcomeMarkets[0] || visibleRelatedOutcomeMarkets[0] || null;
+    if (firstOutcome?.marketSlug) {
+      chooseMarket(firstOutcome.marketSlug, firstOutcome);
+      return;
+    }
+    chooseResult(activeResult);
+  };
+
   const moveHighlight = (delta: number) => {
     setHighlightedIndex((current) => {
       if (!flatResults.length) return 0;
@@ -684,7 +697,8 @@ export function WorkspaceHeader({
               }
               if (event.key === 'Enter') {
                 event.preventDefault();
-                chooseHighlightedResult();
+                if (event.shiftKey) chooseFirstOutcomeForActiveResult();
+                else chooseHighlightedResult();
               }
               if (event.key === 'Escape') {
                 event.preventDefault();
@@ -788,6 +802,7 @@ export function WorkspaceHeader({
                                   <strong>{result.title}</strong>
                                   <small>{result.kind === 'token' ? result.subtitle : result.slug}</small>
                                   <em>{result.coverage}{result.price ? ` · ${result.price}` : ''}</em>
+                                  {result.kind === 'event' && index === highlightedIndex ? <kbd>Shift+Enter first outcome</kbd> : null}
                                 </span>
                                 <span className="qtv-result-badges">
                                   <span
@@ -854,6 +869,16 @@ export function WorkspaceHeader({
                       <small>{activeResult.slug}</small>
                       <div className="qtv-preview-actions">
                         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseResult(activeResult)}>Open</button>
+                        {activeResult.kind === 'event' ? (
+                          <button
+                            type="button"
+                            disabled={!relatedOutcomeMarkets.length}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={chooseFirstOutcomeForActiveResult}
+                          >
+                            Open first outcome
+                          </button>
+                        ) : null}
                         <button type="button" className={favoriteSlugSet.has(activeResult.market.marketSlug) ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => toggleFavorite(activeResult.market)}>
                           {favoriteSlugSet.has(activeResult.market.marketSlug) ? 'Favorited' : 'Favorite'}
                         </button>
@@ -919,11 +944,9 @@ export function WorkspaceHeader({
                   )}
                 </aside>
               </div>
-              {activeSearchText ? (
-                <div className="qtv-palette-foot">
-                  <span>Ctrl/Cmd+K</span><span>Arrow keys</span><span>Enter open</span><span>Esc close</span><span>Tab filter</span>
-                </div>
-              ) : null}
+              <div className="qtv-palette-foot">
+                <span>Ctrl/Cmd+K</span><span>Arrow keys</span><span>Enter open</span><span>Shift+Enter first outcome</span><span>Esc close</span><span>Tab filter</span>
+              </div>
             </div>
             </>
           ) : null}
