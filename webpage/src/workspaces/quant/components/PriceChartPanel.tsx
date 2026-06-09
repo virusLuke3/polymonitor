@@ -265,6 +265,24 @@ function latestChange(group: { points: PricePoint[] }) {
   return latest - previous;
 }
 
+function countRows(groups: OutcomeGroup[]) {
+  return groups.reduce((sum, group) => sum + group.points.length, 0);
+}
+
+function sourceKindCounts(groups: OutcomeGroup[]) {
+  return groups.reduce((counts, group) => {
+    group.points.forEach((point) => {
+      const kind = priceKindForPoint(point, group.tokenSide);
+      if (kind === 'implied') counts.implied += 1;
+      else counts.direct += 1;
+      if (point.isCarriedForward) counts.carried += 1;
+      if (point.isInterpolated) counts.interpolated += 1;
+      if (point.qualityFlags?.length) counts.flagged += 1;
+    });
+    return counts;
+  }, { direct: 0, implied: 0, carried: 0, interpolated: 0, flagged: 0 });
+}
+
 function colorWithOpacity(hex: string, opacity: number) {
   const clean = hex.replace('#', '');
   const value = Number.parseInt(clean.length === 3 ? clean.split('').map((ch) => ch + ch).join('') : clean, 16);
@@ -641,6 +659,62 @@ export function PriceChartPanel({
   const allYesSum = rawGroupedOutcomes.filter((group) => group.tokenSide === 'YES').reduce((sum, group) => sum + latestClose(group), 0);
   const visibleYesSum = visibleOutcomeGroups.filter((group) => group.tokenSide === 'YES').reduce((sum, group) => sum + latestClose(group), 0);
   const sumWarning = eventMode && Math.abs(allYesSum - 1) > 0.08;
+  const chartViewSummary = useMemo(() => {
+    const sourceRows = countRows(sideFilteredOutcomes);
+    const filteredRows = countRows(viewFilteredOutcomes);
+    const visibleRows = countRows(visibleOutcomeGroups);
+    const sourceKinds = sourceKindCounts(sideFilteredOutcomes);
+    const visibleKinds = sourceKindCounts(visibleOutcomeGroups);
+    const coverage = sourceRows > 0 ? filteredRows / sourceRows : 0;
+    const visibleCoverage = filteredRows > 0 ? visibleRows / filteredRows : 0;
+    const qualityRows = sourceKinds.carried + sourceKinds.interpolated + sourceKinds.flagged;
+    const normalizedBlocks = new Set<number>();
+    if (chartViewMode === 'normalized') {
+      sideFilteredOutcomes
+        .filter((group) => group.tokenSide === 'YES')
+        .forEach((group) => group.points.forEach((point) => normalizedBlocks.add(Math.floor(point.timestamp))));
+    }
+    const labels: Record<ChartViewMode, { label: string; detail: string }> = {
+      raw: {
+        label: 'Raw',
+        detail: 'Plot the stored block-close probability without reshaping.',
+      },
+      normalized: {
+        label: 'Normalized',
+        detail: 'YES outcomes are divided by the same-block YES total, so the full event sums to 1.000 when coverage aligns.',
+      },
+      direct: {
+        label: 'Direct',
+        detail: 'Only rows whose plotted side was directly observed from the selected source are shown.',
+      },
+      implied: {
+        label: 'Implied',
+        detail: 'Only complement-derived rows are shown, usually NO from YES or YES from NO.',
+      },
+    };
+    let warning = '';
+    if (sourceRows && chartViewMode === 'direct' && filteredRows === 0) {
+      warning = 'No direct rows for the current side/source. Switch side or use Raw.';
+    } else if (sourceRows && chartViewMode === 'implied' && filteredRows === 0) {
+      warning = 'No implied rows for the current side/source. This source is already direct for the visible side.';
+    } else if (chartViewMode === 'normalized' && Math.abs(allYesSum - 1) > 0.08) {
+      warning = 'Latest raw YES sum is far from 1.000; normalized view is for relative event share, not executable price.';
+    } else if (qualityRows > 0) {
+      warning = `${qualityRows.toLocaleString('en-US')} rows have carried/interpolated/quality flags.`;
+    }
+    return {
+      ...labels[chartViewMode],
+      sourceRows,
+      filteredRows,
+      visibleRows,
+      sourceKinds,
+      visibleKinds,
+      coverage,
+      visibleCoverage,
+      normalizedBlockCount: normalizedBlocks.size,
+      warning,
+    };
+  }, [allYesSum, chartViewMode, sideFilteredOutcomes, viewFilteredOutcomes, visibleOutcomeGroups]);
   const maPoints = useMemo(() => {
     const closes = primaryPoints.map((point) => point.close);
     const ma = movingAverage(closes, Math.min(40, Math.max(3, Math.floor(primaryPoints.length / 20))));
@@ -1393,11 +1467,6 @@ export function PriceChartPanel({
   const sumText = eventMode && hasLoadedPrices ? fmtPrice(chartViewMode === 'normalized' ? 1 : allYesSum) : '--';
   const visibleSumText = eventMode && hasLoadedPrices ? fmtPrice(visibleYesSum) : '--';
   const latestPriceText = latest && hasLoadedPrices ? fmtPrice(latest.close) : '--';
-  const visibleScaleBlocks = hasLoadedPrices && priceSource.includes('block') && primaryPoints.length
-    ? [0, 0.33, 0.66, 1]
-      .map((ratio) => Math.floor(primaryPoints[Math.round((primaryPoints.length - 1) * ratio)]?.timestamp || 0))
-      .filter((block, index, blocks) => block > 0 && blocks.indexOf(block) === index)
-    : [];
   const loadingTitle = dataStatus === 'metadata_loading'
     ? 'Loading market metadata'
     : dataStatus === 'price_loading'
@@ -1589,13 +1658,6 @@ export function PriceChartPanel({
             <span>{market.category} · {eventMode ? `${displayedOutcomeCount} outcomes` : 'outcome probability'} · {priceSource}</span>
             <div className="qtv-indicator-legend">
               <span>Rows <b>{rowsText}</b></span>
-              {visibleScaleBlocks.length ? (
-                <span className="qtv-scale-pill">
-                  Scale
-                  {visibleScaleBlocks.map((block) => <em key={`scale-${block}`}>{blockLabel(block)}</em>)}
-                </span>
-              ) : null}
-              <span>View <b>{chartViewMode}</b></span>
               <span>Range <i>{hasLoadedPrices ? pointLabel(primaryPoints[0], priceSource) : '--'}</i> <em>{hasLoadedPrices ? pointLabel(primaryPoints[primaryPoints.length - 1], priceSource) : '--'}</em></span>
               <span>Volume <b>{hasLoadedPrices ? volumeTotal.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--'}</b></span>
               <span>Selected <b title={selectedGroup?.fullLabel}>{selectedText}</b></span>
@@ -1611,6 +1673,37 @@ export function PriceChartPanel({
                 {blockScaleSummaryTicks.map((block) => (
                   <span key={`inline-${block}`}>{blockLabel(block)}</span>
                 ))}
+              </div>
+            ) : null}
+            {eventMode ? (
+              <div className={`qtv-chart-view-strip ${chartViewSummary.warning ? 'has-warning' : ''}`}>
+                <div className="qtv-view-mode-buttons" aria-label="Price view mode">
+                  {(['raw', 'normalized', 'direct', 'implied'] as ChartViewMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      className={chartViewMode === mode ? 'active' : ''}
+                      type="button"
+                      title={mode === 'raw' ? 'Raw stored probability' : mode === 'normalized' ? 'Normalized event share' : mode === 'direct' ? 'Direct observed rows only' : 'Implied complement rows only'}
+                      onClick={() => setChartViewMode(mode)}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+                <span title={chartViewSummary.detail}><b>{chartViewSummary.label}</b> view</span>
+                <span>source <b>{chartViewSummary.sourceRows.toLocaleString('en-US')}</b></span>
+                <span>mode rows <b>{chartViewSummary.filteredRows.toLocaleString('en-US')}</b> <em>{fmtProbabilityPercent(chartViewSummary.coverage, 0)}</em></span>
+                <span>visible <b>{chartViewSummary.visibleRows.toLocaleString('en-US')}</b> <em>{fmtProbabilityPercent(chartViewSummary.visibleCoverage, 0)}</em></span>
+                <span>direct <b>{chartViewSummary.sourceKinds.direct.toLocaleString('en-US')}</b></span>
+                <span>implied <b>{chartViewSummary.sourceKinds.implied.toLocaleString('en-US')}</b></span>
+                {chartViewMode === 'normalized' ? (
+                  <>
+                    <span>blocks <b>{chartViewSummary.normalizedBlockCount.toLocaleString('en-US')}</b></span>
+                    <span>raw sum <b className={sumWarning && hasLoadedPrices ? 'negative' : ''}>{hasLoadedPrices ? fmtPrice(allYesSum) : '--'}</b></span>
+                    <span>visible share <b>{hasLoadedPrices ? fmtPrice(visibleYesSum) : '--'}</b></span>
+                  </>
+                ) : null}
+                {chartViewSummary.warning ? <strong>{chartViewSummary.warning}</strong> : null}
               </div>
             ) : null}
             <div className="qtv-outcome-legend">

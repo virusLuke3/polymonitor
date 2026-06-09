@@ -2590,11 +2590,11 @@
   z-index: 5;
   grid-row: 2;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: flex-start;
   gap: 12px;
-  min-height: 70px;
-  max-height: 124px;
+  min-height: 72px;
+  max-height: 154px;
   overflow: hidden;
   border-bottom: 1px solid rgba(38, 50, 68, 0.7);
   background: linear-gradient(180deg, rgba(7, 10, 15, 0.98), rgba(7, 10, 15, 0.9));
@@ -2604,6 +2604,7 @@
 
 .qtv-chart-meta {
   min-width: 0;
+  padding-right: 146px;
 }
 
 .qtv-chart-info strong {
@@ -2625,17 +2626,26 @@
 
 .qtv-indicator-legend {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 5px;
   margin-top: 7px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
   font-family: var(--font-mono);
   font-size: 10px;
+}
+
+.qtv-indicator-legend::-webkit-scrollbar {
+  display: none;
 }
 
 .qtv-indicator-legend span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex: 0 0 auto;
   min-height: 20px;
   border: 1px solid rgba(38, 50, 68, 0.88);
   border-radius: 3px;
@@ -2651,6 +2661,90 @@
 
 .qtv-indicator-legend span.qtv-scale-pill em {
   color: #a8b3c3;
+}
+
+.qtv-chart-view-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 26px;
+  margin-top: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+
+.qtv-chart-view-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.qtv-chart-view-strip > span,
+.qtv-chart-view-strip > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: 24px;
+  border: 1px solid rgba(38, 50, 68, 0.78);
+  border-radius: 4px;
+  background: rgba(7, 12, 20, 0.72);
+  color: #8f9bad;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 850;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+
+.qtv-chart-view-strip b {
+  color: #e5edf8;
+  font-weight: 950;
+}
+
+.qtv-chart-view-strip em {
+  color: #58a6ff;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.qtv-chart-view-strip strong {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: rgba(36, 24, 8, 0.72);
+  color: #fbbf24;
+}
+
+.qtv-view-mode-buttons {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  height: 26px;
+  border: 1px solid rgba(38, 50, 68, 0.9);
+  border-radius: 5px;
+  background: #070b12;
+  padding: 2px;
+}
+
+.qtv-view-mode-buttons button {
+  min-width: 52px;
+  height: 20px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #8f9bad;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-view-mode-buttons button:hover,
+.qtv-view-mode-buttons button.active {
+  border-color: rgba(47, 125, 244, 0.54);
+  background: linear-gradient(180deg, rgba(47, 125, 244, 0.24), rgba(47, 125, 244, 0.12));
+  color: #dbeafe;
 }
 
 .qtv-outcome-manager {
@@ -2992,6 +3086,9 @@
 }
 
 .qtv-ohlc {
+  position: absolute;
+  top: 8px;
+  right: 150px;
   flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 8px;
@@ -3005,6 +3102,9 @@
 }
 
 .qtv-scale-switch {
+  position: absolute;
+  top: 44px;
+  right: 12px;
   display: inline-flex;
   gap: 1px;
   border: 1px solid #263244;
