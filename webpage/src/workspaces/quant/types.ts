@@ -141,6 +141,21 @@ export type BacktestResult = {
   predictionMetrics: BacktestMetric[];
 };
 
+export type BatchBacktestRow = {
+  key: string;
+  runId?: number;
+  outcome: string;
+  marketSlug: string;
+  tokenSide: 'YES' | 'NO';
+  rows: number;
+  trades: number;
+  netProfit: string;
+  totalReturn: string;
+  maxDrawdown: string;
+  status: string;
+  error?: string;
+};
+
 export type QuantRows = {
   frontendRows: QuantFrontendPricePoint[];
   blockRows: QuantBlockClosePoint[];

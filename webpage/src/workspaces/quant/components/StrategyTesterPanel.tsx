@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'preact/hooks';
 import type {
   BacktestResult,
+  BatchBacktestRow,
   PerformanceSortKey,
   SortDirection,
   StrategyParameters,
@@ -57,6 +58,7 @@ type StrategyTesterPanelProps = {
   onTesterTabChange: (tab: TesterTab) => void;
   onDeepBacktestChange: () => void;
   onRefresh: () => void;
+  onBatchBacktest: () => void;
   onExport: (format: 'csv' | 'json') => void;
   onPerformanceSearchChange: (value: string) => void;
   onPerformanceSortChange: (key: PerformanceSortKey) => void;
@@ -70,6 +72,8 @@ type StrategyTesterPanelProps = {
   engine?: string;
   rowCount?: number;
   backtestStatus?: string;
+  batchRows?: BatchBacktestRow[];
+  batchStatus?: string;
 };
 
 function loadSavedPresets(): SavedStrategyPreset[] {
@@ -128,6 +132,7 @@ export function StrategyTesterPanel({
   onTesterTabChange,
   onDeepBacktestChange,
   onRefresh,
+  onBatchBacktest,
   onExport,
   onPerformanceSearchChange,
   onPerformanceSortChange,
@@ -141,6 +146,8 @@ export function StrategyTesterPanel({
   engine = '-',
   rowCount = 0,
   backtestStatus = 'idle',
+  batchRows = [],
+  batchStatus = 'idle',
 }: StrategyTesterPanelProps) {
   const [toolTab, setToolTab] = useState<ToolTab>('tester');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -307,6 +314,7 @@ export function StrategyTesterPanel({
         <div className="qtv-tester-actions">
           <label><input type="checkbox" checked readOnly /> Backtest mode</label>
           <label><input type="checkbox" checked={deepBacktest} onChange={onDeepBacktestChange} /> Deep Backtest</label>
+          <button type="button" onClick={onBatchBacktest}>{batchStatus === 'running' ? 'Batch running' : 'Batch Top 5'}</button>
           <button type="button" onClick={() => onExport('json')}>Export JSON</button>
         </div>
       </div>
@@ -470,6 +478,7 @@ export function StrategyTesterPanel({
               </ul>
               <div className="qtv-empty-actions">
                 <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
+                <button type="button" onClick={onBatchBacktest}>Batch Top 5</button>
                 <button type="button" onClick={() => setSettingsOpen(true)}>Settings</button>
                 <button type="button" onClick={onRefresh}>Refresh</button>
               </div>
@@ -517,6 +526,7 @@ export function StrategyTesterPanel({
               <button type="button" onClick={onStrategyAutoTune}>Auto tune from loaded prices</button>
               <button type="button" onClick={() => applyPreset('Backend defaults')}>Reset defaults</button>
               <button type="button" onClick={copyStrategyParameters}>Copy params</button>
+              <button type="button" onClick={onBatchBacktest}>Batch Top 5</button>
               <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
             </div>
             <div className="qtv-preset-save-row">
@@ -615,6 +625,43 @@ export function StrategyTesterPanel({
               <div><dt>PnL</dt><dd className={selectedTrade && selectedTrade.pnl >= 0 ? 'positive' : 'negative'}>{selectedTrade ? `${selectedTrade.pnl.toFixed(2)} USDC` : '-'}</dd></div>
               <div><dt>Exit</dt><dd>{selectedTrade?.exitReason || '-'}</dd></div>
             </dl>
+          </section>
+          <section className="qtv-batch-runs-card">
+            <div className="qtv-run-config-head">
+              <strong>Batch Backtests</strong>
+              <button type="button" onClick={onBatchBacktest}>{batchStatus === 'running' ? 'Running...' : 'Run Top 5'}</button>
+            </div>
+            {batchRows.length ? (
+              <div className="qtv-batch-table">
+                <div className="head">
+                  <span>Outcome</span>
+                  <span>Run</span>
+                  <span>Status</span>
+                  <span>Rows</span>
+                  <span>Trades</span>
+                  <span>Net</span>
+                  <span>Return</span>
+                  <span>Drawdown</span>
+                </div>
+                {batchRows.map((row) => (
+                  <div key={row.key} className={row.status === 'failed' ? 'failed' : row.status === 'succeeded' ? 'succeeded' : ''} title={row.error || row.marketSlug}>
+                    <span>{row.outcome}</span>
+                    <span>{row.runId ? `#${row.runId}` : '-'}</span>
+                    <span>{row.status}</span>
+                    <span>{row.rows.toLocaleString('en-US')}</span>
+                    <span>{row.trades.toLocaleString('en-US')}</span>
+                    <span>{row.netProfit}</span>
+                    <span>{row.totalReturn}</span>
+                    <span>{row.maxDrawdown}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="qtv-tool-empty">
+                <strong>No batch runs</strong>
+                <span>Run Top 5 to backtest multiple event outcomes with the current strategy parameters.</span>
+              </div>
+            )}
           </section>
           <section className="qtv-run-config-card">
             <div className="qtv-run-config-head">

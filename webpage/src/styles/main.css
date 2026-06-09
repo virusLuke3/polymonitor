@@ -3768,6 +3768,54 @@
   min-height: 0;
 }
 
+.qtv-batch-runs-card {
+  grid-column: 1 / -1;
+}
+
+.qtv-batch-table {
+  display: grid;
+  gap: 1px;
+  margin-top: 12px;
+  overflow: auto;
+  border: 1px solid #202938;
+  background: #202938;
+  font-family: var(--font-mono);
+}
+
+.qtv-batch-table > div {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.4fr) 66px 86px 72px 62px 86px 82px 96px;
+  gap: 1px;
+  min-width: 840px;
+}
+
+.qtv-batch-table span {
+  overflow: hidden;
+  background: #0b111c;
+  color: #dbeafe;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 30px;
+  padding: 0 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-batch-table .head span {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-batch-table .succeeded span:nth-child(3) {
+  color: #86efac;
+}
+
+.qtv-batch-table .failed span:nth-child(3) {
+  color: #fecdd3;
+}
+
 .qtv-run-config-head {
   display: flex;
   align-items: center;

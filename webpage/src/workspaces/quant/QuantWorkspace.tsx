@@ -20,13 +20,23 @@ import type { LobPayload, LobSide, QuantBacktestRun, QuantBlockClosePoint, Quant
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
-import type { BacktestEngine, BacktestResult, DataStatus, MarketInfo, PerformanceSortKey, PricePoint, PriceSource, Signal, SortDirection, StrategyParameters, TesterTab, TradeFilter } from './types';
+import type { BacktestEngine, BacktestResult, BatchBacktestRow, DataStatus, MarketInfo, PerformanceSortKey, PricePoint, PriceSource, Signal, SortDirection, StrategyParameters, TesterTab, TradeFilter } from './types';
 import { backtestApiToResult, blockToPrices, emptyBacktestResult, frontendToPrices, marketSeriesToPrices } from './utils/apiAdapters';
 import { deriveEventOutcomeLabel, downloadText, fmtPrice } from './utils/formatters';
 
 function rowSortValue(value: string) {
   const numeric = Number(value.replace(/[^0-9.-]/g, ''));
   return Number.isFinite(numeric) && value.match(/[0-9]/) ? numeric : value.toLowerCase();
+}
+
+function metricText(metrics: Array<{ metricKey?: string; metricName?: string; formattedValue?: string | null; value?: string | number | null }>, keys: string[], fallback = '-') {
+  const normalized = new Set(keys.map((key) => key.toLowerCase()));
+  const metric = metrics.find((row) => (
+    normalized.has(String(row.metricKey || '').toLowerCase())
+    || normalized.has(String(row.metricName || '').toLowerCase().replace(/\s+/g, '_'))
+  ));
+  if (!metric) return fallback;
+  return metric.formattedValue || String(metric.value ?? fallback);
 }
 
 function tradesToCsv(trades: BacktestResult['trades']) {
@@ -507,6 +517,8 @@ export function QuantWorkspace() {
   const [liveLobStatus, setLiveLobStatus] = useState<DataStatus>('idle');
   const [liveLobError, setLiveLobError] = useState('');
   const [liveLobRefreshSeq, setLiveLobRefreshSeq] = useState(0);
+  const [batchBacktestRows, setBatchBacktestRows] = useState<BatchBacktestRow[]>([]);
+  const [batchBacktestStatus, setBatchBacktestStatus] = useState('idle');
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
   const [quantMarkets, setQuantMarkets] = useState<QuantPriceMarket[]>([]);
   const [marketSearchStatus, setMarketSearchStatus] = useState<DataStatus>('idle');
@@ -834,6 +846,113 @@ export function QuantWorkspace() {
       setBacktestStatus('failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runBatchBacktest = async () => {
+    setError('');
+    setBatchBacktestStatus('running');
+    setBacktestStatus('batch running');
+    setTesterTab('runs');
+    setStrategyDrawerCollapsed(false);
+    try {
+      if (!marketSlug.trim()) throw new Error('market_slug is required for batch backtest');
+      const nextRows = marketSeries?.outcomes?.length
+        ? { frontendRows, blockRows, marketSeries }
+        : await refreshQuantRows();
+      const eventTitle = nextRows.marketSeries?.event?.eventTitle || nextRows.marketSeries?.market?.marketTitle || '';
+      const candidates = (nextRows.marketSeries?.outcomes || [])
+        .map((outcome, index) => ({
+          outcome,
+          index,
+          label: deriveEventOutcomeLabel(eventTitle, outcome.marketTitle, outcome.outcomeLabel),
+          rows: toNumber(outcome.rows),
+          latest: toNumber(outcome.buyYesPrice ?? outcome.latestPrice),
+        }))
+        .filter((row) => row.rows > 0)
+        .sort((left, right) => right.latest - left.latest || right.rows - left.rows || left.index - right.index)
+        .slice(0, 5);
+      if (!candidates.length) throw new Error('No loaded event outcomes are eligible for batch backtest');
+
+      const initialRows: BatchBacktestRow[] = candidates.map(({ outcome, label, rows }) => ({
+        key: outcome.tokenId || outcome.marketSlug || label,
+        outcome: label,
+        marketSlug: outcome.marketSlug || marketSlug,
+        tokenSide: 'YES',
+        rows,
+        trades: 0,
+        netProfit: '-',
+        totalReturn: '-',
+        maxDrawdown: '-',
+        status: 'queued',
+      }));
+      setBatchBacktestRows(initialRows);
+
+      const updateBatchRow = (key: string, patch: Partial<BatchBacktestRow>) => {
+        setBatchBacktestRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+      };
+
+      for (const candidate of candidates) {
+        const { outcome, label } = candidate;
+        const key = outcome.tokenId || outcome.marketSlug || label;
+        try {
+          updateBatchRow(key, { status: 'submitting' });
+          const seriesPrices = outcomePricePoints(outcome, 'YES');
+          if (!seriesPrices.length) throw new Error('No YES points for this outcome');
+          const firstX = seriesPrices[0]?.timestamp;
+          const lastX = seriesPrices[seriesPrices.length - 1]?.timestamp;
+          const selectedTokenId = outcome.buyYesTokenId || outcome.tokenId;
+          const created = await createQuantBacktestRun({
+            marketSlug: (outcome.marketSlug || marketSlug).trim(),
+            tokenSide: outcome.buyYesTokenSide || outcome.tokenSide || 'YES',
+            tokenId: selectedTokenId || undefined,
+            outcomeLabel: outcome.buyYesLabel || outcome.outcomeLabel || label,
+            priceSource: backendPriceSource(priceSource),
+            backtestEngine,
+            ...(priceSource === 'orderfilled' && firstX && lastX ? { fromBlock: String(firstX), toBlock: String(lastX) } : {}),
+            ...(priceSource === 'frontend' && firstX && lastX ? { from: String(firstX), to: String(lastX) } : {}),
+            entryThreshold: strategyParameters.entryThreshold,
+            exitThreshold: strategyParameters.exitThreshold,
+            stopLoss: strategyParameters.stopLoss,
+            takeProfit: strategyParameters.takeProfit,
+            maxHoldingBars: strategyParameters.maxHoldingBars,
+            initialCapital: strategyParameters.initialCapital,
+            positionSize: strategyParameters.positionSize,
+            feeBps: strategyParameters.feeBps,
+            slippageBps: strategyParameters.slippageBps,
+            liquidityCapPct: strategyParameters.liquidityCapPct,
+          });
+          updateBatchRow(key, { runId: created.runId, status: created.item.status });
+          const completedRun = ['queued', 'running'].includes(created.item.status)
+            ? await waitForRun(created.runId, (run) => updateBatchRow(key, { status: run.status }))
+            : created.item;
+          if (completedRun.status === 'failed') throw new Error(completedRun.error || 'Backtest failed');
+          const [metricsResult, tradesResult] = await Promise.all([
+            fetchQuantBacktestMetrics(completedRun.runId),
+            fetchQuantBacktestTrades(completedRun.runId, 1000),
+          ]);
+          updateBatchRow(key, {
+            runId: completedRun.runId,
+            rows: toNumber(completedRun.rowsProcessed) || seriesPrices.length,
+            trades: tradesResult.items?.length || 0,
+            netProfit: metricText(metricsResult.items || [], ['net_profit'], '-'),
+            totalReturn: metricText(metricsResult.items || [], ['total_return'], '-'),
+            maxDrawdown: metricText(metricsResult.items || [], ['max_drawdown'], '-'),
+            status: completedRun.status,
+          });
+        } catch (batchError) {
+          updateBatchRow(key, {
+            status: 'failed',
+            error: batchError instanceof Error ? batchError.message : 'Batch backtest failed',
+          });
+        }
+      }
+      setBatchBacktestStatus('complete');
+      setBacktestStatus('batch complete');
+    } catch (batchError) {
+      setBatchBacktestStatus('failed');
+      setBacktestStatus('failed');
+      setError(batchError instanceof Error ? batchError.message : 'Batch backtest failed');
     }
   };
 
@@ -1849,6 +1968,7 @@ export function QuantWorkspace() {
               onTesterTabChange={setTesterTab}
               onDeepBacktestChange={() => setDeepBacktest((current) => !current)}
               onRefresh={() => void runBacktest()}
+              onBatchBacktest={() => void runBatchBacktest()}
               onExport={exportBacktest}
               onPerformanceSearchChange={setPerformanceSearch}
               onPerformanceSortChange={togglePerformanceSort}
@@ -1865,6 +1985,8 @@ export function QuantWorkspace() {
               engine={backtestEngine}
               rowCount={displayedPriceRows}
               backtestStatus={backtestStatus}
+              batchRows={batchBacktestRows}
+              batchStatus={batchBacktestStatus}
             />
           ) : null}
         </section>
