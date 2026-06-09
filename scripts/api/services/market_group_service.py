@@ -61,14 +61,12 @@ GENERIC_TAGS = {
     "15m",
 }
 
-ACTIVE_GROUP_TOPIC_FILTERS: Tuple[Tuple[str, str], ...] = (
-    ("politics", "politic|election|trump|biden|congress|iran|ceasefire|war|president|senate|house"),
-    ("macro", "finance|business|econom|fed|rate|inflation|ipo|valuation|stock|macro|openai"),
-    ("tech", "tech|ai|openai|spacex|tesla|apple|google|nvidia|grok"),
-    ("crypto", "crypto|bitcoin|ethereum|solana|xrp|token|btc|eth|doge"),
-    ("sports", "sports|tennis|soccer|nba|nfl|mlb|nhl|fifa|formula1|ufc|wta|atp|itf"),
-    ("games", "esports|gaming|counter-strike|league of legends|dota|valorant|rainbow six|lol:"),
-    ("culture", "pop-culture|awards|movie|music|celebrity|oscars|grammy"),
+ACTIVE_GROUP_TOPIC_SQL_FILTERS: Tuple[Tuple[str, str], ...] = (
+    ("politics", "LOWER(COALESCE(category, '')) LIKE '%politic%'"),
+    ("macro", "LOWER(COALESCE(category, '')) IN ('macro', 'finance', 'economics', 'business') OR LOWER(COALESCE(category, '')) LIKE '%econom%'"),
+    ("tech", "LOWER(COALESCE(category, '')) LIKE '%tech%'"),
+    ("crypto", "LOWER(COALESCE(category, '')) LIKE '%crypto%'"),
+    ("culture", "LOWER(COALESCE(category, '')) IN ('culture', 'pop-culture', 'entertainment')"),
 )
 
 
@@ -827,19 +825,18 @@ def _serving_active_rows(
     if offset > 0:
         return rows
 
-    text_sql = "LOWER(CONCAT_WS(' ', COALESCE(category, ''), COALESCE(CAST(tags AS TEXT), ''), COALESCE(title, ''), COALESCE(event_slug, '')))"
-    supplemental_limit = max(8, min(18, page_size // 4))
+    supplemental_limit = max(6, min(12, page_size // 6))
     seen = {_serving_row_identity(row) for row in rows}
-    for _, pattern in ACTIVE_GROUP_TOPIC_FILTERS:
+    for _, topic_sql in ACTIVE_GROUP_TOPIC_SQL_FILTERS:
         try:
             extra_rows = ctx["query_all"](
-                _serving_select_sql(f"{where_sql} AND ({text_sql} ~ ?)", order_sql),
-                [*params, pattern, supplemental_limit, 0],
+                _serving_select_sql(f"{where_sql} AND ({topic_sql})", order_sql),
+                [*params, supplemental_limit, 0],
             )
         except Exception:
             logger = getattr(ctx.get("app"), "logger", None)
             if logger:
-                logger.exception("market group active topic query failed pattern=%s", pattern)
+                logger.exception("market group active topic query failed filter=%s", topic_sql)
             continue
         for row in extra_rows:
             key = _serving_row_identity(row)
@@ -1179,7 +1176,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 17}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 18}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
