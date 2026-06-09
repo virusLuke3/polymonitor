@@ -214,7 +214,7 @@ export function WorkspaceHeader({
         choices.set(market.marketSlug, market);
       }
     }
-    return Array.from(choices.values()).slice(0, 1500);
+    return Array.from(choices.values()).slice(0, 40);
   }, [marketOptions, selectedMarketProp]);
   const selectedMarket = useMemo(
     () => selectedMarketProp || marketChoices.find((market) => market.marketSlug === marketSlug),
@@ -310,20 +310,12 @@ export function WorkspaceHeader({
 
   useEffect(() => {
     const onGlobalKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isTyping = Boolean(target?.closest('input, textarea, select, [contenteditable="true"]'));
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setPaletteMode('full');
         setMarketMenuOpen(true);
         inputRef.current?.focus();
         inputRef.current?.select();
-      }
-      if (!isTyping && event.key === '/') {
-        event.preventDefault();
-        setPaletteMode('compact');
-        setMarketMenuOpen(true);
-        inputRef.current?.focus();
       }
     };
     window.addEventListener('keydown', onGlobalKeyDown);

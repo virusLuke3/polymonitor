@@ -1,6 +1,6 @@
 import type { QuantBlockClosePoint, QuantFrontendPricePoint } from '@/types';
 
-export type TesterTab = 'overview' | 'parameters' | 'performance' | 'trades' | 'equity' | 'drawdown' | 'runs' | 'logs' | 'properties';
+export type TesterTab = 'overview' | 'performance' | 'trades' | 'properties';
 export type PriceSource = 'frontend' | 'orderfilled' | 'orderbook' | 'conservative';
 export type BacktestEngine = 'builtin' | 'backtrader' | 'nautilus_trader';
 export type DataStatus = 'idle' | 'loading' | 'metadata_loading' | 'price_loading' | 'partial' | 'ready' | 'empty' | 'error';
@@ -41,9 +41,6 @@ export type PricePoint = {
   yesPriceKind?: 'direct' | 'implied';
   noPriceKind?: 'direct' | 'implied';
   ma?: number;
-  qualityFlags?: string[];
-  isCarriedForward?: boolean;
-  isInterpolated?: boolean;
 };
 
 export type CandlePoint = PricePoint & {
