@@ -407,7 +407,7 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
 
     for index, point in enumerate(points):
         if open_position is None and point.price >= params.entry_threshold:
-            size = _size_for_liquidity(params, point.volume)
+            size = _size_for_liquidity(params, point.price, point.volume)
             if size <= 0:
                 continue
             open_position = OpenPosition(
@@ -473,6 +473,14 @@ def build_metrics(
     fill_coverage = Decimal(len(points)) / Decimal(max(1, len(points))) * Decimal("100")
     stale_ratio = Decimal("0")
     execution_cost = sum((trade.get("execution_cost", Decimal("0")) for trade in trades), Decimal("0"))
+    filled_notional = sum((Decimal(str(trade.get("notional") or 0)) for trade in trades), Decimal("0"))
+    requested_notional = params.position_size * Decimal(len(trades))
+    liquidity_fill_rate = _pct(filled_notional, requested_notional) if requested_notional else Decimal("0")
+    capped_trades = len([
+        trade for trade in trades
+        if Decimal(str(trade.get("notional") or 0)) < params.position_size * Decimal("0.999")
+    ])
+    avg_notional = filled_notional / Decimal(max(1, len(trades)))
     settlement_pnl = net if points[-1].price in (Decimal("0"), Decimal("1")) else Decimal("0")
     resolved_pnl = settlement_pnl
     unrealized_pnl = net - resolved_pnl
@@ -489,6 +497,8 @@ def build_metrics(
         ("unrealized_pnl", "Unrealized PnL", "prediction", unrealized_pnl, _money(unrealized_pnl), "pending", _status(unrealized_pnl), "Mark-to-market PnL for unresolved exposure"),
         ("settlement_pnl", "Settlement PnL", "prediction", settlement_pnl, _money(settlement_pnl), "resolution payoff", _status(settlement_pnl), "PnL attributable to final payoff"),
         ("slippage_cost", "Execution Cost", "prediction", -execution_cost, _money(-execution_cost), f"{params.fee_bps} fee bps / {params.slippage_bps} slip bps", "negative" if execution_cost else "neutral", "Modeled fees plus entry/exit slippage"),
+        ("liquidity_fill_rate", "Liquidity Fill", "prediction", liquidity_fill_rate, f"{liquidity_fill_rate:.1f}%", f"{_money(filled_notional)} filled", "positive" if liquidity_fill_rate >= Decimal("99") else "negative" if capped_trades else "neutral", "Share of requested USDC notional actually filled after liquidity caps"),
+        ("capped_trades", "Capped Trades", "prediction", Decimal(capped_trades), str(capped_trades), f"{_money(avg_notional)} avg fill", "negative" if capped_trades else "positive", "Trades whose filled notional was reduced by volume/liquidity constraints"),
         ("fill_coverage", "Fill Coverage", "prediction", fill_coverage, f"{fill_coverage:.1f}%", "price rows", "positive", "Usable fill price coverage"),
         ("stale_price_ratio", "Stale Price Ratio", "prediction", stale_ratio, f"{stale_ratio:.2f}%", "exact rows", "neutral", "Share of stale/forward-filled prices"),
     ]
@@ -764,13 +774,17 @@ def _execution_price(price: Decimal, params: BacktestParameters, side: str) -> D
     return max(Decimal("0"), price * (Decimal("1") - fraction)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
 
 
-def _size_for_liquidity(params: BacktestParameters, volume: Decimal) -> Decimal:
+def _size_for_liquidity(params: BacktestParameters, price: Decimal, volume: Decimal) -> Decimal:
+    if price <= 0:
+        return Decimal("0")
     cap_pct = max(Decimal("0"), Decimal(str(params.liquidity_cap_pct)))
     if cap_pct <= 0:
         return Decimal("0")
+    target_notional = max(Decimal("0"), Decimal(str(params.position_size)))
     if volume <= 0:
-        return params.position_size
-    return min(params.position_size, volume * cap_pct / Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+        return (target_notional / price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    capped_notional = min(target_notional, volume * cap_pct / Decimal("100"))
+    return (capped_notional / price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
 
 
 def _ratio(numerator: int, denominator: int) -> Decimal:

@@ -127,7 +127,7 @@ def _run_backtrader(
             x_value = int(self.p.x_values[index])
             price = Decimal(str(self.data.close[0]))
             if self.open_position is None and price >= self.p.quant_params.entry_threshold:
-                size = _size_for_liquidity(self.p.quant_params, Decimal(str(self.data.volume[0])))
+                size = _size_for_liquidity(self.p.quant_params, price, Decimal(str(self.data.volume[0])))
                 if size <= 0:
                     self._record_equity(index, x_value, price)
                     return
@@ -275,7 +275,7 @@ def _run_nautilus_trader(
             price = Decimal(str(bar.close))
             if self.open_position is None and price >= self.config.quant_params.entry_threshold:
                 volume = Decimal(str(getattr(bar, "volume", 0) or 0))
-                size = _size_for_liquidity(self.config.quant_params, volume)
+                size = _size_for_liquidity(self.config.quant_params, price, volume)
                 if size <= 0:
                     self._record_equity(x_value, price)
                     return
@@ -593,11 +593,14 @@ def _execution_price(price: Decimal, params: Any, side: str) -> Decimal:
     return max(Decimal("0"), price * (Decimal("1") - fraction)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
 
 
-def _size_for_liquidity(params: Any, volume: Decimal) -> Decimal:
+def _size_for_liquidity(params: Any, price: Decimal, volume: Decimal) -> Decimal:
+    if price <= 0:
+        return Decimal("0")
     cap_pct = max(Decimal("0"), Decimal(str(getattr(params, "liquidity_cap_pct", "100"))))
     if cap_pct <= 0:
         return Decimal("0")
-    position_size = Decimal(str(getattr(params, "position_size", "0")))
+    target_notional = max(Decimal("0"), Decimal(str(getattr(params, "position_size", "0"))))
     if volume <= 0:
-        return position_size
-    return min(position_size, volume * cap_pct / Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+        return (target_notional / price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    capped_notional = min(target_notional, volume * cap_pct / Decimal("100"))
+    return (capped_notional / price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
