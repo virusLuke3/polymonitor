@@ -477,11 +477,6 @@ function pointToScreenSafe(point: PricePoint, points: PricePoint[], range?: Logi
   };
 }
 
-function percentNumber(value: string | undefined) {
-  const numeric = Number(String(value || '').replace('%', ''));
-  return Number.isFinite(numeric) ? numeric : 0;
-}
-
 function percentFromPrice(value: number) {
   return Math.max(5, Math.min(90, (1 - clampProbability(value)) * 100));
 }
@@ -757,12 +752,29 @@ export function PriceChartPanel({
     () => visibleOutcomeGroups.find((group) => group.key === hoveredOutcomeKey) || null,
     [hoveredOutcomeKey, visibleOutcomeGroups],
   );
+  const chartScreenForPoint = (point: PricePoint, group?: OutcomeGroup | null) => {
+    const chart = chartRef.current;
+    const matchGroup = group || visibleOutcomeGroups.find((candidate) => candidate.points.some((row) => Math.floor(row.timestamp) === Math.floor(point.timestamp))) || selectedGroup;
+    const line = matchGroup ? seriesRef.current.lines.get(matchGroup.key) : null;
+    const chartHeight = Math.max(260, containerRef.current?.clientHeight || 420);
+    const chartWidth = Math.max(360, containerRef.current?.clientWidth || 1100);
+    const xCoordinate = chart?.timeScale().timeToCoordinate(chartTime(point));
+    const yCoordinate = line?.priceToCoordinate(point.close);
+    if (typeof xCoordinate === 'number' && Number.isFinite(xCoordinate) && typeof yCoordinate === 'number' && Number.isFinite(yCoordinate)) {
+      return {
+        x: `${Math.max(0, Math.min(chartWidth - 70, xCoordinate))}px`,
+        y: `${Math.max(12, Math.min(chartHeight - 58, yCoordinate))}px`,
+      };
+    }
+    return pointToScreenSafe(point, matchGroup?.points || primaryPoints, visibleLogicalRange);
+  };
   const hoverInspect = pointSnapshot(hover, latestPoint, hoverMaPoint, previousPointFor(hoverGroup?.points || primaryPoints, hover));
-  const hoverScreen = hover ? pointToScreenSafe(hover, hoverGroup?.points || primaryPoints, visibleLogicalRange) : null;
-  const hoverTooltipSide = percentNumber(hoverScreen?.x) > 68 ? 'left-side' : '';
+  const hoverScreen = hover ? chartScreenForPoint(hover, hoverGroup) : null;
+  const hoverX = Number(String(hoverScreen?.x || '').replace(/[^\d.-]/g, ''));
+  const hoverTooltipSide = Number.isFinite(hoverX) && hoverX > Math.max(520, (containerRef.current?.clientWidth || 1100) * 0.66) ? 'left-side' : '';
   const pinnedMaPoint = pinnedPoint ? nearestPoint(maPoints, pinnedPoint.timestamp) : null;
   const pinnedInspect = pointSnapshot(pinnedPoint, latestPoint, pinnedMaPoint, previousPointFor(primaryPoints, pinnedPoint));
-  const pinnedScreen = pinnedPoint ? pointToScreenSafe(pinnedPoint, primaryPoints, visibleLogicalRange) : null;
+  const pinnedScreen = pinnedPoint ? chartScreenForPoint(pinnedPoint, selectedGroup) : null;
   const latestInspect = pointSnapshot(latestPoint, latestPoint, latestMaPoint, previousPointFor(primaryPoints, latestPoint));
   const readoutInspect = hoverInspect || pinnedInspect || latestInspect;
   const readoutMode = hoverInspect ? 'Hover' : pinnedInspect ? 'Pinned' : 'Latest';
@@ -771,6 +783,7 @@ export function PriceChartPanel({
     if (!hoverInspect || !visibleOutcomeGroups.length) return [];
     const hoverBlock = hoverInspect.point.timestamp;
     const maxRows = tooltipMode === 'full' ? 12 : 8;
+    const usedSlots: number[] = [];
     return visibleOutcomeGroups
       .map((group) => {
         const point = nearestPoint(group.points, hoverBlock);
@@ -778,14 +791,23 @@ export function PriceChartPanel({
         const price = clampProbability(point.close);
         const latestGroupPoint = group.points[group.points.length - 1];
         const latestPrice = clampProbability(latestGroupPoint?.close ?? price);
-        const y = percentFromPrice(price);
+        const line = seriesRef.current.lines.get(group.key);
+        const coordinate = line?.priceToCoordinate(price);
+        const chartHeight = Math.max(260, containerRef.current?.clientHeight || 420);
+        const fallbackY = (percentFromPrice(price) / 100) * chartHeight;
+        const rawY = typeof coordinate === 'number' && Number.isFinite(coordinate) ? coordinate : fallbackY;
+        const boundedY = Math.max(14, Math.min(chartHeight - 58, rawY));
+        const slotY = usedSlots.reduce((candidate, used) => (
+          Math.abs(candidate - used) < 22 ? used + 22 : candidate
+        ), boundedY);
+        usedSlots.push(slotY);
         return {
           key: group.key,
           label: group.label,
           fullLabel: group.fullLabel,
           price,
           delta: price - latestPrice,
-          top: `${y}%`,
+          top: `${Math.max(14, Math.min(chartHeight - 58, slotY))}px`,
           color: SERIES_COLORS[group.order % SERIES_COLORS.length] || '#3b82f6',
           active: group.key === hoveredOutcomeKey || group.key === selectedGroup?.key,
         };
@@ -800,7 +822,6 @@ export function PriceChartPanel({
         color: string;
         active: boolean;
       } => Boolean(row))
-      .sort((left, right) => Number.parseFloat(left.top) - Number.parseFloat(right.top))
       .slice(0, maxRows);
   }, [hoverInspect, hoveredOutcomeKey, selectedGroup?.key, tooltipMode, visibleOutcomeGroups]);
   const managerOutcomes = useMemo(() => {
@@ -876,7 +897,7 @@ export function PriceChartPanel({
   }, [primaryPoints, rangeSelection, visibleLogicalRange]);
   const blockAxisTicks = useMemo(() => {
     if (!priceSource.includes('block') || !primaryPoints.length) return [];
-    const axisWidth = Math.max(720, Math.floor(containerRef.current?.clientWidth || 1100));
+    const axisWidth = Math.max(720, Math.floor((containerRef.current?.clientWidth || 1100) - 68));
     const logicalRangeLooksValid = Boolean(
       visibleLogicalRange
       && visibleLogicalRange.to > visibleLogicalRange.from
@@ -889,8 +910,8 @@ export function PriceChartPanel({
     const fromIndex = Math.max(0, Math.min(primaryPoints.length - 1, Math.floor(range.from)));
     const toIndex = Math.max(fromIndex, Math.min(primaryPoints.length - 1, Math.ceil(range.to)));
     const span = Math.max(1, toIndex - fromIndex);
-    const targetLabelCount = Math.floor(axisWidth / 142);
-    const count = Math.min(13, Math.max(5, targetLabelCount));
+    const targetLabelCount = Math.floor(axisWidth / 168);
+    const count = Math.min(11, Math.max(5, targetLabelCount));
     const seen = new Set<number>();
     return Array.from({ length: count }, (_, tickIndex) => {
       const index = Math.round(fromIndex + (span * tickIndex) / Math.max(1, count - 1));
@@ -900,13 +921,17 @@ export function PriceChartPanel({
       if (seen.has(block)) return null;
       seen.add(block);
       const fallbackLeft = `${(tickIndex / Math.max(1, count - 1)) * 100}%`;
+      const coordinate = chartRef.current?.timeScale().timeToCoordinate(chartTime(point));
+      const coordinateLeft = typeof coordinate === 'number' && Number.isFinite(coordinate)
+        ? `${Math.max(0, Math.min(axisWidth, coordinate))}px`
+        : null;
       return {
         key: `${block}-${tickIndex}`,
         block,
         index,
-        left: logicalRangeLooksValid
+        left: coordinateLeft || (logicalRangeLooksValid
           ? axisPercentStyle(axisPercentFromIndex(index, primaryPoints, visibleLogicalRange)) || fallbackLeft
-          : fallbackLeft,
+          : fallbackLeft),
         className: `${tickIndex === 0 ? 'start ' : ''}${tickIndex === count - 1 ? 'end ' : ''}${tickIndex % 2 ? 'level-1 ' : ''}major`,
       };
     }).filter((tick): tick is { key: string; block: number; index: number; left: string; className: string } => Boolean(tick?.left));
@@ -923,7 +948,11 @@ export function PriceChartPanel({
       for (let division = 1; division < divisions; division += 1) {
         const index = Math.round(tick.index + (span * division) / divisions);
         if (index <= tick.index || index >= next.index) continue;
-        const left = axisPercentStyle(axisPercentFromIndex(index, primaryPoints, visibleLogicalRange));
+        const point = primaryPoints[index];
+        const coordinate = point ? chartRef.current?.timeScale().timeToCoordinate(chartTime(point)) : null;
+        const left = typeof coordinate === 'number' && Number.isFinite(coordinate)
+          ? `${Math.max(0, Math.min(Math.max(720, Math.floor((containerRef.current?.clientWidth || 1100) - 68)), coordinate))}px`
+          : axisPercentStyle(axisPercentFromIndex(index, primaryPoints, visibleLogicalRange));
         if (!left) continue;
         minorTicks.push({
           key: `${tick.key}-minor-${division}`,
@@ -1159,7 +1188,7 @@ export function PriceChartPanel({
       const surfaceBox = surface?.getBoundingClientRect();
       const regionBox = region?.getBoundingClientRect();
       if (!surfaceBox || !regionBox) return;
-      const nextTop = Math.max(0, Math.round(regionBox.bottom - surfaceBox.top - 42));
+      const nextTop = Math.max(0, Math.round(regionBox.bottom - surfaceBox.top - 54));
       setBlockAxisTop((current) => (current === nextTop ? current : nextTop));
     };
     syncBlockAxisTop();

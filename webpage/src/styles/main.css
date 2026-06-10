@@ -3295,7 +3295,7 @@
 
 .qtv-tv-chart {
   position: absolute;
-  inset: 0 0 42px 0;
+  inset: 0 0 54px 0;
   min-height: 0;
 }
 
@@ -3306,7 +3306,7 @@
 .qtv-chart-surface.range-enabled::after {
   position: absolute;
   z-index: 3;
-  inset: 0 74px 42px 0;
+  inset: 0 74px 54px 0;
   border: 1px dashed rgba(96, 165, 250, 0.14);
   background:
     linear-gradient(90deg, rgba(96, 165, 250, 0.045) 1px, transparent 1px) 0 0 / 64px 100%;
@@ -3406,7 +3406,7 @@
 .qtv-block-tick-axis {
   position: absolute;
   z-index: 80;
-  height: 42px;
+  height: 54px;
   right: 68px;
   top: 0;
   left: 0;
@@ -3417,7 +3417,7 @@
     linear-gradient(180deg, rgba(7, 10, 15, 0.62), rgba(7, 10, 15, 0.98) 48%, #070a0f);
   color: #7f8a9d;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 850;
   pointer-events: none;
   text-shadow: 0 1px 2px #05070b, 0 0 8px #05070b;
@@ -3429,7 +3429,7 @@
 
 .qtv-block-tick-axis span {
   position: absolute;
-  bottom: 7px;
+  bottom: 9px;
   display: grid;
   justify-items: center;
   gap: 2px;
@@ -3469,8 +3469,8 @@
 }
 
 .qtv-block-tick-axis span.level-1 {
-  bottom: 24px;
-  opacity: 0.82;
+  bottom: 9px;
+  opacity: 0.92;
 }
 
 .qtv-block-tick-axis span.minor b {
@@ -3510,14 +3510,14 @@
 }
 
 .qtv-block-tick-axis .qtv-block-hover-label {
-  top: -48px;
+  top: 5px;
   display: grid;
   grid-template-columns: auto auto;
   gap: 1px 7px;
   min-width: 176px;
   border-color: rgba(47, 129, 247, 0.56);
-  background: rgba(7, 12, 20, 0.96);
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.36);
+  background: rgba(7, 12, 20, 0.98);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.38);
   line-height: 1.25;
   padding: 5px 7px;
 }
@@ -4415,7 +4415,7 @@
   position: absolute;
   z-index: 42;
   top: 0;
-  bottom: 42px;
+  bottom: 54px;
   border: 1px solid rgba(96, 165, 250, 0.85);
   border-top: 0;
   border-bottom: 0;
@@ -4483,7 +4483,7 @@
 
 .qtv-range-notice {
   right: 88px;
-  bottom: 54px;
+  bottom: 66px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -4578,7 +4578,7 @@
   position: absolute;
   z-index: 20;
   right: 16px;
-  bottom: 18px;
+  bottom: 66px;
   display: grid;
   gap: 3px;
   border: 1px solid #263244;
@@ -4786,6 +4786,10 @@
   pointer-events: none;
 }
 
+.qtv-hover-tooltip.compact {
+  display: none;
+}
+
 .qtv-hover-tooltip.left-side {
   transform: translate(calc(-100% - 12px), -50%);
 }
@@ -4892,13 +4896,14 @@
 .qtv-hover-price-tag,
 .qtv-pinned-price-tag {
   position: absolute;
-  right: 0;
+  right: 68px;
   z-index: 31;
   display: grid;
-  min-width: 136px;
+  min-width: 112px;
+  max-width: 172px;
   transform: translateY(-50%);
   border: 1px solid rgba(96, 165, 250, 0.48);
-  border-radius: 3px 0 0 3px;
+  border-radius: 4px;
   background: rgba(37, 99, 235, 0.94);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.38);
   color: #f8fafc;
@@ -4928,10 +4933,12 @@
 
 .qtv-hover-price-tag em,
 .qtv-pinned-price-tag em {
+  overflow: hidden;
   color: rgba(255, 255, 255, 0.72);
   font-size: 7px;
   font-weight: 900;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
   text-transform: uppercase;
 }
 
@@ -4986,9 +4993,9 @@
   position: absolute;
   z-index: 29;
   top: 0;
-  right: 68px;
-  bottom: 42px;
-  width: 220px;
+  right: 188px;
+  bottom: 54px;
+  width: 184px;
   pointer-events: none;
 }
 
@@ -4999,7 +5006,7 @@
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 7px;
-  width: min(220px, 20vw);
+  width: min(184px, 18vw);
   min-height: 20px;
   transform: translateY(-50%);
   border: 1px solid color-mix(in srgb, var(--qtv-axis-color, #3b82f6) 58%, transparent);
@@ -5009,7 +5016,7 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
   color: #dbeafe;
   font-family: var(--font-mono);
-  padding: 3px 7px;
+  padding: 3px 6px;
   backdrop-filter: blur(7px);
 }
 
@@ -5055,7 +5062,7 @@
   position: absolute;
   z-index: 8;
   right: 16px;
-  bottom: 54px;
+  bottom: 66px;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -5129,7 +5136,7 @@
   position: absolute;
   z-index: 8;
   left: 12px;
-  bottom: 18px;
+  bottom: 66px;
   display: flex;
   gap: 6px;
   border: 1px solid #263244;
