@@ -571,6 +571,7 @@ export function PriceChartPanel({
   const pointsRef = useRef<PricePoint[]>([]);
   const visibleOutcomeGroupsRef = useRef<OutcomeGroup[]>([]);
   const dataWindowDragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const navigatorDragRef = useRef(false);
   const suppressViewportModeRef = useRef(false);
   const onVisibleWindowChangeRef = useRef<typeof onVisibleWindowChange>(onVisibleWindowChange);
   const lastWindowNotifyRef = useRef('');
@@ -1005,6 +1006,36 @@ export function PriceChartPanel({
       span: Math.max(1, range.to - range.from),
     };
   }, [blockAxisTicks, primaryPoints, visibleLogicalRange]);
+  const navigatorWindowStyle = useMemo(() => {
+    if (!primaryPoints.length) return null;
+    const fullSpan = Math.max(1, primaryPoints.length - 1);
+    const range = visibleLogicalRange && visibleLogicalRange.to > visibleLogicalRange.from
+      ? visibleLogicalRange
+      : { from: 0, to: fullSpan };
+    const left = Math.max(0, Math.min(100, (Math.max(0, range.from) / fullSpan) * 100));
+    const right = Math.max(left, Math.min(100, (Math.min(fullSpan, range.to) / fullSpan) * 100));
+    return {
+      left: `${left}%`,
+      width: `${Math.max(2.5, right - left)}%`,
+    };
+  }, [primaryPoints.length, visibleLogicalRange]);
+  const navigatorDomainLabels = useMemo(() => {
+    if (!priceSource.includes('block') || !primaryPoints.length) return [];
+    const count = Math.min(5, Math.max(3, primaryPoints.length));
+    const seen = new Set<number>();
+    return Array.from({ length: count }, (_, index) => {
+      const pointIndex = Math.round((Math.max(0, primaryPoints.length - 1) * index) / Math.max(1, count - 1));
+      const block = Math.floor(primaryPoints[pointIndex]?.timestamp || 0);
+      if (!block || seen.has(block)) return null;
+      seen.add(block);
+      return {
+        key: `domain-${block}-${index}`,
+        block,
+        left: `${(index / Math.max(1, count - 1)) * 100}%`,
+        className: `${index === 0 ? 'start ' : ''}${index === count - 1 ? 'end ' : ''}`,
+      };
+    }).filter((row): row is { key: string; block: number; left: string; className: string } => Boolean(row));
+  }, [priceSource, primaryPoints]);
 
   function setChartVisibleRange(range: { from: number; to: number }, viewportMode: 'preset' | 'custom' = 'custom') {
     const next = clampLogicalRange(range, primaryPoints.length);
@@ -1012,6 +1043,42 @@ export function PriceChartPanel({
     visibleLogicalRangeRef.current = next;
     setVisibleLogicalRange((current) => (logicalRangesClose(current, next) ? current : next));
     onViewportModeChange?.(viewportMode);
+  }
+
+  function moveNavigatorToClientX(clientX: number) {
+    const box = chartSurfaceRef.current?.getBoundingClientRect();
+    if (!box || primaryPoints.length < 2) return;
+    const axisWidth = Math.max(120, box.width - 68);
+    const ratio = Math.max(0, Math.min(1, (clientX - box.left) / axisWidth));
+    const fullSpan = Math.max(1, primaryPoints.length - 1);
+    const current = normalizeLogicalRange(chartRef.current?.timeScale().getVisibleLogicalRange() || null)
+      || visibleLogicalRangeRef.current
+      || { from: 0, to: fullSpan };
+    const span = Math.max(8, Math.min(fullSpan, current.to - current.from));
+    const center = ratio * fullSpan;
+    setChartVisibleRange({ from: center - span / 2, to: center + span / 2 });
+  }
+
+  function startNavigatorDrag(event: PointerEvent) {
+    if (primaryPoints.length < 2) return;
+    event.preventDefault();
+    event.stopPropagation();
+    navigatorDragRef.current = true;
+    moveNavigatorToClientX(event.clientX);
+    window.addEventListener('pointermove', handleNavigatorDrag);
+    window.addEventListener('pointerup', stopNavigatorDrag, { once: true });
+    window.addEventListener('pointercancel', stopNavigatorDrag, { once: true });
+  }
+
+  function handleNavigatorDrag(event: PointerEvent) {
+    if (!navigatorDragRef.current) return;
+    event.preventDefault();
+    moveNavigatorToClientX(event.clientX);
+  }
+
+  function stopNavigatorDrag() {
+    navigatorDragRef.current = false;
+    window.removeEventListener('pointermove', handleNavigatorDrag);
   }
 
   function fitData() {
@@ -2332,7 +2399,22 @@ export function PriceChartPanel({
               })}
             </div>
           ) : null}
-          <div className="qtv-block-tick-axis" style={blockAxisStyle} aria-label="Visible block axis">
+          <div
+            className="qtv-block-tick-axis"
+            style={blockAxisStyle}
+            aria-label="Block navigator"
+            onPointerDown={(event) => startNavigatorDrag(event as unknown as PointerEvent)}
+          >
+            <div className="qtv-block-navigator-track" aria-hidden="true">
+              {navigatorWindowStyle ? <i className="qtv-block-navigator-window" style={navigatorWindowStyle} /> : null}
+            </div>
+            <div className="qtv-block-navigator-labels" aria-hidden="true">
+              {navigatorDomainLabels.map((tick) => (
+                <span key={tick.key} className={tick.className} style={{ left: tick.left }}>
+                  <b>{blockLabel(tick.block)}</b>
+                </span>
+              ))}
+            </div>
             {blockAxisMinorTicks.map((tick) => (
               <span key={tick.key} className={`minor ${tick.level}`} style={{ left: tick.left }}>
                 <i />
