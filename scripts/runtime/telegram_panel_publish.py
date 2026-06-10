@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from typing import Any, Dict
+
+
+_repo_root = Path(__file__).resolve().parents[2]
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
 
 
 def _enabled() -> bool:
