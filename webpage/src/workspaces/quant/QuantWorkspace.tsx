@@ -91,6 +91,12 @@ const DEFAULT_STRATEGY_PARAMETERS: StrategyParameters = {
   liquidityCapPct: 100,
   maxPositionNotional: 0,
   minFillPct: 0,
+  executionPriceMode: 'DEPTH',
+  latencySeconds: 0,
+  maxBookStalenessSeconds: 900,
+  allowPartialFill: true,
+  minFillSize: 0,
+  rejectOnStaleBook: true,
 };
 
 function defaultMarketSlug() {
@@ -338,6 +344,12 @@ function normalizeStrategyParameters(value: Partial<StrategyParameters> | null |
     liquidityCapPct: clampNumber(value?.liquidityCapPct, DEFAULT_STRATEGY_PARAMETERS.liquidityCapPct, 0, 100),
     maxPositionNotional: clampNumber(value?.maxPositionNotional, DEFAULT_STRATEGY_PARAMETERS.maxPositionNotional, 0, 1000000000),
     minFillPct: clampNumber(value?.minFillPct, DEFAULT_STRATEGY_PARAMETERS.minFillPct, 0, 100),
+    executionPriceMode: value?.executionPriceMode === 'LEGACY' ? 'LEGACY' : 'DEPTH',
+    latencySeconds: clampNumber(value?.latencySeconds, DEFAULT_STRATEGY_PARAMETERS.latencySeconds, 0, 3600),
+    maxBookStalenessSeconds: clampNumber(value?.maxBookStalenessSeconds, DEFAULT_STRATEGY_PARAMETERS.maxBookStalenessSeconds, 0, 86400),
+    allowPartialFill: value?.allowPartialFill ?? DEFAULT_STRATEGY_PARAMETERS.allowPartialFill,
+    minFillSize: clampNumber(value?.minFillSize, DEFAULT_STRATEGY_PARAMETERS.minFillSize, 0, 1000000000),
+    rejectOnStaleBook: value?.rejectOnStaleBook ?? DEFAULT_STRATEGY_PARAMETERS.rejectOnStaleBook,
   };
 }
 
@@ -1082,6 +1094,14 @@ export function QuantWorkspace() {
         feeBps: strategyNumber(run.feeBps, current.feeBps),
         slippageBps: strategyNumber(run.slippageBps, current.slippageBps),
         liquidityCapPct: strategyNumber(run.liquidityCapPct, current.liquidityCapPct),
+        maxPositionNotional: strategyNumber(run.maxPositionNotional, current.maxPositionNotional),
+        minFillPct: strategyNumber(run.minFillPct, current.minFillPct),
+        executionPriceMode: run.executionPriceMode === 'LEGACY' ? 'LEGACY' : current.executionPriceMode,
+        latencySeconds: strategyNumber(run.latencySeconds, current.latencySeconds),
+        maxBookStalenessSeconds: strategyNumber(run.maxBookStalenessSeconds, current.maxBookStalenessSeconds),
+        allowPartialFill: typeof run.allowPartialFill === 'boolean' ? run.allowPartialFill : current.allowPartialFill,
+        minFillSize: strategyNumber(run.minFillSize, current.minFillSize),
+        rejectOnStaleBook: typeof run.rejectOnStaleBook === 'boolean' ? run.rejectOnStaleBook : current.rejectOnStaleBook,
       }));
       void refreshBacktestRuns();
     } catch (loadError) {
@@ -1121,6 +1141,12 @@ export function QuantWorkspace() {
         liquidity_cap_pct: strategyParameters.liquidityCapPct,
         max_position_notional: strategyParameters.maxPositionNotional,
         min_fill_pct: strategyParameters.minFillPct,
+        execution_price_mode: strategyParameters.executionPriceMode,
+        latency_seconds: strategyParameters.latencySeconds,
+        max_book_staleness_seconds: strategyParameters.maxBookStalenessSeconds,
+        allow_partial_fill: strategyParameters.allowPartialFill,
+        min_fill_size: strategyParameters.minFillSize,
+        reject_on_stale_book: strategyParameters.rejectOnStaleBook,
       },
       live_clob: {
         status: liveLobStatus,
@@ -1226,6 +1252,12 @@ export function QuantWorkspace() {
         liquidityCapPct: strategyParameters.liquidityCapPct,
         maxPositionNotional: strategyParameters.maxPositionNotional,
         minFillPct: strategyParameters.minFillPct,
+        executionPriceMode: strategyParameters.executionPriceMode,
+        latencySeconds: strategyParameters.latencySeconds,
+        maxBookStalenessSeconds: strategyParameters.maxBookStalenessSeconds,
+        allowPartialFill: strategyParameters.allowPartialFill,
+        minFillSize: strategyParameters.minFillSize,
+        rejectOnStaleBook: strategyParameters.rejectOnStaleBook,
         executionContext: buildBacktestExecutionContext('single', sourceRows),
       });
       setBacktestStatus(created.item.status);
@@ -1331,6 +1363,12 @@ export function QuantWorkspace() {
             liquidityCapPct: strategyParameters.liquidityCapPct,
             maxPositionNotional: strategyParameters.maxPositionNotional,
             minFillPct: strategyParameters.minFillPct,
+            executionPriceMode: strategyParameters.executionPriceMode,
+            latencySeconds: strategyParameters.latencySeconds,
+            maxBookStalenessSeconds: strategyParameters.maxBookStalenessSeconds,
+            allowPartialFill: strategyParameters.allowPartialFill,
+            minFillSize: strategyParameters.minFillSize,
+            rejectOnStaleBook: strategyParameters.rejectOnStaleBook,
             executionContext: buildBacktestExecutionContext('batch_top5', seriesPrices, label),
           });
           updateBatchRow(key, { runId: created.runId, status: created.item.status });
@@ -1447,6 +1485,12 @@ export function QuantWorkspace() {
             liquidityCapPct: strategyParameters.liquidityCapPct,
             maxPositionNotional: strategyParameters.maxPositionNotional,
             minFillPct: strategyParameters.minFillPct,
+            executionPriceMode: strategyParameters.executionPriceMode,
+            latencySeconds: strategyParameters.latencySeconds,
+            maxBookStalenessSeconds: strategyParameters.maxBookStalenessSeconds,
+            allowPartialFill: strategyParameters.allowPartialFill,
+            minFillSize: strategyParameters.minFillSize,
+            rejectOnStaleBook: strategyParameters.rejectOnStaleBook,
             executionContext: buildBacktestExecutionContext('split_70_30', segment.points, segment.label),
           });
           updateSplitRow(segment.key, { runId: created.runId, status: created.item.status });
@@ -1583,6 +1627,12 @@ export function QuantWorkspace() {
             liquidityCapPct: strategyParameters.liquidityCapPct,
             maxPositionNotional: strategyParameters.maxPositionNotional,
             minFillPct: strategyParameters.minFillPct,
+            executionPriceMode: strategyParameters.executionPriceMode,
+            latencySeconds: strategyParameters.latencySeconds,
+            maxBookStalenessSeconds: strategyParameters.maxBookStalenessSeconds,
+            allowPartialFill: strategyParameters.allowPartialFill,
+            minFillSize: strategyParameters.minFillSize,
+            rejectOnStaleBook: strategyParameters.rejectOnStaleBook,
             executionContext: buildBacktestExecutionContext('walk_forward', segment.points, segment.label),
           });
           updateWalkForwardRow(segment.key, { runId: created.runId, status: created.item.status });

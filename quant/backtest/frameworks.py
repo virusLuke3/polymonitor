@@ -19,6 +19,8 @@ import sys
 import tempfile
 from typing import Any, Callable
 
+from .execution import execution_config_from_params, lookup_snapshot, simulate_depth_fill, snapshot_from_any
+
 
 SUPPORTED_BACKTEST_ENGINES = {"builtin", "backtrader", "nautilus_trader"}
 
@@ -33,6 +35,12 @@ class AdapterPosition:
     requested_notional: Decimal
     filled_notional: Decimal
     fill_pct: Decimal
+    fill_status: str = "FILLED"
+    book_snapshot_id: int | None = None
+    snapshot_version: str | None = None
+    staleness_seconds: Decimal | None = None
+    staleness_blocks: int | None = None
+    avg_fill_price: Decimal | None = None
 
 
 def normalize_backtest_engine(value: Any) -> str:
@@ -128,9 +136,10 @@ def _run_backtrader(
         def next(self) -> None:
             index = len(self.data) - 1
             x_value = int(self.p.x_values[index])
+            point = self.p.price_points[index]
             price = Decimal(str(self.data.close[0]))
             if self.open_position is None and price >= self.p.quant_params.entry_threshold:
-                fill = _fill_decision(self.p.quant_params, price, Decimal(str(self.data.volume[0])), self.p.run_row.get("_clob_execution"))
+                fill = _fill_decision(self.p.quant_params, point, self.p.run_row, "BUY_YES")
                 if fill["size"] <= 0:
                     self._record_equity(index, x_value, price)
                     return
@@ -143,26 +152,44 @@ def _run_backtrader(
                     requested_notional=fill["requested_notional"],
                     filled_notional=fill["filled_notional"],
                     fill_pct=fill["fill_pct"],
+                    fill_status=fill.get("fill_status", "FILLED"),
+                    book_snapshot_id=fill.get("book_snapshot_id"),
+                    snapshot_version=fill.get("snapshot_version"),
+                    staleness_seconds=fill.get("staleness_seconds"),
+                    staleness_blocks=fill.get("staleness_blocks"),
+                    avg_fill_price=fill.get("avg_fill_price"),
                 )
                 self.events.append(_event("open", self.p.x_axis, x_value, f"T-{self.open_position.trade_index:04d}", price, "entry threshold reached"))
             elif self.open_position is not None:
                 exit_reason = _exit_reason(price, self.open_position.entry_price, index - self.open_position.entry_index, self.p.quant_params)
                 if exit_reason:
-                    trade = _close_trade(self.p.run_row, self.p.x_axis, self.open_position, x_value, price, index, exit_reason, self.p.quant_params)
+                    exit_fill = _fill_decision(self.p.quant_params, point, self.p.run_row, "SELL_YES", target_size=self.open_position.size)
+                    if exit_fill["size"] <= 0:
+                        self.events.append(_event("exit_rejected", self.p.x_axis, x_value, f"T-{self.open_position.trade_index:04d}", price, exit_reason))
+                        self._record_equity(index, x_value, price)
+                        return
+                    trade = _close_trade(self.p.run_row, self.p.x_axis, self.open_position, x_value, price, index, exit_reason, self.p.quant_params, exit_fill=exit_fill)
                     self.trades.append(trade)
                     self.realized_equity += trade["pnl"]
                     self.events.append(_event("close", self.p.x_axis, x_value, trade["trade_id"], price, exit_reason))
-                    self.open_position = None
+                    remaining_size = (self.open_position.size - exit_fill["size"]).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+                    self.open_position.size = remaining_size
+                    if remaining_size <= 0:
+                        self.open_position = None
             self._record_equity(index, x_value, price)
 
         def stop(self) -> None:
             if self.open_position is not None:
                 index = len(self.p.price_points) - 1
                 point = self.p.price_points[index]
-                trade = _close_trade(self.p.run_row, self.p.x_axis, self.open_position, int(point.x_value), point.price, index, "end_of_data", self.p.quant_params)
-                self.trades.append(trade)
-                self.realized_equity += trade["pnl"]
-                self.events.append(_event("close", self.p.x_axis, int(point.x_value), trade["trade_id"], point.price, "end_of_data"))
+                exit_fill = _fill_decision(self.p.quant_params, point, self.p.run_row, "SELL_YES", target_size=self.open_position.size)
+                if exit_fill["size"] > 0:
+                    trade = _close_trade(self.p.run_row, self.p.x_axis, self.open_position, int(point.x_value), point.price, index, "end_of_data", self.p.quant_params, exit_fill=exit_fill)
+                    self.trades.append(trade)
+                    self.realized_equity += trade["pnl"]
+                    self.events.append(_event("close", self.p.x_axis, int(point.x_value), trade["trade_id"], point.price, "end_of_data"))
+                else:
+                    self.events.append(_event("force_close_rejected", self.p.x_axis, int(point.x_value), f"T-{self.open_position.trade_index:04d}", point.price, "end_of_data"))
                 self.open_position = None
             self.result = {
                 "trades": self.trades,
@@ -278,10 +305,10 @@ def _run_nautilus_trader(
         def on_bar(self, bar: Bar) -> None:
             self.index += 1
             x_value = int(self.config.x_values[self.index])
+            point = self.config.price_points[self.index]
             price = Decimal(str(bar.close))
             if self.open_position is None and price >= self.config.quant_params.entry_threshold:
-                volume = Decimal(str(getattr(bar, "volume", 0) or 0))
-                fill = _fill_decision(self.config.quant_params, price, volume, self.config.run_row.get("_clob_execution"))
+                fill = _fill_decision(self.config.quant_params, point, self.config.run_row, "BUY_YES")
                 if fill["size"] <= 0:
                     self._record_equity(x_value, price)
                     return
@@ -294,25 +321,43 @@ def _run_nautilus_trader(
                     fill["requested_notional"],
                     fill["filled_notional"],
                     fill["fill_pct"],
+                    fill.get("fill_status", "FILLED"),
+                    fill.get("book_snapshot_id"),
+                    fill.get("snapshot_version"),
+                    fill.get("staleness_seconds"),
+                    fill.get("staleness_blocks"),
+                    fill.get("avg_fill_price"),
                 )
                 self.events.append(_event("open", self.config.x_axis, x_value, f"T-{self.open_position.trade_index:04d}", price, "entry threshold reached"))
             elif self.open_position is not None:
                 exit_reason = _exit_reason(price, self.open_position.entry_price, self.index - self.open_position.entry_index, self.config.quant_params)
                 if exit_reason:
-                    trade = _close_trade(self.config.run_row, self.config.x_axis, self.open_position, x_value, price, self.index, exit_reason, self.config.quant_params)
+                    exit_fill = _fill_decision(self.config.quant_params, point, self.config.run_row, "SELL_YES", target_size=self.open_position.size)
+                    if exit_fill["size"] <= 0:
+                        self.events.append(_event("exit_rejected", self.config.x_axis, x_value, f"T-{self.open_position.trade_index:04d}", price, exit_reason))
+                        self._record_equity(x_value, price)
+                        return
+                    trade = _close_trade(self.config.run_row, self.config.x_axis, self.open_position, x_value, price, self.index, exit_reason, self.config.quant_params, exit_fill=exit_fill)
                     self.trades.append(trade)
                     self.realized_equity += trade["pnl"]
                     self.events.append(_event("close", self.config.x_axis, x_value, trade["trade_id"], price, exit_reason))
-                    self.open_position = None
+                    remaining_size = (self.open_position.size - exit_fill["size"]).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+                    self.open_position.size = remaining_size
+                    if remaining_size <= 0:
+                        self.open_position = None
             self._record_equity(x_value, price)
 
         def on_stop(self) -> None:
             if self.open_position is not None:
                 point = self.config.price_points[-1]
-                trade = _close_trade(self.config.run_row, self.config.x_axis, self.open_position, int(point.x_value), point.price, len(self.config.price_points) - 1, "end_of_data", self.config.quant_params)
-                self.trades.append(trade)
-                self.realized_equity += trade["pnl"]
-                self.events.append(_event("close", self.config.x_axis, int(point.x_value), trade["trade_id"], point.price, "end_of_data"))
+                exit_fill = _fill_decision(self.config.quant_params, point, self.config.run_row, "SELL_YES", target_size=self.open_position.size)
+                if exit_fill["size"] > 0:
+                    trade = _close_trade(self.config.run_row, self.config.x_axis, self.open_position, int(point.x_value), point.price, len(self.config.price_points) - 1, "end_of_data", self.config.quant_params, exit_fill=exit_fill)
+                    self.trades.append(trade)
+                    self.realized_equity += trade["pnl"]
+                    self.events.append(_event("close", self.config.x_axis, int(point.x_value), trade["trade_id"], point.price, "end_of_data"))
+                else:
+                    self.events.append(_event("force_close_rejected", self.config.x_axis, int(point.x_value), f"T-{self.open_position.trade_index:04d}", point.price, "end_of_data"))
                 self.open_position = None
             self.result = {
                 "trades": self.trades,
@@ -377,6 +422,7 @@ def _run_nautilus_trader_subprocess(points: list[Any], run: dict[str, Any], para
                 "x_value": int(point.x_value),
                 "price": str(point.price),
                 "volume": str(point.volume),
+                "timestamp": point.timestamp.isoformat() if getattr(point, "timestamp", None) else None,
             }
             for point in points
         ],
@@ -394,6 +440,15 @@ def _run_nautilus_trader_subprocess(points: list[Any], run: dict[str, Any], para
             "liquidity_cap_pct": str(getattr(params, "liquidity_cap_pct", "100")),
             "max_position_notional": str(getattr(params, "max_position_notional", "0")),
             "min_fill_pct": str(getattr(params, "min_fill_pct", "0")),
+            "execution_price_mode": str(getattr(params, "execution_price_mode", "DEPTH")),
+            "latency_seconds": str(getattr(params, "latency_seconds", "0")),
+            "max_book_staleness_seconds": str(getattr(params, "max_book_staleness_seconds", "900")),
+            "allow_partial_fill": bool(getattr(params, "allow_partial_fill", True)),
+            "min_fill_size": str(getattr(params, "min_fill_size", "0")),
+            "reject_on_stale_book": bool(getattr(params, "reject_on_stale_book", True)),
+            "final_valuation_mode": str(getattr(params, "final_valuation_mode", "FORCE_CLOSE")),
+            "max_entry_price": str(getattr(params, "max_entry_price", "1")),
+            "min_exit_price": str(getattr(params, "min_exit_price", "0")),
         },
     }
     project_root = Path(__file__).resolve().parents[2]
@@ -446,7 +501,12 @@ _DECIMAL_RESULT_KEYS = {
     "notional",
     "requested_notional",
     "filled_notional",
+    "requested_size",
+    "filled_size",
+    "unfilled_size",
     "fill_pct",
+    "avg_fill_price",
+    "staleness_seconds",
     "fee_cost",
     "slippage_cost",
     "execution_cost",
@@ -552,15 +612,18 @@ def _close_trade(
     point_index: int,
     exit_reason: str,
     params: Any,
+    *,
+    exit_fill: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    fill_exit_price = _execution_price(exit_price, params, "exit")
-    notional = position.entry_price * position.size
-    exit_notional = fill_exit_price * position.size
+    close_size = Decimal(str(exit_fill.get("size"))) if exit_fill else position.size
+    fill_exit_price = Decimal(str(exit_fill.get("exit_price") or exit_fill.get("avg_fill_price"))) if exit_fill and (exit_fill.get("exit_price") or exit_fill.get("avg_fill_price")) else _execution_price(exit_price, params, "exit")
+    notional = position.entry_price * close_size
+    exit_notional = fill_exit_price * close_size
     fee_cost = (notional + exit_notional) * _bps_fraction(getattr(params, "fee_bps", Decimal("0")))
-    slippage_cost = ((position.entry_price - _execution_price(position.entry_price, params, "raw_entry")) * position.size).copy_abs()
-    slippage_cost += ((exit_price - fill_exit_price) * position.size).copy_abs()
+    slippage_cost = ((position.entry_price - _execution_price(position.entry_price, params, "raw_entry")) * close_size).copy_abs()
+    slippage_cost += ((exit_price - fill_exit_price) * close_size).copy_abs()
     execution_cost = fee_cost + slippage_cost
-    pnl = (fill_exit_price - position.entry_price) * position.size - fee_cost
+    pnl = (fill_exit_price - position.entry_price) * close_size - fee_cost
     return {
         "trade_id": f"T-{position.trade_index:04d}",
         "market_slug": run["market_slug"],
@@ -571,11 +634,20 @@ def _close_trade(
         "exit_x": exit_x,
         "entry_price": position.entry_price,
         "exit_price": fill_exit_price,
-        "size": position.size,
+        "size": close_size,
         "notional": notional,
         "requested_notional": getattr(position, "requested_notional", notional),
         "filled_notional": getattr(position, "filled_notional", notional),
+        "requested_size": position.size,
+        "filled_size": close_size,
+        "unfilled_size": max(Decimal("0"), position.size - close_size),
         "fill_pct": getattr(position, "fill_pct", Decimal("100")),
+        "fill_status": exit_fill.get("fill_status") if exit_fill else getattr(position, "fill_status", "FILLED"),
+        "book_snapshot_id": exit_fill.get("book_snapshot_id") if exit_fill else getattr(position, "book_snapshot_id", None),
+        "snapshot_version": exit_fill.get("snapshot_version") if exit_fill else getattr(position, "snapshot_version", None),
+        "staleness_seconds": exit_fill.get("staleness_seconds") if exit_fill else getattr(position, "staleness_seconds", None),
+        "staleness_blocks": exit_fill.get("staleness_blocks") if exit_fill else getattr(position, "staleness_blocks", None),
+        "avg_fill_price": fill_exit_price,
         "pnl": pnl.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
         "pnl_pct": _pct(pnl, notional),
         "holding_bars": max(1, point_index - position.entry_index),
@@ -620,7 +692,7 @@ def _execution_price(price: Decimal, params: Any, side: str) -> Decimal:
 
 
 def _size_for_liquidity(params: Any, price: Decimal, volume: Decimal) -> Decimal:
-    return _fill_decision(params, price, volume)["size"]
+    return _legacy_fill_decision(params, price, volume)["size"]
 
 
 def _target_notional(params: Any) -> Decimal:
@@ -631,7 +703,76 @@ def _target_notional(params: Any) -> Decimal:
     return target
 
 
-def _fill_decision(params: Any, price: Decimal, volume: Decimal, book: dict[str, Any] | None = None) -> dict[str, Any]:
+def _fill_decision(
+    params: Any,
+    point: Any,
+    run: dict[str, Any],
+    side: str,
+    *,
+    target_size: Decimal | None = None,
+) -> dict[str, Any]:
+    price = Decimal(str(point.price))
+    if str(getattr(params, "execution_price_mode", "DEPTH") or "DEPTH").upper() == "LEGACY":
+        fill = _legacy_fill_decision(params, price, Decimal(str(getattr(point, "volume", "0") or "0")))
+        if target_size is not None and fill["size"] > target_size:
+            fill = {**fill, "size": target_size, "filled_notional": (target_size * price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)}
+        return fill
+    config = execution_config_from_params(params)
+    snapshots = [
+        snapshot
+        for snapshot in (snapshot_from_any(item) for item in run.get("_clob_snapshots") or [])
+        if snapshot is not None
+    ]
+    lookup = lookup_snapshot(
+        snapshots,
+        decision_block=int(point.x_value) if run.get("price_source") == "orderfilled_block_close" else None,
+        decision_timestamp=getattr(point, "timestamp", None),
+        config=config,
+    )
+    requested_size = target_size
+    if requested_size is None:
+        target_notional = _target_notional(params)
+        requested_size = (target_notional / max(price, Decimal("0.0000000001"))).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    fill = simulate_depth_fill(
+        side=side,  # type: ignore[arg-type]
+        target_size=max(Decimal("0"), requested_size),
+        config=config,
+        lookup=lookup,
+        cash_available=_target_notional(params) if side.startswith("BUY") else None,
+    )
+    price_key = "entry_price" if side.startswith("BUY") else "exit_price"
+    return {
+        "requested_notional": (fill.requested_size * price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "filled_notional": fill.filled_notional,
+        "fill_pct": fill.fill_pct,
+        "size": fill.filled_size,
+        price_key: fill.avg_fill_price if fill.avg_fill_price > 0 else None,
+        "avg_fill_price": fill.avg_fill_price,
+        "liquidity_cap_pct": max(Decimal("0"), Decimal(str(getattr(params, "liquidity_cap_pct", "100")))),
+        "min_fill_pct": max(Decimal("0"), Decimal(str(getattr(params, "min_fill_pct", "0")))),
+        "partial_fill": fill.status == "PARTIAL",
+        "rejected": fill.status not in {"FILLED", "PARTIAL"},
+        "fill_status": fill.status,
+        "book_snapshot_id": fill.snapshot_id,
+        "snapshot_version": fill.snapshot_version,
+        "staleness_seconds": fill.staleness_seconds,
+        "staleness_blocks": fill.staleness_blocks,
+        "requested_size": fill.requested_size,
+        "filled_size": fill.filled_size,
+        "unfilled_size": fill.unfilled_size,
+        "fee_cost": fill.fee,
+        "slippage_cost": fill.slippage,
+        "execution_source": "clob_depth" if fill.snapshot_id else "no_book",
+        "best_bid": fill.best_bid,
+        "best_ask": fill.best_ask,
+        "spread": fill.spread,
+        "mid": fill.mid,
+        "levels_consumed": fill.levels_consumed,
+        "notes": fill.notes,
+    }
+
+
+def _legacy_fill_decision(params: Any, price: Decimal, volume: Decimal) -> dict[str, Any]:
     target_notional = _target_notional(params)
     cap_pct = max(Decimal("0"), Decimal(str(getattr(params, "liquidity_cap_pct", "100"))))
     min_fill_pct = max(Decimal("0"), Decimal(str(getattr(params, "min_fill_pct", "0"))))
@@ -649,26 +790,6 @@ def _fill_decision(params: Any, price: Decimal, volume: Decimal, book: dict[str,
         return empty
     if cap_pct <= 0:
         return empty
-    book_fill = _fill_from_clob_book(target_notional, cap_pct, book)
-    if book_fill is not None:
-        fill_pct = _pct(book_fill["filled_notional"], target_notional) if target_notional else Decimal("0")
-        if target_notional <= 0 or fill_pct < min_fill_pct:
-            return {
-                **empty,
-                **book_fill,
-                "fill_pct": fill_pct,
-                "partial_fill": book_fill["filled_notional"] > 0 and book_fill["filled_notional"] < target_notional,
-            }
-        return {
-            **book_fill,
-            "requested_notional": target_notional,
-            "fill_pct": fill_pct,
-            "size": book_fill["size"],
-            "liquidity_cap_pct": cap_pct,
-            "min_fill_pct": min_fill_pct,
-            "partial_fill": book_fill["filled_notional"] < target_notional,
-            "rejected": False,
-        }
     if volume <= 0:
         filled_notional = target_notional
     else:

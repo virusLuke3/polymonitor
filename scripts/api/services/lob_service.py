@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import threading
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -41,6 +42,24 @@ def _float_or_none(value: Any) -> float | None:
 
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _snapshot_version(token_id: str, side_name: str, fetched_at: str, side_payload: Dict[str, Any]) -> str:
+    digest = hashlib.sha256()
+    digest.update(str(token_id).encode("utf-8"))
+    digest.update(b"|")
+    digest.update(str(side_name).encode("utf-8"))
+    digest.update(b"|")
+    digest.update(str(fetched_at).encode("utf-8"))
+    digest.update(b"|")
+    for key in ("bids", "asks"):
+        for level in _normalize_levels(side_payload.get(key), reverse=(key == "bids")):
+            digest.update(str(level.get("price")).encode("ascii"))
+            digest.update(b":")
+            digest.update(str(level.get("size")).encode("ascii"))
+            digest.update(b";")
+        digest.update(b"|")
+    return digest.hexdigest()[:20]
 
 
 def _normalize_levels(rows: Any, *, reverse: bool = False) -> list[dict[str, Any]]:
@@ -155,6 +174,7 @@ def _persist_book_side_snapshot(
     source: str,
     book_status: str,
     fetched_at: str,
+    block_number: Any = None,
     side_payload: Dict[str, Any],
 ) -> None:
     if not token_id:
@@ -169,7 +189,9 @@ def _persist_book_side_snapshot(
         "source": source,
         "bookStatus": book_status,
         "fetchedAt": fetched_at,
+        "blockNumber": block_number,
     }
+    snapshot_version = _snapshot_version(token_id, side_name, fetched_at, side_payload)
     _ensure_snapshot_schema()
     with postgres_connection(PostgresSettings()) as conn:
         with conn.cursor() as cur:
@@ -177,14 +199,16 @@ def _persist_book_side_snapshot(
                 """
                 INSERT INTO quant.clob_orderbook_snapshots (
                     token_id, side, paired_token_id, market_title, source, book_status,
+                    block_number, snapshot_timestamp,
                     best_bid, best_ask, spread, mid,
                     bid_depth, ask_depth, depth_total, imbalance,
-                    level_count_bid, level_count_ask, payload, fetched_at
+                    level_count_bid, level_count_ask, payload, snapshot_version, fetched_at
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s,
+                    %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, %s::jsonb, %s
+                    %s, %s, %s::jsonb, %s, %s
                 )
                 """,
                 (
@@ -194,6 +218,8 @@ def _persist_book_side_snapshot(
                     market_title or None,
                     source or "clob-book",
                     book_status or "unknown",
+                    int(block_number) if block_number not in (None, "") else None,
+                    fetched_at,
                     summary["bestBid"],
                     summary["bestAsk"],
                     summary["spread"],
@@ -205,6 +231,7 @@ def _persist_book_side_snapshot(
                     summary["levelCountBid"],
                     summary["levelCountAsk"],
                     json.dumps(payload),
+                    snapshot_version,
                     fetched_at,
                 ),
             )
@@ -216,6 +243,7 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
         source = str(payload.get("source") or "clob-book")
         book_status = str(payload.get("bookStatus") or ("ok" if _lob_payload_has_levels(payload) else "no-book"))
         market_title = str(payload.get("marketTitle") or "")
+        block_number = payload.get("blockNumber") or payload.get("block_number")
         _persist_book_side_snapshot(
             ctx,
             token_id=yes_token_id,
@@ -225,6 +253,7 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
             source=source,
             book_status=book_status,
             fetched_at=fetched_at,
+            block_number=block_number,
             side_payload=payload.get("yes") or _empty_book_side(),
         )
         if no_token_id:
@@ -237,6 +266,7 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
                 source=source,
                 book_status=book_status,
                 fetched_at=fetched_at,
+                block_number=block_number,
                 side_payload=payload.get("no") or _empty_book_side(),
             )
     except Exception as exc:
@@ -265,6 +295,7 @@ def get_lob_snapshots_by_token_payload(ctx: dict, token_id: str, *, side: str = 
                     f"""
                     SELECT
                         snapshot_id, token_id, side, paired_token_id, market_title, source, book_status,
+                        block_number, snapshot_timestamp, snapshot_version,
                         best_bid, best_ask, spread, mid, bid_depth, ask_depth, depth_total, imbalance,
                         level_count_bid, level_count_ask, payload, fetched_at, created_at
                     FROM quant.clob_orderbook_snapshots
@@ -285,6 +316,9 @@ def get_lob_snapshots_by_token_payload(ctx: dict, token_id: str, *, side: str = 
                 "marketTitle": row["market_title"],
                 "source": row["source"],
                 "bookStatus": row["book_status"],
+                "blockNumber": int(row["block_number"]) if row["block_number"] is not None else None,
+                "snapshotTimestamp": row["snapshot_timestamp"].isoformat().replace("+00:00", "Z") if row["snapshot_timestamp"] else None,
+                "snapshotVersion": row["snapshot_version"],
                 "bestBid": _float_or_none(row["best_bid"]),
                 "bestAsk": _float_or_none(row["best_ask"]),
                 "spread": _float_or_none(row["spread"]),

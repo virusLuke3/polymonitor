@@ -7,11 +7,22 @@ position template, two price sources, and durable run/result tables.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import json
 from typing import Any
 
+from .execution import (
+    BookSnapshot,
+    FillResult,
+    execution_config_from_params,
+    lookup_snapshot,
+    parse_book_snapshot,
+    simulate_depth_fill,
+    snapshot_from_any,
+    snapshot_to_dict,
+)
 from .frameworks import normalize_backtest_engine, run_framework_backtest
 from ..prices.build_targets import target_reason, upsert_price_build_targets_for_market
 
@@ -33,6 +44,15 @@ class BacktestParameters:
     liquidity_cap_pct: Decimal = Decimal("100")
     max_position_notional: Decimal = Decimal("0")
     min_fill_pct: Decimal = Decimal("0")
+    execution_price_mode: str = "DEPTH"
+    latency_seconds: Decimal = Decimal("0")
+    max_book_staleness_seconds: Decimal = Decimal("900")
+    allow_partial_fill: bool = True
+    min_fill_size: Decimal = Decimal("0")
+    reject_on_stale_book: bool = True
+    final_valuation_mode: str = "FORCE_CLOSE"
+    max_entry_price: Decimal = Decimal("1")
+    min_exit_price: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -40,6 +60,7 @@ class PricePoint:
     x_value: int
     price: Decimal
     volume: Decimal
+    timestamp: datetime | None = None
 
 
 @dataclass
@@ -52,6 +73,12 @@ class OpenPosition:
     requested_notional: Decimal
     filled_notional: Decimal
     fill_pct: Decimal
+    fill_status: str = "FILLED"
+    book_snapshot_id: int | None = None
+    snapshot_version: str | None = None
+    staleness_seconds: Decimal | None = None
+    staleness_blocks: int | None = None
+    avg_fill_price: Decimal | None = None
 
 
 def decimal_or_default(value: Any, default: Decimal) -> Decimal:
@@ -69,6 +96,19 @@ def int_or_default(value: Any, default: int) -> int:
     except Exception:
         return default
     return parsed if parsed > 0 else default
+
+
+def bool_or_default(value: Any, default: bool) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
 
 
 def normalize_price_source(value: Any) -> str:
@@ -101,6 +141,15 @@ def parse_parameters(payload: dict[str, Any]) -> BacktestParameters:
         liquidity_cap_pct=decimal_or_default(payload.get("liquidity_cap_pct", payload.get("liquidityCapPct")), Decimal("100")),
         max_position_notional=decimal_or_default(payload.get("max_position_notional", payload.get("maxPositionNotional")), Decimal("0")),
         min_fill_pct=decimal_or_default(payload.get("min_fill_pct", payload.get("minFillPct")), Decimal("0")),
+        execution_price_mode=str(payload.get("execution_price_mode", payload.get("executionPriceMode", "DEPTH")) or "DEPTH").upper(),
+        latency_seconds=decimal_or_default(payload.get("latency_seconds", payload.get("latencySeconds")), Decimal("0")),
+        max_book_staleness_seconds=decimal_or_default(payload.get("max_book_staleness_seconds", payload.get("maxBookStalenessSeconds")), Decimal("900")),
+        allow_partial_fill=bool_or_default(payload.get("allow_partial_fill", payload.get("allowPartialFill")), True),
+        min_fill_size=decimal_or_default(payload.get("min_fill_size", payload.get("minFillSize")), Decimal("0")),
+        reject_on_stale_book=bool_or_default(payload.get("reject_on_stale_book", payload.get("rejectOnStaleBook")), True),
+        final_valuation_mode=str(payload.get("final_valuation_mode", payload.get("finalValuationMode", "FORCE_CLOSE")) or "FORCE_CLOSE").upper(),
+        max_entry_price=decimal_or_default(payload.get("max_entry_price", payload.get("maxEntryPrice")), Decimal("1")),
+        min_exit_price=decimal_or_default(payload.get("min_exit_price", payload.get("minExitPrice")), Decimal("0")),
     )
 
 
@@ -148,6 +197,15 @@ def backtest_parameter_snapshot(
             "liquidity_cap_pct": _decimal_text(params.liquidity_cap_pct),
             "max_position_notional": _decimal_text(params.max_position_notional),
             "min_fill_pct": _decimal_text(params.min_fill_pct),
+            "execution_price_mode": params.execution_price_mode,
+            "latency_seconds": _decimal_text(params.latency_seconds),
+            "max_book_staleness_seconds": _decimal_text(params.max_book_staleness_seconds),
+            "allow_partial_fill": bool(params.allow_partial_fill),
+            "min_fill_size": _decimal_text(params.min_fill_size),
+            "reject_on_stale_book": bool(params.reject_on_stale_book),
+            "final_valuation_mode": params.final_valuation_mode,
+            "max_entry_price": _decimal_text(params.max_entry_price),
+            "min_exit_price": _decimal_text(params.min_exit_price),
         },
     }
     if execution_context:
@@ -309,9 +367,12 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                 run_id, entry_threshold, exit_threshold, stop_loss, take_profit,
                 max_holding_bars, initial_capital, position_size,
                 fee_bps, slippage_bps, liquidity_cap_pct,
-                max_position_notional, min_fill_pct
+                max_position_notional, min_fill_pct,
+                execution_price_mode, latency_seconds, max_book_staleness_seconds,
+                allow_partial_fill, min_fill_size, reject_on_stale_book,
+                final_valuation_mode, max_entry_price, min_exit_price
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 run_id,
@@ -327,6 +388,15 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                 params.liquidity_cap_pct,
                 params.max_position_notional,
                 params.min_fill_pct,
+                params.execution_price_mode,
+                params.latency_seconds,
+                params.max_book_staleness_seconds,
+                params.allow_partial_fill,
+                params.min_fill_size,
+                params.reject_on_stale_book,
+                params.final_valuation_mode,
+                params.max_entry_price,
+                params.min_exit_price,
             ),
         )
     upsert_price_build_targets_for_market(
@@ -348,15 +418,14 @@ def execute_backtest_run(conn: Any, run_id: int) -> None:
     run = _get_run(conn, run_id)
     params = _get_parameters(conn, run_id)
     _set_run_status(conn, run_id, "running")
-    clob_execution = load_clob_execution_context(conn, run)
-    if clob_execution:
-        run["_clob_execution"] = clob_execution
+    clob_snapshots = load_clob_execution_snapshots(conn, run)
+    if clob_snapshots:
+        run["_clob_snapshots"] = [snapshot_to_dict(snapshot) for snapshot in clob_snapshots]
     points = fetch_price_points(conn, run)
     if len(points) < 2:
         raise RuntimeError("not enough price rows for backtest")
     data_quality_report = build_data_quality_report(points, run)
-    if clob_execution:
-        data_quality_report["execution_depth"] = _public_clob_execution_context(clob_execution)
+    data_quality_report["execution_depth"] = _public_clob_execution_context(clob_snapshots)
     result = run_framework_backtest(
         run.get("backtest_engine") or "builtin",
         points,
@@ -452,7 +521,7 @@ def fetch_price_points(conn: Any, run: dict[str, Any], *, limit: int = 25000) ->
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            SELECT block_number AS x_value, close_price AS price, volume
+            SELECT block_number AS x_value, close_price AS price, volume, block_timestamp
             FROM quant.market_token_block_close
             WHERE {" AND ".join(filters)}
             ORDER BY block_number ASC
@@ -463,7 +532,7 @@ def fetch_price_points(conn: Any, run: dict[str, Any], *, limit: int = 25000) ->
         return [_price_point(row) for row in cur.fetchall()]
 
 
-def load_clob_execution_context(conn: Any, run: dict[str, Any]) -> dict[str, Any] | None:
+def load_clob_execution_snapshots(conn: Any, run: dict[str, Any]) -> list[BookSnapshot]:
     meta = run.get("meta") or {}
     if isinstance(meta, str):
         try:
@@ -472,7 +541,7 @@ def load_clob_execution_context(conn: Any, run: dict[str, Any]) -> dict[str, Any
             meta = {}
     token_id = str(meta.get("token_id") or "").strip()
     if not token_id:
-        return None
+        return []
     side = str(run.get("token_side") or "").strip().upper()
     values: list[Any] = [token_id]
     side_filter = ""
@@ -484,53 +553,47 @@ def load_clob_execution_context(conn: Any, run: dict[str, Any]) -> dict[str, Any
             f"""
             SELECT
                 snapshot_id, token_id, side, source, book_status,
+                block_number, snapshot_timestamp, snapshot_version,
                 best_bid, best_ask, spread, mid,
                 bid_depth, ask_depth, depth_total,
-                level_count_bid, level_count_ask, payload, fetched_at
+                level_count_bid, level_count_ask, payload, fetched_at, created_at
             FROM quant.clob_orderbook_snapshots
             WHERE token_id = %s
               {side_filter}
               AND book_status = 'ok'
               AND (level_count_bid > 0 OR level_count_ask > 0)
-            ORDER BY fetched_at DESC, snapshot_id DESC
-            LIMIT 1
+            ORDER BY COALESCE(snapshot_timestamp, fetched_at) ASC, block_number ASC NULLS LAST, snapshot_id ASC
+            LIMIT 5000
             """,
             tuple(values),
         )
-        row = cur.fetchone()
-    if not row:
-        return None
-    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        rows = cur.fetchall()
+    return [parse_book_snapshot(dict(row)) for row in rows]
+
+
+def _public_clob_execution_context(snapshots: list[BookSnapshot]) -> dict[str, Any]:
+    if not snapshots:
+        return {"source": "clob_orderbook_snapshots", "snapshot_count": 0, "snapshot_version": None, "warning": "no historical CLOB snapshots loaded"}
+    first = snapshots[0]
+    last = snapshots[-1]
+    version_payload = "|".join(snapshot.snapshot_version for snapshot in snapshots if snapshot.snapshot_version)
+    snapshot_version = hashlib.sha256(version_payload.encode("ascii")).hexdigest()[:20] if version_payload else None
     return {
         "source": "clob_orderbook_snapshots",
-        "snapshot_id": int(row["snapshot_id"]),
-        "token_id": row["token_id"],
-        "side": row["side"],
-        "book_source": row["source"],
-        "book_status": row["book_status"],
-        "best_bid": _decimal_text(Decimal(str(row["best_bid"]))) if row.get("best_bid") is not None else None,
-        "best_ask": _decimal_text(Decimal(str(row["best_ask"]))) if row.get("best_ask") is not None else None,
-        "spread": _decimal_text(Decimal(str(row["spread"]))) if row.get("spread") is not None else None,
-        "mid": _decimal_text(Decimal(str(row["mid"]))) if row.get("mid") is not None else None,
-        "bid_depth": _decimal_text(Decimal(str(row["bid_depth"] or 0))),
-        "ask_depth": _decimal_text(Decimal(str(row["ask_depth"] or 0))),
-        "depth_total": _decimal_text(Decimal(str(row["depth_total"] or 0))),
-        "level_count_bid": int(row["level_count_bid"] or 0),
-        "level_count_ask": int(row["level_count_ask"] or 0),
-        "bids": payload.get("bids") if isinstance(payload.get("bids"), list) else [],
-        "asks": payload.get("asks") if isinstance(payload.get("asks"), list) else [],
-        "fetched_at": row["fetched_at"].isoformat().replace("+00:00", "Z") if row.get("fetched_at") else None,
+        "snapshot_count": len(snapshots),
+        "snapshot_version": snapshot_version,
+        "first_snapshot_id": first.snapshot_id,
+        "last_snapshot_id": last.snapshot_id,
+        "first_timestamp": first.timestamp.isoformat() if first.timestamp else None,
+        "last_timestamp": last.timestamp.isoformat() if last.timestamp else None,
+        "first_block": first.block_number,
+        "last_block": last.block_number,
+        "latest_best_bid": _decimal_text(last.best_bid) if last.best_bid is not None else None,
+        "latest_best_ask": _decimal_text(last.best_ask) if last.best_ask is not None else None,
+        "latest_spread": _decimal_text(last.spread) if last.spread is not None else None,
+        "latest_ask_depth": _decimal_text(last.ask_depth),
+        "latest_bid_depth": _decimal_text(last.bid_depth),
     }
-
-
-def _public_clob_execution_context(context: dict[str, Any]) -> dict[str, Any]:
-    keys = (
-        "source", "snapshot_id", "side", "book_source", "book_status",
-        "best_bid", "best_ask", "spread", "mid",
-        "bid_depth", "ask_depth", "depth_total",
-        "level_count_bid", "level_count_ask", "fetched_at",
-    )
-    return {key: context.get(key) for key in keys}
 
 
 def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: BacktestParameters) -> dict[str, Any]:
@@ -544,7 +607,7 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
 
     for index, point in enumerate(points):
         if open_position is None and point.price >= params.entry_threshold:
-            fill = _fill_decision(params, point.price, point.volume, run.get("_clob_execution"))
+            fill = _fill_decision(params, point, run, "BUY_YES")
             if fill["size"] <= 0:
                 events.append(_event(
                     "fill_rejected",
@@ -565,6 +628,12 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
                 requested_notional=fill["requested_notional"],
                 filled_notional=fill["filled_notional"],
                 fill_pct=fill["fill_pct"],
+                fill_status=fill.get("fill_status", "FILLED"),
+                book_snapshot_id=fill.get("book_snapshot_id"),
+                snapshot_version=fill.get("snapshot_version"),
+                staleness_seconds=fill.get("staleness_seconds"),
+                staleness_blocks=fill.get("staleness_blocks"),
+                avg_fill_price=fill.get("avg_fill_price"),
             )
             events.append(_event(
                 "open",
@@ -578,11 +647,26 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
         elif open_position is not None:
             exit_reason = _exit_reason(point.price, open_position.entry_price, index - open_position.entry_index, params)
             if exit_reason:
-                trade = _close_trade(run, x_axis, open_position, point, index, exit_reason, params)
+                exit_fill = _fill_decision(params, point, run, "SELL_YES", target_size=open_position.size)
+                if exit_fill["size"] <= 0:
+                    events.append(_event(
+                        "exit_rejected",
+                        x_axis,
+                        point.x_value,
+                        f"T-{open_position.trade_index:04d}",
+                        point.price,
+                        exit_reason,
+                        meta=exit_fill,
+                    ))
+                    continue
+                trade = _close_trade(run, x_axis, open_position, point, index, exit_reason, params, exit_fill=exit_fill)
                 trades.append(trade)
                 equity += trade["pnl"]
                 events.append(_event("close", x_axis, point.x_value, trade["trade_id"], point.price, exit_reason))
-                open_position = None
+                remaining_size = (open_position.size - exit_fill["size"]).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+                open_position.size = remaining_size
+                if remaining_size <= 0:
+                    open_position = None
 
         mark_equity = equity
         if open_position is not None:
@@ -603,10 +687,14 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
 
     if open_position is not None:
         last = points[-1]
-        trade = _close_trade(run, x_axis, open_position, last, len(points) - 1, "end_of_data", params)
-        trades.append(trade)
-        equity += trade["pnl"]
-        events.append(_event("close", x_axis, last.x_value, trade["trade_id"], last.price, "end_of_data"))
+        exit_fill = _fill_decision(params, last, run, "SELL_YES", target_size=open_position.size)
+        if exit_fill["size"] > 0:
+            trade = _close_trade(run, x_axis, open_position, last, len(points) - 1, "end_of_data", params, exit_fill=exit_fill)
+            trades.append(trade)
+            equity += trade["pnl"]
+            events.append(_event("close", x_axis, last.x_value, trade["trade_id"], last.price, "end_of_data"))
+        else:
+            events.append(_event("force_close_rejected", x_axis, last.x_value, f"T-{open_position.trade_index:04d}", last.price, "end_of_data", meta=exit_fill))
 
     metrics = build_metrics(trades, equity_rows, points, params)
     return {"trades": trades, "equity": equity_rows, "metrics": metrics, "events": events}
@@ -638,6 +726,19 @@ def build_metrics(
         if Decimal(str(trade.get("filled_notional") or trade.get("notional") or 0))
         < Decimal(str(trade.get("requested_notional") or params.position_size)) * Decimal("0.999")
     ])
+    partial_trades = len([trade for trade in trades if str(trade.get("fill_status") or "").upper() == "PARTIAL"])
+    snapshot_trades = len([trade for trade in trades if trade.get("book_snapshot_id") is not None])
+    stale_trade_count = len([
+        trade for trade in trades
+        if trade.get("staleness_seconds") is not None
+        and Decimal(str(trade.get("staleness_seconds") or 0)) > Decimal(str(params.max_book_staleness_seconds))
+    ])
+    avg_staleness_values = [
+        Decimal(str(trade.get("staleness_seconds") or 0))
+        for trade in trades
+        if trade.get("staleness_seconds") is not None
+    ]
+    avg_book_staleness = sum(avg_staleness_values, Decimal("0")) / Decimal(max(1, len(avg_staleness_values)))
     avg_notional = filled_notional / Decimal(max(1, len(trades)))
     settlement_pnl = net if points[-1].price in (Decimal("0"), Decimal("1")) else Decimal("0")
     resolved_pnl = settlement_pnl
@@ -659,6 +760,11 @@ def build_metrics(
         ("capped_trades", "Capped Trades", "prediction", Decimal(capped_trades), str(capped_trades), f"{_money(avg_notional)} avg fill", "negative" if capped_trades else "positive", "Trades whose filled notional was reduced by volume/liquidity constraints"),
         ("min_fill_pct", "Min Fill", "prediction", params.min_fill_pct, f"{params.min_fill_pct:.1f}%", "entry gate", "neutral", "Entry signals below this fill percentage are rejected instead of partially filled"),
         ("max_position_notional", "Max Position", "prediction", params.max_position_notional, _money(params.max_position_notional) if params.max_position_notional > 0 else "off", "per trade", "neutral", "Maximum requested USDC notional per open position"),
+        ("execution_mode", "Execution Mode", "prediction", Decimal("0"), params.execution_price_mode, "depth replay" if params.execution_price_mode == "DEPTH" else "legacy", "neutral", "Fill model selected for this run"),
+        ("snapshot_fill_coverage", "Snapshot Fill Coverage", "prediction", _ratio(snapshot_trades, len(trades)) * Decimal("100"), f"{_ratio(snapshot_trades, len(trades)) * Decimal('100'):.1f}%", f"{snapshot_trades} / {len(trades)} trades", "positive" if snapshot_trades == len(trades) and trades else "negative" if trades else "neutral", "Closed trades linked to persisted historical CLOB snapshots"),
+        ("partial_fill_count", "Partial Fills", "prediction", Decimal(partial_trades), str(partial_trades), "depth constrained", "negative" if partial_trades else "positive", "Closed trades where the requested order could only partially fill"),
+        ("stale_book_trade_count", "Stale Book Trades", "prediction", Decimal(stale_trade_count), str(stale_trade_count), f"limit {params.max_book_staleness_seconds}s", "negative" if stale_trade_count else "positive", "Closed trades whose book staleness exceeded the configured limit"),
+        ("avg_book_staleness", "Avg Book Staleness", "prediction", avg_book_staleness, f"{avg_book_staleness:.1f}s", "execution snapshots", "neutral", "Average age of the book snapshots used by closed trades"),
         ("fill_coverage", "Fill Coverage", "prediction", fill_coverage, f"{fill_coverage:.1f}%", "price rows", "positive", "Usable fill price coverage"),
         ("stale_price_ratio", "Stale Price Ratio", "prediction", stale_ratio, f"{stale_ratio:.2f}%", "exact rows", "neutral", "Share of stale/forward-filled prices"),
     ]
@@ -721,9 +827,15 @@ def build_data_quality_report(points: list[PricePoint], run: dict[str, Any]) -> 
     if span_coverage < Decimal("0.75"):
         status = "review"
         caveats.append("observed span covers less than 75% of requested range")
+    warning_level = "OK"
+    if caveats:
+        warning_level = "WARN"
+    if len(points) < 10 or span_coverage < Decimal("0.50"):
+        warning_level = "BAD"
     data_version = _points_data_version(points, run)
     return {
         "status": status,
+        "warning_level": warning_level,
         "price_source": run.get("price_source"),
         "x_axis": "block_number" if run.get("price_source") == "orderfilled_block_close" else "timestamp",
         "data_version": data_version,
@@ -772,7 +884,7 @@ def data_quality_metrics(report: dict[str, Any]) -> list[dict[str, Any]]:
             "metric_name": "Data Quality",
             "metric_group": "prediction",
             "value": Decimal("1") if report.get("status") == "ready" else Decimal("0"),
-            "formatted_value": str(report.get("status") or "unknown"),
+            "formatted_value": str(report.get("warning_level") or report.get("status") or "unknown"),
             "delta": f"{report.get('rows', 0)} rows",
             "status": status,
             "tooltip": "; ".join(report.get("caveats") or []) or "No large gaps or jumps detected in the executed price rows",
@@ -883,10 +995,12 @@ def replace_backtest_results(conn: Any, run_id: int, result: dict[str, Any]) -> 
                 run_id, trade_id, market_slug, token_side, side, x_axis,
                 entry_x, exit_x, entry_price, exit_price, size, notional,
                 requested_notional, filled_notional, fill_pct,
-                fee_cost, slippage_cost, execution_cost,
+                requested_size, filled_size, unfilled_size, fill_status,
+                book_snapshot_id, snapshot_version, staleness_seconds, staleness_blocks,
+                avg_fill_price, fee_cost, slippage_cost, execution_cost,
                 pnl, pnl_pct, holding_bars, exit_reason
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
                 (
@@ -905,6 +1019,15 @@ def replace_backtest_results(conn: Any, run_id: int, result: dict[str, Any]) -> 
                     row.get("requested_notional", row["notional"]),
                     row.get("filled_notional", row["notional"]),
                     row.get("fill_pct", Decimal("100")),
+                    row.get("requested_size", row.get("size", Decimal("0"))),
+                    row.get("filled_size", row.get("size", Decimal("0"))),
+                    row.get("unfilled_size", Decimal("0")),
+                    row.get("fill_status", "FILLED"),
+                    row.get("book_snapshot_id"),
+                    row.get("snapshot_version"),
+                    row.get("staleness_seconds"),
+                    row.get("staleness_blocks"),
+                    row.get("avg_fill_price", row.get("exit_price")),
                     row.get("fee_cost", Decimal("0")),
                     row.get("slippage_cost", Decimal("0")),
                     row.get("execution_cost", Decimal("0")),
@@ -973,6 +1096,15 @@ def _get_parameters(conn: Any, run_id: int) -> BacktestParameters:
         liquidity_cap_pct=row.get("liquidity_cap_pct", Decimal("100")),
         max_position_notional=row.get("max_position_notional", Decimal("0")),
         min_fill_pct=row.get("min_fill_pct", Decimal("0")),
+        execution_price_mode=row.get("execution_price_mode", "DEPTH"),
+        latency_seconds=row.get("latency_seconds", Decimal("0")),
+        max_book_staleness_seconds=row.get("max_book_staleness_seconds", Decimal("900")),
+        allow_partial_fill=bool(row.get("allow_partial_fill", True)),
+        min_fill_size=row.get("min_fill_size", Decimal("0")),
+        reject_on_stale_book=bool(row.get("reject_on_stale_book", True)),
+        final_valuation_mode=row.get("final_valuation_mode", "FORCE_CLOSE"),
+        max_entry_price=row.get("max_entry_price", Decimal("1")),
+        min_exit_price=row.get("min_exit_price", Decimal("0")),
     )
 
 
@@ -994,7 +1126,25 @@ def _price_point(row: dict[str, Any]) -> PricePoint:
         x_value=int(row["x_value"]),
         price=Decimal(str(row["price"])),
         volume=Decimal(str(row.get("volume") or 0)),
+        timestamp=_datetime_or_none(row.get("block_timestamp") or row.get("timestamp")),
     )
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _exit_reason(price: Decimal, entry_price: Decimal, holding_bars: int, params: BacktestParameters) -> str | None:
@@ -1017,15 +1167,18 @@ def _close_trade(
     point_index: int,
     exit_reason: str,
     params: BacktestParameters,
+    *,
+    exit_fill: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    exit_price = _execution_price(point.price, params, "exit")
-    notional = position.entry_price * position.size
-    exit_notional = exit_price * position.size
+    close_size = Decimal(str(exit_fill.get("size"))) if exit_fill else position.size
+    exit_price = Decimal(str(exit_fill.get("exit_price") or exit_fill.get("avg_fill_price"))) if exit_fill and (exit_fill.get("exit_price") or exit_fill.get("avg_fill_price")) else _execution_price(point.price, params, "exit")
+    notional = position.entry_price * close_size
+    exit_notional = exit_price * close_size
     fee_cost = (notional + exit_notional) * _bps_fraction(params.fee_bps)
-    slippage_cost = ((position.entry_price - _execution_price(position.entry_price, params, "raw_entry")) * position.size).copy_abs()
-    slippage_cost += ((point.price - exit_price) * position.size).copy_abs()
+    slippage_cost = ((position.entry_price - _execution_price(position.entry_price, params, "raw_entry")) * close_size).copy_abs()
+    slippage_cost += ((point.price - exit_price) * close_size).copy_abs()
     execution_cost = fee_cost + slippage_cost
-    pnl = (exit_price - position.entry_price) * position.size - fee_cost
+    pnl = (exit_price - position.entry_price) * close_size - fee_cost
     return {
         "trade_id": f"T-{position.trade_index:04d}",
         "market_slug": run["market_slug"],
@@ -1036,11 +1189,20 @@ def _close_trade(
         "exit_x": point.x_value,
         "entry_price": position.entry_price,
         "exit_price": exit_price,
-        "size": position.size,
+        "size": close_size,
         "notional": notional,
         "requested_notional": position.requested_notional,
         "filled_notional": position.filled_notional,
+        "requested_size": position.size,
+        "filled_size": close_size,
+        "unfilled_size": max(Decimal("0"), position.size - close_size),
         "fill_pct": position.fill_pct,
+        "fill_status": exit_fill.get("fill_status") if exit_fill else position.fill_status,
+        "book_snapshot_id": exit_fill.get("book_snapshot_id") if exit_fill else position.book_snapshot_id,
+        "snapshot_version": exit_fill.get("snapshot_version") if exit_fill else position.snapshot_version,
+        "staleness_seconds": exit_fill.get("staleness_seconds") if exit_fill else position.staleness_seconds,
+        "staleness_blocks": exit_fill.get("staleness_blocks") if exit_fill else position.staleness_blocks,
+        "avg_fill_price": exit_price,
         "pnl": pnl.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
         "pnl_pct": _pct(pnl, notional),
         "holding_bars": max(1, point_index - position.entry_index),
@@ -1095,7 +1257,7 @@ def _execution_price(price: Decimal, params: BacktestParameters, side: str) -> D
 
 
 def _size_for_liquidity(params: BacktestParameters, price: Decimal, volume: Decimal) -> Decimal:
-    return _fill_decision(params, price, volume)["size"]
+    return _legacy_fill_decision(params, price, volume)["size"]
 
 
 def _target_notional(params: BacktestParameters) -> Decimal:
@@ -1106,7 +1268,83 @@ def _target_notional(params: BacktestParameters) -> Decimal:
     return target
 
 
-def _fill_decision(params: BacktestParameters, price: Decimal, volume: Decimal, book: dict[str, Any] | None = None) -> dict[str, Any]:
+def _fill_decision(
+    params: BacktestParameters,
+    point: PricePoint,
+    run: dict[str, Any],
+    side: str,
+    *,
+    target_size: Decimal | None = None,
+) -> dict[str, Any]:
+    if str(params.execution_price_mode or "DEPTH").upper() == "LEGACY":
+        fill = _legacy_fill_decision(params, point.price, point.volume)
+        if target_size is not None and fill["size"] > target_size:
+            fill = {**fill, "size": target_size, "filled_notional": (target_size * point.price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)}
+        return fill
+    config = execution_config_from_params(params)
+    snapshots = [
+        snapshot
+        for snapshot in (snapshot_from_any(item) for item in run.get("_clob_snapshots") or [])
+        if snapshot is not None
+    ]
+    lookup = lookup_snapshot(
+        snapshots,
+        decision_block=point.x_value if run.get("price_source") == "orderfilled_block_close" else None,
+        decision_timestamp=point.timestamp,
+        config=config,
+    )
+    requested_size = target_size
+    if requested_size is None:
+        target_notional = _target_notional(params)
+        reference_price = max(point.price, Decimal("0.0000000001"))
+        requested_size = (target_notional / reference_price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    fill = simulate_depth_fill(
+        side=side,  # type: ignore[arg-type]
+        target_size=max(Decimal("0"), requested_size),
+        config=config,
+        lookup=lookup,
+        cash_available=_target_notional(params) if side.startswith("BUY") else None,
+    )
+    return _fill_result_to_engine(fill, point.price, params, side)
+
+
+def _fill_result_to_engine(fill: FillResult, signal_price: Decimal, params: BacktestParameters, side: str) -> dict[str, Any]:
+    filled_notional = fill.filled_notional
+    size = fill.filled_size
+    requested_notional = (fill.requested_size * signal_price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    price_key = "entry_price" if side.startswith("BUY") else "exit_price"
+    return {
+        "requested_notional": requested_notional,
+        "filled_notional": filled_notional,
+        "fill_pct": fill.fill_pct,
+        "size": size,
+        price_key: fill.avg_fill_price if fill.avg_fill_price > 0 else None,
+        "avg_fill_price": fill.avg_fill_price,
+        "liquidity_cap_pct": max(Decimal("0"), Decimal(str(params.liquidity_cap_pct))),
+        "min_fill_pct": max(Decimal("0"), Decimal(str(params.min_fill_pct))),
+        "partial_fill": fill.status == "PARTIAL",
+        "rejected": fill.status not in {"FILLED", "PARTIAL"},
+        "fill_status": fill.status,
+        "book_snapshot_id": fill.snapshot_id,
+        "snapshot_version": fill.snapshot_version,
+        "staleness_seconds": fill.staleness_seconds,
+        "staleness_blocks": fill.staleness_blocks,
+        "requested_size": fill.requested_size,
+        "filled_size": fill.filled_size,
+        "unfilled_size": fill.unfilled_size,
+        "fee_cost": fill.fee,
+        "slippage_cost": fill.slippage,
+        "execution_source": "clob_depth" if fill.snapshot_id else "no_book",
+        "best_bid": fill.best_bid,
+        "best_ask": fill.best_ask,
+        "spread": fill.spread,
+        "mid": fill.mid,
+        "levels_consumed": fill.levels_consumed,
+        "notes": fill.notes,
+    }
+
+
+def _legacy_fill_decision(params: BacktestParameters, price: Decimal, volume: Decimal) -> dict[str, Any]:
     target_notional = _target_notional(params)
     empty = {
         "requested_notional": target_notional,
@@ -1122,28 +1360,6 @@ def _fill_decision(params: BacktestParameters, price: Decimal, volume: Decimal, 
     cap_pct = max(Decimal("0"), Decimal(str(params.liquidity_cap_pct)))
     if cap_pct <= 0:
         return empty
-    book_fill = _fill_from_clob_book(target_notional, cap_pct, book)
-    if book_fill is not None:
-        fill_pct = _pct(book_fill["filled_notional"], target_notional) if target_notional else Decimal("0")
-        min_fill_pct = max(Decimal("0"), Decimal(str(params.min_fill_pct)))
-        if target_notional <= 0 or fill_pct < min_fill_pct:
-            return {
-                **empty,
-                **book_fill,
-                "fill_pct": fill_pct,
-                "partial_fill": book_fill["filled_notional"] > 0 and book_fill["filled_notional"] < target_notional,
-                "rejected": True,
-            }
-        return {
-            **book_fill,
-            "requested_notional": target_notional,
-            "fill_pct": fill_pct,
-            "size": book_fill["size"],
-            "liquidity_cap_pct": cap_pct,
-            "min_fill_pct": min_fill_pct,
-            "partial_fill": book_fill["filled_notional"] < target_notional,
-            "rejected": False,
-        }
     if volume <= 0:
         filled_notional = target_notional
     else:

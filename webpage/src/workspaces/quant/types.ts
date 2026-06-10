@@ -22,6 +22,12 @@ export type StrategyParameters = {
   liquidityCapPct: number;
   maxPositionNotional: number;
   minFillPct: number;
+  executionPriceMode: 'DEPTH' | 'LEGACY';
+  latencySeconds: number;
+  maxBookStalenessSeconds: number;
+  allowPartialFill: boolean;
+  minFillSize: number;
+  rejectOnStaleBook: boolean;
 };
 
 export type MarketInfo = {
@@ -94,6 +100,15 @@ export type Trade = {
   exitPrice: number;
   size: number;
   notional: number;
+  requestedSize?: number;
+  filledSize?: number;
+  unfilledSize?: number;
+  fillStatus?: string;
+  bookSnapshotId?: number;
+  snapshotVersion?: string;
+  stalenessSeconds?: number;
+  stalenessBlocks?: number;
+  avgFillPrice?: number;
   pnl: number;
   pnlPct: number;
   holdingTime: string;

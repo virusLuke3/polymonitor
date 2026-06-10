@@ -6,6 +6,7 @@ with a dedicated Python 3.12 environment that has `nautilus_trader` installed.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -32,6 +33,7 @@ def main() -> None:
             x_value=int(row["x_value"]),
             price=Decimal(str(row["price"])),
             volume=Decimal(str(row.get("volume") or "0")),
+            timestamp=_datetime_or_none(row.get("timestamp")),
         )
         for row in payload["points"]
     ]
@@ -48,6 +50,15 @@ def main() -> None:
         liquidity_cap_pct=Decimal(str(payload["params"].get("liquidity_cap_pct", "100"))),
         max_position_notional=Decimal(str(payload["params"].get("max_position_notional", "0"))),
         min_fill_pct=Decimal(str(payload["params"].get("min_fill_pct", "0"))),
+        execution_price_mode=str(payload["params"].get("execution_price_mode", "DEPTH")),
+        latency_seconds=Decimal(str(payload["params"].get("latency_seconds", "0"))),
+        max_book_staleness_seconds=Decimal(str(payload["params"].get("max_book_staleness_seconds", "900"))),
+        allow_partial_fill=bool(payload["params"].get("allow_partial_fill", True)),
+        min_fill_size=Decimal(str(payload["params"].get("min_fill_size", "0"))),
+        reject_on_stale_book=bool(payload["params"].get("reject_on_stale_book", True)),
+        final_valuation_mode=str(payload["params"].get("final_valuation_mode", "FORCE_CLOSE")),
+        max_entry_price=Decimal(str(payload["params"].get("max_entry_price", "1"))),
+        min_exit_price=Decimal(str(payload["params"].get("min_exit_price", "0"))),
     )
     result = _run_nautilus_trader(points, dict(payload["run"]), params, build_metrics)
     output_path.write_text(json.dumps(_json_ready(result)), encoding="utf-8")
@@ -61,6 +72,23 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _json_ready(item) for key, item in value.items()}
     return value
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 if __name__ == "__main__":

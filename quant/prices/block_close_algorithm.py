@@ -38,33 +38,43 @@ def orderfilled_block_close_sql(
     market_ids: Iterable[int] | None = None,
     token_ids: Iterable[str] | None = None,
 ) -> str:
-    filters = [f"block_number BETWEEN {int(from_block)} AND {int(to_block)}"]
+    filters = [f"f.block_number BETWEEN {int(from_block)} AND {int(to_block)}"]
     market_list = sorted({int(market_id) for market_id in market_ids or [] if int(market_id or 0) > 0})
     if market_list:
-        filters.append(f"market_id IN ({','.join(str(market_id) for market_id in market_list)})")
+        filters.append(f"f.market_id IN ({','.join(str(market_id) for market_id in market_list)})")
     token_list = [str(token).lower() for token in token_ids or [] if str(token or "").strip()]
     if token_list:
         quoted = ",".join(quote_clickhouse_string(token) for token in token_list)
-        filters.append(f"token_id IN ({quoted})")
+        filters.append(f"lower(f.token_id) IN ({quoted})")
     where_sql = " AND ".join(filters)
     internal_addresses = ",".join(quote_clickhouse_string(address) for address in INTERNAL_COUNTERPARTIES)
     return f"""
         WITH
+            (SELECT ifNull(max(block_number), 0) FROM {table}) AS max_fact_block,
+            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
+            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
+            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time,
             raw AS (
                 SELECT
-                    market_id,
-                    condition_id,
-                    lower(token_id) AS token_id,
-                    outcome_code,
-                    block_number,
-                    lower(tx_hash) AS tx_hash,
-                    log_index,
-                    lower(replaceRegexpOne(maker, '^0x', '')) AS maker,
-                    lower(replaceRegexpOne(taker, '^0x', '')) AS taker,
-                    price AS raw_price,
-                    size,
-                    maker_amount,
-                    taker_amount,
+                    f.market_id,
+                    f.condition_id,
+                    lower(f.token_id) AS token_id,
+                    f.outcome_code,
+                    f.block_number,
+                    if(
+                        isNull(bt.block_time),
+                        addSeconds(anchor_time, (toInt64(f.block_number) - toInt64(anchor_block)) * 2),
+                        bt.block_time
+                    ) AS block_timestamp,
+                    lower(f.tx_hash) AS tx_hash,
+                    f.log_index,
+                    lower(replaceRegexpOne(f.maker, '^0x', '')) AS maker,
+                    lower(replaceRegexpOne(f.taker, '^0x', '')) AS taker,
+                    f.price AS raw_price,
+                    f.size,
+                    f.maker_amount,
+                    f.taker_amount,
                     (
                         maker_amount IS NOT NULL
                         AND taker_amount IS NOT NULL
@@ -82,7 +92,8 @@ def orderfilled_block_close_sql(
                     (size <= 0) AS is_invalid_size,
                     (trade_price < 0 OR trade_price > 1) AS is_invalid_price,
                     (trade_price <= 0.01 OR trade_price >= 0.99) AS is_extreme_price
-                FROM {table}
+                FROM {table} f
+                LEFT JOIN block_timestamps bt ON bt.block_number = f.block_number
                 WHERE {where_sql}
             ),
             raw_stats AS (
@@ -113,6 +124,7 @@ def orderfilled_block_close_sql(
             clean.token_id AS token_id,
             any(clean.outcome_code) AS outcome_code,
             clean.block_number AS block_number,
+            formatDateTime(any(clean.block_timestamp), '%Y-%m-%dT%H:%i:%SZ', 'UTC') AS block_timestamp,
             toString(argMax(clean.trade_price, tuple(clean.log_index, clean.tx_hash))) AS close_price,
             toString(argMax(clean.raw_price, tuple(clean.log_index, clean.tx_hash))) AS close_raw_price,
             lower(argMax(tx_hash, tuple(log_index, tx_hash))) AS close_tx_hash,

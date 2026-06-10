@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from decimal import Decimal
+from datetime import datetime, timezone
 from typing import Any
 
 from .block_close_algorithm import orderfilled_block_close_sql
@@ -23,6 +24,21 @@ def _decimal_or_none(value: Any) -> Decimal | None:
     if not text or text.upper() in {"NULL", "\\N", "NONE", "NAN"}:
         return None
     return Decimal(text)
+
+
+def _timestamp_or_none(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _yes_probability(token_side: str | None, token_price: Decimal | None) -> Decimal | None:
@@ -94,6 +110,7 @@ def insert_block_close_rows(conn: Any, metadata_by_token: dict[str, dict[str, An
                 meta.get("market_slug"),
                 token_side,
                 int(row["block_number"]),
+                _timestamp_or_none(row.get("block_timestamp")),
                 close_price,
                 _yes_probability(str(token_side), close_price),
                 vwap_price,
@@ -120,7 +137,7 @@ def insert_block_close_rows(conn: Any, metadata_by_token: dict[str, dict[str, An
         return 0
     columns = (
         "token_id", "market_id", "market_slug", "token_side", "block_number",
-        "close_price", "yes_probability_close", "vwap_price", "yes_probability_vwap",
+        "block_timestamp", "close_price", "yes_probability_close", "vwap_price", "yes_probability_vwap",
         "close_raw_price", "close_price_source", "close_tx_hash", "close_log_index",
         "close_maker_amount", "close_taker_amount", "trade_count", "raw_trade_count",
         "internal_filtered_count", "invalid_size_count", "invalid_price_count",

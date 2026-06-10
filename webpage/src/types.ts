@@ -468,6 +468,12 @@ export type QuantBacktestRun = {
   liquidityCapPct?: string | number | null;
   maxPositionNotional?: string | number | null;
   minFillPct?: string | number | null;
+  executionPriceMode?: string | null;
+  latencySeconds?: string | number | null;
+  maxBookStalenessSeconds?: string | number | null;
+  allowPartialFill?: boolean | string | number | null;
+  minFillSize?: string | number | null;
+  rejectOnStaleBook?: boolean | string | number | null;
   parameterFingerprint?: string | null;
   parameterSnapshot?: Record<string, unknown> | null;
   meta?: Record<string, unknown> | null;
@@ -512,7 +518,16 @@ export type QuantBacktestTrade = {
   notional: string | number;
   requestedNotional?: string | number | null;
   filledNotional?: string | number | null;
+  requestedSize?: string | number | null;
+  filledSize?: string | number | null;
+  unfilledSize?: string | number | null;
   fillPct?: string | number | null;
+  fillStatus?: string | null;
+  bookSnapshotId?: string | number | null;
+  snapshotVersion?: string | null;
+  stalenessSeconds?: string | number | null;
+  stalenessBlocks?: string | number | null;
+  avgFillPrice?: string | number | null;
   feeCost?: string | number | null;
   slippageCost?: string | number | null;
   executionCost?: string | number | null;
@@ -545,6 +560,12 @@ export type QuantBacktestCreatePayload = {
   liquidityCapPct?: number;
   maxPositionNotional?: number;
   minFillPct?: number;
+  executionPriceMode?: string;
+  latencySeconds?: number;
+  maxBookStalenessSeconds?: number;
+  allowPartialFill?: boolean;
+  minFillSize?: number;
+  rejectOnStaleBook?: boolean;
   executionContext?: Record<string, unknown>;
 };
 

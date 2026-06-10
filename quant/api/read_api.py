@@ -1582,7 +1582,10 @@ def get_backtest_run(conn: Any, *, run_id: int) -> dict[str, Any] | None:
             SELECT r.*, p.entry_threshold, p.exit_threshold, p.stop_loss, p.take_profit,
                    p.max_holding_bars, p.initial_capital, p.position_size,
                    p.fee_bps, p.slippage_bps, p.liquidity_cap_pct,
-                   p.max_position_notional, p.min_fill_pct
+                   p.max_position_notional, p.min_fill_pct,
+                   p.execution_price_mode, p.latency_seconds, p.max_book_staleness_seconds,
+                   p.allow_partial_fill, p.min_fill_size, p.reject_on_stale_book,
+                   p.final_valuation_mode, p.max_entry_price, p.min_exit_price
             FROM quant.quant_backtest_runs r
             LEFT JOIN quant.quant_backtest_parameters p ON p.run_id = r.run_id
             WHERE r.run_id = %s
@@ -1606,7 +1609,10 @@ def get_backtest_runs(conn: Any, *, market_slug: str | None = None, limit: int =
             SELECT r.*, p.entry_threshold, p.exit_threshold, p.stop_loss, p.take_profit,
                    p.max_holding_bars, p.initial_capital, p.position_size,
                    p.fee_bps, p.slippage_bps, p.liquidity_cap_pct,
-                   p.max_position_notional, p.min_fill_pct
+                   p.max_position_notional, p.min_fill_pct,
+                   p.execution_price_mode, p.latency_seconds, p.max_book_staleness_seconds,
+                   p.allow_partial_fill, p.min_fill_size, p.reject_on_stale_book,
+                   p.final_valuation_mode, p.max_entry_price, p.min_exit_price
             FROM quant.quant_backtest_runs r
             LEFT JOIN quant.quant_backtest_parameters p ON p.run_id = r.run_id
             {where_sql}
