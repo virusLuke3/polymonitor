@@ -13,8 +13,10 @@ import {
   WORLD_CUP_HOST_MATCH_COUNTS,
 } from './data';
 import { WorldCupMap } from './WorldCupMap';
+import { InfoDot } from './components/InfoDot';
 import { SourceRequired, type SourceRequiredRow } from './components/SourceRequired';
 import { CalendarPanel } from './panels/CalendarPanel';
+import { MarketBoardPanel } from './panels/MarketBoardPanel';
 import { WinProbabilityPanel } from './panels/WinProbabilityPanel';
 import type {
   WorldCupDashboardPayload,
@@ -34,7 +36,7 @@ import {
   type MatchFilter,
   type WorldCupPanelId,
 } from './panels/registry';
-import { kickoffDay, kickoffTime, scoreText, stageLabel } from './panels/formatters';
+import { formatCompact, kickoffDay, kickoffTime, probabilityWidth, scoreText, stageLabel } from './panels/formatters';
 import './styles/worldcup-reference-ui.css';
 
 type WorldCupSignalTone = 'red' | 'gold' | 'blue' | 'purple' | 'gray' | 'green';
@@ -65,14 +67,6 @@ function formatCountdown(match: WorldCupMatch | null, now: Date) {
 function formatNumber(value?: number | null, digits = 1) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
   return Number(value).toFixed(digits);
-}
-
-function formatCompact(value?: number | null) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
-  const number = Number(value);
-  if (number >= 1_000_000) return `$${(number / 1_000_000).toFixed(1)}M`;
-  if (number >= 1_000) return `$${(number / 1_000).toFixed(1)}K`;
-  return `$${number.toFixed(0)}`;
 }
 
 function formatUpdatedAgo(iso: string, now: Date) {
@@ -118,21 +112,6 @@ function formatBjtClock(now: Date) {
     second: '2-digit',
     hour12: false,
   }).format(now);
-}
-
-function probabilityWidth(value?: number | null) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '2%';
-  return `${Math.max(2, Math.min(100, Number(value) * 100))}%`;
-}
-
-function percentLabel(value?: number | null, digits = 1) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
-  return `${Number(value).toFixed(digits)}%`;
-}
-
-function probabilityLabel(value?: number | null, digits = 1) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
-  return `${(Number(value) * 100).toFixed(digits)}%`;
 }
 
 function clampNumber(value: number, min: number, max: number) {
@@ -409,10 +388,6 @@ function WorldCupPanelSlot({
       {children}
     </div>
   );
-}
-
-function InfoDot({ label }: { label: string }) {
-  return <span className="wm-worldcup-info-dot" aria-label={label} title={label}>?</span>;
 }
 
 function SignalTags({ tags }: { tags: WorldCupSignalItem['tags'] }) {
@@ -890,56 +865,6 @@ function HostVenuePanel({
           rows={[{ source: 'Open-Meteo runtime weather', status: 'required', detail: 'host-city current and forecast payload' }]}
         />
       )}
-    </Panel>
-  );
-}
-
-function MarketBoardPanel({
-  markets,
-  odds,
-}: {
-  markets: WorldCupPolymarketMarket[];
-  odds: WorldCupOddsSnapshot[];
-}) {
-  const firstMarket = markets[0] || null;
-  const totalVolume = markets.reduce((sum, market) => sum + (market.volume24h || 0), 0);
-  return (
-    <Panel
-      title="MARKET BOARD"
-      count={markets.length}
-      titleControls={<InfoDot label="Only verified local DB / Polymarket market links are shown. No inferred market rows are generated." />}
-      className="wm-worldcup-panel wm-worldcup-market-board-panel"
-    >
-      <div className="wm-worldcup-board-stats">
-        <span><em>24H VOL</em><strong>{formatCompact(totalVolume)}</strong></span>
-        <span><em>LINKS</em><strong>{markets.length}</strong></span>
-        <span><em>BOOKS</em><strong>{odds.length}</strong></span>
-        <span><em>CONF</em><strong>{firstMarket ? percentLabel(firstMarket.confidence * 100, 0) : '--'}</strong></span>
-      </div>
-      {markets.slice(0, 4).map((market, index) => (
-        <article className="wm-worldcup-market-card" key={`${market.eventId || market.title}`}>
-          <div className="wm-worldcup-card-head">
-            <span>{formatCompact(market.volume24h)} · {Math.round(market.confidence * 100)} conf</span>
-            <b>{index === 0 ? 'VERIFIED' : String(market.source || 'market').toUpperCase()}</b>
-          </div>
-          <strong>{market.title}</strong>
-          <div className="wm-worldcup-prob-grid">
-            {market.outcomes.slice(0, 3).map((outcome) => (
-              <span key={outcome.name}>
-                <em>{outcome.name}</em>
-                <strong>{probabilityLabel(outcome.yesPrice)}</strong>
-                <i style={{ width: probabilityWidth(outcome.yesPrice) }} />
-              </span>
-            ))}
-          </div>
-        </article>
-      ))}
-      {!markets.length ? (
-        <SourceRequired
-          detail="No trusted market row is available for this fixture. The board is intentionally empty until local DB/Gamma returns a matched event."
-          rows={[{ source: 'Polymarket local DB / Gamma', status: 'not matched', detail: 'real outcomes and volume required' }]}
-        />
-      ) : null}
     </Panel>
   );
 }

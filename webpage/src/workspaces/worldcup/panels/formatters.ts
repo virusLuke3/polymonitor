@@ -33,3 +33,26 @@ export function kickoffDay(match: WorldCupMatch) {
 export function kickoffTime(match: WorldCupMatch) {
   return match.kickoffBeijing.split(',').pop()?.trim() || match.kickoffBeijing;
 }
+
+export function formatCompact(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+  const number = Number(value);
+  if (number >= 1_000_000) return `$${(number / 1_000_000).toFixed(1)}M`;
+  if (number >= 1_000) return `$${(number / 1_000).toFixed(1)}K`;
+  return `$${number.toFixed(0)}`;
+}
+
+export function probabilityWidth(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '2%';
+  return `${Math.max(2, Math.min(100, Number(value) * 100))}%`;
+}
+
+export function percentLabel(value?: number | null, digits = 1) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+  return `${Number(value).toFixed(digits)}%`;
+}
+
+export function probabilityLabel(value?: number | null, digits = 1) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+  return `${(Number(value) * 100).toFixed(digits)}%`;
+}
