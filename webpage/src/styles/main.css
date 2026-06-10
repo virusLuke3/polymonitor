@@ -14,27 +14,8 @@
   --wm-grid: rgba(57, 255, 115, 0.06);
   --wm-glow: rgba(57, 255, 115, 0.18);
   --wm-shadow: rgba(0, 0, 0, 0.38);
-  --font-mono: 'SF Mono', 'Monaco', 'Cascadia Code', 'Fira Code', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
-  --font-body-base: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', var(--font-body-base);
-}
-
-[data-font="mono"] {
-  --font-body-base: var(--font-mono);
-  --font-body: var(--font-body-base);
-}
-
-[data-font="system"] {
-  --font-body-base: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
-
-[dir="rtl"] {
-  --font-body: 'Tajawal', 'Geeza Pro', 'SF Arabic', 'Tahoma', var(--font-body-base);
-}
-
-:lang(zh-CN),
-:lang(zh) {
-  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', var(--font-body-base);
+  --font-body: 'Inter', 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
 }
 
 .qtv-shell {
@@ -10227,20 +10208,17 @@ body {
 }
 
 .wm-overlay-card span,
-.wm-line-axis,
-.wm-layer-row,
-.wm-sidebar-footer {
-  font-family: var(--font-mono);
-}
-
 .wm-panel-title,
 .wm-panel-badge,
 .wm-panel-count,
 .wm-brief-label,
 .wm-news-source,
 .wm-chip,
-.wm-empty {
-  font-family: var(--font-body);
+.wm-empty,
+.wm-line-axis,
+.wm-layer-row,
+.wm-sidebar-footer {
+  font-family: var(--font-mono);
 }
 
 .wm-overlay-card span {
