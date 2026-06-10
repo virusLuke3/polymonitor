@@ -32,6 +32,7 @@ from api.config import load_api_settings
 from api.services import polymarket_macro_map_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
+from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
 DEFAULT_INTERVAL_SECONDS = 180
@@ -202,6 +203,7 @@ class PolymarketMacroMapWatcher:
 
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(payload)
+        telegram_sent = publish_cached_panel_snapshot(SEED_META_CACHE_KEY, payload)
         status = "ok" if record_count > 0 and payload.get("status") == "ok" else str(payload.get("status") or "degraded")
         self.store_seed_meta(
             status=status,
@@ -211,7 +213,7 @@ class PolymarketMacroMapWatcher:
             cache_mode=payload.get("cacheMode"),
             payload_status=payload.get("status"),
         )
-        return {"status": "stored", "payload": payload}
+        return {"status": "stored", "payload": payload, "telegramSent": telegram_sent}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

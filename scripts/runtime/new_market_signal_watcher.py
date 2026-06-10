@@ -44,6 +44,7 @@ from api.services.new_market_signal_service import (
 )
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
+from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
 DEFAULT_NAMESPACE = "runtime:new-market-signals"
@@ -338,6 +339,7 @@ class NewMarketSignalWatcher:
         payload = self.build_snapshot_payload(status=status, metadata=metadata)
         self.snapshot_store.set(SNAPSHOT_NAMESPACE, SNAPSHOT_CACHE_KEY, payload, SNAPSHOT_TTL_SECONDS)
         self.redis_client.set(self.snapshot_redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=SNAPSHOT_TTL_SECONDS)
+        publish_cached_panel_snapshot("new-market-signals", payload)
         return payload
 
     def preserve_current_snapshot(self, *, reason: str) -> Dict[str, Any]:

@@ -31,6 +31,7 @@ from api.config import load_api_settings
 from api.services import runtime_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
+from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
 DEFAULT_INTERVAL_SECONDS = 60
@@ -208,6 +209,7 @@ class NbaWatcher:
         self,
         *,
         label: str,
+        panel_id: str,
         namespace: str,
         cache_key: str,
         fetcher: Callable[[Dict[str, Any]], Dict[str, Any]],
@@ -228,25 +230,29 @@ class NbaWatcher:
 
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(namespace, cache_key, payload)
+        telegram_sent = publish_cached_panel_snapshot(panel_id, payload)
         status = "ok" if record_count > 0 else "empty"
-        return {"status": status, "recordCount": record_count, "error": None}
+        return {"status": status, "recordCount": record_count, "error": None, "telegramSent": telegram_sent}
 
     def run_once(self) -> Dict[str, Any]:
         components = {
             "scoreboard": self._run_component(
                 label="scoreboard",
+                panel_id="nba-scoreboard",
                 namespace=runtime_service.NBA_SCOREBOARD_NAMESPACE,
                 cache_key=runtime_service.build_nba_scoreboard_cache_key(limit=self.scoreboard_limit),
                 fetcher=lambda ctx: runtime_service.fetch_live_nba_scoreboard_payload(ctx, limit=self.scoreboard_limit),
             ),
             "intel": self._run_component(
                 label="intel",
+                panel_id="nba-intel",
                 namespace=runtime_service.NBA_INTEL_NAMESPACE,
                 cache_key=runtime_service.build_nba_intel_cache_key(limit=self.intel_limit),
                 fetcher=lambda ctx: runtime_service.fetch_live_nba_intel_payload(ctx, limit=self.intel_limit),
             ),
             "predictor": self._run_component(
                 label="predictor",
+                panel_id="espn-matchup-predictor",
                 namespace=runtime_service.NBA_MATCHUP_PREDICTOR_NAMESPACE,
                 cache_key=runtime_service.build_nba_matchup_predictor_cache_key(limit=self.predictor_limit),
                 fetcher=lambda ctx: runtime_service.fetch_live_nba_matchup_predictor_payload(ctx, limit=self.predictor_limit),

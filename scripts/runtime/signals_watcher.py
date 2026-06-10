@@ -29,6 +29,7 @@ from api.config import load_api_settings
 from api.services import polybeats_service, signal_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
+from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
 DEFAULT_INTERVAL_SECONDS = 45
@@ -322,15 +323,16 @@ class SignalsWatcher:
             status = "stale"
         stored_payload = {**payload, "status": status, "cacheMode": "seeded"}
         self.store_payload(stored_payload)
+        telegram_sent = publish_cached_panel_snapshot(str(self.spec["panel_id"]), stored_payload)
         self.store_seed_meta(
             status=status,
             record_count=record_count,
             error_summary=None if record_count else f"{self.component} payload contained no items",
-            metadata={"result": "stored", "component": self.component, "limit": self.limit, **stats},
+            metadata={"result": "stored", "component": self.component, "limit": self.limit, "telegramSent": telegram_sent, **stats},
             source_states=payload.get("sourceStates") if isinstance(payload.get("sourceStates"), dict) else {"database": status},
             payload_status=status,
         )
-        return {"status": status, "recordCount": record_count, "component": self.component}
+        return {"status": status, "recordCount": record_count, "component": self.component, "telegramSent": telegram_sent}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

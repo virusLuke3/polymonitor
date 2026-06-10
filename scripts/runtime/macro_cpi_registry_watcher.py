@@ -20,6 +20,7 @@ from api.config import load_api_settings
 from api.services import macro_cpi_registry_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
+from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
 DEFAULT_INTERVAL_SECONDS = 1800
@@ -128,9 +129,10 @@ class MacroCpiRegistryWatcher:
             return {"panelId": panel_id, "status": "preserved"}
         payload = {**payload, "cacheMode": "redis-seed"}
         self.store_payload(panel_id, payload)
+        telegram_sent = publish_cached_panel_snapshot(panel_id, payload)
         status = "ok" if payload.get("status") == "ok" else str(payload.get("status") or "degraded")
         self.store_meta(panel_id, status=status, record_count=len(payload.get("items") or []), source_states=payload.get("sources"), cache_mode="redis-seed", payload_status=payload.get("status"))
-        return {"panelId": panel_id, "status": "stored", "payloadStatus": payload.get("status"), "items": len(payload.get("items") or [])}
+        return {"panelId": panel_id, "status": "stored", "payloadStatus": payload.get("status"), "items": len(payload.get("items") or []), "telegramSent": telegram_sent}
 
     def run_once(self) -> Dict[str, Any]:
         results = [self.run_panel(panel_id) for panel_id in macro_cpi_registry_service.MACRO_CPI_REGISTRY_PANEL_IDS]

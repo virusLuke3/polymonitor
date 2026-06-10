@@ -39,11 +39,12 @@ from api.config import load_api_settings
 from api.services import worldcup_dashboard_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
+from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 from telegram.topics.client import TelegramClient
 from telegram.topics.config import load_settings as load_telegram_settings
 from telegram.topics.models import MessageCandidate
 from telegram.topics.publisher import publish_candidates
-from telegram.topics.state import PublishState
+from telegram.topics.state import PublishState, state_lock
 
 
 DEFAULT_INTERVAL_SECONDS = 300
@@ -246,13 +247,14 @@ class WorldCupDashboardWatcher:
         if not settings.bot_token and not settings.dry_run:
             return 0
         candidates = [_odds_alert_candidate(row) for row in rows[:8]]
-        state = PublishState(settings.state_path)
         telegram = TelegramClient(
             bot_token=settings.bot_token,
             api_base=settings.telegram_api_base,
             timeout_seconds=settings.request_timeout_seconds,
         )
-        result = publish_candidates(candidates, settings=settings, state=state, telegram=telegram, dry_run=settings.dry_run)
+        with state_lock(settings.state_path):
+            state = PublishState(settings.state_path)
+            result = publish_candidates(candidates, settings=settings, state=state, telegram=telegram, dry_run=settings.dry_run)
         if result.sent:
             print(f"[worldcup-dashboard] odds-alert sent={result.sent} candidates={len(candidates)}", file=sys.stderr)
         return result.sent
@@ -329,6 +331,7 @@ class WorldCupDashboardWatcher:
 
         payload = {**payload, "cacheMode": "remote"}
         self.store_payload(payload)
+        telegram_sent = publish_cached_panel_snapshot("worldcup-dashboard", payload)
         odds_alerts_sent = self.publish_new_odds_alerts(previous, payload)
         status = "ok" if record_count > 0 and len(payload.get("matches") or []) >= 64 else "degraded"
         self.store_seed_meta(
@@ -337,7 +340,7 @@ class WorldCupDashboardWatcher:
             source_states=payload.get("providerStates") if isinstance(payload.get("providerStates"), dict) else {},
             error_summary=None if status == "ok" else "World Cup dashboard snapshot is degraded",
         )
-        return {"status": status, "payload": payload, "oddsAlertsSent": odds_alerts_sent}
+        return {"status": status, "payload": payload, "telegramSent": telegram_sent, "oddsAlertsSent": odds_alerts_sent}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

@@ -21,6 +21,7 @@ from api.config import load_api_settings
 from api.services import weather_news_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
+from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 DEFAULT_INTERVAL_SECONDS = 300
 SEED_META_NAMESPACE = "seed-meta:weather"
@@ -146,9 +147,10 @@ class WeatherNewsWatcher:
             return {"status": "preserved", "payload": previous}
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(payload)
+        telegram_sent = publish_cached_panel_snapshot(SEED_META_CACHE_KEY, payload)
         status = "ok" if payload.get("status") == "ok" else str(payload.get("status") or "degraded")
         self.store_meta(status=status, record_count=len(payload.get("items") or []), source_states=payload.get("sources"), cache_mode="seeded", payload_status=payload.get("status"))
-        return {"status": "stored", "payload": payload}
+        return {"status": "stored", "payload": payload, "telegramSent": telegram_sent}
 
 
 def main() -> int:
