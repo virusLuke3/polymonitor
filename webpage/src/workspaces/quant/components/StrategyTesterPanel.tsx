@@ -180,6 +180,48 @@ function runParameterSummary(run: QuantBacktestRun, fallback: StrategyParameters
   };
 }
 
+function canonicalStrategyParameters(parameters: StrategyParameters) {
+  return {
+    entryThreshold: Number(parameters.entryThreshold.toFixed(6)),
+    exitThreshold: Number(parameters.exitThreshold.toFixed(6)),
+    stopLoss: Number(parameters.stopLoss.toFixed(6)),
+    takeProfit: Number(parameters.takeProfit.toFixed(6)),
+    maxHoldingBars: Math.round(parameters.maxHoldingBars),
+    initialCapital: Number(parameters.initialCapital.toFixed(6)),
+    positionSize: Number(parameters.positionSize.toFixed(6)),
+    feeBps: Number(parameters.feeBps.toFixed(6)),
+    slippageBps: Number(parameters.slippageBps.toFixed(6)),
+    liquidityCapPct: Number(parameters.liquidityCapPct.toFixed(6)),
+  };
+}
+
+function strategyParameterDiffs(current: StrategyParameters, reference: StrategyParameters) {
+  const labels: Record<keyof StrategyParameters, string> = {
+    entryThreshold: 'entry',
+    exitThreshold: 'exit',
+    stopLoss: 'stop',
+    takeProfit: 'take',
+    maxHoldingBars: 'hold',
+    initialCapital: 'capital',
+    positionSize: 'size',
+    feeBps: 'fee',
+    slippageBps: 'slip',
+    liquidityCapPct: 'liq',
+  };
+  return (Object.keys(labels) as Array<keyof StrategyParameters>).map((key) => {
+    const left = key === 'maxHoldingBars' ? Math.round(current[key]) : current[key];
+    const right = key === 'maxHoldingBars' ? Math.round(reference[key]) : reference[key];
+    const diff = Math.abs(Number(left) - Number(right));
+    return {
+      key,
+      label: labels[key],
+      current: left,
+      reference: right,
+      changed: diff > (key === 'maxHoldingBars' ? 0 : 0.000001),
+    };
+  }).filter((row) => row.changed);
+}
+
 async function copyText(value: string) {
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -275,6 +317,10 @@ export function StrategyTesterPanel({
   const localRunFingerprint = useMemo(() => hashText(runPayloadText), [runPayloadText]);
   const serverRunFingerprint = propertyValue('fingerprint');
   const runFingerprint = serverRunFingerprint && serverRunFingerprint !== '-' ? serverRunFingerprint : localRunFingerprint;
+  const liveParameterFingerprint = useMemo(
+    () => hashText(JSON.stringify(canonicalStrategyParameters(strategyParameters))),
+    [strategyParameters],
+  );
   const parameterDiagnostics = useMemo(() => {
     const spread = strategyParameters.entryThreshold - strategyParameters.exitThreshold;
     const roundTripCostBps = (strategyParameters.feeBps * 2) + (strategyParameters.slippageBps * 2);
@@ -460,6 +506,36 @@ export function StrategyTesterPanel({
       isCurrent: Boolean(currentRunId && run.runId === currentRunId),
     }));
   }, [recentBacktestRuns, result.runId]);
+  const parameterDrift = useMemo(() => {
+    const referenceRun = recentBacktestRuns.find((run) => result.runId && run.runId === result.runId)
+      || recentBacktestRuns.find((run) => run.status === 'succeeded')
+      || null;
+    if (!referenceRun) {
+      return {
+        status: 'idle',
+        referenceRun: null,
+        referenceParams: null,
+        diffs: [] as ReturnType<typeof strategyParameterDiffs>,
+        title: 'No reference run',
+        detail: 'Run the current parameters once to anchor reproducibility.',
+      };
+    }
+    const referenceParams = strategyParametersFromRun(referenceRun, strategyParameters);
+    const diffs = strategyParameterDiffs(strategyParameters, referenceParams);
+    const sameContext = (!referenceRun.backtestEngine || referenceRun.backtestEngine === engine)
+      && (!referenceRun.priceSource || referenceRun.priceSource === dataSource || dataSource.includes(referenceRun.priceSource));
+    const status = diffs.length || !sameContext ? 'review' : 'ready';
+    return {
+      status,
+      referenceRun,
+      referenceParams,
+      diffs,
+      title: status === 'ready' ? 'Current parameters match the loaded run' : 'Current parameters differ from the reference run',
+      detail: status === 'ready'
+        ? `#${referenceRun.runId} · ${compactRunTime(referenceRun.createdAt)} · ${runParameterSummary(referenceRun, strategyParameters).label}`
+        : `#${referenceRun.runId} · ${diffs.length.toLocaleString('en-US')} parameter changes${sameContext ? '' : ' · context changed'}`,
+    };
+  }, [dataSource, engine, recentBacktestRuns, result.runId, strategyParameters]);
   const batchLeaderboard = useMemo(() => (
     [...batchRows, ...splitRows, ...walkForwardRows]
       .filter((row) => row.status === 'succeeded' || row.status === 'failed' || row.runId)
@@ -823,6 +899,37 @@ export function StrategyTesterPanel({
                 <strong>{runFingerprint}</strong>
                 <em>{engine} · {dataSource}</em>
               </div>
+            </div>
+            <div className={`qtv-parameter-drift ${parameterDrift.status}`}>
+              <div>
+                <span>Parameter drift</span>
+                <strong>{parameterDrift.title}</strong>
+                <em>{parameterDrift.detail}</em>
+              </div>
+              <b>{parameterDrift.status === 'ready' ? 'MATCH' : parameterDrift.status === 'review' ? 'DRIFT' : 'NEW'}</b>
+              <dl>
+                <div><dt>Live signature</dt><dd>{liveParameterFingerprint}</dd></div>
+                <div><dt>Reference run</dt><dd>{parameterDrift.referenceRun ? `#${parameterDrift.referenceRun.runId}` : '-'}</dd></div>
+                <div><dt>Reference status</dt><dd>{parameterDrift.referenceRun?.status || '-'}</dd></div>
+                <div><dt>Rows</dt><dd>{parameterDrift.referenceRun ? compactRows(parameterDrift.referenceRun.rowsProcessed) : '-'}</dd></div>
+              </dl>
+              {parameterDrift.diffs.length ? (
+                <ul>
+                  {parameterDrift.diffs.slice(0, 6).map((row) => (
+                    <li key={row.key}>
+                      <span>{row.label}</span>
+                      <b>{formatNumber(Number(row.reference), 4)}</b>
+                      <em>→</em>
+                      <strong>{formatNumber(Number(row.current), 4)}</strong>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <footer>
+                <button type="button" disabled={!parameterDrift.referenceRun} onClick={() => parameterDrift.referenceRun && applyRunParameters(parameterDrift.referenceRun)}>Apply reference params</button>
+                <button type="button" onClick={onRefresh}>Run current params</button>
+                <button type="button" onClick={copyStrategyParameters}>Copy live params</button>
+              </footer>
             </div>
             {parameterDiagnostics.warnings.length ? (
               <div className="qtv-parameter-warnings">
