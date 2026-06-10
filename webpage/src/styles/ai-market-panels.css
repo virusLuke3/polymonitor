@@ -395,3 +395,275 @@
     text-align: left;
   }
 }
+
+/* v29 AI panel refinement: keep panel chrome sharp, but move narrative copy
+   back to sans-serif hierarchy so the hero reads like editorial intelligence. */
+.wm-ai-market-panel .wm-panel-header {
+  min-height: 41px;
+  padding: 6px 9px 6px 11px;
+}
+
+.wm-ai-market-panel .wm-panel-title-wrap {
+  gap: 8px;
+}
+
+.wm-ai-market-panel .wm-panel-title {
+  max-width: 190px;
+  color: #f1f3f5;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.18;
+}
+
+.wm-ai-market-panel .wm-panel-badge {
+  padding: 3px 8px 2px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.68px;
+}
+
+.wm-ai-market-panel .wm-panel-count {
+  min-width: 30px;
+  height: 23px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.wm-ai-insights {
+  gap: 10px;
+}
+
+.wm-ai-insight-hero {
+  min-height: 156px;
+  padding: 14px 16px 15px 18px;
+  border-color: rgba(255, 255, 255, 0.085);
+  border-left-width: 4px;
+  border-left-color: rgba(248, 251, 255, 0.96);
+  border-radius: 12px;
+  background:
+    linear-gradient(130deg, rgba(22, 24, 31, 0.98), rgba(24, 24, 25, 0.98) 54%, rgba(29, 28, 48, 0.97)),
+    rgba(18, 18, 20, 0.98);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 34px rgba(0, 0, 0, 0.24);
+}
+
+.wm-ai-insight-hero::after {
+  inset: auto -18% -54px 52%;
+  height: 108px;
+  background: radial-gradient(circle, rgba(108, 148, 218, 0.16), transparent 66%);
+}
+
+.wm-ai-special .wm-ai-insight-hero {
+  border-left-color: rgba(255, 196, 85, 0.94);
+  background:
+    linear-gradient(130deg, rgba(29, 27, 20, 0.98), rgba(24, 23, 24, 0.98) 56%, rgba(47, 32, 20, 0.97)),
+    rgba(18, 18, 20, 0.98);
+}
+
+.wm-ai-trend .wm-ai-insight-hero {
+  border-left-color: rgba(68, 255, 140, 0.88);
+  background:
+    linear-gradient(130deg, rgba(19, 33, 28, 0.98), rgba(23, 24, 25, 0.98) 54%, rgba(20, 32, 43, 0.97)),
+    rgba(18, 18, 20, 0.98);
+}
+
+.wm-ai-insight-source span {
+  color: rgba(236, 239, 244, 0.95);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.wm-ai-insight-source i {
+  width: 9px;
+  height: 9px;
+  background: linear-gradient(180deg, #59e7ff, #4ea7ff);
+  box-shadow: 0 0 12px rgba(88, 180, 255, 0.36);
+}
+
+.wm-ai-insight-source b {
+  padding: 3px 8px 2px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.66px;
+}
+
+.wm-ai-insight-hero em {
+  margin-top: 18px;
+  color: rgba(173, 180, 190, 0.7);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.74px;
+}
+
+.wm-ai-insight-hero p {
+  margin-top: 9px;
+  color: rgba(243, 246, 249, 0.96);
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.42;
+}
+
+.wm-ai-insight-section-head {
+  min-height: 22px;
+  padding: 0 1px;
+}
+
+.wm-ai-insight-section-head span,
+.wm-ai-insight-card-head span,
+.wm-ai-insight-market-card span,
+.wm-ai-insight-watch span {
+  color: rgba(157, 165, 177, 0.88);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.72px;
+}
+
+.wm-ai-insight-section-head em,
+.wm-ai-insight-card-head b {
+  color: rgba(138, 144, 153, 0.78);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.62px;
+}
+
+.wm-ai-insight-list {
+  gap: 7px;
+}
+
+.wm-ai-insight-card,
+.wm-ai-insight-market-card,
+.wm-ai-insight-watch {
+  border-color: rgba(255, 255, 255, 0.075);
+  border-left-width: 3px;
+  border-radius: 0;
+  background:
+    linear-gradient(100deg, rgba(24, 26, 29, 0.96), rgba(18, 19, 22, 0.95) 62%, rgba(17, 24, 30, 0.9)),
+    rgba(18, 18, 20, 0.98);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    0 8px 18px rgba(0, 0, 0, 0.12);
+}
+
+.wm-ai-insight-card::before,
+.wm-ai-insight-market-card::before,
+.wm-ai-insight-watch::before {
+  background: linear-gradient(90deg, rgba(104, 154, 221, 0.06), transparent 56%);
+}
+
+.wm-ai-insight-card {
+  padding: 9px 11px 10px 13px;
+}
+
+.wm-ai-insight-market-card {
+  padding: 10px 10px 10px 13px;
+}
+
+.wm-ai-insight-card strong,
+.wm-ai-insight-market-card strong,
+.wm-ai-insight-watch strong {
+  color: #f1f4f7;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 660;
+  line-height: 1.32;
+}
+
+.wm-ai-insight-card p,
+.wm-ai-insight-market-card p,
+.wm-ai-insight-watch p {
+  margin-top: 5px;
+  color: rgba(206, 212, 219, 0.74);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 430;
+  line-height: 1.42;
+}
+
+.wm-ai-insight-market-card span {
+  margin-bottom: 5px;
+  padding: 2px 6px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wm-ai-insight-market-card > b {
+  max-width: 84px;
+  padding: 3px 7px 2px;
+  border-color: rgba(255, 193, 70, 0.24);
+  color: #ffc962;
+  background: rgba(80, 57, 16, 0.52);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.wm-ai-insight-watch {
+  padding: 9px 11px 10px 13px;
+}
+
+.wm-ai-insight-watch span {
+  margin-bottom: 5px;
+  color: #ffcb67;
+}
+
+.wm-ai-insight-card.positive,
+.wm-ai-insight-market-card.positive,
+.wm-ai-insight-watch.positive {
+  border-left-color: #39ff73;
+}
+
+.wm-ai-insight-card.warning,
+.wm-ai-insight-market-card.warning,
+.wm-ai-insight-watch.warning {
+  border-left-color: #ffbf52;
+  background:
+    linear-gradient(100deg, rgba(41, 31, 18, 0.97), rgba(24, 22, 20, 0.95) 62%, rgba(24, 22, 28, 0.9)),
+    rgba(18, 18, 20, 0.98);
+}
+
+.wm-ai-insight-card.critical,
+.wm-ai-insight-market-card.critical,
+.wm-ai-insight-watch.critical {
+  border-left-color: #ff4d4f;
+  background:
+    linear-gradient(100deg, rgba(48, 24, 29, 0.98), rgba(25, 21, 23, 0.96) 60%, rgba(27, 23, 30, 0.9)),
+    rgba(18, 18, 20, 0.98);
+}
+
+.wm-ai-watchlist {
+  border-top-color: rgba(255, 255, 255, 0.06);
+  padding-top: 7px;
+}
+
+.wm-ai-insight-evidence {
+  gap: 5px;
+  padding-bottom: 3px;
+}
+
+.wm-ai-insight-evidence span {
+  padding: 3px 7px 2px;
+  border-color: rgba(255, 255, 255, 0.11);
+  color: rgba(197, 203, 211, 0.86);
+  background: rgba(255, 255, 255, 0.038);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.62px;
+}
+
+@media (max-width: 760px) {
+  .wm-ai-insight-hero {
+    min-height: 140px;
+    padding: 12px 13px 13px 15px;
+  }
+
+  .wm-ai-insight-hero p {
+    font-size: 13px;
+  }
+}

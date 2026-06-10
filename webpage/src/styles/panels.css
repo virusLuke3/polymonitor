@@ -22656,3 +22656,352 @@ a.wm-orderfilled-row {
 .wm-focused-market-row .wm-block-close-chart ~ .wm-focus-outcome-rail {
   display: none !important;
 }
+
+/* v29 main dashboard broadcast-wall pass:
+   reserve mono for chrome/meta, return titles and summaries to body font,
+   and replace etched cockpit borders with thinner premium wall surfaces. */
+.wm-panel:not(.wm-worldcup-panel) {
+  border-color: #2a2f35;
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0) 18%),
+    linear-gradient(180deg, rgba(15, 17, 20, 0.985), rgba(12, 14, 18, 0.982));
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.3),
+    18px 0 28px rgba(30, 67, 114, 0.12);
+}
+
+.wm-panel:not(.wm-worldcup-panel)::after {
+  border: 0;
+  box-shadow: none;
+  background:
+    linear-gradient(180deg, rgba(86, 124, 168, 0.16), transparent 16%, transparent 84%, rgba(70, 101, 140, 0.18)),
+    linear-gradient(90deg, transparent 0, transparent calc(100% - 1px), rgba(114, 156, 212, 0.22) calc(100% - 1px), rgba(114, 156, 212, 0.22) 100%);
+  opacity: 0.72;
+}
+
+.wm-panel-slot:hover .wm-panel:not(.wm-worldcup-panel),
+.wm-panel-slot.panel-drop-target .wm-panel:not(.wm-worldcup-panel),
+.wm-panel-slot.dragging-source .wm-panel:not(.wm-worldcup-panel) {
+  border-color: #37414b;
+  box-shadow:
+    0 20px 38px rgba(0, 0, 0, 0.34),
+    22px 0 36px rgba(40, 86, 141, 0.16);
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-header {
+  min-height: 40px;
+  padding: 7px 11px 7px 12px;
+  border-bottom-color: rgba(255, 255, 255, 0.075);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.012) 72%, rgba(0, 0, 0, 0) 100%);
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-title-wrap {
+  gap: 9px;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-title-controls,
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-header-right {
+  gap: 6px;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-title {
+  color: #f1f2f4;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.05px;
+  line-height: 1.14;
+  text-transform: uppercase;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-badge {
+  padding: 3px 8px 2px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(219, 224, 231, 0.84);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.72px;
+  line-height: 1;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-badge.live {
+  border-color: rgba(57, 255, 115, 0.38);
+  background: rgba(13, 54, 33, 0.46);
+  color: #58ff97;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-badge.locked {
+  border-color: rgba(255, 190, 76, 0.28);
+  background: rgba(70, 47, 14, 0.5);
+  color: #ffc45a;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-badge.muted {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.022);
+  color: rgba(175, 181, 187, 0.78);
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-count {
+  min-width: 30px;
+  padding: 4px 7px 3px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  background: rgba(58, 60, 66, 0.54);
+  color: rgba(196, 202, 209, 0.82);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.28px;
+  line-height: 1;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-help-button {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.026);
+  color: rgba(196, 202, 211, 0.82);
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-help-button:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.wm-empty-state {
+  border: 1px solid rgba(255, 193, 58, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 191, 73, 0.05), rgba(255, 191, 73, 0.018)),
+    rgba(15, 16, 19, 0.9);
+  color: rgba(199, 204, 211, 0.74);
+}
+
+.wm-empty-state strong {
+  color: #e7eaee;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.38;
+}
+
+.wm-empty-state em {
+  color: rgba(255, 187, 67, 0.76);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.68px;
+  text-transform: uppercase;
+}
+
+.wm-content-feed-panel .wm-panel-body {
+  padding: 0 0 3px;
+}
+
+.wm-content-feed-panel .wm-intel-card {
+  padding: 12px 11px 12px 18px;
+  border-bottom-color: rgba(255, 255, 255, 0.065);
+  border-left-width: 3px;
+  gap: 7px;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.wm-content-feed-panel .wm-intel-card.priority-alert,
+.wm-content-feed-panel .wm-intel-card.priority-caution,
+.wm-content-feed-panel .wm-intel-card.priority-ongoing,
+.wm-content-feed-panel .wm-intel-card.priority-politics,
+.wm-content-feed-panel .wm-intel-card.priority-election,
+.wm-content-feed-panel .wm-intel-card.priority-economic,
+.wm-content-feed-panel .wm-intel-card.priority-finance,
+.wm-content-feed-panel .wm-intel-card.priority-crypto,
+.wm-content-feed-panel .wm-intel-card.priority-sports,
+.wm-content-feed-panel .wm-intel-card.priority-tech,
+.wm-content-feed-panel .wm-intel-card.priority-health,
+.wm-content-feed-panel .wm-intel-card.priority-diplomatic,
+.wm-content-feed-panel .wm-intel-card.priority-conflict,
+.wm-content-feed-panel .wm-intel-card.priority-weather,
+.wm-content-feed-panel .wm-intel-card.priority-culture,
+.wm-content-feed-panel .wm-intel-card.priority-video,
+.wm-content-feed-panel .wm-intel-card.priority-report,
+.wm-content-feed-panel .wm-intel-card.priority-research,
+.wm-content-feed-panel .wm-intel-card.priority-news {
+  margin-left: -10px;
+  padding-left: 24px;
+}
+
+.wm-content-feed-panel .wm-intel-card:hover {
+  border-left-color: #7edcff;
+  background: linear-gradient(90deg, rgba(52, 78, 110, 0.2), rgba(255, 255, 255, 0.018) 44%, transparent 84%);
+  transform: translateX(1px);
+}
+
+.wm-content-feed-panel .wm-intel-rank {
+  top: 12px;
+  left: 8px;
+  color: rgba(138, 144, 152, 0.62);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.wm-content-feed-panel .wm-intel-meta {
+  gap: 6px;
+}
+
+.wm-content-feed-panel .wm-intel-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border-color: rgba(126, 220, 255, 0.34);
+  background: rgba(126, 220, 255, 0.22);
+  box-shadow: 0 0 10px rgba(126, 220, 255, 0.14);
+}
+
+.wm-content-feed-panel .wm-news-source {
+  max-width: 20ch;
+  color: rgba(158, 164, 173, 0.88);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.82px;
+  text-shadow: none;
+}
+
+.wm-content-feed-panel .wm-intel-tag {
+  padding: 3px 7px 2px;
+  border-radius: 4px;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(218, 222, 227, 0.9);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.42px;
+  line-height: 1;
+}
+
+.wm-content-feed-panel .wm-intel-tag.alert {
+  border-color: rgba(255, 91, 91, 0.78);
+  background: #ff4d4f;
+  color: #fff5f5;
+}
+
+.wm-content-feed-panel .wm-intel-tag.caution {
+  border-color: rgba(255, 186, 57, 0.28);
+  background: rgba(88, 62, 17, 0.56);
+  color: #ffc858;
+}
+
+.wm-content-feed-panel .wm-intel-tag.ongoing {
+  border-color: rgba(125, 150, 189, 0.26);
+  background: rgba(41, 53, 72, 0.82);
+  color: #a8b8d1;
+}
+
+.wm-content-feed-panel .wm-intel-tag.politics {
+  border-color: rgba(126, 220, 255, 0.24);
+  color: #99dbff;
+  background: rgba(23, 53, 70, 0.64);
+}
+
+.wm-content-feed-panel .wm-intel-tag.election {
+  border-color: rgba(192, 165, 255, 0.24);
+  color: #d2b8ff;
+  background: rgba(56, 36, 80, 0.54);
+}
+
+.wm-content-feed-panel .wm-intel-tag.sports {
+  border-color: rgba(58, 255, 131, 0.22);
+  color: #72ff9f;
+  background: rgba(13, 64, 35, 0.52);
+}
+
+.wm-content-feed-panel .wm-intel-tag.crypto {
+  border-color: rgba(178, 165, 240, 0.24);
+  color: #cab6ff;
+  background: rgba(48, 41, 74, 0.58);
+}
+
+.wm-content-feed-panel .wm-intel-tag.economic,
+.wm-content-feed-panel .wm-intel-tag.finance,
+.wm-content-feed-panel .wm-intel-tag.tech,
+.wm-content-feed-panel .wm-intel-tag.video {
+  border-color: rgba(255, 187, 55, 0.24);
+  color: #ffc657;
+  background: rgba(82, 59, 17, 0.56);
+}
+
+.wm-content-feed-panel .wm-intel-tag.health {
+  border-color: rgba(255, 116, 158, 0.26);
+  color: #ff95b5;
+  background: rgba(79, 25, 45, 0.56);
+}
+
+.wm-content-feed-panel .wm-intel-tag.diplomatic {
+  border-color: rgba(255, 140, 61, 0.24);
+  color: #ffad67;
+  background: rgba(86, 44, 16, 0.56);
+}
+
+.wm-content-feed-panel .wm-intel-tag.conflict {
+  border-color: rgba(255, 193, 58, 0.24);
+  color: #ffcf64;
+  background: rgba(78, 44, 14, 0.56);
+}
+
+.wm-content-feed-panel .wm-intel-tag.weather {
+  border-color: rgba(126, 209, 255, 0.24);
+  color: #97dfff;
+  background: rgba(24, 55, 73, 0.54);
+}
+
+.wm-content-feed-panel .wm-intel-tag.culture {
+  border-color: rgba(219, 170, 255, 0.24);
+  color: #dfb8ff;
+  background: rgba(67, 39, 82, 0.52);
+}
+
+.wm-content-feed-panel .wm-intel-tag.report,
+.wm-content-feed-panel .wm-intel-tag.research,
+.wm-content-feed-panel .wm-intel-tag.news {
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(198, 203, 209, 0.82);
+  background: rgba(255, 255, 255, 0.032);
+}
+
+.wm-content-feed-panel .wm-news-title {
+  color: #f2f4f6;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1.34;
+  letter-spacing: -0.01em;
+}
+
+.wm-content-feed-panel .wm-intel-summary {
+  color: rgba(205, 211, 218, 0.72);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 430;
+  line-height: 1.45;
+}
+
+.wm-content-feed-panel .wm-news-meta {
+  gap: 7px;
+  color: rgba(136, 142, 149, 0.82);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.26px;
+  text-transform: none;
+}
+
+.wm-content-feed-panel .wm-news-meta b {
+  color: #8ecfff;
+  font-weight: 700;
+  text-decoration: none;
+}
