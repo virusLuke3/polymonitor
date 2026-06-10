@@ -23330,3 +23330,249 @@ a.wm-orderfilled-row {
   color: #a8d9ff;
   font-weight: 760;
 }
+
+/* v31 panel premium pass: raise title hierarchy, status chips, and borders so
+   the non-World Cup panels read like a broadcast wall instead of utility cards. */
+.wm-panel:not(.wm-worldcup-panel) {
+  border: 1px solid #32363c;
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0) 18%),
+    linear-gradient(180deg, #1a1a1a 0%, #121417 100%);
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.38),
+    10px 0 28px rgba(35, 69, 118, 0.14),
+    0 0 0 1px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 1px 0 0 rgba(130, 171, 230, 0.06),
+    inset 0 -26px 40px rgba(22, 40, 73, 0.12);
+}
+
+.wm-panel-slot:hover .wm-panel:not(.wm-worldcup-panel),
+.wm-panel-slot.panel-drop-target .wm-panel:not(.wm-worldcup-panel),
+.wm-panel-slot.dragging-source .wm-panel:not(.wm-worldcup-panel) {
+  border-color: #46515d;
+  box-shadow:
+    0 24px 44px rgba(0, 0, 0, 0.44),
+    14px 0 34px rgba(45, 87, 150, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 -26px 44px rgba(27, 51, 91, 0.16);
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-header {
+  min-height: 46px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(107, 150, 221, 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
+    linear-gradient(180deg, #252525, #1d1d1d);
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-title-wrap,
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-header-right {
+  gap: 10px;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-title {
+  color: #f4f3ee;
+  font-family: var(--font-body);
+  font-size: 13.6px;
+  font-weight: 840;
+  letter-spacing: 0.06em;
+  line-height: 1.05;
+  text-transform: uppercase;
+  text-shadow: 0 0 16px rgba(118, 165, 255, 0.07);
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-badge {
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-badge.live {
+  border-color: rgba(53, 246, 143, 0.36);
+  color: #87ffbc;
+  background: linear-gradient(180deg, rgba(18, 115, 65, 0.45), rgba(11, 45, 28, 0.76));
+  box-shadow:
+    0 0 16px rgba(53, 246, 143, 0.12),
+    inset 0 1px 0 rgba(190, 255, 219, 0.14);
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-badge.locked {
+  border-color: rgba(255, 196, 86, 0.28);
+  color: #ffd47d;
+  background: linear-gradient(180deg, rgba(94, 67, 19, 0.54), rgba(56, 40, 14, 0.82));
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-badge.muted {
+  border-color: rgba(146, 157, 171, 0.18);
+  color: rgba(208, 213, 219, 0.82);
+  background: linear-gradient(180deg, rgba(56, 61, 68, 0.62), rgba(33, 37, 43, 0.84));
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-count {
+  min-width: 34px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: rgba(196, 202, 209, 0.92);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(49, 54, 61, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.28);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-help-button,
+.wm-panel-action-button,
+.wm-market-sort,
+.wm-weather-sort-button {
+  min-height: 28px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-help-button {
+  width: 27px;
+  height: 27px;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  color: rgba(213, 218, 225, 0.86);
+}
+
+.wm-panel-action-button,
+.wm-market-sort,
+.wm-weather-sort-button {
+  border-color: rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
+    rgba(31, 34, 38, 0.82);
+  color: #d6e0ec;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.wm-panel-action-button {
+  padding: 4px 10px 3px;
+}
+
+.wm-market-sort,
+.wm-weather-sort-button {
+  padding: 0 29px 0 11px;
+}
+
+.wm-panel:not(.wm-worldcup-panel) .wm-panel-help-button:hover,
+.wm-panel-action-button:hover,
+.wm-market-sort:hover,
+.wm-weather-sort-button:hover,
+.wm-market-sort:focus,
+.wm-weather-sort-button:focus {
+  border-color: rgba(113, 180, 255, 0.36);
+  background:
+    linear-gradient(180deg, rgba(34, 71, 118, 0.58), rgba(18, 38, 63, 0.78)),
+    rgba(25, 37, 55, 0.86);
+  color: #f2f8ff;
+}
+
+.wm-empty-card strong,
+.wm-empty-state strong,
+.wm-registry-empty strong {
+  font-size: 15px;
+  font-weight: 720;
+}
+
+.wm-panel-loading strong {
+  font-size: 15px;
+  font-weight: 720;
+}
+
+.wm-panel-loading em {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.wm-content-feed-panel .wm-news-source {
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+}
+
+.wm-content-feed-panel .wm-intel-tag {
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 840;
+  letter-spacing: 0.06em;
+}
+
+.wm-content-feed-panel .wm-intel-tag.alert,
+.wm-content-feed-panel .wm-intel-tag.critical {
+  border-color: rgba(255, 96, 96, 0.82);
+  background: linear-gradient(180deg, #ff6169, #e03a48);
+  color: #fff9f9;
+  box-shadow: 0 0 18px rgba(255, 79, 82, 0.16);
+}
+
+.wm-content-feed-panel .wm-intel-tag.caution,
+.wm-content-feed-panel .wm-intel-tag.conflict,
+.wm-content-feed-panel .wm-intel-tag.economic,
+.wm-content-feed-panel .wm-intel-tag.finance,
+.wm-content-feed-panel .wm-intel-tag.tech,
+.wm-content-feed-panel .wm-intel-tag.video {
+  border-color: rgba(255, 194, 79, 0.32);
+  background: linear-gradient(180deg, rgba(103, 73, 22, 0.72), rgba(62, 43, 16, 0.84));
+  color: #ffd97c;
+}
+
+.wm-content-feed-panel .wm-intel-tag.ongoing {
+  border-color: rgba(125, 160, 216, 0.32);
+  background: linear-gradient(180deg, rgba(44, 58, 89, 0.84), rgba(28, 39, 61, 0.92));
+  color: #c2d8ff;
+}
+
+.wm-content-feed-panel .wm-intel-tag.sports,
+.wm-content-feed-panel .wm-intel-tag.health,
+.wm-content-feed-panel .wm-intel-tag.wire,
+.wm-content-feed-panel .wm-intel-tag.positive {
+  border-color: rgba(53, 246, 143, 0.28);
+  background: linear-gradient(180deg, rgba(18, 112, 63, 0.52), rgba(11, 47, 29, 0.78));
+  color: #8bffbc;
+}
+
+.wm-content-feed-panel .wm-news-title {
+  font-size: 16.4px;
+  font-weight: 760;
+  line-height: 1.3;
+  letter-spacing: -0.014em;
+}
+
+.wm-content-feed-panel .wm-intel-summary {
+  font-size: 12.8px;
+  font-weight: 520;
+  line-height: 1.48;
+}
+
+.wm-content-feed-panel .wm-news-meta {
+  font-size: 10.4px;
+  font-weight: 720;
+}
