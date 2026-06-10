@@ -23,7 +23,12 @@ from .formatters import (
     format_worldcup_venue,
     help_text,
     is_address,
+    market_search_action_links,
+    signal_action_links,
     start_text,
+    worldcup_match_action_links,
+    worldcup_matches_action_links,
+    worldcup_news_action_links,
     worldcup_odds_action_links,
     worldcup_matches_page_info,
 )
@@ -90,7 +95,49 @@ def _matches_keyboard(dashboard: dict, args: str) -> dict:
         pager.append(("Next", f"/matches page {page + 1}"))
     if pager:
         rows.append(pager)
+    trade_links = worldcup_matches_action_links(dashboard, args)
+    if trade_links:
+        rows.append(trade_links[:3])
     rows.append([("Overview", "/worldcup"), ("Open Workspace", "https://www.polymonitor.club/?workspace=worldcup")])
+    return _keyboard(rows)
+
+
+def _market_search_keyboard(payload: dict) -> dict | None:
+    links = market_search_action_links(payload)
+    if not links:
+        return None
+    return _keyboard([links[:2]])
+
+
+def _signal_keyboard(payload: dict) -> dict | None:
+    links = signal_action_links(payload)
+    if not links:
+        return None
+    return _keyboard([links[:2], [("Open Workspace", "https://www.polymonitor.club")]])
+
+
+def _worldcup_match_keyboard(args: str, dashboard: dict, markets: dict | None = None) -> dict:
+    links = worldcup_match_action_links(args, dashboard, markets)
+    rows: list[list[tuple[str, str]]] = []
+    if links:
+        rows.append(links[:2])
+    rows.extend(
+        [
+            [("Odds", f"/odds {args}"), ("Team", f"/team {args.split()[0]}")],
+            [("Overview", "/worldcup"), ("Next Matches", "/matches")],
+        ]
+    )
+    return _keyboard(rows)
+
+
+def _worldcup_news_keyboard(args: str, intel: dict, dashboard: dict) -> dict | None:
+    links = worldcup_news_action_links(args, intel, dashboard)
+    rows: list[list[tuple[str, str]]] = []
+    if links:
+        rows.append(links[:2])
+    if len(links) > 2:
+        rows.append(links[2:3])
+    rows.append([("Next Matches", "/matches"), ("Open Workspace", "https://www.polymonitor.club/?workspace=worldcup")])
     return _keyboard(rows)
 
 
@@ -185,7 +232,12 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
         if not args:
             return _usage("market")
         try:
-            return BotReply(format_market_search(args, api.search_markets(args, limit=5)), link_preview=False)
+            payload = api.search_markets(args, limit=5)
+            return BotReply(
+                format_market_search(args, payload),
+                link_preview=False,
+                reply_markup=_market_search_keyboard(payload),
+            )
         except requests.RequestException:
             return _service_error("Market")
     if command == "worldcup":
@@ -211,15 +263,11 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
         try:
             dashboard = api.worldcup_dashboard()
             intel = api.worldcup_intel(limit=36)
+            markets = api.worldcup_market_search(args, limit=5)
             return BotReply(
                 format_worldcup_match(args, dashboard, intel),
                 link_preview=False,
-                reply_markup=_keyboard(
-                    [
-                        [("Odds", f"/odds {args}"), ("查看行情", f"/odds {args}")],
-                        [("Team", f"/team {args.split()[0]}"), ("Overview", "/worldcup")],
-                    ]
-                ),
+                reply_markup=_worldcup_match_keyboard(args, dashboard, markets),
             )
         except requests.RequestException:
             return _service_error("worldcup match")
@@ -243,7 +291,11 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
         try:
             dashboard = api.worldcup_dashboard()
             intel = api.worldcup_intel(limit=36)
-            return BotReply(format_worldcup_news(args, intel, dashboard), link_preview=True)
+            return BotReply(
+                format_worldcup_news(args, intel, dashboard),
+                link_preview=True,
+                reply_markup=_worldcup_news_keyboard(args, intel, dashboard),
+            )
         except requests.RequestException:
             return _service_error("worldcup news")
     if command == "odds":
@@ -262,7 +314,8 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
     if command == "signal":
         topic = args or "polymarket"
         try:
-            return BotReply(format_signals(topic, api.alpha_signals(limit=5)), link_preview=True)
+            payload = api.alpha_signals(limit=5)
+            return BotReply(format_signals(topic, payload), link_preview=True, reply_markup=_signal_keyboard(payload))
         except requests.RequestException:
             return _service_error("Signal")
     if command == "wallet":

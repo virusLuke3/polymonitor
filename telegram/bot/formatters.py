@@ -3,8 +3,10 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
+
+from telegram.topics.market_linker import MarketLink, resolve_market_link
 
 
 ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
@@ -223,6 +225,43 @@ def _polymarket_url(item: Dict[str, Any]) -> str:
     return f"https://polymarket.com/search?query={quote_plus(title)}" if title else ""
 
 
+def _resolved_market_link(
+    item: Dict[str, Any],
+    *,
+    title: str = "",
+    extra_text: Iterable[Any] = (),
+) -> Optional[MarketLink]:
+    link = resolve_market_link(item, title=title, extra_text=extra_text)
+    if link is not None:
+        return link
+    url = _polymarket_url(item)
+    fallback_title = _text(title or item.get("title") or item.get("marketTitle") or item.get("question") or item.get("eventTitle"))
+    if url and fallback_title:
+        return MarketLink(url=url, title=fallback_title, matched_by="payload", score=1.0)
+    return None
+
+
+def _trade_links_from_items(items: Iterable[Dict[str, Any]], *, limit: int = 2) -> List[tuple[str, str]]:
+    links: List[tuple[str, str]] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        link = _resolved_market_link(
+            item,
+            title=_text(item.get("title") or item.get("marketTitle") or item.get("question") or item.get("eventTitle")),
+            extra_text=(item.get("summary"), item.get("source"), item.get("category")),
+        )
+        if link is None or not link.url or link.url in seen:
+            continue
+        seen.add(link.url)
+        label = "Trade Polymarket" if not links else "More Markets"
+        links.append((label, link.url))
+        if len(links) >= limit:
+            break
+    return links
+
+
 def _parse_time(value: Any) -> datetime | None:
     text = _text(value)
     if not text:
@@ -278,6 +317,23 @@ def _worldcup_match_text(match: Dict[str, Any]) -> str:
         _text(match.get("venue")),
     ]
     return " | ".join(part for part in parts if part)
+
+
+def _worldcup_match_market_link(match: Dict[str, Any], dashboard: Dict[str, Any]) -> Optional[MarketLink]:
+    odds_rows = _odds_for_match(match, dashboard, limit=1)
+    if odds_rows:
+        link = _resolved_market_link(
+            odds_rows[0],
+            title=_text(odds_rows[0].get("marketTitle") or odds_rows[0].get("title")),
+            extra_text=(_worldcup_match_label(match), match.get("kickoffUtc"), "FIFA World Cup 2026"),
+        )
+        if link is not None:
+            return link
+    return _resolved_market_link(
+        match,
+        title=_worldcup_match_label(match),
+        extra_text=(),
+    )
 
 
 def _query_terms(query: str) -> List[str]:
@@ -487,7 +543,8 @@ def format_market_search(query: str, payload: Dict[str, Any]) -> str:
         volume = item.get("volume24h") or item.get("volume")
         trades = item.get("tradeCount24h") or item.get("tradeCount")
         tags = _tags([item.get("tags") or [], item.get("category")])
-        url = _polymarket_url(item)
+        link = _resolved_market_link(item, title=title, extra_text=(query, item.get("eventTitle"), item.get("category")))
+        url = link.url if link else ""
         lines.append(f"{index}. {title}")
         if price not in (None, ""):
             lines.append(f"YES: {_pct(price)}")
@@ -504,6 +561,13 @@ def format_market_search(query: str, payload: Dict[str, Any]) -> str:
             lines.append(url)
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def market_search_action_links(payload: Dict[str, Any]) -> List[tuple[str, str]]:
+    raw_items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    if not raw_items and payload.get("title"):
+        raw_items = [payload]
+    return _trade_links_from_items([item for item in raw_items if isinstance(item, dict)], limit=2)
 
 
 def _wallet_labels(summary: Dict[str, Any], daily: List[Dict[str, Any]]) -> List[str]:
@@ -615,11 +679,16 @@ def format_signals(topic: str, payload: Dict[str, Any]) -> str:
             lines.append(summary)
         if tags:
             lines.append(tags)
-        url = _polymarket_url(item)
-        if url:
-            lines.append(url)
+        link = _resolved_market_link(item, title=title, extra_text=(summary, topic, item.get("sourceTag"), item.get("kind")))
+        if link:
+            lines.append(f"Market: {link.url}")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def signal_action_links(payload: Dict[str, Any]) -> List[tuple[str, str]]:
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    return _trade_links_from_items([item for item in items if isinstance(item, dict)], limit=2)
 
 
 def format_worldcup_overview(dashboard: Dict[str, Any], intel: Dict[str, Any] | None = None) -> str:
@@ -642,6 +711,9 @@ def format_worldcup_overview(dashboard: Dict[str, Any], intel: Dict[str, Any] | 
         lines.append(f"- {_worldcup_match_label(match)}")
         lines.append(f"  {_beijing_time(match.get('kickoffUtc'))}")
         lines.append(f"  {_text(match.get('city'))} · {_text(match.get('venue'))}")
+        link = _worldcup_match_market_link(match, dashboard)
+        if link:
+            lines.append(f"  Market: {link.url}")
     lines.extend(["", f"Workspace: {WORLDCUP_WORKSPACE_URL}"])
     return "\n".join(lines).strip()
 
@@ -667,6 +739,9 @@ def format_worldcup_matches(dashboard: Dict[str, Any], query: str = "") -> str:
         group = _text(match.get("group") or match.get("round") or match.get("stage"))
         if group:
             lines.append(f"   {group}")
+        link = _worldcup_match_market_link(match, dashboard)
+        if link:
+            lines.append(f"   Market: {link.url}")
     total_pages = max(1, (len(filtered) + MATCHES_PAGE_SIZE - 1) // MATCHES_PAGE_SIZE)
     if total_pages > 1:
         lines.append("")
@@ -721,9 +796,13 @@ def format_worldcup_match(query: str, dashboard: Dict[str, Any], intel: Dict[str
             if url:
                 lines.append(f"  Trade: {url}")
     else:
-        linker = dashboard.get("marketLinker") if isinstance(dashboard.get("marketLinker"), dict) else {}
-        if linker:
-            lines.extend(["", f"Polymarket: no matched market yet · scanned {int(linker.get('candidates') or 0):,} candidates"])
+        link = _worldcup_match_market_link(match, dashboard)
+        if link:
+            lines.extend(["", "Polymarket:", f"- {_truncate(link.title, 120)}", f"  Trade: {link.url}"])
+        else:
+            linker = dashboard.get("marketLinker") if isinstance(dashboard.get("marketLinker"), dict) else {}
+            if linker:
+                lines.extend(["", f"Polymarket: no matched market yet · scanned {int(linker.get('candidates') or 0):,} candidates"])
     lines.extend(["", f"Odds: /odds {query}", f"Workspace: {WORLDCUP_WORKSPACE_URL}"])
     return "\n".join(lines).strip()
 
@@ -786,8 +865,27 @@ def format_worldcup_news(query: str, intel: Dict[str, Any], dashboard: Dict[str,
         url = _text(item.get("url"))
         if url.startswith("http"):
             lines.append(url)
+        link = _resolved_market_link(item, title=_text(item.get("title")), extra_text=(item.get("summary"), item.get("source"), query, "FIFA World Cup 2026"))
+        if link:
+            lines.append(f"Market: {link.url}")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def worldcup_news_action_links(query: str, intel: Dict[str, Any], dashboard: Dict[str, Any] | None = None) -> List[tuple[str, str]]:
+    rows = _items(intel, "news") or _items(dashboard or {}, "news")
+    if query.strip():
+        rows = [row for row in rows if _match_score(query, row, ("title", "summary", "source")) > 0]
+    links = _trade_links_from_items(rows[:5], limit=2)
+    source_url = ""
+    for row in rows[:5]:
+        url = _text(row.get("url"))
+        if url.startswith("http"):
+            source_url = url
+            break
+    if source_url:
+        links.append(("Source", source_url))
+    return links[:3]
 
 
 def format_worldcup_odds(query: str, dashboard: Dict[str, Any], market_payload: Dict[str, Any]) -> str:
@@ -879,6 +977,47 @@ def worldcup_odds_action_links(query: str, dashboard: Dict[str, Any], market_pay
     if first_url:
         links.insert(1, ("快速下单", first_url))
     links.append(("Open Workspace", WORLDCUP_WORKSPACE_URL))
+    return links
+
+
+def worldcup_match_action_links(query: str, dashboard: Dict[str, Any], market_payload: Dict[str, Any] | None = None) -> List[tuple[str, str]]:
+    matches = _find_matches(query, dashboard, limit=1)
+    rows: List[Dict[str, Any]] = []
+    if matches:
+        odds_rows = _odds_for_match(matches[0], dashboard, limit=2)
+        rows.extend(odds_rows)
+        match_link = _worldcup_match_market_link(matches[0], dashboard)
+        if match_link:
+            rows.append({"title": match_link.title, "url": match_link.url})
+    if market_payload:
+        raw_markets = market_payload.get("items") if isinstance(market_payload.get("items"), list) else []
+        rows.extend(item for item in raw_markets if isinstance(item, dict))
+    links = _trade_links_from_items(rows, limit=2)
+    if not links and query:
+        links.append(("Search Polymarket", f"https://polymarket.com/search?query={quote_plus(query)}"))
+    links.append(("Open Workspace", WORLDCUP_WORKSPACE_URL))
+    return links
+
+
+def worldcup_matches_action_links(dashboard: Dict[str, Any], query: str = "") -> List[tuple[str, str]]:
+    parsed = _parse_matches_args(query)
+    raw_matches = _items(dashboard, "matches")
+    filtered = _filter_matches(raw_matches, group=parsed["group"], date_filter=parsed["date"])
+    if parsed["query"]:
+        filtered = _find_matches(parsed["query"], {**dashboard, "matches": filtered}, limit=200)
+    page_info = worldcup_matches_page_info(dashboard, query)
+    page = int(page_info.get("page") or 1)
+    start = (page - 1) * MATCHES_PAGE_SIZE
+    links: List[tuple[str, str]] = []
+    seen: set[str] = set()
+    for index, match in enumerate(filtered[start:start + MATCHES_PAGE_SIZE], start=1):
+        link = _worldcup_match_market_link(match, dashboard)
+        if link is None or not link.url or link.url in seen:
+            continue
+        seen.add(link.url)
+        links.append((f"{start + index} Trade", link.url))
+        if len(links) >= 3:
+            break
     return links
 
 

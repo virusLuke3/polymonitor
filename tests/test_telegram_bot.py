@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -10,12 +12,17 @@ if str(REPO_ROOT) not in sys.path:
 from telegram.bot.commands import handle_command
 from telegram.bot.config import BotSettings, load_settings
 from telegram.bot.formatters import format_market_search, format_pnl_coverage, format_wallet
-from telegram.bot.formatters import format_worldcup_match, format_worldcup_odds, worldcup_odds_action_links
+from telegram.bot.formatters import format_worldcup_match, format_worldcup_odds, worldcup_matches_action_links, worldcup_odds_action_links
 from telegram.bot.models import CommandRequest
 from telegram.bot.poller import check_alerts, run_once
 from telegram.bot.polydata_api import PolyDataBotApi
 from telegram.bot.router import parse_update
 from telegram.bot.state import BotState
+
+
+@pytest.fixture(autouse=True)
+def _disable_live_market_linking(monkeypatch):
+    monkeypatch.setenv("POLYDATA_TELEGRAM_MARKET_LINKING_ENABLED", "false")
 
 
 class FakeApi:
@@ -413,6 +420,71 @@ def test_worldcup_match_and_odds_include_polymarket_trade_links():
     assert "Trade: https://polymarket.com/event/mexico-vs-south-africa/match-result" in odds_text
     assert ("查看行情", "https://polymarket.com/event/mexico-vs-south-africa/match-result") in links
     assert ("快速下单", "https://polymarket.com/event/mexico-vs-south-africa/match-result") in links
+
+
+def test_query_bot_adds_trade_buttons_from_market_linker(monkeypatch):
+    import telegram.bot.formatters as formatters
+
+    dashboard = FakeApi().worldcup_dashboard()
+
+    def fake_resolve(item, *, title="", extra_text=()):
+        text = " ".join(str(value or "") for value in (title, item.get("title"), item.get("marketTitle"), *extra_text)).lower()
+        if "mexico" in text and "south africa" in text:
+            return formatters.MarketLink(
+                url="https://polymarket.com/event/fifwc-mex-rsa-2026-06-11",
+                title="Mexico vs South Africa",
+                matched_by="test",
+                score=1.0,
+            )
+        if "opener" in text:
+            return formatters.MarketLink(
+                url="https://polymarket.com/event/world-cup-opener",
+                title="World Cup opener",
+                matched_by="test",
+                score=1.0,
+            )
+        return None
+
+    monkeypatch.setattr(formatters, "resolve_market_link", fake_resolve)
+
+    matches_text = formatters.format_worldcup_matches(dashboard, "group a")
+    match_links = worldcup_matches_action_links(dashboard, "group a")
+    news_text = formatters.format_worldcup_news("mexico", FakeApi().worldcup_intel(), dashboard)
+
+    assert "Market: https://polymarket.com/event/fifwc-mex-rsa-2026-06-11" in matches_text
+    assert ("1 Trade", "https://polymarket.com/event/fifwc-mex-rsa-2026-06-11") in match_links
+    assert "Market: https://polymarket.com/event/fifwc-mex-rsa-2026-06-11" in news_text
+
+
+def test_market_and_signal_commands_return_trade_buttons(monkeypatch):
+    import telegram.bot.formatters as formatters
+
+    def fake_resolve(item, *, title="", extra_text=()):
+        text = " ".join(str(value or "") for value in (title, item.get("title"), item.get("marketTitle"), *extra_text)).lower()
+        if "bitcoin" in text:
+            return formatters.MarketLink(
+                url="https://polymarket.com/event/bitcoin-up-or-down",
+                title="Bitcoin Up or Down",
+                matched_by="test",
+                score=1.0,
+            )
+        return None
+
+    monkeypatch.setattr(formatters, "resolve_market_link", fake_resolve)
+    base = {
+        "update_id": 1,
+        "chat_id": 1,
+        "user_id": 2,
+        "message_id": 3,
+        "text": "",
+        "raw": {},
+    }
+
+    signal_reply = handle_command(CommandRequest(command="signal", args="bitcoin", **base), FakeApi())
+
+    assert "Market: https://polymarket.com/event/bitcoin-up-or-down" in signal_reply.text
+    assert signal_reply.reply_markup
+    assert "Trade Polymarket" in str(signal_reply.reply_markup)
 
 
 def test_alert_commands_create_list_and_remove(tmp_path: Path):

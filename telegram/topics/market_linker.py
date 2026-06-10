@@ -73,6 +73,20 @@ EVENT_SUFFIXES = (
     "-first-team-to-score",
     "-total-corners",
 )
+GENERIC_MATCHUP_CONTEXT_TOKENS = {
+    "2026",
+    "area",
+    "city",
+    "cup",
+    "estadio",
+    "fifa",
+    "field",
+    "group",
+    "match",
+    "round",
+    "stadium",
+    "world",
+}
 
 DB_FAILURE_COOLDOWN_SECONDS = 60
 _db_disabled_until = 0.0
@@ -391,6 +405,16 @@ def _is_plain_matchup_query(raw_text: str) -> bool:
 
 
 def _matchup_core_terms(raw_text: str) -> list[str]:
+    parts = _matchup_sides(raw_text)
+    if not parts:
+        return []
+    terms: list[str] = []
+    for side in parts[:2]:
+        terms.extend(side)
+    return terms
+
+
+def _matchup_sides(raw_text: str) -> list[list[str]]:
     text = str(raw_text or "").lower()
     text = re.split(r":|\|| - ", text, maxsplit=1)[0]
     if " vs. " in text:
@@ -403,21 +427,33 @@ def _matchup_core_terms(raw_text: str) -> list[str]:
         parts = text.split(" at ", 1)
     else:
         return []
-    terms: list[str] = []
+    sides: list[list[str]] = []
     for part in parts[:2]:
-        terms.extend(token for token in _tokens(part) if token not in DERIVATIVE_MARKET_TERMS and not token.isdigit())
-    return terms
+        tokens = [
+            token
+            for token in _tokens(part)
+            if token not in DERIVATIVE_MARKET_TERMS
+            and token not in GENERIC_MATCHUP_CONTEXT_TOKENS
+            and not token.isdigit()
+        ]
+        if tokens:
+            sides.append(tokens[:3])
+    return sides if len(sides) == 2 else []
 
 
 def _infer_matchup_event_link(raw_text: str, rows: list[Dict[str, Any]]) -> Optional[MarketLink]:
-    query_tokens = set(_tokens(raw_text))
+    sides = _matchup_sides(raw_text)
+    if len(sides) != 2:
+        return None
+    side_sets = [set(side) for side in sides]
+    query_tokens = set().union(*side_sets)
     grouped: Dict[str, Dict[str, Any]] = {}
     for row in rows:
         base = _event_base_slug(row)
         if not base:
             continue
         row_tokens = set(_tokens(" ".join(str(row.get(key) or "") for key in ("title", "event_title", "slug", "event_slug"))))
-        if len(query_tokens & row_tokens) < min(2, len(query_tokens)):
+        if not all(side and side.issubset(row_tokens) for side in side_sets):
             continue
         entry = grouped.setdefault(base, {"count": 0, "row": row})
         entry["count"] += 1
