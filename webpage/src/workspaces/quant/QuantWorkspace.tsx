@@ -2014,6 +2014,51 @@ export function QuantWorkspace() {
       soloLabel: soloRow?.label || '',
     };
   }, [chartHiddenOutcomeKeys, chartPinnedOutcomeKeys, chartSoloOutcomeKey, selectedBacktestAction, sortedOutcomeRows]);
+  const managedOutcomeLineRows = useMemo(() => {
+    const selectedToken = selectedOutcome?.tokenId || '';
+    const rows = sortedOutcomeRows.flatMap((row) => ([
+      {
+        key: row.yesKey,
+        side: 'YES' as BacktestAction,
+        row,
+        price: row.yes,
+        rows: row.yesRows,
+      },
+      {
+        key: row.noKey,
+        side: 'NO' as BacktestAction,
+        row,
+        price: row.no,
+        rows: row.noRows,
+      },
+    ])).filter((line) => line.key).map((line) => {
+      const watchKey = watchKeyForOutcome(line.row.outcome);
+      const pinned = chartPinnedOutcomeKeys.includes(line.key);
+      const hidden = chartHiddenOutcomeKeys.includes(line.key);
+      const solo = chartSoloOutcomeKey === line.key;
+      const selected = line.row.outcome.tokenId === selectedToken && selectedBacktestAction === line.side;
+      const watched = watchKey ? watchlistKeys.includes(watchKey) : false;
+      const score = (solo ? 64 : 0) + (selected ? 32 : 0) + (pinned ? 16 : 0) + (hidden ? 8 : 0) + (watched ? 4 : 0);
+      return {
+        ...line,
+        pinned,
+        hidden,
+        selected,
+        solo,
+        watched,
+        score,
+      };
+    }).filter((line) => line.score > 0);
+    return rows.sort((left, right) => right.score - left.score || right.price - left.price).slice(0, 12);
+  }, [
+    chartHiddenOutcomeKeys,
+    chartPinnedOutcomeKeys,
+    chartSoloOutcomeKey,
+    selectedBacktestAction,
+    selectedOutcome?.tokenId,
+    sortedOutcomeRows,
+    watchlistKeys,
+  ]);
   const selectedBookQuality = useMemo(() => {
     const yesPoints = selectedOutcome?.points || [];
     const noPoints = selectedOutcome?.complementPoints || [];
@@ -2867,6 +2912,47 @@ export function QuantWorkspace() {
                           <span>Hover</span>
                           <strong>{hoveredOutcomeRow?.label || '--'}</strong>
                         </div>
+                      </section>
+                      <section className="qtv-managed-lines">
+                        <header>
+                          <div>
+                            <span>Managed chart lines</span>
+                            <strong>{managedOutcomeLineRows.length ? `${managedOutcomeLineRows.length} active controls` : 'No pinned, solo, hidden, or watched lines'}</strong>
+                          </div>
+                          <button type="button" disabled={!chartPinnedOutcomeKeys.length && !chartHiddenOutcomeKeys.length && !chartSoloOutcomeKey} onClick={resetChartOutcomeVisibility}>Reset</button>
+                        </header>
+                        {managedOutcomeLineRows.length ? (
+                          <div className="qtv-managed-line-list">
+                            {managedOutcomeLineRows.map((line) => (
+                              <article
+                                key={`managed-${line.key}`}
+                                className={`${line.selected ? 'selected' : ''} ${line.solo ? 'solo' : ''} ${line.pinned ? 'pinned' : ''} ${line.hidden ? 'hidden' : ''}`}
+                              >
+                                <button type="button" onClick={() => selectOutcomeSide(line.row.outcome, line.side)}>
+                                  <span>{line.side}</span>
+                                  <strong title={line.row.fullLabel}>{line.row.label}</strong>
+                                  <b>{fmtPrice(line.price)}</b>
+                                </button>
+                                <div>
+                                  {line.selected ? <em>target</em> : null}
+                                  {line.solo ? <em>solo</em> : null}
+                                  {line.pinned ? <em>pinned</em> : null}
+                                  {line.hidden ? <em>hidden</em> : null}
+                                  {line.watched ? <em>watch</em> : null}
+                                  <small>{line.rows.toLocaleString('en-US')} rows</small>
+                                </div>
+                                <nav aria-label={`${line.side} managed line controls`}>
+                                  <button className={line.pinned ? 'active' : ''} type="button" onClick={() => toggleChartPinnedOutcome(line.key)}>{line.pinned ? 'Unpin' : 'Pin'}</button>
+                                  <button className={line.solo ? 'active' : ''} type="button" onClick={() => setChartSoloOutcomeKey(line.solo ? '' : line.key)}>{line.solo ? 'Clear solo' : 'Solo'}</button>
+                                  <button className={line.hidden ? 'active danger' : 'danger'} type="button" onClick={() => toggleChartHiddenOutcome(line.key)}>{line.hidden ? 'Show' : 'Hide'}</button>
+                                  <button type="button" onClick={() => { selectOutcomeSide(line.row.outcome, line.side); setInspectorTab('book'); }}>Book</button>
+                                </nav>
+                              </article>
+                            ))}
+                          </div>
+                        ) : (
+                          <p>Pin, watch, hide, or solo an outcome to keep it here while scanning the event.</p>
+                        )}
                       </section>
                       {selectedOutcomeRow ? (
                         <section className="qtv-selected-outcome-linebar">

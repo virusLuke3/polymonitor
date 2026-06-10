@@ -1813,6 +1813,208 @@
   white-space: nowrap;
 }
 
+.qtv-managed-lines {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(38, 50, 68, 0.86);
+  border-radius: 5px;
+  background:
+    linear-gradient(180deg, rgba(6, 10, 17, 0.82), rgba(3, 7, 13, 0.92));
+  padding: 8px;
+}
+
+.qtv-managed-lines header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.qtv-managed-lines header div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.qtv-managed-lines header span,
+.qtv-managed-lines header strong {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-managed-lines header span {
+  color: #6b7c95;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.qtv-managed-lines header strong {
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.qtv-managed-lines header button,
+.qtv-managed-line-list nav button {
+  min-width: 0;
+  height: 24px;
+  border: 1px solid rgba(38, 50, 68, 0.82);
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.78);
+  color: #94a3b8;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  padding: 0 7px;
+}
+
+.qtv-managed-lines header button:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.qtv-managed-lines p {
+  margin: 0;
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.55;
+}
+
+.qtv-managed-line-list {
+  display: grid;
+  gap: 6px;
+  max-height: 250px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.qtv-managed-line-list article {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid rgba(32, 41, 56, 0.88);
+  border-left: 3px solid transparent;
+  border-radius: 5px;
+  background: rgba(10, 16, 27, 0.68);
+  padding: 7px;
+}
+
+.qtv-managed-line-list article.selected {
+  border-left-color: #3b82f6;
+}
+
+.qtv-managed-line-list article.pinned {
+  border-left-color: #22c55e;
+}
+
+.qtv-managed-line-list article.solo {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+
+.qtv-managed-line-list article.hidden {
+  opacity: 0.58;
+}
+
+.qtv-managed-line-list article > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  padding: 0;
+  text-align: left;
+}
+
+.qtv-managed-line-list span,
+.qtv-managed-line-list strong,
+.qtv-managed-line-list b,
+.qtv-managed-line-list em,
+.qtv-managed-line-list small {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-managed-line-list span {
+  color: #60a5fa;
+  font-size: 9px;
+  font-weight: 950;
+}
+
+.qtv-managed-line-list strong {
+  color: #e5eefb;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.qtv-managed-line-list b {
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.qtv-managed-line-list article > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.qtv-managed-line-list em,
+.qtv-managed-line-list small {
+  border: 1px solid rgba(39, 50, 69, 0.82);
+  border-radius: 4px;
+  background: rgba(8, 12, 19, 0.72);
+  color: #8c98aa;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 850;
+  padding: 2px 5px;
+}
+
+.qtv-managed-line-list article.selected em:first-child,
+.qtv-managed-line-list article.solo em {
+  border-color: rgba(96, 165, 250, 0.42);
+  color: #bfdbfe;
+}
+
+.qtv-managed-line-list article.pinned em {
+  border-color: rgba(34, 197, 94, 0.34);
+  color: #bbf7d0;
+}
+
+.qtv-managed-line-list nav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.qtv-managed-line-list nav button:hover,
+.qtv-managed-line-list nav button.active {
+  border-color: rgba(96, 165, 250, 0.52);
+  background: rgba(37, 99, 235, 0.16);
+  color: #dbeafe;
+}
+
+.qtv-managed-line-list nav button.danger.active,
+.qtv-managed-line-list nav button.danger:hover {
+  border-color: rgba(244, 63, 94, 0.48);
+  background: rgba(244, 63, 94, 0.1);
+  color: #fecdd3;
+}
+
 .qtv-selected-outcome-linebar {
   display: grid;
   gap: 7px;
