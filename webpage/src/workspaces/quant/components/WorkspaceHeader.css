@@ -1004,11 +1004,17 @@
 }
 
 .qtv-preview-outcomes header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   margin-bottom: 2px;
+}
+
+.qtv-preview-outcomes header div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
 }
 
 .qtv-preview-outcomes header strong {
@@ -1018,11 +1024,77 @@
   font-weight: 900;
 }
 
+.qtv-preview-outcomes header span {
+  overflow: hidden;
+  color: #7f8a9d;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .qtv-preview-outcomes header em {
   color: #6f7b8e;
   font-size: 9px;
   font-style: normal;
   white-space: nowrap;
+}
+
+.qtv-preview-outcome-health {
+  display: grid !important;
+  gap: 4px;
+  padding: 1px 0 2px;
+}
+
+.qtv-preview-outcome-health span {
+  overflow: hidden;
+  height: 4px;
+  border-radius: 999px;
+  background: #172033;
+}
+
+.qtv-preview-outcome-health b {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22c55e, #38bdf8);
+}
+
+.qtv-preview-outcome-health small {
+  overflow: hidden;
+  color: #748094;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-preview-outcome-filters {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 4px !important;
+}
+
+.qtv-preview-outcome-filters button {
+  min-height: 22px !important;
+  border: 1px solid rgba(38, 50, 68, 0.86) !important;
+  border-radius: 3px !important;
+  background: rgba(11, 17, 28, 0.78) !important;
+  color: #8f9bad !important;
+  font-family: var(--font-mono) !important;
+  font-size: 8.5px !important;
+  font-weight: 900 !important;
+  padding: 0 6px !important;
+}
+
+.qtv-preview-outcome-filters button.active,
+.qtv-preview-outcome-filters button:hover {
+  border-color: rgba(34, 197, 94, 0.42) !important;
+  background: rgba(22, 101, 52, 0.18) !important;
+  color: #bbf7d0 !important;
 }
 
 .qtv-preview-outcome-search {
