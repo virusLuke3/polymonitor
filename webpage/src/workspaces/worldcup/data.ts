@@ -13,13 +13,21 @@ import type {
 const DATA_URL = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
 const MS_PER_MINUTE = 60 * 1000;
 const DASHBOARD_CACHE_TTL_MS = 5 * MS_PER_MINUTE;
+const DASHBOARD_STALE_CACHE_TTL_MS = 60 * MS_PER_MINUTE;
 const INITIAL_RUNTIME_TIMEOUT_MS = 3500;
 const SCHEDULE_TIMEOUT_MS = 3500;
 const BACKGROUND_RUNTIME_TIMEOUT_MS = 12000;
+const DASHBOARD_PERSISTENT_CACHE_KEY = 'polydata:worldcup-dashboard-cache:v2';
+const DASHBOARD_PERSISTENT_CACHE_VERSION = 2;
 
 type DashboardCacheEntry = {
   expiresAt: number;
   payload: WorldCupDashboardPayload;
+};
+
+type PersistentDashboardCacheEntry = DashboardCacheEntry & {
+  storedAt: number;
+  version: number;
 };
 
 let dashboardCache: DashboardCacheEntry | null = null;
@@ -180,12 +188,56 @@ function isUsableDashboard(payload: WorldCupDashboardPayload | null | undefined)
 }
 
 function writeDashboardCache(payload: WorldCupDashboardPayload) {
-  dashboardCache = { payload, expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS };
+  const now = Date.now();
+  const entry = { payload, expiresAt: now + DASHBOARD_CACHE_TTL_MS };
+  dashboardCache = entry;
+  if (typeof window !== 'undefined' && isUsableDashboard(payload)) {
+    try {
+      const persistent: PersistentDashboardCacheEntry = {
+        ...entry,
+        storedAt: now,
+        version: DASHBOARD_PERSISTENT_CACHE_VERSION,
+      };
+      window.localStorage.setItem(DASHBOARD_PERSISTENT_CACHE_KEY, JSON.stringify(persistent));
+    } catch {
+      // Best-effort cache only; runtime loading must not depend on storage.
+    }
+  }
   return payload;
 }
 
-function readDashboardCache() {
-  return dashboardCache && dashboardCache.expiresAt > Date.now() ? dashboardCache.payload : null;
+function readPersistentDashboardCache(allowStale = false) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_PERSISTENT_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistentDashboardCacheEntry>;
+    const payload = parsed.payload;
+    const expiresAt = Number(parsed.expiresAt || 0);
+    const storedAt = Number(parsed.storedAt || 0);
+    const now = Date.now();
+    const fresh = expiresAt > now;
+    const staleUsable = allowStale && storedAt > now - DASHBOARD_STALE_CACHE_TTL_MS;
+    if (parsed.version !== DASHBOARD_PERSISTENT_CACHE_VERSION || !isUsableDashboard(payload) || (!fresh && !staleUsable)) {
+      window.localStorage.removeItem(DASHBOARD_PERSISTENT_CACHE_KEY);
+      return null;
+    }
+    if (fresh) dashboardCache = { payload, expiresAt };
+    return payload;
+  } catch {
+    try {
+      window.localStorage.removeItem(DASHBOARD_PERSISTENT_CACHE_KEY);
+    } catch {
+      // Ignore storage cleanup failures.
+    }
+    return null;
+  }
+}
+
+function readDashboardCache(options: { allowStale?: boolean } = {}) {
+  const now = Date.now();
+  if (dashboardCache && dashboardCache.expiresAt > now) return dashboardCache.payload;
+  return readPersistentDashboardCache(Boolean(options.allowStale));
 }
 
 async function loadWorldCupScheduleDashboard(): Promise<WorldCupDashboardPayload> {
@@ -259,6 +311,8 @@ function firstUsableDashboard(promises: Array<Promise<WorldCupDashboardPayload |
 export async function loadWorldCupDashboard(): Promise<WorldCupDashboardPayload> {
   const cached = readDashboardCache();
   if (cached) return cached;
+  const stale = readDashboardCache({ allowStale: true });
+  if (stale) return stale;
   if (dashboardInflight) return dashboardInflight;
 
   const runtimePromise = loadRuntimeDashboard(INITIAL_RUNTIME_TIMEOUT_MS).catch(() => null);
