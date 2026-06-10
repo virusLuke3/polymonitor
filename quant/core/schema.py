@@ -505,6 +505,16 @@ ALTER_TABLE_SQL: tuple[str, ...] = (
 )
 
 
+DATA_MIGRATION_SQL: tuple[str, ...] = (
+    """
+    UPDATE quant.clob_orderbook_snapshots
+    SET snapshot_timestamp = fetched_at
+    WHERE snapshot_timestamp IS NULL
+      AND fetched_at IS NOT NULL
+    """,
+)
+
+
 CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_metadata_slug_side ON quant.market_token_metadata (market_slug, token_side)",
     "CREATE INDEX IF NOT EXISTS idx_quant_metadata_market_side ON quant.market_token_metadata (market_id, token_side)",
@@ -603,6 +613,9 @@ def create_schema(conn: Any) -> None:
     for statement in ALTER_TABLE_SQL:
         if _should_skip_statement(conn, statement):
             continue
+        with conn.cursor() as cur:
+            cur.execute(statement)
+    for statement in DATA_MIGRATION_SQL:
         with conn.cursor() as cur:
             cur.execute(statement)
     for statement in CREATE_INDEX_SQL:
