@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
 
+from .market_linker import MarketLink, resolve_market_link
 from .models import MessageCandidate
 
 RELATED_NEWS_GROUP_LIMIT = 2
@@ -109,6 +110,14 @@ def _source_link(url: str, label: str = "Open link") -> str:
     return f"{label}: {url}" if url else ""
 
 
+def _trade_markup(market_link: Optional[MarketLink], *, extra_buttons: List[Dict[str, str]] | None = None) -> Dict[str, Any] | None:
+    buttons: List[Dict[str, str]] = []
+    if market_link and market_link.url:
+        buttons.append({"text": "Trade Polymarket", "url": market_link.url})
+    buttons.extend(extra_buttons or [])
+    return {"inline_keyboard": [buttons]} if buttons else None
+
+
 def _compose_post(*, header: str, title: str, lines: Iterable[str] = (), tags: str = "", meme: str = "", url: str = "") -> str:
     parts = [header, title.strip()]
     parts.extend(line.strip() for line in lines if str(line or "").strip())
@@ -140,6 +149,7 @@ def format_nba_scoreboard(payload: Dict[str, Any]) -> List[MessageCandidate]:
         broadcast = _text(game.get("broadcast"))
         score_line = f"{away} {away_score} @ {home} {home_score}" if away_score != "-" or home_score != "-" else f"{away} @ {home}"
         details = " | ".join(part for part in (status, tipoff, broadcast) if part)
+        market_link = resolve_market_link(game, title=f"{away} vs {home}", extra_text=(details,))
         tags = _hashtags("NBA", away, home, status)
         meme = "🏀 Vibe: tipoff radar is awake" if "scheduled" in status.lower() else "🏀 Vibe: scoreboard heat"
         text = _compose_post(
@@ -148,10 +158,21 @@ def format_nba_scoreboard(payload: Dict[str, Any]) -> List[MessageCandidate]:
             lines=[details],
             tags=tags,
             meme=meme,
+            url=_source_link(market_link.url, "Market") if market_link else "",
         )
         dedupe = _short_hash("nba-scoreboard", game_id, away_score, home_score, status)
         priority = "high" if str(game.get("state") or "").lower() in {"post", "final"} or "final" in status.lower() else "normal"
-        messages.append(MessageCandidate(topic="nba", dedupe_key=dedupe, text=text, priority=priority, metadata={"panel": "nba-scoreboard"}))
+        messages.append(
+            MessageCandidate(
+                topic="nba",
+                dedupe_key=dedupe,
+                text=text,
+                priority=priority,
+                metadata={"panel": "nba-scoreboard", "marketLink": market_link.url if market_link else ""},
+                link_preview=bool(market_link),
+                reply_markup=_trade_markup(market_link),
+            )
+        )
     return messages
 
 
@@ -164,6 +185,7 @@ def format_nba_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
         source = _text(item.get("source"), "NBA intel")
         description = _text(item.get("description"))
         url = _first_url(item.get("url"))
+        market_link = resolve_market_link(item, title=headline, extra_text=(description, source, "NBA"))
         tags = _hashtags("NBA", source, "Intel")
         text = _compose_post(
             header="📰 NBA Intel",
@@ -171,10 +193,20 @@ def format_nba_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
             lines=[source, description[:260] if description else ""],
             tags=tags,
             meme="🏀 Vibe: locker-room signal",
-            url=_source_link(url, "Source"),
+            url="\n".join(part for part in (_source_link(market_link.url, "Market") if market_link else "", _source_link(url, "Source")) if part),
         )
         dedupe = _short_hash("nba-intel", headline.lower(), url)
-        messages.append(MessageCandidate(topic="nba", dedupe_key=dedupe, text=text, priority="normal", metadata={"panel": "nba-intel"}, link_preview=bool(url)))
+        messages.append(
+            MessageCandidate(
+                topic="nba",
+                dedupe_key=dedupe,
+                text=text,
+                priority="normal",
+                metadata={"panel": "nba-intel", "marketLink": market_link.url if market_link else ""},
+                link_preview=bool(market_link or url),
+                reply_markup=_trade_markup(market_link, extra_buttons=[{"text": "Source", "url": url}] if url else None),
+            )
+        )
 
     for lineup in payload.get("lineups") or []:
         if not isinstance(lineup, dict):
@@ -185,15 +217,27 @@ def format_nba_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
         if not label or not starters:
             continue
         starter_names = ", ".join(_text(player.get("playerName")) for player in starters[:6] if isinstance(player, dict) and _text(player.get("playerName")))
+        market_link = resolve_market_link(lineup, title=label, extra_text=(starter_names, "NBA lineup"))
         text = _compose_post(
             header="🧾 NBA Lineup",
             title=label,
             lines=[status, starter_names],
             tags=_hashtags("NBA", "Lineup"),
             meme="👀 Vibe: rotation watch",
+            url=_source_link(market_link.url, "Market") if market_link else "",
         )
         dedupe = _short_hash("nba-lineup", lineup.get("gameId"), status, starter_names)
-        messages.append(MessageCandidate(topic="nba", dedupe_key=dedupe, text=text, priority="normal", metadata={"panel": "nba-intel"}))
+        messages.append(
+            MessageCandidate(
+                topic="nba",
+                dedupe_key=dedupe,
+                text=text,
+                priority="normal",
+                metadata={"panel": "nba-intel", "marketLink": market_link.url if market_link else ""},
+                link_preview=bool(market_link),
+                reply_markup=_trade_markup(market_link),
+            )
+        )
     return messages
 
 
@@ -218,15 +262,27 @@ def format_nba_predictor(payload: Dict[str, Any]) -> List[MessageCandidate]:
         status = _text(item.get("status") or item.get("state"))
         if status:
             extras.append(status)
+        market_link = resolve_market_link(item, title=f"{away} vs {home}", extra_text=(status, "NBA matchup predictor"))
         text = _compose_post(
             header="🔮 NBA Matchup Predictor",
             title=f"{away} @ {home}",
             lines=[line, " | ".join(extras)],
             tags=_hashtags("NBA", away, home, "Predictor"),
             meme="🧠 Vibe: probability board says hello",
+            url=_source_link(market_link.url, "Market") if market_link else "",
         )
         dedupe = _short_hash("nba-predictor", event_id, round(away_prob or -1), round(home_prob or -1), status)
-        messages.append(MessageCandidate(topic="nba", dedupe_key=dedupe, text=text, priority="normal", metadata={"panel": "espn-matchup-predictor"}))
+        messages.append(
+            MessageCandidate(
+                topic="nba",
+                dedupe_key=dedupe,
+                text=text,
+                priority="normal",
+                metadata={"panel": "espn-matchup-predictor", "marketLink": market_link.url if market_link else ""},
+                link_preview=bool(market_link),
+                reply_markup=_trade_markup(market_link),
+            )
+        )
     return messages
 
 
@@ -350,6 +406,8 @@ def format_weather_map(payload: Dict[str, Any]) -> List[MessageCandidate]:
             continue
         city = _text(item.get("city"), "Unknown")
         label = _text(top_bin.get("label") or top_bin.get("title") or top_bin.get("raw"))
+        market_link = resolve_market_link(item, title=f"{city}: {label}", extra_text=(market_url, "weather"))
+        trade_url = market_link.url if market_link else market_url
         quote = _price(top_bin.get("midPriceYes"))
         coverage = _text(item.get("quoteCoverage"))
         temp = _text(item.get("currentTemp"), "n/a")
@@ -360,9 +418,19 @@ def format_weather_map(payload: Dict[str, Any]) -> List[MessageCandidate]:
             lines=[f"YES {quote} | current {temp} | quotes {coverage}"],
             tags=_hashtags("Weather", city, "Polymarket"),
             meme="☁️ Vibe: forecast meets order book",
-            url=_source_link(market_url, "Market"),
+            url=_source_link(trade_url, "Market"),
         )
-        messages.append(MessageCandidate(topic="weather", dedupe_key=dedupe, text=text, priority="high", metadata={"panel": "global-weather-map"}, link_preview=True))
+        messages.append(
+            MessageCandidate(
+                topic="weather",
+                dedupe_key=dedupe,
+                text=text,
+                priority="high",
+                metadata={"panel": "global-weather-map", "marketLink": trade_url},
+                link_preview=True,
+                reply_markup=_trade_markup(market_link or (MarketLink(url=market_url, title=label, matched_by="payload") if market_url else None)),
+            )
+        )
     return messages
 
 
@@ -379,6 +447,7 @@ def format_weather_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
         source = _text(article.get("source"), "Weather news")
         summary = _text(article.get("summary"))
         url = _first_url(article.get("url"))
+        market_link = resolve_market_link(article, title=title, extra_text=(summary, city, source, "weather"))
         tags = _hashtags("Weather", severity, city, article.get("tags") or [], source)
         text = _compose_post(
             header=f"🚨 Weather {severity.title()}",
@@ -386,11 +455,21 @@ def format_weather_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
             lines=[" | ".join(part for part in (city, source) if part), summary[:260] if summary and summary != title else ""],
             tags=tags,
             meme="🌩 Vibe: skies are speaking",
-            url=_source_link(url, "Source"),
+            url="\n".join(part for part in (_source_link(market_link.url, "Market") if market_link else "", _source_link(url, "Source")) if part),
         )
         dedupe = _short_hash("weather-news", article.get("id"), title.lower(), url)
         priority = "high" if severity == "warning" else "normal"
-        messages.append(MessageCandidate(topic="weather", dedupe_key=dedupe, text=text, priority=priority, metadata={"panel": "weather-news"}, link_preview=bool(url)))
+        messages.append(
+            MessageCandidate(
+                topic="weather",
+                dedupe_key=dedupe,
+                text=text,
+                priority=priority,
+                metadata={"panel": "weather-news", "marketLink": market_link.url if market_link else ""},
+                link_preview=bool(market_link or url),
+                reply_markup=_trade_markup(market_link, extra_buttons=[{"text": "Source", "url": url}] if url else None),
+            )
+        )
     return messages
 
 
@@ -403,16 +482,26 @@ def format_latest_content(payload: Dict[str, Any]) -> List[MessageCandidate]:
         source = _text(item.get("source"), "News")
         summary = _text(item.get("summary") or item.get("description"))
         url = _first_url(item.get("url"))
+        market_link = resolve_market_link(item, title=title, extra_text=(summary, source, item.get("contentType")))
         text = _compose_post(
             header="💬 News",
             title=title,
             lines=[source, summary[:280] if summary and summary != title else ""],
             tags=_hashtags("News", source, item.get("contentType")),
             meme="🗞 Vibe: fresh tape",
-            url=_source_link(url, "Source"),
+            url="\n".join(part for part in (_source_link(market_link.url, "Market") if market_link else "", _source_link(url, "Source")) if part),
         )
         dedupe = _short_hash("latest-content", item.get("id"), title.lower(), url)
-        messages.append(MessageCandidate(topic="news", dedupe_key=dedupe, text=text, metadata={"panel": "latest-content"}, link_preview=bool(url)))
+        messages.append(
+            MessageCandidate(
+                topic="news",
+                dedupe_key=dedupe,
+                text=text,
+                metadata={"panel": "latest-content", "marketLink": market_link.url if market_link else ""},
+                link_preview=bool(market_link or url),
+                reply_markup=_trade_markup(market_link, extra_buttons=[{"text": "Source", "url": url}] if url else None),
+            )
+        )
     return messages
 
 
@@ -423,6 +512,7 @@ def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
     market_title = _text(payload.get("marketTitle") or payload.get("question"), "Focused market")
     market_id = _text(payload.get("marketId") or payload.get("localMarketId"))
     category = _text(payload.get("marketCategory"))
+    market_link = resolve_market_link(payload, title=market_title, extra_text=(category,))
     counts: Dict[str, int] = {}
     for item in items:
         content_type = _text(item.get("contentType"), "news").lower()
@@ -467,7 +557,7 @@ def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
             f"Source mode: {_text(payload.get('sourceMode'))}" if payload.get("sourceMode") else "",
         ],
         tags=_hashtags("MarketIntel", category, source_labels[:3]),
-        url=_source_link(first_url, "Top source"),
+        url="\n".join(part for part in (_source_link(market_link.url, "Market") if market_link else "", _source_link(first_url, "Top source")) if part),
     )
     version_items = []
     for key in ("news", "video", "report", "research"):
@@ -480,7 +570,8 @@ def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
             dedupe_key=dedupe,
             text=text,
             metadata={"panel": "related-news", "marketId": market_id},
-            link_preview=bool(first_url),
+            link_preview=bool(market_link or first_url),
+            reply_markup=_trade_markup(market_link, extra_buttons=[{"text": "Top source", "url": first_url}] if first_url else None),
         )
     ]
 
@@ -495,7 +586,8 @@ def format_alpha_signal(payload: Dict[str, Any]) -> List[MessageCandidate]:
         score = _text(item.get("score") or item.get("confidence") or item.get("rank"))
         action = item.get("action") if isinstance(item.get("action"), dict) else {}
         action_text = " ".join(part for part in (_text(action.get("label")), _text(action.get("outcome"))) if part)
-        url = _polymarket_url(item, title=title)
+        market_link = resolve_market_link(item, title=title, extra_text=(signal, action_text, item.get("sourceTag"), item.get("labels") or []))
+        url = market_link.url if market_link else _polymarket_url(item, title=title)
         lines = [signal[:260] if signal else "", f"Action: {action_text}" if action_text else "", f"score/confidence: {score}" if score else ""]
         text = _compose_post(
             header="🐳 Alpha Signal",
@@ -507,7 +599,17 @@ def format_alpha_signal(payload: Dict[str, Any]) -> List[MessageCandidate]:
         )
         direction = _text(action.get("outcome") or item.get("outcome") or action.get("label")).lower()
         dedupe = _short_hash("alpha-signal", _market_identity(item, title=title), direction)
-        messages.append(MessageCandidate(topic="alpha", dedupe_key=dedupe, text=text, priority="high", metadata={"panel": "alpha-signal"}, link_preview=bool(url)))
+        messages.append(
+            MessageCandidate(
+                topic="alpha",
+                dedupe_key=dedupe,
+                text=text,
+                priority="high",
+                metadata={"panel": "alpha-signal", "marketLink": url},
+                link_preview=bool(url),
+                reply_markup=_trade_markup(market_link or (MarketLink(url=url, title=title, matched_by="fallback") if url else None)),
+            )
+        )
     return messages
 
 
@@ -520,7 +622,8 @@ def format_new_market_signals(payload: Dict[str, Any]) -> List[MessageCandidate]
         status = _text(item.get("status") or item.get("signal") or item.get("reason"))
         probability = _text(item.get("initialYesProbability"))
         probability_line = f"Initial YES probability: {_pct(probability)}" if probability else ""
-        url = _polymarket_url(item, title=title)
+        market_link = resolve_market_link(item, title=title, extra_text=(status,))
+        url = market_link.url if market_link else _polymarket_url(item, title=title)
         asset_tags = _title_tags(title)
         text = _compose_post(
             header="🆕 New Market Signal",
@@ -531,7 +634,17 @@ def format_new_market_signals(payload: Dict[str, Any]) -> List[MessageCandidate]
             url=_source_link(url, "Market/Search"),
         )
         dedupe = _short_hash("new-market-signal", _market_identity(item, title=title))
-        messages.append(MessageCandidate(topic="alpha", dedupe_key=dedupe, text=text, priority="normal", metadata={"panel": "new-market-signals"}, link_preview=bool(url)))
+        messages.append(
+            MessageCandidate(
+                topic="alpha",
+                dedupe_key=dedupe,
+                text=text,
+                priority="normal",
+                metadata={"panel": "new-market-signals", "marketLink": url},
+                link_preview=bool(url),
+                reply_markup=_trade_markup(market_link or (MarketLink(url=url, title=title, matched_by="fallback") if url else None)),
+            )
+        )
     return messages
 
 
@@ -543,7 +656,9 @@ def format_macro_payload(payload: Dict[str, Any], *, panel_label: str, panel_id:
             continue
         status = _text(item.get("status") or item.get("signal") or item.get("summary") or item.get("description"))
         value = _text(item.get("value") or item.get("actual") or item.get("forecast") or item.get("probability"))
-        url = _polymarket_url(item, title=title) or _first_url(item.get("sourceUrl"))
+        source_url = _first_url(item.get("sourceUrl"))
+        market_link = resolve_market_link(item, title=title, extra_text=(status, value, item.get("categoryLabels") or item.get("categoryIds") or []))
+        url = market_link.url if market_link else (_polymarket_url(item, title=title) or source_url)
         top_outcomes = item.get("topOutcomes") if isinstance(item.get("topOutcomes"), list) else []
         outcome_line = ""
         if top_outcomes:
@@ -562,10 +677,20 @@ def format_macro_payload(payload: Dict[str, Any], *, panel_label: str, panel_id:
             lines=[status[:260] if status else "", f"value: {value}" if value else "", outcome_line],
             tags=_hashtags("Macro", "Polymarket", item.get("categoryLabels") or item.get("categoryIds") or []),
             meme="📊 Vibe: macro board is moving",
-            url=_source_link(url, "Market"),
+            url="\n".join(part for part in (_source_link(url, "Market") if url else "", _source_link(source_url, "Source") if source_url and source_url != url else "") if part),
         )
         dedupe = _short_hash(panel_id, item.get("id") or item.get("eventId") or item.get("slug"), title.lower(), status, value)
-        messages.append(MessageCandidate(topic="macro", dedupe_key=dedupe, text=text, priority="normal", metadata={"panel": panel_id}, link_preview=bool(url)))
+        messages.append(
+            MessageCandidate(
+                topic="macro",
+                dedupe_key=dedupe,
+                text=text,
+                priority="normal",
+                metadata={"panel": panel_id, "marketLink": url},
+                link_preview=bool(url or source_url),
+                reply_markup=_trade_markup(market_link or (MarketLink(url=url, title=title, matched_by="fallback") if url else None), extra_buttons=[{"text": "Source", "url": source_url}] if source_url and source_url != url else None),
+            )
+        )
     return messages
 
 

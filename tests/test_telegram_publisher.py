@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -21,9 +23,15 @@ from telegram.topics.formatters import (
     format_weather_news,
     format_worldcup_intel,
 )
+from telegram.topics.market_linker import MarketLink
 from telegram.topics.models import MessageCandidate
 from telegram.topics.publisher import publish_candidates
 from telegram.topics.state import PublishState
+
+
+@pytest.fixture(autouse=True)
+def disable_real_market_linking(monkeypatch):
+    monkeypatch.setenv("POLYDATA_TELEGRAM_MARKET_LINKING_ENABLED", "false")
 
 
 class FakeTelegram:
@@ -175,6 +183,56 @@ def test_rich_news_and_alpha_messages_include_tags_meme_and_links():
     assert "Vibe:" in alpha_message.text
     assert "Market: https://polymarket.com/search?query=Bitcoin+above+%24100k%3F" in alpha_message.text
     assert alpha_message.link_preview is True
+
+
+def test_news_message_adds_trade_button_when_market_link_matches(monkeypatch):
+    monkeypatch.setattr(
+        "telegram.topics.formatters.resolve_market_link",
+        lambda item, *, title="", extra_text=(): MarketLink(
+            url="https://polymarket.com/event/fed-decision-june",
+            title="Fed decision in June?",
+            matched_by="text",
+            score=0.9,
+        ),
+    )
+
+    message = format_latest_content(
+        {
+            "items": [
+                {
+                    "id": "n1",
+                    "title": "Fed decision moves markets",
+                    "source": "Reuters",
+                    "summary": "The June Fed decision changed rate odds.",
+                    "url": "https://news.example/fed",
+                }
+            ]
+        }
+    )[0]
+
+    assert "Market: https://polymarket.com/event/fed-decision-june" in message.text
+    assert "Source: https://news.example/fed" in message.text
+    assert message.reply_markup["inline_keyboard"][0][0]["text"] == "Trade Polymarket"
+    assert message.reply_markup["inline_keyboard"][0][0]["url"] == "https://polymarket.com/event/fed-decision-june"
+
+
+def test_nba_scoreboard_adds_market_link_button(monkeypatch):
+    monkeypatch.setattr(
+        "telegram.topics.formatters.resolve_market_link",
+        lambda item, *, title="", extra_text=(): MarketLink(
+            url="https://polymarket.com/event/lakers-rockets",
+            title="Lakers vs Rockets",
+            matched_by="text",
+            score=0.92,
+        ),
+    )
+
+    message = format_nba_scoreboard(
+        {"items": [{"id": "game-1", "awayTeam": "Lakers", "homeTeam": "Rockets", "status": "Scheduled"}]}
+    )[0]
+
+    assert "Market: https://polymarket.com/event/lakers-rockets" in message.text
+    assert message.reply_markup["inline_keyboard"][0][0]["url"] == "https://polymarket.com/event/lakers-rockets"
 
 
 def test_alpha_dedupe_ignores_flow_and_score_updates_for_same_market_direction():
