@@ -218,6 +218,41 @@ function sumBookDepth(levels: LobSide['bids'], limit = 5) {
   return (levels || []).slice(0, limit).reduce((total, level) => total + toNumber(level.size), 0);
 }
 
+function estimateMarketBuyFill(levels: LobSide['asks'], targetNotional: number, referencePrice: number | null) {
+  const target = Number.isFinite(targetNotional) && targetNotional > 0 ? targetNotional : 0;
+  const sorted = (levels || [])
+    .map((level) => ({ price: toNumber(level.price), size: toNumber(level.size) }))
+    .filter((level) => level.price > 0 && level.size > 0)
+    .sort((left, right) => left.price - right.price);
+  let remaining = target;
+  let spent = 0;
+  let shares = 0;
+  let levelsUsed = 0;
+  for (const level of sorted) {
+    if (remaining <= 0) break;
+    const maxNotional = level.price * level.size;
+    const takeNotional = Math.min(remaining, maxNotional);
+    if (takeNotional <= 0) continue;
+    spent += takeNotional;
+    shares += takeNotional / level.price;
+    remaining -= takeNotional;
+    levelsUsed += 1;
+  }
+  const vwap = shares > 0 ? spent / shares : null;
+  const fillPct = target > 0 ? spent / target : 0;
+  const slippage = vwap !== null && referencePrice !== null ? vwap - referencePrice : null;
+  return {
+    fillPct,
+    levelsUsed,
+    remaining,
+    shares,
+    spent,
+    target,
+    vwap,
+    slippage,
+  };
+}
+
 function persistedBoolean(key: string, fallback: boolean) {
   try {
     const value = window.localStorage.getItem(key);
@@ -2007,6 +2042,12 @@ export function QuantWorkspace() {
   const liveBookSide = selectedBacktestAction === 'NO' ? liveLob?.no : liveLob?.yes;
   const liveBookHasLevels = bookSideHasLevels(liveLob?.yes) || bookSideHasLevels(liveLob?.no);
   const liveSelectedBookHasLevels = bookSideHasLevels(liveBookSide);
+  const selectedBookFillEstimate = useMemo(() => {
+    const reference = finiteNumber(selectedBacktestAction === 'NO' ? selectedOutcomeRow?.no : selectedOutcomeRow?.yes)
+      ?? finiteNumber(liveBookSide?.bestAsk)
+      ?? finiteNumber(liveBookSide?.bestBid);
+    return estimateMarketBuyFill(liveBookSide?.asks, strategyParameters.positionSize, reference);
+  }, [liveBookSide?.asks, liveBookSide?.bestAsk, liveBookSide?.bestBid, selectedBacktestAction, selectedOutcomeRow?.no, selectedOutcomeRow?.yes, strategyParameters.positionSize]);
   const bookExecutionQuality = useMemo(() => {
     const bid = finiteNumber(liveBookSide?.bestBid);
     const ask = finiteNumber(liveBookSide?.bestAsk);
@@ -2027,6 +2068,8 @@ export function QuantWorkspace() {
     if (spread !== null && spread > 0.08) caveats.push('Spread is wide; fills may differ from block-close rows.');
     if (drift !== null && drift > 0.08) caveats.push('Live midpoint is far from the selected block-close price.');
     if (topDepth > 0 && topDepth < 100) caveats.push('Top-of-book depth is thin for production-sized backtests.');
+    if (selectedBookFillEstimate.target > 0 && selectedBookFillEstimate.fillPct < 0.9) caveats.push('Current position size cannot be filled from visible ask depth.');
+    if (selectedBookFillEstimate.slippage !== null && selectedBookFillEstimate.slippage > 0.05) caveats.push('Estimated VWAP is materially above the selected block-close price.');
     if (selectedBookQuality.status === 'review') caveats.push('Historical block-close series has gaps or jumps.');
     if (ageSeconds !== null && ageSeconds > 60) caveats.push('Live book snapshot is stale.');
 
@@ -2083,6 +2126,9 @@ export function QuantWorkspace() {
     liveLobError,
     liveLobStatus,
     selectedBacktestAction,
+    selectedBookFillEstimate.fillPct,
+    selectedBookFillEstimate.slippage,
+    selectedBookFillEstimate.target,
     selectedBookQuality.status,
     selectedOutcomeRow?.no,
     selectedOutcomeRow?.yes,
@@ -2988,6 +3034,26 @@ export function QuantWorkspace() {
                           <div><dt>Mid drift</dt><dd>{formatBookValue(bookExecutionQuality.drift)}</dd></div>
                           <div><dt>Snapshot</dt><dd>{bookExecutionQuality.ageSeconds === null ? '--' : `${bookExecutionQuality.ageSeconds}s ago`}</dd></div>
                         </dl>
+                        <div className={`qtv-book-fill-estimate ${selectedBookFillEstimate.fillPct >= 0.9 ? 'ready' : selectedBookFillEstimate.fillPct > 0 ? 'review' : 'empty'}`}>
+                          <header>
+                            <div>
+                              <strong>Market buy estimate</strong>
+                              <span>{formatBookValue(selectedBookFillEstimate.target, 0)} USDC target · {selectedBacktestAction} asks</span>
+                            </div>
+                            <b>{Math.round(Math.min(1, selectedBookFillEstimate.fillPct) * 100)}%</b>
+                          </header>
+                          <div className="qtv-book-fill-meter">
+                            <i style={{ width: `${Math.max(2, Math.min(100, Math.round(selectedBookFillEstimate.fillPct * 100)))}%` }} />
+                          </div>
+                          <dl>
+                            <div><dt>VWAP</dt><dd>{selectedBookFillEstimate.vwap === null ? '--' : formatBookValue(selectedBookFillEstimate.vwap)}</dd></div>
+                            <div><dt>Slippage</dt><dd>{selectedBookFillEstimate.slippage === null ? '--' : formatBookValue(selectedBookFillEstimate.slippage)}</dd></div>
+                            <div><dt>Filled</dt><dd>{formatBookValue(selectedBookFillEstimate.spent, 0)} USDC</dd></div>
+                            <div><dt>Remainder</dt><dd>{formatBookValue(selectedBookFillEstimate.remaining, 0)} USDC</dd></div>
+                            <div><dt>Shares</dt><dd>{formatBookValue(selectedBookFillEstimate.shares, 2)}</dd></div>
+                            <div><dt>Levels</dt><dd>{selectedBookFillEstimate.levelsUsed.toLocaleString('en-US')}</dd></div>
+                          </dl>
+                        </div>
                         {bookExecutionQuality.caveats.length ? (
                           <ul>
                             {bookExecutionQuality.caveats.slice(0, 3).map((caveat) => <li key={caveat}>{caveat}</li>)}

@@ -2480,6 +2480,112 @@
   padding: 0;
 }
 
+.qtv-book-fill-estimate {
+  display: grid;
+  gap: 7px;
+  overflow: hidden;
+  border: 1px solid rgba(38, 50, 68, 0.9);
+  border-left: 3px solid #64748b;
+  border-radius: 4px;
+  background: rgba(7, 11, 18, 0.72);
+  padding: 8px;
+}
+
+.qtv-book-fill-estimate.ready {
+  border-left-color: #22c55e;
+}
+
+.qtv-book-fill-estimate.review {
+  border-left-color: #f59e0b;
+}
+
+.qtv-book-fill-estimate.empty {
+  border-left-color: #f43f5e;
+}
+
+.qtv-book-fill-estimate header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+}
+
+.qtv-book-fill-estimate header div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.qtv-book-fill-estimate header strong,
+.qtv-book-fill-estimate header span,
+.qtv-book-fill-estimate header b {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qtv-book-fill-estimate header strong {
+  color: #f8fafc;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.qtv-book-fill-estimate header span {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.qtv-book-fill-estimate header b {
+  color: #e2e8f0;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.qtv-book-fill-estimate.ready header b {
+  color: #86efac;
+}
+
+.qtv-book-fill-estimate.review header b {
+  color: #fde68a;
+}
+
+.qtv-book-fill-meter {
+  overflow: hidden;
+  height: 4px;
+  border-radius: 999px;
+  background: #111827;
+}
+
+.qtv-book-fill-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, #22c55e);
+}
+
+.qtv-book-fill-estimate.review .qtv-book-fill-meter i {
+  background: linear-gradient(90deg, #f59e0b, #38bdf8);
+}
+
+.qtv-book-fill-estimate.empty .qtv-book-fill-meter i {
+  background: linear-gradient(90deg, #f43f5e, #f59e0b);
+}
+
+.qtv-book-fill-estimate dl {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-color: #172033;
+  background: #172033;
+}
+
+.qtv-book-fill-estimate dl div {
+  background: #070b12;
+  padding: 6px;
+}
+
 .qtv-live-book-depth {
   display: grid;
   gap: 8px;
