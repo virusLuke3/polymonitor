@@ -12,7 +12,7 @@ from .client import TelegramClient
 from .config import TelegramSettings, load_settings
 from .formatters import format_all_snapshots
 from .models import MessageCandidate
-from .state import PublishState
+from .state import PublishState, state_lock
 
 
 PANEL_ENDPOINTS = {
@@ -127,10 +127,11 @@ def run_once(
         api_base=settings.telegram_api_base,
         timeout_seconds=settings.request_timeout_seconds,
     )
-    state = PublishState(settings.state_path)
     snapshots = fetch_snapshots(api, target=target)
     candidates = format_all_snapshots(snapshots)
-    result = publish_candidates(candidates, settings=settings, state=state, telegram=telegram, dry_run=dry_run, prime=prime)
+    with state_lock(settings.state_path):
+        state = PublishState(settings.state_path)
+        result = publish_candidates(candidates, settings=settings, state=state, telegram=telegram, dry_run=dry_run, prime=prime)
     result.fetched = len(snapshots)
     result.api_base = api.base_url
     result.api_healthy = resolution.healthy

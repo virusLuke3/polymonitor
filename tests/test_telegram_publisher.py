@@ -13,6 +13,7 @@ from telegram.topics.config import TelegramSettings, TopicConfig
 from telegram.topics.formatters import (
     format_alpha_signal,
     format_latest_content,
+    format_new_market_signals,
     format_nba_scoreboard,
     format_panel_snapshot,
     format_related_news,
@@ -174,6 +175,63 @@ def test_rich_news_and_alpha_messages_include_tags_meme_and_links():
     assert "Vibe:" in alpha_message.text
     assert "Market: https://polymarket.com/search?query=Bitcoin+above+%24100k%3F" in alpha_message.text
     assert alpha_message.link_preview is True
+
+
+def test_alpha_dedupe_ignores_flow_and_score_updates_for_same_market_direction():
+    base = {
+        "items": [
+            {
+                "marketId": "m1",
+                "marketTitle": "Mexico vs South Africa",
+                "title": "BUY NO flow $10.9k: Mexico vs South Africa",
+                "summary": "net 79.9%; 75 fills",
+                "score": 81,
+                "outcome": "NO",
+            }
+        ]
+    }
+    updated = {
+        "items": [
+            {
+                "marketId": "m1",
+                "marketTitle": "Mexico vs South Africa",
+                "title": "BUY NO flow $12.1k: Mexico vs South Africa",
+                "summary": "net 82.4%; 91 fills",
+                "score": 88,
+                "outcome": "NO",
+            }
+        ]
+    }
+    reversed_side = {
+        "items": [
+            {
+                "marketId": "m1",
+                "marketTitle": "Mexico vs South Africa",
+                "title": "BUY YES flow: Mexico vs South Africa",
+                "summary": "direction flipped",
+                "outcome": "YES",
+            }
+        ]
+    }
+
+    assert format_alpha_signal(base)[0].dedupe_key == format_alpha_signal(updated)[0].dedupe_key
+    assert format_alpha_signal(base)[0].dedupe_key != format_alpha_signal(reversed_side)[0].dedupe_key
+
+
+def test_new_market_dedupe_ignores_status_updates():
+    first = {"items": [{"marketId": "m1", "title": "Will it rain in NYC?", "status": "fresh"}]}
+    second = {"items": [{"marketId": "m1", "title": "Will it rain in NYC?", "status": "updated"}]}
+
+    assert format_new_market_signals(first)[0].dedupe_key == format_new_market_signals(second)[0].dedupe_key
+
+
+def test_worldcup_dedupe_ignores_generated_at_when_visible_content_is_same():
+    first = {"generatedAt": "2026-06-10T01:00:00Z", "signals": [{"id": "s1", "title": "Mexico vs South Africa: Scheduled"}]}
+    second = {"generatedAt": "2026-06-10T01:05:00Z", "signals": [{"id": "s1", "title": "Mexico vs South Africa: Scheduled"}]}
+    changed = {"generatedAt": "2026-06-10T01:10:00Z", "signals": [{"id": "s2", "title": "Canada vs Bosnia: Scheduled"}]}
+
+    assert format_worldcup_intel(first)[0].dedupe_key == format_worldcup_intel(second)[0].dedupe_key
+    assert format_worldcup_intel(first)[0].dedupe_key != format_worldcup_intel(changed)[0].dedupe_key
 
 
 def test_related_news_formatter_includes_market_context_and_routes_to_intel():

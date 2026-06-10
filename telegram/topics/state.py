@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict
 
 
 class PublishState:
-    def __init__(self, path: str, *, max_entries: int = 2000) -> None:
+    def __init__(self, path: str, *, max_entries: int | None = None) -> None:
         self.path = Path(path).expanduser()
-        self.max_entries = max(100, int(max_entries or 2000))
+        configured = max_entries
+        if configured is None:
+            try:
+                configured = int(os.environ.get("POLYDATA_TELEGRAM_STATE_MAX_ENTRIES", "20000"))
+            except ValueError:
+                configured = 20000
+        self.max_entries = max(100, int(configured or 20000))
         self.payload: Dict[str, Any] = {"sent": {}}
         self.load()
 
@@ -50,3 +59,14 @@ class PublishState:
     def _key(target: str, dedupe_key: str) -> str:
         return f"{target}:{dedupe_key}"
 
+
+@contextlib.contextmanager
+def state_lock(state_path: str):
+    lock_path = Path(state_path).expanduser().with_suffix(Path(state_path).suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

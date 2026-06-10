@@ -91,6 +91,20 @@ def _polymarket_url(item: Dict[str, Any], *, title: str = "") -> str:
     return f"https://polymarket.com/search?query={quote_plus(query)}" if query else ""
 
 
+def _market_identity(item: Dict[str, Any], *, title: str = "") -> str:
+    return _text(
+        item.get("marketId")
+        or item.get("eventId")
+        or item.get("id")
+        or item.get("slug")
+        or item.get("marketSlug")
+        or item.get("eventSlug")
+        or item.get("marketTitle")
+        or item.get("question")
+        or title
+    ).lower()
+
+
 def _source_link(url: str, label: str = "Open link") -> str:
     return f"{label}: {url}" if url else ""
 
@@ -290,11 +304,8 @@ def format_worldcup_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
         tags=_hashtags("WorldCup", "Polymonitor", "Football"),
         url=_source_link(WORLDCUP_WORKSPACE_URL, "Workspace"),
     )
-    version = "|".join(
-        str(item.get("id") or item.get("url") or item.get("title") or "")
-        for item in [*signals[:3], *news[:3], *sorted(weather, key=_weather_risk, reverse=True)[:2]]
-    )
-    dedupe = _short_hash("worldcup-intel", payload.get("generatedAt"), version, len(signals), len(news), len(weather))
+    version = "|".join(lines)
+    dedupe = _short_hash("worldcup-intel", version)
     return [
         MessageCandidate(
             topic="worldcup",
@@ -494,7 +505,8 @@ def format_alpha_signal(payload: Dict[str, Any]) -> List[MessageCandidate]:
             meme="🐋 Vibe: smart money splashed",
             url=_source_link(url, "Market"),
         )
-        dedupe = _short_hash("alpha-signal", item.get("id") or item.get("marketId"), title.lower(), signal, score)
+        direction = _text(action.get("outcome") or item.get("outcome") or action.get("label")).lower()
+        dedupe = _short_hash("alpha-signal", _market_identity(item, title=title), direction)
         messages.append(MessageCandidate(topic="alpha", dedupe_key=dedupe, text=text, priority="high", metadata={"panel": "alpha-signal"}, link_preview=bool(url)))
     return messages
 
@@ -518,7 +530,7 @@ def format_new_market_signals(payload: Dict[str, Any]) -> List[MessageCandidate]
             meme="🧪 Vibe: fresh market just spawned",
             url=_source_link(url, "Market/Search"),
         )
-        dedupe = _short_hash("new-market-signal", item.get("id") or item.get("marketId") or item.get("slug"), title.lower(), status)
+        dedupe = _short_hash("new-market-signal", _market_identity(item, title=title))
         messages.append(MessageCandidate(topic="alpha", dedupe_key=dedupe, text=text, priority="normal", metadata={"panel": "new-market-signals"}, link_preview=bool(url)))
     return messages
 

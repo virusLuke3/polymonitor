@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import contextlib
-import fcntl
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Any, Dict, Iterable
 
 from .client import TelegramClient
@@ -12,7 +9,7 @@ from .config import TelegramSettings, load_settings
 from .formatters import format_panel_snapshot
 from .models import MessageCandidate
 from .publisher import publish_candidates
-from .state import PublishState
+from .state import PublishState, state_lock
 
 
 _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polydata-telegram")
@@ -41,7 +38,7 @@ def _enabled(settings: TelegramSettings) -> bool:
 
 def _publish_candidates(candidates: Iterable[MessageCandidate], settings: TelegramSettings, panel_id: str) -> None:
     try:
-        with _state_lock(settings.state_path):
+        with state_lock(settings.state_path):
             state = PublishState(settings.state_path)
             telegram = TelegramClient(
                 bot_token=settings.bot_token,
@@ -62,18 +59,6 @@ def _publish_candidates(candidates: Iterable[MessageCandidate], settings: Telegr
             )
     except Exception as exc:
         _log(f"publish-failed panel={panel_id} error={exc}")
-
-
-@contextlib.contextmanager
-def _state_lock(state_path: str):
-    lock_path = Path(state_path).expanduser().with_suffix(Path(state_path).suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _log(message: str) -> None:
