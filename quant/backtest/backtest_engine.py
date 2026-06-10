@@ -495,7 +495,7 @@ def fetch_price_points(conn: Any, run: dict[str, Any], *, limit: int = 25000) ->
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT timestamp AS x_value, price, 0::numeric AS volume
+                SELECT timestamp AS x_value, price, 0::numeric AS volume, ts_minute AS block_timestamp
                 FROM quant.market_token_frontend_price_1m
                 WHERE {" AND ".join(filters)}
                 ORDER BY timestamp ASC
@@ -618,32 +618,32 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
                     "entry signal rejected by minimum fill or liquidity constraints",
                     meta=fill,
                 ))
-                continue
-            open_position = OpenPosition(
-                trade_index=len(trades) + 1,
-                entry_index=index,
-                entry_x=point.x_value,
-                entry_price=fill.get("entry_price") or _execution_price(point.price, params, "entry"),
-                size=fill["size"],
-                requested_notional=fill["requested_notional"],
-                filled_notional=fill["filled_notional"],
-                fill_pct=fill["fill_pct"],
-                fill_status=fill.get("fill_status", "FILLED"),
-                book_snapshot_id=fill.get("book_snapshot_id"),
-                snapshot_version=fill.get("snapshot_version"),
-                staleness_seconds=fill.get("staleness_seconds"),
-                staleness_blocks=fill.get("staleness_blocks"),
-                avg_fill_price=fill.get("avg_fill_price"),
-            )
-            events.append(_event(
-                "open",
-                x_axis,
-                point.x_value,
-                f"T-{open_position.trade_index:04d}",
-                point.price,
-                "entry threshold reached",
-                meta=fill,
-            ))
+            else:
+                open_position = OpenPosition(
+                    trade_index=len(trades) + 1,
+                    entry_index=index,
+                    entry_x=point.x_value,
+                    entry_price=fill.get("entry_price") or _execution_price(point.price, params, "entry"),
+                    size=fill["size"],
+                    requested_notional=fill["requested_notional"],
+                    filled_notional=fill["filled_notional"],
+                    fill_pct=fill["fill_pct"],
+                    fill_status=fill.get("fill_status", "FILLED"),
+                    book_snapshot_id=fill.get("book_snapshot_id"),
+                    snapshot_version=fill.get("snapshot_version"),
+                    staleness_seconds=fill.get("staleness_seconds"),
+                    staleness_blocks=fill.get("staleness_blocks"),
+                    avg_fill_price=fill.get("avg_fill_price"),
+                )
+                events.append(_event(
+                    "open",
+                    x_axis,
+                    point.x_value,
+                    f"T-{open_position.trade_index:04d}",
+                    point.price,
+                    "entry threshold reached",
+                    meta=fill,
+                ))
         elif open_position is not None:
             exit_reason = _exit_reason(point.price, open_position.entry_price, index - open_position.entry_index, params)
             if exit_reason:
