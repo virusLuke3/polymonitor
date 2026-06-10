@@ -3193,7 +3193,30 @@ export function QuantWorkspace() {
                 ) : null}
 
                 {inspectorTab === 'trades' ? (
-                  <div className="qtv-inspector-trades">
+                  <div
+                    className="qtv-inspector-trades"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        selectInspectorTradeOffset(-1);
+                      }
+                      if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        selectInspectorTradeOffset(1);
+                      }
+                      if (event.key === 'Enter' && selectedTradeRow) {
+                        event.preventDefault();
+                        setSelectedTradeId(selectedTradeRow.id);
+                        setTesterTab('trades');
+                        setStrategyDrawerCollapsed(false);
+                      }
+                      if (event.key === 'Escape' && selectedTradeRow) {
+                        event.preventDefault();
+                        setSelectedTradeId(null);
+                      }
+                    }}
+                  >
                     <section className="qtv-inspector-trade-head">
                       <div>
                         <span>Trades</span>
@@ -3214,7 +3237,7 @@ export function QuantWorkspace() {
                       <div className="qtv-inspector-trade-focus-copy">
                         <span>Focused trade</span>
                         <strong>{selectedTradeRow ? `${selectedTradeRow.id} · ${selectedTradeRow.side} ${selectedTradeRow.outcome}` : 'None selected'}</strong>
-                        <em>{selectedTradeRow && inspectorTradeStats.selectedIndex >= 0 ? `${inspectorTradeStats.selectedIndex + 1} of ${filteredTrades.length} · chart zooms to entry / exit` : 'Click a trade, or use the table arrow keys.'}</em>
+                        <em>{selectedTradeRow && inspectorTradeStats.selectedIndex >= 0 ? `${inspectorTradeStats.selectedIndex + 1} of ${filteredTrades.length} · chart zooms to entry / exit` : 'Click a trade, then use ↑↓ / Enter / Esc.'}</em>
                       </div>
                       <div className="qtv-inspector-trade-toolbar">
                         <button

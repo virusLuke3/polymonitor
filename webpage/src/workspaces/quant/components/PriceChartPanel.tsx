@@ -1021,7 +1021,7 @@ export function PriceChartPanel({
   }, [primaryPoints.length, visibleLogicalRange]);
   const navigatorDomainLabels = useMemo(() => {
     if (!priceSource.includes('block') || !primaryPoints.length) return [];
-    const count = Math.min(5, Math.max(3, primaryPoints.length));
+    const count = Math.min(3, Math.max(2, primaryPoints.length));
     const seen = new Set<number>();
     return Array.from({ length: count }, (_, index) => {
       const pointIndex = Math.round((Math.max(0, primaryPoints.length - 1) * index) / Math.max(1, count - 1));
@@ -1255,7 +1255,7 @@ export function PriceChartPanel({
       const surfaceBox = surface?.getBoundingClientRect();
       const regionBox = region?.getBoundingClientRect();
       if (!surfaceBox || !regionBox) return;
-      const nextTop = Math.max(0, Math.round(regionBox.bottom - surfaceBox.top - 54));
+      const nextTop = Math.max(0, Math.round(regionBox.bottom - surfaceBox.top - 48));
       setBlockAxisTop((current) => (current === nextTop ? current : nextTop));
     };
     syncBlockAxisTop();
@@ -2414,6 +2414,12 @@ export function PriceChartPanel({
                 </span>
               ))}
             </div>
+            {visibleWindowMeta ? (
+              <div className="qtv-block-navigator-window-readout" aria-hidden="true">
+                <span>visible</span>
+                <b>{blockLabel(visibleWindowMeta.fromBlock)} - {blockLabel(visibleWindowMeta.toBlock)}</b>
+              </div>
+            ) : null}
             {blockAxisMinorTicks.map((tick) => (
               <span key={tick.key} className={`minor ${tick.level}`} style={{ left: tick.left }}>
                 <i />

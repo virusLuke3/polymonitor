@@ -2894,6 +2894,14 @@
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) auto;
 }
 
+.qtv-inspector-trades:focus {
+  outline: none;
+}
+
+.qtv-inspector-trades:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.5);
+}
+
 .qtv-inspector-trade-head {
   position: sticky;
   top: 0;
@@ -3295,7 +3303,7 @@
 
 .qtv-tv-chart {
   position: absolute;
-  inset: 0 0 54px 0;
+  inset: 0 0 48px 0;
   min-height: 0;
 }
 
@@ -3306,7 +3314,7 @@
 .qtv-chart-surface.range-enabled::after {
   position: absolute;
   z-index: 3;
-  inset: 0 74px 54px 0;
+  inset: 0 74px 48px 0;
   border: 1px dashed rgba(96, 165, 250, 0.14);
   background:
     linear-gradient(90deg, rgba(96, 165, 250, 0.045) 1px, transparent 1px) 0 0 / 64px 100%;
@@ -3406,15 +3414,15 @@
 .qtv-block-tick-axis {
   position: absolute;
   z-index: 80;
-  height: 54px;
+  height: 48px;
   right: 68px;
   top: 0;
   left: 0;
   margin: 0;
   border-top: 1px solid rgba(148, 163, 184, 0.14);
   background:
-    linear-gradient(90deg, rgba(148, 163, 184, 0.13) 1px, transparent 1px) 0 0 / 12.5% 100%,
-    linear-gradient(180deg, rgba(7, 10, 15, 0.62), rgba(7, 10, 15, 0.98) 48%, #070a0f);
+    linear-gradient(90deg, rgba(148, 163, 184, 0.11) 1px, transparent 1px) 0 0 / 12.5% 100%,
+    linear-gradient(180deg, rgba(7, 10, 15, 0.42), rgba(7, 10, 15, 0.94) 50%, #070a0f);
   color: #7f8a9d;
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -3447,9 +3455,9 @@
 .qtv-block-navigator-track {
   position: absolute;
   right: 10px;
-  bottom: 24px;
+  bottom: 10px;
   left: 10px;
-  height: 8px;
+  height: 7px;
   border: 1px solid rgba(71, 85, 105, 0.64);
   border-radius: 999px;
   background:
@@ -3493,7 +3501,7 @@
 .qtv-block-navigator-labels {
   position: absolute;
   right: 10px;
-  bottom: 3px;
+  bottom: 23px;
   left: 10px;
   height: 16px;
   pointer-events: none;
@@ -3504,19 +3512,54 @@
 }
 
 .qtv-block-navigator-labels b {
-  color: #dbeafe;
-  font-size: 9.5px;
+  color: #9fb4cf;
+  font-size: 9px;
   font-weight: 950;
 }
 
+.qtv-block-navigator-window-readout {
+  position: absolute;
+  right: 50%;
+  bottom: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(50%);
+  border: 1px solid rgba(38, 50, 68, 0.78);
+  border-radius: 4px;
+  background: rgba(7, 12, 20, 0.88);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  color: #8fa3bd;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 18px;
+  padding: 0 7px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.qtv-block-navigator-window-readout span {
+  position: static;
+  bottom: auto;
+  display: inline;
+  transform: none;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.qtv-block-navigator-window-readout b {
+  color: #dbeafe;
+}
+
 .qtv-block-tick-axis span.minor {
-  bottom: 25px;
-  opacity: 0.24;
+  bottom: 36px;
+  opacity: 0.18;
 }
 
 .qtv-block-tick-axis span.minor.mid {
-  bottom: 25px;
-  opacity: 0.34;
+  bottom: 36px;
+  opacity: 0.28;
 }
 
 .qtv-block-tick-axis span.minor i {
@@ -3541,7 +3584,7 @@
 }
 
 .qtv-block-tick-axis span.level-1 {
-  bottom: 34px;
+  bottom: 36px;
   opacity: 0.4;
 }
 
@@ -3563,8 +3606,8 @@
 }
 
 .qtv-block-tick-axis > span.major {
-  bottom: 34px;
-  opacity: 0.48;
+  bottom: 36px;
+  opacity: 0.38;
 }
 
 .qtv-block-tick-axis > span.major b {
@@ -4496,7 +4539,7 @@
   position: absolute;
   z-index: 42;
   top: 0;
-  bottom: 54px;
+  bottom: 48px;
   border: 1px solid rgba(96, 165, 250, 0.85);
   border-top: 0;
   border-bottom: 0;
@@ -5075,7 +5118,7 @@
   z-index: 29;
   top: 0;
   right: 188px;
-  bottom: 54px;
+  bottom: 48px;
   width: 184px;
   pointer-events: none;
 }
