@@ -37,6 +37,7 @@ except ImportError:
 
 from api.config import load_api_settings
 from api.services import worldcup_dashboard_service
+from db import DEFAULT_DB_PATH, dict_from_row, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
@@ -195,6 +196,15 @@ class WorldCupDashboardWatcher:
         response.raise_for_status()
         return response.text
 
+    def query_all(self, sql: str, params: Optional[list[Any]] = None) -> list[Dict[str, Any]]:
+        conn = get_connection(DEFAULT_DB_PATH)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(sql, tuple(params or ()))
+            return [dict_from_row(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def service_context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
@@ -204,6 +214,7 @@ class WorldCupDashboardWatcher:
             "BeautifulSoup": BeautifulSoup,
             "http_json_get": self.http_json_get,
             "http_text_get": self.http_text_get,
+            "query_all": self.query_all,
             "requests": requests,
             "utc_now_iso": utc_now_iso,
         }

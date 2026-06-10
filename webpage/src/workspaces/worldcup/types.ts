@@ -148,8 +148,26 @@ export type WorldCupOddsSnapshot = {
     name: string;
     decimalOdds?: number;
     impliedProbability?: number;
+    price?: number | string | null;
+    bookCount?: number;
+    source?: string;
+    marketUrl?: string;
   }>;
   generatedAt: string;
+  probabilities?: Array<{
+    outcome?: string;
+    name?: string;
+    price?: number | string | null;
+    impliedProbability?: number | string | null;
+    marketUrl?: string;
+  }>;
+  outcomePrices?: Array<number | string | null>;
+  rawOutcomes?: Array<string>;
+  bookmakerCount?: number;
+  source?: string;
+  sourceUrl?: string;
+  marketUrl?: string;
+  confidence?: number;
 };
 
 export type WorldCupDashboardPayload = {

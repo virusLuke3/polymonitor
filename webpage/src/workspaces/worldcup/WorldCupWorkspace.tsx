@@ -668,6 +668,13 @@ function SchedulePanel({
     <Panel
       title="CALENDAR"
       count={filtered.length}
+      controls={(
+        <>
+          <span className="wm-worldcup-calendar-live">实时</span>
+          <button className="wm-worldcup-calendar-tool" type="button" aria-label="Download calendar">↓</button>
+          <button className="wm-worldcup-calendar-tool summary" type="button" aria-label="Summarize calendar">✦</button>
+        </>
+      )}
       className="wm-worldcup-panel wm-worldcup-schedule-panel"
     >
       <div className="wm-worldcup-filter-strip">
@@ -1362,18 +1369,53 @@ function VenueRefPanel({
   );
 }
 
-function buildWinProbabilityRows(markets: WorldCupPolymarketMarket[], odds: WorldCupOddsSnapshot[], match: WorldCupMatch | null) {
+type WorldCupProbabilityRow = {
+  team: string;
+  poly: number | null;
+  book: number | null;
+  edge: number | null;
+  volume: number;
+};
+
+function percentFromUnknown(value?: number | string | null) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return numeric >= 0 && numeric <= 1 ? numeric * 100 : numeric;
+}
+
+function outcomeMatchesTeam(name: string | undefined, team: string) {
+  const left = String(name || '').trim().toLowerCase();
+  const right = String(team || '').trim().toLowerCase();
+  if (!left || !right) return false;
+  if (team === 'Draw') return /draw|tie|\bx\b/i.test(left);
+  if (left === right) return true;
+  const leftTokens = new Set(left.split(/[^a-z0-9]+/).filter(Boolean));
+  const rightTokens = right.split(/[^a-z0-9]+/).filter((part) => part.length > 1);
+  return rightTokens.some((token) => leftTokens.has(token));
+}
+
+function snapshotOutcomePercent(snapshot: WorldCupOddsSnapshot | undefined, team: string) {
+  if (!snapshot) return null;
+  const direct = (snapshot.outcomes || []).find((outcome) => outcomeMatchesTeam(outcome.name, team));
+  if (direct) return percentFromUnknown(direct.impliedProbability ?? direct.price ?? null);
+  const probability = (snapshot.probabilities || []).find((row) => outcomeMatchesTeam(row.outcome || row.name, team));
+  return percentFromUnknown(probability?.impliedProbability ?? probability?.price ?? null);
+}
+
+function buildWinProbabilityRows(markets: WorldCupPolymarketMarket[], odds: WorldCupOddsSnapshot[], match: WorldCupMatch | null): WorldCupProbabilityRow[] {
   if (!match) return [];
   const market = markets[0];
-  if (!market) return [];
-  const oddsSnapshot = odds[0];
+  const bookmakerSnapshot = odds.find((snapshot) => snapshot.providerType !== 'prediction_market');
+  const predictionSnapshot = odds.find((snapshot) => snapshot.providerType === 'prediction_market' || /polymarket/i.test(snapshot.provider || snapshot.source || ''));
   const teams = [match.homeTeam, 'Draw', match.awayTeam];
   return teams.map((team) => {
     const marketOutcome = market?.outcomes.find((outcome) => outcome.name.toLowerCase() === team.toLowerCase() || (team === 'Draw' && /draw/i.test(outcome.name)));
-    const oddsOutcome = oddsSnapshot?.outcomes.find((outcome) => outcome.name.toLowerCase() === team.toLowerCase() || (team === 'Draw' && /draw/i.test(outcome.name)));
-    if (marketOutcome?.yesPrice == null && oddsOutcome?.impliedProbability == null) return null;
-    const poly = marketOutcome?.yesPrice == null ? null : marketOutcome.yesPrice * 100;
-    const book = oddsOutcome?.impliedProbability ?? null;
+    const poly = marketOutcome?.yesPrice == null
+      ? snapshotOutcomePercent(predictionSnapshot, team)
+      : percentFromUnknown(marketOutcome.yesPrice);
+    const book = snapshotOutcomePercent(bookmakerSnapshot, team);
+    if (poly == null && book == null) return null;
     return {
       team,
       poly,
@@ -1381,7 +1423,7 @@ function buildWinProbabilityRows(markets: WorldCupPolymarketMarket[], odds: Worl
       edge: poly != null && book != null ? poly - book : null,
       volume: market?.volume24h || 0,
     };
-  }).filter((row): row is { team: string; poly: number | null; book: number | null; edge: number | null; volume: number } => Boolean(row));
+  }).filter((row): row is WorldCupProbabilityRow => Boolean(row));
 }
 
 function WinProbabilityPanel({
@@ -1395,16 +1437,19 @@ function WinProbabilityPanel({
 }) {
   const rows = buildWinProbabilityRows(markets, odds, match);
   const pricedRows = rows.filter((row) => row.poly != null);
-  const leader = pricedRows.length
-    ? pricedRows.reduce((best, row) => (row.poly || 0) > (best.poly || 0) ? row : best, pricedRows[0]!)
+  const probabilityRows = pricedRows.length ? pricedRows : rows.filter((row) => row.book != null);
+  const leader = probabilityRows.length
+    ? probabilityRows.reduce((best, row) => ((row.poly ?? row.book) || 0) > ((best.poly ?? best.book) || 0) ? row : best, probabilityRows[0]!)
     : null;
+  const hasPolymarket = rows.some((row) => row.poly != null);
+  const hasBook = rows.some((row) => row.book != null);
   return (
     <Panel title="WIN PROBABILITY" count={rows.length} className="wm-worldcup-panel wm-worldcup-win-probability-panel">
       {rows.length ? (
         <>
           <div className="wm-worldcup-prob-headline">
-            <span><em>MARKET LEADER</em><strong>{leader?.team || '--'}</strong><b>{percentLabel(leader?.poly)}</b></span>
-            <span><em>EDGE</em><strong className={(leader?.edge || 0) >= 0 ? 'green' : 'red'}>{leader?.edge == null ? '--' : `${leader.edge >= 0 ? '+' : ''}${percentLabel(leader.edge)}`}</strong><b>poly-book</b></span>
+            <span><em>{hasPolymarket ? 'MARKET LEADER' : 'BOOK LEADER'}</em><strong>{leader?.team || '--'}</strong><b>{percentLabel(leader?.poly ?? leader?.book)}</b></span>
+            <span><em>{hasPolymarket && hasBook ? 'EDGE' : 'SOURCE'}</em><strong className={(leader?.edge || 0) >= 0 ? 'green' : 'red'}>{leader?.edge == null ? (hasBook ? 'BOOK' : 'POLY') : `${leader.edge >= 0 ? '+' : ''}${percentLabel(leader.edge)}`}</strong><b>{hasPolymarket && hasBook ? 'poly-book' : 'real odds'}</b></span>
           </div>
           <div className="wm-worldcup-prob-table">
             <header><span>OUTCOME</span><span>POLY</span><span>BOOK</span><span>EDGE</span></header>

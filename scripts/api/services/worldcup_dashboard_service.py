@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
@@ -16,6 +17,8 @@ WORLDCUP_DASHBOARD_CACHE_KEY = "dashboard-v1"
 DEFAULT_TTL_SECONDS = 900
 OPENFOOTBALL_2026_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
 POLYMARKET_GAMMA_API_BASE = "https://gamma-api.polymarket.com"
+WORLDCUP_ODDS_SPORT_KEY = "soccer_fifa_world_cup"
+WORLDCUP_ODDS_REGIONS = "us,uk,eu,au"
 MS_PER_MINUTE = 60 * 1000
 
 _REFRESH_LOCK = threading.Lock()
@@ -76,6 +79,21 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(round(float(value)))
     except (TypeError, ValueError):
         return default
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _mean(values: Iterable[float]) -> Optional[float]:
+    rows = [value for value in values if value == value]
+    return sum(rows) / len(rows) if rows else None
 
 
 def _parse_kickoff(match: Dict[str, Any]) -> datetime:
@@ -220,6 +238,9 @@ def _market_text(row: Dict[str, Any]) -> str:
         row.get("groupItemTitle"),
         " ".join(str(value or "") for value in _safe_list(row.get("outcomes"))),
     ]
+    for child in _safe_list(row.get("outcomeMarkets")):
+        if isinstance(child, dict):
+            values.extend([child.get("title"), child.get("slug"), child.get("eventTitle"), child.get("eventSlug")])
     return " ".join(str(value or "") for value in values).lower()
 
 
@@ -245,6 +266,18 @@ def _safe_list(value: Any) -> List[Any]:
     return []
 
 
+def _safe_json_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
 def _polymarket_url(row: Dict[str, Any]) -> str:
     for key in ("marketUrl", "eventUrl", "url"):
         value = str(row.get(key) or "").strip()
@@ -258,6 +291,116 @@ def _polymarket_url(row: Dict[str, Any]) -> str:
         return f"https://polymarket.com/event/{slug}"
     title = str(row.get("title") or row.get("question") or "").strip()
     return f"https://polymarket.com/search?query={quote_plus(title)}" if title else ""
+
+
+def _serving_market_candidate(row: Dict[str, Any]) -> Dict[str, Any]:
+    outcomes = [item for item in _safe_json_list(row.get("outcomes")) if isinstance(item, dict)]
+    top_outcomes = [item for item in _safe_json_list(row.get("top_outcomes")) if isinstance(item, dict)]
+    priced = top_outcomes or outcomes
+    labels: List[str] = []
+    prices: List[Any] = []
+    token_ids: List[Any] = []
+    for outcome in priced:
+        label = outcome.get("label") or outcome.get("title") or outcome.get("outcomeKey") or outcome.get("name")
+        price = outcome.get("yesPrice")
+        if label in (None, "") or price in (None, ""):
+            continue
+        labels.append(str(label))
+        prices.append(price)
+        token_ids.append(outcome.get("yesTokenId") or outcome.get("tokenId") or "")
+    return {
+        "title": row.get("title"),
+        "question": row.get("title"),
+        "marketTitle": row.get("title"),
+        "eventTitle": row.get("event_title"),
+        "eventSlug": row.get("event_slug"),
+        "eventId": row.get("event_id"),
+        "slug": row.get("event_slug"),
+        "gammaMarketId": row.get("default_gamma_market_id"),
+        "conditionId": row.get("default_condition_id"),
+        "outcomes": labels,
+        "outcomePrices": prices,
+        "clobTokenIds": token_ids,
+        "volume24hr": row.get("volume_24h"),
+        "volume24h": row.get("volume_24h"),
+        "active": not bool(row.get("is_trading_closed")),
+        "closed": bool(row.get("is_trading_closed")),
+        "source": "local-db",
+    }
+
+
+def _market_table_candidate(row: Dict[str, Any]) -> Dict[str, Any]:
+    clob_token_ids = _safe_json_list(row.get("clob_token_ids"))
+    yes_token_id = str(row.get("yes_token_id") or (clob_token_ids[0] if clob_token_ids else "") or "").strip()
+    no_token_id = str(row.get("no_token_id") or (clob_token_ids[1] if len(clob_token_ids) > 1 else "") or "").strip()
+    latest_yes = row.get("latest_yes_price")
+    latest_price = row.get("latest_price")
+    return {
+        "id": row.get("id"),
+        "localMarketId": row.get("id"),
+        "title": row.get("title"),
+        "question": row.get("title"),
+        "marketTitle": row.get("title"),
+        "eventTitle": row.get("event_title"),
+        "eventSlug": row.get("event_slug"),
+        "eventId": row.get("event_id"),
+        "slug": row.get("slug"),
+        "gammaMarketId": row.get("gamma_market_id"),
+        "conditionId": row.get("condition_id"),
+        "yes_token_id": yes_token_id,
+        "no_token_id": no_token_id,
+        "clobTokenIds": clob_token_ids or [token for token in (yes_token_id, no_token_id) if token],
+        "latestPrice": latest_price,
+        "latestYesPrice": latest_yes if latest_yes not in (None, "") else latest_price,
+        "latestNoPrice": row.get("latest_no_price"),
+        "outcomes": ["YES", "NO"],
+        "outcomePrices": [latest_yes if latest_yes not in (None, "") else latest_price]
+        if (latest_yes not in (None, "") or latest_price not in (None, ""))
+        else [],
+        "volume24hr": row.get("volume_24h"),
+        "volume24h": row.get("volume_24h"),
+        "active": not bool(row.get("is_trading_closed")),
+        "closed": bool(row.get("is_trading_closed")),
+        "source": "local-db-market",
+    }
+
+
+_WORLDCUP_MARKET_SLUG_RE = re.compile(r"^(fifwc-[a-z0-9]+-[a-z0-9]+-\d{4}-\d{2}-\d{2})-(.+)$")
+
+
+def _worldcup_market_slug_base(slug: Any) -> str:
+    match = _WORLDCUP_MARKET_SLUG_RE.match(str(slug or "").strip().lower())
+    return match.group(1) if match else ""
+
+
+def _moneyline_bundle_title(children: List[Dict[str, Any]], slug_base: str) -> str:
+    for child in children:
+        title = str(child.get("title") or "")
+        draw_match = re.search(r"Will\s+(.+?)\s+vs\.?\s+(.+?)\s+end in a draw\?", title, flags=re.IGNORECASE)
+        if draw_match:
+            return f"{draw_match.group(1).strip()} vs. {draw_match.group(2).strip()} - Match Winner"
+    return f"{slug_base} - Match Winner"
+
+
+def _moneyline_bundle_candidate(slug_base: str, children: List[Dict[str, Any]]) -> Dict[str, Any]:
+    children = sorted(children, key=lambda row: str(row.get("slug") or ""))
+    return {
+        "id": slug_base,
+        "title": _moneyline_bundle_title(children, slug_base),
+        "question": _moneyline_bundle_title(children, slug_base),
+        "marketTitle": _moneyline_bundle_title(children, slug_base),
+        "eventTitle": _moneyline_bundle_title(children, slug_base),
+        "eventSlug": slug_base,
+        "slug": slug_base,
+        "outcomes": [],
+        "outcomePrices": [],
+        "outcomeMarkets": children,
+        "volume24hr": sum(_safe_float(child.get("volume24h") or child.get("volume24hr")) or 0 for child in children),
+        "volume24h": sum(_safe_float(child.get("volume24h") or child.get("volume24hr")) or 0 for child in children),
+        "active": any(child.get("active") is not False for child in children),
+        "closed": all(bool(child.get("closed")) for child in children),
+        "source": "local-db-moneyline",
+    }
 
 
 def _candidate_event_payload(item: Dict[str, Any], event: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -294,10 +437,24 @@ def _canonical_outcome_label(match: Dict[str, Any], label: Any, *, allow_yes_no:
         return text
     home_tokens = _team_tokens(home)
     away_tokens = _team_tokens(away)
-    label_tokens = set(_tokenize(text))
-    if lower == home.lower() or bool(home_tokens & label_tokens):
+    label_tokens = _team_tokens(text) | set(_tokenize(text))
+
+    def _score(team_name: str, team_token_set: set[str]) -> int:
+        team_lower = str(team_name or "").lower()
+        if not team_lower:
+            return 0
+        if lower == team_lower:
+            return 100
+        score = len(team_token_set & label_tokens)
+        if team_lower in lower or lower in team_lower:
+            score += 4
+        return score
+
+    home_score = _score(home, home_tokens)
+    away_score = _score(away, away_tokens)
+    if home_score > away_score and home_score > 0:
         return home
-    if lower == away.lower() or bool(away_tokens & label_tokens):
+    if away_score > home_score and away_score > 0:
         return away
     return text
 
@@ -354,13 +511,53 @@ def _worldcup_market_reject_reason(match: Dict[str, Any], row: Dict[str, Any]) -
     event_has_match = event_home_hit and event_away_hit
     outcome_hint = _match_outcome_hint(match, row)
     outcome_has_match = (outcome_home_hit and outcome_away_hit) or bool(outcome_hint)
+    if _safe_list(row.get("outcomeMarkets")):
+        child_hints = {
+            _match_outcome_hint(match, child)
+            for child in _safe_list(row.get("outcomeMarkets"))
+            if isinstance(child, dict)
+        }
+        if {home_text and str(match.get("homeTeam") or ""), "Draw", away_text and str(match.get("awayTeam") or "")} - {""} <= child_hints:
+            outcome_has_match = True
+            primary_has_match = True
     if not (primary_has_match or (event_has_match and outcome_has_match) or (outcome_home_hit and outcome_away_hit)):
         return "missing-team"
-    worldcup_hit = any(term in text for term in ("world cup", "fifa", "wc2026", "2026"))
+    worldcup_hit = any(term in text for term in ("world cup", "fifa", "fifwc", "wc2026", "2026"))
     if not worldcup_hit:
         return "not-worldcup"
+    prop_terms = (
+        "spread",
+        " o/u ",
+        "over/under",
+        "total",
+        "corners",
+        "first team to score",
+        "first-to-score",
+        "exact score",
+        "halftime",
+        "player props",
+        "goals-",
+        " goals",
+        "both teams to score",
+        "btts",
+        "cards",
+    )
+    outright_terms = (
+        "group a last place",
+        "group a second place",
+        "group a winner",
+        "highest-scoring team",
+        "highest scoring team",
+        "fair play award",
+        "award winner",
+    )
+    market_terms = ("winner", "winning", "win", "match result", "moneyline", "draw", "beat", "advance")
+    if any(term in primary_text for term in outright_terms):
+        return "not-match-market"
+    if not _safe_list(row.get("outcomeMarkets")) and any(term in f" {primary_text} {text} " for term in prop_terms):
+        if not any(term in primary_text for term in market_terms):
+            return "not-match-market"
     if event_has_match and not outcome_has_match:
-        market_terms = ("winner", "winning", "win", "match result", "moneyline", "draw", "beat", "advance")
         if not any(term in primary_text for term in market_terms):
             return "not-match-market"
     return ""
@@ -371,6 +568,14 @@ def _worldcup_market_score(match: Dict[str, Any], row: Dict[str, Any]) -> int:
         return 0
     text = _market_text(row)
     score = 80
+    child_hints = {
+        _match_outcome_hint(match, child)
+        for child in _safe_list(row.get("outcomeMarkets"))
+        if isinstance(child, dict)
+    }
+    expected = {str(match.get("homeTeam") or ""), "Draw", str(match.get("awayTeam") or "")}
+    if expected <= child_hints:
+        score += 60
     if "draw" in text or "winner" in text or "moneyline" in text:
         score += 8
     if _match_outcome_hint(match, row):
@@ -486,7 +691,142 @@ def _gamma_scan_active(ctx: Dict[str, Any], *, limit: int = 120) -> List[Dict[st
     return rows
 
 
+def _significant_market_search_tokens(query: Any) -> List[str]:
+    stop = {"and", "the", "vs", "v", "world", "cup", "fifa", "soccer", "football", "match", "market"}
+    tokens: List[str] = []
+    for token in _tokenize(query):
+        if token in stop or len(token) < 2:
+            continue
+        if token not in tokens:
+            tokens.append(token)
+    return tokens[:8]
+
+
+def _local_event_serving_search(ctx: Dict[str, Any], query: str, *, limit: int) -> List[Dict[str, Any]]:
+    query_all = ctx.get("query_all")
+    if not callable(query_all):
+        return []
+    tokens = _significant_market_search_tokens(query)
+    search_text = """
+        (
+          COALESCE(title, '') || ' ' ||
+          COALESCE(event_slug, '') || ' ' ||
+          COALESCE(event_title, '') || ' ' ||
+          COALESCE(category, '') || ' ' ||
+          COALESCE(CAST(tags AS TEXT), '') || ' ' ||
+          COALESCE(CAST(outcomes AS TEXT), '') || ' ' ||
+          COALESCE(CAST(top_outcomes AS TEXT), '')
+        )
+    """
+    if tokens:
+        token_filter = " AND ".join(f"{search_text} ILIKE ?" for _ in tokens)
+        params: List[Any] = [f"%{token}%" for token in tokens]
+    else:
+        token_filter = f"{search_text} ILIKE ?"
+        params = [f"%{query}%"]
+    try:
+        rows = query_all(
+            f"""
+            SELECT
+              event_id, event_slug, event_title, title, category, tags,
+              volume_24h, outcome_count, default_market_id,
+              default_condition_id, default_gamma_market_id,
+              top_outcomes, outcomes, completion_status,
+              is_trading_closed, active_rank, updated_at
+            FROM event_market_serving
+            WHERE outcome_count > 0
+              AND is_trading_closed = FALSE
+              AND completion_status NOT IN ('SETTLED', 'CANCELLED', 'CLOSED_UNRESOLVED')
+              AND ({token_filter})
+            ORDER BY active_rank DESC NULLS LAST, volume_24h DESC NULLS LAST, updated_at DESC NULLS LAST
+            LIMIT ?
+            """,
+            [*params, int(max(limit, 16))],
+        )
+    except Exception:
+        return []
+    return [{**_serving_market_candidate(row), "source": "local-db"} for row in rows if isinstance(row, dict)]
+
+
+def _local_moneyline_bundle_search(ctx: Dict[str, Any], query: str, *, limit: int) -> List[Dict[str, Any]]:
+    query_all = ctx.get("query_all")
+    if not callable(query_all):
+        return []
+    tokens = _significant_market_search_tokens(query)
+    if not tokens:
+        return []
+    search_text = """
+        (
+          COALESCE(m.title, '') || ' ' ||
+          COALESCE(m.slug, '') || ' ' ||
+          COALESCE(m.event_slug, '') || ' ' ||
+          COALESCE(m.event_title, '') || ' ' ||
+          COALESCE(CAST(m.tags AS TEXT), '')
+        )
+    """
+    token_filter = " OR ".join(f"{search_text} ILIKE ?" for _ in tokens)
+    params: List[Any] = [f"%{token}%" for token in tokens]
+    try:
+        rows = query_all(
+            f"""
+            SELECT
+              m.id, m.gamma_market_id, m.slug, m.condition_id, m.yes_token_id,
+              m.no_token_id, m.clob_token_ids, m.title, m.category, m.tags,
+              m.end_date, m.event_id, m.event_slug, m.event_title,
+              p.latest_price, p.latest_yes_price, p.latest_no_price,
+              s.completion_status, s.is_trading_closed
+            FROM markets m
+            LEFT JOIN market_latest_prices p ON p.market_id = m.id
+            LEFT JOIN market_status_snapshot s ON s.market_id = m.id
+            WHERE COALESCE(s.is_trading_closed, FALSE) = FALSE
+              AND COALESCE(s.completion_status, 'OPEN') NOT IN ('SETTLED', 'CANCELLED', 'CLOSED_UNRESOLVED')
+              AND (m.slug ILIKE ? OR m.slug ILIKE ? OR COALESCE(m.event_slug, '') ILIKE ?)
+              AND ({token_filter})
+            ORDER BY m.end_date ASC NULLS LAST, m.id DESC
+            LIMIT ?
+            """,
+            ["%fifwc%", "%wc2026%", "%fifwc%", *params, int(max(limit * 20, 120))],
+        )
+    except Exception:
+        return []
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        candidate = _market_table_candidate(row)
+        slug_base = _worldcup_market_slug_base(candidate.get("slug"))
+        if not slug_base:
+            continue
+        slug = str(candidate.get("slug") or "").lower()
+        title = str(candidate.get("title") or "").lower()
+        if not ("end in a draw" in title or re.match(r"^will .+ win on \d{4}-\d{2}-\d{2}\?$", title)):
+            continue
+        groups.setdefault(slug_base, []).append(candidate)
+    bundles: List[Dict[str, Any]] = []
+    for slug_base, children in groups.items():
+        if len(children) < 2:
+            continue
+        bundles.append(_moneyline_bundle_candidate(slug_base, children))
+    return bundles[:limit]
+
+
 def _local_market_search(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> List[Dict[str, Any]]:
+    moneyline_rows = _local_moneyline_bundle_search(ctx, query, limit=limit)
+    if moneyline_rows:
+        return moneyline_rows[:limit]
+    local_rows = _local_event_serving_search(ctx, query, limit=limit)
+    if local_rows:
+        seen: set[str] = set()
+        deduped: List[Dict[str, Any]] = []
+        for row in local_rows:
+            key = str(row.get("slug") or row.get("id") or row.get("marketTitle") or "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(row)
+            if len(deduped) >= limit:
+                return deduped
+
     getter = ctx.get("get_markets_payload")
     if not callable(getter):
         return []
@@ -502,10 +842,234 @@ def _local_market_search(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> 
     return rows[:limit]
 
 
+def _percent_from_price(value: Any) -> Optional[float]:
+    number = _safe_float(value)
+    if number is None:
+        return None
+    if 0 <= number <= 1:
+        return number * 100
+    return number
+
+
+def _snapshot_outcomes_from_probabilities(probabilities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    outcomes: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for probability in probabilities:
+        if not isinstance(probability, dict):
+            continue
+        name = str(probability.get("outcome") or probability.get("name") or "").strip()
+        implied = _percent_from_price(probability.get("price") if probability.get("price") is not None else probability.get("impliedProbability"))
+        if not name or implied is None or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        outcomes.append(
+            {
+                "name": name,
+                "impliedProbability": round(implied, 2),
+                "price": probability.get("price"),
+                "marketUrl": probability.get("marketUrl"),
+            }
+        )
+    return outcomes
+
+
+def _ordered_outcomes(match: Dict[str, Any], outcomes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_name = {str(outcome.get("name") or "").lower(): outcome for outcome in outcomes if isinstance(outcome, dict)}
+    ordered: List[Dict[str, Any]] = []
+    for label in (str(match.get("homeTeam") or ""), "Draw", str(match.get("awayTeam") or "")):
+        row = by_name.pop(label.lower(), None)
+        if row:
+            ordered.append(row)
+    ordered.extend(by_name.values())
+    return ordered
+
+
+def _team_match_score(left: Any, right: Any) -> int:
+    left_text = str(left or "").strip().lower()
+    right_text = str(right or "").strip().lower()
+    if not left_text or not right_text:
+        return 0
+    if left_text == right_text:
+        return 4
+    left_tokens = _team_tokens(left_text)
+    right_tokens = _team_tokens(right_text)
+    overlap = left_tokens & right_tokens
+    if not overlap:
+        return 0
+    return 3 if len(overlap) >= min(len(left_tokens), len(right_tokens), 2) else 1
+
+
+def _parse_iso(value: Any) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _bookmaker_event_score(match: Dict[str, Any], event: Dict[str, Any]) -> int:
+    home_score = _team_match_score(match.get("homeTeam"), event.get("home_team"))
+    away_score = _team_match_score(match.get("awayTeam"), event.get("away_team"))
+    reversed_home_score = _team_match_score(match.get("homeTeam"), event.get("away_team"))
+    reversed_away_score = _team_match_score(match.get("awayTeam"), event.get("home_team"))
+    team_score = max(home_score + away_score, reversed_home_score + reversed_away_score)
+    if team_score < 4:
+        return 0
+    match_time = _parse_iso(match.get("kickoffUtc"))
+    event_time = _parse_iso(event.get("commence_time"))
+    time_score = 0
+    if match_time and event_time:
+        delta_hours = abs((match_time - event_time).total_seconds()) / 3600
+        if delta_hours <= 2:
+            time_score = 8
+        elif delta_hours <= 8:
+            time_score = 4
+        elif match_time.date() == event_time.date():
+            time_score = 2
+    return team_score * 4 + time_score
+
+
+def _bookmaker_h2h_outcomes(match: Dict[str, Any], event: Dict[str, Any]) -> List[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for bookmaker in event.get("bookmakers") or []:
+        if not isinstance(bookmaker, dict):
+            continue
+        book_title = str(bookmaker.get("title") or bookmaker.get("key") or "Book").strip()
+        for market in bookmaker.get("markets") or []:
+            if not isinstance(market, dict) or market.get("key") != "h2h":
+                continue
+            raw_rows = []
+            for outcome in market.get("outcomes") or []:
+                if not isinstance(outcome, dict):
+                    continue
+                price = _safe_float(outcome.get("price"))
+                name = _canonical_outcome_label(match, outcome.get("name"))
+                if not name or price is None or price <= 1:
+                    continue
+                raw_rows.append({"name": name, "price": price})
+            overround = sum(1 / row["price"] for row in raw_rows)
+            if overround <= 0:
+                continue
+            for row in raw_rows:
+                implied = (1 / row["price"]) / overround * 100
+                bucket = buckets.setdefault(row["name"], {"prices": [], "probabilities": [], "books": []})
+                bucket["prices"].append(row["price"])
+                bucket["probabilities"].append(implied)
+                bucket["books"].append(book_title)
+    outcomes: List[Dict[str, Any]] = []
+    for name, bucket in buckets.items():
+        implied = _mean([float(value) for value in bucket.get("probabilities") or []])
+        prices = [float(value) for value in bucket.get("prices") or []]
+        if implied is None or not prices:
+            continue
+        outcomes.append(
+            {
+                "name": name,
+                "decimalOdds": round(max(prices), 3),
+                "impliedProbability": round(implied, 2),
+                "bookCount": len(prices),
+                "source": "bookmaker-consensus",
+            }
+        )
+    return _ordered_outcomes(match, outcomes)
+
+
+def _fetch_bookmaker_events(ctx: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
+    getter = ctx.get("http_json_get")
+    settings = ctx.get("SETTINGS")
+    api_key = str(getattr(settings, "the_odds_api_key", "") or "").strip()
+    if not callable(getter) or not api_key:
+        return [], "missing-key", {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": 0, "matched": 0}
+    base_url = str(getattr(settings, "the_odds_api_base_url", "") or "https://api.the-odds-api.com").rstrip("/")
+    try:
+        payload = getter(
+            f"{base_url}/v4/sports/{WORLDCUP_ODDS_SPORT_KEY}/odds/",
+            params={
+                "apiKey": api_key,
+                "regions": WORLDCUP_ODDS_REGIONS,
+                "markets": "h2h",
+                "oddsFormat": "decimal",
+                "dateFormat": "iso",
+            },
+            timeout=12,
+            headers=_headers(),
+        )
+    except Exception:
+        return [], "error", {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": 0, "matched": 0}
+    events = [item for item in (payload if isinstance(payload, list) else []) if isinstance(item, dict)]
+    return events, "ok" if events else "empty", {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": len(events), "matched": 0}
+
+
+def _link_bookmaker_odds(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
+    events, state, stats = _fetch_bookmaker_events(ctx)
+    if not events or not matches:
+        return [], state, stats
+    generated_at = _utc_now_iso()
+    rows: List[Dict[str, Any]] = []
+    used_events: set[str] = set()
+    for match in matches:
+        if str(match.get("status") or "") == "finished":
+            continue
+        best: Optional[Dict[str, Any]] = None
+        best_score = 0
+        for event in events:
+            event_id = str(event.get("id") or event.get("commence_time") or "")
+            if event_id in used_events:
+                continue
+            score = _bookmaker_event_score(match, event)
+            if score > best_score:
+                best = event
+                best_score = score
+        if not best or best_score <= 0:
+            continue
+        outcomes = _bookmaker_h2h_outcomes(match, best)
+        if not outcomes:
+            continue
+        event_id = str(best.get("id") or best.get("commence_time") or "")
+        used_events.add(event_id)
+        book_count = max((int(outcome.get("bookCount") or 0) for outcome in outcomes), default=0)
+        rows.append(
+            {
+                "id": f"{match.get('id')}:bookmaker-h2h",
+                "matchId": match.get("id"),
+                "homeTeam": match.get("homeTeam"),
+                "awayTeam": match.get("awayTeam"),
+                "kickoffUtc": match.get("kickoffUtc"),
+                "provider": "The Odds API consensus",
+                "providerType": "online_bookmaker",
+                "marketType": "moneyline",
+                "outcomes": outcomes,
+                "generatedAt": generated_at,
+                "source": "the-odds-api",
+                "sourceUrl": str(getattr(ctx.get("SETTINGS"), "the_odds_source_url", "") or "https://the-odds-api.com/"),
+                "bookmakerCount": book_count,
+                "eventId": event_id,
+                "commenceTime": best.get("commence_time"),
+                "confidence": min(99, best_score),
+            }
+        )
+        match["oddsLinked"] = True
+    stats["matched"] = len(rows)
+    return rows, "ok" if rows else state, stats
+
+
 def _search_market_sources(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     seen: set[str] = set()
-    for candidate in [*_local_market_search(ctx, query, limit=limit), *_gamma_search(ctx, query, limit=limit)]:
+    local_candidates = _local_market_search(ctx, query, limit=limit)
+    for candidate in local_candidates:
+        key = str(candidate.get("slug") or candidate.get("id") or candidate.get("marketTitle") or "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        rows.append(candidate)
+        if len(rows) >= limit:
+            return rows
+    if any(str(candidate.get("source") or "").startswith("local-db-moneyline") for candidate in rows):
+        return rows
+    for candidate in _gamma_search(ctx, query, limit=limit):
         key = str(candidate.get("slug") or candidate.get("id") or candidate.get("marketTitle") or "")
         if not key or key in seen:
             continue
@@ -546,6 +1110,52 @@ def _clob_snapshot(ctx: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any
     except Exception:
         return {}
     return snapshot if isinstance(snapshot, dict) else {}
+
+
+def _gamma_market_price_snapshot(ctx: Dict[str, Any], market: Dict[str, Any]) -> Dict[str, Any]:
+    getter = ctx.get("http_json_get")
+    requests_module = ctx.get("requests")
+    if not callable(getter) and requests_module is None:
+        return {}
+    gamma_market_id = str(market.get("gammaMarketId") or market.get("gamma_market_id") or "").strip()
+    slug = str(market.get("slug") or "").strip()
+    settings = ctx.get("SETTINGS")
+    base_url = str(getattr(settings, "gamma_api_base", "") or POLYMARKET_GAMMA_API_BASE).rstrip("/")
+    url = f"{base_url}/markets/{gamma_market_id}" if gamma_market_id else f"{base_url}/markets"
+    params = None if gamma_market_id else {"slug": slug, "limit": 1}
+    payload: Any = {}
+    if requests_module is not None:
+        try:
+            response = requests_module.get(url, params=params, timeout=8, headers=_headers())
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            payload = {}
+    if not payload and callable(getter):
+        try:
+            payload = getter(url, params=params, timeout=8, headers=_headers())
+        except Exception:
+            payload = {}
+    if isinstance(payload, list):
+        payload = payload[0] if payload else {}
+    if not isinstance(payload, dict):
+        return {}
+    prices = _safe_json_list(payload.get("outcomePrices"))
+    latest = payload.get("lastTradePrice")
+    if latest in (None, "") and prices:
+        latest = prices[0]
+    return {
+        "marketId": market.get("id") or market.get("localMarketId"),
+        "gammaMarketId": payload.get("id") or gamma_market_id,
+        "latestYesPrice": latest,
+        "latestPrice": latest,
+        "latestNoPrice": (1 - (_safe_float(latest) or 0)) if _safe_float(latest) is not None else None,
+        "volume": payload.get("volume"),
+        "volume24h": payload.get("volume24hr") or payload.get("volume24h"),
+        "liquidity": payload.get("liquidity"),
+        "updatedAt": _utc_now_iso(),
+        "source": "gamma-direct",
+    }
 
 
 def _extract_probability_rows(match: Dict[str, Any], market: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -596,16 +1206,75 @@ def _best_probability_rows(match: Dict[str, Any], markets: List[Dict[str, Any]])
     return ordered[:6]
 
 
+def _bundle_probability_rows(ctx: Dict[str, Any], match: Dict[str, Any], market: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    children = [child for child in _safe_list(market.get("outcomeMarkets")) if isinstance(child, dict)]
+    runtime_by_slug: Dict[str, Dict[str, Any]] = {}
+    gamma_children = [
+        child
+        for child in children
+        if (child.get("latestYesPrice") in (None, "") and child.get("latestPrice") in (None, ""))
+    ]
+    if gamma_children:
+        with ThreadPoolExecutor(max_workers=min(3, len(gamma_children))) as executor:
+            future_map = {executor.submit(_gamma_market_price_snapshot, ctx, child): str(child.get("slug") or child.get("id") or "") for child in gamma_children}
+            for future in as_completed(future_map):
+                try:
+                    runtime_by_slug[future_map[future]] = future.result() or {}
+                except Exception:
+                    runtime_by_slug[future_map[future]] = {}
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        label = _match_outcome_hint(match, child)
+        if label not in {str(match.get("homeTeam") or ""), "Draw", str(match.get("awayTeam") or "")}:
+            continue
+        if label in seen:
+            continue
+        price = child.get("latestYesPrice") if child.get("latestYesPrice") not in (None, "") else child.get("latestPrice")
+        runtime = runtime_by_slug.get(str(child.get("slug") or child.get("id") or ""), {})
+        if price in (None, ""):
+            price = runtime.get("latestYesPrice") if isinstance(runtime, dict) else None
+        if price in (None, ""):
+            runtime = _clob_snapshot(ctx, child)
+            price = runtime.get("latestYesPrice") if isinstance(runtime, dict) else None
+        rows.append(
+            {
+                "outcome": label,
+                "price": price,
+                "marketTitle": child.get("marketTitle") or child.get("title"),
+                "marketUrl": _polymarket_url(child),
+                "clobTokenId": child.get("yes_token_id") or ((child.get("clobTokenIds") or [""])[0] if isinstance(child.get("clobTokenIds"), list) else ""),
+                "source": runtime.get("source") if isinstance(runtime, dict) and runtime else child.get("source") or "local-db-market",
+            }
+        )
+        seen.add(label)
+    return _ordered_probability_rows(match, rows)
+
+
+def _ordered_probability_rows(match: Dict[str, Any], rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_label = {str(row.get("outcome") or row.get("name") or ""): row for row in rows if isinstance(row, dict)}
+    ordered: List[Dict[str, Any]] = []
+    for label in (str(match.get("homeTeam") or ""), "Draw", str(match.get("awayTeam") or "")):
+        row = by_label.pop(label, None)
+        if row:
+            ordered.append(row)
+    ordered.extend(by_label.values())
+    return ordered
+
+
 def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
     if not matches:
         return [], "empty", _new_market_linker_stats(scan_limit=0, scheduled_count=0)
     settings = ctx.get("SETTINGS")
-    scan_limit = int(getattr(settings, "worldcup_market_link_scan_limit", 36) or 36)
+    configured_scan_limit = int(getattr(settings, "worldcup_market_link_scan_limit", 12) or 12)
+    scan_limit = min(configured_scan_limit, 12)
     scheduled = [match for match in matches if str(match.get("status") or "") != "finished"][: max(1, scan_limit)]
     stats = _new_market_linker_stats(scan_limit=scan_limit, scheduled_count=len(scheduled))
     rows: List[Dict[str, Any]] = []
     seen: set[str] = set()
-    scan_candidates = _gamma_scan_active(ctx, limit=int(getattr(settings, "worldcup_market_scan_page_size", 120) or 120))
+    scan_candidates: List[Dict[str, Any]] = []
     for match in scheduled:
         stats["matchesScanned"] += 1
         home = str(match.get("homeTeam") or "").strip()
@@ -640,6 +1309,8 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
                 if score > best_score:
                     best = candidate
                     best_score = score
+            if best_score >= 140 and str((best or {}).get("source") or "").startswith("local-db-moneyline"):
+                break
         if not best or best_score <= 0:
             if match_candidates <= 0:
                 stats["rejections"]["no-candidates"] = int(stats["rejections"].get("no-candidates") or 0) + 1
@@ -651,14 +1322,21 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
         seen.add(key)
         outcomes = _safe_list(best.get("outcomes"))
         outcome_prices = _safe_list(best.get("outcomePrices"))
-        clob = _clob_snapshot(ctx, best)
-        if not outcome_prices and clob.get("latestYesPrice") is not None:
-            outcome_prices = [clob.get("latestYesPrice")]
-            outcomes = outcomes or ["YES"]
-        probabilities = _best_probability_rows(match, accepted) or [
-            {"outcome": str(label), "price": price, "marketUrl": _polymarket_url(best)}
-            for label, price in zip(outcomes, outcome_prices)
-        ]
+        clob = {}
+        if _safe_list(best.get("outcomeMarkets")):
+            probabilities = _bundle_probability_rows(ctx, match, best)
+            outcomes = [row.get("outcome") for row in probabilities]
+            outcome_prices = [row.get("price") for row in probabilities]
+        else:
+            clob = _clob_snapshot(ctx, best)
+            if not outcome_prices and clob.get("latestYesPrice") is not None:
+                outcome_prices = [clob.get("latestYesPrice")]
+                outcomes = outcomes or ["YES"]
+            probabilities = _best_probability_rows(match, accepted) or [
+                {"outcome": str(label), "price": price, "marketUrl": _polymarket_url(best)}
+                for label, price in zip(outcomes, outcome_prices)
+            ]
+        snapshot_outcomes = _ordered_outcomes(match, _snapshot_outcomes_from_probabilities(probabilities))
         market_url = _polymarket_url(best)
         if len(probabilities) > 1 and str(best.get("eventSlug") or "").strip():
             market_url = f"https://polymarket.com/event/{str(best.get('eventSlug')).strip()}"
@@ -679,13 +1357,17 @@ def _link_worldcup_markets(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -
                 "conditionId": best.get("conditionId"),
                 "marketUrl": market_url,
                 "tradeUrl": market_url,
-                "outcomes": outcomes,
+                "outcomes": snapshot_outcomes,
+                "rawOutcomes": outcomes,
                 "outcomePrices": outcome_prices,
                 "probabilities": probabilities,
                 "clobTokenIds": best.get("clobTokenIds"),
                 "clob": clob or None,
                 "source": best.get("source") or "polymarket-gamma",
                 "provider": "Polymarket local/Gamma/CLOB",
+                "providerType": "prediction_market",
+                "marketType": "moneyline",
+                "generatedAt": _utc_now_iso(),
                 "confidence": min(99, best_score),
             }
         )
@@ -703,6 +1385,7 @@ def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     rosters = payload.get("rosters") if isinstance(payload.get("rosters"), list) else []
     odds = payload.get("odds") if isinstance(payload.get("odds"), list) else []
     market_linker = payload.get("marketLinker") if isinstance(payload.get("marketLinker"), dict) else {}
+    bookmaker_linker = payload.get("bookmakerLinker") if isinstance(payload.get("bookmakerLinker"), dict) else {}
     return {
         "generatedAt": str(payload.get("generatedAt") or _utc_now_iso()),
         "cacheMode": str(payload.get("cacheMode") or "remote"),
@@ -724,6 +1407,7 @@ def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "sourceUrl": str(payload.get("sourceUrl") or OPENFOOTBALL_2026_URL),
         "providerStates": payload.get("providerStates") if isinstance(payload.get("providerStates"), dict) else {},
         "marketLinker": market_linker,
+        "bookmakerLinker": bookmaker_linker,
         "summary": {
             "cities": len(cities),
             "matches": len(matches),
@@ -733,6 +1417,8 @@ def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "odds": len(odds),
             "oddsCandidates": int(market_linker.get("candidates") or 0),
             "oddsMatched": int(market_linker.get("matched") or len(odds)),
+            "bookmakerEvents": int(bookmaker_linker.get("events") or 0),
+            "bookmakerMatched": int(bookmaker_linker.get("matched") or 0),
         },
     }
 
@@ -772,10 +1458,14 @@ def build_worldcup_dashboard_payload(
     intel_news = intel.get("news") if isinstance(intel, dict) and isinstance(intel.get("news"), list) else []
     news = intel_news[:24]
     if include_live_market_links:
-        odds, odds_state, market_linker = _link_worldcup_markets(ctx, matches)
+        bookmaker_odds, bookmaker_state, bookmaker_linker = _link_bookmaker_odds(ctx, matches)
+        market_odds, market_state, market_linker = _link_worldcup_markets(ctx, matches)
+        odds = [*bookmaker_odds, *market_odds]
+        odds_state = "ok" if odds else market_state if market_state != "empty" else bookmaker_state
     else:
         odds = []
         odds_state = "deferred"
+        bookmaker_linker = {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": 0, "matched": 0, "mode": "deferred"}
         market_linker = {
             **_new_market_linker_stats(scan_limit=0, scheduled_count=sum(1 for match in matches if str(match.get("status") or "") != "finished")),
             "mode": "deferred",
@@ -809,8 +1499,10 @@ def build_worldcup_dashboard_payload(
                 "worldcupIntel": str((intel or {}).get("status") or "unknown"),
                 "weather": "ok" if weather else "empty",
                 "odds": odds_state,
+                "bookmakerOdds": bookmaker_state if include_live_market_links else "deferred",
                 "rosters": "source-required",
             },
+            "bookmakerLinker": bookmaker_linker,
         }
     )
 
@@ -902,14 +1594,23 @@ def get_worldcup_dashboard_snapshot(ctx: Dict[str, Any]) -> Dict[str, Any]:
     ttl_seconds = max(300, int(getattr(ctx.get("SETTINGS"), "sports_runtime_ttl_seconds", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
     cached = _read_cached(ctx)
     if cached:
+        cached_odds = cached.get("odds") if isinstance(cached.get("odds"), list) else []
+        provider_states = cached.get("providerStates") if isinstance(cached.get("providerStates"), dict) else {}
         if cached.get("cacheMode") == "stale":
             _refresh_async(
                 ctx,
                 ttl_seconds=ttl_seconds,
-                builder=lambda: build_worldcup_dashboard_payload(ctx, include_intel=True, include_live_market_links=False),
+                builder=lambda: build_worldcup_dashboard_payload(ctx, include_intel=True, include_live_market_links=True),
                 stale_payload=cached,
             )
             return {**cached, "status": "stale"}
+        if not cached_odds or provider_states.get("odds") in {"deferred", "empty", "source-required"}:
+            _refresh_async(
+                ctx,
+                ttl_seconds=ttl_seconds,
+                builder=lambda: build_worldcup_dashboard_payload(ctx, include_intel=True, include_live_market_links=True),
+                stale_payload=cached,
+            )
         return cached
     try:
         payload = build_worldcup_dashboard_payload(ctx, include_intel=False, include_live_market_links=False)
@@ -917,7 +1618,7 @@ def get_worldcup_dashboard_snapshot(ctx: Dict[str, Any]) -> Dict[str, Any]:
         _refresh_async(
             ctx,
             ttl_seconds=ttl_seconds,
-            builder=lambda: build_worldcup_dashboard_payload(ctx, include_intel=True, include_live_market_links=False),
+            builder=lambda: build_worldcup_dashboard_payload(ctx, include_intel=True, include_live_market_links=True),
             stale_payload=payload,
         )
         return payload
