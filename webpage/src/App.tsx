@@ -1,4 +1,5 @@
 import { type ComponentChildren } from 'preact';
+import { lazy, Suspense } from 'preact/compat';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
 import { PanelLoading } from '@/components/Panel';
@@ -8,8 +9,6 @@ import { WorldGlobe, type WorldGlobeStatusMetrics } from '@/components/WorldGlob
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
 import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative } from '@/panels/shared/formatters';
-import { QuantWorkspace } from '@/workspaces/quant/QuantWorkspace';
-import { WorldCupWorkspace } from '@/workspaces/worldcup/WorldCupWorkspace';
 import {
   fetchAllActiveMarkets,
   fetchBootstrap,
@@ -84,6 +83,8 @@ const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
 const GEO_SHOCK_STORAGE_KEY = 'polydata:seed:world:geo-sanctions-shock:v1';
 const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
 const APP_VERSION = 'v0.2.1';
+const QuantWorkspace = lazy(() => import('@/workspaces/quant/QuantWorkspace').then((module) => ({ default: module.QuantWorkspace })));
+const WorldCupWorkspace = lazy(() => import('@/workspaces/worldcup/WorldCupWorkspace').then((module) => ({ default: module.WorldCupWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const SITE_NAV_LINKS = [
@@ -2199,13 +2200,15 @@ function WorldMonitorApp() {
       </header>
 
       {workspaceMode === 'worldcup' ? (
-        <WorldCupWorkspace
-          now={now}
-          marketGroups={marketGroups}
-          latestContent={currentLatestContent}
-          weatherPayload={(runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined) || null}
-          geoShockPayload={(runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined) || null}
-        />
+        <Suspense fallback={<PanelLoading label="Loading World Cup workspace" detail="Opening schedule, venues and markets" />}>
+          <WorldCupWorkspace
+            now={now}
+            marketGroups={marketGroups}
+            latestContent={currentLatestContent}
+            weatherPayload={(runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined) || null}
+            geoShockPayload={(runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined) || null}
+          />
+        </Suspense>
       ) : (
       <main className="wm-dashboard">
         <div className="wm-main-content">
@@ -2634,5 +2637,11 @@ function WorldMonitorApp() {
 
 export function App() {
   const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
-  return pathname === '/quant' || pathname.startsWith('/quant/') ? <QuantWorkspace /> : <WorldMonitorApp />;
+  return pathname === '/quant' || pathname.startsWith('/quant/')
+    ? (
+      <Suspense fallback={<PanelLoading label="Loading Quant workspace" detail="Opening chart, command palette and backtest tools" />}>
+        <QuantWorkspace />
+      </Suspense>
+    )
+    : <WorldMonitorApp />;
 }
