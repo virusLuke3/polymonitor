@@ -646,10 +646,14 @@ def build_data_quality_report(points: list[PricePoint], run: dict[str, Any]) -> 
     if span_coverage < Decimal("0.75"):
         status = "review"
         caveats.append("observed span covers less than 75% of requested range")
+    data_version = _points_data_version(points, run)
     return {
         "status": status,
         "price_source": run.get("price_source"),
         "x_axis": "block_number" if run.get("price_source") == "orderfilled_block_close" else "timestamp",
+        "data_version": data_version,
+        "checksum": data_version,
+        "version_basis": "x_value:price:volume",
         "rows": len(points),
         "first_x": first_x,
         "last_x": last_x,
@@ -666,6 +670,23 @@ def build_data_quality_report(points: list[PricePoint], run: dict[str, Any]) -> 
         "span_coverage_pct": _decimal_text((span_coverage * Decimal("100")).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
         "caveats": caveats,
     }
+
+
+def _points_data_version(points: list[PricePoint], run: dict[str, Any]) -> str:
+    digest = hashlib.sha256()
+    digest.update(str(run.get("market_slug") or "").encode("utf-8"))
+    digest.update(b"|")
+    digest.update(str(run.get("token_side") or "").encode("utf-8"))
+    digest.update(b"|")
+    digest.update(str(run.get("price_source") or "").encode("utf-8"))
+    for point in points:
+        digest.update(str(point.x_value).encode("ascii"))
+        digest.update(b":")
+        digest.update(_decimal_text(point.price).encode("ascii"))
+        digest.update(b":")
+        digest.update(_decimal_text(point.volume).encode("ascii"))
+        digest.update(b";")
+    return digest.hexdigest()[:20]
 
 
 def data_quality_metrics(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -703,6 +724,17 @@ def data_quality_metrics(report: dict[str, Any]) -> list[dict[str, Any]]:
             "status": "negative" if report.get("jump_count") else "positive",
             "tooltip": "Large adjacent price jumps detected in the rows used by this backtest",
             "sort_order": 92,
+        },
+        {
+            "metric_key": "data_version",
+            "metric_name": "Data Version",
+            "metric_group": "prediction",
+            "value": Decimal("0"),
+            "formatted_value": str(report.get("data_version") or "-"),
+            "delta": str(report.get("version_basis") or "price rows"),
+            "status": "neutral",
+            "tooltip": "Stable checksum of the exact x/price/volume rows used by this backtest run",
+            "sort_order": 93,
         },
         {
             "metric_key": "span_coverage",

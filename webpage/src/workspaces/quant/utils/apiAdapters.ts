@@ -266,6 +266,7 @@ function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): Proper
       title: 'Data Reproducibility',
       rows: [
         { label: 'actual quality', value: stringifyValue(actualDataQuality.status ?? dataQuality.status) },
+        { label: 'data version', value: stringifyValue(actualDataQuality.data_version ?? actualDataQuality.dataVersion ?? actualDataQuality.checksum ?? dataQuality.dataVersion) },
         { label: 'actual rows', value: stringifyValue(actualDataQuality.rows ?? dataQuality.rows) },
         { label: 'actual range', value: `${stringifyValue(actualDataQuality.first_x ?? actualDataQuality.firstX)} -> ${stringifyValue(actualDataQuality.last_x ?? actualDataQuality.lastX)}` },
         { label: 'gap count', value: stringifyValue(actualDataQuality.gap_count ?? actualDataQuality.gapCount ?? dataQuality.gapCount) },

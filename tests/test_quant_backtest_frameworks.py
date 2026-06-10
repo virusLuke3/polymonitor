@@ -165,8 +165,12 @@ def test_data_quality_report_flags_gaps_and_jumps():
     assert report["status"] == "review"
     assert report["gap_count"] == 1
     assert report["jump_count"] == 1
+    assert len(report["data_version"]) == 20
+    assert report["version_basis"] == "x_value:price:volume"
     assert metrics[0]["metric_key"] == "data_quality_status"
     assert metrics[0]["status"] == "negative"
+    version_metric = next(metric for metric in metrics if metric["metric_key"] == "data_version")
+    assert version_metric["formatted_value"] == report["data_version"]
 
 
 def test_nautilus_framework_runs_through_python312_worker_when_available():
