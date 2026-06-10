@@ -676,6 +676,8 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
                 open_position.size = remaining_size
                 if remaining_size <= 0:
                     open_position = None
+                else:
+                    open_position.trade_index = len(trades) + 1
 
         mark_equity = equity
         if open_position is not None:

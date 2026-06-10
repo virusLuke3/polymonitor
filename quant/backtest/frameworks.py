@@ -184,6 +184,8 @@ def _run_backtrader(
                     self.open_position.size = remaining_size
                     if remaining_size <= 0:
                         self.open_position = None
+                    else:
+                        self.open_position.trade_index = len(self.trades) + 1
             self._record_equity(index, x_value, price)
 
         def stop(self) -> None:
@@ -357,6 +359,8 @@ def _run_nautilus_trader(
                     self.open_position.size = remaining_size
                     if remaining_size <= 0:
                         self.open_position = None
+                    else:
+                        self.open_position.trade_index = len(self.trades) + 1
             self._record_equity(x_value, price)
 
         def on_stop(self) -> None:

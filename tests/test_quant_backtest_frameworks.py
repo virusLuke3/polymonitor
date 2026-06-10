@@ -192,6 +192,7 @@ def test_builtin_framework_defaults_to_orderfilled_probability_fill():
     assert trade["execution_source"] == "orderfilled_volume"
     assert Decimal("59.9") < trade["fill_probability"] < Decimal("60.1")
     assert trade["fill_status"] == "PARTIAL"
+    assert len({row["trade_id"] for row in result["trades"]}) == len(result["trades"])
 
 
 def test_builtin_framework_uses_clob_snapshot_depth_for_entry_fill():
