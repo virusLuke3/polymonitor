@@ -1307,7 +1307,7 @@ export function WorkspaceHeader({
             ['2500', '2.5k'],
             ['5000', '5k'],
             ['15000', '15k'],
-            ['25000', 'All'],
+            ['all', 'All'],
           ] as Array<[string, string]>).map(([value, label]) => (
             <button key={value} className={viewportMode !== 'custom' && timeframe === value ? 'active' : ''} type="button" onClick={() => onTimeframeChange(value)}>{label}</button>
           ))}

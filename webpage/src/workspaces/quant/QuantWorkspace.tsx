@@ -128,7 +128,7 @@ function sleep(ms: number) {
 }
 
 function chartRangeFromTimeframe(timeframe: string) {
-  return timeframe === '25000' ? 'full' : 'latest';
+  return timeframe === 'all' || timeframe === 'full' || timeframe === '25000' ? 'full' : 'latest';
 }
 
 function eventTileRequestShape(chartRange: string, timeframe: string, chartLimit: number) {
@@ -854,6 +854,7 @@ export function QuantWorkspace() {
   const marketEndLabel = formatMarketTime(marketEndValue);
   const marketUpdatedLabel = formatMarketTime(marketUpdatedValue);
   const chartLimit = useMemo(() => {
+    if (chartRangeFromTimeframe(timeframe) === 'full') return 25000;
     const parsed = Number(timeframe);
     return Number.isFinite(parsed) ? Math.max(100, Math.min(25000, parsed)) : 2500;
   }, [timeframe]);
@@ -1714,6 +1715,11 @@ export function QuantWorkspace() {
   };
 
   const changeTimeframePreset = (value: string) => {
+    if (viewportFetchTimerRef.current) {
+      window.clearTimeout(viewportFetchTimerRef.current);
+      viewportFetchTimerRef.current = null;
+    }
+    viewportFetchSeq.current += 1;
     setTimeframe(value);
     setViewportMode('preset');
     setViewportResetSeq((current) => current + 1);
