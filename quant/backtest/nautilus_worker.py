@@ -46,6 +46,8 @@ def main() -> None:
         fee_bps=Decimal(str(payload["params"].get("fee_bps", "0"))),
         slippage_bps=Decimal(str(payload["params"].get("slippage_bps", "0"))),
         liquidity_cap_pct=Decimal(str(payload["params"].get("liquidity_cap_pct", "100"))),
+        max_position_notional=Decimal(str(payload["params"].get("max_position_notional", "0"))),
+        min_fill_pct=Decimal(str(payload["params"].get("min_fill_pct", "0"))),
     )
     result = _run_nautilus_trader(points, dict(payload["run"]), params, build_metrics)
     output_path.write_text(json.dumps(_json_ready(result)), encoding="utf-8")

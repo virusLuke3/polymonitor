@@ -99,7 +99,49 @@ def test_builtin_framework_applies_execution_costs_and_liquidity_cap():
     assert trade["entry_price"] > Decimal("0.60")
     assert trade["exit_price"] < Decimal("0.50")
     assert trade["execution_cost"] > Decimal("0")
+    assert trade["requested_notional"] == Decimal("100")
+    assert trade["filled_notional"] == Decimal("20.0000000000")
+    assert trade["fill_pct"] == Decimal("20.0000000000")
     assert trade["pnl"] < Decimal("-2")
+
+
+def test_builtin_framework_rejects_entry_when_min_fill_not_met():
+    points = [
+        PricePoint(x_value=1, price=Decimal("0.60"), volume=Decimal("20")),
+        PricePoint(x_value=2, price=Decimal("0.70"), volume=Decimal("20")),
+        PricePoint(x_value=3, price=Decimal("0.50"), volume=Decimal("20")),
+    ]
+    run = {
+        "market_slug": "demo-market",
+        "token_side": "YES",
+        "price_source": "orderfilled_block_close",
+    }
+    params = BacktestParameters(
+        entry_threshold=Decimal("0.58"),
+        exit_threshold=Decimal("0.55"),
+        stop_loss=Decimal("0.50"),
+        take_profit=Decimal("0.50"),
+        max_holding_bars=10,
+        initial_capital=Decimal("1000"),
+        position_size=Decimal("100"),
+        liquidity_cap_pct=Decimal("50"),
+        max_position_notional=Decimal("80"),
+        min_fill_pct=Decimal("20"),
+    )
+
+    result = run_framework_backtest(
+        "builtin",
+        points,
+        run,
+        params,
+        builtin_simulator=simulate_strategy,
+        metrics_builder=lambda trades, equity, price_points, parameters: [],
+    )
+
+    assert result["trades"] == []
+    rejected = next(event for event in result["events"] if event["event_type"] == "fill_rejected")
+    assert rejected["meta"]["requested_notional"] == Decimal("80")
+    assert rejected["meta"]["fill_pct"] == Decimal("12.5000000000")
 
 
 def test_data_quality_report_flags_gaps_and_jumps():

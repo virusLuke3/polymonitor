@@ -20,6 +20,8 @@ export type StrategyParameters = {
   feeBps: number;
   slippageBps: number;
   liquidityCapPct: number;
+  maxPositionNotional: number;
+  minFillPct: number;
 };
 
 export type MarketInfo = {

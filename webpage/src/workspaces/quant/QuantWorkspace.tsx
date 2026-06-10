@@ -89,6 +89,8 @@ const DEFAULT_STRATEGY_PARAMETERS: StrategyParameters = {
   feeBps: 0,
   slippageBps: 0,
   liquidityCapPct: 100,
+  maxPositionNotional: 0,
+  minFillPct: 0,
 };
 
 function defaultMarketSlug() {
@@ -334,6 +336,8 @@ function normalizeStrategyParameters(value: Partial<StrategyParameters> | null |
     feeBps: clampNumber(value?.feeBps, DEFAULT_STRATEGY_PARAMETERS.feeBps, 0, 1000),
     slippageBps: clampNumber(value?.slippageBps, DEFAULT_STRATEGY_PARAMETERS.slippageBps, 0, 1000),
     liquidityCapPct: clampNumber(value?.liquidityCapPct, DEFAULT_STRATEGY_PARAMETERS.liquidityCapPct, 0, 100),
+    maxPositionNotional: clampNumber(value?.maxPositionNotional, DEFAULT_STRATEGY_PARAMETERS.maxPositionNotional, 0, 1000000000),
+    minFillPct: clampNumber(value?.minFillPct, DEFAULT_STRATEGY_PARAMETERS.minFillPct, 0, 100),
   };
 }
 
@@ -1115,6 +1119,8 @@ export function QuantWorkspace() {
         fee_bps: strategyParameters.feeBps,
         slippage_bps: strategyParameters.slippageBps,
         liquidity_cap_pct: strategyParameters.liquidityCapPct,
+        max_position_notional: strategyParameters.maxPositionNotional,
+        min_fill_pct: strategyParameters.minFillPct,
       },
       live_clob: {
         status: liveLobStatus,
@@ -1218,6 +1224,8 @@ export function QuantWorkspace() {
         feeBps: strategyParameters.feeBps,
         slippageBps: strategyParameters.slippageBps,
         liquidityCapPct: strategyParameters.liquidityCapPct,
+        maxPositionNotional: strategyParameters.maxPositionNotional,
+        minFillPct: strategyParameters.minFillPct,
         executionContext: buildBacktestExecutionContext('single', sourceRows),
       });
       setBacktestStatus(created.item.status);
@@ -1321,6 +1329,8 @@ export function QuantWorkspace() {
             feeBps: strategyParameters.feeBps,
             slippageBps: strategyParameters.slippageBps,
             liquidityCapPct: strategyParameters.liquidityCapPct,
+            maxPositionNotional: strategyParameters.maxPositionNotional,
+            minFillPct: strategyParameters.minFillPct,
             executionContext: buildBacktestExecutionContext('batch_top5', seriesPrices, label),
           });
           updateBatchRow(key, { runId: created.runId, status: created.item.status });
@@ -1435,6 +1445,8 @@ export function QuantWorkspace() {
             feeBps: strategyParameters.feeBps,
             slippageBps: strategyParameters.slippageBps,
             liquidityCapPct: strategyParameters.liquidityCapPct,
+            maxPositionNotional: strategyParameters.maxPositionNotional,
+            minFillPct: strategyParameters.minFillPct,
             executionContext: buildBacktestExecutionContext('split_70_30', segment.points, segment.label),
           });
           updateSplitRow(segment.key, { runId: created.runId, status: created.item.status });
@@ -1569,6 +1581,8 @@ export function QuantWorkspace() {
             feeBps: strategyParameters.feeBps,
             slippageBps: strategyParameters.slippageBps,
             liquidityCapPct: strategyParameters.liquidityCapPct,
+            maxPositionNotional: strategyParameters.maxPositionNotional,
+            minFillPct: strategyParameters.minFillPct,
             executionContext: buildBacktestExecutionContext('walk_forward', segment.points, segment.label),
           });
           updateWalkForwardRow(segment.key, { runId: created.runId, status: created.item.status });

@@ -466,6 +466,8 @@ export type QuantBacktestRun = {
   feeBps?: string | number | null;
   slippageBps?: string | number | null;
   liquidityCapPct?: string | number | null;
+  maxPositionNotional?: string | number | null;
+  minFillPct?: string | number | null;
   parameterFingerprint?: string | null;
   parameterSnapshot?: Record<string, unknown> | null;
   meta?: Record<string, unknown> | null;
@@ -508,6 +510,12 @@ export type QuantBacktestTrade = {
   exitPrice: string | number;
   size: string | number;
   notional: string | number;
+  requestedNotional?: string | number | null;
+  filledNotional?: string | number | null;
+  fillPct?: string | number | null;
+  feeCost?: string | number | null;
+  slippageCost?: string | number | null;
+  executionCost?: string | number | null;
   pnl: string | number;
   pnlPct: string | number;
   holdingBars: number | string;
@@ -535,6 +543,8 @@ export type QuantBacktestCreatePayload = {
   feeBps?: number;
   slippageBps?: number;
   liquidityCapPct?: number;
+  maxPositionNotional?: number;
+  minFillPct?: number;
   executionContext?: Record<string, unknown>;
 };
 

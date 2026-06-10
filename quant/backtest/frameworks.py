@@ -30,6 +30,9 @@ class AdapterPosition:
     entry_x: int
     entry_price: Decimal
     size: Decimal
+    requested_notional: Decimal
+    filled_notional: Decimal
+    fill_pct: Decimal
 
 
 def normalize_backtest_engine(value: Any) -> str:
@@ -127,8 +130,8 @@ def _run_backtrader(
             x_value = int(self.p.x_values[index])
             price = Decimal(str(self.data.close[0]))
             if self.open_position is None and price >= self.p.quant_params.entry_threshold:
-                size = _size_for_liquidity(self.p.quant_params, price, Decimal(str(self.data.volume[0])))
-                if size <= 0:
+                fill = _fill_decision(self.p.quant_params, price, Decimal(str(self.data.volume[0])))
+                if fill["size"] <= 0:
                     self._record_equity(index, x_value, price)
                     return
                 self.open_position = AdapterPosition(
@@ -136,7 +139,10 @@ def _run_backtrader(
                     entry_index=index,
                     entry_x=x_value,
                     entry_price=_execution_price(price, self.p.quant_params, "entry"),
-                    size=size,
+                    size=fill["size"],
+                    requested_notional=fill["requested_notional"],
+                    filled_notional=fill["filled_notional"],
+                    fill_pct=fill["fill_pct"],
                 )
                 self.events.append(_event("open", self.p.x_axis, x_value, f"T-{self.open_position.trade_index:04d}", price, "entry threshold reached"))
             elif self.open_position is not None:
@@ -275,11 +281,20 @@ def _run_nautilus_trader(
             price = Decimal(str(bar.close))
             if self.open_position is None and price >= self.config.quant_params.entry_threshold:
                 volume = Decimal(str(getattr(bar, "volume", 0) or 0))
-                size = _size_for_liquidity(self.config.quant_params, price, volume)
-                if size <= 0:
+                fill = _fill_decision(self.config.quant_params, price, volume)
+                if fill["size"] <= 0:
                     self._record_equity(x_value, price)
                     return
-                self.open_position = AdapterPosition(len(self.trades) + 1, self.index, x_value, _execution_price(price, self.config.quant_params, "entry"), size)
+                self.open_position = AdapterPosition(
+                    len(self.trades) + 1,
+                    self.index,
+                    x_value,
+                    _execution_price(price, self.config.quant_params, "entry"),
+                    fill["size"],
+                    fill["requested_notional"],
+                    fill["filled_notional"],
+                    fill["fill_pct"],
+                )
                 self.events.append(_event("open", self.config.x_axis, x_value, f"T-{self.open_position.trade_index:04d}", price, "entry threshold reached"))
             elif self.open_position is not None:
                 exit_reason = _exit_reason(price, self.open_position.entry_price, self.index - self.open_position.entry_index, self.config.quant_params)
@@ -377,6 +392,8 @@ def _run_nautilus_trader_subprocess(points: list[Any], run: dict[str, Any], para
             "fee_bps": str(getattr(params, "fee_bps", "0")),
             "slippage_bps": str(getattr(params, "slippage_bps", "0")),
             "liquidity_cap_pct": str(getattr(params, "liquidity_cap_pct", "100")),
+            "max_position_notional": str(getattr(params, "max_position_notional", "0")),
+            "min_fill_pct": str(getattr(params, "min_fill_pct", "0")),
         },
     }
     project_root = Path(__file__).resolve().parents[2]
@@ -550,6 +567,9 @@ def _close_trade(
         "exit_price": fill_exit_price,
         "size": position.size,
         "notional": notional,
+        "requested_notional": getattr(position, "requested_notional", notional),
+        "filled_notional": getattr(position, "filled_notional", notional),
+        "fill_pct": getattr(position, "fill_pct", Decimal("100")),
         "pnl": pnl.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
         "pnl_pct": _pct(pnl, notional),
         "holding_bars": max(1, point_index - position.entry_index),
@@ -594,13 +614,54 @@ def _execution_price(price: Decimal, params: Any, side: str) -> Decimal:
 
 
 def _size_for_liquidity(params: Any, price: Decimal, volume: Decimal) -> Decimal:
-    if price <= 0:
-        return Decimal("0")
+    return _fill_decision(params, price, volume)["size"]
+
+
+def _target_notional(params: Any) -> Decimal:
+    target = max(Decimal("0"), Decimal(str(getattr(params, "position_size", "0"))))
+    max_position = max(Decimal("0"), Decimal(str(getattr(params, "max_position_notional", "0"))))
+    if max_position > 0:
+        target = min(target, max_position)
+    return target
+
+
+def _fill_decision(params: Any, price: Decimal, volume: Decimal) -> dict[str, Any]:
+    target_notional = _target_notional(params)
     cap_pct = max(Decimal("0"), Decimal(str(getattr(params, "liquidity_cap_pct", "100"))))
+    min_fill_pct = max(Decimal("0"), Decimal(str(getattr(params, "min_fill_pct", "0"))))
+    empty = {
+        "requested_notional": target_notional,
+        "filled_notional": Decimal("0"),
+        "fill_pct": Decimal("0"),
+        "size": Decimal("0"),
+        "liquidity_cap_pct": cap_pct,
+        "min_fill_pct": min_fill_pct,
+        "partial_fill": False,
+        "rejected": True,
+    }
+    if price <= 0:
+        return empty
     if cap_pct <= 0:
-        return Decimal("0")
-    target_notional = max(Decimal("0"), Decimal(str(getattr(params, "position_size", "0"))))
+        return empty
     if volume <= 0:
-        return (target_notional / price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
-    capped_notional = min(target_notional, volume * cap_pct / Decimal("100"))
-    return (capped_notional / price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+        filled_notional = target_notional
+    else:
+        filled_notional = min(target_notional, volume * cap_pct / Decimal("100"))
+    fill_pct = _pct(filled_notional, target_notional) if target_notional else Decimal("0")
+    if target_notional <= 0 or fill_pct < min_fill_pct:
+        return {
+            **empty,
+            "filled_notional": filled_notional,
+            "fill_pct": fill_pct,
+            "partial_fill": filled_notional > 0 and filled_notional < target_notional,
+        }
+    return {
+        "requested_notional": target_notional,
+        "filled_notional": filled_notional.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "fill_pct": fill_pct,
+        "size": (filled_notional / price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "liquidity_cap_pct": cap_pct,
+        "min_fill_pct": min_fill_pct,
+        "partial_fill": filled_notional < target_notional,
+        "rejected": False,
+    }

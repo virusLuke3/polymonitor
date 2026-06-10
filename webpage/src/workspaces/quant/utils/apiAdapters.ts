@@ -234,6 +234,8 @@ function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): Proper
         { label: 'fee bps', value: `${run.feeBps ?? 0}` },
         { label: 'slippage bps', value: `${run.slippageBps ?? 0}` },
         { label: 'liquidity cap', value: `${run.liquidityCapPct ?? 100}%` },
+        { label: 'max position', value: run.maxPositionNotional ? `${run.maxPositionNotional} USDC` : 'off' },
+        { label: 'min fill', value: `${run.minFillPct ?? 0}%` },
       ],
     },
     {

@@ -160,6 +160,8 @@ function strategyParametersFromRun(run: QuantBacktestRun, fallback: StrategyPara
     feeBps: runNumber(run.feeBps, fallback.feeBps),
     slippageBps: runNumber(run.slippageBps, fallback.slippageBps),
     liquidityCapPct: runNumber(run.liquidityCapPct, fallback.liquidityCapPct),
+    maxPositionNotional: runNumber(run.maxPositionNotional, fallback.maxPositionNotional),
+    minFillPct: runNumber(run.minFillPct, fallback.minFillPct),
   };
 }
 
@@ -192,6 +194,8 @@ function canonicalStrategyParameters(parameters: StrategyParameters) {
     feeBps: Number(parameters.feeBps.toFixed(6)),
     slippageBps: Number(parameters.slippageBps.toFixed(6)),
     liquidityCapPct: Number(parameters.liquidityCapPct.toFixed(6)),
+    maxPositionNotional: Number(parameters.maxPositionNotional.toFixed(6)),
+    minFillPct: Number(parameters.minFillPct.toFixed(6)),
   };
 }
 
@@ -207,6 +211,8 @@ function strategyParameterDiffs(current: StrategyParameters, reference: Strategy
     feeBps: 'fee',
     slippageBps: 'slip',
     liquidityCapPct: 'liq',
+    maxPositionNotional: 'max pos',
+    minFillPct: 'min fill',
   };
   return (Object.keys(labels) as Array<keyof StrategyParameters>).map((key) => {
     const left = key === 'maxHoldingBars' ? Math.round(current[key]) : current[key];
@@ -334,6 +340,8 @@ export function StrategyTesterPanel({
       spread <= 0 ? 'Entry threshold must stay above exit threshold.' : '',
       spread <= breakEvenMove ? 'Entry/exit spread is tighter than estimated round-trip cost.' : '',
       exposurePct > 20 ? 'Position size uses more than 20% of initial capital.' : '',
+      strategyParameters.maxPositionNotional > 0 && strategyParameters.maxPositionNotional < strategyParameters.positionSize ? 'Max position will cap every requested fill.' : '',
+      strategyParameters.minFillPct > 0 && strategyParameters.liquidityCapPct < strategyParameters.minFillPct ? 'Minimum fill is above the liquidity cap assumption.' : '',
       strategyParameters.liquidityCapPct < 5 ? 'Liquidity cap is very low; fills may be sparse.' : '',
       rowCount < 100 ? 'Loaded rows are thin for a stable backtest.' : '',
     ].filter(Boolean);
@@ -351,10 +359,10 @@ export function StrategyTesterPanel({
   const executionAssumptionRows = useMemo(() => {
     const base = strategyParameters;
     const scenarios = [
-      { key: 'current', label: 'Current', feeBps: base.feeBps, slippageBps: base.slippageBps, liquidityCapPct: base.liquidityCapPct },
-      { key: 'live', label: 'Live CLOB', feeBps: Math.max(base.feeBps, 0), slippageBps: Math.max(base.slippageBps, 2), liquidityCapPct: Math.min(base.liquidityCapPct, 25) },
-      { key: 'stress', label: 'Stress', feeBps: Math.max(base.feeBps, 5), slippageBps: Math.max(base.slippageBps, 10), liquidityCapPct: Math.min(base.liquidityCapPct, 10) },
-      { key: 'zero', label: 'Zero cost', feeBps: 0, slippageBps: 0, liquidityCapPct: 100 },
+      { key: 'current', label: 'Current', feeBps: base.feeBps, slippageBps: base.slippageBps, liquidityCapPct: base.liquidityCapPct, minFillPct: base.minFillPct },
+      { key: 'live', label: 'Live CLOB', feeBps: Math.max(base.feeBps, 0), slippageBps: Math.max(base.slippageBps, 2), liquidityCapPct: Math.min(base.liquidityCapPct, 25), minFillPct: Math.max(base.minFillPct, 20) },
+      { key: 'stress', label: 'Stress', feeBps: Math.max(base.feeBps, 5), slippageBps: Math.max(base.slippageBps, 10), liquidityCapPct: Math.min(base.liquidityCapPct, 10), minFillPct: Math.max(base.minFillPct, 50) },
+      { key: 'zero', label: 'Zero cost', feeBps: 0, slippageBps: 0, liquidityCapPct: 100, minFillPct: 0 },
     ];
     return scenarios.map((scenario) => {
       const roundTripBps = (scenario.feeBps * 2) + (scenario.slippageBps * 2);
@@ -411,6 +419,7 @@ export function StrategyTesterPanel({
       feeBps: scenario.feeBps,
       slippageBps: scenario.slippageBps,
       liquidityCapPct: scenario.liquidityCapPct,
+      minFillPct: scenario.minFillPct,
     });
     copied(`Applied ${scenario.label} execution`);
   };
@@ -445,6 +454,8 @@ export function StrategyTesterPanel({
         feeBps: strategyParameters.feeBps,
         slippageBps: Math.max(strategyParameters.slippageBps, 2),
         liquidityCapPct: Math.min(strategyParameters.liquidityCapPct, 25),
+        maxPositionNotional: strategyParameters.maxPositionNotional,
+        minFillPct: Math.max(strategyParameters.minFillPct, 20),
       });
       return;
     }
@@ -460,6 +471,8 @@ export function StrategyTesterPanel({
         feeBps: strategyParameters.feeBps,
         slippageBps: strategyParameters.slippageBps,
         liquidityCapPct: Math.min(strategyParameters.liquidityCapPct, 60),
+        maxPositionNotional: strategyParameters.maxPositionNotional,
+        minFillPct: strategyParameters.minFillPct,
       });
       return;
     }
@@ -475,6 +488,8 @@ export function StrategyTesterPanel({
         feeBps: 0,
         slippageBps: 0,
         liquidityCapPct: 100,
+        maxPositionNotional: 0,
+        minFillPct: 0,
       });
     }
   };
@@ -489,6 +504,8 @@ export function StrategyTesterPanel({
     ['fee bps', propertyValue('fee bps')],
     ['slippage bps', propertyValue('slippage bps')],
     ['liquidity cap', propertyValue('liquidity cap')],
+    ['max position', propertyValue('max position')],
+    ['min fill', propertyValue('min fill')],
   ];
   const runProvenanceRows = [
     ['Run', result.runId ? `#${result.runId}` : '-'],
@@ -640,6 +657,8 @@ export function StrategyTesterPanel({
           <span>fee <b>{strategyParameters.feeBps} bps</b></span>
           <span>slip <b>{strategyParameters.slippageBps} bps</b></span>
           <span>liq <b>{strategyParameters.liquidityCapPct}%</b></span>
+          <span>max pos <b>{strategyParameters.maxPositionNotional ? strategyParameters.maxPositionNotional.toLocaleString('en-US') : 'off'}</b></span>
+          <span>min fill <b>{strategyParameters.minFillPct}%</b></span>
           <span>framework <b>{propertyValue('engine')}</b></span>
           <span>run <b>{result.runId ? `#${result.runId}` : '-'}</b></span>
         </div>
@@ -769,6 +788,8 @@ export function StrategyTesterPanel({
               <span>Slippage</span><b>{strategyParameters.slippageBps} bps</b>
               <span>Liquidity cap</span><b>{strategyParameters.liquidityCapPct}%</b>
               <span>Position size</span><b>{strategyParameters.positionSize.toLocaleString('en-US')} USDC</b>
+              <span>Max position</span><b>{strategyParameters.maxPositionNotional ? `${strategyParameters.maxPositionNotional.toLocaleString('en-US')} USDC` : 'off'}</b>
+              <span>Min fill</span><b>{strategyParameters.minFillPct}%</b>
               <span>Round trip</span><b>{formatNumber(parameterDiagnostics.roundTripCostBps, 2)} bps</b>
               <span>Capacity</span><b>{formatNumber(parameterDiagnostics.capacity, 0)} USDC</b>
             </div>
@@ -962,6 +983,8 @@ export function StrategyTesterPanel({
               <label><span>Fee bps</span><input type="number" min="0" max="1000" step="0.1" value={strategyParameters.feeBps} onInput={(event) => updateParameter('feeBps', event.currentTarget.value)} /></label>
               <label><span>Slippage bps</span><input type="number" min="0" max="1000" step="0.1" value={strategyParameters.slippageBps} onInput={(event) => updateParameter('slippageBps', event.currentTarget.value)} /></label>
               <label><span>Liquidity cap %</span><input type="number" min="0" max="100" step="1" value={strategyParameters.liquidityCapPct} onInput={(event) => updateParameter('liquidityCapPct', event.currentTarget.value)} /></label>
+              <label><span>Max position</span><input type="number" min="0" step="1" value={strategyParameters.maxPositionNotional} onInput={(event) => updateParameter('maxPositionNotional', event.currentTarget.value)} /></label>
+              <label><span>Min fill %</span><input type="number" min="0" max="100" step="1" value={strategyParameters.minFillPct} onInput={(event) => updateParameter('minFillPct', event.currentTarget.value)} /></label>
               <label><span>Engine</span><input readOnly value={engine} /></label>
               <label><span>Source rows</span><input readOnly value={rowCount.toLocaleString('en-US')} /></label>
               <label><span>Market</span><input readOnly value={marketTitle} /></label>
