@@ -3,6 +3,7 @@ import type {
   ChartPayload,
   ContentPayload,
   LobPayload,
+  LobSnapshotPayload,
   MarketAiInsightPayload,
   MarketAiInsightResponse,
   MarketWideAiInsightLens,
@@ -803,6 +804,14 @@ export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '
   params.set('_ts', String(Date.now()));
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return apiGetWithTimeout<LobPayload>(`/runtime/lob/token/${encodeURIComponent(tokenId)}${suffix}`, timeoutMs);
+}
+
+export function fetchMarketLobSnapshotsByToken(tokenId: string, side = '', limit = 48, timeoutMs = 4500) {
+  const params = new URLSearchParams();
+  if (side.trim()) params.set('side', side.trim().toUpperCase());
+  params.set('limit', String(limit || 48));
+  params.set('_ts', String(Date.now()));
+  return apiGetWithTimeout<LobSnapshotPayload>(`/runtime/lob/token/${encodeURIComponent(tokenId)}/snapshots?${params.toString()}`, timeoutMs);
 }
 
 function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle): WorkspaceBundle {

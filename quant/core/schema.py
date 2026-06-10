@@ -283,6 +283,30 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS quant.clob_orderbook_snapshots (
+        snapshot_id BIGSERIAL PRIMARY KEY,
+        token_id TEXT NOT NULL,
+        side TEXT NOT NULL DEFAULT 'YES',
+        paired_token_id TEXT,
+        market_title TEXT,
+        source TEXT NOT NULL DEFAULT 'clob-book',
+        book_status TEXT NOT NULL DEFAULT 'unknown',
+        best_bid NUMERIC(20, 10),
+        best_ask NUMERIC(20, 10),
+        spread NUMERIC(20, 10),
+        mid NUMERIC(20, 10),
+        bid_depth NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        ask_depth NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        depth_total NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        imbalance NUMERIC(20, 10),
+        level_count_bid INTEGER NOT NULL DEFAULT 0,
+        level_count_ask INTEGER NOT NULL DEFAULT 0,
+        payload JSONB NOT NULL,
+        fetched_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS quant.quant_backtest_runs (
         run_id BIGSERIAL PRIMARY KEY,
         status TEXT NOT NULL DEFAULT 'queued',
@@ -448,6 +472,9 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_orderfilled_token_stats_token ON quant.market_orderfilled_token_stats (token_id_hex)",
     "CREATE INDEX IF NOT EXISTS idx_quant_build_targets_active ON quant.market_price_build_targets (source, status, priority DESC, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_build_targets_slug_side ON quant.market_price_build_targets (market_slug, token_side, source)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_token_time ON quant.clob_orderbook_snapshots (token_id, fetched_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_side_time ON quant.clob_orderbook_snapshots (side, fetched_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_status_time ON quant.clob_orderbook_snapshots (book_status, fetched_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_status ON quant.quant_backtest_runs (status, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_market ON quant.quant_backtest_runs (market_slug, token_side, price_source, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_engine ON quant.quant_backtest_runs (backtest_engine, status, created_at DESC)",

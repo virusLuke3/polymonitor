@@ -22,4 +22,14 @@ def create_lob_blueprint(helpers: dict) -> Blueprint:
         status_code = int(payload.pop("_status", 200))
         return jsonify(payload), status_code
 
+    @bp.route("/runtime/lob/token/<token_id>/snapshots", methods=["GET"])
+    def api_runtime_lob_snapshots_by_token(token_id: str):
+        payload = helpers["get_lob_snapshots_by_token_payload"](
+            token_id,
+            side=request.args.get("side") or "",
+            limit=request.args.get("limit") or 48,
+        )
+        status_code = int(payload.pop("_status", 200))
+        return jsonify(payload), status_code
+
     return bp

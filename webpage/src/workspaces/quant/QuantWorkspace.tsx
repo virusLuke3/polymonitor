@@ -3,6 +3,7 @@ import {
   createQuantBacktestRun,
   fetchQuantBacktestRuns,
   fetchMarketLobByToken,
+  fetchMarketLobSnapshotsByToken,
   fetchQuantBacktestEquity,
   fetchQuantBacktestMetrics,
   fetchQuantBacktestRun,
@@ -18,7 +19,7 @@ import {
   quantPriceStreamUrl,
   type QuantPriceQuery,
 } from '@/services/api';
-import type { LobPayload, LobSide, QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
+import type { LobPayload, LobSide, LobSnapshot, QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
@@ -216,6 +217,43 @@ function bookSideHasLevels(side: LobSide | null | undefined) {
 
 function sumBookDepth(levels: LobSide['bids'], limit = 5) {
   return (levels || []).slice(0, limit).reduce((total, level) => total + toNumber(level.size), 0);
+}
+
+function sumBookNotional(levels: LobSide['bids'], limit = 12) {
+  return (levels || []).slice(0, limit).reduce((total, level) => total + toNumber(level.price) * toNumber(level.size), 0);
+}
+
+function bookMidpoint(side: LobSide | null | undefined) {
+  const bid = finiteNumber(side?.bestBid);
+  const ask = finiteNumber(side?.bestAsk);
+  if (bid !== null && ask !== null) return (bid + ask) / 2;
+  return bid ?? ask ?? null;
+}
+
+function formatBookPercent(value: unknown, digits = 1) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  return `${(numeric * 100).toLocaleString('en-US', { maximumFractionDigits: digits })}%`;
+}
+
+function orderBookLadderRows(levels: LobSide['bids'], side: 'bid' | 'ask', maxNotional: number) {
+  const sorted = (levels || [])
+    .map((level) => ({
+      price: toNumber(level.price),
+      size: toNumber(level.size),
+    }))
+    .filter((level) => level.price > 0 && level.size > 0)
+    .sort((left, right) => (side === 'bid' ? right.price - left.price : left.price - right.price))
+    .slice(0, 8);
+  let cumulative = 0;
+  return sorted.map((level) => {
+    cumulative += level.price * level.size;
+    return {
+      ...level,
+      cumulative,
+      fillPct: maxNotional > 0 ? Math.max(4, Math.min(100, (cumulative / maxNotional) * 100)) : 0,
+    };
+  });
 }
 
 function estimateMarketBuyFill(levels: LobSide['asks'], targetNotional: number, referencePrice: number | null) {
@@ -690,6 +728,9 @@ export function QuantWorkspace() {
   const [liveLobStatus, setLiveLobStatus] = useState<DataStatus>('idle');
   const [liveLobError, setLiveLobError] = useState('');
   const [liveLobRefreshSeq, setLiveLobRefreshSeq] = useState(0);
+  const [lobSnapshots, setLobSnapshots] = useState<LobSnapshot[]>([]);
+  const [lobSnapshotStatus, setLobSnapshotStatus] = useState<DataStatus>('idle');
+  const [lobSnapshotError, setLobSnapshotError] = useState('');
   const [batchBacktestRows, setBatchBacktestRows] = useState<BatchBacktestRow[]>([]);
   const [batchBacktestStatus, setBatchBacktestStatus] = useState('idle');
   const [splitBacktestRows, setSplitBacktestRows] = useState<BatchBacktestRow[]>([]);
@@ -2159,9 +2200,20 @@ export function QuantWorkspace() {
   const selectedBookYesTokenId = selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId || '';
   const selectedBookNoTokenId = selectedOutcome?.buyNoTokenId || '';
   const selectedBookTitle = selectedOutcomeRow?.fullLabel || selectedOutcome?.outcomeLabel || marketInfo.title || '';
+  const selectedLiveBookTokenId = selectedBacktestAction === 'NO'
+    ? (selectedBookNoTokenId || selectedBookYesTokenId)
+    : selectedBookYesTokenId;
   const liveBookSide = selectedBacktestAction === 'NO' ? liveLob?.no : liveLob?.yes;
   const liveBookHasLevels = bookSideHasLevels(liveLob?.yes) || bookSideHasLevels(liveLob?.no);
   const liveSelectedBookHasLevels = bookSideHasLevels(liveBookSide);
+  const liveBookBidDepth = useMemo(() => sumBookNotional(liveBookSide?.bids, 12), [liveBookSide?.bids]);
+  const liveBookAskDepth = useMemo(() => sumBookNotional(liveBookSide?.asks, 12), [liveBookSide?.asks]);
+  const liveBookDepthTotal = liveBookBidDepth + liveBookAskDepth;
+  const liveBookBidImbalance = liveBookDepthTotal > 0 ? liveBookBidDepth / liveBookDepthTotal : 0.5;
+  const liveBookMid = bookMidpoint(liveBookSide);
+  const liveBookLadderMax = Math.max(liveBookBidDepth, liveBookAskDepth, 1);
+  const liveBookBidRows = useMemo(() => orderBookLadderRows(liveBookSide?.bids, 'bid', liveBookLadderMax), [liveBookLadderMax, liveBookSide?.bids]);
+  const liveBookAskRows = useMemo(() => orderBookLadderRows(liveBookSide?.asks, 'ask', liveBookLadderMax), [liveBookLadderMax, liveBookSide?.asks]);
   const selectedBookFillEstimate = useMemo(() => {
     const reference = finiteNumber(selectedBacktestAction === 'NO' ? selectedOutcomeRow?.no : selectedOutcomeRow?.yes)
       ?? finiteNumber(liveBookSide?.bestAsk)
@@ -2260,27 +2312,44 @@ export function QuantWorkspace() {
       setLiveLob(null);
       setLiveLobStatus('empty');
       setLiveLobError('Missing selected YES token id');
+      setLobSnapshots([]);
+      setLobSnapshotStatus('empty');
+      setLobSnapshotError('');
       return undefined;
     }
     let cancelled = false;
     setLiveLobStatus('loading');
     setLiveLobError('');
-    void fetchMarketLobByToken(selectedBookYesTokenId, selectedBookTitle, selectedBookNoTokenId, 3500)
-      .then((payload) => {
+    setLobSnapshotStatus('loading');
+    setLobSnapshotError('');
+    void (async () => {
+      try {
+        const payload = await fetchMarketLobByToken(selectedBookYesTokenId, selectedBookTitle, selectedBookNoTokenId, 3500);
         if (cancelled) return;
         setLiveLob(payload);
         setLiveLobStatus(bookSideHasLevels(payload.yes) || bookSideHasLevels(payload.no) ? 'ready' : 'empty');
-      })
-      .catch((lobError) => {
+      } catch (lobError) {
         if (cancelled) return;
         setLiveLob(null);
         setLiveLobStatus('error');
         setLiveLobError(lobError instanceof Error ? lobError.message : 'Live CLOB book unavailable');
-      });
+      }
+      try {
+        const snapshotPayload = await fetchMarketLobSnapshotsByToken(selectedLiveBookTokenId || selectedBookYesTokenId, selectedBacktestAction, 48, 4500);
+        if (cancelled) return;
+        setLobSnapshots(snapshotPayload.items || []);
+        setLobSnapshotStatus((snapshotPayload.items || []).length ? 'ready' : 'empty');
+      } catch (snapshotError) {
+        if (cancelled) return;
+        setLobSnapshots([]);
+        setLobSnapshotStatus('error');
+        setLobSnapshotError(snapshotError instanceof Error ? snapshotError.message : 'CLOB snapshot history unavailable');
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [inspectorTab, liveLobRefreshSeq, selectedBookNoTokenId, selectedBookTitle, selectedBookYesTokenId]);
+  }, [inspectorTab, liveLobRefreshSeq, selectedBacktestAction, selectedBookNoTokenId, selectedBookTitle, selectedBookYesTokenId, selectedLiveBookTokenId]);
 
   const currentWatchKeySet = useMemo(() => new Set(
     sortedOutcomeRows.map(({ outcome }) => watchKeyForOutcome(outcome)).filter(Boolean),
@@ -3165,8 +3234,8 @@ export function QuantWorkspace() {
                     <section className={`qtv-live-book ${liveLobStatus}`}>
                       <header>
                         <div>
-                          <strong>Live CLOB Depth</strong>
-                          <span>{liveLobStatus === 'ready' ? `${liveLob?.source || 'clob-book'} · ${liveLob?.bookStatus || 'ok'}` : liveLobStatus === 'loading' ? 'loading live /book...' : liveLobStatus === 'error' ? liveLobError || 'CLOB unavailable' : 'no live levels returned'}</span>
+                          <strong>Order Book</strong>
+                          <span>{liveLobStatus === 'ready' ? `${selectedBacktestAction} · ${liveLob?.source || 'clob-book'} · ${liveLob?.bookStatus || 'ok'}` : liveLobStatus === 'loading' ? 'loading live /book...' : liveLobStatus === 'error' ? liveLobError || 'CLOB unavailable' : 'no live levels returned'}</span>
                         </div>
                         <em>{liveLob?.fetchedAt ? new Date(liveLob.fetchedAt).toLocaleTimeString() : '--'}</em>
                       </header>
@@ -3175,6 +3244,86 @@ export function QuantWorkspace() {
                         <span>Bid</span><b>{formatBookValue(liveBookSide?.bestBid)}</b>
                         <span>Ask</span><b>{formatBookValue(liveBookSide?.bestAsk)}</b>
                         <span>Spread</span><b>{formatBookValue(liveBookSide?.spread)}</b>
+                      </div>
+                      <div className="qtv-live-book-trade-strip">
+                        <article>
+                          <span>Best Bid</span>
+                          <strong className="bid">{formatBookValue(liveBookSide?.bestBid)}</strong>
+                        </article>
+                        <article>
+                          <span>Mid</span>
+                          <strong>{formatBookValue(liveBookMid)}</strong>
+                        </article>
+                        <article>
+                          <span>Best Ask</span>
+                          <strong className="ask">{formatBookValue(liveBookSide?.bestAsk)}</strong>
+                        </article>
+                        <article>
+                          <span>Depth</span>
+                          <strong>{formatBookValue(liveBookDepthTotal, 0)}</strong>
+                        </article>
+                      </div>
+                      <div className="qtv-live-book-imbalance" aria-label="live book imbalance">
+                        <span>Bid {Math.round(liveBookBidImbalance * 100)}%</span>
+                        <div>
+                          <i className="bid" style={{ width: `${Math.max(2, Math.round(liveBookBidImbalance * 100))}%` }} />
+                          <i className="ask" style={{ width: `${Math.max(2, Math.round((1 - liveBookBidImbalance) * 100))}%` }} />
+                        </div>
+                        <span>Ask {Math.round((1 - liveBookBidImbalance) * 100)}%</span>
+                      </div>
+                      <div className="qtv-live-book-ladder">
+                        <section className="ask">
+                          <header>
+                            <strong>Asks</strong>
+                            <span>top {liveBookAskRows.length} · {formatBookValue(liveBookAskDepth, 0)} USDC</span>
+                          </header>
+                          <div className="qtv-live-book-ladder-head"><span>Price</span><span>Shares</span><span>Total</span></div>
+                          {liveBookAskRows.length ? liveBookAskRows.map((level) => (
+                            <div key={`ask-${level.price}-${level.size}`} className="qtv-live-book-ladder-row ask">
+                              <i style={{ width: `${level.fillPct}%` }} />
+                              <b>{formatBookValue(level.price)}</b>
+                              <span>{formatBookValue(level.size, 2)}</span>
+                              <em>{formatBookValue(level.cumulative, 0)}</em>
+                            </div>
+                          )) : <p>No live asks for {selectedBacktestAction}.</p>}
+                        </section>
+                        <div className="qtv-live-book-midline">
+                          <span />
+                          <strong>MID {formatBookValue(liveBookMid)}</strong>
+                          <em>spread {formatBookValue(liveBookSide?.spread)}</em>
+                        </div>
+                        <section className="bid">
+                          <header>
+                            <strong>Bids</strong>
+                            <span>top {liveBookBidRows.length} · {formatBookValue(liveBookBidDepth, 0)} USDC</span>
+                          </header>
+                          <div className="qtv-live-book-ladder-head"><span>Price</span><span>Shares</span><span>Total</span></div>
+                          {liveBookBidRows.length ? liveBookBidRows.map((level) => (
+                            <div key={`bid-${level.price}-${level.size}`} className="qtv-live-book-ladder-row bid">
+                              <i style={{ width: `${level.fillPct}%` }} />
+                              <b>{formatBookValue(level.price)}</b>
+                              <span>{formatBookValue(level.size, 2)}</span>
+                              <em>{formatBookValue(level.cumulative, 0)}</em>
+                            </div>
+                          )) : <p>No live bids for {selectedBacktestAction}.</p>}
+                        </section>
+                      </div>
+                      <div className="qtv-lob-snapshot-tape">
+                        <header>
+                          <strong>Depth Snapshots</strong>
+                          <span>{lobSnapshotStatus === 'ready' ? `${lobSnapshots.length} persisted` : lobSnapshotStatus === 'loading' ? 'syncing history' : lobSnapshotStatus === 'error' ? lobSnapshotError : 'no snapshots yet'}</span>
+                        </header>
+                        <div>
+                          {lobSnapshots.slice(0, 8).map((snapshot) => (
+                            <article key={snapshot.snapshotId}>
+                              <span>{snapshot.fetchedAt ? new Date(snapshot.fetchedAt).toLocaleTimeString() : '--'}</span>
+                              <b>{formatBookValue(snapshot.mid)}</b>
+                              <em>{formatBookValue(snapshot.depthTotal, 0)}</em>
+                              <i>{formatBookPercent(snapshot.imbalance, 0)}</i>
+                            </article>
+                          ))}
+                          {!lobSnapshots.length ? <p>{lobSnapshotStatus === 'loading' ? 'Persisting the current CLOB book, then loading recent snapshots.' : 'Open or refresh this book to start building CLOB depth history.'}</p> : null}
+                        </div>
                       </div>
                       <div className={`qtv-book-execution ${bookExecutionQuality.status}`}>
                         <header>
@@ -3222,29 +3371,6 @@ export function QuantWorkspace() {
                         ) : (
                           <p>Live spread, depth, and historical block-close quality are aligned for the selected side.</p>
                         )}
-                      </div>
-                      <div className="qtv-live-book-depth">
-                        {(['yes', 'no'] as const).map((sideName) => {
-                          const side = liveLob?.[sideName];
-                          return (
-                            <section key={sideName}>
-                              <h4>{sideName.toUpperCase()} Book</h4>
-                              <div className="qtv-book-depth-head"><span>Bid</span><span>Size</span><span>Ask</span><span>Size</span></div>
-                              {Array.from({ length: 6 }).map((_, index) => {
-                                const bid = side?.bids?.[index];
-                                const ask = side?.asks?.[index];
-                                return (
-                                  <div key={`${sideName}-${index}`} className="qtv-book-depth-row">
-                                    <b>{formatBookValue(bid?.price)}</b>
-                                    <span>{formatBookValue(bid?.size, 0)}</span>
-                                    <b>{formatBookValue(ask?.price)}</b>
-                                    <span>{formatBookValue(ask?.size, 0)}</span>
-                                  </div>
-                                );
-                              })}
-                            </section>
-                          );
-                        })}
                       </div>
                       {!liveBookHasLevels ? <p>{liveLobStatus === 'loading' ? 'Fetching Polymarket CLOB /book through the API server.' : 'Live CLOB depth is empty for this token pair right now.'}</p> : null}
                     </section>

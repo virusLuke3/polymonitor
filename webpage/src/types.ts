@@ -604,6 +604,36 @@ export type LobPayload = {
   no?: LobSide;
 };
 
+export type LobSnapshot = {
+  snapshotId: number | string;
+  tokenId: string;
+  side: 'YES' | 'NO' | string;
+  pairedTokenId?: string | null;
+  marketTitle?: string | null;
+  source?: string | null;
+  bookStatus?: string | null;
+  bestBid?: string | number | null;
+  bestAsk?: string | number | null;
+  spread?: string | number | null;
+  mid?: string | number | null;
+  bidDepth?: string | number | null;
+  askDepth?: string | number | null;
+  depthTotal?: string | number | null;
+  imbalance?: string | number | null;
+  levelCountBid?: number | string | null;
+  levelCountAsk?: number | string | null;
+  payload?: Record<string, unknown> | null;
+  fetchedAt?: string | null;
+  createdAt?: string | null;
+};
+
+export type LobSnapshotPayload = {
+  tokenId: string;
+  side?: string | null;
+  items: LobSnapshot[];
+  count: number;
+};
+
 export type WorkspaceIdentity = {
   localMarketId?: number | null;
   marketId?: number | null;
