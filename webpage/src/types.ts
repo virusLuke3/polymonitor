@@ -535,6 +535,7 @@ export type QuantBacktestCreatePayload = {
   feeBps?: number;
   slippageBps?: number;
   liquidityCapPct?: number;
+  executionContext?: Record<string, unknown>;
 };
 
 export type QuantListPayload<T> = {

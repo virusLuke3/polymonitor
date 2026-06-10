@@ -1047,6 +1047,77 @@ export function QuantWorkspace() {
     }
   };
 
+  function buildBacktestExecutionContext(scope: string, points: PricePoint[], segment?: string) {
+    const firstPoint = points[0] || null;
+    const lastPoint = points[points.length - 1] || null;
+    const bookSide = selectedBacktestAction === 'NO' ? liveLob?.no : liveLob?.yes;
+    const bidDepth = sumBookDepth(bookSide?.bids, 5);
+    const askDepth = sumBookDepth(bookSide?.asks, 5);
+    return {
+      model: 'fixed_threshold_v1',
+      scope,
+      segment: segment || scope,
+      fill_model: 'close_price_with_bps_slippage_volume_cap_and_live_clob_snapshot',
+      selected_outcome: selectedOutcomeRow?.fullLabel || selectedOutcome?.outcomeLabel || '',
+      selected_side: selectedBacktestAction,
+      selected_token_id: selectedBacktestAction === 'NO'
+        ? selectedOutcome?.buyNoTokenId
+        : selectedOutcome?.buyYesTokenId || selectedOutcome?.tokenId,
+      requested_range: {
+        first_x: firstPoint?.timestamp ?? null,
+        last_x: lastPoint?.timestamp ?? null,
+        rows: points.length,
+        source: backendPriceSource(priceSource),
+      },
+      execution_parameters: {
+        position_size: strategyParameters.positionSize,
+        fee_bps: strategyParameters.feeBps,
+        slippage_bps: strategyParameters.slippageBps,
+        liquidity_cap_pct: strategyParameters.liquidityCapPct,
+      },
+      live_clob: {
+        status: liveLobStatus,
+        source: liveLob?.source || '',
+        book_status: liveLob?.bookStatus || '',
+        fetched_at: liveLob?.fetchedAt || '',
+        side: selectedBacktestAction,
+        best_bid: finiteNumber(bookSide?.bestBid),
+        best_ask: finiteNumber(bookSide?.bestAsk),
+        spread: finiteNumber(bookSide?.spread),
+        bid_depth_5: bidDepth,
+        ask_depth_5: askDepth,
+        top_depth: bidDepth + askDepth,
+      },
+      fill_estimate: {
+        target: selectedBookFillEstimate.target,
+        spent: Number(selectedBookFillEstimate.spent.toFixed(6)),
+        remaining: Number(selectedBookFillEstimate.remaining.toFixed(6)),
+        fill_pct: Number((selectedBookFillEstimate.fillPct * 100).toFixed(4)),
+        vwap: selectedBookFillEstimate.vwap === null ? null : Number(selectedBookFillEstimate.vwap.toFixed(6)),
+        slippage: selectedBookFillEstimate.slippage === null ? null : Number(selectedBookFillEstimate.slippage.toFixed(6)),
+        levels_used: selectedBookFillEstimate.levelsUsed,
+      },
+      execution_quality: {
+        status: bookExecutionQuality.status,
+        confidence: bookExecutionQuality.confidence,
+        spread: bookExecutionQuality.spread,
+        top_depth: bookExecutionQuality.topDepth,
+        drift: bookExecutionQuality.drift,
+        age_seconds: bookExecutionQuality.ageSeconds,
+        caveats: bookExecutionQuality.caveats.slice(0, 8),
+      },
+      data_quality: {
+        status: dataQuality.health,
+        rows: dataQuality.outcomeRows,
+        gap_count: dataQuality.gapCount,
+        spike_count: dataQuality.spikeCount,
+        latest_block: dataQuality.latestBlock,
+        source: dataQuality.source,
+        caveats: dataQuality.warnings.slice(0, 8),
+      },
+    };
+  }
+
   const runBacktest = async () => {
     setLoading(true);
     setError('');
@@ -1106,6 +1177,7 @@ export function QuantWorkspace() {
         feeBps: strategyParameters.feeBps,
         slippageBps: strategyParameters.slippageBps,
         liquidityCapPct: strategyParameters.liquidityCapPct,
+        executionContext: buildBacktestExecutionContext('single', sourceRows),
       });
       setBacktestStatus(created.item.status);
       const completedRun = ['queued', 'running'].includes(created.item.status)
@@ -1208,6 +1280,7 @@ export function QuantWorkspace() {
             feeBps: strategyParameters.feeBps,
             slippageBps: strategyParameters.slippageBps,
             liquidityCapPct: strategyParameters.liquidityCapPct,
+            executionContext: buildBacktestExecutionContext('batch_top5', seriesPrices, label),
           });
           updateBatchRow(key, { runId: created.runId, status: created.item.status });
           const completedRun = ['queued', 'running'].includes(created.item.status)
@@ -1321,6 +1394,7 @@ export function QuantWorkspace() {
             feeBps: strategyParameters.feeBps,
             slippageBps: strategyParameters.slippageBps,
             liquidityCapPct: strategyParameters.liquidityCapPct,
+            executionContext: buildBacktestExecutionContext('split_70_30', segment.points, segment.label),
           });
           updateSplitRow(segment.key, { runId: created.runId, status: created.item.status });
           const completedRun = ['queued', 'running'].includes(created.item.status)
@@ -1454,6 +1528,7 @@ export function QuantWorkspace() {
             feeBps: strategyParameters.feeBps,
             slippageBps: strategyParameters.slippageBps,
             liquidityCapPct: strategyParameters.liquidityCapPct,
+            executionContext: buildBacktestExecutionContext('walk_forward', segment.points, segment.label),
           });
           updateWalkForwardRow(segment.key, { runId: created.runId, status: created.item.status });
           const completedRun = ['queued', 'running'].includes(created.item.status)

@@ -199,6 +199,15 @@ function performanceRows(metrics: QuantBacktestMetric[], trades: Trade[]): Perfo
 function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): PropertyGroup[] {
   const meta = run.meta || {};
   const parameterFingerprint = run.parameterFingerprint || (typeof meta.parameter_fingerprint === 'string' ? meta.parameter_fingerprint : typeof meta.parameterFingerprint === 'string' ? meta.parameterFingerprint : '-');
+  const executionContext = (meta.execution_context || meta.executionContext || run.parameterSnapshot?.execution_context || run.parameterSnapshot?.executionContext || {}) as Record<string, unknown>;
+  const actualDataQuality = (meta.actual_data_quality || meta.actualDataQuality || {}) as Record<string, unknown>;
+  const liveClob = (executionContext.live_clob || executionContext.liveClob || {}) as Record<string, unknown>;
+  const executionQuality = (executionContext.execution_quality || executionContext.executionQuality || {}) as Record<string, unknown>;
+  const fillEstimate = (executionContext.fill_estimate || executionContext.fillEstimate || {}) as Record<string, unknown>;
+  const dataQuality = (executionContext.data_quality || executionContext.dataQuality || {}) as Record<string, unknown>;
+  const stringifyValue = (value: unknown, fallback = '-') => (
+    value === null || value === undefined || value === '' ? fallback : String(value)
+  );
   return [
     {
       title: 'Market Info',
@@ -235,6 +244,32 @@ function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): Proper
         { label: 'fingerprint', value: parameterFingerprint },
         { label: 'run status', value: run.status },
         { label: 'rows processed', value: String(run.rowsProcessed ?? 0) },
+      ],
+    },
+    {
+      title: 'Execution Context',
+      rows: [
+        { label: 'fill model', value: stringifyValue(executionContext.fill_model ?? executionContext.fillModel ?? executionContext.model, 'close + bps') },
+        { label: 'execution status', value: stringifyValue(executionQuality.status ?? liveClob.status) },
+        { label: 'confidence', value: executionQuality.confidence === undefined ? '-' : `${executionQuality.confidence}%` },
+        { label: 'book source', value: stringifyValue(liveClob.source) },
+        { label: 'book snapshot', value: stringifyValue(liveClob.fetchedAt ?? liveClob.fetched_at) },
+        { label: 'best bid / ask', value: `${stringifyValue(liveClob.bestBid ?? liveClob.best_bid)} / ${stringifyValue(liveClob.bestAsk ?? liveClob.best_ask)}` },
+        { label: 'spread', value: stringifyValue(liveClob.spread) },
+        { label: 'top depth', value: stringifyValue(liveClob.topDepth ?? liveClob.top_depth) },
+        { label: 'fill estimate', value: `${stringifyValue(fillEstimate.fillPct ?? fillEstimate.fill_pct, '0')} filled · VWAP ${stringifyValue(fillEstimate.vwap)}` },
+      ],
+    },
+    {
+      title: 'Data Reproducibility',
+      rows: [
+        { label: 'actual quality', value: stringifyValue(actualDataQuality.status ?? dataQuality.status) },
+        { label: 'actual rows', value: stringifyValue(actualDataQuality.rows ?? dataQuality.rows) },
+        { label: 'actual range', value: `${stringifyValue(actualDataQuality.first_x ?? actualDataQuality.firstX)} -> ${stringifyValue(actualDataQuality.last_x ?? actualDataQuality.lastX)}` },
+        { label: 'gap count', value: stringifyValue(actualDataQuality.gap_count ?? actualDataQuality.gapCount ?? dataQuality.gapCount) },
+        { label: 'jump count', value: stringifyValue(actualDataQuality.jump_count ?? actualDataQuality.jumpCount ?? dataQuality.jumpCount) },
+        { label: 'span coverage', value: `${stringifyValue(actualDataQuality.span_coverage_pct ?? actualDataQuality.spanCoveragePct)}%` },
+        { label: 'segment', value: stringifyValue(executionContext.segment ?? executionContext.scope) },
       ],
     },
   ];

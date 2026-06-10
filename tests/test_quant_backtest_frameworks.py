@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from quant.backtest.backtest_engine import BacktestParameters, PricePoint, simulate_strategy
+from quant.backtest.backtest_engine import BacktestParameters, PricePoint, build_data_quality_report, data_quality_metrics, simulate_strategy
 from quant.backtest.frameworks import normalize_backtest_engine, run_framework_backtest
 from quant.backtest.frameworks import _nautilus_python_bin
 
@@ -95,11 +95,36 @@ def test_builtin_framework_applies_execution_costs_and_liquidity_cap():
     )
 
     trade = result["trades"][0]
-    assert trade["size"] == Decimal("20.0000000000")
+    assert trade["size"] == Decimal("33.3333333333")
     assert trade["entry_price"] > Decimal("0.60")
     assert trade["exit_price"] < Decimal("0.50")
     assert trade["execution_cost"] > Decimal("0")
     assert trade["pnl"] < Decimal("-2")
+
+
+def test_data_quality_report_flags_gaps_and_jumps():
+    points = [
+        PricePoint(x_value=100, price=Decimal("0.40"), volume=Decimal("10")),
+        PricePoint(x_value=101, price=Decimal("0.42"), volume=Decimal("10")),
+        PricePoint(x_value=180, price=Decimal("0.82"), volume=Decimal("10")),
+        PricePoint(x_value=181, price=Decimal("0.81"), volume=Decimal("10")),
+    ]
+    run = {
+        "market_slug": "demo-market",
+        "token_side": "YES",
+        "price_source": "orderfilled_block_close",
+        "from_block": 100,
+        "to_block": 181,
+    }
+
+    report = build_data_quality_report(points, run)
+    metrics = data_quality_metrics(report)
+
+    assert report["status"] == "review"
+    assert report["gap_count"] == 1
+    assert report["jump_count"] == 1
+    assert metrics[0]["metric_key"] == "data_quality_status"
+    assert metrics[0]["status"] == "negative"
 
 
 def test_nautilus_framework_runs_through_python312_worker_when_available():

@@ -114,8 +114,9 @@ def backtest_parameter_snapshot(
     from_block: int | None,
     to_block: int | None,
     params: BacktestParameters,
+    execution_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    snapshot = {
         "strategy": "fixed_threshold_v1",
         "market_slug": market_slug,
         "token_side": token_side,
@@ -140,11 +141,49 @@ def backtest_parameter_snapshot(
             "liquidity_cap_pct": _decimal_text(params.liquidity_cap_pct),
         },
     }
+    if execution_context:
+        snapshot["execution_context"] = execution_context
+    return snapshot
 
 
 def backtest_parameter_fingerprint(snapshot: dict[str, Any]) -> str:
     payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _json_safe_scalar(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return _decimal_text(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _sanitize_json_value(value: Any, *, depth: int = 0, max_items: int = 24) -> Any:
+    if depth > 4:
+        return _json_safe_scalar(value)
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, inner in list(value.items())[:max_items]:
+            if not isinstance(key, str):
+                key = str(key)
+            result[key[:80]] = _sanitize_json_value(inner, depth=depth + 1, max_items=max_items)
+        return result
+    if isinstance(value, list):
+        return [_sanitize_json_value(item, depth=depth + 1, max_items=max_items) for item in value[:max_items]]
+    return _json_safe_scalar(value)
+
+
+def _execution_context_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw = payload.get("execution_context", payload.get("executionContext"))
+    if not isinstance(raw, dict):
+        raw = {}
+    context = _sanitize_json_value(raw)
+    if not isinstance(context, dict):
+        context = {}
+    context.setdefault("model", "fixed_threshold_v1")
+    context.setdefault("fill_model", "close_price_with_bps_and_volume_cap")
+    return context
 
 
 def create_and_execute_backtest(conn: Any, payload: dict[str, Any]) -> dict[str, Any]:
@@ -206,6 +245,7 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
     to_ts = _optional_int(payload.get("to_ts", payload.get("to")))
     from_block = _optional_int(payload.get("from_block", payload.get("fromBlock")))
     to_block = _optional_int(payload.get("to_block", payload.get("toBlock")))
+    execution_context = _execution_context_from_payload(payload)
     parameter_snapshot = backtest_parameter_snapshot(
         market_slug=market_slug,
         token_side=token_side,
@@ -218,6 +258,7 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
         from_block=from_block,
         to_block=to_block,
         params=params,
+        execution_context=execution_context,
     )
     parameter_fingerprint = backtest_parameter_fingerprint(parameter_snapshot)
     with conn.cursor() as cur:
@@ -245,6 +286,7 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                         "backtest_engine": backtest_engine,
                         "token_id": token_id,
                         "outcome_label": outcome_label,
+                        "execution_context": execution_context,
                         "parameter_fingerprint": parameter_fingerprint,
                         "parameter_snapshot": parameter_snapshot,
                     }
@@ -297,6 +339,7 @@ def execute_backtest_run(conn: Any, run_id: int) -> None:
     points = fetch_price_points(conn, run)
     if len(points) < 2:
         raise RuntimeError("not enough price rows for backtest")
+    data_quality_report = build_data_quality_report(points, run)
     result = run_framework_backtest(
         run.get("backtest_engine") or "builtin",
         points,
@@ -305,6 +348,8 @@ def execute_backtest_run(conn: Any, run_id: int) -> None:
         builtin_simulator=simulate_strategy,
         metrics_builder=build_metrics,
     )
+    result.setdefault("metrics", [])
+    result["metrics"].extend(data_quality_metrics(data_quality_report))
     replace_backtest_results(conn, run_id, result)
     with conn.cursor() as cur:
         cur.execute(
@@ -312,11 +357,16 @@ def execute_backtest_run(conn: Any, run_id: int) -> None:
             UPDATE quant.quant_backtest_runs
             SET status = 'succeeded',
                 rows_processed = %s,
+                meta = meta || %s::jsonb,
                 finished_at = now(),
                 error = NULL
             WHERE run_id = %s
             """,
-            (len(points), run_id),
+            (
+                len(points),
+                json.dumps({"actual_data_quality": data_quality_report}),
+                run_id,
+            ),
         )
 
 
@@ -515,6 +565,121 @@ def build_metrics(
             "sort_order": index,
         }
         for index, (key, name, group, value, formatted, delta, status, tooltip) in enumerate(rows, start=1)
+    ]
+
+
+def build_data_quality_report(points: list[PricePoint], run: dict[str, Any]) -> dict[str, Any]:
+    x_values = [int(point.x_value) for point in points]
+    prices = [point.price for point in points]
+    deltas = [x_values[index] - x_values[index - 1] for index in range(1, len(x_values)) if x_values[index] > x_values[index - 1]]
+    sorted_deltas = sorted(deltas)
+    median_delta = sorted_deltas[len(sorted_deltas) // 2] if sorted_deltas else 0
+    gap_threshold = int(median_delta * 4) if median_delta else 0
+    gaps = [
+        {"from_x": x_values[index - 1], "to_x": x_values[index], "span": x_values[index] - x_values[index - 1]}
+        for index in range(1, len(x_values))
+        if gap_threshold and x_values[index] - x_values[index - 1] > gap_threshold
+    ]
+    jumps = [
+        {
+            "x": x_values[index],
+            "from_price": _decimal_text(prices[index - 1]),
+            "to_price": _decimal_text(prices[index]),
+            "delta": _decimal_text((prices[index] - prices[index - 1]).copy_abs()),
+        }
+        for index in range(1, len(prices))
+        if (prices[index] - prices[index - 1]).copy_abs() > Decimal("0.18")
+    ]
+    requested_from = run.get("from_block") if run.get("price_source") == "orderfilled_block_close" else run.get("from_ts")
+    requested_to = run.get("to_block") if run.get("price_source") == "orderfilled_block_close" else run.get("to_ts")
+    first_x = x_values[0] if x_values else None
+    last_x = x_values[-1] if x_values else None
+    requested_span = int(requested_to - requested_from) if requested_from is not None and requested_to is not None and requested_to > requested_from else None
+    observed_span = int(last_x - first_x) if first_x is not None and last_x is not None and last_x >= first_x else None
+    span_coverage = Decimal(str(observed_span or 0)) / Decimal(str(requested_span)) if requested_span else Decimal("1")
+    status = "ready"
+    caveats: list[str] = []
+    if gaps:
+        status = "review"
+        caveats.append(f"{len(gaps)} large x-axis gaps")
+    if jumps:
+        status = "review"
+        caveats.append(f"{len(jumps)} price jumps over 18 percentage points")
+    if len(points) < 50:
+        status = "review"
+        caveats.append("fewer than 50 rows")
+    if span_coverage < Decimal("0.75"):
+        status = "review"
+        caveats.append("observed span covers less than 75% of requested range")
+    return {
+        "status": status,
+        "price_source": run.get("price_source"),
+        "x_axis": "block_number" if run.get("price_source") == "orderfilled_block_close" else "timestamp",
+        "rows": len(points),
+        "first_x": first_x,
+        "last_x": last_x,
+        "median_delta": median_delta,
+        "gap_count": len(gaps),
+        "gap_threshold": gap_threshold,
+        "largest_gaps": gaps[:8],
+        "jump_count": len(jumps),
+        "largest_jumps": jumps[:8],
+        "requested_from": requested_from,
+        "requested_to": requested_to,
+        "observed_span": observed_span,
+        "requested_span": requested_span,
+        "span_coverage_pct": _decimal_text((span_coverage * Decimal("100")).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        "caveats": caveats,
+    }
+
+
+def data_quality_metrics(report: dict[str, Any]) -> list[dict[str, Any]]:
+    status = "positive" if report.get("status") == "ready" else "negative"
+    return [
+        {
+            "metric_key": "data_quality_status",
+            "metric_name": "Data Quality",
+            "metric_group": "prediction",
+            "value": Decimal("1") if report.get("status") == "ready" else Decimal("0"),
+            "formatted_value": str(report.get("status") or "unknown"),
+            "delta": f"{report.get('rows', 0)} rows",
+            "status": status,
+            "tooltip": "; ".join(report.get("caveats") or []) or "No large gaps or jumps detected in the executed price rows",
+            "sort_order": 90,
+        },
+        {
+            "metric_key": "gap_count",
+            "metric_name": "Gap Count",
+            "metric_group": "prediction",
+            "value": Decimal(int(report.get("gap_count") or 0)),
+            "formatted_value": str(report.get("gap_count") or 0),
+            "delta": f"threshold {report.get('gap_threshold') or 0}",
+            "status": "negative" if report.get("gap_count") else "positive",
+            "tooltip": "Large x-axis gaps detected in the rows used by this backtest",
+            "sort_order": 91,
+        },
+        {
+            "metric_key": "jump_count",
+            "metric_name": "Jump Count",
+            "metric_group": "prediction",
+            "value": Decimal(int(report.get("jump_count") or 0)),
+            "formatted_value": str(report.get("jump_count") or 0),
+            "delta": ">18 pct points",
+            "status": "negative" if report.get("jump_count") else "positive",
+            "tooltip": "Large adjacent price jumps detected in the rows used by this backtest",
+            "sort_order": 92,
+        },
+        {
+            "metric_key": "span_coverage",
+            "metric_name": "Span Coverage",
+            "metric_group": "prediction",
+            "value": Decimal(str(report.get("span_coverage_pct") or "0")),
+            "formatted_value": f"{report.get('span_coverage_pct') or '0'}%",
+            "delta": f"{report.get('first_x') or '-'} -> {report.get('last_x') or '-'}",
+            "status": "positive" if Decimal(str(report.get("span_coverage_pct") or "0")) >= Decimal("75") else "negative",
+            "tooltip": "Observed row span compared with the requested backtest range",
+            "sort_order": 93,
+        },
     ]
 
 
