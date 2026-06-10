@@ -671,8 +671,8 @@ function SchedulePanel({
       className="wm-worldcup-panel wm-worldcup-schedule-panel"
     >
       <div className="wm-worldcup-filter-strip">
-        {(['all', 'today', 'future', 'market'] as MatchFilter[]).map((item) => (
-          <button className={filter === item ? 'active' : ''} key={item} type="button" onClick={() => onFilter(item)}>{item === 'market' ? 'mkt' : item}</button>
+        {(['all', 'today', 'future'] as MatchFilter[]).map((item) => (
+          <button className={filter === item ? 'active' : ''} key={item} type="button" onClick={() => onFilter(item)}>{item}</button>
         ))}
       </div>
       <div className="wm-worldcup-match-list">
@@ -692,7 +692,6 @@ function SchedulePanel({
               <strong>{match.homeTeam} <i>{scoreText(match)}</i> {match.awayTeam}</strong>
               <em>{match.kickoffBeijing} · {match.city} · {match.venue}</em>
             </span>
-            <span className={`wm-worldcup-status ${match.status || 'scheduled'}`}>{match.marketLinked ? 'MKT' : match.status === 'scheduled' ? 'FIX' : String(match.status || 'scheduled').toUpperCase()}</span>
           </button>
         ))}
       </div>

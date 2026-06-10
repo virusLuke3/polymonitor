@@ -11661,3 +11661,170 @@
   border-radius: 4px !important;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04)) !important;
 }
+
+/* v32 calendar parity: match the tighter worldmonitor calendar treatment.
+   Remove the MKT affordance, enlarge typography, and restore the harder shell. */
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel {
+  border: 1px solid rgba(56, 63, 72, 0.98) !important;
+  border-radius: 0 !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0) 16%),
+    linear-gradient(180deg, #16191c 0%, #0f1317 100%) !important;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    inset 0 -20px 34px rgba(18, 36, 62, 0.14) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-panel-header {
+  min-height: 50px !important;
+  height: 50px !important;
+  padding: 8px 12px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.012)),
+    linear-gradient(180deg, #262626 0%, #1e1e1f 100%) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-panel-title {
+  color: #f3f4ef !important;
+  font-family: var(--wc-font-mono) !important;
+  font-size: 13px !important;
+  font-weight: 820 !important;
+  letter-spacing: 0.1em !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-panel-count {
+  min-width: 34px !important;
+  height: 32px !important;
+  font: 800 12px/1 var(--wc-font-mono) !important;
+  color: #aeb6bf !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(57, 61, 67, 0.86) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-filter-strip {
+  gap: 7px !important;
+  padding: 10px 12px 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-filter-strip button {
+  min-width: 112px !important;
+  height: 34px !important;
+  padding: 0 14px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 4px !important;
+  color: rgba(168, 174, 182, 0.92) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+    rgba(22, 24, 27, 0.9) !important;
+  font-family: var(--wc-font-mono) !important;
+  font-size: 11px !important;
+  font-weight: 840 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-filter-strip button:hover {
+  border-color: rgba(70, 132, 224, 0.26) !important;
+  color: #edf4ff !important;
+  background:
+    linear-gradient(180deg, rgba(39, 61, 97, 0.28), rgba(19, 27, 40, 0.4)),
+    rgba(22, 24, 27, 0.92) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-filter-strip button.active {
+  border-color: rgba(47, 224, 135, 0.42) !important;
+  color: #88ffbc !important;
+  background:
+    linear-gradient(180deg, rgba(20, 104, 60, 0.42), rgba(10, 47, 28, 0.78)),
+    rgba(18, 33, 24, 0.92) !important;
+  box-shadow:
+    0 0 14px rgba(42, 232, 137, 0.1),
+    inset 0 -2px 0 rgba(53, 246, 143, 0.84) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-row {
+  grid-template-columns: 82px minmax(0, 1fr) !important;
+  min-height: 84px !important;
+  padding: 12px 14px 12px 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+  border-left: 3px solid transparent !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012), rgba(255, 255, 255, 0)),
+    transparent !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-row:hover {
+  background:
+    linear-gradient(90deg, rgba(83, 139, 228, 0.08), transparent 18%),
+    rgba(255, 255, 255, 0.018) !important;
+  box-shadow: inset 2px 0 0 rgba(82, 140, 229, 0.26) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-row.active {
+  border-left-color: #35f68f !important;
+  background:
+    linear-gradient(90deg, rgba(42, 232, 137, 0.12), transparent 22%),
+    rgba(255, 255, 255, 0.024) !important;
+  box-shadow: inset 2px 0 0 rgba(53, 246, 143, 0.82) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-time {
+  padding-left: 12px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-time strong {
+  color: #eef2f7 !important;
+  font-family: var(--wc-font-mono) !important;
+  font-size: 16px !important;
+  font-weight: 860 !important;
+  letter-spacing: 0.02em !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-time em {
+  margin-top: 5px !important;
+  color: rgba(149, 157, 166, 0.92) !important;
+  font-family: var(--wc-font-mono) !important;
+  font-size: 10px !important;
+  font-weight: 760 !important;
+  letter-spacing: 0.04em !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-main {
+  gap: 4px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-kicker {
+  color: #d5a73a !important;
+  font-family: var(--wc-font-mono) !important;
+  font-size: 10px !important;
+  font-weight: 820 !important;
+  letter-spacing: 0.06em !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-main strong {
+  color: #f4f5f1 !important;
+  font-family: var(--wc-font-body) !important;
+  font-size: 17px !important;
+  font-weight: 760 !important;
+  line-height: 1.24 !important;
+  letter-spacing: -0.015em !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-main strong i {
+  color: #ffb845 !important;
+  font-style: normal !important;
+  font-weight: 840 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel .wm-worldcup-match-main em {
+  color: rgba(180, 188, 197, 0.82) !important;
+  font-family: var(--wc-font-mono) !important;
+  font-size: 11px !important;
+  font-weight: 640 !important;
+  letter-spacing: 0.02em !important;
+}
