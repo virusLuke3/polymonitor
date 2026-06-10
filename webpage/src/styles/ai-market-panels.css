@@ -907,3 +907,91 @@
   font-weight: 800;
   letter-spacing: 0.08em;
 }
+
+/* Typography reset:
+   align the AI panel with the worldmonitor hierarchy instead of the oversized
+   premium-weight pass. */
+.wm-ai-market-panel .wm-panel-title,
+.wm-ai-market-panel .wm-panel-title-wrap,
+.wm-ai-market-panel .wm-panel-badge,
+.wm-ai-market-panel .wm-panel-count,
+.wm-ai-insight-source,
+.wm-ai-insight-source span,
+.wm-ai-insight-source b,
+.wm-ai-insight-hero em,
+.wm-ai-insight-section-head span,
+.wm-ai-insight-card-head span,
+.wm-ai-insight-market-card span,
+.wm-ai-insight-watch span,
+.wm-ai-insight-section-head em,
+.wm-ai-insight-card-head b,
+.wm-ai-insight-market-card > b,
+.wm-ai-insight-evidence span {
+  font-family: var(--font-body) !important;
+}
+
+.wm-ai-market-panel .wm-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  line-height: 1.16;
+  text-transform: uppercase;
+}
+
+.wm-ai-market-panel .wm-panel-badge,
+.wm-ai-market-panel .wm-panel-count {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.wm-ai-insight-source span {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.wm-ai-insight-source b,
+.wm-ai-insight-hero em,
+.wm-ai-insight-section-head span,
+.wm-ai-insight-card-head span,
+.wm-ai-insight-market-card span,
+.wm-ai-insight-watch span,
+.wm-ai-insight-section-head em,
+.wm-ai-insight-card-head b,
+.wm-ai-insight-market-card > b,
+.wm-ai-insight-evidence span {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.wm-ai-insight-hero p,
+.wm-ai-insight-card strong,
+.wm-ai-insight-market-card strong,
+.wm-ai-insight-watch strong {
+  font-family: var(--font-body) !important;
+  font-weight: 620;
+  letter-spacing: 0;
+}
+
+.wm-ai-insight-hero p {
+  font-size: 15.8px;
+  line-height: 1.42;
+}
+
+.wm-ai-insight-card strong,
+.wm-ai-insight-market-card strong,
+.wm-ai-insight-watch strong {
+  font-size: 14.8px;
+  line-height: 1.35;
+}
+
+.wm-ai-insight-card p,
+.wm-ai-insight-market-card p,
+.wm-ai-insight-watch p {
+  font-family: var(--font-body) !important;
+  font-size: 12.6px;
+  font-weight: 500;
+  line-height: 1.48;
+}
