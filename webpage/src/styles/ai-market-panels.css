@@ -667,3 +667,111 @@
     font-size: 13px;
   }
 }
+
+/* v30 AI uplift: larger editorial copy, hotter severity chips, and stronger
+   title hierarchy so the AI panels stop reading like subdued utility cards. */
+.wm-ai-market-panel .wm-panel-title {
+  font-size: 12.8px;
+  font-weight: 760;
+  letter-spacing: 0.012em;
+}
+
+.wm-ai-market-panel .wm-panel-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.74px;
+}
+
+.wm-ai-market-panel .wm-panel-count {
+  font-size: 11.5px;
+  font-weight: 820;
+}
+
+.wm-ai-insight-hero {
+  min-height: 164px;
+  padding: 15px 17px 16px 19px;
+  border-left-width: 5px;
+}
+
+.wm-ai-insight-source span {
+  font-size: 12px;
+  font-weight: 740;
+}
+
+.wm-ai-insight-source b {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.72px;
+}
+
+.wm-ai-insight-hero em {
+  font-size: 9.5px;
+  font-weight: 760;
+}
+
+.wm-ai-insight-hero p {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.wm-ai-insight-section-head span,
+.wm-ai-insight-card-head span,
+.wm-ai-insight-market-card span,
+.wm-ai-insight-watch span {
+  font-size: 9.5px;
+  font-weight: 780;
+  letter-spacing: 0.74px;
+}
+
+.wm-ai-insight-section-head em,
+.wm-ai-insight-card-head b {
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.wm-ai-insight-card strong,
+.wm-ai-insight-market-card strong,
+.wm-ai-insight-watch strong {
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 1.3;
+}
+
+.wm-ai-insight-card p,
+.wm-ai-insight-market-card p,
+.wm-ai-insight-watch p {
+  font-size: 12.4px;
+  font-weight: 460;
+  line-height: 1.42;
+}
+
+.wm-ai-insight-market-card > b {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.58px;
+}
+
+.wm-ai-insight-card.positive .wm-ai-insight-card-head span,
+.wm-ai-insight-market-card.positive span,
+.wm-ai-insight-watch.positive span {
+  color: #71ff9b;
+}
+
+.wm-ai-insight-card.warning .wm-ai-insight-card-head span,
+.wm-ai-insight-market-card.warning span,
+.wm-ai-insight-watch.warning span {
+  color: #ffd36b;
+}
+
+.wm-ai-insight-card.critical .wm-ai-insight-card-head span,
+.wm-ai-insight-market-card.critical span,
+.wm-ai-insight-watch.critical span {
+  color: #ff7a7c;
+}
+
+.wm-ai-insight-evidence span {
+  font-size: 9px;
+  font-weight: 780;
+  letter-spacing: 0.7px;
+}
