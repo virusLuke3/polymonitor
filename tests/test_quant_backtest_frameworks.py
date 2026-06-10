@@ -144,6 +144,60 @@ def test_builtin_framework_rejects_entry_when_min_fill_not_met():
     assert rejected["meta"]["fill_pct"] == Decimal("12.5000000000")
 
 
+def test_builtin_framework_uses_clob_snapshot_depth_for_entry_fill():
+    points = [
+        PricePoint(x_value=1, price=Decimal("0.60"), volume=Decimal("10000")),
+        PricePoint(x_value=2, price=Decimal("0.50"), volume=Decimal("10000")),
+    ]
+    run = {
+        "market_slug": "demo-market",
+        "token_side": "YES",
+        "price_source": "orderfilled_block_close",
+        "_clob_execution": {
+            "snapshot_id": 123,
+            "best_bid": "0.58",
+            "best_ask": "0.62",
+            "spread": "0.04",
+            "fetched_at": "2026-06-10T00:00:00Z",
+            "asks": [
+                {"price": "0.62", "size": "50"},
+                {"price": "0.64", "size": "200"},
+            ],
+            "bids": [
+                {"price": "0.58", "size": "100"},
+            ],
+        },
+    }
+    params = BacktestParameters(
+        entry_threshold=Decimal("0.58"),
+        exit_threshold=Decimal("0.55"),
+        stop_loss=Decimal("0.50"),
+        take_profit=Decimal("0.50"),
+        max_holding_bars=10,
+        initial_capital=Decimal("1000"),
+        position_size=Decimal("100"),
+        liquidity_cap_pct=Decimal("100"),
+    )
+
+    result = run_framework_backtest(
+        "builtin",
+        points,
+        run,
+        params,
+        builtin_simulator=simulate_strategy,
+        metrics_builder=lambda trades, equity, price_points, parameters: [],
+    )
+
+    trade = result["trades"][0]
+    open_event = next(event for event in result["events"] if event["event_type"] == "open")
+    assert trade["requested_notional"] == Decimal("100")
+    assert trade["filled_notional"] == Decimal("100.0000000000")
+    assert trade["entry_price"] == Decimal("0.6336633663")
+    assert open_event["meta"]["execution_source"] == "clob_snapshot"
+    assert open_event["meta"]["snapshot_id"] == 123
+    assert open_event["meta"]["levels_consumed"] == 2
+
+
 def test_data_quality_report_flags_gaps_and_jumps():
     points = [
         PricePoint(x_value=100, price=Decimal("0.40"), volume=Decimal("10")),

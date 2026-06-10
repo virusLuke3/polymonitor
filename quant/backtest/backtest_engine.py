@@ -348,10 +348,15 @@ def execute_backtest_run(conn: Any, run_id: int) -> None:
     run = _get_run(conn, run_id)
     params = _get_parameters(conn, run_id)
     _set_run_status(conn, run_id, "running")
+    clob_execution = load_clob_execution_context(conn, run)
+    if clob_execution:
+        run["_clob_execution"] = clob_execution
     points = fetch_price_points(conn, run)
     if len(points) < 2:
         raise RuntimeError("not enough price rows for backtest")
     data_quality_report = build_data_quality_report(points, run)
+    if clob_execution:
+        data_quality_report["execution_depth"] = _public_clob_execution_context(clob_execution)
     result = run_framework_backtest(
         run.get("backtest_engine") or "builtin",
         points,
@@ -458,6 +463,76 @@ def fetch_price_points(conn: Any, run: dict[str, Any], *, limit: int = 25000) ->
         return [_price_point(row) for row in cur.fetchall()]
 
 
+def load_clob_execution_context(conn: Any, run: dict[str, Any]) -> dict[str, Any] | None:
+    meta = run.get("meta") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except json.JSONDecodeError:
+            meta = {}
+    token_id = str(meta.get("token_id") or "").strip()
+    if not token_id:
+        return None
+    side = str(run.get("token_side") or "").strip().upper()
+    values: list[Any] = [token_id]
+    side_filter = ""
+    if side in {"YES", "NO"}:
+        side_filter = "AND side = %s"
+        values.append(side)
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT
+                snapshot_id, token_id, side, source, book_status,
+                best_bid, best_ask, spread, mid,
+                bid_depth, ask_depth, depth_total,
+                level_count_bid, level_count_ask, payload, fetched_at
+            FROM quant.clob_orderbook_snapshots
+            WHERE token_id = %s
+              {side_filter}
+              AND book_status = 'ok'
+              AND (level_count_bid > 0 OR level_count_ask > 0)
+            ORDER BY fetched_at DESC, snapshot_id DESC
+            LIMIT 1
+            """,
+            tuple(values),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    return {
+        "source": "clob_orderbook_snapshots",
+        "snapshot_id": int(row["snapshot_id"]),
+        "token_id": row["token_id"],
+        "side": row["side"],
+        "book_source": row["source"],
+        "book_status": row["book_status"],
+        "best_bid": _decimal_text(Decimal(str(row["best_bid"]))) if row.get("best_bid") is not None else None,
+        "best_ask": _decimal_text(Decimal(str(row["best_ask"]))) if row.get("best_ask") is not None else None,
+        "spread": _decimal_text(Decimal(str(row["spread"]))) if row.get("spread") is not None else None,
+        "mid": _decimal_text(Decimal(str(row["mid"]))) if row.get("mid") is not None else None,
+        "bid_depth": _decimal_text(Decimal(str(row["bid_depth"] or 0))),
+        "ask_depth": _decimal_text(Decimal(str(row["ask_depth"] or 0))),
+        "depth_total": _decimal_text(Decimal(str(row["depth_total"] or 0))),
+        "level_count_bid": int(row["level_count_bid"] or 0),
+        "level_count_ask": int(row["level_count_ask"] or 0),
+        "bids": payload.get("bids") if isinstance(payload.get("bids"), list) else [],
+        "asks": payload.get("asks") if isinstance(payload.get("asks"), list) else [],
+        "fetched_at": row["fetched_at"].isoformat().replace("+00:00", "Z") if row.get("fetched_at") else None,
+    }
+
+
+def _public_clob_execution_context(context: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "source", "snapshot_id", "side", "book_source", "book_status",
+        "best_bid", "best_ask", "spread", "mid",
+        "bid_depth", "ask_depth", "depth_total",
+        "level_count_bid", "level_count_ask", "fetched_at",
+    )
+    return {key: context.get(key) for key in keys}
+
+
 def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: BacktestParameters) -> dict[str, Any]:
     x_axis = "timestamp" if run["price_source"] == "frontend" else "block_number"
     equity = params.initial_capital
@@ -469,7 +544,7 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
 
     for index, point in enumerate(points):
         if open_position is None and point.price >= params.entry_threshold:
-            fill = _fill_decision(params, point.price, point.volume)
+            fill = _fill_decision(params, point.price, point.volume, run.get("_clob_execution"))
             if fill["size"] <= 0:
                 events.append(_event(
                     "fill_rejected",
@@ -485,7 +560,7 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
                 trade_index=len(trades) + 1,
                 entry_index=index,
                 entry_x=point.x_value,
-                entry_price=_execution_price(point.price, params, "entry"),
+                entry_price=fill.get("entry_price") or _execution_price(point.price, params, "entry"),
                 size=fill["size"],
                 requested_notional=fill["requested_notional"],
                 filled_notional=fill["filled_notional"],
@@ -1031,7 +1106,7 @@ def _target_notional(params: BacktestParameters) -> Decimal:
     return target
 
 
-def _fill_decision(params: BacktestParameters, price: Decimal, volume: Decimal) -> dict[str, Any]:
+def _fill_decision(params: BacktestParameters, price: Decimal, volume: Decimal, book: dict[str, Any] | None = None) -> dict[str, Any]:
     target_notional = _target_notional(params)
     empty = {
         "requested_notional": target_notional,
@@ -1047,6 +1122,28 @@ def _fill_decision(params: BacktestParameters, price: Decimal, volume: Decimal) 
     cap_pct = max(Decimal("0"), Decimal(str(params.liquidity_cap_pct)))
     if cap_pct <= 0:
         return empty
+    book_fill = _fill_from_clob_book(target_notional, cap_pct, book)
+    if book_fill is not None:
+        fill_pct = _pct(book_fill["filled_notional"], target_notional) if target_notional else Decimal("0")
+        min_fill_pct = max(Decimal("0"), Decimal(str(params.min_fill_pct)))
+        if target_notional <= 0 or fill_pct < min_fill_pct:
+            return {
+                **empty,
+                **book_fill,
+                "fill_pct": fill_pct,
+                "partial_fill": book_fill["filled_notional"] > 0 and book_fill["filled_notional"] < target_notional,
+                "rejected": True,
+            }
+        return {
+            **book_fill,
+            "requested_notional": target_notional,
+            "fill_pct": fill_pct,
+            "size": book_fill["size"],
+            "liquidity_cap_pct": cap_pct,
+            "min_fill_pct": min_fill_pct,
+            "partial_fill": book_fill["filled_notional"] < target_notional,
+            "rejected": False,
+        }
     if volume <= 0:
         filled_notional = target_notional
     else:
@@ -1072,6 +1169,77 @@ def _fill_decision(params: BacktestParameters, price: Decimal, volume: Decimal) 
         "partial_fill": filled_notional < target_notional,
         "rejected": False,
     }
+
+
+def _fill_from_clob_book(target_notional: Decimal, cap_pct: Decimal, book: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not book or target_notional <= 0:
+        return None
+    levels = _book_levels(book.get("asks"), reverse=False)
+    if not levels:
+        return None
+    max_book_notional = target_notional * cap_pct / Decimal("100")
+    remaining = min(target_notional, max_book_notional)
+    if remaining <= 0:
+        return {
+            "requested_notional": target_notional,
+            "filled_notional": Decimal("0"),
+            "size": Decimal("0"),
+            "entry_price": Decimal("0"),
+            "execution_source": "clob_snapshot",
+            "snapshot_id": book.get("snapshot_id"),
+            "book_side": "asks",
+            "levels_consumed": 0,
+            "book_depth_notional": Decimal("0"),
+        }
+    filled_notional = Decimal("0")
+    filled_size = Decimal("0")
+    levels_consumed = 0
+    for level in levels:
+        level_notional = level["price"] * level["size"]
+        if level_notional <= 0:
+            continue
+        take_notional = min(remaining, level_notional)
+        filled_notional += take_notional
+        filled_size += take_notional / level["price"]
+        remaining -= take_notional
+        levels_consumed += 1
+        if remaining <= 0:
+            break
+    entry_price = (filled_notional / filled_size).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP) if filled_size > 0 else Decimal("0")
+    return {
+        "requested_notional": target_notional,
+        "filled_notional": filled_notional.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "size": filled_size.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "entry_price": entry_price,
+        "execution_source": "clob_snapshot",
+        "snapshot_id": book.get("snapshot_id"),
+        "book_side": "asks",
+        "levels_consumed": levels_consumed,
+        "book_depth_notional": sum((level["price"] * level["size"] for level in levels), Decimal("0")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "best_bid": book.get("best_bid"),
+        "best_ask": book.get("best_ask"),
+        "spread": book.get("spread"),
+        "fetched_at": book.get("fetched_at"),
+    }
+
+
+def _book_levels(rows: Any, *, reverse: bool) -> list[dict[str, Decimal]]:
+    if not isinstance(rows, list):
+        return []
+    levels: list[dict[str, Decimal]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            price = Decimal(str(row.get("price")))
+            size = Decimal(str(row.get("size")))
+        except Exception:
+            continue
+        if price <= 0 or size <= 0:
+            continue
+        levels.append({"price": price, "size": size})
+    levels.sort(key=lambda item: item["price"], reverse=reverse)
+    return levels
 
 
 def _ratio(numerator: int, denominator: int) -> Decimal:
