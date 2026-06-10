@@ -2134,7 +2134,7 @@ function WorldMonitorApp() {
   const zoomOut = () => setMapZoom((current) => clampMapZoom(current - 1));
 
   return (
-    <div className="wm-shell">
+    <div className={`wm-shell${workspaceMode === 'worldcup' ? ' wm-shell-worldcup' : ''}`}>
       <div className="wm-promo">
         <span className="wm-pro-badge">PRO</span>
         <span className="wm-promo-copy">PolyMonitor Pro is coming - sharper Polymarket signal, less noise, AI briefs for flow, oracle risk, and macro context.</span>
@@ -2170,7 +2170,7 @@ function WorldMonitorApp() {
             <button className="wm-nav-icon" type="button" onClick={() => setShowSettings(true)} title="Open settings">⚒</button>
             <button className="wm-nav-icon" type="button" onClick={cycleRegion} title="Cycle region">◌</button>
           </div>
-          <div className="wm-brand">POLYDATA MONITOR <span>{APP_VERSION}</span></div>
+          <div className="wm-brand">{workspaceMode === 'worldcup' ? 'MONITOR' : 'POLYDATA MONITOR'} <span>{APP_VERSION}</span></div>
           <div className="wm-live-dot">Live</div>
           <button className="wm-select-pill" type="button" onClick={cycleRegion}>
             {REGION_OPTIONS.find((item) => item.value === region)?.label || 'Global'} ▾

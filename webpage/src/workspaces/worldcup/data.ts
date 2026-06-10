@@ -10,12 +10,13 @@ import type {
   WorldCupVenueCity,
 } from './types';
 
-const DATA_URL = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
+const LOCAL_DATA_URL = '/data/worldcup-2026.json';
+const REMOTE_DATA_URL = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
 const MS_PER_MINUTE = 60 * 1000;
 const DASHBOARD_CACHE_TTL_MS = 5 * MS_PER_MINUTE;
 const DASHBOARD_STALE_CACHE_TTL_MS = 60 * MS_PER_MINUTE;
 const INITIAL_RUNTIME_TIMEOUT_MS = 3500;
-const SCHEDULE_TIMEOUT_MS = 3500;
+const SCHEDULE_TIMEOUT_MS = 12000;
 const BACKGROUND_RUNTIME_TIMEOUT_MS = 12000;
 const DASHBOARD_PERSISTENT_CACHE_KEY = 'polydata:worldcup-dashboard-cache:v2';
 const DASHBOARD_PERSISTENT_CACHE_VERSION = 2;
@@ -246,11 +247,18 @@ async function loadWorldCupScheduleDashboard(): Promise<WorldCupDashboardPayload
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), SCHEDULE_TIMEOUT_MS);
     try {
-      const response = await fetch(DATA_URL, { cache: 'force-cache', signal: controller.signal });
-      if (!response.ok) throw new Error(`world cup schedule ${response.status}`);
-      const data = await response.json();
-      const matches = normalizeWorldCupMatches(data.matches || []);
-      return buildWorldCupDashboard(matches, 'remote');
+      for (const url of [LOCAL_DATA_URL, REMOTE_DATA_URL]) {
+        try {
+          const response = await fetch(url, { cache: 'force-cache', signal: controller.signal });
+          if (!response.ok) throw new Error(`world cup schedule ${response.status}`);
+          const data = await response.json();
+          const matches = normalizeWorldCupMatches(data.matches || []);
+          if (matches.length) return buildWorldCupDashboard(matches, 'remote');
+        } catch {
+          // Try the next official schedule source before showing a source-required state.
+        }
+      }
+      return buildWorldCupDashboard([], 'source-required');
     } catch {
       return buildWorldCupDashboard([], 'source-required');
     } finally {

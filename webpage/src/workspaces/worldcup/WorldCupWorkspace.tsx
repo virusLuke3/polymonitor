@@ -1,6 +1,7 @@
 import { type ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { Panel, PanelLoading } from '@/components/Panel';
+import { PanelLoading } from '@/components/Panel';
+import type { ContentItem } from '@/types';
 import {
   filterWorldCupNews,
   getNextWorldCupMatch,
@@ -12,6 +13,9 @@ import {
   WORLD_CUP_HOST_MATCH_COUNTS,
 } from './data';
 import { WorldCupMap } from './WorldCupMap';
+import { SourceRequired, type SourceRequiredRow } from './components/SourceRequired';
+import { CalendarPanel } from './panels/CalendarPanel';
+import { WinProbabilityPanel } from './panels/WinProbabilityPanel';
 import type {
   WorldCupDashboardPayload,
   WorldCupMatch,
@@ -20,32 +24,20 @@ import type {
   WorldCupPolymarketMarket,
   WorldCupWorkspaceProps,
 } from './types';
+import { WorldCupPanel as Panel } from './components/WorldCupPanel';
+import {
+  WORLD_CUP_PANEL_DRAG_THRESHOLD,
+  WORLD_CUP_PANEL_ORDER,
+  WORLD_CUP_PANEL_ORDER_STORAGE_KEY,
+  readWorldCupPanelOrder,
+  reorderWorldCupPanels,
+  type MatchFilter,
+  type WorldCupPanelId,
+} from './panels/registry';
+import { kickoffDay, kickoffTime, scoreText, stageLabel } from './panels/formatters';
+import './styles/worldcup-reference-ui.css';
 
-type MatchFilter = 'all' | 'today' | 'future' | 'finished' | 'market';
 type WorldCupSignalTone = 'red' | 'gold' | 'blue' | 'purple' | 'gray' | 'green';
-type WorldCupPanelId =
-  | 'calendar'
-  | 'match-control'
-  | 'news'
-  | 'win-probability'
-  | 'venue-risk'
-  | 'market-board'
-  | 'group-advance'
-  | 'team-power'
-  | 'injury-load'
-  | 'match-tempo'
-  | 'ref-cards'
-  | 'travel-load'
-  | 'news-impact'
-  | 'host-venue'
-  | 'team-status'
-  | 'lineup-board'
-  | 'match-model'
-  | 'group-table'
-  | 'media-wire'
-  | 'odds-liquidity'
-  | 'venue-ref'
-  | 'source-audit';
 type WorldCupSignalItem = {
   id: string;
   source: string;
@@ -57,54 +49,6 @@ type WorldCupSignalItem = {
 };
 
 const WORLD_CUP_DASHBOARD_CLASS = 'wm-dashboard wm-worldcup-dashboard wm-worldcup-v5';
-const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v6';
-const WORLD_CUP_PANEL_DRAG_THRESHOLD = 5;
-const WORLD_CUP_PANEL_ORDER: WorldCupPanelId[] = [
-  'calendar',
-  'match-control',
-  'win-probability',
-  'venue-risk',
-  'market-board',
-  'group-advance',
-  'team-power',
-  'injury-load',
-  'match-tempo',
-  'odds-liquidity',
-  'ref-cards',
-  'travel-load',
-  'news-impact',
-  'news',
-  'team-status',
-  'lineup-board',
-  'match-model',
-  'group-table',
-  'media-wire',
-  'host-venue',
-  'venue-ref',
-  'source-audit',
-];
-
-function readWorldCupPanelOrder(): WorldCupPanelId[] {
-  if (typeof window === 'undefined') return WORLD_CUP_PANEL_ORDER;
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(WORLD_CUP_PANEL_ORDER_STORAGE_KEY) || '[]');
-    if (!Array.isArray(parsed)) return WORLD_CUP_PANEL_ORDER;
-    const known = new Set(WORLD_CUP_PANEL_ORDER);
-    const ordered = parsed.filter((id): id is WorldCupPanelId => known.has(id));
-    return [...ordered, ...WORLD_CUP_PANEL_ORDER.filter((id) => !ordered.includes(id))];
-  } catch {
-    return WORLD_CUP_PANEL_ORDER;
-  }
-}
-
-function reorderWorldCupPanels(panelIds: WorldCupPanelId[], draggedId: WorldCupPanelId, targetId: WorldCupPanelId, insertAfter: boolean) {
-  if (draggedId === targetId) return panelIds;
-  const next = panelIds.filter((id) => id !== draggedId);
-  const targetIndex = next.indexOf(targetId);
-  if (targetIndex < 0) return panelIds;
-  next.splice(targetIndex + (insertAfter ? 1 : 0), 0, draggedId);
-  return next;
-}
 
 function formatCountdown(match: WorldCupMatch | null, now: Date) {
   if (!match) return '--';
@@ -176,40 +120,6 @@ function formatBjtClock(now: Date) {
   }).format(now);
 }
 
-function sameBeijingDate(match: WorldCupMatch, now: Date) {
-  const matchDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(match.kickoffUtc));
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(now);
-  return matchDate === today;
-}
-
-function stageLabel(stage: string) {
-  const labels: Record<string, string> = {
-    group: 'GROUP',
-    round32: 'R32',
-    round16: 'R16',
-    quarterfinal: 'QF',
-    semifinal: 'SF',
-    third_place: '3RD',
-    final: 'FINAL',
-  };
-  return labels[stage] || String(stage || 'stage').toUpperCase();
-}
-
-function scoreText(match: WorldCupMatch) {
-  if (match.homeScore === undefined || match.awayScore === undefined) return 'VS';
-  return `${match.homeScore}-${match.awayScore}`;
-}
-
-function kickoffDay(match: WorldCupMatch) {
-  const kickoff = match.kickoffBeijing || match.kickoffUtc || '';
-  const suffix = kickoff.split(',').pop()?.trim();
-  return suffix ? kickoff.replace(`, ${suffix}`, '') : kickoff || 'Kickoff pending';
-}
-
-function kickoffTime(match: WorldCupMatch) {
-  return match.kickoffBeijing.split(',').pop()?.trim() || match.kickoffBeijing;
-}
-
 function probabilityWidth(value?: number | null) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '2%';
   return `${Math.max(2, Math.min(100, Number(value) * 100))}%`;
@@ -232,47 +142,24 @@ function clampNumber(value: number, min: number, max: number) {
 function newsTags(item: WorldCupNewsItem) {
   const text = `${item.title} ${item.summary || ''}`.toLowerCase();
   const tags: Array<{ label: string; tone: string }> = [];
+  tags.push({ label: 'ONGOING', tone: 'gray' });
   if (/(alert|risk|delay|storm|injur|security|crisis)/.test(text)) tags.push({ label: 'ALERT', tone: 'red' });
+  if (/(strike|attack|war|quake|killed|evacuat|ceasefire|conflict|disaster)/.test(text)) tags.push({ label: 'ALERT', tone: 'red' });
   if (/(market|odds|price|trading|polymarket)/.test(text)) tags.push({ label: 'MARKET', tone: 'purple' });
   if (/(weather|storm|heat|rain|travel)/.test(text)) tags.push({ label: 'WEATHER', tone: 'blue' });
   if (/(squad|team|player|coach|roster)/.test(text)) tags.push({ label: 'TEAM', tone: 'gold' });
   return tags.slice(0, 2);
 }
 
-type SourceRequiredRow = {
-  source: string;
-  status: string;
-  detail: string;
-};
-
-const SOURCE_REQUIRED_LABEL = 'SOURCE REQUIRED';
-
-function SourceRequired({
-  title = SOURCE_REQUIRED_LABEL,
-  detail,
-  rows,
-}: {
-  title?: string;
-  detail: string;
-  rows?: SourceRequiredRow[];
-}) {
-  return (
-    <div className="wm-worldcup-source-required">
-      <strong>{title}</strong>
-      <p>{detail}</p>
-      {rows?.length ? (
-        <div className="wm-worldcup-source-required-list">
-          {rows.map((row) => (
-            <span key={`${row.source}-${row.status}`}>
-              <b>{row.source}</b>
-              <em>{row.status}</em>
-              <small>{row.detail}</small>
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
+function latestContentNewsFallback(content: ContentItem[]): WorldCupNewsItem[] {
+  return content.slice(0, 24).map((item, index) => ({
+    id: String(item.id || item.url || `latest-${index}`),
+    title: item.title || 'Global monitor item',
+    source: item.source || 'GLOBAL WIRE',
+    url: item.url || '#',
+    publishedAt: item.publishedAt || new Date().toISOString(),
+    summary: item.summary || '',
+  }));
 }
 
 const HIDDEN_SIGNAL_LABELS = new Set(['SEED', 'RSS', 'PRIMARY', 'LIVE', 'LOCAL DB', 'REMOTE', 'WATCH']);
@@ -640,70 +527,6 @@ function useWorldCupDashboard(marketGroups: WorldCupWorkspaceProps['marketGroups
     [basePayload, marketGroups],
   );
   return { payload, loading, error };
-}
-
-function SchedulePanel({
-  matches,
-  selectedMatchId,
-  filter,
-  now,
-  onFilter,
-  onSelectMatch,
-}: {
-  matches: WorldCupMatch[];
-  selectedMatchId: string | null;
-  filter: MatchFilter;
-  now: Date;
-  onFilter: (filter: MatchFilter) => void;
-  onSelectMatch: (match: WorldCupMatch) => void;
-}) {
-  const filtered = matches.filter((match) => {
-    if (filter === 'today') return sameBeijingDate(match, now);
-    if (filter === 'future') return new Date(match.kickoffUtc) > now;
-    if (filter === 'finished') return match.status === 'finished';
-    if (filter === 'market') return Boolean(match.marketLinked);
-    return true;
-  });
-  return (
-    <Panel
-      title="CALENDAR"
-      count={filtered.length}
-      controls={(
-        <>
-          <span className="wm-worldcup-calendar-live">实时</span>
-          <button className="wm-worldcup-calendar-tool" type="button" aria-label="Download calendar">↓</button>
-          <button className="wm-worldcup-calendar-tool summary" type="button" aria-label="Summarize calendar">✦</button>
-        </>
-      )}
-      className="wm-worldcup-panel wm-worldcup-schedule-panel"
-    >
-      <div className="wm-worldcup-filter-strip">
-        {(['all', 'today', 'future'] as MatchFilter[]).map((item) => (
-          <button className={filter === item ? 'active' : ''} key={item} type="button" onClick={() => onFilter(item)}>{item}</button>
-        ))}
-      </div>
-      <div className="wm-worldcup-match-list">
-        {filtered.slice(0, 104).map((match) => (
-          <button
-            className={`wm-worldcup-match-row ${match.id === selectedMatchId ? 'active' : ''}`}
-            key={match.id}
-            type="button"
-            onClick={() => onSelectMatch(match)}
-          >
-            <span className="wm-worldcup-match-time">
-              <strong>{kickoffTime(match)}</strong>
-              <em>{kickoffDay(match)}</em>
-            </span>
-            <span className="wm-worldcup-match-main">
-              <span className="wm-worldcup-match-kicker">#{match.fifaMatchNumber || '--'} · {match.group || stageLabel(match.stage)} · {match.round}</span>
-              <strong>{match.homeTeam} <i>{scoreText(match)}</i> {match.awayTeam}</strong>
-              <em>{match.kickoffBeijing} · {match.city} · {match.venue}</em>
-            </span>
-          </button>
-        ))}
-      </div>
-    </Panel>
-  );
 }
 
 function MatchPanel({
@@ -1365,185 +1188,6 @@ function VenueRefPanel({
       <div className="wm-worldcup-mini-feed wm-worldcup-mini-feed-compact">
         {[...refVenue.slice(0, 3), ...risk.slice(0, 2)].map((item) => <SignalRow item={item} key={item.id} />)}
       </div>
-    </Panel>
-  );
-}
-
-type WorldCupProbabilityRow = {
-  team: string;
-  poly: number | null;
-  book: number | null;
-  edge: number | null;
-  volume: number;
-};
-
-type WorldCupBookmakerProbabilityRow = {
-  key: string;
-  title: string;
-  lastUpdate: string;
-  outcomes: Array<{
-    team: string;
-    probability: number | null;
-    decimalOdds: number | null;
-  }>;
-};
-
-function percentFromUnknown(value?: number | string | null) {
-  if (value === null || value === undefined || value === '') return null;
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  return numeric >= 0 && numeric <= 1 ? numeric * 100 : numeric;
-}
-
-function outcomeMatchesTeam(name: string | undefined, team: string) {
-  const left = String(name || '').trim().toLowerCase();
-  const right = String(team || '').trim().toLowerCase();
-  if (!left || !right) return false;
-  if (team === 'Draw') return /draw|tie|\bx\b/i.test(left);
-  if (left === right) return true;
-  const leftTokens = new Set(left.split(/[^a-z0-9]+/).filter(Boolean));
-  const rightTokens = right.split(/[^a-z0-9]+/).filter((part) => part.length > 1);
-  return rightTokens.some((token) => leftTokens.has(token));
-}
-
-function snapshotOutcomePercent(snapshot: WorldCupOddsSnapshot | undefined, team: string) {
-  if (!snapshot) return null;
-  const direct = (snapshot.outcomes || []).find((outcome) => outcomeMatchesTeam(outcome.name, team));
-  if (direct) return percentFromUnknown(direct.impliedProbability ?? direct.price ?? null);
-  const probability = (snapshot.probabilities || []).find((row) => outcomeMatchesTeam(row.outcome || row.name, team));
-  return percentFromUnknown(probability?.impliedProbability ?? probability?.price ?? null);
-}
-
-function buildBookmakerProbabilityRows(snapshot: WorldCupOddsSnapshot | undefined, match: WorldCupMatch | null): WorldCupBookmakerProbabilityRow[] {
-  if (!snapshot || !match) return [];
-  const teams = [match.homeTeam, 'Draw', match.awayTeam];
-  return (snapshot.bookmakers || [])
-    .map((bookmaker, index) => {
-      const outcomes = teams.map((team) => {
-        const outcome = (bookmaker.outcomes || []).find((row) => outcomeMatchesTeam(row.name, team));
-        return {
-          team,
-          probability: percentFromUnknown(outcome?.impliedProbability ?? null),
-          decimalOdds: outcome?.decimalOdds == null ? null : Number(outcome.decimalOdds),
-        };
-      });
-      return {
-        key: bookmaker.key || `${bookmaker.title}-${index}`,
-        title: bookmaker.title || bookmaker.key || 'Book',
-        lastUpdate: bookmaker.lastUpdate || snapshot.generatedAt || '',
-        outcomes,
-      };
-    })
-    .filter((row) => row.outcomes.some((outcome) => outcome.probability != null));
-}
-
-function compactTimeLabel(value: string) {
-  if (!value) return '--';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'UTC',
-    timeZoneName: 'short',
-  }).format(date);
-}
-
-function buildWinProbabilityRows(markets: WorldCupPolymarketMarket[], odds: WorldCupOddsSnapshot[], match: WorldCupMatch | null): WorldCupProbabilityRow[] {
-  if (!match) return [];
-  const market = markets[0];
-  const bookmakerSnapshot = odds.find((snapshot) => snapshot.providerType !== 'prediction_market');
-  const predictionSnapshot = odds.find((snapshot) => snapshot.providerType === 'prediction_market' || /polymarket/i.test(snapshot.provider || snapshot.source || ''));
-  const teams = [match.homeTeam, 'Draw', match.awayTeam];
-  return teams.map((team) => {
-    const marketOutcome = market?.outcomes.find((outcome) => outcome.name.toLowerCase() === team.toLowerCase() || (team === 'Draw' && /draw/i.test(outcome.name)));
-    const poly = marketOutcome?.yesPrice == null
-      ? snapshotOutcomePercent(predictionSnapshot, team)
-      : percentFromUnknown(marketOutcome.yesPrice);
-    const book = snapshotOutcomePercent(bookmakerSnapshot, team);
-    if (poly == null && book == null) return null;
-    return {
-      team,
-      poly,
-      book,
-      edge: poly != null && book != null ? poly - book : null,
-      volume: market?.volume24h || 0,
-    };
-  }).filter((row): row is WorldCupProbabilityRow => Boolean(row));
-}
-
-function WinProbabilityPanel({
-  markets,
-  odds,
-  match,
-}: {
-  markets: WorldCupPolymarketMarket[];
-  odds: WorldCupOddsSnapshot[];
-  match: WorldCupMatch | null;
-}) {
-  const rows = buildWinProbabilityRows(markets, odds, match);
-  const bookmakerSnapshot = odds.find((snapshot) => snapshot.providerType !== 'prediction_market');
-  const bookmakerRows = buildBookmakerProbabilityRows(bookmakerSnapshot, match);
-  const outcomeLabels = match ? [match.homeTeam, 'Draw', match.awayTeam] : [];
-  const pricedRows = rows.filter((row) => row.poly != null);
-  const probabilityRows = pricedRows.length ? pricedRows : rows.filter((row) => row.book != null);
-  const leader = probabilityRows.length
-    ? probabilityRows.reduce((best, row) => ((row.poly ?? row.book) || 0) > ((best.poly ?? best.book) || 0) ? row : best, probabilityRows[0]!)
-    : null;
-  const hasPolymarket = rows.some((row) => row.poly != null);
-  const hasBook = rows.some((row) => row.book != null);
-  return (
-    <Panel title="WIN PROBABILITY" count={bookmakerRows.length || rows.length} className="wm-worldcup-panel wm-worldcup-win-probability-panel">
-      {rows.length ? (
-        <>
-          <div className="wm-worldcup-prob-headline">
-            <span><em>{hasPolymarket ? 'MARKET LEADER' : 'BOOK LEADER'}</em><strong>{leader?.team || '--'}</strong><b>{percentLabel(leader?.poly ?? leader?.book)}</b></span>
-            <span><em>{hasPolymarket && hasBook ? 'EDGE' : 'SOURCE'}</em><strong className={(leader?.edge || 0) >= 0 ? 'green' : 'red'}>{leader?.edge == null ? (hasBook ? 'BOOK' : 'POLY') : `${leader.edge >= 0 ? '+' : ''}${percentLabel(leader.edge)}`}</strong><b>{hasPolymarket && hasBook ? 'poly-book' : 'real odds'}</b></span>
-          </div>
-          <div className="wm-worldcup-prob-table">
-            <header><span>OUTCOME</span><span>POLY</span><span>BOOK</span><span>EDGE</span></header>
-            {rows.map((row) => (
-              <div key={row.team}>
-                <strong>{row.team}</strong>
-                <span><b>{percentLabel(row.poly)}</b><i style={{ width: row.poly == null ? '0%' : `${row.poly}%` }} /></span>
-                <span><b>{percentLabel(row.book)}</b><i style={{ width: row.book == null ? '0%' : `${row.book}%` }} /></span>
-                <em className={(row.edge || 0) >= 0 ? 'green' : 'red'}>{row.edge == null ? '--' : `${row.edge >= 0 ? '+' : ''}${percentLabel(row.edge)}`}</em>
-              </div>
-            ))}
-          </div>
-          {bookmakerRows.length ? (
-            <div className="wm-worldcup-bookmaker-board">
-              <header>
-                <span>BOOKMAKER</span>
-                {outcomeLabels.map((label) => <span key={label}>{label}</span>)}
-                <span>UPDATE</span>
-              </header>
-              {bookmakerRows.map((bookmaker) => (
-                <article key={bookmaker.key}>
-                  <strong title={bookmaker.title}>{bookmaker.title}</strong>
-                  {bookmaker.outcomes.map((outcome) => (
-                    <span key={outcome.team}>
-                      <b>{percentLabel(outcome.probability)}</b>
-                      <em>{outcome.decimalOdds == null || !Number.isFinite(outcome.decimalOdds) ? '--' : outcome.decimalOdds.toFixed(2)}</em>
-                      <i style={{ width: outcome.probability == null ? '0%' : `${Math.max(2, Math.min(100, outcome.probability))}%` }} />
-                    </span>
-                  ))}
-                  <time dateTime={bookmaker.lastUpdate}>{compactTimeLabel(bookmaker.lastUpdate)}</time>
-                </article>
-              ))}
-            </div>
-          ) : null}
-        </>
-      ) : (
-        <SourceRequired
-          detail="Win probabilities require real Polymarket outcome prices, bookmaker probabilities, or both. No hash/model fallback is rendered."
-          rows={[
-            { source: 'Polymarket local DB / Gamma', status: markets.length ? 'linked without prices' : 'not matched', detail: 'yesPrice per outcome' },
-            { source: 'Bookmaker odds API', status: odds.length ? 'available' : 'not connected', detail: 'impliedProbability per outcome' },
-          ]}
-        />
-      )}
     </Panel>
   );
 }
@@ -2230,12 +1874,13 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPa
     const runtimeNews = payload?.news || [];
     const contentNews = filterWorldCupNews(latestContent, selectedMatch);
     const seen = new Set<string>();
-    return [...runtimeNews, ...contentNews].filter((item) => {
+    const filteredNews = [...runtimeNews, ...contentNews].filter((item) => {
       const key = `${item.source}:${item.title}`.toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     }).slice(0, 24);
+    return filteredNews.length ? filteredNews : latestContentNewsFallback(latestContent);
   }, [latestContent, payload?.news, selectedMatch]);
 
   useEffect(() => {
@@ -2308,7 +1953,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPa
   ];
   const worldCupPanels: Record<WorldCupPanelId, ComponentChildren> = {
     calendar: (
-      <SchedulePanel
+      <CalendarPanel
         matches={payload.matches}
         selectedMatchId={selectedMatch?.id || null}
         filter={filter}
