@@ -177,6 +177,29 @@ a {
   color: var(--doc-green);
 }
 
+.docs-lang-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--doc-border-strong);
+  border-radius: 12px;
+  background: #ffffff;
+  color: #4f5853 !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  line-height: 18px;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.docs-lang-switch:hover {
+  border-color: rgba(34, 197, 94, 0.42);
+  color: var(--doc-green) !important;
+}
+
 .docs-cta {
   display: inline-flex;
   align-items: center;
