@@ -1377,6 +1377,17 @@ type WorldCupProbabilityRow = {
   volume: number;
 };
 
+type WorldCupBookmakerProbabilityRow = {
+  key: string;
+  title: string;
+  lastUpdate: string;
+  outcomes: Array<{
+    team: string;
+    probability: number | null;
+    decimalOdds: number | null;
+  }>;
+};
+
 function percentFromUnknown(value?: number | string | null) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
@@ -1401,6 +1412,42 @@ function snapshotOutcomePercent(snapshot: WorldCupOddsSnapshot | undefined, team
   if (direct) return percentFromUnknown(direct.impliedProbability ?? direct.price ?? null);
   const probability = (snapshot.probabilities || []).find((row) => outcomeMatchesTeam(row.outcome || row.name, team));
   return percentFromUnknown(probability?.impliedProbability ?? probability?.price ?? null);
+}
+
+function buildBookmakerProbabilityRows(snapshot: WorldCupOddsSnapshot | undefined, match: WorldCupMatch | null): WorldCupBookmakerProbabilityRow[] {
+  if (!snapshot || !match) return [];
+  const teams = [match.homeTeam, 'Draw', match.awayTeam];
+  return (snapshot.bookmakers || [])
+    .map((bookmaker, index) => {
+      const outcomes = teams.map((team) => {
+        const outcome = (bookmaker.outcomes || []).find((row) => outcomeMatchesTeam(row.name, team));
+        return {
+          team,
+          probability: percentFromUnknown(outcome?.impliedProbability ?? null),
+          decimalOdds: outcome?.decimalOdds == null ? null : Number(outcome.decimalOdds),
+        };
+      });
+      return {
+        key: bookmaker.key || `${bookmaker.title}-${index}`,
+        title: bookmaker.title || bookmaker.key || 'Book',
+        lastUpdate: bookmaker.lastUpdate || snapshot.generatedAt || '',
+        outcomes,
+      };
+    })
+    .filter((row) => row.outcomes.some((outcome) => outcome.probability != null));
+}
+
+function compactTimeLabel(value: string) {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+    timeZoneName: 'short',
+  }).format(date);
 }
 
 function buildWinProbabilityRows(markets: WorldCupPolymarketMarket[], odds: WorldCupOddsSnapshot[], match: WorldCupMatch | null): WorldCupProbabilityRow[] {
@@ -1436,6 +1483,9 @@ function WinProbabilityPanel({
   match: WorldCupMatch | null;
 }) {
   const rows = buildWinProbabilityRows(markets, odds, match);
+  const bookmakerSnapshot = odds.find((snapshot) => snapshot.providerType !== 'prediction_market');
+  const bookmakerRows = buildBookmakerProbabilityRows(bookmakerSnapshot, match);
+  const outcomeLabels = match ? [match.homeTeam, 'Draw', match.awayTeam] : [];
   const pricedRows = rows.filter((row) => row.poly != null);
   const probabilityRows = pricedRows.length ? pricedRows : rows.filter((row) => row.book != null);
   const leader = probabilityRows.length
@@ -1444,7 +1494,7 @@ function WinProbabilityPanel({
   const hasPolymarket = rows.some((row) => row.poly != null);
   const hasBook = rows.some((row) => row.book != null);
   return (
-    <Panel title="WIN PROBABILITY" count={rows.length} className="wm-worldcup-panel wm-worldcup-win-probability-panel">
+    <Panel title="WIN PROBABILITY" count={bookmakerRows.length || rows.length} className="wm-worldcup-panel wm-worldcup-win-probability-panel">
       {rows.length ? (
         <>
           <div className="wm-worldcup-prob-headline">
@@ -1462,6 +1512,28 @@ function WinProbabilityPanel({
               </div>
             ))}
           </div>
+          {bookmakerRows.length ? (
+            <div className="wm-worldcup-bookmaker-board">
+              <header>
+                <span>BOOKMAKER</span>
+                {outcomeLabels.map((label) => <span key={label}>{label}</span>)}
+                <span>UPDATE</span>
+              </header>
+              {bookmakerRows.map((bookmaker) => (
+                <article key={bookmaker.key}>
+                  <strong title={bookmaker.title}>{bookmaker.title}</strong>
+                  {bookmaker.outcomes.map((outcome) => (
+                    <span key={outcome.team}>
+                      <b>{percentLabel(outcome.probability)}</b>
+                      <em>{outcome.decimalOdds == null || !Number.isFinite(outcome.decimalOdds) ? '--' : outcome.decimalOdds.toFixed(2)}</em>
+                      <i style={{ width: outcome.probability == null ? '0%' : `${Math.max(2, Math.min(100, outcome.probability))}%` }} />
+                    </span>
+                  ))}
+                  <time dateTime={bookmaker.lastUpdate}>{compactTimeLabel(bookmaker.lastUpdate)}</time>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </>
       ) : (
         <SourceRequired

@@ -10977,3 +10977,94 @@
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-prob-headline strong {
   font: 700 14px/1.1 var(--wc-font-mono) !important;
 }
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board {
+  display: grid !important;
+  gap: 6px !important;
+  margin-top: 12px !important;
+  padding-top: 10px !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.14) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board header,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article {
+  display: grid !important;
+  grid-template-columns: minmax(88px, 1.05fr) repeat(3, minmax(58px, 0.78fr)) minmax(54px, 0.58fr) !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board header {
+  position: sticky !important;
+  top: -1px !important;
+  z-index: 2 !important;
+  padding: 8px 9px !important;
+  border: 1px solid rgba(148, 163, 184, 0.12) !important;
+  border-radius: 6px !important;
+  background: linear-gradient(180deg, rgba(22, 29, 36, 0.96), rgba(13, 18, 23, 0.96)) !important;
+  color: rgba(168, 179, 190, 0.82) !important;
+  font: 820 10px/1 var(--wc-font-mono) !important;
+  letter-spacing: 0.055em !important;
+  text-transform: uppercase !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article {
+  min-height: 44px !important;
+  padding: 8px 9px !important;
+  border: 1px solid rgba(148, 163, 184, 0.105) !important;
+  border-radius: 7px !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012)),
+    rgba(13, 17, 20, 0.82) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article:hover {
+  border-color: rgba(45, 212, 191, 0.26) !important;
+  background:
+    linear-gradient(180deg, rgba(45, 212, 191, 0.045), rgba(255, 255, 255, 0.012)),
+    rgba(15, 20, 24, 0.92) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article > strong {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: rgba(242, 246, 249, 0.92) !important;
+  font: 720 12px/1.15 var(--wc-font-body) !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article > span {
+  display: grid !important;
+  min-width: 0 !important;
+  gap: 3px !important;
+  color: rgba(224, 232, 240, 0.9) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article b {
+  font: 850 12px/1 var(--wc-font-mono) !important;
+  color: #e9eef3 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article time {
+  color: rgba(148, 163, 184, 0.78) !important;
+  font: 760 10px/1 var(--wc-font-mono) !important;
+  letter-spacing: 0.015em !important;
+  text-transform: uppercase !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article i {
+  display: block !important;
+  max-width: 100% !important;
+  height: 3px !important;
+  border-radius: 999px !important;
+  background: linear-gradient(90deg, #2cf7a6, #22d3ee) !important;
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.22) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article time {
+  justify-self: end !important;
+  color: rgba(148, 163, 184, 0.65) !important;
+}

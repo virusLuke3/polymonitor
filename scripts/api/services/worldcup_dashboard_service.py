@@ -931,14 +931,22 @@ def _bookmaker_event_score(match: Dict[str, Any], event: Dict[str, Any]) -> int:
     return team_score * 4 + time_score
 
 
-def _bookmaker_h2h_outcomes(match: Dict[str, Any], event: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _bookmaker_h2h_outcomes(match: Dict[str, Any], event: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     buckets: Dict[str, Dict[str, Any]] = {}
+    bookmaker_rows: List[Dict[str, Any]] = []
     for bookmaker in event.get("bookmakers") or []:
         if not isinstance(bookmaker, dict):
             continue
+        book_key = str(bookmaker.get("key") or "").strip()
         book_title = str(bookmaker.get("title") or bookmaker.get("key") or "Book").strip()
+        book_market_keys: List[str] = []
         for market in bookmaker.get("markets") or []:
-            if not isinstance(market, dict) or market.get("key") != "h2h":
+            if not isinstance(market, dict):
+                continue
+            market_key = str(market.get("key") or "").strip()
+            if market_key:
+                book_market_keys.append(market_key)
+            if market_key != "h2h":
                 continue
             raw_rows = []
             for outcome in market.get("outcomes") or []:
@@ -952,12 +960,30 @@ def _bookmaker_h2h_outcomes(match: Dict[str, Any], event: Dict[str, Any]) -> Lis
             overround = sum(1 / row["price"] for row in raw_rows)
             if overround <= 0:
                 continue
+            book_outcomes: List[Dict[str, Any]] = []
             for row in raw_rows:
                 implied = (1 / row["price"]) / overround * 100
                 bucket = buckets.setdefault(row["name"], {"prices": [], "probabilities": [], "books": []})
                 bucket["prices"].append(row["price"])
                 bucket["probabilities"].append(implied)
                 bucket["books"].append(book_title)
+                book_outcomes.append(
+                    {
+                        "name": row["name"],
+                        "decimalOdds": round(row["price"], 3),
+                        "impliedProbability": round(implied, 2),
+                    }
+                )
+            if book_outcomes:
+                bookmaker_rows.append(
+                    {
+                        "key": book_key,
+                        "title": book_title,
+                        "lastUpdate": bookmaker.get("last_update"),
+                        "markets": sorted(set(book_market_keys)),
+                        "outcomes": _ordered_outcomes(match, book_outcomes),
+                    }
+                )
     outcomes: List[Dict[str, Any]] = []
     for name, bucket in buckets.items():
         implied = _mean([float(value) for value in bucket.get("probabilities") or []])
@@ -973,7 +999,7 @@ def _bookmaker_h2h_outcomes(match: Dict[str, Any], event: Dict[str, Any]) -> Lis
                 "source": "bookmaker-consensus",
             }
         )
-    return _ordered_outcomes(match, outcomes)
+    return _ordered_outcomes(match, outcomes), bookmaker_rows
 
 
 def _fetch_bookmaker_events(ctx: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
@@ -1024,7 +1050,7 @@ def _link_bookmaker_odds(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> 
                 best_score = score
         if not best or best_score <= 0:
             continue
-        outcomes = _bookmaker_h2h_outcomes(match, best)
+        outcomes, bookmakers = _bookmaker_h2h_outcomes(match, best)
         if not outcomes:
             continue
         event_id = str(best.get("id") or best.get("commence_time") or "")
@@ -1045,6 +1071,7 @@ def _link_bookmaker_odds(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> 
                 "source": "the-odds-api",
                 "sourceUrl": str(getattr(ctx.get("SETTINGS"), "the_odds_source_url", "") or "https://the-odds-api.com/"),
                 "bookmakerCount": book_count,
+                "bookmakers": bookmakers,
                 "eventId": event_id,
                 "commenceTime": best.get("commence_time"),
                 "confidence": min(99, best_score),

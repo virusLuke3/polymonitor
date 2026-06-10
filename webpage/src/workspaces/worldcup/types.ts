@@ -153,6 +153,17 @@ export type WorldCupOddsSnapshot = {
     source?: string;
     marketUrl?: string;
   }>;
+  bookmakers?: Array<{
+    key?: string;
+    title: string;
+    lastUpdate?: string;
+    markets?: string[];
+    outcomes: Array<{
+      name: string;
+      decimalOdds?: number;
+      impliedProbability?: number;
+    }>;
+  }>;
   generatedAt: string;
   probabilities?: Array<{
     outcome?: string;
