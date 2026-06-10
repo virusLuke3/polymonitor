@@ -162,7 +162,7 @@ function strategyParametersFromRun(run: QuantBacktestRun, fallback: StrategyPara
     liquidityCapPct: runNumber(run.liquidityCapPct, fallback.liquidityCapPct),
     maxPositionNotional: runNumber(run.maxPositionNotional, fallback.maxPositionNotional),
     minFillPct: runNumber(run.minFillPct, fallback.minFillPct),
-    executionPriceMode: run.executionPriceMode === 'LEGACY' ? 'LEGACY' : fallback.executionPriceMode,
+    executionPriceMode: run.executionPriceMode === 'ORDERFILLED' || run.executionPriceMode === 'DEPTH' || run.executionPriceMode === 'LEGACY' ? run.executionPriceMode : fallback.executionPriceMode,
     latencySeconds: runNumber(run.latencySeconds, fallback.latencySeconds),
     maxBookStalenessSeconds: runNumber(run.maxBookStalenessSeconds, fallback.maxBookStalenessSeconds),
     allowPartialFill: typeof run.allowPartialFill === 'boolean' ? run.allowPartialFill : fallback.allowPartialFill,
@@ -510,7 +510,7 @@ export function StrategyTesterPanel({
         liquidityCapPct: 100,
         maxPositionNotional: 0,
         minFillPct: 0,
-        executionPriceMode: 'DEPTH',
+        executionPriceMode: 'ORDERFILLED',
         latencySeconds: 0,
         maxBookStalenessSeconds: 900,
         allowPartialFill: true,
@@ -1011,7 +1011,7 @@ export function StrategyTesterPanel({
               <label><span>Liquidity cap %</span><input type="number" min="0" max="100" step="1" value={strategyParameters.liquidityCapPct} onInput={(event) => updateParameter('liquidityCapPct', event.currentTarget.value)} /></label>
               <label><span>Max position</span><input type="number" min="0" step="1" value={strategyParameters.maxPositionNotional} onInput={(event) => updateParameter('maxPositionNotional', event.currentTarget.value)} /></label>
               <label><span>Min fill %</span><input type="number" min="0" max="100" step="1" value={strategyParameters.minFillPct} onInput={(event) => updateParameter('minFillPct', event.currentTarget.value)} /></label>
-              <label><span>Execution mode</span><select value={strategyParameters.executionPriceMode} onChange={(event) => onStrategyParametersChange({ ...strategyParameters, executionPriceMode: event.currentTarget.value === 'LEGACY' ? 'LEGACY' : 'DEPTH' })}><option value="DEPTH">Depth snapshot</option><option value="LEGACY">Legacy volume cap</option></select></label>
+              <label><span>Execution mode</span><select value={strategyParameters.executionPriceMode} onChange={(event) => onStrategyParametersChange({ ...strategyParameters, executionPriceMode: event.currentTarget.value === 'DEPTH' || event.currentTarget.value === 'LEGACY' ? event.currentTarget.value : 'ORDERFILLED' })}><option value="ORDERFILLED">OrderFilled probability</option><option value="DEPTH">CLOB depth snapshot</option><option value="LEGACY">Legacy volume cap</option></select></label>
               <label><span>Latency seconds</span><input type="number" min="0" max="3600" step="1" value={strategyParameters.latencySeconds} onInput={(event) => updateParameter('latencySeconds', event.currentTarget.value)} /></label>
               <label><span>Max book stale sec</span><input type="number" min="0" max="86400" step="1" value={strategyParameters.maxBookStalenessSeconds} onInput={(event) => updateParameter('maxBookStalenessSeconds', event.currentTarget.value)} /></label>
               <label><span>Min fill size</span><input type="number" min="0" step="1" value={strategyParameters.minFillSize} onInput={(event) => updateParameter('minFillSize', event.currentTarget.value)} /></label>

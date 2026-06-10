@@ -528,6 +528,11 @@ export type QuantBacktestTrade = {
   stalenessSeconds?: string | number | null;
   stalenessBlocks?: string | number | null;
   avgFillPrice?: string | number | null;
+  fillProbability?: string | number | null;
+  blockVolume?: string | number | null;
+  tradeCount?: string | number | null;
+  availableNotional?: string | number | null;
+  executionSource?: string | null;
   feeCost?: string | number | null;
   slippageCost?: string | number | null;
   executionCost?: string | number | null;

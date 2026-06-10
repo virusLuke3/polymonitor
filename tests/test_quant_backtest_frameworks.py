@@ -152,6 +152,48 @@ def test_builtin_framework_rejects_entry_when_min_fill_not_met():
     assert rejected["meta"]["fill_pct"] == Decimal("12.5000000000")
 
 
+def test_builtin_framework_defaults_to_orderfilled_probability_fill():
+    points = [
+        PricePoint(x_value=1, price=Decimal("0.60"), volume=Decimal("40"), trade_count=4),
+        PricePoint(x_value=2, price=Decimal("0.50"), volume=Decimal("20"), trade_count=2),
+    ]
+    run = {
+        "market_slug": "demo-market",
+        "token_side": "YES",
+        "price_source": "orderfilled_block_close",
+    }
+    params = BacktestParameters(
+        entry_threshold=Decimal("0.58"),
+        exit_threshold=Decimal("0.55"),
+        stop_loss=Decimal("0.50"),
+        take_profit=Decimal("0.50"),
+        max_holding_bars=10,
+        initial_capital=Decimal("1000"),
+        position_size=Decimal("100"),
+        liquidity_cap_pct=Decimal("50"),
+        min_fill_pct=Decimal("0"),
+    )
+
+    result = run_framework_backtest(
+        "builtin",
+        points,
+        run,
+        params,
+        builtin_simulator=simulate_strategy,
+        metrics_builder=lambda trades, equity, price_points, parameters: [],
+    )
+
+    open_event = next(event for event in result["events"] if event["event_type"] == "open")
+    trade = result["trades"][0]
+    assert open_event["meta"]["execution_source"] == "orderfilled_volume"
+    assert open_event["meta"]["fill_probability"] == Decimal("20.0000000000")
+    assert open_event["meta"]["block_volume"] == Decimal("40")
+    assert open_event["meta"]["trade_count"] == 4
+    assert trade["execution_source"] == "orderfilled_volume"
+    assert Decimal("59.9") < trade["fill_probability"] < Decimal("60.1")
+    assert trade["fill_status"] == "PARTIAL"
+
+
 def test_builtin_framework_uses_clob_snapshot_depth_for_entry_fill():
     points = [
         PricePoint(x_value=100, price=Decimal("0.60"), volume=Decimal("10000"), timestamp=_dt("2026-06-10T00:00:30Z")),
@@ -190,6 +232,7 @@ def test_builtin_framework_uses_clob_snapshot_depth_for_entry_fill():
         position_size=Decimal("100"),
         liquidity_cap_pct=Decimal("100"),
         max_book_staleness_seconds=Decimal("900"),
+        execution_price_mode="DEPTH",
     )
 
     result = run_framework_backtest(
@@ -233,7 +276,7 @@ def test_data_quality_report_flags_gaps_and_jumps():
     assert report["gap_count"] == 1
     assert report["jump_count"] == 1
     assert len(report["data_version"]) == 20
-    assert report["version_basis"] == "x_value:price:volume"
+    assert report["version_basis"] == "x_value:price:volume:trade_count"
     assert metrics[0]["metric_key"] == "data_quality_status"
     assert metrics[0]["status"] == "negative"
     version_metric = next(metric for metric in metrics if metric["metric_key"] == "data_version")

@@ -33,6 +33,7 @@ def main() -> None:
             x_value=int(row["x_value"]),
             price=Decimal(str(row["price"])),
             volume=Decimal(str(row.get("volume") or "0")),
+            trade_count=int(row.get("trade_count") or 0),
             timestamp=_datetime_or_none(row.get("timestamp")),
         )
         for row in payload["points"]
@@ -50,7 +51,7 @@ def main() -> None:
         liquidity_cap_pct=Decimal(str(payload["params"].get("liquidity_cap_pct", "100"))),
         max_position_notional=Decimal(str(payload["params"].get("max_position_notional", "0"))),
         min_fill_pct=Decimal(str(payload["params"].get("min_fill_pct", "0"))),
-        execution_price_mode=str(payload["params"].get("execution_price_mode", "DEPTH")),
+        execution_price_mode=str(payload["params"].get("execution_price_mode", "ORDERFILLED")),
         latency_seconds=Decimal(str(payload["params"].get("latency_seconds", "0"))),
         max_book_staleness_seconds=Decimal(str(payload["params"].get("max_book_staleness_seconds", "900"))),
         allow_partial_fill=bool(payload["params"].get("allow_partial_fill", True)),

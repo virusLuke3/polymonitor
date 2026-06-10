@@ -22,7 +22,7 @@ export type StrategyParameters = {
   liquidityCapPct: number;
   maxPositionNotional: number;
   minFillPct: number;
-  executionPriceMode: 'DEPTH' | 'LEGACY';
+  executionPriceMode: 'ORDERFILLED' | 'DEPTH' | 'LEGACY';
   latencySeconds: number;
   maxBookStalenessSeconds: number;
   allowPartialFill: boolean;
@@ -109,6 +109,11 @@ export type Trade = {
   stalenessSeconds?: number;
   stalenessBlocks?: number;
   avgFillPrice?: number;
+  fillProbability?: number;
+  blockVolume?: number;
+  tradeCount?: number;
+  availableNotional?: number;
+  executionSource?: string;
   pnl: number;
   pnlPct: number;
   holdingTime: string;

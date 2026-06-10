@@ -44,7 +44,7 @@ class BacktestParameters:
     liquidity_cap_pct: Decimal = Decimal("100")
     max_position_notional: Decimal = Decimal("0")
     min_fill_pct: Decimal = Decimal("0")
-    execution_price_mode: str = "DEPTH"
+    execution_price_mode: str = "ORDERFILLED"
     latency_seconds: Decimal = Decimal("0")
     max_book_staleness_seconds: Decimal = Decimal("900")
     allow_partial_fill: bool = True
@@ -60,6 +60,7 @@ class PricePoint:
     x_value: int
     price: Decimal
     volume: Decimal
+    trade_count: int = 0
     timestamp: datetime | None = None
 
 
@@ -79,6 +80,10 @@ class OpenPosition:
     staleness_seconds: Decimal | None = None
     staleness_blocks: int | None = None
     avg_fill_price: Decimal | None = None
+    fill_probability: Decimal = Decimal("0")
+    block_volume: Decimal = Decimal("0")
+    trade_count: int = 0
+    available_notional: Decimal = Decimal("0")
 
 
 def decimal_or_default(value: Any, default: Decimal) -> Decimal:
@@ -141,7 +146,7 @@ def parse_parameters(payload: dict[str, Any]) -> BacktestParameters:
         liquidity_cap_pct=decimal_or_default(payload.get("liquidity_cap_pct", payload.get("liquidityCapPct")), Decimal("100")),
         max_position_notional=decimal_or_default(payload.get("max_position_notional", payload.get("maxPositionNotional")), Decimal("0")),
         min_fill_pct=decimal_or_default(payload.get("min_fill_pct", payload.get("minFillPct")), Decimal("0")),
-        execution_price_mode=str(payload.get("execution_price_mode", payload.get("executionPriceMode", "DEPTH")) or "DEPTH").upper(),
+        execution_price_mode=str(payload.get("execution_price_mode", payload.get("executionPriceMode", "ORDERFILLED")) or "ORDERFILLED").upper(),
         latency_seconds=decimal_or_default(payload.get("latency_seconds", payload.get("latencySeconds")), Decimal("0")),
         max_book_staleness_seconds=decimal_or_default(payload.get("max_book_staleness_seconds", payload.get("maxBookStalenessSeconds")), Decimal("900")),
         allow_partial_fill=bool_or_default(payload.get("allow_partial_fill", payload.get("allowPartialFill")), True),
@@ -249,7 +254,7 @@ def _execution_context_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(context, dict):
         context = {}
     context.setdefault("model", "fixed_threshold_v1")
-    context.setdefault("fill_model", "close_price_with_bps_and_volume_cap")
+    context.setdefault("fill_model", "orderfilled_probability_with_participation_cap")
     return context
 
 
@@ -495,7 +500,7 @@ def fetch_price_points(conn: Any, run: dict[str, Any], *, limit: int = 25000) ->
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT timestamp AS x_value, price, 0::numeric AS volume, ts_minute AS block_timestamp
+                SELECT timestamp AS x_value, price, 0::numeric AS volume, 0::bigint AS trade_count, ts_minute AS block_timestamp
                 FROM quant.market_token_frontend_price_1m
                 WHERE {" AND ".join(filters)}
                 ORDER BY timestamp ASC
@@ -521,7 +526,7 @@ def fetch_price_points(conn: Any, run: dict[str, Any], *, limit: int = 25000) ->
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            SELECT block_number AS x_value, close_price AS price, volume, block_timestamp
+            SELECT block_number AS x_value, close_price AS price, volume, trade_count, block_timestamp
             FROM quant.market_token_block_close
             WHERE {" AND ".join(filters)}
             ORDER BY block_number ASC
@@ -634,6 +639,10 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
                     staleness_seconds=fill.get("staleness_seconds"),
                     staleness_blocks=fill.get("staleness_blocks"),
                     avg_fill_price=fill.get("avg_fill_price"),
+                    fill_probability=fill.get("fill_probability", Decimal("0")),
+                    block_volume=fill.get("block_volume", point.volume),
+                    trade_count=int(fill.get("trade_count", point.trade_count) or 0),
+                    available_notional=fill.get("available_notional", Decimal("0")),
                 )
                 events.append(_event(
                     "open",
@@ -728,6 +737,13 @@ def build_metrics(
     ])
     partial_trades = len([trade for trade in trades if str(trade.get("fill_status") or "").upper() == "PARTIAL"])
     snapshot_trades = len([trade for trade in trades if trade.get("book_snapshot_id") is not None])
+    orderfilled_trades = len([trade for trade in trades if str(trade.get("execution_source") or "").lower() == "orderfilled_volume"])
+    fill_probability_values = [
+        Decimal(str(trade.get("fill_probability") or 0))
+        for trade in trades
+        if trade.get("fill_probability") is not None
+    ]
+    avg_fill_probability = sum(fill_probability_values, Decimal("0")) / Decimal(max(1, len(fill_probability_values)))
     stale_trade_count = len([
         trade for trade in trades
         if trade.get("staleness_seconds") is not None
@@ -743,6 +759,31 @@ def build_metrics(
     settlement_pnl = net if points[-1].price in (Decimal("0"), Decimal("1")) else Decimal("0")
     resolved_pnl = settlement_pnl
     unrealized_pnl = net - resolved_pnl
+    mode = str(params.execution_price_mode or "ORDERFILLED").upper()
+    if mode == "DEPTH":
+        mode_delta = "depth replay"
+        snapshot_value = _ratio(snapshot_trades, len(trades)) * Decimal("100")
+        snapshot_formatted = f"{snapshot_value:.1f}%"
+        snapshot_delta = f"{snapshot_trades} / {len(trades)} trades"
+        snapshot_status = "positive" if snapshot_trades == len(trades) and trades else "negative" if trades else "neutral"
+        snapshot_tooltip = "Closed trades linked to persisted historical CLOB snapshots"
+        stale_status = "negative" if stale_trade_count else "positive"
+    elif mode == "ORDERFILLED":
+        mode_delta = "historical fills"
+        snapshot_value = Decimal("0")
+        snapshot_formatted = "not required"
+        snapshot_delta = f"{orderfilled_trades} orderfilled trades"
+        snapshot_status = "neutral"
+        snapshot_tooltip = "OrderFilled execution uses historical traded volume and participation caps; CLOB snapshots are optional, not required"
+        stale_status = "neutral"
+    else:
+        mode_delta = "legacy"
+        snapshot_value = Decimal("0")
+        snapshot_formatted = "not required"
+        snapshot_delta = "legacy mode"
+        snapshot_status = "neutral"
+        snapshot_tooltip = "Legacy execution does not require persisted CLOB snapshots"
+        stale_status = "neutral"
     rows = [
         ("net_profit", "Net Profit", "overview", net, _money(net), _percent(total_return), _status(net), "Closed realized strategy PnL"),
         ("total_return", "Total Return", "overview", total_return, _percent(total_return), "capital", _status(total_return), "Return on initial capital"),
@@ -760,10 +801,11 @@ def build_metrics(
         ("capped_trades", "Capped Trades", "prediction", Decimal(capped_trades), str(capped_trades), f"{_money(avg_notional)} avg fill", "negative" if capped_trades else "positive", "Trades whose filled notional was reduced by volume/liquidity constraints"),
         ("min_fill_pct", "Min Fill", "prediction", params.min_fill_pct, f"{params.min_fill_pct:.1f}%", "entry gate", "neutral", "Entry signals below this fill percentage are rejected instead of partially filled"),
         ("max_position_notional", "Max Position", "prediction", params.max_position_notional, _money(params.max_position_notional) if params.max_position_notional > 0 else "off", "per trade", "neutral", "Maximum requested USDC notional per open position"),
-        ("execution_mode", "Execution Mode", "prediction", Decimal("0"), params.execution_price_mode, "depth replay" if params.execution_price_mode == "DEPTH" else "legacy", "neutral", "Fill model selected for this run"),
-        ("snapshot_fill_coverage", "Snapshot Fill Coverage", "prediction", _ratio(snapshot_trades, len(trades)) * Decimal("100"), f"{_ratio(snapshot_trades, len(trades)) * Decimal('100'):.1f}%", f"{snapshot_trades} / {len(trades)} trades", "positive" if snapshot_trades == len(trades) and trades else "negative" if trades else "neutral", "Closed trades linked to persisted historical CLOB snapshots"),
-        ("partial_fill_count", "Partial Fills", "prediction", Decimal(partial_trades), str(partial_trades), "depth constrained", "negative" if partial_trades else "positive", "Closed trades where the requested order could only partially fill"),
-        ("stale_book_trade_count", "Stale Book Trades", "prediction", Decimal(stale_trade_count), str(stale_trade_count), f"limit {params.max_book_staleness_seconds}s", "negative" if stale_trade_count else "positive", "Closed trades whose book staleness exceeded the configured limit"),
+        ("execution_mode", "Execution Mode", "prediction", Decimal("0"), mode, mode_delta, "neutral", "Fill model selected for this run"),
+        ("avg_fill_probability", "Avg Fill Probability", "prediction", avg_fill_probability, f"{avg_fill_probability:.1f}%", "orderfilled participation" if mode == "ORDERFILLED" else "fills", "neutral", "Deterministic expected fill probability from the execution model, not a random draw"),
+        ("snapshot_fill_coverage", "Snapshot Fill Coverage", "prediction", snapshot_value, snapshot_formatted, snapshot_delta, snapshot_status, snapshot_tooltip),
+        ("partial_fill_count", "Partial Fills", "prediction", Decimal(partial_trades), str(partial_trades), "liquidity constrained", "negative" if partial_trades else "positive", "Closed trades where the requested order could only partially fill"),
+        ("stale_book_trade_count", "Stale Book Trades", "prediction", Decimal(stale_trade_count), str(stale_trade_count), f"limit {params.max_book_staleness_seconds}s", stale_status, "Closed trades whose book staleness exceeded the configured limit"),
         ("avg_book_staleness", "Avg Book Staleness", "prediction", avg_book_staleness, f"{avg_book_staleness:.1f}s", "execution snapshots", "neutral", "Average age of the book snapshots used by closed trades"),
         ("fill_coverage", "Fill Coverage", "prediction", fill_coverage, f"{fill_coverage:.1f}%", "price rows", "positive", "Usable fill price coverage"),
         ("stale_price_ratio", "Stale Price Ratio", "prediction", stale_ratio, f"{stale_ratio:.2f}%", "exact rows", "neutral", "Share of stale/forward-filled prices"),
@@ -840,7 +882,7 @@ def build_data_quality_report(points: list[PricePoint], run: dict[str, Any]) -> 
         "x_axis": "block_number" if run.get("price_source") == "orderfilled_block_close" else "timestamp",
         "data_version": data_version,
         "checksum": data_version,
-        "version_basis": "x_value:price:volume",
+        "version_basis": "x_value:price:volume:trade_count",
         "rows": len(points),
         "first_x": first_x,
         "last_x": last_x,
@@ -872,6 +914,8 @@ def _points_data_version(points: list[PricePoint], run: dict[str, Any]) -> str:
         digest.update(_decimal_text(point.price).encode("ascii"))
         digest.update(b":")
         digest.update(_decimal_text(point.volume).encode("ascii"))
+        digest.update(b":")
+        digest.update(str(point.trade_count).encode("ascii"))
         digest.update(b";")
     return digest.hexdigest()[:20]
 
@@ -997,10 +1041,11 @@ def replace_backtest_results(conn: Any, run_id: int, result: dict[str, Any]) -> 
                 requested_notional, filled_notional, fill_pct,
                 requested_size, filled_size, unfilled_size, fill_status,
                 book_snapshot_id, snapshot_version, staleness_seconds, staleness_blocks,
-                avg_fill_price, fee_cost, slippage_cost, execution_cost,
+                avg_fill_price, fill_probability, block_volume, trade_count,
+                available_notional, execution_source, fee_cost, slippage_cost, execution_cost,
                 pnl, pnl_pct, holding_bars, exit_reason
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
                 (
@@ -1028,6 +1073,11 @@ def replace_backtest_results(conn: Any, run_id: int, result: dict[str, Any]) -> 
                     row.get("staleness_seconds"),
                     row.get("staleness_blocks"),
                     row.get("avg_fill_price", row.get("exit_price")),
+                    row.get("fill_probability", Decimal("0")),
+                    row.get("block_volume", Decimal("0")),
+                    row.get("trade_count", 0),
+                    row.get("available_notional", Decimal("0")),
+                    row.get("execution_source", "unknown"),
                     row.get("fee_cost", Decimal("0")),
                     row.get("slippage_cost", Decimal("0")),
                     row.get("execution_cost", Decimal("0")),
@@ -1096,7 +1146,7 @@ def _get_parameters(conn: Any, run_id: int) -> BacktestParameters:
         liquidity_cap_pct=row.get("liquidity_cap_pct", Decimal("100")),
         max_position_notional=row.get("max_position_notional", Decimal("0")),
         min_fill_pct=row.get("min_fill_pct", Decimal("0")),
-        execution_price_mode=row.get("execution_price_mode", "DEPTH"),
+        execution_price_mode=row.get("execution_price_mode", "ORDERFILLED"),
         latency_seconds=row.get("latency_seconds", Decimal("0")),
         max_book_staleness_seconds=row.get("max_book_staleness_seconds", Decimal("900")),
         allow_partial_fill=bool(row.get("allow_partial_fill", True)),
@@ -1126,6 +1176,7 @@ def _price_point(row: dict[str, Any]) -> PricePoint:
         x_value=int(row["x_value"]),
         price=Decimal(str(row["price"])),
         volume=Decimal(str(row.get("volume") or 0)),
+        trade_count=int(row.get("trade_count") or 0),
         timestamp=_datetime_or_none(row.get("block_timestamp") or row.get("timestamp")),
     )
 
@@ -1202,6 +1253,11 @@ def _close_trade(
         "snapshot_version": exit_fill.get("snapshot_version") if exit_fill else position.snapshot_version,
         "staleness_seconds": exit_fill.get("staleness_seconds") if exit_fill else position.staleness_seconds,
         "staleness_blocks": exit_fill.get("staleness_blocks") if exit_fill else position.staleness_blocks,
+        "fill_probability": exit_fill.get("fill_probability") if exit_fill else position.fill_probability,
+        "block_volume": exit_fill.get("block_volume") if exit_fill else position.block_volume,
+        "trade_count": exit_fill.get("trade_count") if exit_fill else position.trade_count,
+        "available_notional": exit_fill.get("available_notional") if exit_fill else position.available_notional,
+        "execution_source": exit_fill.get("execution_source") if exit_fill else "unknown",
         "avg_fill_price": exit_price,
         "pnl": pnl.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
         "pnl_pct": _pct(pnl, notional),
@@ -1276,7 +1332,10 @@ def _fill_decision(
     *,
     target_size: Decimal | None = None,
 ) -> dict[str, Any]:
-    if str(params.execution_price_mode or "DEPTH").upper() == "LEGACY":
+    mode = str(params.execution_price_mode or "ORDERFILLED").upper()
+    if mode == "ORDERFILLED":
+        return _orderfilled_fill_decision(params, point, side, target_size=target_size)
+    if mode == "LEGACY":
         fill = _legacy_fill_decision(params, point.price, point.volume)
         if target_size is not None and fill["size"] > target_size:
             fill = {**fill, "size": target_size, "filled_notional": (target_size * point.price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)}
@@ -1308,6 +1367,98 @@ def _fill_decision(
     return _fill_result_to_engine(fill, point.price, params, side)
 
 
+def _orderfilled_fill_decision(
+    params: BacktestParameters,
+    point: PricePoint,
+    side: str,
+    *,
+    target_size: Decimal | None = None,
+) -> dict[str, Any]:
+    price = Decimal(str(point.price))
+    exec_price = _execution_price(price, params, "entry" if side.startswith("BUY") else "exit")
+    target_notional = _target_notional(params)
+    if target_size is not None:
+        requested_size = max(Decimal("0"), Decimal(str(target_size)))
+        target_notional = (requested_size * max(exec_price, Decimal("0.0000000001"))).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    else:
+        requested_size = (target_notional / max(exec_price, Decimal("0.0000000001"))).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+
+    cap_pct = max(Decimal("0"), Decimal(str(params.liquidity_cap_pct)))
+    min_fill_pct = max(Decimal("0"), Decimal(str(params.min_fill_pct)))
+    block_volume = max(Decimal("0"), Decimal(str(point.volume or 0)))
+    available_notional = (block_volume * cap_pct / Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    fill_probability = min(Decimal("100"), _pct(available_notional, target_notional)) if target_notional else Decimal("0")
+    empty = {
+        "requested_notional": target_notional,
+        "filled_notional": Decimal("0"),
+        "fill_pct": Decimal("0"),
+        "fill_probability": fill_probability,
+        "size": Decimal("0"),
+        "liquidity_cap_pct": cap_pct,
+        "min_fill_pct": min_fill_pct,
+        "partial_fill": False,
+        "rejected": True,
+        "fill_status": "REJECTED",
+        "requested_size": requested_size,
+        "filled_size": Decimal("0"),
+        "unfilled_size": requested_size,
+        "block_volume": block_volume,
+        "trade_count": int(point.trade_count or 0),
+        "available_notional": available_notional,
+        "execution_source": "orderfilled_volume",
+        "notes": ["no_orderfilled_volume"] if block_volume <= 0 else [],
+    }
+    if price <= 0 or exec_price <= 0 or target_notional <= 0 or cap_pct <= 0:
+        return empty
+    if available_notional <= 0:
+        return empty
+
+    if params.allow_partial_fill:
+        filled_notional = min(target_notional, available_notional)
+    else:
+        if available_notional < target_notional:
+            return {**empty, "notes": ["insufficient_orderfilled_volume_for_full_fill"]}
+        filled_notional = target_notional
+    filled_notional = filled_notional.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    filled_size = (filled_notional / exec_price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    min_size_from_pct = requested_size * min_fill_pct / Decimal("100")
+    min_required_size = max(Decimal(str(params.min_fill_size)), min_size_from_pct).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    fill_pct = _pct(filled_notional, target_notional) if target_notional else Decimal("0")
+    if filled_size <= 0 or filled_size < min_required_size:
+        return {
+            **empty,
+            "filled_notional": filled_notional,
+            "fill_pct": fill_pct,
+            "filled_size": filled_size,
+            "unfilled_size": max(Decimal("0"), requested_size - filled_size),
+            "notes": ["below_min_fill_threshold"],
+        }
+    fill_status = "FILLED" if filled_notional >= target_notional else "PARTIAL"
+    price_key = "entry_price" if side.startswith("BUY") else "exit_price"
+    return {
+        "requested_notional": target_notional,
+        "filled_notional": filled_notional,
+        "fill_pct": fill_pct,
+        "fill_probability": fill_probability,
+        "size": filled_size,
+        price_key: exec_price,
+        "avg_fill_price": exec_price,
+        "liquidity_cap_pct": cap_pct,
+        "min_fill_pct": min_fill_pct,
+        "partial_fill": fill_status == "PARTIAL",
+        "rejected": False,
+        "fill_status": fill_status,
+        "requested_size": requested_size,
+        "filled_size": filled_size,
+        "unfilled_size": max(Decimal("0"), requested_size - filled_size).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "block_volume": block_volume,
+        "trade_count": int(point.trade_count or 0),
+        "available_notional": available_notional,
+        "execution_source": "orderfilled_volume",
+        "notes": ["expected_fill_from_historical_orderfilled_volume"],
+    }
+
+
 def _fill_result_to_engine(fill: FillResult, signal_price: Decimal, params: BacktestParameters, side: str) -> dict[str, Any]:
     filled_notional = fill.filled_notional
     size = fill.filled_size
@@ -1317,6 +1468,7 @@ def _fill_result_to_engine(fill: FillResult, signal_price: Decimal, params: Back
         "requested_notional": requested_notional,
         "filled_notional": filled_notional,
         "fill_pct": fill.fill_pct,
+        "fill_probability": fill.fill_pct,
         "size": size,
         price_key: fill.avg_fill_price if fill.avg_fill_price > 0 else None,
         "avg_fill_price": fill.avg_fill_price,
@@ -1335,6 +1487,9 @@ def _fill_result_to_engine(fill: FillResult, signal_price: Decimal, params: Back
         "fee_cost": fill.fee,
         "slippage_cost": fill.slippage,
         "execution_source": "clob_depth" if fill.snapshot_id else "no_book",
+        "block_volume": Decimal("0"),
+        "trade_count": 0,
+        "available_notional": filled_notional,
         "best_bid": fill.best_bid,
         "best_ask": fill.best_ask,
         "spread": fill.spread,
@@ -1372,6 +1527,7 @@ def _legacy_fill_decision(params: BacktestParameters, price: Decimal, volume: De
             "filled_notional": filled_notional,
             "fill_pct": fill_pct,
             "partial_fill": filled_notional > 0 and filled_notional < target_notional,
+            "fill_probability": fill_pct,
             "rejected": True,
         }
     size = (filled_notional / price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
@@ -1379,10 +1535,19 @@ def _legacy_fill_decision(params: BacktestParameters, price: Decimal, volume: De
         "requested_notional": target_notional,
         "filled_notional": filled_notional.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
         "fill_pct": fill_pct,
+        "fill_probability": fill_pct,
         "size": size,
         "liquidity_cap_pct": cap_pct,
         "min_fill_pct": min_fill_pct,
         "partial_fill": filled_notional < target_notional,
+        "fill_status": "FILLED" if filled_notional >= target_notional else "PARTIAL",
+        "requested_size": size,
+        "filled_size": size,
+        "unfilled_size": Decimal("0"),
+        "block_volume": max(Decimal("0"), Decimal(str(volume or 0))),
+        "trade_count": 0,
+        "available_notional": filled_notional.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "execution_source": "legacy_volume_cap",
         "rejected": False,
     }
 
