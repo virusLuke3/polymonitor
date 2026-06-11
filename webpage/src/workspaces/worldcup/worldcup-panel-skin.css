@@ -3,6 +3,6 @@
  *
  * This file is still imported by the app base layer for backward compatibility,
  * but the active WorldCup UI now lives under styles/layout.css and
- * styles/panels/*.css, with the final panel density lock in
- * styles/panels/worldmonitor-density.css.
+ * styles/panels/*.css, with the final panel chrome lock in
+ * styles/panels/worldmonitor-chrome.css.
  */
