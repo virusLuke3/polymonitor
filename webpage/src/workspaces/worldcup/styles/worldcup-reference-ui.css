@@ -1,7 +1,7 @@
 .wm-worldcup-dashboard.wm-worldcup-v5 {
   --wc-font-terminal: "SF Mono", "Monaco", "Cascadia Code", "Fira Code", "DejaVu Sans Mono", "Liberation Mono", monospace;
   --wc-font-cn: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --wc-font-ui: var(--wc-font-cn);
+  --wc-font-ui: var(--wc-font-terminal);
   --wc-bg: #080a0d;
   --wc-panel-bg: #111315;
   --wc-panel-elevated: #17191c;
