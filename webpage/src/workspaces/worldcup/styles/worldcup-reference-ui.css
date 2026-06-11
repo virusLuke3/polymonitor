@@ -19,8 +19,3 @@
   --wc-orange: #ff8b2b;
   --wc-blue: #58a6ff;
 }
-
-.wm-worldcup-dashboard.wm-worldcup-v5 > .wm-worldcup-hero,
-.wm-worldcup-dashboard.wm-worldcup-v5 > .wm-worldcup-map-section {
-  display: none !important;
-}
