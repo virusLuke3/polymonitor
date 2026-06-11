@@ -21,7 +21,9 @@ import type {
   PriceSummary,
   QuantBacktestCreatePayload,
   QuantBacktestEquityPoint,
+  QuantBacktestLedgerRow,
   QuantBacktestMetric,
+  QuantBacktestOrder,
   QuantBacktestRun,
   QuantBacktestTrade,
   QuantBlockClosePoint,
@@ -472,6 +474,14 @@ export function fetchQuantBacktestTrades(runId: number, limit = 10000) {
   return apiGetWithTimeout<QuantListPayload<QuantBacktestTrade>>(`/quant/backtest-runs/${runId}/trades?limit=${limit}`, 20000);
 }
 
+export function fetchQuantBacktestOrders(runId: number, limit = 10000) {
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestOrder>>(`/quant/backtest-runs/${runId}/orders?limit=${limit}`, 20000);
+}
+
+export function fetchQuantBacktestLedger(runId: number, limit = 10000) {
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestLedgerRow>>(`/quant/backtest-runs/${runId}/ledger?limit=${limit}`, 20000);
+}
+
 export function fetchQuantBacktestEquity(runId: number, limit = 25000) {
   return apiGetWithTimeout<QuantListPayload<QuantBacktestEquityPoint>>(`/quant/backtest-runs/${runId}/equity?limit=${limit}`, 20000);
 }
@@ -645,7 +655,7 @@ export function fetchRuntimeAlpha(limit = 8) {
 }
 
 export function fetchRuntimePolybeats(limit = 8) {
-  return apiGet<RuntimePolybeatsPayload>(`/runtime/signals/polybeats?limit=${limit}`);
+  return apiGet<RuntimePolybeatsPayload>(`/runtime/panels/polybeats-feed?limit=${limit}`);
 }
 
 export function fetchRuntimeNewMarketSignals(limit = 12) {

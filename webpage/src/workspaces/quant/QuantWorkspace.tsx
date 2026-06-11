@@ -5,7 +5,9 @@ import {
   fetchMarketLobByToken,
   fetchMarketLobSnapshotsByToken,
   fetchQuantBacktestEquity,
+  fetchQuantBacktestLedger,
   fetchQuantBacktestMetrics,
+  fetchQuantBacktestOrders,
   fetchQuantBacktestRun,
   fetchQuantBacktestTrades,
   fetchQuantBuildStatus,
@@ -1058,13 +1060,15 @@ export function QuantWorkspace() {
     try {
       const runResponse = await fetchQuantBacktestRun(runId);
       const run = runResponse.item;
-      const [metricsResult, equityResult, tradesResult] = await Promise.all([
+      const [metricsResult, equityResult, tradesResult, ordersResult, ledgerResult] = await Promise.all([
         fetchQuantBacktestMetrics(run.runId),
         fetchQuantBacktestEquity(run.runId),
         fetchQuantBacktestTrades(run.runId),
+        fetchQuantBacktestOrders(run.runId),
+        fetchQuantBacktestLedger(run.runId),
       ]);
       const runPriceSource = uiPriceSource(run.priceSource);
-      const result = backtestApiToResult(run, metricsResult.items || [], equityResult.items || [], tradesResult.items || [], runPriceSource);
+      const result = backtestApiToResult(run, metricsResult.items || [], equityResult.items || [], tradesResult.items || [], runPriceSource, ordersResult.items || [], ledgerResult.items || []);
       setBacktestResult(result);
       setSelectedTradeId(result.trades[0]?.id ?? null);
       setBacktestStatus(run.status || 'loaded');
@@ -1271,12 +1275,14 @@ export function QuantWorkspace() {
       if (['queued', 'running'].includes(completedRun.status)) {
         throw new Error(`Backtest ${completedRun.status}; try refresh in a moment`);
       }
-      const [metricsResult, equityResult, tradesResult] = await Promise.all([
+      const [metricsResult, equityResult, tradesResult, ordersResult, ledgerResult] = await Promise.all([
         fetchQuantBacktestMetrics(completedRun.runId),
         fetchQuantBacktestEquity(completedRun.runId),
         fetchQuantBacktestTrades(completedRun.runId),
+        fetchQuantBacktestOrders(completedRun.runId),
+        fetchQuantBacktestLedger(completedRun.runId),
       ]);
-      const result = backtestApiToResult(completedRun, metricsResult.items || [], equityResult.items || [], tradesResult.items || [], priceSource);
+      const result = backtestApiToResult(completedRun, metricsResult.items || [], equityResult.items || [], tradesResult.items || [], priceSource, ordersResult.items || [], ledgerResult.items || []);
       setBacktestResult(result);
       setSelectedTradeId(result.trades[0]?.id ?? null);
       setBacktestStatus(completedRun.status);

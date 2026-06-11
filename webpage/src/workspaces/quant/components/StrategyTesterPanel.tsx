@@ -29,7 +29,9 @@ const TESTER_TABS: Array<[TesterTab, string]> = [
   ['overview', 'Overview'],
   ['parameters', 'Parameters'],
   ['performance', 'Performance'],
+  ['orders', 'Orders'],
   ['trades', 'Trades'],
+  ['ledger', 'Ledger'],
   ['equity', 'Equity Curve'],
   ['drawdown', 'Drawdown'],
   ['runs', 'Runs'],
@@ -312,6 +314,8 @@ export function StrategyTesterPanel({
   const hasCompletedRun = result.runId > 0 && result.metrics.length > 0;
   const summaryRows = useMemo(() => result.metrics.slice(0, 6), [result.metrics]);
   const latestTrade = result.trades[result.trades.length - 1];
+  const latestOrder = result.orders[result.orders.length - 1];
+  const latestLedger = result.ledger[result.ledger.length - 1];
   const selectedTrade = result.trades.find((trade) => trade.id === selectedTradeId) || latestTrade;
   const propertyValue = (label: string) => {
     const target = label.toLowerCase();
@@ -590,7 +594,7 @@ export function StrategyTesterPanel({
       key: 'single',
       label: 'Single Outcome',
       status: hasCompletedRun ? backtestStatus || 'loaded' : backtestStatus || 'idle',
-      detail: hasCompletedRun ? `#${result.runId} · ${result.trades.length.toLocaleString('en-US')} trades` : 'current selected outcome',
+      detail: hasCompletedRun ? `#${result.runId} · ${result.orders.length.toLocaleString('en-US')} orders · ${result.trades.length.toLocaleString('en-US')} trades` : 'current selected outcome',
       rows: rowCount,
       actionLabel: hasCompletedRun ? 'Rerun' : 'Run',
       action: onRefresh,
@@ -626,7 +630,7 @@ export function StrategyTesterPanel({
       action: onWalkForwardBacktest,
       disabled: rowCount <= 0 || walkForwardStatus === 'running',
     },
-  ]), [backtestStatus, batchRows, batchStatus, hasCompletedRun, onBatchBacktest, onRefresh, onSplitBacktest, onWalkForwardBacktest, result.runId, result.trades.length, rowCount, splitRows, splitStatus, walkForwardRows, walkForwardStatus]);
+  ]), [backtestStatus, batchRows, batchStatus, hasCompletedRun, onBatchBacktest, onRefresh, onSplitBacktest, onWalkForwardBacktest, result.orders.length, result.runId, result.trades.length, rowCount, splitRows, splitStatus, walkForwardRows, walkForwardStatus]);
 
   return (
     <section className="qtv-bottom-panel">
@@ -1083,6 +1087,65 @@ export function StrategyTesterPanel({
         />
       ) : null}
 
+      {toolTab === 'tester' && testerTab === 'orders' ? (
+        <div className="qtv-table-wrap qtv-orders-table-wrap">
+          <div className="qtv-filter-strip">
+            <span>{result.orders.length.toLocaleString('en-US')} orders</span>
+            <span>{result.orders.filter((order) => order.status === 'FILLED').length.toLocaleString('en-US')} filled</span>
+            <span>{result.orders.filter((order) => order.status === 'PARTIAL_FILLED').length.toLocaleString('en-US')} partial</span>
+            <span>{result.orders.filter((order) => order.status === 'NO_FILL').length.toLocaleString('en-US')} no fill</span>
+            <span>{latestOrder ? `latest ${latestOrder.status}` : 'no order lifecycle yet'}</span>
+          </div>
+          <table className="qtv-table">
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Status</th>
+                <th>Side</th>
+                <th>Role</th>
+                <th>Signal Block</th>
+                <th>Submit Block</th>
+                <th>Decision</th>
+                <th>Fill Price</th>
+                <th>Requested</th>
+                <th>Filled</th>
+                <th>Fill Prob</th>
+                <th>Fill %</th>
+                <th>Block Vol</th>
+                <th>Trades</th>
+                <th>Fee</th>
+                <th>Slip</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.orders.map((order) => (
+                <tr key={order.id} className={order.status.toLowerCase().replace(/_/g, '-')}>
+                  <td>{order.id}</td>
+                  <td>{order.status}</td>
+                  <td>{order.side}</td>
+                  <td>{order.role}</td>
+                  <td>{Number.isFinite(order.signalX) ? order.signalX.toLocaleString('en-US') : '-'}</td>
+                  <td>{Number.isFinite(order.submitX) ? order.submitX.toLocaleString('en-US') : '-'}</td>
+                  <td>{order.decisionPrice.toFixed(3)}</td>
+                  <td>{order.avgFillPrice.toFixed(3)}</td>
+                  <td>{formatNumber(order.requestedNotional, 2)}</td>
+                  <td>{formatNumber(order.filledNotional, 2)}</td>
+                  <td>{formatPct(order.fillProbability, 2)}</td>
+                  <td>{formatPct(order.fillPct, 2)}</td>
+                  <td>{formatNumber(order.blockVolume, 2)}</td>
+                  <td>{formatNumber(order.tradeCount, 0)}</td>
+                  <td>{formatNumber(order.feeCost, 4)}</td>
+                  <td>{formatNumber(order.slippageCost, 4)}</td>
+                  <td>{order.noFillReason || order.executionSource}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!result.orders.length ? <div className="qtv-tool-empty"><strong>No order lifecycle</strong><span>Run a Phase 1 backtest to load submitted, filled, partial, and no-fill orders.</span></div> : null}
+        </div>
+      ) : null}
+
       {toolTab === 'tester' && testerTab === 'trades' ? (
         <TradesTableTab
           trades={filteredTrades}
@@ -1091,6 +1154,58 @@ export function StrategyTesterPanel({
           onToggleFilter={onTradeFilterToggle}
           onSelectTrade={onTradeSelect}
         />
+      ) : null}
+
+      {toolTab === 'tester' && testerTab === 'ledger' ? (
+        <div className="qtv-table-wrap qtv-ledger-table-wrap">
+          <div className="qtv-filter-strip">
+            <span>{result.ledger.length.toLocaleString('en-US')} ledger rows</span>
+            <span>{latestLedger ? `cash ${formatNumber(latestLedger.cashAfter, 2)} USDC` : 'cash --'}</span>
+            <span>{latestLedger ? `position ${formatNumber(latestLedger.positionAfter, 4)}` : 'position --'}</span>
+            <span>{latestLedger ? `realized ${formatNumber(latestLedger.realizedPnl, 2)}` : 'realized --'}</span>
+          </div>
+          <table className="qtv-table">
+            <thead>
+              <tr>
+                <th>Ledger</th>
+                <th>Event</th>
+                <th>Block</th>
+                <th>Order</th>
+                <th>Trade</th>
+                <th>Shares Δ</th>
+                <th>Cash Δ</th>
+                <th>Fee</th>
+                <th>Slip</th>
+                <th>Realized PnL</th>
+                <th>Position</th>
+                <th>Cash</th>
+                <th>Price</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.ledger.map((row) => (
+                <tr key={row.id} className={row.eventType.toLowerCase()}>
+                  <td>{row.id}</td>
+                  <td>{row.eventType}</td>
+                  <td>{Number.isFinite(row.xValue) ? row.xValue.toLocaleString('en-US') : '-'}</td>
+                  <td>{row.orderId || '-'}</td>
+                  <td>{row.tradeId || '-'}</td>
+                  <td className={row.sharesDelta >= 0 ? 'positive' : 'negative'}>{formatNumber(row.sharesDelta, 4)}</td>
+                  <td className={row.cashDelta >= 0 ? 'positive' : 'negative'}>{formatNumber(row.cashDelta, 4)}</td>
+                  <td>{formatNumber(row.fee, 4)}</td>
+                  <td>{formatNumber(row.slippageCost, 4)}</td>
+                  <td className={row.realizedPnl >= 0 ? 'positive' : 'negative'}>{formatNumber(row.realizedPnl, 4)}</td>
+                  <td>{formatNumber(row.positionAfter, 4)}</td>
+                  <td>{formatNumber(row.cashAfter, 4)}</td>
+                  <td>{row.price.toFixed(3)}</td>
+                  <td>{row.source}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!result.ledger.length ? <div className="qtv-tool-empty"><strong>No ledger rows</strong><span>Run a completed backtest to see BUY/SELL cashflow, fees, slippage, position, and cash balance.</span></div> : null}
+        </div>
       ) : null}
 
       {toolTab === 'tester' && testerTab === 'equity' ? (
@@ -1117,7 +1232,9 @@ export function StrategyTesterPanel({
               <div><dt>Status</dt><dd>{backtestStatus}</dd></div>
               <div><dt>Engine</dt><dd>{engine}</dd></div>
               <div><dt>Rows</dt><dd>{rowCount.toLocaleString('en-US')}</dd></div>
+              <div><dt>Orders</dt><dd>{result.orders.length.toLocaleString('en-US')}</dd></div>
               <div><dt>Trades</dt><dd>{result.trades.length.toLocaleString('en-US')}</dd></div>
+              <div><dt>Ledger</dt><dd>{result.ledger.length.toLocaleString('en-US')}</dd></div>
               <div><dt>Metrics</dt><dd>{result.metrics.length.toLocaleString('en-US')}</dd></div>
             </dl>
           </section>
@@ -1167,12 +1284,13 @@ export function StrategyTesterPanel({
             )}
           </section>
           <section>
-            <strong>Latest Trade</strong>
+            <strong>Latest Execution</strong>
             <dl>
-              <div><dt>ID</dt><dd>{selectedTrade?.id || '-'}</dd></div>
-              <div><dt>Outcome</dt><dd>{selectedTrade?.outcome || '-'}</dd></div>
+              <div><dt>Order</dt><dd>{latestOrder?.id || '-'}</dd></div>
+              <div><dt>Status</dt><dd>{latestOrder?.status || '-'}</dd></div>
+              <div><dt>Fill</dt><dd>{latestOrder ? `${formatPct(latestOrder.fillPct, 2)} · p=${formatPct(latestOrder.fillProbability, 2)}` : '-'}</dd></div>
               <div><dt>PnL</dt><dd className={selectedTrade && selectedTrade.pnl >= 0 ? 'positive' : 'negative'}>{selectedTrade ? `${selectedTrade.pnl.toFixed(2)} USDC` : '-'}</dd></div>
-              <div><dt>Exit</dt><dd>{selectedTrade?.exitReason || '-'}</dd></div>
+              <div><dt>Cash</dt><dd>{latestLedger ? `${formatNumber(latestLedger.cashAfter, 2)} USDC` : '-'}</dd></div>
             </dl>
           </section>
           <section className="qtv-batch-runs-card">

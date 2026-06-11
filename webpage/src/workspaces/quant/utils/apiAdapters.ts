@@ -1,6 +1,8 @@
 import type {
   QuantBacktestEquityPoint,
+  QuantBacktestLedgerRow,
   QuantBacktestMetric,
+  QuantBacktestOrder,
   QuantBacktestRun,
   QuantBacktestTrade,
   QuantBlockClosePoint,
@@ -8,7 +10,7 @@ import type {
   QuantMarketSeriesPayload,
   QuantMarketSeriesPoint,
 } from '@/types';
-import type { BacktestMetric, BacktestResult, EquityPoint, PerformanceRow, PricePoint, PriceSource, PropertyGroup, Trade } from '../types';
+import type { BacktestMetric, BacktestResult, EquityPoint, LedgerRow, OrderLifecycleRow, PerformanceRow, PricePoint, PriceSource, PropertyGroup, Trade } from '../types';
 import { deriveEventOutcomeLabel, toNumber } from './formatters';
 
 export function frontendToPrices(rows: QuantFrontendPricePoint[]): PricePoint[] {
@@ -187,6 +189,63 @@ function tradeToUi(row: QuantBacktestTrade, run: QuantBacktestRun): Trade {
   };
 }
 
+function orderToUi(row: QuantBacktestOrder): OrderLifecycleRow {
+  return {
+    id: row.orderId,
+    signalIndex: Number(row.signalIndex || 0),
+    tradeId: row.tradeId || undefined,
+    xAxis: row.xAxis || 'block_number',
+    signalX: Number(row.signalX),
+    submitX: Number(row.submitX ?? row.signalX),
+    side: row.side || '-',
+    role: row.role || '-',
+    orderType: row.orderType || '-',
+    status: row.status || '-',
+    decisionPrice: toNumber(row.decisionPrice),
+    requestedPrice: toNumber(row.requestedPrice),
+    requestedSize: toNumber(row.requestedSize),
+    requestedNotional: toNumber(row.requestedNotional),
+    filledSize: toNumber(row.filledSize),
+    filledNotional: toNumber(row.filledNotional),
+    unfilledSize: toNumber(row.unfilledSize),
+    avgFillPrice: toNumber(row.avgFillPrice),
+    fillProbability: toNumber(row.fillProbability),
+    fillPct: toNumber(row.fillPct),
+    blockVolume: toNumber(row.blockVolume),
+    tradeCount: toNumber(row.tradeCount),
+    availableNotional: toNumber(row.availableNotional),
+    feeCost: toNumber(row.feeCost),
+    slippageCost: toNumber(row.slippageCost),
+    executionCost: toNumber(row.executionCost),
+    latencyBlocks: toNumber(row.latencyBlocks),
+    latencySeconds: toNumber(row.latencySeconds),
+    noFillReason: row.noFillReason || '',
+    executionSource: row.executionSource || '-',
+  };
+}
+
+function ledgerToUi(row: QuantBacktestLedgerRow): LedgerRow {
+  return {
+    id: row.ledgerId,
+    orderId: row.orderId || undefined,
+    tradeId: row.tradeId || undefined,
+    eventType: row.eventType || '-',
+    xAxis: row.xAxis || 'block_number',
+    xValue: Number(row.xValue),
+    sharesDelta: toNumber(row.sharesDelta),
+    cashDelta: toNumber(row.cashDelta),
+    fee: toNumber(row.fee),
+    rebate: toNumber(row.rebate),
+    slippageCost: toNumber(row.slippageCost),
+    executionCost: toNumber(row.executionCost),
+    realizedPnl: toNumber(row.realizedPnl),
+    positionAfter: toNumber(row.positionAfter),
+    cashAfter: toNumber(row.cashAfter),
+    price: toNumber(row.price),
+    source: row.source || '-',
+  };
+}
+
 function equityToUi(row: QuantBacktestEquityPoint): EquityPoint {
   return {
     timestamp: Number(row.xValue),
@@ -219,6 +278,7 @@ function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): Proper
   const executionQuality = (executionContext.execution_quality || executionContext.executionQuality || {}) as Record<string, unknown>;
   const fillEstimate = (executionContext.fill_estimate || executionContext.fillEstimate || {}) as Record<string, unknown>;
   const dataQuality = (executionContext.data_quality || executionContext.dataQuality || {}) as Record<string, unknown>;
+  const dataAccess = (actualDataQuality.data_access || actualDataQuality.dataAccess || dataQuality.data_access || dataQuality.dataAccess || {}) as Record<string, unknown>;
   const stringifyValue = (value: unknown, fallback = '-') => (
     value === null || value === undefined || value === '' ? fallback : String(value)
   );
@@ -256,6 +316,11 @@ function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): Proper
         { label: 'min fill size', value: `${run.minFillSize ?? 0}` },
         { label: 'partial fill', value: run.allowPartialFill === false ? 'disabled' : 'enabled' },
         { label: 'stale book gate', value: run.rejectOnStaleBook === false ? 'warn only' : 'reject' },
+        { label: 'execution profile', value: stringifyValue(run.executionProfile ?? run.parameterSnapshot?.execution_profile ?? run.parameterSnapshot?.executionProfile, 'realistic') },
+        { label: 'order role', value: stringifyValue(run.orderRole ?? run.parameterSnapshot?.order_role ?? run.parameterSnapshot?.orderRole, 'taker') },
+        { label: 'latency blocks', value: stringifyValue(run.latencyBlocks ?? run.parameterSnapshot?.latency_blocks ?? run.parameterSnapshot?.latencyBlocks, '0') },
+        { label: 'adverse slippage cents', value: stringifyValue(run.adverseSlippageCents ?? run.parameterSnapshot?.adverse_slippage_cents ?? run.parameterSnapshot?.adverseSlippageCents, '0') },
+        { label: 'fill haircut', value: `${stringifyValue(run.fillProbabilityHaircutPct ?? run.parameterSnapshot?.fill_probability_haircut_pct ?? run.parameterSnapshot?.fillProbabilityHaircutPct, '0')}%` },
       ],
     },
     {
@@ -295,6 +360,19 @@ function propertyGroups(run: QuantBacktestRun, priceSource: PriceSource): Proper
         { label: 'segment', value: stringifyValue(executionContext.segment ?? executionContext.scope) },
       ],
     },
+    {
+      title: 'Data Access Guard',
+      rows: [
+        { label: 'source table', value: stringifyValue(actualDataQuality.source_table ?? actualDataQuality.sourceTable ?? dataAccess.source_table ?? dataAccess.sourceTable) },
+        { label: 'access path', value: stringifyValue(actualDataQuality.access_path ?? actualDataQuality.accessPath ?? dataAccess.access_path ?? dataAccess.accessPath) },
+        { label: 'index hint', value: stringifyValue(actualDataQuality.index_hint ?? actualDataQuality.indexHint ?? dataAccess.index_hint ?? dataAccess.indexHint) },
+        { label: 'query guard', value: stringifyValue(actualDataQuality.query_guard_version ?? actualDataQuality.queryGuardVersion ?? dataAccess.query_guard_version ?? dataAccess.queryGuardVersion) },
+        { label: 'token id', value: stringifyValue(dataAccess.token_id ?? dataAccess.tokenId ?? meta.token_id) },
+        { label: 'requested range', value: `${stringifyValue(dataAccess.requested_from ?? dataAccess.requestedFrom)} -> ${stringifyValue(dataAccess.requested_to ?? dataAccess.requestedTo)}` },
+        { label: 'actual range', value: `${stringifyValue(dataAccess.actual_first_x ?? dataAccess.actualFirstX ?? actualDataQuality.first_x ?? actualDataQuality.firstX)} -> ${stringifyValue(dataAccess.actual_last_x ?? dataAccess.actualLastX ?? actualDataQuality.last_x ?? actualDataQuality.lastX)}` },
+        { label: 'policy', value: stringifyValue((dataAccess.policy as Record<string, unknown> | undefined)?.backtest_price_read ?? (dataAccess.policy as Record<string, unknown> | undefined)?.backtestPriceRead, 'keyed block-close reads only') },
+      ],
+    },
   ];
 }
 
@@ -304,17 +382,23 @@ export function backtestApiToResult(
   equity: QuantBacktestEquityPoint[],
   trades: QuantBacktestTrade[],
   priceSource: PriceSource,
+  orders: QuantBacktestOrder[] = [],
+  ledger: QuantBacktestLedgerRow[] = [],
 ): BacktestResult {
   const overviewMetrics = metrics.filter((metric) => metric.metricGroup !== 'prediction').map(metricToCard);
   const predictionMetrics = metrics.filter((metric) => metric.metricGroup === 'prediction').map(metricToCard);
   const uiTrades = trades.map((trade) => tradeToUi(trade, run));
   const uiEquity = equity.map(equityToUi);
+  const uiOrders = orders.map(orderToUi);
+  const uiLedger = ledger.map(ledgerToUi);
   return {
     runId: run.runId,
     generatedAt: run.finishedAt || run.startedAt || new Date().toISOString(),
     metrics: overviewMetrics,
     equity: uiEquity,
+    orders: uiOrders,
     trades: uiTrades,
+    ledger: uiLedger,
     performanceRows: performanceRows(metrics, uiTrades),
     propertyGroups: propertyGroups(run, priceSource),
     predictionMetrics,
@@ -327,7 +411,9 @@ export function emptyBacktestResult(): BacktestResult {
     generatedAt: '',
     metrics: [],
     equity: [],
+    orders: [],
     trades: [],
+    ledger: [],
     performanceRows: [],
     propertyGroups: [
       {

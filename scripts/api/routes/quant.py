@@ -19,7 +19,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from quant.api.read_api import (  # noqa: E402
     get_backtest_equity,
+    get_backtest_ledger,
     get_backtest_metrics,
+    get_backtest_orders,
     get_backtest_run,
     get_backtest_runs,
     get_backtest_trades,
@@ -171,6 +173,11 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "max_position_notional": "maxPositionNotional",
         "min_fill_pct": "minFillPct",
         "execution_price_mode": "executionPriceMode",
+        "execution_profile": "executionProfile",
+        "order_role": "orderRole",
+        "latency_blocks": "latencyBlocks",
+        "adverse_slippage_cents": "adverseSlippageCents",
+        "fill_probability_haircut_pct": "fillProbabilityHaircutPct",
         "latency_seconds": "latencySeconds",
         "max_book_staleness_seconds": "maxBookStalenessSeconds",
         "allow_partial_fill": "allowPartialFill",
@@ -190,6 +197,22 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "drawdown_pct": "drawdownPct",
         "cumulative_return": "cumulativeReturn",
         "trade_id": "tradeId",
+        "entry_order_id": "entryOrderId",
+        "exit_order_id": "exitOrderId",
+        "order_id": "orderId",
+        "signal_index": "signalIndex",
+        "signal_x": "signalX",
+        "submit_x": "submitX",
+        "decision_price": "decisionPrice",
+        "requested_price": "requestedPrice",
+        "order_type": "orderType",
+        "no_fill_reason": "noFillReason",
+        "ledger_id": "ledgerId",
+        "event_type": "eventType",
+        "shares_delta": "sharesDelta",
+        "cash_delta": "cashDelta",
+        "position_after": "positionAfter",
+        "cash_after": "cashAfter",
         "entry_x": "entryX",
         "exit_x": "exitX",
         "entry_price": "entryPrice",
@@ -1291,6 +1314,20 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         limit = min(max(_parse_int_arg("limit", 1000) or 1000, 1), 25000)
         with postgres_connection(PostgresSettings(), readonly=True) as conn:
             rows = get_backtest_trades(conn, run_id=run_id, limit=limit)
+        return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
+
+    @bp.route("/backtest-runs/<int:run_id>/orders", methods=["GET"])
+    def api_quant_get_backtest_orders(run_id: int):
+        limit = min(max(_parse_int_arg("limit", 1000) or 1000, 1), 25000)
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            rows = get_backtest_orders(conn, run_id=run_id, limit=limit)
+        return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
+
+    @bp.route("/backtest-runs/<int:run_id>/ledger", methods=["GET"])
+    def api_quant_get_backtest_ledger(run_id: int):
+        limit = min(max(_parse_int_arg("limit", 1000) or 1000, 1), 25000)
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            rows = get_backtest_ledger(conn, run_id=run_id, limit=limit)
         return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
 
     @bp.route("/backtest-runs/<int:run_id>/equity", methods=["GET"])

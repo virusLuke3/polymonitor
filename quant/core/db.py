@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 from urllib.parse import urlencode
@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover - exercised only in under-provisioned en
     dict_row = None
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_dotenv_files() -> None:
@@ -39,6 +39,14 @@ def load_dotenv_files() -> None:
 
 
 load_dotenv_files()
+
+
+def env_first(*names: str, default: str = "") -> str:
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is not None and str(raw).strip() != "":
+            return str(raw).strip()
+    return default
 
 
 def env_int(name: str, default: int) -> int:
@@ -68,32 +76,112 @@ def env_bool(name: str, default: bool) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int_first(*names: str, default: int) -> int:
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            return int(str(raw).strip())
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
+def env_float_first(*names: str, default: float) -> float:
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            return float(str(raw).strip())
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
 @dataclass(frozen=True)
 class PostgresSettings:
-    host: str = os.environ.get("POLYDATA_POSTGRES_HOST", os.environ.get("POLYMARKET_POSTGRES_HOST", "127.0.0.1"))
-    port: int = env_int("POLYDATA_POSTGRES_PORT", env_int("POLYMARKET_POSTGRES_PORT", 45432))
-    user: str = os.environ.get("POLYDATA_POSTGRES_USER", os.environ.get("POLYMARKET_POSTGRES_USER", "poly_user"))
-    password: str = os.environ.get(
+    host: str = field(default_factory=lambda: env_first(
+        "POLYDATA_POSTGRES_HOST",
+        "POLYMARKET_POSTGRES_HOST",
+        "POLYMARKET_PostgreSQL_HOST",
+        default="127.0.0.1",
+    ))
+    port: int = field(default_factory=lambda: env_int_first(
+        "POLYDATA_POSTGRES_PORT",
+        "POLYMARKET_POSTGRES_PORT",
+        "POLYMARKET_PostgreSQL_PORT",
+        default=45432,
+    ))
+    user: str = field(default_factory=lambda: env_first(
+        "POLYDATA_POSTGRES_USER",
+        "POLYMARKET_POSTGRES_USER",
+        "POLYMARKET_PostgreSQL_USER",
+        default="poly_user",
+    ))
+    password: str = field(default_factory=lambda: env_first(
         "POLYDATA_POSTGRES_PASSWORD",
-        os.environ.get(
-            "POLYMARKET_POSTGRES_PASSWORD",
-            os.environ.get("POLYMARKET_POSTGRESQL_PASSWORD", os.environ.get("POLYMARKET_PostgreSQL_PASSWORD", "")),
-        ),
-    )
-    database: str = os.environ.get("POLYDATA_POSTGRES_DATABASE", os.environ.get("POLYMARKET_POSTGRES_DATABASE", "poly_data_core"))
-    search_path: str = os.environ.get("POLYDATA_POSTGRES_SEARCH_PATH", "quant,core,oracle,ops,public")
-    connect_timeout_seconds: int = env_int("POLYDATA_QUANT_POSTGRES_CONNECT_TIMEOUT_SECONDS", 10)
+        "POLYMARKET_POSTGRES_PASSWORD",
+        "POLYMARKET_POSTGRESQL_PASSWORD",
+        "POLYMARKET_PostgreSQL_PASSWORD",
+        default="",
+    ))
+    database: str = field(default_factory=lambda: env_first(
+        "POLYDATA_POSTGRES_DATABASE",
+        "POLYMARKET_POSTGRES_DATABASE",
+        "POLYMARKET_PostgreSQL_DATABASE",
+        default="poly_data_core",
+    ))
+    search_path: str = field(default_factory=lambda: env_first(
+        "POLYDATA_POSTGRES_SEARCH_PATH",
+        default="quant,core,oracle,ops,public",
+    ))
+    connect_timeout_seconds: int = field(default_factory=lambda: env_int_first(
+        "POLYDATA_QUANT_POSTGRES_CONNECT_TIMEOUT_SECONDS",
+        default=10,
+    ))
 
 
 @dataclass(frozen=True)
 class ClickHouseSettings:
-    http_url: str = os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL", "").strip()
-    container: str = os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER", "polydata_clickhouse_orderfilled")
-    database: str = os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE", "poly_orderfilled")
-    user: str = os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_USER", "poly_user")
-    password: str = os.environ.get("CLICKHOUSE_PASSWORD", "PolyUserPass_007!")
-    orderfilled_table: str = os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_READ_TABLE", "orderfilled_fact")
-    timeout_seconds: float = env_float("POLYDATA_QUANT_CLICKHOUSE_TIMEOUT_SECONDS", 120.0)
+    http_url: str = field(default_factory=lambda: env_first("POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL", default=""))
+    container: str = field(default_factory=lambda: env_first("POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER", default="polydata_clickhouse_orderfilled"))
+    database: str = field(default_factory=lambda: env_first("POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE", default="poly_orderfilled"))
+    user: str = field(default_factory=lambda: env_first("POLYDATA_ORDERFILLED_CLICKHOUSE_USER", default="poly_user"))
+    password: str = field(default_factory=lambda: env_first(
+        "POLYDATA_ORDERFILLED_CLICKHOUSE_PASSWORD",
+        "CLICKHOUSE_PASSWORD",
+        default="",
+    ))
+    orderfilled_table: str = field(default_factory=lambda: env_first("POLYDATA_ORDERFILLED_CLICKHOUSE_READ_TABLE", default="orderfilled_fact"))
+    timeout_seconds: float = field(default_factory=lambda: env_float_first("POLYDATA_QUANT_CLICKHOUSE_TIMEOUT_SECONDS", default=120.0))
+
+
+def database_settings_summary(
+    postgres: PostgresSettings | None = None,
+    clickhouse: ClickHouseSettings | None = None,
+) -> dict[str, Any]:
+    pg = postgres or PostgresSettings()
+    ch = clickhouse or ClickHouseSettings()
+    return {
+        "postgres": {
+            "host": pg.host,
+            "port": pg.port,
+            "user": pg.user,
+            "database": pg.database,
+            "search_path": pg.search_path,
+            "password_configured": bool(pg.password),
+        },
+        "clickhouse": {
+            "http_url_configured": bool(ch.http_url),
+            "container": ch.container,
+            "database": ch.database,
+            "user": ch.user,
+            "password_configured": bool(ch.password),
+            "orderfilled_table": ch.orderfilled_table,
+        },
+    }
 
 
 def safe_identifier(value: str, *, default: str | None = None) -> str:

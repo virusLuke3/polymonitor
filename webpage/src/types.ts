@@ -474,6 +474,11 @@ export type QuantBacktestRun = {
   allowPartialFill?: boolean | string | number | null;
   minFillSize?: string | number | null;
   rejectOnStaleBook?: boolean | string | number | null;
+  executionProfile?: string | null;
+  orderRole?: string | null;
+  latencyBlocks?: string | number | null;
+  adverseSlippageCents?: string | number | null;
+  fillProbabilityHaircutPct?: string | number | null;
   parameterFingerprint?: string | null;
   parameterSnapshot?: Record<string, unknown> | null;
   meta?: Record<string, unknown> | null;
@@ -540,6 +545,65 @@ export type QuantBacktestTrade = {
   pnlPct: string | number;
   holdingBars: number | string;
   exitReason: string;
+};
+
+export type QuantBacktestOrder = {
+  runId: number;
+  orderId: string;
+  signalIndex?: string | number | null;
+  tradeId?: string | null;
+  xAxis: 'timestamp' | 'block_number' | string;
+  signalX: number | string;
+  submitX?: number | string | null;
+  decisionPrice?: string | number | null;
+  requestedPrice?: string | number | null;
+  side: 'BUY' | 'SELL' | string;
+  role?: string | null;
+  orderType?: string | null;
+  status: string;
+  requestedSize?: string | number | null;
+  requestedNotional?: string | number | null;
+  filledSize?: string | number | null;
+  filledNotional?: string | number | null;
+  unfilledSize?: string | number | null;
+  avgFillPrice?: string | number | null;
+  fillProbability?: string | number | null;
+  fillPct?: string | number | null;
+  blockVolume?: string | number | null;
+  tradeCount?: string | number | null;
+  availableNotional?: string | number | null;
+  feeCost?: string | number | null;
+  slippageCost?: string | number | null;
+  executionCost?: string | number | null;
+  latencyBlocks?: string | number | null;
+  latencySeconds?: string | number | null;
+  noFillReason?: string | null;
+  executionSource?: string | null;
+  meta?: Record<string, unknown> | null;
+};
+
+export type QuantBacktestLedgerRow = {
+  runId: number;
+  ledgerId: string;
+  orderId?: string | null;
+  tradeId?: string | null;
+  eventType: string;
+  xAxis: 'timestamp' | 'block_number' | string;
+  xValue: number | string;
+  marketSlug?: string | null;
+  tokenSide?: string | null;
+  sharesDelta?: string | number | null;
+  cashDelta?: string | number | null;
+  fee?: string | number | null;
+  rebate?: string | number | null;
+  slippageCost?: string | number | null;
+  executionCost?: string | number | null;
+  realizedPnl?: string | number | null;
+  positionAfter?: string | number | null;
+  cashAfter?: string | number | null;
+  price?: string | number | null;
+  source?: string | null;
+  meta?: Record<string, unknown> | null;
 };
 
 export type QuantBacktestCreatePayload = {
@@ -1784,17 +1848,169 @@ export type RuntimePolybeatsWallet = RuntimeSignalAddress & {
   pnlSource?: string | null;
   smartScore?: string | null;
   activeMarkets?: number | string | null;
+  officialLikePnl?: string | null;
+  qualityTier?: string | null;
+  qualityErrorPct?: string | null;
+  qualityReason?: string | null;
+  categoryEdge?: RuntimePolybeatsCategoryEdge | null;
+  marketExposure?: RuntimePolybeatsMarketExposure[];
+  riskFlags?: string[];
+  recentTrades?: RuntimePolybeatsTradeEvidence[];
+};
+
+export type RuntimePolybeatsPnlSummary = {
+  address?: string | null;
+  safeBlock?: number | string | null;
+  realizedTradePnl?: string | null;
+  nonTradePnl?: string | null;
+  conversionCollateralDelta?: string | null;
+  unrealizedPositionValue?: string | null;
+  officialLikePnl?: string | null;
+  buyUsdc?: string | null;
+  sellUsdc?: string | null;
+  redeemUsdc?: string | null;
+  mergeUsdc?: string | null;
+  splitUsdc?: string | null;
+  makerRebateUsdc?: string | null;
+};
+
+export type RuntimePolybeatsQuality = {
+  address?: string | null;
+  qualityTier?: string | null;
+  errorPct?: string | null;
+  reason?: string | null;
+  benchmarkSource?: string | null;
+  benchmarkPnl?: string | null;
+  calculatedPnl?: string | null;
+  safeBlock?: number | string | null;
+  flags?: string[];
+  userName?: string | null;
+  rank?: string | number | null;
+};
+
+export type RuntimePolybeatsCategoryEdge = {
+  category?: string | null;
+  tradeCount?: number | string | null;
+  buyNotional?: string | null;
+  sellNotional?: string | null;
+  netPnl?: string | null;
+  winRate?: string | null;
+  avgPositionSize?: string | null;
+  largestWin?: string | null;
+  largestLoss?: string | null;
+  resolvedMarketCount?: number | string | null;
+};
+
+export type RuntimePolybeatsTradeEvidence = {
+  txHash?: string | null;
+  marketId?: number | string | null;
+  marketTitle?: string | null;
+  conditionId?: string | null;
+  side?: string | null;
+  outcome?: string | null;
+  price?: string | null;
+  size?: string | null;
+  notional?: string | null;
+  blockNumber?: number | string | null;
+  logIndex?: number | string | null;
+  createdAt?: string | null;
+  timestamp?: string | null;
+  maker?: string | null;
+  taker?: string | null;
+};
+
+export type RuntimePolybeatsMarketExposure = {
+  marketId?: number | string | null;
+  title?: string | null;
+  conditionId?: string | null;
+  category?: string | null;
+  side?: string | null;
+  outcome?: string | null;
+  netPosition?: string | null;
+  avgEntryPrice?: string | null;
+  realizedPnl?: string | null;
+  unrealizedValue?: string | null;
+  currentProbability?: string | null;
+  tradeCount?: number | string | null;
+  firstTradeBlock?: number | string | null;
+  lastTradeBlock?: number | string | null;
+};
+
+export type RuntimePolybeatsAddressProfile = {
+  address?: string | null;
+  shortAddress?: string | null;
+  generatedAt?: string | null;
+  safeBlock?: number | string | null;
+  pnlSummary?: RuntimePolybeatsPnlSummary | null;
+  quality?: RuntimePolybeatsQuality | null;
+  categoryStats?: RuntimePolybeatsCategoryEdge[];
+  categoryEdge?: RuntimePolybeatsCategoryEdge | null;
+  recentTrades?: RuntimePolybeatsTradeEvidence[];
+  marketExposure?: RuntimePolybeatsMarketExposure[];
+  riskFlags?: string[];
+};
+
+export type RuntimePolybeatsMarketInfo = {
+  marketId?: number | string | null;
+  title?: string | null;
+  slug?: string | null;
+  conditionId?: string | null;
+  category?: string | null;
+  tags?: string[];
+  currentProbability?: string | null;
+  latestYesPrice?: string | null;
+  latestNoPrice?: string | null;
+  volume24h?: string | null;
+  tradeCount24h?: number | string | null;
+  lastTradeAt?: string | null;
+  status?: string | null;
+  oracleRisk?: string[];
+  oracle?: string | null;
+  settlementSource?: string | null;
+  settlementOutcome?: string | null;
+  enableNegRisk?: boolean | null;
+};
+
+export type RuntimePolybeatsAgentSummary = {
+  brief?: string | null;
+  whyItMatters?: string | null;
+  walletRead?: string | null;
+  marketRead?: string | null;
+  risk?: string | null;
+  confidence?: string | null;
+  contentText?: string | null;
+  tags?: string[];
 };
 
 export type RuntimePolybeatsItem = RuntimeTradeSignal & {
   id?: string | null;
+  signalType?: string | null;
   domain?: string | null;
   marketSlug?: string | null;
   marketCategory?: string | null;
   tags?: string[];
   wallets?: RuntimePolybeatsWallet[];
+  addressProfiles?: RuntimePolybeatsAddressProfile[];
+  orderfilled?: RuntimePolybeatsTradeEvidence | null;
+  tradeEvidence?: RuntimePolybeatsTradeEvidence[];
+  market?: RuntimePolybeatsMarketInfo | null;
+  marketIntel?: {
+    netFlow?: Record<string, unknown> | null;
+    pnlQualitySummary?: Record<string, unknown> | null;
+    riskFlags?: string[];
+  } | null;
+  agentSummary?: RuntimePolybeatsAgentSummary | null;
+  evidencePacket?: Record<string, unknown> | null;
+  reasonCodes?: string[];
   explanation?: string | null;
   narrativeSource?: string | null;
+  signalScore?: string | null;
+  signalScoreValue?: string | null;
+  signalConfidence?: string | null;
+  smartSignal?: boolean | null;
+  sourceLayer?: string | null;
+  sourceTables?: string[];
+  contentText?: string | null;
 };
 
 export type RuntimePolybeatsPayload = {

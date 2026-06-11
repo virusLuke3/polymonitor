@@ -13,7 +13,6 @@ from urllib.request import Request, urlopen
 DEFAULT_CONTAINER = "polydata_clickhouse_orderfilled"
 DEFAULT_DATABASE = "poly_orderfilled"
 DEFAULT_USER = "poly_user"
-DEFAULT_PASSWORD = "PolyUserPass_007!"
 DEFAULT_TABLE = "orderfilled_fact"
 DEFAULT_WHALE_VOLUME_WINDOW_MINUTES = 60
 DEFAULT_ALPHA_VOLUME_WINDOW_MINUTES = 15
@@ -60,7 +59,11 @@ def _settings() -> Dict[str, str]:
         "container": os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER", DEFAULT_CONTAINER),
         "database": _identifier(os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE", DEFAULT_DATABASE), DEFAULT_DATABASE),
         "user": os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_USER", DEFAULT_USER),
-        "password": os.environ.get("CLICKHOUSE_PASSWORD", DEFAULT_PASSWORD),
+        "password": (
+            os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_PASSWORD")
+            or os.environ.get("CLICKHOUSE_PASSWORD")
+            or ""
+        ),
         "table": _identifier(os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_READ_TABLE", DEFAULT_TABLE), DEFAULT_TABLE),
     }
 

@@ -8,6 +8,10 @@ from typing import Any
 
 CREATE_SCHEMA_SQL = "CREATE SCHEMA IF NOT EXISTS quant"
 
+OPTIONAL_EXTENSION_SQL: tuple[str, ...] = (
+    "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+)
+
 
 CREATE_TABLE_SQL: tuple[str, ...] = (
     """
@@ -346,6 +350,11 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
         max_position_notional NUMERIC(38, 10) NOT NULL DEFAULT 0,
         min_fill_pct NUMERIC(20, 10) NOT NULL DEFAULT 0,
         execution_price_mode TEXT NOT NULL DEFAULT 'ORDERFILLED',
+        execution_profile TEXT NOT NULL DEFAULT 'realistic',
+        order_role TEXT NOT NULL DEFAULT 'taker',
+        latency_blocks BIGINT NOT NULL DEFAULT 0,
+        adverse_slippage_cents NUMERIC(20, 10) NOT NULL DEFAULT 0.005,
+        fill_probability_haircut_pct NUMERIC(20, 10) NOT NULL DEFAULT 20,
         latency_seconds NUMERIC(20, 10) NOT NULL DEFAULT 0,
         max_book_staleness_seconds NUMERIC(20, 10) NOT NULL DEFAULT 900,
         allow_partial_fill BOOLEAN NOT NULL DEFAULT TRUE,
@@ -419,12 +428,79 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
         fee_cost NUMERIC(38, 10) NOT NULL DEFAULT 0,
         slippage_cost NUMERIC(38, 10) NOT NULL DEFAULT 0,
         execution_cost NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        entry_order_id TEXT,
+        exit_order_id TEXT,
         pnl NUMERIC(38, 10) NOT NULL,
         pnl_pct NUMERIC(20, 10) NOT NULL,
         holding_bars INTEGER NOT NULL,
         exit_reason TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         PRIMARY KEY (run_id, trade_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_orders (
+        run_id BIGINT NOT NULL REFERENCES quant.quant_backtest_runs(run_id) ON DELETE CASCADE,
+        order_id TEXT NOT NULL,
+        signal_index INTEGER NOT NULL DEFAULT 0,
+        trade_id TEXT,
+        x_axis TEXT NOT NULL,
+        signal_x BIGINT NOT NULL,
+        submit_x BIGINT NOT NULL,
+        decision_price NUMERIC(20, 10) NOT NULL DEFAULT 0,
+        requested_price NUMERIC(20, 10),
+        side TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'taker',
+        order_type TEXT NOT NULL DEFAULT 'market_like_limit',
+        status TEXT NOT NULL,
+        requested_size NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        requested_notional NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        filled_size NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        filled_notional NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        unfilled_size NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        avg_fill_price NUMERIC(20, 10),
+        fill_probability NUMERIC(20, 10) NOT NULL DEFAULT 0,
+        fill_pct NUMERIC(20, 10) NOT NULL DEFAULT 0,
+        block_volume NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        trade_count BIGINT NOT NULL DEFAULT 0,
+        available_notional NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        fee_cost NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        slippage_cost NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        execution_cost NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        latency_blocks BIGINT NOT NULL DEFAULT 0,
+        latency_seconds NUMERIC(20, 10) NOT NULL DEFAULT 0,
+        no_fill_reason TEXT,
+        execution_source TEXT NOT NULL DEFAULT 'unknown',
+        meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (run_id, order_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_ledger (
+        run_id BIGINT NOT NULL REFERENCES quant.quant_backtest_runs(run_id) ON DELETE CASCADE,
+        ledger_id TEXT NOT NULL,
+        order_id TEXT,
+        trade_id TEXT,
+        event_type TEXT NOT NULL,
+        x_axis TEXT NOT NULL,
+        x_value BIGINT NOT NULL,
+        market_slug TEXT NOT NULL,
+        token_side TEXT NOT NULL,
+        shares_delta NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        cash_delta NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        fee NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        rebate NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        slippage_cost NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        execution_cost NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        realized_pnl NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        position_after NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        cash_after NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        price NUMERIC(20, 10),
+        source TEXT NOT NULL DEFAULT 'backtest',
+        meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (run_id, ledger_id)
     )
     """,
     """
@@ -480,6 +556,13 @@ ALTER_TABLE_SQL: tuple[str, ...] = (
     "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS min_fill_pct NUMERIC(20, 10) NOT NULL DEFAULT 0",
     "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS execution_price_mode TEXT NOT NULL DEFAULT 'ORDERFILLED'",
     "ALTER TABLE quant.quant_backtest_parameters ALTER COLUMN execution_price_mode SET DEFAULT 'ORDERFILLED'",
+    "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS execution_profile TEXT NOT NULL DEFAULT 'realistic'",
+    "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS order_role TEXT NOT NULL DEFAULT 'taker'",
+    "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS latency_blocks BIGINT NOT NULL DEFAULT 0",
+    "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS adverse_slippage_cents NUMERIC(20, 10) NOT NULL DEFAULT 0.005",
+    "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS fill_probability_haircut_pct NUMERIC(20, 10) NOT NULL DEFAULT 20",
+    "ALTER TABLE quant.quant_backtest_parameters ALTER COLUMN adverse_slippage_cents SET DEFAULT 0.005",
+    "ALTER TABLE quant.quant_backtest_parameters ALTER COLUMN fill_probability_haircut_pct SET DEFAULT 20",
     "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS latency_seconds NUMERIC(20, 10) NOT NULL DEFAULT 0",
     "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS max_book_staleness_seconds NUMERIC(20, 10) NOT NULL DEFAULT 900",
     "ALTER TABLE quant.quant_backtest_parameters ADD COLUMN IF NOT EXISTS allow_partial_fill BOOLEAN NOT NULL DEFAULT TRUE",
@@ -508,6 +591,8 @@ ALTER_TABLE_SQL: tuple[str, ...] = (
     "ALTER TABLE quant.quant_backtest_trades ADD COLUMN IF NOT EXISTS fee_cost NUMERIC(38, 10) NOT NULL DEFAULT 0",
     "ALTER TABLE quant.quant_backtest_trades ADD COLUMN IF NOT EXISTS slippage_cost NUMERIC(38, 10) NOT NULL DEFAULT 0",
     "ALTER TABLE quant.quant_backtest_trades ADD COLUMN IF NOT EXISTS execution_cost NUMERIC(38, 10) NOT NULL DEFAULT 0",
+    "ALTER TABLE quant.quant_backtest_trades ADD COLUMN IF NOT EXISTS entry_order_id TEXT",
+    "ALTER TABLE quant.quant_backtest_trades ADD COLUMN IF NOT EXISTS exit_order_id TEXT",
     "ALTER TABLE quant.market_event_members ADD COLUMN IF NOT EXISTS grouping_confidence TEXT NOT NULL DEFAULT 'official'",
     "ALTER TABLE quant.market_event_metadata ADD COLUMN IF NOT EXISTS grouping_confidence TEXT NOT NULL DEFAULT 'official'",
     "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS block_number BIGINT",
@@ -563,6 +648,10 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_market ON quant.quant_backtest_runs (market_slug, token_side, price_source, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_engine ON quant.quant_backtest_runs (backtest_engine, status, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_trades_run_pnl ON quant.quant_backtest_trades (run_id, pnl)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_orders_run_status ON quant.quant_backtest_orders (run_id, status, submit_x)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_orders_trade ON quant.quant_backtest_orders (run_id, trade_id)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_ledger_run_event ON quant.quant_backtest_ledger (run_id, event_type, x_value)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_ledger_trade ON quant.quant_backtest_ledger (run_id, trade_id)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_equity_run_x ON quant.quant_backtest_equity (run_id, point_index)",
     "CREATE INDEX IF NOT EXISTS idx_quant_event_metadata_search ON quant.market_event_metadata (event_slug, event_title)",
     "CREATE INDEX IF NOT EXISTS idx_quant_event_metadata_status ON quant.market_event_metadata (status, updated_at DESC)",
@@ -573,6 +662,18 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_price_series_tiles_entity ON quant.quant_price_series_tiles (entity_type, entity_slug, price_source, tile_kind, range_name, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_price_series_tiles_window ON quant.quant_price_series_tiles (entity_type, entity_slug, price_source, tile_kind, window_from_x, window_to_x, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_price_series_tiles_expiry ON quant.quant_price_series_tiles (expires_at)",
+)
+
+
+OPTIONAL_SEARCH_INDEX_SQL: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS idx_quant_metadata_slug_trgm ON quant.market_token_metadata USING gin (lower(market_slug) gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_metadata_title_trgm ON quant.market_token_metadata USING gin (lower(market_title) gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_market_progress_slug_trgm ON quant.market_price_build_market_progress USING gin (lower(market_slug) gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_metadata_slug_trgm ON quant.market_event_metadata USING gin (lower(event_slug) gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_metadata_title_trgm ON quant.market_event_metadata USING gin (lower(event_title) gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_members_slug_trgm ON quant.market_event_members USING gin (lower(market_slug) gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_members_question_trgm ON quant.market_event_members USING gin (lower(question) gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_event_members_outcome_trgm ON quant.market_event_members USING gin (lower(outcome_label) gin_trgm_ops)",
 )
 
 
@@ -615,6 +716,25 @@ def _should_skip_statement(conn: Any, statement: str) -> bool:
     return False
 
 
+def _execute_optional_ddl(conn: Any, statement: str, *, lock_timeout_ms: int = 1500) -> bool:
+    """Run optional search DDL without blocking core API/backtest schema setup."""
+
+    with conn.cursor() as cur:
+        cur.execute("SAVEPOINT optional_search_ddl")
+        try:
+            cur.execute(f"SET LOCAL lock_timeout = '{int(lock_timeout_ms)}ms'")
+            cur.execute(statement)
+            cur.execute("RELEASE SAVEPOINT optional_search_ddl")
+            return True
+        except Exception as exc:
+            cur.execute("ROLLBACK TO SAVEPOINT optional_search_ddl")
+            cur.execute("RELEASE SAVEPOINT optional_search_ddl")
+            sqlstate = str(getattr(exc, "sqlstate", "") or "")
+            if sqlstate in {"55P03", "42501", "42704"}:
+                return False
+            raise
+
+
 def create_schema(conn: Any) -> None:
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(914020250607)")
@@ -634,3 +754,9 @@ def create_schema(conn: Any) -> None:
             continue
         with conn.cursor() as cur:
             cur.execute(statement)
+    for statement in OPTIONAL_EXTENSION_SQL:
+        _execute_optional_ddl(conn, statement)
+    for statement in OPTIONAL_SEARCH_INDEX_SQL:
+        if _should_skip_statement(conn, statement):
+            continue
+        _execute_optional_ddl(conn, statement)

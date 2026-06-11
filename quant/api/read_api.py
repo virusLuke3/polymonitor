@@ -1583,7 +1583,9 @@ def get_backtest_run(conn: Any, *, run_id: int) -> dict[str, Any] | None:
                    p.max_holding_bars, p.initial_capital, p.position_size,
                    p.fee_bps, p.slippage_bps, p.liquidity_cap_pct,
                    p.max_position_notional, p.min_fill_pct,
-                   p.execution_price_mode, p.latency_seconds, p.max_book_staleness_seconds,
+                   p.execution_price_mode, p.execution_profile, p.order_role,
+                   p.latency_blocks, p.adverse_slippage_cents, p.fill_probability_haircut_pct,
+                   p.latency_seconds, p.max_book_staleness_seconds,
                    p.allow_partial_fill, p.min_fill_size, p.reject_on_stale_book,
                    p.final_valuation_mode, p.max_entry_price, p.min_exit_price
             FROM quant.quant_backtest_runs r
@@ -1610,7 +1612,9 @@ def get_backtest_runs(conn: Any, *, market_slug: str | None = None, limit: int =
                    p.max_holding_bars, p.initial_capital, p.position_size,
                    p.fee_bps, p.slippage_bps, p.liquidity_cap_pct,
                    p.max_position_notional, p.min_fill_pct,
-                   p.execution_price_mode, p.latency_seconds, p.max_book_staleness_seconds,
+                   p.execution_price_mode, p.execution_profile, p.order_role,
+                   p.latency_blocks, p.adverse_slippage_cents, p.fill_probability_haircut_pct,
+                   p.latency_seconds, p.max_book_staleness_seconds,
                    p.allow_partial_fill, p.min_fill_size, p.reject_on_stale_book,
                    p.final_valuation_mode, p.max_entry_price, p.min_exit_price
             FROM quant.quant_backtest_runs r
@@ -1661,6 +1665,36 @@ def get_backtest_trades(conn: Any, *, run_id: int, limit: int = 10000) -> list[d
             FROM quant.quant_backtest_trades
             WHERE run_id = %s
             ORDER BY entry_x ASC, trade_id ASC
+            LIMIT %s
+            """,
+            (int(run_id), int(limit)),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_backtest_orders(conn: Any, *, run_id: int, limit: int = 10000) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.quant_backtest_orders
+            WHERE run_id = %s
+            ORDER BY signal_index ASC, order_id ASC
+            LIMIT %s
+            """,
+            (int(run_id), int(limit)),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_backtest_ledger(conn: Any, *, run_id: int, limit: int = 10000) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.quant_backtest_ledger
+            WHERE run_id = %s
+            ORDER BY x_value ASC, ledger_id ASC
             LIMIT %s
             """,
             (int(run_id), int(limit)),

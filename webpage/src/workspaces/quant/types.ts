@@ -1,6 +1,6 @@
 import type { QuantBlockClosePoint, QuantFrontendPricePoint } from '@/types';
 
-export type TesterTab = 'overview' | 'parameters' | 'performance' | 'trades' | 'equity' | 'drawdown' | 'runs' | 'logs' | 'properties';
+export type TesterTab = 'overview' | 'parameters' | 'performance' | 'orders' | 'trades' | 'ledger' | 'equity' | 'drawdown' | 'runs' | 'logs' | 'properties';
 export type PriceSource = 'frontend' | 'orderfilled' | 'orderbook' | 'conservative';
 export type BacktestEngine = 'builtin' | 'backtrader' | 'nautilus_trader';
 export type DataStatus = 'idle' | 'loading' | 'metadata_loading' | 'price_loading' | 'warming' | 'partial' | 'ready' | 'empty' | 'error';
@@ -121,6 +121,59 @@ export type Trade = {
   exitReason: string;
 };
 
+export type OrderLifecycleRow = {
+  id: string;
+  signalIndex: number;
+  tradeId?: string;
+  xAxis: string;
+  signalX: number;
+  submitX: number;
+  side: string;
+  role: string;
+  orderType: string;
+  status: string;
+  decisionPrice: number;
+  requestedPrice: number;
+  requestedSize: number;
+  requestedNotional: number;
+  filledSize: number;
+  filledNotional: number;
+  unfilledSize: number;
+  avgFillPrice: number;
+  fillProbability: number;
+  fillPct: number;
+  blockVolume: number;
+  tradeCount: number;
+  availableNotional: number;
+  feeCost: number;
+  slippageCost: number;
+  executionCost: number;
+  latencyBlocks: number;
+  latencySeconds: number;
+  noFillReason: string;
+  executionSource: string;
+};
+
+export type LedgerRow = {
+  id: string;
+  orderId?: string;
+  tradeId?: string;
+  eventType: string;
+  xAxis: string;
+  xValue: number;
+  sharesDelta: number;
+  cashDelta: number;
+  fee: number;
+  rebate: number;
+  slippageCost: number;
+  executionCost: number;
+  realizedPnl: number;
+  positionAfter: number;
+  cashAfter: number;
+  price: number;
+  source: string;
+};
+
 export type BacktestMetric = {
   name: string;
   value: number;
@@ -157,7 +210,9 @@ export type BacktestResult = {
   generatedAt: string;
   metrics: BacktestMetric[];
   equity: EquityPoint[];
+  orders: OrderLifecycleRow[];
   trades: Trade[];
+  ledger: LedgerRow[];
   performanceRows: PerformanceRow[];
   propertyGroups: PropertyGroup[];
   predictionMetrics: BacktestMetric[];

@@ -23,11 +23,38 @@ from .execution import (
     snapshot_from_any,
     snapshot_to_dict,
 )
+from .execution_profiles import apply_adverse_slippage, apply_probability_haircut, effective_execution_profile
 from .frameworks import normalize_backtest_engine, run_framework_backtest
+from .ledger import build_ledger_rows, ledger_summary
+from .orders import next_order_id, order_from_fill, summarize_orders
 from ..prices.build_targets import target_reason, upsert_price_build_targets_for_market
 
 
 SUPPORTED_PRICE_SOURCES = {"frontend", "orderfilled_block_close"}
+PRICE_QUERY_GUARD_VERSION = "phase1_keyed_price_access_v1"
+
+
+DATA_ACCESS_POLICY = {
+    "market_search": {
+        "allowed_tables": [
+            "quant.market_event_metadata",
+            "quant.market_event_members",
+            "quant.market_price_build_market_progress",
+            "quant.market_token_metadata",
+        ],
+        "forbidden": "Do not discover markets from quant.market_token_block_close with GROUP BY/count or title contains search.",
+    },
+    "backtest_price_read": {
+        "allowed_tables": ["quant.market_token_block_close", "quant.market_token_frontend_price_1m"],
+        "required_access": ["token_id range", "market_slug + token_side range", "market_id + token_side range"],
+        "forbidden": "Do not scan or group all markets from price detail tables during online backtests.",
+    },
+    "raw_orderfilled_verification": {
+        "allowed_tables": ["ClickHouse poly_orderfilled.orderfilled_fact"],
+        "required_access": ["market_id", "token_id", "block_number range", "explicit limit"],
+        "forbidden": "Do not run online all-market raw fact aggregation.",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -45,6 +72,11 @@ class BacktestParameters:
     max_position_notional: Decimal = Decimal("0")
     min_fill_pct: Decimal = Decimal("0")
     execution_price_mode: str = "ORDERFILLED"
+    execution_profile: str = "realistic"
+    order_role: str = "taker"
+    latency_blocks: int = 0
+    adverse_slippage_cents: Decimal = Decimal("0.005")
+    fill_probability_haircut_pct: Decimal = Decimal("20")
     latency_seconds: Decimal = Decimal("0")
     max_book_staleness_seconds: Decimal = Decimal("900")
     allow_partial_fill: bool = True
@@ -84,6 +116,7 @@ class OpenPosition:
     block_volume: Decimal = Decimal("0")
     trade_count: int = 0
     available_notional: Decimal = Decimal("0")
+    entry_order_id: str | None = None
 
 
 def decimal_or_default(value: Any, default: Decimal) -> Decimal:
@@ -147,6 +180,11 @@ def parse_parameters(payload: dict[str, Any]) -> BacktestParameters:
         max_position_notional=decimal_or_default(payload.get("max_position_notional", payload.get("maxPositionNotional")), Decimal("0")),
         min_fill_pct=decimal_or_default(payload.get("min_fill_pct", payload.get("minFillPct")), Decimal("0")),
         execution_price_mode=str(payload.get("execution_price_mode", payload.get("executionPriceMode", "ORDERFILLED")) or "ORDERFILLED").upper(),
+        execution_profile=str(payload.get("execution_profile", payload.get("executionProfile", "realistic")) or "realistic").lower(),
+        order_role=str(payload.get("order_role", payload.get("orderRole", "taker")) or "taker").lower(),
+        latency_blocks=max(0, int_or_default(payload.get("latency_blocks", payload.get("latencyBlocks")), 0)),
+        adverse_slippage_cents=decimal_or_default(payload.get("adverse_slippage_cents", payload.get("adverseSlippageCents")), Decimal("0.005")),
+        fill_probability_haircut_pct=decimal_or_default(payload.get("fill_probability_haircut_pct", payload.get("fillProbabilityHaircutPct")), Decimal("20")),
         latency_seconds=decimal_or_default(payload.get("latency_seconds", payload.get("latencySeconds")), Decimal("0")),
         max_book_staleness_seconds=decimal_or_default(payload.get("max_book_staleness_seconds", payload.get("maxBookStalenessSeconds")), Decimal("900")),
         allow_partial_fill=bool_or_default(payload.get("allow_partial_fill", payload.get("allowPartialFill")), True),
@@ -203,6 +241,11 @@ def backtest_parameter_snapshot(
             "max_position_notional": _decimal_text(params.max_position_notional),
             "min_fill_pct": _decimal_text(params.min_fill_pct),
             "execution_price_mode": params.execution_price_mode,
+            "execution_profile": params.execution_profile,
+            "order_role": params.order_role,
+            "latency_blocks": int(params.latency_blocks),
+            "adverse_slippage_cents": _decimal_text(params.adverse_slippage_cents),
+            "fill_probability_haircut_pct": _decimal_text(params.fill_probability_haircut_pct),
             "latency_seconds": _decimal_text(params.latency_seconds),
             "max_book_staleness_seconds": _decimal_text(params.max_book_staleness_seconds),
             "allow_partial_fill": bool(params.allow_partial_fill),
@@ -373,11 +416,13 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                 max_holding_bars, initial_capital, position_size,
                 fee_bps, slippage_bps, liquidity_cap_pct,
                 max_position_notional, min_fill_pct,
-                execution_price_mode, latency_seconds, max_book_staleness_seconds,
+                execution_price_mode, execution_profile, order_role,
+                latency_blocks, adverse_slippage_cents, fill_probability_haircut_pct,
+                latency_seconds, max_book_staleness_seconds,
                 allow_partial_fill, min_fill_size, reject_on_stale_book,
                 final_valuation_mode, max_entry_price, min_exit_price
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 run_id,
@@ -394,6 +439,11 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                 params.max_position_notional,
                 params.min_fill_pct,
                 params.execution_price_mode,
+                params.execution_profile,
+                params.order_role,
+                params.latency_blocks,
+                params.adverse_slippage_cents,
+                params.fill_probability_haircut_pct,
                 params.latency_seconds,
                 params.max_book_staleness_seconds,
                 params.allow_partial_fill,
@@ -537,6 +587,42 @@ def fetch_price_points(conn: Any, run: dict[str, Any], *, limit: int = 25000) ->
         return [_price_point(row) for row in cur.fetchall()]
 
 
+def price_access_report(run: dict[str, Any], points: list[PricePoint]) -> dict[str, Any]:
+    meta = run.get("meta") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except json.JSONDecodeError:
+            meta = {}
+    token_id = str(meta.get("token_id") or "").strip() or None
+    source = normalize_price_source(run.get("price_source"))
+    first_x = int(points[0].x_value) if points else None
+    last_x = int(points[-1].x_value) if points else None
+    if source == "frontend":
+        access_path = "token_id+timestamp_range" if token_id else "market_slug+token_side+timestamp_range"
+        index_hint = "market_token_frontend_price_1m_pkey" if token_id else "idx_quant_frontend_slug_side_time"
+        source_table = "quant.market_token_frontend_price_1m"
+    else:
+        access_path = "token_id+block_number_range" if token_id else "market_slug+token_side+block_number_range"
+        index_hint = "market_token_block_close_pkey" if token_id else "idx_quant_block_close_slug_side_block"
+        source_table = "quant.market_token_block_close"
+    return {
+        "query_guard_version": PRICE_QUERY_GUARD_VERSION,
+        "source_table": source_table,
+        "access_path": access_path,
+        "index_hint": index_hint,
+        "token_id": token_id,
+        "market_slug": run.get("market_slug"),
+        "token_side": run.get("token_side"),
+        "requested_from": run.get("from_block") if source == "orderfilled_block_close" else run.get("from_ts"),
+        "requested_to": run.get("to_block") if source == "orderfilled_block_close" else run.get("to_ts"),
+        "actual_first_x": first_x,
+        "actual_last_x": last_x,
+        "row_count": len(points),
+        "policy": DATA_ACCESS_POLICY["backtest_price_read"],
+    }
+
+
 def load_clob_execution_snapshots(conn: Any, run: dict[str, Any]) -> list[BookSnapshot]:
     meta = run.get("meta") or {}
     if isinstance(meta, str):
@@ -607,12 +693,32 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
     peak = params.initial_capital
     open_position: OpenPosition | None = None
     trades: list[dict[str, Any]] = []
+    orders: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
     equity_rows: list[dict[str, Any]] = []
+    order_index = 0
+    profile = effective_execution_profile(params)
 
     for index, point in enumerate(points):
         if open_position is None and point.price >= params.entry_threshold:
+            order_index += 1
+            order_id = next_order_id(order_index)
             fill = _fill_decision(params, point, run, "BUY_YES")
+            trade_id = f"T-{len(trades) + 1:04d}"
+            orders.append(order_from_fill(
+                order_id=order_id,
+                signal_index=index + 1,
+                x_axis=x_axis,
+                x_value=point.x_value,
+                side="BUY_YES",
+                role=profile.order_role,
+                order_type="market_like_limit",
+                decision_price=point.price,
+                fill=fill,
+                trade_id=trade_id if fill["size"] > 0 else None,
+                latency_seconds=params.latency_seconds,
+                latency_blocks=profile.latency_blocks,
+            ))
             if fill["size"] <= 0:
                 events.append(_event(
                     "fill_rejected",
@@ -643,6 +749,7 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
                     block_volume=fill.get("block_volume", point.volume),
                     trade_count=int(fill.get("trade_count", point.trade_count) or 0),
                     available_notional=fill.get("available_notional", Decimal("0")),
+                    entry_order_id=order_id,
                 )
                 events.append(_event(
                     "open",
@@ -656,7 +763,24 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
         elif open_position is not None:
             exit_reason = _exit_reason(point.price, open_position.entry_price, index - open_position.entry_index, params)
             if exit_reason:
+                order_index += 1
+                order_id = next_order_id(order_index)
                 exit_fill = _fill_decision(params, point, run, "SELL_YES", target_size=open_position.size)
+                trade_id = f"T-{open_position.trade_index:04d}"
+                orders.append(order_from_fill(
+                    order_id=order_id,
+                    signal_index=index + 1,
+                    x_axis=x_axis,
+                    x_value=point.x_value,
+                    side="SELL_YES",
+                    role=profile.order_role,
+                    order_type="market_like_limit",
+                    decision_price=point.price,
+                    fill=exit_fill,
+                    trade_id=trade_id if exit_fill["size"] > 0 else trade_id,
+                    latency_seconds=params.latency_seconds,
+                    latency_blocks=profile.latency_blocks,
+                ))
                 if exit_fill["size"] <= 0:
                     events.append(_event(
                         "exit_rejected",
@@ -668,7 +792,7 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
                         meta=exit_fill,
                     ))
                     continue
-                trade = _close_trade(run, x_axis, open_position, point, index, exit_reason, params, exit_fill=exit_fill)
+                trade = _close_trade(run, x_axis, open_position, point, index, exit_reason, params, exit_fill=exit_fill, exit_order_id=order_id)
                 trades.append(trade)
                 equity += trade["pnl"]
                 events.append(_event("close", x_axis, point.x_value, trade["trade_id"], point.price, exit_reason))
@@ -698,17 +822,38 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
 
     if open_position is not None:
         last = points[-1]
-        exit_fill = _fill_decision(params, last, run, "SELL_YES", target_size=open_position.size)
+        order_index += 1
+        order_id = next_order_id(order_index)
+        if params.final_valuation_mode == "FORCE_CLOSE":
+            exit_fill = _force_close_fill(params, last, open_position.size)
+        else:
+            exit_fill = _fill_decision(params, last, run, "SELL_YES", target_size=open_position.size)
+        trade_id = f"T-{open_position.trade_index:04d}"
+        orders.append(order_from_fill(
+            order_id=order_id,
+            signal_index=len(points),
+            x_axis=x_axis,
+            x_value=last.x_value,
+            side="SELL_YES",
+            role=profile.order_role,
+            order_type="force_close_limit",
+            decision_price=last.price,
+            fill=exit_fill,
+            trade_id=trade_id if exit_fill["size"] > 0 else trade_id,
+            latency_seconds=params.latency_seconds,
+            latency_blocks=profile.latency_blocks,
+        ))
         if exit_fill["size"] > 0:
-            trade = _close_trade(run, x_axis, open_position, last, len(points) - 1, "end_of_data", params, exit_fill=exit_fill)
+            trade = _close_trade(run, x_axis, open_position, last, len(points) - 1, "end_of_data", params, exit_fill=exit_fill, exit_order_id=order_id)
             trades.append(trade)
             equity += trade["pnl"]
             events.append(_event("close", x_axis, last.x_value, trade["trade_id"], last.price, "end_of_data"))
         else:
             events.append(_event("force_close_rejected", x_axis, last.x_value, f"T-{open_position.trade_index:04d}", last.price, "end_of_data", meta=exit_fill))
 
-    metrics = build_metrics(trades, equity_rows, points, params)
-    return {"trades": trades, "equity": equity_rows, "metrics": metrics, "events": events}
+    ledger_rows = build_ledger_rows(trades, params.initial_capital)
+    metrics = build_metrics(trades, equity_rows, points, params, orders=orders, ledger_rows=ledger_rows)
+    return {"trades": trades, "equity": equity_rows, "metrics": metrics, "events": events, "orders": orders, "ledger": ledger_rows}
 
 
 def build_metrics(
@@ -716,6 +861,9 @@ def build_metrics(
     equity_rows: list[dict[str, Any]],
     points: list[PricePoint],
     params: BacktestParameters,
+    *,
+    orders: list[dict[str, Any]] | None = None,
+    ledger_rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     net = sum((trade["pnl"] for trade in trades), Decimal("0"))
     gross_profit = sum((trade["pnl"] for trade in trades if trade["pnl"] > 0), Decimal("0"))
@@ -758,6 +906,8 @@ def build_metrics(
     ]
     avg_book_staleness = sum(avg_staleness_values, Decimal("0")) / Decimal(max(1, len(avg_staleness_values)))
     avg_notional = filled_notional / Decimal(max(1, len(trades)))
+    order_counts = summarize_orders(orders or [])
+    account = ledger_summary(ledger_rows or [], params.initial_capital)
     settlement_pnl = net if points[-1].price in (Decimal("0"), Decimal("1")) else Decimal("0")
     resolved_pnl = settlement_pnl
     unrealized_pnl = net - resolved_pnl
@@ -793,12 +943,19 @@ def build_metrics(
         ("win_rate", "Win Rate", "overview", _ratio(winners, len(trades)) * Decimal("100"), f"{_ratio(winners, len(trades)) * Decimal('100'):.2f}%", f"{winners} / {len(trades)}", "positive" if winners else "neutral", "Percent profitable closed trades"),
         ("profit_factor", "Profit Factor", "overview", profit_factor, f"{profit_factor:.3f}", "gross P/L", "neutral", "Gross profit divided by gross loss"),
         ("total_trades", "Total Trades", "overview", Decimal(len(trades)), str(len(trades)), "closed", "neutral", "Closed strategy trades"),
+        ("signal_count", "Signals", "overview", Decimal(order_counts["signal_count"]), str(order_counts["signal_count"]), "order intents", "neutral", "Entry and exit order intents generated by strategy signals"),
+        ("submitted_orders", "Submitted Orders", "overview", Decimal(order_counts["submitted_count"]), str(order_counts["submitted_count"]), "lifecycle", "neutral", "Orders submitted to the simulated execution model"),
+        ("no_fill_orders", "No Fill Orders", "overview", Decimal(order_counts["no_fill_count"]), str(order_counts["no_fill_count"]), "missed fills", "negative" if order_counts["no_fill_count"] else "positive", "Orders that saw a signal but did not receive executable historical flow"),
         ("avg_trade", "Avg Trade", "overview", avg_trade, _money(avg_trade), _percent(_pct(avg_trade, params.initial_capital)), _status(avg_trade), "Average closed trade PnL"),
         ("avg_holding", "Avg Holding", "overview", Decimal(str(avg_holding)), f"{avg_holding:.1f} bars", "bars", "neutral", "Average bars held per trade"),
         ("resolved_pnl", "Resolved PnL", "prediction", resolved_pnl, _money(resolved_pnl), "settled", _status(resolved_pnl), "PnL from resolved markets"),
         ("unrealized_pnl", "Unrealized PnL", "prediction", unrealized_pnl, _money(unrealized_pnl), "pending", _status(unrealized_pnl), "Mark-to-market PnL for unresolved exposure"),
         ("settlement_pnl", "Settlement PnL", "prediction", settlement_pnl, _money(settlement_pnl), "resolution payoff", _status(settlement_pnl), "PnL attributable to final payoff"),
         ("slippage_cost", "Execution Cost", "prediction", -execution_cost, _money(-execution_cost), f"{params.fee_bps} fee bps / {params.slippage_bps} slip bps", "negative" if execution_cost else "neutral", "Modeled fees plus entry/exit slippage"),
+        ("ledger_cash_balance", "Ledger Cash", "prediction", account["cash_balance"], _money(account["cash_balance"]), "cash after fills", "neutral", "Cash balance reconstructed from BUY/SELL cashflow ledger"),
+        ("ledger_realized_pnl", "Ledger Realized PnL", "prediction", account["realized_pnl"], _money(account["realized_pnl"]), f"{int(account['ledger_rows'])} ledger rows", _status(account["realized_pnl"]), "Realized PnL sourced from ledger cashflows"),
+        ("ledger_fee_total", "Ledger Fees", "prediction", -account["fee_total"], _money(-account["fee_total"]), "fee attribution", "negative" if account["fee_total"] else "neutral", "Total simulated fees recorded in the ledger"),
+        ("execution_profile", "Execution Profile", "prediction", Decimal("0"), str(params.execution_profile), f"{params.order_role} role", "neutral", "Execution assumption profile controlling fill probability haircut, latency, and adverse slippage"),
         ("liquidity_fill_rate", "Liquidity Fill", "prediction", liquidity_fill_rate, f"{liquidity_fill_rate:.1f}%", f"{_money(filled_notional)} filled", "positive" if liquidity_fill_rate >= Decimal("99") else "negative" if capped_trades else "neutral", "Share of requested USDC notional actually filled after position, liquidity, and min-fill constraints"),
         ("capped_trades", "Capped Trades", "prediction", Decimal(capped_trades), str(capped_trades), f"{_money(avg_notional)} avg fill", "negative" if capped_trades else "positive", "Trades whose filled notional was reduced by volume/liquidity constraints"),
         ("min_fill_pct", "Min Fill", "prediction", params.min_fill_pct, f"{params.min_fill_pct:.1f}%", "entry gate", "neutral", "Entry signals below this fill percentage are rejected instead of partially filled"),
@@ -877,12 +1034,18 @@ def build_data_quality_report(points: list[PricePoint], run: dict[str, Any]) -> 
     if len(points) < 10 or span_coverage < Decimal("0.50"):
         warning_level = "BAD"
     data_version = _points_data_version(points, run)
+    data_access = price_access_report(run, points)
     return {
         "status": status,
         "warning_level": warning_level,
         "price_source": run.get("price_source"),
         "x_axis": "block_number" if run.get("price_source") == "orderfilled_block_close" else "timestamp",
         "data_version": data_version,
+        "data_access": {**data_access, "data_version": data_version},
+        "source_table": data_access["source_table"],
+        "access_path": data_access["access_path"],
+        "index_hint": data_access["index_hint"],
+        "query_guard_version": data_access["query_guard_version"],
         "checksum": data_version,
         "version_basis": "x_value:price:volume:trade_count",
         "rows": len(points),
@@ -970,6 +1133,17 @@ def data_quality_metrics(report: dict[str, Any]) -> list[dict[str, Any]]:
             "sort_order": 93,
         },
         {
+            "metric_key": "data_access_path",
+            "metric_name": "Data Access Path",
+            "metric_group": "system",
+            "value": Decimal("0"),
+            "formatted_value": str(report.get("access_path") or "-"),
+            "delta": str(report.get("source_table") or "-"),
+            "status": "neutral",
+            "tooltip": f"Index hint: {report.get('index_hint') or '-'}; guard: {report.get('query_guard_version') or '-'}",
+            "sort_order": 94,
+        },
+        {
             "metric_key": "span_coverage",
             "metric_name": "Span Coverage",
             "metric_group": "prediction",
@@ -978,7 +1152,7 @@ def data_quality_metrics(report: dict[str, Any]) -> list[dict[str, Any]]:
             "delta": f"{report.get('first_x') or '-'} -> {report.get('last_x') or '-'}",
             "status": "positive" if Decimal(str(report.get("span_coverage_pct") or "0")) >= Decimal("75") else "negative",
             "tooltip": "Observed row span compared with the requested backtest range",
-            "sort_order": 93,
+            "sort_order": 95,
         },
     ]
 
@@ -988,6 +1162,8 @@ def replace_backtest_results(conn: Any, run_id: int, result: dict[str, Any]) -> 
         cur.execute("DELETE FROM quant.quant_backtest_metrics WHERE run_id = %s", (run_id,))
         cur.execute("DELETE FROM quant.quant_backtest_equity WHERE run_id = %s", (run_id,))
         cur.execute("DELETE FROM quant.quant_backtest_trades WHERE run_id = %s", (run_id,))
+        cur.execute("DELETE FROM quant.quant_backtest_orders WHERE run_id = %s", (run_id,))
+        cur.execute("DELETE FROM quant.quant_backtest_ledger WHERE run_id = %s", (run_id,))
         cur.execute("DELETE FROM quant.quant_backtest_events WHERE run_id = %s", (run_id,))
         cur.executemany(
             """
@@ -1038,7 +1214,8 @@ def replace_backtest_results(conn: Any, run_id: int, result: dict[str, Any]) -> 
         cur.executemany(
             """
             INSERT INTO quant.quant_backtest_trades (
-                run_id, trade_id, market_slug, token_side, side, x_axis,
+                run_id, trade_id, entry_order_id, exit_order_id,
+                market_slug, token_side, side, x_axis,
                 entry_x, exit_x, entry_price, exit_price, size, notional,
                 requested_notional, filled_notional, fill_pct,
                 requested_size, filled_size, unfilled_size, fill_status,
@@ -1047,12 +1224,14 @@ def replace_backtest_results(conn: Any, run_id: int, result: dict[str, Any]) -> 
                 available_notional, execution_source, fee_cost, slippage_cost, execution_cost,
                 pnl, pnl_pct, holding_bars, exit_reason
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
                 (
                     run_id,
                     row["trade_id"],
+                    row.get("entry_order_id"),
+                    row.get("exit_order_id"),
                     row["market_slug"],
                     row["token_side"],
                     row["side"],
@@ -1089,6 +1268,94 @@ def replace_backtest_results(conn: Any, run_id: int, result: dict[str, Any]) -> 
                     row["exit_reason"],
                 )
                 for row in result["trades"]
+            ],
+        )
+        cur.executemany(
+            """
+            INSERT INTO quant.quant_backtest_orders (
+                run_id, order_id, signal_index, trade_id, x_axis,
+                signal_x, submit_x, decision_price, requested_price, side,
+                role, order_type, status, requested_size, requested_notional,
+                filled_size, filled_notional, unfilled_size, avg_fill_price,
+                fill_probability, fill_pct, block_volume, trade_count,
+                available_notional, fee_cost, slippage_cost, execution_cost,
+                latency_blocks, latency_seconds, no_fill_reason, execution_source, meta
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            """,
+            [
+                (
+                    run_id,
+                    row["order_id"],
+                    row["signal_index"],
+                    row.get("trade_id"),
+                    row["x_axis"],
+                    row["signal_x"],
+                    row["submit_x"],
+                    row["decision_price"],
+                    row.get("requested_price"),
+                    row["side"],
+                    row["role"],
+                    row["order_type"],
+                    row["status"],
+                    row["requested_size"],
+                    row["requested_notional"],
+                    row["filled_size"],
+                    row["filled_notional"],
+                    row["unfilled_size"],
+                    row.get("avg_fill_price"),
+                    row["fill_probability"],
+                    row["fill_pct"],
+                    row["block_volume"],
+                    row["trade_count"],
+                    row["available_notional"],
+                    row["fee_cost"],
+                    row["slippage_cost"],
+                    row["execution_cost"],
+                    row["latency_blocks"],
+                    row["latency_seconds"],
+                    row.get("no_fill_reason"),
+                    row["execution_source"],
+                    json.dumps(row.get("meta") or {}, default=str),
+                )
+                for row in result.get("orders", [])
+            ],
+        )
+        cur.executemany(
+            """
+            INSERT INTO quant.quant_backtest_ledger (
+                run_id, ledger_id, order_id, trade_id, event_type, x_axis,
+                x_value, market_slug, token_side, shares_delta, cash_delta,
+                fee, rebate, slippage_cost, execution_cost, realized_pnl,
+                position_after, cash_after, price, source, meta
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            """,
+            [
+                (
+                    run_id,
+                    row["ledger_id"],
+                    row.get("order_id"),
+                    row.get("trade_id"),
+                    row["event_type"],
+                    row["x_axis"],
+                    row["x_value"],
+                    row["market_slug"],
+                    row["token_side"],
+                    row["shares_delta"],
+                    row["cash_delta"],
+                    row["fee"],
+                    row["rebate"],
+                    row["slippage_cost"],
+                    row["execution_cost"],
+                    row["realized_pnl"],
+                    row["position_after"],
+                    row["cash_after"],
+                    row.get("price"),
+                    row["source"],
+                    json.dumps(row.get("meta") or {}, default=str),
+                )
+                for row in result.get("ledger", [])
             ],
         )
         cur.executemany(
@@ -1149,6 +1416,11 @@ def _get_parameters(conn: Any, run_id: int) -> BacktestParameters:
         max_position_notional=row.get("max_position_notional", Decimal("0")),
         min_fill_pct=row.get("min_fill_pct", Decimal("0")),
         execution_price_mode=row.get("execution_price_mode", "ORDERFILLED"),
+        execution_profile=row.get("execution_profile", "realistic"),
+        order_role=row.get("order_role", "taker"),
+        latency_blocks=int(row.get("latency_blocks", 0) or 0),
+        adverse_slippage_cents=row.get("adverse_slippage_cents", Decimal("0.005")),
+        fill_probability_haircut_pct=row.get("fill_probability_haircut_pct", Decimal("20")),
         latency_seconds=row.get("latency_seconds", Decimal("0")),
         max_book_staleness_seconds=row.get("max_book_staleness_seconds", Decimal("900")),
         allow_partial_fill=bool(row.get("allow_partial_fill", True)),
@@ -1222,6 +1494,7 @@ def _close_trade(
     params: BacktestParameters,
     *,
     exit_fill: dict[str, Any] | None = None,
+    exit_order_id: str | None = None,
 ) -> dict[str, Any]:
     close_size = Decimal(str(exit_fill.get("size"))) if exit_fill else position.size
     exit_price = Decimal(str(exit_fill.get("exit_price") or exit_fill.get("avg_fill_price"))) if exit_fill and (exit_fill.get("exit_price") or exit_fill.get("avg_fill_price")) else _execution_price(point.price, params, "exit")
@@ -1234,6 +1507,8 @@ def _close_trade(
     pnl = (exit_price - position.entry_price) * close_size - fee_cost
     return {
         "trade_id": f"T-{position.trade_index:04d}",
+        "entry_order_id": position.entry_order_id,
+        "exit_order_id": exit_order_id,
         "market_slug": run["market_slug"],
         "token_side": run["token_side"],
         "side": "LONG",
@@ -1377,7 +1652,9 @@ def _orderfilled_fill_decision(
     target_size: Decimal | None = None,
 ) -> dict[str, Any]:
     price = Decimal(str(point.price))
+    profile = effective_execution_profile(params)
     exec_price = _execution_price(price, params, "entry" if side.startswith("BUY") else "exit")
+    exec_price = apply_adverse_slippage(exec_price, profile, side)
     target_notional = _target_notional(params)
     if target_size is not None:
         requested_size = max(Decimal("0"), Decimal(str(target_size)))
@@ -1389,7 +1666,12 @@ def _orderfilled_fill_decision(
     min_fill_pct = max(Decimal("0"), Decimal(str(params.min_fill_pct)))
     block_volume = max(Decimal("0"), Decimal(str(point.volume or 0)))
     available_notional = (block_volume * cap_pct / Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
-    fill_probability = min(Decimal("100"), _pct(available_notional, target_notional)) if target_notional else Decimal("0")
+    raw_fill_probability = min(Decimal("100"), _pct(available_notional, target_notional)) if target_notional else Decimal("0")
+    fill_probability = apply_probability_haircut(raw_fill_probability, profile)
+    effective_available_notional = min(
+        available_notional,
+        (target_notional * fill_probability / Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+    )
     empty = {
         "requested_notional": target_notional,
         "filled_notional": Decimal("0"),
@@ -1408,6 +1690,12 @@ def _orderfilled_fill_decision(
         "trade_count": int(point.trade_count or 0),
         "available_notional": available_notional,
         "execution_source": "orderfilled_volume",
+        "execution_profile": profile.name,
+        "order_role": profile.order_role,
+        "latency_blocks": profile.latency_blocks,
+        "adverse_slippage_cents": profile.adverse_slippage_cents,
+        "fill_probability_haircut_pct": profile.fill_probability_haircut_pct,
+        "raw_fill_probability": raw_fill_probability,
         "notes": ["no_orderfilled_volume"] if block_volume <= 0 else [],
     }
     if price <= 0 or exec_price <= 0 or target_notional <= 0 or cap_pct <= 0:
@@ -1416,9 +1704,9 @@ def _orderfilled_fill_decision(
         return empty
 
     if params.allow_partial_fill:
-        filled_notional = min(target_notional, available_notional)
+        filled_notional = min(target_notional, effective_available_notional)
     else:
-        if available_notional < target_notional:
+        if effective_available_notional < target_notional:
             return {**empty, "notes": ["insufficient_orderfilled_volume_for_full_fill"]}
         filled_notional = target_notional
     filled_notional = filled_notional.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
@@ -1437,6 +1725,8 @@ def _orderfilled_fill_decision(
         }
     fill_status = "FILLED" if filled_notional >= target_notional else "PARTIAL"
     price_key = "entry_price" if side.startswith("BUY") else "exit_price"
+    slippage_cost = ((exec_price - price) * filled_size).copy_abs().quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    fee_cost = (filled_notional * _bps_fraction(params.fee_bps)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
     return {
         "requested_notional": target_notional,
         "filled_notional": filled_notional,
@@ -1457,6 +1747,15 @@ def _orderfilled_fill_decision(
         "trade_count": int(point.trade_count or 0),
         "available_notional": available_notional,
         "execution_source": "orderfilled_volume",
+        "execution_profile": profile.name,
+        "order_role": profile.order_role,
+        "latency_blocks": profile.latency_blocks,
+        "adverse_slippage_cents": profile.adverse_slippage_cents,
+        "fill_probability_haircut_pct": profile.fill_probability_haircut_pct,
+        "raw_fill_probability": raw_fill_probability,
+        "fee_cost": fee_cost,
+        "slippage_cost": slippage_cost,
+        "execution_cost": fee_cost + slippage_cost,
         "notes": ["expected_fill_from_historical_orderfilled_volume"],
     }
 
@@ -1488,6 +1787,7 @@ def _fill_result_to_engine(fill: FillResult, signal_price: Decimal, params: Back
         "unfilled_size": fill.unfilled_size,
         "fee_cost": fill.fee,
         "slippage_cost": fill.slippage,
+        "execution_cost": fill.fee + fill.slippage,
         "execution_source": "clob_depth" if fill.snapshot_id else "no_book",
         "block_volume": Decimal("0"),
         "trade_count": 0,
@@ -1498,6 +1798,43 @@ def _fill_result_to_engine(fill: FillResult, signal_price: Decimal, params: Back
         "mid": fill.mid,
         "levels_consumed": fill.levels_consumed,
         "notes": fill.notes,
+    }
+
+
+def _force_close_fill(params: BacktestParameters, point: PricePoint, target_size: Decimal) -> dict[str, Any]:
+    requested_size = max(Decimal("0"), Decimal(str(target_size)))
+    profile = effective_execution_profile(params)
+    raw_price = Decimal(str(point.price))
+    exit_price = apply_adverse_slippage(_execution_price(raw_price, params, "exit"), profile, "SELL_YES")
+    filled_notional = (requested_size * exit_price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    fee_cost = (filled_notional * _bps_fraction(params.fee_bps)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    slippage_cost = ((raw_price - exit_price) * requested_size).copy_abs().quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    return {
+        "requested_notional": filled_notional,
+        "filled_notional": filled_notional,
+        "fill_pct": Decimal("100"),
+        "fill_probability": Decimal("100"),
+        "size": requested_size,
+        "exit_price": exit_price,
+        "avg_fill_price": exit_price,
+        "liquidity_cap_pct": max(Decimal("0"), Decimal(str(params.liquidity_cap_pct))),
+        "min_fill_pct": max(Decimal("0"), Decimal(str(params.min_fill_pct))),
+        "partial_fill": False,
+        "rejected": False,
+        "fill_status": "FILLED",
+        "requested_size": requested_size,
+        "filled_size": requested_size,
+        "unfilled_size": Decimal("0"),
+        "block_volume": max(Decimal("0"), Decimal(str(point.volume or 0))),
+        "trade_count": int(point.trade_count or 0),
+        "available_notional": filled_notional,
+        "fee_cost": fee_cost,
+        "slippage_cost": slippage_cost,
+        "execution_cost": fee_cost + slippage_cost,
+        "execution_source": "forced_mark_to_market",
+        "execution_profile": profile.name,
+        "order_role": profile.order_role,
+        "notes": ["force_close_marked_to_last_orderfilled_price"],
     }
 
 
