@@ -5,6 +5,7 @@ import type {
   WorldCupDashboardPayload,
   WorldCupMatch,
   WorldCupNewsItem,
+  WorldCupOddsSnapshot,
   WorldCupPolymarketMarket,
   WorldCupStage,
   WorldCupVenueCity,
@@ -488,6 +489,86 @@ export function matchPolymarketMarkets(match: WorldCupMatch | null, marketGroups
         volume24h: numeric(outcome.volume24h),
       })),
     }));
+}
+
+function isPredictionMarketSnapshot(snapshot: WorldCupOddsSnapshot) {
+  const providerText = `${snapshot.provider || ''} ${snapshot.source || ''}`.toLowerCase();
+  return snapshot.providerType === 'prediction_market' || /polymarket|gamma|clob/.test(providerText);
+}
+
+function priceToProbability(value: unknown) {
+  const parsed = numeric(value);
+  if (parsed === null) return null;
+  if (parsed > 1) return parsed / 100;
+  if (parsed < 0) return null;
+  return parsed;
+}
+
+function snapshotOutcomePrice(snapshot: WorldCupOddsSnapshot, index: number, outcomeName: string) {
+  const probability = snapshot.probabilities?.find((item) => {
+    const label = String(item.outcome || item.name || '').toLowerCase();
+    return label === outcomeName.toLowerCase() || (/draw/i.test(label) && /draw/i.test(outcomeName));
+  });
+  return (
+    priceToProbability(snapshot.outcomes[index]?.price) ??
+    priceToProbability(snapshot.outcomes[index]?.impliedProbability) ??
+    priceToProbability(probability?.price) ??
+    priceToProbability(probability?.impliedProbability) ??
+    priceToProbability(snapshot.outcomePrices?.[index])
+  );
+}
+
+export function matchRuntimePolymarketMarkets(match: WorldCupMatch | null, odds: WorldCupOddsSnapshot[]): WorldCupPolymarketMarket[] {
+  if (!match) return [];
+  return odds
+    .filter((snapshot) => snapshot.matchId === match.id && isPredictionMarketSnapshot(snapshot))
+    .map((snapshot) => {
+      const runtimeSnapshot = snapshot as WorldCupOddsSnapshot & {
+        eventId?: string | number | null;
+        eventSlug?: string | null;
+        id?: string | number | null;
+        marketTitle?: string | null;
+        slug?: string | null;
+        tradeUrl?: string | null;
+      };
+      const confidenceValue = numeric(snapshot.confidence);
+      const confidence = confidenceValue === null ? 0.99 : Math.min(0.99, confidenceValue > 1 ? confidenceValue / 100 : confidenceValue);
+      const title = String(runtimeSnapshot.marketTitle || snapshot.provider || `${match.homeTeam} vs ${match.awayTeam}`);
+      return {
+        matchId: match.id,
+        eventId: runtimeSnapshot.eventId || runtimeSnapshot.id || snapshot.marketUrl || title,
+        slug: runtimeSnapshot.eventSlug || runtimeSnapshot.slug || null,
+        marketUrl: snapshot.marketUrl || null,
+        tradeUrl: runtimeSnapshot.tradeUrl || snapshot.marketUrl || null,
+        title,
+        confidence,
+        source: /gamma/i.test(String(snapshot.source || '')) ? 'gamma' : 'polymarket',
+        volume24h: null,
+        liquidity: null,
+        outcomes: snapshot.outcomes.slice(0, 4).map((outcome, index) => ({
+          name: outcome.name || String(snapshot.rawOutcomes?.[index] || `Outcome ${index + 1}`),
+          yesPrice: snapshotOutcomePrice(snapshot, index, outcome.name),
+          volume24h: null,
+        })),
+      } satisfies WorldCupPolymarketMarket;
+    })
+    .filter((market) => market.outcomes.some((outcome) => outcome.yesPrice !== null && outcome.yesPrice !== undefined));
+}
+
+export function mergeWorldCupSelectedMarkets(
+  match: WorldCupMatch | null,
+  marketGroups: MarketGroupItem[],
+  odds: WorldCupOddsSnapshot[],
+): WorldCupPolymarketMarket[] {
+  const runtimeMarkets = matchRuntimePolymarketMarkets(match, odds);
+  const localMarkets = matchPolymarketMarkets(match, marketGroups);
+  const seen = new Set<string>();
+  return [...runtimeMarkets, ...localMarkets].filter((market) => {
+    const key = String(market.eventId || market.slug || market.marketUrl || market.title).toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function numeric(value: unknown) {

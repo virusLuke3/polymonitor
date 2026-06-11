@@ -7,7 +7,7 @@ import {
   applyWorldCupMarketLinks,
   loadWorldCupDashboard,
   matchCity,
-  matchPolymarketMarkets,
+  mergeWorldCupSelectedMarkets,
   refreshWorldCupDashboard,
   WORLD_CUP_HOST_MATCH_COUNTS,
 } from './data';
@@ -369,7 +369,10 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPa
 
   const selectedMatch = payload?.matches.find((match) => match.id === selectedMatchId) || nextMatch || payload?.matches[0] || null;
   const selectedOdds = payload?.odds.filter((item) => item.matchId === selectedMatch?.id) || [];
-  const selectedMarkets = useMemo(() => matchPolymarketMarkets(selectedMatch, marketGroups), [marketGroups, selectedMatch]);
+  const selectedMarkets = useMemo(
+    () => mergeWorldCupSelectedMarkets(selectedMatch, marketGroups, selectedOdds),
+    [marketGroups, selectedMatch, selectedOdds],
+  );
   const news = useMemo(() => {
     const runtimeNews = payload?.news || [];
     const contentNews = filterWorldCupNews(latestContent, selectedMatch);

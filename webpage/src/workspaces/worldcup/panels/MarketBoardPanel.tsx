@@ -32,7 +32,13 @@ export function MarketBoardPanel({
             <span>{formatCompact(market.volume24h)} · {Math.round(market.confidence * 100)} conf</span>
             <b>{index === 0 ? 'VERIFIED' : String(market.source || 'market').toUpperCase()}</b>
           </div>
-          <strong>{market.title}</strong>
+          {market.marketUrl || market.tradeUrl ? (
+            <a href={market.tradeUrl || market.marketUrl || '#'} target="_blank" rel="noreferrer">
+              <strong>{market.title}</strong>
+            </a>
+          ) : (
+            <strong>{market.title}</strong>
+          )}
           <div className="wm-worldcup-prob-grid">
             {market.outcomes.slice(0, 3).map((outcome) => (
               <span key={outcome.name}>

@@ -115,9 +115,11 @@ export type WorldCupPolymarketMarket = {
   eventId?: string | number | null;
   marketId?: number | null;
   slug?: string | null;
+  marketUrl?: string | null;
+  tradeUrl?: string | null;
   title: string;
   confidence: number;
-  source: 'local-db' | 'gamma' | 'manual' | 'inferred';
+  source: 'local-db' | 'gamma' | 'polymarket' | 'manual' | 'inferred';
   outcomes: Array<{
     name: string;
     yesPrice?: number | null;
