@@ -1,0 +1,16 @@
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-venue-risk-panel {
+  --wc-panel-accent: #34dfff;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-risk-score span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-risk-grid span {
+  border-radius: 8px;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-risk-grid span.gold {
+  border-left-color: rgba(216, 173, 54, 0.82);
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-risk-grid span.blue {
+  border-left-color: rgba(52, 223, 255, 0.82);
+}

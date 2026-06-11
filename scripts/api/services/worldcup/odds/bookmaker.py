@@ -1,0 +1,249 @@
+from __future__ import annotations
+
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
+from api.services.worldcup.common import headers, parse_iso, team_tokens, utc_now_iso
+from api.services.worldcup.odds.probability import ordered_outcomes
+
+WORLDCUP_ODDS_SPORT_KEY = "soccer_fifa_world_cup"
+WORLDCUP_ODDS_REGIONS = "us,uk,eu,au"
+
+
+def safe_float(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def mean(values: Iterable[float]) -> Optional[float]:
+    rows = [value for value in values if value == value]
+    return sum(rows) / len(rows) if rows else None
+
+
+def build_bookmaker_h2h_outcomes(
+    match: Dict[str, Any],
+    event: Dict[str, Any],
+    canonical_outcome_label: Callable[[Dict[str, Any], Any], str],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+    bookmaker_rows: List[Dict[str, Any]] = []
+    for bookmaker in event.get("bookmakers") or []:
+        if not isinstance(bookmaker, dict):
+            continue
+        book_key = str(bookmaker.get("key") or "").strip()
+        book_title = str(bookmaker.get("title") or bookmaker.get("key") or "Book").strip()
+        book_market_keys: List[str] = []
+        for market in bookmaker.get("markets") or []:
+            if not isinstance(market, dict):
+                continue
+            market_key = str(market.get("key") or "").strip()
+            if market_key:
+                book_market_keys.append(market_key)
+            if market_key != "h2h":
+                continue
+            raw_rows = []
+            for outcome in market.get("outcomes") or []:
+                if not isinstance(outcome, dict):
+                    continue
+                price = safe_float(outcome.get("price"))
+                name = canonical_outcome_label(match, outcome.get("name"))
+                if not name or price is None or price <= 1:
+                    continue
+                raw_rows.append({"name": name, "price": price})
+            overround = sum(1 / row["price"] for row in raw_rows)
+            if overround <= 0:
+                continue
+            book_outcomes: List[Dict[str, Any]] = []
+            for row in raw_rows:
+                implied = (1 / row["price"]) / overround * 100
+                bucket = buckets.setdefault(row["name"], {"prices": [], "probabilities": [], "books": []})
+                bucket["prices"].append(row["price"])
+                bucket["probabilities"].append(implied)
+                bucket["books"].append(book_title)
+                book_outcomes.append(
+                    {
+                        "name": row["name"],
+                        "decimalOdds": round(row["price"], 3),
+                        "impliedProbability": round(implied, 2),
+                    }
+                )
+            if book_outcomes:
+                bookmaker_rows.append(
+                    {
+                        "key": book_key,
+                        "title": book_title,
+                        "lastUpdate": bookmaker.get("last_update"),
+                        "markets": sorted(set(book_market_keys)),
+                        "outcomes": ordered_outcomes(match, book_outcomes),
+                    }
+                )
+    outcomes: List[Dict[str, Any]] = []
+    for name, bucket in buckets.items():
+        implied = mean([float(value) for value in bucket.get("probabilities") or []])
+        prices = [float(value) for value in bucket.get("prices") or []]
+        if implied is None or not prices:
+            continue
+        outcomes.append(
+            {
+                "name": name,
+                "decimalOdds": round(max(prices), 3),
+                "impliedProbability": round(implied, 2),
+                "bookCount": len(prices),
+                "source": "bookmaker-consensus",
+            }
+        )
+    return ordered_outcomes(match, outcomes), bookmaker_rows
+
+
+def _canonical_outcome_label(match: Dict[str, Any], label: Any) -> str:
+    text = str(label or "").strip()
+    if not text:
+        return ""
+    lower = text.lower()
+    home = str(match.get("homeTeam") or "").strip()
+    away = str(match.get("awayTeam") or "").strip()
+    if lower in {"draw", "tie", "x"} or "draw" in lower:
+        return "Draw"
+    home_tokens = team_tokens(home)
+    away_tokens = team_tokens(away)
+    label_tokens = team_tokens(text)
+
+    def score(team_name: str, team_token_set: set[str]) -> int:
+        team_lower = str(team_name or "").lower()
+        if not team_lower:
+            return 0
+        if lower == team_lower:
+            return 100
+        value = len(team_token_set & label_tokens)
+        if team_lower in lower or lower in team_lower:
+            value += 4
+        return value
+
+    home_score = score(home, home_tokens)
+    away_score = score(away, away_tokens)
+    if home_score > away_score and home_score > 0:
+        return home
+    if away_score > home_score and away_score > 0:
+        return away
+    return text
+
+
+def _team_match_score(left: Any, right: Any) -> int:
+    left_text = str(left or "").strip().lower()
+    right_text = str(right or "").strip().lower()
+    if not left_text or not right_text:
+        return 0
+    if left_text == right_text:
+        return 4
+    left_tokens = team_tokens(left_text)
+    right_tokens = team_tokens(right_text)
+    overlap = left_tokens & right_tokens
+    if not overlap:
+        return 0
+    return 3 if len(overlap) >= min(len(left_tokens), len(right_tokens), 2) else 1
+
+
+def _bookmaker_event_score(match: Dict[str, Any], event: Dict[str, Any]) -> int:
+    home_score = _team_match_score(match.get("homeTeam"), event.get("home_team"))
+    away_score = _team_match_score(match.get("awayTeam"), event.get("away_team"))
+    reversed_home_score = _team_match_score(match.get("homeTeam"), event.get("away_team"))
+    reversed_away_score = _team_match_score(match.get("awayTeam"), event.get("home_team"))
+    team_score = max(home_score + away_score, reversed_home_score + reversed_away_score)
+    if team_score < 4:
+        return 0
+    match_time = parse_iso(match.get("kickoffUtc"))
+    event_time = parse_iso(event.get("commence_time"))
+    time_score = 0
+    if match_time and event_time:
+        delta_hours = abs((match_time - event_time).total_seconds()) / 3600
+        if delta_hours <= 2:
+            time_score = 8
+        elif delta_hours <= 8:
+            time_score = 4
+        elif match_time.date() == event_time.date():
+            time_score = 2
+    return team_score * 4 + time_score
+
+
+def fetch_bookmaker_events(ctx: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
+    getter = ctx.get("http_json_get")
+    settings = ctx.get("SETTINGS")
+    api_key = str(getattr(settings, "the_odds_api_key", "") or "").strip()
+    if not callable(getter) or not api_key:
+        return [], "missing-key", {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": 0, "matched": 0}
+    base_url = str(getattr(settings, "the_odds_api_base_url", "") or "https://api.the-odds-api.com").rstrip("/")
+    try:
+        payload = getter(
+            f"{base_url}/v4/sports/{WORLDCUP_ODDS_SPORT_KEY}/odds/",
+            params={
+                "apiKey": api_key,
+                "regions": WORLDCUP_ODDS_REGIONS,
+                "markets": "h2h",
+                "oddsFormat": "decimal",
+                "dateFormat": "iso",
+            },
+            timeout=12,
+            headers=headers(),
+        )
+    except Exception:
+        return [], "error", {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": 0, "matched": 0}
+    events = [item for item in (payload if isinstance(payload, list) else []) if isinstance(item, dict)]
+    return events, "ok" if events else "empty", {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": len(events), "matched": 0}
+
+
+def link_bookmaker_odds(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
+    events, state, stats = fetch_bookmaker_events(ctx)
+    if not events or not matches:
+        return [], state, stats
+    generated_at = utc_now_iso()
+    rows: List[Dict[str, Any]] = []
+    used_events: set[str] = set()
+    for match in matches:
+        if str(match.get("status") or "") == "finished":
+            continue
+        best: Optional[Dict[str, Any]] = None
+        best_score = 0
+        for event in events:
+            event_id = str(event.get("id") or event.get("commence_time") or "")
+            if event_id in used_events:
+                continue
+            score = _bookmaker_event_score(match, event)
+            if score > best_score:
+                best = event
+                best_score = score
+        if not best or best_score <= 0:
+            continue
+        outcomes, bookmakers = build_bookmaker_h2h_outcomes(match, best, _canonical_outcome_label)
+        if not outcomes:
+            continue
+        event_id = str(best.get("id") or best.get("commence_time") or "")
+        used_events.add(event_id)
+        book_count = max((int(outcome.get("bookCount") or 0) for outcome in outcomes), default=0)
+        rows.append(
+            {
+                "id": f"{match.get('id')}:bookmaker-h2h",
+                "matchId": match.get("id"),
+                "homeTeam": match.get("homeTeam"),
+                "awayTeam": match.get("awayTeam"),
+                "kickoffUtc": match.get("kickoffUtc"),
+                "provider": "The Odds API consensus",
+                "providerType": "online_bookmaker",
+                "marketType": "moneyline",
+                "outcomes": outcomes,
+                "generatedAt": generated_at,
+                "source": "the-odds-api",
+                "sourceUrl": str(getattr(ctx.get("SETTINGS"), "the_odds_source_url", "") or "https://the-odds-api.com/"),
+                "bookmakerCount": book_count,
+                "bookmakers": bookmakers,
+                "eventId": event_id,
+                "commenceTime": best.get("commence_time"),
+                "confidence": min(99, best_score),
+            }
+        )
+        match["oddsLinked"] = True
+    stats["matched"] = len(rows)
+    return rows, "ok" if rows else state, stats

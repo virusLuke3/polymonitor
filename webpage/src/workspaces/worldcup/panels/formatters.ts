@@ -42,6 +42,11 @@ export function formatCompact(value?: number | null) {
   return `$${number.toFixed(0)}`;
 }
 
+export function formatNumber(value?: number | null, digits = 1) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+  return Number(value).toFixed(digits);
+}
+
 export function probabilityWidth(value?: number | null) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '2%';
   return `${Math.max(2, Math.min(100, Number(value) * 100))}%`;
