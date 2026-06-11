@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -50,7 +51,8 @@ def tokenize(value: Any) -> List[str]:
 
 
 def team_tokens(value: Any) -> set[str]:
-    text = str(value or "").lower().replace("&", " and ")
+    text = unicodedata.normalize("NFKD", str(value or "").lower().replace("&", " and "))
+    text = text.encode("ascii", "ignore").decode("ascii")
     aliases = {
         "usa": "united states america us",
         "us": "united states america usa",
@@ -58,6 +60,10 @@ def team_tokens(value: Any) -> set[str]:
         "czechia": "czech republic czech",
         "bosnia herzegovina": "bosnia herzogovina",
         "bosnia and herzegovina": "bosnia herzegovina",
+        "cote d ivoire": "ivory coast civ",
+        "ivory coast": "cote d ivoire civ",
+        "turkey": "turkiye tur",
+        "turkiye": "turkey tur",
     }
     expanded = text
     for alias, extra in aliases.items():

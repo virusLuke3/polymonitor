@@ -216,6 +216,68 @@ def _moneyline_bundle_candidate(slug_base: str, children: List[Dict[str, Any]]) 
     }
 
 
+_TEAM_SLUG_CODES = {
+    "argentina": "arg",
+    "australia": "aus",
+    "belgium": "bel",
+    "bosnia & herzegovina": "bih",
+    "bosnia and herzegovina": "bih",
+    "brazil": "bra",
+    "canada": "can",
+    "colombia": "col",
+    "croatia": "cro",
+    "curaçao": "cur",
+    "curacao": "cur",
+    "czech republic": "cze",
+    "denmark": "den",
+    "ecuador": "ecu",
+    "england": "eng",
+    "france": "fra",
+    "germany": "ger",
+    "ghana": "gha",
+    "haiti": "hai",
+    "iran": "irn",
+    "italy": "ita",
+    "ivory coast": "civ",
+    "japan": "jpn",
+    "mexico": "mex",
+    "morocco": "mar",
+    "netherlands": "nld",
+    "new zealand": "nzl",
+    "nigeria": "nga",
+    "norway": "nor",
+    "paraguay": "par",
+    "portugal": "por",
+    "qatar": "qat",
+    "scotland": "sco",
+    "senegal": "sen",
+    "south africa": "rsa",
+    "south korea": "kor",
+    "spain": "esp",
+    "sweden": "swe",
+    "switzerland": "sui",
+    "tunisia": "tun",
+    "turkey": "tur",
+    "usa": "usa",
+    "united states": "usa",
+    "uruguay": "uru",
+}
+
+
+def _team_slug_code(team: Any) -> str:
+    text = str(team or "").strip().lower().replace("&", "and")
+    return _TEAM_SLUG_CODES.get(text, re.sub(r"[^a-z0-9]+", "-", text).strip("-")[:3])
+
+
+def _worldcup_match_slug_base_from_match(match: Dict[str, Any]) -> str:
+    home = _team_slug_code(match.get("homeTeam"))
+    away = _team_slug_code(match.get("awayTeam"))
+    date = str(match.get("kickoffUtc") or "")[:10]
+    if not home or not away or not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+        return ""
+    return f"fifwc-{home}-{away}-{date}"
+
+
 def _candidate_event_payload(item: Dict[str, Any], event: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if isinstance(event, dict) and event:
         return event
@@ -401,6 +463,78 @@ def _worldcup_market_score(match: Dict[str, Any], row: Dict[str, Any]) -> int:
     return score
 
 
+def _extract_probability_rows(match: Dict[str, Any], row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    labels = _safe_list(row.get("outcomes"))
+    prices = _safe_list(row.get("outcomePrices"))
+    if not prices:
+        latest = row.get("latestYesPrice") if row.get("latestYesPrice") not in (None, "") else row.get("latestPrice")
+        if latest not in (None, ""):
+            prices = [latest]
+            labels = labels or ["YES"]
+    hint = _match_outcome_hint(match, row)
+    if hint and prices:
+        return [{"outcome": hint, "price": prices[0], "marketUrl": _polymarket_url(row)}]
+    rows: List[Dict[str, Any]] = []
+    for index, label in enumerate(labels):
+        if index >= len(prices):
+            continue
+        outcome = _canonical_outcome_label(match, label)
+        if outcome not in {str(match.get("homeTeam") or ""), str(match.get("awayTeam") or ""), "Draw"}:
+            continue
+        rows.append({"outcome": outcome, "price": prices[index], "marketUrl": _polymarket_url(row)})
+    return rows
+
+
+def _ordered_probability_rows(match: Dict[str, Any], probabilities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_outcome = {
+        str(row.get("outcome") or row.get("name") or "").lower(): row
+        for row in probabilities
+        if isinstance(row, dict)
+    }
+    ordered: List[Dict[str, Any]] = []
+    for label in (str(match.get("homeTeam") or ""), "Draw", str(match.get("awayTeam") or "")):
+        row = by_outcome.pop(label.lower(), None)
+        if row:
+            ordered.append(row)
+    ordered.extend(by_outcome.values())
+    return ordered
+
+
+def _bundle_probability_rows(ctx: Dict[str, Any], match: Dict[str, Any], row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    by_outcome: Dict[str, Dict[str, Any]] = {}
+    for child in _safe_list(row.get("outcomeMarkets")):
+        if not isinstance(child, dict):
+            continue
+        child_rows = _extract_probability_rows(match, child)
+        if not child_rows and str(child.get("slug") or "").endswith("-draw") and _safe_list(child.get("outcomePrices")):
+            child_rows = [{"outcome": "Draw", "price": _safe_list(child.get("outcomePrices"))[0], "marketUrl": _polymarket_url(child)}]
+        for probability in child_rows:
+            outcome = str(probability.get("outcome") or "")
+            if outcome and outcome not in by_outcome:
+                by_outcome[outcome] = probability
+    return _ordered_probability_rows(match, list(by_outcome.values()))
+
+
+def _best_probability_rows(match: Dict[str, Any], candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_outcome: Dict[str, Dict[str, Any]] = {}
+    for candidate in candidates:
+        for probability in _extract_probability_rows(match, candidate):
+            outcome = str(probability.get("outcome") or "")
+            if outcome and outcome not in by_outcome:
+                by_outcome[outcome] = probability
+    rows = _ordered_probability_rows(match, list(by_outcome.values()))
+    return rows if len(rows) >= 2 else []
+
+
+def _clob_snapshot(ctx: Dict[str, Any], row: Dict[str, Any]) -> Dict[str, Any]:
+    latest_yes = row.get("latestYesPrice") if row.get("latestYesPrice") not in (None, "") else row.get("latestPrice")
+    return {
+        "latestYesPrice": latest_yes,
+        "latestNoPrice": row.get("latestNoPrice"),
+        "clobTokenIds": row.get("clobTokenIds"),
+    }
+
+
 def _normalize_market_candidate(item: Dict[str, Any], event: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     event = _candidate_event_payload(item, event)
     title = str(item.get("question") or item.get("title") or event.get("title") or "").strip()
@@ -424,6 +558,36 @@ def _normalize_market_candidate(item: Dict[str, Any], event: Optional[Dict[str, 
         "marketUrl": _polymarket_url({**event, **item, "slug": slug or event_slug, "eventSlug": event_slug}),
         "source": "gamma",
     }
+
+
+def _gamma_moneyline_bundle_search(ctx: Dict[str, Any], match: Dict[str, Any]) -> List[Dict[str, Any]]:
+    getter = ctx.get("http_json_get")
+    if not callable(getter):
+        return []
+    slug_base = _worldcup_match_slug_base_from_match(match)
+    if not slug_base:
+        return []
+    settings = ctx.get("SETTINGS")
+    base_url = str(getattr(settings, "gamma_api_base", "") or POLYMARKET_GAMMA_API_BASE).rstrip("/")
+    suffixes = [_team_slug_code(match.get("homeTeam")), "draw", _team_slug_code(match.get("awayTeam"))]
+    children: List[Dict[str, Any]] = []
+    for suffix in suffixes:
+        if not suffix:
+            continue
+        try:
+            payload = getter(f"{base_url}/markets", params={"slug": f"{slug_base}-{suffix}"}, timeout=8, headers=_headers())
+        except Exception:
+            continue
+        items = payload if isinstance(payload, list) else payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict):
+                children.append(_normalize_market_candidate(item))
+                break
+    if len(children) < 2:
+        return []
+    return [{**_moneyline_bundle_candidate(slug_base, children), "source": "gamma-moneyline"}]
 
 
 def _gamma_search(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> List[Dict[str, Any]]:
@@ -459,6 +623,13 @@ def _gamma_search(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> List[Di
                 if len(rows) >= limit:
                     return rows
     return rows
+
+
+def _search_market_sources(ctx: Dict[str, Any], query: str, *, limit: int = 8) -> List[Dict[str, Any]]:
+    rows = _local_market_search(ctx, query, limit=limit)
+    if rows:
+        return rows[:limit]
+    return _gamma_search(ctx, query, limit=limit)
 
 
 def _gamma_scan_active(ctx: Dict[str, Any], *, limit: int = 120) -> List[Dict[str, Any]]:
@@ -684,9 +855,12 @@ def link_worldcup_markets(
         best_score = 0
         accepted: List[Dict[str, Any]] = []
         match_candidates = 0
+        direct_candidates = _gamma_moneyline_bundle_search(ctx, match)
         for query_index, query in enumerate(queries):
             stats["queries"] += 1
             candidates = _search_market_sources(ctx, query, limit=8)
+            if query_index == 0 and direct_candidates:
+                candidates = [*direct_candidates, *candidates]
             if query_index == 0 and scan_candidates:
                 candidates = [*candidates, *scan_candidates]
             match_candidates += len(candidates)
