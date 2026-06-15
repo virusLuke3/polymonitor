@@ -23199,3 +23199,91 @@ a.wm-orderfilled-row {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.wm-worldcup-home-panel {
+  font-family: var(--font-body);
+}
+
+.wm-worldcup-home-row-meta,
+.wm-worldcup-home-source-list article span,
+.wm-worldcup-home-source-list article strong,
+.wm-worldcup-home-empty strong,
+.wm-worldcup-home-match-list small,
+.wm-worldcup-home-match-list span,
+.wm-worldcup-home-tabs button,
+.wm-worldcup-home-table header,
+.wm-worldcup-home-table span,
+.wm-worldcup-home-metric-strip em,
+.wm-worldcup-home-prob-grid em,
+.wm-worldcup-home-prob-table header,
+.wm-worldcup-home-risk-grid em,
+.wm-worldcup-home-odds-list span,
+.wm-worldcup-home-city-list em,
+.wm-worldcup-home-city-list span,
+.wm-worldcup-home-venue-card span,
+.wm-worldcup-home-fact-grid span,
+.wm-worldcup-home-score em,
+.wm-worldcup-home-player-row span,
+.wm-worldcup-home-player-row em {
+  font-weight: 730;
+  letter-spacing: 0;
+}
+
+.wm-worldcup-home-row-meta b,
+.wm-worldcup-home-news-list b,
+.wm-worldcup-home-impact-list b,
+.wm-worldcup-home-source-list article strong,
+.wm-worldcup-home-meter b {
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.wm-worldcup-home-signal-row > strong,
+.wm-worldcup-home-card-list article > strong,
+.wm-worldcup-home-news-list a > strong,
+.wm-worldcup-home-impact-list a > strong,
+.wm-worldcup-home-match-list article div > strong,
+.wm-worldcup-home-city-list strong,
+.wm-worldcup-home-venue-card strong,
+.wm-worldcup-home-team-grid header strong,
+.wm-worldcup-home-player-row strong,
+.wm-worldcup-home-score strong,
+.wm-worldcup-home-fact-grid strong {
+  color: #e9e9e9;
+  font-family: var(--font-body);
+  font-weight: 780;
+  letter-spacing: 0;
+}
+
+.wm-worldcup-home-empty p,
+.wm-worldcup-home-source-list article em,
+.wm-worldcup-home-signal-row > em,
+.wm-worldcup-home-card-list article > em,
+.wm-worldcup-home-news-list a > em,
+.wm-worldcup-home-impact-list a > em,
+.wm-worldcup-home-match-list article div > em,
+.wm-worldcup-home-venue-card em,
+.wm-worldcup-home-team-grid p {
+  color: rgba(235, 235, 235, 0.56);
+  font-family: var(--font-body);
+  font-weight: 620;
+  letter-spacing: 0;
+}
+
+.wm-worldcup-home-match-list article > span strong,
+.wm-worldcup-home-table div,
+.wm-worldcup-home-metric-strip strong,
+.wm-worldcup-home-risk-grid strong,
+.wm-worldcup-home-prob-grid b,
+.wm-worldcup-home-prob-table b,
+.wm-worldcup-home-risk-score span,
+.wm-worldcup-home-risk-score em,
+.wm-worldcup-home-risk-score strong,
+.wm-worldcup-home-odds-list strong,
+.wm-worldcup-home-odds-list b,
+.wm-worldcup-home-city-list span,
+.wm-worldcup-home-city-list b,
+.wm-worldcup-home-score b {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+}
