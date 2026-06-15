@@ -170,7 +170,7 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
       return undefined;
     }
     setCategoryLoading(true);
-    fetchRuntimeMarketYoutubeChannels(12, activeCategory)
+    fetchRuntimeMarketYoutubeChannels(24, activeCategory)
       .then((nextPayload) => {
         if (cancelled) return;
         setCategoryPayload({ category: activeCategory, payload: nextPayload });
@@ -276,5 +276,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 180000,
-  fetchData: () => fetchRuntimeMarketYoutubeChannels(12),
+  fetchData: () => fetchRuntimeMarketYoutubeChannels(24),
 });

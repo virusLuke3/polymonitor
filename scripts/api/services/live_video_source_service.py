@@ -22,22 +22,60 @@ MARKET_YOUTUBE_CHANNELS_PANEL_ID = "market-youtube-channels"
 MARKET_YOUTUBE_CHANNELS_CACHE_KEY = "panel-v1"
 MANIFEST_PATH = PROJECT_ROOT / "scripts" / "data" / "live_video_sources.json"
 
-CATEGORY_ORDER = ("macro", "geo", "weather", "sports", "crypto", "news", "other")
+CATEGORY_ORDER = (
+    "breaking",
+    "politics",
+    "sports",
+    "crypto",
+    "esports",
+    "iran",
+    "finance",
+    "geopolitics",
+    "tech",
+    "culture",
+    "economy",
+    "weather",
+    "elections",
+    "macro",
+    "geo",
+    "news",
+    "other",
+)
 CATEGORY_LABELS = {
+    "breaking": "Breaking",
+    "politics": "Politics",
     "macro": "Macro",
     "geo": "Geo",
+    "geopolitics": "Geopolitics",
     "weather": "Weather",
     "sports": "Sports",
     "crypto": "Crypto",
+    "esports": "Esports",
+    "iran": "Iran",
+    "finance": "Finance",
+    "tech": "Tech",
+    "culture": "Culture",
+    "economy": "Economy",
+    "elections": "Elections",
     "news": "News",
     "other": "Other",
 }
 CATEGORY_BASE_SCORE = {
+    "breaking": 94,
+    "politics": 90,
     "macro": 92,
     "geo": 88,
+    "geopolitics": 89,
     "weather": 84,
     "sports": 80,
     "crypto": 78,
+    "esports": 76,
+    "iran": 88,
+    "finance": 91,
+    "tech": 80,
+    "culture": 70,
+    "economy": 90,
+    "elections": 89,
     "news": 74,
     "other": 60,
 }
@@ -189,6 +227,7 @@ def normalize_source_item(raw: Dict[str, Any], *, generated_at: str, curated: bo
         "hlsUrl": hls_url,
         "youtubeHandle": youtube_handle,
         "youtubeChannelId": youtube_channel_id,
+        "youtubeProbeEnabled": raw.get("youtubeProbeEnabled") is not False,
         "fallbackVideoId": fallback_video_id,
         "externalUrl": external_url or source_url,
         "quality": _string(raw.get("quality")),
@@ -352,13 +391,17 @@ def _youtube_embed_url(video_id: str | None = None, channel_id: str | None = Non
 
 
 def _enrich_youtube_live_sources(ctx: dict, items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
-    youtube_items = [item for item in items if str(item.get("sourceType") or "").lower() == "youtube"]
+    youtube_items = [
+        item for item in items
+        if str(item.get("sourceType") or "").lower() == "youtube" and item.get("youtubeProbeEnabled") is not False
+    ]
+    skipped_count = sum(1 for item in items if str(item.get("sourceType") or "").lower() == "youtube" and item.get("youtubeProbeEnabled") is False)
     if not youtube_items:
-        return {"status": "skipped", "count": 0, "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
+        return {"status": "skipped", "count": 0, "skippedCount": skipped_count, "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
     if not _youtube_probe_enabled(ctx):
-        return {"status": "disabled", "count": len(youtube_items), "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
+        return {"status": "disabled", "count": len(youtube_items), "skippedCount": skipped_count, "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
     if not _youtube_probe_can_fetch(ctx):
-        return {"status": "skipped", "count": len(youtube_items), "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
+        return {"status": "skipped", "count": len(youtube_items), "skippedCount": skipped_count, "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
 
     live_count = 0
     offline_count = 0
@@ -415,6 +458,7 @@ def _enrich_youtube_live_sources(ctx: dict, items: List[Dict[str, Any]], *, gene
     return {
         "status": status,
         "count": len(youtube_items),
+        "skippedCount": skipped_count,
         "liveCount": live_count,
         "offlineCount": offline_count,
         "errorCount": error_count,
@@ -471,7 +515,7 @@ def normalize_market_youtube_channels_payload(payload: Any, *, ctx: dict | None 
         item for item in all_items
         if not requested_category or _normalize_category(item.get("category")) == requested_category
     ]
-    max_items = max(1, min(int(limit or DEFAULT_MARKET_TV_WIRE_LIMIT), 40))
+    max_items = max(1, min(int(limit or DEFAULT_MARKET_TV_WIRE_LIMIT), 80))
     generated_at = str(result.get("generatedAt") or _utc_now_iso(ctx))
     status = str(result.get("status") or ("ok" if all_items else "warming"))
     cache_mode = str(result.get("cacheMode") or "seeded")
@@ -609,7 +653,10 @@ def normalize_market_tv_wire_payload(payload: Any, *, ctx: dict | None = None, l
         return _empty_payload(ctx, status="invalid", cache_mode="invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     raw_items = result.get("items") if isinstance(result.get("items"), list) else []
-    items = [item for item in raw_items if isinstance(item, dict)]
+    items = [
+        item for item in raw_items
+        if isinstance(item, dict) and str(item.get("sourceType") or "").lower() == "hls"
+    ]
     items.sort(
         key=lambda item: (
             int(item.get("relevanceScore") or 0),
@@ -625,12 +672,13 @@ def normalize_market_tv_wire_payload(payload: Any, *, ctx: dict | None = None, l
     ]
     max_items = max(1, min(int(limit or DEFAULT_MARKET_TV_WIRE_LIMIT), 80))
     result["items"] = selected_items[:max_items]
-    result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(items)
-    result["categories"] = result.get("categories") if isinstance(result.get("categories"), list) else _categories(items)
+    result["summary"] = _summary(items)
+    result["categories"] = _categories(items)
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     result["errors"] = result.get("errors") if isinstance(result.get("errors"), list) else []
     result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
-    result["status"] = str(result.get("status") or ("ok" if items else "warming"))
+    status = str(result.get("status") or ("ok" if items else "warming"))
+    result["status"] = "empty" if status == "ok" and not items else status
     result["cacheMode"] = str(result.get("cacheMode") or "seeded")
     result["source"] = str(result.get("source") or "market-tv-wire-seed")
     result["sourceUrl"] = str(result.get("sourceUrl") or _manifest_path())

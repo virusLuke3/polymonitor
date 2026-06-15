@@ -23891,6 +23891,20 @@ a.wm-orderfilled-row {
     #07090a !important;
 }
 
+.wm-market-tv-panel,
+.wm-market-youtube-panel {
+  font-weight: 760;
+}
+
+.wm-market-tv-panel .wm-panel-title,
+.wm-market-youtube-panel .wm-panel-title,
+.wm-market-tv-panel .wm-panel-badge,
+.wm-market-youtube-panel .wm-panel-badge,
+.wm-market-tv-panel .wm-panel-count,
+.wm-market-youtube-panel .wm-panel-count {
+  font-weight: 950;
+}
+
 .wm-market-tv-layout {
   display: grid;
   min-height: 0;
@@ -23927,6 +23941,7 @@ a.wm-orderfilled-row {
   color: var(--tv-tab-color);
   font-family: var(--wm-font-mono, monospace);
   font-size: 11px;
+  font-weight: 850;
   letter-spacing: 0;
   cursor: pointer;
   box-shadow: inset 0 0 0 1px rgba(var(--tv-tab-rgb), 0.025);
@@ -23996,6 +24011,68 @@ a.wm-orderfilled-row {
   --tv-tab-rgb: 78, 152, 255;
 }
 
+.wm-market-tv-tabs button.tone-breaking,
+.wm-market-youtube-tabs button.tone-breaking {
+  --tv-tab-color: #ff7075;
+  --tv-tab-rgb: 255, 69, 75;
+  --yt-tab-color: #ff7075;
+  --yt-tab-rgb: 255, 69, 75;
+}
+
+.wm-market-tv-tabs button.tone-politics,
+.wm-market-youtube-tabs button.tone-politics,
+.wm-market-tv-tabs button.tone-elections,
+.wm-market-youtube-tabs button.tone-elections {
+  --tv-tab-color: #e0c15b;
+  --tv-tab-rgb: 224, 193, 91;
+  --yt-tab-color: #e0c15b;
+  --yt-tab-rgb: 224, 193, 91;
+}
+
+.wm-market-tv-tabs button.tone-finance,
+.wm-market-youtube-tabs button.tone-finance,
+.wm-market-tv-tabs button.tone-economy,
+.wm-market-youtube-tabs button.tone-economy {
+  --tv-tab-color: #ffd35a;
+  --tv-tab-rgb: 255, 197, 61;
+  --yt-tab-color: #ffd35a;
+  --yt-tab-rgb: 255, 197, 61;
+}
+
+.wm-market-tv-tabs button.tone-geopolitics,
+.wm-market-youtube-tabs button.tone-geopolitics,
+.wm-market-tv-tabs button.tone-iran,
+.wm-market-youtube-tabs button.tone-iran {
+  --tv-tab-color: #ff8d91;
+  --tv-tab-rgb: 255, 69, 75;
+  --yt-tab-color: #ff8d91;
+  --yt-tab-rgb: 255, 69, 75;
+}
+
+.wm-market-tv-tabs button.tone-tech,
+.wm-market-youtube-tabs button.tone-tech {
+  --tv-tab-color: #8bbcff;
+  --tv-tab-rgb: 78, 152, 255;
+  --yt-tab-color: #8bbcff;
+  --yt-tab-rgb: 78, 152, 255;
+}
+
+.wm-market-tv-tabs button.tone-culture,
+.wm-market-youtube-tabs button.tone-culture {
+  --tv-tab-color: #f0a0db;
+  --tv-tab-rgb: 240, 160, 219;
+  --yt-tab-color: #f0a0db;
+  --yt-tab-rgb: 240, 160, 219;
+}
+
+.wm-market-tv-tabs button.tone-esports,
+.wm-market-youtube-tabs button.tone-esports {
+  --tv-tab-color: #b99cff;
+  --tv-tab-rgb: 165, 119, 255;
+  --yt-tab-color: #b99cff;
+  --yt-tab-rgb: 165, 119, 255;
+}
+
 .wm-market-tv-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -24011,6 +24088,7 @@ a.wm-orderfilled-row {
   color: rgba(235, 235, 235, 0.52);
   font-family: var(--wm-font-mono, monospace);
   font-size: 10px;
+  font-weight: 780;
   letter-spacing: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -24021,6 +24099,7 @@ a.wm-orderfilled-row {
   margin-right: 4px;
   color: #f4f6f8;
   font-size: 13px;
+  font-weight: 950;
 }
 
 .wm-market-tv-preview {
@@ -24078,6 +24157,7 @@ a.wm-orderfilled-row {
   display: block;
   color: #f4f6f8;
   font-size: 14px;
+  font-weight: 900;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -24093,6 +24173,7 @@ a.wm-orderfilled-row {
   color: rgba(245, 247, 249, 0.88);
   font-family: var(--wm-font-mono, monospace);
   font-size: 11px;
+  font-weight: 850;
 }
 
 .wm-market-tv-preview-head div {
@@ -24111,12 +24192,14 @@ a.wm-orderfilled-row {
 .wm-market-tv-preview-head strong {
   color: #f4f6f8;
   font-size: 12px;
+  font-weight: 950;
 }
 
 .wm-market-tv-preview-head span {
   margin-top: 2px;
   color: rgba(235, 235, 235, 0.46);
   font-size: 9px;
+  font-weight: 780;
 }
 
 .wm-market-tv-playback {
@@ -24126,6 +24209,7 @@ a.wm-orderfilled-row {
   border-radius: 3px;
   color: rgba(235, 235, 235, 0.56);
   font-size: 9px;
+  font-weight: 850;
   font-style: normal;
 }
 
@@ -24159,6 +24243,7 @@ a.wm-orderfilled-row {
   color: #9ee8f7;
   font-family: var(--wm-font-mono, monospace);
   font-size: 10px;
+  font-weight: 900;
   letter-spacing: 0;
   cursor: pointer;
 }
@@ -24297,6 +24382,7 @@ a.wm-orderfilled-row {
   color: rgba(235, 235, 235, 0.55);
   font-family: var(--wm-font-mono, monospace);
   font-size: 9px;
+  font-weight: 780;
   letter-spacing: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -24323,6 +24409,7 @@ a.wm-orderfilled-row {
   margin-top: 4px;
   color: #f4f6f8;
   font-size: 12px;
+  font-weight: 900;
   line-height: 1.22;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -24333,6 +24420,7 @@ a.wm-orderfilled-row {
   margin: 2px 0 5px;
   color: rgba(235, 235, 235, 0.52);
   font-size: 11px;
+  font-weight: 760;
   line-height: 1.25;
   display: -webkit-box;
   -webkit-line-clamp: 1;
@@ -24352,6 +24440,7 @@ a.wm-orderfilled-row {
 .wm-market-tv-score strong {
   color: #f4f6f8;
   font-size: 17px;
+  font-weight: 950;
   line-height: 1;
 }
 
@@ -24366,6 +24455,7 @@ a.wm-orderfilled-row {
   max-width: 56px;
   color: rgba(235, 235, 235, 0.42);
   font-size: 9px;
+  font-weight: 760;
   font-style: normal;
   white-space: nowrap;
   overflow: hidden;
@@ -24417,7 +24507,7 @@ a.wm-orderfilled-row {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-columns: minmax(0, 1.1fr) minmax(132px, 0.22fr) minmax(240px, 0.82fr);
+  grid-template-columns: minmax(240px, 0.88fr) minmax(132px, 0.2fr) minmax(420px, 1.35fr);
   grid-template-rows: auto;
   align-items: stretch;
   gap: 8px;
@@ -24444,6 +24534,7 @@ a.wm-orderfilled-row {
   color: var(--yt-tab-color);
   font-family: var(--wm-font-mono, monospace);
   font-size: 11px;
+  font-weight: 850;
   letter-spacing: 0;
   cursor: pointer;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
@@ -24492,6 +24583,16 @@ a.wm-orderfilled-row {
   --yt-tab-rgb: 78, 152, 255;
 }
 
+.wm-market-youtube-tabs button.tone-sports {
+  --yt-tab-color: #6ff7aa;
+  --yt-tab-rgb: 36, 242, 132;
+}
+
+.wm-market-youtube-tabs button.tone-crypto {
+  --yt-tab-color: #c7a3ff;
+  --yt-tab-rgb: 166, 119, 255;
+}
+
 .wm-market-youtube-summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -24508,6 +24609,7 @@ a.wm-orderfilled-row {
   color: rgba(235, 235, 235, 0.52);
   font-family: var(--wm-font-mono, monospace);
   font-size: 10px;
+  font-weight: 780;
   letter-spacing: 0;
 }
 
@@ -24515,6 +24617,7 @@ a.wm-orderfilled-row {
   margin-right: 5px;
   color: #f4f6f8;
   font-size: 13px;
+  font-weight: 950;
 }
 
 .wm-market-youtube-list {
@@ -24530,9 +24633,9 @@ a.wm-orderfilled-row {
 
 .wm-market-youtube-row {
   display: grid;
-  width: 210px;
-  min-width: 210px;
-  max-width: 210px;
+  width: 225px;
+  min-width: 225px;
+  max-width: 225px;
   grid-template-columns: 8px minmax(0, 1fr) 30px;
   gap: 7px;
   align-items: center;
@@ -24579,6 +24682,7 @@ a.wm-orderfilled-row {
   color: rgba(235, 235, 235, 0.5);
   font-family: var(--wm-font-mono, monospace);
   font-size: 9px;
+  font-weight: 780;
   font-style: normal;
   letter-spacing: 0;
 }
@@ -24589,6 +24693,7 @@ a.wm-orderfilled-row {
   overflow: hidden;
   color: #f4f6f8;
   font-size: 12px;
+  font-weight: 920;
   line-height: 1.18;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -24605,6 +24710,7 @@ a.wm-orderfilled-row {
   color: #f4f6f8;
   font-family: var(--wm-font-mono, monospace);
   font-size: 14px;
+  font-weight: 950;
   text-align: right;
 }
 
@@ -24626,6 +24732,7 @@ a.wm-orderfilled-row {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 820;
 }
 
 .wm-market-youtube-player {
@@ -24671,12 +24778,14 @@ a.wm-orderfilled-row {
   color: rgba(235, 235, 235, 0.48);
   font-family: var(--wm-font-mono, monospace);
   font-size: 9px;
+  font-weight: 780;
 }
 
 .wm-market-youtube-player header strong {
   margin-top: 2px;
   color: #f4f6f8;
   font-size: 14px;
+  font-weight: 950;
 }
 
 .wm-market-youtube-player button {
@@ -24689,6 +24798,7 @@ a.wm-orderfilled-row {
   color: #9ee8f7;
   font-family: var(--wm-font-mono, monospace);
   font-size: 10px;
+  font-weight: 900;
   letter-spacing: 0;
   cursor: pointer;
 }
@@ -24730,6 +24840,7 @@ a.wm-orderfilled-row {
   color: rgba(235, 235, 235, 0.42);
   font-family: var(--wm-font-mono, monospace);
   font-size: 9px;
+  font-weight: 760;
 }
 
 @media (max-width: 760px) {

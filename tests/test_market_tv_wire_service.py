@@ -54,10 +54,11 @@ def test_market_tv_wire_category_filter_runs_before_limit() -> None:
         "status": "ok",
         "cacheMode": "seeded",
         "items": [
-            {"id": "macro-1", "displayName": "Macro 1", "category": "macro", "status": "ready", "relevanceScore": 100},
-            {"id": "macro-2", "displayName": "Macro 2", "category": "macro", "status": "ready", "relevanceScore": 99},
-            {"id": "sports-1", "displayName": "Sports 1", "category": "sports", "status": "ready", "relevanceScore": 80},
-            {"id": "sports-2", "displayName": "Sports 2", "category": "sports", "status": "ready", "relevanceScore": 79},
+            {"id": "yt-macro", "displayName": "YouTube Macro", "category": "macro", "sourceType": "youtube", "status": "ready", "relevanceScore": 101},
+            {"id": "macro-1", "displayName": "Macro 1", "category": "macro", "sourceType": "hls", "status": "ready", "relevanceScore": 100},
+            {"id": "macro-2", "displayName": "Macro 2", "category": "macro", "sourceType": "hls", "status": "ready", "relevanceScore": 99},
+            {"id": "sports-1", "displayName": "Sports 1", "category": "sports", "sourceType": "hls", "status": "ready", "relevanceScore": 80},
+            {"id": "sports-2", "displayName": "Sports 2", "category": "sports", "sourceType": "hls", "status": "ready", "relevanceScore": 79},
         ],
     }
 
@@ -65,6 +66,7 @@ def test_market_tv_wire_category_filter_runs_before_limit() -> None:
     sports_payload = service.normalize_market_tv_wire_payload(payload, limit=2, category="sports")
 
     assert [item["id"] for item in top_payload["items"]] == ["macro-1", "macro-2"]
+    assert all(item["sourceType"] == "hls" for item in top_payload["items"])
     assert [item["id"] for item in sports_payload["items"]] == ["sports-1", "sports-2"]
     assert sports_payload["selection"] == {
         "category": "sports",

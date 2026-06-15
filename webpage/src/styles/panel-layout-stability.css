@@ -20,7 +20,7 @@
 }
 
 .wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='market-youtube-channels'] {
-  grid-column: span 2 !important;
+  grid-column: span 3 !important;
   grid-row: span 2 !important;
 }
 
@@ -393,6 +393,26 @@
   min-height: 44px;
   padding: 7px 8px 7px 10px;
   background: linear-gradient(90deg, rgba(255, 71, 71, 0.07), rgba(255, 255, 255, 0.02));
+}
+
+@media (max-width: 1500px) {
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='market-youtube-channels'] {
+    grid-column: span 2 !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='market-tv-wire'],
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='market-youtube-channels'] {
+    grid-column: span 2 !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='market-tv-wire'],
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='market-youtube-channels'] {
+    grid-column: span 1 !important;
+  }
 }
 
 @media (max-width: 1500px) {
