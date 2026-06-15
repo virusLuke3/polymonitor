@@ -51,6 +51,7 @@ import type {
   RuntimeJin10Payload,
   RuntimeMacroDriverPayload,
   RuntimeMacroRegistryPayload,
+  RuntimeMarketYoutubeChannelsPayload,
   RuntimeMarketTvWirePayload,
   RuntimeCpiReleaseCommandPayload,
   RuntimeNbaMatchupPredictorPayload,
@@ -663,6 +664,12 @@ export function fetchRuntimeMarketTvWire(limit = 24, category?: string | null) {
   const params = new URLSearchParams({ limit: String(limit) });
   if (category && category !== 'all') params.set('category', category);
   return apiGet<RuntimeMarketTvWirePayload>(`/runtime/content/market-tv-wire?${params.toString()}`);
+}
+
+export function fetchRuntimeMarketYoutubeChannels(limit = 12, category?: string | null) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (category && category !== 'all') params.set('category', category);
+  return apiGet<RuntimeMarketYoutubeChannelsPayload>(`/runtime/content/market-youtube-channels?${params.toString()}`);
 }
 
 export function fetchRuntimeNewMarketSignals(limit = 12) {

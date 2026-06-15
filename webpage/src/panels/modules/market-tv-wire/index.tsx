@@ -7,6 +7,7 @@ import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
 type PlaybackState = 'connecting' | 'playing' | 'waiting' | 'blocked' | 'external';
+const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 
 function badgeLabel(payload?: RuntimeMarketTvWirePayload | null) {
   const status = String(payload?.status || '').toLowerCase();
@@ -37,6 +38,11 @@ function categoryLabel(value?: string | null) {
   const category = String(value || 'other').toUpperCase();
   if (category === 'GEO') return 'GEO';
   return category;
+}
+
+function categoryToneClass(value?: string | null) {
+  const category = String(value || 'all').toLowerCase().replace(/[^a-z0-9-]/g, '');
+  return `tone-${category || 'all'}`;
 }
 
 function sourceTypeLabel(value?: string | null) {
@@ -74,9 +80,40 @@ function isHlsPreviewable(item?: RuntimeMarketTvWireItem | null) {
   return String(item?.sourceType || '').toLowerCase() === 'hls' && Boolean(String(item?.hlsUrl || '').trim());
 }
 
+function youtubeVideoId(item?: RuntimeMarketTvWireItem | null) {
+  const liveId = String(item?.youtubeLiveVideoId || '').trim();
+  if (YOUTUBE_VIDEO_ID_RE.test(liveId)) return liveId;
+  const fallbackId = String(item?.fallbackVideoId || '').trim();
+  return YOUTUBE_VIDEO_ID_RE.test(fallbackId) ? fallbackId : '';
+}
+
+function youtubeEmbedUrl(item?: RuntimeMarketTvWireItem | null) {
+  const embedded = String(item?.youtubeEmbedUrl || '').trim();
+  if (embedded) return embedded;
+  const videoId = youtubeVideoId(item);
+  return videoId ? `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1` : '';
+}
+
+function isYoutubePreviewable(item?: RuntimeMarketTvWireItem | null) {
+  return String(item?.sourceType || '').toLowerCase() === 'youtube' && Boolean(youtubeEmbedUrl(item) || youtubeVideoId(item));
+}
+
+function isEmbeddedPreviewable(item?: RuntimeMarketTvWireItem | null) {
+  return isHlsPreviewable(item) || isYoutubePreviewable(item);
+}
+
+function youtubeProbeLabel(item?: RuntimeMarketTvWireItem | null) {
+  const probeStatus = String(item?.youtubeProbeStatus || '').toLowerCase();
+  if (probeStatus === 'live') return 'YOUTUBE LIVE';
+  if (probeStatus === 'offline') return 'YT VERIFIED';
+  if (probeStatus === 'error') return 'YT FALLBACK';
+  return 'YOUTUBE';
+}
+
 function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsUrl = String(item.hlsUrl || '').trim();
+  const youtubeId = youtubeVideoId(item);
   const [playbackState, setPlaybackState] = useState<PlaybackState>(hlsUrl ? 'connecting' : 'external');
 
   useEffect(() => {
@@ -140,6 +177,34 @@ function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
     };
   }, [hlsUrl]);
 
+  const youtubeUrl = youtubeEmbedUrl(item);
+  if (youtubeUrl) {
+    return (
+      <div className="wm-market-tv-preview youtube">
+        <div className="wm-market-tv-preview-head">
+          <div>
+            <strong>{item.youtubeLiveTitle || itemTitle(item)}</strong>
+            <span>{categoryLabel(item.category)} / {sourceLocation(item)} / {youtubeProbeLabel(item)}</span>
+          </div>
+          <em className="wm-market-tv-playback playing">{youtubeProbeLabel(item)}</em>
+          <button type="button" onClick={() => openExternal(item.externalUrl || item.sourceUrl || `https://www.youtube.com/watch?v=${youtubeId}`)}>
+            OPEN
+          </button>
+        </div>
+        <div className="wm-market-tv-stage">
+          <iframe
+            className="wm-market-tv-youtube-frame"
+            src={youtubeUrl}
+            title={item.youtubeLiveTitle || itemTitle(item)}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (!hlsUrl) {
     return (
       <div className="wm-market-tv-preview external">
@@ -192,7 +257,7 @@ function MarketTvRow({
   active: boolean;
   onPreview: () => void;
 }) {
-  const hlsReady = isHlsPreviewable(item);
+  const previewReady = isEmbeddedPreviewable(item);
   const tags = (item.matchedTerms?.length ? item.matchedTerms : item.marketTags || []).slice(0, 3);
   return (
     <article className={`wm-market-tv-row ${active ? 'active' : ''}`}>
@@ -215,7 +280,7 @@ function MarketTvRow({
         </div>
         <div className="wm-market-tv-score">
           <strong>{scoreLabel(item.relevanceScore)}</strong>
-          <span>{hlsReady ? 'WATCH' : 'OPEN'}</span>
+          <span>{previewReady ? 'WATCH' : 'OPEN'}</span>
           <em>{formatRelative(item.lastCheckedAt)}</em>
         </div>
       </button>
@@ -236,9 +301,10 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
   const items = selectedPayload?.items || [];
   const categories = payload?.categories || selectedPayload?.categories || [];
   const summary = payload?.summary || selectedPayload?.summary || {};
+  const totalCount = Number(summary.total ?? payload?.selection?.total ?? items.length);
   const visibleItems = useMemo(() => items, [items]);
   const activeItem = visibleItems.find((item) => item.id === activeId) || null;
-  const previewItem = activeItem || visibleItems.find(isHlsPreviewable) || visibleItems[0] || null;
+  const previewItem = activeItem || visibleItems.find(isEmbeddedPreviewable) || visibleItems[0] || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -273,7 +339,7 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
       return;
     }
     if (!activeId || !visibleItems.some((item) => item.id === activeId)) {
-      setActiveId((visibleItems.find(isHlsPreviewable) || visibleItems[0])?.id || null);
+      setActiveId((visibleItems.find(isEmbeddedPreviewable) || visibleItems[0])?.id || null);
     }
   }, [activeId, visibleItems]);
 
@@ -306,14 +372,18 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
       <div className="wm-market-tv-layout">
         <div className="wm-market-tv-control-rail">
           <div className="wm-market-tv-tabs">
-            <button type="button" className={activeCategory === 'all' ? 'active' : ''} onClick={() => setActiveCategory('all')}>
-              ALL <span>{items.length}</span>
+            <button
+              type="button"
+              className={`${categoryToneClass('all')} ${activeCategory === 'all' ? 'active' : ''}`}
+              onClick={() => setActiveCategory('all')}
+            >
+              ALL <span>{Number.isFinite(totalCount) ? totalCount : items.length}</span>
             </button>
             {categories.map((category) => (
               <button
                 key={category.id}
                 type="button"
-                className={activeCategory === category.id ? 'active' : ''}
+                className={`${categoryToneClass(category.id)} ${activeCategory === category.id ? 'active' : ''}`}
                 onClick={() => setActiveCategory(category.id)}
               >
                 {category.label} <span>{category.count}</span>

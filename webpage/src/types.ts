@@ -2042,6 +2042,7 @@ export type RuntimeMarketTvWireSummary = {
   regions?: number | null;
   staleCount?: number | null;
   blockedCount?: number | null;
+  embedReady?: number | null;
 };
 
 export type RuntimeMarketTvWireItem = {
@@ -2056,6 +2057,16 @@ export type RuntimeMarketTvWireItem = {
   language?: string | null;
   hlsUrl?: string | null;
   youtubeHandle?: string | null;
+  youtubeLiveVideoId?: string | null;
+  youtubeLiveTitle?: string | null;
+  youtubeHlsUrl?: string | null;
+  youtubeEmbedUrl?: string | null;
+  youtubeEmbedMode?: 'live-video' | 'video' | 'channel-live' | string | null;
+  youtubeChannelId?: string | null;
+  youtubeProbeStatus?: 'live' | 'offline' | 'error' | 'skipped' | 'disabled' | string | null;
+  youtubeChannelName?: string | null;
+  youtubeChannelExists?: boolean | null;
+  youtubeProbeError?: string | null;
   fallbackVideoId?: string | null;
   externalUrl?: string | null;
   quality?: string | null;
@@ -2091,6 +2102,8 @@ export type RuntimeMarketTvWirePayload = {
   items: RuntimeMarketTvWireItem[];
   errors?: string[];
 };
+
+export type RuntimeMarketYoutubeChannelsPayload = RuntimeMarketTvWirePayload;
 
 export type RuntimeNewMarketSignalItem = {
   marketId?: number | null;

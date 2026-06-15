@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlparse
 
 from api.config import PROJECT_ROOT
+from api.services import youtube_live_probe_service
 
 
 PANEL_ID = "market-tv-wire"
@@ -17,6 +18,8 @@ MARKET_TV_WIRE_CACHE_KEY = "panel-v1"
 DEFAULT_MARKET_TV_WIRE_LIMIT = 24
 MARKET_TV_WIRE_TTL_SECONDS = 900
 MARKET_TV_WIRE_SEED_ITEM_LIMIT = 240
+MARKET_YOUTUBE_CHANNELS_PANEL_ID = "market-youtube-channels"
+MARKET_YOUTUBE_CHANNELS_CACHE_KEY = "panel-v1"
 MANIFEST_PATH = PROJECT_ROOT / "scripts" / "data" / "live_video_sources.json"
 
 CATEGORY_ORDER = ("macro", "geo", "weather", "sports", "crypto", "news", "other")
@@ -50,6 +53,7 @@ ALLOWED_SOURCE_ROLES = {"channel", "visual"}
 NOISE_TERMS = ("xxx", "adult", "shopping", "religion", "music", "kids")
 EXTINF_ATTR_RE = re.compile(r'([A-Za-z0-9_-]+)="([^"]*)"')
 SLUG_RE = re.compile(r"[^a-z0-9]+")
+YOUTUBE_PROBE_ENABLED_ENV = "POLYDATA_MARKET_TV_YOUTUBE_PROBE_ENABLED"
 
 
 def utc_now_iso() -> str:
@@ -155,6 +159,7 @@ def normalize_source_item(raw: Dict[str, Any], *, generated_at: str, curated: bo
     hls_url = _string(raw.get("hlsUrl"))
     external_url = _string(raw.get("externalUrl"))
     youtube_handle = _string(raw.get("youtubeHandle"))
+    youtube_channel_id = _string(raw.get("youtubeChannelId"))
     fallback_video_id = _string(raw.get("fallbackVideoId"))
     if source_type == "hls" and not hls_url:
         source_type = "external" if external_url else "hls"
@@ -183,6 +188,7 @@ def normalize_source_item(raw: Dict[str, Any], *, generated_at: str, curated: bo
         "language": _string(raw.get("language")),
         "hlsUrl": hls_url,
         "youtubeHandle": youtube_handle,
+        "youtubeChannelId": youtube_channel_id,
         "fallbackVideoId": fallback_video_id,
         "externalUrl": external_url or source_url,
         "quality": _string(raw.get("quality")),
@@ -305,6 +311,191 @@ def _dedupe(items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return output
 
 
+def _youtube_probe_enabled(ctx: dict) -> bool:
+    explicit = ctx.get("market_tv_youtube_probe_enabled")
+    if explicit is not None:
+        return bool(explicit)
+    value = str(os.environ.get(YOUTUBE_PROBE_ENABLED_ENV, "1")).strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _youtube_probe_can_fetch(ctx: dict) -> bool:
+    return callable(ctx.get("youtube_live_probe")) or callable(ctx.get("http_text_get")) or ctx.get("requests") is not None
+
+
+def _external_url_for_youtube(item: Dict[str, Any], video_id: str | None = None) -> str | None:
+    if video_id:
+        return f"https://www.youtube.com/watch?v={video_id}"
+    existing = _string(item.get("externalUrl") or item.get("sourceUrl"))
+    if existing:
+        return existing
+    handle = _string(item.get("youtubeHandle"))
+    if handle:
+        return f"https://www.youtube.com/{handle if handle.startswith('@') else '@' + handle}/live"
+    return None
+
+
+def _youtube_embed_url(video_id: str | None = None, channel_id: str | None = None) -> tuple[str | None, str | None]:
+    clean_video_id = _string(video_id)
+    if clean_video_id and youtube_live_probe_service.VIDEO_ID_RE.match(clean_video_id):
+        return (
+            f"https://www.youtube-nocookie.com/embed/{clean_video_id}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1",
+            "video",
+        )
+    clean_channel_id = _string(channel_id)
+    if clean_channel_id:
+        return (
+            f"https://www.youtube.com/embed/live_stream?channel={clean_channel_id}&autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1",
+            "channel-live",
+        )
+    return None, None
+
+
+def _enrich_youtube_live_sources(ctx: dict, items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
+    youtube_items = [item for item in items if str(item.get("sourceType") or "").lower() == "youtube"]
+    if not youtube_items:
+        return {"status": "skipped", "count": 0, "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
+    if not _youtube_probe_enabled(ctx):
+        return {"status": "disabled", "count": len(youtube_items), "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
+    if not _youtube_probe_can_fetch(ctx):
+        return {"status": "skipped", "count": len(youtube_items), "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
+
+    live_count = 0
+    offline_count = 0
+    error_count = 0
+    for item in youtube_items:
+        channel = _string(item.get("youtubeHandle"))
+        fallback_video_id = _string(item.get("fallbackVideoId"))
+        try:
+            probe = youtube_live_probe_service.probe_youtube_live(ctx, channel=channel or "", video_id=fallback_video_id or "")
+        except Exception as exc:
+            error_count += 1
+            item["youtubeProbeStatus"] = "error"
+            item["youtubeProbeError"] = str(exc)
+            item["failureReason"] = item.get("failureReason") or str(exc)
+            continue
+
+        video_id = _string(probe.get("videoId"))
+        hls_url = _string(probe.get("hlsUrl"))
+        title = _string(probe.get("title"))
+        channel_id = _string(probe.get("channelId")) or _string(item.get("youtubeChannelId"))
+        channel_name = _string(probe.get("channelName"))
+        error = _string(probe.get("error"))
+        is_live = bool(probe.get("isLive")) and bool(video_id)
+        item["youtubeChannelExists"] = bool(probe.get("channelExists"))
+        item["youtubeChannelId"] = channel_id
+        item["youtubeChannelName"] = channel_name
+        item["youtubeLiveVideoId"] = video_id
+        item["youtubeLiveTitle"] = title
+        item["youtubeHlsUrl"] = hls_url
+        item["youtubeProbeError"] = error
+        item["lastCheckedAt"] = generated_at
+        embed_url, embed_mode = _youtube_embed_url(video_id, channel_id)
+        item["youtubeEmbedUrl"] = embed_url
+        item["youtubeEmbedMode"] = "live-video" if is_live and embed_mode == "video" else embed_mode
+        if video_id:
+            item["fallbackVideoId"] = video_id
+            item["externalUrl"] = _external_url_for_youtube(item, video_id) or item.get("externalUrl")
+        if is_live:
+            live_count += 1
+            item["youtubeProbeStatus"] = "live"
+            item["status"] = "ready"
+            item["relevanceScore"] = min(100, int(item.get("relevanceScore") or 0) + 4)
+        elif error:
+            error_count += 1
+            item["youtubeProbeStatus"] = "error"
+            item["failureReason"] = item.get("failureReason") or error
+        else:
+            offline_count += 1
+            item["youtubeProbeStatus"] = "offline"
+        if not item.get("externalUrl"):
+            item["externalUrl"] = _external_url_for_youtube(item)
+
+    status = "ok" if error_count == 0 else ("degraded" if live_count or offline_count else "error")
+    return {
+        "status": status,
+        "count": len(youtube_items),
+        "liveCount": live_count,
+        "offlineCount": offline_count,
+        "errorCount": error_count,
+        "lastSuccessAt": generated_at if live_count or offline_count else None,
+    }
+
+
+def _youtube_channel_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw_items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    items = [item for item in raw_items if isinstance(item, dict) and str(item.get("sourceType") or "").lower() == "youtube"]
+    for item in items:
+        video_id = _string(item.get("youtubeLiveVideoId") or item.get("fallbackVideoId"))
+        channel_id = _string(item.get("youtubeChannelId"))
+        embed_url = _string(item.get("youtubeEmbedUrl"))
+        embed_mode = _string(item.get("youtubeEmbedMode"))
+        if not embed_url:
+            embed_url, embed_mode = _youtube_embed_url(video_id, channel_id)
+            item["youtubeEmbedUrl"] = embed_url
+            item["youtubeEmbedMode"] = embed_mode
+        if video_id and not item.get("externalUrl"):
+            item["externalUrl"] = _external_url_for_youtube(item, video_id)
+    items.sort(
+        key=lambda item: (
+            1 if item.get("youtubeProbeStatus") == "live" else 0,
+            1 if item.get("youtubeEmbedUrl") else 0,
+            int(item.get("relevanceScore") or 0),
+        ),
+        reverse=True,
+    )
+    return items
+
+
+def _youtube_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        "total": len(items),
+        "liveReady": sum(1 for item in items if item.get("youtubeProbeStatus") == "live"),
+        "marketMatched": sum(1 for item in items if item.get("relevanceScore", 0) >= 80),
+        "regions": len({str(item.get("region") or item.get("country") or "").strip() for item in items if item.get("region") or item.get("country")}),
+        "staleCount": sum(1 for item in items if item.get("youtubeProbeStatus") in {"offline", "error", "skipped"}),
+        "blockedCount": sum(1 for item in items if item.get("status") in {"blocked", "failed"}),
+        "embedReady": sum(1 for item in items if item.get("youtubeEmbedUrl") or item.get("youtubeLiveVideoId") or item.get("fallbackVideoId")),
+    }
+
+
+def normalize_market_youtube_channels_payload(payload: Any, *, ctx: dict | None = None, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, category: str | None = None) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        empty = _empty_payload(ctx, status="invalid", cache_mode="invalid")
+        empty["source"] = "market-youtube-channels"
+        return empty
+    result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
+    all_items = _youtube_channel_items(result)
+    requested_category = _requested_category(category)
+    selected_items = [
+        item for item in all_items
+        if not requested_category or _normalize_category(item.get("category")) == requested_category
+    ]
+    max_items = max(1, min(int(limit or DEFAULT_MARKET_TV_WIRE_LIMIT), 40))
+    generated_at = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    status = str(result.get("status") or ("ok" if all_items else "warming"))
+    cache_mode = str(result.get("cacheMode") or "seeded")
+    return {
+        "generatedAt": generated_at,
+        "status": "empty" if status == "ok" and not all_items else status,
+        "cacheMode": cache_mode,
+        "source": "market-youtube-channels",
+        "sourceUrl": str(result.get("sourceUrl") or _manifest_path()),
+        "summary": _youtube_summary(all_items),
+        "categories": _categories(all_items),
+        "sources": result.get("sources") if isinstance(result.get("sources"), dict) else {},
+        "items": selected_items[:max_items],
+        "errors": result.get("errors") if isinstance(result.get("errors"), list) else [],
+        "selection": {
+            "category": requested_category or "all",
+            "total": len(selected_items),
+            "returned": min(len(selected_items), max_items),
+            "limit": max_items,
+            "truncated": len(selected_items) > max_items,
+        },
+    }
+
+
 def _summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     regions = {str(item.get("region") or item.get("country") or "").strip() for item in items if item.get("region") or item.get("country")}
     return {
@@ -352,7 +543,10 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
             item = normalize_source_item(raw, generated_at=generated_at, curated=True)
             if item:
                 manifest_items.append(item)
+        youtube_probe_state = _enrich_youtube_live_sources(ctx, manifest_items, generated_at=generated_at)
         source_states["manifest"] = {"status": "ok", "count": len(manifest_items), "lastSuccessAt": generated_at}
+        if youtube_probe_state.get("status") not in {"skipped"}:
+            source_states["youtubeLiveProbe"] = youtube_probe_state
         items.extend(manifest_items)
     except Exception as exc:
         errors.append(f"manifest: {exc}")
@@ -490,3 +684,14 @@ def get_market_tv_wire_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_TV_WIRE_L
         if store is not None:
             store.set(MARKET_TV_WIRE_SNAPSHOT_NAMESPACE, MARKET_TV_WIRE_CACHE_KEY, payload, ttl)
     return normalize_market_tv_wire_payload(payload, ctx=ctx, limit=limit, category=category)
+
+
+def get_market_youtube_channels_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, *, category: str | None = None, allow_live_build: bool = False) -> Dict[str, Any]:
+    seeded = _read_seeded(ctx)
+    if seeded is not None:
+        return normalize_market_youtube_channels_payload(seeded, ctx=ctx, limit=limit, category=category)
+    if not allow_live_build:
+        empty = _empty_payload(ctx, status="warming", cache_mode="warming")
+        return normalize_market_youtube_channels_payload(empty, ctx=ctx, limit=limit, category=category)
+    payload = build_market_tv_wire_payload(ctx, include_iptv=False)
+    return normalize_market_youtube_channels_payload(payload, ctx=ctx, limit=limit, category=category)

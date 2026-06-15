@@ -20,7 +20,7 @@ def _get_panel_snapshot(panel, helpers: dict, limit: int | None):
     kwargs = {}
     if limit is not None:
         kwargs["limit"] = limit
-    if panel.panel_id == "market-tv-wire":
+    if panel.panel_id in {"market-tv-wire", "market-youtube-channels"}:
         category = request.args.get("category")
         if category:
             kwargs["category"] = category

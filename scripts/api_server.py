@@ -272,6 +272,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_labor_services_inflation_monitor_snapshot": get_labor_services_inflation_monitor_snapshot,
         "get_latest_content_payload": lambda limit=8: content_service.get_latest_content_payload(build_service_context(), limit=limit),
         "get_market_tv_wire_snapshot": lambda limit=24, category=None: live_video_source_service.get_market_tv_wire_snapshot(build_service_context(), limit=limit, category=category),
+        "get_market_youtube_channels_snapshot": lambda limit=12, category=None: live_video_source_service.get_market_youtube_channels_snapshot(build_service_context(), limit=limit, category=category),
         "get_runtime_content_latest": lambda limit=8: {
             "items": CONTENT_RUNTIME_PROVIDER.get_latest_items(limit=limit),
             "sourceMode": "runtime-rss",
@@ -466,6 +467,7 @@ def build_service_context() -> Dict[str, Any]:
         "get_gamma_active_market_filter": lambda: market_data_client.get_gamma_active_market_filter(build_service_context()),
         "get_latest_content_snapshot": get_latest_content_snapshot,
         "get_market_tv_wire_snapshot": lambda limit=24, category=None: live_video_source_service.get_market_tv_wire_snapshot(build_service_context(), limit=limit, category=category),
+        "get_market_youtube_channels_snapshot": lambda limit=12, category=None: live_video_source_service.get_market_youtube_channels_snapshot(build_service_context(), limit=limit, category=category),
         "get_market_by_id": lambda market_id: market_service.get_market_by_id(build_service_context(), market_id),
         "get_market_chart_payload": lambda market_id, range_name="1d", interval="5m": market_service.get_market_chart_payload(build_service_context(), market_id, range_name=range_name, interval=interval),
         "get_market_clob_price_series": lambda market, range_name="1d", interval="5m": market_data_client.get_market_clob_price_series(

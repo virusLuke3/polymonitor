@@ -23743,31 +23743,85 @@ a.wm-orderfilled-row {
 }
 
 .wm-market-tv-tabs button {
+  --tv-tab-color: rgba(235, 235, 235, 0.62);
+  --tv-tab-rgb: 235, 235, 235;
   min-height: 25px;
   padding: 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(var(--tv-tab-rgb), 0.22);
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.025);
-  color: rgba(235, 235, 235, 0.64);
+  background:
+    linear-gradient(180deg, rgba(var(--tv-tab-rgb), 0.075), rgba(var(--tv-tab-rgb), 0.022)),
+    rgba(255, 255, 255, 0.018);
+  color: var(--tv-tab-color);
   font-family: var(--wm-font-mono, monospace);
   font-size: 11px;
   letter-spacing: 0;
   cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(var(--tv-tab-rgb), 0.025);
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 .wm-market-tv-tabs button span {
-  color: rgba(235, 235, 235, 0.38);
+  color: rgba(var(--tv-tab-rgb), 0.52);
+}
+
+.wm-market-tv-tabs button:hover {
+  border-color: rgba(var(--tv-tab-rgb), 0.42);
+  background:
+    linear-gradient(180deg, rgba(var(--tv-tab-rgb), 0.11), rgba(var(--tv-tab-rgb), 0.035)),
+    rgba(255, 255, 255, 0.025);
+  transform: translateY(-1px);
 }
 
 .wm-market-tv-tabs button.active {
-  border-color: rgba(255, 69, 75, 0.72);
-  background: rgba(255, 69, 75, 0.92);
-  color: #fff;
-  box-shadow: 0 0 18px rgba(255, 69, 75, 0.18);
+  border-color: rgba(var(--tv-tab-rgb), 0.7);
+  background:
+    linear-gradient(180deg, rgba(var(--tv-tab-rgb), 0.34), rgba(var(--tv-tab-rgb), 0.16)),
+    rgba(255, 255, 255, 0.03);
+  color: #f8fbf8;
+  box-shadow:
+    0 0 18px rgba(var(--tv-tab-rgb), 0.2),
+    inset 0 0 0 1px rgba(var(--tv-tab-rgb), 0.14);
+  text-shadow: 0 0 12px rgba(var(--tv-tab-rgb), 0.36);
 }
 
 .wm-market-tv-tabs button.active span {
   color: rgba(255, 255, 255, 0.72);
+}
+
+.wm-market-tv-tabs button.tone-all {
+  --tv-tab-color: rgba(235, 235, 235, 0.68);
+  --tv-tab-rgb: 205, 217, 224;
+}
+
+.wm-market-tv-tabs button.tone-macro {
+  --tv-tab-color: #ffd35a;
+  --tv-tab-rgb: 255, 197, 61;
+}
+
+.wm-market-tv-tabs button.tone-geo {
+  --tv-tab-color: #ff8d91;
+  --tv-tab-rgb: 255, 69, 75;
+}
+
+.wm-market-tv-tabs button.tone-weather {
+  --tv-tab-color: #68daf4;
+  --tv-tab-rgb: 104, 218, 244;
+}
+
+.wm-market-tv-tabs button.tone-sports {
+  --tv-tab-color: #6ff7aa;
+  --tv-tab-rgb: 36, 242, 132;
+}
+
+.wm-market-tv-tabs button.tone-crypto {
+  --tv-tab-color: #c7a3ff;
+  --tv-tab-rgb: 166, 119, 255;
+}
+
+.wm-market-tv-tabs button.tone-news {
+  --tv-tab-color: #8bbcff;
+  --tv-tab-rgb: 78, 152, 255;
 }
 
 .wm-market-tv-summary {
@@ -23822,6 +23876,17 @@ a.wm-orderfilled-row {
   gap: 12px;
   padding: 12px;
   background: linear-gradient(90deg, rgba(104, 218, 244, 0.08), rgba(255, 197, 61, 0.05));
+}
+
+.wm-market-tv-preview.youtube {
+  border-color: rgba(255, 69, 75, 0.18);
+  background:
+    linear-gradient(135deg, rgba(255, 69, 75, 0.065), transparent 26%),
+    linear-gradient(180deg, rgba(104, 218, 244, 0.035), transparent 50%),
+    #020303;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+    0 0 26px rgba(255, 69, 75, 0.08);
 }
 
 .wm-market-tv-preview.external div {
@@ -23934,6 +23999,16 @@ a.wm-orderfilled-row {
   display: block;
   background: #020303;
   object-fit: contain;
+}
+
+.wm-market-tv-youtube-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  background: #000;
 }
 
 .wm-market-tv-stage {
@@ -24145,5 +24220,343 @@ a.wm-orderfilled-row {
 
   .wm-market-tv-preview.external {
     min-height: 160px;
+  }
+}
+
+.wm-market-youtube-panel .wm-panel-body {
+  overflow: hidden;
+  padding: 10px !important;
+  background:
+    radial-gradient(circle at 92% 12%, rgba(255, 69, 75, 0.12), transparent 34%),
+    radial-gradient(circle at 12% 90%, rgba(104, 218, 244, 0.08), transparent 32%),
+    #060708 !important;
+}
+
+.wm-market-youtube-layout {
+  display: grid;
+  min-height: 0;
+  height: calc(100% - 20px);
+  grid-template-columns: minmax(210px, 0.34fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.wm-market-youtube-sidebar {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 7px;
+}
+
+.wm-market-youtube-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wm-market-youtube-tabs button {
+  --yt-tab-color: rgba(235, 235, 235, 0.62);
+  --yt-tab-rgb: 235, 235, 235;
+  min-height: 25px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--yt-tab-rgb), 0.22);
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg, rgba(var(--yt-tab-rgb), 0.075), rgba(var(--yt-tab-rgb), 0.022)),
+    rgba(255, 255, 255, 0.018);
+  color: var(--yt-tab-color);
+  font-family: var(--wm-font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.wm-market-youtube-tabs button span {
+  color: rgba(var(--yt-tab-rgb), 0.52);
+}
+
+.wm-market-youtube-tabs button:hover {
+  border-color: rgba(var(--yt-tab-rgb), 0.42);
+  transform: translateY(-1px);
+}
+
+.wm-market-youtube-tabs button.active {
+  border-color: rgba(var(--yt-tab-rgb), 0.72);
+  background:
+    linear-gradient(180deg, rgba(var(--yt-tab-rgb), 0.34), rgba(var(--yt-tab-rgb), 0.16)),
+    rgba(255, 255, 255, 0.03);
+  color: #f8fbf8;
+  box-shadow: 0 0 18px rgba(var(--yt-tab-rgb), 0.2);
+}
+
+.wm-market-youtube-tabs button.tone-all {
+  --yt-tab-color: rgba(235, 235, 235, 0.68);
+  --yt-tab-rgb: 205, 217, 224;
+}
+
+.wm-market-youtube-tabs button.tone-macro {
+  --yt-tab-color: #ffd35a;
+  --yt-tab-rgb: 255, 197, 61;
+}
+
+.wm-market-youtube-tabs button.tone-geo {
+  --yt-tab-color: #ff8d91;
+  --yt-tab-rgb: 255, 69, 75;
+}
+
+.wm-market-youtube-tabs button.tone-weather {
+  --yt-tab-color: #68daf4;
+  --yt-tab-rgb: 104, 218, 244;
+}
+
+.wm-market-youtube-tabs button.tone-news {
+  --yt-tab-color: #8bbcff;
+  --yt-tab-rgb: 78, 152, 255;
+}
+
+.wm-market-youtube-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wm-market-youtube-summary span {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+  color: rgba(235, 235, 235, 0.52);
+  font-family: var(--wm-font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.wm-market-youtube-summary strong {
+  margin-right: 5px;
+  color: #f4f6f8;
+  font-size: 13px;
+}
+
+.wm-market-youtube-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.wm-market-youtube-row {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 8px minmax(0, 1fr) 34px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wm-market-youtube-row:hover,
+.wm-market-youtube-row.active {
+  border-color: rgba(255, 69, 75, 0.34);
+  background: linear-gradient(90deg, rgba(255, 69, 75, 0.075), rgba(104, 218, 244, 0.025));
+}
+
+.wm-market-youtube-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #8b949e;
+  box-shadow: 0 0 10px rgba(139, 148, 158, 0.4);
+}
+
+.wm-market-youtube-dot.live {
+  background: #24f284;
+  box-shadow: 0 0 12px rgba(36, 242, 132, 0.5);
+}
+
+.wm-market-youtube-dot.ready {
+  background: #ffc53d;
+  box-shadow: 0 0 12px rgba(255, 197, 61, 0.35);
+}
+
+.wm-market-youtube-row div {
+  min-width: 0;
+}
+
+.wm-market-youtube-row small,
+.wm-market-youtube-row em,
+.wm-market-youtube-tags i {
+  color: rgba(235, 235, 235, 0.5);
+  font-family: var(--wm-font-mono, monospace);
+  font-size: 9px;
+  font-style: normal;
+  letter-spacing: 0;
+}
+
+.wm-market-youtube-row strong {
+  display: block;
+  margin: 3px 0 2px;
+  overflow: hidden;
+  color: #f4f6f8;
+  font-size: 12px;
+  line-height: 1.18;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-market-youtube-row em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-market-youtube-row b {
+  color: #f4f6f8;
+  font-family: var(--wm-font-mono, monospace);
+  font-size: 15px;
+  text-align: right;
+}
+
+.wm-market-youtube-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.wm-market-youtube-tags i {
+  max-width: 82px;
+  padding: 2px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.035);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-market-youtube-player {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid rgba(255, 69, 75, 0.18);
+  border-radius: 4px;
+  background:
+    linear-gradient(135deg, rgba(255, 69, 75, 0.07), transparent 26%),
+    #020303;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+    0 0 26px rgba(255, 69, 75, 0.08);
+}
+
+.wm-market-youtube-player header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-market-youtube-player header div {
+  min-width: 0;
+}
+
+.wm-market-youtube-player header span,
+.wm-market-youtube-player header strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-market-youtube-player header span {
+  color: rgba(235, 235, 235, 0.48);
+  font-family: var(--wm-font-mono, monospace);
+  font-size: 9px;
+}
+
+.wm-market-youtube-player header strong {
+  margin-top: 2px;
+  color: #f4f6f8;
+  font-size: 13px;
+}
+
+.wm-market-youtube-player button {
+  flex: 0 0 auto;
+  min-height: 25px;
+  padding: 0 9px;
+  border: 1px solid rgba(104, 218, 244, 0.28);
+  border-radius: 4px;
+  background: rgba(104, 218, 244, 0.08);
+  color: #9ee8f7;
+  font-family: var(--wm-font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.wm-market-youtube-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  background: #000;
+}
+
+.wm-market-youtube-fallback {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 18px;
+  text-align: center;
+}
+
+.wm-market-youtube-fallback strong {
+  color: #f4f6f8;
+  font-size: 18px;
+}
+
+.wm-market-youtube-fallback em {
+  max-width: 320px;
+  color: rgba(235, 235, 235, 0.56);
+  font-style: normal;
+}
+
+.wm-market-youtube-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  height: 18px;
+  padding-top: 5px;
+  color: rgba(235, 235, 235, 0.42);
+  font-family: var(--wm-font-mono, monospace);
+  font-size: 9px;
+}
+
+@media (max-width: 760px) {
+  .wm-market-youtube-layout {
+    height: calc(100% - 20px);
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(220px, 45vh) minmax(0, 1fr);
+  }
+
+  .wm-market-youtube-player {
+    order: -1;
   }
 }

@@ -10,6 +10,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from api.services import live_video_source_service as service
+from api.services import youtube_live_probe_service as youtube_probe
 
 
 def test_market_tv_wire_manifest_payload_builds_without_network() -> None:
@@ -72,3 +73,110 @@ def test_market_tv_wire_category_filter_runs_before_limit() -> None:
         "limit": 2,
         "truncated": False,
     }
+
+
+def test_youtube_probe_parses_live_video_and_hls_manifest() -> None:
+    html = r'''
+<html><head><meta property="og:url" content="https://www.youtube.com/@Foxweather/live"></head>
+<script>
+{"channelId":"UCabc123","ownerChannelName":"FOX Weather","videoDetails":{"videoId":"abcDEF12345","title":"FOX Weather Live","isLive":true},"hlsManifestUrl":"https:\/\/example.com\/live.m3u8\u0026sig=1"}
+</script>
+</html>
+'''
+
+    payload = youtube_probe.parse_channel_html(html)
+
+    assert payload["channelExists"] is True
+    assert payload["channelId"] == "UCabc123"
+    assert payload["channelName"] == "FOX Weather"
+    assert payload["videoId"] == "abcDEF12345"
+    assert payload["isLive"] is True
+    assert payload["title"] == "FOX Weather Live"
+    assert payload["hlsUrl"] == "https://example.com/live.m3u8&sig=1"
+
+
+def test_market_tv_wire_enriches_youtube_manifest_sources() -> None:
+    def probe(channel: str, video_id: str) -> dict:
+        if channel == "@Foxweather":
+            return {
+                "videoId": "abcDEF12345",
+                "isLive": True,
+                "channelExists": True,
+                "channelId": "UCabc123",
+                "channelName": "FOX Weather",
+                "hlsUrl": "https://example.com/fox-weather.m3u8",
+                "title": "FOX Weather Live Now",
+                "error": "",
+            }
+        return {
+            "videoId": "",
+            "isLive": False,
+            "channelExists": True,
+            "channelName": "",
+            "hlsUrl": "",
+            "title": "",
+            "error": "",
+        }
+
+    payload = service.build_market_tv_wire_payload(
+        {"utc_now_iso": lambda: "2026-06-15T00:00:00Z", "youtube_live_probe": probe},
+        include_iptv=False,
+    )
+    fox_weather = next(item for item in payload["items"] if item["id"] == "fox-weather-live")
+
+    assert payload["sources"]["youtubeLiveProbe"]["liveCount"] >= 1
+    assert fox_weather["youtubeProbeStatus"] == "live"
+    assert fox_weather["youtubeChannelId"] == "UCabc123"
+    assert fox_weather["youtubeLiveVideoId"] == "abcDEF12345"
+    assert fox_weather["youtubeHlsUrl"] == "https://example.com/fox-weather.m3u8"
+    assert "youtube-nocookie.com/embed/abcDEF12345" in fox_weather["youtubeEmbedUrl"]
+    assert fox_weather["fallbackVideoId"] == "abcDEF12345"
+    assert fox_weather["externalUrl"] == "https://www.youtube.com/watch?v=abcDEF12345"
+
+
+def test_market_youtube_channels_payload_filters_curated_youtube_sources() -> None:
+    payload = {
+        "generatedAt": "2026-06-15T00:00:00Z",
+        "status": "ok",
+        "cacheMode": "seeded",
+        "items": [
+            {
+                "id": "yt-weather",
+                "displayName": "Weather Live",
+                "category": "weather",
+                "sourceType": "youtube",
+                "youtubeProbeStatus": "live",
+                "youtubeLiveVideoId": "abcDEF12345",
+                "youtubeEmbedUrl": "https://www.youtube-nocookie.com/embed/abcDEF12345",
+                "status": "ready",
+                "relevanceScore": 95,
+            },
+            {
+                "id": "hls-weather",
+                "displayName": "HLS Weather",
+                "category": "weather",
+                "sourceType": "hls",
+                "hlsUrl": "https://example.com/live.m3u8",
+                "status": "ready",
+                "relevanceScore": 99,
+            },
+            {
+                "id": "yt-geo",
+                "displayName": "Geo Live",
+                "category": "geo",
+                "sourceType": "youtube",
+                "fallbackVideoId": "defGHI12345",
+                "status": "ready",
+                "relevanceScore": 90,
+            },
+        ],
+    }
+
+    all_payload = service.normalize_market_youtube_channels_payload(payload, limit=10)
+    weather_payload = service.normalize_market_youtube_channels_payload(payload, limit=10, category="weather")
+
+    assert [item["id"] for item in all_payload["items"]] == ["yt-weather", "yt-geo"]
+    assert [item["id"] for item in weather_payload["items"]] == ["yt-weather"]
+    assert all_payload["summary"]["total"] == 2
+    assert all_payload["summary"]["embedReady"] == 2
+    assert "youtube-nocookie.com/embed/defGHI12345" in all_payload["items"][1]["youtubeEmbedUrl"]
