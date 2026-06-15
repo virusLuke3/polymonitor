@@ -625,7 +625,10 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
         reverse=True,
     )
     seed_limit = max(24, int(os.environ.get("POLYDATA_MARKET_TV_WIRE_SEED_LIMIT", MARKET_TV_WIRE_SEED_ITEM_LIMIT)))
-    items = items[:seed_limit]
+    curated_items = [item for item in items if item.get("curated")]
+    discovered_items = [item for item in items if not item.get("curated")]
+    discovered_limit = max(0, seed_limit - len(curated_items))
+    items = curated_items + discovered_items[:discovered_limit]
     status = "ok" if items and not errors else ("degraded" if items else "empty")
     return {
         "generatedAt": generated_at,

@@ -182,3 +182,41 @@ def test_market_youtube_channels_payload_filters_curated_youtube_sources() -> No
     assert all_payload["summary"]["total"] == 2
     assert all_payload["summary"]["embedReady"] == 2
     assert "youtube-nocookie.com/embed/defGHI12345" in all_payload["items"][1]["youtubeEmbedUrl"]
+
+
+def test_market_tv_wire_seed_keeps_curated_manifest_items_when_iptv_is_large(monkeypatch) -> None:
+    def load_manifest() -> list[dict]:
+        return [
+            {
+                "id": "yt-low-score",
+                "displayName": "Low Score YouTube",
+                "category": "culture",
+                "sourceType": "youtube",
+                "youtubeHandle": "@demo",
+                "youtubeChannelId": "UCdemo",
+                "externalUrl": "https://www.youtube.com/@demo/streams",
+                "sourceUrl": "https://www.youtube.com/@demo/streams",
+                "marketTags": ["culture"],
+            }
+        ]
+
+    playlist = "#EXTM3U\n" + "\n".join(
+        f'#EXTINF:-1 tvg-id="Demo{i}",Demo {i}\nhttps://example.com/live/{i}.m3u8'
+        for i in range(32)
+    )
+
+    monkeypatch.setattr(service, "load_manifest_items", load_manifest)
+    monkeypatch.setenv("POLYDATA_MARKET_TV_WIRE_SEED_LIMIT", "24")
+
+    payload = service.build_market_tv_wire_payload(
+        {
+            "utc_now_iso": lambda: "2026-06-15T00:00:00Z",
+            "http_text_get": lambda url, **kwargs: playlist,
+            "market_tv_youtube_probe_enabled": False,
+        }
+    )
+
+    ids = [item["id"] for item in payload["items"]]
+
+    assert "yt-low-score" in ids
+    assert len(payload["items"]) == 24
