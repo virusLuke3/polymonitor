@@ -16,6 +16,17 @@ def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
         return
 
 
+def _get_panel_snapshot(panel, helpers: dict, limit: int | None):
+    kwargs = {}
+    if limit is not None:
+        kwargs["limit"] = limit
+    if panel.panel_id == "market-tv-wire":
+        category = request.args.get("category")
+        if category:
+            kwargs["category"] = category
+    return panel.get_snapshot(helpers, **kwargs)
+
+
 def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
     bp = Blueprint("runtime_panel_routes", __name__)
 
@@ -40,10 +51,7 @@ def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
             raw_limit = request.args.get(f"limit.{panel_id}") or request.args.get("limit")
             limit = panel.clamp_limit(raw_limit)
             try:
-                if limit is None:
-                    payload = panel.get_snapshot(helpers)
-                else:
-                    payload = panel.get_snapshot(helpers, limit=limit)
+                payload = _get_panel_snapshot(panel, helpers, limit)
                 payloads[panel.panel_id] = payload
                 _publish_runtime_panel(panel.panel_id, payload)
             except Exception as exc:
@@ -65,10 +73,7 @@ def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
 
         def _handler(panel=panel):
             limit = panel.clamp_limit(request.args.get("limit"))
-            if limit is None:
-                payload = panel.get_snapshot(helpers)
-            else:
-                payload = panel.get_snapshot(helpers, limit=limit)
+            payload = _get_panel_snapshot(panel, helpers, limit)
             _publish_runtime_panel(panel.panel_id, payload)
             return jsonify(payload)
 

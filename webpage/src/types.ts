@@ -2078,6 +2078,13 @@ export type RuntimeMarketTvWirePayload = {
   cacheMode?: 'seeded' | 'stale' | 'warming' | 'live-build' | string | null;
   source?: string | null;
   sourceUrl?: string | null;
+  selection?: {
+    category?: string | null;
+    total?: number | string | null;
+    returned?: number | string | null;
+    limit?: number | string | null;
+    truncated?: boolean | null;
+  } | null;
   summary?: RuntimeMarketTvWireSummary | null;
   categories?: RuntimeMarketTvWireCategory[];
   sources?: Record<string, RuntimeMarketTvWireSourceState | string | null | undefined>;

@@ -659,8 +659,10 @@ export function fetchRuntimePolybeats(limit = 8) {
   return apiGet<RuntimePolybeatsPayload>(`/runtime/panels/polybeats-feed?limit=${limit}`);
 }
 
-export function fetchRuntimeMarketTvWire(limit = 24) {
-  return apiGet<RuntimeMarketTvWirePayload>(`/runtime/content/market-tv-wire?limit=${limit}`);
+export function fetchRuntimeMarketTvWire(limit = 24, category?: string | null) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (category && category !== 'all') params.set('category', category);
+  return apiGet<RuntimeMarketTvWirePayload>(`/runtime/content/market-tv-wire?${params.toString()}`);
 }
 
 export function fetchRuntimeNewMarketSignals(limit = 12) {

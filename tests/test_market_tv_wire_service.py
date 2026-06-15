@@ -45,3 +45,30 @@ def test_market_tv_wire_runtime_snapshot_does_not_live_build_by_default() -> Non
     assert payload["status"] == "warming"
     assert payload["cacheMode"] == "warming"
     assert payload["items"] == []
+
+
+def test_market_tv_wire_category_filter_runs_before_limit() -> None:
+    payload = {
+        "generatedAt": "2026-06-15T00:00:00Z",
+        "status": "ok",
+        "cacheMode": "seeded",
+        "items": [
+            {"id": "macro-1", "displayName": "Macro 1", "category": "macro", "status": "ready", "relevanceScore": 100},
+            {"id": "macro-2", "displayName": "Macro 2", "category": "macro", "status": "ready", "relevanceScore": 99},
+            {"id": "sports-1", "displayName": "Sports 1", "category": "sports", "status": "ready", "relevanceScore": 80},
+            {"id": "sports-2", "displayName": "Sports 2", "category": "sports", "status": "ready", "relevanceScore": 79},
+        ],
+    }
+
+    top_payload = service.normalize_market_tv_wire_payload(payload, limit=2)
+    sports_payload = service.normalize_market_tv_wire_payload(payload, limit=2, category="sports")
+
+    assert [item["id"] for item in top_payload["items"]] == ["macro-1", "macro-2"]
+    assert [item["id"] for item in sports_payload["items"]] == ["sports-1", "sports-2"]
+    assert sports_payload["selection"] == {
+        "category": "sports",
+        "total": 2,
+        "returned": 2,
+        "limit": 2,
+        "truncated": False,
+    }

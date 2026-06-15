@@ -227,14 +227,45 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
   const [showHelp, setShowHelp] = useState(false);
   const [activeCategory, setActiveCategory] = useState('all');
   const [activeId, setActiveId] = useState<string | null>(null);
-  const items = payload?.items || [];
-  const categories = payload?.categories || [];
-  const summary = payload?.summary || {};
-  const visibleItems = useMemo(() => (
-    activeCategory === 'all' ? items : items.filter((item) => String(item.category || 'other') === activeCategory)
-  ), [activeCategory, items]);
+  const [categoryPayload, setCategoryPayload] = useState<{ category: string; payload: RuntimeMarketTvWirePayload } | null>(null);
+  const [categoryLoading, setCategoryLoading] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const selectedPayload = activeCategory === 'all'
+    ? payload
+    : (categoryPayload?.category === activeCategory ? categoryPayload.payload : null);
+  const items = selectedPayload?.items || [];
+  const categories = payload?.categories || selectedPayload?.categories || [];
+  const summary = payload?.summary || selectedPayload?.summary || {};
+  const visibleItems = useMemo(() => items, [items]);
   const activeItem = visibleItems.find((item) => item.id === activeId) || null;
   const previewItem = activeItem || visibleItems.find(isHlsPreviewable) || visibleItems[0] || null;
+
+  useEffect(() => {
+    let cancelled = false;
+    setActiveId(null);
+    setCategoryError(null);
+    if (activeCategory === 'all') {
+      setCategoryPayload(null);
+      setCategoryLoading(false);
+      return undefined;
+    }
+    setCategoryLoading(true);
+    fetchRuntimeMarketTvWire(60, activeCategory)
+      .then((nextPayload) => {
+        if (cancelled) return;
+        setCategoryPayload({ category: activeCategory, payload: nextPayload });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setCategoryError(error instanceof Error ? error.message : 'Failed to load category');
+      })
+      .finally(() => {
+        if (!cancelled) setCategoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCategory]);
 
   useEffect(() => {
     if (!visibleItems.length) {
@@ -310,8 +341,8 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
         </div>
         {previewItem ? <MarketTvPreview item={previewItem} /> : (
           <div className="wm-empty-state">
-            <strong>Market TV Wire warming.</strong>
-            <em>GCP seed snapshot or curated source manifest is not ready yet.</em>
+            <strong>{categoryLoading ? 'Market TV Wire loading.' : 'Market TV Wire warming.'}</strong>
+            <em>{categoryError || 'GCP seed snapshot or selected channel category is not ready yet.'}</em>
           </div>
         )}
       </div>

@@ -403,7 +403,14 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
     }
 
 
-def normalize_market_tv_wire_payload(payload: Any, *, ctx: dict | None = None, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT) -> Dict[str, Any]:
+def _requested_category(value: Any) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw or raw == "all":
+        return None
+    return raw if raw in CATEGORY_LABELS else None
+
+
+def normalize_market_tv_wire_payload(payload: Any, *, ctx: dict | None = None, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, category: str | None = None) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return _empty_payload(ctx, status="invalid", cache_mode="invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
@@ -417,8 +424,13 @@ def normalize_market_tv_wire_payload(payload: Any, *, ctx: dict | None = None, l
         ),
         reverse=True,
     )
+    requested_category = _requested_category(category)
+    selected_items = [
+        item for item in items
+        if not requested_category or _normalize_category(item.get("category")) == requested_category
+    ]
     max_items = max(1, min(int(limit or DEFAULT_MARKET_TV_WIRE_LIMIT), 80))
-    result["items"] = items[:max_items]
+    result["items"] = selected_items[:max_items]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(items)
     result["categories"] = result.get("categories") if isinstance(result.get("categories"), list) else _categories(items)
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
@@ -428,6 +440,13 @@ def normalize_market_tv_wire_payload(payload: Any, *, ctx: dict | None = None, l
     result["cacheMode"] = str(result.get("cacheMode") or "seeded")
     result["source"] = str(result.get("source") or "market-tv-wire-seed")
     result["sourceUrl"] = str(result.get("sourceUrl") or _manifest_path())
+    result["selection"] = {
+        "category": requested_category or "all",
+        "total": len(selected_items),
+        "returned": len(result["items"]),
+        "limit": max_items,
+        "truncated": len(selected_items) > max_items,
+    }
     return result
 
 
@@ -455,12 +474,12 @@ def _read_seeded(ctx: dict) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_market_tv_wire_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+def get_market_tv_wire_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, *, category: str | None = None, allow_live_build: bool = False) -> Dict[str, Any]:
     seeded = _read_seeded(ctx)
     if seeded is not None:
-        return normalize_market_tv_wire_payload(seeded, ctx=ctx, limit=limit)
+        return normalize_market_tv_wire_payload(seeded, ctx=ctx, limit=limit, category=category)
     if not allow_live_build:
-        return normalize_market_tv_wire_payload(_empty_payload(ctx, status="warming", cache_mode="warming"), ctx=ctx, limit=limit)
+        return normalize_market_tv_wire_payload(_empty_payload(ctx, status="warming", cache_mode="warming"), ctx=ctx, limit=limit, category=category)
     payload = build_market_tv_wire_payload(ctx)
     if payload.get("items"):
         ttl = max(60, int(getattr(ctx.get("SETTINGS"), "market_tv_wire_ttl_seconds", MARKET_TV_WIRE_TTL_SECONDS) or MARKET_TV_WIRE_TTL_SECONDS))
@@ -470,4 +489,4 @@ def get_market_tv_wire_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_TV_WIRE_L
         store = ctx.get("SNAPSHOT_STORE")
         if store is not None:
             store.set(MARKET_TV_WIRE_SNAPSHOT_NAMESPACE, MARKET_TV_WIRE_CACHE_KEY, payload, ttl)
-    return normalize_market_tv_wire_payload(payload, ctx=ctx, limit=limit)
+    return normalize_market_tv_wire_payload(payload, ctx=ctx, limit=limit, category=category)
