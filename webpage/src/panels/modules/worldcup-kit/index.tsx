@@ -141,6 +141,22 @@ function formatCompact(value?: number | string | null) {
   return String(Math.round(numeric));
 }
 
+type WeatherWithSource = WorldCupCityWeather & { source?: string };
+
+function venueRiskScore(temp: number, precipitation: number, wind: number, matchCount: number) {
+  return Math.max(5, Math.min(96, Math.round((temp > 27 ? 18 : 6) + precipitation * 0.35 + wind * 0.7 + matchCount * 1.4)));
+}
+
+function venueRiskBand(score: number) {
+  if (score >= 68) return { key: 'high', label: 'HIGH STRESS' };
+  if (score >= 42) return { key: 'watch', label: 'WATCH STRESS' };
+  return { key: 'low', label: 'LOW STRESS' };
+}
+
+function venueWeatherSource(weather: WorldCupCityWeather, payload: WorldCupDashboardPayload) {
+  return (weather as WeatherWithSource).source || payload.intelligence?.source?.split('/').pop()?.trim() || 'Weather feed';
+}
+
 function percentLabel(value?: number | string | null, digits = 1) {
   if (value === null || value === undefined || value === '') return '--';
   const numeric = Number(value);
@@ -444,7 +460,11 @@ function countForView(view: WorldCupHomeView, model: WorldCupHomeModel) {
   if (view === 'news' || view === 'news-impact') return news.length;
   if (view === 'host-venue') return payload.weather.length || payload.cities.length;
   if (view === 'source-audit') return 7;
-  if (view === 'venue-risk') return selectedWeather ? '1' : 0;
+  if (view === 'venue-risk') {
+    if (!selectedWeather) return 0;
+    const matchCount = Math.max(WORLD_CUP_HOST_MATCH_COUNTS[model.selectedCity.id] || 0, payload.matches.filter((match) => match.cityId === model.selectedCity.id).length);
+    return venueRiskScore(selectedWeather.current.tempC, selectedWeather.current.precipitationProbability || 0, selectedWeather.current.windKph || 0, matchCount);
+  }
   if (view === 'group-table' || view === 'group-advance') return payload.matches.filter((match) => match.group).length;
   if (view.includes('team') || view.includes('injury') || view.includes('lineup')) return payload.rosters.length;
   return signals.length;
@@ -774,32 +794,44 @@ function VenueRisk({ model }: { model: WorldCupHomeModel }) {
   }
   const matchCount = Math.max(WORLD_CUP_HOST_MATCH_COUNTS[model.selectedCity.id] || 0, model.payload.matches.filter((match) => match.cityId === model.selectedCity.id).length);
   const temp = weather.current.tempC;
-  const rain = weather.current.precipitationProbability || 0;
+  const precipitation = weather.current.precipitationProbability || 0;
   const wind = weather.current.windKph || 0;
-  const risk = Math.max(5, Math.min(96, Math.round((temp > 27 ? 18 : 6) + rain * 0.35 + wind * 0.7 + matchCount * 1.4)));
+  const risk = venueRiskScore(temp, precipitation, wind, matchCount);
+  const band = venueRiskBand(risk);
+  const source = venueWeatherSource(weather, model.payload);
   const metrics = [
-    ['TEMP', temp, 36, 'gold', 'C'],
-    ['RAIN', rain, 100, 'blue', '%'],
-    ['WIND', wind, 40, 'purple', 'kph'],
-    ['LOAD', matchCount * 6, 100, 'green', '%'],
+    { label: 'TEMP', value: temp, max: 36, tone: 'gold', unit: 'C', note: 'ambient' },
+    { label: 'PRECIP', value: precipitation, max: 12, tone: 'blue', unit: 'mm', note: 'current' },
+    { label: 'WIND', value: wind, max: 40, tone: 'purple', unit: 'kph', note: '10m speed' },
+    { label: 'LOAD', value: matchCount * 6, max: 100, tone: 'green', unit: '%', note: `${matchCount} matches` },
   ] as const;
   return (
-    <>
-      <div className="wm-worldcup-home-risk-score">
-        <span>{model.selectedCity.city}</span>
-        <strong>{risk}</strong>
-        <em>{weather.current.condition}</em>
+    <div className="wm-worldcup-venue-risk-stack">
+      <section className={`wm-worldcup-risk-hero risk-${band.key}`}>
+        <div className="wm-worldcup-risk-ring" style={{ '--risk-score': `${risk}%` }}>
+          <span>{risk}</span>
+        </div>
+        <div>
+          <em>{model.selectedCity.city}</em>
+          <strong>{band.label}</strong>
+          <b>{weather.current.condition}</b>
+        </div>
+      </section>
+      <div className="wm-worldcup-risk-meta">
+        <span><em>SOURCE</em><strong>{source}</strong></span>
+        <span><em>UPDATED</em><strong>{formatDateTime(weather.generatedAt)}</strong></span>
       </div>
-      <div className="wm-worldcup-home-risk-grid">
-        {metrics.map(([label, value, max, tone, unit]) => (
-          <span className={`tone-${tone}`} key={label}>
-            <em>{label}</em>
-            <strong>{value}{unit}</strong>
-            <i style={{ width: `${Math.max(4, Math.min(100, (Number(value) / Number(max)) * 100))}%` }} />
+      <div className="wm-worldcup-risk-metric-grid">
+        {metrics.map((metric) => (
+          <span className={metric.tone} key={metric.label}>
+            <em>{metric.label}</em>
+            <strong>{metric.value}{metric.unit}</strong>
+            <small>{metric.note}</small>
+            <i style={{ width: `${Math.max(4, Math.min(100, (Number(metric.value) / Number(metric.max)) * 100))}%` }} />
           </span>
         ))}
       </div>
-    </>
+    </div>
   );
 }
 

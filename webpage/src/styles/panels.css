@@ -23330,6 +23330,178 @@ a.wm-orderfilled-row {
   line-height: 0.95;
 }
 
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel {
+  --risk-accent: #23f07e;
+  --risk-muted: rgba(160, 174, 190, 0.68);
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-venue-risk-stack {
+  display: grid;
+  gap: 4px;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-hero {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 70px;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(35, 240, 126, 0.2);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 18% 50%, rgba(35, 240, 126, 0.18), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012)),
+    #111518;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-hero.risk-watch {
+  --risk-accent: #ffb32b;
+  border-color: rgba(255, 179, 43, 0.25);
+  background:
+    radial-gradient(circle at 18% 50%, rgba(255, 179, 43, 0.16), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012)),
+    #111518;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-hero.risk-high {
+  --risk-accent: #ff4d5e;
+  border-color: rgba(255, 77, 94, 0.28);
+  background:
+    radial-gradient(circle at 18% 50%, rgba(255, 77, 94, 0.16), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012)),
+    #111518;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-ring {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle, #111518 58%, transparent 60%),
+    conic-gradient(var(--risk-accent) var(--risk-score), rgba(255, 255, 255, 0.09) 0);
+  color: var(--risk-accent);
+  font: 850 21px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 18px rgba(35, 240, 126, 0.28);
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-hero div:last-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-hero em,
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-hero b,
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-meta em,
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid em,
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid small {
+  overflow: hidden;
+  font-style: normal;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-hero em {
+  color: var(--risk-muted);
+  font: 760 8px/1 var(--font-mono);
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-hero strong {
+  overflow: hidden;
+  color: #f4f8fb;
+  font: 820 13px/1.05 var(--font-mono);
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-hero b {
+  color: var(--risk-accent);
+  font: 760 9px/1 var(--font-mono);
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-meta span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-meta em,
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid em,
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid small {
+  color: var(--risk-muted);
+  font: 740 8px/1 var(--font-mono);
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-meta strong {
+  overflow: hidden;
+  color: #f2f5f6;
+  font: 720 9px/1.05 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 0;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid span {
+  display: grid;
+  grid-template-rows: auto auto auto 3px;
+  gap: 2px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 5px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012)),
+    #14181b;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid span.green { color: #23f07e; border-top: 2px solid rgba(35, 240, 126, 0.7); }
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid span.blue { color: #37d7f2; border-top: 2px solid rgba(55, 215, 242, 0.7); }
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid span.gold { color: #ffb32b; border-top: 2px solid rgba(255, 179, 43, 0.72); }
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid span.purple { color: #9b7aff; border-top: 2px solid rgba(155, 122, 255, 0.72); }
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid strong {
+  overflow: hidden;
+  color: #f7fafb;
+  font: 800 12px/1 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-home-panel.wm-worldcup-venue-risk-panel .wm-worldcup-risk-metric-grid i {
+  display: block;
+  height: 2px;
+  margin-top: 0;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.84;
+}
+
 .wm-worldcup-home-odds-list article,
 .wm-worldcup-home-city-list article,
 .wm-worldcup-home-player-row {
