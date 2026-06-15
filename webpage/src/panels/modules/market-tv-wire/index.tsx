@@ -6,6 +6,8 @@ import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
+type PlaybackState = 'connecting' | 'playing' | 'waiting' | 'blocked' | 'external';
+
 function badgeLabel(payload?: RuntimeMarketTvWirePayload | null) {
   const status = String(payload?.status || '').toLowerCase();
   const cacheMode = String(payload?.cacheMode || '').toLowerCase();
@@ -68,16 +70,70 @@ function openExternal(url?: string | null) {
   window.open(target, '_blank', 'noopener,noreferrer');
 }
 
+function isHlsPreviewable(item?: RuntimeMarketTvWireItem | null) {
+  return String(item?.sourceType || '').toLowerCase() === 'hls' && Boolean(String(item?.hlsUrl || '').trim());
+}
+
 function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsUrl = String(item.hlsUrl || '').trim();
+  const [playbackState, setPlaybackState] = useState<PlaybackState>(hlsUrl ? 'connecting' : 'external');
 
   useEffect(() => {
     const video = videoRef.current;
+    let cancelled = false;
+    let destroyHls: (() => void) | null = null;
+
+    setPlaybackState(hlsUrl ? 'connecting' : 'external');
     if (!video || !hlsUrl) return undefined;
-    video.src = hlsUrl;
-    video.load();
+
+    const markPlaying = () => setPlaybackState('playing');
+    const markWaiting = () => setPlaybackState('waiting');
+    const markBlocked = () => setPlaybackState('blocked');
+    video.addEventListener('playing', markPlaying);
+    video.addEventListener('waiting', markWaiting);
+    video.addEventListener('error', markBlocked);
+
+    const startNative = () => {
+      video.src = hlsUrl;
+      video.load();
+      video.play().catch(() => setPlaybackState('waiting'));
+    };
+
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      startNative();
+    } else {
+      import('hls.js')
+        .then(({ default: Hls }) => {
+          if (cancelled) return;
+          if (!Hls.isSupported()) {
+            setPlaybackState('blocked');
+            return;
+          }
+          const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            liveSyncDurationCount: 3,
+          });
+          destroyHls = () => hls.destroy();
+          hls.loadSource(hlsUrl);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(() => setPlaybackState('waiting'));
+          });
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (data?.fatal) setPlaybackState('blocked');
+          });
+        })
+        .catch(() => setPlaybackState('blocked'));
+    }
+
     return () => {
+      cancelled = true;
+      video.removeEventListener('playing', markPlaying);
+      video.removeEventListener('waiting', markWaiting);
+      video.removeEventListener('error', markBlocked);
+      destroyHls?.();
       video.pause();
       video.removeAttribute('src');
       video.load();
@@ -102,12 +158,27 @@ function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
   return (
     <div className="wm-market-tv-preview">
       <div className="wm-market-tv-preview-head">
-        <strong>{itemTitle(item)}</strong>
+        <div>
+          <strong>{itemTitle(item)}</strong>
+          <span>{categoryLabel(item.category)} / {sourceLocation(item)} / {sourceTypeLabel(item.sourceType)}</span>
+        </div>
+        <em className={`wm-market-tv-playback ${playbackState}`}>{playbackState.toUpperCase()}</em>
         <button type="button" onClick={() => openExternal(item.externalUrl || item.sourceUrl || item.hlsUrl)}>
           OPEN
         </button>
       </div>
-      <video ref={videoRef} className="wm-market-tv-video" controls muted playsInline />
+      <div className="wm-market-tv-stage">
+        <video ref={videoRef} className="wm-market-tv-video" controls muted playsInline />
+        {playbackState === 'blocked' ? (
+          <button
+            type="button"
+            className="wm-market-tv-fallback"
+            onClick={() => openExternal(item.externalUrl || item.sourceUrl || item.hlsUrl)}
+          >
+            STREAM BLOCKED · OPEN SOURCE
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -121,7 +192,7 @@ function MarketTvRow({
   active: boolean;
   onPreview: () => void;
 }) {
-  const hlsReady = String(item.sourceType || '').toLowerCase() === 'hls' && item.hlsUrl;
+  const hlsReady = isHlsPreviewable(item);
   const tags = (item.matchedTerms?.length ? item.matchedTerms : item.marketTags || []).slice(0, 3);
   return (
     <article className={`wm-market-tv-row ${active ? 'active' : ''}`}>
@@ -144,7 +215,7 @@ function MarketTvRow({
         </div>
         <div className="wm-market-tv-score">
           <strong>{scoreLabel(item.relevanceScore)}</strong>
-          <span>{hlsReady ? 'PREVIEW' : 'OPEN'}</span>
+          <span>{hlsReady ? 'WATCH' : 'OPEN'}</span>
           <em>{formatRelative(item.lastCheckedAt)}</em>
         </div>
       </button>
@@ -163,10 +234,15 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
     activeCategory === 'all' ? items : items.filter((item) => String(item.category || 'other') === activeCategory)
   ), [activeCategory, items]);
   const activeItem = visibleItems.find((item) => item.id === activeId) || null;
+  const previewItem = activeItem || visibleItems.find(isHlsPreviewable) || visibleItems[0] || null;
 
   useEffect(() => {
-    if (activeId && !visibleItems.some((item) => item.id === activeId)) {
+    if (!visibleItems.length) {
       setActiveId(null);
+      return;
+    }
+    if (!activeId || !visibleItems.some((item) => item.id === activeId)) {
+      setActiveId((visibleItems.find(isHlsPreviewable) || visibleItems[0])?.id || null);
     }
   }, [activeId, visibleItems]);
 
@@ -197,46 +273,42 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
       dataPanelId="market-tv-wire"
     >
       <div className="wm-market-tv-layout">
-        <div className="wm-market-tv-tabs">
-          <button type="button" className={activeCategory === 'all' ? 'active' : ''} onClick={() => setActiveCategory('all')}>
-            ALL <span>{items.length}</span>
-          </button>
-          {categories.map((category) => (
-            <button
-              key={category.id}
-              type="button"
-              className={activeCategory === category.id ? 'active' : ''}
-              onClick={() => setActiveCategory(category.id)}
-            >
-              {category.label} <span>{category.count}</span>
+        <div className="wm-market-tv-control-rail">
+          <div className="wm-market-tv-tabs">
+            <button type="button" className={activeCategory === 'all' ? 'active' : ''} onClick={() => setActiveCategory('all')}>
+              ALL <span>{items.length}</span>
             </button>
-          ))}
-        </div>
-        <div className="wm-market-tv-summary">
-          <span><strong>{summary.liveReady ?? 0}</strong> READY</span>
-          <span><strong>{summary.marketMatched ?? 0}</strong> MATCHED</span>
-          <span><strong>{summary.regions ?? 0}</strong> REGIONS</span>
-          <span><strong>{summary.staleCount ?? 0}</strong> STALE</span>
-        </div>
-        {activeItem ? <MarketTvPreview item={activeItem} /> : null}
-        {visibleItems.length ? (
-          <div className="wm-market-tv-list">
-            {visibleItems.map((item) => (
-              <MarketTvRow
-                key={item.id}
-                item={item}
-                active={activeId === item.id}
-                onPreview={() => {
-                  if (String(item.sourceType || '').toLowerCase() === 'hls' && item.hlsUrl) {
-                    setActiveId((current) => current === item.id ? null : item.id);
-                    return;
-                  }
-                  openExternal(item.externalUrl || item.sourceUrl);
-                }}
-              />
+            {categories.map((category) => (
+              <button
+                key={category.id}
+                type="button"
+                className={activeCategory === category.id ? 'active' : ''}
+                onClick={() => setActiveCategory(category.id)}
+              >
+                {category.label} <span>{category.count}</span>
+              </button>
             ))}
           </div>
-        ) : (
+          <div className="wm-market-tv-summary">
+            <span><strong>{summary.liveReady ?? 0}</strong> READY</span>
+            <span><strong>{summary.marketMatched ?? 0}</strong> MATCHED</span>
+            <span><strong>{summary.regions ?? 0}</strong> REGIONS</span>
+            <span><strong>{summary.staleCount ?? 0}</strong> STALE</span>
+          </div>
+          {visibleItems.length ? (
+            <div className="wm-market-tv-list">
+              {visibleItems.map((item) => (
+                <MarketTvRow
+                  key={item.id}
+                  item={item}
+                  active={(activeId || previewItem?.id) === item.id}
+                  onPreview={() => setActiveId(item.id)}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {previewItem ? <MarketTvPreview item={previewItem} /> : (
           <div className="wm-empty-state">
             <strong>Market TV Wire warming.</strong>
             <em>GCP seed snapshot or curated source manifest is not ready yet.</em>
@@ -261,9 +333,10 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Market TV Wire',
   eyebrow: 'content',
   description: 'GCP-seeded live video sources ranked for market context.',
+  size: 'wide',
   defaultEnabled: true,
 }, {
   tier: 'slow',
   intervalMs: 180000,
-  fetchData: () => fetchRuntimeMarketTvWire(24),
+  fetchData: () => fetchRuntimeMarketTvWire(60),
 });

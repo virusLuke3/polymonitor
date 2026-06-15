@@ -14,6 +14,11 @@
   grid-row: span 1 !important;
 }
 
+.wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='market-tv-wire'] {
+  grid-column: span 2 !important;
+  grid-row: span 2 !important;
+}
+
 .wm-dashboard .wm-panel[data-panel-id='global-temperature-monitor'],
 .wm-dashboard .wm-panel[data-panel-id='weather-city-snapshot'],
 .wm-dashboard .wm-panel[data-panel-id='weather-quote-detail'],
@@ -23,7 +28,8 @@
 .wm-dashboard .wm-panel[data-panel-id='weather-news'],
 .wm-dashboard .wm-panel[data-panel-id='nba-scoreboard'],
 .wm-dashboard .wm-panel[data-panel-id='nba-intel'],
-.wm-dashboard .wm-panel[data-panel-id='espn-matchup-predictor'] {
+.wm-dashboard .wm-panel[data-panel-id='espn-matchup-predictor'],
+.wm-dashboard .wm-panel[data-panel-id='market-tv-wire'] {
   min-height: 0;
 }
 
@@ -35,7 +41,8 @@
 .wm-dashboard .wm-weather-news-panel .wm-panel-body,
 .wm-dashboard .wm-nba-scoreboard-panel .wm-panel-body,
 .wm-dashboard .wm-nba-intel-panel .wm-panel-body,
-.wm-dashboard .wm-matchup-predictor-panel .wm-panel-body {
+.wm-dashboard .wm-matchup-predictor-panel .wm-panel-body,
+.wm-dashboard .wm-market-tv-panel .wm-panel-body {
   min-height: 0;
 }
 

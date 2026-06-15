@@ -23469,13 +23469,26 @@ a.wm-orderfilled-row {
 }
 .wm-market-tv-panel .wm-panel-body {
   overflow: hidden;
+  padding: 10px !important;
+  background:
+    radial-gradient(circle at 86% 18%, rgba(104, 218, 244, 0.13), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0) 36%),
+    #07090a !important;
 }
 
 .wm-market-tv-layout {
-  display: flex;
+  display: grid;
   min-height: 0;
   height: 100%;
-  flex-direction: column;
+  grid-template-columns: minmax(230px, 0.36fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.wm-market-tv-control-rail {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -23487,8 +23500,8 @@ a.wm-orderfilled-row {
 }
 
 .wm-market-tv-tabs button {
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 25px;
+  padding: 0 8px;
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.025);
@@ -23516,7 +23529,7 @@ a.wm-orderfilled-row {
 
 .wm-market-tv-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -23544,15 +23557,22 @@ a.wm-orderfilled-row {
 .wm-market-tv-preview {
   display: flex;
   flex-direction: column;
-  min-height: 132px;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   border: 1px solid rgba(104, 218, 244, 0.16);
   border-radius: 4px;
-  background: #050708;
+  background:
+    linear-gradient(135deg, rgba(104, 218, 244, 0.06), transparent 28%),
+    #020303;
   overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+    0 0 24px rgba(104, 218, 244, 0.07);
 }
 
 .wm-market-tv-preview.external {
-  min-height: 84px;
+  min-height: 0;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
@@ -23588,11 +23608,64 @@ a.wm-orderfilled-row {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   color: rgba(245, 247, 249, 0.88);
   font-family: var(--wm-font-mono, monospace);
   font-size: 11px;
+}
+
+.wm-market-tv-preview-head div {
+  min-width: 0;
+}
+
+.wm-market-tv-preview-head strong,
+.wm-market-tv-preview-head span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-market-tv-preview-head strong {
+  color: #f4f6f8;
+  font-size: 12px;
+}
+
+.wm-market-tv-preview-head span {
+  margin-top: 2px;
+  color: rgba(235, 235, 235, 0.46);
+  font-size: 9px;
+}
+
+.wm-market-tv-playback {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  color: rgba(235, 235, 235, 0.56);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.wm-market-tv-playback.playing {
+  border-color: rgba(36, 242, 132, 0.26);
+  color: #65f7a5;
+  background: rgba(36, 242, 132, 0.08);
+}
+
+.wm-market-tv-playback.waiting,
+.wm-market-tv-playback.connecting {
+  border-color: rgba(255, 197, 61, 0.24);
+  color: #ffd978;
+  background: rgba(255, 197, 61, 0.07);
+}
+
+.wm-market-tv-playback.blocked {
+  border-color: rgba(255, 69, 75, 0.25);
+  color: #ff8d91;
+  background: rgba(255, 69, 75, 0.07);
 }
 
 .wm-market-tv-preview button,
@@ -23611,10 +23684,44 @@ a.wm-orderfilled-row {
 }
 
 .wm-market-tv-video {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 174px;
+  height: 100%;
   display: block;
   background: #020303;
+  object-fit: contain;
+}
+
+.wm-market-tv-stage {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    #000;
+  background-size: 32px 32px;
+}
+
+.wm-market-tv-stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.2));
+}
+
+.wm-market-tv-fallback {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  min-height: 34px !important;
+  border-color: rgba(255, 69, 75, 0.34) !important;
+  color: #ffadb0 !important;
+  background: rgba(32, 8, 10, 0.86) !important;
 }
 
 .wm-market-tv-list {
@@ -23644,10 +23751,10 @@ a.wm-orderfilled-row {
 .wm-market-tv-row-main {
   display: grid;
   width: 100%;
-  grid-template-columns: 10px minmax(0, 1fr) 58px;
+  grid-template-columns: 9px minmax(0, 1fr) 48px;
   gap: 8px;
   align-items: center;
-  padding: 8px;
+  padding: 7px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -23725,7 +23832,7 @@ a.wm-orderfilled-row {
   display: block;
   margin-top: 4px;
   color: #f4f6f8;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.22;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -23738,7 +23845,7 @@ a.wm-orderfilled-row {
   font-size: 11px;
   line-height: 1.25;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -23754,7 +23861,7 @@ a.wm-orderfilled-row {
 
 .wm-market-tv-score strong {
   color: #f4f6f8;
-  font-size: 20px;
+  font-size: 17px;
   line-height: 1;
 }
 
@@ -23776,6 +23883,15 @@ a.wm-orderfilled-row {
 }
 
 @media (max-width: 760px) {
+  .wm-market-tv-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(220px, 45vh) minmax(0, 1fr);
+  }
+
+  .wm-market-tv-preview {
+    order: -1;
+  }
+
   .wm-market-tv-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -23784,7 +23900,7 @@ a.wm-orderfilled-row {
     grid-template-columns: 10px minmax(0, 1fr) 48px;
   }
 
-  .wm-market-tv-video {
-    height: 148px;
+  .wm-market-tv-preview.external {
+    min-height: 160px;
   }
 }
