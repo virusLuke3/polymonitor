@@ -23287,3 +23287,119 @@ a.wm-orderfilled-row {
   font-family: var(--font-mono);
   letter-spacing: 0;
 }
+
+.wm-worldcup-calendar-panel .wm-panel-body,
+.wm-worldcup-match-control-panel .wm-panel-body {
+  background:
+    linear-gradient(180deg, rgba(16, 18, 14, 0.98), rgba(5, 7, 8, 0.98)),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 42px);
+}
+
+.wm-worldcup-calendar-panel .wm-worldcup-home-match-list article {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(255, 255, 255, 0.085);
+  background:
+    linear-gradient(90deg, rgba(255, 197, 61, 0.045), rgba(255, 255, 255, 0.026) 32%, rgba(38, 224, 130, 0.018));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.wm-worldcup-calendar-panel .wm-worldcup-home-match-list article::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, #ffc53d, #24f284);
+  opacity: 0.74;
+}
+
+.wm-worldcup-calendar-panel .wm-worldcup-home-match-list article:nth-child(3n + 2)::before {
+  background: linear-gradient(180deg, #68daf4, #24f284);
+}
+
+.wm-worldcup-calendar-panel .wm-worldcup-home-match-list article.active {
+  border-color: rgba(36, 242, 132, 0.42);
+  background:
+    linear-gradient(90deg, rgba(36, 242, 132, 0.16), rgba(255, 197, 61, 0.08) 46%, rgba(104, 218, 244, 0.055));
+  box-shadow:
+    inset 0 0 0 1px rgba(36, 242, 132, 0.12),
+    0 0 24px rgba(36, 242, 132, 0.12);
+}
+
+.wm-worldcup-calendar-panel .wm-worldcup-home-match-list article > span strong {
+  color: #f5f7f4;
+  font-size: 12px;
+  text-shadow: 0 0 14px rgba(255, 197, 61, 0.28);
+}
+
+.wm-worldcup-calendar-panel .wm-worldcup-home-match-list small {
+  color: rgba(104, 218, 244, 0.82);
+}
+
+.wm-worldcup-calendar-panel .wm-worldcup-home-match-list i {
+  color: #ffc53d;
+  text-shadow: 0 0 12px rgba(255, 197, 61, 0.42);
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-score {
+  padding: 5px;
+  border: 1px solid rgba(255, 197, 61, 0.16);
+  background: linear-gradient(90deg, rgba(36, 242, 132, 0.06), rgba(255, 197, 61, 0.08), rgba(104, 218, 244, 0.05));
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-score span {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.026));
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-score span:first-child {
+  border-left: 3px solid #24f284;
+  box-shadow: inset 12px 0 28px rgba(36, 242, 132, 0.08);
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-score span:last-child {
+  border-right: 3px solid #68daf4;
+  box-shadow: inset -12px 0 28px rgba(104, 218, 244, 0.08);
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-score strong {
+  color: #f5f7f4;
+  font-size: 14px;
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-score b {
+  color: #ffc53d;
+  font-size: 22px;
+  text-shadow: 0 0 18px rgba(255, 197, 61, 0.44);
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-fact-grid div {
+  border-color: rgba(255, 255, 255, 0.085);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.048), rgba(255, 255, 255, 0.022));
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-fact-grid div:nth-child(3n + 1) {
+  border-left: 2px solid rgba(255, 197, 61, 0.72);
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-fact-grid div:nth-child(3n + 2) {
+  border-left: 2px solid rgba(36, 242, 132, 0.62);
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-fact-grid div:nth-child(3n) {
+  border-left: 2px solid rgba(104, 218, 244, 0.62);
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-fact-grid span {
+  color: rgba(235, 235, 235, 0.66);
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-fact-grid strong {
+  color: #f1f4f0;
+}
+
+.wm-worldcup-match-control-panel .wm-worldcup-home-fact-grid em {
+  color: rgba(235, 235, 235, 0.5);
+}
