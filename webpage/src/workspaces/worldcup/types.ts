@@ -199,6 +199,7 @@ export type WorldCupDashboardPayload = {
   weather: WorldCupCityWeather[];
   rosters: WorldCupTeamRoster[];
   odds: WorldCupOddsSnapshot[];
+  providerStates?: Record<string, string>;
   intelligence?: WorldCupIntelPayload | null;
 };
 

@@ -176,7 +176,8 @@ function outcomeMatchesTeam(name: string | undefined, team: string) {
   const left = String(name || '').trim().toLowerCase();
   const right = String(team || '').trim().toLowerCase();
   if (!left || !right) return false;
-  if (team === 'Draw') return /draw|tie|\bx\b/i.test(left);
+  if (right === 'draw') return /\b(draw|tie|x)\b/i.test(left);
+  if (/\b(draw|tie|x)\b/i.test(left)) return false;
   if (left === right) return true;
   const leftTokens = new Set(left.split(/[^a-z0-9]+/).filter(Boolean));
   const rightTokens = right.split(/[^a-z0-9]+/).filter((part) => part.length > 1);
@@ -609,18 +610,27 @@ function WinProbability({ model }: { model: WorldCupHomeModel }) {
       />
     );
   }
+  const bookState = model.payload.providerStates?.bookmakerOdds || (book ? 'ok' : 'missing');
   return (
-    <div className="wm-worldcup-home-prob-table">
-      <header><span>OUTCOME</span><span>POLY</span><span>BOOK</span><span>EDGE</span></header>
-      {rows.map((row) => (
-        <div className={row.poly == null && row.book == null ? 'source-missing' : ''} key={row.name}>
-          <strong>{row.name}</strong>
-          <span><b>{percentLabel(row.poly)}</b><i style={{ width: probabilityWidth(row.poly) }} /></span>
-          <span><b>{percentLabel(row.book)}</b><i style={{ width: probabilityWidth(row.book) }} /></span>
-          <em className={row.edge == null ? '' : row.edge >= 0 ? 'tone-green' : 'tone-red'}>{row.edge == null ? '--' : `${row.edge >= 0 ? '+' : ''}${row.edge.toFixed(1)}%`}</em>
+    <>
+      <div className="wm-worldcup-home-prob-table">
+        <header><span>OUTCOME</span><span>POLY</span><span>BOOK</span><span>EDGE</span></header>
+        {rows.map((row) => (
+          <div className={row.poly == null && row.book == null ? 'source-missing' : ''} key={row.name}>
+            <strong>{row.name}</strong>
+            <span><b>{percentLabel(row.poly)}</b><i style={{ width: probabilityWidth(row.poly) }} /></span>
+            <span><b>{percentLabel(row.book)}</b><i style={{ width: probabilityWidth(row.book) }} /></span>
+            <em className={row.edge == null ? '' : row.edge >= 0 ? 'tone-green' : 'tone-red'}>{row.edge == null ? '--' : `${row.edge >= 0 ? '+' : ''}${row.edge.toFixed(1)}%`}</em>
+          </div>
+        ))}
+      </div>
+      {!book ? (
+        <div className="wm-worldcup-home-source-note">
+          <b>BOOK SOURCE</b>
+          <span>{`bookmakerOdds ${bookState}; edge waits for bookmaker probabilities`}</span>
         </div>
-      ))}
-    </div>
+      ) : null}
+    </>
   );
 }
 
