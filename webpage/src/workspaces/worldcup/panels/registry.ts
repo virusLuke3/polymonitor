@@ -5,6 +5,8 @@ export type WorldCupPanelId =
   | 'match-control'
   | 'news'
   | 'win-probability'
+  | 'odds-source-coverage'
+  | 'line-movement'
   | 'venue-risk'
   | 'market-board'
   | 'group-advance'
@@ -24,13 +26,15 @@ export type WorldCupPanelId =
   | 'venue-ref'
   | 'source-audit';
 
-export const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v6';
+export const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v7';
 export const WORLD_CUP_PANEL_DRAG_THRESHOLD = 5;
 
 export const WORLD_CUP_PANEL_ORDER: WorldCupPanelId[] = [
   'calendar',
   'match-control',
   'win-probability',
+  'line-movement',
+  'odds-source-coverage',
   'venue-risk',
   'market-board',
   'group-advance',

@@ -200,6 +200,10 @@ class ApiSettings:
     the_odds_api_key: str
     the_odds_source_url: str
     worldcup_odds_markets: str
+    the_rundown_api_key: str
+    api_football_api_key: str
+    betfair_app_key: str
+    matchbook_api_username: str
     sports_odds_ttl_seconds: int
     sports_odds_sport_key: str
     sports_odds_regions: str
@@ -377,6 +381,10 @@ def load_api_settings() -> ApiSettings:
         ),
         the_odds_source_url=_get_str("POLYDATA_THE_ODDS_SOURCE_URL", THE_ODDS_SOURCE_URL or "https://the-odds-api.com/"),
         worldcup_odds_markets=_get_str("POLYDATA_WORLDCUP_ODDS_MARKETS", "h2h,spreads,totals"),
+        the_rundown_api_key=_get_str("POLYDATA_THERUNDOWN_API_KEY", _get_str("THERUNDOWN_API_KEY", _get_str("the_rundown_api_key", ""))),
+        api_football_api_key=_get_str("POLYDATA_API_FOOTBALL_KEY", _get_str("API_FOOTBALL_KEY", _get_str("api_football_key", ""))),
+        betfair_app_key=_get_str("POLYDATA_BETFAIR_APP_KEY", _get_str("BETFAIR_APP_KEY", _get_str("betfair_app_key", ""))),
+        matchbook_api_username=_get_str("POLYDATA_MATCHBOOK_USERNAME", _get_str("MATCHBOOK_USERNAME", _get_str("matchbook_username", ""))),
         sports_odds_ttl_seconds=_get_int("POLYDATA_SPORTS_ODDS_TTL_SECONDS", 180),
         sports_odds_sport_key=_get_str("POLYDATA_SPORTS_ODDS_SPORT_KEY", "upcoming"),
         sports_odds_regions=_get_str("POLYDATA_SPORTS_ODDS_REGIONS", "us"),

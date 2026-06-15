@@ -25,7 +25,9 @@ import { MatchTempoPanel } from './panels/MatchTempoPanel';
 import { MediaWirePanel } from './panels/MediaWirePanel';
 import { NewsImpactPanel } from './panels/NewsImpactPanel';
 import { NewsPanel } from './panels/NewsPanel';
+import { LineMovementPanel } from './panels/LineMovementPanel';
 import { OddsLiquidityPanel } from './panels/OddsLiquidityPanel';
+import { OddsSourceCoveragePanel } from './panels/OddsSourceCoveragePanel';
 import { RefCardsPanel } from './panels/RefCardsPanel';
 import { SourceAuditPanel } from './panels/SourceAuditPanel';
 import { TeamPowerPanel } from './panels/TeamPowerPanel';
@@ -481,6 +483,8 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPa
     ),
     news: <NewsPanel items={news} />,
     'win-probability': <WinProbabilityPanel markets={selectedMarkets} odds={displayOdds} match={selectedMatch} />,
+    'line-movement': <LineMovementPanel payload={payload} odds={displayOdds} markets={selectedMarkets} match={selectedMatch} />,
+    'odds-source-coverage': <OddsSourceCoveragePanel payload={payload} odds={payload.odds} markets={selectedMarkets} match={selectedMatch} />,
     'venue-risk': <VenueRiskPanel payload={payload} match={selectedMatch} weather={selectedWeather} />,
     'host-venue': (
       <HostVenuePanel

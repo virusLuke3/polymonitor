@@ -206,6 +206,15 @@ export type WorldCupDashboardPayload = {
   rosters: WorldCupTeamRoster[];
   odds: WorldCupOddsSnapshot[];
   providerStates?: Record<string, string>;
+  bookmakerLinker?: {
+    sportKey?: string;
+    events?: number;
+    matched?: number;
+    snapshots?: number;
+    markets?: string[];
+    [key: string]: unknown;
+  };
+  marketLinker?: Record<string, unknown>;
   intelligence?: WorldCupIntelPayload | null;
 };
 

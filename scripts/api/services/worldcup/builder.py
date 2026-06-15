@@ -17,6 +17,7 @@ def build_worldcup_dashboard_payload(
     include_live_market_links: bool = True,
 ) -> Dict[str, Any]:
     generated_at = utc_now_iso()
+    settings = ctx.get("SETTINGS")
     source_matches, schedule_source = fetch_schedule_source(ctx)
     matches = normalize_matches(source_matches)
     intel: Optional[Dict[str, Any]] = None
@@ -30,7 +31,6 @@ def build_worldcup_dashboard_payload(
     news = intel_news[:24]
     if include_live_market_links:
         bookmaker_odds, bookmaker_state, bookmaker_linker = link_bookmaker_odds(ctx, matches)
-        settings = ctx.get("SETTINGS")
         configured_scan_limit = int(getattr(settings, "worldcup_market_link_scan_limit", 12) or 12)
         market_odds, market_state, market_linker = link_worldcup_markets(ctx, matches, settings_scan_limit=configured_scan_limit)
         odds = [*bookmaker_odds, *market_odds]
@@ -46,6 +46,12 @@ def build_worldcup_dashboard_payload(
         }
     starts_at = matches[0]["kickoffUtc"] if matches else "2026-06-11T19:00:00Z"
     ends_at = matches[-1]["kickoffUtc"] if matches else "2026-07-19T19:00:00Z"
+    external_odds_states = {
+        "theRundown": "configured" if str(getattr(settings, "the_rundown_api_key", "") or "").strip() else "missing-key",
+        "apiFootball": "configured" if str(getattr(settings, "api_football_api_key", "") or "").strip() else "missing-key",
+        "betfair": "configured" if str(getattr(settings, "betfair_app_key", "") or "").strip() else "missing-key",
+        "matchbook": "configured" if str(getattr(settings, "matchbook_api_username", "") or "").strip() else "missing-key",
+    }
     return normalize_payload(
         {
             "generatedAt": generated_at,
@@ -73,6 +79,7 @@ def build_worldcup_dashboard_payload(
                 "weather": "ok" if weather else "empty",
                 "odds": odds_state,
                 "bookmakerOdds": bookmaker_state if include_live_market_links else "deferred",
+                **external_odds_states,
                 "rosters": "source-required",
             },
             "bookmakerLinker": bookmaker_linker,
