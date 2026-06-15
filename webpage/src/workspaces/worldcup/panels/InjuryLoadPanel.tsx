@@ -12,8 +12,12 @@ export function InjuryLoadPanel({ payload, match, injuries }: { payload: WorldCu
     const load = roster?.players.length ? clampNumber(injured * 26, 0, 96) : 0;
     return { team, injured, load, hasRoster: Boolean(roster?.players.length) };
   });
+  const teamNewsCounts = teams.map((team) => ({
+    team,
+    count: payload.news.filter((item) => `${item.title} ${item.summary || ''}`.toLowerCase().includes(team.toLowerCase())).length,
+  }));
   return (
-    <Panel title="INJURY LOAD" count={injuries.length} className="wm-worldcup-panel wm-worldcup-injury-load-panel">
+    <Panel title="INJURY LOAD" count={injuries.length || teamNewsCounts.length} className="wm-worldcup-panel wm-worldcup-injury-load-panel">
       {rows.some((row) => row.hasRoster) ? (
         <div className="wm-worldcup-load-grid">
           {rows.map((row) => (
@@ -32,10 +36,29 @@ export function InjuryLoadPanel({ payload, match, injuries }: { payload: WorldCu
           ))}
         </div>
       ) : (
-        <SourceRequired
-          detail="No verified injury feed is available for this match. Doubtful/suspended counts are not guessed."
-          rows={[{ source: 'ESPN injury tracker / official team medical notes', status: 'required', detail: 'player-level status with timestamp' }]}
-        />
+        <>
+          <div className="wm-worldcup-load-grid wm-worldcup-availability-grid">
+            {teamNewsCounts.map((row) => (
+              <section key={row.team}>
+                <header>
+                  <strong>{row.team}</strong>
+                  <span className={row.count ? 'green' : 'red'}>{row.count ? 'NEWS' : 'NO FEED'}</span>
+                </header>
+                <div><span>TEAM NEWS</span><b>{row.count}</b></div>
+                <div><span>PLAYER STATUS</span><b>pending</b></div>
+                <i style={{ width: `${row.count ? 42 : 8}%` }} />
+              </section>
+            ))}
+          </div>
+          <SourceRequired
+            title="INJURY SOURCE REQUIRED"
+            detail="No verified injury feed is available for this match. Team-news coverage is shown, but doubtful/suspended counts are not guessed."
+            rows={[
+              { source: 'Google News team watch', status: teamNewsCounts.some((row) => row.count) ? 'partial' : 'empty', detail: 'news mention count only' },
+              { source: 'ESPN injury tracker / official team medical notes', status: 'required', detail: 'player-level status with timestamp' },
+            ]}
+          />
+        </>
       )}
     </Panel>
   );

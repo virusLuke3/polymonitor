@@ -501,7 +501,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent, geoShockPa
     'team-power': <TeamPowerPanel payload={payload} match={selectedMatch} />,
     'injury-load': <InjuryLoadPanel payload={payload} match={selectedMatch} injuries={injurySignals} />,
     'match-tempo': <MatchTempoPanel xgSignals={xgSignals} tacticalSignals={tacticalSignals} />,
-    'ref-cards': <RefCardsPanel refVenue={refVenueSignals} />,
+    'ref-cards': <RefCardsPanel refVenue={refVenueSignals} match={selectedMatch} weather={selectedWeather} />,
     'travel-load': <TravelLoadPanel payload={payload} match={selectedMatch} />,
     'news-impact': <NewsImpactPanel news={news} />,
     'team-status': <TeamStatusPanel payload={payload} match={selectedMatch} injuries={injurySignals} players={playerPoolSignals} />,
