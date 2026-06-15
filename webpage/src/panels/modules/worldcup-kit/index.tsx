@@ -74,6 +74,7 @@ type WorldCupHomeModel = {
   payload: WorldCupDashboardPayload;
   now: Date;
   selectedMatch: WorldCupMatch | null;
+  selectMatch: (matchId: string) => void;
   selectedCity: WorldCupVenueCity;
   selectedWeather: WorldCupCityWeather | null;
   selectedOdds: WorldCupOddsSnapshot[];
@@ -83,6 +84,27 @@ type WorldCupHomeModel = {
 };
 
 let backgroundRefreshInflight: Promise<WorldCupDashboardPayload> | null = null;
+const WORLD_CUP_HOME_SELECTED_MATCH_STORAGE_KEY = 'polydata:worldcup-home-selected-match:v1';
+const WORLD_CUP_HOME_SELECTED_MATCH_EVENT = 'polydata:worldcup-home-selected-match';
+
+function readWorldCupHomeSelectedMatchId() {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(WORLD_CUP_HOME_SELECTED_MATCH_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeWorldCupHomeSelectedMatchId(matchId: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(WORLD_CUP_HOME_SELECTED_MATCH_STORAGE_KEY, matchId);
+  } catch {
+    // Selection still works for the current page through the custom event.
+  }
+  window.dispatchEvent(new CustomEvent(WORLD_CUP_HOME_SELECTED_MATCH_EVENT, { detail: matchId }));
+}
 
 function statusBadge(payload?: WorldCupDashboardPayload | null) {
   const mode = String(payload?.cacheMode || '').toLowerCase();
@@ -346,14 +368,40 @@ function useWorldCupPayload() {
 function useWorldCupModel(ctx: PanelRuntimeContext) {
   const { payload, loading, error } = useWorldCupPayload();
   const now = useMemo(() => new Date(), []);
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(() => readWorldCupHomeSelectedMatchId());
+  useEffect(() => {
+    const onSelectedMatch = (event: Event) => {
+      const nextMatchId = (event as CustomEvent<string>).detail || readWorldCupHomeSelectedMatchId();
+      setSelectedMatchId(nextMatchId || null);
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === WORLD_CUP_HOME_SELECTED_MATCH_STORAGE_KEY) setSelectedMatchId(event.newValue || null);
+    };
+    window.addEventListener(WORLD_CUP_HOME_SELECTED_MATCH_EVENT, onSelectedMatch);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(WORLD_CUP_HOME_SELECTED_MATCH_EVENT, onSelectedMatch);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
   const linkedPayload = useMemo(
     () => payload ? applyWorldCupMarketLinks(payload, ctx.marketGroups || []) : null,
     [ctx.marketGroups, payload],
   );
   const selectedMatch = useMemo(
-    () => linkedPayload ? (getNextWorldCupMatch(linkedPayload.matches, now) || linkedPayload.matches[0] || null) : null,
-    [linkedPayload, now],
+    () => {
+      if (!linkedPayload) return null;
+      return linkedPayload.matches.find((match) => match.id === selectedMatchId)
+        || getNextWorldCupMatch(linkedPayload.matches, now)
+        || linkedPayload.matches[0]
+        || null;
+    },
+    [linkedPayload, now, selectedMatchId],
   );
+  const selectMatch = (matchId: string) => {
+    setSelectedMatchId(matchId);
+    writeWorldCupHomeSelectedMatchId(matchId);
+  };
   const selectedCity = linkedPayload ? matchCity(linkedPayload.cities, selectedMatch?.cityId || linkedPayload.cities[0]?.id || '') : null;
   const selectedWeather = linkedPayload?.weather.find((item) => item.cityId === selectedCity?.id) || null;
   const selectedOdds = linkedPayload?.odds.filter((item) => item.matchId === selectedMatch?.id) || [];
@@ -375,6 +423,7 @@ function useWorldCupModel(ctx: PanelRuntimeContext) {
     payload: linkedPayload,
     now,
     selectedMatch,
+    selectMatch,
     selectedCity,
     selectedWeather,
     selectedOdds,
@@ -400,11 +449,23 @@ function countForView(view: WorldCupHomeView, model: WorldCupHomeModel) {
   return signals.length;
 }
 
-function matchRows(matches: WorldCupMatch[], selectedMatch: WorldCupMatch | null) {
+function matchRows(matches: WorldCupMatch[], selectedMatch: WorldCupMatch | null, onSelectMatch?: (matchId: string) => void) {
   return (
     <div className="wm-worldcup-home-match-list">
       {matches.slice(0, 24).map((match) => (
-        <article className={match.id === selectedMatch?.id ? 'active' : ''} key={match.id}>
+        <article
+          aria-pressed={match.id === selectedMatch?.id}
+          className={match.id === selectedMatch?.id ? 'active selectable' : 'selectable'}
+          key={match.id}
+          onClick={() => onSelectMatch?.(match.id)}
+          onKeyDown={(event) => {
+            if (!onSelectMatch || (event.key !== 'Enter' && event.key !== ' ')) return;
+            event.preventDefault();
+            onSelectMatch(match.id);
+          }}
+          role="button"
+          tabIndex={0}
+        >
           <span>
             <strong>{formatDateTime(match.kickoffUtc).split(',').pop()?.trim() || '--'}</strong>
             <em>#{match.fifaMatchNumber || '--'}</em>
@@ -473,7 +534,7 @@ function GroupPanel({ model, mode }: { model: WorldCupHomeModel; mode: 'advance'
           </div>
         ))}
       </div>
-      {mode === 'table' ? matchRows(fixtures, model.selectedMatch) : (
+      {mode === 'table' ? matchRows(fixtures, model.selectedMatch, model.selectMatch) : (
         <div className="wm-worldcup-home-metric-strip">
           <span><em>GROUP</em><strong>{group.replace('Group ', '')}</strong></span>
           <span><em>FIX</em><strong>{fixtures.length}</strong></span>
@@ -714,7 +775,7 @@ function VenueRef({ model }: { model: WorldCupHomeModel }) {
         <strong>{model.selectedCity.venue}</strong>
         <em>{model.selectedCity.city} · {model.selectedCity.capacity ? model.selectedCity.capacity.toLocaleString() : '--'} seats · {model.selectedCity.timezone}</em>
       </article>
-      {matchRows(nearby, model.selectedMatch)}
+      {matchRows(nearby, model.selectedMatch, model.selectMatch)}
     </>
   );
 }
@@ -763,7 +824,11 @@ function MatchControl({ model }: { model: WorldCupHomeModel }) {
 function renderView(config: WorldCupHomePanelConfig, model: WorldCupHomeModel) {
   switch (config.view) {
     case 'calendar':
-      return matchRows(model.payload.matches.filter((match) => new Date(match.kickoffUtc) >= model.now).concat(model.payload.matches).slice(0, 32), model.selectedMatch);
+      return matchRows(
+        model.payload.matches.filter((match) => new Date(match.kickoffUtc) >= model.now).concat(model.payload.matches).slice(0, 32),
+        model.selectedMatch,
+        model.selectMatch,
+      );
     case 'match-control':
       return <MatchControl model={model} />;
     case 'win-probability':

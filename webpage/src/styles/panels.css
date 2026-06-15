@@ -22876,6 +22876,21 @@ a.wm-orderfilled-row {
   padding: 7px 8px;
 }
 
+.wm-worldcup-home-match-list article.selectable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.wm-worldcup-home-match-list article.selectable:hover {
+  border-color: rgba(104, 218, 244, 0.36);
+  background: rgba(104, 218, 244, 0.045);
+}
+
+.wm-worldcup-home-match-list article.selectable:focus-visible {
+  outline: 1px solid rgba(255, 197, 61, 0.78);
+  outline-offset: 2px;
+}
+
 .wm-worldcup-home-match-list article.active {
   border-color: rgba(57, 255, 115, 0.24);
   background: rgba(57, 255, 115, 0.035);
