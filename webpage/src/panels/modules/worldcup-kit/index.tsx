@@ -161,6 +161,31 @@ function outcomeMatchesTeam(name: string | undefined, team: string) {
   return rightTokens.some((token) => leftTokens.has(token));
 }
 
+function normalizedTeamText(value?: string | null) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\bcabo verde\b/g, 'cape verde')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function isDerivedWorldCupMarketTitle(value?: string | null) {
+  return /\b(more markets|exact score|corners?|cards?|goals?|o\/u|over\/under|total|spread|handicap|1st half|2nd half)\b/i.test(String(value || ''));
+}
+
+function isHeadToHeadMarket(market: WorldCupPolymarketMarket, match: WorldCupMatch) {
+  const title = normalizedTeamText(market.title);
+  if (!title || isDerivedWorldCupMarketTitle(market.title)) return false;
+  const home = normalizedTeamText(match.homeTeam);
+  const away = normalizedTeamText(match.awayTeam);
+  if (!title.includes(home) || !title.includes(away)) return false;
+  const names = (market.outcomes || []).map((outcome) => normalizedTeamText(outcome.name));
+  const hasHome = names.some((name) => name === home || name.includes(home));
+  const hasAway = names.some((name) => name === away || name.includes(away));
+  const hasDraw = names.some((name) => /\bdraw\b|\btie\b|\bx\b/.test(name));
+  return hasHome && hasAway && hasDraw;
+}
+
 function snapshotOutcomePercent(snapshot: WorldCupOddsSnapshot | undefined, team: string) {
   if (!snapshot) return null;
   const direct = (snapshot.outcomes || []).find((outcome) => outcomeMatchesTeam(outcome.name, team));
@@ -503,7 +528,8 @@ function WinProbability({ model }: { model: WorldCupHomeModel }) {
   const outcomes = [match.homeTeam, 'Draw', match.awayTeam];
   const book = model.selectedOdds.find((row) => row.providerType !== 'prediction_market');
   const prediction = model.selectedOdds.find((row) => row.providerType === 'prediction_market' || /polymarket/i.test(row.provider || row.source || ''));
-  const marketOutcomes = model.selectedMarkets.flatMap((market) => market.outcomes || []);
+  const headToHeadMarket = model.selectedMarkets.find((market) => isHeadToHeadMarket(market, match));
+  const marketOutcomes = (headToHeadMarket ? [headToHeadMarket] : model.selectedMarkets).flatMap((market) => market.outcomes || []);
   const rows = outcomes.map((name) => {
     const marketOutcome = marketOutcomes.find((outcome) => outcomeMatchesTeam(outcome.name, name));
     const poly = marketOutcome?.yesPrice == null ? snapshotOutcomePercent(prediction, name) : percentFromUnknown(marketOutcome.yesPrice);
