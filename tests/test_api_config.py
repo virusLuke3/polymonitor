@@ -34,6 +34,16 @@ class ApiConfigKeyAliasTestCase(unittest.TestCase):
 
         self.assertEqual("fixture-short-odds-key", settings.the_odds_api_key)
 
+    def test_the_odds_api_key_accepts_second_free_key_alias(self):
+        settings = self.load_settings_with_env({"odds_api_key2": "fixture-second-free-key"})
+
+        self.assertEqual("fixture-second-free-key", settings.the_odds_api_key)
+
+    def test_the_odds_api_key_accepts_canonical_second_key_alias(self):
+        settings = self.load_settings_with_env({"POLYDATA_THE_ODDS_API_KEY2": "fixture-canonical-second-key"})
+
+        self.assertEqual("fixture-canonical-second-key", settings.the_odds_api_key)
+
     def test_canonical_the_odds_api_key_overrides_aliases(self):
         settings = self.load_settings_with_env(
             {
@@ -45,6 +55,16 @@ class ApiConfigKeyAliasTestCase(unittest.TestCase):
         )
 
         self.assertEqual("canonical-odds-key", settings.the_odds_api_key)
+
+    def test_second_free_key_overrides_exhausted_primary_key_when_present(self):
+        settings = self.load_settings_with_env(
+            {
+                "POLYDATA_THE_ODDS_API_KEY": "exhausted-primary-key",
+                "odds_api_key2": "fresh-second-free-key",
+            }
+        )
+
+        self.assertEqual("fresh-second-free-key", settings.the_odds_api_key)
 
 
 if __name__ == "__main__":
