@@ -127,6 +127,13 @@ function percentLabel(value?: number | string | null, digits = 1) {
   return `${pct.toFixed(digits)}%`;
 }
 
+function percentFromUnknown(value?: number | string | null) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return numeric >= 0 && numeric <= 1 ? numeric * 100 : numeric;
+}
+
 function probabilityWidth(value?: number | string | null) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '0%';
@@ -141,6 +148,25 @@ function scoreText(match: WorldCupMatch) {
 
 function stageLabel(value?: string | null) {
   return String(value || 'group').replace(/_/g, ' ').toUpperCase();
+}
+
+function outcomeMatchesTeam(name: string | undefined, team: string) {
+  const left = String(name || '').trim().toLowerCase();
+  const right = String(team || '').trim().toLowerCase();
+  if (!left || !right) return false;
+  if (team === 'Draw') return /draw|tie|\bx\b/i.test(left);
+  if (left === right) return true;
+  const leftTokens = new Set(left.split(/[^a-z0-9]+/).filter(Boolean));
+  const rightTokens = right.split(/[^a-z0-9]+/).filter((part) => part.length > 1);
+  return rightTokens.some((token) => leftTokens.has(token));
+}
+
+function snapshotOutcomePercent(snapshot: WorldCupOddsSnapshot | undefined, team: string) {
+  if (!snapshot) return null;
+  const direct = (snapshot.outcomes || []).find((outcome) => outcomeMatchesTeam(outcome.name, team));
+  if (direct) return percentFromUnknown(direct.impliedProbability ?? direct.price ?? null);
+  const probability = (snapshot.probabilities || []).find((row) => outcomeMatchesTeam(row.outcome || row.name, team));
+  return percentFromUnknown(probability?.impliedProbability ?? probability?.price ?? null);
 }
 
 function toneFromText(value: string): SignalTone {
@@ -475,15 +501,17 @@ function WinProbability({ model }: { model: WorldCupHomeModel }) {
   const match = model.selectedMatch;
   if (!match) return <EmptyState detail="No selected match is available." />;
   const outcomes = [match.homeTeam, 'Draw', match.awayTeam];
-  const book = model.selectedOdds.find((row) => row.providerType !== 'prediction_market') || model.selectedOdds[0];
+  const book = model.selectedOdds.find((row) => row.providerType !== 'prediction_market');
+  const prediction = model.selectedOdds.find((row) => row.providerType === 'prediction_market' || /polymarket/i.test(row.provider || row.source || ''));
+  const marketOutcomes = model.selectedMarkets.flatMap((market) => market.outcomes || []);
   const rows = outcomes.map((name) => {
-    const marketOutcome = model.selectedMarkets[0]?.outcomes.find((outcome) => outcome.name.toLowerCase().includes(name.toLowerCase()));
-    const bookOutcome = book?.outcomes.find((outcome) => outcome.name.toLowerCase().includes(name.toLowerCase()) || (name === 'Draw' && /draw/i.test(outcome.name)));
-    const poly = marketOutcome?.yesPrice == null ? null : Number(marketOutcome.yesPrice) * 100;
-    const bookProb = bookOutcome?.impliedProbability == null ? null : Number(bookOutcome.impliedProbability);
+    const marketOutcome = marketOutcomes.find((outcome) => outcomeMatchesTeam(outcome.name, name));
+    const poly = marketOutcome?.yesPrice == null ? snapshotOutcomePercent(prediction, name) : percentFromUnknown(marketOutcome.yesPrice);
+    const bookProb = snapshotOutcomePercent(book, name);
     return { name, poly, book: bookProb, edge: poly != null && bookProb != null ? poly - bookProb : null };
-  }).filter((row) => row.poly != null || row.book != null);
-  if (!rows.length) {
+  });
+  const hasAnyPrice = rows.some((row) => row.poly != null || row.book != null);
+  if (!hasAnyPrice) {
     return (
       <EmptyState
         detail="Win probabilities require real Polymarket outcome prices, bookmaker probabilities, or both."
@@ -498,7 +526,7 @@ function WinProbability({ model }: { model: WorldCupHomeModel }) {
     <div className="wm-worldcup-home-prob-table">
       <header><span>OUTCOME</span><span>POLY</span><span>BOOK</span><span>EDGE</span></header>
       {rows.map((row) => (
-        <div key={row.name}>
+        <div className={row.poly == null && row.book == null ? 'source-missing' : ''} key={row.name}>
           <strong>{row.name}</strong>
           <span><b>{percentLabel(row.poly)}</b><i style={{ width: probabilityWidth(row.poly) }} /></span>
           <span><b>{percentLabel(row.book)}</b><i style={{ width: probabilityWidth(row.book) }} /></span>

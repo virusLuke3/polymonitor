@@ -23403,3 +23403,16 @@ a.wm-orderfilled-row {
 .wm-worldcup-match-control-panel .wm-worldcup-home-fact-grid em {
   color: rgba(235, 235, 235, 0.5);
 }
+
+.wm-worldcup-win-probability-panel .wm-worldcup-home-prob-table div.source-missing {
+  opacity: 0.58;
+}
+
+.wm-worldcup-win-probability-panel .wm-worldcup-home-prob-table div.source-missing strong {
+  color: rgba(235, 235, 235, 0.58);
+}
+
+.wm-worldcup-win-probability-panel .wm-worldcup-home-prob-table div.source-missing b,
+.wm-worldcup-win-probability-panel .wm-worldcup-home-prob-table div.source-missing em {
+  color: rgba(235, 235, 235, 0.42);
+}
