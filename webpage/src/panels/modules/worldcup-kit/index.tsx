@@ -790,7 +790,7 @@ export function createWorldCupHomePanel(config: WorldCupHomePanelConfig): PanelM
     eyebrow: 'World Cup',
     description: config.description,
     size: config.size,
-    defaultEnabled: false,
+    defaultEnabled: true,
     render: (ctx) => <WorldCupHomePanel config={config} ctx={ctx} />,
   };
 }

@@ -430,6 +430,13 @@ function sanitizePanelIds(panelIds: string[]) {
   return unique;
 }
 
+function defaultWorkspacePanelIds(bootstrapPayload?: BootstrapPayload | null) {
+  return sanitizePanelIds([
+    ...DEFAULT_PANEL_IDS,
+    ...(bootstrapPayload?.defaultWorkspace?.panels || []),
+  ]);
+}
+
 function readJsonStorage<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   try {
@@ -1412,7 +1419,7 @@ function WorldMonitorApp() {
         const bootstrapPayload = await fetchBootstrap();
         if (cancelled) return;
 
-        const defaultPanelIds = sanitizePanelIds(bootstrapPayload.defaultWorkspace?.panels || []);
+        const defaultPanelIds = defaultWorkspacePanelIds(bootstrapPayload);
         const immediatePanelIds = activePanelIds.length ? sanitizePanelIds([...activePanelIds, ...defaultPanelIds]) : defaultPanelIds;
         const bootstrapMarketGroups = bootstrapPayload.activeMarketGroupsPreview || [];
         const initialDefaultGroup = pickDefaultMarketGroup(bootstrapMarketGroups);
@@ -1882,7 +1889,7 @@ function WorldMonitorApp() {
   const displayMarkets = filteredMarkets.length ? filteredMarkets : availableMarkets;
   const displayPanelIds = activePanelIds.length
     ? activePanelIds
-    : sanitizePanelIds(bootstrap?.defaultWorkspace?.panels || []);
+    : defaultWorkspacePanelIds(bootstrap);
   const mapBottomPanelIds = displayPanelIds.filter((panelId) => MAP_BOTTOM_PANEL_IDS.includes(panelId));
   const sidePanelIds = displayPanelIds.filter((panelId) => !MAP_BOTTOM_PANEL_IDS.includes(panelId));
   const activeMarketsEntry = PANEL_REGISTRY['active-markets'];
@@ -2624,7 +2631,7 @@ function WorldMonitorApp() {
             </label>
             <div className="wm-settings-actions">
               <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(sanitizePanelIds(PANEL_LIBRARY.map((panel) => panel.id)))}>Enable All Panels</button>
-              <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(sanitizePanelIds(bootstrap?.defaultWorkspace?.panels || []))}>Restore Default Panels</button>
+              <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(defaultWorkspacePanelIds(bootstrap))}>Restore Default Panels</button>
               <button type="button" className="wm-settings-btn primary" onClick={() => { resetWorkspace(); setShowSettings(false); }}>Reset Workspace</button>
             </div>
           </div>
