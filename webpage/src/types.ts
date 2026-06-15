@@ -2022,6 +2022,69 @@ export type RuntimePolybeatsPayload = {
   sources?: Record<string, string | null | undefined>;
 };
 
+export type RuntimeMarketTvWireCategory = {
+  id: string;
+  label: string;
+  count: number;
+};
+
+export type RuntimeMarketTvWireSourceState = {
+  status?: string | null;
+  count?: number | null;
+  lastSuccessAt?: string | null;
+  error?: string | null;
+};
+
+export type RuntimeMarketTvWireSummary = {
+  total?: number | null;
+  liveReady?: number | null;
+  marketMatched?: number | null;
+  regions?: number | null;
+  staleCount?: number | null;
+  blockedCount?: number | null;
+};
+
+export type RuntimeMarketTvWireItem = {
+  id: string;
+  name?: string | null;
+  displayName?: string | null;
+  category?: 'macro' | 'geo' | 'weather' | 'sports' | 'crypto' | 'news' | 'other' | string | null;
+  sourceRole?: 'channel' | 'visual' | string | null;
+  sourceType?: 'hls' | 'youtube' | 'external' | 'timelapse' | string | null;
+  region?: string | null;
+  country?: string | null;
+  language?: string | null;
+  hlsUrl?: string | null;
+  youtubeHandle?: string | null;
+  fallbackVideoId?: string | null;
+  externalUrl?: string | null;
+  quality?: string | null;
+  status?: 'ready' | 'stale' | 'not_24_7' | 'blocked' | 'failed' | 'unknown' | string | null;
+  availability?: 'public' | 'geo_limited' | 'unknown' | string | null;
+  sourceName?: string | null;
+  sourceUrl?: string | null;
+  marketTags?: string[];
+  matchedTerms?: string[];
+  marketUseCase?: string | null;
+  relevanceScore?: number | string | null;
+  lastCheckedAt?: string | null;
+  failureReason?: string | null;
+  curated?: boolean | null;
+};
+
+export type RuntimeMarketTvWirePayload = {
+  generatedAt?: string;
+  status?: 'ok' | 'degraded' | 'empty' | 'invalid' | 'warming' | string | null;
+  cacheMode?: 'seeded' | 'stale' | 'warming' | 'live-build' | string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  summary?: RuntimeMarketTvWireSummary | null;
+  categories?: RuntimeMarketTvWireCategory[];
+  sources?: Record<string, RuntimeMarketTvWireSourceState | string | null | undefined>;
+  items: RuntimeMarketTvWireItem[];
+  errors?: string[];
+};
+
 export type RuntimeNewMarketSignalItem = {
   marketId?: number | null;
   title?: string | null;

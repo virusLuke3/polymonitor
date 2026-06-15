@@ -200,6 +200,14 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 300,
     },
     {
+        "panelId": "market-tv-wire",
+        "namespace": "seed-meta:content",
+        "cacheKey": "market-tv-wire",
+        "serviceName": "polydata-market-tv-wire-seed.service",
+        "intervalEnv": "POLYDATA_MARKET_TV_WIRE_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 900,
+    },
+    {
         "panelId": "food-retail-basket-pressure",
         "namespace": "seed-meta:macro",
         "cacheKey": "food-retail-basket-pressure",

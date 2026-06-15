@@ -51,6 +51,7 @@ import type {
   RuntimeJin10Payload,
   RuntimeMacroDriverPayload,
   RuntimeMacroRegistryPayload,
+  RuntimeMarketTvWirePayload,
   RuntimeCpiReleaseCommandPayload,
   RuntimeNbaMatchupPredictorPayload,
   RuntimeNbaPayload,
@@ -656,6 +657,10 @@ export function fetchRuntimeAlpha(limit = 8) {
 
 export function fetchRuntimePolybeats(limit = 8) {
   return apiGet<RuntimePolybeatsPayload>(`/runtime/panels/polybeats-feed?limit=${limit}`);
+}
+
+export function fetchRuntimeMarketTvWire(limit = 24) {
+  return apiGet<RuntimeMarketTvWirePayload>(`/runtime/content/market-tv-wire?limit=${limit}`);
 }
 
 export function fetchRuntimeNewMarketSignals(limit = 12) {

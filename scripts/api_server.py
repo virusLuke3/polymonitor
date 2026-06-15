@@ -83,7 +83,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, worldcup_dashboard_service, worldcup_intel_service
+from api.services import address_service, bootstrap_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, worldcup_dashboard_service, worldcup_intel_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -271,6 +271,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_labor_wage_services_pressure_snapshot": get_labor_wage_services_pressure_snapshot,
         "get_labor_services_inflation_monitor_snapshot": get_labor_services_inflation_monitor_snapshot,
         "get_latest_content_payload": lambda limit=8: content_service.get_latest_content_payload(build_service_context(), limit=limit),
+        "get_market_tv_wire_snapshot": lambda limit=24: live_video_source_service.get_market_tv_wire_snapshot(build_service_context(), limit=limit),
         "get_runtime_content_latest": lambda limit=8: {
             "items": CONTENT_RUNTIME_PROVIDER.get_latest_items(limit=limit),
             "sourceMode": "runtime-rss",
@@ -464,6 +465,7 @@ def build_service_context() -> Dict[str, Any]:
         "get_existing_trade_read_source": get_existing_trade_read_source,
         "get_gamma_active_market_filter": lambda: market_data_client.get_gamma_active_market_filter(build_service_context()),
         "get_latest_content_snapshot": get_latest_content_snapshot,
+        "get_market_tv_wire_snapshot": lambda limit=24: live_video_source_service.get_market_tv_wire_snapshot(build_service_context(), limit=limit),
         "get_market_by_id": lambda market_id: market_service.get_market_by_id(build_service_context(), market_id),
         "get_market_chart_payload": lambda market_id, range_name="1d", interval="5m": market_service.get_market_chart_payload(build_service_context(), market_id, range_name=range_name, interval=interval),
         "get_market_clob_price_series": lambda market, range_name="1d", interval="5m": market_data_client.get_market_clob_price_series(
