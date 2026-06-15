@@ -16,6 +16,7 @@ MARKET_TV_WIRE_SNAPSHOT_NAMESPACE = "snapshot:content:market-tv-wire"
 MARKET_TV_WIRE_CACHE_KEY = "panel-v1"
 DEFAULT_MARKET_TV_WIRE_LIMIT = 24
 MARKET_TV_WIRE_TTL_SECONDS = 900
+MARKET_TV_WIRE_SEED_ITEM_LIMIT = 240
 MANIFEST_PATH = PROJECT_ROOT / "scripts" / "data" / "live_video_sources.json"
 
 CATEGORY_ORDER = ("macro", "geo", "weather", "sports", "crypto", "news", "other")
@@ -385,6 +386,8 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
         ),
         reverse=True,
     )
+    seed_limit = max(24, int(os.environ.get("POLYDATA_MARKET_TV_WIRE_SEED_LIMIT", MARKET_TV_WIRE_SEED_ITEM_LIMIT)))
+    items = items[:seed_limit]
     status = "ok" if items and not errors else ("degraded" if items else "empty")
     return {
         "generatedAt": generated_at,
