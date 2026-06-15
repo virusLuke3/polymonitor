@@ -169,6 +169,35 @@ def _bookmaker_event_score(match: Dict[str, Any], event: Dict[str, Any]) -> int:
     return team_score * 4 + time_score
 
 
+def _bookmaker_error_state(exc: Exception) -> Tuple[str, Dict[str, Any]]:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    error_code = ""
+    message = ""
+    if response is not None:
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                error_code = str(payload.get("error_code") or payload.get("code") or "").strip()
+                message = str(payload.get("message") or payload.get("error") or "").strip()
+        except Exception:
+            try:
+                message = str(getattr(response, "text", "") or "").strip()
+            except Exception:
+                message = ""
+    normalized_code = error_code.upper()
+    normalized_message = message.lower()
+    if normalized_code == "OUT_OF_USAGE_CREDITS" or "usage quota" in normalized_message:
+        return "quota-exhausted", {"httpStatus": status_code, "errorCode": error_code or "OUT_OF_USAGE_CREDITS"}
+    if normalized_code in {"MISSING_KEY", "NO_API_KEY"} or "api key is missing" in normalized_message:
+        return "missing-key", {"httpStatus": status_code, "errorCode": error_code or "MISSING_KEY"}
+    if normalized_code in {"INVALID_KEY", "UNAUTHORIZED"} or status_code in {401, 403}:
+        return "unauthorized", {"httpStatus": status_code, "errorCode": error_code or "UNAUTHORIZED"}
+    if normalized_code in {"RATE_LIMIT_EXCEEDED", "TOO_MANY_REQUESTS"} or status_code == 429:
+        return "rate-limited", {"httpStatus": status_code, "errorCode": error_code or "RATE_LIMIT_EXCEEDED"}
+    return "error", {"httpStatus": status_code, "errorCode": error_code or exc.__class__.__name__}
+
+
 def fetch_bookmaker_events(ctx: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
     getter = ctx.get("http_json_get")
     settings = ctx.get("SETTINGS")
@@ -189,8 +218,9 @@ def fetch_bookmaker_events(ctx: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], s
             timeout=12,
             headers=headers(),
         )
-    except Exception:
-        return [], "error", {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": 0, "matched": 0}
+    except Exception as exc:
+        state, error_stats = _bookmaker_error_state(exc)
+        return [], state, {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": 0, "matched": 0, **error_stats}
     events = [item for item in (payload if isinstance(payload, list) else []) if isinstance(item, dict)]
     return events, "ok" if events else "empty", {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": len(events), "matched": 0}
 

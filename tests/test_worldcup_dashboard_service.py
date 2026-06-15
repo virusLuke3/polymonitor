@@ -12,7 +12,39 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import worldcup_dashboard_service
+from api.services.worldcup.odds import bookmaker
 from runtime import worldcup_dashboard_watcher
+
+
+class _FakeOddsApiResponse:
+    status_code = 401
+
+    def json(self):
+        return {
+            "message": "Usage quota has been reached. See usage plans at https://the-odds-api.com",
+            "error_code": "OUT_OF_USAGE_CREDITS",
+        }
+
+
+class _FakeOddsApiError(Exception):
+    response = _FakeOddsApiResponse()
+
+
+def test_worldcup_bookmaker_quota_error_is_explicit():
+    def http_json_get(url, *, params=None, timeout=12, headers=None):
+        raise _FakeOddsApiError()
+
+    ctx = {
+        "http_json_get": http_json_get,
+        "SETTINGS": SimpleNamespace(the_odds_api_key="x" * 32, the_odds_api_base_url="https://api.the-odds-api.com"),
+    }
+
+    events, state, stats = bookmaker.fetch_bookmaker_events(ctx)
+
+    assert events == []
+    assert state == "quota-exhausted"
+    assert stats["errorCode"] == "OUT_OF_USAGE_CREDITS"
+    assert stats["httpStatus"] == 401
 
 
 def test_worldcup_dashboard_links_strict_polymarket_market():
