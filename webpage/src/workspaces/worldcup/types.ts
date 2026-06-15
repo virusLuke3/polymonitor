@@ -145,14 +145,18 @@ export type WorldCupOddsSnapshot = {
   matchId: string;
   provider: string;
   providerType: 'traditional_sportsbook' | 'online_bookmaker' | 'exchange' | 'prediction_market';
-  marketType: 'moneyline' | 'total_goals' | 'advance' | 'outright';
+  marketKey?: string;
+  marketType: 'moneyline' | 'spread' | 'total_goals' | 'both_teams_to_score' | 'draw_no_bet' | 'double_chance' | 'advance' | 'outright' | string;
   outcomes: Array<{
     name: string;
     decimalOdds?: number;
+    bestDecimalOdds?: number;
     impliedProbability?: number;
     price?: number | string | null;
+    point?: number | string | null;
     bookCount?: number;
     source?: string;
+    marketKey?: string;
     marketUrl?: string;
   }>;
   bookmakers?: Array<{
@@ -164,6 +168,8 @@ export type WorldCupOddsSnapshot = {
       name: string;
       decimalOdds?: number;
       impliedProbability?: number;
+      point?: number | string | null;
+      marketKey?: string;
     }>;
   }>;
   generatedAt: string;

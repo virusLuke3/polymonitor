@@ -199,6 +199,7 @@ class ApiSettings:
     the_odds_api_base_url: str
     the_odds_api_key: str
     the_odds_source_url: str
+    worldcup_odds_markets: str
     sports_odds_ttl_seconds: int
     sports_odds_sport_key: str
     sports_odds_regions: str
@@ -375,6 +376,7 @@ def load_api_settings() -> ApiSettings:
             ),
         ),
         the_odds_source_url=_get_str("POLYDATA_THE_ODDS_SOURCE_URL", THE_ODDS_SOURCE_URL or "https://the-odds-api.com/"),
+        worldcup_odds_markets=_get_str("POLYDATA_WORLDCUP_ODDS_MARKETS", "h2h,spreads,totals"),
         sports_odds_ttl_seconds=_get_int("POLYDATA_SPORTS_ODDS_TTL_SECONDS", 180),
         sports_odds_sport_key=_get_str("POLYDATA_SPORTS_ODDS_SPORT_KEY", "upcoming"),
         sports_odds_regions=_get_str("POLYDATA_SPORTS_ODDS_REGIONS", "us"),

@@ -584,11 +584,127 @@ function MarketBoard({ model }: { model: WorldCupHomeModel }) {
   );
 }
 
+type WorldCupOddsTab = 'edge' | string;
+
+function oddsSnapshotKey(snapshot: WorldCupOddsSnapshot) {
+  return String(snapshot.marketKey || snapshot.marketType || 'book').toLowerCase();
+}
+
+function oddsMarketShortLabel(snapshot: WorldCupOddsSnapshot | { marketKey?: string; marketType?: string }) {
+  const key = String(snapshot.marketKey || snapshot.marketType || '').toLowerCase();
+  if (key === 'h2h' || key === 'moneyline') return '1X2';
+  if (key === 'spreads' || key === 'spread') return 'AH';
+  if (key === 'totals' || key === 'total_goals') return 'O/U';
+  if (key === 'btts' || key === 'both_teams_to_score') return 'BTTS';
+  if (key === 'draw_no_bet') return 'DNB';
+  if (key === 'double_chance') return 'DC';
+  return key ? key.toUpperCase().slice(0, 8) : 'BOOK';
+}
+
+function oddsMarketTitle(snapshot: WorldCupOddsSnapshot) {
+  const label = oddsMarketShortLabel(snapshot);
+  if (label === 'AH') return 'Asian handicap';
+  if (label === 'O/U') return 'Goals total';
+  if (label === '1X2') return 'Full-time result';
+  if (label === 'BTTS') return 'Both teams score';
+  if (label === 'DNB') return 'Draw no bet';
+  if (label === 'DC') return 'Double chance';
+  return label;
+}
+
+function lineLabel(value?: number | string | null) {
+  if (value === null || value === undefined || value === '') return '--';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  const text = Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return numeric > 0 ? `+${text}` : text;
+}
+
+function oddsPriceLabel(value?: number | string | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  return numeric.toFixed(2);
+}
+
+function latestBookUpdate(snapshot: WorldCupOddsSnapshot) {
+  const values = (snapshot.bookmakers || [])
+    .map((book) => book.lastUpdate)
+    .filter(Boolean)
+    .sort();
+  return values.length ? formatDateTime(values[values.length - 1]) : formatDateTime(snapshot.generatedAt);
+}
+
+function BookmakerMicroBars({ snapshot }: { snapshot: WorldCupOddsSnapshot }) {
+  const rows = (snapshot.outcomes || []).slice(0, 6);
+  if (!rows.length) return null;
+  return (
+    <div className="wm-worldcup-book-bars" aria-hidden="true">
+      {rows.map((row) => (
+        <span key={`${row.name}-${row.point ?? 'x'}`}>
+          <i style={{ width: probabilityWidth(row.impliedProbability) }} />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function BookmakerMarketBoard({ snapshot }: { snapshot: WorldCupOddsSnapshot }) {
+  const bookmakerRows = (snapshot.bookmakers || []).slice(0, 8);
+  return (
+    <div className="wm-worldcup-bookmaker-board">
+      <div className="wm-worldcup-bookmaker-hero">
+        <span>
+          <em>{oddsMarketShortLabel(snapshot)}</em>
+          <strong>{oddsMarketTitle(snapshot)}</strong>
+        </span>
+        <span>
+          <em>BOOKS</em>
+          <strong>{snapshot.bookmakerCount || bookmakerRows.length || '--'}</strong>
+        </span>
+        <span>
+          <em>UPDATE</em>
+          <strong>{latestBookUpdate(snapshot)}</strong>
+        </span>
+      </div>
+      <BookmakerMicroBars snapshot={snapshot} />
+      <div className="wm-worldcup-line-grid">
+        {(snapshot.outcomes || []).slice(0, 8).map((outcome) => (
+          <article key={`${outcome.name}-${outcome.point ?? 'line'}`}>
+            <div>
+              <span>{outcome.name}</span>
+              <strong>{outcome.point == null ? oddsPriceLabel(outcome.decimalOdds) : lineLabel(outcome.point)}</strong>
+            </div>
+            <b>{outcome.point == null ? percentLabel(outcome.impliedProbability) : oddsPriceLabel(outcome.decimalOdds)}</b>
+            <em>{outcome.bookCount || 0} books</em>
+            <i style={{ width: probabilityWidth(outcome.impliedProbability) }} />
+          </article>
+        ))}
+      </div>
+      <div className="wm-worldcup-bookmaker-list">
+        {bookmakerRows.map((book) => (
+          <article key={`${snapshot.matchId}-${oddsSnapshotKey(snapshot)}-${book.key || book.title}`}>
+            <span>{book.title}</span>
+            <div>
+              {(book.outcomes || []).slice(0, 3).map((outcome) => (
+                <b key={`${book.title}-${outcome.name}-${outcome.point ?? 'p'}`}>
+                  {outcome.name}{outcome.point == null ? '' : ` ${lineLabel(outcome.point)}`} <strong>{oddsPriceLabel(outcome.decimalOdds)}</strong>
+                </b>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function WinProbability({ model }: { model: WorldCupHomeModel }) {
   const match = model.selectedMatch;
   if (!match) return <EmptyState detail="No selected match is available." />;
+  const [activeTab, setActiveTab] = useState<WorldCupOddsTab>('edge');
   const outcomes = [match.homeTeam, 'Draw', match.awayTeam];
-  const book = model.selectedOdds.find((row) => row.providerType !== 'prediction_market');
+  const bookSnapshots = model.selectedOdds.filter((row) => row.providerType !== 'prediction_market');
+  const book = bookSnapshots.find((row) => oddsSnapshotKey(row) === 'h2h' || row.marketType === 'moneyline') || bookSnapshots[0];
   const prediction = model.selectedOdds.find((row) => row.providerType === 'prediction_market' || /polymarket/i.test(row.provider || row.source || ''));
   const headToHeadMarket = model.selectedMarkets.find((market) => isHeadToHeadMarket(market, match));
   const marketOutcomes = (headToHeadMarket ? [headToHeadMarket] : model.selectedMarkets).flatMap((market) => market.outcomes || []);
@@ -611,19 +727,36 @@ function WinProbability({ model }: { model: WorldCupHomeModel }) {
     );
   }
   const bookState = model.payload.providerStates?.bookmakerOdds || (book ? 'ok' : 'missing');
+  const selectedSnapshot = bookSnapshots.find((snapshot) => oddsSnapshotKey(snapshot) === activeTab);
   return (
     <>
-      <div className="wm-worldcup-home-prob-table">
-        <header><span>OUTCOME</span><span>POLY</span><span>BOOK</span><span>EDGE</span></header>
-        {rows.map((row) => (
-          <div className={row.poly == null && row.book == null ? 'source-missing' : ''} key={row.name}>
-            <strong>{row.name}</strong>
-            <span><b>{percentLabel(row.poly)}</b><i style={{ width: probabilityWidth(row.poly) }} /></span>
-            <span><b>{percentLabel(row.book)}</b><i style={{ width: probabilityWidth(row.book) }} /></span>
-            <em className={row.edge == null ? '' : row.edge >= 0 ? 'tone-green' : 'tone-red'}>{row.edge == null ? '--' : `${row.edge >= 0 ? '+' : ''}${row.edge.toFixed(1)}%`}</em>
-          </div>
-        ))}
+      <div className="wm-worldcup-odds-switch">
+        <button className={activeTab === 'edge' ? 'active' : ''} type="button" onClick={() => setActiveTab('edge')}>EDGE</button>
+        {bookSnapshots.slice(0, 6).map((snapshot) => {
+          const key = oddsSnapshotKey(snapshot);
+          return (
+            <button className={activeTab === key ? 'active' : ''} key={`${snapshot.matchId}-${key}`} type="button" onClick={() => setActiveTab(key)}>
+              {oddsMarketShortLabel(snapshot)}
+              <span>{snapshot.bookmakerCount || 0}</span>
+            </button>
+          );
+        })}
       </div>
+      {activeTab === 'edge' || !selectedSnapshot ? (
+        <div className="wm-worldcup-home-prob-table">
+          <header><span>OUTCOME</span><span>POLY</span><span>BOOK</span><span>EDGE</span></header>
+          {rows.map((row) => (
+            <div className={row.poly == null && row.book == null ? 'source-missing' : ''} key={row.name}>
+              <strong>{row.name}</strong>
+              <span><b>{percentLabel(row.poly)}</b><i style={{ width: probabilityWidth(row.poly) }} /></span>
+              <span><b>{percentLabel(row.book)}</b><i style={{ width: probabilityWidth(row.book) }} /></span>
+              <em className={row.edge == null ? '' : row.edge >= 0 ? 'tone-green' : 'tone-red'}>{row.edge == null ? '--' : `${row.edge >= 0 ? '+' : ''}${row.edge.toFixed(1)}%`}</em>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <BookmakerMarketBoard snapshot={selectedSnapshot} />
+      )}
       {!book ? (
         <div className="wm-worldcup-home-source-note">
           <b>BOOK SOURCE</b>

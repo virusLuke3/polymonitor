@@ -47,6 +47,77 @@ def test_worldcup_bookmaker_quota_error_is_explicit():
     assert stats["httpStatus"] == 401
 
 
+def test_worldcup_bookmaker_links_configured_main_lines():
+    match = {
+        "id": "wc2026-001",
+        "homeTeam": "Mexico",
+        "awayTeam": "South Africa",
+        "kickoffUtc": "2026-06-11T19:00:00Z",
+        "status": "scheduled",
+    }
+    event = {
+        "id": "event-1",
+        "home_team": "Mexico",
+        "away_team": "South Africa",
+        "commence_time": "2026-06-11T19:00:00Z",
+        "bookmakers": [
+            {
+                "key": "book_a",
+                "title": "Book A",
+                "last_update": "2026-06-10T12:00:00Z",
+                "markets": [
+                    {
+                        "key": "h2h",
+                        "outcomes": [
+                            {"name": "Mexico", "price": 2.0},
+                            {"name": "Draw", "price": 3.25},
+                            {"name": "South Africa", "price": 4.0},
+                        ],
+                    },
+                    {
+                        "key": "spreads",
+                        "outcomes": [
+                            {"name": "Mexico", "price": 1.91, "point": -0.5},
+                            {"name": "South Africa", "price": 1.91, "point": 0.5},
+                        ],
+                    },
+                    {
+                        "key": "totals",
+                        "outcomes": [
+                            {"name": "Over", "price": 1.8, "point": 2.5},
+                            {"name": "Under", "price": 2.0, "point": 2.5},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+
+    def http_json_get(url, *, params=None, timeout=12, headers=None):
+        assert params["markets"] == "h2h,spreads,totals"
+        return [event]
+
+    ctx = {
+        "http_json_get": http_json_get,
+        "SETTINGS": SimpleNamespace(
+            the_odds_api_key="x" * 32,
+            the_odds_api_base_url="https://api.the-odds-api.com",
+            the_odds_source_url="https://the-odds-api.com/",
+            worldcup_odds_markets="h2h,spreads,totals",
+        ),
+    }
+
+    rows, state, stats = bookmaker.link_bookmaker_odds(ctx, [match])
+
+    assert state == "ok"
+    assert stats["matched"] == 1
+    assert stats["snapshots"] == 3
+    assert [row["marketKey"] for row in rows] == ["h2h", "spreads", "totals"]
+    assert rows[0]["marketType"] == "moneyline"
+    assert rows[1]["outcomes"][0]["point"] == -0.5
+    assert rows[2]["outcomes"][0]["name"] == "Over"
+
+
 def test_worldcup_dashboard_links_strict_polymarket_market():
     source_schedule = {
         "matches": [
