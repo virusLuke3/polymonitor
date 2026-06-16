@@ -175,6 +175,7 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
     country_corridors: Counter[tuple[str, str]] = Counter()
     airline_counts: Counter[str] = Counter()
     equipment_counts: Counter[str] = Counter()
+    route_edges: List[Dict[str, Any]] = []
     valid_routes = 0
     direct_routes = 0
 
@@ -206,6 +207,42 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
         for code in _null(row[8]).split():
             if code:
                 equipment_counts[code] += 1
+        src_lat = src.get("lat")
+        src_lon = src.get("lon")
+        dst_lat = dst.get("lat")
+        dst_lon = dst.get("lon")
+        src_code = src.get("iata") or src.get("icao") or src_id
+        dst_code = dst.get("iata") or dst.get("icao") or dst_id
+        airport_counts[str(src_code)] += 1
+        airport_counts[str(dst_code)] += 1
+        if (
+            isinstance(src_lat, (int, float))
+            and isinstance(src_lon, (int, float))
+            and isinstance(dst_lat, (int, float))
+            and isinstance(dst_lon, (int, float))
+            and src_code
+            and dst_code
+            and src_code != dst_code
+        ):
+            route_edges.append(
+                {
+                    "fromCode": src_code,
+                    "toCode": dst_code,
+                    "fromName": src.get("name") or src_code,
+                    "toName": dst.get("name") or dst_code,
+                    "fromCity": src.get("city"),
+                    "toCity": dst.get("city"),
+                    "fromCountry": src.get("country"),
+                    "toCountry": dst.get("country"),
+                    "fromLat": src_lat,
+                    "fromLon": src_lon,
+                    "toLat": dst_lat,
+                    "toLon": dst_lon,
+                    "airline": airline.get("name") or airline_code or "Unknown",
+                    "equipment": _null(row[8]),
+                    "stops": _null(row[7]) or "0",
+                }
+            )
 
     hubs = []
     seen_hubs: set[str] = set()
@@ -225,14 +262,118 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
         {"sourceCountry": pair[0], "destCountry": pair[1], "routeCount": count}
         for pair, count in country_corridors.most_common(10)
     ]
+    top_route_edges: List[Dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    route_edges.sort(
+        key=lambda edge: (
+            airport_counts[str(edge.get("fromCode") or "")]
+            + airport_counts[str(edge.get("toCode") or "")],
+            edge.get("fromCountry") != edge.get("toCountry"),
+        ),
+        reverse=True,
+    )
+    for edge in route_edges:
+        pair = tuple(sorted([str(edge.get("fromCode") or ""), str(edge.get("toCode") or "")]))
+        if not pair[0] or not pair[1] or pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        from_score = airport_counts[str(edge.get("fromCode") or "")]
+        to_score = airport_counts[str(edge.get("toCode") or "")]
+        traffic_score = min(100, max(18, round((from_score + to_score) / 35)))
+        is_international = edge.get("fromCountry") != edge.get("toCountry")
+        route_key = f"{edge.get('fromCode')}-{edge.get('toCode')}"
+        phase_seed = int(hashlib.sha1(route_key.encode("utf-8")).hexdigest()[:4], 16)
+        top_route_edges.append(
+            {
+                **edge,
+                "id": _source_hash(route_key),
+                "corridor": f"{edge.get('fromCountry') or 'Unknown'} / {edge.get('toCountry') or 'Unknown'}",
+                "trafficScore": traffic_score,
+                "riskScore": min(88, max(8, 18 + (12 if is_international else 0) + round(traffic_score * 0.28))),
+                "status": "watch" if is_international and traffic_score >= 70 else "normal",
+                "phase": round((phase_seed % 1000) / 1000, 3),
+                "speed": round(0.055 + ((phase_seed % 7) * 0.007), 3),
+            }
+        )
+        if len(top_route_edges) >= 28:
+            break
+
     return {
         "routeCount": valid_routes,
         "directRouteCount": direct_routes,
         "countryCount": len(country_counts),
         "topHubs": hubs,
+        "topRoutes": top_route_edges,
         "topCountryCorridors": corridors,
         "topAirlines": [{"name": name, "routeCount": count} for name, count in airline_counts.most_common(8)],
         "topEquipment": [{"code": code, "routeCount": count} for code, count in equipment_counts.most_common(8)],
+    }
+
+
+def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str) -> Dict[str, Any]:
+    hubs = []
+    for hub in route_stats.get("topHubs", [])[:12]:
+        code = hub.get("iata") or hub.get("icao") or hub.get("id")
+        route_count = int(hub.get("routeCount") or 0)
+        hubs.append(
+            {
+                "code": code,
+                "name": hub.get("name") or code,
+                "city": hub.get("city"),
+                "country": hub.get("country"),
+                "lat": hub.get("lat"),
+                "lon": hub.get("lon"),
+                "routeCount": route_count,
+                "status": "watch" if route_count >= 1200 else "normal",
+                "riskScore": min(92, max(12, round(route_count / 18))),
+            }
+        )
+    routes = route_stats.get("topRoutes", [])[:24]
+    flights = []
+    for index, route in enumerate(routes[:12]):
+        flights.append(
+            {
+                "id": f"flight-{route.get('id') or index}",
+                "fromCode": route.get("fromCode"),
+                "toCode": route.get("toCode"),
+                "fromLon": route.get("fromLon"),
+                "fromLat": route.get("fromLat"),
+                "toLon": route.get("toLon"),
+                "toLat": route.get("toLat"),
+                "phase": route.get("phase", 0),
+                "speed": route.get("speed", 0.06),
+                "status": route.get("status", "normal"),
+                "riskScore": route.get("riskScore", 0),
+            }
+        )
+    return {
+        "generatedAt": generated_at,
+        "mode": "seeded-route-graph",
+        "hubs": hubs,
+        "routes": routes,
+        "flights": flights,
+        "ops": [
+            {
+                "code": hub.get("code"),
+                "name": hub.get("name"),
+                "city": hub.get("city"),
+                "status": hub.get("status"),
+                "riskScore": hub.get("riskScore"),
+                "routeCount": hub.get("routeCount"),
+            }
+            for hub in hubs[:8]
+        ],
+        "airlines": route_stats.get("topAirlines", [])[:8],
+        "news": [
+            {
+                "title": f"{route.get('fromCode')} -> {route.get('toCode')} corridor baseline",
+                "corridor": route.get("corridor"),
+                "status": route.get("status"),
+                "riskScore": route.get("riskScore"),
+                "source": "OpenFlights",
+            }
+            for route in routes[:5]
+        ],
     }
 
 
@@ -501,6 +642,7 @@ def _item(*, topic: str, entity: str, country: str, title: str, summary: str, me
 
 
 def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
+    generated_at = _utc_now_iso(ctx)
     airports_text, airports_source = _read_openflights_text(ctx, "airports.dat", OPENFLIGHTS_AIRPORTS_URL)
     routes_text, routes_source = _read_openflights_text(ctx, "routes.dat", OPENFLIGHTS_ROUTES_URL)
     try:
@@ -615,7 +757,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
     limited = items[: max(1, int(limit or DEFAULT_LIMIT))]
     return {
         "panelId": PANEL_ID,
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": generated_at,
         "status": "ok" if items else "empty",
         "cacheMode": "live-build",
         "freshness": "live",
@@ -637,6 +779,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             "transitScannedFiles": transit_stats.get("scannedFileCount", 0),
             "aisStatus": ais_status.get("status"),
         },
+        "aviation": _build_aviation_layer(route_stats, generated_at=generated_at),
         "items": limited,
     }
 
@@ -652,6 +795,7 @@ def _empty_payload(ctx: dict, *, cache_mode: str = "seed-miss") -> Dict[str, Any
         "sourceUrl": OPENFLIGHTS_AIRPORTS_URL,
         "sources": {},
         "summary": {"airports": 0, "routes": 0, "countries": 0, "topHub": None, "transitFeeds": 0, "transitOperators": 0, "aisStatus": "unknown"},
+        "aviation": {"mode": "warming", "hubs": [], "routes": [], "flights": [], "ops": [], "airlines": [], "news": []},
         "items": [],
     }
 

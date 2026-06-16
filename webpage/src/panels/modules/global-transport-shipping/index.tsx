@@ -6,7 +6,9 @@ import { formatCompact, formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
-type SortMode = 'impact' | 'latest' | 'source';
+type TransportTab = 'ops' | 'flights' | 'airlines' | 'track' | 'news';
+type AviationPayload = NonNullable<RuntimeGlobalTransportShippingPayload['aviation']>;
+type AviationRoute = NonNullable<AviationPayload['routes']>[number];
 
 function statusBadge(payload?: RuntimeGlobalTransportShippingPayload | null) {
   const mode = String(payload?.cacheMode || '').toLowerCase();
@@ -29,14 +31,9 @@ function numeric(value?: number | string | null) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function clamp(value: number, min = 0, max = 100) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function percent(value?: number | string | null) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return '--';
-  return `${Math.round(parsed * 100)}%`;
+function compactUnknown(value: unknown) {
+  if (typeof value === 'number' || typeof value === 'string' || value === null || value === undefined) return formatCompact(value);
+  return formatCompact(Number(value) || 0);
 }
 
 function glyph(item: RuntimeGlobalTransportShippingItem) {
@@ -46,143 +43,196 @@ function glyph(item: RuntimeGlobalTransportShippingItem) {
   return 'AIR';
 }
 
-function marketCount(item: RuntimeGlobalTransportShippingItem) {
-  return (item.markets || []).length || (item.relatedPolymarketMarketIds || []).length || 0;
-}
-
-function sortItems(items: RuntimeGlobalTransportShippingItem[], mode: SortMode) {
-  const rows = [...items];
-  if (mode === 'latest') {
-    rows.sort((a, b) => String(b.eventTime || '').localeCompare(String(a.eventTime || '')));
-    return rows;
-  }
-  if (mode === 'source') {
-    rows.sort((a, b) => String(a.evidenceType || '').localeCompare(String(b.evidenceType || '')) || numeric(b.metric) - numeric(a.metric));
-    return rows;
-  }
-  rows.sort((a, b) => numeric(b.metric) - numeric(a.metric) || marketCount(b) - marketCount(a));
-  return rows;
-}
-
-function nextMode(mode: SortMode): SortMode {
-  if (mode === 'impact') return 'latest';
-  if (mode === 'latest') return 'source';
-  return 'impact';
-}
-
-function modeLabel(mode: SortMode) {
-  if (mode === 'latest') return 'Latest';
-  if (mode === 'source') return 'Source';
-  return 'Impact';
-}
-
 function openSource(url?: string | null) {
   const target = String(url || '').trim();
   if (target) window.open(target, '_blank', 'noopener,noreferrer');
 }
 
-function sourceCount(items: RuntimeGlobalTransportShippingItem[], source: string) {
-  return items.filter((item) => String(item.evidenceType || '').toUpperCase().includes(source)).length;
+function statusClass(status?: unknown) {
+  const text = String(status || '').toLowerCase();
+  if (text.includes('alert')) return 'alert';
+  if (text.includes('watch') || text.includes('minor')) return 'watch';
+  return 'normal';
 }
 
-function TransportNetwork({ items, payload }: { items: RuntimeGlobalTransportShippingItem[]; payload?: RuntimeGlobalTransportShippingPayload | null }) {
+function statusLabel(status?: unknown) {
+  const text = String(status || '').trim();
+  if (!text) return 'NORMAL';
+  return text.replace(/[_-]+/g, ' ').toUpperCase();
+}
+
+function aviationRoutes(payload?: RuntimeGlobalTransportShippingPayload | null) {
+  return payload?.aviation?.routes || [];
+}
+
+function aviationOps(payload?: RuntimeGlobalTransportShippingPayload | null) {
+  return payload?.aviation?.ops || [];
+}
+
+function aviationAirlines(payload?: RuntimeGlobalTransportShippingPayload | null) {
+  return payload?.aviation?.airlines || [];
+}
+
+function aviationNews(payload?: RuntimeGlobalTransportShippingPayload | null) {
+  return payload?.aviation?.news || [];
+}
+
+function AviationHero({ payload }: { payload?: RuntimeGlobalTransportShippingPayload | null }) {
   const routes = numeric(payload?.summary?.routes);
-  const ais = items.find((item) => String(item.evidenceType || '').toUpperCase().includes('AIS'));
-  const aisMessages = numeric(ais?.metric);
-  const routeIntensity = clamp(routes / 800);
-  const aisIntensity = clamp(aisMessages * 8);
+  const hubs = payload?.aviation?.hubs || [];
+  const routeRows = aviationRoutes(payload);
+  const topHub = hubs[0];
+  const routeRisk = Math.round(Math.max(...routeRows.map((route) => numeric(route.riskScore)), 0));
+  const traffic = Math.round(Math.max(...routeRows.map((route) => numeric(route.trafficScore)), 0));
   return (
-    <div className="wm-transport-network-card">
-      <svg className="wm-transport-map" viewBox="0 0 320 118" role="img" aria-label="Transport network intensity">
+    <div className="wm-aviation-hero">
+      <div className="wm-aviation-radar" aria-hidden="true">
+        <span className="wm-aviation-radar-sweep" />
+        <span className="wm-aviation-runway" />
+        <span className="wm-aviation-plane-dot one" />
+        <span className="wm-aviation-plane-dot two" />
+        <span className="wm-aviation-plane-dot three" />
+      </div>
+      <svg className="wm-aviation-mini-routes" viewBox="0 0 240 92" role="img" aria-label="Aviation corridor preview">
         <defs>
-          <linearGradient id="wmTransportRoute" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.18" />
-            <stop offset="55%" stopColor="#38bdf8" stopOpacity="0.72" />
-            <stop offset="100%" stopColor="#4ade80" stopOpacity="0.18" />
+          <linearGradient id="wmAviationRoute" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.1" />
+            <stop offset="50%" stopColor="#67e8f9" stopOpacity="0.86" />
+            <stop offset="100%" stopColor="#facc15" stopOpacity="0.72" />
           </linearGradient>
         </defs>
-        <path className="wm-transport-gridline" d="M8 34 C80 18 112 48 160 30 S238 22 312 46" />
-        <path className="wm-transport-gridline" d="M14 82 C74 66 104 98 156 76 S250 62 306 88" />
-        <path className="wm-transport-route main" d="M30 74 C88 18 156 18 292 38" style={{ '--route': `${routeIntensity}%` } as any} />
-        <path className="wm-transport-route alt" d="M24 42 C90 95 178 98 302 68" />
-        <path className="wm-transport-route alt two" d="M72 94 C124 42 182 44 250 18" />
+        <path className="wm-aviation-latline" d="M10 42 C62 30 88 46 122 37 S184 23 230 44" />
+        <path className="wm-aviation-latline" d="M12 70 C64 58 96 77 128 64 S188 54 228 72" />
+        <path className="wm-aviation-route-a" d="M22 68 C74 12 138 12 220 35" />
+        <path className="wm-aviation-route-b" d="M20 34 C78 80 146 80 224 56" />
+        <path className="wm-aviation-route-c" d="M58 78 C102 38 152 36 194 18" />
         {[
-          [34, 72, 'ATL'],
-          [86, 34, 'LHR'],
-          [146, 56, 'GT'],
-          [218, 35, 'AIS'],
-          [286, 66, 'PEK'],
+          [28, 66, 'ATL'],
+          [88, 31, 'LHR'],
+          [140, 54, 'DXB'],
+          [195, 25, 'SIN'],
+          [216, 55, 'HKG'],
         ].map(([x, y, label], index) => (
-          <g key={String(label)} className={index === 3 ? 'wm-transport-node ais' : 'wm-transport-node'}>
-            <circle cx={Number(x)} cy={Number(y)} r={index === 3 ? 10 : 7} />
+          <g key={String(label)} className={index === 1 ? 'wm-aviation-node major' : 'wm-aviation-node'}>
+            <circle cx={Number(x)} cy={Number(y)} r={index === 1 ? 6 : 4.5} />
             <text x={Number(x)} y={Number(y) + 21}>{label}</text>
           </g>
         ))}
       </svg>
-      <div className="wm-transport-network-stats">
-        <span><em>AIR ROUTES</em><strong>{formatCompact(payload?.summary?.routes)}</strong></span>
-        <span><em>GTFS FEEDS</em><strong>{formatCompact(payload?.summary?.transitFeeds)}</strong></span>
-        <span><em>AIS MSG</em><strong>{formatCompact(aisMessages)}</strong></span>
-      </div>
-      <div className="wm-transport-signal" style={{ '--ais': `${aisIntensity}%` } as any}>
-        <b>{payload?.summary?.topHub || '--'}</b>
-        <span>{sourceCount(items, 'OPENFLIGHTS')} air / {sourceCount(items, 'TRANSITLAND')} gtfs / {sourceCount(items, 'AIS')} ais</span>
+      <div className="wm-aviation-hero-stats">
+        <span><em>TOP HUB</em><strong>{topHub?.code || payload?.summary?.topHub || '--'}</strong><small>{topHub?.city || 'seeded'}</small></span>
+        <span><em>ROUTES</em><strong>{formatCompact(routes)}</strong><small>OpenFlights</small></span>
+        <span><em>RISK</em><strong>{routeRisk}</strong><small>{traffic} traffic</small></span>
       </div>
     </div>
   );
 }
 
-function TransportRow({ item }: { item: RuntimeGlobalTransportShippingItem }) {
-  const severity = severityClass(item);
-  const tags = (item.tags || []).slice(0, 2);
-  const width = clamp(numeric(item.metric) / 120);
+function OpsRow({ row }: { row: Record<string, unknown> }) {
+  const status = statusClass(row.status);
   return (
-    <button type="button" className={`wm-transport-strip ${severity} ${glyph(item).toLowerCase()}`} onClick={() => openSource(item.sourceUrl)}>
-      <span className="wm-transport-strip-kind">{glyph(item)}</span>
-      <span className="wm-transport-strip-main">
-        <span className="wm-evidence-meta">
-          <b>{item.entity || 'Transport'}</b>
-          <em>{item.evidenceType || item.country || 'SOURCE'}</em>
-          <i className={severity}>{severity.toUpperCase()}</i>
-          {tags.map((tag) => <i key={tag}>{tag.toUpperCase()}</i>)}
-        </span>
-        <strong>{item.title || 'Transport evidence source'}</strong>
-        <small>{item.summary || `${item.country || 'Global'} transport evidence`}</small>
-      </span>
-      <span className="wm-transport-strip-metric">
-        <i style={{ '--width': `${width}%` } as any} />
-        <strong>{formatCompact(item.metric)}</strong>
-        <em>{item.metricLabel || 'SIGNAL'}</em>
-        <small>{percent(item.confidence)} conf</small>
-      </span>
+    <div className="wm-aviation-intel-row">
+      <b>{String(row.code || '--')}</b>
+      <span><strong>{String(row.name || 'Airport')}</strong><em>{String(row.city || 'Global')}</em></span>
+      <i className={status}>{statusLabel(row.status)}</i>
+      <small>{compactUnknown(row.routeCount)}</small>
+    </div>
+  );
+}
+
+function FlightRow({ route }: { route: AviationRoute }) {
+  const risk = numeric(route.riskScore);
+  const status = statusClass(route.status);
+  return (
+    <div className="wm-aviation-intel-row flight">
+      <b>{route.fromCode || '--'}</b>
+      <span><strong>{route.fromCode} &gt; {route.toCode}</strong><em>{route.corridor || route.airline || 'air corridor'}</em></span>
+      <i className={status}>{risk || statusLabel(route.status)}</i>
+      <small>{formatCompact(route.trafficScore)}</small>
+    </div>
+  );
+}
+
+function AirlineRow({ row }: { row: { name?: string | null; routeCount?: number | string | null } }) {
+  return (
+    <div className="wm-aviation-intel-row airline">
+      <b>AL</b>
+      <span><strong>{row.name || 'Airline'}</strong><em>OpenFlights route coverage</em></span>
+      <i className="normal">NORMAL</i>
+      <small>{formatCompact(row.routeCount)}</small>
+    </div>
+  );
+}
+
+function TrackRow({ item }: { item: RuntimeGlobalTransportShippingItem }) {
+  const status = severityClass(item);
+  return (
+    <button type="button" className="wm-aviation-intel-row source" onClick={() => openSource(item.sourceUrl)}>
+      <b>{glyph(item)}</b>
+      <span><strong>{item.entity || item.evidenceType}</strong><em>{item.summary || item.title}</em></span>
+      <i className={status}>{status.toUpperCase()}</i>
+      <small>{formatCompact(item.metric)}</small>
     </button>
+  );
+}
+
+function NewsRow({ row }: { row: Record<string, unknown> }) {
+  const status = statusClass(row.status);
+  return (
+    <div className="wm-aviation-intel-row news">
+      <b>NW</b>
+      <span><strong>{String(row.title || 'Aviation signal')}</strong><em>{String(row.corridor || row.source || 'route intelligence')}</em></span>
+      <i className={status}>{compactUnknown(row.riskScore)}</i>
+      <small>{String(row.source || 'seed')}</small>
+    </div>
   );
 }
 
 function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTransportShippingPayload | null }) {
   const [showHelp, setShowHelp] = useState(false);
-  const [sortMode, setSortMode] = useState<SortMode>('impact');
-  const items = useMemo(() => sortItems(payload?.items || [], sortMode), [payload?.items, sortMode]);
+  const [tab, setTab] = useState<TransportTab>('ops');
+  const items = payload?.items || [];
+  const tabs: Array<{ id: TransportTab; label: string; count: number }> = [
+    { id: 'ops', label: 'Ops', count: aviationOps(payload).length },
+    { id: 'flights', label: 'Flights', count: aviationRoutes(payload).length },
+    { id: 'airlines', label: 'Airlines', count: aviationAirlines(payload).length },
+    { id: 'track', label: 'Track', count: items.length },
+    { id: 'news', label: 'News', count: aviationNews(payload).length },
+  ];
+  const rows = useMemo(() => {
+    if (tab === 'ops') return aviationOps(payload).slice(0, 8).map((row, index) => <OpsRow key={`${row.code || index}`} row={row} />);
+    if (tab === 'flights') return aviationRoutes(payload).slice(0, 8).map((route, index) => <FlightRow key={`${route.id || index}`} route={route} />);
+    if (tab === 'airlines') return aviationAirlines(payload).slice(0, 8).map((row, index) => <AirlineRow key={`${row.name || index}`} row={row} />);
+    if (tab === 'news') return aviationNews(payload).slice(0, 8).map((row, index) => <NewsRow key={`${row.title || index}`} row={row} />);
+    return items.slice(0, 8).map((item) => <TrackRow key={item.id || `${item.evidenceType}-${item.entity}-${item.title}`} item={item} />);
+  }, [items, payload, tab]);
   return (
     <Panel
-      title="TRANSPORT OPS"
+      title="AIRLINE INTEL"
       titleControls={<button type="button" className="wm-panel-help-button" aria-label="Explain transport ops" aria-expanded={showHelp} onClick={() => setShowHelp((value) => !value)}>?</button>}
-      controls={<button type="button" className="wm-evidence-sort-button" aria-label="Change transport ops sort" onClick={() => setSortMode((value) => nextMode(value))}>{modeLabel(sortMode)}</button>}
+      controls={<button type="button" className="wm-evidence-sort-button" aria-label="Refresh aviation source" onClick={() => openSource(payload?.sourceUrl)}>AIR MAP</button>}
       badge={statusBadge(payload)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
       count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Global Transport / Shipping</strong>
-          <p>OpenFlights route topology, Transitland mobility feed coverage, and AISStream websocket readiness as structured transport evidence.</p>
+          <strong>Airline Intel</strong>
+          <p>Seeded aviation corridor graph from OpenFlights, with route-flow animation on the 2D map and supporting transport source status.</p>
         </div>
       ) : null}
       className="wm-market-panel wm-evidence-panel wm-global-transport-panel"
       dataPanelId="global-transport-shipping"
     >
-      <TransportNetwork items={items} payload={payload} />
-      <div className="wm-transport-strips">
-        {items.length ? items.map((item) => <TransportRow key={item.id || `${item.evidenceType}-${item.entity}-${item.title}`} item={item} />) : (
+      <AviationHero payload={payload} />
+      <div className="wm-aviation-tabs" role="tablist" aria-label="Airline intel views">
+        {tabs.map((item) => (
+          <button key={item.id} type="button" className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>
+            {item.label}<span>{item.count}</span>
+          </button>
+        ))}
+      </div>
+      <div className="wm-aviation-intel-list">
+        {rows.length ? rows : (
           <div className="wm-registry-empty"><strong>Transport evidence seed warming</strong><span>{formatRelative(payload?.generatedAt)}</span></div>
         )}
       </div>

@@ -24,6 +24,7 @@ const PANEL_RUNTIME_LIMITS: Record<string, number> = {
   'geo-sanctions-shock': 2000,
   'global-index-monitor': 12,
   'global-temperature-monitor': 60,
+  'global-transport-shipping': 14,
   'weather-market-browser': 60,
   'goods-tariff-supply-watch': 36,
   'ipo-news-watch': 12,

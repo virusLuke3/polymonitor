@@ -46,6 +46,7 @@ import type {
   RuntimeF1Payload,
   RuntimeGeoSanctionsShockItem,
   RuntimeGeoSanctionsShockPayload,
+  RuntimeGlobalTransportShippingPayload,
   RuntimeGlobalWeatherMapPayload,
   RuntimeInflationNowcastPayload,
   RuntimeJin10Payload,
@@ -109,6 +110,7 @@ const INITIAL_LAYERS: LayerToggle[] = [
   { id: 'lob', label: 'Runtime LOB', icon: '▦', enabled: true, hint: 'BOOK' },
   { id: 'intel', label: 'Linked Intel', icon: '✦', enabled: true, hint: 'NEWS' },
   { id: 'ucdp', label: 'UCDP Conflicts', icon: '△', enabled: true, hint: 'CONFLICT' },
+  { id: 'air-routes', label: 'Air Routes', icon: '✈', enabled: true, hint: 'AIR' },
 ];
 
 const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
@@ -355,6 +357,8 @@ function hasGeoConflictCoordinates(item: RuntimeGeoSanctionsShockItem) {
 function WeatherInlineMap({
   payload,
   ucdpEvents,
+  transportPayload,
+  showAirRoutes,
   loading,
   error,
   selectedCityId,
@@ -363,6 +367,8 @@ function WeatherInlineMap({
 }: {
   payload?: RuntimeGlobalWeatherMapPayload | null;
   ucdpEvents: RuntimeGeoSanctionsShockItem[];
+  transportPayload?: RuntimeGlobalTransportShippingPayload | null;
+  showAirRoutes: boolean;
   loading: boolean;
   error?: string | null;
   selectedCityId: string | null;
@@ -413,7 +419,15 @@ function WeatherInlineMap({
         {mappedCount}/{cityCount}
       </div>
       {error ? <div className="wm-inline-weather-map-error">{error}</div> : null}
-      <WeatherDeckMap items={items} ucdpEvents={ucdpEvents} selectedCityId={selected?.cityId || null} onSelectCity={selectCity} height={620} />
+      <WeatherDeckMap
+        items={items}
+        ucdpEvents={ucdpEvents}
+        transportPayload={transportPayload}
+        showAirRoutes={showAirRoutes}
+        selectedCityId={selected?.cityId || null}
+        onSelectCity={selectCity}
+        height={620}
+      />
       {!items.length ? (
         <div className="wm-weather-map-data-loading"><span>{loading ? 'LOADING WEATHER DATA' : 'WEATHER DATA WARMING'}</span></div>
       ) : null}
@@ -2324,6 +2338,8 @@ function WorldMonitorApp() {
                   <WeatherInlineMap
                     payload={weatherMapPayload || (runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined) || null}
                     ucdpEvents={ucdpMapEvents}
+                    transportPayload={(runtimeData['global-transport-shipping'] as RuntimeGlobalTransportShippingPayload | undefined) || null}
+                    showAirRoutes={enabledLayerIds.includes('air-routes')}
                     loading={weatherMapLoading}
                     error={weatherMapError}
                     selectedCityId={selectedWeatherCityId}

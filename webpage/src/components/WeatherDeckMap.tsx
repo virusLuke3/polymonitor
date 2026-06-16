@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import type { Layer, LayersList, PickingInfo } from '@deck.gl/core';
 import { getWeatherMapFallbackStyle, getWeatherMapStyle } from '@/config/weatherBasemap';
-import type { RuntimeGeoSanctionsShockItem, RuntimeGlobalWeatherCity } from '@/types';
+import type { RuntimeGeoSanctionsShockItem, RuntimeGlobalTransportShippingPayload, RuntimeGlobalWeatherCity } from '@/types';
 
 type WeatherTone = 'hot' | 'cool' | 'neutral';
 type MarketTone = 'market' | 'watch' | 'none';
@@ -39,6 +39,8 @@ type WeatherMapPoint = {
 type WeatherDeckMapProps = {
   items: RuntimeGlobalWeatherCity[];
   ucdpEvents?: RuntimeGeoSanctionsShockItem[];
+  transportPayload?: RuntimeGlobalTransportShippingPayload | null;
+  showAirRoutes?: boolean;
   selectedCityId?: string | null;
   onSelectCity?: (cityId: string) => void;
   height?: number;
@@ -127,16 +129,53 @@ type ConflictClusterPoint = {
   sample: ConflictMapPoint;
 };
 
+type AirRoutePath = {
+  id: string;
+  fromCode: string;
+  toCode: string;
+  corridor: string;
+  path: [number, number][];
+  trafficScore: number;
+  riskScore: number;
+  status: string;
+  airline: string;
+};
+
+type AirHubPoint = {
+  code: string;
+  name: string;
+  city: string;
+  country: string;
+  lon: number;
+  lat: number;
+  routeCount: number;
+  riskScore: number;
+  status: string;
+};
+
+type AirFlightPoint = {
+  id: string;
+  fromCode: string;
+  toCode: string;
+  path: [number, number][];
+  progress: number;
+  riskScore: number;
+  status: string;
+};
+
 type DeckTooltipState = {
-  kind: 'city' | 'conflict' | 'cluster';
+  kind: 'city' | 'conflict' | 'cluster' | 'air-route' | 'air-hub' | 'air-flight';
   x: number;
   y: number;
   city?: WeatherMapPoint;
   conflict?: ConflictMapPoint;
   cluster?: ConflictClusterPoint;
+  airRoute?: AirRoutePath;
+  airHub?: AirHubPoint;
+  airFlight?: AirFlightPoint;
 } | null;
 
-type DeckHoverObject = WeatherMapPoint | ConflictMapPoint | ConflictClusterPoint;
+type DeckHoverObject = WeatherMapPoint | ConflictMapPoint | ConflictClusterPoint | AirRoutePath | AirHubPoint | AirFlightPoint;
 
 type CountryNameLabel = {
   id: string;
@@ -537,6 +576,119 @@ function normalizeConflictPoints(items: RuntimeGeoSanctionsShockItem[] = []): Co
       color,
       size,
       label: `${country}${deaths ? ` · ${deaths} deaths` : ''}${actors ? ` · ${actors}` : ''}`,
+    }];
+  });
+}
+
+function airCoord(lonValue?: number | string | null, latValue?: number | string | null): [number, number] | null {
+  const lon = numberValue(lonValue);
+  const lat = numberValue(latValue);
+  if (lon == null || lat == null || lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return [lon, lat];
+}
+
+function wrapDeltaLon(delta: number) {
+  if (delta > 180) return delta - 360;
+  if (delta < -180) return delta + 360;
+  return delta;
+}
+
+function airArcPath(from: [number, number], to: [number, number], steps = 36): [number, number][] {
+  const [fromLon, fromLat] = from;
+  const [toLonRaw, toLat] = to;
+  const deltaLon = wrapDeltaLon(toLonRaw - fromLon);
+  const distance = Math.sqrt(deltaLon * deltaLon + (toLat - fromLat) * (toLat - fromLat));
+  const lift = Math.min(26, Math.max(5, distance * 0.18));
+  const direction = deltaLon >= 0 ? 1 : -1;
+  const controlLon = fromLon + deltaLon * 0.5;
+  const controlLat = (fromLat + toLat) * 0.5 + lift * direction * 0.18 + lift;
+  const points: [number, number][] = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const t = index / steps;
+    const one = 1 - t;
+    let lon = one * one * fromLon + 2 * one * t * controlLon + t * t * (fromLon + deltaLon);
+    if (lon > 180) lon -= 360;
+    if (lon < -180) lon += 360;
+    const lat = one * one * fromLat + 2 * one * t * controlLat + t * t * toLat;
+    points.push([lon, Math.max(-85, Math.min(85, lat))]);
+  }
+  return points;
+}
+
+function pointAlongPath(path: [number, number][], progress: number): [number, number] {
+  if (!path.length) return [0, 0];
+  if (path.length === 1) return path[0] || [0, 0];
+  const scaled = Math.max(0, Math.min(0.999, progress)) * (path.length - 1);
+  const index = Math.floor(scaled);
+  const next = Math.min(path.length - 1, index + 1);
+  const local = scaled - index;
+  const currentPoint = path[index] || path[0] || [0, 0];
+  const nextPoint = path[next] || currentPoint;
+  return [
+    currentPoint[0] + (nextPoint[0] - currentPoint[0]) * local,
+    currentPoint[1] + (nextPoint[1] - currentPoint[1]) * local,
+  ];
+}
+
+function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | null): AirRoutePath[] {
+  return (payload?.aviation?.routes || []).flatMap((route, index): AirRoutePath[] => {
+    const from = airCoord(route.fromLon, route.fromLat);
+    const to = airCoord(route.toLon, route.toLat);
+    const fromCode = String(route.fromCode || '').trim();
+    const toCode = String(route.toCode || '').trim();
+    if (!from || !to || !fromCode || !toCode) return [];
+    if (Math.abs(to[0] - from[0]) > 170) return [];
+    return [{
+      id: String(route.id || `${fromCode}-${toCode}-${index}`),
+      fromCode,
+      toCode,
+      corridor: String(route.corridor || `${route.fromCountry || ''} / ${route.toCountry || ''}`).trim(),
+      path: airArcPath(from, to),
+      trafficScore: numberValue(route.trafficScore) ?? 30,
+      riskScore: numberValue(route.riskScore) ?? 0,
+      status: String(route.status || 'normal'),
+      airline: String(route.airline || 'OpenFlights'),
+    }];
+  });
+}
+
+function normalizeAirHubs(payload?: RuntimeGlobalTransportShippingPayload | null): AirHubPoint[] {
+  return (payload?.aviation?.hubs || []).flatMap((hub): AirHubPoint[] => {
+    const coord = airCoord(hub.lon, hub.lat);
+    const code = String(hub.code || '').trim();
+    if (!coord || !code) return [];
+    return [{
+      code,
+      name: String(hub.name || code),
+      city: String(hub.city || ''),
+      country: String(hub.country || ''),
+      lon: coord[0],
+      lat: coord[1],
+      routeCount: numberValue(hub.routeCount) ?? 0,
+      riskScore: numberValue(hub.riskScore) ?? 0,
+      status: String(hub.status || 'normal'),
+    }];
+  });
+}
+
+function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | null | undefined, routes: AirRoutePath[], animationTime: number): AirFlightPoint[] {
+  const routeByKey = new Map(routes.map((route) => [`${route.fromCode}-${route.toCode}`, route]));
+  return (payload?.aviation?.flights || []).flatMap((flight, index): AirFlightPoint[] => {
+    const fromCode = String(flight.fromCode || '').trim();
+    const toCode = String(flight.toCode || '').trim();
+    const route = routeByKey.get(`${fromCode}-${toCode}`);
+    if (!route) return [];
+    const phase = numberValue(flight.phase) ?? index * 0.11;
+    const speed = numberValue(flight.speed) ?? 0.06;
+    const progress = (phase + animationTime * speed) % 1;
+    return [{
+      id: String(flight.id || `aircraft-${fromCode}-${toCode}-${index}`),
+      fromCode,
+      toCode,
+      path: route.path,
+      progress,
+      riskScore: numberValue(flight.riskScore) ?? route.riskScore,
+      status: String(flight.status || route.status || 'normal'),
     }];
   });
 }
@@ -1023,6 +1175,9 @@ function buildWeatherDeckLayers({
   conflicts,
   countryRisks,
   densityPoints,
+  airRoutes,
+  airHubs,
+  airFlights,
   selectedCityId,
   selectedConflictId,
   zoom,
@@ -1033,6 +1188,9 @@ function buildWeatherDeckLayers({
   conflicts: ConflictMapPoint[];
   countryRisks: CountryRisk[];
   densityPoints: SignalDensityPoint[];
+  airRoutes: AirRoutePath[];
+  airHubs: AirHubPoint[];
+  airFlights: AirFlightPoint[];
   selectedCityId?: string | null;
   selectedConflictId?: string | null;
   zoom: number;
@@ -1049,6 +1207,95 @@ function buildWeatherDeckLayers({
     : new Set<string>();
   const conflictSingles = visibleConflictSingles(conflicts, zoom, bounds, selectedConflictId)
     .filter((point) => !clusterMemberIds.has(point.id) || point.id === selectedConflictId);
+
+  if (airRoutes.length) {
+    layers.push(new PathLayer<AirRoutePath>({
+      id: 'air-route-corridors-underlay',
+      data: airRoutes,
+      getPath: (route) => route.path,
+      getColor: (route) => route.status === 'watch' || route.riskScore >= 55
+        ? [255, 183, 77, 92]
+        : [48, 196, 255, 78],
+      getWidth: (route) => Math.max(1, Math.min(4.5, 1 + route.trafficScore / 28)),
+      widthMinPixels: 1,
+      widthMaxPixels: 5,
+      jointRounded: true,
+      capRounded: true,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [117, 247, 255, 112],
+    }));
+    layers.push(new PathLayer<AirRoutePath>({
+      id: 'air-route-corridors-core',
+      data: airRoutes.slice(0, zoom < 2.2 ? 14 : 24),
+      getPath: (route) => route.path,
+      getColor: (route) => route.status === 'watch' || route.riskScore >= 55
+        ? [255, 206, 88, 172]
+        : [60, 220, 255, 152],
+      getWidth: (route) => Math.max(0.7, Math.min(2.4, 0.8 + route.trafficScore / 56)),
+      widthMinPixels: 0.8,
+      widthMaxPixels: 3,
+      jointRounded: true,
+      capRounded: true,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 245, 166, 140],
+    }));
+  }
+
+  if (airFlights.length) {
+    layers.push(new ScatterplotLayer<AirFlightPoint>({
+      id: 'air-route-moving-aircraft',
+      data: airFlights,
+      getPosition: (flight) => pointAlongPath(flight.path, flight.progress),
+      getRadius: (flight) => flight.status === 'watch' || flight.riskScore >= 55 ? 33000 : 24500,
+      getFillColor: (flight) => flight.status === 'watch' || flight.riskScore >= 55
+        ? [255, 222, 92, 228]
+        : [92, 241, 255, 220],
+      getLineColor: [6, 13, 20, 230],
+      getLineWidth: 1,
+      radiusMinPixels: 3.5,
+      radiusMaxPixels: 7,
+      lineWidthMinPixels: 1,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 255, 255, 95],
+    }));
+  }
+
+  if (airHubs.length) {
+    layers.push(new ScatterplotLayer<AirHubPoint>({
+      id: 'air-route-hub-points',
+      data: airHubs,
+      getPosition: (hub) => [hub.lon, hub.lat],
+      getRadius: (hub) => Math.max(26000, Math.min(76000, 18000 + hub.routeCount * 34)),
+      getFillColor: (hub) => hub.status === 'watch' ? [255, 177, 76, 134] : [24, 211, 238, 126],
+      getLineColor: (hub) => hub.status === 'watch' ? [255, 220, 130, 220] : [87, 235, 255, 225],
+      getLineWidth: 1.5,
+      radiusMinPixels: 4,
+      radiusMaxPixels: 15,
+      lineWidthMinPixels: 1,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 255, 210, 94],
+    }));
+    layers.push(new TextLayer<AirHubPoint>({
+      id: 'air-route-hub-labels',
+      data: airHubs.slice(0, zoom < 2.2 ? 8 : 12),
+      getPosition: (hub) => [hub.lon, hub.lat],
+      getText: (hub) => hub.code,
+      getPixelOffset: [9, 10],
+      getSize: 9,
+      getColor: [174, 233, 241, 186],
+      getTextAnchor: 'start',
+      getAlignmentBaseline: 'center',
+      fontFamily: 'monospace',
+      fontWeight: 900,
+      outlineWidth: 3,
+      outlineColor: [0, 0, 0, 220],
+      pickable: false,
+    }));
+  }
 
   if (visibleDensityPoints.length) {
     layers.push(new ScatterplotLayer<SignalDensityPoint>({
@@ -1287,6 +1534,33 @@ function CountryHoverTooltip({ hover }: { hover: CountryHoverState | null }) {
 
 function DeckMapTooltip({ tooltip }: { tooltip: DeckTooltipState }) {
   if (!tooltip) return null;
+  if (tooltip.kind === 'air-route' && tooltip.airRoute) {
+    const route = tooltip.airRoute;
+    return (
+      <div className={`wm-map-country-tooltip wm-map-deck-tooltip air ${route.status}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
+        <strong>{route.fromCode} &gt; {route.toCode}</strong>
+        <span>{route.corridor} · risk {Math.round(route.riskScore)} · traffic {Math.round(route.trafficScore)}</span>
+      </div>
+    );
+  }
+  if (tooltip.kind === 'air-hub' && tooltip.airHub) {
+    const hub = tooltip.airHub;
+    return (
+      <div className={`wm-map-country-tooltip wm-map-deck-tooltip air ${hub.status}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
+        <strong>{hub.code} · {hub.name}</strong>
+        <span>{hub.city || hub.country} · {Math.round(hub.routeCount)} route edges</span>
+      </div>
+    );
+  }
+  if (tooltip.kind === 'air-flight' && tooltip.airFlight) {
+    const flight = tooltip.airFlight;
+    return (
+      <div className={`wm-map-country-tooltip wm-map-deck-tooltip air ${flight.status}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
+        <strong>{flight.fromCode} &gt; {flight.toCode}</strong>
+        <span>seeded aircraft flow · {Math.round(flight.progress * 100)}% route progress</span>
+      </div>
+    );
+  }
   if (tooltip.kind === 'city' && tooltip.city) {
     const city = tooltip.city;
     return (
@@ -1398,7 +1672,17 @@ function ConflictInspector({ point, onClose }: { point: ConflictMapPoint; onClos
   );
 }
 
-export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, onSelectCity, height = 320, interactive = true, showLabels = true }: WeatherDeckMapProps) {
+export function WeatherDeckMap({
+  items,
+  ucdpEvents = [],
+  transportPayload = null,
+  showAirRoutes = false,
+  selectedCityId = null,
+  onSelectCity,
+  height = 320,
+  interactive = true,
+  showLabels = true,
+}: WeatherDeckMapProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mapHostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -1417,9 +1701,16 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
   const conflictPointsRef = useRef<ConflictMapPoint[]>([]);
   const densityPointsRef = useRef<SignalDensityPoint[]>([]);
   const countryRisksRef = useRef<CountryRisk[]>([]);
+  const airRoutesRef = useRef<AirRoutePath[]>([]);
+  const airHubsRef = useRef<AirHubPoint[]>([]);
+  const airFlightsRef = useRef<AirFlightPoint[]>([]);
+  const animationTimeRef = useRef(0);
+  const airAnimationRafRef = useRef<number | null>(null);
+  const airAnimationLastRef = useRef<number | null>(null);
   const selectedCityIdRef = useRef<string | null>(selectedCityId);
   const selectedConflictIdRef = useRef<string | null>(null);
   const showLabelsRef = useRef(showLabels);
+  const showAirRoutesRef = useRef(showAirRoutes);
   const fallbackAppliedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapDegraded, setMapDegraded] = useState(false);
@@ -1430,6 +1721,9 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
   const [selectedConflict, setSelectedConflict] = useState<ConflictMapPoint | null>(null);
   const points = useMemo(() => normalizePoints(items), [items]);
   const conflictPoints = useMemo(() => normalizeConflictPoints(ucdpEvents), [ucdpEvents]);
+  const airRoutes = useMemo(() => showAirRoutes ? normalizeAirRoutes(transportPayload) : [], [showAirRoutes, transportPayload]);
+  const airHubs = useMemo(() => showAirRoutes ? normalizeAirHubs(transportPayload) : [], [showAirRoutes, transportPayload]);
+  const airFlights = useMemo(() => showAirRoutes ? normalizeAirFlights(transportPayload, airRoutes, animationTimeRef.current) : [], [airRoutes, showAirRoutes, transportPayload]);
   const densityPoints = useMemo(() => buildSignalDensityPoints(points, conflictPoints), [conflictPoints, points]);
   const countryRisks = useMemo(() => buildCountryRisks(conflictPoints), [conflictPoints]);
   const countryRiskByIso = useMemo(() => new Map(countryRisks.map((risk) => [risk.iso2, risk])), [countryRisks]);
@@ -1444,6 +1738,9 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       conflicts: conflictPointsRef.current,
       countryRisks: countryRisksRef.current,
       densityPoints: densityPointsRef.current,
+      airRoutes: showAirRoutesRef.current ? airRoutesRef.current : [],
+      airHubs: showAirRoutesRef.current ? airHubsRef.current : [],
+      airFlights: showAirRoutesRef.current ? airFlightsRef.current : [],
       selectedCityId: selectedCityIdRef.current,
       selectedConflictId: selectedConflictIdRef.current,
       zoom,
@@ -1473,6 +1770,31 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     });
   };
 
+  const stopAirAnimation = () => {
+    if (airAnimationRafRef.current) {
+      window.cancelAnimationFrame(airAnimationRafRef.current);
+      airAnimationRafRef.current = null;
+    }
+    airAnimationLastRef.current = null;
+  };
+
+  const startAirAnimation = () => {
+    stopAirAnimation();
+    if (!showAirRoutesRef.current || !airRoutesRef.current.length) {
+      scheduleDeckUpdate();
+      return;
+    }
+    const tick = (timestamp: number) => {
+      const previous = airAnimationLastRef.current ?? timestamp;
+      airAnimationLastRef.current = timestamp;
+      animationTimeRef.current += Math.min(0.08, Math.max(0, timestamp - previous) / 1000);
+      airFlightsRef.current = normalizeAirFlights(transportPayload, airRoutesRef.current, animationTimeRef.current);
+      scheduleDeckUpdate();
+      airAnimationRafRef.current = window.requestAnimationFrame(tick);
+    };
+    airAnimationRafRef.current = window.requestAnimationFrame(tick);
+  };
+
   const updateDeckTooltip = (next: DeckTooltipState) => {
     pendingTooltipRef.current = next;
     if (tooltipRafRef.current) return;
@@ -1492,6 +1814,18 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     const object = info.object;
     if ('kind' in object && object.kind === 'conflict-cluster') {
       updateDeckTooltip({ kind: 'cluster', x: info.x, y: info.y, cluster: object });
+      return;
+    }
+    if ('path' in object && 'trafficScore' in object) {
+      updateDeckTooltip({ kind: 'air-route', x: info.x, y: info.y, airRoute: object as AirRoutePath });
+      return;
+    }
+    if ('path' in object && 'progress' in object) {
+      updateDeckTooltip({ kind: 'air-flight', x: info.x, y: info.y, airFlight: object as AirFlightPoint });
+      return;
+    }
+    if ('routeCount' in object && 'code' in object) {
+      updateDeckTooltip({ kind: 'air-hub', x: info.x, y: info.y, airHub: object as AirHubPoint });
       return;
     }
     if ('city' in object) {
@@ -1514,6 +1848,9 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
           duration: 520,
         });
       }
+      return;
+    }
+    if ('path' in object || ('routeCount' in object && 'code' in object)) {
       return;
     }
     if ('city' in object) {
@@ -1589,6 +1926,15 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
     showLabelsRef.current = showLabels;
     scheduleDeckUpdate();
   }, [showLabels]);
+
+  useEffect(() => {
+    showAirRoutesRef.current = showAirRoutes;
+    airRoutesRef.current = airRoutes;
+    airHubsRef.current = airHubs;
+    airFlightsRef.current = airFlights;
+    startAirAnimation();
+    return () => stopAirAnimation();
+  }, [airFlights, airHubs, airRoutes, showAirRoutes]);
 
   useEffect(() => {
     onCountrySelectRef.current = (risk: CountryRisk) => {
@@ -1759,6 +2105,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
         window.cancelAnimationFrame(countryPulseRafRef.current);
         countryPulseRafRef.current = null;
       }
+      stopAirAnimation();
       if (deckRafRef.current) {
         window.cancelAnimationFrame(deckRafRef.current);
         deckRafRef.current = null;
@@ -1808,7 +2155,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
   return (
     <div
       ref={rootRef}
-      className={`wm-weather-deck-map map-ready ${points.length ? 'has-screen-points' : 'no-screen-points'} ${mapDegraded ? 'map-degraded' : ''} ${mapInteracting ? 'map-interacting' : ''}`}
+      className={`wm-weather-deck-map map-ready ${points.length ? 'has-screen-points' : 'no-screen-points'} ${showAirRoutes && airRoutes.length ? 'has-air-routes' : ''} ${mapDegraded ? 'map-degraded' : ''} ${mapInteracting ? 'map-interacting' : ''}`}
       style={{ height: `${height}px` }}
     >
       <div ref={mapHostRef} className={`wm-weather-deck-basemap ${mapReady || points.length ? 'ready' : ''}`} />
@@ -1819,6 +2166,7 @@ export function WeatherDeckMap({ items, ucdpEvents = [], selectedCityId = null, 
       <div className="wm-weather-deck-legend" aria-hidden="true">
         <span><i className="hot" />HOT</span>
         <span><i className="cool" />COOL</span>
+        {showAirRoutes && airRoutes.length ? <span><i className="air" />AIR ROUTES</span> : null}
         {conflictPoints.length ? <span><i className="ucdp" />UCDP</span> : null}
         {countryRisks.length ? <span><i className="country" />COUNTRY RISK</span> : null}
       </div>

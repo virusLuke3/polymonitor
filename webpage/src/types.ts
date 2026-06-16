@@ -2264,6 +2264,60 @@ export type RuntimeGlobalTransportShippingPayload = {
     transitScannedFiles?: number | string | null;
     aisStatus?: string | null;
   } | null;
+  aviation?: {
+    generatedAt?: string | null;
+    mode?: string | null;
+    hubs?: Array<{
+      code?: string | null;
+      name?: string | null;
+      city?: string | null;
+      country?: string | null;
+      lat?: number | string | null;
+      lon?: number | string | null;
+      routeCount?: number | string | null;
+      status?: string | null;
+      riskScore?: number | string | null;
+    }>;
+    routes?: Array<{
+      id?: string | null;
+      fromCode?: string | null;
+      toCode?: string | null;
+      fromName?: string | null;
+      toName?: string | null;
+      fromCity?: string | null;
+      toCity?: string | null;
+      fromCountry?: string | null;
+      toCountry?: string | null;
+      fromLat?: number | string | null;
+      fromLon?: number | string | null;
+      toLat?: number | string | null;
+      toLon?: number | string | null;
+      airline?: string | null;
+      equipment?: string | null;
+      corridor?: string | null;
+      trafficScore?: number | string | null;
+      riskScore?: number | string | null;
+      status?: string | null;
+      phase?: number | string | null;
+      speed?: number | string | null;
+    }>;
+    flights?: Array<{
+      id?: string | null;
+      fromCode?: string | null;
+      toCode?: string | null;
+      fromLat?: number | string | null;
+      fromLon?: number | string | null;
+      toLat?: number | string | null;
+      toLon?: number | string | null;
+      phase?: number | string | null;
+      speed?: number | string | null;
+      status?: string | null;
+      riskScore?: number | string | null;
+    }>;
+    ops?: Array<Record<string, unknown>>;
+    airlines?: Array<{ name?: string | null; routeCount?: number | string | null }>;
+    news?: Array<Record<string, unknown>>;
+  } | null;
   items: RuntimeGlobalTransportShippingItem[];
 };
 

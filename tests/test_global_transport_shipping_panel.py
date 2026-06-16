@@ -86,6 +86,13 @@ def test_build_global_transport_shipping_payload_from_structured_sources(tmp_pat
     assert payload["summary"]["transitCatalogFiles"] == 1
     assert payload["summary"]["transitScannedFiles"] == 1
     assert payload["summary"]["aisStatus"] == "missing-key"
+    assert payload["aviation"]["mode"] == "seeded-route-graph"
+    assert payload["aviation"]["hubs"][0]["code"] == "AAA"
+    assert payload["aviation"]["routes"][0]["fromCode"] in {"AAA", "BBB", "CCC"}
+    assert payload["aviation"]["flights"][0]["id"].startswith("flight-")
+    assert payload["aviation"]["ops"][0]["routeCount"] >= 1
+    assert payload["aviation"]["airlines"][0]["name"] == "Fixture Air"
+    assert payload["aviation"]["news"][0]["source"] == "OpenFlights"
     assert any(item["evidenceType"] == "OPENFLIGHTS" and item["entity"] == "AAA" for item in payload["items"])
     assert any(item["evidenceType"] == "TRANSITLAND" and item["metric"] == 2 for item in payload["items"])
     assert any(item["evidenceType"] == "AISSTREAM" and item["severity"] == "watch" for item in payload["items"])
