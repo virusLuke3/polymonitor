@@ -25876,19 +25876,20 @@ button.wm-evidence-row {
 .wm-aviation-icon {
   display: inline-grid;
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   place-items: center;
-  border: 1px solid rgba(56, 189, 248, 0.2);
+  border: 1px solid rgba(56, 189, 248, 0.3);
   border-radius: 5px;
-  background: rgba(56, 189, 248, 0.07);
+  background: rgba(56, 189, 248, 0.1);
   color: rgba(125, 211, 252, 0.95);
 }
 
 .wm-aviation-icon svg {
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
   fill: currentColor;
+  transform: rotate(-10deg);
 }
 
 .wm-aviation-icon.flight {
@@ -25947,15 +25948,15 @@ button.wm-evidence-row {
 }
 
 .wm-aviation-tabs button .wm-aviation-icon {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 4px;
   opacity: 0.7;
 }
 
 .wm-aviation-tabs button .wm-aviation-icon svg {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 
 .wm-aviation-tabs button strong {
