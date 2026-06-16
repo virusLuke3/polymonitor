@@ -91,12 +91,12 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
   const embedUrl = youtubeEmbedUrl(item);
   const videoId = youtubeVideoId(item);
   const externalUrl = item.externalUrl || item.sourceUrl || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : null);
-  const [frameState, setFrameState] = useState<'connecting' | 'playing' | 'blocked' | 'paused'>(embedUrl ? 'connecting' : 'blocked');
+  const [frameState, setFrameState] = useState<'connecting' | 'playing' | 'waiting' | 'blocked' | 'paused' | 'external'>(embedUrl ? 'connecting' : 'external');
   const shouldLoad = useStaggeredLoad(inView && !idle, 900);
 
   useEffect(() => {
     if (!embedUrl) {
-      setFrameState('blocked');
+      setFrameState('external');
       return undefined;
     }
     if (!shouldLoad) {
@@ -104,7 +104,7 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
       return undefined;
     }
     setFrameState('connecting');
-    const timer = window.setTimeout(() => setFrameState((state) => (state === 'playing' ? state : 'blocked')), 12000);
+    const timer = window.setTimeout(() => setFrameState((state) => (state === 'playing' || state === 'blocked' ? state : 'waiting')), 12000);
     return () => window.clearTimeout(timer);
   }, [embedUrl, shouldLoad]);
 
@@ -113,10 +113,16 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
     if (!embedUrl || !iframe) return undefined;
     const handleMessage = (event: MessageEvent) => {
       if (!youtubeBridgeMessageMatches(event, iframe, videoId)) return;
-      const type = String((event.data as { type?: string }).type || '');
-      if (type === 'yt-ready' || type === 'yt-state') setFrameState('playing');
-      if (type === 'yt-error' || type === 'yt-timeout') setFrameState('blocked');
-      if (type === 'yt-autoplay-failed') setFrameState('connecting');
+      const data = event.data as { type?: string; state?: number | string };
+      const type = String(data.type || '');
+      if (type === 'yt-ready') setFrameState('waiting');
+      if (type === 'yt-state') {
+        const state = Number(data.state);
+        if (state === 1 || state === 3) setFrameState('playing');
+        else if (state === 2 || state === 0 || state === 5) setFrameState('waiting');
+      }
+      if (type === 'yt-error') setFrameState('blocked');
+      if (type === 'yt-timeout' || type === 'yt-autoplay-failed') setFrameState('waiting');
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
@@ -148,7 +154,7 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
           referrerPolicy="strict-origin-when-cross-origin"
-          onLoad={() => setFrameState('connecting')}
+          onLoad={() => setFrameState('waiting')}
         />
       ) : embedUrl ? (
         <div className="wm-market-youtube-fallback">

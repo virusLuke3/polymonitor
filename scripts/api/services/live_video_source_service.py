@@ -100,6 +100,30 @@ YOUTUBE_PROBE_ENABLED_ENV = "POLYDATA_MARKET_TV_YOUTUBE_PROBE_ENABLED"
 HLS_PROBE_ENABLED_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_ENABLED"
 HLS_PROBE_TIMEOUT_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_TIMEOUT_SECONDS"
 HLS_PROBE_WORKERS_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_WORKERS"
+YOUTUBE_FALLBACK_VIDEO_IDS = {
+    "nasa-live-youtube": "FuuC4dpSQ1M",
+    "sky-news-live": "OkExVwVzrUY",
+    "dw-news-live": "LuKwFajn37U",
+    "aljazeera-live": "gCNeDWCI0vo",
+    "fox-weather-live": "wt6SIE7BXS8",
+    "france24-english-youtube": "HvZt-nh9sGg",
+    "cnbc-television-youtube": "9NyxcX3rhQs",
+    "bloomberg-markets-youtube": "iEpJwprxDdk",
+    "yahoo-finance-youtube": "KQp-e_XQnDE",
+    "reuters-youtube": "mMAF4eNkm-U",
+    "livenow-fox-youtube": "B4bb4RLwMK8",
+    "bbc-news-youtube": "bjgQzJzCZKs",
+    "trt-world-youtube": "ABfFhWzWs0s",
+}
+TRUSTED_YOUTUBE_FALLBACK_SOURCE_IDS = {
+    "trusted-hls-sky-news",
+    "trusted-hls-euronews",
+    "trusted-hls-alarabiya",
+    "trusted-hls-cbs-news",
+    "trusted-hls-nbc-news",
+    "trusted-hls-trt-world",
+    "trusted-hls-al-hadath",
+}
 
 
 def utc_now_iso() -> str:
@@ -206,7 +230,8 @@ def normalize_source_item(raw: Dict[str, Any], *, generated_at: str, curated: bo
     external_url = _string(raw.get("externalUrl"))
     youtube_handle = _string(raw.get("youtubeHandle"))
     youtube_channel_id = _string(raw.get("youtubeChannelId"))
-    fallback_video_id = _string(raw.get("fallbackVideoId"))
+    raw_id = _string(raw.get("id")) or f"{_string(raw.get('sourceName')) or 'source'}-{display_name}"
+    fallback_video_id = _string(raw.get("fallbackVideoId")) or YOUTUBE_FALLBACK_VIDEO_IDS.get(_slug(raw_id))
     if source_type == "hls" and not hls_url:
         source_type = "external" if external_url else "hls"
     if source_type == "youtube" and not (external_url or youtube_handle or fallback_video_id):
@@ -221,7 +246,7 @@ def normalize_source_item(raw: Dict[str, Any], *, generated_at: str, curated: bo
         return None
     status = _status_for(source_type, raw)
     source_name = _string(raw.get("sourceName")) or ("curated" if curated else "iptv-org")
-    item_id = _string(raw.get("id")) or f"{source_name}-{display_name}"
+    item_id = raw_id
     item = {
         "id": _slug(item_id),
         "name": _string(raw.get("name") or display_name) or display_name,
@@ -358,6 +383,48 @@ def _dedupe(items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
         seen.add(key)
         output.append(item)
+    return output
+
+
+def _trusted_youtube_fallback_items(existing_items: List[Dict[str, Any]], *, generated_at: str) -> List[Dict[str, Any]]:
+    existing_video_ids = {
+        str(item.get("fallbackVideoId") or item.get("youtubeLiveVideoId") or "").strip()
+        for item in existing_items
+        if str(item.get("sourceType") or "").lower() == "youtube"
+    }
+    existing_video_ids.discard("")
+    output: List[Dict[str, Any]] = []
+    for source in trusted_hls_sources.TRUSTED_HLS_SOURCES:
+        source_id = _slug(source.get("id"))
+        fallback_video_id = _string(source.get("fallbackVideoId"))
+        if source_id not in TRUSTED_YOUTUBE_FALLBACK_SOURCE_IDS or not fallback_video_id:
+            continue
+        if fallback_video_id in existing_video_ids:
+            continue
+        display_name = str(source.get("displayName") or "Trusted YouTube").replace(" HLS", "").replace("YouTube Fallback", "").strip()
+        raw_item = {
+            "id": f"trusted-youtube-{source_id.removeprefix('trusted-hls-')}",
+            "displayName": f"{display_name} YouTube",
+            "category": source.get("category"),
+            "sourceRole": source.get("sourceRole") or "channel",
+            "sourceType": "youtube",
+            "region": source.get("region"),
+            "country": source.get("country"),
+            "language": source.get("language"),
+            "youtubeProbeEnabled": False,
+            "fallbackVideoId": fallback_video_id,
+            "externalUrl": f"https://www.youtube.com/watch?v={fallback_video_id}",
+            "sourceName": "worldmonitor-trusted-youtube",
+            "sourceUrl": f"https://www.youtube.com/watch?v={fallback_video_id}",
+            "marketTags": list(source.get("marketTags") or []),
+            "matchedTerms": list(source.get("matchedTerms") or source.get("marketTags") or [])[:4],
+            "marketUseCase": f"YouTube fallback for {source.get('marketUseCase') or 'trusted live market video.'}",
+            "lastCheckedAt": generated_at,
+        }
+        item = normalize_source_item(raw_item, generated_at=generated_at, curated=True)
+        if item:
+            existing_video_ids.add(fallback_video_id)
+            output.append(item)
     return output
 
 
@@ -838,10 +905,17 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
             item = normalize_source_item(raw, generated_at=generated_at, curated=True)
             if item:
                 manifest_items.append(item)
+        trusted_youtube_fallbacks = _trusted_youtube_fallback_items(manifest_items, generated_at=generated_at)
+        manifest_items.extend(trusted_youtube_fallbacks)
         youtube_probe_state = _enrich_youtube_live_sources(ctx, manifest_items, generated_at=generated_at)
         source_states["trustedHls"] = {
             "status": "ok",
             "count": len([item for item in manifest_items if item.get("playbackTier") == "trusted-hls"]),
+            "lastSuccessAt": generated_at,
+        }
+        source_states["trustedYoutubeFallback"] = {
+            "status": "ok",
+            "count": len(trusted_youtube_fallbacks),
             "lastSuccessAt": generated_at,
         }
         source_states["manifest"] = {"status": "ok", "count": len(manifest_items), "lastSuccessAt": generated_at}

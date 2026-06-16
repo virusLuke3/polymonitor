@@ -49,6 +49,29 @@ def test_market_tv_wire_adds_trusted_hls_sources_without_iptv() -> None:
     assert any(item["id"] == "trusted-hls-cnbc" and item.get("hlsProxyRequired") is True for item in trusted)
 
 
+def test_market_youtube_channels_use_curated_fallback_embeds_without_probe() -> None:
+    payload = service.build_market_tv_wire_payload(
+        {
+            "utc_now_iso": lambda: "2026-06-15T00:00:00Z",
+            "market_tv_youtube_probe_enabled": False,
+            "market_tv_hls_probe_enabled": False,
+        },
+        include_iptv=False,
+    )
+    youtube_payload = service.normalize_market_youtube_channels_payload(payload, limit=80)
+    tv_payload = service.normalize_market_tv_wire_payload(payload, limit=80)
+
+    youtube_ids = {item["id"] for item in youtube_payload["items"]}
+
+    assert youtube_payload["summary"]["embedReady"] >= 16
+    assert payload["sources"]["trustedYoutubeFallback"]["count"] >= 4
+    assert "trusted-youtube-cbs-news" in youtube_ids
+    assert "youtube-nocookie.com/embed/R9L8sDK8iEc" in next(
+        item for item in youtube_payload["items"] if item["id"] == "trusted-youtube-cbs-news"
+    )["youtubeEmbedUrl"]
+    assert all(item["sourceType"] == "hls" for item in tv_payload["items"])
+
+
 def test_market_tv_wire_m3u_parser_keeps_https_hls_and_marks_not_24_7() -> None:
     text = """
 #EXTM3U
@@ -373,4 +396,5 @@ def test_market_tv_wire_seed_keeps_curated_manifest_items_when_iptv_is_large(mon
     ids = [item["id"] for item in payload["items"]]
 
     assert "yt-low-score" in ids
-    assert len(payload["items"]) == 24
+    assert len(payload["items"]) >= 24
+    assert not any(item_id.startswith("iptv-") for item_id in ids)

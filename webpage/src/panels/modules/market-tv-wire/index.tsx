@@ -273,7 +273,7 @@ function MarketTvPreview({
       return undefined;
     }
     setYoutubeFrameState('connecting');
-    const timer = window.setTimeout(() => setYoutubeFrameState((state) => (state === 'playing' ? state : 'blocked')), 12000);
+    const timer = window.setTimeout(() => setYoutubeFrameState((state) => (state === 'playing' || state === 'blocked' ? state : 'waiting')), 12000);
     return () => window.clearTimeout(timer);
   }, [youtubeUrl, shouldLoad]);
 
@@ -282,10 +282,16 @@ function MarketTvPreview({
     if (!youtubeUrl || !iframe) return undefined;
     const handleMessage = (event: MessageEvent) => {
       if (!youtubeBridgeMessageMatches(event, iframe, youtubeId)) return;
-      const type = String((event.data as { type?: string }).type || '');
-      if (type === 'yt-ready' || type === 'yt-state') setYoutubeFrameState('playing');
-      if (type === 'yt-error' || type === 'yt-timeout') setYoutubeFrameState('blocked');
-      if (type === 'yt-autoplay-failed') setYoutubeFrameState('waiting');
+      const data = event.data as { type?: string; state?: number | string };
+      const type = String(data.type || '');
+      if (type === 'yt-ready') setYoutubeFrameState('waiting');
+      if (type === 'yt-state') {
+        const state = Number(data.state);
+        if (state === 1 || state === 3) setYoutubeFrameState('playing');
+        else if (state === 2 || state === 0 || state === 5) setYoutubeFrameState('waiting');
+      }
+      if (type === 'yt-error') setYoutubeFrameState('blocked');
+      if (type === 'yt-timeout' || type === 'yt-autoplay-failed') setYoutubeFrameState('waiting');
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
