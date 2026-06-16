@@ -157,11 +157,19 @@ def _relay_base_url(ctx: dict) -> str:
 
 
 def _relay_token(ctx: dict) -> str:
-    return _string(ctx.get("youtube_live_relay_token") or os.environ.get(YOUTUBE_RELAY_TOKEN_ENV))
+    return _string(
+        ctx.get("youtube_live_relay_token")
+        or os.environ.get(YOUTUBE_RELAY_TOKEN_ENV)
+        or os.environ.get("RELAY_SHARED_SECRET")
+    )
 
 
 def _relay_auth_header(ctx: dict) -> str:
-    header = _string(ctx.get("youtube_live_relay_auth_header") or os.environ.get(YOUTUBE_RELAY_AUTH_HEADER_ENV))
+    header = _string(
+        ctx.get("youtube_live_relay_auth_header")
+        or os.environ.get(YOUTUBE_RELAY_AUTH_HEADER_ENV)
+        or os.environ.get("RELAY_AUTH_HEADER")
+    )
     return header or "x-relay-key"
 
 

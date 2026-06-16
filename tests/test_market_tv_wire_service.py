@@ -125,9 +125,11 @@ def test_youtube_probe_parses_live_video_and_hls_manifest() -> None:
 
 def test_youtube_probe_uses_relay_before_scrape() -> None:
     calls: list[str] = []
+    seen_headers: list[dict] = []
 
     def http_json_get(url: str, **kwargs: object) -> dict:
         calls.append(url)
+        seen_headers.append(dict(kwargs.get("headers") or {}))
         return {
             "videoId": "abcDEF12345",
             "isLive": True,
@@ -140,6 +142,7 @@ def test_youtube_probe_uses_relay_before_scrape() -> None:
     payload = youtube_probe.probe_youtube_live(
         {
             "youtube_live_relay_base_url": "https://relay.example",
+            "youtube_live_relay_token": "secret",
             "http_json_get": http_json_get,
         },
         channel="@demo",
@@ -147,6 +150,8 @@ def test_youtube_probe_uses_relay_before_scrape() -> None:
 
     assert calls and calls[0].startswith("https://relay.example/youtube-live?")
     assert "channel=%40demo" in calls[0]
+    assert seen_headers[0]["x-relay-key"] == "secret"
+    assert seen_headers[0]["Authorization"] == "Bearer secret"
     assert payload["videoId"] == "abcDEF12345"
     assert payload["isLive"] is True
 
