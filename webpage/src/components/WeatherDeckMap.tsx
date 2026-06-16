@@ -131,6 +131,7 @@ type ConflictClusterPoint = {
 
 type AirRoutePath = {
   id: string;
+  routeKey: string;
   fromCode: string;
   toCode: string;
   corridor: string;
@@ -593,6 +594,12 @@ function wrapDeltaLon(delta: number) {
   return delta;
 }
 
+function normalizeLon(lon: number) {
+  let normalized = ((lon + 180) % 360 + 360) % 360 - 180;
+  if (normalized === -180 && lon > 0) normalized = 180;
+  return normalized;
+}
+
 function airArcPath(from: [number, number], to: [number, number], steps = 36): [number, number][] {
   const [fromLon, fromLat] = from;
   const [toLonRaw, toLat] = to;
@@ -606,13 +613,45 @@ function airArcPath(from: [number, number], to: [number, number], steps = 36): [
   for (let index = 0; index <= steps; index += 1) {
     const t = index / steps;
     const one = 1 - t;
-    let lon = one * one * fromLon + 2 * one * t * controlLon + t * t * (fromLon + deltaLon);
-    if (lon > 180) lon -= 360;
-    if (lon < -180) lon += 360;
+    const lon = one * one * fromLon + 2 * one * t * controlLon + t * t * (fromLon + deltaLon);
     const lat = one * one * fromLat + 2 * one * t * controlLat + t * t * toLat;
     points.push([lon, Math.max(-85, Math.min(85, lat))]);
   }
   return points;
+}
+
+function splitWrappedAirPath(points: [number, number][]): [number, number][][] {
+  if (points.length < 2) return [];
+  const segments: [number, number][][] = [];
+  let current: [number, number][] = [[normalizeLon(points[0]?.[0] ?? 0), points[0]?.[1] ?? 0]];
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const point = points[index];
+    if (!previous || !point) continue;
+    const [prevLon, prevLat] = previous;
+    const [lon, lat] = point;
+    let crossed = false;
+    if ((prevLon <= 180 && lon > 180) || (prevLon >= 180 && lon < 180 && Math.abs(lon - prevLon) > 90)) {
+      const t = (180 - prevLon) / (lon - prevLon || 1);
+      const crossingLat = prevLat + (lat - prevLat) * Math.max(0, Math.min(1, t));
+      current.push([180, crossingLat]);
+      if (current.length >= 2) segments.push(current);
+      current = [[-180, crossingLat], [normalizeLon(lon), lat]];
+      crossed = true;
+    } else if ((prevLon >= -180 && lon < -180) || (prevLon <= -180 && lon > -180 && Math.abs(lon - prevLon) > 90)) {
+      const t = (-180 - prevLon) / (lon - prevLon || 1);
+      const crossingLat = prevLat + (lat - prevLat) * Math.max(0, Math.min(1, t));
+      current.push([-180, crossingLat]);
+      if (current.length >= 2) segments.push(current);
+      current = [[180, crossingLat], [normalizeLon(lon), lat]];
+      crossed = true;
+    }
+    if (!crossed) current.push([normalizeLon(lon), lat]);
+  }
+  if (current.length >= 2) segments.push(current);
+  return segments
+    .map((segment) => segment.filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat)))
+    .filter((segment) => segment.length >= 2);
 }
 
 function pointAlongPath(path: [number, number][], progress: number): [number, number] {
@@ -637,18 +676,20 @@ function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | nu
     const fromCode = String(route.fromCode || '').trim();
     const toCode = String(route.toCode || '').trim();
     if (!from || !to || !fromCode || !toCode) return [];
-    if (Math.abs(to[0] - from[0]) > 170) return [];
-    return [{
-      id: String(route.id || `${fromCode}-${toCode}-${index}`),
+    const id = String(route.id || `${fromCode}-${toCode}-${index}`);
+    const routeKey = `${fromCode}-${toCode}`;
+    return splitWrappedAirPath(airArcPath(from, to)).map((path, segmentIndex) => ({
+      id: `${id}-${segmentIndex}`,
+      routeKey,
       fromCode,
       toCode,
       corridor: String(route.corridor || `${route.fromCountry || ''} / ${route.toCountry || ''}`).trim(),
-      path: airArcPath(from, to),
+      path,
       trafficScore: numberValue(route.trafficScore) ?? 30,
       riskScore: numberValue(route.riskScore) ?? 0,
       status: String(route.status || 'normal'),
       airline: String(route.airline || 'OpenFlights'),
-    }];
+    }));
   });
 }
 
@@ -672,7 +713,11 @@ function normalizeAirHubs(payload?: RuntimeGlobalTransportShippingPayload | null
 }
 
 function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | null | undefined, routes: AirRoutePath[], animationTime: number): AirFlightPoint[] {
-  const routeByKey = new Map(routes.map((route) => [`${route.fromCode}-${route.toCode}`, route]));
+  const routeByKey = new Map<string, AirRoutePath>();
+  routes.forEach((route) => {
+    const existing = routeByKey.get(route.routeKey);
+    if (!existing || route.path.length > existing.path.length) routeByKey.set(route.routeKey, route);
+  });
   return (payload?.aviation?.flights || []).flatMap((flight, index): AirFlightPoint[] => {
     const fromCode = String(flight.fromCode || '').trim();
     const toCode = String(flight.toCode || '').trim();
@@ -1214,11 +1259,11 @@ function buildWeatherDeckLayers({
       data: airRoutes,
       getPath: (route) => route.path,
       getColor: (route) => route.status === 'watch' || route.riskScore >= 55
-        ? [255, 183, 77, 92]
-        : [48, 196, 255, 78],
-      getWidth: (route) => Math.max(1, Math.min(4.5, 1 + route.trafficScore / 28)),
-      widthMinPixels: 1,
-      widthMaxPixels: 5,
+        ? [255, 183, 77, 54]
+        : [48, 196, 255, 44],
+      getWidth: (route) => Math.max(0.45, Math.min(2.2, 0.45 + route.trafficScore / 64)),
+      widthMinPixels: 0.45,
+      widthMaxPixels: 2.4,
       jointRounded: true,
       capRounded: true,
       pickable: true,
@@ -1227,14 +1272,14 @@ function buildWeatherDeckLayers({
     }));
     layers.push(new PathLayer<AirRoutePath>({
       id: 'air-route-corridors-core',
-      data: airRoutes.slice(0, zoom < 2.2 ? 14 : 24),
+      data: airRoutes.slice(0, zoom < 2.2 ? 90 : 160),
       getPath: (route) => route.path,
       getColor: (route) => route.status === 'watch' || route.riskScore >= 55
-        ? [255, 206, 88, 172]
-        : [60, 220, 255, 152],
-      getWidth: (route) => Math.max(0.7, Math.min(2.4, 0.8 + route.trafficScore / 56)),
-      widthMinPixels: 0.8,
-      widthMaxPixels: 3,
+        ? [255, 206, 88, 142]
+        : [60, 220, 255, 116],
+      getWidth: (route) => Math.max(0.55, Math.min(2.1, 0.55 + route.trafficScore / 76)),
+      widthMinPixels: 0.55,
+      widthMaxPixels: 2.4,
       jointRounded: true,
       capRounded: true,
       pickable: true,
@@ -1248,14 +1293,14 @@ function buildWeatherDeckLayers({
       id: 'air-route-moving-aircraft',
       data: airFlights,
       getPosition: (flight) => pointAlongPath(flight.path, flight.progress),
-      getRadius: (flight) => flight.status === 'watch' || flight.riskScore >= 55 ? 33000 : 24500,
+      getRadius: (flight) => flight.status === 'watch' || flight.riskScore >= 55 ? 25000 : 18000,
       getFillColor: (flight) => flight.status === 'watch' || flight.riskScore >= 55
         ? [255, 222, 92, 228]
         : [92, 241, 255, 220],
       getLineColor: [6, 13, 20, 230],
       getLineWidth: 1,
-      radiusMinPixels: 3.5,
-      radiusMaxPixels: 7,
+      radiusMinPixels: 2.5,
+      radiusMaxPixels: 5.5,
       lineWidthMinPixels: 1,
       pickable: true,
       autoHighlight: true,

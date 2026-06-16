@@ -2298,6 +2298,7 @@ export type RuntimeGlobalTransportShippingPayload = {
       trafficScore?: number | string | null;
       riskScore?: number | string | null;
       status?: string | null;
+      layer?: string | null;
       phase?: number | string | null;
       speed?: number | string | null;
     }>;

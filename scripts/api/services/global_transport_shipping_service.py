@@ -20,6 +20,8 @@ AISSTREAM_CACHE_KEY = "sample-v1"
 DEFAULT_LIMIT = 14
 DEFAULT_TTL_SECONDS = 900
 DEFAULT_AISSTREAM_SAMPLE_INTERVAL_SECONDS = 21600
+AVIATION_ROUTE_LAYER_LIMIT = 360
+AVIATION_FLIGHT_LAYER_LIMIT = 140
 
 OPENFLIGHTS_AIRPORTS_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat"
 OPENFLIGHTS_ROUTES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat"
@@ -246,7 +248,7 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
 
     hubs = []
     seen_hubs: set[str] = set()
-    for airport_id, count in airport_counts.most_common(20):
+    for airport_id, count in airport_counts.most_common(48):
         airport = airports.get(airport_id)
         if not airport:
             continue
@@ -255,7 +257,7 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
             continue
         seen_hubs.add(key)
         hubs.append({**airport, "routeCount": count})
-        if len(hubs) >= 10:
+        if len(hubs) >= 24:
             break
 
     corridors = [
@@ -264,6 +266,8 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
     ]
     top_route_edges: List[Dict[str, Any]] = []
     seen_pairs: set[tuple[str, str]] = set()
+    airport_route_limits: Counter[str] = Counter()
+    country_pair_limits: Counter[tuple[str, str]] = Counter()
     route_edges.sort(
         key=lambda edge: (
             airport_counts[str(edge.get("fromCode") or "")]
@@ -276,9 +280,19 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
         pair = tuple(sorted([str(edge.get("fromCode") or ""), str(edge.get("toCode") or "")]))
         if not pair[0] or not pair[1] or pair in seen_pairs:
             continue
+        country_pair = tuple(sorted([str(edge.get("fromCountry") or "Unknown"), str(edge.get("toCountry") or "Unknown")]))
+        from_code = str(edge.get("fromCode") or "")
+        to_code = str(edge.get("toCode") or "")
+        if airport_route_limits[from_code] >= 28 or airport_route_limits[to_code] >= 28:
+            continue
+        if country_pair_limits[country_pair] >= 34:
+            continue
         seen_pairs.add(pair)
-        from_score = airport_counts[str(edge.get("fromCode") or "")]
-        to_score = airport_counts[str(edge.get("toCode") or "")]
+        airport_route_limits[from_code] += 1
+        airport_route_limits[to_code] += 1
+        country_pair_limits[country_pair] += 1
+        from_score = airport_counts[from_code]
+        to_score = airport_counts[to_code]
         traffic_score = min(100, max(18, round((from_score + to_score) / 35)))
         is_international = edge.get("fromCountry") != edge.get("toCountry")
         route_key = f"{edge.get('fromCode')}-{edge.get('toCode')}"
@@ -291,11 +305,12 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
                 "trafficScore": traffic_score,
                 "riskScore": min(88, max(8, 18 + (12 if is_international else 0) + round(traffic_score * 0.28))),
                 "status": "watch" if is_international and traffic_score >= 70 else "normal",
+                "layer": "trunk" if traffic_score >= 70 else ("international" if is_international else "regional"),
                 "phase": round((phase_seed % 1000) / 1000, 3),
                 "speed": round(0.055 + ((phase_seed % 7) * 0.007), 3),
             }
         )
-        if len(top_route_edges) >= 28:
+        if len(top_route_edges) >= AVIATION_ROUTE_LAYER_LIMIT:
             break
 
     return {
@@ -312,7 +327,7 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
 
 def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str) -> Dict[str, Any]:
     hubs = []
-    for hub in route_stats.get("topHubs", [])[:12]:
+    for hub in route_stats.get("topHubs", [])[:24]:
         code = hub.get("iata") or hub.get("icao") or hub.get("id")
         route_count = int(hub.get("routeCount") or 0)
         hubs.append(
@@ -328,9 +343,9 @@ def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str) -> 
                 "riskScore": min(92, max(12, round(route_count / 18))),
             }
         )
-    routes = route_stats.get("topRoutes", [])[:24]
+    routes = route_stats.get("topRoutes", [])[:AVIATION_ROUTE_LAYER_LIMIT]
     flights = []
-    for index, route in enumerate(routes[:12]):
+    for index, route in enumerate(routes[:AVIATION_FLIGHT_LAYER_LIMIT]):
         flights.append(
             {
                 "id": f"flight-{route.get('id') or index}",
