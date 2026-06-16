@@ -12,6 +12,7 @@ YOUTUBE_LIVE_POSITIVE_TTL_SECONDS = 60
 YOUTUBE_LIVE_NEGATIVE_TTL_SECONDS = 30
 YOUTUBE_RELAY_BASE_ENV = "POLYDATA_YOUTUBE_LIVE_RELAY_BASE_URL"
 YOUTUBE_RELAY_TOKEN_ENV = "POLYDATA_YOUTUBE_LIVE_RELAY_TOKEN"
+YOUTUBE_RELAY_AUTH_HEADER_ENV = "POLYDATA_YOUTUBE_LIVE_RELAY_AUTH_HEADER"
 CHROME_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -159,10 +160,16 @@ def _relay_token(ctx: dict) -> str:
     return _string(ctx.get("youtube_live_relay_token") or os.environ.get(YOUTUBE_RELAY_TOKEN_ENV))
 
 
+def _relay_auth_header(ctx: dict) -> str:
+    header = _string(ctx.get("youtube_live_relay_auth_header") or os.environ.get(YOUTUBE_RELAY_AUTH_HEADER_ENV))
+    return header or "x-relay-key"
+
+
 def _try_relay(ctx: dict, *, channel: str = "", video_id: str = "") -> Optional[Dict[str, Any]]:
     base_url = _relay_base_url(ctx)
     if not base_url:
         return None
+    relay_endpoint = base_url if base_url.rstrip("/").endswith(("/youtube-live", "/youtube/live")) else f"{base_url}/youtube-live"
     params: Dict[str, str] = {}
     if channel:
         params["channel"] = channel
@@ -170,12 +177,15 @@ def _try_relay(ctx: dict, *, channel: str = "", video_id: str = "") -> Optional[
         params["videoId"] = video_id
     if not params:
         return None
-    separator = "&" if "?" in base_url else "?"
-    relay_url = f"{base_url}{separator}{urlencode(params)}"
+    separator = "&" if "?" in relay_endpoint else "?"
+    relay_url = f"{relay_endpoint}{separator}{urlencode(params)}"
     headers = {"User-Agent": CHROME_UA, "Accept": "application/json"}
     token = _relay_token(ctx)
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        relay_header = _relay_auth_header(ctx)
+        headers[relay_header] = token
+        if relay_header.lower() != "authorization":
+            headers["Authorization"] = f"Bearer {token}"
     getter = ctx.get("http_json_get")
     if callable(getter):
         payload = getter(relay_url, timeout=8, headers=headers)

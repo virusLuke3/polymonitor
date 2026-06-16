@@ -139,13 +139,14 @@ def test_youtube_probe_uses_relay_before_scrape() -> None:
 
     payload = youtube_probe.probe_youtube_live(
         {
-            "youtube_live_relay_base_url": "https://relay.example/api/youtube/live",
+            "youtube_live_relay_base_url": "https://relay.example",
             "http_json_get": http_json_get,
         },
         channel="@demo",
     )
 
-    assert calls and "channel=%40demo" in calls[0]
+    assert calls and calls[0].startswith("https://relay.example/youtube-live?")
+    assert "channel=%40demo" in calls[0]
     assert payload["videoId"] == "abcDEF12345"
     assert payload["isLive"] is True
 
