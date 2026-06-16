@@ -615,6 +615,10 @@ def _market_links(ctx: dict, query: str) -> List[Dict[str, Any]]:
         rows = search(query, limit=3) or []
     except Exception:
         return []
+    if isinstance(rows, dict):
+        rows = rows.get("items") or []
+    if not isinstance(rows, list):
+        return []
     links = []
     for row in rows[:3]:
         if not isinstance(row, dict):

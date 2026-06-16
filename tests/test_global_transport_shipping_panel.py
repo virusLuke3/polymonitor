@@ -99,6 +99,32 @@ def test_build_global_transport_shipping_payload_from_structured_sources(tmp_pat
     assert payload["items"][0]["relatedPolymarketMarketIds"]
 
 
+def test_build_global_transport_shipping_payload_accepts_dict_market_search(tmp_path, monkeypatch):
+    openflights_root = tmp_path / "openflights"
+    _write_openflights_fixture(openflights_root)
+    monkeypatch.setenv("POLYDATA_OPENFLIGHTS_ROOT", str(openflights_root))
+    monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
+    monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
+    monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+
+    def http_text_get(url: str, **_: object) -> str:
+        assert url == "https://example.test/transitland.dmfr.json"
+        return json.dumps(TRANSITLAND)
+
+    payload = global_transport_shipping_service.build_global_transport_shipping_payload(
+        {
+            "http_text_get": http_text_get,
+            "utc_now_iso": lambda: "2026-06-16T01:00:00Z",
+            "search_markets": lambda query, limit=3: {
+                "items": [{"id": "pm-2", "slug": "airport-disruption", "question": query}]
+            },
+        },
+        limit=8,
+    )
+
+    assert payload["items"][0]["relatedPolymarketMarketIds"]
+
+
 def test_get_global_transport_shipping_snapshot_returns_seed_miss_without_live_build(tmp_path):
     store = SnapshotStore(str(tmp_path / "snapshots.sqlite3"))
     payload = global_transport_shipping_service.get_global_transport_shipping_snapshot(
