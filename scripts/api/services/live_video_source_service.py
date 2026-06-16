@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -92,6 +95,9 @@ NOISE_TERMS = ("xxx", "adult", "shopping", "religion", "music", "kids")
 EXTINF_ATTR_RE = re.compile(r'([A-Za-z0-9_-]+)="([^"]*)"')
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 YOUTUBE_PROBE_ENABLED_ENV = "POLYDATA_MARKET_TV_YOUTUBE_PROBE_ENABLED"
+HLS_PROBE_ENABLED_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_ENABLED"
+HLS_PROBE_TIMEOUT_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_TIMEOUT_SECONDS"
+HLS_PROBE_WORKERS_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_WORKERS"
 
 
 def utc_now_iso() -> str:
@@ -362,6 +368,143 @@ def _youtube_probe_can_fetch(ctx: dict) -> bool:
     return callable(ctx.get("youtube_live_probe")) or callable(ctx.get("http_text_get")) or ctx.get("requests") is not None
 
 
+def _hls_probe_enabled(ctx: dict) -> bool:
+    explicit = ctx.get("market_tv_hls_probe_enabled")
+    if explicit is not None:
+        return bool(explicit)
+    value = str(os.environ.get(HLS_PROBE_ENABLED_ENV, "1")).strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _hls_probe_timeout_seconds(ctx: dict) -> int:
+    explicit = ctx.get("market_tv_hls_probe_timeout_seconds")
+    if explicit is not None:
+        try:
+            return max(3, min(20, int(explicit)))
+        except Exception:
+            return 10
+    try:
+        return max(3, min(20, int(os.environ.get(HLS_PROBE_TIMEOUT_ENV, "10"))))
+    except Exception:
+        return 10
+
+
+def _hls_probe_workers(ctx: dict) -> int:
+    explicit = ctx.get("market_tv_hls_probe_workers")
+    if explicit is not None:
+        try:
+            return max(1, min(32, int(explicit)))
+        except Exception:
+            return 12
+    try:
+        return max(1, min(32, int(os.environ.get(HLS_PROBE_WORKERS_ENV, "12"))))
+    except Exception:
+        return 12
+
+
+def _hls_probe_result(ok: bool, status: str, *, error: str | None = None, streams: List[str] | None = None) -> Dict[str, Any]:
+    return {
+        "ok": bool(ok),
+        "status": status,
+        "error": error or None,
+        "streams": streams or [],
+    }
+
+
+def _probe_hls_stream(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
+    probe = ctx.get("hls_stream_probe")
+    if callable(probe):
+        result = probe(item)
+        if isinstance(result, dict):
+            status = str(result.get("status") or ("playable" if result.get("ok") else "blocked"))
+            return _hls_probe_result(bool(result.get("ok")), status, error=_string(result.get("error")), streams=_string_list(result.get("streams")))
+    hls_url = _string(item.get("hlsUrl"))
+    if not hls_url:
+        return _hls_probe_result(False, "missing", error="missing hlsUrl")
+    ffprobe = shutil.which(str(ctx.get("ffprobe_path") or "ffprobe"))
+    if not ffprobe:
+        return _hls_probe_result(False, "skipped", error="ffprobe unavailable")
+    timeout_seconds = _hls_probe_timeout_seconds(ctx)
+    cmd = [
+        ffprobe,
+        "-v",
+        "error",
+        "-rw_timeout",
+        str(timeout_seconds * 1_000_000),
+        "-timeout",
+        str(timeout_seconds * 1_000_000),
+        "-user_agent",
+        "Mozilla/5.0 polydata-tv-probe/1.0",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "json",
+        hls_url,
+    ]
+    try:
+        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds + 2)
+    except subprocess.TimeoutExpired:
+        return _hls_probe_result(False, "timeout", error="timeout")
+    except Exception as exc:
+        return _hls_probe_result(False, "error", error=str(exc))
+    if completed.returncode != 0:
+        error = (completed.stderr or completed.stdout or "").strip()
+        return _hls_probe_result(False, "blocked", error=error[:260])
+    try:
+        payload = json.loads(completed.stdout or "{}")
+    except Exception as exc:
+        return _hls_probe_result(False, "error", error=f"ffprobe json parse failed: {exc}")
+    streams = [str(stream.get("codec_type") or "") for stream in payload.get("streams") or [] if isinstance(stream, dict)]
+    ok = "video" in streams or "audio" in streams
+    return _hls_probe_result(ok, "playable" if ok else "empty", streams=streams)
+
+
+def _enrich_hls_watchability(ctx: dict, items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
+    hls_items = [item for item in items if str(item.get("sourceType") or "").lower() == "hls"]
+    if not hls_items:
+        return {"status": "skipped", "count": 0, "playableCount": 0, "blockedCount": 0, "lastSuccessAt": None}
+    if not _hls_probe_enabled(ctx):
+        for item in hls_items:
+            item.setdefault("hlsProbeStatus", "unverified")
+        return {"status": "disabled", "count": len(hls_items), "playableCount": 0, "blockedCount": 0, "lastSuccessAt": None}
+    playable_count = 0
+    blocked_count = 0
+    timeout_count = 0
+    def apply_probe(item: Dict[str, Any], probe: Dict[str, Any]) -> None:
+        nonlocal playable_count, blocked_count, timeout_count
+        item["hlsProbeStatus"] = probe["status"]
+        item["hlsProbeError"] = probe.get("error")
+        item["hlsProbeStreams"] = probe.get("streams") or []
+        item["lastCheckedAt"] = generated_at
+        if probe["ok"]:
+            playable_count += 1
+            item["status"] = "ready"
+        else:
+            blocked_count += 1
+            if probe["status"] == "timeout":
+                timeout_count += 1
+            item["status"] = "blocked"
+            item["failureReason"] = probe.get("error") or probe["status"]
+            item["relevanceScore"] = max(0, int(item.get("relevanceScore") or 0) - 30)
+
+    workers = min(len(hls_items), _hls_probe_workers(ctx))
+    if workers <= 1:
+        for item in hls_items:
+            apply_probe(item, _probe_hls_stream(ctx, item))
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for item, probe in zip(hls_items, executor.map(lambda source: _probe_hls_stream(ctx, source), hls_items)):
+                apply_probe(item, probe)
+    return {
+        "status": "ok" if playable_count else "error",
+        "count": len(hls_items),
+        "playableCount": playable_count,
+        "blockedCount": blocked_count,
+        "timeoutCount": timeout_count,
+        "lastSuccessAt": generated_at if playable_count else None,
+    }
+
+
 def _external_url_for_youtube(item: Dict[str, Any], video_id: str | None = None) -> str | None:
     if video_id:
         return f"https://www.youtube.com/watch?v={video_id}"
@@ -380,12 +523,6 @@ def _youtube_embed_url(video_id: str | None = None, channel_id: str | None = Non
         return (
             f"https://www.youtube-nocookie.com/embed/{clean_video_id}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1",
             "video",
-        )
-    clean_channel_id = _string(channel_id)
-    if clean_channel_id:
-        return (
-            f"https://www.youtube.com/embed/live_stream?channel={clean_channel_id}&autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1",
-            "channel-live",
         )
     return None, None
 
@@ -474,6 +611,17 @@ def _youtube_channel_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         channel_id = _string(item.get("youtubeChannelId"))
         embed_url = _string(item.get("youtubeEmbedUrl"))
         embed_mode = _string(item.get("youtubeEmbedMode"))
+        if embed_mode and embed_mode not in {"video", "live-video"}:
+            embed_url = ""
+            item["youtubeEmbedUrl"] = None
+            item["youtubeEmbedMode"] = None
+        if "embed/live_stream" in str(embed_url or ""):
+            embed_url = ""
+            item["youtubeEmbedUrl"] = None
+            item["youtubeEmbedMode"] = None
+        if embed_url and not embed_mode and video_id:
+            embed_mode = "video"
+            item["youtubeEmbedMode"] = embed_mode
         if not embed_url:
             embed_url, embed_mode = _youtube_embed_url(video_id, channel_id)
             item["youtubeEmbedUrl"] = embed_url
@@ -499,7 +647,7 @@ def _youtube_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         "regions": len({str(item.get("region") or item.get("country") or "").strip() for item in items if item.get("region") or item.get("country")}),
         "staleCount": sum(1 for item in items if item.get("youtubeProbeStatus") in {"offline", "error", "skipped"}),
         "blockedCount": sum(1 for item in items if item.get("status") in {"blocked", "failed"}),
-        "embedReady": sum(1 for item in items if item.get("youtubeEmbedUrl") or item.get("youtubeLiveVideoId") or item.get("fallbackVideoId")),
+        "embedReady": sum(1 for item in items if item.get("youtubeEmbedUrl") and item.get("youtubeEmbedMode") in {"video", "live-video"}),
     }
 
 
@@ -615,11 +763,15 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
             "error": "; ".join(errors[-iptv_errors:]) if iptv_errors else None,
         }
 
+    hls_probe_state = _enrich_hls_watchability(ctx, items, generated_at=generated_at)
+    if hls_probe_state.get("status") not in {"skipped"}:
+        source_states["hlsWatchabilityProbe"] = hls_probe_state
+
     items = _dedupe(items)
     items.sort(
         key=lambda item: (
-            int(item.get("relevanceScore") or 0),
             1 if item.get("status") == "ready" else 0,
+            int(item.get("relevanceScore") or 0),
             1 if item.get("curated") else 0,
         ),
         reverse=True,
@@ -662,8 +814,8 @@ def normalize_market_tv_wire_payload(payload: Any, *, ctx: dict | None = None, l
     ]
     items.sort(
         key=lambda item: (
-            int(item.get("relevanceScore") or 0),
             1 if item.get("status") == "ready" else 0,
+            int(item.get("relevanceScore") or 0),
             1 if item.get("curated") else 0,
         ),
         reverse=True,

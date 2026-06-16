@@ -184,6 +184,33 @@ def test_market_youtube_channels_payload_filters_curated_youtube_sources() -> No
     assert "youtube-nocookie.com/embed/defGHI12345" in all_payload["items"][1]["youtubeEmbedUrl"]
 
 
+def test_market_youtube_channels_drops_channel_live_embed_cache() -> None:
+    payload = {
+        "generatedAt": "2026-06-15T00:00:00Z",
+        "status": "ok",
+        "cacheMode": "seeded",
+        "items": [
+            {
+                "id": "yt-channel-only",
+                "displayName": "Channel Only",
+                "category": "crypto",
+                "sourceType": "youtube",
+                "youtubeChannelId": "UCdemo",
+                "youtubeEmbedUrl": "https://www.youtube.com/embed/live_stream?channel=UCdemo",
+                "youtubeEmbedMode": "channel-live",
+                "status": "ready",
+                "relevanceScore": 88,
+            }
+        ],
+    }
+
+    next_payload = service.normalize_market_youtube_channels_payload(payload, limit=10)
+
+    assert next_payload["summary"]["embedReady"] == 0
+    assert next_payload["items"][0]["youtubeEmbedUrl"] is None
+    assert next_payload["items"][0]["youtubeEmbedMode"] is None
+
+
 def test_market_tv_wire_seed_keeps_curated_manifest_items_when_iptv_is_large(monkeypatch) -> None:
     def load_manifest() -> list[dict]:
         return [
@@ -213,6 +240,7 @@ def test_market_tv_wire_seed_keeps_curated_manifest_items_when_iptv_is_large(mon
             "utc_now_iso": lambda: "2026-06-15T00:00:00Z",
             "http_text_get": lambda url, **kwargs: playlist,
             "market_tv_youtube_probe_enabled": False,
+            "market_tv_hls_probe_enabled": False,
         }
     )
 

@@ -77,7 +77,12 @@ function openExternal(url?: string | null) {
 }
 
 function isHlsPreviewable(item?: RuntimeMarketTvWireItem | null) {
-  return String(item?.sourceType || '').toLowerCase() === 'hls' && Boolean(String(item?.hlsUrl || '').trim());
+  const probeStatus = String(item?.hlsProbeStatus || '').toLowerCase();
+  const status = String(item?.status || '').toLowerCase();
+  const hasHlsUrl = Boolean(String(item?.hlsUrl || '').trim());
+  if (String(item?.sourceType || '').toLowerCase() !== 'hls' || !hasHlsUrl) return false;
+  if (probeStatus) return probeStatus === 'playable' || probeStatus === 'unverified';
+  return status === 'ready' || status === 'not_24_7';
 }
 
 function youtubeVideoId(item?: RuntimeMarketTvWireItem | null) {
@@ -88,6 +93,8 @@ function youtubeVideoId(item?: RuntimeMarketTvWireItem | null) {
 }
 
 function youtubeEmbedUrl(item?: RuntimeMarketTvWireItem | null) {
+  const mode = String(item?.youtubeEmbedMode || '').toLowerCase();
+  if (mode && mode !== 'live-video' && mode !== 'video') return '';
   const embedded = String(item?.youtubeEmbedUrl || '').trim();
   if (embedded) return embedded;
   const videoId = youtubeVideoId(item);
@@ -120,13 +127,24 @@ function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
     const video = videoRef.current;
     let cancelled = false;
     let destroyHls: (() => void) | null = null;
+    let recoveries = 0;
 
     setPlaybackState(hlsUrl ? 'connecting' : 'external');
     if (!video || !hlsUrl) return undefined;
 
     const markPlaying = () => setPlaybackState('playing');
     const markWaiting = () => setPlaybackState('waiting');
-    const markBlocked = () => setPlaybackState('blocked');
+    const markBlocked = () => {
+      if (recoveries < 2) {
+        recoveries += 1;
+        setPlaybackState('waiting');
+        window.setTimeout(() => {
+          if (!cancelled) video.play().catch(() => setPlaybackState('waiting'));
+        }, 800);
+        return;
+      }
+      setPlaybackState('blocked');
+    };
     video.addEventListener('playing', markPlaying);
     video.addEventListener('waiting', markWaiting);
     video.addEventListener('error', markBlocked);
@@ -159,7 +177,20 @@ function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
             video.play().catch(() => setPlaybackState('waiting'));
           });
           hls.on(Hls.Events.ERROR, (_event, data) => {
-            if (data?.fatal) setPlaybackState('blocked');
+            if (!data?.fatal) return;
+            if (recoveries < 2 && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              recoveries += 1;
+              setPlaybackState('waiting');
+              hls.startLoad();
+              return;
+            }
+            if (recoveries < 2 && data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              recoveries += 1;
+              setPlaybackState('waiting');
+              hls.recoverMediaError();
+              return;
+            }
+            setPlaybackState('blocked');
           });
         })
         .catch(() => setPlaybackState('blocked'));

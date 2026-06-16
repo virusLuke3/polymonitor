@@ -2056,6 +2056,9 @@ export type RuntimeMarketTvWireItem = {
   country?: string | null;
   language?: string | null;
   hlsUrl?: string | null;
+  hlsProbeStatus?: 'playable' | 'blocked' | 'timeout' | 'error' | 'missing' | 'skipped' | 'unverified' | string | null;
+  hlsProbeError?: string | null;
+  hlsProbeStreams?: string[];
   youtubeHandle?: string | null;
   youtubeLiveVideoId?: string | null;
   youtubeLiveTitle?: string | null;

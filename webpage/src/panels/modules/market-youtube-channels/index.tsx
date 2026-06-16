@@ -52,7 +52,13 @@ function youtubeVideoId(item?: RuntimeMarketTvWireItem | null) {
   return YOUTUBE_VIDEO_ID_RE.test(fallbackId) ? fallbackId : '';
 }
 
+function hasPlayableYoutubeEmbed(item?: RuntimeMarketTvWireItem | null) {
+  const mode = String(item?.youtubeEmbedMode || '').toLowerCase();
+  return mode === 'live-video' || mode === 'video' || Boolean(youtubeVideoId(item));
+}
+
 function youtubeEmbedUrl(item?: RuntimeMarketTvWireItem | null) {
+  if (!hasPlayableYoutubeEmbed(item)) return '';
   const embedded = String(item?.youtubeEmbedUrl || '').trim();
   if (embedded) return embedded;
   const videoId = youtubeVideoId(item);
@@ -64,7 +70,7 @@ function probeLabel(item?: RuntimeMarketTvWireItem | null) {
   if (status === 'live') return 'LIVE';
   if (status === 'offline') return 'VIDEO';
   if (status === 'error') return 'FALLBACK';
-  return 'CHANNEL';
+  return 'OPEN';
 }
 
 function scoreLabel(value?: string | number | null) {
@@ -105,7 +111,7 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
       ) : (
         <div className="wm-market-youtube-fallback">
           <strong>{channelName(item)}</strong>
-          <em>{item.marketUseCase || 'Polymarket-relevant YouTube source.'}</em>
+          <em>{item.marketUseCase || 'Open the YouTube channel externally. Current live embed is not verified.'}</em>
           <button type="button" onClick={() => openExternal(externalUrl)}>
             OPEN
           </button>
@@ -127,7 +133,7 @@ function MarketYoutubeRow({
   const tags = (item.matchedTerms?.length ? item.matchedTerms : item.marketTags || []).slice(0, 3);
   return (
     <button type="button" className={`wm-market-youtube-row ${active ? 'active' : ''}`} onClick={onSelect}>
-      <span className={`wm-market-youtube-dot ${String(item.youtubeProbeStatus || '').toLowerCase() === 'live' ? 'live' : 'ready'}`} />
+      <span className={`wm-market-youtube-dot ${youtubeEmbedUrl(item) ? 'live' : 'ready'}`} />
       <div>
         <small>{categoryLabel(item.category)} / {probeLabel(item)}</small>
         <strong>{channelName(item)}</strong>
