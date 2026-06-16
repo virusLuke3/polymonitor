@@ -200,6 +200,22 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 300,
     },
     {
+        "panelId": "breaking-event-radar",
+        "namespace": "seed-meta:evidence",
+        "cacheKey": "breaking-event-radar",
+        "serviceName": "polydata-breaking-event-radar-seed.service",
+        "intervalEnv": "POLYDATA_BREAKING_EVENT_RADAR_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 300,
+    },
+    {
+        "panelId": "world-cup-match-ops",
+        "namespace": "seed-meta:sports",
+        "cacheKey": "world-cup-match-ops",
+        "serviceName": "polydata-world-cup-match-ops-seed.service",
+        "intervalEnv": "POLYDATA_WORLD_CUP_MATCH_OPS_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 300,
+    },
+    {
         "panelId": "market-tv-wire",
         "namespace": "seed-meta:content",
         "cacheKey": "market-tv-wire",

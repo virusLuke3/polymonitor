@@ -24905,3 +24905,210 @@ a.wm-orderfilled-row {
     max-width: 190px;
   }
 }
+
+.wm-evidence-panel .wm-panel-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.wm-evidence-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) 0.7fr 0.7fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.wm-evidence-summary span {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  padding: 5px 7px;
+  border-radius: 5px;
+}
+
+.wm-evidence-summary em,
+.wm-evidence-value em,
+.wm-evidence-value small,
+.wm-evidence-main small,
+.wm-evidence-meta em {
+  display: block;
+  color: rgba(226, 232, 240, 0.54);
+  font-size: 8.5px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wm-evidence-summary strong {
+  display: block;
+  overflow: hidden;
+  color: rgba(248, 250, 252, 0.92);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-evidence-list {
+  display: grid;
+  gap: 6px;
+}
+
+.wm-evidence-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 58px;
+  gap: 8px;
+  width: 100%;
+  min-height: 66px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-left: 2px solid rgba(148, 163, 184, 0.5);
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.42);
+  color: inherit;
+  text-align: left;
+}
+
+button.wm-evidence-row {
+  cursor: pointer;
+}
+
+.wm-evidence-row:hover {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.wm-evidence-row.alert {
+  border-left-color: rgba(248, 113, 113, 0.95);
+}
+
+.wm-evidence-row.watch {
+  border-left-color: rgba(245, 158, 11, 0.95);
+}
+
+.wm-evidence-row.normal {
+  border-left-color: rgba(56, 189, 248, 0.7);
+}
+
+.wm-evidence-glyph {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(226, 232, 240, 0.82);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.wm-evidence-main {
+  min-width: 0;
+}
+
+.wm-evidence-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+
+.wm-evidence-meta b,
+.wm-evidence-meta i {
+  display: inline-flex;
+  max-width: 120px;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-style: normal;
+  font-weight: 850;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-evidence-meta b {
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  background: rgba(56, 189, 248, 0.08);
+  color: #67e8f9;
+}
+
+.wm-evidence-meta i {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(148, 163, 184, 0.08);
+  color: rgba(226, 232, 240, 0.76);
+}
+
+.wm-evidence-meta i.alert {
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(248, 113, 113, 0.16);
+  color: #fecaca;
+}
+
+.wm-evidence-meta i.watch {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.13);
+  color: #fde68a;
+}
+
+.wm-evidence-main strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(248, 250, 252, 0.94);
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1.22;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.wm-evidence-main strong span {
+  color: rgba(148, 163, 184, 0.72);
+  font-weight: 650;
+}
+
+.wm-evidence-main small {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 3px;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.wm-evidence-value {
+  display: grid;
+  align-content: center;
+  justify-items: end;
+  min-width: 0;
+}
+
+.wm-evidence-value strong {
+  color: rgba(248, 250, 252, 0.96);
+  font-variant-numeric: tabular-nums;
+  font-size: 17px;
+  font-weight: 860;
+  line-height: 1.1;
+}
+
+.wm-evidence-sort-button {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.68);
+  color: rgba(226, 232, 240, 0.82);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}

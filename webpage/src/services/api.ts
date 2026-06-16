@@ -33,6 +33,7 @@ import type {
   QuantMarketSeriesPayload,
   QuantPriceMarket,
   RuntimeMarketGroup,
+  RuntimeBreakingEventRadarPayload,
   RuntimeCryptoFundingPayload,
   RuntimeCommodityTransmissionPayload,
   RuntimeCpiReleaseCalendarPayload,
@@ -65,6 +66,7 @@ import type {
   RuntimeSportsOddsPayload,
   RuntimeTechPanelPayload,
   RuntimeWeatherNewsPayload,
+  RuntimeWorldCupMatchOpsPayload,
   SystemHealth,
   TradeRow,
   WorkspaceBundle,
@@ -602,6 +604,14 @@ export function fetchRuntimeGlobalTemperatureMonitor(limit = 60) {
 
 export function fetchRuntimeWeatherNews(limit = 24) {
   return apiGet<RuntimeWeatherNewsPayload>(`/runtime/weather/news?limit=${limit}`);
+}
+
+export function fetchRuntimeBreakingEventRadar(limit = 12) {
+  return apiGet<RuntimeBreakingEventRadarPayload>(`/runtime/evidence/breaking-event-radar?limit=${limit}`);
+}
+
+export function fetchRuntimeWorldCupMatchOps(limit = 12) {
+  return apiGet<RuntimeWorldCupMatchOpsPayload>(`/runtime/sports/world-cup-match-ops?limit=${limit}`);
 }
 
 export function fetchRuntimeFoodRetailBasket(limit = 8) {

@@ -4,6 +4,7 @@ Wants=polydata-db-tunnel.service
 Wants=polydata-api.service
 Wants=polydata-content-topic-refresh.service
 Wants=polydata-alpha-signal-seed.service
+Wants=polydata-breaking-event-radar-seed.service
 Wants=polydata-bootstrap-seed.service
 Wants=polydata-cpi-release-calendar-seed.service
 Wants=polydata-crypto-funding-seed.service
@@ -37,6 +38,7 @@ Wants=polydata-weather-news-seed.service
 Wants=polydata-whale-trades-seed.service
 Wants=polydata-worldcup-core-seed.service
 Wants=polydata-worldcup-live-seed.service
+Wants=polydata-world-cup-match-ops-seed.service
 Wants=polydata-telegram-query-bot.service
 After=network-online.target
 

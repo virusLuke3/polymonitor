@@ -9,6 +9,7 @@ import { panel as priceChart } from './price-chart';
 import { panel as sampleChainTrades } from './sample-chain-trades';
 import { panel as oracleTimeline } from './oracle-timeline';
 import { panel as relatedNews } from './related-news';
+import { panel as breakingEventRadar } from './breaking-event-radar';
 import { panel as marketTvWire } from './market-tv-wire';
 import { panel as marketYoutubeChannels } from './market-youtube-channels';
 import { panel as alphaSignal } from './alpha-signal';
@@ -64,6 +65,7 @@ import { panel as nbaIntel } from './nba-intel';
 import { panel as espnMatchupPredictor } from './espn-matchup-predictor';
 import { panel as esportsIntel } from './esports-intel';
 import { panel as sportsOdds } from './sports-odds';
+import { panel as worldCupMatchOps } from './world-cup-match-ops';
 import { panel as inflationNowcast } from './inflation-nowcast';
 import { panel as jin10Flash } from './jin10-flash';
 import { panel as newMarketSignals } from './new-market-signals';
@@ -103,6 +105,7 @@ export const PANEL_MODULES: PanelModule[] = [
   sampleChainTrades,
   oracleTimeline,
   relatedNews,
+  breakingEventRadar,
   marketTvWire,
   marketYoutubeChannels,
   alphaSignal,
@@ -159,6 +162,7 @@ export const PANEL_MODULES: PanelModule[] = [
   espnMatchupPredictor,
   esportsIntel,
   sportsOdds,
+  worldCupMatchOps,
   jin10Flash,
   newMarketSignals,
   lobDepth,

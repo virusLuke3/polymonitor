@@ -83,7 +83,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, worldcup_dashboard_service, worldcup_intel_service
+from api.services import address_service, bootstrap_service, breaking_event_radar_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, world_cup_match_ops_service, worldcup_dashboard_service, worldcup_intel_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -241,6 +241,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_address_summary_cached": lambda address, days=30: address_service.get_address_summary_cached(build_service_context(), address, days),
         "get_address_trades_payload": lambda address, **kwargs: address_service.get_address_trades_payload(build_service_context(), address, **kwargs),
         "get_alpha_signal_snapshot": get_alpha_signal_snapshot,
+        "get_breaking_event_radar_snapshot": lambda limit=12: breaking_event_radar_service.get_breaking_event_radar_snapshot(build_service_context(), limit=limit),
         "get_bootstrap_payload_cached": get_bootstrap_payload_cached,
         "get_cached_json": get_cached_json,
         "get_dashboard_payload_cached": get_dashboard_payload_cached,
@@ -325,6 +326,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_worldcup_dashboard_snapshot": lambda: worldcup_dashboard_service.get_worldcup_dashboard_snapshot(build_service_context()),
         "get_worldcup_live_snapshot": lambda: worldcup_dashboard_service.get_worldcup_live_snapshot(build_service_context()),
         "get_worldcup_panel_snapshot": lambda panel_id: worldcup_dashboard_service.get_worldcup_panel_snapshot(build_service_context(), panel_id),
+        "get_world_cup_match_ops_snapshot": lambda limit=12: world_cup_match_ops_service.get_world_cup_match_ops_snapshot(build_service_context(), limit=limit),
         "get_worldcup_intel_snapshot": lambda limit=96: worldcup_intel_service.get_worldcup_intel_snapshot(build_service_context(), limit=limit),
         "get_new_market_signals_snapshot": get_new_market_signals_snapshot,
         "get_polybeats_snapshot": get_polybeats_snapshot,
@@ -440,6 +442,7 @@ def build_service_context() -> Dict[str, Any]:
             include_change_24h=include_change_24h,
         ),
         "get_alpha_signal_snapshot": get_alpha_signal_snapshot,
+        "get_breaking_event_radar_snapshot": lambda limit=12: breaking_event_radar_service.get_breaking_event_radar_snapshot(build_service_context(), limit=limit),
         "get_bootstrap_component_cached": get_bootstrap_component_cached,
         "get_bootstrap_payload_cached": get_bootstrap_payload_cached,
         "get_cached_json": get_cached_json,
@@ -547,6 +550,8 @@ def build_service_context() -> Dict[str, Any]:
         "get_trades_by_market_id": lambda market_id, limit=100, offset=0: market_service.get_trades_by_market_id(build_service_context(), market_id, limit=limit, offset=offset),
         "get_whale_trades_snapshot": get_whale_trades_snapshot,
         "get_weather_news_snapshot": lambda limit=24: weather_news_service.get_weather_news_snapshot(build_service_context(), limit=limit),
+        "get_world_cup_match_ops_snapshot": lambda limit=12: world_cup_match_ops_service.get_world_cup_match_ops_snapshot(build_service_context(), limit=limit),
+        "get_worldcup_dashboard_snapshot": lambda: worldcup_dashboard_service.get_worldcup_dashboard_snapshot(build_service_context()),
         "get_yahoo_market_snapshot": lambda symbol, interval="30m", range_name="5d", ttl_seconds=None: market_data_client.get_yahoo_market_snapshot(
             build_service_context(),
             symbol,

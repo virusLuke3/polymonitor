@@ -2112,6 +2112,117 @@ export type RuntimeMarketTvWirePayload = {
 
 export type RuntimeMarketYoutubeChannelsPayload = RuntimeMarketTvWirePayload;
 
+export type RuntimeEvidenceMarketLink = {
+  marketId?: string | number | null;
+  slug?: string | null;
+  question?: string | null;
+  marketUrl?: string | null;
+  matchScore?: number | string | null;
+  matchReasons?: string[];
+};
+
+export type RuntimeBreakingEventRadarItem = {
+  id?: string | null;
+  topic?: string | null;
+  entity?: string | null;
+  country?: string | null;
+  team?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  eventTime?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  evidenceType?: string | null;
+  mentionCount?: number | string | null;
+  mentionCount15m?: number | string | null;
+  mentionCount1h?: number | string | null;
+  mentionCount24h?: number | string | null;
+  velocityScore?: number | string | null;
+  sourceDiversity?: number | string | null;
+  countrySpread?: number | string | null;
+  tone?: number | string | null;
+  wikiPageviewDelta?: number | string | null;
+  confidence?: number | string | null;
+  severity?: 'alert' | 'watch' | 'normal' | string | null;
+  tags?: string[];
+  relatedPolymarketMarketIds?: Array<string | number>;
+  markets?: RuntimeEvidenceMarketLink[];
+  evidence?: Record<string, unknown> | null;
+};
+
+export type RuntimeBreakingEventRadarPayload = {
+  panelId?: string;
+  generatedAt?: string;
+  status?: string | null;
+  cacheMode?: string | null;
+  freshness?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  sources?: Record<string, unknown>;
+  summary?: {
+    total?: number | string | null;
+    alerts?: number | string | null;
+    watch?: number | string | null;
+    topEntity?: string | null;
+    topVelocity?: number | string | null;
+  } | null;
+  items: RuntimeBreakingEventRadarItem[];
+  errors?: string[];
+};
+
+export type RuntimeWorldCupMatchOpsItem = {
+  id?: string | null;
+  topic?: string | null;
+  entity?: string | null;
+  country?: string | null;
+  team?: string | null;
+  eventTime?: string | null;
+  sourceUrl?: string | null;
+  confidence?: number | string | null;
+  homeTeam?: string | null;
+  awayTeam?: string | null;
+  score?: { home?: number | string | null; away?: number | string | null } | null;
+  matchStatus?: string | null;
+  stage?: string | null;
+  group?: string | null;
+  round?: string | null;
+  kickoffUtc?: string | null;
+  kickoffLocal?: string | null;
+  kickoffBeijing?: string | null;
+  minutesUntilKickoff?: number | string | null;
+  venue?: string | null;
+  cityId?: string | null;
+  city?: string | null;
+  weatherRisk?: { level?: string | null; score?: number | string | null; label?: string | null } | null;
+  weather?: Record<string, unknown> | null;
+  broadcastSources?: unknown[];
+  marketLinked?: boolean | null;
+  oddsLinked?: boolean | null;
+  relatedPolymarketMarketIds?: Array<string | number>;
+  markets?: RuntimeEvidenceMarketLink[];
+  evidence?: Record<string, unknown> | null;
+};
+
+export type RuntimeWorldCupMatchOpsPayload = {
+  panelId?: string;
+  generatedAt?: string;
+  status?: string | null;
+  cacheMode?: string | null;
+  freshness?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  sources?: Record<string, unknown>;
+  summary?: {
+    total?: number | string | null;
+    returned?: number | string | null;
+    linkedMarkets?: number | string | null;
+    weatherWatch?: number | string | null;
+    nextKickoffAt?: string | null;
+    nextMatch?: string | null;
+  } | null;
+  items: RuntimeWorldCupMatchOpsItem[];
+};
+
 export type RuntimeNewMarketSignalItem = {
   marketId?: number | null;
   title?: string | null;
