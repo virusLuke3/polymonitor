@@ -24,6 +24,12 @@
   grid-row: span 2 !important;
 }
 
+.wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='breaking-event-radar'],
+.wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='world-cup-match-ops'],
+.wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='global-transport-shipping'] {
+  grid-column: span 2 !important;
+}
+
 .wm-dashboard .wm-panel[data-panel-id='global-temperature-monitor'],
 .wm-dashboard .wm-panel[data-panel-id='weather-city-snapshot'],
 .wm-dashboard .wm-panel[data-panel-id='weather-quote-detail'],
