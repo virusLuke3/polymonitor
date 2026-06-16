@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import { fetchRuntimeMarketYoutubeChannels } from '@/services/api';
+import { buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketYoutubeChannels } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketYoutubeChannelsPayload } from '@/types';
 import { formatRelative } from '../../shared/formatters';
+import { useElementInView, useIdlePause, useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
@@ -59,10 +60,9 @@ function hasPlayableYoutubeEmbed(item?: RuntimeMarketTvWireItem | null) {
 
 function youtubeEmbedUrl(item?: RuntimeMarketTvWireItem | null) {
   if (!hasPlayableYoutubeEmbed(item)) return '';
-  const embedded = String(item?.youtubeEmbedUrl || '').trim();
-  if (embedded) return embedded;
   const videoId = youtubeVideoId(item);
-  return videoId ? `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1` : '';
+  if (videoId) return buildRuntimeYoutubeEmbedUrl(videoId, { autoplay: true, mute: true, quality: 'hd720' });
+  return String(item?.youtubeEmbedUrl || '').trim();
 }
 
 function probeLabel(item?: RuntimeMarketTvWireItem | null) {
@@ -85,23 +85,51 @@ function openExternal(url?: string | null) {
 }
 
 function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
+  const [containerRef, inView] = useElementInView<HTMLDivElement>();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const idle = useIdlePause();
   const embedUrl = youtubeEmbedUrl(item);
   const videoId = youtubeVideoId(item);
   const externalUrl = item.externalUrl || item.sourceUrl || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : null);
-  const [frameState, setFrameState] = useState<'connecting' | 'playing' | 'blocked'>(embedUrl ? 'connecting' : 'blocked');
+  const [frameState, setFrameState] = useState<'connecting' | 'playing' | 'blocked' | 'paused'>(embedUrl ? 'connecting' : 'blocked');
+  const shouldLoad = useStaggeredLoad(inView && !idle, 900);
 
   useEffect(() => {
     if (!embedUrl) {
       setFrameState('blocked');
       return undefined;
     }
+    if (!shouldLoad) {
+      setFrameState('paused');
+      return undefined;
+    }
     setFrameState('connecting');
     const timer = window.setTimeout(() => setFrameState((state) => (state === 'playing' ? state : 'blocked')), 12000);
     return () => window.clearTimeout(timer);
-  }, [embedUrl]);
+  }, [embedUrl, shouldLoad]);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!embedUrl || !iframe) return undefined;
+    const handleMessage = (event: MessageEvent) => {
+      if (!youtubeBridgeMessageMatches(event, iframe, videoId)) return;
+      const type = String((event.data as { type?: string }).type || '');
+      if (type === 'yt-ready' || type === 'yt-state') setFrameState('playing');
+      if (type === 'yt-error' || type === 'yt-timeout') setFrameState('blocked');
+      if (type === 'yt-autoplay-failed') setFrameState('connecting');
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [embedUrl, videoId]);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow || !embedUrl) return;
+    iframe.contentWindow.postMessage({ type: shouldLoad ? 'play' : 'pause' }, '*');
+  }, [embedUrl, shouldLoad]);
 
   return (
-    <div className={`wm-market-youtube-player ${frameState === 'blocked' ? 'blocked' : ''}`}>
+    <div ref={containerRef} className={`wm-market-youtube-player ${frameState === 'blocked' ? 'blocked' : ''}`}>
       <header>
         <div>
           <span>{categoryLabel(item.category)} / {sourceLocation(item)} / {probeLabel(item)}</span>
@@ -111,16 +139,25 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
           OPEN
         </button>
       </header>
-      {embedUrl ? (
+      {embedUrl && shouldLoad ? (
         <iframe
+          ref={iframeRef}
           className="wm-market-youtube-frame"
           src={embedUrl}
           title={itemTitle(item)}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
           referrerPolicy="strict-origin-when-cross-origin"
-          onLoad={() => setFrameState('playing')}
+          onLoad={() => setFrameState('connecting')}
         />
+      ) : embedUrl ? (
+        <div className="wm-market-youtube-fallback">
+          <strong>{channelName(item)}</strong>
+          <em>Stream paused until this panel is visible and active.</em>
+          <button type="button" onClick={() => openExternal(externalUrl)}>
+            OPEN
+          </button>
+        </div>
       ) : (
         <div className="wm-market-youtube-fallback">
           <strong>{channelName(item)}</strong>

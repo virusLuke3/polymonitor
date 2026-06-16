@@ -671,6 +671,17 @@ export function buildRuntimeHlsProxyUrl(hlsUrl: string) {
   return `${API_BASE}/runtime/content/hls-proxy?${params.toString()}`;
 }
 
+export function buildRuntimeYoutubeEmbedUrl(videoId: string, options?: { autoplay?: boolean; mute?: boolean; quality?: string }) {
+  const params = new URLSearchParams({
+    videoId,
+    autoplay: options?.autoplay === false ? '0' : '1',
+    mute: options?.mute === false ? '0' : '1',
+    parentOrigin: window.location.origin,
+  });
+  if (options?.quality) params.set('vq', options.quality);
+  return `${API_BASE}/runtime/content/youtube-embed?${params.toString()}`;
+}
+
 export function fetchRuntimeMarketYoutubeChannels(limit = 12, category?: string | null) {
   const params = new URLSearchParams({ limit: String(limit) });
   if (category && category !== 'all') params.set('category', category);

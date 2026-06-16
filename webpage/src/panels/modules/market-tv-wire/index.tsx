@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import { buildRuntimeHlsProxyUrl, fetchRuntimeMarketTvWire } from '@/services/api';
+import { buildRuntimeHlsProxyUrl, buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketTvWire } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketTvWirePayload } from '@/types';
 import { formatRelative } from '../../shared/formatters';
+import { useElementInView, useIdlePause, useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
@@ -109,10 +110,10 @@ function youtubeVideoId(item?: RuntimeMarketTvWireItem | null) {
 function youtubeEmbedUrl(item?: RuntimeMarketTvWireItem | null) {
   const mode = String(item?.youtubeEmbedMode || '').toLowerCase();
   if (mode && mode !== 'live-video' && mode !== 'video') return '';
-  const embedded = String(item?.youtubeEmbedUrl || '').trim();
-  if (embedded) return embedded;
   const videoId = youtubeVideoId(item);
-  return videoId ? `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1` : '';
+  if (videoId) return buildRuntimeYoutubeEmbedUrl(videoId, { autoplay: true, mute: true, quality: 'hd720' });
+  const embedded = String(item?.youtubeEmbedUrl || '').trim();
+  return embedded;
 }
 
 function isYoutubePreviewable(item?: RuntimeMarketTvWireItem | null) {
@@ -139,7 +140,10 @@ function MarketTvPreview({
   item: RuntimeMarketTvWireItem;
   onPlaybackBlocked?: (item: RuntimeMarketTvWireItem) => void;
 }) {
+  const [containerRef, inView] = useElementInView<HTMLDivElement>();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const idle = useIdlePause();
   const sourceType = String(item.sourceType || '').toLowerCase();
   const rawHlsUrl = String(item.hlsUrl || '').trim();
   const initialHlsUrl = hlsPlaybackUrl(item);
@@ -150,6 +154,7 @@ function MarketTvPreview({
   const [activeHlsUrl, setActiveHlsUrl] = useState(initialHlsUrl);
   const [playbackState, setPlaybackState] = useState<PlaybackState>(initialHlsUrl ? 'connecting' : 'external');
   const [youtubeFrameState, setYoutubeFrameState] = useState<PlaybackState>(youtubeUrl ? 'connecting' : 'external');
+  const shouldLoad = useStaggeredLoad(inView && !idle, 200);
 
   useEffect(() => {
     setActiveHlsUrl(initialHlsUrl);
@@ -162,8 +167,11 @@ function MarketTvPreview({
     let recoveries = 0;
 
     blockedReportedRef.current = false;
-    setPlaybackState(activeHlsUrl ? 'connecting' : 'external');
-    if (!video || !activeHlsUrl) return undefined;
+    setPlaybackState(activeHlsUrl ? (shouldLoad ? 'connecting' : 'waiting') : 'external');
+    if (!video || !activeHlsUrl || !shouldLoad) {
+      video?.pause();
+      return undefined;
+    }
 
     const markPlaying = () => setPlaybackState('playing');
     const markWaiting = () => setPlaybackState('waiting');
@@ -257,21 +265,41 @@ function MarketTvPreview({
       video.removeAttribute('src');
       video.load();
     };
-  }, [activeHlsUrl, canProxyFallback, item.id, rawHlsUrl]);
+  }, [activeHlsUrl, canProxyFallback, item.id, rawHlsUrl, shouldLoad]);
 
   useEffect(() => {
-    if (!youtubeUrl) {
+    if (!youtubeUrl || !shouldLoad) {
       setYoutubeFrameState('external');
       return undefined;
     }
     setYoutubeFrameState('connecting');
     const timer = window.setTimeout(() => setYoutubeFrameState((state) => (state === 'playing' ? state : 'blocked')), 12000);
     return () => window.clearTimeout(timer);
-  }, [youtubeUrl]);
+  }, [youtubeUrl, shouldLoad]);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!youtubeUrl || !iframe) return undefined;
+    const handleMessage = (event: MessageEvent) => {
+      if (!youtubeBridgeMessageMatches(event, iframe, youtubeId)) return;
+      const type = String((event.data as { type?: string }).type || '');
+      if (type === 'yt-ready' || type === 'yt-state') setYoutubeFrameState('playing');
+      if (type === 'yt-error' || type === 'yt-timeout') setYoutubeFrameState('blocked');
+      if (type === 'yt-autoplay-failed') setYoutubeFrameState('waiting');
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [youtubeUrl, youtubeId]);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow || !youtubeUrl) return;
+    iframe.contentWindow.postMessage({ type: shouldLoad ? 'play' : 'pause' }, '*');
+  }, [shouldLoad, youtubeUrl]);
 
   if (youtubeUrl && (sourceType === 'youtube' || !rawHlsUrl)) {
     return (
-      <div className="wm-market-tv-preview youtube">
+      <div ref={containerRef} className="wm-market-tv-preview youtube">
         <div className="wm-market-tv-preview-head">
           <div>
             <strong>{item.youtubeLiveTitle || itemTitle(item)}</strong>
@@ -285,15 +313,20 @@ function MarketTvPreview({
           </button>
         </div>
         <div className="wm-market-tv-stage">
-          <iframe
-            className="wm-market-tv-youtube-frame"
-            src={youtubeUrl}
-            title={item.youtubeLiveTitle || itemTitle(item)}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            referrerPolicy="strict-origin-when-cross-origin"
-            onLoad={() => setYoutubeFrameState('playing')}
-          />
+          {shouldLoad ? (
+            <iframe
+              ref={iframeRef}
+              className="wm-market-tv-youtube-frame"
+              src={youtubeUrl}
+              title={item.youtubeLiveTitle || itemTitle(item)}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
+              onLoad={() => setYoutubeFrameState('waiting')}
+            />
+          ) : (
+            <div className="wm-market-tv-fallback passive">STREAM PAUSED · STANDBY</div>
+          )}
           {youtubeFrameState === 'blocked' ? (
             <button
               type="button"
@@ -324,7 +357,7 @@ function MarketTvPreview({
   }
 
   return (
-    <div className="wm-market-tv-preview">
+    <div ref={containerRef} className="wm-market-tv-preview">
       <div className="wm-market-tv-preview-head">
         <div>
           <strong>{itemTitle(item)}</strong>

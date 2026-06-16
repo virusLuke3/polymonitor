@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any, Dict, Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 
 
 YOUTUBE_LIVE_PROBE_NAMESPACE = "probe:youtube-live"
 YOUTUBE_LIVE_POSITIVE_TTL_SECONDS = 60
 YOUTUBE_LIVE_NEGATIVE_TTL_SECONDS = 30
+YOUTUBE_RELAY_BASE_ENV = "POLYDATA_YOUTUBE_LIVE_RELAY_BASE_URL"
+YOUTUBE_RELAY_TOKEN_ENV = "POLYDATA_YOUTUBE_LIVE_RELAY_TOKEN"
 CHROME_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -148,6 +151,44 @@ def _http_json_get(ctx: dict, url: str, *, timeout: int) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _relay_base_url(ctx: dict) -> str:
+    return _string(ctx.get("youtube_live_relay_base_url") or os.environ.get(YOUTUBE_RELAY_BASE_ENV)).rstrip("/")
+
+
+def _relay_token(ctx: dict) -> str:
+    return _string(ctx.get("youtube_live_relay_token") or os.environ.get(YOUTUBE_RELAY_TOKEN_ENV))
+
+
+def _try_relay(ctx: dict, *, channel: str = "", video_id: str = "") -> Optional[Dict[str, Any]]:
+    base_url = _relay_base_url(ctx)
+    if not base_url:
+        return None
+    params: Dict[str, str] = {}
+    if channel:
+        params["channel"] = channel
+    if video_id and VIDEO_ID_RE.match(video_id):
+        params["videoId"] = video_id
+    if not params:
+        return None
+    separator = "&" if "?" in base_url else "?"
+    relay_url = f"{base_url}{separator}{urlencode(params)}"
+    headers = {"User-Agent": CHROME_UA, "Accept": "application/json"}
+    token = _relay_token(ctx)
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    getter = ctx.get("http_json_get")
+    if callable(getter):
+        payload = getter(relay_url, timeout=8, headers=headers)
+        return payload if isinstance(payload, dict) else None
+    requests_module = ctx.get("requests")
+    if requests_module is None:
+        raise RuntimeError("http_json_get unavailable")
+    response = requests_module.get(relay_url, timeout=8, headers=headers)
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, dict) else None
+
+
 def _try_channel_scrape(ctx: dict, channel: str) -> Optional[Dict[str, Any]]:
     normalized_channel = _normalize_channel(channel)
     if not normalized_channel:
@@ -181,14 +222,15 @@ def _fetch_live_stream_info(ctx: dict, *, channel: str = "", video_id: str = "")
     if callable(probe):
         return _normalize_probe(probe(channel=channel, video_id=video_id))
 
-    if channel:
-        try:
-            scraped = _try_channel_scrape(ctx, channel)
-            if scraped:
-                return _normalize_probe(scraped)
-        except Exception as exc:
-            if not video_id:
-                return _empty_probe(f"Channel scrape failed: {exc}", channel_exists=True)
+    relay_error = ""
+    try:
+        relayed = _try_relay(ctx, channel=channel, video_id=video_id)
+        if relayed:
+            normalized = _normalize_probe(relayed)
+            if normalized.get("videoId") or normalized.get("channelExists") or not normalized.get("error"):
+                return normalized
+    except Exception as exc:
+        relay_error = f"Relay failed: {exc}"
 
     if video_id:
         try:
@@ -196,9 +238,20 @@ def _fetch_live_stream_info(ctx: dict, *, channel: str = "", video_id: str = "")
             if oembed:
                 return _normalize_probe(oembed)
         except Exception as exc:
-            return _empty_probe(f"OEmbed failed: {exc}")
+            if not channel:
+                return _empty_probe(f"{relay_error}; OEmbed failed: {exc}".strip("; "))
 
-    return _empty_probe("Failed to detect live status", channel_exists=bool(channel))
+    if channel:
+        try:
+            scraped = _try_channel_scrape(ctx, channel)
+            if scraped:
+                return _normalize_probe(scraped)
+        except Exception as exc:
+            if not video_id:
+                error = f"{relay_error}; Channel scrape failed: {exc}".strip("; ")
+                return _empty_probe(error, channel_exists=True)
+
+    return _empty_probe(relay_error or "Failed to detect live status", channel_exists=bool(channel))
 
 
 def _cache_key(channel: str = "", video_id: str = "") -> str:
@@ -221,8 +274,27 @@ def probe_youtube_live(ctx: dict, *, channel: str = "", video_id: str = "") -> D
         cached = reader(YOUTUBE_LIVE_PROBE_NAMESPACE, cache_key)
         if isinstance(cached, dict):
             return _normalize_probe(cached)
+    store = ctx.get("SNAPSHOT_STORE")
+    if store is not None:
+        try:
+            cached = store.get(YOUTUBE_LIVE_PROBE_NAMESPACE, cache_key)
+            if isinstance(cached, dict):
+                return _normalize_probe(cached)
+        except Exception:
+            pass
 
     result = _normalize_probe(_fetch_live_stream_info(ctx, channel=channel, video_id=video_id))
+    if not result.get("videoId"):
+        if store is not None:
+            try:
+                stale = store.get_stale(YOUTUBE_LIVE_PROBE_NAMESPACE, cache_key)
+                if isinstance(stale, dict):
+                    normalized_stale = _normalize_probe(stale)
+                    if normalized_stale.get("videoId"):
+                        normalized_stale["error"] = result.get("error") or "using stale YouTube live probe"
+                        result = normalized_stale
+            except Exception:
+                pass
     ttl = YOUTUBE_LIVE_POSITIVE_TTL_SECONDS if result.get("videoId") else YOUTUBE_LIVE_NEGATIVE_TTL_SECONDS
     writer = ctx.get("set_cached_json")
     if callable(writer):
@@ -230,7 +302,6 @@ def probe_youtube_live(ctx: dict, *, channel: str = "", video_id: str = "") -> D
             writer(YOUTUBE_LIVE_PROBE_NAMESPACE, cache_key, result, ttl)
         except Exception:
             pass
-    store = ctx.get("SNAPSHOT_STORE")
     if store is not None:
         try:
             store.set(YOUTUBE_LIVE_PROBE_NAMESPACE, cache_key, result, ttl)

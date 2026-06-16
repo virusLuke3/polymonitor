@@ -3,7 +3,7 @@ from __future__ import annotations
 from flask import Blueprint, Response, jsonify, request
 
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
-from api.services import hls_proxy_service
+from api.services import hls_proxy_service, youtube_embed_service
 
 
 def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
@@ -45,6 +45,23 @@ def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
         response.headers["Cache-Control"] = hls_proxy_service.cache_control_for(content_type)
         response.headers["X-Content-Type-Options"] = "nosniff"
         return response
+
+    @bp.route("/runtime/content/youtube-embed", methods=["GET"])
+    def api_runtime_youtube_embed():
+        video_id = request.args.get("videoId") or ""
+        try:
+            origin = request.host_url.rstrip("/")
+            html = youtube_embed_service.build_youtube_embed_html(
+                video_id=video_id,
+                request_origin=origin,
+                parent_origin=request.args.get("parentOrigin") or "",
+                autoplay=request.args.get("autoplay"),
+                mute=request.args.get("mute"),
+                quality=request.args.get("vq"),
+            )
+        except ValueError as exc:
+            return Response(str(exc), status=400, content_type="text/plain; charset=utf-8")
+        return Response(html, status=200, headers=youtube_embed_service.youtube_embed_headers())
 
     @bp.route("/runtime/panels", methods=["GET"])
     def api_runtime_panels_batch():

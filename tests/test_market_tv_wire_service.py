@@ -11,6 +11,7 @@ if str(SCRIPTS) not in sys.path:
 
 from api.services import live_video_source_service as service
 from api.services import hls_proxy_service
+from api.services import youtube_embed_service
 from api.services import youtube_live_probe_service as youtube_probe
 
 
@@ -120,6 +121,46 @@ def test_youtube_probe_parses_live_video_and_hls_manifest() -> None:
     assert payload["isLive"] is True
     assert payload["title"] == "FOX Weather Live"
     assert payload["hlsUrl"] == "https://example.com/live.m3u8&sig=1"
+
+
+def test_youtube_probe_uses_relay_before_scrape() -> None:
+    calls: list[str] = []
+
+    def http_json_get(url: str, **kwargs: object) -> dict:
+        calls.append(url)
+        return {
+            "videoId": "abcDEF12345",
+            "isLive": True,
+            "channelExists": True,
+            "channelName": "Relay Channel",
+            "title": "Relay Live",
+            "hlsUrl": "https://example.com/live.m3u8",
+        }
+
+    payload = youtube_probe.probe_youtube_live(
+        {
+            "youtube_live_relay_base_url": "https://relay.example/api/youtube/live",
+            "http_json_get": http_json_get,
+        },
+        channel="@demo",
+    )
+
+    assert calls and "channel=%40demo" in calls[0]
+    assert payload["videoId"] == "abcDEF12345"
+    assert payload["isLive"] is True
+
+
+def test_youtube_embed_bridge_html_posts_player_events() -> None:
+    html = youtube_embed_service.build_youtube_embed_html(
+        video_id="abcDEF12345",
+        request_origin="https://polymonitor.club",
+        parent_origin="https://polymonitor.club",
+    )
+
+    assert "https://www.youtube.com/iframe_api" in html
+    assert "postMessage" in html
+    assert "yt-ready" in html
+    assert "yt-error" in html
 
 
 def test_market_tv_wire_enriches_youtube_manifest_sources() -> None:
