@@ -25851,255 +25851,36 @@ button.wm-evidence-row {
   --aviation-yellow: #facc15;
 }
 
-.wm-aviation-hero {
-  position: relative;
-  display: grid;
-  grid-template-columns: 118px minmax(0, 1fr) 118px;
-  gap: 10px;
-  min-height: 150px;
-  margin-bottom: 8px;
-  overflow: hidden;
-  border: 1px solid rgba(56, 189, 248, 0.24);
-  border-radius: 7px;
-  background:
-    linear-gradient(rgba(56, 189, 248, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 189, 248, 0.05) 1px, transparent 1px),
-    radial-gradient(circle at 26% 46%, rgba(56, 189, 248, 0.18), transparent 31%),
-    radial-gradient(circle at 72% 22%, rgba(60, 255, 136, 0.14), transparent 35%),
-    linear-gradient(135deg, rgba(3, 7, 18, 0.96), rgba(4, 24, 35, 0.82));
-  background-size: 24px 24px, 24px 24px, auto, auto, auto;
-  padding: 11px;
-}
-
-.wm-aviation-hero::after {
-  position: absolute;
-  inset: auto -10% -42px;
-  height: 62px;
-  background: linear-gradient(180deg, transparent, rgba(56, 189, 248, 0.1));
-  content: "";
-  pointer-events: none;
-}
-
-.wm-aviation-radar {
-  position: relative;
-  align-self: center;
-  width: 108px;
-  height: 108px;
-  border: 1px solid rgba(125, 211, 252, 0.24);
-  border-radius: 999px;
-  background:
-    radial-gradient(circle, rgba(125, 211, 252, 0.14) 0 3px, transparent 4px),
-    repeating-radial-gradient(circle, rgba(125, 211, 252, 0.12) 0 1px, transparent 1px 24px),
-    conic-gradient(from 210deg, rgba(56, 189, 248, 0.08), rgba(56, 189, 248, 0.24), transparent 25%, transparent);
-  box-shadow: inset 0 0 30px rgba(14, 165, 233, 0.16), 0 0 24px rgba(14, 165, 233, 0.1);
-}
-
-.wm-aviation-radar::before,
-.wm-aviation-radar::after {
-  position: absolute;
-  left: 50%;
-  top: 8px;
-  bottom: 8px;
-  width: 1px;
-  background: rgba(125, 211, 252, 0.15);
-  content: "";
-  transform: translateX(-50%);
-}
-
-.wm-aviation-radar::after {
-  top: 50%;
-  left: 8px;
-  right: 8px;
-  bottom: auto;
-  width: auto;
-  height: 1px;
-  transform: translateY(-50%);
-}
-
-.wm-aviation-radar-sweep {
-  position: absolute;
-  inset: 7px;
-  border-radius: inherit;
-  background: conic-gradient(from 18deg, rgba(60, 255, 136, 0.48), rgba(60, 255, 136, 0.12) 14%, transparent 26%);
-  mix-blend-mode: screen;
-  transform-origin: center;
-  animation: wm-aviation-sweep 3.8s linear infinite;
-}
-
-.wm-aviation-runway {
-  position: absolute;
-  left: 50%;
-  bottom: 13px;
-  width: 15px;
-  height: 58px;
-  border-radius: 999px;
-  background:
-    repeating-linear-gradient(180deg, rgba(248, 250, 252, 0.78) 0 5px, transparent 5px 11px),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.2), rgba(15, 23, 42, 0.88));
-  box-shadow: 0 0 18px rgba(56, 189, 248, 0.16);
-  transform: translateX(-50%) rotate(18deg);
-}
-
-.wm-aviation-plane-dot {
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  border: 1px solid rgba(248, 250, 252, 0.8);
-  border-radius: 999px;
-  background: var(--aviation-blue);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.8);
-}
-
-.wm-aviation-plane-dot.one {
-  left: 18px;
-  top: 34px;
-}
-
-.wm-aviation-plane-dot.two {
-  right: 22px;
-  top: 48px;
-  background: var(--aviation-green);
-  box-shadow: 0 0 12px rgba(60, 255, 136, 0.75);
-}
-
-.wm-aviation-plane-dot.three {
-  left: 44px;
-  bottom: 20px;
-  background: var(--aviation-yellow);
-  box-shadow: 0 0 12px rgba(250, 204, 21, 0.72);
-}
-
-.wm-aviation-mini-routes {
-  position: relative;
-  z-index: 1;
-  align-self: center;
-  width: 100%;
-  min-width: 0;
-  height: 118px;
-}
-
-.wm-aviation-mini-routes path {
-  fill: none;
-  stroke-linecap: round;
-}
-
-.wm-aviation-latline {
-  stroke: rgba(148, 163, 184, 0.15);
-  stroke-dasharray: 2 8;
-  stroke-width: 1;
-}
-
-.wm-aviation-route-a,
-.wm-aviation-route-b,
-.wm-aviation-route-c {
-  stroke: url("#wmAviationRoute");
-  stroke-width: 2.2;
-  stroke-dasharray: 360;
-  filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.52));
-  animation: wm-aviation-route-flow 4.2s linear infinite;
-}
-
-.wm-aviation-route-b {
-  animation-delay: -1.2s;
-  opacity: 0.72;
-}
-
-.wm-aviation-route-c {
-  stroke: rgba(60, 255, 136, 0.48);
-  stroke-width: 1.5;
-  animation-delay: -2.5s;
-}
-
-.wm-aviation-node circle {
-  fill: rgba(5, 10, 24, 0.96);
-  stroke: var(--aviation-blue);
-  stroke-width: 2;
-}
-
-.wm-aviation-node.major circle {
-  stroke: var(--aviation-green);
-  filter: drop-shadow(0 0 8px rgba(60, 255, 136, 0.68));
-}
-
-.wm-aviation-node text {
-  fill: rgba(226, 232, 240, 0.7);
-  font-family: var(--font-mono);
-  font-size: 8px;
-  font-weight: 900;
-  text-anchor: middle;
-}
-
-.wm-aviation-hero-stats {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 7px;
-  align-content: center;
-}
-
-.wm-aviation-hero-stats span {
-  min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.045);
-  padding: 7px 8px;
-}
-
-.wm-aviation-hero-stats em,
-.wm-aviation-hero-stats small {
-  display: block;
-  overflow: hidden;
-  color: rgba(226, 232, 240, 0.5);
-  font-family: var(--font-mono);
-  font-size: 8px;
-  font-style: normal;
-  font-weight: 900;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.wm-aviation-hero-stats strong {
-  display: block;
-  overflow: hidden;
-  color: rgba(248, 250, 252, 0.98);
-  font-family: var(--font-mono);
-  font-size: 19px;
-  font-weight: 950;
-  letter-spacing: 0;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .wm-aviation-tabs {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 4px;
-  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  min-height: 49px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0 18px;
 }
 
 .wm-aviation-tabs button {
   appearance: none;
+  position: relative;
   min-width: 0;
-  height: 34px;
+  height: 49px;
   border: 0;
-  border-bottom: 2px solid transparent;
-  background: rgba(255, 255, 255, 0.035);
+  background: transparent;
   color: rgba(226, 232, 240, 0.58);
   cursor: pointer;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 800;
   letter-spacing: 0;
-  padding: 0 6px;
+  padding: 0;
   text-align: left;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
 .wm-aviation-tabs button span {
-  float: right;
+  margin-left: 8px;
   color: rgba(148, 163, 184, 0.62);
   font-family: var(--font-mono);
   font-size: 9px;
@@ -26107,44 +25888,44 @@ button.wm-evidence-row {
 }
 
 .wm-aviation-tabs button.active {
-  border-bottom-color: rgba(248, 250, 252, 0.96);
-  background: linear-gradient(180deg, rgba(56, 189, 248, 0.12), rgba(56, 189, 248, 0.035));
   color: rgba(248, 250, 252, 0.96);
+}
+
+.wm-aviation-tabs button.active::after {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(248, 250, 252, 0.96);
+  content: "";
 }
 
 .wm-aviation-intel-list {
   display: grid;
-  gap: 2px;
+  gap: 0;
+  padding: 12px 16px 8px;
 }
 
 .wm-aviation-intel-row {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) 76px 58px;
+  grid-template-columns: 74px minmax(0, 1fr) 88px 34px;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   width: 100%;
-  min-height: 54px;
+  min-height: 52px;
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   background: transparent;
   color: inherit;
-  padding: 7px 0;
+  padding: 8px 0;
   text-align: left;
 }
 
 .wm-aviation-intel-row > b {
-  display: grid;
-  width: 44px;
-  height: 32px;
-  place-items: center;
-  border: 1px solid rgba(125, 211, 252, 0.18);
-  border-radius: 4px;
-  background:
-    linear-gradient(90deg, transparent 47%, rgba(125, 211, 252, 0.16) 48% 52%, transparent 53%),
-    rgba(15, 23, 42, 0.72);
   color: rgba(248, 250, 252, 0.92);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 17px;
   font-weight: 950;
 }
 
@@ -26178,32 +25959,29 @@ button.wm-evidence-row {
 }
 
 .wm-aviation-intel-row > i {
-  justify-self: start;
-  min-width: 56px;
-  border-radius: 4px;
-  background: rgba(34, 197, 94, 0.12);
+  justify-self: end;
+  min-width: 72px;
+  background: transparent;
   color: rgba(74, 222, 128, 0.98);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 950;
-  padding: 4px 7px;
-  text-align: center;
+  padding: 0;
+  text-align: right;
 }
 
 .wm-aviation-intel-row > i.watch {
-  background: rgba(250, 204, 21, 0.14);
   color: rgba(250, 204, 21, 0.98);
 }
 
 .wm-aviation-intel-row > i.alert {
-  background: rgba(248, 113, 113, 0.15);
   color: rgba(248, 113, 113, 0.98);
 }
 
 .wm-aviation-intel-row > small {
   justify-self: end;
-  color: rgba(226, 232, 240, 0.78);
+  color: rgba(226, 232, 240, 0.42);
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 950;
@@ -26228,7 +26006,14 @@ button.wm-evidence-row {
 }
 
 .wm-aviation-intel-row.source:hover {
-  background: rgba(56, 189, 248, 0.055);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wm-aviation-refresh-button {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  text-align: center;
 }
 
 @keyframes wm-breaking-pulse {
@@ -26262,29 +26047,10 @@ button.wm-evidence-row {
   }
 }
 
-@keyframes wm-aviation-sweep {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes wm-aviation-route-flow {
-  from {
-    stroke-dashoffset: 360;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .wm-breaking-pulse-stack span,
   .wm-transport-route.main,
-  .wm-transport-node.ais circle,
-  .wm-aviation-radar-sweep,
-  .wm-aviation-route-a,
-  .wm-aviation-route-b,
-  .wm-aviation-route-c {
+  .wm-transport-node.ais circle {
     animation: none;
   }
 }

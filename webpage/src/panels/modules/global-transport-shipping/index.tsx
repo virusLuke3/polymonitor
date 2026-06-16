@@ -77,57 +77,6 @@ function aviationNews(payload?: RuntimeGlobalTransportShippingPayload | null) {
   return payload?.aviation?.news || [];
 }
 
-function AviationHero({ payload }: { payload?: RuntimeGlobalTransportShippingPayload | null }) {
-  const routes = numeric(payload?.summary?.routes);
-  const hubs = payload?.aviation?.hubs || [];
-  const routeRows = aviationRoutes(payload);
-  const topHub = hubs[0];
-  const routeRisk = Math.round(Math.max(...routeRows.map((route) => numeric(route.riskScore)), 0));
-  const traffic = Math.round(Math.max(...routeRows.map((route) => numeric(route.trafficScore)), 0));
-  return (
-    <div className="wm-aviation-hero">
-      <div className="wm-aviation-radar" aria-hidden="true">
-        <span className="wm-aviation-radar-sweep" />
-        <span className="wm-aviation-runway" />
-        <span className="wm-aviation-plane-dot one" />
-        <span className="wm-aviation-plane-dot two" />
-        <span className="wm-aviation-plane-dot three" />
-      </div>
-      <svg className="wm-aviation-mini-routes" viewBox="0 0 240 92" role="img" aria-label="Aviation corridor preview">
-        <defs>
-          <linearGradient id="wmAviationRoute" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.1" />
-            <stop offset="50%" stopColor="#67e8f9" stopOpacity="0.86" />
-            <stop offset="100%" stopColor="#facc15" stopOpacity="0.72" />
-          </linearGradient>
-        </defs>
-        <path className="wm-aviation-latline" d="M10 42 C62 30 88 46 122 37 S184 23 230 44" />
-        <path className="wm-aviation-latline" d="M12 70 C64 58 96 77 128 64 S188 54 228 72" />
-        <path className="wm-aviation-route-a" d="M22 68 C74 12 138 12 220 35" />
-        <path className="wm-aviation-route-b" d="M20 34 C78 80 146 80 224 56" />
-        <path className="wm-aviation-route-c" d="M58 78 C102 38 152 36 194 18" />
-        {[
-          [28, 66, 'ATL'],
-          [88, 31, 'LHR'],
-          [140, 54, 'DXB'],
-          [195, 25, 'SIN'],
-          [216, 55, 'HKG'],
-        ].map(([x, y, label], index) => (
-          <g key={String(label)} className={index === 1 ? 'wm-aviation-node major' : 'wm-aviation-node'}>
-            <circle cx={Number(x)} cy={Number(y)} r={index === 1 ? 6 : 4.5} />
-            <text x={Number(x)} y={Number(y) + 21}>{label}</text>
-          </g>
-        ))}
-      </svg>
-      <div className="wm-aviation-hero-stats">
-        <span><em>TOP HUB</em><strong>{topHub?.code || payload?.summary?.topHub || '--'}</strong><small>{topHub?.city || 'seeded'}</small></span>
-        <span><em>ROUTES</em><strong>{formatCompact(routes)}</strong><small>OpenFlights</small></span>
-        <span><em>RISK</em><strong>{routeRisk}</strong><small>{traffic} traffic</small></span>
-      </div>
-    </div>
-  );
-}
-
 function OpsRow({ row }: { row: Record<string, unknown> }) {
   const status = statusClass(row.status);
   return (
@@ -135,7 +84,7 @@ function OpsRow({ row }: { row: Record<string, unknown> }) {
       <b>{String(row.code || '--')}</b>
       <span><strong>{String(row.name || 'Airport')}</strong><em>{String(row.city || 'Global')}</em></span>
       <i className={status}>{statusLabel(row.status)}</i>
-      <small>{compactUnknown(row.routeCount)}</small>
+      <small>--</small>
     </div>
   );
 }
@@ -208,22 +157,21 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
   }, [items, payload, tab]);
   return (
     <Panel
-      title="AIRLINE INTEL"
+      title="航空公司情报"
       titleControls={<button type="button" className="wm-panel-help-button" aria-label="Explain transport ops" aria-expanded={showHelp} onClick={() => setShowHelp((value) => !value)}>?</button>}
-      controls={<button type="button" className="wm-evidence-sort-button" aria-label="Refresh aviation source" onClick={() => openSource(payload?.sourceUrl)}>AIR MAP</button>}
+      controls={<button type="button" className="wm-evidence-sort-button wm-aviation-refresh-button" aria-label="Open aviation source" onClick={() => openSource(payload?.sourceUrl)}>↻</button>}
       badge={statusBadge(payload)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
       count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Airline Intel</strong>
+          <strong>航空公司情报</strong>
           <p>Seeded aviation corridor graph from OpenFlights, with route-flow animation on the 2D map and supporting transport source status.</p>
         </div>
       ) : null}
       className="wm-market-panel wm-evidence-panel wm-global-transport-panel"
       dataPanelId="global-transport-shipping"
     >
-      <AviationHero payload={payload} />
       <div className="wm-aviation-tabs" role="tablist" aria-label="Airline intel views">
         {tabs.map((item) => (
           <button key={item.id} type="button" className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>
