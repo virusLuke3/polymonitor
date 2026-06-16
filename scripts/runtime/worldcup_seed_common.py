@@ -125,6 +125,19 @@ class WorldCupSeedWatcher:
         finally:
             conn.close()
 
+    def get_cached_json(self, namespace: str, cache_key: str) -> Any:
+        raw = self.redis_client.get(redis_key(self.redis_prefix, namespace, cache_key))
+        if not raw:
+            return None
+        return json.loads(str(raw))
+
+    def set_cached_json(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
+        self.redis_client.set(
+            redis_key(self.redis_prefix, namespace, cache_key),
+            json.dumps(payload, ensure_ascii=True, default=str),
+            ex=max(1, int(ttl_seconds or 1)),
+        )
+
     def service_context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
@@ -132,12 +145,14 @@ class WorldCupSeedWatcher:
             "SNAPSHOT_STORE": self.snapshot_store,
             "app": _AppAdapter(self.mode),
             "BeautifulSoup": BeautifulSoup,
+            "get_cached_json": self.get_cached_json,
             "http_json_get": self.http_json_get,
             "http_text_get": self.http_text_get,
             "query_all": self.query_all,
             "requests": requests,
             "redis_client": self.redis_client,
             "redis_prefix": self.redis_prefix,
+            "set_cached_json": self.set_cached_json,
             "utc_now_iso": utc_now_iso,
         }
 
