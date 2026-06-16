@@ -179,6 +179,13 @@ function probabilityWidth(value?: number | string | null) {
   return `${Math.max(3, Math.min(100, pct))}%`;
 }
 
+function daysBetween(a?: string, b?: string) {
+  const left = new Date(a || '').getTime();
+  const right = new Date(b || '').getTime();
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+  return Math.round(Math.abs(left - right) / 86_400_000);
+}
+
 function scoreText(match: WorldCupMatch) {
   if (match.homeScore == null || match.awayScore == null) return 'vs';
   return `${match.homeScore}-${match.awayScore}`;
@@ -466,7 +473,10 @@ function countForView(view: WorldCupHomeView, model: WorldCupHomeModel) {
     return venueRiskScore(selectedWeather.current.tempC, selectedWeather.current.precipitationProbability || 0, selectedWeather.current.windKph || 0, matchCount);
   }
   if (view === 'group-table' || view === 'group-advance') return payload.matches.filter((match) => match.group).length;
-  if (view.includes('team') || view.includes('injury') || view.includes('lineup')) return payload.rosters.length;
+  if (view === 'team-power') return payload.rosters.length || selectedOdds.length || selectedMarkets.length;
+  if (view === 'team-status' || view === 'injury-load' || view === 'lineup-board') return payload.rosters.length || news.length || (model.selectedMatch ? 2 : 0);
+  if (view === 'ref-cards') return signals.filter((row) => /ref|card|venue|risk/i.test(`${row.source} ${row.title}`)).length || (model.selectedMatch ? 2 : 0);
+  if (view === 'travel-load') return signals.filter((row) => /city|host|venue|travel/i.test(`${row.source} ${row.title}`)).length || (model.selectedMatch ? 2 : 0);
   return signals.length;
 }
 
@@ -857,6 +867,59 @@ function RosterPanel({ model, mode }: { model: WorldCupHomeModel; mode: 'power' 
   const teams = model.selectedMatch ? [model.selectedMatch.homeTeam, model.selectedMatch.awayTeam] : model.payload.rosters.slice(0, 2).map((roster) => roster.team);
   const rosters = model.payload.rosters.filter((roster) => teams.includes(roster.team));
   if (!rosters.length) {
+    const book = model.selectedOdds.find((row) => row.providerType !== 'prediction_market' && ['h2h', 'moneyline', 'h2h_3_way'].includes(String(row.marketKey || row.marketType)));
+    if (mode === 'power' && book) {
+      return (
+        <>
+          <div className="wm-worldcup-home-team-grid">
+            {teams.map((team) => {
+              const outcome = (book.outcomes || []).find((row) => outcomeMatchesTeam(row.name, team));
+              const probability = percentFromUnknown(outcome?.impliedProbability ?? null);
+              return (
+                <section key={team}>
+                  <header><strong>{team}</strong><span>book power</span></header>
+                  <div className="wm-worldcup-home-meter"><i style={{ width: probabilityWidth(probability) }} /><b>{percentLabel(probability)} implied</b></div>
+                  <p>{outcome?.decimalOdds ? `${outcome.decimalOdds.toFixed(2)} decimal · ${outcome.bookCount || book.bookmakerCount || 0} books` : 'Bookmaker consensus row is linked.'}</p>
+                </section>
+              );
+            })}
+          </div>
+          <EmptyState
+            detail="Showing bookmaker-implied team strength from real odds. Player-level power still waits for official squads and injury status."
+            rows={[
+              { source: 'The Odds API h2h', status: 'live', detail: `${book.provider || 'bookmaker'} consensus` },
+              { source: 'Official squads / injury feed', status: 'required', detail: 'player-level availability' },
+            ]}
+          />
+        </>
+      );
+    }
+    const newsCounts = teams.map((team) => ({
+      team,
+      count: model.news.filter((item) => `${item.title} ${item.summary || ''}`.toLowerCase().includes(team.toLowerCase())).length,
+    }));
+    if ((mode === 'injury' || mode === 'status') && newsCounts.length) {
+      return (
+        <>
+          <div className="wm-worldcup-home-team-grid">
+            {newsCounts.map((row) => (
+              <section key={row.team}>
+                <header><strong>{row.team}</strong><span>{row.count ? 'news watch' : 'no feed'}</span></header>
+                <div className="wm-worldcup-home-meter"><i style={{ width: `${row.count ? 42 : 6}%` }} /><b>{row.count} team-news rows</b></div>
+                <p>Official injury and player-status feed is not connected.</p>
+              </section>
+            ))}
+          </div>
+          <EmptyState
+            detail={`${mode.toUpperCase()} has schedule/news context, but verified player availability still requires an official injury feed.`}
+            rows={[
+              { source: 'World Cup news watch', status: newsCounts.some((row) => row.count) ? 'partial' : 'empty', detail: 'team mention count only' },
+              { source: 'Official squads / injury feed', status: 'required', detail: 'player-level availability' },
+            ]}
+          />
+        </>
+      );
+    }
     return (
       <EmptyState
         detail={`${mode.toUpperCase()} requires official squad, injury, or player-status feeds. Values are not estimated in the browser.`}
@@ -955,6 +1018,79 @@ function VenueRef({ model }: { model: WorldCupHomeModel }) {
   );
 }
 
+function RefCardsFallback({ model }: { model: WorldCupHomeModel }) {
+  const match = model.selectedMatch;
+  if (!match) {
+    return <EmptyState detail="Referee and cards data requires a selected fixture plus an official/statistical provider." />;
+  }
+  return (
+    <SignalList
+      rows={[
+        {
+          id: 'home-ref-required',
+          source: 'FIFA REF FEED',
+          title: `${match.homeTeam} vs ${match.awayTeam}: referee appointment not connected`,
+          summary: 'Cards, fouls, penalties and VAR tendencies remain disabled until an official appointment/history source is connected.',
+          tone: 'gold',
+          tags: [{ label: 'REF', tone: 'red' }, { label: 'REQUIRED', tone: 'gold' }],
+        },
+        {
+          id: 'home-cards-context',
+          source: 'MATCH CONTEXT',
+          title: `${match.city}: ${model.selectedWeather?.current.condition || 'weather pending'} card-context watch`,
+          summary: `Temp ${model.selectedWeather?.current.tempC ?? '--'}C · wind ${model.selectedWeather?.current.windKph ?? '--'} kph · rain ${model.selectedWeather?.current.precipitationProbability ?? 0}%. Context only, not a referee card model.`,
+          tone: 'blue',
+          tags: [{ label: 'CONTEXT', tone: 'blue' }, { label: 'NO MODEL', tone: 'gray' }],
+        },
+      ]}
+      empty={null}
+    />
+  );
+}
+
+function TravelLoadFallback({ model }: { model: WorldCupHomeModel }) {
+  const match = model.selectedMatch;
+  if (!match) {
+    return <EmptyState detail="Travel load requires a selected fixture plus team-base, previous-match and itinerary data." />;
+  }
+  const cityMatches = model.payload.matches.filter((item) => item.cityId === match.cityId);
+  const teams = [match.homeTeam, match.awayTeam];
+  const rows = teams.map((team) => {
+    const teamMatches = model.payload.matches
+      .filter((item) => item.homeTeam === team || item.awayTeam === team)
+      .sort((a, b) => new Date(a.kickoffUtc).getTime() - new Date(b.kickoffUtc).getTime());
+    const index = teamMatches.findIndex((item) => item.id === match.id);
+    const previous = index > 0 ? teamMatches[index - 1] : null;
+    const restDays = previous ? daysBetween(previous.kickoffUtc, match.kickoffUtc) : null;
+    const load = Math.max(8, Math.min(96, Math.round(
+      (restDays === null ? 22 : restDays <= 3 ? 72 : restDays <= 4 ? 54 : 30)
+      + ((model.selectedWeather?.current.windKph || 0) >= 24 ? 12 : 0)
+      + ((model.selectedWeather?.current.precipitationProbability || 0) >= 45 ? 12 : 0),
+    )));
+    return { team, previous, restDays, load };
+  });
+  return (
+    <>
+      <div className="wm-worldcup-home-team-grid">
+        {rows.map((row) => (
+          <section key={row.team}>
+            <header><strong>{row.team}</strong><span>{row.restDays === null ? 'open' : `${row.restDays}d rest`}</span></header>
+            <div className="wm-worldcup-home-meter"><i style={{ width: `${row.load}%` }} /><b>{row.load}/100 schedule load</b></div>
+            <p>{row.previous ? `${row.previous.city} previous fixture · ${cityMatches.length} host-city matches` : `First visible fixture · ${cityMatches.length} host-city matches`}</p>
+          </section>
+        ))}
+      </div>
+      <EmptyState
+        detail={`${match.venue} load is computed from real fixture/weather rows. Team-base travel distance still requires official logistics data.`}
+        rows={[
+          { source: 'FIFA fixture history', status: model.payload.matches.length ? 'partial' : 'required', detail: 'previous fixture and recovery window' },
+          { source: 'Official team base / federation logistics', status: 'required', detail: 'camp location, flights and travel dates' },
+        ]}
+      />
+    </>
+  );
+}
+
 function SourceAudit({ model }: { model: WorldCupHomeModel }) {
   const states = model.payload.intelligence?.providerStates || {};
   return sourceRows([
@@ -1040,9 +1176,9 @@ function renderView(config: WorldCupHomePanelConfig, model: WorldCupHomeModel) {
     case 'match-model':
       return <SignalList rows={model.signals.filter((row) => /match|tempo|model|market/i.test(`${row.source} ${row.title}`))} empty={<EmptyState detail="xG, tempo and tactical model rows require a trusted statistical feed." />} />;
     case 'ref-cards':
-      return <SignalList rows={model.signals.filter((row) => /ref|card|venue|risk/i.test(`${row.source} ${row.title}`))} empty={<EmptyState detail="Referee and cards data requires an official/statistical provider." />} />;
+      return <SignalList rows={model.signals.filter((row) => /ref|card|venue|risk/i.test(`${row.source} ${row.title}`))} empty={<RefCardsFallback model={model} />} />;
     case 'travel-load':
-      return <SignalList rows={model.signals.filter((row) => /city|host|venue|travel/i.test(`${row.source} ${row.title}`))} empty={<EmptyState detail="Travel load requires team-base, previous-match and itinerary data." />} />;
+      return <SignalList rows={model.signals.filter((row) => /city|host|venue|travel/i.test(`${row.source} ${row.title}`))} empty={<TravelLoadFallback model={model} />} />;
     case 'lineup-board':
       return <SignalList rows={model.signals.filter((row) => /team|squad|lineup|roster/i.test(`${row.source} ${row.title}`))} empty={<EmptyState detail="Predicted XI and confirmed lineup cards require official team feeds." />} />;
     default:
