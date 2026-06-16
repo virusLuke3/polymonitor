@@ -15,8 +15,11 @@ from typing import Any, Dict, Iterable, List, Optional
 PANEL_ID = "global-transport-shipping"
 GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE = "snapshot:transport:global-shipping"
 GLOBAL_TRANSPORT_CACHE_KEY = "panel-v1"
+AISSTREAM_SNAPSHOT_NAMESPACE = "snapshot:transport:aisstream"
+AISSTREAM_CACHE_KEY = "sample-v1"
 DEFAULT_LIMIT = 14
 DEFAULT_TTL_SECONDS = 900
+DEFAULT_AISSTREAM_SAMPLE_INTERVAL_SECONDS = 21600
 
 OPENFLIGHTS_AIRPORTS_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat"
 OPENFLIGHTS_ROUTES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat"
@@ -52,6 +55,38 @@ def _float(value: Any) -> Optional[float]:
         return float(text) if text else None
     except (TypeError, ValueError):
         return None
+
+
+def _parse_iso(value: Any) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _age_seconds(value: Any) -> Optional[float]:
+    parsed = _parse_iso(value)
+    if parsed is None:
+        return None
+    return (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, default) or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
 
 
 def _local_openflights_path(filename: str) -> Optional[Path]:
@@ -340,19 +375,80 @@ async def _sample_aisstream(api_key: str, *, timeout_seconds: int) -> Dict[str, 
     return {"status": "ok", "messageCount": vessels, "topShipHints": dict(countries.most_common(5))}
 
 
-def _aisstream_status() -> Dict[str, Any]:
-    api_key = str(os.environ.get("POLYDATA_AISSTREAM_API_KEY") or "").strip()
+def _aisstream_api_key() -> str:
+    return str(os.environ.get("POLYDATA_AISSTREAM_API_KEY") or os.environ.get("AISSTREAM_API_KEY") or "").strip()
+
+
+def _read_aisstream_cache(ctx: dict, *, max_age_seconds: int) -> Optional[Dict[str, Any]]:
+    reader = ctx.get("get_cached_json")
+    payload = reader(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY) if callable(reader) else None
+    if not isinstance(payload, dict):
+        store = ctx.get("SNAPSHOT_STORE")
+        if store is not None:
+            payload = store.get(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY)
+    if not isinstance(payload, dict):
+        return None
+    sampled_at = payload.get("sampledAt") or payload.get("generatedAt")
+    age = _age_seconds(sampled_at)
+    if age is None or age > max_age_seconds:
+        return None
+    return {**payload, "cacheMode": "ais-cache", "ageSeconds": round(max(0, age))}
+
+
+def _store_aisstream_cache(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
+    store = ctx.get("SNAPSHOT_STORE")
+    if store is not None:
+        store.set(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY, payload, ttl_seconds)
+    setter = ctx.get("set_cached_json")
+    if callable(setter):
+        setter(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY, payload, ttl_seconds)
+
+
+def _aisstream_status(ctx: dict) -> Dict[str, Any]:
+    api_key = _aisstream_api_key()
+    min_interval = _env_int(
+        "POLYDATA_AISSTREAM_MIN_SAMPLE_INTERVAL_SECONDS",
+        DEFAULT_AISSTREAM_SAMPLE_INTERVAL_SECONDS,
+        minimum=900,
+        maximum=86400,
+    )
     if not api_key:
         return {"status": "missing-key", "messageCount": 0, "sourceUrl": AISSTREAM_DOC_URL}
-    if str(os.environ.get("POLYDATA_AISSTREAM_SAMPLE_ENABLED", "0")).strip().lower() not in {"1", "true", "yes", "on"}:
-        return {"status": "configured", "messageCount": 0, "sourceUrl": AISSTREAM_DOC_URL}
+    cached = _read_aisstream_cache(ctx, max_age_seconds=min_interval)
+    if cached is not None:
+        return cached
+    if not _env_bool("POLYDATA_AISSTREAM_SAMPLE_ENABLED", True):
+        return {
+            "status": "configured",
+            "messageCount": 0,
+            "sourceUrl": AISSTREAM_DOC_URL,
+            "cacheTtlSeconds": min_interval,
+            "sampleEnabled": False,
+        }
     try:
         import asyncio
 
-        timeout_seconds = max(3, min(int(os.environ.get("POLYDATA_AISSTREAM_SAMPLE_SECONDS", "8") or 8), 20))
-        return {**asyncio.run(_sample_aisstream(api_key, timeout_seconds=timeout_seconds)), "sourceUrl": AISSTREAM_DOC_URL}
+        timeout_seconds = _env_int("POLYDATA_AISSTREAM_SAMPLE_SECONDS", 8, minimum=3, maximum=20)
+        sampled = {
+            **asyncio.run(_sample_aisstream(api_key, timeout_seconds=timeout_seconds)),
+            "sourceUrl": AISSTREAM_DOC_URL,
+            "sampledAt": _utc_now_iso(ctx),
+            "sampleWindowSeconds": timeout_seconds,
+            "cacheTtlSeconds": min_interval,
+        }
+        _store_aisstream_cache(ctx, sampled, ttl_seconds=min_interval)
+        return sampled
     except Exception as exc:
-        return {"status": "error", "messageCount": 0, "error": exc.__class__.__name__, "sourceUrl": AISSTREAM_DOC_URL}
+        error_payload = {
+            "status": "error",
+            "messageCount": 0,
+            "error": exc.__class__.__name__,
+            "sourceUrl": AISSTREAM_DOC_URL,
+            "sampledAt": _utc_now_iso(ctx),
+            "cacheTtlSeconds": min_interval,
+        }
+        _store_aisstream_cache(ctx, error_payload, ttl_seconds=min_interval)
+        return error_payload
 
 
 def _market_links(ctx: dict, query: str) -> List[Dict[str, Any]]:
@@ -416,7 +512,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
     route_stats = _parse_routes(routes_text, airports, airlines)
 
     transit_stats, transit_url = _fetch_transitland_catalog(ctx)
-    ais_status = _aisstream_status()
+    ais_status = _aisstream_status(ctx)
 
     items: List[Dict[str, Any]] = []
     for hub in route_stats["topHubs"][:6]:
@@ -503,7 +599,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             entity="AISStream",
             country="Global",
             title="Global AIS websocket status",
-            summary=f"AISStream status: {ais_status.get('status')}. Configure POLYDATA_AISSTREAM_API_KEY for live vessel sample.",
+            summary=f"AISStream status: {ais_status.get('status')}. Uses cached low-frequency samples when AISSTREAM_API_KEY is configured.",
             metric=int(ais_status.get("messageCount") or 0),
             metric_label="AIS MSG",
             source_url=AISSTREAM_DOC_URL,

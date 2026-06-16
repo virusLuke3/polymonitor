@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -132,6 +133,33 @@ def test_transitland_catalog_defaults_to_index_sampling(monkeypatch):
     assert stats["scannedFileCount"] == 2
     assert stats["feedCount"] == 2
     assert stats["specCounts"] == {"gtfs": 1, "gtfs-rt": 1}
+
+
+def test_aisstream_status_uses_plain_env_alias_and_fresh_cache(monkeypatch):
+    monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("AISSTREAM_API_KEY", "test-key")
+    monkeypatch.setenv("POLYDATA_AISSTREAM_MIN_SAMPLE_INTERVAL_SECONDS", "21600")
+
+    def fail_sample(*_: object, **__: object) -> None:
+        raise AssertionError("fresh AIS cache should avoid websocket sampling")
+
+    monkeypatch.setattr(global_transport_shipping_service, "_sample_aisstream", fail_sample)
+    sampled_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    payload = global_transport_shipping_service._aisstream_status(
+        {
+            "utc_now_iso": lambda: sampled_at,
+            "get_cached_json": lambda namespace, cache_key: {
+                "status": "ok",
+                "messageCount": 7,
+                "sampledAt": sampled_at,
+                "sourceUrl": "https://aisstream.io/documentation",
+            },
+        }
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["messageCount"] == 7
+    assert payload["cacheMode"] == "ais-cache"
 
 
 def test_global_transport_shipping_runtime_panel_registered():
