@@ -2,13 +2,14 @@
 
 ## 目标
 
-第一阶段不是从零实现一个新回测框架，而是在当前已经实现的 `ORDERFILLED + market_token_block_close + fill_probability` 基础上，补齐可审计执行回测所需的关键能力。
+第一阶段不是从零实现一个新回测框架，而是在当前已经实现的 `ORDERFILLED + market_token_block_close` 基础上，补齐可审计执行回测所需的关键能力。
 
 目标是把现在“能跑 trades 的价格/成交量回测”升级成：
 
 - 能解释每个策略信号为什么成交、部分成交或没有成交。
 - 能把 signal、order、fill、trade、ledger 串起来。
-- 能用 OrderFilled block 级真实成交流估计成交概率。
+- 能用 OrderFilled block 级真实成交流回放限价单成交。
+- 能区分中途真实卖出 PnL 和持有到结算的 settlement PnL。
 - 能区分 optimistic / realistic / conservative / stress 执行假设。
 - 能让净收益从 ledger/cashflow 推导，而不是只靠 entry/exit price 差。
 
@@ -423,7 +424,36 @@ created_at
 
 ### 目标
 
-保留当前 `block_volume * liquidity_cap_pct` 的主模型，但增加执行 profile，使它更接近真实市场。
+把默认执行口径从“价格信号触发后用 volume/probability 估计成交”改成“先挂限价单，再用后续真实 OrderFilled 成交价穿价回放成交”。
+
+这条是 Polymarket 回测的核心约束：多数实盘成交来自 limit order。不能把 `price >= entry_threshold` 这种价格走势信号直接当成可交易机会。
+
+默认模型：
+
+```text
+BUY limit L:
+  订单先挂出。
+  只有后续真实 trade_price <= L，才认为买单被吃进。
+
+SELL limit L:
+  订单先挂出。
+  只有后续真实 trade_price >= L，才认为卖单被吃出。
+```
+
+小资金 Phase 1 假设：
+
+- 只要真实成交价穿过 limit price，就允许成交。
+- 不做全量 L2 queue position。
+- 不因为资金太大造成不可成交；大资金、partial fill、queue miss 后续再增强。
+- `block_volume/trade_count` 只作为审计信息和可选压力模型，不再是默认成交必要条件。
+
+卖出和结算：
+
+- 中途能卖出时，用真实穿价成交价或更保守的 limit price 记录 `trade_exit_pnl`。
+- 中途卖不出时，继续持仓。
+- 回测结束不能默认用最后价格 `FORCE_CLOSE`。
+- 已结算市场必须按 YES payoff `0/1` 结算，生成 `settlement_pnl`。
+- 未提供 settlement value 且价格没有明确 0/1 时，仓位应保持 open/unresolved，不能伪造成已成交退出。
 
 ### 当前状态
 
@@ -436,6 +466,9 @@ fill_probability = min(100, available_notional / target_notional)
 
 这已经比 close price 必成交更真实，但还缺：
 
+- 默认仍偏 signal backtest，不是 limit order replay
+- `FORCE_CLOSE` 使用最后价格退出，容易把不可卖出的尾盘价格当成可成交价格
+- 缺少 `trade_exit_pnl` vs `settlement_pnl` 的分解
 - profile 分档
 - order role
 - latency blocks
@@ -449,17 +482,26 @@ fill_probability = min(100, available_notional / target_notional)
 新增到 `quant_backtest_parameters`：
 
 ```text
+execution_price_mode TEXT DEFAULT 'ORDERFILLED_LIMIT_REPLAY'
+buy_limit_price NUMERIC(20, 10)
+sell_limit_price NUMERIC(20, 10)
+settlement_value NUMERIC(20, 10)
 execution_profile TEXT DEFAULT 'realistic'
 order_role TEXT DEFAULT 'taker'
 latency_blocks BIGINT DEFAULT 0
 adverse_slippage_cents NUMERIC(20, 10) DEFAULT 0
 fill_probability_haircut_pct NUMERIC(20, 10) DEFAULT 0
+final_valuation_mode TEXT DEFAULT 'SETTLEMENT'
 ```
 
 说明：
 
 - `participation_cap_pct` 第一阶段不单独新建，先复用现有 `liquidity_cap_pct`，避免参数重复。
 - `execution_profile` 用于一键设置参数组合，但仍允许用户手动覆盖。
+- `entry_threshold` 在新模式下只兼容旧参数，默认映射为 `buy_limit_price`。
+- `exit_threshold/take_profit` 不再自动代表可成交卖价；新模式优先使用 `sell_limit_price`。
+- 如果 `settlement_value` 未显式传入，但最后价格已经是 `0` 或 `1`，可以把最后价格作为 settlement payoff。
+- 如果 `settlement_value` 不存在且最后价格不是 `0/1`，不得用最后价格强平。
 
 ### Profile 建议
 
@@ -490,22 +532,29 @@ fill_probability_haircut_pct NUMERIC(20, 10) DEFAULT 0
 
 ### 成交模型输入
 
+- limit order side
+- buy_limit_price
+- sell_limit_price
+- 后续 block 的真实 OrderFilled trade/block close price
+- latency blocks
 - block volume
 - trade count
-- recent N block volume
-- price jump
-- order size / block volume ratio
+- settlement_value
 - time-to-expiry
 - execution profile
 - order role
 
-第一阶段可以先实现前五项；`time-to-expiry` 后续再接 metadata。
+第一阶段必须先实现 limit price 穿价和 settlement payoff；`time-to-expiry` 后续再接 metadata。
 
 ### 输出字段
 
 写入 orders/trades：
 
-- fill probability
+- limit price
+- crossing price
+- crossing block
+- trade_exit_pnl
+- settlement_pnl
 - actual fill size
 - actual fill price
 - slippage cost
@@ -518,26 +567,34 @@ fill_probability_haircut_pct NUMERIC(20, 10) DEFAULT 0
 
 2. 扩展 `parse_parameters()`、parameter snapshot、fingerprint。
 
-3. 修改 `_orderfilled_fill_decision()`：
-   - 套用 profile/haircut。
-   - 对 BUY 增加 adverse slippage。
-   - 对 SELL 增加不利出场滑点。
+3. 新增 `ORDERFILLED_LIMIT_REPLAY` 执行模式：
+   - BUY 只有 `trade_price <= buy_limit_price` 才能成交。
+   - SELL 只有 `trade_price >= sell_limit_price` 才能成交。
+   - 默认小资金假设下，穿价即成交。
+   - 成交价默认用 limit price；如后续需要更精细，可扩展为 midpoint/worse-of-limit-and-trade。
    - 输出结构化 `no_fill_reason`。
 
 4. metrics 增加：
    - execution_profile
+   - execution_mode
    - no_fill_count
    - rejected_count
    - avg_slippage_cost
    - avg_latency_blocks
+   - trade_exit_pnl
+   - settlement_pnl
 
 5. 前端 Settings 增加 profile/role/latency/adverse slippage。
 
 ### 验收
 
-- `realistic` 成为默认口径。
-- `stress` 能显著降低成交和收益。
-- 同一 market 可以对比 optimistic / realistic / conservative / stress。
+- `ORDERFILLED_LIMIT_REPLAY` 成为默认口径。
+- 同一 market 可以对比 limit replay 与旧 `ORDERFILLED` volume/probability 模式。
+- BUY 不因为当前价格达到信号阈值就成交，必须等后续价格 `<= buy_limit_price`。
+- SELL 不因为触发退出信号就成交，必须等后续价格 `>= sell_limit_price`。
+- 如果 SELL 没穿价，不能用最后 price force close。
+- 若有 settlement value，最终按 `0/1` 结算。
+- 报告必须区分 `trade_exit_pnl` 和 `settlement_pnl`。
 - No Fill 和 slippage 的原因可解释。
 
 ## Phase 1D: Ledger / Cashflow MVP
@@ -590,6 +647,10 @@ created_at
 - `FEE`
 - `REBATE`
 - `MARK_TO_MARKET`
+- `SETTLEMENT`
+
+兼容旧模式：
+
 - `FORCE_CLOSE`
 
 后续扩展：
@@ -609,7 +670,10 @@ created_at
 
 4. 同一笔 entry 如果被多次 partial exit，ledger 只能记录一次 `BUY`，然后记录多条 `SELL`。不能因为 trade table 拆成多条 closed leg，就重复扣买入现金。
 
-5. `final_valuation_mode=FORCE_CLOSE` 只用于回测结束时残余仓位的最终估值/强制平仓；中途 exit 仍然必须走 OrderFilled 成交概率模型。这样既保留中途 `NO_FILL/PARTIAL_FILLED`，又能保证 run 结束时账户 PnL 可复现。
+5. `final_valuation_mode=SETTLEMENT` 是 Polymarket 默认口径。回测结束时残余仓位不能用最后 price 强制平仓；必须：
+   - 如果已知 settlement payoff，按 `0/1` 结算。
+   - 如果未知 settlement payoff，保留 open/unresolved 仓位，只给 mark-to-market，不给 realized exit PnL。
+   - `FORCE_CLOSE` 只能作为 legacy/diagnostic 模式显式启用。
 
 6. 生成 running state：
    - `position_after`
@@ -618,6 +682,8 @@ created_at
 7. metrics 的 `net_profit` 增加 ledger 校验口径：
    - `net_profit_trade`
    - `net_profit_ledger`
+   - `trade_exit_pnl`
+   - `settlement_pnl`
    - `ledger_diff`
 
 8. API 增加：
@@ -668,6 +734,12 @@ created_at
     - realized PnL
     - unrealized PnL
     - total equity
+11. `ORDERFILLED_LIMIT_REPLAY` 买入必须等待后续真实价格 `<= buy_limit_price`。
+12. `ORDERFILLED_LIMIT_REPLAY` 卖出必须等待后续真实价格 `>= sell_limit_price`。
+13. 卖出未穿价时，不能用最后价格退出；已知结算结果时按 `0/1` 生成 `SETTLEMENT` ledger。
+14. 回测结果必须拆分：
+    - `trade_exit_pnl`
+    - `settlement_pnl`
 
 ### Smoke run
 

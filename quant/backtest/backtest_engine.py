@@ -27,6 +27,7 @@ from .execution_profiles import apply_adverse_slippage, apply_probability_haircu
 from .frameworks import normalize_backtest_engine, run_framework_backtest
 from .ledger import build_ledger_rows, ledger_summary
 from .orders import next_order_id, order_from_fill, summarize_orders
+from .runners.execution_replay import OrderIntent, ReplayTradeEvent, replay_limit_order, sequence_key
 from ..prices.build_targets import target_reason, upsert_price_build_targets_for_market
 
 
@@ -71,7 +72,7 @@ class BacktestParameters:
     liquidity_cap_pct: Decimal = Decimal("100")
     max_position_notional: Decimal = Decimal("0")
     min_fill_pct: Decimal = Decimal("0")
-    execution_price_mode: str = "ORDERFILLED"
+    execution_price_mode: str = "ORDERFILLED_LIMIT_REPLAY"
     execution_profile: str = "realistic"
     order_role: str = "taker"
     latency_blocks: int = 0
@@ -82,9 +83,12 @@ class BacktestParameters:
     allow_partial_fill: bool = True
     min_fill_size: Decimal = Decimal("0")
     reject_on_stale_book: bool = True
-    final_valuation_mode: str = "FORCE_CLOSE"
+    final_valuation_mode: str = "SETTLEMENT"
     max_entry_price: Decimal = Decimal("1")
     min_exit_price: Decimal = Decimal("0")
+    buy_limit_price: Decimal | None = None
+    sell_limit_price: Decimal | None = None
+    settlement_value: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +121,8 @@ class OpenPosition:
     trade_count: int = 0
     available_notional: Decimal = Decimal("0")
     entry_order_id: str | None = None
+    entry_fee_cost: Decimal = Decimal("0")
+    entry_slippage_cost: Decimal = Decimal("0")
 
 
 def decimal_or_default(value: Any, default: Decimal) -> Decimal:
@@ -149,6 +155,16 @@ def bool_or_default(value: Any, default: bool) -> bool:
     return default
 
 
+def decimal_or_none(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except Exception:
+        return None
+    return parsed if parsed >= 0 else None
+
+
 def normalize_price_source(value: Any) -> str:
     text = str(value or "frontend").strip().lower()
     aliases = {
@@ -179,7 +195,7 @@ def parse_parameters(payload: dict[str, Any]) -> BacktestParameters:
         liquidity_cap_pct=decimal_or_default(payload.get("liquidity_cap_pct", payload.get("liquidityCapPct")), Decimal("100")),
         max_position_notional=decimal_or_default(payload.get("max_position_notional", payload.get("maxPositionNotional")), Decimal("0")),
         min_fill_pct=decimal_or_default(payload.get("min_fill_pct", payload.get("minFillPct")), Decimal("0")),
-        execution_price_mode=str(payload.get("execution_price_mode", payload.get("executionPriceMode", "ORDERFILLED")) or "ORDERFILLED").upper(),
+        execution_price_mode=str(payload.get("execution_price_mode", payload.get("executionPriceMode", "ORDERFILLED_LIMIT_REPLAY")) or "ORDERFILLED_LIMIT_REPLAY").upper(),
         execution_profile=str(payload.get("execution_profile", payload.get("executionProfile", "realistic")) or "realistic").lower(),
         order_role=str(payload.get("order_role", payload.get("orderRole", "taker")) or "taker").lower(),
         latency_blocks=max(0, int_or_default(payload.get("latency_blocks", payload.get("latencyBlocks")), 0)),
@@ -190,14 +206,21 @@ def parse_parameters(payload: dict[str, Any]) -> BacktestParameters:
         allow_partial_fill=bool_or_default(payload.get("allow_partial_fill", payload.get("allowPartialFill")), True),
         min_fill_size=decimal_or_default(payload.get("min_fill_size", payload.get("minFillSize")), Decimal("0")),
         reject_on_stale_book=bool_or_default(payload.get("reject_on_stale_book", payload.get("rejectOnStaleBook")), True),
-        final_valuation_mode=str(payload.get("final_valuation_mode", payload.get("finalValuationMode", "FORCE_CLOSE")) or "FORCE_CLOSE").upper(),
+        final_valuation_mode=str(payload.get("final_valuation_mode", payload.get("finalValuationMode", "SETTLEMENT")) or "SETTLEMENT").upper(),
         max_entry_price=decimal_or_default(payload.get("max_entry_price", payload.get("maxEntryPrice")), Decimal("1")),
         min_exit_price=decimal_or_default(payload.get("min_exit_price", payload.get("minExitPrice")), Decimal("0")),
+        buy_limit_price=decimal_or_none(payload.get("buy_limit_price", payload.get("buyLimitPrice"))),
+        sell_limit_price=decimal_or_none(payload.get("sell_limit_price", payload.get("sellLimitPrice"))),
+        settlement_value=decimal_or_none(payload.get("settlement_value", payload.get("settlementValue"))),
     )
 
 
 def _decimal_text(value: Decimal) -> str:
     return format(Decimal(str(value)).normalize(), "f")
+
+
+def _optional_decimal_text(value: Decimal | None) -> str | None:
+    return _decimal_text(value) if value is not None else None
 
 
 def backtest_parameter_snapshot(
@@ -254,6 +277,9 @@ def backtest_parameter_snapshot(
             "final_valuation_mode": params.final_valuation_mode,
             "max_entry_price": _decimal_text(params.max_entry_price),
             "min_exit_price": _decimal_text(params.min_exit_price),
+            "buy_limit_price": _optional_decimal_text(params.buy_limit_price),
+            "sell_limit_price": _optional_decimal_text(params.sell_limit_price),
+            "settlement_value": _optional_decimal_text(params.settlement_value),
         },
     }
     if execution_context:
@@ -296,8 +322,12 @@ def _execution_context_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     context = _sanitize_json_value(raw)
     if not isinstance(context, dict):
         context = {}
+    mode = str(payload.get("execution_price_mode", payload.get("executionPriceMode", "ORDERFILLED_LIMIT_REPLAY")) or "").upper()
     context.setdefault("model", "fixed_threshold_v1")
-    context.setdefault("fill_model", "orderfilled_probability_with_participation_cap")
+    context.setdefault(
+        "fill_model",
+        "orderfilled_limit_cross_then_settlement" if mode in {"ORDERFILLED_LIMIT_REPLAY", "LIMIT_REPLAY"} else "orderfilled_probability_with_participation_cap",
+    )
     return context
 
 
@@ -420,9 +450,10 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                 latency_blocks, adverse_slippage_cents, fill_probability_haircut_pct,
                 latency_seconds, max_book_staleness_seconds,
                 allow_partial_fill, min_fill_size, reject_on_stale_book,
-                final_valuation_mode, max_entry_price, min_exit_price
+                final_valuation_mode, max_entry_price, min_exit_price,
+                buy_limit_price, sell_limit_price, settlement_value
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 run_id,
@@ -452,6 +483,9 @@ def create_backtest_run(conn: Any, payload: dict[str, Any]) -> int:
                 params.final_valuation_mode,
                 params.max_entry_price,
                 params.min_exit_price,
+                params.buy_limit_price,
+                params.sell_limit_price,
+                params.settlement_value,
             ),
         )
     upsert_price_build_targets_for_market(
@@ -688,6 +722,9 @@ def _public_clob_execution_context(snapshots: list[BookSnapshot]) -> dict[str, A
 
 
 def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: BacktestParameters) -> dict[str, Any]:
+    if _is_limit_replay_mode(params):
+        return simulate_limit_replay_strategy(points, run, params)
+
     x_axis = "timestamp" if run["price_source"] == "frontend" else "block_number"
     equity = params.initial_capital
     peak = params.initial_capital
@@ -750,6 +787,8 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
                     trade_count=int(fill.get("trade_count", point.trade_count) or 0),
                     available_notional=fill.get("available_notional", Decimal("0")),
                     entry_order_id=order_id,
+                    entry_fee_cost=Decimal(str(fill.get("fee_cost") or 0)),
+                    entry_slippage_cost=Decimal(str(fill.get("slippage_cost") or 0)),
                 )
                 events.append(_event(
                     "open",
@@ -856,6 +895,227 @@ def simulate_strategy(points: list[PricePoint], run: dict[str, Any], params: Bac
     return {"trades": trades, "equity": equity_rows, "metrics": metrics, "events": events, "orders": orders, "ledger": ledger_rows}
 
 
+def simulate_limit_replay_strategy(points: list[PricePoint], run: dict[str, Any], params: BacktestParameters) -> dict[str, Any]:
+    """Replay a small passive limit-order strategy against historical OrderFilled prices.
+
+    This mode intentionally does not treat `price >= threshold` as a fillable
+    opportunity. A buy only fills after a later historical trade/block close is
+    at or below the buy limit; a sell only fills after a later price is at or
+    above the sell limit. If the sell never crosses, the position is held to
+    settlement instead of being force-closed at the final traded price.
+    """
+
+    x_axis = "timestamp" if run["price_source"] == "frontend" else "block_number"
+    equity = params.initial_capital
+    peak = params.initial_capital
+    orders: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
+    equity_rows: list[dict[str, Any]] = []
+    order_index = 0
+    buy_limit = _buy_limit_price(params)
+    first = points[0]
+    open_position: OpenPosition | None = None
+    buy_order_emitted = False
+    sell_order_emitted = False
+    sell_order_signal_x: int | None = None
+    sell_limit: Decimal | None = None
+
+    for index, point in enumerate(points):
+        if open_position is None and not buy_order_emitted and _after_latency(first, point, params, x_axis):
+            if point.price <= buy_limit:
+                order_index += 1
+                order_id = next_order_id(order_index)
+                fill = _limit_replay_fill(
+                    params,
+                    point,
+                    "BUY_YES",
+                    limit_price=buy_limit,
+                    decision_x=first.x_value,
+                )
+                trade_id = f"T-{len(trades) + 1:04d}" if not fill.get("rejected") else None
+                orders.append(order_from_fill(
+                    order_id=order_id,
+                    signal_index=1,
+                    x_axis=x_axis,
+                    x_value=first.x_value,
+                    side="BUY_YES",
+                    role="maker",
+                    order_type="resting_limit",
+                    decision_price=buy_limit,
+                    fill=fill,
+                    trade_id=trade_id,
+                    latency_seconds=params.latency_seconds,
+                    latency_blocks=params.latency_blocks,
+                ))
+                buy_order_emitted = True
+                if fill.get("rejected") or Decimal(str(fill.get("size") or 0)) <= 0:
+                    events.append(_event("buy_no_fill", x_axis, point.x_value, None, point.price, "buy limit crossed but volume cap prevented fill", meta=fill))
+                    continue
+                open_position = OpenPosition(
+                    trade_index=len(trades) + 1,
+                    entry_index=index,
+                    entry_x=point.x_value,
+                    entry_price=fill.get("entry_price") or buy_limit,
+                    size=fill["size"],
+                    requested_notional=fill["requested_notional"],
+                    filled_notional=fill["filled_notional"],
+                    fill_pct=fill["fill_pct"],
+                    fill_status=fill.get("fill_status", "FILLED"),
+                    fill_probability=fill.get("fill_probability", Decimal("100")),
+                    block_volume=fill.get("block_volume", point.volume),
+                    trade_count=int(fill.get("trade_count", point.trade_count) or 0),
+                    available_notional=fill.get("available_notional", fill["filled_notional"]),
+                    entry_order_id=order_id,
+                    entry_fee_cost=Decimal(str(fill.get("fee_cost") or 0)),
+                    entry_slippage_cost=Decimal(str(fill.get("slippage_cost") or 0)),
+                )
+                sell_order_signal_x = point.x_value
+                sell_limit = _sell_limit_price(params, open_position.entry_price)
+                events.append(_event("open", x_axis, point.x_value, trade_id, point.price, "buy limit crossed", meta=fill))
+
+        elif open_position is not None and not sell_order_emitted:
+            if sell_order_signal_x is None:
+                sell_order_signal_x = open_position.entry_x
+            if sell_limit is None:
+                sell_limit = _sell_limit_price(params, open_position.entry_price)
+            if _after_latency_value(sell_order_signal_x, point, params, x_axis) and _sell_limit_can_fill(point.price, sell_limit):
+                order_index += 1
+                order_id = next_order_id(order_index)
+                exit_fill = _limit_replay_fill(
+                    params,
+                    point,
+                    "SELL_YES",
+                    limit_price=sell_limit,
+                    decision_x=sell_order_signal_x,
+                    target_size=open_position.size,
+                )
+                trade_id = f"T-{open_position.trade_index:04d}"
+                orders.append(order_from_fill(
+                    order_id=order_id,
+                    signal_index=index + 1,
+                    x_axis=x_axis,
+                    x_value=sell_order_signal_x,
+                    side="SELL_YES",
+                    role="maker",
+                    order_type="resting_limit",
+                    decision_price=sell_limit,
+                    fill=exit_fill,
+                    trade_id=trade_id,
+                    latency_seconds=params.latency_seconds,
+                    latency_blocks=params.latency_blocks,
+                ))
+                sell_order_emitted = True
+                if exit_fill.get("rejected") or Decimal(str(exit_fill.get("size") or 0)) <= 0:
+                    events.append(_event("sell_no_fill", x_axis, point.x_value, trade_id, point.price, "sell limit crossed but volume cap prevented fill", meta=exit_fill))
+                    continue
+                trade = _close_trade(run, x_axis, open_position, point, index, "limit_exit", params, exit_fill=exit_fill, exit_order_id=order_id)
+                trades.append(trade)
+                equity += trade["pnl"]
+                events.append(_event("close", x_axis, point.x_value, trade_id, point.price, "sell limit crossed", meta=exit_fill))
+                open_position = None
+
+        mark_equity = equity
+        if open_position is not None:
+            mark_equity += (point.price - open_position.entry_price) * open_position.size
+        peak = max(peak, mark_equity)
+        drawdown = mark_equity - peak
+        equity_rows.append(
+            {
+                "point_index": index + 1,
+                "x_axis": x_axis,
+                "x_value": point.x_value,
+                "equity": mark_equity,
+                "drawdown": drawdown,
+                "drawdown_pct": _pct(drawdown, peak),
+                "cumulative_return": _pct(mark_equity - params.initial_capital, params.initial_capital),
+            }
+        )
+
+    if not buy_order_emitted:
+        order_index += 1
+        orders.append(order_from_fill(
+            order_id=next_order_id(order_index),
+            signal_index=1,
+            x_axis=x_axis,
+            x_value=first.x_value,
+            side="BUY_YES",
+            role="maker",
+            order_type="resting_limit",
+            decision_price=buy_limit,
+            fill=_limit_replay_no_fill(params, first, "BUY_YES", limit_price=buy_limit, note="buy_limit_not_crossed"),
+            latency_seconds=params.latency_seconds,
+            latency_blocks=params.latency_blocks,
+        ))
+        events.append(_event("buy_no_fill", x_axis, first.x_value, None, first.price, "buy limit never crossed"))
+
+    if open_position is not None:
+        assert sell_order_signal_x is not None
+        assert sell_limit is not None
+        if not sell_order_emitted:
+            order_index += 1
+            orders.append(order_from_fill(
+                order_id=next_order_id(order_index),
+                signal_index=open_position.entry_index + 1,
+                x_axis=x_axis,
+                x_value=sell_order_signal_x,
+                side="SELL_YES",
+                role="maker",
+                order_type="resting_limit",
+                decision_price=sell_limit,
+                fill=_limit_replay_no_fill(
+                    params,
+                    points[-1],
+                    "SELL_YES",
+                    limit_price=sell_limit,
+                    note="sell_limit_not_crossed" if sell_limit < Decimal("0.98") else "terminal_price_limit_not_fillable",
+                    target_size=open_position.size,
+                ),
+                trade_id=f"T-{open_position.trade_index:04d}",
+                latency_seconds=params.latency_seconds,
+                latency_blocks=params.latency_blocks,
+            ))
+        settlement_value = _settlement_value(params, points)
+        if settlement_value is not None:
+            last = points[-1]
+            order_index += 1
+            order_id = next_order_id(order_index)
+            settlement_fill = _settlement_fill(params, last, open_position.size, settlement_value)
+            trade_id = f"T-{open_position.trade_index:04d}"
+            orders.append(order_from_fill(
+                order_id=order_id,
+                signal_index=len(points),
+                x_axis=x_axis,
+                x_value=last.x_value,
+                side="SELL_YES",
+                role="settlement",
+                order_type="settlement",
+                decision_price=settlement_value,
+                fill=settlement_fill,
+                trade_id=trade_id,
+                latency_seconds=Decimal("0"),
+                latency_blocks=0,
+            ))
+            trade = _close_trade(run, x_axis, open_position, last, len(points) - 1, "settlement", params, exit_fill=settlement_fill, exit_order_id=order_id)
+            trades.append(trade)
+            equity += trade["pnl"]
+            events.append(_event("settlement", x_axis, last.x_value, trade_id, settlement_value, "held to settlement payoff", meta=settlement_fill))
+        else:
+            events.append(_event(
+                "unresolved_open",
+                x_axis,
+                points[-1].x_value,
+                f"T-{open_position.trade_index:04d}",
+                points[-1].price,
+                "sell limit not crossed and settlement value unavailable",
+                meta={"settlement_value": None, "position_size": _decimal_text(open_position.size)},
+            ))
+
+    ledger_rows = build_ledger_rows(trades, params.initial_capital)
+    metrics = build_metrics(trades, equity_rows, points, params, orders=orders, ledger_rows=ledger_rows)
+    return {"trades": trades, "equity": equity_rows, "metrics": metrics, "events": events, "orders": orders, "ledger": ledger_rows}
+
+
 def build_metrics(
     trades: list[dict[str, Any]],
     equity_rows: list[dict[str, Any]],
@@ -866,6 +1126,11 @@ def build_metrics(
     ledger_rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     net = sum((trade["pnl"] for trade in trades), Decimal("0"))
+    settlement_pnl = sum(
+        (trade["pnl"] for trade in trades if str(trade.get("exit_reason") or "").lower() == "settlement"),
+        Decimal("0"),
+    )
+    trade_exit_pnl = net - settlement_pnl
     gross_profit = sum((trade["pnl"] for trade in trades if trade["pnl"] > 0), Decimal("0"))
     gross_loss = sum((trade["pnl"] for trade in trades if trade["pnl"] < 0), Decimal("0"))
     winners = len([trade for trade in trades if trade["pnl"] > 0])
@@ -908,7 +1173,6 @@ def build_metrics(
     avg_notional = filled_notional / Decimal(max(1, len(trades)))
     order_counts = summarize_orders(orders or [])
     account = ledger_summary(ledger_rows or [], params.initial_capital)
-    settlement_pnl = net if points[-1].price in (Decimal("0"), Decimal("1")) else Decimal("0")
     resolved_pnl = settlement_pnl
     unrealized_pnl = net - resolved_pnl
     mode = str(params.execution_price_mode or "ORDERFILLED").upper()
@@ -927,6 +1191,14 @@ def build_metrics(
         snapshot_delta = f"{orderfilled_trades} orderfilled trades"
         snapshot_status = "neutral"
         snapshot_tooltip = "OrderFilled execution uses historical traded volume and participation caps; CLOB snapshots are optional, not required"
+        stale_status = "neutral"
+    elif mode in {"ORDERFILLED_LIMIT_REPLAY", "LIMIT_REPLAY"}:
+        mode_delta = "limit replay"
+        snapshot_value = Decimal("0")
+        snapshot_formatted = "not required"
+        snapshot_delta = "crossing price required"
+        snapshot_status = "neutral"
+        snapshot_tooltip = "OrderFilled limit replay only fills BUY when trade price <= limit and SELL when trade price >= limit; residual positions settle at 0/1 when known"
         stale_status = "neutral"
     else:
         mode_delta = "legacy"
@@ -951,6 +1223,7 @@ def build_metrics(
         ("resolved_pnl", "Resolved PnL", "prediction", resolved_pnl, _money(resolved_pnl), "settled", _status(resolved_pnl), "PnL from resolved markets"),
         ("unrealized_pnl", "Unrealized PnL", "prediction", unrealized_pnl, _money(unrealized_pnl), "pending", _status(unrealized_pnl), "Mark-to-market PnL for unresolved exposure"),
         ("settlement_pnl", "Settlement PnL", "prediction", settlement_pnl, _money(settlement_pnl), "resolution payoff", _status(settlement_pnl), "PnL attributable to final payoff"),
+        ("trade_exit_pnl", "Trade Exit PnL", "prediction", trade_exit_pnl, _money(trade_exit_pnl), "matched exits", _status(trade_exit_pnl), "PnL from exits that crossed a real historical sell limit"),
         ("slippage_cost", "Execution Cost", "prediction", -execution_cost, _money(-execution_cost), f"{params.fee_bps} fee bps / {params.slippage_bps} slip bps", "negative" if execution_cost else "neutral", "Modeled fees plus entry/exit slippage"),
         ("ledger_cash_balance", "Ledger Cash", "prediction", account["cash_balance"], _money(account["cash_balance"]), "cash after fills", "neutral", "Cash balance reconstructed from BUY/SELL cashflow ledger"),
         ("ledger_realized_pnl", "Ledger Realized PnL", "prediction", account["realized_pnl"], _money(account["realized_pnl"]), f"{int(account['ledger_rows'])} ledger rows", _status(account["realized_pnl"]), "Realized PnL sourced from ledger cashflows"),
@@ -1415,7 +1688,7 @@ def _get_parameters(conn: Any, run_id: int) -> BacktestParameters:
         liquidity_cap_pct=row.get("liquidity_cap_pct", Decimal("100")),
         max_position_notional=row.get("max_position_notional", Decimal("0")),
         min_fill_pct=row.get("min_fill_pct", Decimal("0")),
-        execution_price_mode=row.get("execution_price_mode", "ORDERFILLED"),
+        execution_price_mode=row.get("execution_price_mode", "ORDERFILLED_LIMIT_REPLAY"),
         execution_profile=row.get("execution_profile", "realistic"),
         order_role=row.get("order_role", "taker"),
         latency_blocks=int(row.get("latency_blocks", 0) or 0),
@@ -1426,9 +1699,12 @@ def _get_parameters(conn: Any, run_id: int) -> BacktestParameters:
         allow_partial_fill=bool(row.get("allow_partial_fill", True)),
         min_fill_size=row.get("min_fill_size", Decimal("0")),
         reject_on_stale_book=bool(row.get("reject_on_stale_book", True)),
-        final_valuation_mode=row.get("final_valuation_mode", "FORCE_CLOSE"),
+        final_valuation_mode=row.get("final_valuation_mode", "SETTLEMENT"),
         max_entry_price=row.get("max_entry_price", Decimal("1")),
         min_exit_price=row.get("min_exit_price", Decimal("0")),
+        buy_limit_price=row.get("buy_limit_price"),
+        sell_limit_price=row.get("sell_limit_price"),
+        settlement_value=row.get("settlement_value"),
     )
 
 
@@ -1497,12 +1773,28 @@ def _close_trade(
     exit_order_id: str | None = None,
 ) -> dict[str, Any]:
     close_size = Decimal(str(exit_fill.get("size"))) if exit_fill else position.size
-    exit_price = Decimal(str(exit_fill.get("exit_price") or exit_fill.get("avg_fill_price"))) if exit_fill and (exit_fill.get("exit_price") or exit_fill.get("avg_fill_price")) else _execution_price(point.price, params, "exit")
+    exit_price_value = None
+    if exit_fill:
+        exit_price_value = exit_fill.get("exit_price")
+        if exit_price_value is None:
+            exit_price_value = exit_fill.get("avg_fill_price")
+    exit_price = Decimal(str(exit_price_value)) if exit_price_value is not None else _execution_price(point.price, params, "exit")
     notional = position.entry_price * close_size
     exit_notional = exit_price * close_size
-    fee_cost = (notional + exit_notional) * _bps_fraction(params.fee_bps)
-    slippage_cost = ((position.entry_price - _execution_price(position.entry_price, params, "raw_entry")) * close_size).copy_abs()
-    slippage_cost += ((point.price - exit_price) * close_size).copy_abs()
+    entry_fee_cost = Decimal(str(getattr(position, "entry_fee_cost", Decimal("0")) or 0))
+    if entry_fee_cost <= 0 and params.fee_bps > 0:
+        entry_fee_cost = notional * _bps_fraction(params.fee_bps)
+    exit_fee_cost = Decimal(str(exit_fill.get("fee_cost") or 0)) if exit_fill else (exit_notional * _bps_fraction(params.fee_bps))
+    if exit_fee_cost <= 0 and params.fee_bps > 0 and exit_reason != "settlement":
+        exit_fee_cost = exit_notional * _bps_fraction(params.fee_bps)
+    fee_cost = entry_fee_cost + exit_fee_cost
+    entry_slippage_cost = Decimal(str(getattr(position, "entry_slippage_cost", Decimal("0")) or 0))
+    if entry_slippage_cost <= 0 and params.slippage_bps > 0:
+        entry_slippage_cost = (notional * _bps_fraction(params.slippage_bps)).copy_abs()
+    exit_slippage_cost = Decimal(str(exit_fill.get("slippage_cost") or 0)) if exit_fill else ((point.price - exit_price) * close_size).copy_abs()
+    if exit_slippage_cost <= 0 and params.slippage_bps > 0 and exit_reason != "settlement":
+        exit_slippage_cost = (exit_notional * _bps_fraction(params.slippage_bps)).copy_abs()
+    slippage_cost = entry_slippage_cost + exit_slippage_cost
     execution_cost = fee_cost + slippage_cost
     pnl = (exit_price - position.entry_price) * close_size - fee_cost
     return {
@@ -1543,6 +1835,10 @@ def _close_trade(
         "fee_cost": fee_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
         "slippage_cost": slippage_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
         "execution_cost": execution_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "entry_fee_cost": entry_fee_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "exit_fee_cost": exit_fee_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "entry_slippage_cost": entry_slippage_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "exit_slippage_cost": exit_slippage_cost.quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
     }
 
 
@@ -1565,6 +1861,203 @@ def _optional_int(value: Any) -> int | None:
         return int(str(value))
     except Exception:
         return None
+
+
+def _is_limit_replay_mode(params: BacktestParameters) -> bool:
+    return str(params.execution_price_mode or "").upper() in {"ORDERFILLED_LIMIT_REPLAY", "LIMIT_REPLAY"}
+
+
+def _buy_limit_price(params: BacktestParameters) -> Decimal:
+    value = params.buy_limit_price if params.buy_limit_price is not None else params.entry_threshold
+    return min(max(Decimal("0"), Decimal(str(value))), Decimal("1")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+
+
+def _sell_limit_price(params: BacktestParameters, entry_price: Decimal) -> Decimal:
+    if params.sell_limit_price is not None:
+        value = params.sell_limit_price
+    else:
+        value = Decimal(str(entry_price)) * (Decimal("1") + Decimal(str(params.take_profit)))
+    return min(max(Decimal("0"), Decimal(str(value))), Decimal("1")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+
+
+def _settlement_value(params: BacktestParameters, points: list[PricePoint]) -> Decimal | None:
+    if params.settlement_value is not None:
+        value = Decimal(str(params.settlement_value))
+        if value in (Decimal("0"), Decimal("1")):
+            return value
+    if points:
+        last_price = Decimal(str(points[-1].price))
+        if last_price in (Decimal("0"), Decimal("1")):
+            return last_price
+    return None
+
+
+def _after_latency(first: PricePoint, point: PricePoint, params: BacktestParameters, x_axis: str) -> bool:
+    return _after_latency_value(first.x_value, point, params, x_axis)
+
+
+def _after_latency_value(start_x: int, point: PricePoint, params: BacktestParameters, x_axis: str) -> bool:
+    if x_axis == "block_number":
+        return int(point.x_value) >= int(start_x) + int(params.latency_blocks or 0)
+    return True
+
+
+def _sell_limit_can_fill(trade_price: Decimal, sell_limit: Decimal) -> bool:
+    if sell_limit >= Decimal("0.98"):
+        return False
+    return Decimal(str(trade_price)) >= Decimal(str(sell_limit))
+
+
+def _limit_replay_fill(
+    params: BacktestParameters,
+    point: PricePoint,
+    side: str,
+    *,
+    limit_price: Decimal,
+    decision_x: int,
+    target_size: Decimal | None = None,
+) -> dict[str, Any]:
+    price = Decimal(str(limit_price)).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    target_notional = _target_notional(params)
+    if target_size is None:
+        requested_size = (target_notional / max(price, Decimal("0.0000000001"))).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    else:
+        requested_size = max(Decimal("0"), Decimal(str(target_size)))
+        target_notional = (requested_size * price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    event = ReplayTradeEvent(
+        market_id=0,
+        token_id="",
+        block_number=int(point.x_value),
+        transaction_index=0,
+        log_index=1,
+        tx_hash=f"synthetic-{int(point.x_value)}",
+        trade_price=Decimal(str(point.price)),
+        size=max(Decimal("0"), Decimal(str(point.volume or 0))),
+    )
+    replay = replay_limit_order(
+        OrderIntent(
+            side="BUY_YES" if side.startswith("BUY") else "SELL_YES",
+            limit_price=price,
+            size=requested_size,
+            time_in_force="GTC",
+            submit_sequence=sequence_key(int(decision_x), 0, 0, "synthetic-submit"),
+            liquidity_cap_pct=max(Decimal("0"), Decimal(str(params.liquidity_cap_pct))),
+            fee_bps=max(Decimal("0"), Decimal(str(params.fee_bps))),
+        ),
+        [event],
+    )
+    price_key = "entry_price" if side.startswith("BUY") else "exit_price"
+    filled_notional = replay.filled_notional
+    return {
+        "requested_notional": target_notional,
+        "filled_notional": filled_notional,
+        "fill_pct": replay.fill_pct,
+        "fill_probability": replay.fill_pct,
+        "size": replay.filled_size,
+        price_key: price,
+        "avg_fill_price": price,
+        "liquidity_cap_pct": max(Decimal("0"), Decimal(str(params.liquidity_cap_pct))),
+        "min_fill_pct": max(Decimal("0"), Decimal(str(params.min_fill_pct))),
+        "partial_fill": replay.status == "PARTIAL_FILLED",
+        "rejected": replay.status in {"NO_FILL", "REJECTED", "EXPIRED"},
+        "fill_status": "PARTIAL" if replay.status == "PARTIAL_FILLED" else replay.status,
+        "requested_size": requested_size,
+        "filled_size": replay.filled_size,
+        "unfilled_size": replay.unfilled_size,
+        "block_volume": max(Decimal("0"), Decimal(str(point.volume or 0))),
+        "trade_count": int(point.trade_count or 0),
+        "available_notional": (max(Decimal("0"), Decimal(str(point.volume or 0))) * price * max(Decimal("0"), Decimal(str(params.liquidity_cap_pct))) / Decimal("100")).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP),
+        "fee_cost": replay.fee,
+        "slippage_cost": Decimal("0"),
+        "execution_cost": replay.fee,
+        "execution_source": "orderfilled_limit_replay",
+        "execution_profile": params.execution_profile,
+        "order_role": "maker",
+        "limit_price": price,
+        "crossing_price": Decimal(str(point.price)),
+        "decision_x": int(decision_x),
+        "crossing_x": int(point.x_value),
+        "notes": replay.to_fill_dict().get("notes") or (["buy_limit_crossed"] if side.startswith("BUY") else ["sell_limit_crossed"]),
+    }
+
+
+def _limit_replay_no_fill(
+    params: BacktestParameters,
+    point: PricePoint,
+    side: str,
+    *,
+    limit_price: Decimal,
+    note: str,
+    target_size: Decimal | None = None,
+) -> dict[str, Any]:
+    price = max(Decimal(str(limit_price)), Decimal("0.0000000001"))
+    target_notional = _target_notional(params)
+    if target_size is None:
+        requested_size = (target_notional / price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    else:
+        requested_size = max(Decimal("0"), Decimal(str(target_size)))
+        target_notional = (requested_size * price).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    return {
+        "requested_notional": target_notional,
+        "filled_notional": Decimal("0"),
+        "fill_pct": Decimal("0"),
+        "fill_probability": Decimal("0"),
+        "size": Decimal("0"),
+        "liquidity_cap_pct": max(Decimal("0"), Decimal(str(params.liquidity_cap_pct))),
+        "min_fill_pct": max(Decimal("0"), Decimal(str(params.min_fill_pct))),
+        "partial_fill": False,
+        "rejected": True,
+        "fill_status": "NO_FILL",
+        "requested_size": requested_size,
+        "filled_size": Decimal("0"),
+        "unfilled_size": requested_size,
+        "block_volume": max(Decimal("0"), Decimal(str(point.volume or 0))),
+        "trade_count": int(point.trade_count or 0),
+        "available_notional": Decimal("0"),
+        "fee_cost": Decimal("0"),
+        "slippage_cost": Decimal("0"),
+        "execution_cost": Decimal("0"),
+        "execution_source": "orderfilled_limit_replay",
+        "execution_profile": params.execution_profile,
+        "order_role": "maker",
+        "limit_price": Decimal(str(limit_price)),
+        "last_seen_price": Decimal(str(point.price)),
+        "notes": [note],
+    }
+
+
+def _settlement_fill(params: BacktestParameters, point: PricePoint, target_size: Decimal, settlement_value: Decimal) -> dict[str, Any]:
+    requested_size = max(Decimal("0"), Decimal(str(target_size)))
+    payoff = Decimal(str(settlement_value))
+    filled_notional = (requested_size * payoff).quantize(Decimal("0.0000000001"), rounding=ROUND_HALF_UP)
+    return {
+        "requested_notional": filled_notional,
+        "filled_notional": filled_notional,
+        "fill_pct": Decimal("100"),
+        "fill_probability": Decimal("100"),
+        "size": requested_size,
+        "exit_price": payoff,
+        "avg_fill_price": payoff,
+        "liquidity_cap_pct": Decimal("0"),
+        "min_fill_pct": Decimal("0"),
+        "partial_fill": False,
+        "rejected": False,
+        "fill_status": "FILLED",
+        "requested_size": requested_size,
+        "filled_size": requested_size,
+        "unfilled_size": Decimal("0"),
+        "block_volume": max(Decimal("0"), Decimal(str(point.volume or 0))),
+        "trade_count": int(point.trade_count or 0),
+        "available_notional": filled_notional,
+        "fee_cost": Decimal("0"),
+        "slippage_cost": Decimal("0"),
+        "execution_cost": Decimal("0"),
+        "execution_source": "settlement_payoff",
+        "execution_profile": params.execution_profile,
+        "order_role": "settlement",
+        "settlement_value": payoff,
+        "notes": ["settlement_payoff"],
+    }
 
 
 def _pct(numerator: Decimal, denominator: Decimal) -> Decimal:

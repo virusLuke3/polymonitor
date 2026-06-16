@@ -233,7 +233,7 @@ def test_builtin_framework_rejects_entry_when_min_fill_not_met():
     assert rejected["meta"]["fill_pct"] == Decimal("12.5000000000")
 
 
-def test_builtin_framework_defaults_to_orderfilled_probability_fill():
+def test_builtin_framework_supports_legacy_orderfilled_probability_fill():
     points = [
         PricePoint(x_value=1, price=Decimal("0.60"), volume=Decimal("40"), trade_count=4),
         PricePoint(x_value=2, price=Decimal("0.50"), volume=Decimal("20"), trade_count=2),
@@ -253,6 +253,7 @@ def test_builtin_framework_defaults_to_orderfilled_probability_fill():
         position_size=Decimal("100"),
         liquidity_cap_pct=Decimal("50"),
         min_fill_pct=Decimal("0"),
+        execution_price_mode="ORDERFILLED",
         execution_profile="optimistic",
         adverse_slippage_cents=Decimal("0"),
         fill_probability_haircut_pct=Decimal("0"),
@@ -301,6 +302,7 @@ def test_orderfilled_first_phase1_tracks_orders_ledger_and_account_pnl():
         fee_bps=Decimal("10"),
         slippage_bps=Decimal("0"),
         liquidity_cap_pct=Decimal("100"),
+        execution_price_mode="ORDERFILLED",
         execution_profile="realistic",
         adverse_slippage_cents=Decimal("0.005"),
         fill_probability_haircut_pct=Decimal("20"),
@@ -330,7 +332,8 @@ def test_orderfilled_first_phase1_tracks_orders_ledger_and_account_pnl():
     assert len(ledger) == 3
     assert ledger[0]["event_type"] == "BUY"
     assert ledger[0]["cash_after"] < Decimal("100")
-    assert ledger[0]["position_after"] == orders[0]["filled_size"]
+    assert ledger[0]["position_after"] == sum((row["size"] for row in result["trades"]), Decimal("0"))
+    assert ledger[0]["position_after"] <= orders[0]["filled_size"]
     assert ledger[1]["event_type"] == "SELL"
     assert ledger[1]["position_after"] > Decimal("0")
     assert ledger[-1]["event_type"] == "SELL"
@@ -338,6 +341,89 @@ def test_orderfilled_first_phase1_tracks_orders_ledger_and_account_pnl():
     net_pnl = sum((row["pnl"] for row in result["trades"]), Decimal("0"))
     assert (ledger[-1]["cash_after"] - (params.initial_capital + net_pnl)).copy_abs() <= Decimal("0.0000000001")
     assert next(metric for metric in result["metrics"] if metric["metric_key"] == "ledger_realized_pnl")["value"] == net_pnl
+
+
+def test_default_limit_replay_waits_for_buy_cross_then_sell_cross():
+    points = [
+        PricePoint(x_value=1, price=Decimal("0.60"), volume=Decimal("10"), trade_count=1),
+        PricePoint(x_value=2, price=Decimal("0.56"), volume=Decimal("10"), trade_count=1),
+        PricePoint(x_value=3, price=Decimal("0.40"), volume=Decimal("50"), trade_count=1),
+        PricePoint(x_value=4, price=Decimal("0.70"), volume=Decimal("50"), trade_count=1),
+    ]
+    run = {
+        "market_slug": "demo-market",
+        "token_side": "YES",
+        "price_source": "orderfilled_block_close",
+    }
+    params = BacktestParameters(
+        initial_capital=Decimal("100"),
+        position_size=Decimal("10"),
+        buy_limit_price=Decimal("0.50"),
+        sell_limit_price=Decimal("0.65"),
+        fee_bps=Decimal("0"),
+    )
+
+    result = run_framework_backtest(
+        "builtin",
+        points,
+        run,
+        params,
+        builtin_simulator=simulate_strategy,
+        metrics_builder=lambda trades, equity, price_points, parameters: [],
+    )
+
+    assert [order["status"] for order in result["orders"]] == ["FILLED", "FILLED"]
+    trade = result["trades"][0]
+    assert trade["entry_x"] == 3
+    assert trade["entry_price"] == Decimal("0.5000000000")
+    assert trade["exit_x"] == 4
+    assert trade["exit_price"] == Decimal("0.6500000000")
+    assert trade["exit_reason"] == "limit_exit"
+    assert trade["pnl"] == Decimal("3.0000000000")
+    assert result["ledger"][0]["event_type"] == "BUY"
+    assert result["ledger"][1]["event_type"] == "SELL"
+    assert next(metric for metric in result["metrics"] if metric["metric_key"] == "trade_exit_pnl")["value"] == Decimal("3.0000000000")
+    assert next(metric for metric in result["metrics"] if metric["metric_key"] == "settlement_pnl")["value"] == Decimal("0E-10")
+
+
+def test_limit_replay_does_not_force_close_when_sell_does_not_cross_and_settles():
+    points = [
+        PricePoint(x_value=1, price=Decimal("0.60"), volume=Decimal("10"), trade_count=1),
+        PricePoint(x_value=2, price=Decimal("0.40"), volume=Decimal("50"), trade_count=1),
+        PricePoint(x_value=3, price=Decimal("0.97"), volume=Decimal("10"), trade_count=1),
+    ]
+    run = {
+        "market_slug": "demo-market",
+        "token_side": "YES",
+        "price_source": "orderfilled_block_close",
+    }
+    params = BacktestParameters(
+        initial_capital=Decimal("100"),
+        position_size=Decimal("10"),
+        buy_limit_price=Decimal("0.50"),
+        sell_limit_price=Decimal("0.99"),
+        settlement_value=Decimal("1"),
+        fee_bps=Decimal("0"),
+    )
+
+    result = run_framework_backtest(
+        "builtin",
+        points,
+        run,
+        params,
+        builtin_simulator=simulate_strategy,
+        metrics_builder=lambda trades, equity, price_points, parameters: [],
+    )
+
+    assert [order["order_type"] for order in result["orders"]] == ["resting_limit", "resting_limit", "settlement"]
+    assert [order["status"] for order in result["orders"]] == ["FILLED", "NO_FILL", "FILLED"]
+    trade = result["trades"][0]
+    assert trade["exit_reason"] == "settlement"
+    assert trade["exit_price"] == Decimal("1")
+    assert trade["pnl"] == Decimal("10.0000000000")
+    assert result["ledger"][-1]["event_type"] == "SETTLEMENT"
+    assert next(metric for metric in result["metrics"] if metric["metric_key"] == "trade_exit_pnl")["value"] == Decimal("0E-10")
+    assert next(metric for metric in result["metrics"] if metric["metric_key"] == "settlement_pnl")["value"] == Decimal("10.0000000000")
 
 
 def test_builtin_framework_uses_clob_snapshot_depth_for_entry_fill():

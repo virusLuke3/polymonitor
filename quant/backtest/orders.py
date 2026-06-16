@@ -16,9 +16,21 @@ def order_status_from_fill(fill: dict[str, Any]) -> str:
         return "FILLED"
     if status in {"PARTIAL", "PARTIAL_FILLED"}:
         return "PARTIAL_FILLED"
+    if status == "EXPIRED":
+        return "EXPIRED"
     if fill.get("rejected"):
         notes = fill.get("notes") or []
-        if isinstance(notes, list) and "no_orderfilled_volume" in notes:
+        if isinstance(notes, list) and any(
+            item in notes
+            for item in (
+                "no_orderfilled_volume",
+                "buy_limit_not_crossed",
+                "sell_limit_not_crossed",
+                "limit_not_crossed",
+                "terminal_price_limit_not_fillable",
+                "unresolved_without_settlement_value",
+            )
+        ):
             return "NO_FILL"
         return "REJECTED"
     if Decimal(str(fill.get("filled_size") or fill.get("size") or 0)) <= 0:
@@ -108,6 +120,7 @@ def summarize_orders(orders: list[dict[str, Any]]) -> dict[str, int]:
         "partial_fill_count": 0,
         "no_fill_count": 0,
         "rejected_count": 0,
+        "expired_count": 0,
     }
     for order in orders:
         status = str(order.get("status") or "").upper()
@@ -119,4 +132,6 @@ def summarize_orders(orders: list[dict[str, Any]]) -> dict[str, int]:
             counts["no_fill_count"] += 1
         elif status == "REJECTED":
             counts["rejected_count"] += 1
+        elif status == "EXPIRED":
+            counts["expired_count"] += 1
     return counts

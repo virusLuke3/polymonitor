@@ -80,7 +80,19 @@ def run_framework_backtest(
     """Execute a normalized quant backtest with the requested framework."""
 
     engine = normalize_backtest_engine(engine)
-    if engine == "builtin":
+    execution_mode = str(getattr(params, "execution_price_mode", "") or "").upper()
+    if engine != "builtin" and execution_mode in {"ORDERFILLED_LIMIT_REPLAY", "LIMIT_REPLAY"}:
+        result = builtin_simulator(points, run, params)
+        result.setdefault("events", []).append({
+            "event_type": "engine_routed_to_builtin",
+            "x_axis": "block_number" if run.get("price_source") == "orderfilled_block_close" else "timestamp",
+            "x_value": int(getattr(points[0], "x_value", 0)) if points else 0,
+            "trade_id": None,
+            "price": Decimal("0"),
+            "message": f"{engine} adapter does not implement passive limit replay; used builtin limit replay engine",
+            "meta": {"requested_engine": engine, "execution_price_mode": execution_mode},
+        })
+    elif engine == "builtin":
         result = builtin_simulator(points, run, params)
     elif engine == "backtrader":
         result = _run_backtrader(points, run, params, metrics_builder)
@@ -457,13 +469,16 @@ def _run_nautilus_trader_subprocess(points: list[Any], run: dict[str, Any], para
             "liquidity_cap_pct": str(getattr(params, "liquidity_cap_pct", "100")),
             "max_position_notional": str(getattr(params, "max_position_notional", "0")),
             "min_fill_pct": str(getattr(params, "min_fill_pct", "0")),
-            "execution_price_mode": str(getattr(params, "execution_price_mode", "ORDERFILLED")),
+            "execution_price_mode": str(getattr(params, "execution_price_mode", "ORDERFILLED_LIMIT_REPLAY")),
             "latency_seconds": str(getattr(params, "latency_seconds", "0")),
             "max_book_staleness_seconds": str(getattr(params, "max_book_staleness_seconds", "900")),
             "allow_partial_fill": bool(getattr(params, "allow_partial_fill", True)),
             "min_fill_size": str(getattr(params, "min_fill_size", "0")),
             "reject_on_stale_book": bool(getattr(params, "reject_on_stale_book", True)),
-            "final_valuation_mode": str(getattr(params, "final_valuation_mode", "FORCE_CLOSE")),
+            "final_valuation_mode": str(getattr(params, "final_valuation_mode", "SETTLEMENT")),
+            "buy_limit_price": "" if getattr(params, "buy_limit_price", None) is None else str(getattr(params, "buy_limit_price")),
+            "sell_limit_price": "" if getattr(params, "sell_limit_price", None) is None else str(getattr(params, "sell_limit_price")),
+            "settlement_value": "" if getattr(params, "settlement_value", None) is None else str(getattr(params, "settlement_value")),
             "max_entry_price": str(getattr(params, "max_entry_price", "1")),
             "min_exit_price": str(getattr(params, "min_exit_price", "0")),
         },
@@ -734,7 +749,7 @@ def _fill_decision(
     target_size: Decimal | None = None,
 ) -> dict[str, Any]:
     price = Decimal(str(point.price))
-    mode = str(getattr(params, "execution_price_mode", "ORDERFILLED") or "ORDERFILLED").upper()
+    mode = str(getattr(params, "execution_price_mode", "ORDERFILLED_LIMIT_REPLAY") or "ORDERFILLED_LIMIT_REPLAY").upper()
     if mode == "ORDERFILLED":
         return _orderfilled_fill_decision(params, point, side, target_size=target_size)
     if mode == "LEGACY":

@@ -1587,7 +1587,8 @@ def get_backtest_run(conn: Any, *, run_id: int) -> dict[str, Any] | None:
                    p.latency_blocks, p.adverse_slippage_cents, p.fill_probability_haircut_pct,
                    p.latency_seconds, p.max_book_staleness_seconds,
                    p.allow_partial_fill, p.min_fill_size, p.reject_on_stale_book,
-                   p.final_valuation_mode, p.max_entry_price, p.min_exit_price
+                   p.final_valuation_mode, p.max_entry_price, p.min_exit_price,
+                   p.buy_limit_price, p.sell_limit_price, p.settlement_value
             FROM quant.quant_backtest_runs r
             LEFT JOIN quant.quant_backtest_parameters p ON p.run_id = r.run_id
             WHERE r.run_id = %s
@@ -1616,7 +1617,8 @@ def get_backtest_runs(conn: Any, *, market_slug: str | None = None, limit: int =
                    p.latency_blocks, p.adverse_slippage_cents, p.fill_probability_haircut_pct,
                    p.latency_seconds, p.max_book_staleness_seconds,
                    p.allow_partial_fill, p.min_fill_size, p.reject_on_stale_book,
-                   p.final_valuation_mode, p.max_entry_price, p.min_exit_price
+                   p.final_valuation_mode, p.max_entry_price, p.min_exit_price,
+                   p.buy_limit_price, p.sell_limit_price, p.settlement_value
             FROM quant.quant_backtest_runs r
             LEFT JOIN quant.quant_backtest_parameters p ON p.run_id = r.run_id
             {where_sql}

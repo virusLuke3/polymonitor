@@ -31,8 +31,24 @@ def build_ledger_rows(trades: list[dict[str, Any]], initial_capital: Decimal) ->
                 if str(item.get("entry_order_id") or item.get("trade_id") or "") == entry_order_id
             ]
             entry_size = sum((Decimal(str(item.get("size") or 0)) for item in entry_trades), Decimal("0"))
-            entry_fee = sum((Decimal(str(item.get("fee_cost") or 0)) / Decimal("2") for item in entry_trades), Decimal("0")).quantize(Q, rounding=ROUND_HALF_UP)
-            entry_slippage = sum((Decimal(str(item.get("slippage_cost") or 0)) / Decimal("2") for item in entry_trades), Decimal("0")).quantize(Q, rounding=ROUND_HALF_UP)
+            entry_fee = sum(
+                (
+                    Decimal(str(item.get("entry_fee_cost")))
+                    if item.get("entry_fee_cost") is not None
+                    else Decimal(str(item.get("fee_cost") or 0)) / Decimal("2")
+                    for item in entry_trades
+                ),
+                Decimal("0"),
+            ).quantize(Q, rounding=ROUND_HALF_UP)
+            entry_slippage = sum(
+                (
+                    Decimal(str(item.get("entry_slippage_cost")))
+                    if item.get("entry_slippage_cost") is not None
+                    else Decimal(str(item.get("slippage_cost") or 0)) / Decimal("2")
+                    for item in entry_trades
+                ),
+                Decimal("0"),
+            ).quantize(Q, rounding=ROUND_HALF_UP)
             entry_notional = (entry_price * entry_size).quantize(Q, rounding=ROUND_HALF_UP)
             # Slippage is already embedded in the simulated execution price.
             # Keep it as attribution, but do not subtract it twice from cash.
@@ -63,10 +79,26 @@ def build_ledger_rows(trades: list[dict[str, Any]], initial_capital: Decimal) ->
         exit_notional = (exit_price * size).quantize(Q, rounding=ROUND_HALF_UP)
         fee = Decimal(str(trade.get("fee_cost") or 0)).quantize(Q, rounding=ROUND_HALF_UP)
         slippage = Decimal(str(trade.get("slippage_cost") or 0)).quantize(Q, rounding=ROUND_HALF_UP)
-        buy_fee = (fee / Decimal("2")).quantize(Q, rounding=ROUND_HALF_UP)
-        sell_fee = (fee - buy_fee).quantize(Q, rounding=ROUND_HALF_UP)
-        buy_slippage = (slippage / Decimal("2")).quantize(Q, rounding=ROUND_HALF_UP)
-        sell_slippage = (slippage - buy_slippage).quantize(Q, rounding=ROUND_HALF_UP)
+        buy_fee = (
+            Decimal(str(trade.get("entry_fee_cost"))).quantize(Q, rounding=ROUND_HALF_UP)
+            if trade.get("entry_fee_cost") is not None
+            else (fee / Decimal("2")).quantize(Q, rounding=ROUND_HALF_UP)
+        )
+        sell_fee = (
+            Decimal(str(trade.get("exit_fee_cost"))).quantize(Q, rounding=ROUND_HALF_UP)
+            if trade.get("exit_fee_cost") is not None
+            else (fee - buy_fee).quantize(Q, rounding=ROUND_HALF_UP)
+        )
+        buy_slippage = (
+            Decimal(str(trade.get("entry_slippage_cost"))).quantize(Q, rounding=ROUND_HALF_UP)
+            if trade.get("entry_slippage_cost") is not None
+            else (slippage / Decimal("2")).quantize(Q, rounding=ROUND_HALF_UP)
+        )
+        sell_slippage = (
+            Decimal(str(trade.get("exit_slippage_cost"))).quantize(Q, rounding=ROUND_HALF_UP)
+            if trade.get("exit_slippage_cost") is not None
+            else (slippage - buy_slippage).quantize(Q, rounding=ROUND_HALF_UP)
+        )
         cash_delta = (exit_notional - sell_fee).quantize(Q, rounding=ROUND_HALF_UP)
         realized_pnl = Decimal(str(trade.get("pnl") or 0)).quantize(Q, rounding=ROUND_HALF_UP)
         cash += cash_delta
@@ -75,7 +107,7 @@ def build_ledger_rows(trades: list[dict[str, Any]], initial_capital: Decimal) ->
             ledger_index=ledger_index,
             trade=trade,
             order_id=exit_order_id or None,
-            event_type="SELL",
+            event_type="SETTLEMENT" if str(trade.get("exit_reason") or "").lower() == "settlement" else "SELL",
             x_value=int(trade["exit_x"]),
             shares_delta=-size,
             cash_delta=cash_delta,
