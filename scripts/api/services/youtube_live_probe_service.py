@@ -247,8 +247,10 @@ def _fetch_live_stream_info(ctx: dict, *, channel: str = "", video_id: str = "")
         relayed = _try_relay(ctx, channel=channel, video_id=video_id)
         if relayed:
             normalized = _normalize_probe(relayed)
-            if normalized.get("videoId") or normalized.get("channelExists") or not normalized.get("error"):
+            if normalized.get("videoId") or (video_id and normalized.get("channelExists")):
                 return normalized
+            if normalized.get("error"):
+                relay_error = normalized["error"]
     except Exception as exc:
         relay_error = f"Relay failed: {exc}"
 
