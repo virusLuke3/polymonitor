@@ -9,7 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
-from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlparse
+from urllib.request import Request, urlopen
 
 from api.config import PROJECT_ROOT
 from api.services import youtube_live_probe_service
@@ -411,6 +413,88 @@ def _hls_probe_result(ok: bool, status: str, *, error: str | None = None, stream
     }
 
 
+def _hls_http_fetch(url: str, *, timeout: int, max_bytes: int, binary: bool = False) -> bytes | str:
+    headers = {
+        "Accept": "*/*",
+        "User-Agent": "Mozilla/5.0 polydata-tv-probe/1.0",
+    }
+    if binary:
+        headers["Range"] = f"bytes=0-{max(0, max_bytes - 1)}"
+    request = Request(
+        url,
+        headers=headers,
+    )
+    with urlopen(request, timeout=timeout) as response:
+        status = int(getattr(response, "status", 200) or 200)
+        if status >= 400:
+            raise RuntimeError(f"http {status}")
+        data = response.read(max_bytes)
+    if binary:
+        return data
+    return data.decode("utf-8", errors="replace")
+
+
+def _next_hls_uri(lines: List[str], marker: str) -> str | None:
+    for index, line in enumerate(lines):
+        if not line.upper().startswith(marker):
+            continue
+        for candidate in lines[index + 1:]:
+            candidate = candidate.strip()
+            if candidate and not candidate.startswith("#"):
+                return candidate
+    return None
+
+
+def _first_hls_segment_uri(lines: List[str]) -> str | None:
+    for line in lines:
+        candidate = line.strip()
+        if not candidate or candidate.startswith("#"):
+            continue
+        lower = candidate.lower()
+        if lower.endswith(".m3u8") or ".m3u8?" in lower:
+            continue
+        return candidate
+    return None
+
+
+def _probe_hls_stream_http(ctx: dict, hls_url: str) -> Dict[str, Any]:
+    timeout_seconds = _hls_probe_timeout_seconds(ctx)
+    try:
+        manifest = _hls_http_fetch(hls_url, timeout=timeout_seconds, max_bytes=1_000_000)
+        if not isinstance(manifest, str) or "#EXTM3U" not in manifest:
+            return _hls_probe_result(False, "blocked", error="missing #EXTM3U manifest")
+        lines = [line.strip() for line in manifest.splitlines() if line.strip()]
+        variant_uri = _next_hls_uri(lines, "#EXT-X-STREAM-INF")
+        media_url = urljoin(hls_url, variant_uri) if variant_uri else hls_url
+        media_manifest = manifest
+        if variant_uri:
+            media_manifest = _hls_http_fetch(media_url, timeout=timeout_seconds, max_bytes=1_000_000)
+            if not isinstance(media_manifest, str) or "#EXTM3U" not in media_manifest:
+                return _hls_probe_result(False, "blocked", error="variant playlist missing #EXTM3U")
+        media_lines = [line.strip() for line in str(media_manifest).splitlines() if line.strip()]
+        has_media_playlist = any(line.upper().startswith(("#EXTINF", "#EXT-X-TARGETDURATION", "#EXT-X-MEDIA-SEQUENCE")) for line in media_lines)
+        if not has_media_playlist:
+            return _hls_probe_result(False, "empty", error="no media playlist entries")
+        segment_uri = _first_hls_segment_uri(media_lines)
+        if segment_uri:
+            segment_url = urljoin(media_url, segment_uri)
+            sample = _hls_http_fetch(segment_url, timeout=timeout_seconds, max_bytes=2048, binary=True)
+            if not sample:
+                return _hls_probe_result(False, "empty", error="first media segment returned no bytes")
+            return _hls_probe_result(True, "playable", streams=["manifest", "segment"])
+        return _hls_probe_result(True, "playable", streams=["manifest"])
+    except TimeoutError:
+        return _hls_probe_result(False, "timeout", error="timeout")
+    except HTTPError as exc:
+        return _hls_probe_result(False, "blocked", error=f"http {exc.code}")
+    except URLError as exc:
+        reason = str(getattr(exc, "reason", exc))
+        return _hls_probe_result(False, "timeout" if "timed out" in reason.lower() else "blocked", error=reason[:260])
+    except Exception as exc:
+        message = str(exc)
+        return _hls_probe_result(False, "timeout" if "timed out" in message.lower() else "blocked", error=message[:260])
+
+
 def _probe_hls_stream(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
     probe = ctx.get("hls_stream_probe")
     if callable(probe):
@@ -423,7 +507,7 @@ def _probe_hls_stream(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
         return _hls_probe_result(False, "missing", error="missing hlsUrl")
     ffprobe = shutil.which(str(ctx.get("ffprobe_path") or "ffprobe"))
     if not ffprobe:
-        return _hls_probe_result(False, "skipped", error="ffprobe unavailable")
+        return _probe_hls_stream_http(ctx, hls_url)
     timeout_seconds = _hls_probe_timeout_seconds(ctx)
     cmd = [
         ffprobe,

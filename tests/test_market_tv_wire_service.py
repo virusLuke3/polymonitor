@@ -136,6 +136,44 @@ def test_market_tv_wire_enriches_youtube_manifest_sources() -> None:
     assert fox_weather["externalUrl"] == "https://www.youtube.com/watch?v=abcDEF12345"
 
 
+def test_market_tv_wire_hls_probe_uses_http_fallback_when_ffprobe_missing(monkeypatch) -> None:
+    class Response:
+        def __init__(self, body: bytes | str) -> None:
+            self.status = 200
+            self.body = body.encode() if isinstance(body, str) else body
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self, max_bytes: int) -> bytes:
+            return self.body[:max_bytes]
+
+    def fake_urlopen(request: object, timeout: int = 10) -> Response:
+        url = getattr(request, "full_url", "")
+        if url.endswith("master.m3u8"):
+            return Response("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nchild/live.m3u8\n")
+        if url.endswith("child/live.m3u8"):
+            return Response("#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegment.ts\n")
+        if url.endswith("child/segment.ts"):
+            return Response(b"\x47\x40\x00\x10")
+        raise AssertionError(url)
+
+    monkeypatch.setattr(service.shutil, "which", lambda _: None)
+    monkeypatch.setattr(service, "urlopen", fake_urlopen)
+
+    probe = service._probe_hls_stream(
+        {"market_tv_hls_probe_timeout_seconds": 3},
+        {"sourceType": "hls", "hlsUrl": "https://example.com/master.m3u8"},
+    )
+
+    assert probe["ok"] is True
+    assert probe["status"] == "playable"
+    assert probe["streams"] == ["manifest", "segment"]
+
+
 def test_market_youtube_channels_payload_filters_curated_youtube_sources() -> None:
     payload = {
         "generatedAt": "2026-06-15T00:00:00Z",
