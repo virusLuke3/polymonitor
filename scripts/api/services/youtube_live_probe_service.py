@@ -153,7 +153,9 @@ def _http_json_get(ctx: dict, url: str, *, timeout: int) -> Dict[str, Any]:
 
 
 def _relay_base_url(ctx: dict) -> str:
-    return _string(ctx.get("youtube_live_relay_base_url") or os.environ.get(YOUTUBE_RELAY_BASE_ENV)).rstrip("/")
+    if "youtube_live_relay_base_url" in ctx:
+        return _string(ctx.get("youtube_live_relay_base_url")).rstrip("/")
+    return _string(os.environ.get(YOUTUBE_RELAY_BASE_ENV)).rstrip("/")
 
 
 def _relay_token(ctx: dict) -> str:

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import os
+
 from flask import Blueprint, Response, jsonify, request
 
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
-from api.services import hls_proxy_service, youtube_embed_service
+from api.services import hls_proxy_service, youtube_embed_service, youtube_live_probe_service
+
+try:
+    import requests as requests_module
+except Exception:  # pragma: no cover
+    requests_module = None
 
 
 def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
@@ -30,6 +37,28 @@ def _get_panel_snapshot(panel, helpers: dict, limit: int | None):
 
 def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
     bp = Blueprint("runtime_panel_routes", __name__)
+
+    def _youtube_relay_token() -> str:
+        return str(
+            os.environ.get("POLYDATA_YOUTUBE_LIVE_RELAY_TOKEN")
+            or os.environ.get("RELAY_SHARED_SECRET")
+            or ""
+        ).strip()
+
+    def _youtube_relay_auth_header() -> str:
+        return str(
+            os.environ.get("POLYDATA_YOUTUBE_LIVE_RELAY_AUTH_HEADER")
+            or os.environ.get("RELAY_AUTH_HEADER")
+            or "x-polymonitor-relay-key"
+        ).strip() or "x-polymonitor-relay-key"
+
+    def _is_authorized_youtube_relay_request() -> bool:
+        expected = _youtube_relay_token()
+        if not expected:
+            return False
+        supplied = request.headers.get(_youtube_relay_auth_header()) or ""
+        authorization = request.headers.get("Authorization") or ""
+        return supplied == expected or authorization == f"Bearer {expected}"
 
     @bp.route("/runtime/content/hls-proxy", methods=["GET"])
     def api_runtime_hls_proxy():
@@ -62,6 +91,25 @@ def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
         except ValueError as exc:
             return Response(str(exc), status=400, content_type="text/plain; charset=utf-8")
         return Response(html, status=200, headers=youtube_embed_service.youtube_embed_headers())
+
+    @bp.route("/runtime/content/youtube-live", methods=["GET"])
+    def api_runtime_youtube_live_relay():
+        if not _is_authorized_youtube_relay_request():
+            return jsonify({"error": "Unauthorized"}), 401
+        channel = request.args.get("channel") or ""
+        video_id = request.args.get("videoId") or ""
+        if not channel and not video_id:
+            return jsonify({"error": "Missing channel or videoId parameter"}), 400
+        if requests_module is None:
+            return jsonify({"error": "requests unavailable"}), 503
+        ctx = {
+            "requests": requests_module,
+            "youtube_live_relay_base_url": "",
+        }
+        payload = youtube_live_probe_service._fetch_live_stream_info(ctx, channel=channel, video_id=video_id)
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=120"
+        return response
 
     @bp.route("/runtime/panels", methods=["GET"])
     def api_runtime_panels_batch():
