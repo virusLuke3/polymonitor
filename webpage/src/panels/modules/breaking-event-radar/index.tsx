@@ -29,9 +29,8 @@ function score(value?: number | string | null) {
   return Number.isFinite(numeric) ? String(Math.round(numeric)) : '--';
 }
 
-function percent(value?: number | string | null) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? `${Math.round(numeric)}%` : '--';
+function clamp(value: number, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function marketCount(item: RuntimeBreakingEventRadarItem) {
@@ -69,13 +68,65 @@ function openSource(url?: string | null) {
   if (target) window.open(target, '_blank', 'noopener,noreferrer');
 }
 
+function heatBars(items: RuntimeBreakingEventRadarItem[]) {
+  const values = items.slice(0, 14).map((item) => clamp(Number(item.velocityScore || item.mentionCount || 0)));
+  return values.length ? values : [18, 24, 31, 44, 38, 52, 47, 61, 55, 69, 63, 75, 71, 84];
+}
+
+function topicInitial(value?: string | null) {
+  return String(value || 'E').trim().slice(0, 1).toUpperCase() || 'E';
+}
+
+function RadarScope({ items, payload }: { items: RuntimeBreakingEventRadarItem[]; payload?: RuntimeBreakingEventRadarPayload | null }) {
+  const top = items[0];
+  const heat = clamp(Number(payload?.summary?.topVelocity || top?.velocityScore || 0));
+  const alerts = clamp(Number(payload?.summary?.alerts || 0), 0, 9);
+  const bars = heatBars(items);
+  return (
+    <div className="wm-breaking-scope">
+      <div className="wm-breaking-orbit" style={{ '--heat': `${heat}%` } as any}>
+        <span className="wm-breaking-orbit-core">{score(heat)}</span>
+        {items.slice(0, 5).map((item, index) => (
+          <i
+            key={item.id || `${item.entity}-${index}`}
+            className={`wm-breaking-orbit-dot ${severityClass(item)}`}
+            style={{ '--dot-index': index } as any}
+          >
+            {topicInitial(item.topic || item.entity)}
+          </i>
+        ))}
+      </div>
+      <div className="wm-breaking-pulse-stack" aria-hidden="true">
+        {bars.map((value, index) => (
+          <span key={index} style={{ height: `${18 + value * 0.74}%`, animationDelay: `${index * 90}ms` }} />
+        ))}
+      </div>
+      <div className="wm-breaking-scope-copy">
+        <em>TOP EVENT</em>
+        <strong>{payload?.summary?.topEntity || top?.entity || '--'}</strong>
+        <span>{alerts} alert{alerts === 1 ? '' : 's'} / {items.length} tracked</span>
+      </div>
+    </div>
+  );
+}
+
 function RadarRow({ item }: { item: RuntimeBreakingEventRadarItem }) {
   const severity = severityClass(item);
   const tags = (item.tags || []).slice(0, 2);
+  const points = [
+    Number(item.mentionCount15m || 0),
+    Number(item.mentionCount1h || 0),
+    Number(item.mentionCount24h || 0) / 8,
+    Number(item.sourceDiversity || 0) * 16,
+    Number(item.velocityScore || 0),
+  ].map((value) => clamp(Number.isFinite(value) ? value : 0, 7, 100));
   return (
-    <button type="button" className={`wm-evidence-row wm-breaking-row ${severity}`} onClick={() => openSource(item.sourceUrl)}>
-      <span className="wm-evidence-glyph">{severity === 'alert' ? '!' : severity === 'watch' ? '?' : 'i'}</span>
-      <span className="wm-evidence-main">
+    <button type="button" className={`wm-breaking-card ${severity}`} onClick={() => openSource(item.sourceUrl)}>
+      <span className="wm-breaking-card-rail">
+        <i>{severity === 'alert' ? '!' : severity === 'watch' ? '?' : 'i'}</i>
+        <b>{score(item.velocityScore)}</b>
+      </span>
+      <span className="wm-breaking-card-main">
         <span className="wm-evidence-meta">
           <b>{item.entity || 'Event'}</b>
           <em>{item.source || item.country || 'GDELT'}</em>
@@ -85,10 +136,9 @@ function RadarRow({ item }: { item: RuntimeBreakingEventRadarItem }) {
         <strong>{item.title || 'Breaking source warming'}</strong>
         <small>{item.summary || `${item.country || 'Global'} evidence stream`}</small>
       </span>
-      <span className="wm-evidence-value">
-        <strong>{score(item.velocityScore)}</strong>
-        <em>{marketCount(item)} PMKT</em>
-        <small>{percent(item.confidence)} conf</small>
+      <span className="wm-breaking-card-viz" aria-hidden="true">
+        {points.map((value, index) => <i key={index} style={{ height: `${value}%` }} />)}
+        <em>{marketCount(item)}M</em>
       </span>
     </button>
   );
@@ -115,12 +165,8 @@ function BreakingEventRadarPanel({ payload }: { payload?: RuntimeBreakingEventRa
       className="wm-market-panel wm-evidence-panel wm-breaking-radar-panel"
       dataPanelId="breaking-event-radar"
     >
-      <div className="wm-evidence-summary">
-        <span><em>TOP</em><strong>{payload?.summary?.topEntity || '--'}</strong></span>
-        <span><em>HEAT</em><strong>{score(payload?.summary?.topVelocity)}</strong></span>
-        <span><em>ALERTS</em><strong>{score(payload?.summary?.alerts)}</strong></span>
-      </div>
-      <div className="wm-evidence-list">
+      <RadarScope items={items} payload={payload} />
+      <div className="wm-breaking-feed">
         {items.length ? items.map((item) => <RadarRow key={item.id || `${item.entity}-${item.title}`} item={item} />) : (
           <div className="wm-registry-empty"><strong>Breaking evidence seed warming</strong><span>{formatRelative(payload?.generatedAt)}</span></div>
         )}

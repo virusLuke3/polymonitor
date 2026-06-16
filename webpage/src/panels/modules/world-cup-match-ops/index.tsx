@@ -44,6 +44,10 @@ function score(value?: number | string | null) {
   return Number.isFinite(numeric) ? String(Math.round(numeric)) : '--';
 }
 
+function clamp(value: number, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function riskClass(item: RuntimeWorldCupMatchOpsItem) {
   const level = String(item.weatherRisk?.level || '').toLowerCase();
   if (level === 'high') return 'alert';
@@ -81,12 +85,55 @@ function modeLabel(mode: SortMode) {
   return 'Next';
 }
 
+function kickoffProgress(item: RuntimeWorldCupMatchOpsItem) {
+  const minutes = Number(item.minutesUntilKickoff);
+  if (!Number.isFinite(minutes)) return 0;
+  return clamp(100 - (minutes / (60 * 36)) * 100);
+}
+
+function MatchOpsPitch({ items, payload }: { items: RuntimeWorldCupMatchOpsItem[]; payload?: RuntimeWorldCupMatchOpsPayload | null }) {
+  const next = items[0];
+  const weather = clamp(Number(payload?.summary?.weatherWatch || next?.weatherRisk?.score || 0) * 12, 0, 100);
+  return (
+    <div className="wm-match-pitch-card">
+      <div className="wm-match-pitch">
+        <span className="wm-match-pitch-line center" />
+        <span className="wm-match-pitch-box left" />
+        <span className="wm-match-pitch-box right" />
+        {items.slice(0, 5).map((item, index) => (
+          <i
+            key={item.id || `${item.homeTeam}-${item.kickoffUtc}`}
+            className={`wm-match-pitch-dot ${riskClass(item)}`}
+            style={{ '--x': `${14 + index * 18}%`, '--y': `${index % 2 ? 64 : 34}%` } as any}
+          >
+            {index + 1}
+          </i>
+        ))}
+      </div>
+      <div className="wm-match-command">
+        <em>NEXT KICK</em>
+        <strong>{next ? `${next.homeTeam || 'TBD'} vs ${next.awayTeam || 'TBD'}` : payload?.summary?.nextMatch || '--'}</strong>
+        <span>{next?.venue || next?.city || 'Venue TBD'}</span>
+      </div>
+      <div className="wm-match-risk-dial" style={{ '--risk': `${weather}%` } as any}>
+        <b>{score(payload?.summary?.linkedMarkets)}</b>
+        <span>PMKT</span>
+      </div>
+    </div>
+  );
+}
+
 function MatchRow({ item }: { item: RuntimeWorldCupMatchOpsItem }) {
   const risk = riskClass(item);
+  const progress = kickoffProgress(item);
+  const wx = clamp(Number(item.weatherRisk?.score || 0) * 10);
   return (
-    <article className={`wm-evidence-row wm-match-ops-row ${risk}`}>
-      <span className="wm-evidence-glyph">WC</span>
-      <span className="wm-evidence-main">
+    <article className={`wm-match-ticket ${risk}`}>
+      <span className="wm-match-countdown">
+        <b>{minutesLabel(item.minutesUntilKickoff)}</b>
+        <i style={{ '--progress': `${progress}%` } as any} />
+      </span>
+      <span className="wm-match-ticket-main">
         <span className="wm-evidence-meta">
           <b>{dateLabel(item.kickoffUtc)}</b>
           <em>{item.city || 'Venue TBD'}</em>
@@ -96,9 +143,9 @@ function MatchRow({ item }: { item: RuntimeWorldCupMatchOpsItem }) {
         <strong>{item.homeTeam || 'TBD'} <span>vs</span> {item.awayTeam || 'TBD'}</strong>
         <small>{item.venue || item.round || 'World Cup 2026'} / {String(item.stage || 'group').toUpperCase()}</small>
       </span>
-      <span className="wm-evidence-value">
-        <strong>{minutesLabel(item.minutesUntilKickoff)}</strong>
-        <em>{score(item.weatherRisk?.score)} risk</em>
+      <span className="wm-match-ticket-viz">
+        <i style={{ '--wx': `${wx}%` } as any}><b /></i>
+        <em>{score(item.weatherRisk?.score)} WX</em>
         <small>{marketCount(item)} PMKT</small>
       </span>
     </article>
@@ -126,12 +173,8 @@ function WorldCupMatchOpsPanel({ payload }: { payload?: RuntimeWorldCupMatchOpsP
       className="wm-market-panel wm-evidence-panel wm-world-cup-match-ops-panel"
       dataPanelId="world-cup-match-ops"
     >
-      <div className="wm-evidence-summary">
-        <span><em>NEXT</em><strong>{payload?.summary?.nextMatch || '--'}</strong></span>
-        <span><em>PMKT</em><strong>{score(payload?.summary?.linkedMarkets)}</strong></span>
-        <span><em>WX</em><strong>{score(payload?.summary?.weatherWatch)}</strong></span>
-      </div>
-      <div className="wm-evidence-list">
+      <MatchOpsPitch items={items} payload={payload} />
+      <div className="wm-match-lane">
         {items.length ? items.map((item) => <MatchRow key={item.id || `${item.homeTeam}-${item.awayTeam}-${item.kickoffUtc}`} item={item} />) : (
           <div className="wm-registry-empty"><strong>World Cup Match Ops seed warming</strong></div>
         )}

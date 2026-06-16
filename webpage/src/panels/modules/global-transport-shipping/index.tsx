@@ -29,6 +29,10 @@ function numeric(value?: number | string | null) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function clamp(value: number, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function percent(value?: number | string | null) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return '--';
@@ -77,13 +81,65 @@ function openSource(url?: string | null) {
   if (target) window.open(target, '_blank', 'noopener,noreferrer');
 }
 
+function sourceCount(items: RuntimeGlobalTransportShippingItem[], source: string) {
+  return items.filter((item) => String(item.evidenceType || '').toUpperCase().includes(source)).length;
+}
+
+function TransportNetwork({ items, payload }: { items: RuntimeGlobalTransportShippingItem[]; payload?: RuntimeGlobalTransportShippingPayload | null }) {
+  const routes = numeric(payload?.summary?.routes);
+  const ais = items.find((item) => String(item.evidenceType || '').toUpperCase().includes('AIS'));
+  const aisMessages = numeric(ais?.metric);
+  const routeIntensity = clamp(routes / 800);
+  const aisIntensity = clamp(aisMessages * 8);
+  return (
+    <div className="wm-transport-network-card">
+      <svg className="wm-transport-map" viewBox="0 0 320 118" role="img" aria-label="Transport network intensity">
+        <defs>
+          <linearGradient id="wmTransportRoute" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.18" />
+            <stop offset="55%" stopColor="#38bdf8" stopOpacity="0.72" />
+            <stop offset="100%" stopColor="#4ade80" stopOpacity="0.18" />
+          </linearGradient>
+        </defs>
+        <path className="wm-transport-gridline" d="M8 34 C80 18 112 48 160 30 S238 22 312 46" />
+        <path className="wm-transport-gridline" d="M14 82 C74 66 104 98 156 76 S250 62 306 88" />
+        <path className="wm-transport-route main" d="M30 74 C88 18 156 18 292 38" style={{ '--route': `${routeIntensity}%` } as any} />
+        <path className="wm-transport-route alt" d="M24 42 C90 95 178 98 302 68" />
+        <path className="wm-transport-route alt two" d="M72 94 C124 42 182 44 250 18" />
+        {[
+          [34, 72, 'ATL'],
+          [86, 34, 'LHR'],
+          [146, 56, 'GT'],
+          [218, 35, 'AIS'],
+          [286, 66, 'PEK'],
+        ].map(([x, y, label], index) => (
+          <g key={String(label)} className={index === 3 ? 'wm-transport-node ais' : 'wm-transport-node'}>
+            <circle cx={Number(x)} cy={Number(y)} r={index === 3 ? 10 : 7} />
+            <text x={Number(x)} y={Number(y) + 21}>{label}</text>
+          </g>
+        ))}
+      </svg>
+      <div className="wm-transport-network-stats">
+        <span><em>AIR ROUTES</em><strong>{formatCompact(payload?.summary?.routes)}</strong></span>
+        <span><em>GTFS FEEDS</em><strong>{formatCompact(payload?.summary?.transitFeeds)}</strong></span>
+        <span><em>AIS MSG</em><strong>{formatCompact(aisMessages)}</strong></span>
+      </div>
+      <div className="wm-transport-signal" style={{ '--ais': `${aisIntensity}%` } as any}>
+        <b>{payload?.summary?.topHub || '--'}</b>
+        <span>{sourceCount(items, 'OPENFLIGHTS')} air / {sourceCount(items, 'TRANSITLAND')} gtfs / {sourceCount(items, 'AIS')} ais</span>
+      </div>
+    </div>
+  );
+}
+
 function TransportRow({ item }: { item: RuntimeGlobalTransportShippingItem }) {
   const severity = severityClass(item);
   const tags = (item.tags || []).slice(0, 2);
+  const width = clamp(numeric(item.metric) / 120);
   return (
-    <button type="button" className={`wm-evidence-row wm-transport-row ${severity}`} onClick={() => openSource(item.sourceUrl)}>
-      <span className="wm-evidence-glyph">{glyph(item)}</span>
-      <span className="wm-evidence-main">
+    <button type="button" className={`wm-transport-strip ${severity} ${glyph(item).toLowerCase()}`} onClick={() => openSource(item.sourceUrl)}>
+      <span className="wm-transport-strip-kind">{glyph(item)}</span>
+      <span className="wm-transport-strip-main">
         <span className="wm-evidence-meta">
           <b>{item.entity || 'Transport'}</b>
           <em>{item.evidenceType || item.country || 'SOURCE'}</em>
@@ -93,7 +149,8 @@ function TransportRow({ item }: { item: RuntimeGlobalTransportShippingItem }) {
         <strong>{item.title || 'Transport evidence source'}</strong>
         <small>{item.summary || `${item.country || 'Global'} transport evidence`}</small>
       </span>
-      <span className="wm-evidence-value">
+      <span className="wm-transport-strip-metric">
+        <i style={{ '--width': `${width}%` } as any} />
         <strong>{formatCompact(item.metric)}</strong>
         <em>{item.metricLabel || 'SIGNAL'}</em>
         <small>{percent(item.confidence)} conf</small>
@@ -123,12 +180,8 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
       className="wm-market-panel wm-evidence-panel wm-global-transport-panel"
       dataPanelId="global-transport-shipping"
     >
-      <div className="wm-evidence-summary">
-        <span><em>HUB</em><strong>{payload?.summary?.topHub || '--'}</strong></span>
-        <span><em>ROUTES</em><strong>{formatCompact(payload?.summary?.routes)}</strong></span>
-        <span><em>GTFS</em><strong>{formatCompact(payload?.summary?.transitFeeds)}</strong></span>
-      </div>
-      <div className="wm-evidence-list">
+      <TransportNetwork items={items} payload={payload} />
+      <div className="wm-transport-strips">
         {items.length ? items.map((item) => <TransportRow key={item.id || `${item.evidenceType}-${item.entity}-${item.title}`} item={item} />) : (
           <div className="wm-registry-empty"><strong>Transport evidence seed warming</strong><span>{formatRelative(payload?.generatedAt)}</span></div>
         )}
