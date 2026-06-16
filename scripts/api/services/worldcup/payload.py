@@ -14,6 +14,7 @@ def normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     odds = payload.get("odds") if isinstance(payload.get("odds"), list) else []
     market_linker = payload.get("marketLinker") if isinstance(payload.get("marketLinker"), dict) else {}
     bookmaker_linker = payload.get("bookmakerLinker") if isinstance(payload.get("bookmakerLinker"), dict) else {}
+    result_linker = payload.get("resultLinker") if isinstance(payload.get("resultLinker"), dict) else {}
     return {
         "generatedAt": str(payload.get("generatedAt") or utc_now_iso()),
         "cacheMode": str(payload.get("cacheMode") or "remote"),
@@ -36,6 +37,7 @@ def normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "providerStates": payload.get("providerStates") if isinstance(payload.get("providerStates"), dict) else {},
         "marketLinker": market_linker,
         "bookmakerLinker": bookmaker_linker,
+        "resultLinker": result_linker,
         "summary": {
             "cities": len(cities),
             "matches": len(matches),
@@ -47,6 +49,8 @@ def normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "oddsMatched": int(market_linker.get("matched") or len(odds)),
             "bookmakerEvents": int(bookmaker_linker.get("events") or 0),
             "bookmakerMatched": int(bookmaker_linker.get("matched") or 0),
+            "scoreEvents": int(result_linker.get("completed") or 0),
+            "scoreMatched": int(result_linker.get("matched") or 0),
         },
     }
 

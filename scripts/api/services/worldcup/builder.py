@@ -7,6 +7,7 @@ from api.services.worldcup.common import utc_now_iso
 from api.services.worldcup.odds.bookmaker import WORLDCUP_ODDS_SPORT_KEY, link_bookmaker_odds
 from api.services.worldcup.odds.polymarket import link_worldcup_markets, new_market_linker_stats
 from api.services.worldcup.payload import normalize_payload
+from api.services.worldcup.results import merge_espn_scoreboard_results
 from api.services.worldcup.schedule import OPENFOOTBALL_2026_URL, WORLD_CUP_CITIES, fetch_schedule_source, normalize_matches
 
 
@@ -20,6 +21,7 @@ def build_worldcup_dashboard_payload(
     settings = ctx.get("SETTINGS")
     source_matches, schedule_source = fetch_schedule_source(ctx)
     matches = normalize_matches(source_matches)
+    matches, result_linker = merge_espn_scoreboard_results(ctx, matches)
     intel: Optional[Dict[str, Any]] = None
     if include_intel:
         try:
@@ -71,10 +73,11 @@ def build_worldcup_dashboard_payload(
             "odds": odds,
             "marketLinker": market_linker,
             "intelligence": intel,
-            "source": f"{schedule_source} / {intel.get('source') if isinstance(intel, dict) else 'runtime intel deferred'}",
+            "source": f"{schedule_source} / {result_linker.get('source') if result_linker.get('matched') else 'score source pending'} / {intel.get('source') if isinstance(intel, dict) else 'runtime intel deferred'}",
             "sourceUrl": OPENFOOTBALL_2026_URL,
             "providerStates": {
                 "schedule": "ok" if len(matches) >= 100 else "source-required",
+                "matchResults": str(result_linker.get("state") or "source-required"),
                 "worldcupIntel": str((intel or {}).get("status") or "unknown"),
                 "weather": "ok" if weather else "empty",
                 "odds": odds_state,
@@ -83,5 +86,6 @@ def build_worldcup_dashboard_payload(
                 "rosters": "source-required",
             },
             "bookmakerLinker": bookmaker_linker,
+            "resultLinker": result_linker,
         }
     )

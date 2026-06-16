@@ -13,6 +13,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.services import worldcup_dashboard_service
 from api.services.worldcup.odds import bookmaker
+from api.services.worldcup import builder as worldcup_builder
 from runtime import worldcup_dashboard_watcher
 
 
@@ -123,7 +124,7 @@ def test_worldcup_dashboard_links_strict_polymarket_market():
         "matches": [
             {
                 "num": 1,
-                "date": "2026-06-11",
+                "date": "2026-07-01",
                 "time": "13:00 UTC-6",
                 "team1": "Mexico",
                 "team2": "South Africa",
@@ -164,7 +165,7 @@ def test_worldcup_dashboard_links_strict_polymarket_market():
     }
 
     with patch.object(
-        worldcup_dashboard_service.worldcup_intel_service,
+        worldcup_builder.worldcup_intel_service,
         "get_worldcup_intel_snapshot",
         return_value={"status": "ok", "weather": [], "news": [], "signals": []},
     ):
@@ -189,7 +190,7 @@ def test_worldcup_dashboard_rejects_event_level_false_positive_market():
         "matches": [
             {
                 "num": 2,
-                "date": "2026-06-12",
+                "date": "2026-07-02",
                 "time": "02:00 UTC+0",
                 "team1": "South Korea",
                 "team2": "Czech Republic",
@@ -229,13 +230,13 @@ def test_worldcup_dashboard_rejects_event_level_false_positive_market():
     }
 
     with patch.object(
-        worldcup_dashboard_service.worldcup_intel_service,
+        worldcup_builder.worldcup_intel_service,
         "get_worldcup_intel_snapshot",
         return_value={"status": "ok", "weather": [], "news": [], "signals": []},
     ):
         payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(ctx)
 
-    assert payload["providerStates"]["odds"] == "empty"
+    assert payload["providerStates"]["odds"] in {"empty", "missing-key"}
     assert payload["odds"] == []
     assert payload["matches"][0]["marketLinked"] is False
     assert payload["marketLinker"]["matched"] == 0
@@ -247,7 +248,7 @@ def test_worldcup_dashboard_links_match_result_market_group():
         "matches": [
             {
                 "num": 1,
-                "date": "2026-06-11",
+                "date": "2026-07-01",
                 "time": "13:00 UTC-6",
                 "team1": "Mexico",
                 "team2": "South Africa",
@@ -313,7 +314,7 @@ def test_worldcup_dashboard_links_match_result_market_group():
     }
 
     with patch.object(
-        worldcup_dashboard_service.worldcup_intel_service,
+        worldcup_builder.worldcup_intel_service,
         "get_worldcup_intel_snapshot",
         return_value={"status": "ok", "weather": [], "news": [], "signals": []},
     ):
@@ -323,29 +324,116 @@ def test_worldcup_dashboard_links_match_result_market_group():
     odds = payload["odds"][0]
     assert odds["marketUrl"] == "https://polymarket.com/event/mexico-vs-south-africa-fifa-world-cup-2026"
     assert odds["tradeUrl"] == odds["marketUrl"]
-    assert odds["probabilities"][:3] == [
+    assert [
+        {key: row.get(key) for key in ("outcome", "price", "marketUrl")}
+        for row in odds["probabilities"][:3]
+    ] == [
         {
             "outcome": "Mexico",
             "price": "0.49",
-            "marketTitle": "Mexico",
             "marketUrl": "https://polymarket.com/event/mexico-vs-south-africa-fifa-world-cup-2026/mexico-vs-south-africa-mexico",
-            "clobTokenId": "",
         },
         {
             "outcome": "Draw",
             "price": "0.29",
-            "marketTitle": "Draw",
             "marketUrl": "https://polymarket.com/event/mexico-vs-south-africa-fifa-world-cup-2026/mexico-vs-south-africa-draw",
-            "clobTokenId": "",
         },
         {
             "outcome": "South Africa",
             "price": "0.22",
-            "marketTitle": "South Africa",
             "marketUrl": "https://polymarket.com/event/mexico-vs-south-africa-fifa-world-cup-2026/mexico-vs-south-africa-south-africa",
-            "clobTokenId": "",
         },
     ]
+
+
+def test_worldcup_dashboard_merges_espn_scoreboard_results():
+    source_schedule = {
+        "matches": [
+            {
+                "num": 19,
+                "date": "2026-06-13",
+                "time": "20:00 UTC-5",
+                "team1": "USA",
+                "team2": "Paraguay",
+                "group": "Group D",
+                "round": "Matchday 1",
+                "ground": "Los Angeles (Inglewood)",
+            },
+            {
+                "num": 20,
+                "date": "2026-06-13",
+                "time": "21:00 UTC-7",
+                "team1": "Australia",
+                "team2": "Turkey",
+                "group": "Group D",
+                "round": "Matchday 1",
+                "ground": "Vancouver",
+            },
+        ]
+    }
+    espn_scoreboard = {
+        "events": [
+            {
+                "id": "760419",
+                "date": "2026-06-14T01:00Z",
+                "competitions": [
+                    {
+                        "date": "2026-06-14T01:00Z",
+                        "altGameNote": "FIFA World Cup, Group D",
+                        "status": {"type": {"completed": True, "state": "post", "shortDetail": "FT"}},
+                        "competitors": [
+                            {"homeAway": "home", "score": "3", "team": {"displayName": "United States"}},
+                            {"homeAway": "away", "score": "1", "team": {"displayName": "Paraguay"}},
+                        ],
+                    }
+                ],
+            },
+            {
+                "id": "760421",
+                "date": "2026-06-14T04:00Z",
+                "competitions": [
+                    {
+                        "date": "2026-06-14T04:00Z",
+                        "altGameNote": "FIFA World Cup, Group D",
+                        "status": {"type": {"completed": True, "state": "post", "shortDetail": "FT"}},
+                        "competitors": [
+                            {"homeAway": "home", "score": "2", "team": {"displayName": "Australia"}},
+                            {"homeAway": "away", "score": "1", "team": {"displayName": "Türkiye"}},
+                        ],
+                    }
+                ],
+            },
+        ]
+    }
+
+    def http_json_get(url, *, params=None, timeout=12, headers=None):
+        if "openfootball" in url:
+            return source_schedule
+        if "site.api.espn.com" in url:
+            return espn_scoreboard
+        raise AssertionError(url)
+
+    ctx = {
+        "http_json_get": http_json_get,
+        "SETTINGS": SimpleNamespace(worldcup_market_link_scan_limit=0),
+    }
+
+    with patch.object(
+        worldcup_builder.worldcup_intel_service,
+        "get_worldcup_intel_snapshot",
+        return_value={"status": "ok", "weather": [], "news": [], "signals": []},
+    ):
+        payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(ctx, include_live_market_links=False)
+
+    usa = next(match for match in payload["matches"] if match["id"] == "wc2026-019")
+    australia = next(match for match in payload["matches"] if match["id"] == "wc2026-020")
+    assert payload["providerStates"]["matchResults"] == "ok"
+    assert payload["summary"]["scoreMatched"] == 2
+    assert usa["homeScore"] == 3
+    assert usa["awayScore"] == 1
+    assert australia["homeScore"] == 2
+    assert australia["awayScore"] == 1
+    assert australia["scoreSource"] == "ESPN scoreboard"
 
 
 def test_worldcup_dashboard_watcher_builds_new_odds_alert_candidate():

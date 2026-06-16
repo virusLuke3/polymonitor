@@ -47,7 +47,9 @@ def parse_iso(value: Any) -> Optional[datetime]:
 
 
 def tokenize(value: Any) -> List[str]:
-    return [part for part in re.split(r"[^0-9a-z]+", str(value or "").lower()) if part]
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(part for part in text if not unicodedata.combining(part))
+    return [part for part in re.split(r"[^0-9a-z]+", text.lower()) if part]
 
 
 def team_tokens(value: Any) -> set[str]:
@@ -58,6 +60,9 @@ def team_tokens(value: Any) -> set[str]:
         "us": "united states america usa",
         "south korea": "korea republic korea",
         "czechia": "czech republic czech",
+        "turkiye": "turkey turkiye",
+        "türkiye": "turkey turkiye",
+        "united states": "usa us america",
         "bosnia herzegovina": "bosnia herzogovina",
         "bosnia and herzegovina": "bosnia herzegovina",
         "cote d ivoire": "ivory coast civ",
