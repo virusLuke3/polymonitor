@@ -10,17 +10,42 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from api.services import live_video_source_service as service
+from api.services import hls_proxy_service
 from api.services import youtube_live_probe_service as youtube_probe
 
 
 def test_market_tv_wire_manifest_payload_builds_without_network() -> None:
-    payload = service.build_market_tv_wire_payload({"utc_now_iso": lambda: "2026-06-15T00:00:00Z"}, include_iptv=False)
+    payload = service.build_market_tv_wire_payload(
+        {
+            "utc_now_iso": lambda: "2026-06-15T00:00:00Z",
+            "market_tv_youtube_probe_enabled": False,
+            "market_tv_hls_probe_enabled": False,
+        },
+        include_iptv=False,
+    )
 
     assert payload["status"] == "ok"
     assert payload["summary"]["total"] >= 10
     assert payload["items"]
     assert payload["items"][0]["relevanceScore"] >= payload["items"][-1]["relevanceScore"]
     assert {category["id"] for category in payload["categories"]} >= {"macro", "geo", "weather"}
+
+
+def test_market_tv_wire_adds_trusted_hls_sources_without_iptv() -> None:
+    payload = service.build_market_tv_wire_payload(
+        {
+            "utc_now_iso": lambda: "2026-06-15T00:00:00Z",
+            "market_tv_youtube_probe_enabled": False,
+            "market_tv_hls_probe_enabled": False,
+        },
+        include_iptv=False,
+    )
+
+    trusted = [item for item in payload["items"] if item.get("playbackTier") == "trusted-hls"]
+
+    assert trusted
+    assert payload["sources"]["trustedHls"]["count"] == len(trusted)
+    assert any(item["id"] == "trusted-hls-cnbc" and item.get("hlsProxyRequired") is True for item in trusted)
 
 
 def test_market_tv_wire_m3u_parser_keeps_https_hls_and_marks_not_24_7() -> None:
@@ -121,7 +146,11 @@ def test_market_tv_wire_enriches_youtube_manifest_sources() -> None:
         }
 
     payload = service.build_market_tv_wire_payload(
-        {"utc_now_iso": lambda: "2026-06-15T00:00:00Z", "youtube_live_probe": probe},
+        {
+            "utc_now_iso": lambda: "2026-06-15T00:00:00Z",
+            "youtube_live_probe": probe,
+            "market_tv_hls_probe_enabled": False,
+        },
         include_iptv=False,
     )
     fox_weather = next(item for item in payload["items"] if item["id"] == "fox-weather-live")
@@ -172,6 +201,18 @@ def test_market_tv_wire_hls_probe_uses_http_fallback_when_ffprobe_missing(monkey
     assert probe["ok"] is True
     assert probe["status"] == "playable"
     assert probe["streams"] == ["manifest", "segment"]
+
+
+def test_hls_proxy_rewrites_manifest_to_same_proxy_route() -> None:
+    manifest = '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:4,\nsegment.ts\n'
+
+    rewritten = hls_proxy_service.rewrite_manifest(
+        manifest,
+        manifest_url="https://example.com/live/master.m3u8",
+    )
+
+    assert "hls-proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fsegment.ts" in rewritten
+    assert 'URI="hls-proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fkey.bin"' in rewritten
 
 
 def test_market_youtube_channels_payload_filters_curated_youtube_sources() -> None:

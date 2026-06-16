@@ -2056,6 +2056,8 @@ export type RuntimeMarketTvWireItem = {
   country?: string | null;
   language?: string | null;
   hlsUrl?: string | null;
+  hlsProxyRequired?: boolean | null;
+  hlsProxyReferer?: string | null;
   hlsProbeStatus?: 'playable' | 'blocked' | 'timeout' | 'error' | 'missing' | 'skipped' | 'unverified' | string | null;
   hlsProbeError?: string | null;
   hlsProbeStreams?: string[];
@@ -2077,6 +2079,8 @@ export type RuntimeMarketTvWireItem = {
   availability?: 'public' | 'geo_limited' | 'unknown' | string | null;
   sourceName?: string | null;
   sourceUrl?: string | null;
+  playbackTier?: string | null;
+  playbackStrategy?: string | null;
   marketTags?: string[];
   matchedTerms?: string[];
   marketUseCase?: string | null;

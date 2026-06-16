@@ -666,6 +666,11 @@ export function fetchRuntimeMarketTvWire(limit = 24, category?: string | null) {
   return apiGet<RuntimeMarketTvWirePayload>(`/runtime/content/market-tv-wire?${params.toString()}`);
 }
 
+export function buildRuntimeHlsProxyUrl(hlsUrl: string) {
+  const params = new URLSearchParams({ url: hlsUrl });
+  return `${API_BASE}/runtime/content/hls-proxy?${params.toString()}`;
+}
+
 export function fetchRuntimeMarketYoutubeChannels(limit = 12, category?: string | null) {
   const params = new URLSearchParams({ limit: String(limit) });
   if (category && category !== 'all') params.set('category', category);

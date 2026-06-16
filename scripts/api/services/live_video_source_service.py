@@ -14,7 +14,7 @@ from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from api.config import PROJECT_ROOT
-from api.services import youtube_live_probe_service
+from api.services import trusted_hls_sources, youtube_live_probe_service
 
 
 PANEL_ID = "market-tv-wire"
@@ -251,6 +251,9 @@ def normalize_source_item(raw: Dict[str, Any], *, generated_at: str, curated: bo
         "failureReason": _string(raw.get("failureReason")),
         "curated": bool(curated),
     }
+    for key in ("playbackTier", "playbackStrategy", "hlsProxyRequired", "hlsProxyReferer"):
+        if key in raw:
+            item[key] = raw.get(key)
     item["relevanceScore"] = _score_for(category, curated=curated, source_type=source_type, status=status, market_tags=market_tags)
     return item
 
@@ -413,11 +416,16 @@ def _hls_probe_result(ok: bool, status: str, *, error: str | None = None, stream
     }
 
 
-def _hls_http_fetch(url: str, *, timeout: int, max_bytes: int, binary: bool = False) -> bytes | str:
+def _hls_http_fetch(url: str, *, timeout: int, max_bytes: int, binary: bool = False, referer: str | None = None) -> bytes | str:
     headers = {
         "Accept": "*/*",
         "User-Agent": "Mozilla/5.0 polydata-tv-probe/1.0",
     }
+    if referer:
+        headers["Referer"] = referer
+        referer_parts = urlparse(referer)
+        if referer_parts.scheme and referer_parts.netloc:
+            headers["Origin"] = f"{referer_parts.scheme}://{referer_parts.netloc}"
     if binary:
         headers["Range"] = f"bytes=0-{max(0, max_bytes - 1)}"
     request = Request(
@@ -457,10 +465,12 @@ def _first_hls_segment_uri(lines: List[str]) -> str | None:
     return None
 
 
-def _probe_hls_stream_http(ctx: dict, hls_url: str) -> Dict[str, Any]:
+def _probe_hls_stream_http(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
     timeout_seconds = _hls_probe_timeout_seconds(ctx)
+    hls_url = _string(item.get("hlsUrl")) or ""
+    referer = _string(item.get("hlsProxyReferer"))
     try:
-        manifest = _hls_http_fetch(hls_url, timeout=timeout_seconds, max_bytes=1_000_000)
+        manifest = _hls_http_fetch(hls_url, timeout=timeout_seconds, max_bytes=1_000_000, referer=referer)
         if not isinstance(manifest, str) or "#EXTM3U" not in manifest:
             return _hls_probe_result(False, "blocked", error="missing #EXTM3U manifest")
         lines = [line.strip() for line in manifest.splitlines() if line.strip()]
@@ -468,7 +478,7 @@ def _probe_hls_stream_http(ctx: dict, hls_url: str) -> Dict[str, Any]:
         media_url = urljoin(hls_url, variant_uri) if variant_uri else hls_url
         media_manifest = manifest
         if variant_uri:
-            media_manifest = _hls_http_fetch(media_url, timeout=timeout_seconds, max_bytes=1_000_000)
+            media_manifest = _hls_http_fetch(media_url, timeout=timeout_seconds, max_bytes=1_000_000, referer=referer)
             if not isinstance(media_manifest, str) or "#EXTM3U" not in media_manifest:
                 return _hls_probe_result(False, "blocked", error="variant playlist missing #EXTM3U")
         media_lines = [line.strip() for line in str(media_manifest).splitlines() if line.strip()]
@@ -478,7 +488,7 @@ def _probe_hls_stream_http(ctx: dict, hls_url: str) -> Dict[str, Any]:
         segment_uri = _first_hls_segment_uri(media_lines)
         if segment_uri:
             segment_url = urljoin(media_url, segment_uri)
-            sample = _hls_http_fetch(segment_url, timeout=timeout_seconds, max_bytes=2048, binary=True)
+            sample = _hls_http_fetch(segment_url, timeout=timeout_seconds, max_bytes=2048, binary=True, referer=referer)
             if not sample:
                 return _hls_probe_result(False, "empty", error="first media segment returned no bytes")
             return _hls_probe_result(True, "playable", streams=["manifest", "segment"])
@@ -505,9 +515,10 @@ def _probe_hls_stream(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
     hls_url = _string(item.get("hlsUrl"))
     if not hls_url:
         return _hls_probe_result(False, "missing", error="missing hlsUrl")
+    referer = _string(item.get("hlsProxyReferer"))
     ffprobe = shutil.which(str(ctx.get("ffprobe_path") or "ffprobe"))
     if not ffprobe:
-        return _probe_hls_stream_http(ctx, hls_url)
+        return _probe_hls_stream_http(ctx, item)
     timeout_seconds = _hls_probe_timeout_seconds(ctx)
     cmd = [
         ffprobe,
@@ -523,8 +534,12 @@ def _probe_hls_stream(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
         "stream=codec_type",
         "-of",
         "json",
-        hls_url,
     ]
+    if referer:
+        referer_parts = urlparse(referer)
+        origin = f"{referer_parts.scheme}://{referer_parts.netloc}" if referer_parts.scheme and referer_parts.netloc else referer.rstrip("/")
+        cmd.extend(["-headers", f"Referer: {referer}\r\nOrigin: {origin}\r\n"])
+    cmd.append(hls_url)
     try:
         completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds + 2)
     except subprocess.TimeoutExpired:
@@ -815,11 +830,20 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
     items: List[Dict[str, Any]] = []
     manifest_items: List[Dict[str, Any]] = []
     try:
+        for raw in trusted_hls_sources.trusted_hls_items(generated_at=generated_at):
+            item = normalize_source_item(raw, generated_at=generated_at, curated=True)
+            if item:
+                manifest_items.append(item)
         for raw in load_manifest_items():
             item = normalize_source_item(raw, generated_at=generated_at, curated=True)
             if item:
                 manifest_items.append(item)
         youtube_probe_state = _enrich_youtube_live_sources(ctx, manifest_items, generated_at=generated_at)
+        source_states["trustedHls"] = {
+            "status": "ok",
+            "count": len([item for item in manifest_items if item.get("playbackTier") == "trusted-hls"]),
+            "lastSuccessAt": generated_at,
+        }
         source_states["manifest"] = {"status": "ok", "count": len(manifest_items), "lastSuccessAt": generated_at}
         if youtube_probe_state.get("status") not in {"skipped"}:
             source_states["youtubeLiveProbe"] = youtube_probe_state

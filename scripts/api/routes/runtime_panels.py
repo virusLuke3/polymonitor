@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
+from api.services import hls_proxy_service
 
 
 def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
@@ -29,6 +30,21 @@ def _get_panel_snapshot(panel, helpers: dict, limit: int | None):
 
 def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
     bp = Blueprint("runtime_panel_routes", __name__)
+
+    @bp.route("/runtime/content/hls-proxy", methods=["GET"])
+    def api_runtime_hls_proxy():
+        target_url = request.args.get("url") or ""
+        try:
+            data, content_type, status = hls_proxy_service.fetch_hls_resource(target_url)
+        except hls_proxy_service.HlsProxyError as exc:
+            return jsonify({"status": "error", "error": str(exc)}), exc.status_code
+        except Exception as exc:
+            helpers["app"].logger.warning("runtime hls proxy failed url=%s error=%s", target_url[:160], exc)
+            return jsonify({"status": "error", "error": "upstream HLS fetch failed"}), 502
+        response = Response(data, status=status, content_type=content_type)
+        response.headers["Cache-Control"] = hls_proxy_service.cache_control_for(content_type)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @bp.route("/runtime/panels", methods=["GET"])
     def api_runtime_panels_batch():

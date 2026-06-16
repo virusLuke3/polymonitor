@@ -88,8 +88,20 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
   const embedUrl = youtubeEmbedUrl(item);
   const videoId = youtubeVideoId(item);
   const externalUrl = item.externalUrl || item.sourceUrl || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : null);
+  const [frameState, setFrameState] = useState<'connecting' | 'playing' | 'blocked'>(embedUrl ? 'connecting' : 'blocked');
+
+  useEffect(() => {
+    if (!embedUrl) {
+      setFrameState('blocked');
+      return undefined;
+    }
+    setFrameState('connecting');
+    const timer = window.setTimeout(() => setFrameState((state) => (state === 'playing' ? state : 'blocked')), 12000);
+    return () => window.clearTimeout(timer);
+  }, [embedUrl]);
+
   return (
-    <div className="wm-market-youtube-player">
+    <div className={`wm-market-youtube-player ${frameState === 'blocked' ? 'blocked' : ''}`}>
       <header>
         <div>
           <span>{categoryLabel(item.category)} / {sourceLocation(item)} / {probeLabel(item)}</span>
@@ -107,6 +119,7 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
           referrerPolicy="strict-origin-when-cross-origin"
+          onLoad={() => setFrameState('playing')}
         />
       ) : (
         <div className="wm-market-youtube-fallback">
@@ -117,6 +130,15 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
           </button>
         </div>
       )}
+      {embedUrl && frameState === 'blocked' ? (
+        <div className="wm-market-youtube-blocked">
+          <strong>YOUTUBE EMBED BLOCKED</strong>
+          <em>This channel or video does not allow embedded playback. Open the source page.</em>
+          <button type="button" onClick={() => openExternal(externalUrl)}>
+            OPEN
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
