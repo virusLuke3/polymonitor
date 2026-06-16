@@ -64,6 +64,52 @@
   overflow: hidden;
 }
 
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-final-result-table div.settled-winner {
+  background:
+    linear-gradient(90deg, rgba(49, 242, 138, 0.12), rgba(49, 242, 138, 0.02)),
+    rgba(255, 255, 255, 0.018);
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-final-result-table div.source-missing {
+  opacity: 0.52;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-win-probability-panel .wm-worldcup-home-source-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 197, 61, 0.18);
+  border-left: 2px solid rgba(255, 197, 61, 0.72);
+  border-radius: 4px;
+  background:
+    linear-gradient(90deg, rgba(255, 197, 61, 0.085), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.02);
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-win-probability-panel .wm-worldcup-home-source-note b {
+  flex: 0 0 auto;
+  color: #ffc53d;
+  font-family: var(--wm-font-mono, monospace);
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-win-probability-panel .wm-worldcup-home-source-note span {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(235, 235, 235, 0.62);
+  font-family: var(--wm-font-body, system-ui, sans-serif);
+  font-size: 10px;
+  font-weight: 620;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-bookmaker-board article:hover {
   border-color: rgba(52, 223, 255, 0.32);
   background: rgba(24, 30, 35, 0.92);

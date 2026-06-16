@@ -200,6 +200,8 @@ class ApiSettings:
     the_odds_api_key: str
     the_odds_source_url: str
     worldcup_odds_markets: str
+    worldcup_core_seed_ttl_seconds: int
+    worldcup_live_seed_ttl_seconds: int
     the_rundown_api_key: str
     api_football_api_key: str
     betfair_app_key: str
@@ -381,6 +383,8 @@ def load_api_settings() -> ApiSettings:
         ),
         the_odds_source_url=_get_str("POLYDATA_THE_ODDS_SOURCE_URL", THE_ODDS_SOURCE_URL or "https://the-odds-api.com/"),
         worldcup_odds_markets=_get_str("POLYDATA_WORLDCUP_ODDS_MARKETS", "h2h,spreads,totals"),
+        worldcup_core_seed_ttl_seconds=_get_int("POLYDATA_WORLDCUP_CORE_SEED_TTL_SECONDS", 86400),
+        worldcup_live_seed_ttl_seconds=_get_int("POLYDATA_WORLDCUP_LIVE_SEED_TTL_SECONDS", 300),
         the_rundown_api_key=_get_str("POLYDATA_THERUNDOWN_API_KEY", _get_str("THERUNDOWN_API_KEY", _get_str("the_rundown_api_key", ""))),
         api_football_api_key=_get_str("POLYDATA_API_FOOTBALL_KEY", _get_str("API_FOOTBALL_KEY", _get_str("api_football_key", ""))),
         betfair_app_key=_get_str("POLYDATA_BETFAIR_APP_KEY", _get_str("BETFAIR_APP_KEY", _get_str("betfair_app_key", ""))),

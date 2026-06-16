@@ -191,6 +191,13 @@ function scoreText(match: WorldCupMatch) {
   return `${match.homeScore}-${match.awayScore}`;
 }
 
+function finalResultOutcome(match: WorldCupMatch | null) {
+  if (!match || match.status !== 'finished' || match.homeScore == null || match.awayScore == null) return null;
+  if (match.homeScore > match.awayScore) return match.homeTeam;
+  if (match.homeScore < match.awayScore) return match.awayTeam;
+  return 'Draw';
+}
+
 function stageLabel(value?: string | null) {
   return String(value || 'group').replace(/_/g, ' ').toUpperCase();
 }
@@ -733,6 +740,36 @@ function WinProbability({ model }: { model: WorldCupHomeModel }) {
   const match = model.selectedMatch;
   if (!match) return <EmptyState detail="No selected match is available." />;
   const [activeTab, setActiveTab] = useState<WorldCupOddsTab>('edge');
+  const settledOutcome = finalResultOutcome(match);
+  if (settledOutcome) {
+    const source = String((match as WorldCupMatch & { scoreSource?: string }).scoreSource || 'ESPN scoreboard');
+    return (
+      <>
+        <div className="wm-worldcup-odds-switch">
+          <button className="active" type="button">FINAL</button>
+        </div>
+        <div className="wm-worldcup-home-prob-table">
+          <header><span>OUTCOME</span><span>SCORE</span><span>RESULT</span><span>SOURCE</span></header>
+          {[match.homeTeam, 'Draw', match.awayTeam].map((name) => {
+            const won = name === settledOutcome;
+            const score = name === match.homeTeam ? match.homeScore : name === match.awayTeam ? match.awayScore : scoreText(match);
+            return (
+              <div className={won ? 'settled-winner' : 'source-missing'} key={name}>
+                <strong>{name}</strong>
+                <span><b>{score}</b><i style={{ width: won ? '100%' : '0%' }} /></span>
+                <span><b>{won ? 'WIN' : '--'}</b><i style={{ width: won ? '100%' : '0%' }} /></span>
+                <em className={won ? 'tone-green' : ''}>{won ? '100%' : '--'}</em>
+              </div>
+            );
+          })}
+        </div>
+        <div className="wm-worldcup-home-source-note">
+          <b>BOOK SOURCE</b>
+          <span>finished match; bookmaker odds are closed by source, result verified from {source}</span>
+        </div>
+      </>
+    );
+  }
   const outcomes = [match.homeTeam, 'Draw', match.awayTeam];
   const bookSnapshots = model.selectedOdds.filter((row) => row.providerType !== 'prediction_market');
   const book = bookSnapshots.find((row) => oddsSnapshotKey(row) === 'h2h' || row.marketType === 'moneyline') || bookSnapshots[0];

@@ -14,6 +14,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 from api.services import worldcup_dashboard_service
 from api.services.worldcup.odds import bookmaker
 from api.services.worldcup import builder as worldcup_builder
+from api.services.worldcup.panels import build_worldcup_panel_payloads, panel_ttl_seconds
 from runtime import worldcup_dashboard_watcher
 
 
@@ -434,6 +435,81 @@ def test_worldcup_dashboard_merges_espn_scoreboard_results():
     assert australia["homeScore"] == 2
     assert australia["awayScore"] == 1
     assert australia["scoreSource"] == "ESPN scoreboard"
+
+
+def test_worldcup_split_merge_preserves_core_odds_and_live_results():
+    core = {
+        "generatedAt": "2026-06-16T00:00:00Z",
+        "matches": [
+            {
+                "id": "wc2026-044",
+                "homeTeam": "Saudi Arabia",
+                "awayTeam": "Uruguay",
+                "kickoffUtc": "2026-06-16T06:00:00Z",
+                "kickoffBeijing": "2026-06-16T14:00:00+08:00",
+                "kickoffLocal": "2026-06-16T02:00:00-04:00",
+                "cityId": "miami",
+                "city": "Miami Gardens",
+                "venue": "Hard Rock Stadium",
+                "stage": "group",
+                "round": "Matchday 5",
+                "status": "scheduled",
+            }
+        ],
+        "odds": [{"matchId": "wc2026-044", "provider": "The Odds API", "providerType": "online_bookmaker", "marketType": "moneyline", "outcomes": []}],
+        "providerStates": {"odds": "ok", "bookmakerOdds": "ok"},
+        "bookmakerLinker": {"events": 57, "matched": 56},
+        "marketLinker": {"matched": 4, "candidates": 292},
+    }
+    live = {
+        "generatedAt": "2026-06-16T00:05:00Z",
+        "matches": [
+            {
+                **core["matches"][0],
+                "status": "finished",
+                "homeScore": 1,
+                "awayScore": 1,
+                "scoreSource": "ESPN scoreboard",
+                "scoreStatus": "FT",
+            }
+        ],
+        "news": [{"id": "n1", "title": "Saudi Arabia vs Uruguay result", "source": "ESPN", "url": "", "publishedAt": "2026-06-16T00:05:00Z"}],
+        "weather": [{"cityId": "miami", "current": {"tempC": 28, "condition": "Storm"}, "forecast": [], "generatedAt": "2026-06-16T00:05:00Z"}],
+        "providerStates": {"matchResults": "ok", "weather": "ok", "odds": "core-seed-only", "bookmakerOdds": "core-seed-only"},
+        "resultLinker": {"source": "ESPN scoreboard", "state": "ok", "matched": 1, "completed": 1},
+    }
+
+    payload = worldcup_builder.merge_worldcup_core_live_payload(core, live)
+
+    assert payload["odds"] == core["odds"]
+    assert payload["providerStates"]["odds"] == "ok"
+    assert payload["providerStates"]["bookmakerOdds"] == "ok"
+    assert payload["matches"][0]["status"] == "finished"
+    assert payload["matches"][0]["homeScore"] == 1
+    assert payload["summary"]["scoreMatched"] == 1
+
+
+def test_worldcup_panel_payloads_are_independent_cache_projections():
+    dashboard = {
+        "generatedAt": "2026-06-16T00:05:00Z",
+        "matches": [{"id": "wc2026-001", "homeTeam": "Spain", "awayTeam": "Cape Verde", "status": "scheduled"}],
+        "odds": [{"matchId": "wc2026-001", "provider": "The Odds API", "providerType": "online_bookmaker", "marketType": "moneyline", "outcomes": []}],
+        "news": [{"id": "n1", "title": "Spain team news", "source": "ESPN", "url": "", "publishedAt": "2026-06-16T00:05:00Z", "teams": ["Spain"]}],
+        "weather": [{"cityId": "atlanta", "current": {"tempC": 28, "condition": "Clear"}, "forecast": [], "generatedAt": "2026-06-16T00:05:00Z"}],
+        "providerStates": {"odds": "ok", "worldcupIntel": "ok"},
+        "bookmakerLinker": {"matched": 1},
+        "marketLinker": {"matched": 1},
+    }
+
+    panels = build_worldcup_panel_payloads(dashboard)
+
+    assert "win-probability" in panels
+    assert "news-impact" in panels
+    assert panels["win-probability"]["panelId"] == "win-probability"
+    assert panels["win-probability"]["data"]["odds"][0]["matchId"] == "wc2026-001"
+    assert panels["news-impact"]["data"]["news"][0]["title"] == "Spain team news"
+    assert panel_ttl_seconds("win-probability", 86400, 300) == 86400
+    assert panel_ttl_seconds("news-impact", 86400, 300) == 300
 
 
 def test_worldcup_dashboard_watcher_builds_new_odds_alert_candidate():

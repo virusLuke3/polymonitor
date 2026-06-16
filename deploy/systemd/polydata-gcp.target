@@ -35,7 +35,8 @@ Wants=polydata-suspicious-trades-seed.service
 Wants=polydata-tech-panels-seed.service
 Wants=polydata-weather-news-seed.service
 Wants=polydata-whale-trades-seed.service
-Wants=polydata-worldcup-dashboard-seed.service
+Wants=polydata-worldcup-core-seed.service
+Wants=polydata-worldcup-live-seed.service
 Wants=polydata-telegram-query-bot.service
 After=network-online.target
 

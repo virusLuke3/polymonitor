@@ -44,4 +44,25 @@ def create_runtime_sports_blueprint(helpers: dict) -> Blueprint:
         response.headers["Vary"] = "Accept-Encoding"
         return response
 
+    @bp.route("/runtime/worldcup/core", methods=["GET"])
+    def api_runtime_worldcup_core():
+        response = jsonify(helpers["get_worldcup_core_snapshot"]())
+        response.headers["Cache-Control"] = WORLDCUP_DASHBOARD_CACHE_CONTROL
+        response.headers["Vary"] = "Accept-Encoding"
+        return response
+
+    @bp.route("/runtime/worldcup/live", methods=["GET"])
+    def api_runtime_worldcup_live():
+        response = jsonify(helpers["get_worldcup_live_snapshot"]())
+        response.headers["Cache-Control"] = "public, max-age=20, stale-while-revalidate=60"
+        response.headers["Vary"] = "Accept-Encoding"
+        return response
+
+    @bp.route("/runtime/worldcup/panel/<panel_id>", methods=["GET"])
+    def api_runtime_worldcup_panel(panel_id: str):
+        response = jsonify(helpers["get_worldcup_panel_snapshot"](panel_id=panel_id))
+        response.headers["Cache-Control"] = WORLDCUP_DASHBOARD_CACHE_CONTROL
+        response.headers["Vary"] = "Accept-Encoding"
+        return response
+
     return bp

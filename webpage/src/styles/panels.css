@@ -23838,6 +23838,12 @@ a.wm-orderfilled-row {
   opacity: 0.58;
 }
 
+.wm-worldcup-win-probability-panel .wm-worldcup-home-prob-table div.settled-winner {
+  background:
+    linear-gradient(90deg, rgba(35, 240, 126, 0.12), rgba(35, 240, 126, 0.02)),
+    rgba(255, 255, 255, 0.018);
+}
+
 .wm-worldcup-win-probability-panel .wm-worldcup-home-prob-table div.source-missing strong {
   color: rgba(235, 235, 235, 0.58);
 }

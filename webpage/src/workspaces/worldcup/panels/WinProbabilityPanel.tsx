@@ -27,6 +27,13 @@ function percentLabel(value?: number | null, digits = 1) {
   return `${Number(value).toFixed(digits)}%`;
 }
 
+function finalResultOutcome(match: WorldCupMatch | null) {
+  if (!match || match.status !== 'finished' || match.homeScore == null || match.awayScore == null) return null;
+  if (match.homeScore > match.awayScore) return match.homeTeam;
+  if (match.homeScore < match.awayScore) return match.awayTeam;
+  return 'Draw';
+}
+
 function percentFromUnknown(value?: number | string | null) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
@@ -225,6 +232,42 @@ export function WinProbabilityPanel({
   match: WorldCupMatch | null;
 }) {
   const [activeTab, setActiveTab] = useState('edge');
+  const settledOutcome = finalResultOutcome(match);
+  if (settledOutcome && match) {
+    const teams = [match.homeTeam, 'Draw', match.awayTeam];
+    const scoreStatus = String((match as WorldCupMatch & { scoreStatus?: string }).scoreStatus || 'FT');
+    const source = String((match as WorldCupMatch & { scoreSource?: string }).scoreSource || 'ESPN scoreboard');
+    return (
+      <Panel title="WIN PROBABILITY" count={3} className="wm-worldcup-panel wm-worldcup-win-probability-panel">
+        <div className="wm-worldcup-odds-mode-tabs">
+          <button className="active" type="button">FINAL</button>
+        </div>
+        <div className="wm-worldcup-prob-headline">
+          <span><em>FINAL RESULT</em><strong>{match.homeScore}-{match.awayScore}</strong><b>{scoreStatus}</b></span>
+          <span><em>SETTLED OUTCOME</em><strong className="green">{settledOutcome}</strong><b>{source}</b></span>
+        </div>
+        <div className="wm-worldcup-prob-table wm-worldcup-final-result-table">
+          <header><span>OUTCOME</span><span>SCORE</span><span>RESULT</span><span>SOURCE</span></header>
+          {teams.map((team) => {
+            const score = team === match.homeTeam ? match.homeScore : team === match.awayTeam ? match.awayScore : `${match.homeScore}-${match.awayScore}`;
+            const won = team === settledOutcome;
+            return (
+              <div className={won ? 'settled-winner' : 'source-missing'} key={team}>
+                <strong>{team}</strong>
+                <span><b>{score}</b><i style={{ width: won ? '100%' : '0%' }} /></span>
+                <span><b>{won ? 'WIN' : '--'}</b><i style={{ width: won ? '100%' : '0%' }} /></span>
+                <em className={won ? 'green' : ''}>{won ? '100%' : '--'}</em>
+              </div>
+            );
+          })}
+        </div>
+        <div className="wm-worldcup-home-source-note">
+          <b>BOOK SOURCE</b>
+          <span>finished match; pre-match bookmaker odds are closed by source, result verified from {source}</span>
+        </div>
+      </Panel>
+    );
+  }
   const rows = buildWinProbabilityRows(markets, odds, match);
   const bookmakerSnapshots = odds.filter((snapshot) => snapshot.providerType !== 'prediction_market');
   const bookmakerSnapshot = bookmakerSnapshots.find((snapshot) => oddsSnapshotKey(snapshot) === 'h2h' || snapshot.marketType === 'moneyline') || bookmakerSnapshots[0];
