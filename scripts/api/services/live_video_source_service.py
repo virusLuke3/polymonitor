@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
+from xml.etree import ElementTree as ET
 
 from api.config import PROJECT_ROOT
 from api.services import trusted_hls_sources, youtube_live_probe_service
@@ -100,6 +101,7 @@ YOUTUBE_PROBE_ENABLED_ENV = "POLYDATA_MARKET_TV_YOUTUBE_PROBE_ENABLED"
 HLS_PROBE_ENABLED_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_ENABLED"
 HLS_PROBE_TIMEOUT_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_TIMEOUT_SECONDS"
 HLS_PROBE_WORKERS_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_WORKERS"
+YOUTUBE_RSS_FALLBACK_ENABLED_ENV = "POLYDATA_MARKET_TV_YOUTUBE_RSS_FALLBACK_ENABLED"
 YOUTUBE_FALLBACK_VIDEO_IDS = {
     "nasa-live-youtube": "FuuC4dpSQ1M",
     "sky-news-live": "OkExVwVzrUY",
@@ -362,14 +364,14 @@ def parse_m3u_playlist(text: str, *, category: str, source_url: str, generated_a
     return items
 
 
-def _http_text_get(ctx: dict, url: str) -> str:
+def _http_text_get(ctx: dict, url: str, *, timeout: int = 10) -> str:
     getter = ctx.get("http_text_get")
     if callable(getter):
-        return getter(url, timeout=10, headers={"User-Agent": "polydata-market-tv-wire/1.0"})
+        return getter(url, timeout=max(3, min(15, int(timeout or 10))), headers={"User-Agent": "polydata-market-tv-wire/1.0"})
     requests_module = ctx.get("requests")
     if requests_module is None:
         raise RuntimeError("http_text_get unavailable")
-    response = requests_module.get(url, timeout=10, headers={"User-Agent": "polydata-market-tv-wire/1.0"})
+    response = requests_module.get(url, timeout=max(3, min(15, int(timeout or 10))), headers={"User-Agent": "polydata-market-tv-wire/1.0"})
     response.raise_for_status()
     return response.text
 
@@ -438,6 +440,14 @@ def _youtube_probe_enabled(ctx: dict) -> bool:
 
 def _youtube_probe_can_fetch(ctx: dict) -> bool:
     return callable(ctx.get("youtube_live_probe")) or callable(ctx.get("http_text_get")) or ctx.get("requests") is not None
+
+
+def _youtube_rss_fallback_enabled(ctx: dict) -> bool:
+    explicit = ctx.get("market_tv_youtube_rss_fallback_enabled")
+    if explicit is not None:
+        return bool(explicit)
+    value = str(os.environ.get(YOUTUBE_RSS_FALLBACK_ENABLED_ENV, "0")).strip().lower()
+    return value not in {"0", "false", "no", "off"}
 
 
 def _hls_probe_enabled(ctx: dict) -> bool:
@@ -693,6 +703,70 @@ def _youtube_embed_url(video_id: str | None = None, channel_id: str | None = Non
     return None, None
 
 
+def _youtube_rss_latest_video(ctx: dict, channel_id: str) -> Dict[str, str] | None:
+    clean_channel_id = _string(channel_id)
+    if not clean_channel_id:
+        return None
+    text = _http_text_get(ctx, f"https://www.youtube.com/feeds/videos.xml?channel_id={clean_channel_id}", timeout=5)
+    root = ET.fromstring(text.encode("utf-8") if isinstance(text, str) else text)
+    namespaces = {
+        "atom": "http://www.w3.org/2005/Atom",
+        "yt": "http://www.youtube.com/xml/schemas/2015",
+    }
+    entry = root.find("atom:entry", namespaces)
+    if entry is None:
+        return None
+    video_id = _string(entry.findtext("yt:videoId", namespaces=namespaces))
+    if not video_id or not youtube_live_probe_service.VIDEO_ID_RE.match(video_id):
+        return None
+    title = _string(entry.findtext("atom:title", namespaces=namespaces))
+    return {"videoId": video_id, "title": title or ""}
+
+
+def _enrich_youtube_rss_fallbacks(ctx: dict, items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
+    youtube_items = [
+        item for item in items
+        if str(item.get("sourceType") or "").lower() == "youtube"
+        and not _string(item.get("fallbackVideoId"))
+        and _string(item.get("youtubeChannelId"))
+    ]
+    if not youtube_items:
+        return {"status": "skipped", "count": 0, "readyCount": 0, "errorCount": 0, "lastSuccessAt": None}
+    if not _youtube_rss_fallback_enabled(ctx) or not callable(ctx.get("http_text_get")):
+        return {"status": "disabled", "count": len(youtube_items), "readyCount": 0, "errorCount": 0, "lastSuccessAt": None}
+    ready_count = 0
+    error_count = 0
+    def fetch_latest(item: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str] | None, str | None]:
+        try:
+            latest = _youtube_rss_latest_video(ctx, str(item.get("youtubeChannelId") or ""))
+        except Exception as exc:
+            return item, None, str(exc)[:220]
+        return item, latest, None
+
+    workers = min(len(youtube_items), 8)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = executor.map(fetch_latest, youtube_items)
+        for item, latest, error in results:
+            if error:
+                error_count += 1
+                item["youtubeRssFallbackError"] = error
+                continue
+            if not latest:
+                continue
+            ready_count += 1
+            item["fallbackVideoId"] = latest["videoId"]
+            item["youtubeFallbackTitle"] = latest.get("title") or None
+            item["youtubeFallbackSource"] = "channel-rss"
+            item["lastCheckedAt"] = generated_at
+    return {
+        "status": "ok" if ready_count else ("degraded" if error_count < len(youtube_items) else "error"),
+        "count": len(youtube_items),
+        "readyCount": ready_count,
+        "errorCount": error_count,
+        "lastSuccessAt": generated_at if ready_count else None,
+    }
+
+
 def _enrich_youtube_live_sources(ctx: dict, items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
     youtube_items = [
         item for item in items
@@ -907,6 +981,7 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
                 manifest_items.append(item)
         trusted_youtube_fallbacks = _trusted_youtube_fallback_items(manifest_items, generated_at=generated_at)
         manifest_items.extend(trusted_youtube_fallbacks)
+        youtube_rss_fallback_state = _enrich_youtube_rss_fallbacks(ctx, manifest_items, generated_at=generated_at)
         youtube_probe_state = _enrich_youtube_live_sources(ctx, manifest_items, generated_at=generated_at)
         source_states["trustedHls"] = {
             "status": "ok",
@@ -918,6 +993,8 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
             "count": len(trusted_youtube_fallbacks),
             "lastSuccessAt": generated_at,
         }
+        if youtube_rss_fallback_state.get("status") not in {"skipped"}:
+            source_states["youtubeRssFallback"] = youtube_rss_fallback_state
         source_states["manifest"] = {"status": "ok", "count": len(manifest_items), "lastSuccessAt": generated_at}
         if youtube_probe_state.get("status") not in {"skipped"}:
             source_states["youtubeLiveProbe"] = youtube_probe_state

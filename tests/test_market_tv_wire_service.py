@@ -72,6 +72,52 @@ def test_market_youtube_channels_use_curated_fallback_embeds_without_probe() -> 
     assert all(item["sourceType"] == "hls" for item in tv_payload["items"])
 
 
+def test_market_youtube_channels_fill_missing_fallback_from_channel_rss(monkeypatch) -> None:
+    def load_manifest() -> list[dict]:
+        return [
+            {
+                "id": "rss-demo-youtube",
+                "displayName": "RSS Demo",
+                "category": "macro",
+                "sourceType": "youtube",
+                "youtubeHandle": "@rssdemo",
+                "youtubeChannelId": "UCdemo",
+                "youtubeProbeEnabled": False,
+                "externalUrl": "https://www.youtube.com/@rssdemo/streams",
+                "sourceUrl": "https://www.youtube.com/@rssdemo/streams",
+                "marketTags": ["macro", "fed"],
+            }
+        ]
+
+    rss = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <yt:videoId>rssABC12345</yt:videoId>
+    <title>Macro hearing live replay</title>
+  </entry>
+</feed>
+"""
+
+    monkeypatch.setattr(service, "load_manifest_items", load_manifest)
+    payload = service.build_market_tv_wire_payload(
+        {
+            "utc_now_iso": lambda: "2026-06-15T00:00:00Z",
+            "http_text_get": lambda url, **kwargs: rss,
+            "market_tv_youtube_rss_fallback_enabled": True,
+            "market_tv_youtube_probe_enabled": False,
+            "market_tv_hls_probe_enabled": False,
+        },
+        include_iptv=False,
+    )
+    youtube_payload = service.normalize_market_youtube_channels_payload(payload, limit=80)
+    demo = next(item for item in youtube_payload["items"] if item["id"] == "rss-demo-youtube")
+
+    assert payload["sources"]["youtubeRssFallback"]["readyCount"] == 1
+    assert demo["fallbackVideoId"] == "rssABC12345"
+    assert demo["youtubeFallbackSource"] == "channel-rss"
+    assert "youtube-nocookie.com/embed/rssABC12345" in demo["youtubeEmbedUrl"]
+
+
 def test_market_tv_wire_m3u_parser_keeps_https_hls_and_marks_not_24_7() -> None:
     text = """
 #EXTM3U
