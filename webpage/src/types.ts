@@ -2260,6 +2260,8 @@ export type RuntimeGlobalTransportShippingPayload = {
     topHub?: string | null;
     transitFeeds?: number | string | null;
     transitOperators?: number | string | null;
+    transitCatalogFiles?: number | string | null;
+    transitScannedFiles?: number | string | null;
     aisStatus?: string | null;
   } | null;
   items: RuntimeGlobalTransportShippingItem[];

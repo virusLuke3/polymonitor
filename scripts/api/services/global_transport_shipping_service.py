@@ -22,6 +22,7 @@ OPENFLIGHTS_AIRPORTS_URL = "https://raw.githubusercontent.com/jpatokal/openfligh
 OPENFLIGHTS_ROUTES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat"
 OPENFLIGHTS_AIRLINES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airlines.dat"
 TRANSITLAND_ATLAS_URL = "https://raw.githubusercontent.com/transitland/transitland-atlas/master/feeds/gtfs-source-feeds.transit.land.dmfr.json"
+TRANSITLAND_ATLAS_INDEX_URL = "https://api.github.com/repos/transitland/transitland-atlas/contents/feeds"
 AISSTREAM_DOC_URL = "https://aisstream.io/documentation"
 
 _LIVE_REFRESH_LOCK = threading.Lock()
@@ -200,53 +201,109 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
     }
 
 
-def _parse_transitland(payload: Dict[str, Any]) -> Dict[str, Any]:
-    feeds = payload.get("feeds") if isinstance(payload.get("feeds"), list) else []
+def _parse_transitland_payloads(payloads: Iterable[Dict[str, Any]], *, catalog_file_count: int = 0, scanned_file_count: int = 0) -> Dict[str, Any]:
     operators_by_id: Dict[str, Dict[str, Any]] = {}
     spec_counts: Counter[str] = Counter()
     authorization_counts: Counter[str] = Counter()
     country_hint_counts: Counter[str] = Counter()
     sample_feeds: List[Dict[str, Any]] = []
 
-    for feed in feeds:
-        if not isinstance(feed, dict):
-            continue
-        spec = str(feed.get("spec") or "unknown")
-        spec_counts[spec] += 1
-        auth = feed.get("authorization")
-        auth_type = "open"
-        if isinstance(auth, dict) and auth.get("type"):
-            auth_type = str(auth.get("type"))
-        authorization_counts[auth_type] += 1
-        feed_id = str(feed.get("id") or "")
-        parts = feed_id.split("-")
-        if len(parts) >= 2:
-            country_hint_counts[parts[-1]] += 1
-        for operator in feed.get("operators") or []:
-            if not isinstance(operator, dict):
+    for payload in payloads:
+        feeds = payload.get("feeds") if isinstance(payload.get("feeds"), list) else []
+        for feed in feeds:
+            if not isinstance(feed, dict):
                 continue
-            operator_id = str(operator.get("onestop_id") or operator.get("id") or operator.get("name") or "")
-            if operator_id:
-                operators_by_id[operator_id] = operator
-        if len(sample_feeds) < 6:
+            spec = str(feed.get("spec") or "unknown")
+            spec_counts[spec] += 1
+            auth = feed.get("authorization")
+            auth_type = "open"
+            if isinstance(auth, dict) and auth.get("type"):
+                auth_type = str(auth.get("type"))
+            authorization_counts[auth_type] += 1
+            feed_id = str(feed.get("id") or "")
+            parts = feed_id.split("-")
+            if len(parts) >= 2:
+                country_hint_counts[parts[-1]] += 1
+            for operator in feed.get("operators") or []:
+                if not isinstance(operator, dict):
+                    continue
+                operator_id = str(operator.get("onestop_id") or operator.get("id") or operator.get("name") or "")
+                if operator_id:
+                    operators_by_id[operator_id] = operator
+            if len(sample_feeds) >= 8:
+                continue
+            urls = feed.get("urls") if isinstance(feed.get("urls"), dict) else {}
             sample_feeds.append(
                 {
                     "id": feed_id,
                     "spec": spec,
-                    "url": (feed.get("urls") or {}).get("static_current") if isinstance(feed.get("urls"), dict) else None,
+                    "url": urls.get("static_current") or urls.get("realtime_vehicle_positions") or urls.get("realtime_trip_updates"),
                     "authorization": auth_type,
                     "operators": [op.get("name") for op in feed.get("operators") or [] if isinstance(op, dict) and op.get("name")][:3],
                 }
             )
 
     return {
-        "feedCount": len(feeds),
+        "feedCount": sum(spec_counts.values()),
         "operatorCount": len(operators_by_id),
+        "catalogFileCount": catalog_file_count,
+        "scannedFileCount": scanned_file_count,
         "specCounts": dict(spec_counts),
         "authorizationCounts": dict(authorization_counts),
         "topCountryHints": [{"code": key, "feedCount": value} for key, value in country_hint_counts.most_common(8)],
         "sampleFeeds": sample_feeds,
     }
+
+
+def _select_evenly(rows: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    if limit <= 0 or len(rows) <= limit:
+        return rows
+    if limit == 1:
+        return [rows[0]]
+    step = (len(rows) - 1) / float(limit - 1)
+    indexes = sorted({round(index * step) for index in range(limit)})
+    return [rows[index] for index in indexes]
+
+
+def _fetch_transitland_catalog(ctx: dict) -> tuple[Dict[str, Any], str]:
+    explicit_urls = [
+        url.strip()
+        for url in str(os.environ.get("POLYDATA_TRANSITLAND_ATLAS_URLS") or "").split(",")
+        if url.strip()
+    ]
+    legacy_url = str(os.environ.get("POLYDATA_TRANSITLAND_ATLAS_URL") or "").strip()
+    if explicit_urls or legacy_url:
+        urls = explicit_urls or [legacy_url]
+        payloads = []
+        for url in urls:
+            parsed = json.loads(_http_text(ctx, url, timeout=20))
+            if isinstance(parsed, dict):
+                payloads.append(parsed)
+        return _parse_transitland_payloads(payloads, catalog_file_count=len(urls), scanned_file_count=len(payloads)), urls[0] if urls else TRANSITLAND_ATLAS_URL
+
+    index_url = os.environ.get("POLYDATA_TRANSITLAND_ATLAS_INDEX_URL", TRANSITLAND_ATLAS_INDEX_URL)
+    file_limit = max(1, min(int(os.environ.get("POLYDATA_TRANSITLAND_ATLAS_FILE_LIMIT", "48") or 48), 120))
+    index_payload = json.loads(_http_text(ctx, index_url, timeout=20))
+    files = []
+    if isinstance(index_payload, list):
+        for item in index_payload:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "")
+            url = str(item.get("download_url") or "")
+            if name.endswith(".dmfr.json") and url:
+                files.append({"name": name, "downloadUrl": url})
+    selected = _select_evenly(files, file_limit)
+    payloads = []
+    for item in selected:
+        parsed = json.loads(_http_text(ctx, item["downloadUrl"], timeout=20))
+        if isinstance(parsed, dict):
+            payloads.append(parsed)
+    if payloads:
+        return _parse_transitland_payloads(payloads, catalog_file_count=len(files), scanned_file_count=len(payloads)), index_url
+    parsed = json.loads(_http_text(ctx, TRANSITLAND_ATLAS_URL, timeout=20))
+    payloads = [parsed] if isinstance(parsed, dict) else []
+    return _parse_transitland_payloads(payloads, catalog_file_count=1, scanned_file_count=len(payloads)), TRANSITLAND_ATLAS_URL
 
 
 async def _sample_aisstream(api_key: str, *, timeout_seconds: int) -> Dict[str, Any]:
@@ -358,9 +415,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
     airlines = _parse_airlines(airlines_text)
     route_stats = _parse_routes(routes_text, airports, airlines)
 
-    transit_url = os.environ.get("POLYDATA_TRANSITLAND_ATLAS_URL", TRANSITLAND_ATLAS_URL)
-    transit_payload = json.loads(_http_text(ctx, transit_url, timeout=20))
-    transit_stats = _parse_transitland(transit_payload if isinstance(transit_payload, dict) else {})
+    transit_stats, transit_url = _fetch_transitland_catalog(ctx)
     ais_status = _aisstream_status()
 
     items: List[Dict[str, Any]] = []
@@ -412,7 +467,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             entity="Transitland Atlas",
             country="Global",
             title="Transitland mobility feed catalog",
-            summary=f"{transit_stats['feedCount']} feeds / {transit_stats['operatorCount']} operators in sampled DMFR catalog.",
+            summary=f"{transit_stats['feedCount']} feeds / {transit_stats['operatorCount']} operators across {transit_stats.get('scannedFileCount', 0)} of {transit_stats.get('catalogFileCount', 0)} DMFR files.",
             metric=int(transit_stats["feedCount"]),
             metric_label="FEEDS",
             source_url=transit_url,
@@ -482,6 +537,8 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             "topHub": (route_stats["topHubs"][0].get("iata") or route_stats["topHubs"][0].get("name")) if route_stats["topHubs"] else None,
             "transitFeeds": transit_stats["feedCount"],
             "transitOperators": transit_stats["operatorCount"],
+            "transitCatalogFiles": transit_stats.get("catalogFileCount", 0),
+            "transitScannedFiles": transit_stats.get("scannedFileCount", 0),
             "aisStatus": ais_status.get("status"),
         },
         "items": limited,

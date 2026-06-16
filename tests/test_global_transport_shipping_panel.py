@@ -60,10 +60,12 @@ def test_build_global_transport_shipping_payload_from_structured_sources(tmp_pat
     openflights_root = tmp_path / "openflights"
     _write_openflights_fixture(openflights_root)
     monkeypatch.setenv("POLYDATA_OPENFLIGHTS_ROOT", str(openflights_root))
+    monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
+    monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
     monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
 
     def http_text_get(url: str, **_: object) -> str:
-        assert "transitland-atlas" in url
+        assert url == "https://example.test/transitland.dmfr.json"
         return json.dumps(TRANSITLAND)
 
     payload = global_transport_shipping_service.build_global_transport_shipping_payload(
@@ -80,6 +82,8 @@ def test_build_global_transport_shipping_payload_from_structured_sources(tmp_pat
     assert payload["summary"]["airports"] == 3
     assert payload["summary"]["routes"] == 4
     assert payload["summary"]["transitFeeds"] == 2
+    assert payload["summary"]["transitCatalogFiles"] == 1
+    assert payload["summary"]["transitScannedFiles"] == 1
     assert payload["summary"]["aisStatus"] == "missing-key"
     assert any(item["evidenceType"] == "OPENFLIGHTS" and item["entity"] == "AAA" for item in payload["items"])
     assert any(item["evidenceType"] == "TRANSITLAND" and item["metric"] == 2 for item in payload["items"])
@@ -100,6 +104,34 @@ def test_get_global_transport_shipping_snapshot_returns_seed_miss_without_live_b
     assert payload["status"] == "warming"
     assert payload["cacheMode"] == "seed-miss"
     assert payload["items"] == []
+
+
+def test_transitland_catalog_defaults_to_index_sampling(monkeypatch):
+    monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URL", raising=False)
+    monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
+    monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_FILE_LIMIT", "2")
+    index = [
+        {"name": "a.dmfr.json", "download_url": "https://raw.test/a.dmfr.json"},
+        {"name": "b.dmfr.json", "download_url": "https://raw.test/b.dmfr.json"},
+        {"name": "c.dmfr.json", "download_url": "https://raw.test/c.dmfr.json"},
+    ]
+    payloads = {
+        "https://raw.test/a.dmfr.json": {"feeds": [{"id": "f-us-a", "spec": "gtfs", "operators": [{"onestop_id": "o-a", "name": "A"}]}]},
+        "https://raw.test/c.dmfr.json": {"feeds": [{"id": "f-fr-c", "spec": "gtfs-rt", "operators": [{"onestop_id": "o-c", "name": "C"}]}]},
+    }
+
+    def http_text_get(url: str, **_: object) -> str:
+        if "api.github.com" in url:
+            return json.dumps(index)
+        return json.dumps(payloads[url])
+
+    stats, source_url = global_transport_shipping_service._fetch_transitland_catalog({"http_text_get": http_text_get})
+
+    assert source_url.endswith("/contents/feeds")
+    assert stats["catalogFileCount"] == 3
+    assert stats["scannedFileCount"] == 2
+    assert stats["feedCount"] == 2
+    assert stats["specCounts"] == {"gtfs": 1, "gtfs-rt": 1}
 
 
 def test_global_transport_shipping_runtime_panel_registered():
