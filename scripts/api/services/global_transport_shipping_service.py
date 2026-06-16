@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 PANEL_ID = "global-transport-shipping"
 GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE = "snapshot:transport:global-shipping"
-GLOBAL_TRANSPORT_CACHE_KEY = "panel-v1"
+GLOBAL_TRANSPORT_CACHE_KEY = "panel-v2"
 AISSTREAM_SNAPSHOT_NAMESPACE = "snapshot:transport:aisstream"
 AISSTREAM_CACHE_KEY = "sample-v1"
 DEFAULT_LIMIT = 14
