@@ -44,6 +44,7 @@ import type {
   RuntimeFinanceMarketAtlasPayload,
   RuntimeFinanceWatchPayload,
   RuntimeGlobalWeatherMapPayload,
+  RuntimeGlobalTransportShippingPayload,
   RuntimeGridEsportsPayload,
   RuntimeFoodRetailBasketPayload,
   RuntimeGeoSanctionsShockPayload,
@@ -604,6 +605,10 @@ export function fetchRuntimeGlobalTemperatureMonitor(limit = 60) {
 
 export function fetchRuntimeWeatherNews(limit = 24) {
   return apiGet<RuntimeWeatherNewsPayload>(`/runtime/weather/news?limit=${limit}`);
+}
+
+export function fetchRuntimeGlobalTransportShipping(limit = 14) {
+  return apiGet<RuntimeGlobalTransportShippingPayload>(`/runtime/transport/global-shipping?limit=${limit}`);
 }
 
 export function fetchRuntimeBreakingEventRadar(limit = 12) {

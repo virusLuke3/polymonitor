@@ -33,6 +33,7 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "get_polymarket_macro_map_snapshot": lambda limit=12: {"limit": limit},
         "get_f1_panel_snapshot": lambda limit=10: {"limit": limit},
         "get_geo_sanctions_shock_snapshot": lambda limit=6: {"limit": limit},
+        "get_global_transport_shipping_snapshot": lambda limit=14: {"limit": limit},
         "get_global_weather_map_snapshot": lambda limit=34: {"limit": limit},
         "get_grid_esports_snapshot": lambda limit=10: {"limit": limit},
         "get_sports_odds_snapshot": lambda limit=8: {"limit": limit},
@@ -77,6 +78,7 @@ def test_default_workspace_panel_ids_include_runtime_and_static_panels():
     assert "esports-intel" in panel_ids
     assert "sports-odds" in panel_ids
     assert "crypto-funding-watch" in panel_ids
+    assert "global-transport-shipping" in panel_ids
     assert "cpi-release-command-center" in panel_ids
     assert "cpi-components-pressure-registry" in panel_ids
     assert "goods-tariff-supply-watch" in panel_ids

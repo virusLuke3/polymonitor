@@ -216,6 +216,14 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 300,
     },
     {
+        "panelId": "global-transport-shipping",
+        "namespace": "seed-meta:transport",
+        "cacheKey": "global-transport-shipping",
+        "serviceName": "polydata-global-transport-shipping-seed.service",
+        "intervalEnv": "POLYDATA_GLOBAL_TRANSPORT_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 3600,
+    },
+    {
         "panelId": "market-tv-wire",
         "namespace": "seed-meta:content",
         "cacheKey": "market-tv-wire",

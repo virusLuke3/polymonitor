@@ -37,6 +37,7 @@ import { panel as stablecoinMonitor } from './stablecoin-monitor';
 import { panel as blockchainPolicyNews } from './blockchain-policy-news';
 import { panel as tradePolicyRadar } from './trade-policy-radar';
 import { panel as geoSanctionsShock } from './geo-sanctions-shock';
+import { panel as globalTransportShipping } from './global-transport-shipping';
 import { panel as cpiReleaseCommandCenter } from './cpi-release-command-center';
 import { panel as cpiComponentsPressureRegistry } from './cpi-components-pressure-registry';
 import { panel as goodsTariffSupplyWatch } from './goods-tariff-supply-watch';
@@ -133,6 +134,7 @@ export const PANEL_MODULES: PanelModule[] = [
   blockchainPolicyNews,
   tradePolicyRadar,
   geoSanctionsShock,
+  globalTransportShipping,
   cpiReleaseCommandCenter,
   cpiComponentsPressureRegistry,
   goodsTariffSupplyWatch,

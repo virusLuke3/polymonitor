@@ -2223,6 +2223,48 @@ export type RuntimeWorldCupMatchOpsPayload = {
   items: RuntimeWorldCupMatchOpsItem[];
 };
 
+export type RuntimeGlobalTransportShippingItem = {
+  id?: string | null;
+  topic?: string | null;
+  entity?: string | null;
+  country?: string | null;
+  team?: string | null;
+  eventTime?: string | null;
+  sourceUrl?: string | null;
+  evidenceType?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  metric?: number | string | null;
+  metricLabel?: string | null;
+  confidence?: number | string | null;
+  severity?: 'alert' | 'watch' | 'normal' | string | null;
+  tags?: string[];
+  relatedPolymarketMarketIds?: Array<string | number>;
+  markets?: RuntimeEvidenceMarketLink[];
+  evidence?: Record<string, unknown> | null;
+};
+
+export type RuntimeGlobalTransportShippingPayload = {
+  panelId?: string;
+  generatedAt?: string;
+  status?: string | null;
+  cacheMode?: string | null;
+  freshness?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  sources?: Record<string, unknown>;
+  summary?: {
+    airports?: number | string | null;
+    routes?: number | string | null;
+    countries?: number | string | null;
+    topHub?: string | null;
+    transitFeeds?: number | string | null;
+    transitOperators?: number | string | null;
+    aisStatus?: string | null;
+  } | null;
+  items: RuntimeGlobalTransportShippingItem[];
+};
+
 export type RuntimeNewMarketSignalItem = {
   marketId?: number | null;
   title?: string | null;

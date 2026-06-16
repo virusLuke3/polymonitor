@@ -15,6 +15,7 @@ Wants=polydata-finance-external-sources-seed.service
 Wants=polydata-finance-watch-panels-seed.service
 Wants=polydata-food-retail-basket-seed.service
 Wants=polydata-geo-sanctions-shock.service
+Wants=polydata-global-transport-shipping-seed.service
 Wants=polydata-global-weather-map-seed.service
 Wants=polydata-grid-esports-seed.service
 Wants=polydata-inflation-nowcast-seed.service
