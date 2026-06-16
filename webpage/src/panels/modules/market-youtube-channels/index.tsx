@@ -8,6 +8,9 @@ import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
 const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+const YOUTUBE_PANEL_LIMIT = 80;
+const YOUTUBE_LIVE_ROTATE_MS = 10 * 60 * 1000;
+const YOUTUBE_VIDEO_ROTATE_MS = 7 * 60 * 1000;
 
 function badgeLabel(payload?: RuntimeMarketYoutubeChannelsPayload | null) {
   const status = String(payload?.status || '').toLowerCase();
@@ -84,9 +87,41 @@ function openExternal(url?: string | null) {
   window.open(target, '_blank', 'noopener,noreferrer');
 }
 
-function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
+function stableHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function playableYoutubeItems(items: RuntimeMarketTvWireItem[]) {
+  return items.filter((item) => youtubeEmbedUrl(item));
+}
+
+function rotatingDefaultYoutubeItem(items: RuntimeMarketTvWireItem[], category: string, generatedAt?: string | null) {
+  const playable = playableYoutubeItems(items);
+  if (!playable.length) return items[0] || null;
+  const nonNasa = playable.filter((item) => !/nasa/i.test(`${item.id} ${item.displayName || ''} ${item.youtubeChannelName || ''}`));
+  const pool = nonNasa.length > 1 ? nonNasa : playable;
+  const sixHourBucket = Math.floor(Date.now() / (6 * 60 * 60 * 1000));
+  const seed = `${category}:${String(generatedAt || '').slice(0, 13)}:${sixHourBucket}:${pool.length}`;
+  return pool[stableHash(seed) % pool.length] || pool[0] || null;
+}
+
+function nextYoutubeItem(items: RuntimeMarketTvWireItem[], currentId?: string | null) {
+  const playable = playableYoutubeItems(items);
+  const pool = playable.length ? playable : items;
+  if (!pool.length) return null;
+  const currentIndex = pool.findIndex((item) => item.id === currentId);
+  return pool[(currentIndex + 1 + pool.length) % pool.length] || pool[0] || null;
+}
+
+function MarketYoutubePlayer({ item, onEnded }: { item: RuntimeMarketTvWireItem; onEnded?: () => void }) {
   const [containerRef, inView] = useElementInView<HTMLDivElement>();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const endedRef = useRef(false);
   const idle = useIdlePause();
   const embedUrl = youtubeEmbedUrl(item);
   const videoId = youtubeVideoId(item);
@@ -95,6 +130,7 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
   const shouldLoad = useStaggeredLoad(inView && !idle, 900);
 
   useEffect(() => {
+    endedRef.current = false;
     if (!embedUrl) {
       setFrameState('external');
       return undefined;
@@ -119,14 +155,27 @@ function MarketYoutubePlayer({ item }: { item: RuntimeMarketTvWireItem }) {
       if (type === 'yt-state') {
         const state = Number(data.state);
         if (state === 1 || state === 3) setFrameState('playing');
-        else if (state === 2 || state === 0 || state === 5) setFrameState('waiting');
+        else if (state === 2 || state === 5) setFrameState('waiting');
+        else if (state === 0) {
+          setFrameState('waiting');
+          if (!endedRef.current) {
+            endedRef.current = true;
+            window.setTimeout(() => onEnded?.(), 800);
+          }
+        }
       }
-      if (type === 'yt-error') setFrameState('blocked');
+      if (type === 'yt-error') {
+        setFrameState('blocked');
+        if (!endedRef.current) {
+          endedRef.current = true;
+          window.setTimeout(() => onEnded?.(), 1800);
+        }
+      }
       if (type === 'yt-timeout' || type === 'yt-autoplay-failed') setFrameState('waiting');
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [embedUrl, videoId]);
+  }, [embedUrl, onEnded, videoId]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -220,6 +269,7 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
   const [categoryPayload, setCategoryPayload] = useState<{ category: string; payload: RuntimeMarketYoutubeChannelsPayload } | null>(null);
   const [categoryLoading, setCategoryLoading] = useState(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [autoRotate, setAutoRotate] = useState(true);
   const selectedPayload = activeCategory === 'all'
     ? payload
     : (categoryPayload?.category === activeCategory ? categoryPayload.payload : null);
@@ -229,7 +279,16 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
   const totalCount = Number(summary.total ?? payload?.selection?.total ?? items.length);
   const visibleItems = useMemo(() => items, [items]);
   const activeItem = visibleItems.find((item) => item.id === activeId) || null;
-  const playerItem = activeItem || visibleItems.find((item) => youtubeEmbedUrl(item)) || visibleItems[0] || null;
+  const defaultItem = useMemo(
+    () => rotatingDefaultYoutubeItem(visibleItems, activeCategory, selectedPayload?.generatedAt || payload?.generatedAt),
+    [activeCategory, payload?.generatedAt, selectedPayload?.generatedAt, visibleItems],
+  );
+  const playerItem = activeItem || defaultItem || null;
+
+  const advanceToNextItem = () => {
+    const next = nextYoutubeItem(visibleItems, playerItem?.id || activeId);
+    if (next) setActiveId(next.id);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -241,7 +300,7 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
       return undefined;
     }
     setCategoryLoading(true);
-    fetchRuntimeMarketYoutubeChannels(24, activeCategory)
+    fetchRuntimeMarketYoutubeChannels(YOUTUBE_PANEL_LIMIT, activeCategory)
       .then((nextPayload) => {
         if (cancelled) return;
         setCategoryPayload({ category: activeCategory, payload: nextPayload });
@@ -264,9 +323,16 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
       return;
     }
     if (!activeId || !visibleItems.some((item) => item.id === activeId)) {
-      setActiveId((visibleItems.find((item) => youtubeEmbedUrl(item)) || visibleItems[0])?.id || null);
+      setActiveId(defaultItem?.id || null);
     }
-  }, [activeId, visibleItems]);
+  }, [activeId, defaultItem, visibleItems]);
+
+  useEffect(() => {
+    if (!autoRotate || !playerItem || visibleItems.length <= 1) return undefined;
+    const isLive = String(playerItem.youtubeEmbedMode || '').toLowerCase() === 'live-video' || String(playerItem.youtubeProbeStatus || '').toLowerCase() === 'live';
+    const timer = window.setTimeout(advanceToNextItem, isLive ? YOUTUBE_LIVE_ROTATE_MS : YOUTUBE_VIDEO_ROTATE_MS);
+    return () => window.clearTimeout(timer);
+  }, [activeId, autoRotate, playerItem?.id, visibleItems]);
 
   return (
     <Panel
@@ -301,6 +367,13 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
           <div className="wm-market-youtube-summary">
             <span><strong>{summary.liveReady ?? 0}</strong> LIVE</span>
             <span><strong>{summary.embedReady ?? 0}</strong> EMBED</span>
+            <button
+              type="button"
+              className={autoRotate ? 'active' : ''}
+              onClick={() => setAutoRotate((value) => !value)}
+            >
+              AUTO
+            </button>
           </div>
           <div className="wm-market-youtube-list">
             {visibleItems.map((item) => (
@@ -313,7 +386,7 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
             ))}
           </div>
         </aside>
-        {playerItem ? <MarketYoutubePlayer item={playerItem} /> : (
+        {playerItem ? <MarketYoutubePlayer item={playerItem} onEnded={autoRotate ? advanceToNextItem : undefined} /> : (
           <div className="wm-empty-state">
             <strong>{categoryLoading ? 'YouTube TV loading.' : 'YouTube TV warming.'}</strong>
             <em>{categoryError || 'GCP seeded YouTube channel snapshot is not ready yet.'}</em>
@@ -347,5 +420,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 180000,
-  fetchData: () => fetchRuntimeMarketYoutubeChannels(24),
+  fetchData: () => fetchRuntimeMarketYoutubeChannels(YOUTUBE_PANEL_LIMIT),
 });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -120,6 +121,7 @@ HLS_PROBE_ENABLED_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_ENABLED"
 HLS_PROBE_TIMEOUT_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_TIMEOUT_SECONDS"
 HLS_PROBE_WORKERS_ENV = "POLYDATA_MARKET_TV_HLS_PROBE_WORKERS"
 YOUTUBE_RSS_FALLBACK_ENABLED_ENV = "POLYDATA_MARKET_TV_YOUTUBE_RSS_FALLBACK_ENABLED"
+YOUTUBE_RSS_REFRESH_EXISTING_LIMIT_ENV = "POLYDATA_MARKET_YOUTUBE_RSS_REFRESH_EXISTING_LIMIT"
 YOUTUBE_FALLBACK_VIDEO_IDS = {
     "nasa-live-youtube": "FuuC4dpSQ1M",
     "sky-news-live": "OkExVwVzrUY",
@@ -741,13 +743,52 @@ def _youtube_rss_latest_video(ctx: dict, channel_id: str) -> Dict[str, str] | No
     return {"videoId": video_id, "title": title or ""}
 
 
+def _youtube_rss_refresh_existing_limit(ctx: dict) -> int:
+    explicit = ctx.get("market_tv_youtube_rss_refresh_existing_limit")
+    if explicit is not None:
+        try:
+            return max(0, min(64, int(explicit)))
+        except Exception:
+            return 16
+    try:
+        return max(0, min(64, int(os.environ.get(YOUTUBE_RSS_REFRESH_EXISTING_LIMIT_ENV, "16"))))
+    except Exception:
+        return 16
+
+
+def _daily_refresh_sort_key(item: Dict[str, Any], generated_at: str) -> str:
+    identity = _string(item.get("id")) or _string(item.get("youtubeChannelId")) or _string(item.get("displayName"))
+    date_key = _string(generated_at)[:10] or "daily"
+    return hashlib.sha1(f"{date_key}:{identity}".encode("utf-8")).hexdigest()
+
+
 def _enrich_youtube_rss_fallbacks(ctx: dict, items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
-    youtube_items = [
+    refresh_existing = bool(ctx.get("market_tv_youtube_rss_refresh_existing"))
+    missing_items = [
         item for item in items
         if str(item.get("sourceType") or "").lower() == "youtube"
-        and not _string(item.get("fallbackVideoId"))
         and _string(item.get("youtubeChannelId"))
+        and not _string(item.get("fallbackVideoId"))
     ]
+    refresh_items: List[Dict[str, Any]] = []
+    if refresh_existing:
+        refresh_limit = _youtube_rss_refresh_existing_limit(ctx)
+        refresh_candidates = [
+            item for item in items
+            if str(item.get("sourceType") or "").lower() == "youtube"
+            and _string(item.get("youtubeChannelId"))
+            and _string(item.get("fallbackVideoId"))
+            and item.get("youtubeProbeEnabled") is False
+        ]
+        refresh_items = sorted(refresh_candidates, key=lambda item: _daily_refresh_sort_key(item, generated_at))[:refresh_limit]
+    seen_ids: set[str] = set()
+    youtube_items: List[Dict[str, Any]] = []
+    for item in [*missing_items, *refresh_items]:
+        identity = _string(item.get("id")) or _string(item.get("youtubeChannelId"))
+        if identity in seen_ids:
+            continue
+        seen_ids.add(identity)
+        youtube_items.append(item)
     if not youtube_items:
         return {"status": "skipped", "count": 0, "readyCount": 0, "errorCount": 0, "lastSuccessAt": None}
     if not _youtube_rss_fallback_enabled(ctx) or not callable(ctx.get("http_text_get")):

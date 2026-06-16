@@ -26,6 +26,9 @@ DEFAULT_INTERVAL_SECONDS = 900
 SEED_META_NAMESPACE = "seed-meta:content"
 SEED_META_CACHE_KEY = "market-tv-wire"
 SEED_META_SERVICE_NAME = "polydata-market-tv-wire-seed.service"
+YOUTUBE_RSS_REFRESH_STATE_NAMESPACE = "state:content"
+YOUTUBE_RSS_REFRESH_STATE_KEY = "market-tv-wire:youtube-rss-refresh"
+DEFAULT_YOUTUBE_RSS_REFRESH_SECONDS = 86400
 
 
 class _Logger:
@@ -82,7 +85,23 @@ class MarketTvWireWatcher:
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
         self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
 
-    def context(self) -> Dict[str, Any]:
+    def _youtube_rss_refresh_seconds(self) -> int:
+        try:
+            return max(3600, int(os.environ.get("POLYDATA_MARKET_YOUTUBE_RSS_REFRESH_SECONDS", DEFAULT_YOUTUBE_RSS_REFRESH_SECONDS)))
+        except Exception:
+            return DEFAULT_YOUTUBE_RSS_REFRESH_SECONDS
+
+    def _youtube_rss_refresh_due(self) -> bool:
+        return not bool(self.redis_client.get(_redis_key(self.redis_prefix, YOUTUBE_RSS_REFRESH_STATE_NAMESPACE, YOUTUBE_RSS_REFRESH_STATE_KEY)))
+
+    def _mark_youtube_rss_refresh_attempted(self) -> None:
+        self.redis_client.set(
+            _redis_key(self.redis_prefix, YOUTUBE_RSS_REFRESH_STATE_NAMESPACE, YOUTUBE_RSS_REFRESH_STATE_KEY),
+            utc_now_iso(),
+            ex=self._youtube_rss_refresh_seconds(),
+        )
+
+    def context(self, *, youtube_rss_refresh_due: bool = False) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
             "app": _App(),
@@ -91,6 +110,8 @@ class MarketTvWireWatcher:
             "get_cached_json": self._get_cached_json,
             "set_cached_json": self._set_cached_json,
             "utc_now_iso": utc_now_iso,
+            "market_tv_youtube_rss_fallback_enabled": youtube_rss_refresh_due,
+            "market_tv_youtube_rss_refresh_existing": youtube_rss_refresh_due,
         }
 
     def previous(self) -> Dict[str, Any]:
@@ -139,8 +160,12 @@ class MarketTvWireWatcher:
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
+        youtube_rss_refresh_due = self._youtube_rss_refresh_due()
         try:
-            payload = live_video_source_service.build_market_tv_wire_payload(self.context(), include_iptv=True)
+            payload = live_video_source_service.build_market_tv_wire_payload(
+                self.context(youtube_rss_refresh_due=youtube_rss_refresh_due),
+                include_iptv=True,
+            )
         except Exception as exc:
             if previous:
                 self.store_payload(previous)
@@ -168,6 +193,8 @@ class MarketTvWireWatcher:
 
         stored_payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(stored_payload)
+        if youtube_rss_refresh_due:
+            self._mark_youtube_rss_refresh_attempted()
         payload_status = str(stored_payload.get("status") or "degraded")
         meta_status = "ok" if payload_status == "ok" else payload_status
         self.store_meta(

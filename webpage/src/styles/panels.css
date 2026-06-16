@@ -24619,6 +24619,34 @@ a.wm-orderfilled-row {
   letter-spacing: 0;
 }
 
+.wm-market-youtube-summary button {
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(104, 218, 244, 0.22);
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg, rgba(104, 218, 244, 0.07), rgba(104, 218, 244, 0.018)),
+    rgba(255, 255, 255, 0.018);
+  color: rgba(158, 232, 247, 0.68);
+  font-family: var(--wm-font-mono, monospace);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.wm-market-youtube-summary button.active {
+  border-color: rgba(36, 242, 132, 0.46);
+  background:
+    linear-gradient(180deg, rgba(36, 242, 132, 0.18), rgba(36, 242, 132, 0.055)),
+    rgba(255, 255, 255, 0.024);
+  color: #7dffb8;
+  box-shadow:
+    0 0 14px rgba(36, 242, 132, 0.12),
+    inset 0 0 0 1px rgba(36, 242, 132, 0.08);
+}
+
 .wm-market-youtube-summary strong {
   margin-right: 5px;
   color: #f4f6f8;
