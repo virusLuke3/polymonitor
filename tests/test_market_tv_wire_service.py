@@ -72,6 +72,29 @@ def test_market_youtube_channels_use_curated_fallback_embeds_without_probe() -> 
     assert all(item["sourceType"] == "hls" for item in tv_payload["items"])
 
 
+def test_market_youtube_topic_filters_match_tags_not_only_primary_category() -> None:
+    payload = service.build_market_tv_wire_payload(
+        {
+            "utc_now_iso": lambda: "2026-06-15T00:00:00Z",
+            "market_tv_youtube_probe_enabled": False,
+            "market_tv_hls_probe_enabled": False,
+        },
+        include_iptv=False,
+    )
+    all_payload = service.normalize_market_youtube_channels_payload(payload, limit=80)
+    elections_payload = service.normalize_market_youtube_channels_payload(payload, limit=80, category="elections")
+
+    election_ids = {item["id"] for item in elections_payload["items"]}
+    election_category = next(category for category in all_payload["categories"] if category["id"] == "elections")
+
+    assert elections_payload["selection"]["total"] >= 8
+    assert election_category["count"] == elections_payload["selection"]["total"]
+    assert "cspan-youtube" in election_ids
+    assert "pbs-newshour-youtube" in election_ids
+    assert "abc-news-youtube" in election_ids
+    assert any(item["category"] != "elections" for item in elections_payload["items"])
+
+
 def test_market_youtube_channels_fill_missing_fallback_from_channel_rss(monkeypatch) -> None:
     def load_manifest() -> list[dict]:
         return [

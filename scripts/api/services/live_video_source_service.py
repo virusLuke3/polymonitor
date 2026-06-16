@@ -85,6 +85,24 @@ CATEGORY_BASE_SCORE = {
     "news": 74,
     "other": 60,
 }
+YOUTUBE_TOPIC_ALIASES = {
+    "breaking": {"breaking", "news", "world", "disaster", "courts", "public-safety"},
+    "politics": {"politics", "elections", "congress", "white-house", "policy", "government", "courts", "debates", "campaign"},
+    "sports": {"sports", "nba", "nfl", "mlb", "soccer", "world-cup", "fifa", "f1", "grand-prix", "playoffs", "basketball", "injury"},
+    "crypto": {"crypto", "bitcoin", "ethereum", "defi", "etf", "regulation", "btc", "eth"},
+    "esports": {"esports", "gaming", "valorant", "tournament", "riot"},
+    "iran": {"iran", "nuclear", "sanctions", "middle-east", "conflict", "diplomacy"},
+    "finance": {"finance", "stocks", "markets", "earnings", "rates", "economy", "fed", "business"},
+    "geopolitics": {"geopolitics", "conflict", "war", "diplomacy", "middle-east", "china", "india", "asia", "europe", "turkey", "gulf", "un"},
+    "tech": {"tech", "ai", "startups", "ipo", "platforms", "consumer", "regulation"},
+    "culture": {"culture", "climate", "public-interest", "consumer", "world"},
+    "economy": {"economy", "business", "macro", "policy", "markets", "consumer", "finance"},
+    "weather": {"weather", "hurricane", "storm", "flood", "temperature", "forecast", "climate", "disaster"},
+    "elections": {"elections", "election", "campaign", "vote", "debates", "congress", "white-house"},
+    "macro": {"macro", "fed", "rates", "inflation", "economy", "markets", "finance", "stocks", "oil", "commodities"},
+    "geo": {"geo", "space", "nasa", "launch", "iss", "science"},
+    "news": {"news", "breaking", "world", "politics", "elections", "weather", "policy"},
+}
 IPTV_CATEGORY_FEEDS = (
     ("news", "https://iptv-org.github.io/iptv/categories/news.m3u"),
     ("macro", "https://iptv-org.github.io/iptv/categories/business.m3u"),
@@ -891,6 +909,47 @@ def _youtube_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _topic_token(value: Any) -> str:
+    return SLUG_RE.sub("-", str(value or "").strip().lower()).strip("-")
+
+
+def _youtube_topic_tokens(item: Dict[str, Any]) -> set[str]:
+    tokens = {_normalize_category(item.get("category"))}
+    for key in ("marketTags", "matchedTerms"):
+        for value in _string_list(item.get(key)):
+            token = _topic_token(value)
+            if token:
+                tokens.add(token)
+    for key in ("displayName", "sourceName"):
+        for part in re.split(r"[^A-Za-z0-9_-]+", str(item.get(key) or "").lower()):
+            token = _topic_token(part)
+            if token:
+                tokens.add(token)
+    return tokens
+
+
+def _youtube_item_matches_topic(item: Dict[str, Any], topic: str | None) -> bool:
+    requested = _normalize_category(topic)
+    if not topic or requested == "other":
+        return True
+    tokens = _youtube_topic_tokens(item)
+    aliases = {requested, *YOUTUBE_TOPIC_ALIASES.get(requested, set())}
+    return bool(tokens.intersection(aliases))
+
+
+def _youtube_categories(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    counts = {category: 0 for category in CATEGORY_ORDER}
+    for item in items:
+        tokens = _youtube_topic_tokens(item)
+        for category in CATEGORY_ORDER:
+            if category == "other":
+                continue
+            aliases = {category, *YOUTUBE_TOPIC_ALIASES.get(category, set())}
+            if tokens.intersection(aliases):
+                counts[category] = counts.get(category, 0) + 1
+    return [{"id": category, "label": CATEGORY_LABELS[category], "count": counts.get(category, 0)} for category in CATEGORY_ORDER if counts.get(category, 0)]
+
+
 def normalize_market_youtube_channels_payload(payload: Any, *, ctx: dict | None = None, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, category: str | None = None) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         empty = _empty_payload(ctx, status="invalid", cache_mode="invalid")
@@ -901,7 +960,7 @@ def normalize_market_youtube_channels_payload(payload: Any, *, ctx: dict | None 
     requested_category = _requested_category(category)
     selected_items = [
         item for item in all_items
-        if not requested_category or _normalize_category(item.get("category")) == requested_category
+        if not requested_category or _youtube_item_matches_topic(item, requested_category)
     ]
     max_items = max(1, min(int(limit or DEFAULT_MARKET_TV_WIRE_LIMIT), 80))
     generated_at = str(result.get("generatedAt") or _utc_now_iso(ctx))
@@ -914,7 +973,7 @@ def normalize_market_youtube_channels_payload(payload: Any, *, ctx: dict | None 
         "source": "market-youtube-channels",
         "sourceUrl": str(result.get("sourceUrl") or _manifest_path()),
         "summary": _youtube_summary(all_items),
-        "categories": _categories(all_items),
+        "categories": _youtube_categories(all_items),
         "sources": result.get("sources") if isinstance(result.get("sources"), dict) else {},
         "items": selected_items[:max_items],
         "errors": result.get("errors") if isinstance(result.get("errors"), list) else [],
