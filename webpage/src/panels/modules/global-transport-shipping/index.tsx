@@ -7,6 +7,7 @@ import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
 type TransportTab = 'ops' | 'flights' | 'airlines' | 'track' | 'news';
+type AviationIconKind = 'airport' | 'flight' | 'airline' | 'track' | 'news';
 type AviationPayload = NonNullable<RuntimeGlobalTransportShippingPayload['aviation']>;
 type AviationRoute = NonNullable<AviationPayload['routes']>[number];
 
@@ -77,11 +78,28 @@ function aviationNews(payload?: RuntimeGlobalTransportShippingPayload | null) {
   return payload?.aviation?.news || [];
 }
 
+function AviationIcon({ kind }: { kind: AviationIconKind }) {
+  const paths: Record<AviationIconKind, string> = {
+    airport: 'M12 3l6 18h-2.4l-1.1-3.3h-5L8.4 21H6L12 3Zm0 6.1L10.2 15h3.6L12 9.1Z',
+    flight: 'M20.5 13.2 13.4 15 10 21l-1.7-.5 1.1-5.1-4.4-1.7-2.2 2.1-1.3-.9 2.7-4 5 .7 4.3-8.2c.4-.8 1.2-1.2 2.1-.9.9.3 1.3 1.2.9 2l-3 7 6.5.4.5 1.3Z',
+    airline: 'M4 15.8 20 7l.7 1.5-16 8.8L4 15.8Zm3.4 2.5 9.6-3.1.5 1.6-8.7 4.2-1.4-2.7Zm-1-7.4 9.1-4.4.7 1.5-8.8 5.1-1-2.2Z',
+    track: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18Zm0 2a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm0 2.6a4.4 4.4 0 0 1 4.4 4.4h-2a2.4 2.4 0 0 0-2.4-2.4v-2Zm0 4.4 5.6-5.6 1.4 1.4-6.2 6.2H8v-2h4Z',
+    news: 'M5 4h14a1 1 0 0 1 1 1v14l-3-2H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm2 4v2h10V8H7Zm0 4v2h7v-2H7Z',
+  };
+  return (
+    <span className={`wm-aviation-icon ${kind}`} aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false">
+        <path d={paths[kind]} />
+      </svg>
+    </span>
+  );
+}
+
 function OpsRow({ row }: { row: Record<string, unknown> }) {
   const status = statusClass(row.status);
   return (
     <div className="wm-aviation-intel-row">
-      <b>{String(row.code || '--')}</b>
+      <span className="wm-aviation-code"><AviationIcon kind="airport" /><b>{String(row.code || '--')}</b></span>
       <span><strong>{String(row.name || 'Airport')}</strong><em>{String(row.city || 'Global')}</em></span>
       <i className={status}>{statusLabel(row.status)}</i>
       <small>--</small>
@@ -94,7 +112,7 @@ function FlightRow({ route }: { route: AviationRoute }) {
   const status = statusClass(route.status);
   return (
     <div className="wm-aviation-intel-row flight">
-      <b>{route.fromCode || '--'}</b>
+      <span className="wm-aviation-code"><AviationIcon kind="flight" /><b>{route.fromCode || '--'}</b></span>
       <span><strong>{route.fromCode} &gt; {route.toCode}</strong><em>{route.corridor || route.airline || 'air corridor'}</em></span>
       <i className={status}>{risk || statusLabel(route.status)}</i>
       <small>{formatCompact(route.trafficScore)}</small>
@@ -105,7 +123,7 @@ function FlightRow({ route }: { route: AviationRoute }) {
 function AirlineRow({ row }: { row: { name?: string | null; routeCount?: number | string | null } }) {
   return (
     <div className="wm-aviation-intel-row airline">
-      <b>AL</b>
+      <span className="wm-aviation-code"><AviationIcon kind="airline" /><b>AL</b></span>
       <span><strong>{row.name || 'Airline'}</strong><em>OpenFlights route coverage</em></span>
       <i className="normal">NORMAL</i>
       <small>{formatCompact(row.routeCount)}</small>
@@ -117,7 +135,7 @@ function TrackRow({ item }: { item: RuntimeGlobalTransportShippingItem }) {
   const status = severityClass(item);
   return (
     <button type="button" className="wm-aviation-intel-row source" onClick={() => openSource(item.sourceUrl)}>
-      <b>{glyph(item)}</b>
+      <span className="wm-aviation-code"><AviationIcon kind="track" /><b>{glyph(item)}</b></span>
       <span><strong>{item.entity || item.evidenceType}</strong><em>{item.summary || item.title}</em></span>
       <i className={status}>{status.toUpperCase()}</i>
       <small>{formatCompact(item.metric)}</small>
@@ -129,7 +147,7 @@ function NewsRow({ row }: { row: Record<string, unknown> }) {
   const status = statusClass(row.status);
   return (
     <div className="wm-aviation-intel-row news">
-      <b>NW</b>
+      <span className="wm-aviation-code"><AviationIcon kind="news" /><b>NW</b></span>
       <span><strong>{String(row.title || 'Aviation signal')}</strong><em>{String(row.corridor || row.source || 'route intelligence')}</em></span>
       <i className={status}>{compactUnknown(row.riskScore)}</i>
       <small>{String(row.source || 'seed')}</small>
@@ -141,12 +159,12 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
   const [showHelp, setShowHelp] = useState(false);
   const [tab, setTab] = useState<TransportTab>('ops');
   const items = payload?.items || [];
-  const tabs: Array<{ id: TransportTab; label: string; count: number }> = [
-    { id: 'ops', label: 'Ops', count: aviationOps(payload).length },
-    { id: 'flights', label: 'Flights', count: aviationRoutes(payload).length },
-    { id: 'airlines', label: 'Airlines', count: aviationAirlines(payload).length },
-    { id: 'track', label: 'Track', count: items.length },
-    { id: 'news', label: 'News', count: aviationNews(payload).length },
+  const tabs: Array<{ id: TransportTab; label: string; count: number; icon: AviationIconKind }> = [
+    { id: 'ops', label: 'Ops', count: aviationOps(payload).length, icon: 'airport' },
+    { id: 'flights', label: 'Flights', count: aviationRoutes(payload).length, icon: 'flight' },
+    { id: 'airlines', label: 'Airlines', count: aviationAirlines(payload).length, icon: 'airline' },
+    { id: 'track', label: 'Track', count: items.length, icon: 'track' },
+    { id: 'news', label: 'News', count: aviationNews(payload).length, icon: 'news' },
   ];
   const rows = useMemo(() => {
     if (tab === 'ops') return aviationOps(payload).slice(0, 8).map((row, index) => <OpsRow key={`${row.code || index}`} row={row} />);
@@ -175,7 +193,7 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
       <div className="wm-aviation-tabs" role="tablist" aria-label="Airline intel views">
         {tabs.map((item) => (
           <button key={item.id} type="button" className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>
-            {item.label}<span>{item.count}</span>
+            <AviationIcon kind={item.icon} /><strong>{item.label}</strong><span>{item.count}</span>
           </button>
         ))}
       </div>
