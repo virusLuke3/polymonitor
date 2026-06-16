@@ -73,6 +73,8 @@ type MapViewMode = '3d' | '2d' | 'heatmap' | 'density';
 type CommandPaletteTab = 'markets' | 'panels' | 'commands';
 const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
 const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v4';
+const PANEL_LAYOUT_PROMOTION_STORAGE_KEY = 'polydata:workspace-panel-layout-promotions:v1';
+const PROMOTED_WIDE_PANEL_IDS = ['breaking-event-radar', 'world-cup-match-ops', 'global-transport-shipping'];
 const MARKET_GROUP_SORT_STORAGE_KEY = 'wm:marketGroupSort:v1';
 const DEFAULT_MAP_VIEW_MODE: MapViewMode = '2d';
 const VIEW_STORAGE_KEY = 'polydata:map-view:v4';
@@ -1303,6 +1305,23 @@ function WorldMonitorApp() {
     const savedPanelIds = sanitizePanelIds(readJsonStorage<string[]>(PANEL_STORAGE_KEY, []));
     setActivePanelIds(savedPanelIds.length ? sanitizePanelIds([...savedPanelIds, ...DEFAULT_PANEL_IDS]) : DEFAULT_PANEL_IDS);
     setPanelPrefsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem(PANEL_LAYOUT_PROMOTION_STORAGE_KEY) === 'live-evidence-wide') return;
+    setPanelLayoutPrefs((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const panelId of PROMOTED_WIDE_PANEL_IDS) {
+        const entry = next[panelId] || {};
+        if ((entry.colSpan || 0) >= 2) continue;
+        next[panelId] = { ...entry, colSpan: 2 };
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+    window.localStorage.setItem(PANEL_LAYOUT_PROMOTION_STORAGE_KEY, 'live-evidence-wide');
   }, []);
 
   useEffect(() => {

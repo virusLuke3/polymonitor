@@ -194,6 +194,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'World Cup Match Ops',
   eyebrow: 'sports',
   description: 'World Cup schedule, venue weather, score status, and Polymarket match links.',
+  size: 'wide',
   defaultEnabled: true,
 }, {
   tier: 'fast',

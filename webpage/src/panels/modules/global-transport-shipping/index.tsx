@@ -201,6 +201,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Global Transport / Shipping',
   eyebrow: 'transport',
   description: 'OpenFlights, Transitland Atlas, and AISStream transport evidence linked to markets.',
+  size: 'wide',
   defaultEnabled: true,
 }, {
   tier: 'slow',

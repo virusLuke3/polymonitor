@@ -186,6 +186,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Breaking Event Radar',
   eyebrow: 'evidence',
   description: 'GDELT and Wikimedia evidence velocity linked to Polymarket topics.',
+  size: 'wide',
   defaultEnabled: true,
 }, {
   tier: 'slow',
