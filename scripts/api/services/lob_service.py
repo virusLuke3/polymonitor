@@ -18,7 +18,7 @@ except Exception:  # pragma: no cover - requests is an API dependency in normal 
 
 from quant.core.db import PostgresSettings, postgres_connection
 from quant.core.schema import create_schema
-from quant.orderbook import TokenBookIdentity, normalize_rest_book
+from quant.orderbook import OrderBookNotReady, OrderBookOutOfOrder, TokenBookIdentity, normalize_polymarket_event, normalize_rest_book
 from quant.orderbook.coverage import (
     CoverageSelectionContext,
     PRIORITY_TOPICS,
@@ -84,6 +84,7 @@ class LocalOrderBookRuntimeManager:
         market_title: str = "",
         condition_id: str = "",
         market_slug: str | None = None,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         yes_state = self.get_token_snapshot(
             token_id=yes_token_id,
@@ -92,6 +93,7 @@ class LocalOrderBookRuntimeManager:
             outcome="YES",
             outcome_index=0,
             market_slug=market_slug,
+            force_refresh=force_refresh,
         )
         no_state = self.get_token_snapshot(
             token_id=no_token_id,
@@ -100,6 +102,7 @@ class LocalOrderBookRuntimeManager:
             outcome="NO",
             outcome_index=1,
             market_slug=market_slug,
+            force_refresh=force_refresh,
         )
         return _panel_payload_from_state(
             market_id=market_id,
@@ -116,10 +119,11 @@ class LocalOrderBookRuntimeManager:
         yes_token_id: str,
         no_token_id: str = "",
         market_title: str = "",
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
-        yes_state = self.get_token_snapshot(token_id=yes_token_id, market_id=0, outcome="YES", outcome_index=0)
+        yes_state = self.get_token_snapshot(token_id=yes_token_id, market_id=0, outcome="YES", outcome_index=0, force_refresh=force_refresh)
         no_state = (
-            self.get_token_snapshot(token_id=no_token_id, market_id=0, outcome="NO", outcome_index=1)
+            self.get_token_snapshot(token_id=no_token_id, market_id=0, outcome="NO", outcome_index=1, force_refresh=force_refresh)
             if no_token_id
             else _empty_state_payload("NO")
         )
@@ -141,6 +145,7 @@ class LocalOrderBookRuntimeManager:
         outcome: str = "YES",
         outcome_index: int = 0,
         market_slug: str | None = None,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         token_id = str(token_id or "").strip()
         if not token_id:
@@ -148,7 +153,7 @@ class LocalOrderBookRuntimeManager:
         now = time.time()
         with self._lock:
             cached = self._cache.get(token_id)
-            if cached and now - float(cached.get("cached_at") or 0) < self.cache_ttl_seconds:
+            if not force_refresh and cached and now - float(cached.get("cached_at") or 0) < self.cache_ttl_seconds:
                 return dict(cached["payload"])
 
         state_payload = self._fetch_apply_snapshot(
@@ -164,6 +169,67 @@ class LocalOrderBookRuntimeManager:
         with self._lock:
             self._cache[token_id] = {"cached_at": now, "payload": dict(state_payload)}
         return state_payload
+
+    def get_cached_market_snapshot(
+        self,
+        *,
+        market_id: int,
+        yes_token_id: str,
+        no_token_id: str,
+        market_title: str = "",
+    ) -> Dict[str, Any]:
+        yes_state = self._state_payload_from_registry(str(yes_token_id or ""), fallback_outcome="YES")
+        no_state = self._state_payload_from_registry(str(no_token_id or ""), fallback_outcome="NO") if no_token_id else _empty_state_payload("NO")
+        return _panel_payload_from_state(
+            market_id=market_id,
+            local_market_id=market_id,
+            market_title=market_title,
+            yes_state=yes_state,
+            no_state=no_state,
+            token_mode=False,
+        )
+
+    def apply_polymarket_event(
+        self,
+        event: Dict[str, Any],
+        identities_by_token: Dict[str, TokenBookIdentity],
+    ) -> list[Dict[str, Any]]:
+        applied: list[Dict[str, Any]] = []
+        for normalized in normalize_polymarket_event(event):
+            identity = identities_by_token.get(normalized.token_id)
+            if identity is None:
+                continue
+            applied.append(self.apply_normalized_event(identity, normalized))
+        return applied
+
+    def apply_normalized_event(self, identity: TokenBookIdentity, event: Any) -> Dict[str, Any]:
+        with self._lock:
+            try:
+                self.registry.apply(identity, event)
+            except (OrderBookNotReady, OrderBookOutOfOrder):
+                self._cache.pop(identity.token_id, None)
+                raise
+            payload = self._state_payload_from_registry_locked(identity.token_id, fallback_outcome=identity.outcome)
+            payload["snapshot_source"] = "websocket"
+            self._cache[identity.token_id] = {"cached_at": time.time(), "payload": dict(payload)}
+            return payload
+
+    def _state_payload_from_registry(self, token_id: str, *, fallback_outcome: str = "") -> Dict[str, Any]:
+        with self._lock:
+            cached = self._cache.get(token_id)
+            if cached and isinstance(cached.get("payload"), dict):
+                return dict(cached["payload"])
+            return self._state_payload_from_registry_locked(token_id, fallback_outcome=fallback_outcome)
+
+    def _state_payload_from_registry_locked(self, token_id: str, *, fallback_outcome: str = "") -> Dict[str, Any]:
+        book = self.registry.get(token_id)
+        if book is None:
+            return _empty_state_payload(fallback_outcome, token_id=token_id)
+        payload = book.snapshot_payload(depth_levels=self.depth_limit)
+        payload["source"] = "local-orderbook"
+        payload["snapshot_source"] = "registry"
+        payload["runtime_model"] = "LocalOrderBook"
+        return payload
 
     def _fetch_apply_snapshot(self, identity: TokenBookIdentity) -> Dict[str, Any]:
         response = self._session.get(
@@ -284,6 +350,12 @@ def _panel_payload_from_state(
     no = _panel_side_from_state_payload(no_state)
     fetched_at = _iso_utc_now()
     timestamps = [value for value in (yes.get("snapshotTimestamp"), no.get("snapshotTimestamp")) if value]
+    side_snapshot_sources = {
+        str(value)
+        for value in (yes.get("snapshotSource"), no.get("snapshotSource"))
+        if value
+    }
+    snapshot_source = side_snapshot_sources.pop() if len(side_snapshot_sources) == 1 else ("mixed" if side_snapshot_sources else "rest-book")
     payload = {
         "marketId": market_id,
         "localMarketId": local_market_id,
@@ -292,7 +364,7 @@ def _panel_payload_from_state(
         "updatedAt": max(timestamps) if timestamps else fetched_at,
         "tokenMode": bool(token_mode),
         "source": "local-orderbook",
-        "snapshotSource": "rest-book",
+        "snapshotSource": snapshot_source,
         "runtimeModel": "LocalOrderBook",
         "yes": yes,
         "no": no,
@@ -561,6 +633,10 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
         logger = ctx.get("app").logger if ctx.get("app") else None
         if logger:
             logger.warning("clob snapshot persistence failed token_id=%s: %s", yes_token_id, exc)
+
+
+def persist_runtime_lob_payload(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> None:
+    _persist_orderbook_snapshots(ctx, payload, yes_token_id, no_token_id)
 
 
 def get_lob_snapshots_by_token_payload(ctx: dict, token_id: str, *, side: str = "", limit: int = 48) -> Dict[str, Any]:

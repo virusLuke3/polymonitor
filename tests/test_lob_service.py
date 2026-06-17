@@ -13,6 +13,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.services import lob_service
 from api.services.lob_service import LocalOrderBookRuntimeManager, _book_side_summary, _unchanged_snapshot_min_interval_seconds
+from quant.orderbook import TokenBookIdentity
 
 
 def test_book_side_summary_sorts_levels_and_computes_notional_depth():
@@ -97,6 +98,49 @@ def test_local_orderbook_runtime_manager_feeds_rest_book_into_registry():
     assert payload["yes"]["statePayload"]["snapshot_source"] == "rest-book"
     assert payload["yes"]["statePayload"]["runtime_model"] == "LocalOrderBook"
     assert manager.registry.get("yes-token").snapshot_payload(depth_levels=12)["best_bid"] == "0.184"
+
+
+def test_local_orderbook_runtime_manager_force_refresh_bypasses_cache():
+    session = FakeSession({
+        "yes-token": {"bids": [{"price": "0.40", "size": "10"}], "asks": [{"price": "0.41", "size": "10"}]},
+    })
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=session, cache_ttl_seconds=30)
+
+    manager.get_token_snapshot(token_id="yes-token")
+    manager.get_token_snapshot(token_id="yes-token")
+    manager.get_token_snapshot(token_id="yes-token", force_refresh=True)
+
+    assert [call[1] for call in session.calls] == ["yes-token", "yes-token"]
+
+
+def test_local_orderbook_runtime_manager_applies_websocket_price_change_to_registry():
+    session = FakeSession({
+        "yes-token": {"bids": [{"price": "0.40", "size": "10"}], "asks": [{"price": "0.42", "size": "10"}]},
+    })
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=session, cache_ttl_seconds=30)
+    identity = TokenBookIdentity("yes-token", 42, "0xcondition", "YES", 0)
+
+    manager.get_token_snapshot(token_id="yes-token", market_id=42, condition_id="0xcondition", outcome="YES")
+    applied = manager.apply_polymarket_event(
+        {
+            "event_type": "price_change",
+            "timestamp": "9999999999999",
+            "price_changes": [{"asset_id": "yes-token", "side": "BUY", "price": "0.41", "size": "12"}],
+        },
+        {"yes-token": identity},
+    )
+
+    assert applied
+    assert applied[0]["snapshot_source"] == "websocket"
+    assert applied[0]["best_bid"] == "0.41"
+    cached = manager.get_cached_market_snapshot(
+        market_id=42,
+        yes_token_id="yes-token",
+        no_token_id="",
+        market_title="Sample",
+    )
+    assert cached["snapshotSource"] == "mixed"
+    assert cached["yes"]["bestBid"] == "0.41"
 
 
 def test_token_lob_payload_persists_state_machine_payload(monkeypatch):

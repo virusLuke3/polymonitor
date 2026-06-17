@@ -76,6 +76,7 @@ from db.trade_v2 import (
     uint256_storage_to_text,
 )
 from runtime.content_runtime import RuntimeContentProvider
+from runtime import local_orderbook_websocket_watcher
 from runtime.snapshot_store import SnapshotStore
 from oracle.settlement_parser import parse_oracle_settlement_event
 from api import cache as api_cache, db as api_db
@@ -1825,6 +1826,7 @@ def initialize_runtime(
             prewarm_critical_payloads()
         if SNAPSHOT_PREWARM_ENABLED and _claim_snapshot_prewarm_owner():
             start_snapshot_prewarm_thread()
+        local_orderbook_websocket_watcher.start_background_worker(build_service_context(), lock_dir=_runtime_coordination_dir())
         _runtime_initialized = True
         return app
 
