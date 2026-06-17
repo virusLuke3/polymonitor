@@ -143,6 +143,32 @@ def test_local_orderbook_runtime_manager_applies_websocket_price_change_to_regis
     assert cached["yes"]["bestBid"] == "0.41"
 
 
+def test_local_orderbook_runtime_manager_prefers_ready_registry_after_cache_expiry():
+    session = FakeSession({
+        "yes-token": {"bids": [{"price": "0.40", "size": "10"}], "asks": [{"price": "0.42", "size": "10"}]},
+    })
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=session, cache_ttl_seconds=30)
+    identity = TokenBookIdentity("yes-token", 42, "0xcondition", "YES", 0)
+
+    manager.get_token_snapshot(token_id="yes-token", market_id=42, condition_id="0xcondition", outcome="YES")
+    manager.apply_polymarket_event(
+        {
+            "event_type": "price_change",
+            "timestamp": "9999999999999",
+            "price_changes": [{"asset_id": "yes-token", "side": "BUY", "price": "0.41", "size": "12"}],
+        },
+        {"yes-token": identity},
+    )
+    manager._cache["yes-token"]["cached_at"] = 0
+    before_calls = len(session.calls)
+
+    payload = manager.get_token_snapshot(token_id="yes-token", market_id=42, condition_id="0xcondition", outcome="YES")
+
+    assert len(session.calls) == before_calls
+    assert payload["snapshot_source"] == "websocket"
+    assert payload["best_bid"] == "0.41"
+
+
 def test_token_lob_payload_persists_state_machine_payload(monkeypatch):
     session = FakeSession({
         "yes-token": {

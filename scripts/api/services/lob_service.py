@@ -155,6 +155,16 @@ class LocalOrderBookRuntimeManager:
             cached = self._cache.get(token_id)
             if not force_refresh and cached and now - float(cached.get("cached_at") or 0) < self.cache_ttl_seconds:
                 return dict(cached["payload"])
+            if not force_refresh:
+                book = self.registry.get(token_id)
+                if book is not None and book.ready:
+                    payload = book.snapshot_payload(depth_levels=self.depth_limit)
+                    cached_payload = cached.get("payload") if cached and isinstance(cached.get("payload"), dict) else {}
+                    payload["source"] = "local-orderbook"
+                    payload["snapshot_source"] = cached_payload.get("snapshot_source") or "registry"
+                    payload["runtime_model"] = "LocalOrderBook"
+                    self._cache[token_id] = {"cached_at": now, "payload": dict(payload)}
+                    return payload
 
         state_payload = self._fetch_apply_snapshot(
             TokenBookIdentity(
