@@ -408,7 +408,7 @@ def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
         "database": ctx["describe_db_target"](),
         "redis": bool(ctx["get_redis_client"]()),
         "apiStatus": "ok",
-        "lobRuntime": {"status": "ready", "mode": "memory"},
+        "lobRuntime": {"status": "ready", "mode": "local-orderbook"},
         "contentSync": {
             "status": "database-runtime-intel"
             if ctx["table_exists"]("content_items") and ctx["table_exists"]("content_links")

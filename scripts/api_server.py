@@ -76,7 +76,6 @@ from db.trade_v2 import (
     uint256_storage_to_text,
 )
 from runtime.content_runtime import RuntimeContentProvider
-from runtime.lob_runtime import LOBRuntimeManager
 from runtime.snapshot_store import SnapshotStore
 from oracle.settlement_parser import parse_oracle_settlement_event
 from api import cache as api_cache, db as api_db
@@ -124,7 +123,7 @@ TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
 TRADE_STATS_SOURCE = sql_identifier(get_trade_stats_source())
 ADDRESS_HISTORY_SOURCE = sql_identifier(get_address_history_source())
 CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
-LOB_RUNTIME_MANAGER = LOBRuntimeManager(
+LOB_RUNTIME_MANAGER = lob_service.LocalOrderBookRuntimeManager(
     api_base=SETTINGS.clob_api_base,
     timeout_seconds=min(max(1, SETTINGS.clob_timeout_seconds), 3),
 )

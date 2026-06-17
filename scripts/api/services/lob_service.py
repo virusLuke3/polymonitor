@@ -2,27 +2,293 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import threading
+import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict
 
 try:
+    import requests
     from requests import RequestException
 except Exception:  # pragma: no cover - requests is an API dependency in normal runtime.
+    requests = None
     RequestException = Exception
 
 from quant.core.db import PostgresSettings, postgres_connection
 from quant.core.schema import create_schema
+from quant.orderbook import TokenBookIdentity, normalize_rest_book
+from quant.orderbook.registry import OrderBookRegistry
 
 
 _SNAPSHOT_SCHEMA_READY = False
 _SNAPSHOT_SCHEMA_LOCK = threading.Lock()
 BOOK_LEVEL_LIMIT = 12
+DEFAULT_LOB_CACHE_TTL_SECONDS = 3
+
+
+class LocalOrderBookRuntimeManager:
+    """REST snapshot bootstrapper around the shared LocalOrderBook registry."""
+
+    def __init__(
+        self,
+        *,
+        api_base: str,
+        timeout_seconds: int = 3,
+        cache_ttl_seconds: int = DEFAULT_LOB_CACHE_TTL_SECONDS,
+        depth_limit: int = BOOK_LEVEL_LIMIT,
+        session: Any | None = None,
+    ) -> None:
+        if requests is None and session is None:  # pragma: no cover - dependency guard.
+            raise RuntimeError("requests is required for LocalOrderBookRuntimeManager")
+        self.api_base = str(api_base or "").rstrip("/")
+        self.timeout_seconds = max(1, int(timeout_seconds or 3))
+        self.cache_ttl_seconds = max(1, int(cache_ttl_seconds or DEFAULT_LOB_CACHE_TTL_SECONDS))
+        self.depth_limit = max(1, min(int(depth_limit or BOOK_LEVEL_LIMIT), BOOK_LEVEL_LIMIT))
+        self.registry = OrderBookRegistry()
+        self._lock = threading.Lock()
+        self._cache: dict[str, dict[str, Any]] = {}
+        self._session = session or requests.Session()
+        if hasattr(self._session, "trust_env"):
+            self._session.trust_env = str(os.environ.get("POLYDATA_CLOB_TRUST_ENV_PROXY") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        if hasattr(self._session, "headers"):
+            self._session.headers.update(
+                {
+                    "Accept": "application/json",
+                    "User-Agent": "polyData-local-orderbook/1.0",
+                }
+            )
+
+    def get_market_snapshot(
+        self,
+        *,
+        market_id: int,
+        yes_token_id: str,
+        no_token_id: str,
+        market_title: str = "",
+        condition_id: str = "",
+        market_slug: str | None = None,
+    ) -> Dict[str, Any]:
+        yes_state = self.get_token_snapshot(
+            token_id=yes_token_id,
+            market_id=market_id,
+            condition_id=condition_id,
+            outcome="YES",
+            outcome_index=0,
+            market_slug=market_slug,
+        )
+        no_state = self.get_token_snapshot(
+            token_id=no_token_id,
+            market_id=market_id,
+            condition_id=condition_id,
+            outcome="NO",
+            outcome_index=1,
+            market_slug=market_slug,
+        )
+        return _panel_payload_from_state(
+            market_id=market_id,
+            local_market_id=market_id,
+            market_title=market_title,
+            yes_state=yes_state,
+            no_state=no_state,
+            token_mode=False,
+        )
+
+    def get_token_pair_snapshot(
+        self,
+        *,
+        yes_token_id: str,
+        no_token_id: str = "",
+        market_title: str = "",
+    ) -> Dict[str, Any]:
+        yes_state = self.get_token_snapshot(token_id=yes_token_id, market_id=0, outcome="YES", outcome_index=0)
+        no_state = (
+            self.get_token_snapshot(token_id=no_token_id, market_id=0, outcome="NO", outcome_index=1)
+            if no_token_id
+            else _empty_state_payload("NO")
+        )
+        return _panel_payload_from_state(
+            market_id=0,
+            local_market_id=None,
+            market_title=market_title,
+            yes_state=yes_state,
+            no_state=no_state,
+            token_mode=True,
+        )
+
+    def get_token_snapshot(
+        self,
+        *,
+        token_id: str,
+        market_id: int = 0,
+        condition_id: str = "",
+        outcome: str = "YES",
+        outcome_index: int = 0,
+        market_slug: str | None = None,
+    ) -> Dict[str, Any]:
+        token_id = str(token_id or "").strip()
+        if not token_id:
+            return _empty_state_payload(outcome)
+        now = time.time()
+        with self._lock:
+            cached = self._cache.get(token_id)
+            if cached and now - float(cached.get("cached_at") or 0) < self.cache_ttl_seconds:
+                return dict(cached["payload"])
+
+        state_payload = self._fetch_apply_snapshot(
+            TokenBookIdentity(
+                token_id=token_id,
+                market_id=int(market_id or 0),
+                condition_id=str(condition_id or ""),
+                outcome=str(outcome or ""),
+                outcome_index=int(outcome_index or 0),
+                market_slug=market_slug,
+            )
+        )
+        with self._lock:
+            self._cache[token_id] = {"cached_at": now, "payload": dict(state_payload)}
+        return state_payload
+
+    def _fetch_apply_snapshot(self, identity: TokenBookIdentity) -> Dict[str, Any]:
+        response = self._session.get(
+            f"{self.api_base}/book",
+            params={"token_id": identity.token_id},
+            timeout=self.timeout_seconds,
+        )
+        if response.status_code == 404:
+            raw_payload: dict[str, Any] = {"bids": [], "asks": [], "status_code": 404}
+        else:
+            response.raise_for_status()
+            raw_payload = response.json() if getattr(response, "content", b"") else {}
+            if not isinstance(raw_payload, dict):
+                raw_payload = {}
+
+        event = normalize_rest_book(identity.token_id, raw_payload)
+        with self._lock:
+            self.registry.apply(identity, event)
+            book = self.registry.get(identity.token_id)
+            if book is None:
+                return _empty_state_payload(identity.outcome, token_id=identity.token_id)
+            payload = book.snapshot_payload(depth_levels=self.depth_limit)
+        payload["source"] = "local-orderbook"
+        payload["snapshot_source"] = "rest-book"
+        payload["runtime_model"] = "LocalOrderBook"
+        if response.status_code == 404:
+            payload["book_status"] = "no-book"
+        return payload
 
 
 def _empty_book_side() -> Dict[str, Any]:
     return {"bids": [], "asks": [], "bestBid": None, "bestAsk": None, "spread": None}
+
+
+def _empty_state_payload(outcome: str = "", *, token_id: str = "") -> Dict[str, Any]:
+    return {
+        "snapshot_id": 0,
+        "token_id": str(token_id or ""),
+        "market_id": 0,
+        "condition_id": "",
+        "outcome": str(outcome or ""),
+        "side": str(outcome or ""),
+        "status": "not_ready",
+        "book_status": "no-book",
+        "source": "local-orderbook",
+        "snapshot_source": "rest-book",
+        "runtime_model": "LocalOrderBook",
+        "generation": 0,
+        "last_event_ts_ms": None,
+        "timestamp": None,
+        "snapshot_timestamp": None,
+        "snapshot_version": None,
+        "best_bid": None,
+        "best_ask": None,
+        "mid": None,
+        "spread": None,
+        "bid_depth": "0",
+        "ask_depth": "0",
+        "depth_total": "0",
+        "imbalance": None,
+        "bids": [],
+        "asks": [],
+    }
+
+
+def _levels_with_side(levels: Any, side: str) -> list[dict[str, Any]]:
+    normalized = _normalize_levels(levels, reverse=(side == "bid"))
+    return [{"side": side, **level} for level in normalized]
+
+
+def _panel_side_from_state_payload(state_payload: Dict[str, Any]) -> Dict[str, Any]:
+    state = dict(state_payload or {})
+    bids = _levels_with_side(state.get("bids"), "bid")
+    asks = _levels_with_side(state.get("asks"), "ask")
+    best_bid = state.get("best_bid") or (bids[0].get("price") if bids else None)
+    best_ask = state.get("best_ask") or (asks[0].get("price") if asks else None)
+    return {
+        **state,
+        "statePayload": state,
+        "tokenId": state.get("token_id") or "",
+        "marketId": state.get("market_id"),
+        "conditionId": state.get("condition_id") or "",
+        "outcome": state.get("outcome") or state.get("side") or "",
+        "status": state.get("status") or "not_ready",
+        "bookStatus": state.get("book_status") or ("ok" if bids or asks else "no-book"),
+        "source": "local-orderbook",
+        "snapshotSource": state.get("snapshot_source") or "rest-book",
+        "runtimeModel": state.get("runtime_model") or "LocalOrderBook",
+        "generation": state.get("generation") or 0,
+        "lastEventTsMs": state.get("last_event_ts_ms"),
+        "snapshotTimestamp": state.get("snapshot_timestamp") or state.get("timestamp"),
+        "snapshotVersion": state.get("snapshot_version"),
+        "bestBid": best_bid,
+        "bestAsk": best_ask,
+        "mid": state.get("mid"),
+        "spread": state.get("spread"),
+        "bidDepth": state.get("bid_depth") or "0",
+        "askDepth": state.get("ask_depth") or "0",
+        "depthTotal": state.get("depth_total") or "0",
+        "imbalance": state.get("imbalance"),
+        "levelCountBid": len(bids),
+        "levelCountAsk": len(asks),
+        "bids": bids,
+        "asks": asks,
+    }
+
+
+def _panel_payload_from_state(
+    *,
+    market_id: int,
+    local_market_id: int | None,
+    market_title: str,
+    yes_state: Dict[str, Any],
+    no_state: Dict[str, Any],
+    token_mode: bool,
+) -> Dict[str, Any]:
+    yes = _panel_side_from_state_payload(yes_state)
+    no = _panel_side_from_state_payload(no_state)
+    fetched_at = _iso_utc_now()
+    timestamps = [value for value in (yes.get("snapshotTimestamp"), no.get("snapshotTimestamp")) if value]
+    payload = {
+        "marketId": market_id,
+        "localMarketId": local_market_id,
+        "marketTitle": str(market_title or ""),
+        "fetchedAt": fetched_at,
+        "updatedAt": max(timestamps) if timestamps else fetched_at,
+        "tokenMode": bool(token_mode),
+        "source": "local-orderbook",
+        "snapshotSource": "rest-book",
+        "runtimeModel": "LocalOrderBook",
+        "yes": yes,
+        "no": no,
+    }
+    payload["bookStatus"] = "ok" if _lob_payload_has_levels(payload) else "no-book"
+    return payload
 
 
 def _decimal_or_none(value: Any) -> Decimal | None:
@@ -131,27 +397,6 @@ def _lob_payload_has_levels(payload: Dict[str, Any]) -> bool:
     return _book_side_has_levels(payload.get("yes") or {}) or _book_side_has_levels(payload.get("no") or {})
 
 
-def _book_side_from_clob(ctx: dict, token_id: str) -> Dict[str, Any]:
-    if not token_id:
-        return _empty_book_side()
-    session = ctx["get_clob_session"]()
-    response = session.get(
-        f"{ctx['CLOB_API_BASE'].rstrip('/')}/book",
-        params={"token_id": token_id},
-        timeout=min(float(ctx.get("CLOB_TIMEOUT_SECONDS") or 3), 3.0),
-    )
-    if response.status_code == 404:
-        return _empty_book_side()
-    response.raise_for_status()
-    data = response.json() or {}
-
-    bids = _normalize_levels(data.get("bids"), reverse=True)
-    asks = _normalize_levels(data.get("asks"), reverse=False)
-    best_bid = bids[0].get("price") if bids else None
-    best_ask = asks[0].get("price") if asks else None
-    return _book_side_summary({"bids": bids, "asks": asks, "bestBid": best_bid, "bestAsk": best_ask})
-
-
 def _ensure_snapshot_schema() -> None:
     global _SNAPSHOT_SCHEMA_READY
     if _SNAPSHOT_SCHEMA_READY:
@@ -180,18 +425,27 @@ def _persist_book_side_snapshot(
     if not token_id:
         return
     summary = _book_side_summary(side_payload)
+    state_payload = side_payload.get("statePayload") if isinstance(side_payload, dict) else None
+    state_payload = dict(state_payload) if isinstance(state_payload, dict) else dict(side_payload or {})
     payload = {
+        **state_payload,
         **summary,
         "tokenId": token_id,
         "pairedTokenId": paired_token_id,
         "side": side_name,
         "marketTitle": market_title,
-        "source": source,
+        "source": source or "local-orderbook",
         "bookStatus": book_status,
         "fetchedAt": fetched_at,
         "blockNumber": block_number,
+        "runtimeModel": state_payload.get("runtime_model") or side_payload.get("runtimeModel") or "LocalOrderBook",
+        "snapshotSource": state_payload.get("snapshot_source") or side_payload.get("snapshotSource") or "rest-book",
     }
-    snapshot_version = _snapshot_version(token_id, side_name, fetched_at, side_payload)
+    snapshot_version = str(
+        state_payload.get("snapshot_version")
+        or side_payload.get("snapshotVersion")
+        or _snapshot_version(token_id, side_name, fetched_at, side_payload)
+    )
     _ensure_snapshot_schema()
     with postgres_connection(PostgresSettings()) as conn:
         with conn.cursor() as cur:
@@ -216,7 +470,7 @@ def _persist_book_side_snapshot(
                     side_name,
                     paired_token_id or None,
                     market_title or None,
-                    source or "clob-book",
+                    source or "local-orderbook",
                     book_status or "unknown",
                     int(block_number) if block_number not in (None, "") else None,
                     fetched_at,
@@ -240,7 +494,7 @@ def _persist_book_side_snapshot(
 def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> None:
     try:
         fetched_at = str(payload.get("fetchedAt") or _iso_utc_now())
-        source = str(payload.get("source") or "clob-book")
+        source = str(payload.get("source") or "local-orderbook")
         book_status = str(payload.get("bookStatus") or ("ok" if _lob_payload_has_levels(payload) else "no-book"))
         market_title = str(payload.get("marketTitle") or "")
         block_number = payload.get("blockNumber") or payload.get("block_number")
@@ -339,28 +593,15 @@ def get_lob_snapshots_by_token_payload(ctx: dict, token_id: str, *, side: str = 
         return {"error": "LOB snapshot history unavailable", "detail": str(exc), "items": [], "count": 0, "_status": 502}
 
 
-def _clob_book_fallback(ctx: dict, market: Dict[str, Any], yes_token_id: str, no_token_id: str) -> Dict[str, Any]:
-    payload = {
-        "marketId": market.get("id"),
-        "localMarketId": market.get("id"),
-        "marketTitle": str(market.get("title") or ""),
-        "fetchedAt": _iso_utc_now(),
-        "source": "clob-book",
-        "yes": _book_side_from_clob(ctx, yes_token_id),
-        "no": _book_side_from_clob(ctx, no_token_id),
-    }
-    payload["bookStatus"] = "ok" if _lob_payload_has_levels(payload) else "no-book"
-    _persist_orderbook_snapshots(ctx, payload, yes_token_id, no_token_id)
-    return payload
-
-
 def _unavailable_lob_payload(market: Dict[str, Any], detail: str = "") -> Dict[str, Any]:
     return {
         "marketId": market.get("id"),
         "localMarketId": market.get("id"),
         "marketTitle": str(market.get("title") or ""),
         "fetchedAt": _iso_utc_now(),
-        "source": "clob-book",
+        "source": "local-orderbook",
+        "snapshotSource": "rest-book",
+        "runtimeModel": "LocalOrderBook",
         "bookStatus": "unavailable",
         "detail": detail[:220],
         "yes": _empty_book_side(),
@@ -380,21 +621,15 @@ def get_runtime_lob_by_token_payload(
     if not yes_token_id:
         return {"error": "Missing token id", "marketId": 0, "localMarketId": None, "_status": 400}
     try:
-        payload = {
-            "marketId": 0,
-            "localMarketId": None,
-            "marketTitle": str(market_title or ""),
-            "fetchedAt": _iso_utc_now(),
-            "tokenMode": True,
-            "source": "clob-book",
-            "yes": _book_side_from_clob(ctx, yes_token_id),
-            "no": _book_side_from_clob(ctx, no_token_id) if no_token_id else _empty_book_side(),
-        }
-        payload["bookStatus"] = "ok" if _lob_payload_has_levels(payload) else "no-book"
+        payload = ctx["LOB_RUNTIME_MANAGER"].get_token_pair_snapshot(
+            yes_token_id=yes_token_id,
+            no_token_id=no_token_id,
+            market_title=str(market_title or ""),
+        )
         _persist_orderbook_snapshots(ctx, payload, yes_token_id, no_token_id)
         return payload
     except Exception as exc:
-        ctx["app"].logger.exception("lob-runtime token fallback failed token_id=%s", yes_token_id)
+        ctx["app"].logger.exception("local-orderbook token snapshot failed token_id=%s", yes_token_id)
         return {
             "error": "LOB token snapshot unavailable",
             "marketId": 0,
@@ -418,31 +653,25 @@ def get_runtime_lob_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
             yes_token_id=yes_token_id,
             no_token_id=no_token_id,
             market_title=str(market.get("title") or ""),
+            condition_id=str(market.get("condition_id") or market.get("conditionId") or ""),
+            market_slug=str(market.get("slug") or market.get("market_slug") or "") or None,
         )
         if isinstance(runtime_payload, dict):
             runtime_payload.setdefault("localMarketId", market_id)
-            runtime_payload.setdefault("source", "runtime-lob")
+            runtime_payload.setdefault("source", "local-orderbook")
+            runtime_payload.setdefault("snapshotSource", "rest-book")
+            runtime_payload.setdefault("runtimeModel", "LocalOrderBook")
             runtime_payload.setdefault("bookStatus", "ok" if _lob_payload_has_levels(runtime_payload) else "no-book")
-        if _lob_payload_has_levels(runtime_payload):
-            _persist_orderbook_snapshots(ctx, runtime_payload, yes_token_id, no_token_id)
-            return runtime_payload
-        fallback_payload = _clob_book_fallback(ctx, market, yes_token_id, no_token_id)
-        if _lob_payload_has_levels(fallback_payload):
-            fallback_payload["fallbackReason"] = "runtime-empty"
-            return fallback_payload
-        return runtime_payload if isinstance(runtime_payload, dict) else fallback_payload
+        _persist_orderbook_snapshots(ctx, runtime_payload, yes_token_id, no_token_id)
+        return runtime_payload
     except Exception as exc:
-        ctx["app"].logger.warning("lob-runtime failed market_id=%s; falling back to CLOB /book: %s", market_id, exc)
+        ctx["app"].logger.warning("local-orderbook failed market_id=%s: %s", market_id, exc)
         if isinstance(exc, RequestException):
             return _unavailable_lob_payload(market, str(exc))
-        try:
-            return _clob_book_fallback(ctx, market, yes_token_id, no_token_id)
-        except Exception as fallback_exc:
-            ctx["app"].logger.exception("lob-runtime fallback failed market_id=%s", market_id)
-            return {
-                "error": "LOB runtime unavailable",
-                "marketId": market_id,
-                "localMarketId": market_id,
-                "detail": str(fallback_exc),
-                "_status": 502,
-            }
+        return {
+            "error": "LOB runtime unavailable",
+            "marketId": market_id,
+            "localMarketId": market_id,
+            "detail": str(exc),
+            "_status": 502,
+        }
