@@ -63,6 +63,7 @@ TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+WORLDCUP_EXCLUDE_KEYWORDS: tuple[str, ...] = ("icc", "t20", "cricket")
 TOPIC_BASE_SCORE: dict[str, int] = {"worldcup": 3200, "crypto": 2800, "politics": 2600}
 
 
@@ -107,6 +108,8 @@ class OrderBookCoverageTarget:
 def classify_priority_topic(row: dict[str, Any]) -> str | None:
     text = _row_search_text(row)
     for topic in PRIORITY_TOPICS:
+        if topic == "worldcup" and any(keyword in text for keyword in WORLDCUP_EXCLUDE_KEYWORDS):
+            continue
         if any(keyword in text for keyword in TOPIC_KEYWORDS[topic]):
             return topic
     return None

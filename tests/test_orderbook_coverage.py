@@ -15,6 +15,7 @@ def test_classifies_priority_topics_from_category_tags_and_title():
     assert classify_priority_topic({"category": "crypto", "title": "Bitcoin above 100k?"}) == "crypto"
     assert classify_priority_topic({"tags": '["politics", "election"]', "title": "Senate control?"}) == "politics"
     assert classify_priority_topic({"category": "weather", "title": "Rain in NYC?"}) is None
+    assert classify_priority_topic({"title": "ICC T20 World Cup, Women: India vs Pakistan"}) is None
 
 
 def test_build_coverage_target_assigns_hot_sampling_for_active_market():
