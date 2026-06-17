@@ -164,24 +164,41 @@ def select_orderbook_coverage_targets(
             continue
         buckets[target.topic].append(target)
 
-    selected: list[OrderBookCoverageTarget] = []
-    seen_markets: set[int] = set()
+    ranked_by_topic: dict[str, list[OrderBookCoverageTarget]] = {}
     for topic in PRIORITY_TOPICS:
         if topic not in buckets:
             continue
-        ranked = sorted(
+        ranked_by_topic[topic] = sorted(
             buckets[topic],
             key=lambda item: (item.priority_score, item.trade_count_24h, item.volume_24h, -item.market_id),
             reverse=True,
-        )
-        for target in ranked[: max(0, int(limits.get(topic, 0)))]:
-            if target.market_id in seen_markets:
+        )[: max(0, int(limits.get(topic, 0)))]
+
+    selected: list[OrderBookCoverageTarget] = []
+    seen_markets: set[int] = set()
+    cursors = {topic: 0 for topic in ranked_by_topic}
+    while len(selected) < max(0, int(global_limit)):
+        progressed = False
+        for topic in PRIORITY_TOPICS:
+            ranked = ranked_by_topic.get(topic)
+            if not ranked:
                 continue
+            idx = cursors.get(topic, 0)
+            while idx < len(ranked) and ranked[idx].market_id in seen_markets:
+                idx += 1
+            cursors[topic] = idx
+            if idx >= len(ranked):
+                continue
+            target = ranked[idx]
             selected.append(target)
             seen_markets.add(target.market_id)
-
-    selected.sort(key=lambda item: (item.priority_score, item.trade_count_24h, item.volume_24h), reverse=True)
-    return selected[: max(0, int(global_limit))]
+            cursors[topic] = idx + 1
+            progressed = True
+            if len(selected) >= max(0, int(global_limit)):
+                break
+        if not progressed:
+            break
+    return selected
 
 
 def summarize_coverage_targets(targets: Iterable[OrderBookCoverageTarget]) -> dict[str, Any]:

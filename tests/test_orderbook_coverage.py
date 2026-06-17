@@ -62,3 +62,36 @@ def test_select_coverage_targets_respects_topic_filter_and_limits():
     targets = select_orderbook_coverage_targets(rows, global_limit=10, topics=["crypto"])
 
     assert [target.market_id for target in targets] == [1]
+
+
+def test_select_coverage_targets_fairly_mixes_requested_topics():
+    rows = [
+        {
+            "market_id": 1,
+            "market_title": "US election winner",
+            "category": "politics",
+            "yes_token_id": "y1",
+            "no_token_id": "n1",
+            "volume_24h": "200000",
+        },
+        {
+            "market_id": 2,
+            "market_title": "Another election market",
+            "category": "politics",
+            "yes_token_id": "y2",
+            "no_token_id": "n2",
+            "volume_24h": "150000",
+        },
+        {
+            "market_id": 3,
+            "market_title": "Bitcoin above 100k?",
+            "category": "crypto",
+            "yes_token_id": "y3",
+            "no_token_id": "n3",
+            "volume_24h": "1000",
+        },
+    ]
+
+    targets = select_orderbook_coverage_targets(rows, global_limit=2, topics=["crypto", "politics"])
+
+    assert [target.topic for target in targets] == ["crypto", "politics"]
