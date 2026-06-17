@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
+  AreaSeries,
+  CandlestickSeries,
   ColorType,
   createChart,
   HistogramSeries,
   LineSeries,
+  LineType,
+  type AreaData,
+  type CandlestickData,
   type HistogramData,
   type IChartApi,
   type ISeriesApi,
@@ -23,6 +28,8 @@ type TooltipMode = 'compact' | 'full';
 type DataWindowMode = 'compact' | 'expanded';
 type DataWindowDock = 'floating' | 'left' | 'right';
 type ChartViewMode = 'raw' | 'normalized' | 'direct' | 'implied';
+type ChartType = 'Block-close line' | 'Line' | 'Step line' | 'Area' | 'Candles';
+type PriceSeriesApi = ISeriesApi<'Line'> | ISeriesApi<'Area'> | ISeriesApi<'Candlestick'>;
 type RangeSelection = { startX: number; currentX: number } | null;
 type LogicalRangeState = { from: number; to: number } | null;
 type LogicalRangeLike = LogicalRangeState | undefined;
@@ -87,9 +94,10 @@ type PriceChartPanelProps = {
 };
 
 type SeriesRefs = {
-  lines: Map<string, ISeriesApi<'Line'>>;
+  lines: Map<string, PriceSeriesApi>;
   ma: ISeriesApi<'Line'> | null;
   volume: ISeriesApi<'Histogram'> | null;
+  kind: ChartType;
 };
 
 type Drawing = {
@@ -127,6 +135,12 @@ function chartTime(point: PricePoint): Time {
 function blockLabel(value: number) {
   if (!Number.isFinite(value)) return '';
   return value.toLocaleString('en-US');
+}
+
+function compactIdentifier(value: string | undefined) {
+  if (!value) return '--';
+  if (value.length <= 16) return value;
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
 function pointLabel(point: PricePoint | undefined, source: string) {
@@ -189,6 +203,30 @@ function lineData(points: PricePoint[]): LineData<Time>[] {
   }));
 }
 
+function areaData(points: PricePoint[]): AreaData<Time>[] {
+  return points.map((point) => ({
+    time: chartTime(point),
+    value: point.close,
+  }));
+}
+
+function candleData(points: PricePoint[]): CandlestickData<Time>[] {
+  return points.map((point, index) => {
+    const previous = index > 0 ? points[index - 1] : null;
+    const open = clampProbability(previous?.close ?? point.close);
+    const close = clampProbability(point.close);
+    const movement = Math.abs(close - open);
+    const wick = Math.max(0.0005, Math.min(0.015, movement * 0.35));
+    return {
+      time: chartTime(point),
+      open,
+      high: clampProbability(Math.max(open, close) + wick),
+      low: clampProbability(Math.min(open, close) - wick),
+      close,
+    };
+  });
+}
+
 function volumeData(points: PricePoint[]): HistogramData<Time>[] {
   const byTime = new Map<number, number>();
   points
@@ -204,6 +242,13 @@ function volumeData(points: PricePoint[]): HistogramData<Time>[] {
       value: volume,
       color: 'rgba(148,163,184,0.24)',
     }));
+}
+
+function chartTypeCaption(chartType: ChartType) {
+  if (chartType === 'Candles') return 'close-derived candles';
+  if (chartType === 'Step line') return 'step line';
+  if (chartType === 'Area') return 'area';
+  return 'line';
 }
 
 function formatSigned(value: number, digits = 3) {
@@ -567,7 +612,7 @@ export function PriceChartPanel({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartSurfaceRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<SeriesRefs>({ lines: new Map(), ma: null, volume: null });
+  const seriesRef = useRef<SeriesRefs>({ lines: new Map(), ma: null, volume: null, kind: 'Block-close line' });
   const pointsRef = useRef<PricePoint[]>([]);
   const visibleOutcomeGroupsRef = useRef<OutcomeGroup[]>([]);
   const dataWindowDragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
@@ -592,7 +637,7 @@ export function PriceChartPanel({
   const [pendingDrawing, setPendingDrawing] = useState<Drawing | null>(null);
   const [drawingsLocked, setDrawingsLocked] = useState(false);
   const [drawingsHidden, setDrawingsHidden] = useState(false);
-  const [chartType, setChartType] = useState('Block-close line');
+  const [chartType, setChartType] = useState<ChartType>('Block-close line');
   const [indicatorMode, setIndicatorMode] = useState({ ma: true, ema: false, bands: false, rsi: false, volume: true });
   const [displayMode, setDisplayMode] = useState<EventDisplayMode>(() => persistedState('polydata.quant.event.displayMode', 'top5'));
   const [eventSortMode, setEventSortMode] = useState<EventSortMode>(() => persistedState('polydata.quant.event.sortMode', 'probability'));
@@ -1500,7 +1545,7 @@ export function PriceChartPanel({
       lastValueVisible: false,
     });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    seriesRef.current = { lines: new Map(), ma, volume };
+    seriesRef.current = { lines: new Map(), ma, volume, kind: chartType };
     chartRef.current = chart;
 
     chart.subscribeCrosshairMove((param) => {
@@ -1587,22 +1632,29 @@ export function PriceChartPanel({
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRange);
       chart.remove();
       chartRef.current = null;
-      seriesRef.current = { lines: new Map(), ma: null, volume: null };
+      seriesRef.current = { lines: new Map(), ma: null, volume: null, kind: chartType };
     };
-  }, [priceSource, scaleMode]);
+  }, [chartType, priceSource, scaleMode]);
 
   useEffect(() => {
     const chart = chartRef.current;
     const series = seriesRef.current;
     if (!chart || !series.ma || !series.volume) return;
-    const activeKeys = new Set(visibleOutcomeGroups.map((group) => group.key));
+    const candleGroup = selectedGroup || visibleOutcomeGroups[0] || null;
+    const renderGroups = chartType === 'Candles' && candleGroup ? [candleGroup] : visibleOutcomeGroups;
+    const activeKeys = new Set(renderGroups.map((group) => group.key));
+    if (series.kind !== chartType) {
+      Array.from(series.lines.values()).forEach((line) => chart.removeSeries(line));
+      series.lines.clear();
+      series.kind = chartType;
+    }
     Array.from(series.lines.entries()).forEach(([key, line]) => {
       if (!activeKeys.has(key)) {
         chart.removeSeries(line);
         series.lines.delete(key);
       }
     });
-    visibleOutcomeGroups.forEach((group, index) => {
+    renderGroups.forEach((group, index) => {
       const autoscaleInfoProvider = scaleProvider(scaleMode, group.points, allPoints);
       const baseColor = SERIES_COLORS[group.order % SERIES_COLORS.length] || '#3b82f6';
       const isSelected = selectedGroup?.key === group.key;
@@ -1615,26 +1667,78 @@ export function PriceChartPanel({
         || (labelMode === 'top' && isTopLabel);
       let line = series.lines.get(group.key);
       if (!line) {
-        line = chart.addSeries(LineSeries, {
-          color: colorWithOpacity(baseColor, opacity),
+        if (chartType === 'Area') {
+          line = chart.addSeries(AreaSeries, {
+            lineColor: colorWithOpacity(baseColor, opacity),
+            topColor: colorWithOpacity(baseColor, 0.18),
+            bottomColor: colorWithOpacity(baseColor, 0.01),
+            lineWidth,
+            priceLineVisible: showPriceLine,
+            priceLineColor: baseColor,
+            priceLineWidth: 1,
+            title: group.fullLabel,
+            autoscaleInfoProvider,
+          });
+        } else if (chartType === 'Candles') {
+          line = chart.addSeries(CandlestickSeries, {
+            upColor: '#10b981',
+            downColor: '#ef4444',
+            borderUpColor: '#34d399',
+            borderDownColor: '#fb7185',
+            wickUpColor: '#34d399',
+            wickDownColor: '#fb7185',
+            priceLineVisible: showPriceLine,
+            priceLineColor: baseColor,
+            priceLineWidth: 1,
+            title: group.fullLabel,
+            autoscaleInfoProvider,
+          });
+        } else {
+          line = chart.addSeries(LineSeries, {
+            color: colorWithOpacity(baseColor, opacity),
+            lineWidth,
+            lineType: chartType === 'Step line' ? LineType.WithSteps : LineType.Simple,
+            priceLineVisible: showPriceLine,
+            priceLineColor: baseColor,
+            priceLineWidth: 1,
+            title: group.fullLabel,
+            autoscaleInfoProvider,
+          });
+        }
+        series.lines.set(group.key, line);
+      }
+      if (chartType === 'Area') {
+        (line as ISeriesApi<'Area'>).applyOptions({
+          lineColor: colorWithOpacity(baseColor, opacity),
+          topColor: colorWithOpacity(baseColor, 0.18),
+          bottomColor: colorWithOpacity(baseColor, 0.01),
           lineWidth,
           priceLineVisible: showPriceLine,
           priceLineColor: baseColor,
-          priceLineWidth: 1,
-          title: group.fullLabel,
+          title: `${group.fullLabel} ${fmtProbabilityPercent(latestClose(group))}`,
           autoscaleInfoProvider,
         });
-        series.lines.set(group.key, line);
+        (line as ISeriesApi<'Area'>).setData(areaData(group.points));
+      } else if (chartType === 'Candles') {
+        (line as ISeriesApi<'Candlestick'>).applyOptions({
+          priceLineVisible: showPriceLine,
+          priceLineColor: baseColor,
+          title: `${group.fullLabel} ${fmtProbabilityPercent(latestClose(group))}`,
+          autoscaleInfoProvider,
+        });
+        (line as ISeriesApi<'Candlestick'>).setData(candleData(group.points));
+      } else {
+        (line as ISeriesApi<'Line'>).applyOptions({
+          color: colorWithOpacity(baseColor, opacity),
+          lineWidth,
+          lineType: chartType === 'Step line' ? LineType.WithSteps : LineType.Simple,
+          priceLineVisible: showPriceLine,
+          priceLineColor: baseColor,
+          title: `${group.fullLabel} ${fmtProbabilityPercent(latestClose(group))}`,
+          autoscaleInfoProvider,
+        });
+        (line as ISeriesApi<'Line'>).setData(lineData(group.points));
       }
-      line.applyOptions({
-        color: colorWithOpacity(baseColor, opacity),
-        lineWidth,
-        priceLineVisible: showPriceLine,
-        priceLineColor: baseColor,
-        title: `${group.fullLabel} ${fmtProbabilityPercent(latestClose(group))}`,
-        autoscaleInfoProvider,
-      });
-      line.setData(lineData(group.points));
     });
     series.ma.setData(indicatorMode.ma ? lineData(maPoints) : []);
     series.volume.setData(indicatorMode.volume ? volumeData(allPoints) : []);
@@ -1649,7 +1753,7 @@ export function PriceChartPanel({
         suppressViewportModeRef.current = false;
       }, 0);
     }
-  }, [allPoints, displayMode, eventMode, fitRequestKey, indicatorMode.ma, indicatorMode.volume, labelMode, maPoints, scaleMode, selectedGroup, visibleOutcomeGroups]);
+  }, [allPoints, chartType, displayMode, eventMode, fitRequestKey, indicatorMode.ma, indicatorMode.volume, labelMode, maPoints, scaleMode, selectedGroup, visibleOutcomeGroups]);
 
   const drawingPointFromEvent = (event: MouseEvent) => {
     const box = containerRef.current?.getBoundingClientRect();
@@ -1794,6 +1898,15 @@ export function PriceChartPanel({
       top: `${dataWindowSettings.y ?? 122}px`,
     }
     : undefined;
+  const marketMetadataRows: Array<[string, string]> = [
+    ['Condition', market.conditionId],
+    ['YES token', market.yesTokenId],
+    ['NO token', market.noTokenId],
+    ['Resolution', market.resolutionTime || market.endTime],
+    ['Outcome', market.resolvedOutcome],
+    ['Liquidity', market.liquidity],
+    ['Volume', market.volume],
+  ].filter((row): row is [string, string] => Boolean(row[1] && row[1] !== '--'));
 
   return (
     <section className="qtv-chart-shell">
@@ -1816,12 +1929,12 @@ export function PriceChartPanel({
         <div className="qtv-advanced-toolbar" aria-label="Advanced chart controls">
           <div className="qtv-toolbar-group">
             <span>Chart</span>
-            <select value={chartType} onChange={(event) => setChartType(event.currentTarget.value)}>
+            <select value={chartType} onChange={(event) => setChartType(event.currentTarget.value as ChartType)}>
               <option>Block-close line</option>
               <option>Line</option>
               <option>Step line</option>
               <option>Area</option>
-              <option disabled>Candles requires OHLC</option>
+              <option>Candles</option>
             </select>
             <button type="button" title="Fit visible data (F)" onClick={fitData}>Fit</button>
             <button type="button" title="Zoom in (+)" onClick={() => zoomLogicalRange(0.72)}>+</button>
@@ -1949,6 +2062,15 @@ export function PriceChartPanel({
           <div className="qtv-chart-meta">
             <strong>{market.title}</strong>
             <span>{market.category} · {eventMode ? `${displayedOutcomeCount} outcomes` : 'outcome probability'} · {priceSource}</span>
+            <div className="qtv-market-metadata-strip" aria-label="Polymarket metadata">
+              <span>view <b>{chartTypeCaption(chartType)}</b></span>
+              {marketMetadataRows.map(([label, value]) => (
+                <span key={label} title={`${label}: ${value}`}>
+                  <em>{label}</em>
+                  <b>{label.includes('token') || label === 'Condition' ? compactIdentifier(value) : value}</b>
+                </span>
+              ))}
+            </div>
             <div className="qtv-indicator-legend">
               <span>Rows <b>{rowsText}</b></span>
               <span>Range <i>{hasLoadedPrices ? pointLabel(primaryPoints[0], priceSource) : '--'}</i> <em>{hasLoadedPrices ? pointLabel(primaryPoints[primaryPoints.length - 1], priceSource) : '--'}</em></span>

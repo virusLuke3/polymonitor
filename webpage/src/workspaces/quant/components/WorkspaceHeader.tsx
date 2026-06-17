@@ -1317,10 +1317,12 @@ export function WorkspaceHeader({
         <div className="qtv-workbar-group qtv-select-group">
           <label>
             <span>Source</span>
-        <select value={priceSource} onChange={(event) => onPriceSourceChange(event.currentTarget.value as PriceSource)}>
-          <option value="orderfilled">OrderFilled block close</option>
-          <option value="frontend">Frontend price-history</option>
-        </select>
+            <select value={priceSource} onChange={(event) => onPriceSourceChange(event.currentTarget.value as PriceSource)}>
+              <option value="orderfilled">OrderFilled block close</option>
+              <option value="frontend">Frontend price-history</option>
+              <option value="orderbook" disabled>Orderbook mid · pending history</option>
+              <option value="conservative" disabled>Conservative bid/ask · pending history</option>
+            </select>
           </label>
           <label>
             <span>Engine</span>

@@ -469,6 +469,10 @@ export type QuantBacktestRun = {
   maxPositionNotional?: string | number | null;
   minFillPct?: string | number | null;
   executionPriceMode?: string | null;
+  finalValuationMode?: string | null;
+  buyLimitPrice?: string | number | null;
+  sellLimitPrice?: string | number | null;
+  settlementValue?: string | number | null;
   latencySeconds?: string | number | null;
   maxBookStalenessSeconds?: string | number | null;
   allowPartialFill?: boolean | string | number | null;
@@ -630,8 +634,17 @@ export type QuantBacktestCreatePayload = {
   maxPositionNotional?: number;
   minFillPct?: number;
   executionPriceMode?: string;
+  executionProfile?: string;
+  orderRole?: string;
+  finalValuationMode?: string;
+  buyLimitPrice?: number;
+  sellLimitPrice?: number;
+  settlementValue?: number;
   latencySeconds?: number;
+  latencyBlocks?: number;
   maxBookStalenessSeconds?: number;
+  adverseSlippageCents?: number;
+  fillProbabilityHaircutPct?: number;
   allowPartialFill?: boolean;
   minFillSize?: number;
   rejectOnStaleBook?: boolean;

@@ -51,6 +51,13 @@ function formatNumber(value: number, digits = 2) {
   return value.toLocaleString('en-US', { maximumFractionDigits: digits });
 }
 
+function formatParameterValue(value: unknown) {
+  if (typeof value === 'number') return formatNumber(value, 4);
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  if (value === undefined || value === null || value === '') return '-';
+  return String(value);
+}
+
 function statusForRisk(value: boolean) {
   return value ? 'ready' : 'review';
 }
@@ -164,9 +171,18 @@ function strategyParametersFromRun(run: QuantBacktestRun, fallback: StrategyPara
     liquidityCapPct: runNumber(run.liquidityCapPct, fallback.liquidityCapPct),
     maxPositionNotional: runNumber(run.maxPositionNotional, fallback.maxPositionNotional),
     minFillPct: runNumber(run.minFillPct, fallback.minFillPct),
-    executionPriceMode: run.executionPriceMode === 'ORDERFILLED' || run.executionPriceMode === 'DEPTH' || run.executionPriceMode === 'LEGACY' ? run.executionPriceMode : fallback.executionPriceMode,
+    executionProfile: fallback.executionProfile,
+    orderRole: fallback.orderRole,
+    executionPriceMode: run.executionPriceMode === 'ORDERFILLED_LIMIT_REPLAY' || run.executionPriceMode === 'ORDERFILLED' || run.executionPriceMode === 'DEPTH' || run.executionPriceMode === 'LEGACY' ? run.executionPriceMode : fallback.executionPriceMode,
+    finalValuationMode: run.finalValuationMode === 'FORCE_CLOSE' ? 'FORCE_CLOSE' : fallback.finalValuationMode,
+    buyLimitPrice: run.buyLimitPrice === null || run.buyLimitPrice === undefined ? fallback.buyLimitPrice : runNumber(run.buyLimitPrice, fallback.buyLimitPrice ?? fallback.entryThreshold),
+    sellLimitPrice: run.sellLimitPrice === null || run.sellLimitPrice === undefined ? fallback.sellLimitPrice : runNumber(run.sellLimitPrice, fallback.sellLimitPrice ?? 0.99),
+    settlementValue: run.settlementValue === null || run.settlementValue === undefined ? fallback.settlementValue : runNumber(run.settlementValue, fallback.settlementValue ?? 0),
     latencySeconds: runNumber(run.latencySeconds, fallback.latencySeconds),
+    latencyBlocks: fallback.latencyBlocks,
     maxBookStalenessSeconds: runNumber(run.maxBookStalenessSeconds, fallback.maxBookStalenessSeconds),
+    adverseSlippageCents: fallback.adverseSlippageCents,
+    fillProbabilityHaircutPct: fallback.fillProbabilityHaircutPct,
     allowPartialFill: typeof run.allowPartialFill === 'boolean' ? run.allowPartialFill : fallback.allowPartialFill,
     minFillSize: runNumber(run.minFillSize, fallback.minFillSize),
     rejectOnStaleBook: typeof run.rejectOnStaleBook === 'boolean' ? run.rejectOnStaleBook : fallback.rejectOnStaleBook,
@@ -186,8 +202,12 @@ function runParameterSummary(run: QuantBacktestRun, fallback: StrategyParameters
     costBps,
     riskPct,
     fingerprint,
-    label: `${params.entryThreshold.toFixed(3)}→${params.exitThreshold.toFixed(3)} · ${costBps.toFixed(1)}bps · ${riskPct.toFixed(1)}% risk`,
+    label: `${params.executionPriceMode === 'ORDERFILLED_LIMIT_REPLAY' ? 'limit replay' : `${params.entryThreshold.toFixed(3)}→${params.exitThreshold.toFixed(3)}`} · ${costBps.toFixed(1)}bps · ${riskPct.toFixed(1)}% risk`,
   };
+}
+
+function optionalFixed(value: number | undefined, digits = 6) {
+  return Number.isFinite(value) ? Number(Number(value).toFixed(digits)) : undefined;
 }
 
 function canonicalStrategyParameters(parameters: StrategyParameters) {
@@ -204,9 +224,18 @@ function canonicalStrategyParameters(parameters: StrategyParameters) {
     liquidityCapPct: Number(parameters.liquidityCapPct.toFixed(6)),
     maxPositionNotional: Number(parameters.maxPositionNotional.toFixed(6)),
     minFillPct: Number(parameters.minFillPct.toFixed(6)),
+    executionProfile: parameters.executionProfile,
+    orderRole: parameters.orderRole,
     executionPriceMode: parameters.executionPriceMode,
+    finalValuationMode: parameters.finalValuationMode,
+    buyLimitPrice: optionalFixed(parameters.buyLimitPrice),
+    sellLimitPrice: optionalFixed(parameters.sellLimitPrice),
+    settlementValue: optionalFixed(parameters.settlementValue),
     latencySeconds: Number(parameters.latencySeconds.toFixed(6)),
+    latencyBlocks: Math.round(parameters.latencyBlocks),
     maxBookStalenessSeconds: Number(parameters.maxBookStalenessSeconds.toFixed(6)),
+    adverseSlippageCents: Number(parameters.adverseSlippageCents.toFixed(6)),
+    fillProbabilityHaircutPct: Number(parameters.fillProbabilityHaircutPct.toFixed(6)),
     allowPartialFill: parameters.allowPartialFill,
     minFillSize: Number(parameters.minFillSize.toFixed(6)),
     rejectOnStaleBook: parameters.rejectOnStaleBook,
@@ -227,9 +256,18 @@ function strategyParameterDiffs(current: StrategyParameters, reference: Strategy
     liquidityCapPct: 'liq',
     maxPositionNotional: 'max pos',
     minFillPct: 'min fill',
+    executionProfile: 'profile',
+    orderRole: 'role',
     executionPriceMode: 'mode',
+    finalValuationMode: 'valuation',
+    buyLimitPrice: 'buy limit',
+    sellLimitPrice: 'sell limit',
+    settlementValue: 'settlement',
     latencySeconds: 'latency',
+    latencyBlocks: 'lat blocks',
     maxBookStalenessSeconds: 'stale',
+    adverseSlippageCents: 'adverse slip',
+    fillProbabilityHaircutPct: 'fill haircut',
     allowPartialFill: 'partial',
     minFillSize: 'min size',
     rejectOnStaleBook: 'stale gate',
@@ -237,7 +275,9 @@ function strategyParameterDiffs(current: StrategyParameters, reference: Strategy
   return (Object.keys(labels) as Array<keyof StrategyParameters>).map((key) => {
     const left = key === 'maxHoldingBars' ? Math.round(current[key]) : current[key];
     const right = key === 'maxHoldingBars' ? Math.round(reference[key]) : reference[key];
-    const diff = Math.abs(Number(left) - Number(right));
+    const diff = typeof left === 'number' && typeof right === 'number'
+      ? Math.abs(Number(left) - Number(right))
+      : (String(left ?? '') === String(right ?? '') ? 0 : 1);
     return {
       key,
       label: labels[key],
@@ -381,10 +421,10 @@ export function StrategyTesterPanel({
   const executionAssumptionRows = useMemo(() => {
     const base = strategyParameters;
     const scenarios = [
-      { key: 'current', label: 'Current', feeBps: base.feeBps, slippageBps: base.slippageBps, liquidityCapPct: base.liquidityCapPct, minFillPct: base.minFillPct },
-      { key: 'live', label: 'Live CLOB', feeBps: Math.max(base.feeBps, 0), slippageBps: Math.max(base.slippageBps, 2), liquidityCapPct: Math.min(base.liquidityCapPct, 25), minFillPct: Math.max(base.minFillPct, 20) },
-      { key: 'stress', label: 'Stress', feeBps: Math.max(base.feeBps, 5), slippageBps: Math.max(base.slippageBps, 10), liquidityCapPct: Math.min(base.liquidityCapPct, 10), minFillPct: Math.max(base.minFillPct, 50) },
-      { key: 'zero', label: 'Zero cost', feeBps: 0, slippageBps: 0, liquidityCapPct: 100, minFillPct: 0 },
+      { key: 'current', label: 'Current', profile: base.executionProfile, role: base.orderRole, feeBps: base.feeBps, slippageBps: base.slippageBps, liquidityCapPct: base.liquidityCapPct, minFillPct: base.minFillPct, latencyBlocks: base.latencyBlocks, adverseSlippageCents: base.adverseSlippageCents, fillProbabilityHaircutPct: base.fillProbabilityHaircutPct },
+      { key: 'live', label: 'Live CLOB', profile: 'realistic' as const, role: 'taker' as const, feeBps: Math.max(base.feeBps, 0), slippageBps: Math.max(base.slippageBps, 2), liquidityCapPct: Math.min(base.liquidityCapPct, 25), minFillPct: Math.max(base.minFillPct, 20), latencyBlocks: Math.max(base.latencyBlocks, 1), adverseSlippageCents: Math.max(base.adverseSlippageCents, 0.005), fillProbabilityHaircutPct: Math.max(base.fillProbabilityHaircutPct, 20) },
+      { key: 'stress', label: 'Stress', profile: 'stress' as const, role: 'taker' as const, feeBps: Math.max(base.feeBps, 5), slippageBps: Math.max(base.slippageBps, 10), liquidityCapPct: Math.min(base.liquidityCapPct, 10), minFillPct: Math.max(base.minFillPct, 50), latencyBlocks: Math.max(base.latencyBlocks, 3), adverseSlippageCents: Math.max(base.adverseSlippageCents, 0.02), fillProbabilityHaircutPct: Math.max(base.fillProbabilityHaircutPct, 45) },
+      { key: 'zero', label: 'Zero cost', profile: 'optimistic' as const, role: 'maker' as const, feeBps: 0, slippageBps: 0, liquidityCapPct: 100, minFillPct: 0, latencyBlocks: 0, adverseSlippageCents: 0, fillProbabilityHaircutPct: 0 },
     ];
     return scenarios.map((scenario) => {
       const roundTripBps = (scenario.feeBps * 2) + (scenario.slippageBps * 2);
@@ -427,10 +467,15 @@ export function StrategyTesterPanel({
   };
   const updateParameter = (key: keyof StrategyParameters, value: string) => {
     const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return;
+    if (!Number.isFinite(numeric)) {
+      if (key === 'settlementValue' && value.trim() === '') {
+        onStrategyParametersChange({ ...strategyParameters, settlementValue: undefined });
+      }
+      return;
+    }
     onStrategyParametersChange({
       ...strategyParameters,
-      [key]: key === 'maxHoldingBars' ? Math.round(numeric) : numeric,
+      [key]: key === 'maxHoldingBars' || key === 'latencyBlocks' ? Math.round(numeric) : numeric,
     });
   };
   const applyExecutionAssumption = (key: string) => {
@@ -442,6 +487,11 @@ export function StrategyTesterPanel({
       slippageBps: scenario.slippageBps,
       liquidityCapPct: scenario.liquidityCapPct,
       minFillPct: scenario.minFillPct,
+      executionProfile: scenario.profile,
+      orderRole: scenario.role,
+      latencyBlocks: scenario.latencyBlocks,
+      adverseSlippageCents: scenario.adverseSlippageCents,
+      fillProbabilityHaircutPct: scenario.fillProbabilityHaircutPct,
     });
     copied(`Applied ${scenario.label} execution`);
   };
@@ -479,6 +529,15 @@ export function StrategyTesterPanel({
         liquidityCapPct: Math.min(strategyParameters.liquidityCapPct, 25),
         maxPositionNotional: strategyParameters.maxPositionNotional,
         minFillPct: Math.max(strategyParameters.minFillPct, 20),
+        executionProfile: 'conservative',
+        orderRole: 'taker',
+        executionPriceMode: 'ORDERFILLED_LIMIT_REPLAY',
+        finalValuationMode: 'SETTLEMENT',
+        buyLimitPrice: Math.min(strategyParameters.buyLimitPrice ?? 0.5, 0.48),
+        sellLimitPrice: Math.max(strategyParameters.sellLimitPrice ?? 0.99, 0.99),
+        latencyBlocks: Math.max(strategyParameters.latencyBlocks, 1),
+        adverseSlippageCents: Math.max(strategyParameters.adverseSlippageCents, 0.01),
+        fillProbabilityHaircutPct: Math.max(strategyParameters.fillProbabilityHaircutPct, 25),
       });
       return;
     }
@@ -497,6 +556,15 @@ export function StrategyTesterPanel({
         liquidityCapPct: Math.min(strategyParameters.liquidityCapPct, 60),
         maxPositionNotional: strategyParameters.maxPositionNotional,
         minFillPct: strategyParameters.minFillPct,
+        executionProfile: 'realistic',
+        orderRole: 'taker',
+        executionPriceMode: 'ORDERFILLED_LIMIT_REPLAY',
+        finalValuationMode: 'SETTLEMENT',
+        buyLimitPrice: Math.max(strategyParameters.buyLimitPrice ?? 0.5, 0.54),
+        sellLimitPrice: Math.min(strategyParameters.sellLimitPrice ?? 0.8, 0.8),
+        latencyBlocks: strategyParameters.latencyBlocks,
+        adverseSlippageCents: strategyParameters.adverseSlippageCents,
+        fillProbabilityHaircutPct: strategyParameters.fillProbabilityHaircutPct,
       });
       return;
     }
@@ -514,9 +582,18 @@ export function StrategyTesterPanel({
         liquidityCapPct: 100,
         maxPositionNotional: 0,
         minFillPct: 0,
-        executionPriceMode: 'ORDERFILLED',
+        executionProfile: 'realistic',
+        orderRole: 'taker',
+        executionPriceMode: 'ORDERFILLED_LIMIT_REPLAY',
+        finalValuationMode: 'SETTLEMENT',
+        buyLimitPrice: 0.5,
+        sellLimitPrice: 0.99,
+        settlementValue: undefined,
         latencySeconds: 0,
+        latencyBlocks: 0,
         maxBookStalenessSeconds: 900,
+        adverseSlippageCents: 0.005,
+        fillProbabilityHaircutPct: 20,
         allowPartialFill: true,
         minFillSize: 0,
         rejectOnStaleBook: true,
@@ -687,6 +764,9 @@ export function StrategyTesterPanel({
           <span>fee <b>{strategyParameters.feeBps} bps</b></span>
           <span>slip <b>{strategyParameters.slippageBps} bps</b></span>
           <span>liq <b>{strategyParameters.liquidityCapPct}%</b></span>
+          <span>profile <b>{strategyParameters.executionProfile}</b></span>
+          <span>role <b>{strategyParameters.orderRole}</b></span>
+          <span>lat <b>{strategyParameters.latencyBlocks} blocks</b></span>
           <span>max pos <b>{strategyParameters.maxPositionNotional ? strategyParameters.maxPositionNotional.toLocaleString('en-US') : 'off'}</b></span>
           <span>min fill <b>{strategyParameters.minFillPct}%</b></span>
           <span>framework <b>{propertyValue('engine')}</b></span>
@@ -817,9 +897,13 @@ export function StrategyTesterPanel({
               <span>Fee</span><b>{strategyParameters.feeBps} bps</b>
               <span>Slippage</span><b>{strategyParameters.slippageBps} bps</b>
               <span>Liquidity cap</span><b>{strategyParameters.liquidityCapPct}%</b>
+              <span>Execution profile</span><b>{strategyParameters.executionProfile}</b>
+              <span>Order role</span><b>{strategyParameters.orderRole}</b>
               <span>Position size</span><b>{strategyParameters.positionSize.toLocaleString('en-US')} USDC</b>
               <span>Max position</span><b>{strategyParameters.maxPositionNotional ? `${strategyParameters.maxPositionNotional.toLocaleString('en-US')} USDC` : 'off'}</b>
               <span>Min fill</span><b>{strategyParameters.minFillPct}%</b>
+              <span>Latency</span><b>{strategyParameters.latencyBlocks} blocks</b>
+              <span>Adverse slip</span><b>{formatNumber(strategyParameters.adverseSlippageCents, 4)} cents</b>
               <span>Round trip</span><b>{formatNumber(parameterDiagnostics.roundTripCostBps, 2)} bps</b>
               <span>Capacity</span><b>{formatNumber(parameterDiagnostics.capacity, 0)} USDC</b>
             </div>
@@ -969,9 +1053,9 @@ export function StrategyTesterPanel({
                   {parameterDrift.diffs.slice(0, 6).map((row) => (
                     <li key={row.key}>
                       <span>{row.label}</span>
-                      <b>{formatNumber(Number(row.reference), 4)}</b>
+                      <b>{formatParameterValue(row.reference)}</b>
                       <em>→</em>
-                      <strong>{formatNumber(Number(row.current), 4)}</strong>
+                      <strong>{formatParameterValue(row.current)}</strong>
                     </li>
                   ))}
                 </ul>
@@ -1015,9 +1099,18 @@ export function StrategyTesterPanel({
               <label><span>Liquidity cap %</span><input type="number" min="0" max="100" step="1" value={strategyParameters.liquidityCapPct} onInput={(event) => updateParameter('liquidityCapPct', event.currentTarget.value)} /></label>
               <label><span>Max position</span><input type="number" min="0" step="1" value={strategyParameters.maxPositionNotional} onInput={(event) => updateParameter('maxPositionNotional', event.currentTarget.value)} /></label>
               <label><span>Min fill %</span><input type="number" min="0" max="100" step="1" value={strategyParameters.minFillPct} onInput={(event) => updateParameter('minFillPct', event.currentTarget.value)} /></label>
-              <label><span>Execution mode</span><select value={strategyParameters.executionPriceMode} onChange={(event) => onStrategyParametersChange({ ...strategyParameters, executionPriceMode: event.currentTarget.value === 'DEPTH' || event.currentTarget.value === 'LEGACY' ? event.currentTarget.value : 'ORDERFILLED' })}><option value="ORDERFILLED">OrderFilled probability</option><option value="DEPTH">CLOB depth snapshot</option><option value="LEGACY">Legacy volume cap</option></select></label>
+              <label><span>Execution profile</span><select value={strategyParameters.executionProfile} onChange={(event) => onStrategyParametersChange({ ...strategyParameters, executionProfile: event.currentTarget.value === 'optimistic' || event.currentTarget.value === 'conservative' || event.currentTarget.value === 'stress' ? event.currentTarget.value : 'realistic' })}><option value="optimistic">Optimistic</option><option value="realistic">Realistic</option><option value="conservative">Conservative</option><option value="stress">Stress</option></select></label>
+              <label><span>Order role</span><select value={strategyParameters.orderRole} onChange={(event) => onStrategyParametersChange({ ...strategyParameters, orderRole: event.currentTarget.value === 'maker' ? 'maker' : 'taker' })}><option value="taker">Taker</option><option value="maker">Maker</option></select></label>
+              <label><span>Execution mode</span><select value={strategyParameters.executionPriceMode} onChange={(event) => onStrategyParametersChange({ ...strategyParameters, executionPriceMode: event.currentTarget.value === 'ORDERFILLED' || event.currentTarget.value === 'DEPTH' || event.currentTarget.value === 'LEGACY' ? event.currentTarget.value : 'ORDERFILLED_LIMIT_REPLAY' })}><option value="ORDERFILLED_LIMIT_REPLAY">Limit replay</option><option value="ORDERFILLED">OrderFilled probability</option><option value="DEPTH">CLOB depth snapshot</option><option value="LEGACY">Legacy volume cap</option></select></label>
+              <label><span>Final valuation</span><select value={strategyParameters.finalValuationMode} onChange={(event) => onStrategyParametersChange({ ...strategyParameters, finalValuationMode: event.currentTarget.value === 'FORCE_CLOSE' ? 'FORCE_CLOSE' : 'SETTLEMENT' })}><option value="SETTLEMENT">Settlement 0/1</option><option value="FORCE_CLOSE">Legacy force close</option></select></label>
+              <label><span>Buy limit</span><input type="number" min="0.001" max="0.999" step="0.001" value={strategyParameters.buyLimitPrice ?? ''} onInput={(event) => updateParameter('buyLimitPrice', event.currentTarget.value)} /></label>
+              <label><span>Sell limit</span><input type="number" min="0.001" max="0.999" step="0.001" value={strategyParameters.sellLimitPrice ?? ''} onInput={(event) => updateParameter('sellLimitPrice', event.currentTarget.value)} /></label>
+              <label><span>Settlement value</span><input type="number" min="0" max="1" step="1" value={strategyParameters.settlementValue ?? ''} onInput={(event) => updateParameter('settlementValue', event.currentTarget.value)} /></label>
               <label><span>Latency seconds</span><input type="number" min="0" max="3600" step="1" value={strategyParameters.latencySeconds} onInput={(event) => updateParameter('latencySeconds', event.currentTarget.value)} /></label>
+              <label><span>Latency blocks</span><input type="number" min="0" max="100000" step="1" value={strategyParameters.latencyBlocks} onInput={(event) => updateParameter('latencyBlocks', event.currentTarget.value)} /></label>
               <label><span>Max book stale sec</span><input type="number" min="0" max="86400" step="1" value={strategyParameters.maxBookStalenessSeconds} onInput={(event) => updateParameter('maxBookStalenessSeconds', event.currentTarget.value)} /></label>
+              <label><span>Adverse slip cents</span><input type="number" min="0" max="1" step="0.001" value={strategyParameters.adverseSlippageCents} onInput={(event) => updateParameter('adverseSlippageCents', event.currentTarget.value)} /></label>
+              <label><span>Fill haircut %</span><input type="number" min="0" max="100" step="1" value={strategyParameters.fillProbabilityHaircutPct} onInput={(event) => updateParameter('fillProbabilityHaircutPct', event.currentTarget.value)} /></label>
               <label><span>Min fill size</span><input type="number" min="0" step="1" value={strategyParameters.minFillSize} onInput={(event) => updateParameter('minFillSize', event.currentTarget.value)} /></label>
               <label><span>Allow partial</span><select value={strategyParameters.allowPartialFill ? 'yes' : 'no'} onChange={(event) => onStrategyParametersChange({ ...strategyParameters, allowPartialFill: event.currentTarget.value === 'yes' })}><option value="yes">Yes</option><option value="no">No</option></select></label>
               <label><span>Reject stale book</span><select value={strategyParameters.rejectOnStaleBook ? 'yes' : 'no'} onChange={(event) => onStrategyParametersChange({ ...strategyParameters, rejectOnStaleBook: event.currentTarget.value === 'yes' })}><option value="yes">Yes</option><option value="no">No</option></select></label>

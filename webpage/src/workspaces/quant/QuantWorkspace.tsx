@@ -21,7 +21,7 @@ import {
   quantPriceStreamUrl,
   type QuantPriceQuery,
 } from '@/services/api';
-import type { LobPayload, LobSide, LobSnapshot, QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
+import type { LobPayload, LobSide, LobSnapshot, QuantBacktestCreatePayload, QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
@@ -93,9 +93,17 @@ const DEFAULT_STRATEGY_PARAMETERS: StrategyParameters = {
   liquidityCapPct: 100,
   maxPositionNotional: 0,
   minFillPct: 0,
-  executionPriceMode: 'ORDERFILLED',
+  executionProfile: 'realistic',
+  orderRole: 'taker',
+  executionPriceMode: 'ORDERFILLED_LIMIT_REPLAY',
+  finalValuationMode: 'SETTLEMENT',
+  buyLimitPrice: 0.5,
+  sellLimitPrice: 0.99,
   latencySeconds: 0,
+  latencyBlocks: 0,
   maxBookStalenessSeconds: 900,
+  adverseSlippageCents: 0.005,
+  fillProbabilityHaircutPct: 20,
   allowPartialFill: true,
   minFillSize: 0,
   rejectOnStaleBook: true,
@@ -346,9 +354,18 @@ function normalizeStrategyParameters(value: Partial<StrategyParameters> | null |
     liquidityCapPct: clampNumber(value?.liquidityCapPct, DEFAULT_STRATEGY_PARAMETERS.liquidityCapPct, 0, 100),
     maxPositionNotional: clampNumber(value?.maxPositionNotional, DEFAULT_STRATEGY_PARAMETERS.maxPositionNotional, 0, 1000000000),
     minFillPct: clampNumber(value?.minFillPct, DEFAULT_STRATEGY_PARAMETERS.minFillPct, 0, 100),
-    executionPriceMode: value?.executionPriceMode === 'DEPTH' || value?.executionPriceMode === 'LEGACY' ? value.executionPriceMode : 'ORDERFILLED',
+    executionProfile: value?.executionProfile === 'optimistic' || value?.executionProfile === 'conservative' || value?.executionProfile === 'stress' ? value.executionProfile : DEFAULT_STRATEGY_PARAMETERS.executionProfile,
+    orderRole: value?.orderRole === 'maker' ? 'maker' : DEFAULT_STRATEGY_PARAMETERS.orderRole,
+    executionPriceMode: value?.executionPriceMode === 'ORDERFILLED_LIMIT_REPLAY' || value?.executionPriceMode === 'ORDERFILLED' || value?.executionPriceMode === 'DEPTH' || value?.executionPriceMode === 'LEGACY' ? value.executionPriceMode : DEFAULT_STRATEGY_PARAMETERS.executionPriceMode,
+    finalValuationMode: value?.finalValuationMode === 'FORCE_CLOSE' ? 'FORCE_CLOSE' : 'SETTLEMENT',
+    buyLimitPrice: clampNumber(value?.buyLimitPrice, DEFAULT_STRATEGY_PARAMETERS.buyLimitPrice ?? DEFAULT_STRATEGY_PARAMETERS.entryThreshold, 0.001, 0.999),
+    sellLimitPrice: clampNumber(value?.sellLimitPrice, DEFAULT_STRATEGY_PARAMETERS.sellLimitPrice ?? 0.999, 0.001, 0.999),
+    settlementValue: value?.settlementValue === undefined || value?.settlementValue === null ? undefined : clampNumber(value.settlementValue, 0, 0, 1),
     latencySeconds: clampNumber(value?.latencySeconds, DEFAULT_STRATEGY_PARAMETERS.latencySeconds, 0, 3600),
+    latencyBlocks: Math.round(clampNumber(value?.latencyBlocks, DEFAULT_STRATEGY_PARAMETERS.latencyBlocks, 0, 100000)),
     maxBookStalenessSeconds: clampNumber(value?.maxBookStalenessSeconds, DEFAULT_STRATEGY_PARAMETERS.maxBookStalenessSeconds, 0, 86400),
+    adverseSlippageCents: clampNumber(value?.adverseSlippageCents, DEFAULT_STRATEGY_PARAMETERS.adverseSlippageCents, 0, 1),
+    fillProbabilityHaircutPct: clampNumber(value?.fillProbabilityHaircutPct, DEFAULT_STRATEGY_PARAMETERS.fillProbabilityHaircutPct, 0, 100),
     allowPartialFill: value?.allowPartialFill ?? DEFAULT_STRATEGY_PARAMETERS.allowPartialFill,
     minFillSize: clampNumber(value?.minFillSize, DEFAULT_STRATEGY_PARAMETERS.minFillSize, 0, 1000000000),
     rejectOnStaleBook: value?.rejectOnStaleBook ?? DEFAULT_STRATEGY_PARAMETERS.rejectOnStaleBook,
@@ -362,6 +379,67 @@ function persistedStrategyParameters() {
   } catch {
     return DEFAULT_STRATEGY_PARAMETERS;
   }
+}
+
+function backtestParameterPayload(strategyParameters: StrategyParameters): Pick<
+  QuantBacktestCreatePayload,
+  | 'entryThreshold'
+  | 'exitThreshold'
+  | 'stopLoss'
+  | 'takeProfit'
+  | 'maxHoldingBars'
+  | 'initialCapital'
+  | 'positionSize'
+  | 'feeBps'
+  | 'slippageBps'
+  | 'liquidityCapPct'
+  | 'maxPositionNotional'
+  | 'minFillPct'
+  | 'executionProfile'
+  | 'orderRole'
+  | 'executionPriceMode'
+  | 'finalValuationMode'
+  | 'buyLimitPrice'
+  | 'sellLimitPrice'
+  | 'settlementValue'
+  | 'latencySeconds'
+  | 'latencyBlocks'
+  | 'maxBookStalenessSeconds'
+  | 'adverseSlippageCents'
+  | 'fillProbabilityHaircutPct'
+  | 'allowPartialFill'
+  | 'minFillSize'
+  | 'rejectOnStaleBook'
+> {
+  return {
+    entryThreshold: strategyParameters.entryThreshold,
+    exitThreshold: strategyParameters.exitThreshold,
+    stopLoss: strategyParameters.stopLoss,
+    takeProfit: strategyParameters.takeProfit,
+    maxHoldingBars: strategyParameters.maxHoldingBars,
+    initialCapital: strategyParameters.initialCapital,
+    positionSize: strategyParameters.positionSize,
+    feeBps: strategyParameters.feeBps,
+    slippageBps: strategyParameters.slippageBps,
+    liquidityCapPct: strategyParameters.liquidityCapPct,
+    maxPositionNotional: strategyParameters.maxPositionNotional,
+    minFillPct: strategyParameters.minFillPct,
+    executionProfile: strategyParameters.executionProfile,
+    orderRole: strategyParameters.orderRole,
+    executionPriceMode: strategyParameters.executionPriceMode,
+    finalValuationMode: strategyParameters.finalValuationMode,
+    buyLimitPrice: strategyParameters.buyLimitPrice,
+    sellLimitPrice: strategyParameters.sellLimitPrice,
+    settlementValue: strategyParameters.settlementValue,
+    latencySeconds: strategyParameters.latencySeconds,
+    latencyBlocks: strategyParameters.latencyBlocks,
+    maxBookStalenessSeconds: strategyParameters.maxBookStalenessSeconds,
+    adverseSlippageCents: strategyParameters.adverseSlippageCents,
+    fillProbabilityHaircutPct: strategyParameters.fillProbabilityHaircutPct,
+    allowPartialFill: strategyParameters.allowPartialFill,
+    minFillSize: strategyParameters.minFillSize,
+    rejectOnStaleBook: strategyParameters.rejectOnStaleBook,
+  };
 }
 
 function chartOutcomeKey(outcome: QuantMarketSeriesOutcome | null | undefined, label: string, side: BacktestAction = 'YES') {
@@ -1101,9 +1179,18 @@ export function QuantWorkspace() {
         liquidityCapPct: strategyNumber(run.liquidityCapPct, current.liquidityCapPct),
         maxPositionNotional: strategyNumber(run.maxPositionNotional, current.maxPositionNotional),
         minFillPct: strategyNumber(run.minFillPct, current.minFillPct),
-        executionPriceMode: run.executionPriceMode === 'DEPTH' || run.executionPriceMode === 'LEGACY' || run.executionPriceMode === 'ORDERFILLED' ? run.executionPriceMode : current.executionPriceMode,
+        executionProfile: current.executionProfile,
+        orderRole: current.orderRole,
+        executionPriceMode: run.executionPriceMode === 'ORDERFILLED_LIMIT_REPLAY' || run.executionPriceMode === 'DEPTH' || run.executionPriceMode === 'LEGACY' || run.executionPriceMode === 'ORDERFILLED' ? run.executionPriceMode : current.executionPriceMode,
+        finalValuationMode: run.finalValuationMode === 'FORCE_CLOSE' ? 'FORCE_CLOSE' : current.finalValuationMode,
+        buyLimitPrice: strategyNumber(run.buyLimitPrice, current.buyLimitPrice ?? current.entryThreshold),
+        sellLimitPrice: strategyNumber(run.sellLimitPrice, current.sellLimitPrice ?? 0.99),
+        settlementValue: run.settlementValue === null || run.settlementValue === undefined ? current.settlementValue : strategyNumber(run.settlementValue, current.settlementValue ?? 0),
         latencySeconds: strategyNumber(run.latencySeconds, current.latencySeconds),
+        latencyBlocks: current.latencyBlocks,
         maxBookStalenessSeconds: strategyNumber(run.maxBookStalenessSeconds, current.maxBookStalenessSeconds),
+        adverseSlippageCents: current.adverseSlippageCents,
+        fillProbabilityHaircutPct: current.fillProbabilityHaircutPct,
         allowPartialFill: typeof run.allowPartialFill === 'boolean' ? run.allowPartialFill : current.allowPartialFill,
         minFillSize: strategyNumber(run.minFillSize, current.minFillSize),
         rejectOnStaleBook: typeof run.rejectOnStaleBook === 'boolean' ? run.rejectOnStaleBook : current.rejectOnStaleBook,
@@ -1127,7 +1214,9 @@ export function QuantWorkspace() {
       model: 'fixed_threshold_v1',
       scope,
       segment: segment || scope,
-      fill_model: 'close_price_with_bps_slippage_volume_cap_and_live_clob_snapshot',
+      fill_model: strategyParameters.executionPriceMode === 'ORDERFILLED_LIMIT_REPLAY'
+        ? 'orderfilled_limit_cross_then_settlement'
+        : 'close_price_with_bps_slippage_volume_cap_and_live_clob_snapshot',
       selected_outcome: selectedOutcomeRow?.fullLabel || selectedOutcome?.outcomeLabel || '',
       selected_side: selectedBacktestAction,
       selected_token_id: selectedBacktestAction === 'NO'
@@ -1146,9 +1235,18 @@ export function QuantWorkspace() {
         liquidity_cap_pct: strategyParameters.liquidityCapPct,
         max_position_notional: strategyParameters.maxPositionNotional,
         min_fill_pct: strategyParameters.minFillPct,
+        execution_profile: strategyParameters.executionProfile,
+        order_role: strategyParameters.orderRole,
         execution_price_mode: strategyParameters.executionPriceMode,
+        final_valuation_mode: strategyParameters.finalValuationMode,
+        buy_limit_price: strategyParameters.buyLimitPrice ?? null,
+        sell_limit_price: strategyParameters.sellLimitPrice ?? null,
+        settlement_value: strategyParameters.settlementValue ?? null,
         latency_seconds: strategyParameters.latencySeconds,
+        latency_blocks: strategyParameters.latencyBlocks,
         max_book_staleness_seconds: strategyParameters.maxBookStalenessSeconds,
+        adverse_slippage_cents: strategyParameters.adverseSlippageCents,
+        fill_probability_haircut_pct: strategyParameters.fillProbabilityHaircutPct,
         allow_partial_fill: strategyParameters.allowPartialFill,
         min_fill_size: strategyParameters.minFillSize,
         reject_on_stale_book: strategyParameters.rejectOnStaleBook,
@@ -1245,24 +1343,7 @@ export function QuantWorkspace() {
         backtestEngine,
         ...(priceSource === 'orderfilled' && firstBlock && lastBlock ? { fromBlock: String(firstBlock), toBlock: String(lastBlock) } : {}),
         ...(priceSource === 'frontend' && firstTs && lastTs ? { from: String(firstTs), to: String(lastTs) } : {}),
-        entryThreshold: strategyParameters.entryThreshold,
-        exitThreshold: strategyParameters.exitThreshold,
-        stopLoss: strategyParameters.stopLoss,
-        takeProfit: strategyParameters.takeProfit,
-        maxHoldingBars: strategyParameters.maxHoldingBars,
-        initialCapital: strategyParameters.initialCapital,
-        positionSize: strategyParameters.positionSize,
-        feeBps: strategyParameters.feeBps,
-        slippageBps: strategyParameters.slippageBps,
-        liquidityCapPct: strategyParameters.liquidityCapPct,
-        maxPositionNotional: strategyParameters.maxPositionNotional,
-        minFillPct: strategyParameters.minFillPct,
-        executionPriceMode: strategyParameters.executionPriceMode,
-        latencySeconds: strategyParameters.latencySeconds,
-        maxBookStalenessSeconds: strategyParameters.maxBookStalenessSeconds,
-        allowPartialFill: strategyParameters.allowPartialFill,
-        minFillSize: strategyParameters.minFillSize,
-        rejectOnStaleBook: strategyParameters.rejectOnStaleBook,
+        ...backtestParameterPayload(strategyParameters),
         executionContext: buildBacktestExecutionContext('single', sourceRows),
       });
       setBacktestStatus(created.item.status);
@@ -1358,24 +1439,7 @@ export function QuantWorkspace() {
             backtestEngine,
             ...(priceSource === 'orderfilled' && firstX && lastX ? { fromBlock: String(firstX), toBlock: String(lastX) } : {}),
             ...(priceSource === 'frontend' && firstX && lastX ? { from: String(firstX), to: String(lastX) } : {}),
-            entryThreshold: strategyParameters.entryThreshold,
-            exitThreshold: strategyParameters.exitThreshold,
-            stopLoss: strategyParameters.stopLoss,
-            takeProfit: strategyParameters.takeProfit,
-            maxHoldingBars: strategyParameters.maxHoldingBars,
-            initialCapital: strategyParameters.initialCapital,
-            positionSize: strategyParameters.positionSize,
-            feeBps: strategyParameters.feeBps,
-            slippageBps: strategyParameters.slippageBps,
-            liquidityCapPct: strategyParameters.liquidityCapPct,
-            maxPositionNotional: strategyParameters.maxPositionNotional,
-            minFillPct: strategyParameters.minFillPct,
-            executionPriceMode: strategyParameters.executionPriceMode,
-            latencySeconds: strategyParameters.latencySeconds,
-            maxBookStalenessSeconds: strategyParameters.maxBookStalenessSeconds,
-            allowPartialFill: strategyParameters.allowPartialFill,
-            minFillSize: strategyParameters.minFillSize,
-            rejectOnStaleBook: strategyParameters.rejectOnStaleBook,
+            ...backtestParameterPayload(strategyParameters),
             executionContext: buildBacktestExecutionContext('batch_top5', seriesPrices, label),
           });
           updateBatchRow(key, { runId: created.runId, status: created.item.status });
@@ -1480,24 +1544,7 @@ export function QuantWorkspace() {
             backtestEngine,
             ...(priceSource === 'orderfilled' && firstX && lastX ? { fromBlock: String(firstX), toBlock: String(lastX) } : {}),
             ...(priceSource === 'frontend' && firstX && lastX ? { from: String(firstX), to: String(lastX) } : {}),
-            entryThreshold: strategyParameters.entryThreshold,
-            exitThreshold: strategyParameters.exitThreshold,
-            stopLoss: strategyParameters.stopLoss,
-            takeProfit: strategyParameters.takeProfit,
-            maxHoldingBars: strategyParameters.maxHoldingBars,
-            initialCapital: strategyParameters.initialCapital,
-            positionSize: strategyParameters.positionSize,
-            feeBps: strategyParameters.feeBps,
-            slippageBps: strategyParameters.slippageBps,
-            liquidityCapPct: strategyParameters.liquidityCapPct,
-            maxPositionNotional: strategyParameters.maxPositionNotional,
-            minFillPct: strategyParameters.minFillPct,
-            executionPriceMode: strategyParameters.executionPriceMode,
-            latencySeconds: strategyParameters.latencySeconds,
-            maxBookStalenessSeconds: strategyParameters.maxBookStalenessSeconds,
-            allowPartialFill: strategyParameters.allowPartialFill,
-            minFillSize: strategyParameters.minFillSize,
-            rejectOnStaleBook: strategyParameters.rejectOnStaleBook,
+            ...backtestParameterPayload(strategyParameters),
             executionContext: buildBacktestExecutionContext('split_70_30', segment.points, segment.label),
           });
           updateSplitRow(segment.key, { runId: created.runId, status: created.item.status });
@@ -1622,24 +1669,7 @@ export function QuantWorkspace() {
             backtestEngine,
             ...(priceSource === 'orderfilled' && firstX && lastX ? { fromBlock: String(firstX), toBlock: String(lastX) } : {}),
             ...(priceSource === 'frontend' && firstX && lastX ? { from: String(firstX), to: String(lastX) } : {}),
-            entryThreshold: strategyParameters.entryThreshold,
-            exitThreshold: strategyParameters.exitThreshold,
-            stopLoss: strategyParameters.stopLoss,
-            takeProfit: strategyParameters.takeProfit,
-            maxHoldingBars: strategyParameters.maxHoldingBars,
-            initialCapital: strategyParameters.initialCapital,
-            positionSize: strategyParameters.positionSize,
-            feeBps: strategyParameters.feeBps,
-            slippageBps: strategyParameters.slippageBps,
-            liquidityCapPct: strategyParameters.liquidityCapPct,
-            maxPositionNotional: strategyParameters.maxPositionNotional,
-            minFillPct: strategyParameters.minFillPct,
-            executionPriceMode: strategyParameters.executionPriceMode,
-            latencySeconds: strategyParameters.latencySeconds,
-            maxBookStalenessSeconds: strategyParameters.maxBookStalenessSeconds,
-            allowPartialFill: strategyParameters.allowPartialFill,
-            minFillSize: strategyParameters.minFillSize,
-            rejectOnStaleBook: strategyParameters.rejectOnStaleBook,
+            ...backtestParameterPayload(strategyParameters),
             executionContext: buildBacktestExecutionContext('walk_forward', segment.points, segment.label),
           });
           updateWalkForwardRow(segment.key, { runId: created.runId, status: created.item.status });
