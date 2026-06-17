@@ -140,6 +140,7 @@ type AirRoutePath = {
   riskScore: number;
   status: string;
   airline: string;
+  layer: 'trunk' | 'international' | 'regional';
 };
 
 type AirHubPoint = {
@@ -196,6 +197,16 @@ type SignalDensityPoint = {
   lat: number;
   tone: 'cool' | 'warm' | 'risk' | 'alert';
   weight: number;
+};
+
+type AirLensMode = 'all' | 'trunk' | 'watch';
+type AirFocusRegion = 'global' | 'atlantic' | 'europe' | 'asia' | 'gulf';
+
+type AirFocusPreset = {
+  id: AirFocusRegion;
+  label: string;
+  bounds: [number, number, number, number] | null;
+  maxZoom?: number;
 };
 
 const LOCAL_WORLD_COUNTRIES_GEOJSON_URL = '/map-data/world-countries.geojson';
@@ -332,6 +343,22 @@ const COUNTRY_ISO2_ALIASES: Record<string, string> = {
   zimbabwe: 'ZW',
 };
 
+const AIR_LENS_OPTIONS: Array<{ id: AirLensMode; label: string }> = [
+  { id: 'trunk', label: 'Trunk' },
+  { id: 'all', label: 'All' },
+  { id: 'watch', label: 'Watch' },
+];
+
+const AIR_FOCUS_PRESETS: AirFocusPreset[] = [
+  { id: 'global', label: 'Global', bounds: null },
+  { id: 'atlantic', label: 'Atlantic', bounds: [-105, 22, 25, 66], maxZoom: 3.25 },
+  { id: 'europe', label: 'Europe', bounds: [-14, 34, 42, 64], maxZoom: 4.2 },
+  { id: 'asia', label: 'Asia', bounds: [68, 1, 146, 55], maxZoom: 4.1 },
+  { id: 'gulf', label: 'Gulf', bounds: [32, 15, 62, 34], maxZoom: 4.8 },
+];
+
+const AIR_FOCUS_PRESET_MAP = new Map(AIR_FOCUS_PRESETS.map((preset) => [preset.id, preset]));
+
 function numberValue(value?: string | number | null) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
@@ -437,6 +464,16 @@ function temperatureLabel(value: number | null, unit: string) {
 function probabilityLabel(value: number | null) {
   if (value == null) return '--';
   return `${Math.round(value * 100)}%`;
+}
+
+function airRouteLayerLabel(layer: string) {
+  if (layer === 'trunk') return 'TRUNK';
+  if (layer === 'international') return 'INTERNATIONAL';
+  return 'REGIONAL';
+}
+
+function airFocusLabel(region: AirFocusRegion) {
+  return AIR_FOCUS_PRESET_MAP.get(region)?.label || 'Global';
 }
 
 function binTemperatureLabel(bin: RuntimeGlobalWeatherCity['topBin'], fallbackUnit: string) {
@@ -689,6 +726,9 @@ function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | nu
       riskScore: numberValue(route.riskScore) ?? 0,
       status: String(route.status || 'normal'),
       airline: String(route.airline || 'OpenFlights'),
+      layer: route.layer === 'trunk' || route.layer === 'international' || route.layer === 'regional'
+        ? route.layer
+        : ((numberValue(route.trafficScore) ?? 0) >= 70 ? 'trunk' : 'regional'),
     }));
   });
 }
@@ -736,6 +776,57 @@ function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | nu
       status: String(flight.status || route.status || 'normal'),
     }];
   });
+}
+
+function airRouteMatchesLens(route: AirRoutePath, lens: AirLensMode) {
+  if (lens === 'watch') return route.status === 'watch' || route.riskScore >= 55;
+  if (lens === 'trunk') return route.layer === 'trunk' || route.trafficScore >= 70;
+  return true;
+}
+
+function pointInRect(lon: number, lat: number, bounds: [number, number, number, number]) {
+  return lon >= bounds[0] && lon <= bounds[2] && lat >= bounds[1] && lat <= bounds[3];
+}
+
+function airRouteMatchesRegion(route: AirRoutePath, region: AirFocusRegion) {
+  if (region === 'global') return true;
+  const preset = AIR_FOCUS_PRESET_MAP.get(region);
+  if (!preset?.bounds) return true;
+  return route.path.some(([lon, lat]) => pointInRect(lon, lat, preset.bounds!));
+}
+
+function airHubMatchesRegion(hub: AirHubPoint, region: AirFocusRegion) {
+  if (region === 'global') return true;
+  const preset = AIR_FOCUS_PRESET_MAP.get(region);
+  if (!preset?.bounds) return true;
+  return pointInRect(hub.lon, hub.lat, preset.bounds);
+}
+
+function airRoutePriority(route: AirRoutePath) {
+  const watchRank = route.status === 'watch' || route.riskScore >= 55 ? 0 : 1;
+  const layerRank = route.layer === 'trunk' ? 0 : route.layer === 'international' ? 1 : 2;
+  return [watchRank, layerRank, -(route.trafficScore || 0), -(route.riskScore || 0), route.id] as const;
+}
+
+function sortAirRoutes(routes: AirRoutePath[]) {
+  return [...routes].sort((left, right) => {
+    const a = airRoutePriority(left);
+    const b = airRoutePriority(right);
+    if (a[0] !== b[0]) return a[0] - b[0];
+    if (a[1] !== b[1]) return a[1] - b[1];
+    if (a[2] !== b[2]) return a[2] - b[2];
+    if (a[3] !== b[3]) return a[3] - b[3];
+    if (a[4] < b[4]) return -1;
+    if (a[4] > b[4]) return 1;
+    return 0;
+  });
+}
+
+function airRouteBudget(zoom: number, lens: AirLensMode, region: AirFocusRegion) {
+  if (region !== 'global') return zoom < 2.4 ? 180 : 260;
+  if (lens === 'watch') return zoom < 2.3 ? 80 : 120;
+  if (lens === 'trunk') return zoom < 2.3 ? 110 : 170;
+  return zoom < 2.1 ? 120 : 190;
 }
 
 function buildCountryRisks(points: ConflictMapPoint[]): CountryRisk[] {
@@ -1220,6 +1311,7 @@ function buildWeatherDeckLayers({
   conflicts,
   countryRisks,
   densityPoints,
+  airContextRoutes,
   airRoutes,
   airHubs,
   airFlights,
@@ -1233,6 +1325,7 @@ function buildWeatherDeckLayers({
   conflicts: ConflictMapPoint[];
   countryRisks: CountryRisk[];
   densityPoints: SignalDensityPoint[];
+  airContextRoutes: AirRoutePath[];
   airRoutes: AirRoutePath[];
   airHubs: AirHubPoint[];
   airFlights: AirFlightPoint[];
@@ -1253,15 +1346,40 @@ function buildWeatherDeckLayers({
   const conflictSingles = visibleConflictSingles(conflicts, zoom, bounds, selectedConflictId)
     .filter((point) => !clusterMemberIds.has(point.id) || point.id === selectedConflictId);
 
+  const routeColor = (route: AirRoutePath, alpha: number): [number, number, number, number] => {
+    if (route.status === 'watch' || route.riskScore >= 55) return [255, 204, 82, alpha];
+    if (route.layer === 'trunk') return [86, 230, 255, alpha];
+    if (route.layer === 'international') return [64, 165, 255, alpha];
+    return [103, 136, 168, Math.max(16, Math.round(alpha * 0.72))];
+  };
+
+  const routeWidth = (route: AirRoutePath, base: number) => {
+    const layerBoost = route.layer === 'trunk' ? 0.5 : route.layer === 'international' ? 0.18 : -0.08;
+    return Math.max(0.35, Math.min(2.8, base + layerBoost + route.trafficScore / 82));
+  };
+
+  if (airContextRoutes.length) {
+    layers.push(new PathLayer<AirRoutePath>({
+      id: 'air-route-corridors-context',
+      data: airContextRoutes,
+      getPath: (route) => route.path,
+      getColor: (route) => routeColor(route, 20),
+      getWidth: (route) => routeWidth(route, 0.12),
+      widthMinPixels: 0.3,
+      widthMaxPixels: 1.5,
+      jointRounded: true,
+      capRounded: true,
+      pickable: false,
+    }));
+  }
+
   if (airRoutes.length) {
     layers.push(new PathLayer<AirRoutePath>({
       id: 'air-route-corridors-underlay',
       data: airRoutes,
       getPath: (route) => route.path,
-      getColor: (route) => route.status === 'watch' || route.riskScore >= 55
-        ? [255, 183, 77, 54]
-        : [48, 196, 255, 44],
-      getWidth: (route) => Math.max(0.45, Math.min(2.2, 0.45 + route.trafficScore / 64)),
+      getColor: (route) => routeColor(route, 42),
+      getWidth: (route) => routeWidth(route, 0.22),
       widthMinPixels: 0.45,
       widthMaxPixels: 2.4,
       jointRounded: true,
@@ -1272,12 +1390,10 @@ function buildWeatherDeckLayers({
     }));
     layers.push(new PathLayer<AirRoutePath>({
       id: 'air-route-corridors-core',
-      data: airRoutes.slice(0, zoom < 2.2 ? 90 : 160),
+      data: airRoutes,
       getPath: (route) => route.path,
-      getColor: (route) => route.status === 'watch' || route.riskScore >= 55
-        ? [255, 206, 88, 142]
-        : [60, 220, 255, 116],
-      getWidth: (route) => Math.max(0.55, Math.min(2.1, 0.55 + route.trafficScore / 76)),
+      getColor: (route) => routeColor(route, 128),
+      getWidth: (route) => routeWidth(route, 0.26),
       widthMinPixels: 0.55,
       widthMaxPixels: 2.4,
       jointRounded: true,
@@ -1564,6 +1680,72 @@ function setupCountryInteractions(
   });
 }
 
+function AirMapControls({
+  lens,
+  focus,
+  routeCount,
+  totalRouteCount,
+  hubCount,
+  flightCount,
+  onLensChange,
+  onFocusChange,
+}: {
+  lens: AirLensMode;
+  focus: AirFocusRegion;
+  routeCount: number;
+  totalRouteCount: number;
+  hubCount: number;
+  flightCount: number;
+  onLensChange: (lens: AirLensMode) => void;
+  onFocusChange: (focus: AirFocusRegion) => void;
+}) {
+  return (
+    <div className="wm-air-map-controls">
+      <div className="wm-air-map-head">
+        <div>
+          <span>Air Lens</span>
+          <strong>{airFocusLabel(focus)} / {lens.toUpperCase()}</strong>
+        </div>
+        <div className="wm-air-map-counts" aria-hidden="true">
+          <b>{routeCount}</b>
+          <small>{totalRouteCount}</small>
+        </div>
+      </div>
+      <div className="wm-air-map-stats" aria-hidden="true">
+        <span><i className="routes" />{routeCount} corridors</span>
+        <span><i className="hubs" />{hubCount} hubs</span>
+        <span><i className="flights" />{flightCount} flights</span>
+      </div>
+      <div className="wm-air-map-segments" role="tablist" aria-label="Air route layer">
+        {AIR_LENS_OPTIONS.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            className={option.id === lens ? 'active' : ''}
+            aria-pressed={option.id === lens}
+            onClick={() => onLensChange(option.id)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="wm-air-map-focus-strip" role="tablist" aria-label="Air route focus region">
+        {AIR_FOCUS_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className={preset.id === focus ? 'active' : ''}
+            aria-pressed={preset.id === focus}
+            onClick={() => onFocusChange(preset.id)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CountryHoverTooltip({ hover }: { hover: CountryHoverState | null }) {
   if (!hover) return null;
   return (
@@ -1584,7 +1766,7 @@ function DeckMapTooltip({ tooltip }: { tooltip: DeckTooltipState }) {
     return (
       <div className={`wm-map-country-tooltip wm-map-deck-tooltip air ${route.status}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
         <strong>{route.fromCode} &gt; {route.toCode}</strong>
-        <span>{route.corridor} · risk {Math.round(route.riskScore)} · traffic {Math.round(route.trafficScore)}</span>
+        <span>{airRouteLayerLabel(route.layer)} · {route.corridor} · risk {Math.round(route.riskScore)} · traffic {Math.round(route.trafficScore)}</span>
       </div>
     );
   }
@@ -1746,6 +1928,7 @@ export function WeatherDeckMap({
   const conflictPointsRef = useRef<ConflictMapPoint[]>([]);
   const densityPointsRef = useRef<SignalDensityPoint[]>([]);
   const countryRisksRef = useRef<CountryRisk[]>([]);
+  const airContextRoutesRef = useRef<AirRoutePath[]>([]);
   const airRoutesRef = useRef<AirRoutePath[]>([]);
   const airHubsRef = useRef<AirHubPoint[]>([]);
   const airFlightsRef = useRef<AirFlightPoint[]>([]);
@@ -1760,15 +1943,48 @@ export function WeatherDeckMap({
   const [mapReady, setMapReady] = useState(false);
   const [mapDegraded, setMapDegraded] = useState(false);
   const [mapInteracting, setMapInteracting] = useState(false);
+  const [mapZoom, setMapZoom] = useState(1.25);
   const [deckTooltip, setDeckTooltip] = useState<DeckTooltipState>(null);
   const [countryHover, setCountryHover] = useState<CountryHoverState | null>(null);
   const [selectedCountryRisk, setSelectedCountryRisk] = useState<CountryRisk | null>(null);
   const [selectedConflict, setSelectedConflict] = useState<ConflictMapPoint | null>(null);
+  const [airLensMode, setAirLensMode] = useState<AirLensMode>('trunk');
+  const [airFocusRegion, setAirFocusRegion] = useState<AirFocusRegion>('global');
   const points = useMemo(() => normalizePoints(items), [items]);
   const conflictPoints = useMemo(() => normalizeConflictPoints(ucdpEvents), [ucdpEvents]);
-  const airRoutes = useMemo(() => showAirRoutes ? normalizeAirRoutes(transportPayload) : [], [showAirRoutes, transportPayload]);
-  const airHubs = useMemo(() => showAirRoutes ? normalizeAirHubs(transportPayload) : [], [showAirRoutes, transportPayload]);
-  const airFlights = useMemo(() => showAirRoutes ? normalizeAirFlights(transportPayload, airRoutes, animationTimeRef.current) : [], [airRoutes, showAirRoutes, transportPayload]);
+  const allAirRoutes = useMemo(() => showAirRoutes ? normalizeAirRoutes(transportPayload) : [], [showAirRoutes, transportPayload]);
+  const allAirHubs = useMemo(() => showAirRoutes ? normalizeAirHubs(transportPayload) : [], [showAirRoutes, transportPayload]);
+  const lensRoutes = useMemo(
+    () => showAirRoutes ? sortAirRoutes(allAirRoutes.filter((route) => airRouteMatchesLens(route, airLensMode))) : [],
+    [airLensMode, allAirRoutes, showAirRoutes],
+  );
+  const primaryAirRouteUniverse = useMemo(
+    () => lensRoutes.filter((route) => airRouteMatchesRegion(route, airFocusRegion)),
+    [airFocusRegion, lensRoutes],
+  );
+  const airContextRoutes = useMemo(
+    () => airFocusRegion === 'global' ? [] : lensRoutes.filter((route) => !airRouteMatchesRegion(route, airFocusRegion)).slice(0, 140),
+    [airFocusRegion, lensRoutes],
+  );
+  const visibleAirRouteBudget = useMemo(
+    () => airRouteBudget(mapZoom, airLensMode, airFocusRegion),
+    [airFocusRegion, airLensMode, mapZoom],
+  );
+  const airRoutes = useMemo(
+    () => primaryAirRouteUniverse.slice(0, visibleAirRouteBudget),
+    [primaryAirRouteUniverse, visibleAirRouteBudget],
+  );
+  const primaryHubCodes = useMemo(() => new Set(airRoutes.flatMap((route) => [route.fromCode, route.toCode])), [airRoutes]);
+  const airHubs = useMemo(
+    () => showAirRoutes
+      ? allAirHubs.filter((hub) => primaryHubCodes.has(hub.code) || (airFocusRegion !== 'global' && airHubMatchesRegion(hub, airFocusRegion)))
+      : [],
+    [airFocusRegion, allAirHubs, primaryHubCodes, showAirRoutes],
+  );
+  const airFlights = useMemo(
+    () => showAirRoutes ? normalizeAirFlights(transportPayload, airRoutes, animationTimeRef.current) : [],
+    [airRoutes, showAirRoutes, transportPayload],
+  );
   const densityPoints = useMemo(() => buildSignalDensityPoints(points, conflictPoints), [conflictPoints, points]);
   const countryRisks = useMemo(() => buildCountryRisks(conflictPoints), [conflictPoints]);
   const countryRiskByIso = useMemo(() => new Map(countryRisks.map((risk) => [risk.iso2, risk])), [countryRisks]);
@@ -1783,6 +1999,7 @@ export function WeatherDeckMap({
       conflicts: conflictPointsRef.current,
       countryRisks: countryRisksRef.current,
       densityPoints: densityPointsRef.current,
+      airContextRoutes: showAirRoutesRef.current ? airContextRoutesRef.current : [],
       airRoutes: showAirRoutesRef.current ? airRoutesRef.current : [],
       airHubs: showAirRoutesRef.current ? airHubsRef.current : [],
       airFlights: showAirRoutesRef.current ? airFlightsRef.current : [],
@@ -1974,12 +2191,13 @@ export function WeatherDeckMap({
 
   useEffect(() => {
     showAirRoutesRef.current = showAirRoutes;
+    airContextRoutesRef.current = airContextRoutes;
     airRoutesRef.current = airRoutes;
     airHubsRef.current = airHubs;
     airFlightsRef.current = airFlights;
     startAirAnimation();
     return () => stopAirAnimation();
-  }, [airFlights, airHubs, airRoutes, showAirRoutes]);
+  }, [airContextRoutes, airFlights, airHubs, airRoutes, showAirRoutes]);
 
   useEffect(() => {
     onCountrySelectRef.current = (risk: CountryRisk) => {
@@ -2009,6 +2227,34 @@ export function WeatherDeckMap({
     densityPointsRef.current = densityPoints;
     scheduleDeckUpdate();
   }, [densityPoints]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !showAirRoutes) return;
+    const preset = AIR_FOCUS_PRESET_MAP.get(airFocusRegion);
+    if (!preset) return;
+    if (preset.bounds == null) {
+      map.easeTo({
+        center: [20, 24],
+        zoom: 1.25,
+        duration: 540,
+        essential: true,
+      });
+      return;
+    }
+    map.fitBounds(
+      [
+        [preset.bounds[0], preset.bounds[1]],
+        [preset.bounds[2], preset.bounds[3]],
+      ],
+      {
+        padding: { top: 88, right: 24, bottom: 36, left: 24 },
+        maxZoom: preset.maxZoom || 4.2,
+        duration: 620,
+        essential: true,
+      },
+    );
+  }, [airFocusRegion, showAirRoutes]);
 
   useEffect(() => {
     countryRisksRef.current = countryRisks;
@@ -2046,6 +2292,7 @@ export function WeatherDeckMap({
         window.clearTimeout(interactionEndTimerRef.current);
         interactionEndTimerRef.current = null;
       }
+      setMapZoom(map.getZoom());
       if (mapInteractingRef.current) return;
       mapInteractingRef.current = true;
       setMapInteracting(true);
@@ -2057,6 +2304,7 @@ export function WeatherDeckMap({
         interactionEndTimerRef.current = null;
         mapInteractingRef.current = false;
         setMapInteracting(false);
+        setMapZoom(map.getZoom());
         scheduleDeckUpdate(120);
       }, 110);
     };
@@ -2065,6 +2313,7 @@ export function WeatherDeckMap({
       const bounds = rootRef.current.getBoundingClientRect();
       if (bounds.width < 1 || bounds.height < 1) return;
       map.resize();
+      setMapZoom(map.getZoom());
       map.triggerRepaint();
       ensureCountryLayers(map, countryRisksRef.current);
       setupCountryInteractions(map, countryRiskByIsoRef, setCountryHover, onCountrySelectRef);
@@ -2204,6 +2453,18 @@ export function WeatherDeckMap({
       style={{ height: `${height}px` }}
     >
       <div ref={mapHostRef} className={`wm-weather-deck-basemap ${mapReady || points.length ? 'ready' : ''}`} />
+      {showAirRoutes && allAirRoutes.length ? (
+        <AirMapControls
+          lens={airLensMode}
+          focus={airFocusRegion}
+          routeCount={primaryAirRouteUniverse.length}
+          totalRouteCount={lensRoutes.length}
+          hubCount={airHubs.length}
+          flightCount={airFlights.length}
+          onLensChange={setAirLensMode}
+          onFocusChange={setAirFocusRegion}
+        />
+      ) : null}
       <CountryHoverTooltip hover={countryHover} />
       <DeckMapTooltip tooltip={deckTooltip} />
       {selectedCountryRisk ? <CountryRiskInspector risk={selectedCountryRisk} onClose={() => { setSelectedCountryRisk(null); highlightCountry(null); }} /> : null}
