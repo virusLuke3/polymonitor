@@ -169,6 +169,17 @@ type AirFlightPoint = {
   status: string;
 };
 
+type AirMotionPoint = {
+  id: string;
+  lon: number;
+  lat: number;
+  routeId: string;
+  source: Exclude<AirRiskSource, 'all'>;
+  pulse: number;
+  progress: number;
+  emphasis: number;
+};
+
 type DeckTooltipState = {
   kind: 'city' | 'conflict' | 'cluster' | 'air-route' | 'air-hub' | 'air-flight';
   x: number;
@@ -724,6 +735,75 @@ function pointAlongPath(path: [number, number][], progress: number): [number, nu
     currentPoint[0] + (nextPoint[0] - currentPoint[0]) * local,
     currentPoint[1] + (nextPoint[1] - currentPoint[1]) * local,
   ];
+}
+
+function routeMotionSource(route: AirRoutePath, lens: AirLensMode, riskSource: AirRiskSource): Exclude<AirRiskSource, 'all'> | null {
+  if (lens === 'watch' && riskSource !== 'all') {
+    return route.riskSources.includes(riskSource) ? riskSource : null;
+  }
+  if (route.riskSources.includes('conflict')) return 'conflict';
+  if (route.riskSources.includes('weather')) return 'weather';
+  if (route.riskSources.includes('corridor')) return 'corridor';
+  return null;
+}
+
+function buildAirMotionPoints(routes: AirRoutePath[], animationTime: number, lens: AirLensMode, riskSource: AirRiskSource): AirMotionPoint[] {
+  const points: AirMotionPoint[] = [];
+  routes.forEach((route) => {
+    const source = routeMotionSource(route, lens, riskSource);
+    if (!source) return;
+    const seed = hashUnit(`air-motion:${route.id}`);
+    const emphasis = Math.max(0.72, Math.min(1.45, 0.72 + route.trafficScore / 120 + route.riskScore / 220));
+    if (source === 'conflict') {
+      const anchor = 0.14 + seed * 0.72;
+      const pulse = 0.5 + 0.5 * Math.sin(animationTime * 5.4 + seed * Math.PI * 4);
+      const [lon, lat] = pointAlongPath(route.path, anchor);
+      points.push({
+        id: `${route.id}:conflict`,
+        lon,
+        lat,
+        routeId: route.id,
+        source,
+        pulse,
+        progress: anchor,
+        emphasis,
+      });
+      return;
+    }
+    if (source === 'weather') {
+      const speed = 0.052 + seed * 0.026;
+      [0, 0.38].forEach((offset, index) => {
+        const progress = (seed + offset + animationTime * speed) % 1;
+        const pulse = 0.58 + 0.42 * Math.sin(animationTime * 2.4 + (seed + index) * Math.PI * 3);
+        const [lon, lat] = pointAlongPath(route.path, progress);
+        points.push({
+          id: `${route.id}:weather:${index}`,
+          lon,
+          lat,
+          routeId: route.id,
+          source,
+          pulse,
+          progress,
+          emphasis,
+        });
+      });
+      return;
+    }
+    const progress = (seed + animationTime * (0.024 + seed * 0.008)) % 1;
+    const pulse = 0.72 + 0.12 * Math.sin(animationTime * 1.2 + seed * Math.PI * 2);
+    const [lon, lat] = pointAlongPath(route.path, progress);
+    points.push({
+      id: `${route.id}:corridor`,
+      lon,
+      lat,
+      routeId: route.id,
+      source,
+      pulse,
+      progress,
+      emphasis,
+    });
+  });
+  return points;
 }
 
 function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | null): AirRoutePath[] {
@@ -1410,6 +1490,9 @@ function buildWeatherDeckLayers({
   airRoutes,
   airHubs,
   airFlights,
+  animationTime,
+  airLensMode,
+  airRiskSource,
   selectedCityId,
   selectedConflictId,
   zoom,
@@ -1424,6 +1507,9 @@ function buildWeatherDeckLayers({
   airRoutes: AirRoutePath[];
   airHubs: AirHubPoint[];
   airFlights: AirFlightPoint[];
+  animationTime: number;
+  airLensMode: AirLensMode;
+  airRiskSource: AirRiskSource;
   selectedCityId?: string | null;
   selectedConflictId?: string | null;
   zoom: number;
@@ -1440,6 +1526,10 @@ function buildWeatherDeckLayers({
     : new Set<string>();
   const conflictSingles = visibleConflictSingles(conflicts, zoom, bounds, selectedConflictId)
     .filter((point) => !clusterMemberIds.has(point.id) || point.id === selectedConflictId);
+  const airMotionPoints = buildAirMotionPoints(airRoutes, animationTime, airLensMode, airRiskSource);
+  const conflictMotionPoints = airMotionPoints.filter((point) => point.source === 'conflict');
+  const weatherMotionPoints = airMotionPoints.filter((point) => point.source === 'weather');
+  const corridorMotionPoints = airMotionPoints.filter((point) => point.source === 'corridor');
 
   const routeColor = (route: AirRoutePath, alpha: number): [number, number, number, number] => {
     if (route.layer === 'trunk') return [94, 238, 255, alpha];
@@ -1450,6 +1540,26 @@ function buildWeatherDeckLayers({
   const routeWidth = (route: AirRoutePath, base: number) => {
     const layerBoost = route.layer === 'trunk' ? 0.5 : route.layer === 'international' ? 0.18 : -0.08;
     return Math.max(0.35, Math.min(2.8, base + layerBoost + route.trafficScore / 82));
+  };
+
+  const routeAlpha = (route: AirRoutePath, alpha: number) => {
+    const seed = hashUnit(`air-alpha:${route.id}`);
+    const pulse = 0.5 + 0.5 * Math.sin(animationTime * 2.8 + seed * Math.PI * 4);
+    const source = routeMotionSource(route, airLensMode, airRiskSource);
+    if (source === 'conflict') return Math.round(alpha * (0.92 + pulse * 0.42));
+    if (source === 'weather') return Math.round(alpha * (0.88 + pulse * 0.22));
+    if (source === 'corridor') return Math.round(alpha * (0.92 + pulse * 0.1));
+    return alpha;
+  };
+
+  const routeAnimatedWidth = (route: AirRoutePath, base: number) => {
+    const seed = hashUnit(`air-width:${route.id}`);
+    const pulse = 0.5 + 0.5 * Math.sin(animationTime * 2.6 + seed * Math.PI * 3);
+    const source = routeMotionSource(route, airLensMode, airRiskSource);
+    if (source === 'conflict') return routeWidth(route, base + pulse * 0.16);
+    if (source === 'weather') return routeWidth(route, base + pulse * 0.08);
+    if (source === 'corridor') return routeWidth(route, base + pulse * 0.04);
+    return routeWidth(route, base);
   };
 
   if (airContextRoutes.length) {
@@ -1472,8 +1582,8 @@ function buildWeatherDeckLayers({
       id: 'air-route-corridors-underlay',
       data: airRoutes,
       getPath: (route) => route.path,
-      getColor: (route) => routeColor(route, 42),
-      getWidth: (route) => routeWidth(route, 0.22),
+      getColor: (route) => routeColor(route, routeAlpha(route, 42)),
+      getWidth: (route) => routeAnimatedWidth(route, 0.22),
       widthMinPixels: 0.45,
       widthMaxPixels: 2.4,
       jointRounded: true,
@@ -1486,8 +1596,8 @@ function buildWeatherDeckLayers({
       id: 'air-route-corridors-core',
       data: airRoutes,
       getPath: (route) => route.path,
-      getColor: (route) => routeColor(route, 128),
-      getWidth: (route) => routeWidth(route, 0.26),
+      getColor: (route) => routeColor(route, routeAlpha(route, 128)),
+      getWidth: (route) => routeAnimatedWidth(route, 0.26),
       widthMinPixels: 0.55,
       widthMaxPixels: 2.4,
       jointRounded: true,
@@ -1495,6 +1605,68 @@ function buildWeatherDeckLayers({
       pickable: true,
       autoHighlight: true,
       highlightColor: [255, 245, 166, 140],
+    }));
+  }
+
+  if (corridorMotionPoints.length) {
+    layers.push(new ScatterplotLayer<AirMotionPoint>({
+      id: 'air-route-corridor-runners',
+      data: corridorMotionPoints,
+      getPosition: (point) => [point.lon, point.lat],
+      getRadius: (point) => 12000 + point.emphasis * 9000,
+      getFillColor: (point) => [186, 233, 255, Math.round(126 + point.pulse * 44)],
+      getLineColor: [8, 18, 30, 180],
+      getLineWidth: 1,
+      radiusMinPixels: 1.9,
+      radiusMaxPixels: 4.2,
+      lineWidthMinPixels: 1,
+      pickable: false,
+      stroked: true,
+    }));
+  }
+
+  if (weatherMotionPoints.length) {
+    layers.push(new ScatterplotLayer<AirMotionPoint>({
+      id: 'air-route-weather-flow',
+      data: weatherMotionPoints,
+      getPosition: (point) => [point.lon, point.lat],
+      getRadius: (point) => 14000 + point.emphasis * 12000 + point.pulse * 4000,
+      getFillColor: (point) => [72, 244, 211, Math.round(118 + point.pulse * 76)],
+      getLineColor: [7, 24, 30, 180],
+      getLineWidth: 1,
+      radiusMinPixels: 2.1,
+      radiusMaxPixels: 5.2,
+      lineWidthMinPixels: 1,
+      pickable: false,
+      stroked: true,
+    }));
+  }
+
+  if (conflictMotionPoints.length) {
+    layers.push(new ScatterplotLayer<AirMotionPoint>({
+      id: 'air-route-conflict-halo',
+      data: conflictMotionPoints,
+      getPosition: (point) => [point.lon, point.lat],
+      getRadius: (point) => 32000 + point.emphasis * 18000 + point.pulse * 18000,
+      getFillColor: (point) => [255, 84, 68, Math.round(20 + point.pulse * 42)],
+      radiusMinPixels: 4,
+      radiusMaxPixels: 12,
+      pickable: false,
+      stroked: false,
+    }));
+    layers.push(new ScatterplotLayer<AirMotionPoint>({
+      id: 'air-route-conflict-core',
+      data: conflictMotionPoints,
+      getPosition: (point) => [point.lon, point.lat],
+      getRadius: (point) => 12000 + point.emphasis * 9000 + point.pulse * 4000,
+      getFillColor: (point) => [255, 172, 92, Math.round(122 + point.pulse * 92)],
+      getLineColor: [52, 6, 6, 200],
+      getLineWidth: 1,
+      radiusMinPixels: 2.4,
+      radiusMaxPixels: 7.4,
+      lineWidthMinPixels: 1,
+      pickable: false,
+      stroked: true,
     }));
   }
 
@@ -2138,6 +2310,9 @@ export function WeatherDeckMap({
       airRoutes: showAirRoutesRef.current ? airRoutesRef.current : [],
       airHubs: showAirRoutesRef.current ? airHubsRef.current : [],
       airFlights: showAirRoutesRef.current ? airFlightsRef.current : [],
+      animationTime: animationTimeRef.current,
+      airLensMode,
+      airRiskSource,
       selectedCityId: selectedCityIdRef.current,
       selectedConflictId: selectedConflictIdRef.current,
       zoom,
