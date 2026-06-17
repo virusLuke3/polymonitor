@@ -14224,6 +14224,18 @@ a.wm-orderfilled-row {
   line-height: 1.1;
 }
 
+.wm-air-map-head em {
+  display: block;
+  margin-top: 4px;
+  color: #ffd67b;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .wm-air-map-counts {
   display: grid;
   justify-items: end;
@@ -14298,14 +14310,16 @@ a.wm-orderfilled-row {
 }
 
 .wm-air-map-segments,
-.wm-air-map-focus-strip {
+.wm-air-map-focus-strip,
+.wm-air-map-risk-strip {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
 .wm-air-map-segments button,
-.wm-air-map-focus-strip button {
+.wm-air-map-focus-strip button,
+.wm-air-map-risk-strip button {
   appearance: none;
   padding: 5px 8px;
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -14316,7 +14330,8 @@ a.wm-orderfilled-row {
 }
 
 .wm-air-map-segments button:hover,
-.wm-air-map-focus-strip button:hover {
+.wm-air-map-focus-strip button:hover,
+.wm-air-map-risk-strip button:hover {
   border-color: rgba(115, 216, 255, 0.24);
   color: #dff7ff;
 }
@@ -14333,6 +14348,37 @@ a.wm-orderfilled-row {
   background: rgba(105, 71, 12, 0.32);
   color: #fff1bf;
   box-shadow: inset 0 0 0 1px rgba(255, 209, 91, 0.1);
+}
+
+.wm-air-map-risk-strip {
+  padding-top: 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wm-air-map-risk-strip button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wm-air-map-risk-strip button span,
+.wm-air-map-risk-strip button b {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wm-air-map-risk-strip button b {
+  color: #d6e4ee;
+}
+
+.wm-air-map-risk-strip button.active {
+  border-color: rgba(255, 107, 76, 0.35);
+  background: rgba(88, 35, 28, 0.32);
+  color: #ffe2d8;
+  box-shadow: inset 0 0 0 1px rgba(255, 107, 76, 0.1);
 }
 
 @media (max-width: 900px) {
