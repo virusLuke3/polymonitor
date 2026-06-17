@@ -24,6 +24,7 @@ import {
   fetchMarketTrades,
   fetchRecentOracle,
   fetchRecentTrades,
+  fetchRuntimeGeoSanctionsShock,
   fetchRuntimeGlobalWeatherMap,
   fetchSystemHealth,
   fetchWorkspaceBundle,
@@ -1162,6 +1163,7 @@ function WorldMonitorApp() {
     qualityLevel: 'high',
     dpr: 1,
   });
+  const geoShockHydratingRef = useRef(false);
   const [region, setRegion] = useState<RegionKey>(() => {
     const override = readSearchParam('region');
     return REGION_OPTIONS.some((option) => option.value === override) ? (override as RegionKey) : readStringStorage(REGION_STORAGE_KEY, 'global');
@@ -1388,6 +1390,26 @@ function WorldMonitorApp() {
   useEffect(() => {
     writeGeoShockRuntimeSeed(runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined);
   }, [runtimeData]);
+
+  useEffect(() => {
+    const ucdpEnabled = layers.some((layer) => layer.id === 'ucdp' && layer.enabled);
+    const geoShockPayload = runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined;
+    if (!ucdpEnabled || hasRenderableGeoShockPayload(geoShockPayload) || geoShockHydratingRef.current) return;
+    geoShockHydratingRef.current = true;
+    let cancelled = false;
+    void fetchRuntimeGeoSanctionsShock(2000)
+      .then((payload) => {
+        if (cancelled || !hasRenderableGeoShockPayload(payload)) return;
+        setRuntimeData((current) => mergeRuntimeData(current, { 'geo-sanctions-shock': payload }));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        geoShockHydratingRef.current = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [layers, runtimeData]);
 
   useEffect(() => {
     bootstrapRef.current = bootstrap;
