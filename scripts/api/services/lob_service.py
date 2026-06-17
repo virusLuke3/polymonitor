@@ -26,6 +26,7 @@ _SNAPSHOT_SCHEMA_READY = False
 _SNAPSHOT_SCHEMA_LOCK = threading.Lock()
 BOOK_LEVEL_LIMIT = 12
 DEFAULT_LOB_CACHE_TTL_SECONDS = 3
+DEFAULT_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS = 300
 
 
 class LocalOrderBookRuntimeManager:
@@ -328,6 +329,14 @@ def _snapshot_version(token_id: str, side_name: str, fetched_at: str, side_paylo
     return digest.hexdigest()[:20]
 
 
+def _unchanged_snapshot_min_interval_seconds() -> int:
+    raw = os.environ.get("POLYDATA_LOB_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS")
+    try:
+        return max(0, int(raw if raw not in (None, "") else DEFAULT_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS))
+    except (TypeError, ValueError):
+        return DEFAULT_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS
+
+
 def _normalize_levels(rows: Any, *, reverse: bool = False) -> list[dict[str, Any]]:
     if not isinstance(rows, list):
         return []
@@ -449,6 +458,22 @@ def _persist_book_side_snapshot(
     _ensure_snapshot_schema()
     with postgres_connection(PostgresSettings()) as conn:
         with conn.cursor() as cur:
+            unchanged_min_interval_seconds = _unchanged_snapshot_min_interval_seconds()
+            if snapshot_version and unchanged_min_interval_seconds > 0:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM quant.clob_orderbook_snapshots
+                    WHERE token_id = %s
+                      AND side = %s
+                      AND snapshot_version = %s
+                      AND fetched_at >= (%s::timestamptz - (%s::text || ' seconds')::interval)
+                    LIMIT 1
+                    """,
+                    (token_id, side_name, snapshot_version, fetched_at, str(unchanged_min_interval_seconds)),
+                )
+                if cur.fetchone():
+                    return
             cur.execute(
                 """
                 INSERT INTO quant.clob_orderbook_snapshots (

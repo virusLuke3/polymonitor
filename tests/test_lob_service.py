@@ -12,7 +12,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import lob_service
-from api.services.lob_service import LocalOrderBookRuntimeManager, _book_side_summary
+from api.services.lob_service import LocalOrderBookRuntimeManager, _book_side_summary, _unchanged_snapshot_min_interval_seconds
 
 
 def test_book_side_summary_sorts_levels_and_computes_notional_depth():
@@ -130,3 +130,14 @@ def test_token_lob_payload_persists_state_machine_payload(monkeypatch):
     assert no_token_id == ""
     assert persisted_payload["yes"]["statePayload"]["source"] == "local-orderbook"
     assert persisted_payload["yes"]["statePayload"]["snapshot_version"]
+
+
+def test_unchanged_snapshot_min_interval_env(monkeypatch):
+    monkeypatch.delenv("POLYDATA_LOB_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS", raising=False)
+    assert _unchanged_snapshot_min_interval_seconds() == 300
+
+    monkeypatch.setenv("POLYDATA_LOB_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS", "0")
+    assert _unchanged_snapshot_min_interval_seconds() == 0
+
+    monkeypatch.setenv("POLYDATA_LOB_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS", "bad")
+    assert _unchanged_snapshot_min_interval_seconds() == 300
