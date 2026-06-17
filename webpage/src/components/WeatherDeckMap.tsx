@@ -801,27 +801,56 @@ function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | nu
   });
 }
 
-function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], countryRisks: CountryRisk[]) {
+function routeTouchesHotspot(path: [number, number][], hotspots: Array<{ lon: number; lat: number }>, radius: number) {
+  if (!hotspots.length || !path.length) return false;
+  const step = Math.max(1, Math.floor(path.length / 7));
+  for (let index = 0; index < path.length; index += step) {
+    const point = path[index];
+    if (!point) continue;
+    const [lon, lat] = point;
+    for (const hotspot of hotspots) {
+      if (Math.abs(hotspot.lon - lon) <= radius && Math.abs(hotspot.lat - lat) <= radius) return true;
+    }
+  }
+  return false;
+}
+
+function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], conflicts: ConflictMapPoint[]) {
   const weatherCountries = new Set(
     cities
-      .filter((city) => city.temperatureTone !== 'neutral' || city.marketTone !== 'none')
+      .filter((city) => city.temperatureTone !== 'neutral')
       .map((city) => iso2ForCountry(city.country))
       .filter((value): value is string => Boolean(value)),
   );
+  const weatherHotspots = cities
+    .filter((city) => city.temperatureTone !== 'neutral')
+    .map((city) => ({ lon: city.lon, lat: city.lat }));
   const conflictCountries = new Set(
-    countryRisks
-      .filter((risk) => risk.level !== 'quiet' || risk.eventCount > 0)
-      .map((risk) => risk.iso2)
-      .filter(Boolean),
+    conflicts
+      .map((point) => point.iso2)
+      .filter((value): value is string => Boolean(value)),
   );
+  const conflictHotspots = conflicts
+    .filter((point) => point.deaths > 0 || point.tone !== 'unknown')
+    .sort((left, right) => right.deaths - left.deaths)
+    .slice(0, 220)
+    .map((point) => ({ lon: point.lon, lat: point.lat }));
   return routes.map((route) => {
     const fromIso = iso2ForCountry(route.fromCountry);
     const toIso = iso2ForCountry(route.toCountry);
     const riskSources: AirRiskSource[] = [];
-    if ((fromIso && conflictCountries.has(fromIso)) || (toIso && conflictCountries.has(toIso))) {
+    if (
+      (fromIso && conflictCountries.has(fromIso))
+      || (toIso && conflictCountries.has(toIso))
+      || routeTouchesHotspot(route.path, conflictHotspots, 5.8)
+    ) {
       riskSources.push('conflict');
     }
-    if ((fromIso && weatherCountries.has(fromIso)) || (toIso && weatherCountries.has(toIso))) {
+    if (
+      (fromIso && weatherCountries.has(fromIso))
+      || (toIso && weatherCountries.has(toIso))
+      || routeTouchesHotspot(route.path, weatherHotspots, 4.8)
+    ) {
       riskSources.push('weather');
     }
     if (
@@ -892,7 +921,7 @@ function airRouteBudget(zoom: number, lens: AirLensMode, region: AirFocusRegion)
   if (region !== 'global') return zoom < 2.4 ? 180 : 260;
   if (lens === 'watch') return zoom < 2.3 ? 80 : 120;
   if (lens === 'trunk') return zoom < 2.3 ? 110 : 170;
-  return zoom < 2.1 ? 210 : 300;
+  return zoom < 2.1 ? 280 : 420;
 }
 
 function buildCountryRisks(points: ConflictMapPoint[]): CountryRisk[] {
@@ -1413,10 +1442,9 @@ function buildWeatherDeckLayers({
     .filter((point) => !clusterMemberIds.has(point.id) || point.id === selectedConflictId);
 
   const routeColor = (route: AirRoutePath, alpha: number): [number, number, number, number] => {
-    if (route.status === 'watch' || route.riskScore >= 55) return [255, 204, 82, alpha];
-    if (route.layer === 'trunk') return [86, 230, 255, alpha];
-    if (route.layer === 'international') return [64, 165, 255, alpha];
-    return [103, 136, 168, Math.max(16, Math.round(alpha * 0.72))];
+    if (route.layer === 'trunk') return [94, 238, 255, alpha];
+    if (route.layer === 'international') return [68, 176, 255, Math.max(24, Math.round(alpha * 0.92))];
+    return [98, 126, 156, Math.max(18, Math.round(alpha * 0.68))];
   };
 
   const routeWidth = (route: AirRoutePath, base: number) => {
@@ -2048,8 +2076,8 @@ export function WeatherDeckMap({
   const baseAirRoutes = useMemo(() => showAirRoutes ? normalizeAirRoutes(transportPayload) : [], [showAirRoutes, transportPayload]);
   const allAirHubs = useMemo(() => showAirRoutes ? normalizeAirHubs(transportPayload) : [], [showAirRoutes, transportPayload]);
   const allAirRoutes = useMemo(
-    () => showAirRoutes ? enrichedAirRoutes(baseAirRoutes, points, countryRisks) : [],
-    [baseAirRoutes, countryRisks, points, showAirRoutes],
+    () => showAirRoutes ? enrichedAirRoutes(baseAirRoutes, points, conflictPoints) : [],
+    [baseAirRoutes, conflictPoints, points, showAirRoutes],
   );
   const watchRoutes = useMemo(
     () => allAirRoutes.filter((route) => route.riskSources.length > 0 && airRouteMatchesRegion(route, airFocusRegion)),
