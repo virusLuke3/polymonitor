@@ -40,6 +40,7 @@ DEFAULT_COVERAGE_REFRESH_SECONDS = 300
 DEFAULT_RECONNECT_SECONDS = 5
 DEFAULT_SUBSCRIPTION_BATCH_SIZE = 200
 DEFAULT_FALLBACK_SAMPLE_INTERVAL_SECONDS = 60
+DEFAULT_BOOTSTRAP_MARKET_LIMIT = 24
 DEFAULT_LOCK_NAME = "local-orderbook-websocket.worker.lock"
 
 
@@ -122,6 +123,7 @@ class LocalOrderBookWebsocketWatcher:
         topics: str = DEFAULT_COVERAGE_TOPICS,
         coverage_refresh_seconds: int = DEFAULT_COVERAGE_REFRESH_SECONDS,
         subscription_batch_size: int = DEFAULT_SUBSCRIPTION_BATCH_SIZE,
+        bootstrap_market_limit: int = DEFAULT_BOOTSTRAP_MARKET_LIMIT,
         persist: bool = True,
         bootstrap: bool = True,
         logger: Any | None = None,
@@ -137,6 +139,7 @@ class LocalOrderBookWebsocketWatcher:
         self.topics = str(topics or DEFAULT_COVERAGE_TOPICS)
         self.coverage_refresh_seconds = max(30, int(coverage_refresh_seconds or DEFAULT_COVERAGE_REFRESH_SECONDS))
         self.subscription_batch_size = max(1, min(int(subscription_batch_size or DEFAULT_SUBSCRIPTION_BATCH_SIZE), 500))
+        self.bootstrap_market_limit = max(0, int(bootstrap_market_limit if bootstrap_market_limit is not None else DEFAULT_BOOTSTRAP_MARKET_LIMIT))
         self.persist = bool(persist)
         self.bootstrap = bool(bootstrap)
         self.logger = logger or _Logger()
@@ -208,7 +211,7 @@ class LocalOrderBookWebsocketWatcher:
 
     async def run_connection(self, *, run_seconds: int | None = None) -> None:
         targets = self.refresh_targets()
-        self.bootstrap_targets(targets, force_refresh=True)
+        self.bootstrap_targets(targets[: self.bootstrap_market_limit] if self.bootstrap_market_limit else [], force_refresh=True)
         deadline = time.monotonic() + run_seconds if run_seconds and run_seconds > 0 else None
         last_refresh_at = time.monotonic()
         async with websockets.connect(self.ws_url, ping_interval=None, close_timeout=10, max_queue=1000) as websocket:
@@ -372,6 +375,7 @@ def start_background_worker(ctx: dict[str, Any], *, lock_dir: str | Path | None 
                 limit=int(os.environ.get("POLYDATA_LOB_COVERAGE_LIMIT", DEFAULT_COVERAGE_LIMIT) or DEFAULT_COVERAGE_LIMIT),
                 topics=os.environ.get("POLYDATA_LOB_COVERAGE_TOPICS", DEFAULT_COVERAGE_TOPICS),
                 coverage_refresh_seconds=int(os.environ.get("POLYDATA_LOB_COVERAGE_REFRESH_SECONDS", DEFAULT_COVERAGE_REFRESH_SECONDS) or DEFAULT_COVERAGE_REFRESH_SECONDS),
+                bootstrap_market_limit=int(os.environ.get("POLYDATA_LOB_BOOTSTRAP_MARKET_LIMIT", DEFAULT_BOOTSTRAP_MARKET_LIMIT) or DEFAULT_BOOTSTRAP_MARKET_LIMIT),
                 persist=str(os.environ.get("POLYDATA_LOB_WS_PERSIST_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"},
                 logger=logger,
             )
@@ -420,6 +424,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=int(os.environ.get("POLYDATA_LOB_COVERAGE_LIMIT", DEFAULT_COVERAGE_LIMIT) or DEFAULT_COVERAGE_LIMIT))
     parser.add_argument("--topics", default=os.environ.get("POLYDATA_LOB_COVERAGE_TOPICS", DEFAULT_COVERAGE_TOPICS))
     parser.add_argument("--coverage-refresh-seconds", type=int, default=int(os.environ.get("POLYDATA_LOB_COVERAGE_REFRESH_SECONDS", DEFAULT_COVERAGE_REFRESH_SECONDS) or DEFAULT_COVERAGE_REFRESH_SECONDS))
+    parser.add_argument("--bootstrap-limit", type=int, default=int(os.environ.get("POLYDATA_LOB_BOOTSTRAP_MARKET_LIMIT", DEFAULT_BOOTSTRAP_MARKET_LIMIT) or DEFAULT_BOOTSTRAP_MARKET_LIMIT))
     parser.add_argument("--run-seconds", type=int, default=0)
     parser.add_argument("--bootstrap-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Apply state in memory but skip database persistence")
@@ -434,10 +439,11 @@ def main() -> int:
         limit=args.limit,
         topics=args.topics,
         coverage_refresh_seconds=args.coverage_refresh_seconds,
+        bootstrap_market_limit=args.bootstrap_limit,
         persist=not args.dry_run,
     )
     targets = watcher.refresh_targets()
-    watcher.bootstrap_targets(targets, force_refresh=True)
+    watcher.bootstrap_targets(targets[: args.bootstrap_limit] if args.bootstrap_limit else [], force_refresh=True)
     if args.bootstrap_only:
         return 0
     asyncio.run(watcher.run_connection(run_seconds=args.run_seconds if args.run_seconds > 0 else None))
