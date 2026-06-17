@@ -803,7 +803,7 @@ function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | nu
 
 function routeTouchesHotspot(path: [number, number][], hotspots: Array<{ lon: number; lat: number }>, radius: number) {
   if (!hotspots.length || !path.length) return false;
-  const step = Math.max(1, Math.floor(path.length / 7));
+  const step = Math.max(1, Math.floor(path.length / 12));
   for (let index = 0; index < path.length; index += step) {
     const point = path[index];
     if (!point) continue;
@@ -833,7 +833,7 @@ function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], co
   const conflictHotspots = conflicts
     .filter((point) => point.deaths > 0 || point.tone !== 'unknown')
     .sort((left, right) => right.deaths - left.deaths)
-    .slice(0, 220)
+    .slice(0, 320)
     .map((point) => ({ lon: point.lon, lat: point.lat }));
   return routes.map((route) => {
     const fromIso = iso2ForCountry(route.fromCountry);
@@ -842,7 +842,7 @@ function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], co
     if (
       (fromIso && conflictCountries.has(fromIso))
       || (toIso && conflictCountries.has(toIso))
-      || routeTouchesHotspot(route.path, conflictHotspots, 5.8)
+      || routeTouchesHotspot(route.path, conflictHotspots, 8.8)
     ) {
       riskSources.push('conflict');
     }
