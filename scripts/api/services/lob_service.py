@@ -647,12 +647,12 @@ def get_lob_coverage_targets_payload(ctx: dict, *, limit: int = 250, topics: str
               AND NOT COALESCE(mss.is_trading_closed, FALSE)
               AND NOT COALESCE(mss.is_resolved, FALSE)
               AND (
-                LOWER(COALESCE(m.category, '')) SIMILAR TO '%(worldcup|world cup|crypto|politic|election|geopolitic|sports)%'
-                OR LOWER(COALESCE(m.slug, '')) SIMILAR TO '%(worldcup|world-cup|fifa|crypto|bitcoin|ethereum|election|trump|politic)%'
-                OR LOWER(COALESCE(m.title, '')) SIMILAR TO '%(world cup|fifa|crypto|bitcoin|ethereum|election|trump|politic|president|senate|congress)%'
-                OR LOWER(COALESCE(m.event_slug, '')) SIMILAR TO '%(worldcup|world-cup|fifa|crypto|bitcoin|ethereum|election|trump|politic)%'
-                OR LOWER(COALESCE(m.event_title, '')) SIMILAR TO '%(world cup|fifa|crypto|bitcoin|ethereum|election|trump|politic|president)%'
-                OR LOWER(COALESCE(CAST(m.tags AS TEXT), '')) SIMILAR TO '%(worldcup|world cup|fifa|crypto|bitcoin|ethereum|election|trump|politic|geopolitic)%'
+                LOWER(COALESCE(m.category, '')) SIMILAR TO '%%(worldcup|world cup|crypto|politic|election|geopolitic|sports)%%'
+                OR LOWER(COALESCE(m.slug, '')) SIMILAR TO '%%(worldcup|world-cup|fifa|crypto|bitcoin|ethereum|election|trump|politic)%%'
+                OR LOWER(COALESCE(m.title, '')) SIMILAR TO '%%(world cup|fifa|crypto|bitcoin|ethereum|election|trump|politic|president|senate|congress)%%'
+                OR LOWER(COALESCE(m.event_slug, '')) SIMILAR TO '%%(worldcup|world-cup|fifa|crypto|bitcoin|ethereum|election|trump|politic)%%'
+                OR LOWER(COALESCE(m.event_title, '')) SIMILAR TO '%%(world cup|fifa|crypto|bitcoin|ethereum|election|trump|politic|president)%%'
+                OR LOWER(COALESCE(CAST(m.tags AS TEXT), '')) SIMILAR TO '%%(worldcup|world cup|fifa|crypto|bitcoin|ethereum|election|trump|politic|geopolitic)%%'
               )
             ORDER BY COALESCE(mls.volume_24h, 0) DESC, COALESCE(mls.trade_count_24h, 0) DESC, activity_at DESC NULLS LAST
             LIMIT ?
