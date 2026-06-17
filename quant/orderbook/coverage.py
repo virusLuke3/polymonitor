@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
@@ -64,7 +64,16 @@ TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 WORLDCUP_EXCLUDE_KEYWORDS: tuple[str, ...] = ("icc", "t20", "cricket")
+CRYPTO_ASSET_KEYWORDS: tuple[str, ...] = ("bitcoin", "btc", "ethereum", "eth")
+CRYPTO_TARGET_KEYWORDS: tuple[str, ...] = (" above ", " hit ", "will hit", "price will", "what price", "when will")
+CRYPTO_EXCLUDE_KEYWORDS: tuple[str, ...] = ("up or down", "updown", " 5m", "-5m", "5-minute", " 15m", "-15m", "15-minute")
 TOPIC_BASE_SCORE: dict[str, int] = {"worldcup": 3200, "crypto": 2800, "politics": 2600}
+
+
+@dataclass(frozen=True)
+class CoverageSelectionContext:
+    active_worldcup_market_ids: frozenset[int] = field(default_factory=frozenset)
+    active_worldcup_terms: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -105,18 +114,23 @@ class OrderBookCoverageTarget:
         }
 
 
-def classify_priority_topic(row: dict[str, Any]) -> str | None:
+def classify_priority_topic(row: dict[str, Any], *, context: CoverageSelectionContext | None = None) -> str | None:
     text = _row_search_text(row)
     for topic in PRIORITY_TOPICS:
-        if topic == "worldcup" and any(keyword in text for keyword in WORLDCUP_EXCLUDE_KEYWORDS):
+        if topic == "worldcup":
+            if any(keyword in text for keyword in WORLDCUP_EXCLUDE_KEYWORDS):
+                continue
+            if not _is_active_worldcup_market(row, text, context):
+                continue
+        if topic == "crypto" and not _is_trackable_crypto_market(text):
             continue
         if any(keyword in text for keyword in TOPIC_KEYWORDS[topic]):
             return topic
     return None
 
 
-def build_coverage_target(row: dict[str, Any]) -> OrderBookCoverageTarget | None:
-    topic = classify_priority_topic(row)
+def build_coverage_target(row: dict[str, Any], *, context: CoverageSelectionContext | None = None) -> OrderBookCoverageTarget | None:
+    topic = classify_priority_topic(row, context=context)
     if topic is None:
         return None
     market_id = _int_or_none(row.get("market_id") or row.get("id"))
@@ -154,12 +168,13 @@ def select_orderbook_coverage_targets(
     topic_limits: dict[str, int] | None = None,
     global_limit: int = DEFAULT_GLOBAL_LIMIT,
     topics: Iterable[str] | None = None,
+    context: CoverageSelectionContext | None = None,
 ) -> list[OrderBookCoverageTarget]:
     topic_allow = {topic for topic in (topics or PRIORITY_TOPICS) if topic in PRIORITY_TOPICS}
     limits = {**DEFAULT_TOPIC_LIMITS, **(topic_limits or {})}
     buckets: dict[str, list[OrderBookCoverageTarget]] = {topic: [] for topic in topic_allow}
     for row in rows:
-        target = build_coverage_target(row)
+        target = build_coverage_target(row, context=context)
         if target is None or target.topic not in topic_allow:
             continue
         buckets[target.topic].append(target)
@@ -214,6 +229,26 @@ def summarize_coverage_targets(targets: Iterable[OrderBookCoverageTarget]) -> di
     summary["marketCount"] = len(target_list)
     summary["tokenCount"] = len(target_list) * 2
     return summary
+
+
+def _is_active_worldcup_market(row: dict[str, Any], text: str, context: CoverageSelectionContext | None) -> bool:
+    if context is None:
+        return False
+    market_id = _int_or_none(row.get("market_id") or row.get("id"))
+    if market_id is not None and market_id in context.active_worldcup_market_ids:
+        return True
+    if " vs " not in text and "spread:" not in text and "total" not in text:
+        return False
+    return any(term and term in text for term in context.active_worldcup_terms)
+
+
+def _is_trackable_crypto_market(text: str) -> bool:
+    padded = f" {text} "
+    if any(keyword in padded for keyword in CRYPTO_EXCLUDE_KEYWORDS):
+        return False
+    if not any(keyword in padded for keyword in CRYPTO_ASSET_KEYWORDS):
+        return False
+    return any(keyword in padded for keyword in CRYPTO_TARGET_KEYWORDS)
 
 
 def _sampling_policy(volume_24h: Decimal, trade_count_24h: int) -> tuple[str, int, int]:

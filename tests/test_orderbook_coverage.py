@@ -7,29 +7,35 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from quant.orderbook.coverage import build_coverage_target, classify_priority_topic, select_orderbook_coverage_targets
+from quant.orderbook.coverage import CoverageSelectionContext, build_coverage_target, classify_priority_topic, select_orderbook_coverage_targets
 
 
 def test_classifies_priority_topics_from_category_tags_and_title():
-    assert classify_priority_topic({"title": "2026 FIFA World Cup winner", "tags": ["sports"]}) == "worldcup"
+    assert classify_priority_topic({"title": "2026 FIFA World Cup winner", "tags": ["sports"]}) is None
+    assert classify_priority_topic(
+        {"market_id": 44, "title": "Mexico vs South Africa - FIFA World Cup 2026 winner", "tags": ["sports"]},
+        context=CoverageSelectionContext(frozenset({44}), frozenset()),
+    ) == "worldcup"
     assert classify_priority_topic({"category": "crypto", "title": "Bitcoin above 100k?"}) == "crypto"
+    assert classify_priority_topic({"category": "crypto", "title": "BTC Up or Down 5m"}) is None
+    assert classify_priority_topic({"category": "crypto", "title": "Will Solana hit $200?"}) is None
     assert classify_priority_topic({"tags": '["politics", "election"]', "title": "Senate control?"}) == "politics"
     assert classify_priority_topic({"category": "weather", "title": "Rain in NYC?"}) is None
     assert classify_priority_topic({"title": "ICC T20 World Cup, Women: India vs Pakistan"}) is None
 
 
-def test_build_coverage_target_assigns_hot_sampling_for_active_market():
+def test_build_coverage_target_assigns_hot_sampling_for_active_worldcup_match():
     target = build_coverage_target({
         "market_id": 101,
-        "market_slug": "2026-fifa-world-cup-winner",
-        "market_title": "2026 FIFA World Cup winner",
+        "market_slug": "mexico-vs-south-africa-fifa-world-cup-2026",
+        "market_title": "Mexico vs South Africa - FIFA World Cup 2026 winner",
         "category": "sports",
         "tags": ["world-cup", "soccer"],
         "yes_token_id": "yes",
         "no_token_id": "no",
         "volume_24h": "60000",
         "trade_count_24h": 220,
-    })
+    }, context=CoverageSelectionContext(frozenset({101}), frozenset()))
 
     assert target is not None
     assert target.topic == "worldcup"
@@ -43,7 +49,7 @@ def test_select_coverage_targets_respects_topic_filter_and_limits():
     rows = [
         {
             "market_id": 1,
-            "market_title": "Bitcoin high",
+            "market_title": "Bitcoin above $100,000?",
             "category": "crypto",
             "yes_token_id": "y1",
             "no_token_id": "n1",
@@ -95,3 +101,48 @@ def test_select_coverage_targets_fairly_mixes_requested_topics():
     targets = select_orderbook_coverage_targets(rows, global_limit=2, topics=["crypto", "politics"])
 
     assert [target.topic for target in targets] == ["crypto", "politics"]
+
+
+def test_select_coverage_targets_uses_active_worldcup_context_and_crypto_shape():
+    rows = [
+        {
+            "market_id": 10,
+            "market_title": "FIFA World Cup 2026 winner",
+            "category": "sports",
+            "yes_token_id": "y10",
+            "no_token_id": "n10",
+            "volume_24h": "100000",
+        },
+        {
+            "market_id": 11,
+            "market_title": "Mexico vs South Africa - FIFA World Cup 2026 winner",
+            "category": "sports",
+            "yes_token_id": "y11",
+            "no_token_id": "n11",
+            "volume_24h": "50000",
+        },
+        {
+            "market_id": 12,
+            "market_title": "BTC Up or Down 5m",
+            "category": "crypto",
+            "yes_token_id": "y12",
+            "no_token_id": "n12",
+            "volume_24h": "999999",
+        },
+        {
+            "market_id": 13,
+            "market_title": "What price will Ethereum hit in June?",
+            "category": "crypto",
+            "yes_token_id": "y13",
+            "no_token_id": "n13",
+            "volume_24h": "1000",
+        },
+    ]
+
+    targets = select_orderbook_coverage_targets(
+        rows,
+        global_limit=10,
+        context=CoverageSelectionContext(frozenset({11}), frozenset({"mexico vs south africa"})),
+    )
+
+    assert [target.market_id for target in targets] == [11, 13]

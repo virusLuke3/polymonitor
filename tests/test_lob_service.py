@@ -183,6 +183,18 @@ def test_lob_coverage_targets_payload_prioritizes_requested_topics():
     ]
     ctx = {
         "query_all": lambda sql, params=(): rows,
+        "get_world_cup_match_ops_snapshot": lambda limit=48: {
+            "items": [
+                {
+                    "matchStatus": "live",
+                    "minutesUntilKickoff": -35,
+                    "homeTeam": "Mexico",
+                    "awayTeam": "South Africa",
+                    "relatedPolymarketMarketIds": [11],
+                    "markets": [{"marketId": 11}],
+                }
+            ]
+        },
         "app": type("FakeApp", (), {"logger": FakeLogger()})(),
     }
 

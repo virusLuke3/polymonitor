@@ -19,7 +19,12 @@ except Exception:  # pragma: no cover - requests is an API dependency in normal 
 from quant.core.db import PostgresSettings, postgres_connection
 from quant.core.schema import create_schema
 from quant.orderbook import TokenBookIdentity, normalize_rest_book
-from quant.orderbook.coverage import PRIORITY_TOPICS, select_orderbook_coverage_targets, summarize_coverage_targets
+from quant.orderbook.coverage import (
+    CoverageSelectionContext,
+    PRIORITY_TOPICS,
+    select_orderbook_coverage_targets,
+    summarize_coverage_targets,
+)
 from quant.orderbook.registry import OrderBookRegistry
 
 
@@ -29,6 +34,8 @@ BOOK_LEVEL_LIMIT = 12
 DEFAULT_LOB_CACHE_TTL_SECONDS = 3
 DEFAULT_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS = 300
 LOB_COVERAGE_RAW_ROW_LIMIT = 1200
+WORLDCUP_ACTIVE_MATCH_WINDOW_BEFORE_MINUTES = 120
+WORLDCUP_ACTIVE_MATCH_WINDOW_AFTER_MINUTES = 180
 
 
 class LocalOrderBookRuntimeManager:
@@ -659,12 +666,17 @@ def get_lob_coverage_targets_payload(ctx: dict, *, limit: int = 250, topics: str
             """,
             (LOB_COVERAGE_RAW_ROW_LIMIT,),
         )
-        targets = select_orderbook_coverage_targets(rows, global_limit=limit, topics=topic_list)
+        worldcup_context, worldcup_context_payload = _build_worldcup_selection_context(ctx)
+        targets = select_orderbook_coverage_targets(rows, global_limit=limit, topics=topic_list, context=worldcup_context)
         payload_targets = [target.as_payload() for target in targets]
         summary = summarize_coverage_targets(targets)
         return {
             "source": "local-orderbook-coverage-policy",
             "priorityTopics": topic_list or list(PRIORITY_TOPICS),
+            "selectionContext": {
+                "worldcup": worldcup_context_payload,
+                "crypto": {"assets": ["BTC", "ETH"], "patterns": ["above", "hit"], "excluded": ["up-or-down", "5m", "15m"]},
+            },
             "count": len(payload_targets),
             "summary": summary,
             "storagePolicy": {
@@ -691,6 +703,79 @@ def _parse_coverage_topics(value: str | list[str] | tuple[str, ...]) -> list[str
         if topic in PRIORITY_TOPICS and topic not in topics:
             topics.append(topic)
     return topics
+
+
+def _build_worldcup_selection_context(ctx: dict) -> tuple[CoverageSelectionContext, Dict[str, Any]]:
+    getter = ctx.get("get_world_cup_match_ops_snapshot")
+    if not callable(getter):
+        return CoverageSelectionContext(), {"activeMatchCount": 0, "activeMarketIdCount": 0, "mode": "unavailable"}
+    try:
+        payload = getter(limit=48)
+    except Exception as exc:
+        logger = ctx.get("app").logger if ctx.get("app") else None
+        if logger:
+            logger.warning("worldcup match-ops unavailable for LOB coverage context: %s", exc)
+        return CoverageSelectionContext(), {"activeMatchCount": 0, "activeMarketIdCount": 0, "mode": "error"}
+    items = [item for item in (payload or {}).get("items") or [] if isinstance(item, dict)]
+    active_items = [item for item in items if _is_active_worldcup_match_item(item)]
+    market_ids: set[int] = set()
+    terms: set[str] = set()
+    for item in active_items:
+        for value in item.get("relatedPolymarketMarketIds") or []:
+            parsed = _int_or_none(value)
+            if parsed is not None:
+                market_ids.add(parsed)
+        for market in item.get("markets") or []:
+            if not isinstance(market, dict):
+                continue
+            parsed = _int_or_none(market.get("marketId") or market.get("id"))
+            if parsed is not None:
+                market_ids.add(parsed)
+        home = _coverage_term(item.get("homeTeam"))
+        away = _coverage_term(item.get("awayTeam"))
+        entity = _coverage_term(item.get("entity"))
+        for term in (home, away, entity):
+            if term:
+                terms.add(term)
+        if home and away:
+            terms.add(f"{home} vs {away}")
+            terms.add(f"{away} vs {home}")
+    return (
+        CoverageSelectionContext(frozenset(market_ids), frozenset(terms)),
+        {
+            "mode": "match-ops-active-window",
+            "activeMatchCount": len(active_items),
+            "activeMarketIdCount": len(market_ids),
+            "activeTerms": sorted(terms)[:24],
+            "windowMinutes": {
+                "beforeKickoff": WORLDCUP_ACTIVE_MATCH_WINDOW_BEFORE_MINUTES,
+                "afterKickoff": WORLDCUP_ACTIVE_MATCH_WINDOW_AFTER_MINUTES,
+            },
+        },
+    )
+
+
+def _is_active_worldcup_match_item(item: Dict[str, Any]) -> bool:
+    status = str(item.get("matchStatus") or item.get("status") or "").strip().lower()
+    if status in {"in", "live", "in_progress", "in-progress", "halftime", "half-time"}:
+        return True
+    minutes = _int_or_none(item.get("minutesUntilKickoff"))
+    if minutes is None:
+        return False
+    return -WORLDCUP_ACTIVE_MATCH_WINDOW_AFTER_MINUTES <= minutes <= WORLDCUP_ACTIVE_MATCH_WINDOW_BEFORE_MINUTES
+
+
+def _coverage_term(value: Any) -> str:
+    return str(value or "").strip().lower().replace("_", "-")
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return int(float(str(value)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _int_clamped(value: Any, *, default: int, minimum: int, maximum: int) -> int:
