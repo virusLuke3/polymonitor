@@ -145,6 +145,8 @@ type AirRoutePath = {
   airline: string;
   layer: 'trunk' | 'international' | 'regional';
   riskSources: AirRiskSource[];
+  weatherAnchors: number[];
+  conflictAnchors: number[];
 };
 
 type AirHubPoint = {
@@ -737,6 +739,46 @@ function pointAlongPath(path: [number, number][], progress: number): [number, nu
   ];
 }
 
+function endpointRiskAnchors(fromMatch: boolean, toMatch: boolean) {
+  if (fromMatch && toMatch) return [0.24, 0.76];
+  if (fromMatch) return [0.22];
+  if (toMatch) return [0.78];
+  return [];
+}
+
+function routeHotspotProgresses(path: [number, number][], hotspots: Array<{ lon: number; lat: number }>, radius: number, limit = 3) {
+  if (!hotspots.length || !path.length) return [];
+  const matches: Array<{ progress: number; distance: number }> = [];
+  for (let index = 0; index < path.length; index += 1) {
+    const point = path[index];
+    if (!point) continue;
+    const [lon, lat] = point;
+    const latScale = Math.max(0.42, Math.cos((lat * Math.PI) / 180));
+    let bestDistance = Infinity;
+    for (const hotspot of hotspots) {
+      const dx = (hotspot.lon - lon) * latScale;
+      const dy = hotspot.lat - lat;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance <= radius && distance < bestDistance) bestDistance = distance;
+    }
+    if (bestDistance !== Infinity) {
+      matches.push({
+        progress: index / Math.max(1, path.length - 1),
+        distance: bestDistance,
+      });
+    }
+  }
+  return matches
+    .sort((left, right) => left.distance - right.distance)
+    .reduce<number[]>((anchors, match) => {
+      if (anchors.some((anchor) => Math.abs(anchor - match.progress) < 0.08)) return anchors;
+      anchors.push(match.progress);
+      return anchors;
+    }, [])
+    .slice(0, limit)
+    .sort((left, right) => left - right);
+}
+
 function routeMotionSource(route: AirRoutePath, lens: AirLensMode, riskSource: AirRiskSource): Exclude<AirRiskSource, 'all'> | null {
   if (lens === 'watch' && riskSource !== 'all') {
     return route.riskSources.includes(riskSource) ? riskSource : null;
@@ -755,52 +797,65 @@ function buildAirMotionPoints(routes: AirRoutePath[], animationTime: number, len
     const seed = hashUnit(`air-motion:${route.id}`);
     const emphasis = Math.max(0.72, Math.min(1.45, 0.72 + route.trafficScore / 120 + route.riskScore / 220));
     if (source === 'conflict') {
-      const anchor = 0.14 + seed * 0.72;
-      const pulse = 0.5 + 0.5 * Math.sin(animationTime * 5.4 + seed * Math.PI * 4);
-      const [lon, lat] = pointAlongPath(route.path, anchor);
-      points.push({
-        id: `${route.id}:conflict`,
-        lon,
-        lat,
-        routeId: route.id,
-        source,
-        pulse,
-        progress: anchor,
-        emphasis,
-      });
-      return;
-    }
-    if (source === 'weather') {
-      const speed = 0.052 + seed * 0.026;
-      [0, 0.38].forEach((offset, index) => {
-        const progress = (seed + offset + animationTime * speed) % 1;
-        const pulse = 0.58 + 0.42 * Math.sin(animationTime * 2.4 + (seed + index) * Math.PI * 3);
-        const [lon, lat] = pointAlongPath(route.path, progress);
+      const anchors = route.conflictAnchors.length ? route.conflictAnchors.slice(0, 3) : [0.14 + seed * 0.72];
+      anchors.forEach((anchor, index) => {
+        const pulse = 0.5 + 0.5 * Math.sin(animationTime * 5.4 + (seed + index * 0.17) * Math.PI * 4);
+        const [lon, lat] = pointAlongPath(route.path, anchor);
         points.push({
-          id: `${route.id}:weather:${index}`,
+          id: `${route.id}:conflict:${index}`,
           lon,
           lat,
           routeId: route.id,
           source,
           pulse,
-          progress,
-          emphasis,
+          progress: anchor,
+          emphasis: emphasis + index * 0.08,
         });
       });
       return;
     }
-    const progress = (seed + animationTime * (0.024 + seed * 0.008)) % 1;
-    const pulse = 0.72 + 0.12 * Math.sin(animationTime * 1.2 + seed * Math.PI * 2);
-    const [lon, lat] = pointAlongPath(route.path, progress);
-    points.push({
-      id: `${route.id}:corridor`,
-      lon,
-      lat,
-      routeId: route.id,
-      source,
-      pulse,
-      progress,
-      emphasis,
+    if (source === 'weather') {
+      const anchors = route.weatherAnchors.length ? route.weatherAnchors.slice(0, 2) : [0.32, 0.68];
+      anchors.forEach((anchor, anchorIndex) => {
+        const drift = 0.14 + hashUnit(`${route.id}:weather-drift:${anchorIndex}`) * 0.12;
+        const forwardSpeed = 0.048 + seed * 0.022;
+        const reverseSpeed = 0.038 + seed * 0.016;
+        [
+          { direction: 1, speed: forwardSpeed },
+          { direction: -1, speed: reverseSpeed },
+        ].forEach((flow, index) => {
+          const progress = (anchor + flow.direction * animationTime * flow.speed + (index === 0 ? drift : -drift) + 1) % 1;
+          const pulse = 0.58 + 0.42 * Math.sin(animationTime * (2.2 + index * 0.35) + (seed + anchorIndex + index) * Math.PI * 3);
+          const [lon, lat] = pointAlongPath(route.path, progress);
+          points.push({
+            id: `${route.id}:weather:${anchorIndex}:${index}`,
+            lon,
+            lat,
+            routeId: route.id,
+            source,
+            pulse,
+            progress,
+            emphasis: emphasis + anchorIndex * 0.06,
+          });
+        });
+      });
+      return;
+    }
+    const anchors = route.layer === 'trunk' ? [0.24, 0.68] : [0.46];
+    anchors.forEach((anchor, index) => {
+      const progress = (anchor + seed * 0.16 + animationTime * (0.018 + seed * 0.007)) % 1;
+      const pulse = 0.72 + 0.12 * Math.sin(animationTime * 1.2 + (seed + index * 0.13) * Math.PI * 2);
+      const [lon, lat] = pointAlongPath(route.path, progress);
+      points.push({
+        id: `${route.id}:corridor:${index}`,
+        lon,
+        lat,
+        routeId: route.id,
+        source,
+        pulse,
+        progress,
+        emphasis,
+      });
     });
   });
   return points;
@@ -832,6 +887,8 @@ function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | nu
         ? route.layer
         : ((numberValue(route.trafficScore) ?? 0) >= 70 ? 'trunk' : 'regional'),
       riskSources: [],
+      weatherAnchors: [],
+      conflictAnchors: [],
     }));
   });
 }
@@ -881,20 +938,6 @@ function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | nu
   });
 }
 
-function routeTouchesHotspot(path: [number, number][], hotspots: Array<{ lon: number; lat: number }>, radius: number) {
-  if (!hotspots.length || !path.length) return false;
-  const step = Math.max(1, Math.floor(path.length / 12));
-  for (let index = 0; index < path.length; index += step) {
-    const point = path[index];
-    if (!point) continue;
-    const [lon, lat] = point;
-    for (const hotspot of hotspots) {
-      if (Math.abs(hotspot.lon - lon) <= radius && Math.abs(hotspot.lat - lat) <= radius) return true;
-    }
-  }
-  return false;
-}
-
 function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], conflicts: ConflictMapPoint[]) {
   const weatherCountries = new Set(
     cities
@@ -918,19 +961,23 @@ function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], co
   return routes.map((route) => {
     const fromIso = iso2ForCountry(route.fromCountry);
     const toIso = iso2ForCountry(route.toCountry);
+    const fromConflictMatch = Boolean(fromIso && conflictCountries.has(fromIso));
+    const toConflictMatch = Boolean(toIso && conflictCountries.has(toIso));
+    const fromWeatherMatch = Boolean(fromIso && weatherCountries.has(fromIso));
+    const toWeatherMatch = Boolean(toIso && weatherCountries.has(toIso));
+    const conflictAnchors = Array.from(new Set([
+      ...endpointRiskAnchors(fromConflictMatch, toConflictMatch),
+      ...routeHotspotProgresses(route.path, conflictHotspots, 8.8, 3),
+    ])).sort((left, right) => left - right);
+    const weatherAnchors = Array.from(new Set([
+      ...endpointRiskAnchors(fromWeatherMatch, toWeatherMatch),
+      ...routeHotspotProgresses(route.path, weatherHotspots, 5.2, 3),
+    ])).sort((left, right) => left - right);
     const riskSources: AirRiskSource[] = [];
-    if (
-      (fromIso && conflictCountries.has(fromIso))
-      || (toIso && conflictCountries.has(toIso))
-      || routeTouchesHotspot(route.path, conflictHotspots, 8.8)
-    ) {
+    if (conflictAnchors.length) {
       riskSources.push('conflict');
     }
-    if (
-      (fromIso && weatherCountries.has(fromIso))
-      || (toIso && weatherCountries.has(toIso))
-      || routeTouchesHotspot(route.path, weatherHotspots, 4.8)
-    ) {
+    if (weatherAnchors.length) {
       riskSources.push('weather');
     }
     if (
@@ -942,7 +989,7 @@ function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], co
       riskSources.push('corridor');
     }
     if (!riskSources.length && route.riskScore >= 60) riskSources.push('corridor');
-    return { ...route, riskSources };
+    return { ...route, riskSources, weatherAnchors, conflictAnchors };
   });
 }
 
