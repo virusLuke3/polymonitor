@@ -348,6 +348,11 @@ def build_route_helpers() -> Dict[str, Any]:
             side=side,
             limit=limit,
         ),
+        "get_lob_coverage_targets_payload": lambda limit=250, topics="": lob_service.get_lob_coverage_targets_payload(
+            build_service_context(),
+            limit=limit,
+            topics=topics,
+        ),
         "get_snapshot_payload": get_snapshot_payload,
         "SNAPSHOT_STORE": SNAPSHOT_STORE,
         "get_suspicious_trades_snapshot": get_suspicious_trades_snapshot,
@@ -541,6 +546,11 @@ def build_service_context() -> Dict[str, Any]:
             token_id,
             side=side,
             limit=limit,
+        ),
+        "get_lob_coverage_targets_payload": lambda limit=250, topics="": lob_service.get_lob_coverage_targets_payload(
+            build_service_context(),
+            limit=limit,
+            topics=topics,
         ),
         "get_snapshot_payload": get_snapshot_payload,
         "get_shelter_rent_oer_pressure_snapshot": lambda limit=8: macro_cpi_panels_service.get_shelter_rent_oer_pressure_snapshot(build_service_context(), limit=limit),

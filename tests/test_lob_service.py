@@ -141,3 +141,56 @@ def test_unchanged_snapshot_min_interval_env(monkeypatch):
 
     monkeypatch.setenv("POLYDATA_LOB_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS", "bad")
     assert _unchanged_snapshot_min_interval_seconds() == 300
+
+
+def test_lob_coverage_targets_payload_prioritizes_requested_topics():
+    class FakeLogger:
+        def exception(self, *args, **kwargs):
+            raise AssertionError(args)
+
+    rows = [
+        {
+            "market_id": 11,
+            "market_slug": "2026-fifa-world-cup-winner",
+            "market_title": "2026 FIFA World Cup winner",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-wc",
+            "no_token_id": "no-wc",
+            "volume_24h": "70000",
+            "trade_count_24h": 250,
+        },
+        {
+            "market_id": 12,
+            "market_slug": "bitcoin-100k",
+            "market_title": "Bitcoin above 100k?",
+            "category": "crypto",
+            "tags": ["crypto", "bitcoin"],
+            "yes_token_id": "yes-btc",
+            "no_token_id": "no-btc",
+            "volume_24h": "15000",
+            "trade_count_24h": 40,
+        },
+        {
+            "market_id": 13,
+            "market_slug": "rain-nyc",
+            "market_title": "Rain in NYC?",
+            "category": "weather",
+            "tags": ["weather"],
+            "yes_token_id": "yes-rain",
+            "no_token_id": "no-rain",
+        },
+    ]
+    ctx = {
+        "query_all": lambda sql, params=(): rows,
+        "app": type("FakeApp", (), {"logger": FakeLogger()})(),
+    }
+
+    payload = lob_service.get_lob_coverage_targets_payload(ctx, limit=10, topics="worldcup,crypto")
+
+    assert payload["source"] == "local-orderbook-coverage-policy"
+    assert payload["summary"]["marketCount"] == 2
+    assert payload["summary"]["tokenCount"] == 4
+    assert [item["topic"] for item in payload["items"]] == ["worldcup", "crypto"]
+    assert payload["items"][0]["tier"] == "hot"
+    assert payload["items"][1]["sampleIntervalSeconds"] == 60

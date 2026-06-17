@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover - requests is an API dependency in normal 
 from quant.core.db import PostgresSettings, postgres_connection
 from quant.core.schema import create_schema
 from quant.orderbook import TokenBookIdentity, normalize_rest_book
+from quant.orderbook.coverage import PRIORITY_TOPICS, select_orderbook_coverage_targets, summarize_coverage_targets
 from quant.orderbook.registry import OrderBookRegistry
 
 
@@ -27,6 +28,7 @@ _SNAPSHOT_SCHEMA_LOCK = threading.Lock()
 BOOK_LEVEL_LIMIT = 12
 DEFAULT_LOB_CACHE_TTL_SECONDS = 3
 DEFAULT_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS = 300
+LOB_COVERAGE_RAW_ROW_LIMIT = 1200
 
 
 class LocalOrderBookRuntimeManager:
@@ -616,6 +618,87 @@ def get_lob_snapshots_by_token_payload(ctx: dict, token_id: str, *, side: str = 
     except Exception as exc:
         ctx["app"].logger.exception("lob snapshot history failed token_id=%s", token_id)
         return {"error": "LOB snapshot history unavailable", "detail": str(exc), "items": [], "count": 0, "_status": 502}
+
+
+def get_lob_coverage_targets_payload(ctx: dict, *, limit: int = 250, topics: str | list[str] | tuple[str, ...] = "") -> Dict[str, Any]:
+    limit = _int_clamped(limit, default=250, minimum=1, maximum=500)
+    topic_list = _parse_coverage_topics(topics)
+    try:
+        rows = ctx["query_all"](
+            """
+            SELECT
+                m.id AS market_id,
+                m.slug AS market_slug,
+                COALESCE(m.title, m.slug) AS market_title,
+                m.category,
+                m.tags,
+                m.yes_token_id,
+                m.no_token_id,
+                m.event_slug,
+                m.event_title,
+                COALESCE(mls.volume_24h, 0) AS volume_24h,
+                COALESCE(mls.trade_count_24h, 0) AS trade_count_24h,
+                COALESCE(mls.last_trade_at, mls.latest_trade_at, m.migrated_at, m.created_at) AS activity_at
+            FROM core.markets m
+            LEFT JOIN core.market_list_serving mls ON mls.market_id = m.id
+            LEFT JOIN core.market_status_snapshot mss ON mss.market_id = m.id
+            WHERE COALESCE(m.yes_token_id, '') <> ''
+              AND COALESCE(m.no_token_id, '') <> ''
+              AND NOT COALESCE(mss.is_trading_closed, FALSE)
+              AND NOT COALESCE(mss.is_resolved, FALSE)
+              AND (
+                LOWER(COALESCE(m.category, '')) SIMILAR TO '%(worldcup|world cup|crypto|politic|election|geopolitic|sports)%'
+                OR LOWER(COALESCE(m.slug, '')) SIMILAR TO '%(worldcup|world-cup|fifa|crypto|bitcoin|ethereum|election|trump|politic)%'
+                OR LOWER(COALESCE(m.title, '')) SIMILAR TO '%(world cup|fifa|crypto|bitcoin|ethereum|election|trump|politic|president|senate|congress)%'
+                OR LOWER(COALESCE(m.event_slug, '')) SIMILAR TO '%(worldcup|world-cup|fifa|crypto|bitcoin|ethereum|election|trump|politic)%'
+                OR LOWER(COALESCE(m.event_title, '')) SIMILAR TO '%(world cup|fifa|crypto|bitcoin|ethereum|election|trump|politic|president)%'
+                OR LOWER(COALESCE(CAST(m.tags AS TEXT), '')) SIMILAR TO '%(worldcup|world cup|fifa|crypto|bitcoin|ethereum|election|trump|politic|geopolitic)%'
+              )
+            ORDER BY COALESCE(mls.volume_24h, 0) DESC, COALESCE(mls.trade_count_24h, 0) DESC, activity_at DESC NULLS LAST
+            LIMIT ?
+            """,
+            (LOB_COVERAGE_RAW_ROW_LIMIT,),
+        )
+        targets = select_orderbook_coverage_targets(rows, global_limit=limit, topics=topic_list)
+        payload_targets = [target.as_payload() for target in targets]
+        summary = summarize_coverage_targets(targets)
+        return {
+            "source": "local-orderbook-coverage-policy",
+            "priorityTopics": topic_list or list(PRIORITY_TOPICS),
+            "count": len(payload_targets),
+            "summary": summary,
+            "storagePolicy": {
+                "hot": {"sampleIntervalSeconds": 15, "rawRetentionDays": 14},
+                "warm": {"sampleIntervalSeconds": 60, "rawRetentionDays": 14},
+                "cold": {"sampleIntervalSeconds": 300, "rawRetentionDays": 7},
+                "unchangedSnapshotMinIntervalSeconds": _unchanged_snapshot_min_interval_seconds(),
+            },
+            "items": payload_targets,
+        }
+    except Exception as exc:
+        ctx["app"].logger.exception("lob coverage target selection failed")
+        return {"error": "LOB coverage targets unavailable", "detail": str(exc), "items": [], "count": 0, "_status": 502}
+
+
+def _parse_coverage_topics(value: str | list[str] | tuple[str, ...]) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        raw_items = value
+    else:
+        raw_items = str(value or "").replace("|", ",").split(",")
+    topics = []
+    for item in raw_items:
+        topic = str(item or "").strip().lower()
+        if topic in PRIORITY_TOPICS and topic not in topics:
+            topics.append(topic)
+    return topics
+
+
+def _int_clamped(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value if value not in (None, "") else default)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(parsed, maximum))
 
 
 def _unavailable_lob_payload(market: Dict[str, Any], detail: str = "") -> Dict[str, Any]:
