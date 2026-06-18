@@ -1010,7 +1010,23 @@ def _opensky_live_status(ctx: dict) -> Dict[str, Any]:
     cached = _read_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, OPENSKY_CACHE_KEY, max_age_seconds=min_interval)
     if cached is not None:
         return cached
-    token, token_state = _opensky_access_token(ctx)
+    sampled_at = _utc_now_iso(ctx)
+    try:
+        token, token_state = _opensky_access_token(ctx)
+    except Exception as exc:
+        live_payload = {
+            "status": "error",
+            "aircraftCount": 0,
+            "aircraft": [],
+            "regions": [],
+            "errors": [{"stage": "auth", "error": exc.__class__.__name__}],
+            "sourceUrl": OPENSKY_DOC_URL,
+            "sampledAt": sampled_at,
+            "cacheTtlSeconds": min_interval,
+            "tokenState": "auth-error",
+        }
+        _store_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, OPENSKY_CACHE_KEY, live_payload, ttl_seconds=min_interval)
+        return live_payload
     if not token:
         return {
             "status": token_state.get("status") or "missing-key",
@@ -1020,7 +1036,6 @@ def _opensky_live_status(ctx: dict) -> Dict[str, Any]:
             "sourceUrl": OPENSKY_DOC_URL,
             "cacheTtlSeconds": min_interval,
         }
-    sampled_at = _utc_now_iso(ctx)
     headers = {"Authorization": f"Bearer {token}", "User-Agent": "polydata-global-transport/1.0"}
     region_rows = []
     aircraft: List[Dict[str, Any]] = []
@@ -1258,7 +1273,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
         "openflights": "fresh",
         "transitland": "fresh",
         "aisstream": "degraded" if ais_status.get("status") in {"missing-key", "error"} else ("stale" if ais_status.get("cacheMode") else "fresh"),
-        "opensky": "degraded" if opensky_status.get("status") in {"missing-key", "auth-error", "error"} else ("stale" if opensky_status.get("cacheMode") else "fresh"),
+        "opensky": "degraded" if opensky_status.get("status") in {"missing-key", "auth-error", "error", "partial"} else ("stale" if opensky_status.get("cacheMode") else "fresh"),
         "weatherRiskJoin": "frontend-runtime",
         "conflictRiskJoin": "frontend-runtime",
     }

@@ -251,6 +251,47 @@ def test_opensky_live_status_uses_oauth_and_state_cache(monkeypatch):
     assert calls == {"token": 1, "states": 1}
 
 
+def test_opensky_auth_failure_degrades_without_breaking_payload(tmp_path, monkeypatch):
+    openflights_root = tmp_path / "openflights"
+    _write_openflights_fixture(openflights_root)
+    monkeypatch.setenv("POLYDATA_OPENFLIGHTS_ROOT", str(openflights_root))
+    monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
+    monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
+    monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("OPENSKY_CLIENT_ID", "client-id")
+    monkeypatch.setenv("OPENSKY_CLIENT_SECRET", "client-secret")
+
+    cache = {}
+
+    def fail_token(ctx: dict) -> tuple[str, dict]:
+        raise TimeoutError("opensky auth timeout")
+
+    def http_text_get(url: str, **_: object) -> str:
+        assert url == "https://example.test/transitland.dmfr.json"
+        return json.dumps(TRANSITLAND)
+
+    monkeypatch.setattr(global_transport_shipping_service, "_opensky_access_token", fail_token)
+    payload = global_transport_shipping_service.build_global_transport_shipping_payload(
+        {
+            "http_text_get": http_text_get,
+            "utc_now_iso": lambda: "2026-06-16T01:00:00Z",
+            "search_markets": lambda query, limit=3: [],
+            "get_cached_json": lambda namespace, key: cache.get((namespace, key)),
+            "set_cached_json": lambda namespace, key, value, ttl: cache.__setitem__((namespace, key), value),
+        },
+        limit=8,
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["summary"]["openSkyStatus"] == "error"
+    assert payload["summary"]["liveFlightSamples"] == 0
+    assert payload["sourceHealth"]["opensky"] == "degraded"
+    assert payload["sources"]["opensky"]["status"] == "error"
+    assert payload["aviation"]["mode"] == "seeded-route-graph"
+    assert payload["aviation"]["liveFlights"] == []
+    assert cache[(global_transport_shipping_service.OPENSKY_SNAPSHOT_NAMESPACE, global_transport_shipping_service.OPENSKY_CACHE_KEY)]["status"] == "error"
+
+
 def test_global_transport_shipping_runtime_panel_registered():
     panel = get_panel_by_id("global-transport-shipping")
 
