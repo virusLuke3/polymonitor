@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import hashlib
+import json
+import os
+from pathlib import Path
 import time
 from typing import Any, Literal
 
@@ -38,6 +42,9 @@ SUPPORTED_UNIVERSES = (
     "fifa_world_cup_2026",
     "watchlist_slugs",
 )
+
+UNIVERSE_CACHE_VERSION = "replay_universe_v1"
+DEFAULT_UNIVERSE_CACHE_TTL_SECONDS = 3600
 
 
 @dataclass(frozen=True)
@@ -115,6 +122,15 @@ def universe_spec_from_payload(payload: dict[str, Any] | None) -> UniverseSpec:
 
 
 def select_replay_universe(spec: UniverseSpec) -> list[ResolvedMarketCandidate]:
+    cached = _read_universe_cache(spec)
+    if cached is not None:
+        return cached
+    candidates = _select_replay_universe_uncached(spec)
+    _write_universe_cache(spec, candidates)
+    return candidates
+
+
+def _select_replay_universe_uncached(spec: UniverseSpec) -> list[ResolvedMarketCandidate]:
     if spec.universe_name == "nba_2024_25_moneyline":
         return select_nba_2024_25_moneyline_markets(limit=spec.limit)
     if spec.universe_name not in SUPPORTED_UNIVERSES and spec.universe_type == "preset":
@@ -379,3 +395,129 @@ def _is_retryable_postgres_error(exc: Exception) -> bool:
         or "connection refused" in message
         or "server closed the connection" in message
     )
+
+
+def _read_universe_cache(spec: UniverseSpec) -> list[ResolvedMarketCandidate] | None:
+    if not _universe_cache_enabled():
+        return None
+    path = _universe_cache_path(spec)
+    try:
+        if not path.exists():
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        created_at = float(payload.get("created_at_epoch") or 0)
+        ttl = _universe_cache_ttl_seconds(spec)
+        if ttl <= 0 or time.time() - created_at > ttl:
+            return None
+        rows = payload.get("markets")
+        if not isinstance(rows, list):
+            return None
+        return [_candidate_from_cache_row(row) for row in rows if isinstance(row, dict)]
+    except Exception:
+        return None
+
+
+def _write_universe_cache(spec: UniverseSpec, candidates: list[ResolvedMarketCandidate]) -> None:
+    if not _universe_cache_enabled() or _universe_cache_ttl_seconds(spec) <= 0:
+        return
+    path = _universe_cache_path(spec)
+    payload = {
+        "version": UNIVERSE_CACHE_VERSION,
+        "created_at_epoch": time.time(),
+        "spec": _universe_cache_payload(spec),
+        "markets": [_candidate_to_cache_row(candidate) for candidate in candidates],
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str), encoding="utf-8")
+        tmp_path.replace(path)
+    except Exception:
+        return
+
+
+def _universe_cache_enabled() -> bool:
+    return str(os.environ.get("POLYDATA_BACKTEST_UNIVERSE_CACHE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _universe_cache_ttl_seconds(spec: UniverseSpec) -> int:
+    raw_value = os.environ.get("POLYDATA_BACKTEST_UNIVERSE_CACHE_TTL_SECONDS")
+    if raw_value:
+        try:
+            return max(0, int(raw_value))
+        except ValueError:
+            return DEFAULT_UNIVERSE_CACHE_TTL_SECONDS
+    if spec.universe_name == "nba_2024_25_moneyline":
+        return 24 * 60 * 60
+    return DEFAULT_UNIVERSE_CACHE_TTL_SECONDS
+
+
+def _universe_cache_path(spec: UniverseSpec) -> Path:
+    root = Path(os.environ.get("POLYDATA_BACKTEST_UNIVERSE_CACHE_DIR") or "data/backtest_universe_cache")
+    digest = hashlib.sha256(json.dumps(_universe_cache_payload(spec), sort_keys=True, default=str).encode("utf-8")).hexdigest()[:24]
+    return root / f"{digest}.json"
+
+
+def _universe_cache_payload(spec: UniverseSpec) -> dict[str, Any]:
+    return {
+        "version": UNIVERSE_CACHE_VERSION,
+        "universe_name": spec.universe_name,
+        "universe_type": spec.universe_type,
+        "limit": int(spec.limit),
+        "market_ids": list(spec.market_ids),
+        "market_slugs": list(spec.market_slugs),
+        "event_slug": spec.event_slug,
+        "category": spec.category,
+        "start_date": spec.start_date,
+        "end_date": spec.end_date,
+        "require_resolved": spec.require_resolved,
+        "require_orderfilled_rows": spec.require_orderfilled_rows,
+    }
+
+
+def _candidate_to_cache_row(candidate: ResolvedMarketCandidate) -> dict[str, Any]:
+    return {
+        "market_id": candidate.market_id,
+        "market_slug": candidate.market_slug,
+        "title": candidate.title,
+        "end_date": candidate.end_date.isoformat() if isinstance(candidate.end_date, datetime) else candidate.end_date,
+        "settlement_code": candidate.settlement_code,
+        "settlement_outcome": candidate.settlement_outcome,
+        "event_slug": candidate.event_slug,
+        "category": candidate.category,
+        "token_yes_id": candidate.token_yes_id,
+        "token_no_id": candidate.token_no_id,
+        "coverage_status": candidate.coverage_status,
+        "orderfilled_rows": candidate.orderfilled_rows,
+        "block_rows": candidate.block_rows,
+    }
+
+
+def _candidate_from_cache_row(row: dict[str, Any]) -> ResolvedMarketCandidate:
+    end_date = _parse_cached_datetime(row.get("end_date"))
+    return ResolvedMarketCandidate(
+        market_id=int(row["market_id"]),
+        market_slug=str(row["market_slug"]),
+        title=str(row.get("title") or row["market_slug"]),
+        end_date=end_date,
+        settlement_code=int(row.get("settlement_code") or 0),
+        settlement_outcome=str(row.get("settlement_outcome") or ""),
+        event_slug=str(row.get("event_slug") or ""),
+        category=str(row.get("category") or ""),
+        token_yes_id=str(row["token_yes_id"]) if row.get("token_yes_id") else None,
+        token_no_id=str(row["token_no_id"]) if row.get("token_no_id") else None,
+        coverage_status=str(row.get("coverage_status") or "unknown"),
+        orderfilled_rows=int(row.get("orderfilled_rows") or 0),
+        block_rows=int(row.get("block_rows") or 0),
+    )
+
+
+def _parse_cached_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if value in (None, ""):
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None

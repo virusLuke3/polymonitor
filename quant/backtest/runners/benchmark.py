@@ -148,7 +148,9 @@ def run_orderfilled_fast_accurate_benchmark(
         persist_conn.commit()
 
     try:
+        selector_started = time.perf_counter()
         markets = select_replay_universe(universe_spec)
+        selector_sec = round(time.perf_counter() - selector_started, 6)
         base_spec = FavoriteHoldStrategySpec(
             min_probability=min_probability,
             max_probability=max_probability,
@@ -267,6 +269,7 @@ def run_orderfilled_fast_accurate_benchmark(
             "prediction_quality": extra_artifacts["prediction_quality"],
             "profiles": [asdict(row) for row in profile_results],
             "timing": {
+                "selector_sec": selector_sec,
                 "fast_db_query_sec": fast_dataset.db_query_sec if fast_dataset is not None else 0,
                 "accurate_db_query_sec": accurate_dataset.db_query_sec if accurate_dataset is not None else 0,
                 "total_runtime_sec": round(time.perf_counter() - started, 6),

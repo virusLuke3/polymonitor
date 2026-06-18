@@ -31,6 +31,7 @@ class AcceptanceCaseResult:
     market_count: int
     fast_raw_rows: int
     accurate_raw_rows: int
+    selector_sec: float
     fast_db_query_sec: float
     accurate_db_query_sec: float
     total_runtime_sec: float
@@ -95,6 +96,7 @@ def run_nba_acceptance_report(
                         market_count=0,
                         fast_raw_rows=0,
                         accurate_raw_rows=0,
+                        selector_sec=0.0,
                         fast_db_query_sec=0.0,
                         accurate_db_query_sec=0.0,
                         total_runtime_sec=0.0,
@@ -135,6 +137,7 @@ def _case_from_result(case_key: str, *, limit: int, profiles: tuple[str, ...], r
         market_count=int(result.market_count),
         fast_raw_rows=int(result.summary.get("fast_raw_rows") or 0),
         accurate_raw_rows=int(result.summary.get("accurate_raw_rows") or 0),
+        selector_sec=float(timing.get("selector_sec") or 0.0),
         fast_db_query_sec=float(timing.get("fast_db_query_sec") or 0.0),
         accurate_db_query_sec=float(timing.get("accurate_db_query_sec") or 0.0),
         total_runtime_sec=float(timing.get("total_runtime_sec") or 0.0),
@@ -160,6 +163,7 @@ def _summary(cases: list[AcceptanceCaseResult], *, total_runtime_sec: float) -> 
         "profile_groups": ["+".join(case.profiles) for case in cases],
         "total_runtime_sec": total_runtime_sec,
         "max_case_runtime_sec": max((case.total_runtime_sec for case in completed), default=0.0),
+        "selector_sec_total": round(sum(case.selector_sec for case in completed), 6),
         "fast_raw_rows_total": sum(case.fast_raw_rows for case in completed),
         "accurate_raw_rows_total": sum(case.accurate_raw_rows for case in completed),
         "status_mismatches_total": sum(case.status_mismatches for case in completed),
