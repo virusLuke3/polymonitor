@@ -141,6 +141,8 @@ def build_coverage_target(row: dict[str, Any], *, context: CoverageSelectionCont
     volume_24h = _decimal(row.get("volume_24h") or row.get("volume24h") or 0)
     trade_count_24h = int(_int_or_none(row.get("trade_count_24h") or row.get("tradeCount24h")) or 0)
     tier, sample_interval_seconds, retention_days = _sampling_policy(volume_24h, trade_count_24h)
+    if topic == "worldcup" and tier == "cold":
+        tier, sample_interval_seconds, retention_days = "warm", 60, 14
     priority_score = _priority_score(topic, volume_24h, trade_count_24h, tier)
     tags = tuple(_parse_tags(row.get("tags")))
     return OrderBookCoverageTarget(

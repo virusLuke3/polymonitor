@@ -45,6 +45,26 @@ def test_build_coverage_target_assigns_hot_sampling_for_active_worldcup_match():
     assert target.priority_score > Decimal("0")
 
 
+def test_active_worldcup_match_is_at_least_warm_when_volume_is_low():
+    target = build_coverage_target({
+        "market_id": 102,
+        "market_slug": "mexico-vs-south-africa-fifa-world-cup-2026-low-volume",
+        "market_title": "Mexico vs South Africa - FIFA World Cup 2026 total",
+        "category": "sports",
+        "tags": ["world-cup", "soccer"],
+        "yes_token_id": "yes",
+        "no_token_id": "no",
+        "volume_24h": "0",
+        "trade_count_24h": 0,
+    }, context=CoverageSelectionContext(frozenset({102}), frozenset()))
+
+    assert target is not None
+    assert target.topic == "worldcup"
+    assert target.tier == "warm"
+    assert target.sample_interval_seconds == 60
+    assert target.retention_days == 14
+
+
 def test_select_coverage_targets_respects_topic_filter_and_limits():
     rows = [
         {
