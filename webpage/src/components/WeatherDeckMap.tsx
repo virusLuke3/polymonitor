@@ -35,6 +35,7 @@ type WeatherMapPoint = {
   sublabel: string;
   labelDx: number;
   labelDy: number;
+  weatherImpact: number;
 };
 
 type WeatherDeckMapProps = {
@@ -145,8 +146,10 @@ type AirRoutePath = {
   airline: string;
   layer: 'trunk' | 'international' | 'regional';
   riskSources: AirRiskSource[];
-  weatherAnchors: number[];
-  conflictAnchors: number[];
+  weatherAnchors: RiskAnchor[];
+  conflictAnchors: RiskAnchor[];
+  weatherIntensity: number;
+  conflictIntensity: number;
 };
 
 type AirHubPoint = {
@@ -180,6 +183,12 @@ type AirMotionPoint = {
   pulse: number;
   progress: number;
   emphasis: number;
+  intensity: number;
+};
+
+type RiskAnchor = {
+  progress: number;
+  intensity: number;
 };
 
 type DeckTooltipState = {
@@ -429,6 +438,23 @@ function conflictColor(item: RuntimeGeoSanctionsShockItem | ConflictMapPoint) {
   return '#ffd400';
 }
 
+function conflictSeverityScore(item: RuntimeGeoSanctionsShockItem | ConflictMapPoint) {
+  const severity = String(item.severity || '').toLowerCase();
+  const severityBase = severity === 'critical'
+    ? 0.92
+    : severity === 'warning' || severity === 'high'
+      ? 0.72
+      : severity === 'medium'
+        ? 0.56
+        : severity === 'low'
+          ? 0.34
+          : 0.42;
+  const deaths = Math.max(0, numberValue((item as RuntimeGeoSanctionsShockItem).deathsBest ?? (item as ConflictMapPoint).deaths) ?? 0);
+  const deathBoost = clamp01(Math.log10(deaths + 1) / 2.5);
+  const toneBoost = violenceTone(item) === 'state' ? 0.1 : violenceTone(item) === 'onesided' ? 0.05 : 0;
+  return clamp01(severityBase * 0.62 + deathBoost * 0.28 + toneBoost);
+}
+
 function countryRiskLevel(score: number): CountryRiskLevel {
   if (score >= 72) return 'critical';
   if (score >= 46) return 'elevated';
@@ -544,6 +570,60 @@ function temperatureTone(city: RuntimeGlobalWeatherCity): WeatherTone {
   return 'neutral';
 }
 
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function conditionStormScore(condition?: string | null) {
+  const normalized = String(condition || '').toLowerCase().trim();
+  if (!normalized) return 0.08;
+  if (/(hurricane|typhoon|cyclone|tornado|supercell|blizzard|ice storm)/.test(normalized)) return 1;
+  if (/(thunder|lightning|storm|squall|hail)/.test(normalized)) return 0.88;
+  if (/(heavy rain|heavy snow|freezing rain|snowstorm)/.test(normalized)) return 0.78;
+  if (/(rain|showers|snow|sleet|drizzle)/.test(normalized)) return 0.56;
+  if (/(wind|gust|fog|mist|smoke|dust)/.test(normalized)) return 0.42;
+  if (/(overcast|cloudy)/.test(normalized)) return 0.16;
+  if (/(partly cloudy|mainly clear)/.test(normalized)) return 0.1;
+  if (/(clear|sunny)/.test(normalized)) return 0.06;
+  return 0.18;
+}
+
+function normalizeTemperatureToCelsius(value: number, unit: string) {
+  return String(unit || '').toUpperCase() === 'F' ? (value - 32) * (5 / 9) : value;
+}
+
+function hourlySwingScore(city: RuntimeGlobalWeatherCity) {
+  const unit = String(city.unit || '').toUpperCase();
+  const hourly = (city.hourly || [])
+    .map((entry) => numberValue(entry?.temp))
+    .filter((value): value is number => value != null);
+  if (hourly.length < 2) return 0;
+  const min = Math.min(...hourly);
+  const max = Math.max(...hourly);
+  const swingC = Math.abs(normalizeTemperatureToCelsius(max, unit) - normalizeTemperatureToCelsius(min, unit));
+  return clamp01(swingC / 8);
+}
+
+function temperatureExtremityScore(city: RuntimeGlobalWeatherCity) {
+  const unit = String(city.unit || '').toUpperCase();
+  const reference = numberValue(city.forecastHigh ?? city.currentTemp ?? city.todayHigh ?? city.todayLow);
+  if (reference == null) return 0;
+  const tempC = normalizeTemperatureToCelsius(reference, unit);
+  if (tempC >= 40 || tempC <= -8) return 1;
+  if (tempC >= 35 || tempC <= -2) return 0.78;
+  if (tempC >= 31 || tempC <= 3) return 0.52;
+  if (tempC >= 28 || tempC <= 7) return 0.3;
+  return 0.08;
+}
+
+function weatherImpactScore(city: RuntimeGlobalWeatherCity) {
+  const condition = conditionStormScore(city.condition);
+  const extremity = temperatureExtremityScore(city);
+  const swing = hourlySwingScore(city);
+  const toneBoost = temperatureTone(city) === 'neutral' ? 0 : 0.08;
+  return clamp01(0.04 + condition * 0.64 + extremity * 0.2 + swing * 0.12 + toneBoost);
+}
+
 function marketTone(city: RuntimeGlobalWeatherCity): MarketTone {
   if (!city.eventSlug) return 'none';
   const coverageParts = String(city.quoteCoverage || '').split('/').map((part) => Number(part));
@@ -563,6 +643,7 @@ function shouldShowLabel(point: WeatherMapPoint, selectedCityId?: string | null)
     || point.currentTemp != null
     || Boolean(point.topBinLabel)
     || point.temperatureTone === 'hot'
+    || point.weatherImpact >= 0.52
     || IMPORTANT_CITY_IDS.has(point.id);
 }
 
@@ -583,6 +664,7 @@ function normalizePoints(items: RuntimeGlobalWeatherCity[]): WeatherMapPoint[] {
     const weatherTemperature = temperatureLabel(forecastHigh ?? currentTemp, unit);
     const priceSuffix = topBinPrice != null ? ` · ${probabilityLabel(topBinPrice)}` : '';
     const sublabel = `${topBinTemperature || weatherTemperature}${priceSuffix}`;
+    const impact = weatherImpactScore(city);
     return [{
       id,
       city: String(city.city || id),
@@ -607,6 +689,7 @@ function normalizePoints(items: RuntimeGlobalWeatherCity[]): WeatherMapPoint[] {
       sublabel,
       labelDx: numberValue(city.labelDx) ?? 8,
       labelDy: numberValue(city.labelDy) ?? -16,
+      weatherImpact: impact,
     }];
   });
 }
@@ -739,44 +822,73 @@ function pointAlongPath(path: [number, number][], progress: number): [number, nu
   ];
 }
 
-function endpointRiskAnchors(fromMatch: boolean, toMatch: boolean) {
-  if (fromMatch && toMatch) return [0.24, 0.76];
-  if (fromMatch) return [0.22];
-  if (toMatch) return [0.78];
-  return [];
+function endpointRiskAnchors(fromIntensity: number, toIntensity: number): RiskAnchor[] {
+  const anchors: RiskAnchor[] = [];
+  if (fromIntensity > 0 && toIntensity > 0) {
+    anchors.push({ progress: 0.24, intensity: fromIntensity });
+    anchors.push({ progress: 0.76, intensity: toIntensity });
+    return anchors;
+  }
+  if (fromIntensity > 0) anchors.push({ progress: 0.22, intensity: fromIntensity });
+  if (toIntensity > 0) anchors.push({ progress: 0.78, intensity: toIntensity });
+  return anchors;
 }
 
-function routeHotspotProgresses(path: [number, number][], hotspots: Array<{ lon: number; lat: number }>, radius: number, limit = 3) {
+function routeHotspotAnchors(path: [number, number][], hotspots: Array<{ lon: number; lat: number; intensity: number }>, radius: number, limit = 3) {
   if (!hotspots.length || !path.length) return [];
-  const matches: Array<{ progress: number; distance: number }> = [];
+  const matches: RiskAnchor[] = [];
   for (let index = 0; index < path.length; index += 1) {
     const point = path[index];
     if (!point) continue;
     const [lon, lat] = point;
     const latScale = Math.max(0.42, Math.cos((lat * Math.PI) / 180));
     let bestDistance = Infinity;
+    let bestIntensity = 0;
     for (const hotspot of hotspots) {
       const dx = (hotspot.lon - lon) * latScale;
       const dy = hotspot.lat - lat;
       const distance = Math.sqrt(dx * dx + dy * dy);
-      if (distance <= radius && distance < bestDistance) bestDistance = distance;
+      if (distance <= radius && distance < bestDistance) {
+        bestDistance = distance;
+        bestIntensity = hotspot.intensity;
+      }
     }
     if (bestDistance !== Infinity) {
       matches.push({
         progress: index / Math.max(1, path.length - 1),
-        distance: bestDistance,
+        intensity: clamp01(bestIntensity * (1 - bestDistance / Math.max(radius, 0.1))),
       });
     }
   }
   return matches
-    .sort((left, right) => left.distance - right.distance)
-    .reduce<number[]>((anchors, match) => {
-      if (anchors.some((anchor) => Math.abs(anchor - match.progress) < 0.08)) return anchors;
-      anchors.push(match.progress);
+    .sort((left, right) => right.intensity - left.intensity)
+    .reduce<RiskAnchor[]>((anchors, match) => {
+      const existing = anchors.find((anchor) => Math.abs(anchor.progress - match.progress) < 0.08);
+      if (existing) {
+        existing.intensity = Math.max(existing.intensity, match.intensity);
+        return anchors;
+      }
+      anchors.push({ ...match });
       return anchors;
     }, [])
     .slice(0, limit)
-    .sort((left, right) => left - right);
+    .sort((left, right) => left.progress - right.progress);
+}
+
+function mergeRiskAnchors(anchors: RiskAnchor[]) {
+  return anchors
+    .filter((anchor) => anchor.intensity > 0.04)
+    .sort((left, right) => left.progress - right.progress)
+    .reduce<RiskAnchor[]>((merged, anchor) => {
+      const last = merged[merged.length - 1];
+      if (last && Math.abs(last.progress - anchor.progress) < 0.05) {
+        last.progress = (last.progress + anchor.progress) * 0.5;
+        last.intensity = Math.max(last.intensity, anchor.intensity);
+        return merged;
+      }
+      merged.push({ ...anchor });
+      return merged;
+    }, []);
 }
 
 function routeMotionSource(route: AirRoutePath, lens: AirLensMode, riskSource: AirRiskSource): Exclude<AirRiskSource, 'all'> | null {
@@ -797,10 +909,12 @@ function buildAirMotionPoints(routes: AirRoutePath[], animationTime: number, len
     const seed = hashUnit(`air-motion:${route.id}`);
     const emphasis = Math.max(0.72, Math.min(1.45, 0.72 + route.trafficScore / 120 + route.riskScore / 220));
     if (source === 'conflict') {
-      const anchors = route.conflictAnchors.length ? route.conflictAnchors.slice(0, 3) : [0.14 + seed * 0.72];
+      const anchors = route.conflictAnchors.length
+        ? route.conflictAnchors.slice(0, 3)
+        : [{ progress: 0.14 + seed * 0.72, intensity: Math.max(0.38, route.conflictIntensity || 0.48) }];
       anchors.forEach((anchor, index) => {
-        const pulse = 0.5 + 0.5 * Math.sin(animationTime * 5.4 + (seed + index * 0.17) * Math.PI * 4);
-        const [lon, lat] = pointAlongPath(route.path, anchor);
+        const pulse = 0.5 + 0.5 * Math.sin(animationTime * (4.6 + anchor.intensity * 2.4) + (seed + index * 0.17) * Math.PI * 4);
+        const [lon, lat] = pointAlongPath(route.path, anchor.progress);
         points.push({
           id: `${route.id}:conflict:${index}`,
           lon,
@@ -808,24 +922,28 @@ function buildAirMotionPoints(routes: AirRoutePath[], animationTime: number, len
           routeId: route.id,
           source,
           pulse,
-          progress: anchor,
+          progress: anchor.progress,
           emphasis: emphasis + index * 0.08,
+          intensity: anchor.intensity,
         });
       });
       return;
     }
     if (source === 'weather') {
-      const anchors = route.weatherAnchors.length ? route.weatherAnchors.slice(0, 2) : [0.32, 0.68];
+      const anchors = route.weatherAnchors.length
+        ? route.weatherAnchors.slice(0, 2)
+        : [{ progress: 0.32, intensity: Math.max(0.24, route.weatherIntensity || 0.34) }, { progress: 0.68, intensity: Math.max(0.24, route.weatherIntensity || 0.34) }];
       anchors.forEach((anchor, anchorIndex) => {
         const drift = 0.14 + hashUnit(`${route.id}:weather-drift:${anchorIndex}`) * 0.12;
-        const forwardSpeed = 0.048 + seed * 0.022;
-        const reverseSpeed = 0.038 + seed * 0.016;
+        const stormIntensity = clamp01((anchor.intensity + route.weatherIntensity) * 0.5);
+        const forwardSpeed = 0.022 + stormIntensity * 0.064 + seed * 0.018;
+        const reverseSpeed = 0.016 + stormIntensity * 0.048 + seed * 0.014;
         [
           { direction: 1, speed: forwardSpeed },
           { direction: -1, speed: reverseSpeed },
         ].forEach((flow, index) => {
-          const progress = (anchor + flow.direction * animationTime * flow.speed + (index === 0 ? drift : -drift) + 1) % 1;
-          const pulse = 0.58 + 0.42 * Math.sin(animationTime * (2.2 + index * 0.35) + (seed + anchorIndex + index) * Math.PI * 3);
+          const progress = (anchor.progress + flow.direction * animationTime * flow.speed + (index === 0 ? drift : -drift) + 1) % 1;
+          const pulse = 0.58 + 0.42 * Math.sin(animationTime * (1.8 + stormIntensity * 1.8 + index * 0.3) + (seed + anchorIndex + index) * Math.PI * 3);
           const [lon, lat] = pointAlongPath(route.path, progress);
           points.push({
             id: `${route.id}:weather:${anchorIndex}:${index}`,
@@ -836,6 +954,7 @@ function buildAirMotionPoints(routes: AirRoutePath[], animationTime: number, len
             pulse,
             progress,
             emphasis: emphasis + anchorIndex * 0.06,
+            intensity: stormIntensity,
           });
         });
       });
@@ -855,6 +974,7 @@ function buildAirMotionPoints(routes: AirRoutePath[], animationTime: number, len
         pulse,
         progress,
         emphasis,
+        intensity: Math.max(0.26, Math.min(0.72, 0.24 + route.trafficScore / 140)),
       });
     });
   });
@@ -889,6 +1009,8 @@ function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | nu
       riskSources: [],
       weatherAnchors: [],
       conflictAnchors: [],
+      weatherIntensity: 0,
+      conflictIntensity: 0,
     }));
   });
 }
@@ -939,45 +1061,56 @@ function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | nu
 }
 
 function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], conflicts: ConflictMapPoint[]) {
-  const weatherCountries = new Set(
-    cities
-      .filter((city) => city.temperatureTone !== 'neutral')
-      .map((city) => iso2ForCountry(city.country))
-      .filter((value): value is string => Boolean(value)),
-  );
+  const weatherCountries = new Map<string, number>();
+  cities
+    .filter((city) => city.weatherImpact >= 0.18)
+    .forEach((city) => {
+      const iso2 = iso2ForCountry(city.country);
+      if (!iso2) return;
+      weatherCountries.set(iso2, Math.max(weatherCountries.get(iso2) || 0, city.weatherImpact));
+    });
   const weatherHotspots = cities
-    .filter((city) => city.temperatureTone !== 'neutral')
-    .map((city) => ({ lon: city.lon, lat: city.lat }));
-  const conflictCountries = new Set(
-    conflicts
-      .map((point) => point.iso2)
-      .filter((value): value is string => Boolean(value)),
-  );
+    .filter((city) => city.weatherImpact >= 0.18)
+    .map((city) => ({ lon: city.lon, lat: city.lat, intensity: city.weatherImpact }));
+  const conflictCountries = new Map<string, number>();
+  conflicts.forEach((point) => {
+    if (!point.iso2) return;
+    const severity = conflictSeverityScore(point);
+    conflictCountries.set(point.iso2, Math.max(conflictCountries.get(point.iso2) || 0, severity));
+  });
   const conflictHotspots = conflicts
     .filter((point) => point.deaths > 0 || point.tone !== 'unknown')
-    .sort((left, right) => right.deaths - left.deaths)
+    .sort((left, right) => conflictSeverityScore(right) - conflictSeverityScore(left) || right.deaths - left.deaths)
     .slice(0, 320)
-    .map((point) => ({ lon: point.lon, lat: point.lat }));
+    .map((point) => ({ lon: point.lon, lat: point.lat, intensity: conflictSeverityScore(point) }));
   return routes.map((route) => {
     const fromIso = iso2ForCountry(route.fromCountry);
     const toIso = iso2ForCountry(route.toCountry);
-    const fromConflictMatch = Boolean(fromIso && conflictCountries.has(fromIso));
-    const toConflictMatch = Boolean(toIso && conflictCountries.has(toIso));
-    const fromWeatherMatch = Boolean(fromIso && weatherCountries.has(fromIso));
-    const toWeatherMatch = Boolean(toIso && weatherCountries.has(toIso));
-    const conflictAnchors = Array.from(new Set([
-      ...endpointRiskAnchors(fromConflictMatch, toConflictMatch),
-      ...routeHotspotProgresses(route.path, conflictHotspots, 8.8, 3),
-    ])).sort((left, right) => left - right);
-    const weatherAnchors = Array.from(new Set([
-      ...endpointRiskAnchors(fromWeatherMatch, toWeatherMatch),
-      ...routeHotspotProgresses(route.path, weatherHotspots, 5.2, 3),
-    ])).sort((left, right) => left - right);
+    const fromConflictIntensity = fromIso ? (conflictCountries.get(fromIso) || 0) : 0;
+    const toConflictIntensity = toIso ? (conflictCountries.get(toIso) || 0) : 0;
+    const fromWeatherIntensity = fromIso ? (weatherCountries.get(fromIso) || 0) : 0;
+    const toWeatherIntensity = toIso ? (weatherCountries.get(toIso) || 0) : 0;
+    const conflictAnchors = mergeRiskAnchors([
+      ...endpointRiskAnchors(fromConflictIntensity, toConflictIntensity),
+      ...routeHotspotAnchors(route.path, conflictHotspots, 8.8, 3),
+    ]);
+    const weatherAnchors = mergeRiskAnchors([
+      ...endpointRiskAnchors(fromWeatherIntensity, toWeatherIntensity),
+      ...routeHotspotAnchors(route.path, weatherHotspots, 5.2, 3),
+    ]);
+    const conflictIntensity = clamp01(Math.max(
+      conflictAnchors.reduce((max, anchor) => Math.max(max, anchor.intensity), 0),
+      route.status === 'watch' ? route.riskScore / 180 : route.riskScore / 240,
+    ));
+    const weatherIntensity = clamp01(Math.max(
+      weatherAnchors.reduce((max, anchor) => Math.max(max, anchor.intensity), 0),
+      route.status === 'watch' ? route.riskScore / 260 : 0,
+    ));
     const riskSources: AirRiskSource[] = [];
-    if (conflictAnchors.length) {
+    if (conflictAnchors.length && conflictIntensity >= 0.16) {
       riskSources.push('conflict');
     }
-    if (weatherAnchors.length) {
+    if (weatherAnchors.length && weatherIntensity >= 0.14) {
       riskSources.push('weather');
     }
     if (
@@ -989,7 +1122,7 @@ function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], co
       riskSources.push('corridor');
     }
     if (!riskSources.length && route.riskScore >= 60) riskSources.push('corridor');
-    return { ...route, riskSources, weatherAnchors, conflictAnchors };
+    return { ...route, riskSources, weatherAnchors, conflictAnchors, conflictIntensity, weatherIntensity };
   });
 }
 
@@ -1577,6 +1710,7 @@ function buildWeatherDeckLayers({
   const conflictMotionPoints = airMotionPoints.filter((point) => point.source === 'conflict');
   const weatherMotionPoints = airMotionPoints.filter((point) => point.source === 'weather');
   const corridorMotionPoints = airMotionPoints.filter((point) => point.source === 'corridor');
+  const criticalConflictMotionPoints = conflictMotionPoints.filter((point) => point.intensity >= 0.72);
 
   const routeColor = (route: AirRoutePath, alpha: number): [number, number, number, number] => {
     if (route.layer === 'trunk') return [94, 238, 255, alpha];
@@ -1593,8 +1727,8 @@ function buildWeatherDeckLayers({
     const seed = hashUnit(`air-alpha:${route.id}`);
     const pulse = 0.5 + 0.5 * Math.sin(animationTime * 2.8 + seed * Math.PI * 4);
     const source = routeMotionSource(route, airLensMode, airRiskSource);
-    if (source === 'conflict') return Math.round(alpha * (0.92 + pulse * 0.42));
-    if (source === 'weather') return Math.round(alpha * (0.88 + pulse * 0.22));
+    if (source === 'conflict') return Math.round(alpha * (0.9 + pulse * (0.16 + route.conflictIntensity * 0.34)));
+    if (source === 'weather') return Math.round(alpha * (0.84 + pulse * (0.12 + route.weatherIntensity * 0.22)));
     if (source === 'corridor') return Math.round(alpha * (0.92 + pulse * 0.1));
     return alpha;
   };
@@ -1603,8 +1737,8 @@ function buildWeatherDeckLayers({
     const seed = hashUnit(`air-width:${route.id}`);
     const pulse = 0.5 + 0.5 * Math.sin(animationTime * 2.6 + seed * Math.PI * 3);
     const source = routeMotionSource(route, airLensMode, airRiskSource);
-    if (source === 'conflict') return routeWidth(route, base + pulse * 0.16);
-    if (source === 'weather') return routeWidth(route, base + pulse * 0.08);
+    if (source === 'conflict') return routeWidth(route, base + pulse * (0.08 + route.conflictIntensity * 0.14));
+    if (source === 'weather') return routeWidth(route, base + pulse * (0.05 + route.weatherIntensity * 0.12));
     if (source === 'corridor') return routeWidth(route, base + pulse * 0.04);
     return routeWidth(route, base);
   };
@@ -1677,40 +1811,47 @@ function buildWeatherDeckLayers({
       id: 'air-route-weather-flow',
       data: weatherMotionPoints,
       getPosition: (point) => [point.lon, point.lat],
-      getRadius: (point) => 14000 + point.emphasis * 12000 + point.pulse * 4000,
-      getFillColor: (point) => [72, 244, 211, Math.round(118 + point.pulse * 76)],
+      getRadius: (point) => 11000 + point.emphasis * 7000 + point.intensity * 20000 + point.pulse * (2500 + point.intensity * 3500),
+      getFillColor: (point) => [72, 244, 211, Math.round(88 + point.intensity * 48 + point.pulse * 58)],
       getLineColor: [7, 24, 30, 180],
       getLineWidth: 1,
-      radiusMinPixels: 2.1,
-      radiusMaxPixels: 5.2,
+      radiusMinPixels: 1.8,
+      radiusMaxPixels: 6.2,
       lineWidthMinPixels: 1,
       pickable: false,
       stroked: true,
     }));
   }
 
-  if (conflictMotionPoints.length) {
+  if (criticalConflictMotionPoints.length) {
     layers.push(new ScatterplotLayer<AirMotionPoint>({
       id: 'air-route-conflict-halo',
-      data: conflictMotionPoints,
+      data: criticalConflictMotionPoints,
       getPosition: (point) => [point.lon, point.lat],
-      getRadius: (point) => 32000 + point.emphasis * 18000 + point.pulse * 18000,
-      getFillColor: (point) => [255, 84, 68, Math.round(20 + point.pulse * 42)],
-      radiusMinPixels: 4,
-      radiusMaxPixels: 12,
+      getRadius: (point) => 26000 + point.emphasis * 12000 + point.intensity * 52000 + point.pulse * (12000 + point.intensity * 18000),
+      getFillColor: (point) => [255, 84, 68, Math.round(16 + point.intensity * 34 + point.pulse * 34)],
+      radiusMinPixels: 5,
+      radiusMaxPixels: 16,
       pickable: false,
       stroked: false,
     }));
+  }
+
+  if (conflictMotionPoints.length) {
     layers.push(new ScatterplotLayer<AirMotionPoint>({
       id: 'air-route-conflict-core',
       data: conflictMotionPoints,
       getPosition: (point) => [point.lon, point.lat],
-      getRadius: (point) => 12000 + point.emphasis * 9000 + point.pulse * 4000,
-      getFillColor: (point) => [255, 172, 92, Math.round(122 + point.pulse * 92)],
+      getRadius: (point) => point.intensity >= 0.72
+        ? 11000 + point.emphasis * 7000 + point.intensity * 18000 + point.pulse * 5000
+        : 7000 + point.emphasis * 4200 + point.intensity * 9000 + point.pulse * 2200,
+      getFillColor: (point) => point.intensity >= 0.72
+        ? [255, 172, 92, Math.round(118 + point.intensity * 42 + point.pulse * 68)]
+        : [255, 132, 80, Math.round(90 + point.intensity * 46 + point.pulse * 34)],
       getLineColor: [52, 6, 6, 200],
       getLineWidth: 1,
-      radiusMinPixels: 2.4,
-      radiusMaxPixels: 7.4,
+      radiusMinPixels: 1.8,
+      radiusMaxPixels: 8.2,
       lineWidthMinPixels: 1,
       pickable: false,
       stroked: true,
