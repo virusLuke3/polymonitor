@@ -120,6 +120,22 @@ def _round_metric(value: Any, digits: int = 1) -> Optional[float]:
     return round(number, digits)
 
 
+def _max_metric(values: List[Any], *, digits: int = 1) -> Optional[float]:
+    present = [_float(value) for value in values]
+    filtered = [value for value in present if value is not None]
+    if not filtered:
+        return None
+    return round(max(filtered), digits)
+
+
+def _sum_metric(values: List[Any], *, digits: int = 1) -> Optional[float]:
+    present = [_float(value) for value in values]
+    filtered = [value for value in present if value is not None]
+    if not filtered:
+        return None
+    return round(sum(filtered), digits)
+
+
 def _parse_ts(value: Any) -> float:
     if not value:
         return 0.0
@@ -436,9 +452,14 @@ def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[
         except Exception:
             failed_chunks += 1
             continue
+        if isinstance(payload, dict) and payload.get("error"):
+            failed_chunks += 1
+            continue
         responses = payload if isinstance(payload, list) else [payload]
         for city, row in zip(chunk, responses):
             if not isinstance(row, dict):
+                continue
+            if row.get("error"):
                 continue
             unit = str(city.get("unit") or "F").upper()
             current = row.get("current") if isinstance(row.get("current"), dict) else {}
@@ -481,7 +502,7 @@ def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[
                     daily_codes[:7],
                 )
             ]
-            by_city[str(city["city_id"])] = {
+            weather_row = {
                 "condition": describe_weather_code(current.get("weather_code")),
                 "weatherCode": _float(current.get("weather_code")),
                 "currentTemp": _c_to_unit(current.get("temperature_2m"), unit),
@@ -525,6 +546,8 @@ def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[
                 "weatherUpdatedAt": current.get("time") or row.get("generationtime_ms"),
                 "updatedAt": current.get("time") or row.get("generationtime_ms"),
             }
+            if _item_has_weather_signal(weather_row):
+                by_city[str(city["city_id"])] = weather_row
     if not by_city and failed_chunks:
         raise RuntimeError("open meteo fetch failed for all chunks")
     return by_city
@@ -572,21 +595,58 @@ def _wttr_city_weather(ctx: dict, city: Dict[str, Any]) -> Optional[Dict[str, An
         date_value = str(row.get("date") or "")
         high = row.get("maxtempF") if unit == "F" else row.get("maxtempC")
         low = row.get("mintempF") if unit == "F" else row.get("mintempC")
-        daily_rows.append({"date": date_value, "high": _float(high), "low": _float(low)})
-        for hourly in (row.get("hourly") or []):
+        row_hourly = [hourly for hourly in (row.get("hourly") or []) if isinstance(hourly, dict)]
+        daily_rows.append(
+            {
+                "date": date_value,
+                "high": _float(high),
+                "low": _float(low),
+                "precipitationSum": _sum_metric([hourly.get("precipMM") for hourly in row_hourly]),
+                "precipitationProbabilityMax": _max_metric([hourly.get("chanceofrain") for hourly in row_hourly], digits=0),
+                "windSpeedMax": _max_metric([hourly.get("windspeedKmph") for hourly in row_hourly]),
+                "windGustMax": _max_metric([hourly.get("WindGustKmph") for hourly in row_hourly]),
+                "weatherCode": _float((row_hourly[0] if row_hourly else {}).get("weatherCode")),
+            }
+        )
+        for hourly in row_hourly:
             if not isinstance(hourly, dict):
                 continue
             temp = hourly.get("tempF") if unit == "F" else hourly.get("tempC")
-            hourly_rows.append({"time": _wttr_time_label(date_value, hourly.get("time")), "temp": _float(temp)})
+            hourly_rows.append(
+                {
+                    "time": _wttr_time_label(date_value, hourly.get("time")),
+                    "temp": _float(temp),
+                    "precipitation": _round_metric(hourly.get("precipMM")),
+                    "precipitationProbability": _round_metric(hourly.get("chanceofrain"), 0),
+                    "windSpeed": _round_metric(hourly.get("windspeedKmph")),
+                    "windGust": _round_metric(hourly.get("WindGustKmph")),
+                    "weatherCode": _float(hourly.get("weatherCode")),
+                }
+            )
     current_temp = current.get("temp_F") if unit == "F" else current.get("temp_C")
     return {
         "condition": _wttr_condition(current),
+        "weatherCode": _float(current.get("weatherCode")),
         "currentTemp": _float(current_temp),
+        "currentWindSpeed": _round_metric(current.get("windspeedKmph")),
+        "currentWindGust": _round_metric(current.get("WindGustKmph")),
+        "currentPrecipitation": _round_metric(current.get("precipMM")),
         "todayHigh": daily_rows[0]["high"] if daily_rows else None,
         "todayLow": daily_rows[0]["low"] if daily_rows else None,
+        "todayWindSpeed": daily_rows[0].get("windSpeedMax") if daily_rows else None,
+        "todayWindGust": daily_rows[0].get("windGustMax") if daily_rows else None,
+        "todayPrecipitationSum": daily_rows[0].get("precipitationSum") if daily_rows else None,
+        "todayPrecipitationProbability": daily_rows[0].get("precipitationProbabilityMax") if daily_rows else None,
         "forecastHigh": max([row["high"] for row in daily_rows if row.get("high") is not None], default=None),
-        "hourly": [row for row in hourly_rows[:24] if row.get("temp") is not None],
-        "daily": [row for row in daily_rows if row.get("high") is not None or row.get("low") is not None],
+        "forecastWindSpeedMax": max([row["windSpeedMax"] for row in daily_rows if row.get("windSpeedMax") is not None], default=None),
+        "forecastWindGustMax": max([row["windGustMax"] for row in daily_rows if row.get("windGustMax") is not None], default=None),
+        "forecastPrecipitationSum": max([row["precipitationSum"] for row in daily_rows if row.get("precipitationSum") is not None], default=None),
+        "forecastPrecipitationProbabilityMax": max([row["precipitationProbabilityMax"] for row in daily_rows if row.get("precipitationProbabilityMax") is not None], default=None),
+        "windSpeedUnit": "km/h",
+        "precipitationUnit": "mm",
+        "hourly": [row for row in hourly_rows[:24] if any(row.get(key) is not None for key in ("temp", "precipitation", "windSpeed", "windGust"))],
+        "daily": [row for row in daily_rows if any(row.get(key) is not None for key in ("high", "low", "precipitationSum", "windSpeedMax", "windGustMax"))],
+        "weatherUpdatedAt": _utc_now_iso(ctx),
         "updatedAt": _utc_now_iso(ctx),
         "weatherProvider": "wttr.in",
     }

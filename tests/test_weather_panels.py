@@ -245,6 +245,95 @@ def test_global_weather_map_builds_weather_metar_and_market_payload(monkeypatch)
     assert "wind_gusts_10m_max" in request_params["openMeteo"]["daily"]
 
 
+def test_global_weather_map_uses_wttr_real_intensity_when_open_meteo_errors(monkeypatch):
+    monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", lambda ctx, market: {"bookStatus": "no-book"})
+
+    def http_json_get(url, *, params=None, **kwargs):
+        if "open.example" in url:
+            return {"error": True, "reason": "Daily API request limit exceeded. Please try again tomorrow."}
+        if "wttr.in" in url:
+            return {
+                "current_condition": [
+                    {
+                        "temp_F": "68",
+                        "weatherCode": "116",
+                        "precipMM": "1.4",
+                        "windspeedKmph": "24",
+                        "weatherDesc": [{"value": "Partly cloudy"}],
+                    }
+                ],
+                "weather": [
+                    {
+                        "date": "2026-05-12",
+                        "maxtempF": "79",
+                        "mintempF": "63",
+                        "hourly": [
+                            {
+                                "time": "0",
+                                "tempF": "69",
+                                "precipMM": "0.0",
+                                "chanceofrain": "15",
+                                "windspeedKmph": "18",
+                                "WindGustKmph": "25",
+                                "weatherCode": "116",
+                            },
+                            {
+                                "time": "300",
+                                "tempF": "70",
+                                "precipMM": "1.2",
+                                "chanceofrain": "60",
+                                "windspeedKmph": "21",
+                                "WindGustKmph": "31",
+                                "weatherCode": "119",
+                            },
+                        ],
+                    },
+                    {
+                        "date": "2026-05-13",
+                        "maxtempF": "82",
+                        "mintempF": "61",
+                        "hourly": [
+                            {
+                                "time": "0",
+                                "tempF": "71",
+                                "precipMM": "2.7",
+                                "chanceofrain": "75",
+                                "windspeedKmph": "27",
+                                "WindGustKmph": "39",
+                                "weatherCode": "296",
+                            }
+                        ],
+                    },
+                ],
+            }
+        if "aviation.example" in url:
+            return []
+        if "gamma.example" in url:
+            return []
+        return []
+
+    ctx = make_ctx(http_json_get=http_json_get)
+    payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=1)
+
+    city = payload["items"][0]
+    assert city["currentTemp"] == 68.0
+    assert city["currentWindSpeed"] == 24.0
+    assert city["currentPrecipitation"] == 1.4
+    assert city["todayWindGust"] == 31.0
+    assert city["todayPrecipitationSum"] == 1.2
+    assert city["todayPrecipitationProbability"] == 60.0
+    assert city["forecastWindSpeedMax"] == 27.0
+    assert city["forecastWindGustMax"] == 39.0
+    assert city["forecastPrecipitationSum"] == 2.7
+    assert city["forecastPrecipitationProbabilityMax"] == 75.0
+    assert city["hourly"][1]["windGust"] == 31.0
+    assert city["daily"][0]["precipitationProbabilityMax"] == 60.0
+    assert city["windSpeedUnit"] == "km/h"
+    assert city["precipitationUnit"] == "mm"
+    assert city["sourceStates"]["openMeteo"] == "error"
+    assert city["sourceStates"]["wttr"] == "ok"
+
+
 def test_global_weather_map_uses_local_market_database_before_gamma(monkeypatch):
     monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", lambda ctx, market: {"bestBidYes": 0.44, "bestAskYes": 0.48})
     db_rows = [
