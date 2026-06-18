@@ -165,22 +165,39 @@ def run_orderfilled_fast_accurate_benchmark(
             yes_only=True,
             execution_profile="realistic",
         )
-        fast_dataset = load_favorite_replay_dataset_for_markets(
-            markets,
-            specs=[base_spec],
-            replay_mode="fast",
-            force_block_replay_backfill=force_block_replay_backfill,
-            build_tag=f"{universe_name}_fast_replay",
+        needs_fast = any(_parse_profile_key(key)[0] == "fast" for key in profile_keys)
+        needs_accurate = any(_parse_profile_key(key)[0] == "accurate" for key in profile_keys)
+        if not needs_fast and needs_accurate:
+            # Accurate comparisons still need the block replay baseline for coverage
+            # and reporting, but a pure accurate run should not waste time running
+            # every fast execution profile.
+            needs_fast = True
+        fast_dataset = (
+            load_favorite_replay_dataset_for_markets(
+                markets,
+                specs=[base_spec],
+                replay_mode="fast",
+                force_block_replay_backfill=force_block_replay_backfill,
+                build_tag=f"{universe_name}_fast_replay",
+            )
+            if needs_fast
+            else None
         )
-        accurate_dataset = load_favorite_replay_dataset_for_markets(
-            markets,
-            specs=[base_spec],
-            replay_mode="accurate",
+        accurate_dataset = (
+            load_favorite_replay_dataset_for_markets(
+                markets,
+                specs=[base_spec],
+                replay_mode="accurate",
+            )
+            if needs_accurate
+            else None
         )
         reports: dict[str, NbaFavoriteHoldReport] = {}
         for key in profile_keys:
             replay_mode, execution_profile = _parse_profile_key(key)
             dataset = fast_dataset if replay_mode == "fast" else accurate_dataset
+            if dataset is None:
+                continue
             spec = FavoriteHoldStrategySpec(**{**base_spec.__dict__, "execution_profile": execution_profile})
             reports[key] = run_nba_pregame_favorite_hold_from_dataset(
                 dataset,
@@ -197,10 +214,18 @@ def run_orderfilled_fast_accurate_benchmark(
         )
         comparison = summarize_fast_accurate_rows(comparison_rows)
         profile_results = [
-            _profile_result(key, report, raw_rows=(fast_dataset.raw_row_count if key.startswith("fast:") else accurate_dataset.raw_row_count))
+            _profile_result(
+                key,
+                report,
+                raw_rows=(
+                    (fast_dataset.raw_row_count if fast_dataset is not None else 0)
+                    if key.startswith("fast:")
+                    else (accurate_dataset.raw_row_count if accurate_dataset is not None else 0)
+                ),
+            )
             for key, report in reports.items()
         ]
-        backfill = fast_dataset.backfill_result
+        backfill = fast_dataset.backfill_result if fast_dataset is not None else None
         coverage_summary = {
             "table": backfill.table if backfill else "orderfilled_block_replay",
             "market_count": backfill.market_count if backfill else 0,
@@ -215,8 +240,8 @@ def run_orderfilled_fast_accurate_benchmark(
         universe_payload = {
             **_universe_payload(universe_spec),
             "selected_market_count": len(markets),
-            "fast_raw_market_count": fast_dataset.raw_market_count,
-            "accurate_raw_market_count": accurate_dataset.raw_market_count,
+            "fast_raw_market_count": fast_dataset.raw_market_count if fast_dataset is not None else 0,
+            "accurate_raw_market_count": accurate_dataset.raw_market_count if accurate_dataset is not None else 0,
         }
         extra_artifacts = build_benchmark_artifacts(
             reports=reports,
@@ -227,8 +252,8 @@ def run_orderfilled_fast_accurate_benchmark(
         summary = {
             "market_count": len(markets),
             "universe": universe_payload,
-            "fast_raw_rows": fast_dataset.raw_row_count,
-            "accurate_raw_rows": accurate_dataset.raw_row_count,
+            "fast_raw_rows": fast_dataset.raw_row_count if fast_dataset is not None else 0,
+            "accurate_raw_rows": accurate_dataset.raw_row_count if accurate_dataset is not None else 0,
             "status_mismatches": comparison.status_mismatches,
             "pnl_diff_abs_total": comparison.pnl_diff_abs_total,
             "total_pnl_diff": comparison.pnl_diff_abs_total,
@@ -240,8 +265,8 @@ def run_orderfilled_fast_accurate_benchmark(
             "prediction_quality": extra_artifacts["prediction_quality"],
             "profiles": [asdict(row) for row in profile_results],
             "timing": {
-                "fast_db_query_sec": fast_dataset.db_query_sec,
-                "accurate_db_query_sec": accurate_dataset.db_query_sec,
+                "fast_db_query_sec": fast_dataset.db_query_sec if fast_dataset is not None else 0,
+                "accurate_db_query_sec": accurate_dataset.db_query_sec if accurate_dataset is not None else 0,
                 "total_runtime_sec": round(time.perf_counter() - started, 6),
             },
         }
