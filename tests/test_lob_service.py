@@ -479,3 +479,82 @@ def test_lob_coverage_excludes_finished_worldcup_match_even_inside_time_window(m
 
     assert payload["summary"]["topics"]["worldcup"] == 0
     assert payload["items"] == []
+
+
+def test_lob_coverage_starts_worldcup_one_hour_before_kickoff(monkeypatch):
+    class FakeLogger:
+        def exception(self, *args, **kwargs):
+            raise AssertionError(args)
+
+    rows = [
+        {
+            "market_id": 101,
+            "market_slug": "fifwc-cze-rsa-2026-06-18-spread-away-4pt5",
+            "market_title": "Spread: South Africa (-4.5)",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-101",
+            "no_token_id": "no-101",
+        }
+    ]
+
+    def payload_for(minutes):
+        ctx = {
+            "query_all": lambda sql, params=(): rows,
+            "get_world_cup_match_ops_snapshot": lambda limit=48: {
+                "items": [
+                    {
+                        "matchStatus": "scheduled",
+                        "minutesUntilKickoff": minutes,
+                        "homeTeam": "Czech Republic",
+                        "awayTeam": "South Africa",
+                        "markets": [{"slug": "fifwc-cze-rsa-2026-06-18"}],
+                    }
+                ]
+            },
+            "app": type("FakeApp", (), {"logger": FakeLogger()})(),
+        }
+        return lob_service.get_lob_coverage_targets_payload(ctx, limit=10, topics="worldcup")
+
+    assert payload_for(70)["items"] == []
+    assert len(payload_for(55)["items"]) == 1
+
+
+def test_lob_coverage_keeps_schedule_only_worldcup_match_until_fallback_end(monkeypatch):
+    class FakeLogger:
+        def exception(self, *args, **kwargs):
+            raise AssertionError(args)
+
+    rows = [
+        {
+            "market_id": 101,
+            "market_slug": "fifwc-cze-rsa-2026-06-18-spread-away-4pt5",
+            "market_title": "Spread: South Africa (-4.5)",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-101",
+            "no_token_id": "no-101",
+        }
+    ]
+
+    def payload_for(minutes):
+        ctx = {
+            "query_all": lambda sql, params=(): rows,
+            "get_world_cup_match_ops_snapshot": lambda limit=48: {
+                "items": [
+                    {
+                        "matchStatus": "finished",
+                        "minutesUntilKickoff": minutes,
+                        "homeTeam": "Czech Republic",
+                        "awayTeam": "South Africa",
+                        "score": {"home": None, "away": None},
+                        "markets": [{"slug": "fifwc-cze-rsa-2026-06-18"}],
+                    }
+                ]
+            },
+            "app": type("FakeApp", (), {"logger": FakeLogger()})(),
+        }
+        return lob_service.get_lob_coverage_targets_payload(ctx, limit=10, topics="worldcup")
+
+    assert len(payload_for(-100)["items"]) == 1
+    assert payload_for(-170)["items"] == []

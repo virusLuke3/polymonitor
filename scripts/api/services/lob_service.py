@@ -34,8 +34,8 @@ BOOK_LEVEL_LIMIT = 12
 DEFAULT_LOB_CACHE_TTL_SECONDS = 3
 DEFAULT_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS = 300
 LOB_COVERAGE_RAW_ROW_LIMIT = 1200
-WORLDCUP_ACTIVE_MATCH_WINDOW_BEFORE_MINUTES = 120
-WORLDCUP_ACTIVE_MATCH_WINDOW_AFTER_MINUTES = 180
+WORLDCUP_LOB_PRE_KICKOFF_MINUTES = 60
+WORLDCUP_LOB_FALLBACK_MATCH_MINUTES = 150
 DEFAULT_WORLDCUP_LOB_MARKET_LIMIT = 12
 
 
@@ -1011,8 +1011,8 @@ def _build_worldcup_selection_context(ctx: dict) -> tuple[CoverageSelectionConte
             "activeTerms": sorted(terms)[:24],
             "activeSlugs": sorted(slugs)[:24],
             "windowMinutes": {
-                "beforeKickoff": WORLDCUP_ACTIVE_MATCH_WINDOW_BEFORE_MINUTES,
-                "afterKickoff": WORLDCUP_ACTIVE_MATCH_WINDOW_AFTER_MINUTES,
+                "beforeKickoff": _worldcup_lob_pre_kickoff_minutes(),
+                "fallbackAfterKickoff": _worldcup_lob_fallback_match_minutes(),
             },
         },
     )
@@ -1020,14 +1020,41 @@ def _build_worldcup_selection_context(ctx: dict) -> tuple[CoverageSelectionConte
 
 def _is_active_worldcup_match_item(item: Dict[str, Any]) -> bool:
     status = str(item.get("matchStatus") or item.get("status") or "").strip().lower()
-    if status in {"final", "finished", "complete", "completed", "ended", "closed", "resolved", "full-time", "fulltime", "ft"}:
+    if status in {"final", "complete", "completed", "ended", "closed", "resolved", "full-time", "fulltime", "ft"}:
+        return False
+    if status == "finished" and _worldcup_match_has_final_evidence(item):
         return False
     if status in {"in", "live", "in_progress", "in-progress", "halftime", "half-time"}:
         return True
     minutes = _int_or_none(item.get("minutesUntilKickoff"))
     if minutes is None:
         return False
-    return -WORLDCUP_ACTIVE_MATCH_WINDOW_AFTER_MINUTES <= minutes <= WORLDCUP_ACTIVE_MATCH_WINDOW_BEFORE_MINUTES
+    return -_worldcup_lob_fallback_match_minutes() <= minutes <= _worldcup_lob_pre_kickoff_minutes()
+
+
+def _worldcup_match_has_final_evidence(item: Dict[str, Any]) -> bool:
+    score = item.get("score") if isinstance(item.get("score"), dict) else {}
+    if score.get("home") is not None and score.get("away") is not None:
+        return True
+    return bool(item.get("scoreSource") or item.get("scoreEventId") or item.get("scoreUpdatedAt"))
+
+
+def _worldcup_lob_pre_kickoff_minutes() -> int:
+    return _int_clamped(
+        os.environ.get("POLYDATA_LOB_WORLDCUP_PRE_KICKOFF_MINUTES"),
+        default=WORLDCUP_LOB_PRE_KICKOFF_MINUTES,
+        minimum=0,
+        maximum=240,
+    )
+
+
+def _worldcup_lob_fallback_match_minutes() -> int:
+    return _int_clamped(
+        os.environ.get("POLYDATA_LOB_WORLDCUP_FALLBACK_MATCH_MINUTES"),
+        default=WORLDCUP_LOB_FALLBACK_MATCH_MINUTES,
+        minimum=90,
+        maximum=240,
+    )
 
 
 def _coverage_term(value: Any) -> str:
