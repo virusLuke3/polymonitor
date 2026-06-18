@@ -1033,6 +1033,7 @@ def _load_window_orderfilled_block_replay_rows(
     rows = load_orderfilled_block_replay_rows_for_ranges(
         market_block_ranges,
         client=client,
+        column_profile="favorite_hold",
     )
     return rows, backfill
 
@@ -1193,23 +1194,47 @@ def _normalize_orderfilled_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
     normalized: list[dict[str, Any]] = []
     for row in rows:
         block_time = _parse_block_time(row.get("block_time"))
-        item = dict(row)
-        item["_market_id"] = int(row["market_id"])
-        item["_outcome_code"] = int(row["outcome_code"])
-        item["_token_id"] = str(row["token_id"])
-        item["_block_number"] = int(row["block_number"])
-        item["_log_index"] = int(row.get("log_index", row.get("last_log_index", 0)))
-        item["_tx_hash"] = str(row.get("tx_hash", row.get("last_tx_hash", "")))
-        item["_block_time"] = block_time
-        item["_price"] = Decimal(str(row.get("price", row.get("close_price"))))
-        item["_size"] = Decimal(str(row.get("size", row.get("volume", "0"))))
-        if "low_price" in row:
-            item["_low_price"] = Decimal(str(row["low_price"]))
-        if "high_price" in row:
-            item["_high_price"] = Decimal(str(row["high_price"]))
-        if "close_price" in row:
-            item["_close_price"] = Decimal(str(row["close_price"]))
-        item["_replay_source"] = str(row.get("replay_source", "orderfilled_fact"))
+        market_id = int(row["market_id"])
+        outcome_code = int(row["outcome_code"])
+        token_id = str(row["token_id"])
+        block_number = int(row["block_number"])
+        log_index = int(row.get("log_index", row.get("last_log_index", 0)))
+        tx_hash = str(row.get("tx_hash", row.get("last_tx_hash", "")))
+        price_raw = row.get("price", row.get("close_price"))
+        size_raw = row.get("size", row.get("volume", "0"))
+        item = {
+            "market_id": market_id,
+            "outcome_code": outcome_code,
+            "token_id": token_id,
+            "block_number": block_number,
+            "block_time": block_time,
+            "log_index": log_index,
+            "tx_hash": tx_hash,
+            "price": price_raw,
+            "size": size_raw,
+            "_market_id": market_id,
+            "_outcome_code": outcome_code,
+            "_token_id": token_id,
+            "_block_number": block_number,
+            "_log_index": log_index,
+            "_tx_hash": tx_hash,
+            "_block_time": block_time,
+            "_price": Decimal(str(price_raw)),
+            "_size": Decimal(str(size_raw)),
+            "_replay_source": str(row.get("replay_source", "orderfilled_fact")),
+        }
+        low_price = row.get("low_price")
+        if low_price is not None:
+            item["low_price"] = low_price
+            item["_low_price"] = Decimal(str(low_price))
+        high_price = row.get("high_price")
+        if high_price is not None:
+            item["high_price"] = high_price
+            item["_high_price"] = Decimal(str(high_price))
+        close_price = row.get("close_price")
+        if close_price is not None:
+            item["close_price"] = close_price
+            item["_close_price"] = Decimal(str(close_price))
         normalized.append(item)
     return normalized
 

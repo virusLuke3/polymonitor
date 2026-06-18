@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 import time
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 from ...core.db import ClickHouseClient, safe_identifier
 
@@ -421,6 +421,7 @@ def load_orderfilled_block_replay_rows_for_ranges(
     *,
     table: str = DEFAULT_BLOCK_REPLAY_TABLE,
     client: ClickHouseClient | None = None,
+    column_profile: Literal["full", "favorite_hold"] = "full",
 ) -> list[dict[str, Any]]:
     """Load block replay rows using per-market block windows."""
 
@@ -445,32 +446,16 @@ def load_orderfilled_block_replay_rows_for_ranges(
                 ids_sql=ids_sql,
                 min_block=min_block,
                 max_block=max_block,
+                column_profile=column_profile,
             ),
             ranges,
         )
     range_sql = _market_block_range_condition(ranges)
+    projection = _block_replay_projection(column_profile, table_alias=None)
     return ch.query_json_rows(
         f"""
         SELECT
-            market_id,
-            outcome_code,
-            token_id,
-            block_number,
-            block_time,
-            open_price,
-            high_price,
-            low_price,
-            close_price,
-            volume,
-            trade_count,
-            first_log_index,
-            last_log_index,
-            lower(last_tx_hash) AS tx_hash,
-            low_price AS buy_cross_price,
-            high_price AS sell_cross_price,
-            close_price AS price,
-            volume AS size,
-            'orderfilled_block_replay' AS replay_source
+            {projection}
         FROM {table_name}
         PREWHERE market_id IN ({ids_sql})
           AND block_number BETWEEN {min_block} AND {max_block}
@@ -489,6 +474,7 @@ def _load_orderfilled_block_replay_rows_for_ranges_join(
     ids_sql: str,
     min_block: int,
     max_block: int,
+    column_profile: Literal["full", "favorite_hold"] = "full",
 ) -> list[dict[str, Any]]:
     """Load many market windows with an inline range table.
 
@@ -502,49 +488,15 @@ def _load_orderfilled_block_replay_rows_for_ranges_join(
         f"(toUInt64({int(market_id)}), toUInt64({int(bounds[0])}), toUInt64({int(bounds[1])}))"
         for market_id, bounds in sorted(ranges.items())
     )
+    inner_projection = _block_replay_projection(column_profile, table_alias=None)
+    outer_projection = _block_replay_projection(column_profile, table_alias="f")
     return client.query_json_rows(
         f"""
         SELECT
-            f.market_id AS market_id,
-            f.outcome_code AS outcome_code,
-            f.token_id AS token_id,
-            f.block_number AS block_number,
-            f.block_time AS block_time,
-            f.open_price AS open_price,
-            f.high_price AS high_price,
-            f.low_price AS low_price,
-            f.close_price AS close_price,
-            f.volume AS volume,
-            f.trade_count AS trade_count,
-            f.first_log_index AS first_log_index,
-            f.last_log_index AS last_log_index,
-            f.tx_hash AS tx_hash,
-            f.buy_cross_price AS buy_cross_price,
-            f.sell_cross_price AS sell_cross_price,
-            f.price AS price,
-            f.size AS size,
-            f.replay_source AS replay_source
+            {outer_projection}
         FROM (
             SELECT
-                market_id,
-                outcome_code,
-                token_id,
-                block_number,
-                block_time,
-                open_price,
-                high_price,
-                low_price,
-                close_price,
-                volume,
-                trade_count,
-                first_log_index,
-                last_log_index,
-                lower(last_tx_hash) AS tx_hash,
-                low_price AS buy_cross_price,
-                high_price AS sell_cross_price,
-                close_price AS price,
-                volume AS size,
-                'orderfilled_block_replay' AS replay_source
+                {inner_projection}
             FROM {table}
             PREWHERE market_id IN ({ids_sql})
               AND block_number BETWEEN {int(min_block)} AND {int(max_block)}
@@ -561,6 +513,54 @@ def _load_orderfilled_block_replay_rows_for_ranges_join(
         """,
         timeout_seconds=240,
     )
+
+
+def _block_replay_projection(
+    column_profile: Literal["full", "favorite_hold"],
+    *,
+    table_alias: str | None,
+) -> str:
+    prefix = f"{table_alias}." if table_alias else ""
+    if column_profile == "favorite_hold":
+        log_index_expr = f"{prefix}log_index" if table_alias else f"{prefix}last_log_index"
+        tx_hash_expr = f"{prefix}tx_hash" if table_alias else f"lower({prefix}last_tx_hash)"
+        return f"""
+            {prefix}market_id AS market_id,
+            {prefix}outcome_code AS outcome_code,
+            {prefix}token_id AS token_id,
+            {prefix}block_number AS block_number,
+            {prefix}block_time AS block_time,
+            {prefix}low_price AS low_price,
+            {prefix}close_price AS close_price,
+            {prefix}volume AS volume,
+            {log_index_expr} AS log_index,
+            {tx_hash_expr} AS tx_hash,
+            {prefix}close_price AS price,
+            {prefix}volume AS size,
+            'orderfilled_block_replay' AS replay_source
+        """
+    tx_hash_expr = f"{prefix}tx_hash" if table_alias else f"lower({prefix}last_tx_hash)"
+    return f"""
+            {prefix}market_id AS market_id,
+            {prefix}outcome_code AS outcome_code,
+            {prefix}token_id AS token_id,
+            {prefix}block_number AS block_number,
+            {prefix}block_time AS block_time,
+            {prefix}open_price AS open_price,
+            {prefix}high_price AS high_price,
+            {prefix}low_price AS low_price,
+            {prefix}close_price AS close_price,
+            {prefix}volume AS volume,
+            {prefix}trade_count AS trade_count,
+            {prefix}first_log_index AS first_log_index,
+            {prefix}last_log_index AS last_log_index,
+            {tx_hash_expr} AS tx_hash,
+            {prefix}low_price AS buy_cross_price,
+            {prefix}high_price AS sell_cross_price,
+            {prefix}close_price AS price,
+            {prefix}volume AS size,
+            'orderfilled_block_replay' AS replay_source
+        """
 
 
 def _filter_replay_rows_for_ranges(rows: list[dict[str, Any]], ranges: dict[int, tuple[int, int]]) -> list[dict[str, Any]]:
