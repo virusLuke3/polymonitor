@@ -872,15 +872,15 @@ def _load_window_orderfilled_rows(
     return client.query_json_rows(
         f"""
         SELECT
-            f.market_id,
-            f.outcome_code,
-            f.token_id,
-            f.block_number,
-            f.log_index,
+            f.market_id AS market_id,
+            f.outcome_code AS outcome_code,
+            f.token_id AS token_id,
+            f.block_number AS block_number,
+            f.log_index AS log_index,
             lower(f.tx_hash) AS tx_hash,
-            f.price,
-            f.size,
-            bt.block_time
+            f.price AS price,
+            f.size AS size,
+            bt.block_time AS block_time
         FROM (
             SELECT
                 market_id,
