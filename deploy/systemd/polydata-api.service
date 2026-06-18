@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/bin/bash -lc 'POLYDATA_LOB_WEBSOCKET_ENABLED="${POLYDATA_LOB_WEBSOCKET_ENABLED:-1}" exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/api_server.py --backend postgres --skip-init-schema --host "${POLYDATA_API_HOST:-127.0.0.1}" --port "${POLYDATA_API_PORT:-18500}"'
+ExecStart=/bin/bash -lc 'POLYDATA_LOB_WEBSOCKET_ENABLED="${POLYDATA_API_LOB_WEBSOCKET_ENABLED:-0}" exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/api_server.py --backend postgres --skip-init-schema --host "${POLYDATA_API_HOST:-127.0.0.1}" --port "${POLYDATA_API_PORT:-18500}"'
 Restart=always
 RestartSec=10
 StandardOutput=journal

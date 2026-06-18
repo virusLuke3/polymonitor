@@ -118,6 +118,7 @@ POLYDATA_MARKETS_LATEST_SNAPSHOT_FALLBACK=1
 POLYDATA_ALLOWED_ORIGINS=
 POLYDATA_CLOB_API_BASE=https://clob.polymarket.com
 POLYDATA_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
+POLYDATA_API_LOB_WEBSOCKET_ENABLED=0
 POLYDATA_LOB_WEBSOCKET_ENABLED=1
 POLYDATA_LOB_COVERAGE_LIMIT=250
 POLYDATA_LOB_COVERAGE_TOPICS=worldcup,crypto,politics
@@ -175,7 +176,7 @@ Wants=network-online.target polydata-db-tunnel.service
 Type=simple
 WorkingDirectory=${REMOTE_REPO_ROOT}
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/bin/bash -lc 'exec "${REMOTE_REPO_ROOT}/.venv/bin/gunicorn" --workers "${POLYDATA_GUNICORN_WORKERS:-3}" --threads "${POLYDATA_GUNICORN_THREADS:-4}" --bind "${POLYDATA_API_HOST:-127.0.0.1}:${POLYDATA_API_PORT:-18500}" --timeout 180 --graceful-timeout 30 --max-requests "${POLYDATA_GUNICORN_MAX_REQUESTS:-300}" --max-requests-jitter "${POLYDATA_GUNICORN_MAX_REQUESTS_JITTER:-60}" scripts.api.app:app'
+ExecStart=/bin/bash -lc 'POLYDATA_LOB_WEBSOCKET_ENABLED="${POLYDATA_API_LOB_WEBSOCKET_ENABLED:-0}" exec "${REMOTE_REPO_ROOT}/.venv/bin/gunicorn" --workers "${POLYDATA_GUNICORN_WORKERS:-3}" --threads "${POLYDATA_GUNICORN_THREADS:-4}" --bind "${POLYDATA_API_HOST:-127.0.0.1}:${POLYDATA_API_PORT:-18500}" --timeout 180 --graceful-timeout 30 --max-requests "${POLYDATA_GUNICORN_MAX_REQUESTS:-300}" --max-requests-jitter "${POLYDATA_GUNICORN_MAX_REQUESTS_JITTER:-60}" scripts.api.app:app'
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -258,6 +259,7 @@ GCP_UNITS=(
   polydata-grid-esports-seed.service
   polydata-inflation-nowcast-seed.service
   polydata-jin10-seed.service
+  polydata-lob-websocket.service
   polydata-lob-maintenance.service
   polydata-macro-cpi-panels-seed.service
   polydata-macro-cpi-registry-seed.service
@@ -373,7 +375,7 @@ echo "[5/7] Verifying Nginx proxy ..."
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "curl -fsS http://127.0.0.1/wm-api/health && echo"
 
 echo "[6/7] Remote service status ..."
-ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "systemctl --user --no-pager --full status polydata-gcp.target polydata-db-tunnel.service polydata-api.service | sed -n '1,180p'"
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "systemctl --user --no-pager --full status polydata-gcp.target polydata-db-tunnel.service polydata-api.service polydata-lob-websocket.service | sed -n '1,220p'"
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "for unit in polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-event-market-serving.service polydata-market-workspace-serving.service polydata-db-reverse-tunnel.service polydata-local-collector.target; do state=\$(systemctl --user is-active \"\$unit\" 2>/dev/null || true); printf '%s %s\n' \"\$unit\" \"\$state\"; test \"\$state\" != active; done"
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "sudo systemctl --no-pager --full status nginx redis-server | sed -n '1,160p'"
 
