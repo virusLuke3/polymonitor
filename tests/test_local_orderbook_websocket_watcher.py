@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -126,6 +127,35 @@ def test_watcher_sends_market_channel_heartbeat():
     assert last_ping_at == 100.0
     assert unchanged == 100.0
     assert get_runtime_status()["pingCount"] >= 1
+
+
+def test_watcher_subscribe_uses_smaller_batches_with_replace_first_payload():
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=FakeSession(), cache_ttl_seconds=30)
+    watcher = LocalOrderBookWebsocketWatcher(
+        ctx={"LOB_RUNTIME_MANAGER": manager},
+        ws_url="wss://example.test/ws",
+        persist=False,
+        logger=FakeLogger(),
+        subscription_batch_size=80,
+        subscription_batch_pause_seconds=0,
+    )
+
+    class FakeWebsocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, payload):
+            self.sent.append(payload)
+
+    websocket = FakeWebsocket()
+    asyncio.run(watcher.subscribe(websocket, [f"token-{index}" for index in range(201)], replace=True))
+    payloads = [json.loads(item) for item in websocket.sent]
+
+    assert [len(payload["assets_ids"]) for payload in payloads] == [80, 80, 41]
+    assert payloads[0]["type"] == "market"
+    assert "operation" not in payloads[0]
+    assert payloads[1]["operation"] == "subscribe"
+    assert payloads[2]["operation"] == "subscribe"
 
 
 def test_watcher_applies_price_change_and_persists_sample(monkeypatch):

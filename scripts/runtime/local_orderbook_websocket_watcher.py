@@ -40,7 +40,8 @@ DEFAULT_COVERAGE_LIMIT = 250
 DEFAULT_COVERAGE_TOPICS = "worldcup,crypto,politics"
 DEFAULT_COVERAGE_REFRESH_SECONDS = 300
 DEFAULT_RECONNECT_SECONDS = 5
-DEFAULT_SUBSCRIPTION_BATCH_SIZE = 200
+DEFAULT_SUBSCRIPTION_BATCH_SIZE = 80
+DEFAULT_SUBSCRIPTION_BATCH_PAUSE_SECONDS = 0.2
 DEFAULT_FALLBACK_SAMPLE_INTERVAL_SECONDS = 60
 DEFAULT_BOOTSTRAP_MARKET_LIMIT = 6
 DEFAULT_LOCK_NAME = "local-orderbook-websocket.worker.lock"
@@ -218,6 +219,7 @@ class LocalOrderBookWebsocketWatcher:
         topics: str = DEFAULT_COVERAGE_TOPICS,
         coverage_refresh_seconds: int = DEFAULT_COVERAGE_REFRESH_SECONDS,
         subscription_batch_size: int = DEFAULT_SUBSCRIPTION_BATCH_SIZE,
+        subscription_batch_pause_seconds: float = DEFAULT_SUBSCRIPTION_BATCH_PAUSE_SECONDS,
         bootstrap_market_limit: int = DEFAULT_BOOTSTRAP_MARKET_LIMIT,
         persist: bool = True,
         bootstrap: bool = True,
@@ -234,6 +236,7 @@ class LocalOrderBookWebsocketWatcher:
         self.topics = str(topics or DEFAULT_COVERAGE_TOPICS)
         self.coverage_refresh_seconds = max(30, int(coverage_refresh_seconds or DEFAULT_COVERAGE_REFRESH_SECONDS))
         self.subscription_batch_size = max(1, min(int(subscription_batch_size or DEFAULT_SUBSCRIPTION_BATCH_SIZE), 500))
+        self.subscription_batch_pause_seconds = max(0.0, float(subscription_batch_pause_seconds if subscription_batch_pause_seconds is not None else DEFAULT_SUBSCRIPTION_BATCH_PAUSE_SECONDS))
         self.bootstrap_market_limit = max(0, int(bootstrap_market_limit if bootstrap_market_limit is not None else DEFAULT_BOOTSTRAP_MARKET_LIMIT))
         self.persist = bool(persist)
         self.bootstrap = bool(bootstrap)
@@ -405,6 +408,14 @@ class LocalOrderBookWebsocketWatcher:
                 payload = {"operation": "subscribe", "custom_feature_enabled": True, "assets_ids": batch}
             await websocket.send(json.dumps(payload, ensure_ascii=True))
             self.subscribed_tokens.update(batch)
+            _update_runtime_status(
+                subscribedTokenCount=len(self.subscribed_tokens),
+                subscriptionBatchSize=self.subscription_batch_size,
+                subscriptionBatchCount=index + 1,
+                subscriptionBatchPauseSeconds=self.subscription_batch_pause_seconds,
+            )
+            if self.subscription_batch_pause_seconds and index < len(batches) - 1:
+                await asyncio.sleep(self.subscription_batch_pause_seconds)
         _update_runtime_status(subscribedTokenCount=len(self.subscribed_tokens))
 
     async def unsubscribe(self, websocket: Any, token_ids: list[str]) -> None:
@@ -784,6 +795,12 @@ def start_background_worker(ctx: dict[str, Any], *, lock_dir: str | Path | None 
                 limit=int(os.environ.get("POLYDATA_LOB_COVERAGE_LIMIT", DEFAULT_COVERAGE_LIMIT) or DEFAULT_COVERAGE_LIMIT),
                 topics=os.environ.get("POLYDATA_LOB_COVERAGE_TOPICS", DEFAULT_COVERAGE_TOPICS),
                 coverage_refresh_seconds=int(os.environ.get("POLYDATA_LOB_COVERAGE_REFRESH_SECONDS", DEFAULT_COVERAGE_REFRESH_SECONDS) or DEFAULT_COVERAGE_REFRESH_SECONDS),
+                subscription_batch_size=int(os.environ.get("POLYDATA_LOB_SUBSCRIPTION_BATCH_SIZE", DEFAULT_SUBSCRIPTION_BATCH_SIZE) or DEFAULT_SUBSCRIPTION_BATCH_SIZE),
+                subscription_batch_pause_seconds=_env_float(
+                    "POLYDATA_LOB_SUBSCRIPTION_BATCH_PAUSE_SECONDS",
+                    DEFAULT_SUBSCRIPTION_BATCH_PAUSE_SECONDS,
+                    minimum=0.0,
+                ),
                 bootstrap_market_limit=int(os.environ.get("POLYDATA_LOB_BOOTSTRAP_MARKET_LIMIT", DEFAULT_BOOTSTRAP_MARKET_LIMIT) or DEFAULT_BOOTSTRAP_MARKET_LIMIT),
                 persist=str(os.environ.get("POLYDATA_LOB_WS_PERSIST_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"},
                 logger=logger,
@@ -869,6 +886,13 @@ def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
         return max(minimum, int(os.environ.get(name, default) or default))
     except (TypeError, ValueError):
         return max(minimum, int(default))
+
+
+def _env_float(name: str, default: float, *, minimum: float = 0.0) -> float:
+    try:
+        return max(minimum, float(os.environ.get(name, default) or default))
+    except (TypeError, ValueError):
+        return max(minimum, float(default))
 
 
 def _tier_drift_seconds(tier: str) -> int:
