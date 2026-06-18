@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import time
 from typing import Any, Literal
 
 from ...core.db import postgres_connection
@@ -154,10 +155,8 @@ def select_nba_2024_25_markets(*, limit: int = 5) -> list[MarketCandidate]:
         keyword_groups.append(f"({pattern_filters})")
         params.extend([f"%{keyword}%"] * 5)
     params.append(limit)
-    with postgres_connection(readonly=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
+    rows = _query_postgres_rows(
+        f"""
                 SELECT
                     m.market_id,
                     m.market_slug,
@@ -181,20 +180,20 @@ def select_nba_2024_25_markets(*, limit: int = 5) -> list[MarketCandidate]:
                 ORDER BY m.block_rows DESC, m.orderfilled_rows DESC, m.updated_at DESC
                 LIMIT %s
                 """,
-                params,
-            )
-            return [
-                MarketCandidate(
-                    market_id=int(row["market_id"]),
-                    market_slug=str(row["market_slug"]),
-                    token_id=str(row["token_id"]) if row.get("token_id") else None,
-                    token_side=str(row["token_side"]),
-                    from_block=int(row["from_block"]) if row.get("from_block") is not None else None,
-                    to_block=int(row["to_block"]) if row.get("to_block") is not None else None,
-                    title=str(row.get("title") or ""),
-                )
-                for row in cur.fetchall()
-            ]
+        params,
+    )
+    return [
+        MarketCandidate(
+            market_id=int(row["market_id"]),
+            market_slug=str(row["market_slug"]),
+            token_id=str(row["token_id"]) if row.get("token_id") else None,
+            token_side=str(row["token_side"]),
+            from_block=int(row["from_block"]) if row.get("from_block") is not None else None,
+            to_block=int(row["to_block"]) if row.get("to_block") is not None else None,
+            title=str(row.get("title") or ""),
+        )
+        for row in rows
+    ]
 
 
 def select_nba_2024_25_moneyline_markets(*, limit: int = 200) -> list[ResolvedMarketCandidate]:
@@ -205,10 +204,8 @@ def select_nba_2024_25_moneyline_markets(*, limit: int = 200) -> list[ResolvedMa
     ClickHouse OrderFilled rows, while many of those markets have not been
     materialized into `quant.market_token_block_close` yet.
     """
-    with postgres_connection(readonly=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    rows = _query_postgres_rows(
+        """
                 SELECT
                     m.id AS market_id,
                     m.slug AS market_slug,
@@ -226,22 +223,22 @@ def select_nba_2024_25_moneyline_markets(*, limit: int = 200) -> list[ResolvedMa
                 ORDER BY m.end_date ASC, m.id ASC
                 LIMIT %s
                 """,
-                (limit,),
-            )
-            return [
-                ResolvedMarketCandidate(
-                    market_id=int(row["market_id"]),
-                    market_slug=str(row["market_slug"]),
-                    title=str(row.get("title") or row["market_slug"]),
-                    end_date=row.get("end_date"),
-                    settlement_code=int(row["settlement_code"]),
-                    settlement_outcome=str(row.get("settlement_outcome") or ""),
-                    category="sports",
-                    event_slug="nba_2024_25",
-                    coverage_status="raw_orderfilled",
-                )
-                for row in cur.fetchall()
-            ]
+        (limit,),
+    )
+    return [
+        ResolvedMarketCandidate(
+            market_id=int(row["market_id"]),
+            market_slug=str(row["market_slug"]),
+            title=str(row.get("title") or row["market_slug"]),
+            end_date=row.get("end_date"),
+            settlement_code=int(row["settlement_code"]),
+            settlement_outcome=str(row.get("settlement_outcome") or ""),
+            category="sports",
+            event_slug="nba_2024_25",
+            coverage_status="raw_orderfilled",
+        )
+        for row in rows
+    ]
 
 
 def _select_metadata_universe(spec: UniverseSpec) -> list[ResolvedMarketCandidate]:
@@ -277,10 +274,8 @@ def _select_metadata_universe(spec: UniverseSpec) -> list[ResolvedMarketCandidat
         params.append(spec.end_date)
     params.append(spec.limit)
     where_sql = "\n                  AND ".join(filters)
-    with postgres_connection(readonly=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
+    rows = _query_postgres_rows(
+        f"""
                 SELECT DISTINCT ON (m.market_id)
                     m.market_id,
                     m.market_slug,
@@ -304,26 +299,26 @@ def _select_metadata_universe(spec: UniverseSpec) -> list[ResolvedMarketCandidat
                 ORDER BY m.market_id, COALESCE(m.orderfilled_rows, 0) DESC, COALESCE(m.block_rows, p.block_rows_written, 0) DESC
                 LIMIT %s
                 """,
-                params,
-            )
-            return [
-                ResolvedMarketCandidate(
-                    market_id=int(row["market_id"]),
-                    market_slug=str(row["market_slug"]),
-                    title=str(row.get("title") or row["market_slug"]),
-                    end_date=row.get("end_date"),
-                    settlement_code=int(row.get("settlement_code") or 0),
-                    settlement_outcome=str(row.get("settlement_outcome") or ""),
-                    event_slug=str(row.get("event_slug") or ""),
-                    category=str(row.get("category") or ""),
-                    token_yes_id=str(row["token_yes_id"]) if row.get("token_yes_id") else None,
-                    token_no_id=str(row["token_no_id"]) if row.get("token_no_id") else None,
-                    coverage_status=str(row.get("coverage_status") or "unknown"),
-                    orderfilled_rows=int(row.get("orderfilled_rows") or 0),
-                    block_rows=int(row.get("block_rows") or 0),
-                )
-                for row in cur.fetchall()
-            ]
+        params,
+    )
+    return [
+        ResolvedMarketCandidate(
+            market_id=int(row["market_id"]),
+            market_slug=str(row["market_slug"]),
+            title=str(row.get("title") or row["market_slug"]),
+            end_date=row.get("end_date"),
+            settlement_code=int(row.get("settlement_code") or 0),
+            settlement_outcome=str(row.get("settlement_outcome") or ""),
+            event_slug=str(row.get("event_slug") or ""),
+            category=str(row.get("category") or ""),
+            token_yes_id=str(row["token_yes_id"]) if row.get("token_yes_id") else None,
+            token_no_id=str(row["token_no_id"]) if row.get("token_no_id") else None,
+            coverage_status=str(row.get("coverage_status") or "unknown"),
+            orderfilled_rows=int(row.get("orderfilled_rows") or 0),
+            block_rows=int(row.get("block_rows") or 0),
+        )
+        for row in rows
+    ]
 
 
 def _preset_spec(name: str) -> UniverseSpec:
@@ -353,3 +348,34 @@ def _universe_label(name: str) -> str:
         "watchlist_slugs": "Watchlist Slugs",
     }
     return labels.get(name, name.replace("_", " ").title())
+
+
+def _query_postgres_rows(sql: str, params: Any, *, attempts: int = 3) -> list[dict[str, Any]]:
+    last_error: Exception | None = None
+    for attempt in range(max(1, attempts)):
+        try:
+            with postgres_connection(readonly=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, params)
+                    return list(cur.fetchall())
+        except Exception as exc:  # pragma: no cover - exact psycopg subclasses vary by version.
+            last_error = exc
+            if attempt >= attempts - 1 or not _is_retryable_postgres_error(exc):
+                raise
+            time.sleep(0.35 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+    return []
+
+
+def _is_retryable_postgres_error(exc: Exception) -> bool:
+    name = exc.__class__.__name__.lower()
+    message = str(exc).lower()
+    return (
+        "connectiontimeout" in name
+        or "operationalerror" in name
+        or "connection timeout" in message
+        or "timeout expired" in message
+        or "connection refused" in message
+        or "server closed the connection" in message
+    )
