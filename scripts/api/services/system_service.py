@@ -404,11 +404,32 @@ def _system_health_cache_ttl_seconds() -> int:
 
 
 def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
+    lob_runtime: Dict[str, Any] = {"status": "ready", "mode": "local-orderbook"}
+    runtime_getter = ctx.get("get_lob_runtime_status")
+    if callable(runtime_getter):
+        try:
+            runtime_payload = runtime_getter()
+            if isinstance(runtime_payload, dict):
+                lob_runtime.update(runtime_payload)
+        except Exception as exc:
+            lob_runtime.update({"status": "unavailable", "detail": str(exc)[:240]})
+    storage_getter = ctx.get("get_lob_storage_status")
+    if callable(storage_getter):
+        try:
+            storage_payload = storage_getter()
+            if isinstance(storage_payload, dict):
+                lob_runtime["storage"] = storage_payload
+                if storage_payload.get("rollupWatermark") is not None:
+                    lob_runtime["rollupWatermark"] = storage_payload.get("rollupWatermark")
+                if storage_payload.get("deadLetters1h") is not None:
+                    lob_runtime["deadLetters1h"] = storage_payload.get("deadLetters1h")
+        except Exception as exc:
+            lob_runtime["storage"] = {"status": "unavailable", "detail": str(exc)[:240]}
     payload: Dict[str, Any] = {
         "database": ctx["describe_db_target"](),
         "redis": bool(ctx["get_redis_client"]()),
         "apiStatus": "ok",
-        "lobRuntime": {"status": "ready", "mode": "local-orderbook"},
+        "lobRuntime": lob_runtime,
         "contentSync": {
             "status": "database-runtime-intel"
             if ctx["table_exists"]("content_items") and ctx["table_exists"]("content_links")

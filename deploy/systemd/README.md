@@ -29,6 +29,7 @@ not a separate code tree.
 - `polydata-new-market-signal.service`
 - `polydata-geo-sanctions-shock.service`
 - `polydata-quant-backtest-runner.service`
+- `polydata-lob-maintenance.service`
 
 These services should write/read Redis and SQLite seed snapshots. They should not
 run raw market discovery, OrderFilled indexing, or oracle chain scans on GCP.
@@ -118,6 +119,7 @@ cp deploy/systemd/polydata-*-seed.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-geo-sanctions-shock.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-new-market-signal.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-quant-backtest-runner.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-lob-maintenance.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now polydata-gcp.target
 ```

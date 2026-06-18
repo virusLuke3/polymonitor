@@ -224,6 +224,32 @@ class LocalOrderBookRuntimeManager:
             self._cache[identity.token_id] = {"cached_at": time.time(), "payload": dict(payload)}
             return payload
 
+    def mark_all_stale(self, reason: str = "runtime_stale") -> int:
+        with self._lock:
+            self.registry.mark_all_stale(reason)
+            self._cache.clear()
+            return len(self.registry.books)
+
+    def mark_token_stale_if_idle(self, token_id: str, *, now_ms: int, stale_after_ms: int) -> bool:
+        with self._lock:
+            book = self.registry.get(str(token_id or ""))
+            if book is None:
+                return False
+            changed = book.mark_stale_if_idle(now_ms=now_ms, stale_after_ms=stale_after_ms)
+            if changed:
+                self._cache.pop(book.identity.token_id, None)
+            return changed
+
+    def runtime_book_counts(self) -> Dict[str, int]:
+        with self._lock:
+            books = list(self.registry.books.values())
+        return {
+            "bookCount": len(books),
+            "readyCount": sum(1 for book in books if book.status == "ready"),
+            "staleCount": sum(1 for book in books if book.status == "stale"),
+            "notReadyCount": sum(1 for book in books if book.status == "not_ready"),
+        }
+
     def _state_payload_from_registry(self, token_id: str, *, fallback_outcome: str = "") -> Dict[str, Any]:
         with self._lock:
             cached = self._cache.get(token_id)
@@ -398,6 +424,15 @@ def _float_or_none(value: Any) -> float | None:
     return float(parsed) if parsed is not None else None
 
 
+def _int_or_none_local(value: Any) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return int(float(str(value)))
+    except (TypeError, ValueError):
+        return None
+
+
 def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -521,25 +556,45 @@ def _persist_book_side_snapshot(
     fetched_at: str,
     block_number: Any = None,
     side_payload: Dict[str, Any],
+    coverage_payload: Dict[str, Any] | None = None,
 ) -> None:
     if not token_id:
         return
     summary = _book_side_summary(side_payload)
     state_payload = side_payload.get("statePayload") if isinstance(side_payload, dict) else None
     state_payload = dict(state_payload) if isinstance(state_payload, dict) else dict(side_payload or {})
+    coverage_payload = dict(coverage_payload) if isinstance(coverage_payload, dict) else {}
+    market_id = _int_or_none_local(state_payload.get("market_id") or side_payload.get("marketId"))
+    condition_id = str(state_payload.get("condition_id") or side_payload.get("conditionId") or "")
+    market_slug = str(state_payload.get("market_slug") or side_payload.get("marketSlug") or "")
+    snapshot_source = str(state_payload.get("snapshot_source") or side_payload.get("snapshotSource") or "rest-book")
+    storage_tier = str(coverage_payload.get("tier") or state_payload.get("storage_tier") or side_payload.get("storageTier") or "unknown")
+    book_generation = _int_or_none_local(state_payload.get("generation") or side_payload.get("generation"))
+    last_event_ts_ms = _int_or_none_local(state_payload.get("last_event_ts_ms") or side_payload.get("lastEventTsMs"))
     payload = {
         **state_payload,
         **summary,
         "tokenId": token_id,
         "pairedTokenId": paired_token_id,
         "side": side_name,
+        "market_id": market_id or state_payload.get("market_id"),
+        "marketId": market_id,
+        "condition_id": condition_id,
+        "conditionId": condition_id,
+        "market_slug": market_slug,
+        "marketSlug": market_slug,
         "marketTitle": market_title,
         "source": source or "local-orderbook",
         "bookStatus": book_status,
         "fetchedAt": fetched_at,
         "blockNumber": block_number,
+        "coverage": coverage_payload,
         "runtimeModel": state_payload.get("runtime_model") or side_payload.get("runtimeModel") or "LocalOrderBook",
-        "snapshotSource": state_payload.get("snapshot_source") or side_payload.get("snapshotSource") or "rest-book",
+        "snapshot_source": snapshot_source,
+        "snapshotSource": snapshot_source,
+        "storageTier": storage_tier,
+        "bookGeneration": book_generation,
+        "lastEventTsMs": last_event_ts_ms,
     }
     snapshot_version = str(
         state_payload.get("snapshot_version")
@@ -568,12 +623,16 @@ def _persist_book_side_snapshot(
             cur.execute(
                 """
                 INSERT INTO quant.clob_orderbook_snapshots (
-                    token_id, side, paired_token_id, market_title, source, book_status,
+                    token_id, side, paired_token_id,
+                    market_id, condition_id, market_slug, market_title,
+                    source, snapshot_source, storage_tier, book_generation, last_event_ts_ms, book_status,
                     block_number, snapshot_timestamp,
                     best_bid, best_ask, spread, mid,
                     bid_depth, ask_depth, depth_total, imbalance,
                     level_count_bid, level_count_ask, payload, snapshot_version, fetched_at
                 ) VALUES (
+                    %s, %s, %s,
+                    %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s,
                     %s, %s, %s, %s,
@@ -585,8 +644,15 @@ def _persist_book_side_snapshot(
                     token_id,
                     side_name,
                     paired_token_id or None,
+                    market_id,
+                    condition_id or None,
+                    market_slug or None,
                     market_title or None,
                     source or "local-orderbook",
+                    snapshot_source or None,
+                    storage_tier or "unknown",
+                    book_generation,
+                    last_event_ts_ms,
                     book_status or "unknown",
                     int(block_number) if block_number not in (None, "") else None,
                     fetched_at,
@@ -614,6 +680,7 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
         book_status = str(payload.get("bookStatus") or ("ok" if _lob_payload_has_levels(payload) else "no-book"))
         market_title = str(payload.get("marketTitle") or "")
         block_number = payload.get("blockNumber") or payload.get("block_number")
+        coverage_payload = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
         _persist_book_side_snapshot(
             ctx,
             token_id=yes_token_id,
@@ -625,6 +692,7 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
             fetched_at=fetched_at,
             block_number=block_number,
             side_payload=payload.get("yes") or _empty_book_side(),
+            coverage_payload=coverage_payload,
         )
         if no_token_id:
             _persist_book_side_snapshot(
@@ -638,6 +706,7 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
                 fetched_at=fetched_at,
                 block_number=block_number,
                 side_payload=payload.get("no") or _empty_book_side(),
+                coverage_payload=coverage_payload,
             )
     except Exception as exc:
         logger = ctx.get("app").logger if ctx.get("app") else None
@@ -647,6 +716,88 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
 
 def persist_runtime_lob_payload(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> None:
     _persist_orderbook_snapshots(ctx, payload, yes_token_id, no_token_id)
+
+
+def write_lob_dead_letter(
+    *,
+    reason: str,
+    raw_payload: Dict[str, Any] | list[Any] | str | None = None,
+    token_id: str = "",
+    market_id: int | None = None,
+    condition_id: str = "",
+    event_type: str = "",
+    source: str = "local-orderbook",
+    detail: str = "",
+) -> bool:
+    reason = str(reason or "").strip() or "unknown"
+    try:
+        _ensure_snapshot_schema()
+        if isinstance(raw_payload, (dict, list)):
+            payload_json = json.dumps(raw_payload)
+        elif raw_payload is None:
+            payload_json = "{}"
+        else:
+            payload_json = json.dumps({"raw": str(raw_payload)[:4000]})
+        with postgres_connection(PostgresSettings()) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO quant.clob_orderbook_dead_letters (
+                        reason, token_id, market_id, condition_id, event_type, source, raw_payload, detail
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s::jsonb, %s
+                    )
+                    """,
+                    (
+                        reason,
+                        str(token_id or "") or None,
+                        market_id,
+                        str(condition_id or "") or None,
+                        str(event_type or "") or None,
+                        str(source or "local-orderbook"),
+                        payload_json,
+                        str(detail or "")[:2000] or None,
+                    ),
+                )
+        return True
+    except Exception:
+        return False
+
+
+def get_lob_storage_status() -> Dict[str, Any]:
+    try:
+        _ensure_snapshot_schema()
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        max(fetched_at) AS latest_raw_at,
+                        count(*) FILTER (WHERE fetched_at >= now() - interval '1 hour') AS raw_rows_1h
+                    FROM quant.clob_orderbook_snapshots
+                    """
+                )
+                snapshot_row = cur.fetchone() or {}
+                cur.execute("SELECT max(bucket_minute) AS rollup_watermark FROM quant.clob_orderbook_rollups_1m")
+                rollup_row = cur.fetchone() or {}
+                cur.execute(
+                    """
+                    SELECT count(*) AS dead_letters_1h
+                    FROM quant.clob_orderbook_dead_letters
+                    WHERE created_at >= now() - interval '1 hour'
+                    """
+                )
+                dead_row = cur.fetchone() or {}
+        latest_raw_at = snapshot_row.get("latest_raw_at")
+        rollup_watermark = rollup_row.get("rollup_watermark")
+        return {
+            "latestRawAt": latest_raw_at.isoformat().replace("+00:00", "Z") if latest_raw_at else None,
+            "rawRows1h": int(snapshot_row.get("raw_rows_1h") or 0),
+            "rollupWatermark": rollup_watermark.isoformat().replace("+00:00", "Z") if rollup_watermark else None,
+            "deadLetters1h": int(dead_row.get("dead_letters_1h") or 0),
+        }
+    except Exception as exc:
+        return {"status": "unavailable", "detail": str(exc)[:240]}
 
 
 def get_lob_snapshots_by_token_payload(ctx: dict, token_id: str, *, side: str = "", limit: int = 48) -> Dict[str, Any]:

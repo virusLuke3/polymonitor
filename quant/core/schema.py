@@ -293,8 +293,15 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
         token_id TEXT NOT NULL,
         side TEXT NOT NULL DEFAULT 'YES',
         paired_token_id TEXT,
+        market_id BIGINT,
+        condition_id TEXT,
+        market_slug TEXT,
         market_title TEXT,
         source TEXT NOT NULL DEFAULT 'clob-book',
+        snapshot_source TEXT,
+        storage_tier TEXT NOT NULL DEFAULT 'unknown',
+        book_generation BIGINT,
+        last_event_ts_ms BIGINT,
         book_status TEXT NOT NULL DEFAULT 'unknown',
         block_number BIGINT,
         snapshot_timestamp TIMESTAMPTZ,
@@ -311,6 +318,53 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
         payload JSONB NOT NULL,
         snapshot_version TEXT,
         fetched_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.clob_orderbook_rollups_1m (
+        token_id TEXT NOT NULL,
+        side TEXT NOT NULL DEFAULT 'YES',
+        bucket_minute TIMESTAMPTZ NOT NULL,
+        market_id BIGINT,
+        condition_id TEXT,
+        market_slug TEXT,
+        market_title TEXT,
+        source TEXT NOT NULL DEFAULT 'local-orderbook',
+        snapshot_source TEXT,
+        storage_tier TEXT NOT NULL DEFAULT 'unknown',
+        book_status TEXT NOT NULL DEFAULT 'unknown',
+        first_snapshot_id BIGINT,
+        last_snapshot_id BIGINT,
+        sample_count BIGINT NOT NULL DEFAULT 0,
+        first_fetched_at TIMESTAMPTZ,
+        last_fetched_at TIMESTAMPTZ,
+        best_bid NUMERIC(20, 10),
+        best_ask NUMERIC(20, 10),
+        spread NUMERIC(20, 10),
+        mid NUMERIC(20, 10),
+        bid_depth NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        ask_depth NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        depth_total NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        imbalance NUMERIC(20, 10),
+        level_count_bid INTEGER NOT NULL DEFAULT 0,
+        level_count_ask INTEGER NOT NULL DEFAULT 0,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (token_id, side, bucket_minute)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.clob_orderbook_dead_letters (
+        dead_letter_id BIGSERIAL PRIMARY KEY,
+        reason TEXT NOT NULL,
+        token_id TEXT,
+        market_id BIGINT,
+        condition_id TEXT,
+        event_type TEXT,
+        source TEXT NOT NULL DEFAULT 'local-orderbook',
+        raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        detail TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
@@ -605,6 +659,13 @@ ALTER_TABLE_SQL: tuple[str, ...] = (
     "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS block_number BIGINT",
     "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS snapshot_timestamp TIMESTAMPTZ",
     "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS snapshot_version TEXT",
+    "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS market_id BIGINT",
+    "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS condition_id TEXT",
+    "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS market_slug TEXT",
+    "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS snapshot_source TEXT",
+    "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS storage_tier TEXT NOT NULL DEFAULT 'unknown'",
+    "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS book_generation BIGINT",
+    "ALTER TABLE quant.clob_orderbook_snapshots ADD COLUMN IF NOT EXISTS last_event_ts_ms BIGINT",
 )
 
 
@@ -614,6 +675,41 @@ DATA_MIGRATION_SQL: tuple[str, ...] = (
     SET snapshot_timestamp = fetched_at
     WHERE snapshot_timestamp IS NULL
       AND fetched_at IS NOT NULL
+    """,
+    """
+    UPDATE quant.clob_orderbook_snapshots
+    SET
+        market_id = COALESCE(
+            market_id,
+            CASE
+                WHEN (payload->>'market_id') ~ '^[0-9]+$' THEN (payload->>'market_id')::bigint
+                WHEN (payload->>'marketId') ~ '^[0-9]+$' THEN (payload->>'marketId')::bigint
+                ELSE NULL
+            END
+        ),
+        condition_id = COALESCE(condition_id, NULLIF(payload->>'condition_id', ''), NULLIF(payload->>'conditionId', '')),
+        market_slug = COALESCE(market_slug, NULLIF(payload->>'market_slug', ''), NULLIF(payload->>'marketSlug', '')),
+        snapshot_source = COALESCE(snapshot_source, NULLIF(payload->>'snapshot_source', ''), NULLIF(payload->>'snapshotSource', '')),
+        storage_tier = COALESCE(NULLIF(storage_tier, 'unknown'), NULLIF(payload->'coverage'->>'tier', ''), 'unknown'),
+        book_generation = COALESCE(
+            book_generation,
+            CASE WHEN (payload->>'generation') ~ '^[0-9]+$' THEN (payload->>'generation')::bigint ELSE NULL END
+        ),
+        last_event_ts_ms = COALESCE(
+            last_event_ts_ms,
+            CASE
+                WHEN (payload->>'last_event_ts_ms') ~ '^[0-9]+$' THEN (payload->>'last_event_ts_ms')::bigint
+                WHEN (payload->>'lastEventTsMs') ~ '^[0-9]+$' THEN (payload->>'lastEventTsMs')::bigint
+                ELSE NULL
+            END
+        )
+    WHERE (market_id IS NULL AND ((payload->>'market_id') ~ '^[0-9]+$' OR (payload->>'marketId') ~ '^[0-9]+$'))
+       OR (condition_id IS NULL AND (NULLIF(payload->>'condition_id', '') IS NOT NULL OR NULLIF(payload->>'conditionId', '') IS NOT NULL))
+       OR (market_slug IS NULL AND (NULLIF(payload->>'market_slug', '') IS NOT NULL OR NULLIF(payload->>'marketSlug', '') IS NOT NULL))
+       OR (snapshot_source IS NULL AND (NULLIF(payload->>'snapshot_source', '') IS NOT NULL OR NULLIF(payload->>'snapshotSource', '') IS NOT NULL))
+       OR (storage_tier = 'unknown' AND NULLIF(payload->'coverage'->>'tier', '') IS NOT NULL)
+       OR (book_generation IS NULL AND (payload->>'generation') ~ '^[0-9]+$')
+       OR (last_event_ts_ms IS NULL AND ((payload->>'last_event_ts_ms') ~ '^[0-9]+$' OR (payload->>'lastEventTsMs') ~ '^[0-9]+$'))
     """,
 )
 
@@ -651,6 +747,13 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_token_block ON quant.clob_orderbook_snapshots (token_id, block_number DESC, snapshot_id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_side_time ON quant.clob_orderbook_snapshots (side, fetched_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_status_time ON quant.clob_orderbook_snapshots (book_status, fetched_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_market_side_time ON quant.clob_orderbook_snapshots (market_id, side, fetched_at DESC) WHERE market_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_storage_time ON quant.clob_orderbook_snapshots (storage_tier, fetched_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_source_time ON quant.clob_orderbook_snapshots (snapshot_source, fetched_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_lob_rollups_market_time ON quant.clob_orderbook_rollups_1m (market_id, side, bucket_minute DESC) WHERE market_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_quant_lob_rollups_storage_time ON quant.clob_orderbook_rollups_1m (storage_tier, bucket_minute DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_lob_dead_letters_created ON quant.clob_orderbook_dead_letters (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_lob_dead_letters_reason ON quant.clob_orderbook_dead_letters (reason, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_status ON quant.quant_backtest_runs (status, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_market ON quant.quant_backtest_runs (market_slug, token_side, price_source, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_runs_engine ON quant.quant_backtest_runs (backtest_engine, status, created_at DESC)",

@@ -42,6 +42,46 @@ DEFAULT_SUBSCRIPTION_BATCH_SIZE = 200
 DEFAULT_FALLBACK_SAMPLE_INTERVAL_SECONDS = 60
 DEFAULT_BOOTSTRAP_MARKET_LIMIT = 6
 DEFAULT_LOCK_NAME = "local-orderbook-websocket.worker.lock"
+DEFAULT_DRIFT_CHECK_INTERVAL_SECONDS = 60
+DEFAULT_DRIFT_CHECK_MAX_PER_TICK = 3
+DRIFT_CHECK_SECONDS_BY_TIER = {"hot": 900, "warm": 1800, "cold": 3600}
+STALE_IDLE_SECONDS_BY_TIER = {"hot": 120, "warm": 300, "cold": 900}
+
+
+_STATUS_LOCK = threading.Lock()
+_RUNTIME_STATUS: dict[str, Any] = {
+    "status": "disabled",
+    "mode": "local-orderbook",
+    "targetCount": 0,
+    "subscribedTokenCount": 0,
+    "lastMessageAt": None,
+    "lastPersistAt": None,
+    "lastCoverageRefreshAt": None,
+    "lastConnectAt": None,
+    "reconnectCount": 0,
+    "staleCount": 0,
+    "deadLetterCount": 0,
+    "driftMismatchCount": 0,
+}
+
+
+def _utc_now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _update_runtime_status(**updates: Any) -> None:
+    with _STATUS_LOCK:
+        _RUNTIME_STATUS.update(updates)
+
+
+def _increment_runtime_status(key: str, amount: int = 1) -> None:
+    with _STATUS_LOCK:
+        _RUNTIME_STATUS[key] = int(_RUNTIME_STATUS.get(key) or 0) + int(amount)
+
+
+def get_runtime_status() -> dict[str, Any]:
+    with _STATUS_LOCK:
+        return dict(_RUNTIME_STATUS)
 
 
 @dataclass(frozen=True)
@@ -148,6 +188,8 @@ class LocalOrderBookWebsocketWatcher:
         self.target_by_token: dict[str, CoverageTarget] = {}
         self.subscribed_tokens: set[str] = set()
         self._last_persisted_at_by_market: dict[int, float] = {}
+        self._last_drift_check_at_by_market: dict[int, float] = {}
+        self._last_idle_check_at = 0.0
         self._stop_event = asyncio.Event()
 
     def stop(self) -> None:
@@ -173,6 +215,14 @@ class LocalOrderBookWebsocketWatcher:
             self.target_by_token[no_identity.token_id] = target
         summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
         self.logger.info("coverage refreshed markets=%s tokens=%s topics=%s", len(targets), len(self.identities_by_token), summary.get("topics"))
+        _update_runtime_status(
+            status="coverage_ready",
+            targetCount=len(targets),
+            subscribedTokenCount=len(self.subscribed_tokens),
+            coverageTopics=self.topics,
+            coverageSummary=summary,
+            lastCoverageRefreshAt=_utc_now_iso(),
+        )
         return targets
 
     def bootstrap_targets(self, targets: Iterable[CoverageTarget] | None = None, *, force_refresh: bool = False) -> int:
@@ -194,6 +244,15 @@ class LocalOrderBookWebsocketWatcher:
                 self.persist_target_if_due(target, force=True, reason="bootstrap")
             except Exception as exc:
                 self.logger.warning("bootstrap failed market_id=%s title=%s error=%s", target.market_id, target.market_title[:80], exc)
+                self.write_dead_letter(
+                    "bootstrap_failed",
+                    raw_payload=target.raw,
+                    token_id=target.yes_token_id,
+                    market_id=target.market_id,
+                    condition_id=target.condition_id,
+                    event_type="bootstrap",
+                    detail=str(exc),
+                )
         if count:
             self.logger.info("bootstrap complete markets=%s", count)
         return count
@@ -207,16 +266,22 @@ class LocalOrderBookWebsocketWatcher:
                 raise
             except Exception as exc:
                 self.logger.warning("websocket connection failed: %s", exc)
+                _increment_runtime_status("reconnectCount")
+                _update_runtime_status(status="reconnecting")
                 await asyncio.sleep(reconnect_seconds)
 
     async def run_connection(self, *, run_seconds: int | None = None) -> None:
+        if self.subscribed_tokens or self.manager.runtime_book_counts().get("bookCount"):
+            self.mark_registry_stale("websocket_reconnect")
         targets = self.refresh_targets()
         self.bootstrap_targets(targets[: self.bootstrap_market_limit] if self.bootstrap_market_limit else [], force_refresh=True)
         deadline = time.monotonic() + run_seconds if run_seconds and run_seconds > 0 else None
         last_refresh_at = time.monotonic()
+        last_drift_tick = 0.0
         async with websockets.connect(self.ws_url, ping_interval=None, close_timeout=10, max_queue=1000) as websocket:
             await self.subscribe(websocket, sorted(self.identities_by_token), replace=True)
             self.logger.info("connected subscribed_tokens=%s", len(self.subscribed_tokens))
+            _update_runtime_status(status="connected", subscribedTokenCount=len(self.subscribed_tokens), lastConnectAt=_utc_now_iso())
             while not self._stop_event.is_set():
                 now = time.monotonic()
                 if deadline is not None and now >= deadline:
@@ -224,6 +289,9 @@ class LocalOrderBookWebsocketWatcher:
                 if now - last_refresh_at >= self.coverage_refresh_seconds:
                     await self.reconcile_subscriptions(websocket)
                     last_refresh_at = now
+                if now - last_drift_tick >= _env_int("POLYDATA_LOB_DRIFT_CHECK_INTERVAL_SECONDS", DEFAULT_DRIFT_CHECK_INTERVAL_SECONDS, minimum=10):
+                    self.run_periodic_checks()
+                    last_drift_tick = now
                 timeout = 5.0
                 if deadline is not None:
                     timeout = max(0.1, min(timeout, deadline - now))
@@ -262,12 +330,14 @@ class LocalOrderBookWebsocketWatcher:
                 payload = {"operation": "subscribe", "custom_feature_enabled": True, "assets_ids": batch}
             await websocket.send(json.dumps(payload, ensure_ascii=True))
             self.subscribed_tokens.update(batch)
+        _update_runtime_status(subscribedTokenCount=len(self.subscribed_tokens))
 
     async def unsubscribe(self, websocket: Any, token_ids: list[str]) -> None:
         for batch in _chunked(token_ids, self.subscription_batch_size):
             await websocket.send(json.dumps({"operation": "unsubscribe", "assets_ids": batch}, ensure_ascii=True))
             for token_id in batch:
                 self.subscribed_tokens.discard(token_id)
+        _update_runtime_status(subscribedTokenCount=len(self.subscribed_tokens))
 
     async def handle_raw_message(self, raw_message: str) -> None:
         if raw_message in {"PONG", "PING", ""}:
@@ -276,23 +346,49 @@ class LocalOrderBookWebsocketWatcher:
             payload = json.loads(raw_message)
         except json.JSONDecodeError:
             self.logger.warning("ignoring non-json websocket message=%s", raw_message[:160])
+            self.write_dead_letter("invalid_json", raw_payload=raw_message, event_type="websocket_message")
             return
+        _update_runtime_status(lastMessageAt=_utc_now_iso(), status="connected")
         for event in _iter_json_events(payload):
             self.handle_event(event)
 
     def handle_event(self, event: dict[str, Any]) -> int:
         changed_markets: set[int] = set()
-        for normalized in normalize_polymarket_event(event):
+        normalized_events = list(normalize_polymarket_event(event))
+        event_type = str(event.get("event_type") or event.get("type") or "")
+        if not normalized_events and event_type in {"book", "price_change"}:
+            self.write_dead_letter("unparsed_event", raw_payload=event, event_type=event_type)
+        for normalized in normalized_events:
             identity = self.identities_by_token.get(normalized.token_id)
             if identity is None:
+                self.write_dead_letter("unknown_token", raw_payload=event, token_id=normalized.token_id, event_type=event_type)
                 continue
             target = self.target_by_token.get(normalized.token_id)
             try:
                 self.manager.apply_normalized_event(identity, normalized)
-            except (OrderBookNotReady, OrderBookOutOfOrder):
+            except (OrderBookNotReady, OrderBookOutOfOrder) as exc:
+                self.write_dead_letter(
+                    "price_change_before_ready" if isinstance(exc, OrderBookNotReady) else "out_of_order_resnapshot",
+                    raw_payload=event,
+                    token_id=normalized.token_id,
+                    market_id=target.market_id if target else identity.market_id,
+                    condition_id=target.condition_id if target else identity.condition_id,
+                    event_type=event_type,
+                )
                 if target is not None:
                     self.bootstrap_targets([target], force_refresh=True)
                     changed_markets.add(target.market_id)
+                continue
+            except ValueError as exc:
+                self.write_dead_letter(
+                    "invalid_orderbook_event",
+                    raw_payload=event,
+                    token_id=normalized.token_id,
+                    market_id=target.market_id if target else identity.market_id,
+                    condition_id=target.condition_id if target else identity.condition_id,
+                    event_type=event_type,
+                    detail=str(exc),
+                )
                 continue
             if target is not None:
                 changed_markets.add(target.market_id)
@@ -324,7 +420,109 @@ class LocalOrderBookWebsocketWatcher:
         payload["source"] = "local-orderbook"
         lob_service.persist_runtime_lob_payload(self.ctx, payload, target.yes_token_id, target.no_token_id)
         self._last_persisted_at_by_market[target.market_id] = now
+        _update_runtime_status(lastPersistAt=_utc_now_iso())
         return True
+
+    def mark_registry_stale(self, reason: str) -> int:
+        count = self.manager.mark_all_stale(reason)
+        counts = self.manager.runtime_book_counts()
+        _update_runtime_status(status="stale", staleCount=counts.get("staleCount", count), bookCount=counts.get("bookCount", count))
+        return count
+
+    def run_periodic_checks(self) -> None:
+        self.run_drift_checks()
+        self.mark_idle_books_stale()
+
+    def run_drift_checks(self) -> int:
+        max_per_tick = _env_int("POLYDATA_LOB_DRIFT_CHECK_MAX_PER_TICK", DEFAULT_DRIFT_CHECK_MAX_PER_TICK, minimum=0)
+        if max_per_tick <= 0:
+            return 0
+        now = time.time()
+        checked = 0
+        for target in list(self.targets_by_market.values()):
+            if checked >= max_per_tick:
+                break
+            interval = _tier_drift_seconds(target.tier)
+            if now - float(self._last_drift_check_at_by_market.get(target.market_id) or 0) < interval:
+                continue
+            self._last_drift_check_at_by_market[target.market_id] = now
+            before = self.manager.get_cached_market_snapshot(
+                market_id=target.market_id,
+                yes_token_id=target.yes_token_id,
+                no_token_id=target.no_token_id,
+                market_title=target.market_title,
+            )
+            before_hash = _market_snapshot_hash(before)
+            try:
+                after = self.manager.get_market_snapshot(
+                    market_id=target.market_id,
+                    yes_token_id=target.yes_token_id,
+                    no_token_id=target.no_token_id,
+                    market_title=target.market_title,
+                    condition_id=target.condition_id,
+                    market_slug=target.market_slug or None,
+                    force_refresh=True,
+                )
+            except Exception as exc:
+                self.write_dead_letter(
+                    "drift_resnapshot_failed",
+                    raw_payload=target.raw,
+                    token_id=target.yes_token_id,
+                    market_id=target.market_id,
+                    condition_id=target.condition_id,
+                    event_type="drift_check",
+                    detail=str(exc),
+                )
+                continue
+            checked += 1
+            if before_hash and before_hash != _market_snapshot_hash(after):
+                _increment_runtime_status("driftMismatchCount")
+                self.persist_target_if_due(target, force=True, reason="drift_check")
+        return checked
+
+    def mark_idle_books_stale(self) -> int:
+        now = time.time()
+        if now - self._last_idle_check_at < 30:
+            return 0
+        self._last_idle_check_at = now
+        now_ms = int(now * 1000)
+        changed_markets: set[int] = set()
+        for target in self.targets_by_market.values():
+            stale_after_ms = _tier_stale_idle_seconds(target.tier) * 1000
+            changed = False
+            for token_id in target.token_ids:
+                changed = self.manager.mark_token_stale_if_idle(token_id, now_ms=now_ms, stale_after_ms=stale_after_ms) or changed
+            if changed:
+                changed_markets.add(target.market_id)
+        for market_id in changed_markets:
+            target = self.targets_by_market.get(market_id)
+            if target is not None:
+                self.persist_target_if_due(target, force=True, reason="idle_stale")
+        counts = self.manager.runtime_book_counts()
+        _update_runtime_status(staleCount=counts.get("staleCount", 0), bookCount=counts.get("bookCount", 0))
+        return len(changed_markets)
+
+    def write_dead_letter(
+        self,
+        reason: str,
+        *,
+        raw_payload: Any = None,
+        token_id: str = "",
+        market_id: int | None = None,
+        condition_id: str = "",
+        event_type: str = "",
+        detail: str = "",
+    ) -> None:
+        if lob_service.write_lob_dead_letter(
+            reason=reason,
+            raw_payload=raw_payload,
+            token_id=token_id,
+            market_id=market_id,
+            condition_id=condition_id,
+            event_type=event_type,
+            detail=detail,
+        ):
+            _increment_runtime_status("deadLetterCount")
 
 
 class _FileLock:
@@ -355,16 +553,19 @@ class _FileLock:
 
 def start_background_worker(ctx: dict[str, Any], *, lock_dir: str | Path | None = None) -> threading.Thread | None:
     if str(os.environ.get("POLYDATA_LOB_WEBSOCKET_ENABLED", "0")).strip().lower() not in {"1", "true", "yes", "on"}:
+        _update_runtime_status(status="disabled")
         return None
     logger = _Logger()
     ws_url = os.environ.get("POLYDATA_CLOB_WS_URL") or POLYMARKET_CLOB_WS_URL
     if not str(ws_url or "").strip():
         logger.warning("websocket disabled: POLYDATA_CLOB_WS_URL is empty")
+        _update_runtime_status(status="disabled", detail="missing websocket url")
         return None
     base_dir = Path(lock_dir or os.environ.get("POLYDATA_RUNTIME_LOCK_DIR") or "/tmp/polydata")
     lock = _FileLock(base_dir / DEFAULT_LOCK_NAME)
     if not lock.acquire():
         logger.info("websocket disabled: another process owns %s", lock.path)
+        _update_runtime_status(status="standby", detail=f"lock held: {lock.path}")
         return None
 
     def _run() -> None:
@@ -386,6 +587,7 @@ def start_background_worker(ctx: dict[str, Any], *, lock_dir: str | Path | None 
     thread = threading.Thread(target=_run, name="local-orderbook-websocket", daemon=True)
     thread.start()
     logger.info("websocket background worker started")
+    _update_runtime_status(status="starting")
     return thread
 
 
@@ -416,6 +618,46 @@ def _int_or_none(value: Any) -> int | None:
         return int(float(str(value)))
     except (TypeError, ValueError):
         return None
+
+
+def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(os.environ.get(name, default) or default))
+    except (TypeError, ValueError):
+        return max(minimum, int(default))
+
+
+def _tier_drift_seconds(tier: str) -> int:
+    tier_key = str(tier or "").strip().lower()
+    default = DRIFT_CHECK_SECONDS_BY_TIER.get(tier_key, DRIFT_CHECK_SECONDS_BY_TIER["cold"])
+    return _env_int(f"POLYDATA_LOB_DRIFT_SECONDS_{tier_key.upper()}", default, minimum=60)
+
+
+def _tier_stale_idle_seconds(tier: str) -> int:
+    tier_key = str(tier or "").strip().lower()
+    default = STALE_IDLE_SECONDS_BY_TIER.get(tier_key, STALE_IDLE_SECONDS_BY_TIER["cold"])
+    return _env_int(f"POLYDATA_LOB_STALE_IDLE_SECONDS_{tier_key.upper()}", default, minimum=30)
+
+
+def _market_snapshot_hash(payload: dict[str, Any]) -> str:
+    sides = []
+    for side_name in ("yes", "no"):
+        side = payload.get(side_name) if isinstance(payload, dict) else None
+        if not isinstance(side, dict):
+            continue
+        sides.append(
+            {
+                "side": side_name,
+                "snapshotVersion": side.get("snapshotVersion") or side.get("snapshot_version"),
+                "bids": side.get("bids") or [],
+                "asks": side.get("asks") or [],
+            }
+        )
+    if not sides:
+        return ""
+    import hashlib
+
+    return hashlib.sha256(json.dumps(sides, sort_keys=True, ensure_ascii=True).encode("utf-8")).hexdigest()[:20]
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

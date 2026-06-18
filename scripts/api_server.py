@@ -447,6 +447,8 @@ def build_service_context() -> Dict[str, Any]:
             include_runtime_prices=include_runtime_prices,
             include_change_24h=include_change_24h,
         ),
+        "get_lob_runtime_status": local_orderbook_websocket_watcher.get_runtime_status,
+        "get_lob_storage_status": lob_service.get_lob_storage_status,
         "get_alpha_signal_snapshot": get_alpha_signal_snapshot,
         "get_breaking_event_radar_snapshot": lambda limit=12: breaking_event_radar_service.get_breaking_event_radar_snapshot(build_service_context(), limit=limit),
         "get_bootstrap_component_cached": get_bootstrap_component_cached,

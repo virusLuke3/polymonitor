@@ -13,7 +13,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.services import lob_service
 from api.services.lob_service import LocalOrderBookRuntimeManager
-from runtime.local_orderbook_websocket_watcher import CoverageTarget, LocalOrderBookWebsocketWatcher, _iter_json_events
+from runtime.local_orderbook_websocket_watcher import CoverageTarget, LocalOrderBookWebsocketWatcher, _iter_json_events, get_runtime_status
 
 
 class FakeResponse:
@@ -119,3 +119,70 @@ def test_watcher_applies_price_change_and_persists_sample(monkeypatch):
     assert no_token_id == "no-token"
     assert payload["yes"]["bestBid"] == "0.41"
     assert payload["coverage"]["topic"] == "crypto"
+
+
+def test_watcher_unknown_token_goes_to_dead_letter(monkeypatch):
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=FakeSession(), cache_ttl_seconds=30)
+    watcher = LocalOrderBookWebsocketWatcher(ctx={"LOB_RUNTIME_MANAGER": manager}, ws_url="wss://example.test/ws", persist=False, logger=FakeLogger())
+    dead_letters = []
+    monkeypatch.setattr(
+        lob_service,
+        "write_lob_dead_letter",
+        lambda **kwargs: dead_letters.append(kwargs) or True,
+    )
+
+    changed = watcher.handle_event(
+        {
+            "event_type": "price_change",
+            "timestamp": "9999999999999",
+            "price_changes": [{"asset_id": "unknown-token", "side": "BUY", "price": "0.41", "size": "12"}],
+        }
+    )
+
+    assert changed == 0
+    assert dead_letters[-1]["reason"] == "unknown_token"
+    assert dead_letters[-1]["token_id"] == "unknown-token"
+    assert get_runtime_status()["deadLetterCount"] >= 1
+
+
+def test_watcher_price_change_before_ready_resnapshots_without_polluting_state(monkeypatch):
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=FakeSession(), cache_ttl_seconds=30)
+    watcher = LocalOrderBookWebsocketWatcher(ctx={"LOB_RUNTIME_MANAGER": manager}, ws_url="wss://example.test/ws", persist=False, logger=FakeLogger())
+    target = CoverageTarget.from_payload(_target_payload())
+    assert target is not None
+    yes_identity, no_identity = target.identities()
+    watcher.targets_by_market = {target.market_id: target}
+    watcher.identities_by_token = {yes_identity.token_id: yes_identity, no_identity.token_id: no_identity}
+    watcher.target_by_token = {yes_identity.token_id: target, no_identity.token_id: target}
+    dead_letters = []
+    monkeypatch.setattr(
+        lob_service,
+        "write_lob_dead_letter",
+        lambda **kwargs: dead_letters.append(kwargs) or True,
+    )
+
+    changed = watcher.handle_event(
+        {
+            "event_type": "price_change",
+            "timestamp": "9999999999999",
+            "price_changes": [{"asset_id": "yes-token", "side": "BUY", "price": "0.41", "size": "12"}],
+        }
+    )
+
+    assert changed == 1
+    assert dead_letters[-1]["reason"] == "price_change_before_ready"
+    assert manager.registry.get("yes-token").ready
+    assert manager.registry.get("yes-token").best_bid()[0].normalize().to_eng_string() == "0.4"
+
+
+def test_watcher_reconnect_marks_existing_books_stale():
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=FakeSession(), cache_ttl_seconds=30)
+    watcher = LocalOrderBookWebsocketWatcher(ctx={"LOB_RUNTIME_MANAGER": manager}, ws_url="wss://example.test/ws", persist=False, logger=FakeLogger())
+    target = CoverageTarget.from_payload(_target_payload())
+    assert target is not None
+    watcher.bootstrap_targets([target], force_refresh=True)
+
+    stale_count = watcher.mark_registry_stale("websocket_reconnect")
+
+    assert stale_count == 2
+    assert manager.runtime_book_counts()["staleCount"] == 2

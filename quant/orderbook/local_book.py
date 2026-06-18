@@ -102,9 +102,13 @@ class LocalOrderBook:
 
     def mark_stale_if_idle(self, *, now_ms: int, stale_after_ms: int) -> bool:
         if self.last_event_ts_ms is None:
+            if self.status == "stale" and self.stale_reason == "no_events":
+                return False
             self.mark_stale("no_events")
             return True
         if int(now_ms) - int(self.last_event_ts_ms) >= int(stale_after_ms):
+            if self.status == "stale" and self.stale_reason == "idle_timeout":
+                return False
             self.mark_stale("idle_timeout")
             return True
         return False

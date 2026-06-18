@@ -20,6 +20,7 @@ Wants=polydata-global-weather-map-seed.service
 Wants=polydata-grid-esports-seed.service
 Wants=polydata-inflation-nowcast-seed.service
 Wants=polydata-jin10-seed.service
+Wants=polydata-lob-maintenance.service
 Wants=polydata-macro-cpi-panels-seed.service
 Wants=polydata-macro-cpi-registry-seed.service
 Wants=polydata-market-group-seed.service

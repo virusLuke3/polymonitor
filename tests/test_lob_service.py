@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -200,6 +201,89 @@ def test_token_lob_payload_persists_state_machine_payload(monkeypatch):
     assert no_token_id == ""
     assert persisted_payload["yes"]["statePayload"]["source"] == "local-orderbook"
     assert persisted_payload["yes"]["statePayload"]["snapshot_version"]
+
+
+def test_lob_snapshot_persistence_writes_hardened_columns(monkeypatch):
+    statements = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def execute(self, sql, params=()):
+            statements.append((sql, params))
+
+        def fetchone(self):
+            return None
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+    @contextmanager
+    def fake_postgres_connection(*args, **kwargs):
+        yield FakeConn()
+
+    monkeypatch.setattr(lob_service, "_ensure_snapshot_schema", lambda: None)
+    monkeypatch.setattr(lob_service, "postgres_connection", fake_postgres_connection)
+
+    lob_service._persist_book_side_snapshot(
+        {},
+        token_id="yes-token",
+        side_name="YES",
+        paired_token_id="no-token",
+        market_title="Bitcoin above 100k?",
+        source="local-orderbook",
+        book_status="ok",
+        fetched_at="2026-06-18T00:00:00Z",
+        side_payload={
+            "statePayload": {
+                "market_id": 42,
+                "condition_id": "0xcondition",
+                "market_slug": "bitcoin-above-100k",
+                "snapshot_source": "websocket",
+                "generation": 7,
+                "last_event_ts_ms": 123456789,
+                "snapshot_version": "abc123",
+            },
+            "bids": [{"price": "0.40", "size": "10"}],
+            "asks": [{"price": "0.42", "size": "10"}],
+        },
+        coverage_payload={"tier": "hot", "topic": "crypto"},
+    )
+
+    insert_sql, params = statements[-1]
+    assert "market_id, condition_id, market_slug, market_title" in insert_sql
+    assert "snapshot_source, storage_tier, book_generation, last_event_ts_ms" in insert_sql
+    assert params[3:12] == (
+        42,
+        "0xcondition",
+        "bitcoin-above-100k",
+        "Bitcoin above 100k?",
+        "local-orderbook",
+        "websocket",
+        "hot",
+        7,
+        123456789,
+    )
+
+
+def test_local_orderbook_runtime_manager_marks_books_stale_and_counts():
+    session = FakeSession({
+        "yes-token": {"bids": [{"price": "0.40", "size": "10"}], "asks": [{"price": "0.42", "size": "10"}]},
+    })
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=session, cache_ttl_seconds=30)
+    manager.get_token_snapshot(token_id="yes-token", market_id=42, condition_id="0xcondition", outcome="YES")
+
+    assert manager.runtime_book_counts()["readyCount"] == 1
+    assert manager.mark_all_stale("websocket_reconnect") == 1
+    counts = manager.runtime_book_counts()
+
+    assert counts["staleCount"] == 1
+    assert counts["readyCount"] == 0
 
 
 def test_unchanged_snapshot_min_interval_env(monkeypatch):
