@@ -63,6 +63,31 @@ def mark_benchmark_run_started(conn: Any, *, benchmark_id: int) -> None:
         )
 
 
+def claim_next_queued_benchmark_run(conn: Any) -> dict[str, Any] | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH next_run AS (
+                SELECT benchmark_id
+                FROM quant.quant_backtest_benchmark_runs
+                WHERE status = 'queued'
+                ORDER BY created_at ASC, benchmark_id ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE quant.quant_backtest_benchmark_runs b
+            SET status = 'running',
+                started_at = COALESCE(b.started_at, now()),
+                error = NULL
+            FROM next_run
+            WHERE b.benchmark_id = next_run.benchmark_id
+            RETURNING b.*
+            """
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
 def complete_benchmark_run(
     conn: Any,
     *,

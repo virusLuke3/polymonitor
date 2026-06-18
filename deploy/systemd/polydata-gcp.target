@@ -30,6 +30,7 @@ Wants=polydata-new-market-signal.service
 Wants=polydata-polybeats-feed-seed.service
 Wants=polydata-polymarket-macro-map-seed.service
 Wants=polydata-quant-backtest-runner.service
+Wants=polydata-quant-backtest-benchmark-worker.service
 Wants=polydata-quant-event-tile-seed.service
 Wants=polydata-quant-event-tile-frontend-seed.service
 Wants=polydata-quant-frontend-active-seed.service
