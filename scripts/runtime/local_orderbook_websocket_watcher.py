@@ -49,6 +49,7 @@ DEFAULT_DRIFT_CHECK_INTERVAL_SECONDS = 60
 DEFAULT_DRIFT_CHECK_MAX_PER_TICK = 3
 DEFAULT_PING_INTERVAL_SECONDS = 10
 DEFAULT_RECENT_EVENT_SAMPLE_LIMIT = 12
+DEFAULT_STATUS_FILE_WRITE_INTERVAL_SECONDS = 2.0
 DRIFT_CHECK_SECONDS_BY_TIER = {"hot": 900, "warm": 1800, "cold": 3600}
 STALE_IDLE_SECONDS_BY_TIER = {"hot": 120, "warm": 300, "cold": 900}
 KNOWN_MARKET_EVENT_TYPES = {
@@ -63,6 +64,7 @@ KNOWN_MARKET_EVENT_TYPES = {
 
 
 _STATUS_LOCK = threading.Lock()
+_STATUS_FILE_LAST_WRITE_AT = 0.0
 _RUNTIME_STATUS: dict[str, Any] = {
     "status": "disabled",
     "mode": "local-orderbook",
@@ -115,12 +117,16 @@ def _utc_now_iso() -> str:
 
 def _update_runtime_status(**updates: Any) -> None:
     with _STATUS_LOCK:
+        updates.setdefault("statusUpdatedAt", _utc_now_iso())
         _RUNTIME_STATUS.update(updates)
+        _write_runtime_status_file_if_due_unlocked()
 
 
 def _increment_runtime_status(key: str, amount: int = 1) -> None:
     with _STATUS_LOCK:
         _RUNTIME_STATUS[key] = int(_RUNTIME_STATUS.get(key) or 0) + int(amount)
+        _RUNTIME_STATUS["statusUpdatedAt"] = _utc_now_iso()
+        _write_runtime_status_file_if_due_unlocked()
 
 
 def _record_event_diagnostic(event: dict[str, Any]) -> None:
@@ -133,11 +139,70 @@ def _record_event_diagnostic(event: dict[str, Any]) -> None:
         recent.append(sample)
         _RUNTIME_STATUS["eventTypeCounts"] = counts
         _RUNTIME_STATUS["recentEventSamples"] = recent[-DEFAULT_RECENT_EVENT_SAMPLE_LIMIT:]
+        _RUNTIME_STATUS["statusUpdatedAt"] = _utc_now_iso()
+        _write_runtime_status_file_if_due_unlocked()
 
 
 def get_runtime_status() -> dict[str, Any]:
     with _STATUS_LOCK:
-        return dict(_RUNTIME_STATUS)
+        local_status = dict(_RUNTIME_STATUS)
+    file_status = _read_runtime_status_file()
+    if not file_status:
+        return local_status
+    local_updated_at = str(local_status.get("statusUpdatedAt") or "")
+    file_updated_at = str(file_status.get("statusUpdatedAt") or "")
+    if file_updated_at >= local_updated_at or str(local_status.get("status") or "") in {"disabled", "ready"}:
+        return file_status
+    return local_status
+
+
+def _runtime_status_path() -> Path | None:
+    raw = str(os.environ.get("POLYDATA_LOB_RUNTIME_STATUS_PATH") or "").strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser()
+
+
+def _write_runtime_status_file_if_due_unlocked(*, force: bool = False) -> None:
+    global _STATUS_FILE_LAST_WRITE_AT
+    path = _runtime_status_path()
+    if path is None:
+        return
+    now = time.monotonic()
+    interval = _env_float(
+        "POLYDATA_LOB_RUNTIME_STATUS_WRITE_INTERVAL_SECONDS",
+        DEFAULT_STATUS_FILE_WRITE_INTERVAL_SECONDS,
+        minimum=0.1,
+    )
+    if not force and now - _STATUS_FILE_LAST_WRITE_AT < interval:
+        return
+    _STATUS_FILE_LAST_WRITE_AT = now
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = dict(_RUNTIME_STATUS)
+        payload["statusFileWrittenAt"] = _utc_now_iso()
+        tmp_path = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+        os.replace(tmp_path, path)
+    except Exception:
+        return
+
+
+def _read_runtime_status_file() -> dict[str, Any] | None:
+    path = _runtime_status_path()
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        payload["statusFileAgeSeconds"] = max(0, int(time.time() - path.stat().st_mtime))
+    except Exception:
+        pass
+    return payload
 
 
 @dataclass(frozen=True)

@@ -15,7 +15,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.services import lob_service
 from api.services.lob_service import LocalOrderBookRuntimeManager
-from runtime.local_orderbook_websocket_watcher import CoverageTarget, LocalOrderBookWebsocketWatcher, _iter_json_events, get_runtime_status
+from runtime.local_orderbook_websocket_watcher import CoverageTarget, LocalOrderBookWebsocketWatcher, _iter_json_events, _update_runtime_status, get_runtime_status
 
 
 class FakeResponse:
@@ -92,6 +92,21 @@ def test_refresh_targets_preserves_coverage_token_order(monkeypatch):
     watcher.refresh_targets()
 
     assert watcher.subscription_token_order == ["z-hot", "a-hot", "m-warm", "b-warm"]
+
+
+def test_runtime_status_can_roundtrip_through_status_file(monkeypatch, tmp_path):
+    status_path = tmp_path / "lob-status.json"
+    monkeypatch.setenv("POLYDATA_LOB_RUNTIME_STATUS_PATH", str(status_path))
+    monkeypatch.setenv("POLYDATA_LOB_RUNTIME_STATUS_WRITE_INTERVAL_SECONDS", "0.1")
+
+    _update_runtime_status(status="connected", subscribedTokenCount=7, priceChangeEventCount=11)
+    status = get_runtime_status()
+
+    assert status_path.exists()
+    assert status["status"] == "connected"
+    assert status["subscribedTokenCount"] == 7
+    assert status["priceChangeEventCount"] == 11
+    assert status["statusFileAgeSeconds"] >= 0
 
 
 def test_iter_json_events_accepts_single_and_list_payloads():
