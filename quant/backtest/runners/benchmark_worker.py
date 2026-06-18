@@ -11,7 +11,12 @@ import socket
 import time
 from typing import Any
 
-from ..benchmark_persistence import claim_next_queued_benchmark_run, fail_benchmark_run, update_benchmark_worker_heartbeat
+from ..benchmark_persistence import (
+    claim_next_queued_benchmark_run,
+    fail_benchmark_run,
+    fail_stale_running_benchmark_runs,
+    update_benchmark_worker_heartbeat,
+)
 from ...core.db import PostgresSettings, postgres_connection
 from ...core.schema import create_schema
 from .benchmark import run_orderfilled_fast_accurate_benchmark
@@ -94,7 +99,7 @@ def run_claimed_benchmark(row: dict[str, Any]) -> int:
     return benchmark_id
 
 
-def run_worker(*, once: bool = False, poll_seconds: float = 2.0, init_schema: bool = True) -> int:
+def run_worker(*, once: bool = False, poll_seconds: float = 2.0, init_schema: bool = True, stale_running_seconds: int = 3600) -> int:
     processed = 0
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     if init_schema:
@@ -104,6 +109,9 @@ def run_worker(*, once: bool = False, poll_seconds: float = 2.0, init_schema: bo
         claimed: dict[str, Any] | None = None
         try:
             with postgres_connection(PostgresSettings(), readonly=False) as conn:
+                stale_count = fail_stale_running_benchmark_runs(conn, stale_after_seconds=stale_running_seconds)
+                if stale_count:
+                    LOGGER.warning("marked stale running benchmarks failed count=%s threshold_seconds=%s", stale_count, stale_running_seconds)
                 update_benchmark_worker_heartbeat(conn, worker_id=worker_id, status="idle", meta={"processed": processed})
                 claimed = claim_next_queued_benchmark_run(conn)
                 conn.commit()
@@ -154,13 +162,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true", help="Claim and run at most one queued benchmark, then exit.")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
+    parser.add_argument("--stale-running-seconds", type=int, default=3600)
     parser.add_argument("--skip-init-schema", action="store_true")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
     logging.basicConfig(level=getattr(logging, str(args.log_level).upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s %(message)s")
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
-    run_worker(once=bool(args.once), poll_seconds=float(args.poll_seconds), init_schema=not bool(args.skip_init_schema))
+    run_worker(
+        once=bool(args.once),
+        poll_seconds=float(args.poll_seconds),
+        init_schema=not bool(args.skip_init_schema),
+        stale_running_seconds=int(args.stale_running_seconds),
+    )
     return 0
 
 

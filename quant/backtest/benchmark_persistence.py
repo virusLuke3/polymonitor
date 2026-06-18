@@ -172,6 +172,23 @@ def fail_benchmark_run(conn: Any, *, benchmark_id: int, error: str) -> None:
         )
 
 
+def fail_stale_running_benchmark_runs(conn: Any, *, stale_after_seconds: int = 3600) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE quant.quant_backtest_benchmark_runs
+            SET status = 'failed',
+                error = %s,
+                finished_at = now()
+            WHERE status = 'running'
+              AND started_at IS NOT NULL
+              AND started_at < now() - (%s::text || ' seconds')::interval
+            """,
+            (f"stale running benchmark exceeded {int(stale_after_seconds)} seconds", int(stale_after_seconds)),
+        )
+        return int(cur.rowcount or 0)
+
+
 def cancel_queued_benchmark_run(conn: Any, *, benchmark_id: int) -> dict[str, Any] | None:
     with conn.cursor() as cur:
         cur.execute(
