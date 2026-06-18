@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -81,6 +82,50 @@ def test_iter_json_events_accepts_single_and_list_payloads():
         {"event_type": "book"},
         {"event_type": "price_change"},
     ]
+
+
+def test_watcher_records_raw_event_type_diagnostics():
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=FakeSession(), cache_ttl_seconds=30)
+    watcher = LocalOrderBookWebsocketWatcher(ctx={"LOB_RUNTIME_MANAGER": manager}, ws_url="wss://example.test/ws", persist=False, logger=FakeLogger())
+
+    changed = watcher.handle_event(
+        {
+            "event_type": "best_bid_ask",
+            "asset_id": "yes-token",
+            "market": "0xcondition",
+            "best_bid": "0.40",
+            "best_ask": "0.42",
+            "timestamp": "9999999999999",
+        }
+    )
+
+    status = get_runtime_status()
+    assert changed == 0
+    assert status["eventTypeCounts"]["best_bid_ask"] >= 1
+    assert status["bestBidAskEventCount"] >= 1
+    assert status["recentEventSamples"][-1]["eventType"] == "best_bid_ask"
+    assert "best_bid" in status["recentEventSamples"][-1]["keys"]
+
+
+def test_watcher_sends_market_channel_heartbeat():
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=FakeSession(), cache_ttl_seconds=30)
+    watcher = LocalOrderBookWebsocketWatcher(ctx={"LOB_RUNTIME_MANAGER": manager}, ws_url="wss://example.test/ws", persist=False, logger=FakeLogger())
+
+    class FakeWebsocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, payload):
+            self.sent.append(payload)
+
+    websocket = FakeWebsocket()
+    last_ping_at = asyncio.run(watcher.send_heartbeat_if_due(websocket, now=100.0, last_ping_at=0.0, interval_seconds=10))
+    unchanged = asyncio.run(watcher.send_heartbeat_if_due(websocket, now=105.0, last_ping_at=last_ping_at, interval_seconds=10))
+
+    assert websocket.sent == ["PING"]
+    assert last_ping_at == 100.0
+    assert unchanged == 100.0
+    assert get_runtime_status()["pingCount"] >= 1
 
 
 def test_watcher_applies_price_change_and_persists_sample(monkeypatch):

@@ -46,8 +46,19 @@ DEFAULT_BOOTSTRAP_MARKET_LIMIT = 6
 DEFAULT_LOCK_NAME = "local-orderbook-websocket.worker.lock"
 DEFAULT_DRIFT_CHECK_INTERVAL_SECONDS = 60
 DEFAULT_DRIFT_CHECK_MAX_PER_TICK = 3
+DEFAULT_PING_INTERVAL_SECONDS = 10
+DEFAULT_RECENT_EVENT_SAMPLE_LIMIT = 12
 DRIFT_CHECK_SECONDS_BY_TIER = {"hot": 900, "warm": 1800, "cold": 3600}
 STALE_IDLE_SECONDS_BY_TIER = {"hot": 120, "warm": 300, "cold": 900}
+KNOWN_MARKET_EVENT_TYPES = {
+    "book",
+    "price_change",
+    "last_trade_price",
+    "tick_size_change",
+    "best_bid_ask",
+    "new_market",
+    "market_resolved",
+}
 
 
 _STATUS_LOCK = threading.Lock()
@@ -65,8 +76,21 @@ _RUNTIME_STATUS: dict[str, Any] = {
     "deadLetterCount": 0,
     "driftMismatchCount": 0,
     "rawMessageCount": 0,
+    "pingCount": 0,
+    "pongCount": 0,
+    "lastPingAt": None,
+    "lastPongAt": None,
     "bookEventCount": 0,
     "priceChangeEventCount": 0,
+    "lastTradePriceEventCount": 0,
+    "bestBidAskEventCount": 0,
+    "tickSizeChangeEventCount": 0,
+    "newMarketEventCount": 0,
+    "marketResolvedEventCount": 0,
+    "unknownEventTypeCount": 0,
+    "unparsedEventCount": 0,
+    "eventTypeCounts": {},
+    "recentEventSamples": [],
     "normalizedEventCount": 0,
     "normalizedDeltaCount": 0,
     "normalizedSnapshotCount": 0,
@@ -96,6 +120,18 @@ def _update_runtime_status(**updates: Any) -> None:
 def _increment_runtime_status(key: str, amount: int = 1) -> None:
     with _STATUS_LOCK:
         _RUNTIME_STATUS[key] = int(_RUNTIME_STATUS.get(key) or 0) + int(amount)
+
+
+def _record_event_diagnostic(event: dict[str, Any]) -> None:
+    event_type = str(event.get("event_type") or event.get("type") or "unknown").strip() or "unknown"
+    sample = _event_sample(event, event_type=event_type)
+    with _STATUS_LOCK:
+        counts = dict(_RUNTIME_STATUS.get("eventTypeCounts") or {})
+        counts[event_type] = int(counts.get(event_type) or 0) + 1
+        recent = list(_RUNTIME_STATUS.get("recentEventSamples") or [])
+        recent.append(sample)
+        _RUNTIME_STATUS["eventTypeCounts"] = counts
+        _RUNTIME_STATUS["recentEventSamples"] = recent[-DEFAULT_RECENT_EVENT_SAMPLE_LIMIT:]
 
 
 def get_runtime_status() -> dict[str, Any]:
@@ -298,6 +334,8 @@ class LocalOrderBookWebsocketWatcher:
         deadline = time.monotonic() + run_seconds if run_seconds and run_seconds > 0 else None
         last_refresh_at = time.monotonic()
         last_drift_tick = 0.0
+        last_ping_at = 0.0
+        ping_interval_seconds = _env_int("POLYDATA_LOB_WS_PING_INTERVAL_SECONDS", DEFAULT_PING_INTERVAL_SECONDS, minimum=0)
         async with websockets.connect(self.ws_url, ping_interval=None, close_timeout=10, max_queue=1000) as websocket:
             await self.subscribe(websocket, sorted(self.identities_by_token), replace=True)
             self.logger.info("connected subscribed_tokens=%s", len(self.subscribed_tokens))
@@ -312,6 +350,12 @@ class LocalOrderBookWebsocketWatcher:
                 if now - last_drift_tick >= _env_int("POLYDATA_LOB_DRIFT_CHECK_INTERVAL_SECONDS", DEFAULT_DRIFT_CHECK_INTERVAL_SECONDS, minimum=10):
                     self.run_periodic_checks()
                     last_drift_tick = now
+                last_ping_at = await self.send_heartbeat_if_due(
+                    websocket,
+                    now=now,
+                    last_ping_at=last_ping_at,
+                    interval_seconds=ping_interval_seconds,
+                )
                 timeout = 5.0
                 if deadline is not None:
                     timeout = max(0.1, min(timeout, deadline - now))
@@ -323,6 +367,16 @@ class LocalOrderBookWebsocketWatcher:
                     raw_message = raw_message.decode("utf-8")
                 await self.handle_raw_message(str(raw_message))
         self.flush_clickhouse_sink(force=True)
+
+    async def send_heartbeat_if_due(self, websocket: Any, *, now: float, last_ping_at: float, interval_seconds: int) -> float:
+        if interval_seconds <= 0:
+            return last_ping_at
+        if now - float(last_ping_at or 0.0) < interval_seconds:
+            return last_ping_at
+        await websocket.send("PING")
+        _increment_runtime_status("pingCount")
+        _update_runtime_status(lastPingAt=_utc_now_iso())
+        return now
 
     async def reconcile_subscriptions(self, websocket: Any) -> None:
         previous = set(self.subscribed_tokens)
@@ -361,7 +415,11 @@ class LocalOrderBookWebsocketWatcher:
         _update_runtime_status(subscribedTokenCount=len(self.subscribed_tokens))
 
     async def handle_raw_message(self, raw_message: str) -> None:
-        if raw_message in {"PONG", "PING", ""}:
+        if raw_message == "PONG":
+            _increment_runtime_status("pongCount")
+            _update_runtime_status(lastPongAt=_utc_now_iso())
+            return
+        if raw_message in {"PING", ""}:
             return
         _increment_runtime_status("rawMessageCount")
         try:
@@ -376,17 +434,31 @@ class LocalOrderBookWebsocketWatcher:
 
     def handle_event(self, event: dict[str, Any]) -> int:
         changed_markets: set[int] = set()
-        normalized_events = list(normalize_polymarket_event(event))
         event_type = str(event.get("event_type") or event.get("type") or "")
+        _record_event_diagnostic(event)
+        normalized_events = list(normalize_polymarket_event(event))
         if event_type == "book":
             _increment_runtime_status("bookEventCount")
         elif event_type == "price_change":
             _increment_runtime_status("priceChangeEventCount")
+        elif event_type == "last_trade_price":
+            _increment_runtime_status("lastTradePriceEventCount")
+        elif event_type == "best_bid_ask":
+            _increment_runtime_status("bestBidAskEventCount")
+        elif event_type == "tick_size_change":
+            _increment_runtime_status("tickSizeChangeEventCount")
+        elif event_type == "new_market":
+            _increment_runtime_status("newMarketEventCount")
+        elif event_type == "market_resolved":
+            _increment_runtime_status("marketResolvedEventCount")
+        elif event_type not in KNOWN_MARKET_EVENT_TYPES:
+            _increment_runtime_status("unknownEventTypeCount")
         if normalized_events:
             _increment_runtime_status("normalizedEventCount", len(normalized_events))
             _increment_runtime_status("normalizedDeltaCount", sum(1 for item in normalized_events if isinstance(item, NormalizedBookDelta)))
             _increment_runtime_status("normalizedSnapshotCount", sum(1 for item in normalized_events if isinstance(item, NormalizedBookSnapshot)))
         if not normalized_events and event_type in {"book", "price_change"}:
+            _increment_runtime_status("unparsedEventCount")
             self.write_dead_letter("unparsed_event", raw_payload=event, event_type=event_type)
         for normalized in normalized_events:
             identity = self.identities_by_token.get(normalized.token_id)
@@ -742,6 +814,35 @@ def _iter_json_events(payload: Any) -> Iterable[dict[str, Any]]:
                 yield item
 
 
+def _event_sample(event: dict[str, Any], *, event_type: str) -> dict[str, Any]:
+    sample: dict[str, Any] = {
+        "eventType": event_type,
+        "keys": sorted(str(key) for key in event.keys())[:16],
+        "timestamp": str(event.get("timestamp") or "")[:32] or None,
+        "market": _short_text(event.get("market"), limit=32),
+        "assetId": _short_text(event.get("asset_id"), limit=32),
+    }
+    if isinstance(event.get("bids"), list):
+        sample["bidCount"] = len(event.get("bids") or [])
+    if isinstance(event.get("asks"), list):
+        sample["askCount"] = len(event.get("asks") or [])
+    if isinstance(event.get("price_changes"), list):
+        changes = [item for item in event.get("price_changes") or [] if isinstance(item, dict)]
+        sample["priceChangeCount"] = len(changes)
+        if changes:
+            first = changes[0]
+            sample["firstPriceChange"] = {
+                "keys": sorted(str(key) for key in first.keys())[:16],
+                "assetId": _short_text(first.get("asset_id"), limit=32),
+                "side": _short_text(first.get("side"), limit=12),
+                "hasBestBid": first.get("best_bid") is not None,
+                "hasBestAsk": first.get("best_ask") is not None,
+            }
+    if isinstance(event.get("assets_ids"), list):
+        sample["assetIdCount"] = len(event.get("assets_ids") or [])
+    return {key: value for key, value in sample.items() if value is not None and value != ""}
+
+
 def _chunked(values: list[str], size: int) -> Iterable[list[str]]:
     for index in range(0, len(values), max(1, int(size))):
         yield values[index : index + size]
@@ -754,6 +855,13 @@ def _int_or_none(value: Any) -> int | None:
         return int(float(str(value)))
     except (TypeError, ValueError):
         return None
+
+
+def _short_text(value: Any, *, limit: int) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text[: max(1, int(limit))]
 
 
 def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
