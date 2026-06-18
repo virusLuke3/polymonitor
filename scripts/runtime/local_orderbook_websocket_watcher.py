@@ -32,6 +32,8 @@ except ImportError:  # pragma: no cover - dependency guard.
 from api.services import lob_service
 from data_sources import POLYMARKET_CLOB_WS_URL
 from quant.orderbook import OrderBookNotReady, OrderBookOutOfOrder, TokenBookIdentity, normalize_polymarket_event
+from quant.orderbook.clickhouse_sink import ClickHouseLobSink, LobClickHouseSettings
+from quant.orderbook.polymarket_adapter import NormalizedBookDelta, NormalizedBookSnapshot
 
 
 DEFAULT_COVERAGE_LIMIT = 250
@@ -62,6 +64,9 @@ _RUNTIME_STATUS: dict[str, Any] = {
     "staleCount": 0,
     "deadLetterCount": 0,
     "driftMismatchCount": 0,
+    "clickhouseEnabled": False,
+    "clickhouseRowsInserted": 0,
+    "clickhouseBufferedRows": 0,
 }
 
 
@@ -190,6 +195,7 @@ class LocalOrderBookWebsocketWatcher:
         self._last_persisted_at_by_market: dict[int, float] = {}
         self._last_drift_check_at_by_market: dict[int, float] = {}
         self._last_idle_check_at = 0.0
+        self.clickhouse_sink = self._build_clickhouse_sink()
         self._stop_event = asyncio.Event()
 
     def stop(self) -> None:
@@ -302,6 +308,7 @@ class LocalOrderBookWebsocketWatcher:
                 if isinstance(raw_message, bytes):
                     raw_message = raw_message.decode("utf-8")
                 await self.handle_raw_message(str(raw_message))
+        self.flush_clickhouse_sink(force=True)
 
     async def reconcile_subscriptions(self, websocket: Any) -> None:
         previous = set(self.subscribed_tokens)
@@ -365,7 +372,8 @@ class LocalOrderBookWebsocketWatcher:
                 continue
             target = self.target_by_token.get(normalized.token_id)
             try:
-                self.manager.apply_normalized_event(identity, normalized)
+                state_payload = self.manager.apply_normalized_event(identity, normalized)
+                self.enqueue_clickhouse_event(identity=identity, target=target, event=normalized, state_payload=state_payload)
             except (OrderBookNotReady, OrderBookOutOfOrder) as exc:
                 self.write_dead_letter(
                     "price_change_before_ready" if isinstance(exc, OrderBookNotReady) else "out_of_order_resnapshot",
@@ -396,6 +404,7 @@ class LocalOrderBookWebsocketWatcher:
             target = self.targets_by_market.get(market_id)
             if target is not None:
                 self.persist_target_if_due(target, reason=str(event.get("event_type") or "websocket"))
+        self.flush_clickhouse_sink()
         return len(changed_markets)
 
     def persist_target_if_due(self, target: CoverageTarget, *, force: bool = False, reason: str = "") -> bool:
@@ -432,6 +441,7 @@ class LocalOrderBookWebsocketWatcher:
     def run_periodic_checks(self) -> None:
         self.run_drift_checks()
         self.mark_idle_books_stale()
+        self.flush_clickhouse_sink()
 
     def run_drift_checks(self) -> int:
         max_per_tick = _env_int("POLYDATA_LOB_DRIFT_CHECK_MAX_PER_TICK", DEFAULT_DRIFT_CHECK_MAX_PER_TICK, minimum=0)
@@ -523,6 +533,87 @@ class LocalOrderBookWebsocketWatcher:
             detail=detail,
         ):
             _increment_runtime_status("deadLetterCount")
+
+    def _build_clickhouse_sink(self) -> ClickHouseLobSink | None:
+        settings = LobClickHouseSettings()
+        if not settings.enabled:
+            _update_runtime_status(clickhouseEnabled=False)
+            return None
+        try:
+            sink = ClickHouseLobSink(settings=settings)
+            sink.create_schema()
+            _update_runtime_status(
+                clickhouseEnabled=True,
+                clickhouseTiers=sorted(settings.tiers),
+                clickhouseDeltaTable=settings.delta_table,
+                clickhouseLevelTable=settings.level_table,
+                clickhouseTtlDays=settings.ttl_days,
+            )
+            return sink
+        except Exception as exc:
+            self.logger.warning("ClickHouse LOB sink disabled after init failure: %s", exc)
+            _update_runtime_status(clickhouseEnabled=False, clickhouseError=str(exc)[:240])
+            return None
+
+    def enqueue_clickhouse_event(
+        self,
+        *,
+        identity: TokenBookIdentity,
+        target: CoverageTarget | None,
+        event: Any,
+        state_payload: dict[str, Any],
+    ) -> None:
+        if self.clickhouse_sink is None or target is None:
+            return
+        generation = _int_or_none(state_payload.get("generation")) or 0
+        received_ts_ms = int(time.time() * 1000)
+        try:
+            if isinstance(event, NormalizedBookDelta):
+                self.clickhouse_sink.enqueue_delta(
+                    identity=identity,
+                    event=event,
+                    tier=target.tier,
+                    generation=generation,
+                    source="websocket",
+                    received_ts_ms=received_ts_ms,
+                )
+            elif isinstance(event, NormalizedBookSnapshot):
+                self.clickhouse_sink.enqueue_snapshot_levels(
+                    identity=identity,
+                    event=event,
+                    tier=target.tier,
+                    generation=generation,
+                    source="websocket",
+                    received_ts_ms=received_ts_ms,
+                    depth_limit=self.manager.depth_limit,
+                )
+            _update_runtime_status(clickhouseBufferedRows=self.clickhouse_sink.buffered_rows())
+        except Exception as exc:
+            self.logger.warning("ClickHouse LOB enqueue failed token_id=%s error=%s", identity.token_id, exc)
+            self.write_dead_letter(
+                "clickhouse_lob_enqueue_failed",
+                raw_payload=getattr(event, "raw", None),
+                token_id=identity.token_id,
+                market_id=identity.market_id,
+                condition_id=identity.condition_id,
+                event_type="clickhouse_lob",
+                detail=str(exc),
+            )
+
+    def flush_clickhouse_sink(self, *, force: bool = False) -> int:
+        if self.clickhouse_sink is None:
+            return 0
+        try:
+            inserted = self.clickhouse_sink.flush_if_due(force=force)
+            _update_runtime_status(
+                clickhouseRowsInserted=self.clickhouse_sink.rows_inserted,
+                clickhouseBufferedRows=self.clickhouse_sink.buffered_rows(),
+            )
+            return inserted
+        except Exception as exc:
+            self.logger.warning("ClickHouse LOB flush failed: %s", exc)
+            _update_runtime_status(clickhouseError=str(exc)[:240], clickhouseBufferedRows=self.clickhouse_sink.buffered_rows())
+            return 0
 
 
 class _FileLock:

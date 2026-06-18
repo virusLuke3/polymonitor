@@ -186,3 +186,49 @@ def test_watcher_reconnect_marks_existing_books_stale():
 
     assert stale_count == 2
     assert manager.runtime_book_counts()["staleCount"] == 2
+
+
+def test_watcher_writes_clickhouse_delta_after_state_machine_apply(monkeypatch):
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=FakeSession(), cache_ttl_seconds=30)
+    watcher = LocalOrderBookWebsocketWatcher(ctx={"LOB_RUNTIME_MANAGER": manager}, ws_url="wss://example.test/ws", persist=False, logger=FakeLogger())
+    target = CoverageTarget.from_payload(_target_payload())
+    assert target is not None
+    yes_identity, no_identity = target.identities()
+    watcher.targets_by_market = {target.market_id: target}
+    watcher.identities_by_token = {yes_identity.token_id: yes_identity, no_identity.token_id: no_identity}
+    watcher.target_by_token = {yes_identity.token_id: target, no_identity.token_id: target}
+    watcher.bootstrap_targets([target], force_refresh=True)
+
+    class FakeSink:
+        def __init__(self):
+            self.calls = []
+            self.rows_inserted = 0
+
+        def enqueue_delta(self, **kwargs):
+            self.calls.append(kwargs)
+            return 1
+
+        def enqueue_snapshot_levels(self, **kwargs):
+            raise AssertionError("delta test should not write levels")
+
+        def flush_if_due(self, force=False):
+            return 0
+
+        def buffered_rows(self):
+            return 0
+
+    sink = FakeSink()
+    watcher.clickhouse_sink = sink
+
+    watcher.handle_event(
+        {
+            "event_type": "price_change",
+            "timestamp": "9999999999999",
+            "price_changes": [{"asset_id": "yes-token", "side": "BUY", "price": "0.41", "size": "12"}],
+        }
+    )
+
+    assert sink.calls
+    assert sink.calls[-1]["identity"].token_id == "yes-token"
+    assert sink.calls[-1]["tier"] == "hot"
+    assert sink.calls[-1]["generation"] >= 1

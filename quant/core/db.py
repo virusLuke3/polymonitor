@@ -259,7 +259,7 @@ class ClickHouseClient:
     def _query_text(self, query: str, *, stdin: str | None = None, timeout_seconds: float | None = None) -> str:
         timeout = self.settings.timeout_seconds if timeout_seconds is None else timeout_seconds
         if self.settings.http_url:
-            return self._query_http(query, timeout_seconds=timeout)
+            return self._query_http(query, stdin=stdin, timeout_seconds=timeout)
         if shutil.which("docker") is None:
             raise RuntimeError("docker is unavailable and POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL is not configured")
         completed = subprocess.run(
@@ -289,7 +289,7 @@ class ClickHouseClient:
             query,
         ]
 
-    def _query_http(self, query: str, *, timeout_seconds: float) -> str:
+    def _query_http(self, query: str, *, stdin: str | None = None, timeout_seconds: float) -> str:
         params = urlencode(
             {
                 "database": self.settings.database,
@@ -298,9 +298,10 @@ class ClickHouseClient:
             }
         )
         separator = "&" if "?" in self.settings.http_url else "?"
+        body = query if stdin is None else query.rstrip() + "\n" + stdin
         request = Request(
             f"{self.settings.http_url}{separator}{params}",
-            data=query.encode("utf-8"),
+            data=body.encode("utf-8"),
             method="POST",
             headers={"Content-Type": "text/plain; charset=utf-8"},
         )
