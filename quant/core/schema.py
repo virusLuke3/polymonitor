@@ -804,7 +804,6 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_build_targets_active ON quant.market_price_build_targets (source, status, priority DESC, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_build_targets_slug_side ON quant.market_price_build_targets (market_slug, token_side, source)",
     "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_token_time ON quant.clob_orderbook_snapshots (token_id, fetched_at DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_token_side_version_time ON quant.clob_orderbook_snapshots (token_id, side, snapshot_version, fetched_at DESC) WHERE snapshot_version IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_token_snapshot_time ON quant.clob_orderbook_snapshots (token_id, snapshot_timestamp DESC, snapshot_id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_token_block ON quant.clob_orderbook_snapshots (token_id, block_number DESC, snapshot_id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_clob_snapshots_side_time ON quant.clob_orderbook_snapshots (side, fetched_at DESC)",
