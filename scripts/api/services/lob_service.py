@@ -36,6 +36,7 @@ DEFAULT_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS = 300
 LOB_COVERAGE_RAW_ROW_LIMIT = 1200
 WORLDCUP_ACTIVE_MATCH_WINDOW_BEFORE_MINUTES = 120
 WORLDCUP_ACTIVE_MATCH_WINDOW_AFTER_MINUTES = 180
+DEFAULT_WORLDCUP_LOB_MARKET_LIMIT = 3
 
 
 class LocalOrderBookRuntimeManager:
@@ -906,7 +907,14 @@ def get_lob_coverage_targets_payload(ctx: dict, *, limit: int = 250, topics: str
             (LOB_COVERAGE_RAW_ROW_LIMIT,),
         )
         worldcup_context, worldcup_context_payload = _build_worldcup_selection_context(ctx)
-        targets = select_orderbook_coverage_targets(rows, global_limit=limit, topics=topic_list, context=worldcup_context)
+        worldcup_market_limit = _worldcup_lob_market_limit()
+        targets = select_orderbook_coverage_targets(
+            rows,
+            global_limit=limit,
+            topics=topic_list,
+            topic_limits={"worldcup": worldcup_market_limit},
+            context=worldcup_context,
+        )
         payload_targets = [target.as_payload() for target in targets]
         summary = summarize_coverage_targets(targets)
         return {
@@ -915,6 +923,9 @@ def get_lob_coverage_targets_payload(ctx: dict, *, limit: int = 250, topics: str
             "selectionContext": {
                 "worldcup": worldcup_context_payload,
                 "crypto": {"assets": ["BTC", "ETH"], "patterns": ["above", "hit"], "excluded": ["up-or-down", "5m", "15m"]},
+            },
+            "selectionLimits": {
+                "worldcupMarketLimit": worldcup_market_limit,
             },
             "count": len(payload_targets),
             "summary": summary,
@@ -942,6 +953,15 @@ def _parse_coverage_topics(value: str | list[str] | tuple[str, ...]) -> list[str
         if topic in PRIORITY_TOPICS and topic not in topics:
             topics.append(topic)
     return topics
+
+
+def _worldcup_lob_market_limit() -> int:
+    return _int_clamped(
+        os.environ.get("POLYDATA_LOB_WORLDCUP_MARKET_LIMIT"),
+        default=DEFAULT_WORLDCUP_LOB_MARKET_LIMIT,
+        minimum=0,
+        maximum=20,
+    )
 
 
 def _build_worldcup_selection_context(ctx: dict) -> tuple[CoverageSelectionContext, Dict[str, Any]]:

@@ -360,3 +360,44 @@ def test_lob_coverage_targets_payload_prioritizes_requested_topics():
     assert [item["topic"] for item in payload["items"]] == ["worldcup", "crypto"]
     assert payload["items"][0]["tier"] == "hot"
     assert payload["items"][1]["sampleIntervalSeconds"] == 60
+
+
+def test_lob_coverage_targets_caps_active_worldcup_markets(monkeypatch):
+    class FakeLogger:
+        def exception(self, *args, **kwargs):
+            raise AssertionError(args)
+
+    monkeypatch.delenv("POLYDATA_LOB_WORLDCUP_MARKET_LIMIT", raising=False)
+    rows = [
+        {
+            "market_id": market_id,
+            "market_slug": f"fifwc-match-{market_id}",
+            "market_title": f"FIFA World Cup live match market {market_id}",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": f"yes-{market_id}",
+            "no_token_id": f"no-{market_id}",
+            "volume_24h": str(1000 + market_id),
+        }
+        for market_id in (101, 102, 103, 104)
+    ]
+    ctx = {
+        "query_all": lambda sql, params=(): rows,
+        "get_world_cup_match_ops_snapshot": lambda limit=48: {
+            "items": [
+                {
+                    "matchStatus": "live",
+                    "relatedPolymarketMarketIds": [101, 102, 103, 104],
+                    "markets": [{"marketId": 101}, {"marketId": 102}, {"marketId": 103}, {"marketId": 104}],
+                }
+            ]
+        },
+        "app": type("FakeApp", (), {"logger": FakeLogger()})(),
+    }
+
+    payload = lob_service.get_lob_coverage_targets_payload(ctx, limit=10, topics="worldcup")
+
+    assert payload["selectionLimits"]["worldcupMarketLimit"] == 3
+    assert payload["summary"]["topics"]["worldcup"] == 3
+    assert len(payload["items"]) == 3
+    assert all(item["topic"] == "worldcup" for item in payload["items"])
