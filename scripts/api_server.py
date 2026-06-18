@@ -580,6 +580,7 @@ def build_service_context() -> Dict[str, Any]:
             timeout=timeout,
             headers=headers,
         ),
+        "http_form_post": http_form_post,
         "http_text_get": http_text_get,
         "http_bytes_get": http_bytes_get,
         "xlrd": xlrd,
@@ -802,6 +803,19 @@ def get_snapshot_payload(namespace: str, cache_key: str, builder, *, ttl_seconds
 
 def http_json_get(url: str, *, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
     return market_data_client.http_json_get(build_service_context(), url, params=params, timeout=timeout, headers=headers)
+
+
+def http_form_post(url: str, *, data: Dict[str, Any], timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
+    if requests is None:
+        raise RuntimeError("requests is not installed")
+    session = requests.Session()
+    session.trust_env = str(os.environ.get("POLYDATA_API_HTTP_TRUST_ENV_PROXY") or "").strip().lower() in {"1", "true", "yes", "on"}
+    try:
+        response = session.post(url, data=data, timeout=timeout, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    finally:
+        session.close()
 
 
 def http_text_get(url: str, *, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> str:

@@ -177,6 +177,22 @@ type AirFlightPoint = {
   status: string;
 };
 
+type LiveAircraftPoint = {
+  id: string;
+  callsign: string;
+  originCountry: string;
+  regionLabel: string;
+  lon: number;
+  lat: number;
+  altitude: number | null;
+  velocity: number | null;
+  heading: number | null;
+  verticalRate: number | null;
+  onGround: boolean;
+  riskScore: number;
+  status: string;
+};
+
 type AirMotionPoint = {
   id: string;
   lon: number;
@@ -195,7 +211,7 @@ type RiskAnchor = {
 };
 
 type DeckTooltipState = {
-  kind: 'city' | 'conflict' | 'cluster' | 'air-route' | 'air-hub' | 'air-flight';
+  kind: 'city' | 'conflict' | 'cluster' | 'air-route' | 'air-hub' | 'air-flight' | 'live-aircraft';
   x: number;
   y: number;
   city?: WeatherMapPoint;
@@ -204,9 +220,10 @@ type DeckTooltipState = {
   airRoute?: AirRoutePath;
   airHub?: AirHubPoint;
   airFlight?: AirFlightPoint;
+  liveAircraft?: LiveAircraftPoint;
 } | null;
 
-type DeckHoverObject = WeatherMapPoint | ConflictMapPoint | ConflictClusterPoint | AirRoutePath | AirHubPoint | AirFlightPoint;
+type DeckHoverObject = WeatherMapPoint | ConflictMapPoint | ConflictClusterPoint | AirRoutePath | AirHubPoint | AirFlightPoint | LiveAircraftPoint;
 
 type CountryNameLabel = {
   id: string;
@@ -1135,6 +1152,28 @@ function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | nu
   });
 }
 
+function normalizeLiveAircraft(payload?: RuntimeGlobalTransportShippingPayload | null): LiveAircraftPoint[] {
+  return (payload?.aviation?.liveFlights || []).flatMap((row, index): LiveAircraftPoint[] => {
+    const coord = airCoord(row.lon, row.lat);
+    if (!coord) return [];
+    return [{
+      id: String(row.id || row.icao24 || `opensky-${index}`),
+      callsign: String(row.callsign || row.icao24 || 'OPEN'),
+      originCountry: String(row.originCountry || 'Unknown'),
+      regionLabel: String(row.regionLabel || row.region || 'OpenSky'),
+      lon: coord[0],
+      lat: coord[1],
+      altitude: numberValue(row.baroAltitude),
+      velocity: numberValue(row.velocity),
+      heading: numberValue(row.heading),
+      verticalRate: numberValue(row.verticalRate),
+      onGround: Boolean(row.onGround),
+      riskScore: numberValue(row.riskScore) ?? 0,
+      status: String(row.status || 'normal'),
+    }];
+  });
+}
+
 function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], conflicts: ConflictMapPoint[]) {
   const weatherCountries = new Map<string, number>();
   cities
@@ -1762,6 +1801,7 @@ function buildWeatherDeckLayers({
   airRoutes,
   airHubs,
   airFlights,
+  liveAircraft,
   animationTime,
   airLensMode,
   airRiskSource,
@@ -1779,6 +1819,7 @@ function buildWeatherDeckLayers({
   airRoutes: AirRoutePath[];
   airHubs: AirHubPoint[];
   airFlights: AirFlightPoint[];
+  liveAircraft: LiveAircraftPoint[];
   animationTime: number;
   airLensMode: AirLensMode;
   airRiskSource: AirRiskSource;
@@ -1967,6 +2008,32 @@ function buildWeatherDeckLayers({
       pickable: true,
       autoHighlight: true,
       highlightColor: [255, 255, 255, 95],
+    }));
+  }
+
+  if (liveAircraft.length) {
+    layers.push(new ScatterplotLayer<LiveAircraftPoint>({
+      id: 'opensky-live-aircraft',
+      data: liveAircraft,
+      getPosition: (flight) => [flight.lon, flight.lat],
+      getRadius: (flight) => {
+        const speedBoost = Math.min(18000, Math.max(0, (flight.velocity || 0) * 52));
+        return (flight.status === 'watch' || flight.riskScore >= 34 ? 24000 : 17000) + speedBoost;
+      },
+      getFillColor: (flight) => flight.status === 'watch' || flight.riskScore >= 34
+        ? [255, 218, 84, 235]
+        : [72, 244, 255, 226],
+      getLineColor: (flight) => flight.status === 'watch' || flight.riskScore >= 34
+        ? [75, 28, 4, 235]
+        : [5, 22, 31, 230],
+      getLineWidth: 1,
+      radiusMinPixels: 2.4,
+      radiusMaxPixels: 6.4,
+      lineWidthMinPixels: 1,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 255, 255, 115],
+      stroked: true,
     }));
   }
 
@@ -2358,6 +2425,16 @@ function DeckMapTooltip({ tooltip }: { tooltip: DeckTooltipState }) {
       </div>
     );
   }
+  if (tooltip.kind === 'live-aircraft' && tooltip.liveAircraft) {
+    const flight = tooltip.liveAircraft;
+    return (
+      <div className={`wm-map-country-tooltip wm-map-deck-tooltip air ${flight.status}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
+        <strong>{flight.callsign}</strong>
+        <span>OpenSky · {flight.regionLabel} · {flight.originCountry}</span>
+        <small>{Math.round(flight.velocity || 0)} m/s · {Math.round(flight.altitude || 0)} m · risk {Math.round(flight.riskScore)}</small>
+      </div>
+    );
+  }
   if (tooltip.kind === 'city' && tooltip.city) {
     const city = tooltip.city;
     return (
@@ -2502,6 +2579,7 @@ export function WeatherDeckMap({
   const airRoutesRef = useRef<AirRoutePath[]>([]);
   const airHubsRef = useRef<AirHubPoint[]>([]);
   const airFlightsRef = useRef<AirFlightPoint[]>([]);
+  const liveAircraftRef = useRef<LiveAircraftPoint[]>([]);
   const animationTimeRef = useRef(0);
   const airAnimationRafRef = useRef<number | null>(null);
   const airAnimationLastRef = useRef<number | null>(null);
@@ -2576,6 +2654,10 @@ export function WeatherDeckMap({
     () => showAirRoutes ? normalizeAirFlights(transportPayload, airRoutes, animationTimeRef.current) : [],
     [airRoutes, showAirRoutes, transportPayload],
   );
+  const liveAircraft = useMemo(
+    () => showAirRoutes ? normalizeLiveAircraft(transportPayload) : [],
+    [showAirRoutes, transportPayload],
+  );
 
   const updateDeckLayers = () => {
     const map = mapRef.current;
@@ -2591,6 +2673,7 @@ export function WeatherDeckMap({
       airRoutes: showAirRoutesRef.current ? airRoutesRef.current : [],
       airHubs: showAirRoutesRef.current ? airHubsRef.current : [],
       airFlights: showAirRoutesRef.current ? airFlightsRef.current : [],
+      liveAircraft: showAirRoutesRef.current ? liveAircraftRef.current : [],
       animationTime: animationTimeRef.current,
       airLensMode,
       airRiskSource,
@@ -2642,6 +2725,7 @@ export function WeatherDeckMap({
       airAnimationLastRef.current = timestamp;
       animationTimeRef.current += Math.min(0.08, Math.max(0, timestamp - previous) / 1000);
       airFlightsRef.current = normalizeAirFlights(transportPayload, airRoutesRef.current, animationTimeRef.current);
+      liveAircraftRef.current = normalizeLiveAircraft(transportPayload);
       scheduleDeckUpdate();
       airAnimationRafRef.current = window.requestAnimationFrame(tick);
     };
@@ -2677,6 +2761,10 @@ export function WeatherDeckMap({
       updateDeckTooltip({ kind: 'air-flight', x: info.x, y: info.y, airFlight: object as AirFlightPoint });
       return;
     }
+    if ('callsign' in object && 'originCountry' in object && 'regionLabel' in object) {
+      updateDeckTooltip({ kind: 'live-aircraft', x: info.x, y: info.y, liveAircraft: object as LiveAircraftPoint });
+      return;
+    }
     if ('routeCount' in object && 'code' in object) {
       updateDeckTooltip({ kind: 'air-hub', x: info.x, y: info.y, airHub: object as AirHubPoint });
       return;
@@ -2703,7 +2791,7 @@ export function WeatherDeckMap({
       }
       return;
     }
-    if ('path' in object || ('routeCount' in object && 'code' in object)) {
+    if ('path' in object || ('routeCount' in object && 'code' in object) || ('callsign' in object && 'originCountry' in object)) {
       return;
     }
     if ('city' in object) {
@@ -2786,9 +2874,10 @@ export function WeatherDeckMap({
     airRoutesRef.current = airRoutes;
     airHubsRef.current = airHubs;
     airFlightsRef.current = airFlights;
+    liveAircraftRef.current = liveAircraft;
     startAirAnimation();
     return () => stopAirAnimation();
-  }, [airContextRoutes, airFlights, airHubs, airRoutes, showAirRoutes]);
+  }, [airContextRoutes, airFlights, airHubs, airRoutes, liveAircraft, showAirRoutes]);
 
   useEffect(() => {
     onCountrySelectRef.current = (risk: CountryRisk) => {
@@ -3062,7 +3151,7 @@ export function WeatherDeckMap({
           routeCount={primaryAirRouteUniverse.length}
           totalRouteCount={airLensMode === 'watch' && airRiskSource !== 'all' ? riskCounts.all : lensRoutes.length}
           hubCount={airHubs.length}
-          flightCount={airFlights.length}
+          flightCount={airFlights.length + liveAircraft.length}
           riskCounts={riskCounts}
           onLensChange={setAirLensMode}
           onFocusChange={setAirFocusRegion}

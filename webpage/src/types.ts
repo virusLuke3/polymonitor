@@ -2391,6 +2391,7 @@ export type RuntimeGlobalTransportShippingPayload = {
     routes?: number | string | null;
     visibleRoutes?: number | string | null;
     flightSamples?: number | string | null;
+    liveFlightSamples?: number | string | null;
     countries?: number | string | null;
     topHub?: string | null;
     transitFeeds?: number | string | null;
@@ -2398,6 +2399,8 @@ export type RuntimeGlobalTransportShippingPayload = {
     transitCatalogFiles?: number | string | null;
     transitScannedFiles?: number | string | null;
     aisStatus?: string | null;
+    openSkyStatus?: string | null;
+    openSkyRegions?: number | string | null;
     evidenceVersion?: string | null;
   } | null;
   evidence?: {
@@ -2474,6 +2477,27 @@ export type RuntimeGlobalTransportShippingPayload = {
       layer?: string | null;
       source?: string | null;
       sourceUrl?: string | null;
+    }>;
+    liveFlights?: Array<{
+      id?: string | null;
+      icao24?: string | null;
+      callsign?: string | null;
+      originCountry?: string | null;
+      region?: string | null;
+      regionLabel?: string | null;
+      lat?: number | string | null;
+      lon?: number | string | null;
+      baroAltitude?: number | string | null;
+      velocity?: number | string | null;
+      heading?: number | string | null;
+      verticalRate?: number | string | null;
+      onGround?: boolean | null;
+      lastContact?: number | string | null;
+      status?: string | null;
+      riskScore?: number | string | null;
+      source?: string | null;
+      sourceUrl?: string | null;
+      updatedAt?: string | null;
     }>;
     ops?: Array<Record<string, unknown>>;
     airlines?: Array<{ name?: string | null; routeCount?: number | string | null; status?: string | null; exposureScore?: number | string | null; trend?: Array<number | string | null>; sourceUrl?: string | null }>;

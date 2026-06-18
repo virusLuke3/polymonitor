@@ -17,9 +17,13 @@ GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE = "snapshot:transport:global-shipping"
 GLOBAL_TRANSPORT_CACHE_KEY = "panel-v3"
 AISSTREAM_SNAPSHOT_NAMESPACE = "snapshot:transport:aisstream"
 AISSTREAM_CACHE_KEY = "sample-v1"
+OPENSKY_SNAPSHOT_NAMESPACE = "snapshot:transport:opensky"
+OPENSKY_CACHE_KEY = "live-v1"
+OPENSKY_TOKEN_CACHE_KEY = "token-v1"
 DEFAULT_LIMIT = 14
 DEFAULT_TTL_SECONDS = 900
 DEFAULT_AISSTREAM_SAMPLE_INTERVAL_SECONDS = 21600
+DEFAULT_OPENSKY_SAMPLE_INTERVAL_SECONDS = 900
 AVIATION_ROUTE_LAYER_LIMIT = 360
 AVIATION_FLIGHT_LAYER_LIMIT = 140
 EVIDENCE_SCHEMA_VERSION = "air-evidence-v1"
@@ -30,6 +34,16 @@ OPENFLIGHTS_AIRLINES_URL = "https://raw.githubusercontent.com/jpatokal/openfligh
 TRANSITLAND_ATLAS_URL = "https://raw.githubusercontent.com/transitland/transitland-atlas/master/feeds/gtfs-source-feeds.transit.land.dmfr.json"
 TRANSITLAND_ATLAS_INDEX_URL = "https://api.github.com/repos/transitland/transitland-atlas/contents/feeds"
 AISSTREAM_DOC_URL = "https://aisstream.io/documentation"
+OPENSKY_AUTH_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
+OPENSKY_STATES_URL = "https://opensky-network.org/api/states/all"
+OPENSKY_DOC_URL = "https://openskynetwork.github.io/opensky-api/rest.html"
+OPENSKY_REGIONS = [
+    {"id": "us-east", "label": "US East", "lamin": 24.0, "lomin": -88.0, "lamax": 49.5, "lomax": -66.0},
+    {"id": "europe", "label": "Europe", "lamin": 35.0, "lomin": -12.0, "lamax": 61.0, "lomax": 32.0},
+    {"id": "gulf", "label": "Gulf", "lamin": 18.0, "lomin": 34.0, "lamax": 33.0, "lomax": 62.0},
+    {"id": "east-asia", "label": "East Asia", "lamin": 20.0, "lomin": 102.0, "lamax": 45.0, "lomax": 141.0},
+    {"id": "southeast-asia", "label": "SE Asia", "lamin": -8.0, "lomin": 95.0, "lamax": 18.0, "lomax": 125.0},
+]
 
 _LIVE_REFRESH_LOCK = threading.Lock()
 _LIVE_REFRESHING: set[str] = set()
@@ -113,6 +127,28 @@ def _http_text(ctx: dict, url: str, *, timeout: int = 18) -> str:
     if callable(getter):
         return str(getter(url, timeout=timeout, headers={"User-Agent": "polydata-global-transport/1.0"}))
     raise RuntimeError("http_text_get unavailable")
+
+
+def _http_json_get(ctx: dict, url: str, *, params: Dict[str, Any] | None = None, timeout: int = 18, headers: Dict[str, str] | None = None) -> Any:
+    getter = ctx.get("http_json_get")
+    if callable(getter):
+        return getter(url, params=params, timeout=timeout, headers=headers)
+    import requests
+
+    response = requests.get(url, params=params, timeout=timeout, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+
+def _http_form_post(ctx: dict, url: str, *, data: Dict[str, Any], timeout: int = 18, headers: Dict[str, str] | None = None) -> Any:
+    poster = ctx.get("http_form_post")
+    if callable(poster):
+        return poster(url, data=data, timeout=timeout, headers=headers)
+    import requests
+
+    response = requests.post(url, data=data, timeout=timeout, headers=headers)
+    response.raise_for_status()
+    return response.json()
 
 
 def _read_openflights_text(ctx: dict, filename: str, url: str) -> tuple[str, str]:
@@ -387,7 +423,7 @@ def _trend(seed: str, *, length: int = 9, floor: int = 16, ceiling: int = 92) ->
     return values
 
 
-def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str, source_url: str) -> Dict[str, Any]:
+def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str, source_url: str, opensky_status: Dict[str, Any] | None = None) -> Dict[str, Any]:
     hubs = []
     for hub in route_stats.get("topHubs", [])[:24]:
         code = hub.get("iata") or hub.get("icao") or hub.get("id")
@@ -505,10 +541,11 @@ def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str, sou
     ]
     return {
         "generatedAt": generated_at,
-        "mode": "seeded-route-graph",
+        "mode": "live-aircraft" if (opensky_status or {}).get("aircraft") else "seeded-route-graph",
         "hubs": hubs,
         "routes": routes,
         "flights": flights,
+        "liveFlights": (opensky_status or {}).get("aircraft") or [],
         "ops": ops_rows,
         "airlines": airline_rows,
         "news": news_rows,
@@ -578,6 +615,22 @@ def _build_evidence_payload(aviation: Dict[str, Any], items: List[Dict[str, Any]
         )
         for row in aviation.get("ops", [])
     ]
+    live_records = [
+        _evidence_record(
+            evidence_type="live_aircraft",
+            entity=str(row.get("callsign") or row.get("icao24") or "aircraft"),
+            lat=row.get("lat"),
+            lon=row.get("lon"),
+            severity=str(row.get("status") or "normal"),
+            confidence=0.82,
+            source="OpenSky",
+            source_url=str(row.get("sourceUrl") or OPENSKY_DOC_URL),
+            updated_at=str(row.get("updatedAt") or generated_at),
+            risk_sources=["opensky", "aircraft"],
+            reason=f"{row.get('regionLabel') or row.get('region') or 'region'} live aircraft state / {row.get('originCountry') or 'unknown'}",
+        )
+        for row in aviation.get("liveFlights", [])[:96]
+    ]
     risk_records = [
         _evidence_record(
             evidence_type=str(item.get("evidenceType") or item.get("topic") or "transport"),
@@ -596,7 +649,7 @@ def _build_evidence_payload(aviation: Dict[str, Any], items: List[Dict[str, Any]
     return {
         "schemaVersion": EVIDENCE_SCHEMA_VERSION,
         "routes": route_records,
-        "risks": risk_records,
+        "risks": risk_records + live_records,
         "ops": ops_records,
     }
 
@@ -769,6 +822,33 @@ def _store_aisstream_cache(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: i
         setter(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY, payload, ttl_seconds)
 
 
+def _read_cached_payload(ctx: dict, namespace: str, cache_key: str, *, max_age_seconds: int | None = None) -> Optional[Dict[str, Any]]:
+    reader = ctx.get("get_cached_json")
+    payload = reader(namespace, cache_key) if callable(reader) else None
+    if not isinstance(payload, dict):
+        store = ctx.get("SNAPSHOT_STORE")
+        if store is not None:
+            payload = store.get(namespace, cache_key)
+    if not isinstance(payload, dict):
+        return None
+    if max_age_seconds is not None:
+        generated_at = payload.get("sampledAt") or payload.get("generatedAt") or payload.get("updatedAt")
+        age = _age_seconds(generated_at)
+        if age is None or age > max_age_seconds:
+            return None
+        return {**payload, "cacheMode": payload.get("cacheMode") or "cache", "ageSeconds": round(max(0, age))}
+    return payload
+
+
+def _store_cached_payload(ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
+    store = ctx.get("SNAPSHOT_STORE")
+    if store is not None:
+        store.set(namespace, cache_key, payload, ttl_seconds)
+    setter = ctx.get("set_cached_json")
+    if callable(setter):
+        setter(namespace, cache_key, payload, ttl_seconds)
+
+
 def _aisstream_status(ctx: dict) -> Dict[str, Any]:
     api_key = _aisstream_api_key()
     min_interval = _env_int(
@@ -814,6 +894,175 @@ def _aisstream_status(ctx: dict) -> Dict[str, Any]:
         }
         _store_aisstream_cache(ctx, error_payload, ttl_seconds=min_interval)
         return error_payload
+
+
+def _opensky_credentials() -> tuple[str, str]:
+    client_id = str(os.environ.get("POLYDATA_OPENSKY_CLIENT_ID") or os.environ.get("OPENSKY_CLIENT_ID") or "").strip()
+    client_secret = str(os.environ.get("POLYDATA_OPENSKY_CLIENT_SECRET") or os.environ.get("OPENSKY_CLIENT_SECRET") or "").strip()
+    return client_id, client_secret
+
+
+def _opensky_region_plan() -> List[Dict[str, Any]]:
+    raw = str(os.environ.get("POLYDATA_OPENSKY_REGIONS_JSON") or "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                regions = [row for row in parsed if isinstance(row, dict)]
+                if regions:
+                    return regions
+        except json.JSONDecodeError:
+            pass
+    region_limit = _env_int("POLYDATA_OPENSKY_REGION_LIMIT", 3, minimum=1, maximum=len(OPENSKY_REGIONS))
+    offset = _env_int("POLYDATA_OPENSKY_REGION_OFFSET", 0, minimum=0, maximum=max(0, len(OPENSKY_REGIONS) - 1))
+    rotated = OPENSKY_REGIONS[offset:] + OPENSKY_REGIONS[:offset]
+    return rotated[:region_limit]
+
+
+def _opensky_access_token(ctx: dict) -> tuple[Optional[str], Dict[str, Any]]:
+    client_id, client_secret = _opensky_credentials()
+    if not client_id or not client_secret:
+        return None, {"status": "missing-key", "sourceUrl": OPENSKY_DOC_URL}
+    cached = _read_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, OPENSKY_TOKEN_CACHE_KEY)
+    if cached and cached.get("accessToken"):
+        expires_at = _parse_iso(cached.get("expiresAt"))
+        if expires_at and (expires_at - datetime.now(timezone.utc)).total_seconds() > 90:
+            return str(cached["accessToken"]), {"status": "token-cache", "sourceUrl": OPENSKY_DOC_URL}
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+    payload = _http_form_post(
+        ctx,
+        OPENSKY_AUTH_URL,
+        data=data,
+        timeout=15,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "polydata-global-transport/1.0"},
+    )
+    if not isinstance(payload, dict) or not payload.get("access_token"):
+        return None, {"status": "auth-error", "sourceUrl": OPENSKY_DOC_URL}
+    expires_in = int(payload.get("expires_in") or 1800)
+    expires_at = datetime.now(timezone.utc).timestamp() + max(120, expires_in - 60)
+    token_payload = {
+        "status": "ok",
+        "accessToken": str(payload["access_token"]),
+        "expiresAt": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generatedAt": _utc_now_iso(ctx),
+        "sourceUrl": OPENSKY_DOC_URL,
+    }
+    _store_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, OPENSKY_TOKEN_CACHE_KEY, token_payload, ttl_seconds=max(120, expires_in - 60))
+    return str(payload["access_token"]), {"status": "token-live", "sourceUrl": OPENSKY_DOC_URL}
+
+
+def _normalize_opensky_state(row: List[Any], *, region: Dict[str, Any], sampled_at: str) -> Optional[Dict[str, Any]]:
+    if not isinstance(row, list) or len(row) < 17:
+        return None
+    lon = _float(row[5])
+    lat = _float(row[6])
+    if lat is None or lon is None:
+        return None
+    velocity = _float(row[9])
+    altitude = _float(row[7]) or _float(row[13])
+    callsign = str(row[1] or "").strip() or str(row[0] or "").strip()[:8] or "OPEN"
+    origin_country = str(row[2] or "Unknown").strip()
+    vertical_rate = _float(row[11])
+    on_ground = bool(row[8])
+    risk_score = 18
+    if altitude is not None and altitude < 900:
+        risk_score += 12
+    if vertical_rate is not None and abs(vertical_rate) >= 8:
+        risk_score += 8
+    if on_ground:
+        risk_score = max(6, risk_score - 8)
+    if velocity is not None and velocity < 65 and not on_ground:
+        risk_score += 7
+    return {
+        "id": f"opensky-{_source_hash(str(row[0] or callsign))}",
+        "icao24": row[0],
+        "callsign": callsign,
+        "originCountry": origin_country,
+        "region": region.get("id"),
+        "regionLabel": region.get("label") or region.get("id"),
+        "lat": lat,
+        "lon": lon,
+        "baroAltitude": altitude,
+        "velocity": velocity,
+        "heading": _float(row[10]),
+        "verticalRate": vertical_rate,
+        "onGround": on_ground,
+        "lastContact": row[4],
+        "status": "watch" if risk_score >= 34 else "normal",
+        "riskScore": min(88, risk_score),
+        "source": "OpenSky",
+        "sourceUrl": OPENSKY_DOC_URL,
+        "updatedAt": sampled_at,
+    }
+
+
+def _opensky_live_status(ctx: dict) -> Dict[str, Any]:
+    min_interval = _env_int(
+        "POLYDATA_OPENSKY_MIN_SAMPLE_INTERVAL_SECONDS",
+        DEFAULT_OPENSKY_SAMPLE_INTERVAL_SECONDS,
+        minimum=300,
+        maximum=21600,
+    )
+    cached = _read_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, OPENSKY_CACHE_KEY, max_age_seconds=min_interval)
+    if cached is not None:
+        return cached
+    token, token_state = _opensky_access_token(ctx)
+    if not token:
+        return {
+            "status": token_state.get("status") or "missing-key",
+            "aircraftCount": 0,
+            "regions": [],
+            "aircraft": [],
+            "sourceUrl": OPENSKY_DOC_URL,
+            "cacheTtlSeconds": min_interval,
+        }
+    sampled_at = _utc_now_iso(ctx)
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": "polydata-global-transport/1.0"}
+    region_rows = []
+    aircraft: List[Dict[str, Any]] = []
+    errors = []
+    per_region_limit = _env_int("POLYDATA_OPENSKY_PER_REGION_AIRCRAFT_LIMIT", 36, minimum=8, maximum=120)
+    for region in _opensky_region_plan():
+        params = {
+            "lamin": region.get("lamin"),
+            "lomin": region.get("lomin"),
+            "lamax": region.get("lamax"),
+            "lomax": region.get("lomax"),
+        }
+        try:
+            payload = _http_json_get(ctx, OPENSKY_STATES_URL, params=params, timeout=18, headers=headers)
+            states = payload.get("states") if isinstance(payload, dict) else []
+            if not isinstance(states, list):
+                states = []
+            normalized = [
+                item
+                for item in (_normalize_opensky_state(row, region=region, sampled_at=sampled_at) for row in states)
+                if item is not None
+            ]
+            normalized.sort(key=lambda item: (0 if item.get("status") == "watch" else 1, -(float(item.get("velocity") or 0))))
+            picked = normalized[:per_region_limit]
+            aircraft.extend(picked)
+            region_rows.append({"id": region.get("id"), "label": region.get("label"), "status": "ok", "aircraftCount": len(normalized), "returned": len(picked)})
+        except Exception as exc:
+            errors.append({"region": region.get("id"), "error": exc.__class__.__name__})
+            region_rows.append({"id": region.get("id"), "label": region.get("label"), "status": "error", "aircraftCount": 0, "returned": 0})
+    live_payload = {
+        "status": "ok" if aircraft else ("partial" if errors else "empty"),
+        "aircraftCount": len(aircraft),
+        "aircraft": aircraft[: _env_int("POLYDATA_OPENSKY_AIRCRAFT_LIMIT", 140, minimum=24, maximum=360)],
+        "regions": region_rows,
+        "errors": errors,
+        "sourceUrl": OPENSKY_DOC_URL,
+        "sampledAt": sampled_at,
+        "cacheTtlSeconds": min_interval,
+        "tokenState": token_state.get("status"),
+    }
+    _store_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, OPENSKY_CACHE_KEY, live_payload, ttl_seconds=min_interval)
+    return live_payload
 
 
 def _market_links(ctx: dict, query: str) -> List[Dict[str, Any]]:
@@ -883,6 +1132,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
 
     transit_stats, transit_url = _fetch_transitland_catalog(ctx)
     ais_status = _aisstream_status(ctx)
+    opensky_status = _opensky_live_status(ctx)
 
     items: List[Dict[str, Any]] = []
     for hub in route_stats["topHubs"][:6]:
@@ -981,14 +1231,34 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             markets=_market_links(ctx, "shipping disruption port vessel"),
         )
     )
+    opensky_severity = "watch" if opensky_status.get("status") in {"missing-key", "auth-error", "error", "partial"} else "normal"
+    items.append(
+        _item(
+            topic="aviation",
+            entity="OpenSky Network",
+            country="Global",
+            title="OpenSky live aircraft state",
+            summary=f"OpenSky status: {opensky_status.get('status')}. {opensky_status.get('aircraftCount') or 0} aircraft returned across {len(opensky_status.get('regions') or [])} sampled regions.",
+            metric=int(opensky_status.get("aircraftCount") or 0),
+            metric_label="AIRCRAFT",
+            source_url=OPENSKY_DOC_URL,
+            evidence_type="OPENSKY",
+            confidence=0.42 if opensky_status.get("status") in {"missing-key", "auth-error"} else 0.82,
+            severity=opensky_severity,
+            tags=["opensky", "live-aircraft"],
+            evidence=opensky_status,
+            markets=_market_links(ctx, "flight delay airline disruption live aircraft"),
+        )
+    )
     items.sort(key=lambda row: (0 if row["severity"] == "watch" else 1, -int(row.get("metric") or 0)))
     limited = items[: max(1, int(limit or DEFAULT_LIMIT))]
-    aviation = _build_aviation_layer(route_stats, generated_at=generated_at, source_url=routes_source)
+    aviation = _build_aviation_layer(route_stats, generated_at=generated_at, source_url=routes_source, opensky_status=opensky_status)
     evidence_payload = _build_evidence_payload(aviation, limited, generated_at=generated_at)
     source_health = {
         "openflights": "fresh",
         "transitland": "fresh",
         "aisstream": "degraded" if ais_status.get("status") in {"missing-key", "error"} else ("stale" if ais_status.get("cacheMode") else "fresh"),
+        "opensky": "degraded" if opensky_status.get("status") in {"missing-key", "auth-error", "error"} else ("stale" if opensky_status.get("cacheMode") else "fresh"),
         "weatherRiskJoin": "frontend-runtime",
         "conflictRiskJoin": "frontend-runtime",
     }
@@ -998,12 +1268,13 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
         "status": "ok" if items else "empty",
         "cacheMode": "live-build",
         "freshness": "live",
-        "source": "OpenFlights + Transitland Atlas + AISStream",
+        "source": "OpenFlights + OpenSky + Transitland Atlas + AISStream",
         "sourceUrl": OPENFLIGHTS_AIRPORTS_URL,
         "sources": {
             "openflights": {"status": "ok", "airportsSource": airports_source, "routesSource": routes_source},
             "transitland": {"status": "ok", "sourceUrl": transit_url},
             "aisstream": {"status": ais_status.get("status"), "sourceUrl": AISSTREAM_DOC_URL},
+            "opensky": {"status": opensky_status.get("status"), "sourceUrl": OPENSKY_DOC_URL},
         },
         "sourceHealth": source_health,
         "cachePolicy": {
@@ -1017,6 +1288,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             ),
             "quotaGuard": {
                 "aisstream": "cached-low-frequency",
+                "opensky": "oauth-bbox-cache",
                 "openflights": "static-source",
                 "transitland": "sampled-catalog",
             },
@@ -1026,6 +1298,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             "routes": route_stats["routeCount"],
             "visibleRoutes": len(aviation.get("routes", [])),
             "flightSamples": len(aviation.get("flights", [])),
+            "liveFlightSamples": len(aviation.get("liveFlights", [])),
             "countries": route_stats["countryCount"],
             "topHub": (route_stats["topHubs"][0].get("iata") or route_stats["topHubs"][0].get("name")) if route_stats["topHubs"] else None,
             "transitFeeds": transit_stats["feedCount"],
@@ -1033,6 +1306,8 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             "transitCatalogFiles": transit_stats.get("catalogFileCount", 0),
             "transitScannedFiles": transit_stats.get("scannedFileCount", 0),
             "aisStatus": ais_status.get("status"),
+            "openSkyStatus": opensky_status.get("status"),
+            "openSkyRegions": len(opensky_status.get("regions") or []),
             "evidenceVersion": EVIDENCE_SCHEMA_VERSION,
         },
         "aviation": aviation,
@@ -1048,11 +1323,11 @@ def _empty_payload(ctx: dict, *, cache_mode: str = "seed-miss") -> Dict[str, Any
         "status": "warming",
         "cacheMode": cache_mode,
         "freshness": "warming",
-        "source": "OpenFlights + Transitland Atlas + AISStream",
+        "source": "OpenFlights + OpenSky + Transitland Atlas + AISStream",
         "sourceUrl": OPENFLIGHTS_AIRPORTS_URL,
         "sources": {},
-        "summary": {"airports": 0, "routes": 0, "visibleRoutes": 0, "flightSamples": 0, "countries": 0, "topHub": None, "transitFeeds": 0, "transitOperators": 0, "aisStatus": "unknown", "evidenceVersion": EVIDENCE_SCHEMA_VERSION},
-        "aviation": {"mode": "warming", "hubs": [], "routes": [], "flights": [], "ops": [], "airlines": [], "news": []},
+        "summary": {"airports": 0, "routes": 0, "visibleRoutes": 0, "flightSamples": 0, "liveFlightSamples": 0, "countries": 0, "topHub": None, "transitFeeds": 0, "transitOperators": 0, "aisStatus": "unknown", "openSkyStatus": "unknown", "openSkyRegions": 0, "evidenceVersion": EVIDENCE_SCHEMA_VERSION},
+        "aviation": {"mode": "warming", "hubs": [], "routes": [], "flights": [], "liveFlights": [], "ops": [], "airlines": [], "news": []},
         "evidence": {"schemaVersion": EVIDENCE_SCHEMA_VERSION, "routes": [], "risks": [], "ops": []},
         "items": [],
     }

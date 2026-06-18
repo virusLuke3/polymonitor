@@ -106,6 +106,10 @@ function aviationRoutes(payload?: RuntimeGlobalTransportShippingPayload | null) 
   return payload?.aviation?.routes || [];
 }
 
+function aviationLiveFlights(payload?: RuntimeGlobalTransportShippingPayload | null) {
+  return payload?.aviation?.liveFlights || [];
+}
+
 function aviationOps(payload?: RuntimeGlobalTransportShippingPayload | null) {
   return payload?.aviation?.ops || [];
 }
@@ -193,6 +197,21 @@ function FlightSampleRow({ row }: { row: Record<string, unknown> }) {
   );
 }
 
+function LiveAircraftRow({ row }: { row: NonNullable<AviationPayload['liveFlights']>[number] }) {
+  const status = statusClass(row.status);
+  const speed = numeric(row.velocity);
+  const altitude = numeric(row.baroAltitude);
+  return (
+    <div className="wm-aviation-intel-row flight live">
+      <span className="wm-aviation-code"><AviationIcon kind="flight" /><b>{String(row.callsign || row.icao24 || 'OPEN')}</b></span>
+      <span><strong>{row.regionLabel || row.region || 'OpenSky'}</strong><em>{row.originCountry || 'Unknown'} · {row.onGround ? 'GROUND' : 'AIRBORNE'}</em></span>
+      <RiskMeter value={row.riskScore || speed / 3} className={status} />
+      <i className={status}>{Math.round(speed)}M/S</i>
+      <small>{altitude ? `${Math.round(altitude / 100) / 10}K` : '--'}</small>
+    </div>
+  );
+}
+
 function TrackRow({ item }: { item: RuntimeGlobalTransportShippingItem }) {
   const status = severityClass(item);
   return (
@@ -223,9 +242,9 @@ function SourceHealthStrip({ payload }: { payload?: RuntimeGlobalTransportShippi
   const health = payload?.sourceHealth || {};
   const rows: Array<[string, unknown]> = [
     ['OpenFlights', health.openflights || payload?.sources?.openflights],
+    ['OpenSky', health.opensky || payload?.summary?.openSkyStatus],
     ['Transitland', health.transitland || payload?.sources?.transitland],
     ['AIS', health.aisstream || payload?.summary?.aisStatus],
-    ['WX Join', health.weatherRiskJoin],
     ['Conflict', health.conflictRiskJoin],
   ];
   return (
@@ -244,7 +263,7 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
   const items = payload?.items || [];
   const tabs: Array<{ id: TransportTab; label: string; count: number; icon: AviationIconKind }> = [
     { id: 'ops', label: 'Ops', count: aviationOps(payload).length, icon: 'airport' },
-    { id: 'flights', label: 'Flights', count: aviationRoutes(payload).length, icon: 'flight' },
+    { id: 'flights', label: 'Flights', count: aviationLiveFlights(payload).length || aviationRoutes(payload).length, icon: 'flight' },
     { id: 'airlines', label: 'Airlines', count: aviationAirlines(payload).length, icon: 'airline' },
     { id: 'track', label: 'Track', count: items.length, icon: 'track' },
     { id: 'news', label: 'News', count: aviationNews(payload).length, icon: 'news' },
@@ -252,6 +271,8 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
   const rows = useMemo(() => {
     if (tab === 'ops') return aviationOps(payload).slice(0, 8).map((row, index) => <OpsRow key={`${row.code || index}`} row={row} />);
     if (tab === 'flights') {
+      const liveFlights = aviationLiveFlights(payload);
+      if (liveFlights.length) return liveFlights.slice(0, 8).map((row, index) => <LiveAircraftRow key={`${row.id || row.icao24 || index}`} row={row} />);
       const flights = payload?.aviation?.flights || [];
       if (flights.length) return flights.slice(0, 8).map((row, index) => <FlightSampleRow key={`${row.id || index}`} row={row} />);
       return aviationRoutes(payload).slice(0, 8).map((route, index) => <FlightRow key={`${route.id || index}`} route={route} />);

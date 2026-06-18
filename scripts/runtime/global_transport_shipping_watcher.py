@@ -90,6 +90,16 @@ class GlobalTransportShippingWatcher:
         response.raise_for_status()
         return response.text
 
+    def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 18, headers: Optional[Dict[str, str]] = None) -> Any:
+        response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
+        response.raise_for_status()
+        return response.json()
+
+    def http_form_post(self, url: str, data: Dict[str, Any], timeout: int = 18, headers: Optional[Dict[str, str]] = None) -> Any:
+        response = self.requests.post(url, data=data, timeout=timeout, headers=headers)
+        response.raise_for_status()
+        return response.json()
+
     def get_cached_json(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
         raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
         if not raw:
@@ -106,6 +116,8 @@ class GlobalTransportShippingWatcher:
             "SNAPSHOT_STORE": self.snapshot_store,
             "app": _App(),
             "http_text_get": self.http_text_get,
+            "http_json_get": self.http_json_get,
+            "http_form_post": self.http_form_post,
             "get_cached_json": self.get_cached_json,
             "set_cached_json": self.set_cached_json,
             "utc_now_iso": utc_now_iso,

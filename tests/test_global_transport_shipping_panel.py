@@ -64,6 +64,10 @@ def test_build_global_transport_shipping_payload_from_structured_sources(tmp_pat
     monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
     monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
     monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_ID", raising=False)
+    monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("OPENSKY_CLIENT_ID", raising=False)
+    monkeypatch.delenv("OPENSKY_CLIENT_SECRET", raising=False)
 
     def http_text_get(url: str, **_: object) -> str:
         assert url == "https://example.test/transitland.dmfr.json"
@@ -86,10 +90,12 @@ def test_build_global_transport_shipping_payload_from_structured_sources(tmp_pat
     assert payload["summary"]["transitCatalogFiles"] == 1
     assert payload["summary"]["transitScannedFiles"] == 1
     assert payload["summary"]["aisStatus"] == "missing-key"
+    assert payload["summary"]["openSkyStatus"] == "missing-key"
     assert payload["aviation"]["mode"] == "seeded-route-graph"
     assert payload["aviation"]["hubs"][0]["code"] == "AAA"
     assert payload["aviation"]["routes"][0]["fromCode"] in {"AAA", "BBB", "CCC"}
     assert payload["aviation"]["flights"][0]["id"].startswith("flight-")
+    assert payload["aviation"]["liveFlights"] == []
     assert payload["aviation"]["ops"][0]["routeCount"] >= 1
     assert payload["aviation"]["airlines"][0]["name"] == "Fixture Air"
     assert payload["aviation"]["news"][0]["source"] == "OpenFlights"
@@ -106,6 +112,10 @@ def test_build_global_transport_shipping_payload_accepts_dict_market_search(tmp_
     monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
     monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
     monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_ID", raising=False)
+    monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("OPENSKY_CLIENT_ID", raising=False)
+    monkeypatch.delenv("OPENSKY_CLIENT_SECRET", raising=False)
 
     def http_text_get(url: str, **_: object) -> str:
         assert url == "https://example.test/transitland.dmfr.json"
@@ -193,6 +203,52 @@ def test_aisstream_status_uses_plain_env_alias_and_fresh_cache(monkeypatch):
     assert payload["status"] == "ok"
     assert payload["messageCount"] == 7
     assert payload["cacheMode"] == "ais-cache"
+
+
+def test_opensky_live_status_uses_oauth_and_state_cache(monkeypatch):
+    monkeypatch.setenv("OPENSKY_CLIENT_ID", "client-id")
+    monkeypatch.setenv("OPENSKY_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("POLYDATA_OPENSKY_REGION_LIMIT", "1")
+    cache = {}
+    calls = {"token": 0, "states": 0}
+
+    def http_form_post(url: str, data=None, **_: object) -> dict:
+        calls["token"] += 1
+        assert "openid-connect/token" in url
+        assert data["grant_type"] == "client_credentials"
+        return {"access_token": "token-value", "expires_in": 1800}
+
+    def http_json_get(url: str, params=None, headers=None, **_: object) -> dict:
+        calls["states"] += 1
+        assert "states/all" in url
+        assert headers["Authorization"] == "Bearer token-value"
+        assert params["lamin"] is not None
+        return {
+            "time": 1780000000,
+            "states": [
+                ["abc123", "TEST123 ", "United States", 1780000000, 1780000000, -73.7, 40.6, 3200, False, 210, 88, -1.2, None, 3300, "1234", False, 0],
+                ["nogeo", "DROP ", "United States", 1780000000, 1780000000, None, None, 3200, False, 210, 88, -1.2, None, 3300, "1234", False, 0],
+            ],
+        }
+
+    sampled_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    ctx = {
+        "utc_now_iso": lambda: sampled_at,
+        "http_form_post": http_form_post,
+        "http_json_get": http_json_get,
+        "get_cached_json": lambda namespace, key: cache.get((namespace, key)),
+        "set_cached_json": lambda namespace, key, payload, ttl: cache.__setitem__((namespace, key), payload),
+    }
+
+    first = global_transport_shipping_service._opensky_live_status(ctx)
+    second = global_transport_shipping_service._opensky_live_status(ctx)
+
+    assert first["status"] == "ok"
+    assert first["aircraftCount"] == 1
+    assert first["aircraft"][0]["callsign"] == "TEST123"
+    assert first["regions"][0]["returned"] == 1
+    assert second["cacheMode"] == "cache"
+    assert calls == {"token": 1, "states": 1}
 
 
 def test_global_transport_shipping_runtime_panel_registered():
