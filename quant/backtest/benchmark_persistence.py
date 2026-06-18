@@ -18,7 +18,11 @@ def create_benchmark_run(
     strategy_name: str,
     parameters: dict[str, Any],
     profiles: dict[str, Any],
+    status: str = "running",
 ) -> int:
+    normalized_status = str(status or "running").strip().lower()
+    if normalized_status not in {"queued", "running"}:
+        raise ValueError(f"unsupported benchmark status: {status!r}")
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -26,20 +30,37 @@ def create_benchmark_run(
                 status, universe_type, universe_name, market_count,
                 strategy_name, parameters, profiles, started_at
             )
-            VALUES ('running', %s, %s, %s, %s, %s::jsonb, %s::jsonb, now())
+            VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, CASE WHEN %s = 'running' THEN now() ELSE NULL END)
             RETURNING benchmark_id
             """,
             (
+                normalized_status,
                 universe_type,
                 universe_name,
                 int(market_count),
                 strategy_name,
                 _json_dumps(parameters),
                 _json_dumps(profiles),
+                normalized_status,
             ),
         )
         row = cur.fetchone()
         return int(row["benchmark_id"] if isinstance(row, dict) else row[0])
+
+
+def mark_benchmark_run_started(conn: Any, *, benchmark_id: int) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE quant.quant_backtest_benchmark_runs
+            SET status = 'running',
+                started_at = COALESCE(started_at, now()),
+                error = NULL
+            WHERE benchmark_id = %s
+              AND status IN ('queued', 'running')
+            """,
+            (int(benchmark_id),),
+        )
 
 
 def complete_benchmark_run(

@@ -5,6 +5,7 @@ from decimal import Decimal
 import json
 import logging
 from pathlib import Path
+from queue import Queue
 import sys
 import threading
 import time
@@ -45,6 +46,7 @@ from quant.backtest.benchmark_persistence import (  # noqa: E402
     get_benchmark_rows,
     get_benchmark_run,
     list_benchmark_runs,
+    mark_benchmark_run_started,
 )
 from quant.backtest.runners.benchmark import run_orderfilled_fast_accurate_benchmark  # noqa: E402
 from quant.backtest.runners.coverage_build import build_replay_coverage  # noqa: E402
@@ -53,6 +55,11 @@ from quant.core.db import PostgresSettings, postgres_connection  # noqa: E402
 from quant.core.schema import create_schema  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
+BENCHMARK_JOB_QUEUE: Queue[tuple[int, dict[str, Any]]] = Queue()
+BENCHMARK_WORKER_LOCK = threading.Lock()
+BENCHMARK_ENQUEUE_LOCK = threading.Lock()
+BENCHMARK_ENQUEUED_IDS: set[int] = set()
+BENCHMARK_WORKER: threading.Thread | None = None
 QUANT_EVENT_TILE_NAMESPACE = "quant-event-tile"
 QUANT_EVENT_TILE_WARM_KEY = "quant-event-tile-warm:events"
 QUANT_PRICE_TILE_NAMESPACE = "quant-price-series-tiles"
@@ -220,6 +227,8 @@ def _run_benchmark_job(benchmark_id: int, payload: dict[str, Any]) -> None:
         parts = _benchmark_request_parts(payload)
         with postgres_connection(PostgresSettings(), readonly=False) as conn:
             create_schema(conn)
+            mark_benchmark_run_started(conn, benchmark_id=int(benchmark_id))
+            conn.commit()
             run_orderfilled_fast_accurate_benchmark(
                 universe_spec=parts["universe_spec"],
                 persist_conn=conn,
@@ -242,6 +251,63 @@ def _run_benchmark_job(benchmark_id: int, payload: dict[str, Any]) -> None:
                 conn.commit()
         except Exception:
             LOGGER.exception("quant backtest benchmark failed-state write failed benchmark_id=%s", benchmark_id)
+
+
+def _benchmark_worker_loop() -> None:
+    while True:
+        benchmark_id, payload = BENCHMARK_JOB_QUEUE.get()
+        try:
+            _run_benchmark_job(int(benchmark_id), dict(payload))
+        finally:
+            with BENCHMARK_ENQUEUE_LOCK:
+                BENCHMARK_ENQUEUED_IDS.discard(int(benchmark_id))
+            BENCHMARK_JOB_QUEUE.task_done()
+
+
+def _ensure_benchmark_worker() -> None:
+    global BENCHMARK_WORKER
+    with BENCHMARK_WORKER_LOCK:
+        if BENCHMARK_WORKER is not None and BENCHMARK_WORKER.is_alive():
+            return
+        BENCHMARK_WORKER = threading.Thread(
+            target=_benchmark_worker_loop,
+            name="quant-benchmark-worker",
+            daemon=True,
+        )
+        BENCHMARK_WORKER.start()
+
+
+def _enqueue_benchmark_job(benchmark_id: int, payload: dict[str, Any]) -> bool:
+    _ensure_benchmark_worker()
+    normalized_id = int(benchmark_id)
+    with BENCHMARK_ENQUEUE_LOCK:
+        if normalized_id in BENCHMARK_ENQUEUED_IDS:
+            return False
+        BENCHMARK_ENQUEUED_IDS.add(normalized_id)
+    BENCHMARK_JOB_QUEUE.put((normalized_id, dict(payload)))
+    return True
+
+
+def _benchmark_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    parameters = row.get("parameters") if isinstance(row.get("parameters"), dict) else {}
+    profiles = row.get("profiles") if isinstance(row.get("profiles"), dict) else {}
+    strategy = {
+        "minProbability": parameters.get("min_probability"),
+        "maxProbability": parameters.get("max_probability"),
+        "stake": parameters.get("stake"),
+        "initialCapital": parameters.get("initial_capital"),
+        "maxDailyCost": parameters.get("max_daily_cost"),
+        "maxConcurrentPositions": parameters.get("max_concurrent_positions"),
+        "maxDailyTrades": parameters.get("max_daily_trades"),
+    }
+    return {
+        "universeSpec": parameters.get("universe") or {},
+        "limit": parameters.get("limit") or row.get("market_count") or 50,
+        "strategy": row.get("strategy_name") or "favorite_hold_v1",
+        "strategySpec": {key: value for key, value in strategy.items() if value is not None},
+        "profileBundle": profiles.get("requested") or "fast-vs-accurate",
+        "forceBlockReplayBackfill": False,
+    }
 
 
 def _json_value(value: Any) -> Any:
@@ -1506,6 +1572,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
                     strategy_name="favorite_hold_v1",
                     parameters=parts["parameters"],
                     profiles=parts["profiles"],
+                    status="queued",
                 )
                 conn.commit()
                 row = get_benchmark_run(conn, benchmark_id=int(benchmark_id))
@@ -1516,13 +1583,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             return jsonify({"error": str(exc)}), 500
         if not row:
             return jsonify({"error": "benchmark run not found"}), 500
-        worker = threading.Thread(
-            target=_run_benchmark_job,
-            args=(int(row["benchmark_id"]), dict(payload)),
-            name=f"quant-benchmark-{row['benchmark_id']}",
-            daemon=True,
-        )
-        worker.start()
+        _enqueue_benchmark_job(int(row["benchmark_id"]), dict(payload))
         return jsonify({
             "item": _camel_row(row),
             "benchmarkId": row.get("benchmark_id"),
@@ -1548,6 +1609,8 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             artifacts = get_benchmark_artifacts(conn, benchmark_id=benchmark_id)
         if not row:
             return jsonify({"error": "benchmark not found"}), 404
+        if str(row.get("status") or "").lower() == "queued":
+            _enqueue_benchmark_job(int(row["benchmark_id"]), _benchmark_payload_from_row(row))
         return jsonify({"item": _camel_row(row), "artifacts": [_camel_row(item) for item in artifacts]})
 
     @bp.route("/backtest-benchmarks/<int:benchmark_id>/rows", methods=["GET"])
