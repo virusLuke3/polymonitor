@@ -21,6 +21,7 @@ import type {
   PriceSummary,
   QuantBacktestBenchmarkArtifact,
   QuantBacktestBenchmarkCreatePayload,
+  QuantBacktestBenchmarkQueue,
   QuantBacktestBenchmarkRow,
   QuantBacktestBenchmarkRun,
   QuantBacktestUniverse,
@@ -513,9 +514,14 @@ export function fetchQuantBacktestBenchmarks(limit = 25) {
   return apiGetWithTimeout<QuantListPayload<QuantBacktestBenchmarkRun>>(`/quant/backtest-benchmarks?limit=${limit}`, 20000);
 }
 
-export function fetchQuantBacktestBenchmark(benchmarkId: number) {
+export function fetchQuantBacktestBenchmarkQueue() {
+  return apiGetWithTimeout<QuantBacktestBenchmarkQueue>('/quant/backtest-benchmark-queue', 15000);
+}
+
+export function fetchQuantBacktestBenchmark(benchmarkId: number, includeArtifacts = true) {
+  const query = includeArtifacts ? '' : '?includeArtifacts=0';
   return apiGetWithTimeout<{ item: QuantBacktestBenchmarkRun; artifacts: QuantBacktestBenchmarkArtifact[] }>(
-    `/quant/backtest-benchmarks/${benchmarkId}`,
+    `/quant/backtest-benchmarks/${benchmarkId}${query}`,
     20000,
   );
 }

@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 from decimal import Decimal
 import logging
+import os
 import signal
+import socket
 import time
 from typing import Any
 
-from ..benchmark_persistence import claim_next_queued_benchmark_run, fail_benchmark_run
+from ..benchmark_persistence import claim_next_queued_benchmark_run, fail_benchmark_run, update_benchmark_worker_heartbeat
 from ...core.db import PostgresSettings, postgres_connection
 from ...core.schema import create_schema
 from .benchmark import run_orderfilled_fast_accurate_benchmark
@@ -94,6 +96,7 @@ def run_claimed_benchmark(row: dict[str, Any]) -> int:
 
 def run_worker(*, once: bool = False, poll_seconds: float = 2.0, init_schema: bool = True) -> int:
     processed = 0
+    worker_id = f"{socket.gethostname()}:{os.getpid()}"
     if init_schema:
         with postgres_connection(PostgresSettings(), readonly=False) as conn:
             create_schema(conn)
@@ -101,6 +104,7 @@ def run_worker(*, once: bool = False, poll_seconds: float = 2.0, init_schema: bo
         claimed: dict[str, Any] | None = None
         try:
             with postgres_connection(PostgresSettings(), readonly=False) as conn:
+                update_benchmark_worker_heartbeat(conn, worker_id=worker_id, status="idle", meta={"processed": processed})
                 claimed = claim_next_queued_benchmark_run(conn)
                 conn.commit()
             if not claimed:
@@ -110,15 +114,28 @@ def run_worker(*, once: bool = False, poll_seconds: float = 2.0, init_schema: bo
                 continue
             benchmark_id = int(claimed["benchmark_id"])
             LOGGER.info("claimed benchmark_id=%s universe=%s", benchmark_id, claimed.get("universe_name"))
+            with postgres_connection(PostgresSettings(), readonly=False) as conn:
+                update_benchmark_worker_heartbeat(conn, worker_id=worker_id, status="running", current_benchmark_id=benchmark_id, meta={"processed": processed})
+                conn.commit()
             run_claimed_benchmark(claimed)
             LOGGER.info("completed benchmark_id=%s", benchmark_id)
             processed += 1
+            with postgres_connection(PostgresSettings(), readonly=False) as conn:
+                update_benchmark_worker_heartbeat(conn, worker_id=worker_id, status="idle", current_benchmark_id=None, meta={"processed": processed, "last_completed_benchmark_id": benchmark_id})
+                conn.commit()
         except Exception as exc:
             LOGGER.exception("benchmark worker job failed")
             if claimed and claimed.get("benchmark_id"):
                 try:
                     with postgres_connection(PostgresSettings(), readonly=False) as conn:
                         fail_benchmark_run(conn, benchmark_id=int(claimed["benchmark_id"]), error=str(exc))
+                        update_benchmark_worker_heartbeat(
+                            conn,
+                            worker_id=worker_id,
+                            status="failed",
+                            current_benchmark_id=int(claimed["benchmark_id"]),
+                            meta={"processed": processed, "error": str(exc)},
+                        )
                         conn.commit()
                 except Exception:
                     LOGGER.exception("benchmark worker failed-state write failed")

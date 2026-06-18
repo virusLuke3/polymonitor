@@ -533,6 +533,21 @@ export type QuantBacktestBenchmarkArtifact = {
   createdAt?: string | null;
 };
 
+export type QuantBacktestBenchmarkQueue = {
+  counts?: Record<string, number>;
+  queuedCount?: number;
+  runningCount?: number;
+  completedCount?: number;
+  failedCount?: number;
+  canceledCount?: number;
+  oldestQueuedAt?: string | null;
+  oldestQueuedAgeSeconds?: number | null;
+  lastCompletedAt?: string | null;
+  lastFailedAt?: string | null;
+  workerOnline?: boolean;
+  workers?: Array<Record<string, unknown>>;
+};
+
 export type QuantBacktestUniverse = {
   universeName: string;
   universeType: string;

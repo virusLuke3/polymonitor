@@ -626,6 +626,16 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
         PRIMARY KEY (benchmark_id, artifact_key)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_benchmark_worker_heartbeats (
+        worker_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'idle',
+        current_benchmark_id BIGINT,
+        heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        meta JSONB NOT NULL DEFAULT '{}'::jsonb
+    )
+    """,
 )
 
 
@@ -816,6 +826,8 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_equity_run_x ON quant.quant_backtest_equity (run_id, point_index)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_runs_created ON quant.quant_backtest_benchmark_runs (created_at DESC, benchmark_id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_runs_universe ON quant.quant_backtest_benchmark_runs (universe_name, status, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_runs_queue ON quant.quant_backtest_benchmark_runs (status, created_at ASC, benchmark_id ASC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_workers_heartbeat ON quant.quant_backtest_benchmark_worker_heartbeats (heartbeat_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_rows_quality ON quant.quant_backtest_benchmark_rows (benchmark_id, data_quality, row_index)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_rows_market ON quant.quant_backtest_benchmark_rows (market_slug, benchmark_id)",
     "CREATE INDEX IF NOT EXISTS idx_quant_event_metadata_search ON quant.market_event_metadata (event_slug, event_title)",

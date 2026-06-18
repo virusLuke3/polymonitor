@@ -38,11 +38,14 @@ from quant.api.read_api import (  # noqa: E402
 )
 from quant.backtest.backtest_engine import create_and_execute_backtest  # noqa: E402
 from quant.backtest.benchmark_persistence import (  # noqa: E402
+    cancel_queued_benchmark_run,
     create_benchmark_run,
+    get_benchmark_queue_status,
     get_benchmark_artifacts,
     get_benchmark_rows,
     get_benchmark_run,
     list_benchmark_runs,
+    retry_benchmark_run,
 )
 from quant.backtest.runners.coverage_build import build_replay_coverage  # noqa: E402
 from quant.backtest.runners.selectors import list_supported_universes, universe_spec_from_payload  # noqa: E402
@@ -1504,14 +1507,37 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
             rows = list_benchmark_runs(conn, limit=limit)
         return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
 
+    @bp.route("/backtest-benchmark-queue", methods=["GET"])
+    def api_quant_get_backtest_benchmark_queue():
+        with BENCHMARK_DB_POOL.connection(readonly=True) as conn:
+            payload = get_benchmark_queue_status(conn)
+        return jsonify(_camel_row(payload))
+
     @bp.route("/backtest-benchmarks/<int:benchmark_id>", methods=["GET"])
     def api_quant_get_backtest_benchmark(benchmark_id: int):
+        include_artifacts = _parse_bool_arg("includeArtifacts", _parse_bool_arg("include_artifacts", True))
         with BENCHMARK_DB_POOL.connection(readonly=True) as conn:
             row = get_benchmark_run(conn, benchmark_id=benchmark_id)
-            artifacts = get_benchmark_artifacts(conn, benchmark_id=benchmark_id)
+            artifacts = get_benchmark_artifacts(conn, benchmark_id=benchmark_id) if include_artifacts else []
         if not row:
             return jsonify({"error": "benchmark not found"}), 404
         return jsonify({"item": _camel_row(row), "artifacts": [_camel_row(item) for item in artifacts]})
+
+    @bp.route("/backtest-benchmarks/<int:benchmark_id>/cancel", methods=["POST"])
+    def api_quant_cancel_backtest_benchmark(benchmark_id: int):
+        with BENCHMARK_DB_POOL.connection(readonly=False) as conn:
+            row = cancel_queued_benchmark_run(conn, benchmark_id=benchmark_id)
+        if not row:
+            return jsonify({"error": "benchmark is not queued or does not exist"}), 409
+        return jsonify({"item": _camel_row(row), "benchmarkId": row.get("benchmark_id"), "status": row.get("status")})
+
+    @bp.route("/backtest-benchmarks/<int:benchmark_id>/retry", methods=["POST"])
+    def api_quant_retry_backtest_benchmark(benchmark_id: int):
+        with BENCHMARK_DB_POOL.connection(readonly=False) as conn:
+            row = retry_benchmark_run(conn, benchmark_id=benchmark_id)
+        if not row:
+            return jsonify({"error": "benchmark is not failed/canceled or does not exist"}), 409
+        return jsonify({"item": _camel_row(row), "benchmarkId": row.get("benchmark_id"), "status": row.get("status")}), 202
 
     @bp.route("/backtest-benchmarks/<int:benchmark_id>/rows", methods=["GET"])
     def api_quant_get_backtest_benchmark_rows(benchmark_id: int):

@@ -172,6 +172,48 @@ def fail_benchmark_run(conn: Any, *, benchmark_id: int, error: str) -> None:
         )
 
 
+def cancel_queued_benchmark_run(conn: Any, *, benchmark_id: int) -> dict[str, Any] | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE quant.quant_backtest_benchmark_runs
+            SET status = 'canceled',
+                error = 'canceled by user',
+                finished_at = now()
+            WHERE benchmark_id = %s
+              AND status = 'queued'
+            RETURNING *
+            """,
+            (int(benchmark_id),),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def retry_benchmark_run(conn: Any, *, benchmark_id: int) -> dict[str, Any] | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE quant.quant_backtest_benchmark_runs
+            SET status = 'queued',
+                summary = '{}'::jsonb,
+                data_version = NULL,
+                error = NULL,
+                started_at = NULL,
+                finished_at = NULL
+            WHERE benchmark_id = %s
+              AND status IN ('failed', 'canceled')
+            RETURNING *
+            """,
+            (int(benchmark_id),),
+        )
+        row = cur.fetchone()
+        if row:
+            cur.execute("DELETE FROM quant.quant_backtest_benchmark_rows WHERE benchmark_id = %s", (int(benchmark_id),))
+            cur.execute("DELETE FROM quant.quant_backtest_benchmark_artifacts WHERE benchmark_id = %s", (int(benchmark_id),))
+        return dict(row) if row else None
+
+
 def list_benchmark_runs(conn: Any, *, limit: int = 25) -> list[dict[str, Any]]:
     with conn.cursor() as cur:
         cur.execute(
@@ -184,6 +226,79 @@ def list_benchmark_runs(conn: Any, *, limit: int = 25) -> list[dict[str, Any]]:
             (int(limit),),
         )
         return [dict(row) for row in cur.fetchall()]
+
+
+def get_benchmark_queue_status(conn: Any) -> dict[str, Any]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT status, count(*) AS count
+            FROM quant.quant_backtest_benchmark_runs
+            WHERE created_at >= now() - interval '7 days'
+            GROUP BY status
+            """
+        )
+        counts = {str(row["status"]): int(row["count"]) for row in cur.fetchall()}
+        cur.execute(
+            """
+            SELECT
+                min(created_at) FILTER (WHERE status = 'queued') AS oldest_queued_at,
+                max(finished_at) FILTER (WHERE status = 'completed') AS last_completed_at,
+                max(finished_at) FILTER (WHERE status = 'failed') AS last_failed_at
+            FROM quant.quant_backtest_benchmark_runs
+            WHERE created_at >= now() - interval '7 days'
+            """
+        )
+        timing = dict(cur.fetchone() or {})
+        cur.execute(
+            """
+            SELECT *
+            FROM quant.quant_backtest_benchmark_worker_heartbeats
+            ORDER BY heartbeat_at DESC
+            LIMIT 8
+            """
+        )
+        workers = [dict(row) for row in cur.fetchall()]
+    oldest = timing.get("oldest_queued_at")
+    return {
+        "counts": counts,
+        "queued_count": counts.get("queued", 0),
+        "running_count": counts.get("running", 0),
+        "completed_count": counts.get("completed", 0),
+        "failed_count": counts.get("failed", 0),
+        "canceled_count": counts.get("canceled", 0),
+        "oldest_queued_at": oldest,
+        "oldest_queued_age_seconds": _age_seconds(oldest),
+        "last_completed_at": timing.get("last_completed_at"),
+        "last_failed_at": timing.get("last_failed_at"),
+        "workers": workers,
+        "worker_online": any(_age_seconds(row.get("heartbeat_at")) is not None and _age_seconds(row.get("heartbeat_at")) <= 30 for row in workers),
+    }
+
+
+def update_benchmark_worker_heartbeat(
+    conn: Any,
+    *,
+    worker_id: str,
+    status: str,
+    current_benchmark_id: int | None = None,
+    meta: dict[str, Any] | None = None,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO quant.quant_backtest_benchmark_worker_heartbeats (
+                worker_id, status, current_benchmark_id, heartbeat_at, started_at, meta
+            )
+            VALUES (%s, %s, %s, now(), now(), %s::jsonb)
+            ON CONFLICT (worker_id) DO UPDATE
+            SET status = EXCLUDED.status,
+                current_benchmark_id = EXCLUDED.current_benchmark_id,
+                heartbeat_at = now(),
+                meta = EXCLUDED.meta
+            """,
+            (str(worker_id), str(status), current_benchmark_id, _json_dumps(meta or {})),
+        )
 
 
 def get_benchmark_run(conn: Any, *, benchmark_id: int) -> dict[str, Any] | None:
@@ -272,3 +387,12 @@ def _parse_timestamp(value: Any) -> datetime | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _age_seconds(value: Any) -> float | None:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return max(0.0, (datetime.now(tz=parsed.tzinfo) - parsed).total_seconds())
