@@ -20,6 +20,7 @@ from .analysis import DailyTradeRow, DriftBucketRow, ProbabilityBucketRow, build
 from .base import MemorySampler, Timer
 from .block_replay_store import (
     BlockReplayBackfillResult,
+    GLOBAL_RANGE_SCAN_MARKET_THRESHOLD,
     backfill_orderfilled_block_replay,
     load_orderfilled_block_replay_rows_for_ranges,
 )
@@ -860,6 +861,14 @@ def _load_window_orderfilled_rows(
     range_sql = _market_block_range_condition(market_block_ranges)
     if range_sql == "":
         return []
+    if len(market_block_ranges) >= GLOBAL_RANGE_SCAN_MARKET_THRESHOLD and block_min is not None and block_max is not None:
+        return _load_window_orderfilled_rows_for_ranges_join(
+            client,
+            market_block_ranges,
+            ids_sql=ids,
+            block_min=block_min,
+            block_max=block_max,
+        )
     return client.query_json_rows(
         f"""
         SELECT
@@ -890,6 +899,79 @@ def _load_window_orderfilled_rows(
         ORDER BY f.market_id ASC, f.outcome_code ASC, f.block_number ASC, f.log_index ASC, f.tx_hash ASC
         """
     )
+
+
+def _load_window_orderfilled_rows_for_ranges_join(
+    client: ClickHouseClient,
+    market_block_ranges: dict[int, tuple[int, int]],
+    *,
+    ids_sql: str,
+    block_min: int,
+    block_max: int,
+) -> list[dict[str, Any]]:
+    ranges = {
+        int(market_id): (int(bounds[0]), int(bounds[1]))
+        for market_id, bounds in market_block_ranges.items()
+        if bounds[0] is not None and bounds[1] is not None and int(bounds[0]) <= int(bounds[1])
+    }
+    if not ranges:
+        return []
+    range_values = ", ".join(
+        f"(toUInt64({int(market_id)}), toUInt64({int(bounds[0])}), toUInt64({int(bounds[1])}))"
+        for market_id, bounds in sorted(ranges.items())
+    )
+    rows = client.query_json_rows(
+        f"""
+        SELECT
+            f.market_id,
+            f.outcome_code,
+            f.token_id,
+            f.block_number,
+            f.log_index,
+            lower(f.tx_hash) AS tx_hash,
+            f.price,
+            f.size,
+            bt.block_time
+        FROM (
+            SELECT
+                market_id,
+                outcome_code,
+                token_id,
+                block_number,
+                log_index,
+                tx_hash,
+                price,
+                size
+            FROM orderfilled_fact
+            PREWHERE market_id IN ({ids_sql})
+              AND block_number BETWEEN {int(block_min)} AND {int(block_max)}
+        ) AS f
+        INNER JOIN (
+            SELECT
+                tupleElement(r, 1) AS market_id,
+                tupleElement(r, 2) AS from_block,
+                tupleElement(r, 3) AS to_block
+            FROM (SELECT arrayJoin([{range_values}]) AS r)
+        ) AS ranges ON f.market_id = ranges.market_id
+        INNER JOIN block_timestamps bt ON bt.block_number = f.block_number
+        WHERE f.block_number BETWEEN ranges.from_block AND ranges.to_block
+        ORDER BY f.market_id ASC, f.outcome_code ASC, f.block_number ASC, f.log_index ASC, f.tx_hash ASC
+        """,
+        timeout_seconds=240,
+    )
+    return _filter_orderfilled_rows_for_ranges(rows, ranges)
+
+
+def _filter_orderfilled_rows_for_ranges(rows: list[dict[str, Any]], ranges: dict[int, tuple[int, int]]) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        bounds = ranges.get(int(row["market_id"]))
+        if bounds is None:
+            continue
+        block_number = int(row["block_number"])
+        if int(bounds[0]) <= block_number <= int(bounds[1]):
+            filtered.append(row)
+    return filtered
 
 
 def _load_window_orderfilled_block_replay_rows(

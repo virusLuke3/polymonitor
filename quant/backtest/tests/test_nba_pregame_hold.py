@@ -11,6 +11,7 @@ from quant.backtest.runners.nba_pregame_hold import (
     NbaFavoriteReplayDataset,
     _build_favorite_trades,
     _build_trades,
+    _load_window_orderfilled_rows_for_ranges_join,
     _market_event_time,
     _normalize_orderfilled_rows,
     run_nba_pregame_favorite_hold_from_dataset,
@@ -21,6 +22,43 @@ from quant.backtest.runners.strategy_lab import FavoriteHoldStrategySpec, mark_s
 
 
 pytestmark = pytest.mark.backtest_validation
+
+
+class _FakeClickHouseClient:
+    def __init__(self, rows):
+        self.rows = rows
+        self.sql = ""
+
+    def query_json_rows(self, sql, timeout_seconds=None):
+        self.sql = sql
+        return list(self.rows)
+
+
+def test_large_raw_orderfilled_range_load_uses_inline_range_join():
+    client = _FakeClickHouseClient(
+        [
+            {"market_id": 1, "block_number": 100, "price": "0.60"},
+            {"market_id": 1, "block_number": 500, "price": "0.61"},
+            {"market_id": 2, "block_number": 210, "price": "0.70"},
+        ]
+    )
+
+    rows = _load_window_orderfilled_rows_for_ranges_join(
+        client,
+        {
+            1: (90, 120),
+            2: (200, 220),
+        },
+        ids_sql="1,2",
+        block_min=90,
+        block_max=500,
+    )
+
+    assert [(row["market_id"], row["block_number"]) for row in rows] == [(1, 100), (2, 210)]
+    assert "PREWHERE market_id IN (1,2)" in client.sql
+    assert "arrayJoin" in client.sql
+    assert "INNER JOIN" in client.sql
+    assert " OR " not in client.sql
 
 
 def test_pregame_limit_fill_uses_only_future_crossing_inside_window():
