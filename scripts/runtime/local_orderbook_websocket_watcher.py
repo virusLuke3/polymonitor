@@ -408,7 +408,9 @@ class LocalOrderBookWebsocketWatcher:
         last_drift_tick = 0.0
         last_ping_at = 0.0
         ping_interval_seconds = _env_int("POLYDATA_LOB_WS_PING_INTERVAL_SECONDS", DEFAULT_PING_INTERVAL_SECONDS, minimum=0)
-        async with websockets.connect(self.ws_url, ping_interval=None, close_timeout=10, max_queue=1000) as websocket:
+        self.logger.info("connecting ws_url=%s target_tokens=%s batch_size=%s", self.ws_url, len(self.subscription_token_order), self.subscription_batch_size)
+        async with websockets.connect(self.ws_url, ping_interval=None, close_timeout=10, open_timeout=15, max_queue=1000) as websocket:
+            self.logger.info("websocket opened")
             await self.subscribe(websocket, list(self.subscription_token_order), replace=True)
             self.logger.info("connected subscribed_tokens=%s", len(self.subscribed_tokens))
             _update_runtime_status(status="connected", subscribedTokenCount=len(self.subscribed_tokens), lastConnectAt=_utc_now_iso())
@@ -1033,9 +1035,9 @@ def main() -> int:
         bootstrap_market_limit=args.bootstrap_limit,
         persist=not args.dry_run,
     )
-    targets = watcher.refresh_targets()
-    watcher.bootstrap_targets(targets[: args.bootstrap_limit] if args.bootstrap_limit else [], force_refresh=True)
     if args.bootstrap_only:
+        targets = watcher.refresh_targets()
+        watcher.bootstrap_targets(targets[: args.bootstrap_limit] if args.bootstrap_limit else [], force_refresh=True)
         return 0
     asyncio.run(watcher.run_connection(run_seconds=args.run_seconds if args.run_seconds > 0 else None))
     return 0
