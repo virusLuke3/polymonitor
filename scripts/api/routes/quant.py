@@ -415,6 +415,20 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "data_quality": "dataQuality",
         "artifact_key": "artifactKey",
         "artifact_kind": "artifactKind",
+        "queued_count": "queuedCount",
+        "running_count": "runningCount",
+        "completed_count": "completedCount",
+        "failed_count": "failedCount",
+        "canceled_count": "canceledCount",
+        "oldest_queued_at": "oldestQueuedAt",
+        "oldest_queued_age_seconds": "oldestQueuedAgeSeconds",
+        "last_completed_at": "lastCompletedAt",
+        "last_failed_at": "lastFailedAt",
+        "worker_online": "workerOnline",
+        "worker_id": "workerId",
+        "current_benchmark_id": "currentBenchmarkId",
+        "heartbeat_at": "heartbeatAt",
+        "started_at": "startedAt",
     }
     result = {mapping.get(key, key): _camel_value(value, mapping) for key, value in row.items()}
     meta = result.get("meta")
