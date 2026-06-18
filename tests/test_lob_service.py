@@ -443,6 +443,74 @@ def test_lob_coverage_worldcup_default_limit_allows_real_schedule_days(monkeypat
     assert len(payload["items"]) == 5
 
 
+def test_lob_coverage_derives_worldcup_fixture_slug_prefixes(monkeypatch):
+    class FakeLogger:
+        def exception(self, *args, **kwargs):
+            raise AssertionError(args)
+
+    rows = [
+        {
+            "market_id": 101,
+            "market_slug": "fifwc-che-bih-2026-06-18-spread-home-4pt5",
+            "market_title": "Spread: Switzerland (-4.5)",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-101",
+            "no_token_id": "no-101",
+        },
+        {
+            "market_id": 102,
+            "market_slug": "fifwc-can-qat-2026-06-18-total-7pt5",
+            "market_title": "Canada vs. Qatar: O/U 7.5",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-102",
+            "no_token_id": "no-102",
+        },
+        {
+            "market_id": 103,
+            "market_slug": "fifwc-mex-kr-2026-06-18-spread-home-3pt5",
+            "market_title": "Spread: Mexico (-3.5)",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-103",
+            "no_token_id": "no-103",
+        },
+        {
+            "market_id": 104,
+            "market_slug": "fifwc-usa-aus-2026-06-19-total-7pt5",
+            "market_title": "United States vs. Australia: O/U 7.5",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-104",
+            "no_token_id": "no-104",
+        },
+    ]
+    ctx = {
+        "query_all": lambda sql, params=(): rows,
+        "get_world_cup_match_ops_snapshot": lambda limit=48: {
+            "items": [
+                {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-18T19:00:00Z", "homeTeam": "Switzerland", "awayTeam": "Bosnia & Herzegovina"},
+                {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-18T22:00:00Z", "homeTeam": "Canada", "awayTeam": "Qatar"},
+                {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-19T01:00:00Z", "homeTeam": "Mexico", "awayTeam": "South Korea"},
+                {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-19T19:00:00Z", "homeTeam": "USA", "awayTeam": "Australia"},
+            ]
+        },
+        "app": type("FakeApp", (), {"logger": FakeLogger()})(),
+    }
+
+    payload = lob_service.get_lob_coverage_targets_payload(ctx, limit=10, topics="worldcup")
+
+    assert payload["summary"]["topics"]["worldcup"] == 4
+    assert {item["marketId"] for item in payload["items"]} == {101, 102, 103, 104}
+    assert {
+        "fifwc-che-bih-2026-06-18",
+        "fifwc-can-qat-2026-06-18",
+        "fifwc-mex-kr-2026-06-18",
+        "fifwc-usa-aus-2026-06-19",
+    } <= set((payload["selectionContext"]["worldcup"] or {}).get("activeSlugs") or [])
+
+
 def test_lob_coverage_excludes_finished_worldcup_match_even_inside_time_window(monkeypatch):
     class FakeLogger:
         def exception(self, *args, **kwargs):

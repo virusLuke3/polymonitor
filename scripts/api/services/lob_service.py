@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import hashlib
+import contextlib
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict
 
@@ -37,6 +38,33 @@ LOB_COVERAGE_RAW_ROW_LIMIT = 1200
 WORLDCUP_LOB_PRE_KICKOFF_MINUTES = 60
 WORLDCUP_LOB_FALLBACK_MATCH_MINUTES = 150
 DEFAULT_WORLDCUP_LOB_MARKET_LIMIT = 12
+WORLDCUP_TEAM_SLUG_CODES = {
+    "argentina": "arg",
+    "australia": "aus",
+    "belgium": "bel",
+    "bosnia & herzegovina": "bih",
+    "bosnia and herzegovina": "bih",
+    "bosnia-herzegovina": "bih",
+    "brazil": "bra",
+    "canada": "can",
+    "czech republic": "cze",
+    "czechia": "cze",
+    "england": "eng",
+    "france": "fra",
+    "germany": "ger",
+    "italy": "ita",
+    "japan": "jpn",
+    "korea republic": "kr",
+    "mexico": "mex",
+    "netherlands": "ned",
+    "qatar": "qat",
+    "south africa": "rsa",
+    "south korea": "kr",
+    "spain": "esp",
+    "switzerland": "che",
+    "united states": "usa",
+    "usa": "usa",
+}
 
 
 class LocalOrderBookRuntimeManager:
@@ -1002,6 +1030,7 @@ def _build_worldcup_selection_context(ctx: dict) -> tuple[CoverageSelectionConte
         if home and away:
             terms.add(f"{home} vs {away}")
             terms.add(f"{away} vs {home}")
+        slugs.update(_worldcup_fixture_slug_prefixes(item))
     return (
         CoverageSelectionContext(frozenset(market_ids), frozenset(terms), frozenset(slugs)),
         {
@@ -1059,6 +1088,36 @@ def _worldcup_lob_fallback_match_minutes() -> int:
 
 def _coverage_term(value: Any) -> str:
     return str(value or "").strip().lower().replace("_", "-")
+
+
+def _worldcup_fixture_slug_prefixes(item: Dict[str, Any]) -> set[str]:
+    kickoff_date = str(item.get("kickoffUtc") or item.get("eventTime") or "")[:10]
+    if not kickoff_date:
+        return set()
+    home_code = _worldcup_team_slug_code(item.get("homeTeam"))
+    away_code = _worldcup_team_slug_code(item.get("awayTeam"))
+    if not home_code or not away_code:
+        return set()
+    dates = {kickoff_date}
+    with contextlib.suppress(Exception):
+        previous = datetime.fromisoformat(kickoff_date).date() - timedelta(days=1)
+        dates.add(previous.isoformat())
+    return {
+        f"fifwc-{left}-{right}-{date_value}"
+        for date_value in dates
+        for left, right in ((home_code, away_code), (away_code, home_code))
+    }
+
+
+def _worldcup_team_slug_code(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    normalized = text.replace("_", " ").replace("-", " ")
+    normalized = " ".join(normalized.split())
+    if normalized in WORLDCUP_TEAM_SLUG_CODES:
+        return WORLDCUP_TEAM_SLUG_CODES[normalized]
+    return ""
 
 
 def _int_or_none(value: Any) -> int | None:
