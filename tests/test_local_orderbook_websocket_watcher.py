@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 
 
@@ -219,6 +221,7 @@ def test_watcher_applies_price_change_and_persists_sample(monkeypatch):
             "price_changes": [{"asset_id": "yes-token", "side": "BUY", "price": "0.41", "size": "12"}],
         }
     )
+    watcher.drain_snapshot_persistor(timeout_seconds=1)
 
     assert changed == 1
     assert persisted
@@ -227,6 +230,46 @@ def test_watcher_applies_price_change_and_persists_sample(monkeypatch):
     assert no_token_id == "no-token"
     assert payload["yes"]["bestBid"] == "0.41"
     assert payload["coverage"]["topic"] == "crypto"
+
+
+def test_watcher_snapshot_persist_is_non_blocking(monkeypatch):
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=FakeSession(), cache_ttl_seconds=30)
+    ctx = {"LOB_RUNTIME_MANAGER": manager}
+    watcher = LocalOrderBookWebsocketWatcher(ctx=ctx, ws_url="wss://example.test/ws", persist=True, logger=FakeLogger())
+    target = CoverageTarget.from_payload(_target_payload())
+    assert target is not None
+    watcher.targets_by_market = {target.market_id: target}
+    yes_identity, no_identity = target.identities()
+    watcher.identities_by_token = {yes_identity.token_id: yes_identity, no_identity.token_id: no_identity}
+    watcher.target_by_token = {yes_identity.token_id: target, no_identity.token_id: target}
+    watcher.persist = False
+    watcher.bootstrap_targets([target], force_refresh=True)
+    watcher.persist = True
+    watcher._last_persisted_at_by_market.clear()
+    release = threading.Event()
+    started = threading.Event()
+
+    def slow_persist(ctx, payload, yes_token_id, no_token_id):
+        started.set()
+        release.wait(timeout=1)
+
+    monkeypatch.setattr(lob_service, "persist_runtime_lob_payload", slow_persist)
+
+    before = time.monotonic()
+    changed = watcher.handle_event(
+        {
+            "event_type": "price_change",
+            "timestamp": "9999999999999",
+            "price_changes": [{"asset_id": "yes-token", "side": "BUY", "price": "0.41", "size": "12"}],
+        }
+    )
+    elapsed = time.monotonic() - before
+
+    assert changed == 1
+    assert elapsed < 0.2
+    assert started.wait(timeout=1)
+    release.set()
+    assert watcher.drain_snapshot_persistor(timeout_seconds=1)
 
 
 def test_watcher_unknown_token_goes_to_dead_letter(monkeypatch):

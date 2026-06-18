@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import os
+import queue
 import sys
 import threading
 import time
@@ -50,6 +51,8 @@ DEFAULT_DRIFT_CHECK_MAX_PER_TICK = 3
 DEFAULT_PING_INTERVAL_SECONDS = 10
 DEFAULT_RECENT_EVENT_SAMPLE_LIMIT = 12
 DEFAULT_STATUS_FILE_WRITE_INTERVAL_SECONDS = 2.0
+DEFAULT_SNAPSHOT_PERSIST_QUEUE_MAX_SIZE = 500
+DEFAULT_SNAPSHOT_PERSIST_DRAIN_SECONDS = 5.0
 DRIFT_CHECK_SECONDS_BY_TIER = {"hot": 900, "warm": 1800, "cold": 3600}
 STALE_IDLE_SECONDS_BY_TIER = {"hot": 120, "warm": 300, "cold": 900}
 KNOWN_MARKET_EVENT_TYPES = {
@@ -108,6 +111,12 @@ _RUNTIME_STATUS: dict[str, Any] = {
         "rowsInserted": 0,
         "bufferedRows": 0,
     },
+    "snapshotPersistQueuedCount": 0,
+    "snapshotPersistWrittenCount": 0,
+    "snapshotPersistDropCount": 0,
+    "snapshotPersistFailureCount": 0,
+    "snapshotPersistPendingCount": 0,
+    "lastPersistQueuedAt": None,
 }
 
 
@@ -276,6 +285,62 @@ class _Logger:
         print(f"[local-orderbook-ws] ERROR {message % args if args else message}", file=sys.stderr)
 
 
+@dataclass(frozen=True)
+class _SnapshotPersistJob:
+    payload: dict[str, Any]
+    yes_token_id: str
+    no_token_id: str
+
+
+class _SnapshotPersistWorker:
+    def __init__(self, *, ctx: dict[str, Any], logger: Any, max_queue_size: int | None = None) -> None:
+        self.ctx = ctx
+        self.logger = logger
+        self.queue: queue.Queue[_SnapshotPersistJob | None] = queue.Queue(
+            maxsize=max(1, int(max_queue_size or _env_int("POLYDATA_LOB_SNAPSHOT_PERSIST_QUEUE_MAX_SIZE", DEFAULT_SNAPSHOT_PERSIST_QUEUE_MAX_SIZE, minimum=1)))
+        )
+        self._thread = threading.Thread(target=self._run, name="local-orderbook-snapshot-persist", daemon=True)
+        self._thread.start()
+        _update_runtime_status(snapshotPersistQueueMaxSize=self.queue.maxsize, snapshotPersistPendingCount=0)
+
+    def enqueue(self, payload: dict[str, Any], yes_token_id: str, no_token_id: str) -> bool:
+        job = _SnapshotPersistJob(dict(payload), str(yes_token_id or ""), str(no_token_id or ""))
+        try:
+            self.queue.put_nowait(job)
+        except queue.Full:
+            _increment_runtime_status("snapshotPersistDropCount")
+            _update_runtime_status(snapshotPersistPendingCount=self.queue.qsize())
+            return False
+        _increment_runtime_status("snapshotPersistQueuedCount")
+        _update_runtime_status(lastPersistQueuedAt=_utc_now_iso(), snapshotPersistPendingCount=self.queue.qsize())
+        return True
+
+    def drain(self, *, timeout_seconds: float = DEFAULT_SNAPSHOT_PERSIST_DRAIN_SECONDS) -> bool:
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+        while self.queue.unfinished_tasks > 0 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        _update_runtime_status(snapshotPersistPendingCount=self.queue.qsize())
+        return self.queue.unfinished_tasks <= 0
+
+    def _run(self) -> None:
+        while True:
+            job = self.queue.get()
+            try:
+                if job is None:
+                    return
+                try:
+                    lob_service.persist_runtime_lob_payload(self.ctx, job.payload, job.yes_token_id, job.no_token_id)
+                    _increment_runtime_status("snapshotPersistWrittenCount")
+                    _update_runtime_status(lastPersistAt=_utc_now_iso(), snapshotPersistPendingCount=self.queue.qsize())
+                except Exception as exc:
+                    _increment_runtime_status("snapshotPersistFailureCount")
+                    _update_runtime_status(snapshotPersistPendingCount=self.queue.qsize())
+                    if self.logger:
+                        self.logger.warning("snapshot persist worker failed token_id=%s error=%s", job.yes_token_id, exc)
+            finally:
+                self.queue.task_done()
+
+
 class LocalOrderBookWebsocketWatcher:
     def __init__(
         self,
@@ -317,6 +382,7 @@ class LocalOrderBookWebsocketWatcher:
         self._last_drift_check_at_by_market: dict[int, float] = {}
         self._last_idle_check_at = 0.0
         self.clickhouse_sink = self._build_clickhouse_sink()
+        self.snapshot_persistor = _SnapshotPersistWorker(ctx=ctx, logger=self.logger) if self.persist else None
         self._stop_event = asyncio.Event()
 
     def stop(self) -> None:
@@ -443,6 +509,7 @@ class LocalOrderBookWebsocketWatcher:
                     raw_message = raw_message.decode("utf-8")
                 await self.handle_raw_message(str(raw_message))
         self.flush_clickhouse_sink(force=True)
+        self.drain_snapshot_persistor()
 
     async def send_heartbeat_if_due(self, websocket: Any, *, now: float, last_ping_at: float, interval_seconds: int) -> float:
         if interval_seconds <= 0:
@@ -591,7 +658,7 @@ class LocalOrderBookWebsocketWatcher:
         return len(changed_markets)
 
     def persist_target_if_due(self, target: CoverageTarget, *, force: bool = False, reason: str = "") -> bool:
-        if not self.persist:
+        if not self.persist or self.snapshot_persistor is None:
             return False
         now = time.time()
         last_at = float(self._last_persisted_at_by_market.get(target.market_id) or 0)
@@ -610,10 +677,20 @@ class LocalOrderBookWebsocketWatcher:
             "reason": reason,
         }
         payload["source"] = "local-orderbook"
-        lob_service.persist_runtime_lob_payload(self.ctx, payload, target.yes_token_id, target.no_token_id)
-        self._last_persisted_at_by_market[target.market_id] = now
-        _update_runtime_status(lastPersistAt=_utc_now_iso())
-        return True
+        queued = self.snapshot_persistor.enqueue(payload, target.yes_token_id, target.no_token_id)
+        if queued:
+            self._last_persisted_at_by_market[target.market_id] = now
+        return queued
+
+    def drain_snapshot_persistor(self, *, timeout_seconds: float | None = None) -> bool:
+        if self.snapshot_persistor is None:
+            return True
+        timeout = (
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else _env_float("POLYDATA_LOB_SNAPSHOT_PERSIST_DRAIN_SECONDS", DEFAULT_SNAPSHOT_PERSIST_DRAIN_SECONDS, minimum=0.0)
+        )
+        return self.snapshot_persistor.drain(timeout_seconds=timeout)
 
     def mark_registry_stale(self, reason: str) -> int:
         count = self.manager.mark_all_stale(reason)
