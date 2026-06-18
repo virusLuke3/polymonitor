@@ -250,15 +250,19 @@ def get_benchmark_queue_status(conn: Any) -> dict[str, Any]:
             """
         )
         timing = dict(cur.fetchone() or {})
-        cur.execute(
-            """
-            SELECT *
-            FROM quant.quant_backtest_benchmark_worker_heartbeats
-            ORDER BY heartbeat_at DESC
-            LIMIT 8
-            """
-        )
-        workers = [dict(row) for row in cur.fetchall()]
+        try:
+            cur.execute(
+                """
+                SELECT *
+                FROM quant.quant_backtest_benchmark_worker_heartbeats
+                ORDER BY heartbeat_at DESC
+                LIMIT 8
+                """
+            )
+            workers = [dict(row) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            workers = []
     oldest = timing.get("oldest_queued_at")
     return {
         "counts": counts,
