@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from ...core.db import postgres_connection
 from .data_sources import MarketCandidate
@@ -27,6 +27,33 @@ NBA_KEYWORDS = (
     "suns",
 )
 
+UniverseType = Literal["preset", "category", "event", "watchlist"]
+
+SUPPORTED_UNIVERSES = (
+    "nba_2024_25_moneyline",
+    "sports_recent_ready",
+    "crypto_recent_ready",
+    "politics_recent_ready",
+    "fifa_world_cup_2026",
+    "watchlist_slugs",
+)
+
+
+@dataclass(frozen=True)
+class UniverseSpec:
+    universe_name: str = "nba_2024_25_moneyline"
+    universe_type: UniverseType = "preset"
+    limit: int = 50
+    market_ids: tuple[int, ...] = ()
+    market_slugs: tuple[str, ...] = ()
+    event_slug: str | None = None
+    category: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    require_resolved: bool = True
+    require_orderfilled_rows: bool = True
+    meta: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class ResolvedMarketCandidate:
@@ -36,6 +63,79 @@ class ResolvedMarketCandidate:
     end_date: datetime | None
     settlement_code: int
     settlement_outcome: str
+    event_slug: str = ""
+    category: str = ""
+    token_yes_id: str | None = None
+    token_no_id: str | None = None
+    coverage_status: str = "unknown"
+    orderfilled_rows: int = 0
+    block_rows: int = 0
+
+
+def default_universe_specs() -> list[UniverseSpec]:
+    return [
+        UniverseSpec(universe_name="nba_2024_25_moneyline", universe_type="preset", category="sports"),
+        UniverseSpec(universe_name="sports_recent_ready", universe_type="category", category="sports"),
+        UniverseSpec(universe_name="crypto_recent_ready", universe_type="category", category="crypto"),
+        UniverseSpec(universe_name="politics_recent_ready", universe_type="category", category="politics"),
+        UniverseSpec(universe_name="fifa_world_cup_2026", universe_type="event", event_slug="2026-fifa-world-cup-winner-595", category="sports", require_resolved=False),
+        UniverseSpec(universe_name="watchlist_slugs", universe_type="watchlist", require_resolved=True),
+    ]
+
+
+def universe_spec_from_payload(payload: dict[str, Any] | None) -> UniverseSpec:
+    data = payload or {}
+    nested = data.get("universeSpec") or data.get("universe_spec") or {}
+    if isinstance(nested, dict):
+        merged = {**data, **nested}
+    else:
+        merged = data
+    universe_name = str(merged.get("universe") or merged.get("universeName") or merged.get("universe_name") or "nba_2024_25_moneyline")
+    preset = _preset_spec(universe_name)
+    market_ids = tuple(int(value) for value in (merged.get("marketIds") or merged.get("market_ids") or preset.market_ids or ()) if str(value).strip())
+    market_slugs = tuple(str(value).strip() for value in (merged.get("marketSlugs") or merged.get("market_slugs") or preset.market_slugs or ()) if str(value).strip())
+    limit = int(merged.get("limit") or preset.limit or 50)
+    require_resolved = _bool_value(merged.get("requireResolved", merged.get("require_resolved", preset.require_resolved)))
+    require_orderfilled_rows = _bool_value(merged.get("requireOrderfilledRows", merged.get("require_orderfilled_rows", preset.require_orderfilled_rows)))
+    return UniverseSpec(
+        universe_name=universe_name,
+        universe_type=str(merged.get("universeType") or merged.get("universe_type") or preset.universe_type),  # type: ignore[arg-type]
+        limit=max(1, min(limit, 500)),
+        market_ids=market_ids,
+        market_slugs=market_slugs,
+        event_slug=str(merged.get("eventSlug") or merged.get("event_slug") or preset.event_slug or "") or None,
+        category=str(merged.get("category") or preset.category or "") or None,
+        start_date=str(merged.get("startDate") or merged.get("start_date") or preset.start_date or "") or None,
+        end_date=str(merged.get("endDate") or merged.get("end_date") or preset.end_date or "") or None,
+        require_resolved=require_resolved,
+        require_orderfilled_rows=require_orderfilled_rows,
+        meta={"raw": merged},
+    )
+
+
+def select_replay_universe(spec: UniverseSpec) -> list[ResolvedMarketCandidate]:
+    if spec.universe_name == "nba_2024_25_moneyline":
+        return select_nba_2024_25_moneyline_markets(limit=spec.limit)
+    if spec.universe_name not in SUPPORTED_UNIVERSES and spec.universe_type == "preset":
+        raise ValueError(f"unsupported universe: {spec.universe_name}")
+    if spec.universe_type == "watchlist" and not spec.market_slugs and not spec.market_ids:
+        raise ValueError("watchlist_slugs universe requires marketSlugs or marketIds")
+    return _select_metadata_universe(spec)
+
+
+def list_supported_universes() -> list[dict[str, Any]]:
+    return [
+        {
+            "universeName": spec.universe_name,
+            "universeType": spec.universe_type,
+            "category": spec.category,
+            "eventSlug": spec.event_slug,
+            "requireResolved": spec.require_resolved,
+            "requireOrderfilledRows": spec.require_orderfilled_rows,
+            "label": _universe_label(spec.universe_name),
+        }
+        for spec in default_universe_specs()
+    ]
 
 
 def select_nba_2024_25_markets(*, limit: int = 5) -> list[MarketCandidate]:
@@ -136,6 +236,120 @@ def select_nba_2024_25_moneyline_markets(*, limit: int = 200) -> list[ResolvedMa
                     end_date=row.get("end_date"),
                     settlement_code=int(row["settlement_code"]),
                     settlement_outcome=str(row.get("settlement_outcome") or ""),
+                    category="sports",
+                    event_slug="nba_2024_25",
+                    coverage_status="raw_orderfilled",
                 )
                 for row in cur.fetchall()
             ]
+
+
+def _select_metadata_universe(spec: UniverseSpec) -> list[ResolvedMarketCandidate]:
+    filters = [
+        "m.token_yes_id IS NOT NULL",
+        "m.token_no_id IS NOT NULL",
+        "COALESCE(p.min_block_complete, p.first_orderfilled_block, m.latest_block) IS NOT NULL",
+        "COALESCE(p.max_block_complete, p.last_orderfilled_block, m.latest_block) IS NOT NULL",
+    ]
+    params: list[Any] = []
+    if spec.require_orderfilled_rows:
+        filters.append("COALESCE(m.orderfilled_rows, p.block_rows_written, 0) > 0")
+    if spec.require_resolved:
+        filters.append("COALESCE(s.is_resolved, m.resolved, false) IS TRUE")
+        filters.append("COALESCE(s.settlement_code, 0) IN (1, 2)")
+    if spec.category:
+        filters.append("(lower(COALESCE(e.event_category, cm.category, '')) = lower(%s) OR lower(COALESCE(e.event_subcategory, '')) = lower(%s))")
+        params.extend([spec.category, spec.category])
+    if spec.event_slug:
+        filters.append("(e.event_slug = %s OR m.event_slug = %s OR cm.event_slug = %s)")
+        params.extend([spec.event_slug, spec.event_slug, spec.event_slug])
+    if spec.market_ids:
+        filters.append("m.market_id = ANY(%s)")
+        params.append(list(spec.market_ids))
+    if spec.market_slugs:
+        filters.append("m.market_slug = ANY(%s)")
+        params.append(list(spec.market_slugs))
+    if spec.start_date:
+        filters.append("COALESCE(cm.end_date, e.end_date, e.resolution_date, e.start_date, m.latest_timestamp, m.updated_at) >= %s::timestamptz")
+        params.append(spec.start_date)
+    if spec.end_date:
+        filters.append("COALESCE(cm.end_date, e.end_date, e.resolution_date, e.start_date, m.latest_timestamp, m.updated_at) < %s::timestamptz")
+        params.append(spec.end_date)
+    params.append(spec.limit)
+    where_sql = "\n                  AND ".join(filters)
+    with postgres_connection(readonly=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT DISTINCT ON (m.market_id)
+                    m.market_id,
+                    m.market_slug,
+                    COALESCE(cm.title, m.question, e.event_title, m.market_slug) AS title,
+                    COALESCE(cm.end_date, e.end_date, e.resolution_date, e.start_date, m.latest_timestamp, m.updated_at) AS end_date,
+                    COALESCE(s.settlement_code, 0) AS settlement_code,
+                    COALESCE(s.settlement_outcome, CASE WHEN COALESCE(s.is_resolved, m.resolved, false) THEN 'RESOLVED' ELSE 'UNRESOLVED' END) AS settlement_outcome,
+                    COALESCE(e.event_slug, m.event_slug, cm.event_slug, '') AS event_slug,
+                    COALESCE(e.event_category, cm.category, '') AS category,
+                    m.token_yes_id,
+                    m.token_no_id,
+                    COALESCE(m.coverage_status, p.status, 'unknown') AS coverage_status,
+                    COALESCE(m.orderfilled_rows, 0) AS orderfilled_rows,
+                    COALESCE(m.block_rows, p.block_rows_written, 0) AS block_rows
+                FROM quant.market_event_members m
+                LEFT JOIN quant.market_event_metadata e ON e.event_slug = m.event_slug
+                LEFT JOIN quant.market_price_build_market_progress p ON p.market_id = m.market_id
+                LEFT JOIN core.markets cm ON cm.id = m.market_id
+                LEFT JOIN core.market_status_snapshot s ON s.market_id = m.market_id
+                WHERE {where_sql}
+                ORDER BY m.market_id, COALESCE(m.orderfilled_rows, 0) DESC, COALESCE(m.block_rows, p.block_rows_written, 0) DESC
+                LIMIT %s
+                """,
+                params,
+            )
+            return [
+                ResolvedMarketCandidate(
+                    market_id=int(row["market_id"]),
+                    market_slug=str(row["market_slug"]),
+                    title=str(row.get("title") or row["market_slug"]),
+                    end_date=row.get("end_date"),
+                    settlement_code=int(row.get("settlement_code") or 0),
+                    settlement_outcome=str(row.get("settlement_outcome") or ""),
+                    event_slug=str(row.get("event_slug") or ""),
+                    category=str(row.get("category") or ""),
+                    token_yes_id=str(row["token_yes_id"]) if row.get("token_yes_id") else None,
+                    token_no_id=str(row["token_no_id"]) if row.get("token_no_id") else None,
+                    coverage_status=str(row.get("coverage_status") or "unknown"),
+                    orderfilled_rows=int(row.get("orderfilled_rows") or 0),
+                    block_rows=int(row.get("block_rows") or 0),
+                )
+                for row in cur.fetchall()
+            ]
+
+
+def _preset_spec(name: str) -> UniverseSpec:
+    for spec in default_universe_specs():
+        if spec.universe_name == name:
+            return spec
+    if name == "watchlist_slugs":
+        return UniverseSpec(universe_name=name, universe_type="watchlist")
+    return UniverseSpec(universe_name=name, universe_type="preset")
+
+
+def _bool_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+def _universe_label(name: str) -> str:
+    labels = {
+        "nba_2024_25_moneyline": "NBA 2024/25 Moneyline",
+        "sports_recent_ready": "Sports Recent Ready",
+        "crypto_recent_ready": "Crypto Recent Ready",
+        "politics_recent_ready": "Politics Recent Ready",
+        "fifa_world_cup_2026": "2026 FIFA World Cup Winner",
+        "watchlist_slugs": "Watchlist Slugs",
+    }
+    return labels.get(name, name.replace("_", " ").title())

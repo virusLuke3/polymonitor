@@ -1,6 +1,6 @@
 import type { QuantBlockClosePoint, QuantFrontendPricePoint } from '@/types';
 
-export type TesterTab = 'overview' | 'parameters' | 'performance' | 'orders' | 'trades' | 'ledger' | 'equity' | 'drawdown' | 'runs' | 'logs' | 'properties';
+export type TesterTab = 'overview' | 'benchmark' | 'fillQuality' | 'dataQuality' | 'regime' | 'predictionQuality' | 'parameters' | 'performance' | 'orders' | 'trades' | 'ledger' | 'equity' | 'drawdown' | 'runs' | 'logs' | 'properties';
 export type PriceSource = 'frontend' | 'orderfilled' | 'orderbook' | 'conservative';
 export type BacktestEngine = 'builtin' | 'backtrader' | 'nautilus_trader';
 export type DataStatus = 'idle' | 'loading' | 'metadata_loading' | 'price_loading' | 'warming' | 'partial' | 'ready' | 'empty' | 'error';

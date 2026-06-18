@@ -19,6 +19,11 @@ import type {
   MarketWorkspaceHealth,
   OraclePayload,
   PriceSummary,
+  QuantBacktestBenchmarkArtifact,
+  QuantBacktestBenchmarkCreatePayload,
+  QuantBacktestBenchmarkRow,
+  QuantBacktestBenchmarkRun,
+  QuantBacktestUniverse,
   QuantBacktestCreatePayload,
   QuantBacktestEquityPoint,
   QuantBacktestLedgerRow,
@@ -493,6 +498,51 @@ export function fetchQuantBacktestEquity(runId: number, limit = 25000) {
 
 export function fetchQuantBacktestMetrics(runId: number) {
   return apiGetWithTimeout<QuantListPayload<QuantBacktestMetric>>(`/quant/backtest-runs/${runId}/metrics`, 15000);
+}
+
+export function createQuantBacktestBenchmark(payload: QuantBacktestBenchmarkCreatePayload) {
+  return apiPostWithTimeout<{
+    item: QuantBacktestBenchmarkRun;
+    benchmarkId: number;
+    status: string;
+    artifacts?: QuantBacktestBenchmarkArtifact[];
+  }>('/quant/backtest-benchmarks', payload, 180000);
+}
+
+export function fetchQuantBacktestBenchmarks(limit = 25) {
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestBenchmarkRun>>(`/quant/backtest-benchmarks?limit=${limit}`, 20000);
+}
+
+export function fetchQuantBacktestBenchmark(benchmarkId: number) {
+  return apiGetWithTimeout<{ item: QuantBacktestBenchmarkRun; artifacts: QuantBacktestBenchmarkArtifact[] }>(
+    `/quant/backtest-benchmarks/${benchmarkId}`,
+    20000,
+  );
+}
+
+export function fetchQuantBacktestBenchmarkRows(benchmarkId: number, limit = 10000) {
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestBenchmarkRow>>(
+    `/quant/backtest-benchmarks/${benchmarkId}/rows?limit=${limit}`,
+    30000,
+  );
+}
+
+export function fetchQuantBacktestUniverses() {
+  return apiGetWithTimeout<QuantListPayload<QuantBacktestUniverse>>('/quant/backtest-universes', 15000);
+}
+
+export function buildQuantBacktestReplayCoverage(payload: {
+  universe?: string;
+  limit?: number;
+  windowStartHours?: number;
+  windowEndHours?: number;
+  force?: boolean;
+}) {
+  return apiPostWithTimeout<{ item: Record<string, unknown>; status: string }>(
+    '/quant/backtest-replay-coverage/build',
+    payload,
+    180000,
+  );
 }
 
 export function fetchLatestContent(limit = 8) {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'preact/hooks';
-import type { QuantBacktestRun } from '@/types';
+import type { QuantBacktestBenchmarkArtifact, QuantBacktestBenchmarkRow, QuantBacktestBenchmarkRun, QuantBacktestRun, QuantBacktestUniverse } from '@/types';
 import type {
   BacktestResult,
   BatchBacktestRow,
@@ -27,6 +27,11 @@ const TOOL_TABS: Array<[ToolTab, string]> = [
 
 const TESTER_TABS: Array<[TesterTab, string]> = [
   ['overview', 'Overview'],
+  ['benchmark', 'Benchmark'],
+  ['fillQuality', 'Fill Quality'],
+  ['dataQuality', 'Data Quality'],
+  ['regime', 'Regime'],
+  ['predictionQuality', 'Prediction Quality'],
   ['parameters', 'Parameters'],
   ['performance', 'Performance'],
   ['orders', 'Orders'],
@@ -107,6 +112,16 @@ type StrategyTesterPanelProps = {
   recentBacktestRuns?: QuantBacktestRun[];
   backtestRunsStatus?: string;
   onRunLoad?: (runId: number) => void;
+  benchmarkRun?: QuantBacktestBenchmarkRun | null;
+  benchmarkRows?: QuantBacktestBenchmarkRow[];
+  benchmarkArtifacts?: QuantBacktestBenchmarkArtifact[];
+  benchmarkUniverses?: QuantBacktestUniverse[];
+  selectedBenchmarkUniverse?: string;
+  selectedBenchmarkLimit?: number;
+  benchmarkStatus?: string;
+  onRunBenchmark?: () => void;
+  onBenchmarkUniverseChange?: (universe: string) => void;
+  onBenchmarkLimitChange?: (limit: number) => void;
 };
 
 function loadSavedPresets(): SavedStrategyPreset[] {
@@ -145,6 +160,54 @@ function compactRows(value?: string | number | null) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '-';
   return numeric.toLocaleString('en-US');
+}
+
+function benchmarkSummaryValue(summary: Record<string, unknown> | null | undefined, key: string) {
+  const direct = summary?.[key];
+  if (direct !== undefined && direct !== null) return direct;
+  const comparison = summary?.comparison;
+  if (comparison && typeof comparison === 'object') {
+    const nested = (comparison as Record<string, unknown>)[key];
+    if (nested !== undefined && nested !== null) return nested;
+  }
+  const realistic = summary?.['accurate:realistic'];
+  if (realistic && typeof realistic === 'object') {
+    const nested = (realistic as Record<string, unknown>)[key];
+    if (nested !== undefined && nested !== null) return nested;
+  }
+  return undefined;
+}
+
+function benchmarkSummaryText(summary: Record<string, unknown> | null | undefined, key: string, fallback = '-') {
+  const value = benchmarkSummaryValue(summary, key);
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'number') return Number.isFinite(value) ? formatNumber(value, 4) : fallback;
+  return String(value);
+}
+
+function artifactPayload(artifacts: QuantBacktestBenchmarkArtifact[] | undefined, key: string) {
+  return artifacts?.find((artifact) => artifact.artifactKey === key)?.payload;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function asArray(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') as Array<Record<string, unknown>> : [];
+}
+
+function recordText(record: Record<string, unknown>, key: string, fallback = '-') {
+  const value = record[key];
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'number') return formatNumber(value, 4);
+  return String(value);
+}
+
+function compactMoney(value?: string | number | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '-';
+  return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}`;
 }
 
 function numericFromMetric(value: string) {
@@ -344,6 +407,16 @@ export function StrategyTesterPanel({
   recentBacktestRuns = [],
   backtestRunsStatus = 'idle',
   onRunLoad,
+  benchmarkRun = null,
+  benchmarkRows = [],
+  benchmarkArtifacts = [],
+  benchmarkUniverses = [],
+  selectedBenchmarkUniverse = 'nba_2024_25_moneyline',
+  selectedBenchmarkLimit = 50,
+  benchmarkStatus = 'idle',
+  onRunBenchmark,
+  onBenchmarkUniverseChange,
+  onBenchmarkLimitChange,
 }: StrategyTesterPanelProps) {
   const [toolTab, setToolTab] = useState<ToolTab>('tester');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -352,6 +425,7 @@ export function StrategyTesterPanel({
   const [presetDraftName, setPresetDraftName] = useState('Momentum live');
   const [copyNotice, setCopyNotice] = useState('');
   const hasCompletedRun = result.runId > 0 && result.metrics.length > 0;
+  const isBenchmarkRunning = benchmarkStatus === 'running' || benchmarkStatus === 'loading';
   const summaryRows = useMemo(() => result.metrics.slice(0, 6), [result.metrics]);
   const latestTrade = result.trades[result.trades.length - 1];
   const latestOrder = result.orders[result.orders.length - 1];
@@ -666,6 +740,25 @@ export function StrategyTesterPanel({
       .sort((left, right) => numericFromMetric(right.netProfit) - numericFromMetric(left.netProfit))
       .slice(0, 8)
   ), [batchRows, splitRows, walkForwardRows]);
+  const benchmarkSummaryRows = useMemo(() => {
+    const summary = benchmarkRun?.summary || {};
+    return [
+      ['Markets', benchmarkRun?.marketCount ?? benchmarkSummaryValue(summary, 'market_count') ?? '-'],
+      ['Fast raw rows', benchmarkSummaryText(summary, 'fast_raw_rows')],
+      ['Accurate raw rows', benchmarkSummaryText(summary, 'accurate_raw_rows')],
+      ['PnL diff', benchmarkSummaryText(summary, 'total_pnl_diff')],
+      ['Status mismatch', benchmarkSummaryText(summary, 'status_mismatches')],
+      ['Runtime', `${benchmarkSummaryText(summary, 'total_runtime_sec')}s`],
+    ] as Array<[string, unknown]>;
+  }, [benchmarkRun]);
+  const benchmarkArtifactRows = useMemo(() => {
+    const fillQuality = asRecord(artifactPayload(benchmarkArtifacts, 'fill_quality') || benchmarkRun?.summary?.fill_quality);
+    const dataQuality = asRecord(artifactPayload(benchmarkArtifacts, 'data_quality') || benchmarkRun?.summary?.data_quality);
+    const regimeBuckets = asRecord(artifactPayload(benchmarkArtifacts, 'regime_buckets'));
+    const predictionQuality = asRecord(artifactPayload(benchmarkArtifacts, 'prediction_quality') || benchmarkRun?.summary?.prediction_quality);
+    const profiles = asArray(artifactPayload(benchmarkArtifacts, 'profiles') || benchmarkRun?.summary?.profiles);
+    return { fillQuality, dataQuality, regimeBuckets, predictionQuality, profiles };
+  }, [benchmarkArtifacts, benchmarkRun]);
   const runControlRows = useMemo(() => ([
     {
       key: 'single',
@@ -698,6 +791,16 @@ export function StrategyTesterPanel({
       disabled: rowCount <= 0 || batchStatus === 'running',
     },
     {
+      key: 'benchmark',
+      label: 'Universe Benchmark',
+      status: benchmarkStatus,
+      detail: benchmarkRun ? `#${benchmarkRun.benchmarkId} · ${benchmarkRows.length.toLocaleString('en-US')} market rows` : 'fast/accurate bundle',
+      rows: Number(benchmarkRun?.marketCount || 0),
+      actionLabel: isBenchmarkRunning ? 'Running' : `Run ${selectedBenchmarkLimit}`,
+      action: onRunBenchmark || (() => undefined),
+      disabled: !onRunBenchmark || isBenchmarkRunning,
+    },
+    {
       key: 'walk-forward',
       label: 'Walk-forward',
       status: walkForwardStatus,
@@ -707,7 +810,7 @@ export function StrategyTesterPanel({
       action: onWalkForwardBacktest,
       disabled: rowCount <= 0 || walkForwardStatus === 'running',
     },
-  ]), [backtestStatus, batchRows, batchStatus, hasCompletedRun, onBatchBacktest, onRefresh, onSplitBacktest, onWalkForwardBacktest, result.orders.length, result.runId, result.trades.length, rowCount, splitRows, splitStatus, walkForwardRows, walkForwardStatus]);
+  ]), [backtestStatus, batchRows, batchStatus, benchmarkRows.length, benchmarkRun, benchmarkStatus, hasCompletedRun, isBenchmarkRunning, onBatchBacktest, onRefresh, onRunBenchmark, onSplitBacktest, onWalkForwardBacktest, result.orders.length, result.runId, result.trades.length, rowCount, selectedBenchmarkLimit, splitRows, splitStatus, walkForwardRows, walkForwardStatus]);
 
   return (
     <section className="qtv-bottom-panel">
@@ -737,6 +840,25 @@ export function StrategyTesterPanel({
           <button type="button" onClick={onSplitBacktest}>{splitStatus === 'running' ? 'Split running' : 'Split 70/30'}</button>
           <button type="button" onClick={onWalkForwardBacktest}>{walkForwardStatus === 'running' ? 'WF running' : 'Walk-forward'}</button>
           <button type="button" onClick={onBatchBacktest}>{batchStatus === 'running' ? 'Batch running' : 'Batch Top 5'}</button>
+          <select
+            value={selectedBenchmarkUniverse}
+            title="Benchmark universe"
+            onChange={(event) => onBenchmarkUniverseChange?.(event.currentTarget.value)}
+          >
+            {(benchmarkUniverses.length ? benchmarkUniverses : [{ universeName: 'nba_2024_25_moneyline', label: 'NBA 2024/25 Moneyline', universeType: 'preset' }]).map((universe) => (
+              <option key={universe.universeName} value={universe.universeName}>{universe.label || universe.universeName}</option>
+            ))}
+          </select>
+          <select
+            value={String(selectedBenchmarkLimit)}
+            title="Benchmark market limit"
+            onChange={(event) => onBenchmarkLimitChange?.(Number(event.currentTarget.value))}
+          >
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="500">500</option>
+          </select>
+          <button type="button" disabled={!onRunBenchmark || isBenchmarkRunning} onClick={onRunBenchmark}>{isBenchmarkRunning ? 'Benchmark running' : 'Benchmark'}</button>
           <button type="button" onClick={() => onExport('json')}>Export JSON</button>
         </div>
       </div>
@@ -954,6 +1076,47 @@ export function StrategyTesterPanel({
                 <button type="button" onClick={() => onExport('csv')}>Export CSV</button>
               </div>
             </div>
+            {benchmarkRun ? (
+              <section className="qtv-benchmark-card">
+                <header>
+                  <div>
+                    <strong>Fast / Accurate Benchmark</strong>
+                    <span>#{benchmarkRun.benchmarkId} · {benchmarkRun.universeName || 'nba_2024_25_moneyline'} · {benchmarkRun.status}</span>
+                  </div>
+                  <button type="button" disabled={!onRunBenchmark || isBenchmarkRunning} onClick={onRunBenchmark}>
+                    {isBenchmarkRunning ? 'Running' : 'Rerun'}
+                  </button>
+                </header>
+                <div className="qtv-benchmark-metrics">
+                  {benchmarkSummaryRows.map(([label, value]) => (
+                    <div key={label}>
+                      <span>{label}</span>
+                      <b>{String(value)}</b>
+                    </div>
+                  ))}
+                </div>
+                {benchmarkRows.length ? (
+                  <div className="qtv-benchmark-table">
+                    <div className="head">
+                      <span>Market</span>
+                      <span>Fast</span>
+                      <span>Accurate</span>
+                      <span>PnL diff</span>
+                      <span>Quality</span>
+                    </div>
+                    {benchmarkRows.slice(0, 8).map((row) => (
+                      <div key={`${row.benchmarkId}-${row.rowIndex}`}>
+                        <span title={row.marketSlug || row.title || ''}>{row.title || row.marketSlug || '-'}</span>
+                        <span>{row.fastStatus || '-'}</span>
+                        <span>{row.accurateStatus || '-'}</span>
+                        <span className={Number(row.pnlDiff) >= 0 ? 'ready' : 'review'}>{compactMoney(row.pnlDiff)}</span>
+                        <span>{row.dataQuality || '-'}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
           </div>
         ) : (
           <div className="qtv-tester-empty">
@@ -978,6 +1141,7 @@ export function StrategyTesterPanel({
                 <button className="primary" type="button" onClick={onRefresh}>Run Backtest</button>
                 <button type="button" onClick={onSplitBacktest}>Split</button>
                 <button type="button" onClick={onBatchBacktest}>Batch Top 5</button>
+                <button type="button" disabled={!onRunBenchmark || isBenchmarkRunning} onClick={onRunBenchmark}>Benchmark</button>
                 <button type="button" onClick={() => setSettingsOpen(true)}>Settings</button>
                 <button type="button" onClick={onRefresh}>Refresh</button>
               </div>
@@ -1315,6 +1479,163 @@ export function StrategyTesterPanel({
         </div>
       ) : null}
 
+      {toolTab === 'tester' && testerTab === 'benchmark' ? (
+        <div className="qtv-runs-panel">
+          <section className="qtv-benchmark-card">
+            <header>
+              <div>
+                <strong>OrderFilled Benchmark</strong>
+                <span>{benchmarkRun ? `#${benchmarkRun.benchmarkId} · ${benchmarkRun.universeName || selectedBenchmarkUniverse} · ${benchmarkRun.status}` : `${selectedBenchmarkUniverse} · favorite_hold_v1`}</span>
+              </div>
+              <button type="button" disabled={!onRunBenchmark || isBenchmarkRunning} onClick={onRunBenchmark}>
+                {isBenchmarkRunning ? 'Running' : `Run ${selectedBenchmarkLimit}`}
+              </button>
+            </header>
+            <div className="qtv-benchmark-metrics">
+              {benchmarkSummaryRows.map(([label, value]) => (
+                <div key={`bench-tab-${label}`}>
+                  <span>{label}</span>
+                  <b>{String(value)}</b>
+                </div>
+              ))}
+            </div>
+            <div className="qtv-benchmark-table">
+              <div className="head">
+                <span>Market</span>
+                <span>Fast</span>
+                <span>Accurate</span>
+                <span>PnL diff</span>
+                <span>Quality</span>
+              </div>
+              {benchmarkRows.slice(0, 24).map((row) => (
+                <div key={`bench-tab-${row.benchmarkId}-${row.rowIndex}`}>
+                  <span title={row.marketSlug || row.title || ''}>{row.title || row.marketSlug || '-'}</span>
+                  <span>{row.fastStatus || '-'}</span>
+                  <span>{row.accurateStatus || '-'}</span>
+                  <span className={Number(row.pnlDiff) >= 0 ? 'ready' : 'review'}>{compactMoney(row.pnlDiff)}</span>
+                  <span>{row.dataQuality || '-'}</span>
+                </div>
+              ))}
+            </div>
+            {!benchmarkRun ? <div className="qtv-tool-empty"><strong>No benchmark run loaded</strong><span>Select a universe and run the fast/accurate bundle.</span></div> : null}
+          </section>
+          <section className="qtv-benchmark-card">
+            <header><div><strong>Profiles</strong><span>fast/accurate execution bundle</span></div></header>
+            <div className="qtv-benchmark-table">
+              <div className="head">
+                <span>Profile</span>
+                <span>Signals</span>
+                <span>Trades</span>
+                <span>No fill</span>
+                <span>PnL</span>
+              </div>
+              {benchmarkArtifactRows.profiles.slice(0, 8).map((row) => (
+                <div key={`profile-${recordText(row, 'key')}`}>
+                  <span>{recordText(row, 'key')}</span>
+                  <span>{recordText(row, 'signal_count')}</span>
+                  <span>{recordText(row, 'trades')}</span>
+                  <span>{recordText(row, 'no_fills')}</span>
+                  <span className={Number(row.total_pnl) >= 0 ? 'ready' : 'review'}>{recordText(row, 'total_pnl')}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {toolTab === 'tester' && testerTab === 'fillQuality' ? (
+        <div className="qtv-runs-panel">
+          <section className="qtv-benchmark-card">
+            <header><div><strong>Fill Quality</strong><span>signals, fills, slippage, latency, no-fill reasons</span></div></header>
+            <div className="qtv-benchmark-metrics">
+              {[
+                ['Signals', recordText(benchmarkArtifactRows.fillQuality, 'signal_count')],
+                ['Submitted', recordText(benchmarkArtifactRows.fillQuality, 'submitted_count')],
+                ['Filled', recordText(benchmarkArtifactRows.fillQuality, 'filled_count')],
+                ['Fill rate', recordText(benchmarkArtifactRows.fillQuality, 'fill_rate')],
+                ['Partial', recordText(benchmarkArtifactRows.fillQuality, 'partial_fill_rate')],
+                ['No fill', recordText(benchmarkArtifactRows.fillQuality, 'no_fill_rate')],
+                ['Avg fill', recordText(benchmarkArtifactRows.fillQuality, 'avg_fill_price')],
+                ['Latency blocks', recordText(benchmarkArtifactRows.fillQuality, 'avg_latency_blocks')],
+              ].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
+            </div>
+            <pre>{JSON.stringify(benchmarkArtifactRows.fillQuality.no_fill_reasons || {}, null, 2)}</pre>
+          </section>
+        </div>
+      ) : null}
+
+      {toolTab === 'tester' && testerTab === 'dataQuality' ? (
+        <div className="qtv-runs-panel">
+          <section className="qtv-benchmark-card">
+            <header><div><strong>Data Quality</strong><span>coverage, replay rows, fast/accurate mismatch</span></div></header>
+            <div className="qtv-benchmark-metrics">
+              {[
+                ['Source', recordText(benchmarkArtifactRows.dataQuality, 'source_table')],
+                ['Raw markets', recordText(benchmarkArtifactRows.dataQuality, 'raw_market_count')],
+                ['Raw rows', recordText(benchmarkArtifactRows.dataQuality, 'raw_rows')],
+                ['Status mismatch', recordText(benchmarkArtifactRows.dataQuality, 'status_mismatch_count')],
+                ['PnL drift', recordText(benchmarkArtifactRows.dataQuality, 'pnl_drift_count')],
+                ['Gap', recordText(benchmarkArtifactRows.dataQuality, 'gap_status')],
+                ['Stale', recordText(benchmarkArtifactRows.dataQuality, 'stale_status')],
+              ].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
+            </div>
+            <pre>{JSON.stringify(benchmarkArtifactRows.dataQuality.coverage || {}, null, 2)}</pre>
+          </section>
+        </div>
+      ) : null}
+
+      {toolTab === 'tester' && testerTab === 'regime' ? (
+        <div className="qtv-runs-panel">
+          {['price_bucket', 'liquidity_bucket', 'drift_bucket', 'settlement_bucket'].map((key) => (
+            <section key={key} className="qtv-benchmark-card">
+              <header><div><strong>{key.replace(/_/g, ' ')}</strong><span>bucketed PnL and sample count</span></div></header>
+              <div className="qtv-benchmark-table">
+                <div className="head"><span>Bucket</span><span>Count</span><span>PnL</span><span></span><span></span></div>
+                {asArray(benchmarkArtifactRows.regimeBuckets[key]).map((row) => (
+                  <div key={`${key}-${recordText(row, 'bucket')}`}>
+                    <span>{recordText(row, 'bucket')}</span>
+                    <span>{recordText(row, 'count')}</span>
+                    <span className={Number(row.pnl) >= 0 ? 'ready' : 'review'}>{recordText(row, 'pnl')}</span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : null}
+
+      {toolTab === 'tester' && testerTab === 'predictionQuality' ? (
+        <div className="qtv-runs-panel">
+          <section className="qtv-benchmark-card">
+            <header><div><strong>Prediction Quality</strong><span>Brier, calibration, close-line drift</span></div></header>
+            <div className="qtv-benchmark-metrics">
+              {[
+                ['Samples', recordText(benchmarkArtifactRows.predictionQuality, 'sample_count')],
+                ['Brier', recordText(benchmarkArtifactRows.predictionQuality, 'brier_score')],
+                ['Market Brier', recordText(benchmarkArtifactRows.predictionQuality, 'market_brier_score')],
+                ['Advantage', recordText(benchmarkArtifactRows.predictionQuality, 'brier_advantage')],
+                ['Snapshot drift', recordText(benchmarkArtifactRows.predictionQuality, 'avg_snapshot_drift')],
+                ['Close-line drift', recordText(benchmarkArtifactRows.predictionQuality, 'avg_close_line_drift')],
+              ].map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}
+            </div>
+            <div className="qtv-benchmark-table">
+              <div className="head"><span>Bucket</span><span>Count</span><span>Predicted</span><span>Actual</span><span>Brier</span></div>
+              {asArray(benchmarkArtifactRows.predictionQuality.calibration_buckets).map((row) => (
+                <div key={`cal-${recordText(row, 'bucket')}`}>
+                  <span>{recordText(row, 'bucket')}</span>
+                  <span>{recordText(row, 'count')}</span>
+                  <span>{recordText(row, 'avg_predicted')}</span>
+                  <span>{recordText(row, 'actual_rate')}</span>
+                  <span>{recordText(row, 'brier_score')}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {toolTab === 'tester' && testerTab === 'runs' ? (
         <div className="qtv-runs-panel">
           <section>
@@ -1330,6 +1651,52 @@ export function StrategyTesterPanel({
               <div><dt>Ledger</dt><dd>{result.ledger.length.toLocaleString('en-US')}</dd></div>
               <div><dt>Metrics</dt><dd>{result.metrics.length.toLocaleString('en-US')}</dd></div>
             </dl>
+          </section>
+          <section className="qtv-benchmark-card">
+            <header>
+              <div>
+                <strong>Benchmark Run</strong>
+                <span>{benchmarkRun ? `#${benchmarkRun.benchmarkId} · ${benchmarkRun.status}` : benchmarkStatus}</span>
+              </div>
+              <button type="button" disabled={!onRunBenchmark || isBenchmarkRunning} onClick={onRunBenchmark}>
+                {isBenchmarkRunning ? 'Running' : `Run ${selectedBenchmarkLimit}`}
+              </button>
+            </header>
+            {benchmarkRun ? (
+              <>
+                <div className="qtv-benchmark-metrics">
+                  {benchmarkSummaryRows.map(([label, value]) => (
+                    <div key={`run-${label}`}>
+                      <span>{label}</span>
+                      <b>{String(value)}</b>
+                    </div>
+                  ))}
+                </div>
+                <div className="qtv-benchmark-table">
+                  <div className="head">
+                    <span>Market</span>
+                    <span>Fast</span>
+                    <span>Accurate</span>
+                    <span>PnL diff</span>
+                    <span>Quality</span>
+                  </div>
+                  {benchmarkRows.slice(0, 12).map((row) => (
+                    <div key={`runs-bench-${row.benchmarkId}-${row.rowIndex}`}>
+                      <span title={row.marketSlug || row.title || ''}>{row.title || row.marketSlug || '-'}</span>
+                      <span>{row.fastStatus || '-'}</span>
+                      <span>{row.accurateStatus || '-'}</span>
+                      <span className={Number(row.pnlDiff) >= 0 ? 'ready' : 'review'}>{compactMoney(row.pnlDiff)}</span>
+                      <span>{row.dataQuality || '-'}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="qtv-tool-empty">
+                <strong>No benchmark run loaded</strong>
+                <span>Run a universe benchmark to persist fast/accurate timing, ledger summary, coverage state, and per-market diffs.</span>
+              </div>
+            )}
           </section>
           <section className="qtv-run-history-card">
             <div className="qtv-run-config-head">

@@ -37,6 +37,15 @@ from quant.api.read_api import (  # noqa: E402
     get_quant_price_markets,
 )
 from quant.backtest.backtest_engine import create_and_execute_backtest  # noqa: E402
+from quant.backtest.benchmark_persistence import (  # noqa: E402
+    get_benchmark_artifacts,
+    get_benchmark_rows,
+    get_benchmark_run,
+    list_benchmark_runs,
+)
+from quant.backtest.runners.benchmark import run_orderfilled_fast_accurate_benchmark  # noqa: E402
+from quant.backtest.runners.coverage_build import build_replay_coverage  # noqa: E402
+from quant.backtest.runners.selectors import list_supported_universes, universe_spec_from_payload  # noqa: E402
 from quant.core.db import PostgresSettings, postgres_connection  # noqa: E402
 from quant.core.schema import create_schema  # noqa: E402
 
@@ -112,6 +121,37 @@ def _parse_time_arg(name: str) -> int | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return int(parsed.timestamp())
+
+
+def _optional_decimal_payload(value: Any) -> Decimal | None:
+    if value in (None, "", "null"):
+        return None
+    return Decimal(str(value))
+
+
+def _optional_int_payload(value: Any) -> int | None:
+    if value in (None, "", "null"):
+        return None
+    return int(value)
+
+
+def _benchmark_profile_keys(payload: dict[str, Any]) -> tuple[str, ...]:
+    replay_profiles = payload.get("replayProfiles") or payload.get("replay_profiles")
+    execution_profiles = payload.get("executionProfiles") or payload.get("execution_profiles")
+    if replay_profiles and execution_profiles:
+        keys = tuple(
+            f"{str(replay)}:{str(profile)}"
+            for replay in replay_profiles
+            for profile in execution_profiles
+            if str(replay) in {"fast", "accurate"}
+        )
+        return keys or ("fast:optimistic", "fast:realistic", "fast:stress", "accurate:realistic")
+    bundle = payload.get("profileBundle") or payload.get("profile_bundle")
+    if bundle in (None, "", "fast-vs-accurate"):
+        return ("fast:optimistic", "fast:realistic", "fast:stress", "accurate:realistic")
+    if isinstance(bundle, list):
+        return tuple(str(item) for item in bundle)
+    return tuple(str(item).strip() for item in str(bundle).split(",") if str(item).strip())
 
 
 def _json_value(value: Any) -> Any:
@@ -297,6 +337,22 @@ def _camel_row(row: dict[str, Any]) -> dict[str, Any]:
         "top_n": "topN",
         "max_points": "maxPoints",
         "source_limit": "sourceLimit",
+        "benchmark_id": "benchmarkId",
+        "universe_type": "universeType",
+        "universe_name": "universeName",
+        "strategy_name": "strategyName",
+        "data_version": "dataVersion",
+        "row_index": "rowIndex",
+        "fast_status": "fastStatus",
+        "accurate_status": "accurateStatus",
+        "fast_pnl": "fastPnl",
+        "accurate_pnl": "accuratePnl",
+        "pnl_diff": "pnlDiff",
+        "fast_fill_block": "fastFillBlock",
+        "accurate_fill_block": "accurateFillBlock",
+        "data_quality": "dataQuality",
+        "artifact_key": "artifactKey",
+        "artifact_kind": "artifactKind",
     }
     result = {mapping.get(key, key): _camel_value(value, mapping) for key, value in row.items()}
     meta = result.get("meta")
@@ -1345,5 +1401,92 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         with postgres_connection(PostgresSettings(), readonly=True) as conn:
             rows = get_backtest_metrics(conn, run_id=run_id)
         return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
+
+    @bp.route("/backtest-benchmarks", methods=["POST"])
+    def api_quant_create_backtest_benchmark():
+        payload = request.get_json(silent=True) or {}
+        universe_spec = universe_spec_from_payload(payload)
+        strategy_payload = payload.get("strategySpec") or payload.get("strategy_spec") or {}
+        if not isinstance(strategy_payload, dict):
+            strategy_payload = {}
+        profile_keys = _benchmark_profile_keys(payload)
+        try:
+            with postgres_connection(PostgresSettings(), readonly=False) as conn:
+                create_schema(conn)
+                result = run_orderfilled_fast_accurate_benchmark(
+                    universe_spec=universe_spec,
+                    persist_conn=conn,
+                    force_block_replay_backfill=bool(payload.get("forceBlockReplayBackfill") or payload.get("force_block_replay_backfill")),
+                    min_probability=Decimal(str(strategy_payload.get("minProbability") or strategy_payload.get("min_probability") or payload.get("minProbability") or "0.60")),
+                    max_probability=Decimal(str(strategy_payload.get("maxProbability") or strategy_payload.get("max_probability") or payload.get("maxProbability") or "0.80")),
+                    stake=Decimal(str(strategy_payload.get("stake") or payload.get("stake") or "10")),
+                    initial_capital=Decimal(str(strategy_payload.get("initialCapital") or strategy_payload.get("initial_capital") or payload.get("initialCapital") or "1000")),
+                    max_daily_cost=_optional_decimal_payload(strategy_payload.get("maxDailyCost", strategy_payload.get("max_daily_cost", payload.get("maxDailyCost", payload.get("max_daily_cost", "20"))))),
+                    max_concurrent_positions=_optional_int_payload(strategy_payload.get("maxConcurrentPositions", strategy_payload.get("max_concurrent_positions", payload.get("maxConcurrentPositions", payload.get("max_concurrent_positions", 2))))),
+                    max_daily_trades=_optional_int_payload(strategy_payload.get("maxDailyTrades", strategy_payload.get("max_daily_trades", payload.get("maxDailyTrades", payload.get("max_daily_trades"))))),
+                    profile_keys=profile_keys,
+                )
+                row = get_benchmark_run(conn, benchmark_id=int(result.benchmark_id or 0))
+                artifacts = get_benchmark_artifacts(conn, benchmark_id=int(result.benchmark_id or 0))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            route_logger.exception("quant backtest benchmark failed")
+            return jsonify({"error": str(exc)}), 500
+        if not row:
+            return jsonify({"error": "benchmark run not found"}), 500
+        return jsonify({
+            "item": _camel_row(row),
+            "benchmarkId": row.get("benchmark_id"),
+            "status": row.get("status"),
+            "artifacts": [_camel_row(item) for item in artifacts],
+        }), 202
+
+    @bp.route("/backtest-universes", methods=["GET"])
+    def api_quant_list_backtest_universes():
+        return jsonify({"items": list_supported_universes(), "count": len(list_supported_universes())})
+
+    @bp.route("/backtest-benchmarks", methods=["GET"])
+    def api_quant_list_backtest_benchmarks():
+        limit = min(max(_parse_int_arg("limit", 25) or 25, 1), 100)
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            rows = list_benchmark_runs(conn, limit=limit)
+        return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
+
+    @bp.route("/backtest-benchmarks/<int:benchmark_id>", methods=["GET"])
+    def api_quant_get_backtest_benchmark(benchmark_id: int):
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            row = get_benchmark_run(conn, benchmark_id=benchmark_id)
+            artifacts = get_benchmark_artifacts(conn, benchmark_id=benchmark_id)
+        if not row:
+            return jsonify({"error": "benchmark not found"}), 404
+        return jsonify({"item": _camel_row(row), "artifacts": [_camel_row(item) for item in artifacts]})
+
+    @bp.route("/backtest-benchmarks/<int:benchmark_id>/rows", methods=["GET"])
+    def api_quant_get_backtest_benchmark_rows(benchmark_id: int):
+        limit = min(max(_parse_int_arg("limit", 10000) or 10000, 1), 25000)
+        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+            rows = get_benchmark_rows(conn, benchmark_id=benchmark_id, limit=limit)
+        return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
+
+    @bp.route("/backtest-replay-coverage/build", methods=["POST"])
+    def api_quant_build_backtest_replay_coverage():
+        payload = request.get_json(silent=True) or {}
+        universe = str(payload.get("universe") or "nba_2024_25_moneyline")
+        limit = min(max(int(payload.get("limit") or 500), 1), 500)
+        try:
+            result = build_replay_coverage(
+                universe=universe,
+                limit=limit,
+                window_start_hours=Decimal(str(payload.get("windowStartHours") or payload.get("window_start_hours") or "25")),
+                window_end_hours=Decimal(str(payload.get("windowEndHours") or payload.get("window_end_hours") or "0")),
+                force=bool(payload.get("force")),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            route_logger.exception("quant replay coverage build failed")
+            return jsonify({"error": str(exc)}), 500
+        return jsonify(_camel_row(result)), 202
 
     return bp

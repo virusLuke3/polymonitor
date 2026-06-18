@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
+  createQuantBacktestBenchmark,
   createQuantBacktestRun,
+  fetchQuantBacktestBenchmark,
+  fetchQuantBacktestBenchmarkRows,
+  fetchQuantBacktestBenchmarks,
+  fetchQuantBacktestUniverses,
   fetchQuantBacktestRuns,
   fetchMarketLobByToken,
   fetchMarketLobSnapshotsByToken,
@@ -21,7 +26,7 @@ import {
   quantPriceStreamUrl,
   type QuantPriceQuery,
 } from '@/services/api';
-import type { LobPayload, LobSide, LobSnapshot, QuantBacktestCreatePayload, QuantBacktestRun, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
+import type { LobPayload, LobSide, LobSnapshot, QuantBacktestBenchmarkArtifact, QuantBacktestBenchmarkRow, QuantBacktestBenchmarkRun, QuantBacktestCreatePayload, QuantBacktestRun, QuantBacktestUniverse, QuantBlockClosePoint, QuantBuildRun, QuantFrontendPricePoint, QuantMarketSeriesOutcome, QuantMarketSeriesPayload, QuantMarketSeriesPoint, QuantPriceMarket } from '@/types';
 import { PriceChartPanel } from './components/PriceChartPanel';
 import { StrategyTesterPanel } from './components/StrategyTesterPanel';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
@@ -836,6 +841,14 @@ export function QuantWorkspace() {
   const [runs, setRuns] = useState<QuantBuildRun[]>([]);
   const [recentBacktestRuns, setRecentBacktestRuns] = useState<QuantBacktestRun[]>([]);
   const [backtestRunsStatus, setBacktestRunsStatus] = useState<DataStatus>('idle');
+  const [recentBenchmarkRuns, setRecentBenchmarkRuns] = useState<QuantBacktestBenchmarkRun[]>([]);
+  const [benchmarkRun, setBenchmarkRun] = useState<QuantBacktestBenchmarkRun | null>(null);
+  const [benchmarkRows, setBenchmarkRows] = useState<QuantBacktestBenchmarkRow[]>([]);
+  const [benchmarkArtifacts, setBenchmarkArtifacts] = useState<QuantBacktestBenchmarkArtifact[]>([]);
+  const [benchmarkUniverses, setBenchmarkUniverses] = useState<QuantBacktestUniverse[]>([]);
+  const [benchmarkUniverse, setBenchmarkUniverse] = useState('nba_2024_25_moneyline');
+  const [benchmarkLimit, setBenchmarkLimit] = useState(50);
+  const [benchmarkStatus, setBenchmarkStatus] = useState<DataStatus>('idle');
   const [quantMarkets, setQuantMarkets] = useState<QuantPriceMarket[]>([]);
   const [marketSearchStatus, setMarketSearchStatus] = useState<DataStatus>('idle');
   const [selectedMarketMeta, setSelectedMarketMeta] = useState<QuantPriceMarket | null>(() => (
@@ -1130,6 +1143,35 @@ export function QuantWorkspace() {
     }
   };
 
+  const refreshBenchmarkRuns = async () => {
+    try {
+      const payload = await fetchQuantBacktestBenchmarks(12);
+      const items = payload.items || [];
+      setRecentBenchmarkRuns(items);
+      if (!benchmarkRun && items.length) {
+        const [latestBenchmark] = items;
+        if (!latestBenchmark) return;
+        const detail = await fetchQuantBacktestBenchmark(latestBenchmark.benchmarkId);
+        setBenchmarkRun(detail.item || latestBenchmark);
+        setBenchmarkArtifacts(detail.artifacts || []);
+        const rows = await fetchQuantBacktestBenchmarkRows(latestBenchmark.benchmarkId, 1000);
+        setBenchmarkRows(rows.items || []);
+        setBenchmarkStatus(latestBenchmark.status === 'completed' ? 'ready' : 'idle');
+      }
+    } catch (benchmarkError) {
+      if (import.meta.env.DEV && !isAbortLikeError(benchmarkError)) console.debug('[quant] benchmark history failed', benchmarkError);
+    }
+  };
+
+  const refreshBenchmarkUniverses = async () => {
+    try {
+      const payload = await fetchQuantBacktestUniverses();
+      setBenchmarkUniverses(payload.items || []);
+    } catch (universeError) {
+      if (import.meta.env.DEV && !isAbortLikeError(universeError)) console.debug('[quant] benchmark universes failed', universeError);
+    }
+  };
+
   const loadBacktestRun = async (runId: number) => {
     if (!runId) return;
     setLoading(true);
@@ -1374,6 +1416,43 @@ export function QuantWorkspace() {
       setBacktestStatus('failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runBenchmark = async () => {
+    setError('');
+    setBenchmarkStatus('loading');
+    setTesterTab('benchmark');
+    setStrategyDrawerCollapsed(false);
+    try {
+      const created = await createQuantBacktestBenchmark({
+        universe: benchmarkUniverse,
+        limit: benchmarkLimit,
+        strategy: 'favorite_hold_v1',
+        strategySpec: {
+          minProbability: 0.6,
+          maxProbability: 0.8,
+          stake: 10,
+          initialCapital: strategyParameters.initialCapital || 1000,
+          maxDailyCost: 20,
+          maxConcurrentPositions: 2,
+        },
+        profileBundle: 'fast-vs-accurate',
+        stake: 10,
+        initialCapital: strategyParameters.initialCapital || 1000,
+        maxDailyCost: 20,
+        maxConcurrentPositions: 2,
+        forceBlockReplayBackfill: false,
+      });
+      setBenchmarkRun(created.item);
+      setBenchmarkArtifacts(created.artifacts || []);
+      setBenchmarkStatus(created.item.status === 'completed' ? 'ready' : 'ready');
+      const rows = await fetchQuantBacktestBenchmarkRows(created.benchmarkId, 1000);
+      setBenchmarkRows(rows.items || []);
+      void refreshBenchmarkRuns();
+    } catch (benchmarkError) {
+      setBenchmarkStatus('error');
+      setError(benchmarkError instanceof Error ? benchmarkError.message : 'Benchmark failed');
     }
   };
 
@@ -1849,6 +1928,8 @@ export function QuantWorkspace() {
 
   useEffect(() => {
     void refreshBacktestRuns();
+    void refreshBenchmarkRuns();
+    void refreshBenchmarkUniverses();
   }, []);
 
   const prefetchMarketSlug = (slug: string) => {
@@ -3882,6 +3963,16 @@ export function QuantWorkspace() {
               recentBacktestRuns={recentBacktestRuns}
               backtestRunsStatus={backtestRunsStatus}
               onRunLoad={(runId) => void loadBacktestRun(runId)}
+              benchmarkRun={benchmarkRun}
+              benchmarkRows={benchmarkRows}
+              benchmarkArtifacts={benchmarkArtifacts}
+              benchmarkUniverses={benchmarkUniverses}
+              selectedBenchmarkUniverse={benchmarkUniverse}
+              selectedBenchmarkLimit={benchmarkLimit}
+              benchmarkStatus={benchmarkStatus === 'idle' && recentBenchmarkRuns.length ? 'ready' : benchmarkStatus}
+              onRunBenchmark={() => void runBenchmark()}
+              onBenchmarkUniverseChange={setBenchmarkUniverse}
+              onBenchmarkLimitChange={setBenchmarkLimit}
             />
           ) : null}
         </section>

@@ -575,6 +575,57 @@ CREATE_TABLE_SQL: tuple[str, ...] = (
         PRIMARY KEY (run_id, event_index)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_benchmark_runs (
+        benchmark_id BIGSERIAL PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'queued',
+        universe_type TEXT NOT NULL DEFAULT 'preset',
+        universe_name TEXT NOT NULL,
+        market_count INTEGER NOT NULL DEFAULT 0,
+        strategy_name TEXT NOT NULL,
+        parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+        profiles JSONB NOT NULL DEFAULT '{}'::jsonb,
+        summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+        data_version TEXT,
+        error TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_benchmark_rows (
+        benchmark_id BIGINT NOT NULL REFERENCES quant.quant_backtest_benchmark_runs(benchmark_id) ON DELETE CASCADE,
+        row_index INTEGER NOT NULL,
+        market_id BIGINT,
+        market_slug TEXT NOT NULL,
+        title TEXT,
+        event_time TIMESTAMPTZ,
+        outcome TEXT,
+        signal_time TIMESTAMPTZ,
+        fast_status TEXT,
+        accurate_status TEXT,
+        fast_pnl NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        accurate_pnl NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        pnl_diff NUMERIC(38, 10) NOT NULL DEFAULT 0,
+        fast_fill_block BIGINT NOT NULL DEFAULT 0,
+        accurate_fill_block BIGINT NOT NULL DEFAULT 0,
+        data_quality TEXT NOT NULL DEFAULT 'unknown',
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (benchmark_id, row_index)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant.quant_backtest_benchmark_artifacts (
+        benchmark_id BIGINT NOT NULL REFERENCES quant.quant_backtest_benchmark_runs(benchmark_id) ON DELETE CASCADE,
+        artifact_key TEXT NOT NULL,
+        artifact_kind TEXT NOT NULL,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (benchmark_id, artifact_key)
+    )
+    """,
 )
 
 
@@ -763,6 +814,10 @@ CREATE_INDEX_SQL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_ledger_run_event ON quant.quant_backtest_ledger (run_id, event_type, x_value)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_ledger_trade ON quant.quant_backtest_ledger (run_id, trade_id)",
     "CREATE INDEX IF NOT EXISTS idx_quant_backtest_equity_run_x ON quant.quant_backtest_equity (run_id, point_index)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_runs_created ON quant.quant_backtest_benchmark_runs (created_at DESC, benchmark_id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_runs_universe ON quant.quant_backtest_benchmark_runs (universe_name, status, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_rows_quality ON quant.quant_backtest_benchmark_rows (benchmark_id, data_quality, row_index)",
+    "CREATE INDEX IF NOT EXISTS idx_quant_backtest_benchmark_rows_market ON quant.quant_backtest_benchmark_rows (market_slug, benchmark_id)",
     "CREATE INDEX IF NOT EXISTS idx_quant_event_metadata_search ON quant.market_event_metadata (event_slug, event_title)",
     "CREATE INDEX IF NOT EXISTS idx_quant_event_metadata_status ON quant.market_event_metadata (status, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_quant_event_members_market ON quant.market_event_members (market_id)",

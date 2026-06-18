@@ -488,6 +488,77 @@ export type QuantBacktestRun = {
   meta?: Record<string, unknown> | null;
 };
 
+export type QuantBacktestBenchmarkRun = {
+  benchmarkId: number;
+  status: string;
+  universeType?: string | null;
+  universeName?: string | null;
+  marketCount?: number | string | null;
+  strategyName?: string | null;
+  parameters?: Record<string, unknown> | null;
+  profiles?: Record<string, unknown> | null;
+  summary?: Record<string, unknown> | null;
+  dataVersion?: string | null;
+  error?: string | null;
+  createdAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+};
+
+export type QuantBacktestBenchmarkRow = {
+  benchmarkId: number;
+  rowIndex: number;
+  marketId?: string | number | null;
+  marketSlug?: string | null;
+  title?: string | null;
+  eventTime?: string | null;
+  outcome?: string | null;
+  signalTime?: string | null;
+  fastStatus?: string | null;
+  accurateStatus?: string | null;
+  fastPnl?: string | number | null;
+  accuratePnl?: string | number | null;
+  pnlDiff?: string | number | null;
+  fastFillBlock?: string | number | null;
+  accurateFillBlock?: string | number | null;
+  dataQuality?: string | null;
+  payload?: Record<string, unknown> | null;
+};
+
+export type QuantBacktestBenchmarkArtifact = {
+  benchmarkId: number;
+  artifactKey: string;
+  artifactKind: string;
+  payload?: unknown;
+  createdAt?: string | null;
+};
+
+export type QuantBacktestUniverse = {
+  universeName: string;
+  universeType: string;
+  label?: string | null;
+  category?: string | null;
+  eventSlug?: string | null;
+  requireResolved?: boolean;
+  requireOrderfilledRows?: boolean;
+};
+
+export type QuantBacktestBenchmarkCreatePayload = {
+  universe?: string;
+  universeSpec?: Record<string, unknown>;
+  limit?: number;
+  strategy?: string;
+  strategySpec?: Record<string, unknown>;
+  replayProfiles?: string[];
+  executionProfiles?: string[];
+  profileBundle?: string | string[];
+  stake?: number;
+  initialCapital?: number;
+  maxDailyCost?: number;
+  maxConcurrentPositions?: number;
+  forceBlockReplayBackfill?: boolean;
+};
+
 export type QuantBacktestMetric = {
   runId: number;
   metricKey: string;
@@ -633,9 +704,9 @@ export type QuantBacktestCreatePayload = {
   liquidityCapPct?: number;
   maxPositionNotional?: number;
   minFillPct?: number;
-  executionPriceMode?: string;
   executionProfile?: string;
   orderRole?: string;
+  executionPriceMode?: string;
   finalValuationMode?: string;
   buyLimitPrice?: number;
   sellLimitPrice?: number;

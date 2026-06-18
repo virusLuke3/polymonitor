@@ -125,19 +125,34 @@ def build_ledger_rows(trades: list[dict[str, Any]], initial_capital: Decimal) ->
 
 def ledger_summary(rows: list[dict[str, Any]], initial_capital: Decimal) -> dict[str, Decimal]:
     cash = Decimal(str(initial_capital))
+    position = Decimal("0")
     realized = Decimal("0")
+    trade_exit = Decimal("0")
+    settlement = Decimal("0")
     fees = Decimal("0")
     slippage = Decimal("0")
+    rebate = Decimal("0")
     for row in rows:
         cash = Decimal(str(row.get("cash_after", cash)))
+        position = Decimal(str(row.get("position_after", position)))
         realized += Decimal(str(row.get("realized_pnl") or 0))
+        event_type = str(row.get("event_type") or "").upper()
+        if event_type == "SETTLEMENT":
+            settlement += Decimal(str(row.get("realized_pnl") or 0))
+        elif event_type == "SELL":
+            trade_exit += Decimal(str(row.get("realized_pnl") or 0))
         fees += Decimal(str(row.get("fee") or 0))
         slippage += Decimal(str(row.get("slippage_cost") or 0))
+        rebate += Decimal(str(row.get("rebate") or 0))
     return {
         "cash_balance": cash.quantize(Q, rounding=ROUND_HALF_UP),
+        "position_after": position.quantize(Q, rounding=ROUND_HALF_UP),
         "realized_pnl": realized.quantize(Q, rounding=ROUND_HALF_UP),
+        "trade_exit_pnl": trade_exit.quantize(Q, rounding=ROUND_HALF_UP),
+        "settlement_pnl": settlement.quantize(Q, rounding=ROUND_HALF_UP),
         "fee_total": fees.quantize(Q, rounding=ROUND_HALF_UP),
         "slippage_total": slippage.quantize(Q, rounding=ROUND_HALF_UP),
+        "rebate_total": rebate.quantize(Q, rounding=ROUND_HALF_UP),
         "ledger_rows": Decimal(len(rows)),
     }
 
