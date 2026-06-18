@@ -1498,7 +1498,6 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         try:
             parts = _benchmark_request_parts(payload)
             with postgres_connection(PostgresSettings(), readonly=False) as conn:
-                create_schema(conn)
                 benchmark_id = create_benchmark_run(
                     conn,
                     universe_type=parts["universe_spec"].universe_type,
