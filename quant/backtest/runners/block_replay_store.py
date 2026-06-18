@@ -17,6 +17,7 @@ from ...core.db import ClickHouseClient, safe_identifier
 
 DEFAULT_BLOCK_REPLAY_TABLE = "orderfilled_block_replay"
 DEFAULT_BLOCK_REPLAY_COVERAGE_TABLE = "orderfilled_block_replay_coverage"
+GLOBAL_RANGE_SCAN_MARKET_THRESHOLD = 128
 
 
 @dataclass(frozen=True)
@@ -435,6 +436,17 @@ def load_orderfilled_block_replay_rows_for_ranges(
     ids_sql = ",".join(str(market_id) for market_id in sorted(ranges))
     min_block = min(bounds[0] for bounds in ranges.values())
     max_block = max(bounds[1] for bounds in ranges.values())
+    if len(ranges) >= GLOBAL_RANGE_SCAN_MARKET_THRESHOLD:
+        return _filter_replay_rows_for_ranges(
+            load_orderfilled_block_replay_rows(
+                ranges,
+                from_block=min_block,
+                to_block=max_block,
+                table=table_name,
+                client=ch,
+            ),
+            ranges,
+        )
     range_sql = _market_block_range_condition(ranges)
     return ch.query_json_rows(
         f"""
@@ -466,6 +478,21 @@ def load_orderfilled_block_replay_rows_for_ranges(
         """,
         timeout_seconds=240,
     )
+
+
+def _filter_replay_rows_for_ranges(rows: list[dict[str, Any]], ranges: dict[int, tuple[int, int]]) -> list[dict[str, Any]]:
+    """Filter a broad primary-key scan down to per-market replay windows."""
+
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        market_id = int(row["market_id"])
+        bounds = ranges.get(market_id)
+        if bounds is None:
+            continue
+        block_number = int(row["block_number"])
+        if int(bounds[0]) <= block_number <= int(bounds[1]):
+            filtered.append(row)
+    return filtered
 
 
 def _count_replay_rows(
