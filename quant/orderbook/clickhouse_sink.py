@@ -22,6 +22,9 @@ DEFAULT_CLICKHOUSE_TIERS = "hot,warm"
 DEFAULT_BATCH_SIZE = 250
 DEFAULT_FLUSH_INTERVAL_SECONDS = 5
 DEFAULT_TTL_DAYS = 30
+DEFAULT_SCHEMA_TIMEOUT_SECONDS = 5
+DEFAULT_INSERT_TIMEOUT_SECONDS = 10
+DEFAULT_REPORT_TIMEOUT_SECONDS = 5
 PRICE_SCALE = Decimal("1000000")
 SIZE_SCALE = Decimal("1000000")
 
@@ -73,6 +76,9 @@ class LobClickHouseSettings:
     flush_interval_seconds: int = field(default_factory=lambda: max(1, env_int("POLYDATA_LOB_CLICKHOUSE_FLUSH_INTERVAL_SECONDS", DEFAULT_FLUSH_INTERVAL_SECONDS)))
     ttl_days: int = field(default_factory=lambda: max(1, env_int("POLYDATA_LOB_CLICKHOUSE_TTL_DAYS", DEFAULT_TTL_DAYS)))
     write_levels: bool = field(default_factory=lambda: env_bool("POLYDATA_LOB_CLICKHOUSE_WRITE_LEVELS", True))
+    schema_timeout_seconds: int = field(default_factory=lambda: max(1, env_int("POLYDATA_LOB_CLICKHOUSE_SCHEMA_TIMEOUT_SECONDS", DEFAULT_SCHEMA_TIMEOUT_SECONDS)))
+    insert_timeout_seconds: int = field(default_factory=lambda: max(1, env_int("POLYDATA_LOB_CLICKHOUSE_INSERT_TIMEOUT_SECONDS", DEFAULT_INSERT_TIMEOUT_SECONDS)))
+    report_timeout_seconds: int = field(default_factory=lambda: max(1, env_int("POLYDATA_LOB_CLICKHOUSE_REPORT_TIMEOUT_SECONDS", DEFAULT_REPORT_TIMEOUT_SECONDS)))
 
     def tier_allowed(self, tier: str) -> bool:
         return str(tier or "").strip().lower() in self.tiers
@@ -264,6 +270,8 @@ class ClickHouseLobSink:
                 "ttlDays": self.settings.ttl_days,
                 "batchSize": self.settings.batch_size,
                 "flushIntervalSeconds": self.settings.flush_interval_seconds,
+                "schemaTimeoutSeconds": self.settings.schema_timeout_seconds,
+                "insertTimeoutSeconds": self.settings.insert_timeout_seconds,
                 "writeLevels": self.settings.write_levels,
                 "bufferedRows": buffered["delta"] + buffered["level"],
                 "bufferedDeltaRows": buffered["delta"],
@@ -279,7 +287,11 @@ class ClickHouseLobSink:
         table_name = safe_identifier(table)
         column_sql = ", ".join(safe_identifier(column) for column in columns)
         payload = "\n".join(rows) + "\n"
-        self.client.execute(f"INSERT INTO {table_name} ({column_sql}) FORMAT TabSeparated", stdin=payload, timeout_seconds=30)
+        self.client.execute(
+            f"INSERT INTO {table_name} ({column_sql}) FORMAT TabSeparated",
+            stdin=payload,
+            timeout_seconds=self.settings.insert_timeout_seconds,
+        )
 
 
 def create_lob_clickhouse_schema(client: ClickHouseClient | None = None, settings: LobClickHouseSettings | None = None) -> None:
@@ -313,7 +325,8 @@ def create_lob_clickhouse_schema(client: ClickHouseClient | None = None, setting
         ORDER BY (market_id, token_id, event_ts, book_side, price_ppm)
         TTL event_date + INTERVAL {ttl_days} DAY DELETE
         SETTINGS index_granularity = 8192
-        """
+        """,
+        timeout_seconds=settings.schema_timeout_seconds,
     )
     client.execute(
         f"""
@@ -340,7 +353,8 @@ def create_lob_clickhouse_schema(client: ClickHouseClient | None = None, setting
         ORDER BY (market_id, token_id, event_ts, book_side, level_index)
         TTL event_date + INTERVAL {ttl_days} DAY DELETE
         SETTINGS index_granularity = 8192
-        """
+        """,
+        timeout_seconds=settings.schema_timeout_seconds,
     )
 
 
@@ -431,7 +445,8 @@ def clickhouse_lob_storage_report(client: ClickHouseClient | None = None, settin
         FROM system.parts
         WHERE active AND database = currentDatabase() AND table IN ({quoted_tables})
         GROUP BY table
-        """
+        """,
+        timeout_seconds=settings.report_timeout_seconds,
     )
     by_table: dict[str, dict[str, Any]] = {
         table: {"table": table, "rows": 0, "bytesOnDisk": 0, "rows1h": 0, "estimatedBytesPerRow": 0.0}
@@ -451,7 +466,13 @@ def clickhouse_lob_storage_report(client: ClickHouseClient | None = None, settin
             )
     for table in table_names:
         try:
-            rows_1h = int(client.query_scalar(f"SELECT count() FROM {table} WHERE event_ts >= now() - INTERVAL 1 HOUR") or 0)
+            rows_1h = int(
+                client.query_scalar(
+                    f"SELECT count() FROM {table} WHERE event_ts >= now() - INTERVAL 1 HOUR",
+                    timeout_seconds=settings.report_timeout_seconds,
+                )
+                or 0
+            )
         except Exception:
             rows_1h = 0
         by_table[table]["rows1h"] = rows_1h

@@ -31,14 +31,14 @@ class FakeClickHouseClient:
         self.executed.append((query, stdin, timeout_seconds))
 
     def query_json_rows(self, query, *, timeout_seconds=None):
-        self.json_rows.append(query)
+        self.json_rows.append((query, timeout_seconds))
         return [
             {"table": "quant_lob_delta_fact", "rows": 1000, "bytes_on_disk": 80000},
             {"table": "quant_lob_level_fact", "rows": 200, "bytes_on_disk": 24000},
         ]
 
     def query_scalar(self, query, *, timeout_seconds=None):
-        self.scalars.append(query)
+        self.scalars.append((query, timeout_seconds))
         return "50" if "quant_lob_delta_fact" in query else "5"
 
 
@@ -48,7 +48,7 @@ def _identity() -> TokenBookIdentity:
 
 def test_clickhouse_lob_schema_uses_compressed_numeric_columns_and_ttl():
     client = FakeClickHouseClient()
-    settings = LobClickHouseSettings(enabled=True, ttl_days=14)
+    settings = LobClickHouseSettings(enabled=True, ttl_days=14, schema_timeout_seconds=3)
 
     create_lob_clickhouse_schema(client=client, settings=settings)
 
@@ -59,6 +59,7 @@ def test_clickhouse_lob_schema_uses_compressed_numeric_columns_and_ttl():
     assert "LowCardinality(String)" in ddl
     assert "TTL event_date + INTERVAL 14 DAY DELETE" in ddl
     assert "ORDER BY (market_id, token_id, event_ts, book_side, price_ppm)" in ddl
+    assert {timeout for _query, _stdin, timeout in client.executed} == {3}
 
 
 def test_delta_event_to_tsv_compresses_price_size_and_codes():
@@ -106,7 +107,7 @@ def test_snapshot_event_to_level_tsv_writes_top_n_only():
 
 def test_clickhouse_lob_sink_respects_tier_filter_and_batches():
     client = FakeClickHouseClient()
-    settings = LobClickHouseSettings(enabled=True, tiers=frozenset({"hot"}), batch_size=1)
+    settings = LobClickHouseSettings(enabled=True, tiers=frozenset({"hot"}), batch_size=1, insert_timeout_seconds=4)
     sink = ClickHouseLobSink(settings=settings, client=client)
 
     skipped = sink.enqueue_delta(
@@ -124,6 +125,7 @@ def test_clickhouse_lob_sink_respects_tier_filter_and_batches():
     assert written == 1
     assert len(client.executed) == 1
     assert "INSERT INTO quant_lob_delta_fact" in client.executed[0][0]
+    assert client.executed[0][2] == 4
     status = sink.status_snapshot()
     assert status["deltaEventsSeen"] == 2
     assert status["deltaRowsSkippedTier"] == 1
@@ -159,10 +161,12 @@ def test_clickhouse_lob_sink_status_reports_level_rows_and_buffers():
 
 def test_clickhouse_lob_storage_report_projects_retention_bytes():
     client = FakeClickHouseClient()
-    settings = LobClickHouseSettings(enabled=True, ttl_days=7)
+    settings = LobClickHouseSettings(enabled=True, ttl_days=7, report_timeout_seconds=6)
 
     report = clickhouse_lob_storage_report(client=client, settings=settings)
 
     assert report["totalBytesOnDisk"] == 104000
     assert report["projectedBytesPerDay"] > 0
     assert report["projectedRetentionBytes"] == report["projectedBytesPerDay"] * 7
+    assert [timeout for _query, timeout in client.json_rows] == [6]
+    assert [timeout for _query, timeout in client.scalars] == [6, 6]
