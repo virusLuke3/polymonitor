@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import shutil
 import subprocess
 from contextlib import contextmanager
@@ -193,6 +194,18 @@ def safe_identifier(value: str, *, default: str | None = None) -> str:
     return text
 
 
+def _configure_postgres_connection(conn: Any, cfg: PostgresSettings, *, readonly: bool) -> None:
+    if cfg.search_path:
+        with conn.cursor() as cur:
+            cur.execute("SET search_path TO " + cfg.search_path)
+    with conn.cursor() as cur:
+        cur.execute("SET max_parallel_workers_per_gather = 0")
+        cur.execute("SET work_mem = '32MB'")
+    if readonly:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+
+
 @contextmanager
 def postgres_connection(settings: PostgresSettings | None = None, *, readonly: bool = False) -> Iterator[Any]:
     if psycopg is None:
@@ -209,15 +222,7 @@ def postgres_connection(settings: PostgresSettings | None = None, *, readonly: b
         autocommit=False,
     )
     try:
-        if cfg.search_path:
-            with conn.cursor() as cur:
-                cur.execute("SET search_path TO " + cfg.search_path)
-        with conn.cursor() as cur:
-            cur.execute("SET max_parallel_workers_per_gather = 0")
-            cur.execute("SET work_mem = '32MB'")
-        if readonly:
-            with conn.cursor() as cur:
-                cur.execute("SET TRANSACTION READ ONLY")
+        _configure_postgres_connection(conn, cfg, readonly=readonly)
         yield conn
         if not readonly:
             conn.commit()
@@ -227,6 +232,72 @@ def postgres_connection(settings: PostgresSettings | None = None, *, readonly: b
         raise
     finally:
         conn.close()
+
+
+class PostgresConnectionPool:
+    """Tiny thread-safe psycopg connection pool for short API requests."""
+
+    def __init__(self, settings: PostgresSettings | None = None, *, max_size: int = 4) -> None:
+        if psycopg is None:
+            raise RuntimeError("psycopg is not installed. Install psycopg[binary] first.")
+        self.settings = settings or PostgresSettings()
+        self.max_size = max(1, int(max_size))
+        self._pool: queue.LifoQueue[Any] = queue.LifoQueue(maxsize=self.max_size)
+        self._created = 0
+
+    @contextmanager
+    def connection(self, *, readonly: bool = False) -> Iterator[Any]:
+        conn = self._checkout()
+        reusable = True
+        try:
+            _configure_postgres_connection(conn, self.settings, readonly=readonly)
+            yield conn
+            if not readonly:
+                conn.commit()
+            else:
+                conn.rollback()
+        except Exception:
+            reusable = False
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            if reusable and not getattr(conn, "closed", False):
+                try:
+                    conn.rollback()
+                    self._pool.put_nowait(conn)
+                except Exception:
+                    self._close(conn)
+            else:
+                self._close(conn)
+
+    def _checkout(self) -> Any:
+        try:
+            conn = self._pool.get_nowait()
+            if not getattr(conn, "closed", False):
+                return conn
+        except queue.Empty:
+            pass
+        self._created += 1
+        return psycopg.connect(
+            host=self.settings.host,
+            port=self.settings.port,
+            user=self.settings.user,
+            password=self.settings.password,
+            dbname=self.settings.database,
+            connect_timeout=self.settings.connect_timeout_seconds,
+            row_factory=dict_row,
+            autocommit=False,
+        )
+
+    @staticmethod
+    def _close(conn: Any) -> None:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 class ClickHouseClient:

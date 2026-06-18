@@ -46,10 +46,11 @@ from quant.backtest.benchmark_persistence import (  # noqa: E402
 )
 from quant.backtest.runners.coverage_build import build_replay_coverage  # noqa: E402
 from quant.backtest.runners.selectors import list_supported_universes, universe_spec_from_payload  # noqa: E402
-from quant.core.db import PostgresSettings, postgres_connection  # noqa: E402
+from quant.core.db import PostgresConnectionPool, PostgresSettings, postgres_connection  # noqa: E402
 from quant.core.schema import create_schema  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
+BENCHMARK_DB_POOL = PostgresConnectionPool(PostgresSettings(), max_size=4)
 QUANT_EVENT_TILE_NAMESPACE = "quant-event-tile"
 QUANT_EVENT_TILE_WARM_KEY = "quant-event-tile-warm:events"
 QUANT_PRICE_TILE_NAMESPACE = "quant-price-series-tiles"
@@ -1465,7 +1466,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
         payload = request.get_json(silent=True) or {}
         try:
             parts = _benchmark_request_parts(payload)
-            with postgres_connection(PostgresSettings(), readonly=False) as conn:
+            with BENCHMARK_DB_POOL.connection(readonly=False) as conn:
                 benchmark_id = create_benchmark_run(
                     conn,
                     universe_type=parts["universe_spec"].universe_type,
@@ -1499,13 +1500,13 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
     @bp.route("/backtest-benchmarks", methods=["GET"])
     def api_quant_list_backtest_benchmarks():
         limit = min(max(_parse_int_arg("limit", 25) or 25, 1), 100)
-        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+        with BENCHMARK_DB_POOL.connection(readonly=True) as conn:
             rows = list_benchmark_runs(conn, limit=limit)
         return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
 
     @bp.route("/backtest-benchmarks/<int:benchmark_id>", methods=["GET"])
     def api_quant_get_backtest_benchmark(benchmark_id: int):
-        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+        with BENCHMARK_DB_POOL.connection(readonly=True) as conn:
             row = get_benchmark_run(conn, benchmark_id=benchmark_id)
             artifacts = get_benchmark_artifacts(conn, benchmark_id=benchmark_id)
         if not row:
@@ -1515,7 +1516,7 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
     @bp.route("/backtest-benchmarks/<int:benchmark_id>/rows", methods=["GET"])
     def api_quant_get_backtest_benchmark_rows(benchmark_id: int):
         limit = min(max(_parse_int_arg("limit", 10000) or 10000, 1), 25000)
-        with postgres_connection(PostgresSettings(), readonly=True) as conn:
+        with BENCHMARK_DB_POOL.connection(readonly=True) as conn:
             rows = get_benchmark_rows(conn, benchmark_id=benchmark_id, limit=limit)
         return jsonify({"items": [_camel_row(row) for row in rows], "count": len(rows)})
 
