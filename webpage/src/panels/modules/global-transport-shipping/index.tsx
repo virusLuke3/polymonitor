@@ -102,6 +102,11 @@ function riskSourcesLabel(value: unknown) {
   return value.slice(0, 3).map((item) => String(item || '').toUpperCase()).join(' / ');
 }
 
+function summaryNumber(value: unknown) {
+  const parsed = numeric(value as number | string | null);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function aviationRoutes(payload?: RuntimeGlobalTransportShippingPayload | null) {
   return payload?.aviation?.routes || [];
 }
@@ -238,6 +243,52 @@ function NewsRow({ row }: { row: Record<string, unknown> }) {
   );
 }
 
+function AviationStatusDeck({ payload }: { payload?: RuntimeGlobalTransportShippingPayload | null }) {
+  const summary = payload?.summary || {};
+  const liveFlights = aviationLiveFlights(payload);
+  const liveCount = summaryNumber(summary.liveFlightSamples) || liveFlights.length;
+  const routeCount = summaryNumber(summary.routes);
+  const visibleRoutes = summaryNumber(summary.visibleRoutes);
+  const topHub = String(summary.topHub || payload?.aviation?.hubs?.[0]?.code || '--');
+  const source = String(summary.liveFlightSource || (liveFlights.length ? liveFlights[0]?.source : '') || 'ROUTE GRAPH');
+  const health = statusClass(summary.adsbStatus || summary.openSkyStatus || payload?.status);
+  const blips = liveFlights.length ? liveFlights.slice(0, 6) : (payload?.aviation?.hubs || []).slice(0, 6);
+  return (
+    <div className="wm-aviation-status-deck">
+      <div className={`wm-aviation-radar-scope ${health}`}>
+        <span className="wm-aviation-radar-sweep" />
+        <svg viewBox="0 0 156 104" focusable="false" aria-hidden="true">
+          <path className="grid" d="M14 80 C36 18 115 18 142 80M28 80 C46 38 105 38 128 80M48 80 C60 58 93 58 108 80M78 10V94M18 80H140" />
+          <path className="route" d="M20 76 C52 34 86 38 136 22" />
+          <path className="route ghost" d="M26 30 C58 58 100 62 138 48" />
+          {blips.map((row, index) => {
+            const record = row as Record<string, unknown>;
+            const seed = String(record.callsign || record.code || record.icao24 || record.id || index);
+            const hash = seed.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+            const x = 26 + ((hash + index * 19) % 102);
+            const y = 24 + ((hash + index * 13) % 56);
+            return <circle key={`${seed}-${index}`} className={index < 2 ? 'hot' : ''} cx={x} cy={y} r={index < 2 ? 4.6 : 3.4} />;
+          })}
+        </svg>
+        <div className="wm-aviation-radar-readout">
+          <b>{formatCompact(liveCount)}</b>
+          <span>{source}</span>
+        </div>
+      </div>
+      <div className="wm-aviation-status-copy">
+        <span>LIVE AIR PICTURE</span>
+        <strong>{topHub} terminal net</strong>
+        <em>{formatCompact(visibleRoutes)} visible corridors / {formatCompact(routeCount)} OpenFlights edges</em>
+        <div className="wm-aviation-stat-row">
+          <i><b>{formatCompact(liveCount)}</b><small>live aircraft</small></i>
+          <i><b>{statusLabel(summary.adsbStatus)}</b><small>adsb fallback</small></i>
+          <i><b>{statusLabel(summary.openSkyStatus)}</b><small>opensky</small></i>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SourceHealthStrip({ payload }: { payload?: RuntimeGlobalTransportShippingPayload | null }) {
   const health = payload?.sourceHealth || {};
   const rows: Array<[string, unknown]> = [
@@ -298,6 +349,7 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
       className="wm-market-panel wm-evidence-panel wm-global-transport-panel"
       dataPanelId="global-transport-shipping"
     >
+      <AviationStatusDeck payload={payload} />
       <SourceHealthStrip payload={payload} />
       <div className="wm-aviation-tabs" role="tablist" aria-label="Airline intel views">
         {tabs.map((item) => (
