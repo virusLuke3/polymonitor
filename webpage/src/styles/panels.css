@@ -26167,7 +26167,7 @@ button.wm-evidence-row {
 
 .wm-aviation-source-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(86px, 1fr));
   gap: 6px;
   padding: 10px 16px 0;
 }

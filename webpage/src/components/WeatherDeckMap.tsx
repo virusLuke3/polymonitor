@@ -180,6 +180,7 @@ type AirFlightPoint = {
 type LiveAircraftPoint = {
   id: string;
   callsign: string;
+  source: string;
   originCountry: string;
   regionLabel: string;
   lon: number;
@@ -1159,6 +1160,7 @@ function normalizeLiveAircraft(payload?: RuntimeGlobalTransportShippingPayload |
     return [{
       id: String(row.id || row.icao24 || `opensky-${index}`),
       callsign: String(row.callsign || row.icao24 || 'OPEN'),
+      source: String(row.source || 'OpenSky'),
       originCountry: String(row.originCountry || 'Unknown'),
       regionLabel: String(row.regionLabel || row.region || 'OpenSky'),
       lon: coord[0],
@@ -2013,7 +2015,7 @@ function buildWeatherDeckLayers({
 
   if (liveAircraft.length) {
     layers.push(new ScatterplotLayer<LiveAircraftPoint>({
-      id: 'opensky-live-aircraft',
+      id: 'live-aircraft',
       data: liveAircraft,
       getPosition: (flight) => [flight.lon, flight.lat],
       getRadius: (flight) => {
@@ -2430,7 +2432,7 @@ function DeckMapTooltip({ tooltip }: { tooltip: DeckTooltipState }) {
     return (
       <div className={`wm-map-country-tooltip wm-map-deck-tooltip air ${flight.status}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
         <strong>{flight.callsign}</strong>
-        <span>OpenSky · {flight.regionLabel} · {flight.originCountry}</span>
+        <span>{flight.source} · {flight.regionLabel} · {flight.originCountry}</span>
         <small>{Math.round(flight.velocity || 0)} m/s · {Math.round(flight.altitude || 0)} m · risk {Math.round(flight.riskScore)}</small>
       </div>
     );

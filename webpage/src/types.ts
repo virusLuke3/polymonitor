@@ -2401,6 +2401,9 @@ export type RuntimeGlobalTransportShippingPayload = {
     aisStatus?: string | null;
     openSkyStatus?: string | null;
     openSkyRegions?: number | string | null;
+    adsbStatus?: string | null;
+    adsbRegions?: number | string | null;
+    liveFlightSource?: string | null;
     evidenceVersion?: string | null;
   } | null;
   evidence?: {
@@ -2497,6 +2500,8 @@ export type RuntimeGlobalTransportShippingPayload = {
       riskScore?: number | string | null;
       source?: string | null;
       sourceUrl?: string | null;
+      registration?: string | null;
+      aircraftType?: string | null;
       updatedAt?: string | null;
     }>;
     ops?: Array<Record<string, unknown>>;

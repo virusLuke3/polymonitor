@@ -68,6 +68,7 @@ def test_build_global_transport_shipping_payload_from_structured_sources(tmp_pat
     monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("OPENSKY_CLIENT_ID", raising=False)
     monkeypatch.delenv("OPENSKY_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("POLYDATA_ADSB_FALLBACK_ENABLED", "0")
 
     def http_text_get(url: str, **_: object) -> str:
         assert url == "https://example.test/transitland.dmfr.json"
@@ -116,6 +117,7 @@ def test_build_global_transport_shipping_payload_accepts_dict_market_search(tmp_
     monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("OPENSKY_CLIENT_ID", raising=False)
     monkeypatch.delenv("OPENSKY_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("POLYDATA_ADSB_FALLBACK_ENABLED", "0")
 
     def http_text_get(url: str, **_: object) -> str:
         assert url == "https://example.test/transitland.dmfr.json"
@@ -260,6 +262,7 @@ def test_opensky_auth_failure_degrades_without_breaking_payload(tmp_path, monkey
     monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
     monkeypatch.setenv("OPENSKY_CLIENT_ID", "client-id")
     monkeypatch.setenv("OPENSKY_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("POLYDATA_ADSB_FALLBACK_ENABLED", "0")
 
     cache = {}
 
@@ -290,6 +293,74 @@ def test_opensky_auth_failure_degrades_without_breaking_payload(tmp_path, monkey
     assert payload["aviation"]["mode"] == "seeded-route-graph"
     assert payload["aviation"]["liveFlights"] == []
     assert cache[(global_transport_shipping_service.OPENSKY_SNAPSHOT_NAMESPACE, global_transport_shipping_service.OPENSKY_CACHE_KEY)]["status"] == "error"
+
+
+def test_adsb_fallback_supplies_live_aircraft_when_opensky_degraded(tmp_path, monkeypatch):
+    openflights_root = tmp_path / "openflights"
+    _write_openflights_fixture(openflights_root)
+    monkeypatch.setenv("POLYDATA_OPENFLIGHTS_ROOT", str(openflights_root))
+    monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
+    monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
+    monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.setenv("OPENSKY_CLIENT_ID", "client-id")
+    monkeypatch.setenv("OPENSKY_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("POLYDATA_ADSB_HUB_LIMIT", "1")
+    monkeypatch.setenv("POLYDATA_ADSB_PER_HUB_AIRCRAFT_LIMIT", "6")
+    monkeypatch.setenv("POLYDATA_ADSB_AIRCRAFT_LIMIT", "12")
+    cache = {}
+
+    def fail_token(ctx: dict) -> tuple[str, dict]:
+        raise TimeoutError("opensky auth timeout")
+
+    def http_text_get(url: str, **_: object) -> str:
+        assert url == "https://example.test/transitland.dmfr.json"
+        return json.dumps(TRANSITLAND)
+
+    def http_json_get(url: str, **_: object) -> dict:
+        assert "/point/" in url
+        return {
+            "ac": [
+                {
+                    "hex": "a53207",
+                    "flight": "AAL1567 ",
+                    "r": "N434AN",
+                    "t": "A21N",
+                    "alt_baro": 17900,
+                    "gs": 405.7,
+                    "track": 273.25,
+                    "baro_rate": 320,
+                    "lat": 33.9,
+                    "lon": -84.1,
+                    "emergency": "none",
+                    "seen": 2,
+                },
+                {"hex": "nogeo", "flight": "DROP", "gs": 120},
+            ]
+        }
+
+    monkeypatch.setattr(global_transport_shipping_service, "_opensky_access_token", fail_token)
+    payload = global_transport_shipping_service.build_global_transport_shipping_payload(
+        {
+            "http_text_get": http_text_get,
+            "http_json_get": http_json_get,
+            "utc_now_iso": lambda: "2026-06-16T01:00:00Z",
+            "search_markets": lambda query, limit=3: [],
+            "get_cached_json": lambda namespace, key: cache.get((namespace, key)),
+            "set_cached_json": lambda namespace, key, value, ttl: cache.__setitem__((namespace, key), value),
+        },
+        limit=10,
+    )
+
+    assert payload["summary"]["openSkyStatus"] == "error"
+    assert payload["summary"]["adsbStatus"] == "ok"
+    assert payload["summary"]["liveFlightSource"] == "ADSB.lol"
+    assert payload["summary"]["liveFlightSamples"] == 1
+    assert payload["sourceHealth"]["opensky"] == "degraded"
+    assert payload["sourceHealth"]["adsb"] == "fresh"
+    assert payload["aviation"]["mode"] == "live-aircraft"
+    assert payload["aviation"]["liveFlights"][0]["source"] == "ADSB.lol"
+    assert payload["aviation"]["liveFlights"][0]["callsign"] == "AAL1567"
+    assert any(item["evidenceType"] == "ADSBLOL" and item["metric"] == 1 for item in payload["items"])
 
 
 def test_global_transport_shipping_runtime_panel_registered():

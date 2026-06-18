@@ -20,10 +20,13 @@ AISSTREAM_CACHE_KEY = "sample-v1"
 OPENSKY_SNAPSHOT_NAMESPACE = "snapshot:transport:opensky"
 OPENSKY_CACHE_KEY = "live-v1"
 OPENSKY_TOKEN_CACHE_KEY = "token-v1"
+ADSB_SNAPSHOT_NAMESPACE = "snapshot:transport:adsb"
+ADSB_CACHE_KEY = "live-v1"
 DEFAULT_LIMIT = 14
 DEFAULT_TTL_SECONDS = 900
 DEFAULT_AISSTREAM_SAMPLE_INTERVAL_SECONDS = 21600
 DEFAULT_OPENSKY_SAMPLE_INTERVAL_SECONDS = 900
+DEFAULT_ADSB_SAMPLE_INTERVAL_SECONDS = 1800
 AVIATION_ROUTE_LAYER_LIMIT = 360
 AVIATION_FLIGHT_LAYER_LIMIT = 140
 EVIDENCE_SCHEMA_VERSION = "air-evidence-v1"
@@ -37,6 +40,8 @@ AISSTREAM_DOC_URL = "https://aisstream.io/documentation"
 OPENSKY_AUTH_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
 OPENSKY_STATES_URL = "https://opensky-network.org/api/states/all"
 OPENSKY_DOC_URL = "https://openskynetwork.github.io/opensky-api/rest.html"
+ADSB_LOL_BASE_URL = "https://api.adsb.lol/v2"
+ADSB_LOL_DOC_URL = "https://www.adsb.lol/docs/open-data/api/"
 OPENSKY_REGIONS = [
     {"id": "us-east", "label": "US East", "lamin": 24.0, "lomin": -88.0, "lamax": 49.5, "lomax": -66.0},
     {"id": "europe", "label": "Europe", "lamin": 35.0, "lomin": -12.0, "lamax": 61.0, "lomax": 32.0},
@@ -423,7 +428,7 @@ def _trend(seed: str, *, length: int = 9, floor: int = 16, ceiling: int = 92) ->
     return values
 
 
-def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str, source_url: str, opensky_status: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str, source_url: str, live_aircraft_status: Dict[str, Any] | None = None) -> Dict[str, Any]:
     hubs = []
     for hub in route_stats.get("topHubs", [])[:24]:
         code = hub.get("iata") or hub.get("icao") or hub.get("id")
@@ -541,11 +546,11 @@ def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str, sou
     ]
     return {
         "generatedAt": generated_at,
-        "mode": "live-aircraft" if (opensky_status or {}).get("aircraft") else "seeded-route-graph",
+        "mode": "live-aircraft" if (live_aircraft_status or {}).get("aircraft") else "seeded-route-graph",
         "hubs": hubs,
         "routes": routes,
         "flights": flights,
-        "liveFlights": (opensky_status or {}).get("aircraft") or [],
+        "liveFlights": (live_aircraft_status or {}).get("aircraft") or [],
         "ops": ops_rows,
         "airlines": airline_rows,
         "news": news_rows,
@@ -623,10 +628,10 @@ def _build_evidence_payload(aviation: Dict[str, Any], items: List[Dict[str, Any]
             lon=row.get("lon"),
             severity=str(row.get("status") or "normal"),
             confidence=0.82,
-            source="OpenSky",
+            source=str(row.get("source") or "OpenSky"),
             source_url=str(row.get("sourceUrl") or OPENSKY_DOC_URL),
             updated_at=str(row.get("updatedAt") or generated_at),
-            risk_sources=["opensky", "aircraft"],
+            risk_sources=[str(row.get("source") or "opensky").lower(), "aircraft"],
             reason=f"{row.get('regionLabel') or row.get('region') or 'region'} live aircraft state / {row.get('originCountry') or 'unknown'}",
         )
         for row in aviation.get("liveFlights", [])[:96]
@@ -1000,6 +1005,142 @@ def _normalize_opensky_state(row: List[Any], *, region: Dict[str, Any], sampled_
     }
 
 
+def _adsb_base_url() -> str:
+    return str(os.environ.get("POLYDATA_ADSB_BASE_URL") or ADSB_LOL_BASE_URL).rstrip("/")
+
+
+def _adsb_number(value: Any) -> Optional[float]:
+    if isinstance(value, str) and value.strip().lower() == "ground":
+        return 0.0
+    return _float(value)
+
+
+def _normalize_adsb_aircraft(row: Dict[str, Any], *, hub: Dict[str, Any], sampled_at: str) -> Optional[Dict[str, Any]]:
+    if not isinstance(row, dict):
+        return None
+    lat = _float(row.get("lat"))
+    lon = _float(row.get("lon"))
+    if lat is None or lon is None:
+        return None
+    callsign = str(row.get("flight") or row.get("r") or row.get("hex") or "ADSB").strip() or "ADSB"
+    ground_value = str(row.get("alt_baro") or "").strip().lower()
+    on_ground = ground_value == "ground"
+    altitude_ft = _adsb_number(row.get("alt_baro"))
+    if altitude_ft is None:
+        altitude_ft = _adsb_number(row.get("alt_geom"))
+    ground_speed_knots = _adsb_number(row.get("gs"))
+    vertical_rate_ft_min = _adsb_number(row.get("baro_rate"))
+    emergency = str(row.get("emergency") or "").strip().lower()
+    risk_score = 16
+    if emergency and emergency not in {"none", "null", "false"}:
+        risk_score += 42
+    if altitude_ft is not None and altitude_ft < 3000 and not on_ground:
+        risk_score += 12
+    if vertical_rate_ft_min is not None and abs(vertical_rate_ft_min) >= 1500:
+        risk_score += 8
+    if on_ground:
+        risk_score = max(5, risk_score - 7)
+    if ground_speed_knots is not None and ground_speed_knots < 135 and not on_ground:
+        risk_score += 6
+    return {
+        "id": f"adsb-{_source_hash(str(row.get('hex') or callsign))}",
+        "icao24": row.get("hex"),
+        "callsign": callsign,
+        "registration": row.get("r"),
+        "aircraftType": row.get("t"),
+        "originCountry": str(row.get("ownOp") or row.get("desc") or "Unknown").strip() or "Unknown",
+        "region": str(hub.get("iata") or hub.get("icao") or hub.get("id") or "hub").lower(),
+        "regionLabel": f"{hub.get('iata') or hub.get('icao') or 'HUB'} vicinity",
+        "lat": lat,
+        "lon": lon,
+        "baroAltitude": round(altitude_ft * 0.3048, 1) if altitude_ft is not None else None,
+        "velocity": round(ground_speed_knots * 0.514444, 1) if ground_speed_knots is not None else None,
+        "heading": _float(row.get("track") if row.get("track") is not None else row.get("true_heading")),
+        "verticalRate": round(vertical_rate_ft_min * 0.00508, 2) if vertical_rate_ft_min is not None else None,
+        "onGround": on_ground,
+        "lastContact": row.get("seen") or row.get("seen_pos"),
+        "status": "watch" if risk_score >= 34 else "normal",
+        "riskScore": min(92, risk_score),
+        "source": "ADSB.lol",
+        "sourceUrl": ADSB_LOL_DOC_URL,
+        "updatedAt": sampled_at,
+    }
+
+
+def _adsb_live_status(ctx: dict, hubs: List[Dict[str, Any]], *, enabled: bool = True) -> Dict[str, Any]:
+    min_interval = _env_int(
+        "POLYDATA_ADSB_MIN_SAMPLE_INTERVAL_SECONDS",
+        DEFAULT_ADSB_SAMPLE_INTERVAL_SECONDS,
+        minimum=900,
+        maximum=21600,
+    )
+    if not enabled or not _env_bool("POLYDATA_ADSB_FALLBACK_ENABLED", True):
+        return {
+            "status": "skipped",
+            "aircraftCount": 0,
+            "aircraft": [],
+            "regions": [],
+            "sourceUrl": ADSB_LOL_DOC_URL,
+            "cacheTtlSeconds": min_interval,
+        }
+    cached = _read_cached_payload(ctx, ADSB_SNAPSHOT_NAMESPACE, ADSB_CACHE_KEY, max_age_seconds=min_interval)
+    if cached is not None:
+        return cached
+    sampled_at = _utc_now_iso(ctx)
+    hub_limit = _env_int("POLYDATA_ADSB_HUB_LIMIT", 4, minimum=1, maximum=10)
+    per_hub_limit = _env_int("POLYDATA_ADSB_PER_HUB_AIRCRAFT_LIMIT", 24, minimum=6, maximum=80)
+    total_limit = _env_int("POLYDATA_ADSB_AIRCRAFT_LIMIT", 96, minimum=12, maximum=220)
+    radius_nm = _env_int("POLYDATA_ADSB_RADIUS_NM", 70, minimum=20, maximum=250)
+    base_url = _adsb_base_url()
+    aircraft: List[Dict[str, Any]] = []
+    regions = []
+    errors = []
+    seen: set[str] = set()
+    for hub in hubs[:hub_limit]:
+        lat = _float(hub.get("lat"))
+        lon = _float(hub.get("lon"))
+        code = hub.get("iata") or hub.get("icao") or hub.get("id") or "hub"
+        if lat is None or lon is None:
+            continue
+        url = f"{base_url}/point/{lat:.5f}/{lon:.5f}/{radius_nm}"
+        try:
+            payload = _http_json_get(ctx, url, timeout=14, headers={"User-Agent": "polydata-global-transport/1.0"})
+            rows = payload.get("ac") if isinstance(payload, dict) else []
+            if not isinstance(rows, list):
+                rows = []
+            normalized = []
+            for row in rows:
+                item = _normalize_adsb_aircraft(row, hub=hub, sampled_at=sampled_at)
+                if item is None:
+                    continue
+                key = str(item.get("icao24") or item.get("id"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized.append(item)
+            normalized.sort(key=lambda item: (0 if item.get("status") == "watch" else 1, -(float(item.get("velocity") or 0))))
+            picked = normalized[:per_hub_limit]
+            aircraft.extend(picked)
+            regions.append({"id": str(code), "label": f"{code} vicinity", "status": "ok", "aircraftCount": len(normalized), "returned": len(picked)})
+        except Exception as exc:
+            errors.append({"region": str(code), "error": exc.__class__.__name__})
+            regions.append({"id": str(code), "label": f"{code} vicinity", "status": "error", "aircraftCount": 0, "returned": 0})
+    live_payload = {
+        "status": "ok" if aircraft else ("partial" if errors else "empty"),
+        "aircraftCount": len(aircraft),
+        "aircraft": aircraft[:total_limit],
+        "regions": regions,
+        "errors": errors,
+        "sourceUrl": ADSB_LOL_DOC_URL,
+        "source": "ADSB.lol",
+        "sampledAt": sampled_at,
+        "cacheTtlSeconds": min_interval,
+        "baseUrl": base_url,
+    }
+    _store_cached_payload(ctx, ADSB_SNAPSHOT_NAMESPACE, ADSB_CACHE_KEY, live_payload, ttl_seconds=min_interval)
+    return live_payload
+
+
 def _opensky_live_status(ctx: dict) -> Dict[str, Any]:
     min_interval = _env_int(
         "POLYDATA_OPENSKY_MIN_SAMPLE_INTERVAL_SECONDS",
@@ -1021,6 +1162,7 @@ def _opensky_live_status(ctx: dict) -> Dict[str, Any]:
             "regions": [],
             "errors": [{"stage": "auth", "error": exc.__class__.__name__}],
             "sourceUrl": OPENSKY_DOC_URL,
+            "source": "OpenSky",
             "sampledAt": sampled_at,
             "cacheTtlSeconds": min_interval,
             "tokenState": "auth-error",
@@ -1072,6 +1214,7 @@ def _opensky_live_status(ctx: dict) -> Dict[str, Any]:
         "regions": region_rows,
         "errors": errors,
         "sourceUrl": OPENSKY_DOC_URL,
+        "source": "OpenSky",
         "sampledAt": sampled_at,
         "cacheTtlSeconds": min_interval,
         "tokenState": token_state.get("status"),
@@ -1148,6 +1291,8 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
     transit_stats, transit_url = _fetch_transitland_catalog(ctx)
     ais_status = _aisstream_status(ctx)
     opensky_status = _opensky_live_status(ctx)
+    adsb_status = _adsb_live_status(ctx, route_stats.get("topHubs", []), enabled=not bool(opensky_status.get("aircraft")))
+    live_aircraft_status = opensky_status if opensky_status.get("aircraft") else adsb_status
 
     items: List[Dict[str, Any]] = []
     for hub in route_stats["topHubs"][:6]:
@@ -1258,22 +1403,43 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             metric_label="AIRCRAFT",
             source_url=OPENSKY_DOC_URL,
             evidence_type="OPENSKY",
-            confidence=0.42 if opensky_status.get("status") in {"missing-key", "auth-error"} else 0.82,
+            confidence=0.42 if opensky_status.get("status") in {"missing-key", "auth-error", "error"} else 0.82,
             severity=opensky_severity,
             tags=["opensky", "live-aircraft"],
             evidence=opensky_status,
             markets=_market_links(ctx, "flight delay airline disruption live aircraft"),
         )
     )
+    if adsb_status.get("status") != "skipped" or adsb_status.get("aircraft"):
+        adsb_severity = "watch" if adsb_status.get("status") in {"error", "partial"} else "normal"
+        items.append(
+            _item(
+                topic="aviation",
+                entity="ADSB.lol",
+                country="Global",
+                title="ADSB.lol fallback aircraft state",
+                summary=f"ADSB.lol status: {adsb_status.get('status')}. {adsb_status.get('aircraftCount') or 0} aircraft returned across {len(adsb_status.get('regions') or [])} hub regions.",
+                metric=int(adsb_status.get("aircraftCount") or 0),
+                metric_label="AIRCRAFT",
+                source_url=ADSB_LOL_DOC_URL,
+                evidence_type="ADSBLOL",
+                confidence=0.76 if adsb_status.get("aircraft") else 0.5,
+                severity=adsb_severity,
+                tags=["adsb", "live-aircraft", "fallback"],
+                evidence=adsb_status,
+                markets=_market_links(ctx, "flight delay airline disruption adsb aircraft"),
+            )
+        )
     items.sort(key=lambda row: (0 if row["severity"] == "watch" else 1, -int(row.get("metric") or 0)))
     limited = items[: max(1, int(limit or DEFAULT_LIMIT))]
-    aviation = _build_aviation_layer(route_stats, generated_at=generated_at, source_url=routes_source, opensky_status=opensky_status)
+    aviation = _build_aviation_layer(route_stats, generated_at=generated_at, source_url=routes_source, live_aircraft_status=live_aircraft_status)
     evidence_payload = _build_evidence_payload(aviation, limited, generated_at=generated_at)
     source_health = {
         "openflights": "fresh",
         "transitland": "fresh",
         "aisstream": "degraded" if ais_status.get("status") in {"missing-key", "error"} else ("stale" if ais_status.get("cacheMode") else "fresh"),
         "opensky": "degraded" if opensky_status.get("status") in {"missing-key", "auth-error", "error", "partial"} else ("stale" if opensky_status.get("cacheMode") else "fresh"),
+        "adsb": "skipped" if adsb_status.get("status") == "skipped" else ("degraded" if adsb_status.get("status") in {"error", "partial"} else ("stale" if adsb_status.get("cacheMode") else "fresh")),
         "weatherRiskJoin": "frontend-runtime",
         "conflictRiskJoin": "frontend-runtime",
     }
@@ -1290,6 +1456,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             "transitland": {"status": "ok", "sourceUrl": transit_url},
             "aisstream": {"status": ais_status.get("status"), "sourceUrl": AISSTREAM_DOC_URL},
             "opensky": {"status": opensky_status.get("status"), "sourceUrl": OPENSKY_DOC_URL},
+            "adsb": {"status": adsb_status.get("status"), "sourceUrl": ADSB_LOL_DOC_URL},
         },
         "sourceHealth": source_health,
         "cachePolicy": {
@@ -1304,6 +1471,7 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             "quotaGuard": {
                 "aisstream": "cached-low-frequency",
                 "opensky": "oauth-bbox-cache",
+                "adsb": "fallback-hub-bbox-cache",
                 "openflights": "static-source",
                 "transitland": "sampled-catalog",
             },
@@ -1323,6 +1491,9 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             "aisStatus": ais_status.get("status"),
             "openSkyStatus": opensky_status.get("status"),
             "openSkyRegions": len(opensky_status.get("regions") or []),
+            "adsbStatus": adsb_status.get("status"),
+            "adsbRegions": len(adsb_status.get("regions") or []),
+            "liveFlightSource": live_aircraft_status.get("source") or ("OpenSky" if opensky_status.get("aircraft") else ("ADSB.lol" if adsb_status.get("aircraft") else None)),
             "evidenceVersion": EVIDENCE_SCHEMA_VERSION,
         },
         "aviation": aviation,

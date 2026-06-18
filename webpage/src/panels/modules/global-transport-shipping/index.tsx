@@ -86,8 +86,8 @@ function openSource(url?: string | null) {
 
 function statusClass(status?: unknown) {
   const text = String(status || '').toLowerCase();
-  if (text.includes('alert')) return 'alert';
-  if (text.includes('watch') || text.includes('minor')) return 'watch';
+  if (text.includes('alert') || text.includes('error') || text.includes('auth')) return 'alert';
+  if (text.includes('watch') || text.includes('minor') || text.includes('degraded') || text.includes('stale') || text.includes('missing')) return 'watch';
   return 'normal';
 }
 
@@ -243,9 +243,9 @@ function SourceHealthStrip({ payload }: { payload?: RuntimeGlobalTransportShippi
   const rows: Array<[string, unknown]> = [
     ['OpenFlights', health.openflights || payload?.sources?.openflights],
     ['OpenSky', health.opensky || payload?.summary?.openSkyStatus],
+    ['ADSB', health.adsb || payload?.summary?.adsbStatus],
     ['Transitland', health.transitland || payload?.sources?.transitland],
     ['AIS', health.aisstream || payload?.summary?.aisStatus],
-    ['Conflict', health.conflictRiskJoin],
   ];
   return (
     <div className="wm-aviation-source-strip" aria-label="Aviation evidence source health">
