@@ -1020,6 +1020,8 @@ def _build_worldcup_selection_context(ctx: dict) -> tuple[CoverageSelectionConte
 
 def _is_active_worldcup_match_item(item: Dict[str, Any]) -> bool:
     status = str(item.get("matchStatus") or item.get("status") or "").strip().lower()
+    if status in {"final", "finished", "complete", "completed", "ended", "closed", "resolved", "full-time", "fulltime", "ft"}:
+        return False
     if status in {"in", "live", "in_progress", "in-progress", "halftime", "half-time"}:
         return True
     minutes = _int_or_none(item.get("minutesUntilKickoff"))
