@@ -673,7 +673,7 @@ def _persist_book_side_snapshot(
             )
 
 
-def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> None:
+def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> bool:
     try:
         fetched_at = str(payload.get("fetchedAt") or _iso_utc_now())
         source = str(payload.get("source") or "local-orderbook")
@@ -708,14 +708,16 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
                 side_payload=payload.get("no") or _empty_book_side(),
                 coverage_payload=coverage_payload,
             )
+        return True
     except Exception as exc:
         logger = ctx.get("app").logger if ctx.get("app") else None
         if logger:
             logger.warning("clob snapshot persistence failed token_id=%s: %s", yes_token_id, exc)
+        return False
 
 
-def persist_runtime_lob_payload(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> None:
-    _persist_orderbook_snapshots(ctx, payload, yes_token_id, no_token_id)
+def persist_runtime_lob_payload(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> bool:
+    return _persist_orderbook_snapshots(ctx, payload, yes_token_id, no_token_id)
 
 
 def write_lob_dead_letter(

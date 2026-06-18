@@ -53,6 +53,7 @@ DEFAULT_RECENT_EVENT_SAMPLE_LIMIT = 12
 DEFAULT_STATUS_FILE_WRITE_INTERVAL_SECONDS = 2.0
 DEFAULT_SNAPSHOT_PERSIST_QUEUE_MAX_SIZE = 500
 DEFAULT_SNAPSHOT_PERSIST_DRAIN_SECONDS = 5.0
+DEFAULT_SNAPSHOT_PERSIST_FAILURE_BACKOFF_SECONDS = 60
 DRIFT_CHECK_SECONDS_BY_TIER = {"hot": 900, "warm": 1800, "cold": 3600}
 STALE_IDLE_SECONDS_BY_TIER = {"hot": 120, "warm": 300, "cold": 900}
 KNOWN_MARKET_EVENT_TYPES = {
@@ -117,6 +118,9 @@ _RUNTIME_STATUS: dict[str, Any] = {
     "snapshotPersistFailureCount": 0,
     "snapshotPersistCoalescedCount": 0,
     "snapshotPersistPendingCount": 0,
+    "snapshotPersistBackoffUntil": None,
+    "snapshotPersistBackoffSeconds": 0,
+    "snapshotPersistLastFailureAt": None,
     "lastPersistQueuedAt": None,
 }
 
@@ -302,6 +306,7 @@ class _SnapshotPersistWorker:
         )
         self._lock = threading.Lock()
         self._latest_by_key: dict[str, _SnapshotPersistJob] = {}
+        self._backoff_until = 0.0
         self._thread = threading.Thread(target=self._run, name="local-orderbook-snapshot-persist", daemon=True)
         self._thread.start()
         _update_runtime_status(snapshotPersistQueueMaxSize=self.queue.maxsize, snapshotPersistPendingCount=0)
@@ -344,21 +349,44 @@ class _SnapshotPersistWorker:
             try:
                 if key is None:
                     return
+                self._sleep_for_backoff_if_needed()
                 with self._lock:
                     job = self._latest_by_key.pop(key, None)
                 if job is None:
                     continue
                 try:
-                    lob_service.persist_runtime_lob_payload(self.ctx, job.payload, job.yes_token_id, job.no_token_id)
+                    persisted = lob_service.persist_runtime_lob_payload(self.ctx, job.payload, job.yes_token_id, job.no_token_id)
+                    if persisted is False:
+                        raise RuntimeError("snapshot persistence returned false")
                     _increment_runtime_status("snapshotPersistWrittenCount")
-                    _update_runtime_status(lastPersistAt=_utc_now_iso(), snapshotPersistPendingCount=self.pending_count())
+                    _update_runtime_status(
+                        lastPersistAt=_utc_now_iso(),
+                        snapshotPersistPendingCount=self.pending_count(),
+                        snapshotPersistBackoffUntil=None,
+                        snapshotPersistBackoffSeconds=0,
+                    )
                 except Exception as exc:
                     _increment_runtime_status("snapshotPersistFailureCount")
-                    _update_runtime_status(snapshotPersistPendingCount=self.pending_count())
+                    self._start_failure_backoff()
+                    _update_runtime_status(snapshotPersistPendingCount=self.pending_count(), snapshotPersistLastFailureAt=_utc_now_iso())
                     if self.logger:
                         self.logger.warning("snapshot persist worker failed token_id=%s error=%s", job.yes_token_id, exc)
             finally:
                 self.queue.task_done()
+
+    def _sleep_for_backoff_if_needed(self) -> None:
+        remaining = self._backoff_until - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, _env_float("POLYDATA_LOB_SNAPSHOT_PERSIST_FAILURE_BACKOFF_SECONDS", DEFAULT_SNAPSHOT_PERSIST_FAILURE_BACKOFF_SECONDS, minimum=1.0)))
+
+    def _start_failure_backoff(self) -> None:
+        seconds = _env_float("POLYDATA_LOB_SNAPSHOT_PERSIST_FAILURE_BACKOFF_SECONDS", DEFAULT_SNAPSHOT_PERSIST_FAILURE_BACKOFF_SECONDS, minimum=1.0)
+        self._backoff_until = time.monotonic() + seconds
+        _update_runtime_status(
+            snapshotPersistBackoffUntil=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + seconds)),
+            snapshotPersistBackoffSeconds=seconds,
+        )
 
 
 class LocalOrderBookWebsocketWatcher:
