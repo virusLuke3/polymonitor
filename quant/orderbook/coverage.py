@@ -74,6 +74,7 @@ TOPIC_BASE_SCORE: dict[str, int] = {"worldcup": 3200, "crypto": 2800, "politics"
 class CoverageSelectionContext:
     active_worldcup_market_ids: frozenset[int] = field(default_factory=frozenset)
     active_worldcup_terms: frozenset[str] = field(default_factory=frozenset)
+    active_worldcup_slugs: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -238,6 +239,9 @@ def _is_active_worldcup_market(row: dict[str, Any], text: str, context: Coverage
         return False
     market_id = _int_or_none(row.get("market_id") or row.get("id"))
     if market_id is not None and market_id in context.active_worldcup_market_ids:
+        return True
+    slug = str(row.get("market_slug") or row.get("slug") or "").strip().lower()
+    if slug and any(active_slug and slug.startswith(active_slug) for active_slug in context.active_worldcup_slugs):
         return True
     if " vs " not in text and "spread:" not in text and "total" not in text:
         return False

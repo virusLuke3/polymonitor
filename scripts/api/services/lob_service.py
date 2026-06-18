@@ -979,6 +979,7 @@ def _build_worldcup_selection_context(ctx: dict) -> tuple[CoverageSelectionConte
     active_items = [item for item in items if _is_active_worldcup_match_item(item)]
     market_ids: set[int] = set()
     terms: set[str] = set()
+    slugs: set[str] = set()
     for item in active_items:
         for value in item.get("relatedPolymarketMarketIds") or []:
             parsed = _int_or_none(value)
@@ -990,22 +991,25 @@ def _build_worldcup_selection_context(ctx: dict) -> tuple[CoverageSelectionConte
             parsed = _int_or_none(market.get("marketId") or market.get("id"))
             if parsed is not None:
                 market_ids.add(parsed)
+            slug = str(market.get("slug") or "").strip().lower()
+            if slug:
+                slugs.add(slug)
         home = _coverage_term(item.get("homeTeam"))
         away = _coverage_term(item.get("awayTeam"))
         entity = _coverage_term(item.get("entity"))
-        for term in (home, away, entity):
-            if term:
-                terms.add(term)
+        if entity:
+            terms.add(entity)
         if home and away:
             terms.add(f"{home} vs {away}")
             terms.add(f"{away} vs {home}")
     return (
-        CoverageSelectionContext(frozenset(market_ids), frozenset(terms)),
+        CoverageSelectionContext(frozenset(market_ids), frozenset(terms), frozenset(slugs)),
         {
             "mode": "match-ops-active-window",
             "activeMatchCount": len(active_items),
             "activeMarketIdCount": len(market_ids),
             "activeTerms": sorted(terms)[:24],
+            "activeSlugs": sorted(slugs)[:24],
             "windowMinutes": {
                 "beforeKickoff": WORLDCUP_ACTIVE_MATCH_WINDOW_BEFORE_MINUTES,
                 "afterKickoff": WORLDCUP_ACTIVE_MATCH_WINDOW_AFTER_MINUTES,

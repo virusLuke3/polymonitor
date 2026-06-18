@@ -65,6 +65,37 @@ def test_active_worldcup_match_is_at_least_warm_when_volume_is_low():
     assert target.retention_days == 14
 
 
+def test_active_worldcup_slug_matches_same_match_derivatives_only():
+    context = CoverageSelectionContext(
+        frozenset(),
+        frozenset({"czech republic vs south africa"}),
+        frozenset({"fifwc-cze-rsa-2026-06-18"}),
+    )
+
+    same_match = build_coverage_target({
+        "market_id": 103,
+        "market_slug": "fifwc-cze-rsa-2026-06-18-spread-away-4pt5",
+        "market_title": "Spread: South Africa (-4.5)",
+        "category": "sports",
+        "tags": ["world-cup"],
+        "yes_token_id": "yes",
+        "no_token_id": "no",
+    }, context=context)
+    future_match = build_coverage_target({
+        "market_id": 104,
+        "market_slug": "fifwc-rsa-kr-2026-06-24-spread-home-5pt5",
+        "market_title": "Spread: South Africa (-5.5)",
+        "category": "sports",
+        "tags": ["world-cup"],
+        "yes_token_id": "yes",
+        "no_token_id": "no",
+    }, context=context)
+
+    assert same_match is not None
+    assert same_match.market_id == 103
+    assert future_match is None
+
+
 def test_select_coverage_targets_respects_topic_filter_and_limits():
     rows = [
         {
