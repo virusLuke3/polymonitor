@@ -321,6 +321,33 @@ class ClickHouseClient:
                 rows.append(parsed)
         return rows
 
+    def query_json_compact_rows(
+        self,
+        query: str,
+        *,
+        columns: Sequence[str],
+        timeout_seconds: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read rows through ClickHouse JSONCompactEachRow.
+
+        JSONEachRow repeats object keys for every row, which is costly for
+        large replay windows. JSONCompactEachRow keeps a stable projection and
+        returns each row as an array, so callers can zip it back to dicts.
+        """
+
+        names = [str(column) for column in columns]
+        full_query = query.rstrip().removesuffix(";") + "\nFORMAT JSONCompactEachRow"
+        output = self._query_text(full_query, timeout_seconds=timeout_seconds)
+        rows: list[dict[str, Any]] = []
+        for line in output.splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                rows.append(dict(zip(names, parsed)))
+        return rows
+
     def query_scalar(self, query: str, *, timeout_seconds: float | None = None) -> str:
         return self._query_text(query.rstrip().removesuffix(";"), timeout_seconds=timeout_seconds).strip()
 

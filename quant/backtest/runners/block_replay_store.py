@@ -452,7 +452,9 @@ def load_orderfilled_block_replay_rows_for_ranges(
         )
     range_sql = _market_block_range_condition(ranges)
     projection = _block_replay_projection(column_profile, table_alias=None)
-    return ch.query_json_rows(
+    columns = _block_replay_projection_columns(column_profile)
+    return _query_compact_block_replay_rows(
+        ch,
         f"""
         SELECT
             {projection}
@@ -462,6 +464,7 @@ def load_orderfilled_block_replay_rows_for_ranges(
         WHERE {range_sql}
         ORDER BY market_id ASC, outcome_code ASC, block_number ASC
         """,
+        columns=columns,
         timeout_seconds=240,
     )
 
@@ -490,7 +493,9 @@ def _load_orderfilled_block_replay_rows_for_ranges_join(
     )
     inner_projection = _block_replay_projection(column_profile, table_alias=None)
     outer_projection = _block_replay_projection(column_profile, table_alias="f")
-    return client.query_json_rows(
+    columns = _block_replay_projection_columns(column_profile)
+    return _query_compact_block_replay_rows(
+        client,
         f"""
         SELECT
             {outer_projection}
@@ -511,8 +516,62 @@ def _load_orderfilled_block_replay_rows_for_ranges_join(
         WHERE f.block_number BETWEEN ranges.from_block AND ranges.to_block
         ORDER BY f.market_id ASC, f.outcome_code ASC, f.block_number ASC
         """,
+        columns=columns,
         timeout_seconds=240,
     )
+
+
+def _query_compact_block_replay_rows(
+    client: ClickHouseClient,
+    query: str,
+    *,
+    columns: list[str],
+    timeout_seconds: float,
+) -> list[dict[str, Any]]:
+    query_compact = getattr(client, "query_json_compact_rows", None)
+    if callable(query_compact):
+        return query_compact(query, columns=columns, timeout_seconds=timeout_seconds)
+    return client.query_json_rows(query, timeout_seconds=timeout_seconds)
+
+
+def _block_replay_projection_columns(column_profile: Literal["full", "favorite_hold"]) -> list[str]:
+    if column_profile == "favorite_hold":
+        return [
+            "market_id",
+            "outcome_code",
+            "token_id",
+            "block_number",
+            "block_time",
+            "low_price",
+            "close_price",
+            "volume",
+            "log_index",
+            "tx_hash",
+            "price",
+            "size",
+            "replay_source",
+        ]
+    return [
+        "market_id",
+        "outcome_code",
+        "token_id",
+        "block_number",
+        "block_time",
+        "open_price",
+        "high_price",
+        "low_price",
+        "close_price",
+        "volume",
+        "trade_count",
+        "first_log_index",
+        "last_log_index",
+        "tx_hash",
+        "buy_cross_price",
+        "sell_cross_price",
+        "price",
+        "size",
+        "replay_source",
+    ]
 
 
 def _block_replay_projection(
