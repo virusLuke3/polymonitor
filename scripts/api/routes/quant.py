@@ -6,6 +6,7 @@ import json
 import logging
 from pathlib import Path
 import sys
+import threading
 import time
 from typing import Any
 import uuid
@@ -38,6 +39,8 @@ from quant.api.read_api import (  # noqa: E402
 )
 from quant.backtest.backtest_engine import create_and_execute_backtest  # noqa: E402
 from quant.backtest.benchmark_persistence import (  # noqa: E402
+    create_benchmark_run,
+    fail_benchmark_run,
     get_benchmark_artifacts,
     get_benchmark_rows,
     get_benchmark_run,
@@ -152,6 +155,93 @@ def _benchmark_profile_keys(payload: dict[str, Any]) -> tuple[str, ...]:
     if isinstance(bundle, list):
         return tuple(str(item) for item in bundle)
     return tuple(str(item).strip() for item in str(bundle).split(",") if str(item).strip())
+
+
+def _benchmark_request_parts(payload: dict[str, Any]) -> dict[str, Any]:
+    universe_spec = universe_spec_from_payload(payload)
+    strategy_payload = payload.get("strategySpec") or payload.get("strategy_spec") or {}
+    if not isinstance(strategy_payload, dict):
+        strategy_payload = {}
+    profile_keys = _benchmark_profile_keys(payload)
+    min_probability = Decimal(str(strategy_payload.get("minProbability") or strategy_payload.get("min_probability") or payload.get("minProbability") or "0.60"))
+    max_probability = Decimal(str(strategy_payload.get("maxProbability") or strategy_payload.get("max_probability") or payload.get("maxProbability") or "0.80"))
+    stake = Decimal(str(strategy_payload.get("stake") or payload.get("stake") or "10"))
+    initial_capital = Decimal(str(strategy_payload.get("initialCapital") or strategy_payload.get("initial_capital") or payload.get("initialCapital") or "1000"))
+    max_daily_cost = _optional_decimal_payload(strategy_payload.get("maxDailyCost", strategy_payload.get("max_daily_cost", payload.get("maxDailyCost", payload.get("max_daily_cost", "20")))))
+    max_concurrent_positions = _optional_int_payload(strategy_payload.get("maxConcurrentPositions", strategy_payload.get("max_concurrent_positions", payload.get("maxConcurrentPositions", payload.get("max_concurrent_positions", 2)))))
+    max_daily_trades = _optional_int_payload(strategy_payload.get("maxDailyTrades", strategy_payload.get("max_daily_trades", payload.get("maxDailyTrades", payload.get("max_daily_trades")))))
+    parameters = {
+        "limit": int(universe_spec.limit),
+        "universe": {
+            "universeName": universe_spec.universe_name,
+            "universeType": universe_spec.universe_type,
+            "limit": int(universe_spec.limit),
+            "marketIds": list(universe_spec.market_ids or []),
+            "marketSlugs": list(universe_spec.market_slugs or []),
+            "eventSlug": universe_spec.event_slug,
+            "category": universe_spec.category,
+            "startDate": universe_spec.start_date,
+            "endDate": universe_spec.end_date,
+            "requireResolved": bool(universe_spec.require_resolved),
+            "requireOrderfilledRows": bool(universe_spec.require_orderfilled_rows),
+        },
+        "min_probability": str(min_probability),
+        "max_probability": str(max_probability),
+        "snapshot_hours_before_start": "1",
+        "signal_lookback_hours": "24",
+        "window_start_hours": "1",
+        "window_end_hours": "0",
+        "initial_capital": str(initial_capital),
+        "stake": str(stake),
+        "max_daily_cost": str(max_daily_cost) if max_daily_cost is not None else None,
+        "max_concurrent_positions": max_concurrent_positions,
+        "max_daily_trades": max_daily_trades,
+        "yes_only": True,
+        "sort_by": "probability_desc",
+    }
+    return {
+        "universe_spec": universe_spec,
+        "profile_keys": profile_keys,
+        "parameters": parameters,
+        "profiles": {"requested": list(profile_keys)},
+        "force_block_replay_backfill": bool(payload.get("forceBlockReplayBackfill") or payload.get("force_block_replay_backfill")),
+        "min_probability": min_probability,
+        "max_probability": max_probability,
+        "stake": stake,
+        "initial_capital": initial_capital,
+        "max_daily_cost": max_daily_cost,
+        "max_concurrent_positions": max_concurrent_positions,
+        "max_daily_trades": max_daily_trades,
+    }
+
+
+def _run_benchmark_job(benchmark_id: int, payload: dict[str, Any]) -> None:
+    try:
+        parts = _benchmark_request_parts(payload)
+        with postgres_connection(PostgresSettings(), readonly=False) as conn:
+            create_schema(conn)
+            run_orderfilled_fast_accurate_benchmark(
+                universe_spec=parts["universe_spec"],
+                persist_conn=conn,
+                benchmark_id=int(benchmark_id),
+                force_block_replay_backfill=parts["force_block_replay_backfill"],
+                min_probability=parts["min_probability"],
+                max_probability=parts["max_probability"],
+                stake=parts["stake"],
+                initial_capital=parts["initial_capital"],
+                max_daily_cost=parts["max_daily_cost"],
+                max_concurrent_positions=parts["max_concurrent_positions"],
+                max_daily_trades=parts["max_daily_trades"],
+                profile_keys=parts["profile_keys"],
+            )
+    except Exception as exc:  # pragma: no cover - exercised by live API smoke
+        LOGGER.exception("quant backtest benchmark background job failed benchmark_id=%s", benchmark_id)
+        try:
+            with postgres_connection(PostgresSettings(), readonly=False) as conn:
+                fail_benchmark_run(conn, benchmark_id=int(benchmark_id), error=str(exc))
+                conn.commit()
+        except Exception:
+            LOGGER.exception("quant backtest benchmark failed-state write failed benchmark_id=%s", benchmark_id)
 
 
 def _json_value(value: Any) -> Any:
@@ -1405,41 +1495,40 @@ def create_quant_blueprint(helpers: dict) -> Blueprint:
     @bp.route("/backtest-benchmarks", methods=["POST"])
     def api_quant_create_backtest_benchmark():
         payload = request.get_json(silent=True) or {}
-        universe_spec = universe_spec_from_payload(payload)
-        strategy_payload = payload.get("strategySpec") or payload.get("strategy_spec") or {}
-        if not isinstance(strategy_payload, dict):
-            strategy_payload = {}
-        profile_keys = _benchmark_profile_keys(payload)
         try:
+            parts = _benchmark_request_parts(payload)
             with postgres_connection(PostgresSettings(), readonly=False) as conn:
                 create_schema(conn)
-                result = run_orderfilled_fast_accurate_benchmark(
-                    universe_spec=universe_spec,
-                    persist_conn=conn,
-                    force_block_replay_backfill=bool(payload.get("forceBlockReplayBackfill") or payload.get("force_block_replay_backfill")),
-                    min_probability=Decimal(str(strategy_payload.get("minProbability") or strategy_payload.get("min_probability") or payload.get("minProbability") or "0.60")),
-                    max_probability=Decimal(str(strategy_payload.get("maxProbability") or strategy_payload.get("max_probability") or payload.get("maxProbability") or "0.80")),
-                    stake=Decimal(str(strategy_payload.get("stake") or payload.get("stake") or "10")),
-                    initial_capital=Decimal(str(strategy_payload.get("initialCapital") or strategy_payload.get("initial_capital") or payload.get("initialCapital") or "1000")),
-                    max_daily_cost=_optional_decimal_payload(strategy_payload.get("maxDailyCost", strategy_payload.get("max_daily_cost", payload.get("maxDailyCost", payload.get("max_daily_cost", "20"))))),
-                    max_concurrent_positions=_optional_int_payload(strategy_payload.get("maxConcurrentPositions", strategy_payload.get("max_concurrent_positions", payload.get("maxConcurrentPositions", payload.get("max_concurrent_positions", 2))))),
-                    max_daily_trades=_optional_int_payload(strategy_payload.get("maxDailyTrades", strategy_payload.get("max_daily_trades", payload.get("maxDailyTrades", payload.get("max_daily_trades"))))),
-                    profile_keys=profile_keys,
+                benchmark_id = create_benchmark_run(
+                    conn,
+                    universe_type=parts["universe_spec"].universe_type,
+                    universe_name=parts["universe_spec"].universe_name,
+                    market_count=parts["universe_spec"].limit,
+                    strategy_name="favorite_hold_v1",
+                    parameters=parts["parameters"],
+                    profiles=parts["profiles"],
                 )
-                row = get_benchmark_run(conn, benchmark_id=int(result.benchmark_id or 0))
-                artifacts = get_benchmark_artifacts(conn, benchmark_id=int(result.benchmark_id or 0))
+                conn.commit()
+                row = get_benchmark_run(conn, benchmark_id=int(benchmark_id))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
-            route_logger.exception("quant backtest benchmark failed")
+            route_logger.exception("quant backtest benchmark enqueue failed")
             return jsonify({"error": str(exc)}), 500
         if not row:
             return jsonify({"error": "benchmark run not found"}), 500
+        worker = threading.Thread(
+            target=_run_benchmark_job,
+            args=(int(row["benchmark_id"]), dict(payload)),
+            name=f"quant-benchmark-{row['benchmark_id']}",
+            daemon=True,
+        )
+        worker.start()
         return jsonify({
             "item": _camel_row(row),
             "benchmarkId": row.get("benchmark_id"),
             "status": row.get("status"),
-            "artifacts": [_camel_row(item) for item in artifacts],
+            "artifacts": [],
         }), 202
 
     @bp.route("/backtest-universes", methods=["GET"])

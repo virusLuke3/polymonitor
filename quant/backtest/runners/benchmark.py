@@ -78,6 +78,7 @@ def run_nba_fast_accurate_benchmark(
     max_concurrent_positions: int | None = 2,
     max_daily_trades: int | None = None,
     profile_keys: tuple[str, ...] = DEFAULT_PROFILES,
+    benchmark_id: int | None = None,
 ) -> BacktestBenchmarkResult:
     """Run the NBA benchmark bundle and optionally persist it."""
     return run_orderfilled_fast_accurate_benchmark(
@@ -92,6 +93,7 @@ def run_nba_fast_accurate_benchmark(
         max_concurrent_positions=max_concurrent_positions,
         max_daily_trades=max_daily_trades,
         profile_keys=profile_keys,
+        benchmark_id=benchmark_id,
     )
 
 
@@ -108,6 +110,7 @@ def run_orderfilled_fast_accurate_benchmark(
     max_concurrent_positions: int | None = 2,
     max_daily_trades: int | None = None,
     profile_keys: tuple[str, ...] = DEFAULT_PROFILES,
+    benchmark_id: int | None = None,
 ) -> BacktestBenchmarkResult:
     """Run a generic OrderFilled-first fast/accurate benchmark bundle."""
 
@@ -132,8 +135,7 @@ def run_orderfilled_fast_accurate_benchmark(
         "sort_by": "probability_desc",
     }
     profiles = {"requested": list(profile_keys)}
-    benchmark_id: int | None = None
-    if persist_conn is not None:
+    if persist_conn is not None and benchmark_id is None:
         benchmark_id = create_benchmark_run(
             persist_conn,
             universe_type=universe_spec.universe_type,

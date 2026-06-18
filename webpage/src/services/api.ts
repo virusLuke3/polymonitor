@@ -506,7 +506,7 @@ export function createQuantBacktestBenchmark(payload: QuantBacktestBenchmarkCrea
     benchmarkId: number;
     status: string;
     artifacts?: QuantBacktestBenchmarkArtifact[];
-  }>('/quant/backtest-benchmarks', payload, 180000);
+  }>('/quant/backtest-benchmarks', payload, 20000);
 }
 
 export function fetchQuantBacktestBenchmarks(limit = 25) {

@@ -1446,7 +1446,23 @@ export function QuantWorkspace() {
       });
       setBenchmarkRun(created.item);
       setBenchmarkArtifacts(created.artifacts || []);
-      setBenchmarkStatus(created.item.status === 'completed' ? 'ready' : 'ready');
+      setBenchmarkRows([]);
+      let currentRun = created.item;
+      setBenchmarkStatus(currentRun.status === 'completed' ? 'ready' : 'loading');
+      for (let attempt = 0; attempt < 180 && currentRun.status !== 'completed' && currentRun.status !== 'failed'; attempt += 1) {
+        await sleep(2000);
+        const detail = await fetchQuantBacktestBenchmark(created.benchmarkId);
+        currentRun = detail.item;
+        setBenchmarkRun(detail.item);
+        setBenchmarkArtifacts(detail.artifacts || []);
+        setBenchmarkStatus(currentRun.status === 'completed' ? 'ready' : 'loading');
+      }
+      if (currentRun.status === 'failed') {
+        throw new Error(currentRun.error || 'Benchmark failed');
+      }
+      if (currentRun.status !== 'completed') {
+        throw new Error(`Benchmark #${created.benchmarkId} is still ${currentRun.status || 'running'}`);
+      }
       const rows = await fetchQuantBacktestBenchmarkRows(created.benchmarkId, 1000);
       setBenchmarkRows(rows.items || []);
       void refreshBenchmarkRuns();
