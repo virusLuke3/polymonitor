@@ -407,7 +407,7 @@ class LocalOrderBookWebsocketWatcher:
         self.bootstrap_targets(targets[: self.bootstrap_market_limit] if self.bootstrap_market_limit else [], force_refresh=True)
         deadline = time.monotonic() + run_seconds if run_seconds and run_seconds > 0 else None
         last_refresh_at = time.monotonic()
-        last_drift_tick = 0.0
+        last_drift_tick = time.monotonic()
         last_ping_at = 0.0
         ping_interval_seconds = _env_int("POLYDATA_LOB_WS_PING_INTERVAL_SECONDS", DEFAULT_PING_INTERVAL_SECONDS, minimum=0)
         self.logger.info("connecting ws_url=%s target_tokens=%s batch_size=%s", self.ws_url, len(self.subscription_token_order), self.subscription_batch_size)
