@@ -168,6 +168,8 @@ def _write_runtime_status_file_if_due_unlocked(*, force: bool = False) -> None:
     path = _runtime_status_path()
     if path is None:
         return
+    if not _env_bool("POLYDATA_LOB_WEBSOCKET_ENABLED", False):
+        return
     now = time.monotonic()
     interval = _env_float(
         "POLYDATA_LOB_RUNTIME_STATUS_WRITE_INTERVAL_SECONDS",
@@ -976,6 +978,13 @@ def _env_float(name: str, default: float, *, minimum: float = 0.0) -> float:
         return max(minimum, float(os.environ.get(name, default) or default))
     except (TypeError, ValueError):
         return max(minimum, float(default))
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _tier_drift_seconds(tier: str) -> int:

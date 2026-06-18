@@ -96,6 +96,7 @@ def test_refresh_targets_preserves_coverage_token_order(monkeypatch):
 
 def test_runtime_status_can_roundtrip_through_status_file(monkeypatch, tmp_path):
     status_path = tmp_path / "lob-status.json"
+    monkeypatch.setenv("POLYDATA_LOB_WEBSOCKET_ENABLED", "1")
     monkeypatch.setenv("POLYDATA_LOB_RUNTIME_STATUS_PATH", str(status_path))
     monkeypatch.setenv("POLYDATA_LOB_RUNTIME_STATUS_WRITE_INTERVAL_SECONDS", "0.1")
 
