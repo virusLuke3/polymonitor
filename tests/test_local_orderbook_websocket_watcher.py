@@ -203,9 +203,11 @@ def test_watcher_writes_clickhouse_delta_after_state_machine_apply(monkeypatch):
         def __init__(self):
             self.calls = []
             self.rows_inserted = 0
+            self.delta_rows_enqueued = 0
 
         def enqueue_delta(self, **kwargs):
             self.calls.append(kwargs)
+            self.delta_rows_enqueued += 1
             return 1
 
         def enqueue_snapshot_levels(self, **kwargs):
@@ -216,6 +218,18 @@ def test_watcher_writes_clickhouse_delta_after_state_machine_apply(monkeypatch):
 
         def buffered_rows(self):
             return 0
+
+        def status_snapshot(self):
+            return {
+                "enabled": True,
+                "rowsInserted": self.rows_inserted,
+                "bufferedRows": 0,
+                "deltaRowsEnqueued": self.delta_rows_enqueued,
+                "deltaRowsInserted": 0,
+                "levelRowsEnqueued": 0,
+                "levelRowsInserted": 0,
+                "flushFailureCount": 0,
+            }
 
     sink = FakeSink()
     watcher.clickhouse_sink = sink
@@ -232,3 +246,6 @@ def test_watcher_writes_clickhouse_delta_after_state_machine_apply(monkeypatch):
     assert sink.calls[-1]["identity"].token_id == "yes-token"
     assert sink.calls[-1]["tier"] == "hot"
     assert sink.calls[-1]["generation"] >= 1
+    status = get_runtime_status()
+    assert status["clickhouse"]["deltaRowsEnqueued"] >= 1
+    assert status["priceChangeEventCount"] >= 1

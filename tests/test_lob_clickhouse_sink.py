@@ -124,6 +124,37 @@ def test_clickhouse_lob_sink_respects_tier_filter_and_batches():
     assert written == 1
     assert len(client.executed) == 1
     assert "INSERT INTO quant_lob_delta_fact" in client.executed[0][0]
+    status = sink.status_snapshot()
+    assert status["deltaEventsSeen"] == 2
+    assert status["deltaRowsSkippedTier"] == 1
+    assert status["deltaRowsEnqueued"] == 1
+    assert status["deltaRowsInserted"] == 1
+    assert status["bufferedRows"] == 0
+
+
+def test_clickhouse_lob_sink_status_reports_level_rows_and_buffers():
+    client = FakeClickHouseClient()
+    settings = LobClickHouseSettings(enabled=True, tiers=frozenset({"warm"}), batch_size=100)
+    sink = ClickHouseLobSink(settings=settings, client=client)
+
+    written = sink.enqueue_snapshot_levels(
+        identity=_identity(),
+        event=NormalizedBookSnapshot(
+            "token-yes",
+            bids=((Decimal("0.40"), Decimal("10")),),
+            asks=((Decimal("0.42"), Decimal("11")),),
+            event_ts_ms=1234567890123,
+        ),
+        tier="warm",
+        depth_limit=2,
+    )
+
+    assert written == 2
+    status = sink.status_snapshot()
+    assert status["snapshotEventsSeen"] == 1
+    assert status["levelRowsEnqueued"] == 2
+    assert status["levelRowsInserted"] == 0
+    assert status["bufferedLevelRows"] == 2
 
 
 def test_clickhouse_lob_storage_report_projects_retention_bytes():

@@ -78,6 +78,50 @@ class LobClickHouseSettings:
         return str(tier or "").strip().lower() in self.tiers
 
 
+@dataclass
+class ClickHouseLobSinkStats:
+    delta_events_seen: int = 0
+    delta_rows_enqueued: int = 0
+    delta_rows_inserted: int = 0
+    delta_rows_skipped_disabled: int = 0
+    delta_rows_skipped_tier: int = 0
+    delta_rows_skipped_invalid: int = 0
+    snapshot_events_seen: int = 0
+    level_rows_enqueued: int = 0
+    level_rows_inserted: int = 0
+    level_rows_skipped_disabled: int = 0
+    level_rows_skipped_tier: int = 0
+    level_rows_skipped_invalid: int = 0
+    flush_count: int = 0
+    flush_failure_count: int = 0
+    last_enqueue_at: str | None = None
+    last_flush_at: str | None = None
+    last_insert_at: str | None = None
+    last_error: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "deltaEventsSeen": self.delta_events_seen,
+            "deltaRowsEnqueued": self.delta_rows_enqueued,
+            "deltaRowsInserted": self.delta_rows_inserted,
+            "deltaRowsSkippedDisabled": self.delta_rows_skipped_disabled,
+            "deltaRowsSkippedTier": self.delta_rows_skipped_tier,
+            "deltaRowsSkippedInvalid": self.delta_rows_skipped_invalid,
+            "snapshotEventsSeen": self.snapshot_events_seen,
+            "levelRowsEnqueued": self.level_rows_enqueued,
+            "levelRowsInserted": self.level_rows_inserted,
+            "levelRowsSkippedDisabled": self.level_rows_skipped_disabled,
+            "levelRowsSkippedTier": self.level_rows_skipped_tier,
+            "levelRowsSkippedInvalid": self.level_rows_skipped_invalid,
+            "flushCount": self.flush_count,
+            "flushFailureCount": self.flush_failure_count,
+            "lastEnqueueAt": self.last_enqueue_at,
+            "lastFlushAt": self.last_flush_at,
+            "lastInsertAt": self.last_insert_at,
+            "lastError": self.last_error,
+        }
+
+
 class ClickHouseLobSink:
     def __init__(self, *, settings: LobClickHouseSettings | None = None, client: ClickHouseClient | None = None) -> None:
         self.settings = settings or LobClickHouseSettings()
@@ -87,6 +131,7 @@ class ClickHouseLobSink:
         self._last_flush_at = time.monotonic()
         self.rows_inserted = 0
         self.flush_count = 0
+        self.stats = ClickHouseLobSinkStats()
 
     @classmethod
     def from_env(cls) -> "ClickHouseLobSink":
@@ -105,7 +150,12 @@ class ClickHouseLobSink:
         source: str = "websocket",
         received_ts_ms: int | None = None,
     ) -> int:
-        if not self.settings.enabled or not self.settings.tier_allowed(tier):
+        self.stats.delta_events_seen += 1
+        if not self.settings.enabled:
+            self.stats.delta_rows_skipped_disabled += 1
+            return 0
+        if not self.settings.tier_allowed(tier):
+            self.stats.delta_rows_skipped_tier += 1
             return 0
         row = delta_event_to_tsv(
             identity=identity,
@@ -116,8 +166,11 @@ class ClickHouseLobSink:
             received_ts_ms=received_ts_ms,
         )
         if not row:
+            self.stats.delta_rows_skipped_invalid += 1
             return 0
         self._delta_rows.append(row)
+        self.stats.delta_rows_enqueued += 1
+        self.stats.last_enqueue_at = _utc_now_iso()
         self.flush_if_due()
         return 1
 
@@ -132,7 +185,12 @@ class ClickHouseLobSink:
         received_ts_ms: int | None = None,
         depth_limit: int = 12,
     ) -> int:
-        if not self.settings.enabled or not self.settings.write_levels or not self.settings.tier_allowed(tier):
+        self.stats.snapshot_events_seen += 1
+        if not self.settings.enabled or not self.settings.write_levels:
+            self.stats.level_rows_skipped_disabled += 1
+            return 0
+        if not self.settings.tier_allowed(tier):
+            self.stats.level_rows_skipped_tier += 1
             return 0
         rows = snapshot_event_to_level_tsv(
             identity=identity,
@@ -144,8 +202,11 @@ class ClickHouseLobSink:
             depth_limit=depth_limit,
         )
         if not rows:
+            self.stats.level_rows_skipped_invalid += 1
             return 0
         self._level_rows.extend(rows)
+        self.stats.level_rows_enqueued += len(rows)
+        self.stats.last_enqueue_at = _utc_now_iso()
         self.flush_if_due()
         return len(rows)
 
@@ -165,18 +226,52 @@ class ClickHouseLobSink:
             self._delta_rows = []
             self._insert_tsv(self.settings.delta_table, DELTA_COLUMNS, rows)
             inserted += len(rows)
+            self.stats.delta_rows_inserted += len(rows)
         if self._level_rows:
             rows = self._level_rows
             self._level_rows = []
             self._insert_tsv(self.settings.level_table, LEVEL_COLUMNS, rows)
             inserted += len(rows)
+            self.stats.level_rows_inserted += len(rows)
         self.rows_inserted += inserted
         self.flush_count += 1 if inserted else 0
+        self.stats.flush_count = self.flush_count
         self._last_flush_at = time.monotonic()
+        self.stats.last_flush_at = _utc_now_iso()
+        if inserted:
+            self.stats.last_insert_at = self.stats.last_flush_at
         return inserted
 
     def buffered_rows(self) -> int:
         return len(self._delta_rows) + len(self._level_rows)
+
+    def buffered_rows_by_table(self) -> dict[str, int]:
+        return {"delta": len(self._delta_rows), "level": len(self._level_rows)}
+
+    def mark_flush_failure(self, error: Exception | str) -> None:
+        self.stats.flush_failure_count += 1
+        self.stats.last_error = str(error)[:240]
+
+    def status_snapshot(self) -> dict[str, Any]:
+        stats = self.stats.as_dict()
+        buffered = self.buffered_rows_by_table()
+        stats.update(
+            {
+                "enabled": self.settings.enabled,
+                "tiers": sorted(self.settings.tiers),
+                "deltaTable": self.settings.delta_table,
+                "levelTable": self.settings.level_table,
+                "ttlDays": self.settings.ttl_days,
+                "batchSize": self.settings.batch_size,
+                "flushIntervalSeconds": self.settings.flush_interval_seconds,
+                "writeLevels": self.settings.write_levels,
+                "bufferedRows": buffered["delta"] + buffered["level"],
+                "bufferedDeltaRows": buffered["delta"],
+                "bufferedLevelRows": buffered["level"],
+                "rowsInserted": self.rows_inserted,
+            }
+        )
+        return stats
 
     def _insert_tsv(self, table: str, columns: Iterable[str], rows: list[str]) -> None:
         if not rows:
@@ -392,6 +487,10 @@ def _scaled_uint(value: Decimal, scale: Decimal) -> int | None:
 
 def _ch_datetime64(ts_ms: int) -> str:
     return datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:23]
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _token_side_code(outcome: str) -> int:

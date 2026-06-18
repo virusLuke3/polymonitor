@@ -64,9 +64,23 @@ _RUNTIME_STATUS: dict[str, Any] = {
     "staleCount": 0,
     "deadLetterCount": 0,
     "driftMismatchCount": 0,
+    "rawMessageCount": 0,
+    "bookEventCount": 0,
+    "priceChangeEventCount": 0,
+    "normalizedEventCount": 0,
+    "normalizedDeltaCount": 0,
+    "normalizedSnapshotCount": 0,
+    "unknownTokenCount": 0,
+    "stateApplyCount": 0,
+    "stateApplyFailureCount": 0,
     "clickhouseEnabled": False,
     "clickhouseRowsInserted": 0,
     "clickhouseBufferedRows": 0,
+    "clickhouse": {
+        "enabled": False,
+        "rowsInserted": 0,
+        "bufferedRows": 0,
+    },
 }
 
 
@@ -349,6 +363,7 @@ class LocalOrderBookWebsocketWatcher:
     async def handle_raw_message(self, raw_message: str) -> None:
         if raw_message in {"PONG", "PING", ""}:
             return
+        _increment_runtime_status("rawMessageCount")
         try:
             payload = json.loads(raw_message)
         except json.JSONDecodeError:
@@ -363,18 +378,29 @@ class LocalOrderBookWebsocketWatcher:
         changed_markets: set[int] = set()
         normalized_events = list(normalize_polymarket_event(event))
         event_type = str(event.get("event_type") or event.get("type") or "")
+        if event_type == "book":
+            _increment_runtime_status("bookEventCount")
+        elif event_type == "price_change":
+            _increment_runtime_status("priceChangeEventCount")
+        if normalized_events:
+            _increment_runtime_status("normalizedEventCount", len(normalized_events))
+            _increment_runtime_status("normalizedDeltaCount", sum(1 for item in normalized_events if isinstance(item, NormalizedBookDelta)))
+            _increment_runtime_status("normalizedSnapshotCount", sum(1 for item in normalized_events if isinstance(item, NormalizedBookSnapshot)))
         if not normalized_events and event_type in {"book", "price_change"}:
             self.write_dead_letter("unparsed_event", raw_payload=event, event_type=event_type)
         for normalized in normalized_events:
             identity = self.identities_by_token.get(normalized.token_id)
             if identity is None:
+                _increment_runtime_status("unknownTokenCount")
                 self.write_dead_letter("unknown_token", raw_payload=event, token_id=normalized.token_id, event_type=event_type)
                 continue
             target = self.target_by_token.get(normalized.token_id)
             try:
                 state_payload = self.manager.apply_normalized_event(identity, normalized)
+                _increment_runtime_status("stateApplyCount")
                 self.enqueue_clickhouse_event(identity=identity, target=target, event=normalized, state_payload=state_payload)
             except (OrderBookNotReady, OrderBookOutOfOrder) as exc:
+                _increment_runtime_status("stateApplyFailureCount")
                 self.write_dead_letter(
                     "price_change_before_ready" if isinstance(exc, OrderBookNotReady) else "out_of_order_resnapshot",
                     raw_payload=event,
@@ -388,6 +414,7 @@ class LocalOrderBookWebsocketWatcher:
                     changed_markets.add(target.market_id)
                 continue
             except ValueError as exc:
+                _increment_runtime_status("stateApplyFailureCount")
                 self.write_dead_letter(
                     "invalid_orderbook_event",
                     raw_payload=event,
@@ -537,7 +564,7 @@ class LocalOrderBookWebsocketWatcher:
     def _build_clickhouse_sink(self) -> ClickHouseLobSink | None:
         settings = LobClickHouseSettings()
         if not settings.enabled:
-            _update_runtime_status(clickhouseEnabled=False)
+            _update_runtime_status(clickhouseEnabled=False, clickhouse={"enabled": False, "rowsInserted": 0, "bufferedRows": 0})
             return None
         try:
             sink = ClickHouseLobSink(settings=settings)
@@ -548,6 +575,7 @@ class LocalOrderBookWebsocketWatcher:
                 clickhouseDeltaTable=settings.delta_table,
                 clickhouseLevelTable=settings.level_table,
                 clickhouseTtlDays=settings.ttl_days,
+                clickhouse=sink.status_snapshot(),
             )
             return sink
         except Exception as exc:
@@ -587,7 +615,7 @@ class LocalOrderBookWebsocketWatcher:
                     received_ts_ms=received_ts_ms,
                     depth_limit=self.manager.depth_limit,
                 )
-            _update_runtime_status(clickhouseBufferedRows=self.clickhouse_sink.buffered_rows())
+            self._sync_clickhouse_status()
         except Exception as exc:
             self.logger.warning("ClickHouse LOB enqueue failed token_id=%s error=%s", identity.token_id, exc)
             self.write_dead_letter(
@@ -605,15 +633,32 @@ class LocalOrderBookWebsocketWatcher:
             return 0
         try:
             inserted = self.clickhouse_sink.flush_if_due(force=force)
-            _update_runtime_status(
-                clickhouseRowsInserted=self.clickhouse_sink.rows_inserted,
-                clickhouseBufferedRows=self.clickhouse_sink.buffered_rows(),
-            )
+            self._sync_clickhouse_status()
             return inserted
         except Exception as exc:
             self.logger.warning("ClickHouse LOB flush failed: %s", exc)
-            _update_runtime_status(clickhouseError=str(exc)[:240], clickhouseBufferedRows=self.clickhouse_sink.buffered_rows())
+            self.clickhouse_sink.mark_flush_failure(exc)
+            self._sync_clickhouse_status(extra={"clickhouseError": str(exc)[:240]})
             return 0
+
+    def _sync_clickhouse_status(self, *, extra: dict[str, Any] | None = None) -> None:
+        if self.clickhouse_sink is None:
+            return
+        snapshot = self.clickhouse_sink.status_snapshot()
+        updates = {
+            "clickhouseEnabled": bool(snapshot.get("enabled")),
+            "clickhouseRowsInserted": int(snapshot.get("rowsInserted") or 0),
+            "clickhouseBufferedRows": int(snapshot.get("bufferedRows") or 0),
+            "clickhouseDeltaRowsInserted": int(snapshot.get("deltaRowsInserted") or 0),
+            "clickhouseLevelRowsInserted": int(snapshot.get("levelRowsInserted") or 0),
+            "clickhouseDeltaRowsEnqueued": int(snapshot.get("deltaRowsEnqueued") or 0),
+            "clickhouseLevelRowsEnqueued": int(snapshot.get("levelRowsEnqueued") or 0),
+            "clickhouseFlushFailureCount": int(snapshot.get("flushFailureCount") or 0),
+            "clickhouse": snapshot,
+        }
+        if extra:
+            updates.update(extra)
+        _update_runtime_status(**updates)
 
 
 class _FileLock:
