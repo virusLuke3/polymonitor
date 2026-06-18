@@ -438,12 +438,13 @@ def load_orderfilled_block_replay_rows_for_ranges(
     max_block = max(bounds[1] for bounds in ranges.values())
     if len(ranges) >= GLOBAL_RANGE_SCAN_MARKET_THRESHOLD:
         return _filter_replay_rows_for_ranges(
-            load_orderfilled_block_replay_rows(
+            _load_orderfilled_block_replay_rows_for_ranges_join(
                 ranges,
-                from_block=min_block,
-                to_block=max_block,
                 table=table_name,
                 client=ch,
+                ids_sql=ids_sql,
+                min_block=min_block,
+                max_block=max_block,
             ),
             ranges,
         )
@@ -475,6 +476,88 @@ def load_orderfilled_block_replay_rows_for_ranges(
           AND block_number BETWEEN {min_block} AND {max_block}
         WHERE {range_sql}
         ORDER BY market_id ASC, outcome_code ASC, block_number ASC
+        """,
+        timeout_seconds=240,
+    )
+
+
+def _load_orderfilled_block_replay_rows_for_ranges_join(
+    ranges: dict[int, tuple[int, int]],
+    *,
+    table: str,
+    client: ClickHouseClient,
+    ids_sql: str,
+    min_block: int,
+    max_block: int,
+) -> list[dict[str, Any]]:
+    """Load many market windows with an inline range table.
+
+    A giant OR clause such as `(market_id = 1 AND block BETWEEN ...) OR ...`
+    can make ClickHouse spend minutes planning/scanning hundreds of markets.
+    This shape keeps the primary-key prefilter simple, then joins a tiny
+    in-memory table of requested per-market block windows.
+    """
+
+    range_values = ", ".join(
+        f"(toUInt64({int(market_id)}), toUInt64({int(bounds[0])}), toUInt64({int(bounds[1])}))"
+        for market_id, bounds in sorted(ranges.items())
+    )
+    return client.query_json_rows(
+        f"""
+        SELECT
+            f.market_id,
+            f.outcome_code,
+            f.token_id,
+            f.block_number,
+            f.block_time,
+            f.open_price,
+            f.high_price,
+            f.low_price,
+            f.close_price,
+            f.volume,
+            f.trade_count,
+            f.first_log_index,
+            f.last_log_index,
+            f.tx_hash,
+            f.buy_cross_price,
+            f.sell_cross_price,
+            f.price,
+            f.size,
+            f.replay_source
+        FROM (
+            SELECT
+                market_id,
+                outcome_code,
+                token_id,
+                block_number,
+                block_time,
+                open_price,
+                high_price,
+                low_price,
+                close_price,
+                volume,
+                trade_count,
+                first_log_index,
+                last_log_index,
+                lower(last_tx_hash) AS tx_hash,
+                low_price AS buy_cross_price,
+                high_price AS sell_cross_price,
+                close_price AS price,
+                volume AS size,
+                'orderfilled_block_replay' AS replay_source
+            FROM {table}
+            PREWHERE market_id IN ({ids_sql})
+              AND block_number BETWEEN {int(min_block)} AND {int(max_block)}
+        ) AS f
+        INNER JOIN (
+            SELECT
+                tupleElement(r, 1) AS market_id,
+                tupleElement(r, 2) AS from_block,
+                tupleElement(r, 3) AS to_block
+            FROM (SELECT arrayJoin([{range_values}]) AS r)
+        ) AS ranges ON f.market_id = ranges.market_id
+        WHERE f.block_number BETWEEN ranges.from_block AND ranges.to_block
+        ORDER BY f.market_id ASC, f.outcome_code ASC, f.block_number ASC
         """,
         timeout_seconds=240,
     )

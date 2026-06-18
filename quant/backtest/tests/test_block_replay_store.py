@@ -36,5 +36,6 @@ def test_large_block_replay_range_load_uses_primary_key_scan_and_filters_rows(mo
     assert [(row["market_id"], row["block_number"]) for row in rows] == [(1, 100), (2, 210)]
     assert "PREWHERE market_id IN (1,2,3)" in client.sql
     assert "block_number BETWEEN 90 AND 1100" in client.sql
-    assert "f.market_id" not in client.sql
+    assert "arrayJoin" in client.sql
+    assert "INNER JOIN" in client.sql
     assert " OR " not in client.sql
