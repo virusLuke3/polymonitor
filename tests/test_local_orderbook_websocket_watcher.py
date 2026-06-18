@@ -77,6 +77,23 @@ def test_coverage_target_builds_token_identities():
     assert no.outcome_index == 1
 
 
+def test_refresh_targets_preserves_coverage_token_order(monkeypatch):
+    manager = LocalOrderBookRuntimeManager(api_base="https://clob.test", session=FakeSession(), cache_ttl_seconds=30)
+    watcher = LocalOrderBookWebsocketWatcher(ctx={"LOB_RUNTIME_MANAGER": manager}, ws_url="wss://example.test/ws", persist=False, logger=FakeLogger())
+    payload = {
+        "items": [
+            {**_target_payload(), "marketId": 1, "yesTokenId": "z-hot", "noTokenId": "a-hot"},
+            {**_target_payload(), "marketId": 2, "yesTokenId": "m-warm", "noTokenId": "b-warm"},
+        ],
+        "summary": {"topics": {"crypto": 2}},
+    }
+    monkeypatch.setattr(lob_service, "get_lob_coverage_targets_payload", lambda ctx, limit, topics: payload)
+
+    watcher.refresh_targets()
+
+    assert watcher.subscription_token_order == ["z-hot", "a-hot", "m-warm", "b-warm"]
+
+
 def test_iter_json_events_accepts_single_and_list_payloads():
     assert list(_iter_json_events({"event_type": "book"})) == [{"event_type": "book"}]
     assert list(_iter_json_events([{"event_type": "book"}, "skip", {"event_type": "price_change"}])) == [

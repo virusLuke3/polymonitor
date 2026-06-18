@@ -244,6 +244,7 @@ class LocalOrderBookWebsocketWatcher:
         self.targets_by_market: dict[int, CoverageTarget] = {}
         self.identities_by_token: dict[str, TokenBookIdentity] = {}
         self.target_by_token: dict[str, CoverageTarget] = {}
+        self.subscription_token_order: list[str] = []
         self.subscribed_tokens: set[str] = set()
         self._last_persisted_at_by_market: dict[int, float] = {}
         self._last_drift_check_at_by_market: dict[int, float] = {}
@@ -266,12 +267,15 @@ class LocalOrderBookWebsocketWatcher:
         self.targets_by_market = {target.market_id: target for target in targets}
         self.identities_by_token = {}
         self.target_by_token = {}
+        token_order: list[str] = []
         for target in targets:
             yes_identity, no_identity = target.identities()
             self.identities_by_token[yes_identity.token_id] = yes_identity
             self.identities_by_token[no_identity.token_id] = no_identity
             self.target_by_token[yes_identity.token_id] = target
             self.target_by_token[no_identity.token_id] = target
+            token_order.extend([yes_identity.token_id, no_identity.token_id])
+        self.subscription_token_order = _dedupe_preserve_order(token_order)
         summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
         self.logger.info("coverage refreshed markets=%s tokens=%s topics=%s", len(targets), len(self.identities_by_token), summary.get("topics"))
         _update_runtime_status(
@@ -340,7 +344,7 @@ class LocalOrderBookWebsocketWatcher:
         last_ping_at = 0.0
         ping_interval_seconds = _env_int("POLYDATA_LOB_WS_PING_INTERVAL_SECONDS", DEFAULT_PING_INTERVAL_SECONDS, minimum=0)
         async with websockets.connect(self.ws_url, ping_interval=None, close_timeout=10, max_queue=1000) as websocket:
-            await self.subscribe(websocket, sorted(self.identities_by_token), replace=True)
+            await self.subscribe(websocket, list(self.subscription_token_order), replace=True)
             self.logger.info("connected subscribed_tokens=%s", len(self.subscribed_tokens))
             _update_runtime_status(status="connected", subscribedTokenCount=len(self.subscribed_tokens), lastConnectAt=_utc_now_iso())
             while not self._stop_event.is_set():
@@ -388,7 +392,7 @@ class LocalOrderBookWebsocketWatcher:
         added_targets = [target for target in targets if any(token_id not in previous for token_id in target.token_ids)]
         if added_targets:
             self.bootstrap_targets(added_targets, force_refresh=True)
-        to_subscribe = sorted(desired - previous)
+        to_subscribe = [token_id for token_id in self.subscription_token_order if token_id not in previous]
         to_unsubscribe = sorted(previous - desired)
         if to_subscribe:
             await self.subscribe(websocket, to_subscribe, replace=False)
@@ -863,6 +867,18 @@ def _event_sample(event: dict[str, Any], *, event_type: str) -> dict[str, Any]:
 def _chunked(values: list[str], size: int) -> Iterable[list[str]]:
     for index in range(0, len(values), max(1, int(size))):
         yield values[index : index + size]
+
+
+def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _int_or_none(value: Any) -> int | None:
