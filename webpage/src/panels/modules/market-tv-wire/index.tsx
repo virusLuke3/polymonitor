@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import { buildRuntimeHlsProxyUrl, buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketTvWire } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketTvWirePayload } from '@/types';
 import { formatRelative } from '../../shared/formatters';
-import { useElementInView, useIdlePause, useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
+import { useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
@@ -140,10 +140,8 @@ function MarketTvPreview({
   item: RuntimeMarketTvWireItem;
   onPlaybackBlocked?: (item: RuntimeMarketTvWireItem) => void;
 }) {
-  const [containerRef, inView] = useElementInView<HTMLDivElement>();
   const videoRef = useRef<HTMLVideoElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const idle = useIdlePause();
   const sourceType = String(item.sourceType || '').toLowerCase();
   const rawHlsUrl = String(item.hlsUrl || '').trim();
   const initialHlsUrl = hlsPlaybackUrl(item);
@@ -154,7 +152,7 @@ function MarketTvPreview({
   const [activeHlsUrl, setActiveHlsUrl] = useState(initialHlsUrl);
   const [playbackState, setPlaybackState] = useState<PlaybackState>(initialHlsUrl ? 'connecting' : 'external');
   const [youtubeFrameState, setYoutubeFrameState] = useState<PlaybackState>(youtubeUrl ? 'connecting' : 'external');
-  const shouldLoad = useStaggeredLoad(inView && !idle, 200);
+  const shouldLoad = useStaggeredLoad(Boolean(initialHlsUrl || youtubeUrl), 200);
 
   useEffect(() => {
     setActiveHlsUrl(initialHlsUrl);
@@ -169,7 +167,6 @@ function MarketTvPreview({
     blockedReportedRef.current = false;
     setPlaybackState(activeHlsUrl ? (shouldLoad ? 'connecting' : 'waiting') : 'external');
     if (!video || !activeHlsUrl || !shouldLoad) {
-      video?.pause();
       return undefined;
     }
 
@@ -299,13 +296,13 @@ function MarketTvPreview({
 
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (!iframe?.contentWindow || !youtubeUrl) return;
-    iframe.contentWindow.postMessage({ type: shouldLoad ? 'play' : 'pause' }, '*');
+    if (!iframe?.contentWindow || !youtubeUrl || !shouldLoad) return;
+    iframe.contentWindow.postMessage({ type: 'play' }, '*');
   }, [shouldLoad, youtubeUrl]);
 
   if (youtubeUrl && (sourceType === 'youtube' || !rawHlsUrl)) {
     return (
-      <div ref={containerRef} className="wm-market-tv-preview youtube">
+      <div className="wm-market-tv-preview youtube">
         <div className="wm-market-tv-preview-head">
           <div>
             <strong>{item.youtubeLiveTitle || itemTitle(item)}</strong>
@@ -363,7 +360,7 @@ function MarketTvPreview({
   }
 
   return (
-    <div ref={containerRef} className="wm-market-tv-preview">
+    <div className="wm-market-tv-preview">
       <div className="wm-market-tv-preview-head">
         <div>
           <strong>{itemTitle(item)}</strong>

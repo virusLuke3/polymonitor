@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import { buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketYoutubeChannels } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketYoutubeChannelsPayload } from '@/types';
 import { formatRelative } from '../../shared/formatters';
-import { useElementInView, useIdlePause, useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
+import { useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
@@ -119,15 +119,13 @@ function nextYoutubeItem(items: RuntimeMarketTvWireItem[], currentId?: string | 
 }
 
 function MarketYoutubePlayer({ item, onEnded }: { item: RuntimeMarketTvWireItem; onEnded?: () => void }) {
-  const [containerRef, inView] = useElementInView<HTMLDivElement>();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const endedRef = useRef(false);
-  const idle = useIdlePause();
   const embedUrl = youtubeEmbedUrl(item);
   const videoId = youtubeVideoId(item);
   const externalUrl = item.externalUrl || item.sourceUrl || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : null);
-  const [frameState, setFrameState] = useState<'connecting' | 'playing' | 'waiting' | 'blocked' | 'paused' | 'external'>(embedUrl ? 'connecting' : 'external');
-  const shouldLoad = useStaggeredLoad(inView && !idle, 900);
+  const [frameState, setFrameState] = useState<'connecting' | 'playing' | 'waiting' | 'blocked' | 'external'>(embedUrl ? 'connecting' : 'external');
+  const shouldLoad = useStaggeredLoad(Boolean(embedUrl), 900);
 
   useEffect(() => {
     endedRef.current = false;
@@ -136,7 +134,7 @@ function MarketYoutubePlayer({ item, onEnded }: { item: RuntimeMarketTvWireItem;
       return undefined;
     }
     if (!shouldLoad) {
-      setFrameState('paused');
+      setFrameState('waiting');
       return undefined;
     }
     setFrameState('connecting');
@@ -179,12 +177,12 @@ function MarketYoutubePlayer({ item, onEnded }: { item: RuntimeMarketTvWireItem;
 
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (!iframe?.contentWindow || !embedUrl) return;
-    iframe.contentWindow.postMessage({ type: shouldLoad ? 'play' : 'pause' }, '*');
+    if (!iframe?.contentWindow || !embedUrl || !shouldLoad) return;
+    iframe.contentWindow.postMessage({ type: 'play' }, '*');
   }, [embedUrl, shouldLoad]);
 
   return (
-    <div ref={containerRef} className={`wm-market-youtube-player ${frameState === 'blocked' ? 'blocked' : ''}`}>
+    <div className={`wm-market-youtube-player ${frameState === 'blocked' ? 'blocked' : ''}`}>
       <header>
         <div>
           <span>{categoryLabel(item.category)} / {sourceLocation(item)} / {probeLabel(item)}</span>
@@ -208,7 +206,7 @@ function MarketYoutubePlayer({ item, onEnded }: { item: RuntimeMarketTvWireItem;
       ) : embedUrl ? (
         <div className="wm-market-youtube-fallback">
           <strong>{channelName(item)}</strong>
-          <em>Stream paused until this panel is visible and active.</em>
+          <em>Preparing embedded playback.</em>
           <button type="button" onClick={() => openExternal(externalUrl)}>
             OPEN
           </button>
