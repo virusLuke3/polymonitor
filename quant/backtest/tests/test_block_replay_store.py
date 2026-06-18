@@ -19,7 +19,7 @@ def test_large_block_replay_range_load_uses_primary_key_scan_and_filters_rows(mo
         [
             {"market_id": 1, "block_number": 100, "price": "0.60"},
             {"market_id": 1, "block_number": 500, "price": "0.61"},
-            {"market_id": 2, "block_number": 210, "price": "0.70"},
+            {"f.market_id": 2, "f.block_number": 210, "price": "0.70"},
             {"market_id": 3, "block_number": 300, "price": "0.80"},
         ]
     )

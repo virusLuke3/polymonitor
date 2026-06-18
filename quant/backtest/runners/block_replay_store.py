@@ -568,14 +568,30 @@ def _filter_replay_rows_for_ranges(rows: list[dict[str, Any]], ranges: dict[int,
 
     filtered: list[dict[str, Any]] = []
     for row in rows:
-        market_id = int(row["market_id"])
+        market_value = _lookup_row_value(row, "market_id")
+        block_value = _lookup_row_value(row, "block_number")
+        if market_value is None or block_value is None:
+            continue
+        market_id = int(market_value)
         bounds = ranges.get(market_id)
         if bounds is None:
             continue
-        block_number = int(row["block_number"])
+        block_number = int(block_value)
         if int(bounds[0]) <= block_number <= int(bounds[1]):
+            if "market_id" not in row or "block_number" not in row:
+                row = {**row, "market_id": market_id, "block_number": block_number}
             filtered.append(row)
     return filtered
+
+
+def _lookup_row_value(row: dict[str, Any], key: str) -> Any | None:
+    if key in row:
+        return row[key]
+    dotted = f".{key}"
+    for row_key, value in row.items():
+        if str(row_key).endswith(dotted):
+            return value
+    return None
 
 
 def _count_replay_rows(

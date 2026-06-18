@@ -39,7 +39,7 @@ def test_large_raw_orderfilled_range_load_uses_inline_range_join():
         [
             {"market_id": 1, "block_number": 100, "price": "0.60"},
             {"market_id": 1, "block_number": 500, "price": "0.61"},
-            {"market_id": 2, "block_number": 210, "price": "0.70"},
+            {"f.market_id": 2, "f.block_number": 210, "price": "0.70"},
         ]
     )
 
