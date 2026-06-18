@@ -115,6 +115,7 @@ _RUNTIME_STATUS: dict[str, Any] = {
     "snapshotPersistWrittenCount": 0,
     "snapshotPersistDropCount": 0,
     "snapshotPersistFailureCount": 0,
+    "snapshotPersistCoalescedCount": 0,
     "snapshotPersistPendingCount": 0,
     "lastPersistQueuedAt": None,
 }
@@ -296,45 +297,64 @@ class _SnapshotPersistWorker:
     def __init__(self, *, ctx: dict[str, Any], logger: Any, max_queue_size: int | None = None) -> None:
         self.ctx = ctx
         self.logger = logger
-        self.queue: queue.Queue[_SnapshotPersistJob | None] = queue.Queue(
+        self.queue: queue.Queue[str | None] = queue.Queue(
             maxsize=max(1, int(max_queue_size or _env_int("POLYDATA_LOB_SNAPSHOT_PERSIST_QUEUE_MAX_SIZE", DEFAULT_SNAPSHOT_PERSIST_QUEUE_MAX_SIZE, minimum=1)))
         )
+        self._lock = threading.Lock()
+        self._latest_by_key: dict[str, _SnapshotPersistJob] = {}
         self._thread = threading.Thread(target=self._run, name="local-orderbook-snapshot-persist", daemon=True)
         self._thread.start()
         _update_runtime_status(snapshotPersistQueueMaxSize=self.queue.maxsize, snapshotPersistPendingCount=0)
 
     def enqueue(self, payload: dict[str, Any], yes_token_id: str, no_token_id: str) -> bool:
         job = _SnapshotPersistJob(dict(payload), str(yes_token_id or ""), str(no_token_id or ""))
-        try:
-            self.queue.put_nowait(job)
-        except queue.Full:
-            _increment_runtime_status("snapshotPersistDropCount")
-            _update_runtime_status(snapshotPersistPendingCount=self.queue.qsize())
-            return False
+        key = _snapshot_persist_key(job.payload, job.yes_token_id, job.no_token_id)
+        with self._lock:
+            already_pending = key in self._latest_by_key
+            self._latest_by_key[key] = job
+            if already_pending:
+                _increment_runtime_status("snapshotPersistCoalescedCount")
+                _update_runtime_status(lastPersistQueuedAt=_utc_now_iso(), snapshotPersistPendingCount=len(self._latest_by_key))
+                return True
+            try:
+                self.queue.put_nowait(key)
+            except queue.Full:
+                self._latest_by_key.pop(key, None)
+                _increment_runtime_status("snapshotPersistDropCount")
+                _update_runtime_status(snapshotPersistPendingCount=len(self._latest_by_key))
+                return False
         _increment_runtime_status("snapshotPersistQueuedCount")
-        _update_runtime_status(lastPersistQueuedAt=_utc_now_iso(), snapshotPersistPendingCount=self.queue.qsize())
+        _update_runtime_status(lastPersistQueuedAt=_utc_now_iso(), snapshotPersistPendingCount=self.pending_count())
         return True
 
     def drain(self, *, timeout_seconds: float = DEFAULT_SNAPSHOT_PERSIST_DRAIN_SECONDS) -> bool:
         deadline = time.monotonic() + max(0.0, float(timeout_seconds))
-        while self.queue.unfinished_tasks > 0 and time.monotonic() < deadline:
+        while self.pending_count() > 0 and time.monotonic() < deadline:
             time.sleep(0.02)
-        _update_runtime_status(snapshotPersistPendingCount=self.queue.qsize())
-        return self.queue.unfinished_tasks <= 0
+        _update_runtime_status(snapshotPersistPendingCount=self.pending_count())
+        return self.pending_count() <= 0
+
+    def pending_count(self) -> int:
+        with self._lock:
+            return len(self._latest_by_key)
 
     def _run(self) -> None:
         while True:
-            job = self.queue.get()
+            key = self.queue.get()
             try:
-                if job is None:
+                if key is None:
                     return
+                with self._lock:
+                    job = self._latest_by_key.pop(key, None)
+                if job is None:
+                    continue
                 try:
                     lob_service.persist_runtime_lob_payload(self.ctx, job.payload, job.yes_token_id, job.no_token_id)
                     _increment_runtime_status("snapshotPersistWrittenCount")
-                    _update_runtime_status(lastPersistAt=_utc_now_iso(), snapshotPersistPendingCount=self.queue.qsize())
+                    _update_runtime_status(lastPersistAt=_utc_now_iso(), snapshotPersistPendingCount=self.pending_count())
                 except Exception as exc:
                     _increment_runtime_status("snapshotPersistFailureCount")
-                    _update_runtime_status(snapshotPersistPendingCount=self.queue.qsize())
+                    _update_runtime_status(snapshotPersistPendingCount=self.pending_count())
                     if self.logger:
                         self.logger.warning("snapshot persist worker failed token_id=%s error=%s", job.yes_token_id, exc)
             finally:
@@ -1025,6 +1045,13 @@ def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:
         seen.add(text)
         result.append(text)
     return result
+
+
+def _snapshot_persist_key(payload: dict[str, Any], yes_token_id: str, no_token_id: str) -> str:
+    market_id = _int_or_none(payload.get("marketId") or payload.get("market_id"))
+    if market_id is not None:
+        return f"market:{market_id}"
+    return f"tokens:{yes_token_id}:{no_token_id}"
 
 
 def _int_or_none(value: Any) -> int | None:
