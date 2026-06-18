@@ -193,3 +193,11 @@ def test_local_book_converts_to_depth_execution_snapshot():
     assert snapshot.asks[0] == (Decimal("0.52"), Decimal("25"))
     assert fill.status == "FILLED"
     assert fill.snapshot_id == 77
+
+
+def test_local_book_snapshot_payload_includes_market_slug_for_thin_storage():
+    payload = _book().snapshot_payload(depth_levels=2)
+
+    assert payload["market_id"] == 123
+    assert payload["market_slug"] == "sample-market"
+    assert payload["condition_id"] == "0xcondition"

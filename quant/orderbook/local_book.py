@@ -236,6 +236,7 @@ class LocalOrderBook:
             "snapshot_id": 0,
             "token_id": self.identity.token_id,
             "market_id": self.identity.market_id,
+            "market_slug": self.identity.market_slug or "",
             "condition_id": self.identity.condition_id,
             "outcome": self.identity.outcome,
             "side": self.identity.outcome,
