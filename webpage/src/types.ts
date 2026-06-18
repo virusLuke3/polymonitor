@@ -1600,13 +1600,44 @@ export type RuntimeGlobalWeatherCity = {
   labelDx?: number | string | null;
   labelDy?: number | string | null;
   condition?: string | null;
+  weatherCode?: number | string | null;
   currentTemp?: number | string | null;
+  currentWindSpeed?: number | string | null;
+  currentWindGust?: number | string | null;
+  currentPrecipitation?: number | string | null;
   todayHigh?: number | string | null;
   todayLow?: number | string | null;
+  todayWindSpeed?: number | string | null;
+  todayWindGust?: number | string | null;
+  todayPrecipitationSum?: number | string | null;
+  todayPrecipitationProbability?: number | string | null;
   forecastHigh?: number | string | null;
+  forecastWindSpeedMax?: number | string | null;
+  forecastWindGustMax?: number | string | null;
+  forecastPrecipitationSum?: number | string | null;
+  forecastPrecipitationProbabilityMax?: number | string | null;
+  windSpeedUnit?: string | null;
+  precipitationUnit?: string | null;
   metarTemp?: number | string | null;
-  hourly?: Array<{ time?: string | null; temp?: number | string | null }>;
-  daily?: Array<{ date?: string | null; high?: number | string | null; low?: number | string | null }>;
+  hourly?: Array<{
+    time?: string | null;
+    temp?: number | string | null;
+    precipitation?: number | string | null;
+    precipitationProbability?: number | string | null;
+    windSpeed?: number | string | null;
+    windGust?: number | string | null;
+    weatherCode?: number | string | null;
+  }>;
+  daily?: Array<{
+    date?: string | null;
+    high?: number | string | null;
+    low?: number | string | null;
+    precipitationSum?: number | string | null;
+    precipitationProbabilityMax?: number | string | null;
+    windSpeedMax?: number | string | null;
+    windGustMax?: number | string | null;
+    weatherCode?: number | string | null;
+  }>;
   eventSlug?: string | null;
   eventTitle?: string | null;
   marketSource?: string | null;
@@ -1636,6 +1667,7 @@ export type RuntimeGlobalWeatherCity = {
   sourceStates?: Record<string, string>;
   weatherCarryForward?: boolean;
   weatherCarryForwardFields?: string[];
+  weatherUpdatedAt?: string | null;
   updatedAt?: string | null;
 };
 

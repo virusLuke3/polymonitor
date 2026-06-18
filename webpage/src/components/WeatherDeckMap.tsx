@@ -592,6 +592,11 @@ function normalizeTemperatureToCelsius(value: number, unit: string) {
   return String(unit || '').toUpperCase() === 'F' ? (value - 32) * (5 / 9) : value;
 }
 
+function numericMax(values: Array<number | null | undefined>) {
+  const filtered = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  return filtered.length ? Math.max(...filtered) : null;
+}
+
 function hourlySwingScore(city: RuntimeGlobalWeatherCity) {
   const unit = String(city.unit || '').toUpperCase();
   const hourly = (city.hourly || [])
@@ -616,11 +621,74 @@ function temperatureExtremityScore(city: RuntimeGlobalWeatherCity) {
   return 0.08;
 }
 
+function windImpactScore(city: RuntimeGlobalWeatherCity) {
+  const hourlyWind = (city.hourly || [])
+    .map((entry) => numberValue(entry?.windSpeed))
+    .filter((value): value is number => value != null);
+  const hourlyGust = (city.hourly || [])
+    .map((entry) => numberValue(entry?.windGust))
+    .filter((value): value is number => value != null);
+  const peakWind = numericMax([
+    numberValue(city.currentWindSpeed),
+    numberValue(city.todayWindSpeed),
+    numberValue(city.forecastWindSpeedMax),
+    ...hourlyWind,
+  ]);
+  const peakGust = numericMax([
+    numberValue(city.currentWindGust),
+    numberValue(city.todayWindGust),
+    numberValue(city.forecastWindGustMax),
+    ...hourlyGust,
+  ]);
+  const windScore = peakWind == null ? 0 : clamp01(peakWind / 52);
+  const gustScore = peakGust == null ? 0 : clamp01(peakGust / 82);
+  return clamp01(Math.max(windScore * 0.8, gustScore));
+}
+
+function precipitationImpactScore(city: RuntimeGlobalWeatherCity) {
+  const hourlyPrecip = (city.hourly || [])
+    .map((entry) => numberValue(entry?.precipitation))
+    .filter((value): value is number => value != null);
+  const hourlyProbability = (city.hourly || [])
+    .map((entry) => numberValue(entry?.precipitationProbability))
+    .filter((value): value is number => value != null);
+  const peakRate = numericMax([numberValue(city.currentPrecipitation), ...hourlyPrecip]);
+  const dailySum = numericMax([
+    numberValue(city.todayPrecipitationSum),
+    numberValue(city.forecastPrecipitationSum),
+    ...(city.daily || []).map((entry) => numberValue(entry?.precipitationSum)),
+  ]);
+  const peakProbability = numericMax([
+    numberValue(city.todayPrecipitationProbability),
+    numberValue(city.forecastPrecipitationProbabilityMax),
+    ...hourlyProbability,
+    ...(city.daily || []).map((entry) => numberValue(entry?.precipitationProbabilityMax)),
+  ]);
+  const rateScore = peakRate == null ? 0 : clamp01(peakRate / 9);
+  const sumScore = dailySum == null ? 0 : clamp01(dailySum / 34);
+  const probabilityScore = peakProbability == null ? 0 : clamp01(peakProbability / 100);
+  return clamp01(Math.max(rateScore * 0.9, sumScore * 0.82, probabilityScore * 0.72));
+}
+
 function weatherImpactScore(city: RuntimeGlobalWeatherCity) {
   const condition = conditionStormScore(city.condition);
   const extremity = temperatureExtremityScore(city);
   const swing = hourlySwingScore(city);
+  const wind = windImpactScore(city);
+  const precipitation = precipitationImpactScore(city);
   const toneBoost = temperatureTone(city) === 'neutral' ? 0 : 0.08;
+  const hasObservedSeverity = wind > 0 || precipitation > 0;
+  if (hasObservedSeverity) {
+    return clamp01(
+      0.02
+      + wind * 0.38
+      + precipitation * 0.34
+      + condition * 0.14
+      + extremity * 0.07
+      + swing * 0.03
+      + toneBoost * 0.5,
+    );
+  }
   return clamp01(0.04 + condition * 0.64 + extremity * 0.2 + swing * 0.12 + toneBoost);
 }
 

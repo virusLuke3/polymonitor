@@ -113,6 +113,13 @@ def _c_to_unit(value: Any, unit: str) -> Optional[float]:
     return round((number * 9 / 5) + 32, 1) if str(unit).upper() == "F" else round(number, 1)
 
 
+def _round_metric(value: Any, digits: int = 1) -> Optional[float]:
+    number = _float(value)
+    if number is None:
+        return None
+    return round(number, digits)
+
+
 def _parse_ts(value: Any) -> float:
     if not value:
         return 0.0
@@ -417,9 +424,9 @@ def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[
                 params={
                     "latitude": ",".join(str(city["lat"]) for city in chunk),
                     "longitude": ",".join(str(city["lon"]) for city in chunk),
-                    "current": "temperature_2m,weather_code",
-                    "hourly": "temperature_2m",
-                    "daily": "temperature_2m_max,temperature_2m_min",
+                    "current": "temperature_2m,weather_code,precipitation,wind_speed_10m,wind_gusts_10m",
+                    "hourly": "temperature_2m,precipitation,precipitation_probability,wind_speed_10m,wind_gusts_10m,weather_code",
+                    "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,weather_code",
                     "forecast_days": 7,
                     "timezone": "auto",
                 },
@@ -439,21 +446,83 @@ def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[
             hourly = row.get("hourly") if isinstance(row.get("hourly"), dict) else {}
             hourly_times = hourly.get("time") if isinstance(hourly.get("time"), list) else []
             hourly_temps = hourly.get("temperature_2m") if isinstance(hourly.get("temperature_2m"), list) else []
+            hourly_precip = hourly.get("precipitation") if isinstance(hourly.get("precipitation"), list) else []
+            hourly_precip_prob = hourly.get("precipitation_probability") if isinstance(hourly.get("precipitation_probability"), list) else []
+            hourly_wind = hourly.get("wind_speed_10m") if isinstance(hourly.get("wind_speed_10m"), list) else []
+            hourly_gust = hourly.get("wind_gusts_10m") if isinstance(hourly.get("wind_gusts_10m"), list) else []
+            hourly_codes = hourly.get("weather_code") if isinstance(hourly.get("weather_code"), list) else []
             daily_dates = daily.get("time") if isinstance(daily.get("time"), list) else []
             daily_highs = daily.get("temperature_2m_max") if isinstance(daily.get("temperature_2m_max"), list) else []
             daily_lows = daily.get("temperature_2m_min") if isinstance(daily.get("temperature_2m_min"), list) else []
+            daily_precip_sum = daily.get("precipitation_sum") if isinstance(daily.get("precipitation_sum"), list) else []
+            daily_precip_prob = daily.get("precipitation_probability_max") if isinstance(daily.get("precipitation_probability_max"), list) else []
+            daily_wind = daily.get("wind_speed_10m_max") if isinstance(daily.get("wind_speed_10m_max"), list) else []
+            daily_gust = daily.get("wind_gusts_10m_max") if isinstance(daily.get("wind_gusts_10m_max"), list) else []
+            daily_codes = daily.get("weather_code") if isinstance(daily.get("weather_code"), list) else []
             daily_rows = [
-                {"date": day, "high": _c_to_unit(high, unit), "low": _c_to_unit(low, unit)}
-                for day, high, low in zip(daily_dates[:7], daily_highs[:7], daily_lows[:7])
+                {
+                    "date": day,
+                    "high": _c_to_unit(high, unit),
+                    "low": _c_to_unit(low, unit),
+                    "precipitationSum": _round_metric(precip_sum),
+                    "precipitationProbabilityMax": _round_metric(precip_prob, 0),
+                    "windSpeedMax": _round_metric(wind_speed),
+                    "windGustMax": _round_metric(wind_gust),
+                    "weatherCode": _float(weather_code),
+                }
+                for day, high, low, precip_sum, precip_prob, wind_speed, wind_gust, weather_code in zip(
+                    daily_dates[:7],
+                    daily_highs[:7],
+                    daily_lows[:7],
+                    daily_precip_sum[:7],
+                    daily_precip_prob[:7],
+                    daily_wind[:7],
+                    daily_gust[:7],
+                    daily_codes[:7],
+                )
             ]
             by_city[str(city["city_id"])] = {
                 "condition": describe_weather_code(current.get("weather_code")),
+                "weatherCode": _float(current.get("weather_code")),
                 "currentTemp": _c_to_unit(current.get("temperature_2m"), unit),
+                "currentWindSpeed": _round_metric(current.get("wind_speed_10m")),
+                "currentWindGust": _round_metric(current.get("wind_gusts_10m")),
+                "currentPrecipitation": _round_metric(current.get("precipitation")),
                 "todayHigh": daily_rows[0]["high"] if daily_rows else None,
                 "todayLow": daily_rows[0]["low"] if daily_rows else None,
+                "todayWindSpeed": daily_rows[0].get("windSpeedMax") if daily_rows else None,
+                "todayWindGust": daily_rows[0].get("windGustMax") if daily_rows else None,
+                "todayPrecipitationSum": daily_rows[0].get("precipitationSum") if daily_rows else None,
+                "todayPrecipitationProbability": daily_rows[0].get("precipitationProbabilityMax") if daily_rows else None,
                 "forecastHigh": max([row["high"] for row in daily_rows if row.get("high") is not None], default=None),
-                "hourly": [{"time": time_value, "temp": _c_to_unit(temp, unit)} for time_value, temp in zip(hourly_times[:24], hourly_temps[:24])],
+                "forecastWindSpeedMax": max([row["windSpeedMax"] for row in daily_rows if row.get("windSpeedMax") is not None], default=None),
+                "forecastWindGustMax": max([row["windGustMax"] for row in daily_rows if row.get("windGustMax") is not None], default=None),
+                "forecastPrecipitationSum": max([row["precipitationSum"] for row in daily_rows if row.get("precipitationSum") is not None], default=None),
+                "forecastPrecipitationProbabilityMax": max([row["precipitationProbabilityMax"] for row in daily_rows if row.get("precipitationProbabilityMax") is not None], default=None),
+                "windSpeedUnit": "km/h",
+                "precipitationUnit": "mm",
+                "hourly": [
+                    {
+                        "time": time_value,
+                        "temp": _c_to_unit(temp, unit),
+                        "precipitation": _round_metric(precipitation),
+                        "precipitationProbability": _round_metric(precipitation_probability, 0),
+                        "windSpeed": _round_metric(wind_speed),
+                        "windGust": _round_metric(wind_gust),
+                        "weatherCode": _float(weather_code),
+                    }
+                    for time_value, temp, precipitation, precipitation_probability, wind_speed, wind_gust, weather_code in zip(
+                        hourly_times[:24],
+                        hourly_temps[:24],
+                        hourly_precip[:24],
+                        hourly_precip_prob[:24],
+                        hourly_wind[:24],
+                        hourly_gust[:24],
+                        hourly_codes[:24],
+                    )
+                ],
                 "daily": daily_rows,
+                "weatherUpdatedAt": current.get("time") or row.get("generationtime_ms"),
                 "updatedAt": current.get("time") or row.get("generationtime_ms"),
             }
     if not by_city and failed_chunks:
@@ -1694,10 +1763,33 @@ def _source_status(value: bool) -> str:
     return "ok" if value else "error"
 
 
+def _item_has_weather_signal(item: Dict[str, Any]) -> bool:
+    signal_keys = (
+        "currentTemp",
+        "metarTemp",
+        "todayHigh",
+        "forecastHigh",
+        "currentWindSpeed",
+        "currentWindGust",
+        "currentPrecipitation",
+        "todayWindSpeed",
+        "todayWindGust",
+        "todayPrecipitationSum",
+        "todayPrecipitationProbability",
+        "forecastWindSpeedMax",
+        "forecastWindGustMax",
+        "forecastPrecipitationSum",
+        "forecastPrecipitationProbabilityMax",
+    )
+    if any(item.get(key) is not None for key in signal_keys):
+        return True
+    return bool(item.get("hourly") or item.get("daily"))
+
+
 def build_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     mapped = [
         item for item in items
-        if item.get("currentTemp") is not None or item.get("metarTemp") is not None
+        if _item_has_weather_signal(item)
     ]
     markets = [item for item in items if item.get("eventSlug")]
     stale = [item for item in items if "error" in set((item.get("sourceStates") or {}).values())]
@@ -1734,9 +1826,22 @@ _WEATHER_CARRY_FORWARD_FIELDS = (
     "currentTemp",
     "condition",
     "weatherCode",
+    "currentWindSpeed",
+    "currentWindGust",
+    "currentPrecipitation",
     "todayHigh",
     "todayLow",
+    "todayWindSpeed",
+    "todayWindGust",
+    "todayPrecipitationSum",
+    "todayPrecipitationProbability",
     "forecastHigh",
+    "forecastWindSpeedMax",
+    "forecastWindGustMax",
+    "forecastPrecipitationSum",
+    "forecastPrecipitationProbabilityMax",
+    "windSpeedUnit",
+    "precipitationUnit",
     "hourly",
     "daily",
     "weatherUpdatedAt",

@@ -57,7 +57,23 @@ def _payload_has_weather_values(payload: Dict[str, Any]) -> bool:
     for item in payload.get("items") or []:
         if not isinstance(item, dict):
             continue
-        if item.get("currentTemp") is not None or item.get("metarTemp") is not None or item.get("todayHigh") is not None or item.get("forecastHigh") is not None:
+        if any(item.get(key) is not None for key in (
+            "currentTemp",
+            "metarTemp",
+            "todayHigh",
+            "forecastHigh",
+            "currentWindSpeed",
+            "currentWindGust",
+            "currentPrecipitation",
+            "todayWindSpeed",
+            "todayWindGust",
+            "todayPrecipitationSum",
+            "todayPrecipitationProbability",
+            "forecastWindSpeedMax",
+            "forecastWindGustMax",
+            "forecastPrecipitationSum",
+            "forecastPrecipitationProbabilityMax",
+        )):
             return True
         if item.get("hourly") or item.get("daily"):
             return True

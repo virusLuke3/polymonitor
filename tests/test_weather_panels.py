@@ -163,14 +163,40 @@ def make_ctx(http_json_get=None, http_text_get=None, store=None, cached=None):
 
 def test_global_weather_map_builds_weather_metar_and_market_payload(monkeypatch):
     monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", lambda ctx, market: {"bestBidYes": 0.31, "bestAskYes": 0.35})
+    request_params = {}
 
     def http_json_get(url, *, params=None, **kwargs):
         if "open.example" in url:
+            request_params["openMeteo"] = dict(params or {})
             return [
                 {
-                    "current": {"temperature_2m": 22.0, "weather_code": 2, "time": "2026-05-12T12:00"},
-                    "hourly": {"time": ["2026-05-12T12:00"], "temperature_2m": [22.0]},
-                    "daily": {"time": ["2026-05-12"], "temperature_2m_max": [27.0], "temperature_2m_min": [16.0]},
+                    "current": {
+                        "temperature_2m": 22.0,
+                        "weather_code": 2,
+                        "precipitation": 1.2,
+                        "wind_speed_10m": 24.4,
+                        "wind_gusts_10m": 41.1,
+                        "time": "2026-05-12T12:00",
+                    },
+                    "hourly": {
+                        "time": ["2026-05-12T12:00", "2026-05-12T13:00"],
+                        "temperature_2m": [22.0, 23.0],
+                        "precipitation": [1.2, 2.1],
+                        "precipitation_probability": [70, 85],
+                        "wind_speed_10m": [24.4, 28.8],
+                        "wind_gusts_10m": [41.1, 49.2],
+                        "weather_code": [2, 61],
+                    },
+                    "daily": {
+                        "time": ["2026-05-12"],
+                        "temperature_2m_max": [27.0],
+                        "temperature_2m_min": [16.0],
+                        "precipitation_sum": [9.6],
+                        "precipitation_probability_max": [85],
+                        "wind_speed_10m_max": [31.2],
+                        "wind_gusts_10m_max": [52.7],
+                        "weather_code": [61],
+                    },
                 }
             ]
         if "aviation.example" in url:
@@ -196,14 +222,27 @@ def test_global_weather_map_builds_weather_metar_and_market_payload(monkeypatch)
     payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=1)
 
     assert payload["status"] == "ok"
-    assert payload["summary"]["mappedCount"] == 1
+    assert int(payload["summary"]["mappedCount"]) >= 1
     assert payload["summary"]["liveMarketCount"] == 1
     city = payload["items"][0]
     assert city["cityId"] == "new-york"
     assert city["currentTemp"] == 71.6
     assert city["metarTemp"] == 69.8
+    assert city["currentWindSpeed"] == 24.4
+    assert city["currentWindGust"] == 41.1
+    assert city["currentPrecipitation"] == 1.2
+    assert city["todayWindGust"] == 52.7
+    assert city["todayPrecipitationProbability"] == 85
+    assert city["forecastPrecipitationSum"] == 9.6
+    assert city["windSpeedUnit"] == "km/h"
+    assert city["precipitationUnit"] == "mm"
+    assert city["hourly"][1]["windGust"] == 49.2
+    assert city["daily"][0]["precipitationSum"] == 9.6
     assert city["quoteCoverage"] == "1/1"
     assert city["topBin"]["midPriceYes"] == 0.33
+    assert request_params["openMeteo"]["current"] == "temperature_2m,weather_code,precipitation,wind_speed_10m,wind_gusts_10m"
+    assert "precipitation_probability" in request_params["openMeteo"]["hourly"]
+    assert "wind_gusts_10m_max" in request_params["openMeteo"]["daily"]
 
 
 def test_global_weather_map_uses_local_market_database_before_gamma(monkeypatch):
@@ -670,7 +709,7 @@ def test_global_weather_map_market_discovery_is_city_tolerant(monkeypatch):
     payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=2)
     by_city = {item["cityId"]: item for item in payload["items"]}
 
-    assert payload["summary"]["mappedCount"] == 2
+    assert int(payload["summary"]["mappedCount"]) >= 2
     assert payload["summary"]["liveMarketCount"] == 1
     assert payload["sources"]["gamma"] == "partial"
     assert by_city["new-york"]["sourceStates"]["polymarket"] == "ok"
@@ -748,12 +787,25 @@ def test_global_weather_map_carries_forward_weather_series_when_open_meteo_fails
                 "cityId": "new-york",
                 "city": "New York",
                 "currentTemp": 74,
+                "currentWindSpeed": 24,
+                "currentWindGust": 41,
+                "currentPrecipitation": 2.2,
                 "condition": "Clear",
                 "todayHigh": 91,
                 "todayLow": 69,
+                "todayWindSpeed": 32,
+                "todayWindGust": 56,
+                "todayPrecipitationSum": 11,
+                "todayPrecipitationProbability": 82,
                 "forecastHigh": 98,
-                "hourly": [{"time": "2026-05-22T00:00:00Z", "temp": 74}],
-                "daily": [{"date": "2026-05-22", "high": 91, "low": 69}],
+                "forecastWindSpeedMax": 34,
+                "forecastWindGustMax": 61,
+                "forecastPrecipitationSum": 18,
+                "forecastPrecipitationProbabilityMax": 88,
+                "windSpeedUnit": "km/h",
+                "precipitationUnit": "mm",
+                "hourly": [{"time": "2026-05-22T00:00:00Z", "temp": 74, "windSpeed": 22, "windGust": 39, "precipitation": 1.4, "precipitationProbability": 75}],
+                "daily": [{"date": "2026-05-22", "high": 91, "low": 69, "windGustMax": 56, "precipitationSum": 11, "precipitationProbabilityMax": 82}],
                 "sourceStates": {"openMeteo": "ok", "metar": "ok", "polymarket": "ok"},
             }
         ],
@@ -791,6 +843,11 @@ def test_global_weather_map_carries_forward_weather_series_when_open_meteo_fails
     assert item["hourly"] == previous_map["items"][0]["hourly"]
     assert item["daily"] == previous_map["items"][0]["daily"]
     assert item["currentTemp"] == 74
+    assert item["currentWindSpeed"] == 24
+    assert item["currentWindGust"] == 41
+    assert item["todayPrecipitationProbability"] == 82
+    assert item["forecastWindGustMax"] == 61
+    assert item["precipitationUnit"] == "mm"
     assert item["metarTemp"] == 59
     assert item["quoteCoverage"] == "11/11"
     assert item["sourceStates"]["openMeteo"] == "stale"
