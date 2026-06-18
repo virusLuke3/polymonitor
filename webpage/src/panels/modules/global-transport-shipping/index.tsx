@@ -32,6 +32,41 @@ function numeric(value?: number | string | null) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function clampPercent(value?: number | string | null) {
+  return Math.max(0, Math.min(100, Math.round(numeric(value))));
+}
+
+function riskStyle(value?: number | string | null) {
+  return { '--risk': `${clampPercent(value)}%` } as Record<string, string>;
+}
+
+function trendValues(value: unknown, fallbackSeed: string) {
+  if (Array.isArray(value)) {
+    const parsed = value.map((item) => numeric(item as string | number | null)).filter((item) => item > 0);
+    if (parsed.length) return parsed.slice(0, 10);
+  }
+  const seed = fallbackSeed.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return Array.from({ length: 8 }, (_, index) => 20 + ((seed + index * 13) % 58));
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  const max = Math.max(1, ...values);
+  const points = values.map((value, index) => {
+    const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * 54;
+    const y = 24 - (Math.max(0, value) / max) * 20;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg className="wm-aviation-spark" viewBox="0 0 56 26" focusable="false" aria-hidden="true">
+      <polyline points={points} />
+    </svg>
+  );
+}
+
+function RiskMeter({ value, className = '' }: { value?: number | string | null; className?: string }) {
+  return <span className={`wm-aviation-risk-meter ${className}`} style={riskStyle(value)} aria-hidden="true"><i /></span>;
+}
+
 function compactUnknown(value: unknown) {
   if (typeof value === 'number' || typeof value === 'string' || value === null || value === undefined) return formatCompact(value);
   return formatCompact(Number(value) || 0);
@@ -60,6 +95,11 @@ function statusLabel(status?: unknown) {
   const text = String(status || '').trim();
   if (!text) return 'NORMAL';
   return text.replace(/[_-]+/g, ' ').toUpperCase();
+}
+
+function riskSourcesLabel(value: unknown) {
+  if (!Array.isArray(value) || !value.length) return 'BASELINE';
+  return value.slice(0, 3).map((item) => String(item || '').toUpperCase()).join(' / ');
 }
 
 function aviationRoutes(payload?: RuntimeGlobalTransportShippingPayload | null) {
@@ -97,12 +137,14 @@ function AviationIcon({ kind }: { kind: AviationIconKind }) {
 
 function OpsRow({ row }: { row: Record<string, unknown> }) {
   const status = statusClass(row.status);
+  const risk = clampPercent((row.riskScore ?? row.delayScore) as number | string | null);
   return (
-    <div className="wm-aviation-intel-row">
+    <div className="wm-aviation-intel-row ops">
       <span className="wm-aviation-code"><AviationIcon kind="airport" /><b>{String(row.code || '--')}</b></span>
-      <span><strong>{String(row.name || 'Airport')}</strong><em>{String(row.city || 'Global')}</em></span>
+      <span><strong>{String(row.name || 'Airport')}</strong><em>{String(row.city || row.country || 'Global')}</em></span>
+      <Sparkline values={trendValues(row.trend, String(row.code || row.name || 'hub'))} />
       <i className={status}>{statusLabel(row.status)}</i>
-      <small>--</small>
+      <small>{risk}</small>
     </div>
   );
 }
@@ -113,20 +155,40 @@ function FlightRow({ route }: { route: AviationRoute }) {
   return (
     <div className="wm-aviation-intel-row flight">
       <span className="wm-aviation-code"><AviationIcon kind="flight" /><b>{route.fromCode || '--'}</b></span>
-      <span><strong>{route.fromCode} &gt; {route.toCode}</strong><em>{route.corridor || route.airline || 'air corridor'}</em></span>
+      <span>
+        <strong>{route.fromCode} &gt; {route.toCode}</strong>
+        <em>{riskSourcesLabel(route.riskSources)} · {route.corridor || route.airline || 'air corridor'}</em>
+      </span>
+      <RiskMeter value={risk} className={status} />
       <i className={status}>{risk || statusLabel(route.status)}</i>
-      <small>{formatCompact(route.trafficScore)}</small>
+      <small>{String(route.layer || 'air').toUpperCase()}</small>
     </div>
   );
 }
 
-function AirlineRow({ row }: { row: { name?: string | null; routeCount?: number | string | null } }) {
+function AirlineRow({ row }: { row: { name?: string | null; routeCount?: number | string | null; status?: string | null; exposureScore?: number | string | null; trend?: Array<number | string | null> } }) {
+  const exposure = row.exposureScore ?? row.routeCount;
+  const status = statusClass(row.status);
   return (
     <div className="wm-aviation-intel-row airline">
       <span className="wm-aviation-code"><AviationIcon kind="airline" /><b>AL</b></span>
       <span><strong>{row.name || 'Airline'}</strong><em>OpenFlights route coverage</em></span>
-      <i className="normal">NORMAL</i>
-      <small>{formatCompact(row.routeCount)}</small>
+      <Sparkline values={trendValues(row.trend, row.name || 'airline')} />
+      <i className={status}>{statusLabel(row.status)}</i>
+      <small>{formatCompact(exposure)}</small>
+    </div>
+  );
+}
+
+function FlightSampleRow({ row }: { row: Record<string, unknown> }) {
+  const status = statusClass(row.status);
+  return (
+    <div className="wm-aviation-intel-row flight">
+      <span className="wm-aviation-code"><AviationIcon kind="flight" /><b>{String(row.callsign || row.fromCode || 'AIR')}</b></span>
+      <span><strong>{String(row.fromCode || '--')} &gt; {String(row.toCode || '--')}</strong><em>{riskSourcesLabel(row.riskSources)} · {String(row.layer || 'route')}</em></span>
+      <RiskMeter value={(row.riskScore ?? row.trafficScore) as number | string | null} className={status} />
+      <i className={status}>{compactUnknown(row.riskScore)}</i>
+      <small>{compactUnknown(row.routeCount)}</small>
     </div>
   );
 }
@@ -137,6 +199,7 @@ function TrackRow({ item }: { item: RuntimeGlobalTransportShippingItem }) {
     <button type="button" className="wm-aviation-intel-row source" onClick={() => openSource(item.sourceUrl)}>
       <span className="wm-aviation-code"><AviationIcon kind="track" /><b>{glyph(item)}</b></span>
       <span><strong>{item.entity || item.evidenceType}</strong><em>{item.summary || item.title}</em></span>
+      <RiskMeter value={Number(item.confidence || 0) * 100 || item.metric} className={status} />
       <i className={status}>{status.toUpperCase()}</i>
       <small>{formatCompact(item.metric)}</small>
     </button>
@@ -148,9 +211,29 @@ function NewsRow({ row }: { row: Record<string, unknown> }) {
   return (
     <div className="wm-aviation-intel-row news">
       <span className="wm-aviation-code"><AviationIcon kind="news" /><b>NW</b></span>
-      <span><strong>{String(row.title || 'Aviation signal')}</strong><em>{String(row.corridor || row.source || 'route intelligence')}</em></span>
+      <span><strong>{String(row.title || 'Aviation signal')}</strong><em>{riskSourcesLabel(row.riskSources)} · {String(row.riskReason || row.corridor || row.source || 'route intelligence')}</em></span>
+      <RiskMeter value={row.riskScore as number | string | null} className={status} />
       <i className={status}>{compactUnknown(row.riskScore)}</i>
       <small>{String(row.source || 'seed')}</small>
+    </div>
+  );
+}
+
+function SourceHealthStrip({ payload }: { payload?: RuntimeGlobalTransportShippingPayload | null }) {
+  const health = payload?.sourceHealth || {};
+  const rows: Array<[string, unknown]> = [
+    ['OpenFlights', health.openflights || payload?.sources?.openflights],
+    ['Transitland', health.transitland || payload?.sources?.transitland],
+    ['AIS', health.aisstream || payload?.summary?.aisStatus],
+    ['WX Join', health.weatherRiskJoin],
+    ['Conflict', health.conflictRiskJoin],
+  ];
+  return (
+    <div className="wm-aviation-source-strip" aria-label="Aviation evidence source health">
+      {rows.map(([label, value]) => {
+        const text = typeof value === 'string' ? value : (value ? 'ok' : 'warming');
+        return <span key={label} className={statusClass(text)}><b>{label}</b><em>{String(text).toUpperCase()}</em></span>;
+      })}
     </div>
   );
 }
@@ -168,7 +251,11 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
   ];
   const rows = useMemo(() => {
     if (tab === 'ops') return aviationOps(payload).slice(0, 8).map((row, index) => <OpsRow key={`${row.code || index}`} row={row} />);
-    if (tab === 'flights') return aviationRoutes(payload).slice(0, 8).map((route, index) => <FlightRow key={`${route.id || index}`} route={route} />);
+    if (tab === 'flights') {
+      const flights = payload?.aviation?.flights || [];
+      if (flights.length) return flights.slice(0, 8).map((row, index) => <FlightSampleRow key={`${row.id || index}`} row={row} />);
+      return aviationRoutes(payload).slice(0, 8).map((route, index) => <FlightRow key={`${route.id || index}`} route={route} />);
+    }
     if (tab === 'airlines') return aviationAirlines(payload).slice(0, 8).map((row, index) => <AirlineRow key={`${row.name || index}`} row={row} />);
     if (tab === 'news') return aviationNews(payload).slice(0, 8).map((row, index) => <NewsRow key={`${row.title || index}`} row={row} />);
     return items.slice(0, 8).map((item) => <TrackRow key={item.id || `${item.evidenceType}-${item.entity}-${item.title}`} item={item} />);
@@ -184,12 +271,13 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
           <strong>航空公司情报</strong>
-          <p>Seeded aviation corridor graph from OpenFlights, with route-flow animation on the 2D map and supporting transport source status.</p>
+          <p>Air evidence radar: OpenFlights route graph, Transitland feed coverage, AIS sample state, and runtime weather/conflict route joins.</p>
         </div>
       ) : null}
       className="wm-market-panel wm-evidence-panel wm-global-transport-panel"
       dataPanelId="global-transport-shipping"
     >
+      <SourceHealthStrip payload={payload} />
       <div className="wm-aviation-tabs" role="tablist" aria-label="Airline intel views">
         {tabs.map((item) => (
           <button key={item.id} type="button" className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>

@@ -2369,9 +2369,13 @@ export type RuntimeGlobalTransportShippingPayload = {
   source?: string | null;
   sourceUrl?: string | null;
   sources?: Record<string, unknown>;
+  sourceHealth?: Record<string, unknown>;
+  cachePolicy?: Record<string, unknown>;
   summary?: {
     airports?: number | string | null;
     routes?: number | string | null;
+    visibleRoutes?: number | string | null;
+    flightSamples?: number | string | null;
     countries?: number | string | null;
     topHub?: string | null;
     transitFeeds?: number | string | null;
@@ -2379,6 +2383,13 @@ export type RuntimeGlobalTransportShippingPayload = {
     transitCatalogFiles?: number | string | null;
     transitScannedFiles?: number | string | null;
     aisStatus?: string | null;
+    evidenceVersion?: string | null;
+  } | null;
+  evidence?: {
+    schemaVersion?: string | null;
+    routes?: Array<Record<string, unknown>>;
+    risks?: Array<Record<string, unknown>>;
+    ops?: Array<Record<string, unknown>>;
   } | null;
   aviation?: {
     generatedAt?: string | null;
@@ -2393,6 +2404,10 @@ export type RuntimeGlobalTransportShippingPayload = {
       routeCount?: number | string | null;
       status?: string | null;
       riskScore?: number | string | null;
+      delayScore?: number | string | null;
+      trend?: Array<number | string | null>;
+      source?: string | null;
+      sourceUrl?: string | null;
     }>;
     routes?: Array<{
       id?: string | null;
@@ -2417,9 +2432,17 @@ export type RuntimeGlobalTransportShippingPayload = {
       layer?: string | null;
       phase?: number | string | null;
       speed?: number | string | null;
+      riskSources?: string[];
+      riskReason?: string | null;
+      confidence?: number | string | null;
+      source?: string | null;
+      sourceUrl?: string | null;
+      trend?: Array<number | string | null>;
+      relatedPolymarketMarketIds?: Array<string | number>;
     }>;
     flights?: Array<{
       id?: string | null;
+      callsign?: string | null;
       fromCode?: string | null;
       toCode?: string | null;
       fromLat?: number | string | null;
@@ -2430,9 +2453,15 @@ export type RuntimeGlobalTransportShippingPayload = {
       speed?: number | string | null;
       status?: string | null;
       riskScore?: number | string | null;
+      trafficScore?: number | string | null;
+      riskSources?: string[];
+      riskReason?: string | null;
+      layer?: string | null;
+      source?: string | null;
+      sourceUrl?: string | null;
     }>;
     ops?: Array<Record<string, unknown>>;
-    airlines?: Array<{ name?: string | null; routeCount?: number | string | null }>;
+    airlines?: Array<{ name?: string | null; routeCount?: number | string | null; status?: string | null; exposureScore?: number | string | null; trend?: Array<number | string | null>; sourceUrl?: string | null }>;
     news?: Array<Record<string, unknown>>;
   } | null;
   items: RuntimeGlobalTransportShippingItem[];

@@ -146,6 +146,9 @@ type AirRoutePath = {
   airline: string;
   layer: 'trunk' | 'international' | 'regional';
   riskSources: AirRiskSource[];
+  riskReason: string;
+  sourceUrl: string;
+  trend: number[];
   weatherAnchors: RiskAnchor[];
   conflictAnchors: RiskAnchor[];
   weatherIntensity: number;
@@ -1058,6 +1061,7 @@ function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | nu
     if (!from || !to || !fromCode || !toCode) return [];
     const id = String(route.id || `${fromCode}-${toCode}-${index}`);
     const routeKey = `${fromCode}-${toCode}`;
+    const backendRiskSources = normalizeAirRiskSources(route.riskSources);
     return splitWrappedAirPath(airArcPath(from, to)).map((path, segmentIndex) => ({
       id: `${id}-${segmentIndex}`,
       routeKey,
@@ -1074,11 +1078,14 @@ function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | nu
       layer: route.layer === 'trunk' || route.layer === 'international' || route.layer === 'regional'
         ? route.layer
         : ((numberValue(route.trafficScore) ?? 0) >= 70 ? 'trunk' : 'regional'),
-      riskSources: [],
+      riskSources: backendRiskSources,
+      riskReason: String(route.riskReason || ''),
+      sourceUrl: String(route.sourceUrl || ''),
+      trend: normalizeAirTrend(route.trend),
       weatherAnchors: [],
       conflictAnchors: [],
-      weatherIntensity: 0,
-      conflictIntensity: 0,
+      weatherIntensity: backendRiskSources.includes('weather') ? Math.max(0.18, (numberValue(route.riskScore) ?? 0) / 180) : 0,
+      conflictIntensity: backendRiskSources.includes('conflict') ? Math.max(0.2, (numberValue(route.riskScore) ?? 0) / 150) : 0,
     }));
   });
 }
@@ -1174,7 +1181,7 @@ function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], co
       weatherAnchors.reduce((max, anchor) => Math.max(max, anchor.intensity), 0),
       route.status === 'watch' ? route.riskScore / 260 : 0,
     ));
-    const riskSources: AirRiskSource[] = [];
+    const riskSources: AirRiskSource[] = [...route.riskSources];
     if (conflictAnchors.length && conflictIntensity >= 0.16) {
       riskSources.push('conflict');
     }
@@ -1190,7 +1197,7 @@ function enrichedAirRoutes(routes: AirRoutePath[], cities: WeatherMapPoint[], co
       riskSources.push('corridor');
     }
     if (!riskSources.length && route.riskScore >= 60) riskSources.push('corridor');
-    return { ...route, riskSources, weatherAnchors, conflictAnchors, conflictIntensity, weatherIntensity };
+    return { ...route, riskSources: listUnique(riskSources), weatherAnchors, conflictAnchors, conflictIntensity, weatherIntensity };
   });
 }
 
@@ -1203,6 +1210,23 @@ function airRouteMatchesLens(route: AirRoutePath, lens: AirLensMode) {
 function airRouteMatchesRiskSource(route: AirRoutePath, source: AirRiskSource) {
   if (source === 'all') return true;
   return route.riskSources.includes(source);
+}
+
+function normalizeAirRiskSources(value?: unknown): AirRiskSource[] {
+  if (!Array.isArray(value)) return [];
+  const valid = new Set<AirRiskSource>(['weather', 'conflict', 'corridor']);
+  return value
+    .map((item) => String(item || '').toLowerCase().trim())
+    .filter((item): item is AirRiskSource => valid.has(item as AirRiskSource));
+}
+
+function normalizeAirTrend(value?: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => numberValue(item)).filter((item): item is number => item !== null).slice(0, 12);
+}
+
+function listUnique<T>(items: T[]): T[] {
+  return Array.from(new Set(items));
 }
 
 function pointInRect(lon: number, lat: number, bounds: [number, number, number, number]) {
@@ -1246,10 +1270,10 @@ function sortAirRoutes(routes: AirRoutePath[]) {
 }
 
 function airRouteBudget(zoom: number, lens: AirLensMode, region: AirFocusRegion) {
-  if (region !== 'global') return zoom < 2.4 ? 180 : 260;
-  if (lens === 'watch') return zoom < 2.3 ? 80 : 120;
-  if (lens === 'trunk') return zoom < 2.3 ? 110 : 170;
-  return zoom < 2.1 ? 280 : 420;
+  if (region !== 'global') return zoom < 2.4 ? 220 : 320;
+  if (lens === 'watch') return zoom < 2.3 ? 110 : 165;
+  if (lens === 'trunk') return zoom < 2.3 ? 140 : 210;
+  return zoom < 2.1 ? 380 : 560;
 }
 
 function buildCountryRisks(points: ConflictMapPoint[]): CountryRisk[] {
@@ -2312,6 +2336,7 @@ function DeckMapTooltip({ tooltip }: { tooltip: DeckTooltipState }) {
       <div className={`wm-map-country-tooltip wm-map-deck-tooltip air ${route.status}`} style={{ transform: `translate(${Math.round(tooltip.x + 14)}px, ${Math.round(tooltip.y + 14)}px)` }}>
         <strong>{route.fromCode} &gt; {route.toCode}</strong>
         <span>{airRouteLayerLabel(route.layer)} · {route.riskSources.map((source) => airRiskSourceLabel(source)).join(' / ') || 'BASELINE'} · {route.corridor}</span>
+        {route.riskReason ? <small>{compactText(route.riskReason, 72)}</small> : null}
       </div>
     );
   }

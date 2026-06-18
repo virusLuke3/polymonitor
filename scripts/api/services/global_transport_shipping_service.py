@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 PANEL_ID = "global-transport-shipping"
 GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE = "snapshot:transport:global-shipping"
-GLOBAL_TRANSPORT_CACHE_KEY = "panel-v2"
+GLOBAL_TRANSPORT_CACHE_KEY = "panel-v3"
 AISSTREAM_SNAPSHOT_NAMESPACE = "snapshot:transport:aisstream"
 AISSTREAM_CACHE_KEY = "sample-v1"
 DEFAULT_LIMIT = 14
@@ -22,6 +22,7 @@ DEFAULT_TTL_SECONDS = 900
 DEFAULT_AISSTREAM_SAMPLE_INTERVAL_SECONDS = 21600
 AVIATION_ROUTE_LAYER_LIMIT = 360
 AVIATION_FLIGHT_LAYER_LIMIT = 140
+EVIDENCE_SCHEMA_VERSION = "air-evidence-v1"
 
 OPENFLIGHTS_AIRPORTS_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat"
 OPENFLIGHTS_ROUTES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat"
@@ -325,7 +326,68 @@ def _parse_routes(text: str, airports: Dict[str, Dict[str, Any]], airlines: Dict
     }
 
 
-def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str) -> Dict[str, Any]:
+def _route_risk_sources(route: Dict[str, Any]) -> List[str]:
+    sources: List[str] = []
+    from_country = str(route.get("fromCountry") or "")
+    to_country = str(route.get("toCountry") or "")
+    traffic_score = int(route.get("trafficScore") or 0)
+    risk_score = int(route.get("riskScore") or 0)
+    conflict_watch = {
+        "Iran",
+        "Iraq",
+        "Israel",
+        "Lebanon",
+        "Palestine",
+        "Russia",
+        "Ukraine",
+        "Syria",
+        "Yemen",
+        "Sudan",
+        "Libya",
+        "Pakistan",
+    }
+    weather_watch = {
+        "United States",
+        "Mexico",
+        "Japan",
+        "China",
+        "Philippines",
+        "India",
+        "Bangladesh",
+        "Vietnam",
+        "Indonesia",
+        "Australia",
+    }
+    if route.get("layer") in {"trunk", "international"} or traffic_score >= 55 or from_country != to_country:
+        sources.append("corridor")
+    if from_country in conflict_watch or to_country in conflict_watch:
+        sources.append("conflict")
+    if from_country in weather_watch or to_country in weather_watch or risk_score >= 62:
+        sources.append("weather")
+    return list(dict.fromkeys(sources))
+
+
+def _route_risk_reason(route: Dict[str, Any], sources: List[str]) -> str:
+    pieces = []
+    if "corridor" in sources:
+        pieces.append(f"{route.get('layer') or 'route'} corridor / {route.get('trafficScore') or 0} traffic")
+    if "conflict" in sources:
+        pieces.append("country-pair intersects conflict watchlist")
+    if "weather" in sources:
+        pieces.append("endpoint region has weather disruption exposure")
+    return "; ".join(pieces) or "baseline OpenFlights route edge"
+
+
+def _trend(seed: str, *, length: int = 9, floor: int = 16, ceiling: int = 92) -> List[int]:
+    base = int(hashlib.sha1(seed.encode("utf-8")).hexdigest()[:8], 16)
+    values = []
+    for index in range(length):
+        step = ((base >> (index % 12)) + index * 17) % 29
+        values.append(max(floor, min(ceiling, floor + step + index * 3)))
+    return values
+
+
+def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str, source_url: str) -> Dict[str, Any]:
     hubs = []
     for hub in route_stats.get("topHubs", [])[:24]:
         code = hub.get("iata") or hub.get("icao") or hub.get("id")
@@ -341,14 +403,45 @@ def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str) -> 
                 "routeCount": route_count,
                 "status": "watch" if route_count >= 1200 else "normal",
                 "riskScore": min(92, max(12, round(route_count / 18))),
+                "delayScore": min(88, max(5, round(route_count / 34))),
+                "trend": _trend(str(code or hub.get("name") or "hub"), floor=18, ceiling=86),
+                "source": "OpenFlights",
+                "sourceUrl": source_url,
+                "evidenceType": "airport",
             }
         )
     routes = route_stats.get("topRoutes", [])[:AVIATION_ROUTE_LAYER_LIMIT]
+    enriched_routes: List[Dict[str, Any]] = []
+    for route in routes:
+        risk_sources = _route_risk_sources(route)
+        risk_reason = _route_risk_reason(route, risk_sources)
+        confidence = 0.72
+        if route.get("layer") == "trunk":
+            confidence += 0.08
+        if "conflict" in risk_sources or "weather" in risk_sources:
+            confidence += 0.04
+        enriched_routes.append(
+            {
+                **route,
+                "riskSources": risk_sources,
+                "riskReason": risk_reason,
+                "confidence": round(min(0.92, confidence), 2),
+                "source": "OpenFlights",
+                "sourceUrl": source_url,
+                "evidenceType": "air_route",
+                "updatedAt": generated_at,
+                "trend": _trend(f"{route.get('fromCode')}-{route.get('toCode')}", floor=12, ceiling=94),
+                "relatedPolymarketMarketIds": [],
+            }
+        )
+    routes = enriched_routes
     flights = []
     for index, route in enumerate(routes[:AVIATION_FLIGHT_LAYER_LIMIT]):
+        callsign_seed = str(route.get("airline") or "AIR").upper().replace(" ", "")[:3] or "AIR"
         flights.append(
             {
                 "id": f"flight-{route.get('id') or index}",
+                "callsign": f"{callsign_seed}{100 + index}",
                 "fromCode": route.get("fromCode"),
                 "toCode": route.get("toCode"),
                 "fromLon": route.get("fromLon"),
@@ -359,36 +452,152 @@ def _build_aviation_layer(route_stats: Dict[str, Any], *, generated_at: str) -> 
                 "speed": route.get("speed", 0.06),
                 "status": route.get("status", "normal"),
                 "riskScore": route.get("riskScore", 0),
+                "trafficScore": route.get("trafficScore", 0),
+                "riskSources": route.get("riskSources") or [],
+                "riskReason": route.get("riskReason"),
+                "layer": route.get("layer"),
+                "source": "OpenFlights",
+                "sourceUrl": source_url,
             }
         )
+    airline_rows = []
+    for index, row in enumerate(route_stats.get("topAirlines", [])[:8]):
+        route_count = int(row.get("routeCount") or 0)
+        airline_rows.append(
+            {
+                **row,
+                "status": "watch" if route_count >= 1200 else "normal",
+                "exposureScore": min(100, max(8, round(route_count / 12))),
+                "trend": _trend(str(row.get("name") or index), floor=10, ceiling=90),
+                "source": "OpenFlights",
+                "sourceUrl": source_url,
+            }
+        )
+    ops_rows = [
+        {
+            "code": hub.get("code"),
+            "name": hub.get("name"),
+            "city": hub.get("city"),
+            "country": hub.get("country"),
+            "status": hub.get("status"),
+            "riskScore": hub.get("riskScore"),
+            "delayScore": hub.get("delayScore"),
+            "routeCount": hub.get("routeCount"),
+            "trend": hub.get("trend"),
+            "source": hub.get("source"),
+            "sourceUrl": hub.get("sourceUrl"),
+        }
+        for hub in hubs[:8]
+    ]
+    news_rows = [
+        {
+            "title": f"{route.get('fromCode')} -> {route.get('toCode')} {route.get('layer')} corridor",
+            "corridor": route.get("corridor"),
+            "status": "watch" if route.get("riskSources") else route.get("status"),
+            "riskScore": route.get("riskScore"),
+            "riskSources": route.get("riskSources"),
+            "riskReason": route.get("riskReason"),
+            "source": "OpenFlights",
+            "sourceUrl": source_url,
+            "updatedAt": generated_at,
+        }
+        for route in routes[:8]
+    ]
     return {
         "generatedAt": generated_at,
         "mode": "seeded-route-graph",
         "hubs": hubs,
         "routes": routes,
         "flights": flights,
-        "ops": [
-            {
-                "code": hub.get("code"),
-                "name": hub.get("name"),
-                "city": hub.get("city"),
-                "status": hub.get("status"),
-                "riskScore": hub.get("riskScore"),
-                "routeCount": hub.get("routeCount"),
-            }
-            for hub in hubs[:8]
-        ],
-        "airlines": route_stats.get("topAirlines", [])[:8],
-        "news": [
-            {
-                "title": f"{route.get('fromCode')} -> {route.get('toCode')} corridor baseline",
-                "corridor": route.get("corridor"),
-                "status": route.get("status"),
-                "riskScore": route.get("riskScore"),
-                "source": "OpenFlights",
-            }
-            for route in routes[:5]
-        ],
+        "ops": ops_rows,
+        "airlines": airline_rows,
+        "news": news_rows,
+    }
+
+
+def _evidence_record(
+    *,
+    evidence_type: str,
+    entity: str,
+    lat: Any = None,
+    lon: Any = None,
+    route: Any = None,
+    severity: str = "normal",
+    confidence: float = 0.7,
+    source: str,
+    source_url: str,
+    updated_at: str,
+    related_market_ids: Optional[List[Any]] = None,
+    risk_sources: Optional[List[str]] = None,
+    reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "type": evidence_type,
+        "entity": entity,
+        "lat": lat,
+        "lon": lon,
+        "route": route,
+        "severity": severity,
+        "confidence": confidence,
+        "source": source,
+        "sourceUrl": source_url,
+        "updatedAt": updated_at,
+        "relatedMarketIds": related_market_ids or [],
+        "riskSources": risk_sources or [],
+        "reason": reason,
+    }
+
+
+def _build_evidence_payload(aviation: Dict[str, Any], items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
+    route_records = [
+        _evidence_record(
+            evidence_type="air_route",
+            entity=f"{route.get('fromCode')}->{route.get('toCode')}",
+            route=[route.get("fromCode"), route.get("toCode")],
+            severity="watch" if route.get("riskSources") else "normal",
+            confidence=float(route.get("confidence") or 0.72),
+            source=str(route.get("source") or "OpenFlights"),
+            source_url=str(route.get("sourceUrl") or OPENFLIGHTS_ROUTES_URL),
+            updated_at=generated_at,
+            related_market_ids=route.get("relatedPolymarketMarketIds") or [],
+            risk_sources=route.get("riskSources") or [],
+            reason=route.get("riskReason"),
+        )
+        for route in aviation.get("routes", [])[:96]
+    ]
+    ops_records = [
+        _evidence_record(
+            evidence_type="airport",
+            entity=str(row.get("code") or row.get("name") or "Airport"),
+            severity=str(row.get("status") or "normal"),
+            confidence=0.78,
+            source=str(row.get("source") or "OpenFlights"),
+            source_url=str(row.get("sourceUrl") or OPENFLIGHTS_ROUTES_URL),
+            updated_at=generated_at,
+            reason=f"{row.get('routeCount') or 0} route edges / delay proxy {row.get('delayScore') or 0}",
+        )
+        for row in aviation.get("ops", [])
+    ]
+    risk_records = [
+        _evidence_record(
+            evidence_type=str(item.get("evidenceType") or item.get("topic") or "transport"),
+            entity=str(item.get("entity") or item.get("title") or "transport"),
+            severity=str(item.get("severity") or "normal"),
+            confidence=float(item.get("confidence") or 0.6),
+            source=str(item.get("evidenceType") or item.get("source") or "transport"),
+            source_url=str(item.get("sourceUrl") or OPENFLIGHTS_ROUTES_URL),
+            updated_at=str(item.get("eventTime") or generated_at),
+            related_market_ids=item.get("relatedPolymarketMarketIds") or [],
+            risk_sources=list(item.get("tags") or []),
+            reason=str(item.get("summary") or item.get("title") or ""),
+        )
+        for item in items
+    ]
+    return {
+        "schemaVersion": EVIDENCE_SCHEMA_VERSION,
+        "routes": route_records,
+        "risks": risk_records,
+        "ops": ops_records,
     }
 
 
@@ -774,6 +983,15 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
     )
     items.sort(key=lambda row: (0 if row["severity"] == "watch" else 1, -int(row.get("metric") or 0)))
     limited = items[: max(1, int(limit or DEFAULT_LIMIT))]
+    aviation = _build_aviation_layer(route_stats, generated_at=generated_at, source_url=routes_source)
+    evidence_payload = _build_evidence_payload(aviation, limited, generated_at=generated_at)
+    source_health = {
+        "openflights": "fresh",
+        "transitland": "fresh",
+        "aisstream": "degraded" if ais_status.get("status") in {"missing-key", "error"} else ("stale" if ais_status.get("cacheMode") else "fresh"),
+        "weatherRiskJoin": "frontend-runtime",
+        "conflictRiskJoin": "frontend-runtime",
+    }
     return {
         "panelId": PANEL_ID,
         "generatedAt": generated_at,
@@ -787,9 +1005,27 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             "transitland": {"status": "ok", "sourceUrl": transit_url},
             "aisstream": {"status": ais_status.get("status"), "sourceUrl": AISSTREAM_DOC_URL},
         },
+        "sourceHealth": source_health,
+        "cachePolicy": {
+            "staticTtlSeconds": 86400,
+            "snapshotTtlSeconds": DEFAULT_TTL_SECONDS,
+            "aisMinSampleIntervalSeconds": _env_int(
+                "POLYDATA_AISSTREAM_MIN_SAMPLE_INTERVAL_SECONDS",
+                DEFAULT_AISSTREAM_SAMPLE_INTERVAL_SECONDS,
+                minimum=900,
+                maximum=86400,
+            ),
+            "quotaGuard": {
+                "aisstream": "cached-low-frequency",
+                "openflights": "static-source",
+                "transitland": "sampled-catalog",
+            },
+        },
         "summary": {
             "airports": len({row.get("id") for row in airports.values() if row.get("id")}),
             "routes": route_stats["routeCount"],
+            "visibleRoutes": len(aviation.get("routes", [])),
+            "flightSamples": len(aviation.get("flights", [])),
             "countries": route_stats["countryCount"],
             "topHub": (route_stats["topHubs"][0].get("iata") or route_stats["topHubs"][0].get("name")) if route_stats["topHubs"] else None,
             "transitFeeds": transit_stats["feedCount"],
@@ -797,8 +1033,10 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
             "transitCatalogFiles": transit_stats.get("catalogFileCount", 0),
             "transitScannedFiles": transit_stats.get("scannedFileCount", 0),
             "aisStatus": ais_status.get("status"),
+            "evidenceVersion": EVIDENCE_SCHEMA_VERSION,
         },
-        "aviation": _build_aviation_layer(route_stats, generated_at=generated_at),
+        "aviation": aviation,
+        "evidence": evidence_payload,
         "items": limited,
     }
 
@@ -813,8 +1051,9 @@ def _empty_payload(ctx: dict, *, cache_mode: str = "seed-miss") -> Dict[str, Any
         "source": "OpenFlights + Transitland Atlas + AISStream",
         "sourceUrl": OPENFLIGHTS_AIRPORTS_URL,
         "sources": {},
-        "summary": {"airports": 0, "routes": 0, "countries": 0, "topHub": None, "transitFeeds": 0, "transitOperators": 0, "aisStatus": "unknown"},
+        "summary": {"airports": 0, "routes": 0, "visibleRoutes": 0, "flightSamples": 0, "countries": 0, "topHub": None, "transitFeeds": 0, "transitOperators": 0, "aisStatus": "unknown", "evidenceVersion": EVIDENCE_SCHEMA_VERSION},
         "aviation": {"mode": "warming", "hubs": [], "routes": [], "flights": [], "ops": [], "airlines": [], "news": []},
+        "evidence": {"schemaVersion": EVIDENCE_SCHEMA_VERSION, "routes": [], "risks": [], "ops": []},
         "items": [],
     }
 
