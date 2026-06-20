@@ -444,7 +444,8 @@ def run_once(
     reports: list[dict[str, Any]] = []
     with postgres_connection(PostgresSettings(), readonly=True) as conn:
         with conn.cursor() as cur:
-            cur.execute("SET LOCAL statement_timeout = %s", (env_int("POLYDATA_LOB_WORLDCUP_GUARD_POSTGRES_STATEMENT_TIMEOUT_MS", DEFAULT_POSTGRES_STATEMENT_TIMEOUT_MS),))
+            timeout_ms = env_int("POLYDATA_LOB_WORLDCUP_GUARD_POSTGRES_STATEMENT_TIMEOUT_MS", DEFAULT_POSTGRES_STATEMENT_TIMEOUT_MS)
+            cur.execute("SELECT set_config('statement_timeout', %s, true)", (str(max(1000, timeout_ms)),))
         for match in matches:
             prefixes = match_prefixes(match)
             kickoff = parse_iso_datetime(match.get("kickoffUtc") or match.get("eventTime"))
