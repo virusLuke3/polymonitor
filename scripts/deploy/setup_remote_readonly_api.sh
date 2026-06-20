@@ -150,6 +150,12 @@ POLYDATA_LOB_CLICKHOUSE_BATCH_SIZE=250
 POLYDATA_LOB_CLICKHOUSE_FLUSH_INTERVAL_SECONDS=5
 POLYDATA_LOB_CLICKHOUSE_TTL_DAYS=30
 POLYDATA_LOB_CLICKHOUSE_WRITE_LEVELS=1
+POLYDATA_LOB_WORLDCUP_GUARD_INTERVAL_SECONDS=300
+POLYDATA_LOB_WORLDCUP_GUARD_STATUS_PATH=/tmp/polydata/worldcup-lob-guard-status.json
+POLYDATA_LOB_WORLDCUP_GUARD_LOOKAHEAD_HOURS=36
+POLYDATA_LOB_WORLDCUP_GUARD_LOOKBACK_HOURS=12
+POLYDATA_LOB_WORLDCUP_GUARD_MIN_MARKETS=1
+POLYDATA_LOB_WORLDCUP_GUARD_CLICKHOUSE_ENABLED=1
 EOF
 
 cat > "${LOCAL_TUNNEL_SERVICE}" <<EOF
@@ -263,6 +269,7 @@ GCP_UNITS=(
   polydata-jin10-seed.service
   polydata-lob-websocket.service
   polydata-lob-maintenance.service
+  polydata-worldcup-lob-guard.service
   polydata-macro-cpi-panels-seed.service
   polydata-macro-cpi-registry-seed.service
   polydata-market-group-seed.service
