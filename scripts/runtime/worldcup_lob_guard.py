@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 import time
 from dataclasses import dataclass
@@ -27,6 +28,8 @@ DEFAULT_API_BASE = "http://127.0.0.1:18500"
 DEFAULT_INTERVAL_SECONDS = 300
 DEFAULT_API_TIMEOUT_SECONDS = 60
 DEFAULT_COVERAGE_API_TIMEOUT_SECONDS = 15
+DEFAULT_RUN_TIMEOUT_SECONDS = 120
+DEFAULT_POSTGRES_STATEMENT_TIMEOUT_MS = 15000
 DEFAULT_LOOKAHEAD_HOURS = 36
 DEFAULT_LOOKBACK_HOURS = 12
 DEFAULT_PRE_KICKOFF_MINUTES = 60
@@ -440,6 +443,8 @@ def run_once(
     matches = relevant_matches(dashboard, now=now, policy=policy)
     reports: list[dict[str, Any]] = []
     with postgres_connection(PostgresSettings(), readonly=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout = %s", (env_int("POLYDATA_LOB_WORLDCUP_GUARD_POSTGRES_STATEMENT_TIMEOUT_MS", DEFAULT_POSTGRES_STATEMENT_TIMEOUT_MS),))
         for match in matches:
             prefixes = match_prefixes(match)
             kickoff = parse_iso_datetime(match.get("kickoffUtc") or match.get("eventTime"))
@@ -496,6 +501,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--interval", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS))
     parser.add_argument("--api-timeout-seconds", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_API_TIMEOUT_SECONDS", DEFAULT_API_TIMEOUT_SECONDS))
     parser.add_argument("--coverage-api-timeout-seconds", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_COVERAGE_API_TIMEOUT_SECONDS", DEFAULT_COVERAGE_API_TIMEOUT_SECONDS))
+    parser.add_argument("--run-timeout-seconds", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_RUN_TIMEOUT_SECONDS", DEFAULT_RUN_TIMEOUT_SECONDS))
     parser.add_argument("--lookahead-hours", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_LOOKAHEAD_HOURS", DEFAULT_LOOKAHEAD_HOURS))
     parser.add_argument("--lookback-hours", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_LOOKBACK_HOURS", DEFAULT_LOOKBACK_HOURS))
     parser.add_argument("--pre-kickoff-minutes", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_PRE_KICKOFF_MINUTES", DEFAULT_PRE_KICKOFF_MINUTES))
@@ -515,16 +521,24 @@ def main() -> int:
         clickhouse_enabled=env_bool("POLYDATA_LOB_WORLDCUP_GUARD_CLICKHOUSE_ENABLED", False),
     )
     watch = bool(args.watch or not args.once)
+    run_timeout_seconds = max(30, int(args.run_timeout_seconds or DEFAULT_RUN_TIMEOUT_SECONDS))
     while True:
         try:
-            payload = run_once(
-                api_base=args.api_base,
-                status_path=args.status_path,
-                policy=policy,
-                dry_run=args.dry_run,
-                api_timeout_seconds=max(10, int(args.api_timeout_seconds or DEFAULT_API_TIMEOUT_SECONDS)),
-                coverage_api_timeout_seconds=max(3, int(args.coverage_api_timeout_seconds or DEFAULT_COVERAGE_API_TIMEOUT_SECONDS)),
-            )
+            previous_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(SIGALRM, _raise_run_timeout)
+            signal.alarm(run_timeout_seconds)
+            try:
+                payload = run_once(
+                    api_base=args.api_base,
+                    status_path=args.status_path,
+                    policy=policy,
+                    dry_run=args.dry_run,
+                    api_timeout_seconds=max(10, int(args.api_timeout_seconds or DEFAULT_API_TIMEOUT_SECONDS)),
+                    coverage_api_timeout_seconds=max(3, int(args.coverage_api_timeout_seconds or DEFAULT_COVERAGE_API_TIMEOUT_SECONDS)),
+                )
+            finally:
+                signal.alarm(0)
+                signal.signal(SIGALRM, previous_handler)
             print(json.dumps(payload, ensure_ascii=True, default=str, sort_keys=True), flush=True)
         except KeyboardInterrupt:
             return 0
@@ -537,6 +551,10 @@ def main() -> int:
         if not watch:
             return 0
         time.sleep(max(60, int(args.interval or DEFAULT_INTERVAL_SECONDS)))
+
+
+def _raise_run_timeout(signum: int, frame: Any) -> None:
+    raise TimeoutError("worldcup LOB guard run timed out")
 
 
 if __name__ == "__main__":
