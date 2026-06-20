@@ -119,3 +119,20 @@ def test_worldcup_lob_guard_dead_letter_alerts_are_deduped(monkeypatch):
     assert guard.write_alerts([dict(report)], dry_run=False) == 1
     assert guard.write_alerts([dict(report)], dry_run=False) == 0
     assert len(calls) == 1
+
+
+def test_worldcup_lob_guard_does_not_alert_old_unmapped_completed_match():
+    policy = guard.GuardPolicy()
+    report = guard.evaluate_match(
+        _match(homeTeam="Scotland", awayTeam="Morocco", kickoffUtc="2026-06-19T22:00:00Z"),
+        now=_dt("2026-06-20T07:45:00Z"),
+        policy=policy,
+        market={"tokenized": 0},
+        snapshots={"rows15m": 0, "rowsInWindow": 0, "marketsInWindow": 0},
+        coverage_count=None,
+        ch_stats={"enabled": False},
+    )
+
+    assert report["prefixes"] == []
+    assert report["status"] == "unmapped"
+    assert report["checks"] == []

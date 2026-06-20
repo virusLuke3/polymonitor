@@ -266,7 +266,27 @@ def evaluate_match(
     end = kickoff + timedelta(minutes=policy.post_kickoff_minutes)
     minutes_until = int((kickoff - now).total_seconds() // 60)
     phase = match_phase(now, start=start, kickoff=kickoff, end=end)
+    prefixes = match_prefixes(match)
     checks: list[dict[str, Any]] = []
+
+    if not prefixes:
+        if now <= end and minutes_until <= policy.precheck_market_minutes:
+            checks.append(check_result("market-prefixes", False, "no fixture slug prefixes resolved"))
+        return {
+            "key": match_key(match),
+            "label": match_label(match),
+            "phase": phase,
+            "kickoffUtc": kickoff.isoformat().replace("+00:00", "Z"),
+            "lobWindow": {"startUtc": start.isoformat().replace("+00:00", "Z"), "endUtc": end.isoformat().replace("+00:00", "Z")},
+            "minutesUntilKickoff": minutes_until,
+            "prefixes": [],
+            "market": market,
+            "coverageMarketCount": coverage_count,
+            "snapshots": snapshots,
+            "clickhouse": ch_stats or {"enabled": False},
+            "checks": checks,
+            "status": "alert" if checks else "unmapped",
+        }
 
     if minutes_until <= policy.precheck_market_minutes and now < start:
         checks.append(check_result("market-linked", market.get("tokenized", 0) >= policy.min_markets, f"tokenized={market.get('tokenized', 0)}"))
@@ -292,7 +312,7 @@ def evaluate_match(
         "kickoffUtc": kickoff.isoformat().replace("+00:00", "Z"),
         "lobWindow": {"startUtc": start.isoformat().replace("+00:00", "Z"), "endUtc": end.isoformat().replace("+00:00", "Z")},
         "minutesUntilKickoff": minutes_until,
-        "prefixes": match_prefixes(match),
+        "prefixes": prefixes,
         "market": market,
         "coverageMarketCount": coverage_count,
         "snapshots": snapshots,
