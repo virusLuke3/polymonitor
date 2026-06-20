@@ -485,6 +485,15 @@ def test_lob_coverage_derives_worldcup_fixture_slug_prefixes(monkeypatch):
             "yes_token_id": "yes-104",
             "no_token_id": "no-104",
         },
+        {
+            "market_id": 105,
+            "market_slug": "fifwc-par-tur-2026-06-19-spread-home-3pt5",
+            "market_title": "Spread: Paraguay (-3.5)",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-105",
+            "no_token_id": "no-105",
+        },
     ]
     ctx = {
         "query_all": lambda sql, params=(): rows,
@@ -494,6 +503,7 @@ def test_lob_coverage_derives_worldcup_fixture_slug_prefixes(monkeypatch):
                 {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-18T22:00:00Z", "homeTeam": "Canada", "awayTeam": "Qatar"},
                 {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-19T01:00:00Z", "homeTeam": "Mexico", "awayTeam": "South Korea"},
                 {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-19T19:00:00Z", "homeTeam": "USA", "awayTeam": "Australia"},
+                {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-20T01:00:00Z", "homeTeam": "Paraguay", "awayTeam": "Turkey"},
             ]
         },
         "app": type("FakeApp", (), {"logger": FakeLogger()})(),
@@ -501,13 +511,14 @@ def test_lob_coverage_derives_worldcup_fixture_slug_prefixes(monkeypatch):
 
     payload = lob_service.get_lob_coverage_targets_payload(ctx, limit=10, topics="worldcup")
 
-    assert payload["summary"]["topics"]["worldcup"] == 4
-    assert {item["marketId"] for item in payload["items"]} == {101, 102, 103, 104}
+    assert payload["summary"]["topics"]["worldcup"] == 5
+    assert {item["marketId"] for item in payload["items"]} == {101, 102, 103, 104, 105}
     assert {
         "fifwc-che-bih-2026-06-18",
         "fifwc-can-qat-2026-06-18",
         "fifwc-mex-kr-2026-06-18",
         "fifwc-usa-aus-2026-06-19",
+        "fifwc-par-tur-2026-06-19",
     } <= set((payload["selectionContext"]["worldcup"] or {}).get("activeSlugs") or [])
 
 
