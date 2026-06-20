@@ -494,6 +494,42 @@ def test_lob_coverage_derives_worldcup_fixture_slug_prefixes(monkeypatch):
             "yes_token_id": "yes-105",
             "no_token_id": "no-105",
         },
+        {
+            "market_id": 106,
+            "market_slug": "fifwc-nld-swe-2026-06-20-spread-home-3pt5",
+            "market_title": "Spread: Netherlands (-3.5)",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-106",
+            "no_token_id": "no-106",
+        },
+        {
+            "market_id": 107,
+            "market_slug": "fifwc-ger-civ-2026-06-20-total-2pt5",
+            "market_title": "Germany vs. Cote d'Ivoire: O/U 2.5",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-107",
+            "no_token_id": "no-107",
+        },
+        {
+            "market_id": 108,
+            "market_slug": "fifwc-ecu-cur-2026-06-20-spread-home-2pt5",
+            "market_title": "Spread: Ecuador (-2.5)",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-108",
+            "no_token_id": "no-108",
+        },
+        {
+            "market_id": 109,
+            "market_slug": "fifwc-tun-jpn-2026-06-21-total-2pt5",
+            "market_title": "Tunisia vs. Japan: O/U 2.5",
+            "category": "sports",
+            "tags": ["world-cup"],
+            "yes_token_id": "yes-109",
+            "no_token_id": "no-109",
+        },
     ]
     ctx = {
         "query_all": lambda sql, params=(): rows,
@@ -504,6 +540,10 @@ def test_lob_coverage_derives_worldcup_fixture_slug_prefixes(monkeypatch):
                 {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-19T01:00:00Z", "homeTeam": "Mexico", "awayTeam": "South Korea"},
                 {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-19T19:00:00Z", "homeTeam": "USA", "awayTeam": "Australia"},
                 {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-20T01:00:00Z", "homeTeam": "Paraguay", "awayTeam": "Turkey"},
+                {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-20T17:00:00Z", "homeTeam": "Netherlands", "awayTeam": "Sweden"},
+                {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-20T20:00:00Z", "homeTeam": "Germany", "awayTeam": "Côte d'Ivoire"},
+                {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-21T00:00:00Z", "homeTeam": "Ecuador", "awayTeam": "Curaçao"},
+                {"matchStatus": "scheduled", "minutesUntilKickoff": 55, "kickoffUtc": "2026-06-21T04:00:00Z", "homeTeam": "Tunisia", "awayTeam": "Japan"},
             ]
         },
         "app": type("FakeApp", (), {"logger": FakeLogger()})(),
@@ -511,15 +551,9 @@ def test_lob_coverage_derives_worldcup_fixture_slug_prefixes(monkeypatch):
 
     payload = lob_service.get_lob_coverage_targets_payload(ctx, limit=10, topics="worldcup")
 
-    assert payload["summary"]["topics"]["worldcup"] == 5
-    assert {item["marketId"] for item in payload["items"]} == {101, 102, 103, 104, 105}
-    assert {
-        "fifwc-che-bih-2026-06-18",
-        "fifwc-can-qat-2026-06-18",
-        "fifwc-mex-kr-2026-06-18",
-        "fifwc-usa-aus-2026-06-19",
-        "fifwc-par-tur-2026-06-19",
-    } <= set((payload["selectionContext"]["worldcup"] or {}).get("activeSlugs") or [])
+    assert payload["summary"]["topics"]["worldcup"] == 9
+    assert {item["marketId"] for item in payload["items"]} == {101, 102, 103, 104, 105, 106, 107, 108, 109}
+    assert (payload["selectionContext"]["worldcup"] or {}).get("activeMatchCount") == 9
 
 
 def test_lob_coverage_excludes_finished_worldcup_match_even_inside_time_window(monkeypatch):

@@ -49,20 +49,28 @@ WORLDCUP_TEAM_SLUG_CODES = {
     "canada": "can",
     "czech republic": "cze",
     "czechia": "cze",
+    "cote d'ivoire": "civ",
+    "côte d'ivoire": "civ",
+    "curacao": ("cur", "cuw", "kor"),
+    "curaçao": ("cur", "cuw", "kor"),
+    "ecuador": "ecu",
     "england": "eng",
     "france": "fra",
     "germany": "ger",
+    "ivory coast": "civ",
     "italy": "ita",
     "japan": "jpn",
     "korea republic": "kr",
     "mexico": "mex",
-    "netherlands": "ned",
+    "netherlands": ("nld", "ned"),
     "paraguay": "par",
     "qatar": "qat",
     "south africa": "rsa",
     "south korea": "kr",
     "spain": "esp",
+    "sweden": "swe",
     "switzerland": "che",
+    "tunisia": "tun",
     "turkey": "tur",
     "turkiye": "tur",
     "türkiye": "tur",
@@ -1098,9 +1106,9 @@ def _worldcup_fixture_slug_prefixes(item: Dict[str, Any]) -> set[str]:
     kickoff_date = str(item.get("kickoffUtc") or item.get("eventTime") or "")[:10]
     if not kickoff_date:
         return set()
-    home_code = _worldcup_team_slug_code(item.get("homeTeam"))
-    away_code = _worldcup_team_slug_code(item.get("awayTeam"))
-    if not home_code or not away_code:
+    home_codes = _worldcup_team_slug_codes(item.get("homeTeam"))
+    away_codes = _worldcup_team_slug_codes(item.get("awayTeam"))
+    if not home_codes or not away_codes:
         return set()
     dates = {kickoff_date}
     with contextlib.suppress(Exception):
@@ -1109,19 +1117,24 @@ def _worldcup_fixture_slug_prefixes(item: Dict[str, Any]) -> set[str]:
     return {
         f"fifwc-{left}-{right}-{date_value}"
         for date_value in dates
+        for home_code in home_codes
+        for away_code in away_codes
         for left, right in ((home_code, away_code), (away_code, home_code))
     }
 
 
-def _worldcup_team_slug_code(value: Any) -> str:
+def _worldcup_team_slug_codes(value: Any) -> set[str]:
     text = str(value or "").strip().lower()
     if not text:
-        return ""
+        return set()
     normalized = text.replace("_", " ").replace("-", " ")
     normalized = " ".join(normalized.split())
-    if normalized in WORLDCUP_TEAM_SLUG_CODES:
-        return WORLDCUP_TEAM_SLUG_CODES[normalized]
-    return ""
+    codes = WORLDCUP_TEAM_SLUG_CODES.get(normalized)
+    if not codes:
+        return set()
+    if isinstance(codes, str):
+        return {codes}
+    return {str(code) for code in codes if str(code).strip()}
 
 
 def _int_or_none(value: Any) -> int | None:
