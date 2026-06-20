@@ -525,7 +525,7 @@ def main() -> int:
     while True:
         try:
             previous_handler = signal.getsignal(signal.SIGALRM)
-            signal.signal(SIGALRM, _raise_run_timeout)
+            signal.signal(signal.SIGALRM, _raise_run_timeout)
             signal.alarm(run_timeout_seconds)
             try:
                 payload = run_once(
@@ -538,7 +538,7 @@ def main() -> int:
                 )
             finally:
                 signal.alarm(0)
-                signal.signal(SIGALRM, previous_handler)
+                signal.signal(signal.SIGALRM, previous_handler)
             print(json.dumps(payload, ensure_ascii=True, default=str, sort_keys=True), flush=True)
         except KeyboardInterrupt:
             return 0
