@@ -148,42 +148,68 @@ def market_stats(conn: Any, prefixes: list[str]) -> dict[str, Any]:
     }
 
 
-def snapshot_stats(conn: Any, prefixes: list[str], *, window_start: datetime, window_end: datetime) -> dict[str, Any]:
+def snapshot_stats(conn: Any, prefixes: list[str], *, window_start: datetime, window_end: datetime, now: datetime) -> dict[str, Any]:
     if not prefixes:
         return {"rows": 0, "markets": 0, "tokens": 0, "rowsInWindow": 0, "marketsInWindow": 0}
+    scan_start = min(window_start, now - timedelta(minutes=15))
+    scan_end = max(window_end, now)
     with conn.cursor() as cur:
         cur.execute(
             """
+            WITH scoped AS (
+                SELECT
+                    market_id,
+                    token_id,
+                    snapshot_source,
+                    source,
+                    payload,
+                    COALESCE(snapshot_timestamp, fetched_at, created_at) AS ts
+                FROM quant.clob_orderbook_snapshots
+                WHERE market_slug LIKE ANY(%s)
+                  AND COALESCE(snapshot_timestamp, fetched_at, created_at) >= %s
+                  AND COALESCE(snapshot_timestamp, fetched_at, created_at) <= %s
+            )
             SELECT
                 count(*) AS rows,
                 count(DISTINCT market_id) AS markets,
                 count(DISTINCT token_id) AS tokens,
-                min(COALESCE(snapshot_timestamp, fetched_at, created_at)) AS first_ts,
-                max(COALESCE(snapshot_timestamp, fetched_at, created_at)) AS last_ts,
-                min(COALESCE(snapshot_timestamp, fetched_at, created_at)) FILTER (
-                    WHERE COALESCE(snapshot_timestamp, fetched_at, created_at) >= %s
-                      AND COALESCE(snapshot_timestamp, fetched_at, created_at) <= %s
+                min(ts) AS first_ts,
+                max(ts) AS last_ts,
+                min(ts) FILTER (
+                    WHERE ts >= %s
+                      AND ts <= %s
                 ) AS first_ts_in_window,
-                max(COALESCE(snapshot_timestamp, fetched_at, created_at)) FILTER (
-                    WHERE COALESCE(snapshot_timestamp, fetched_at, created_at) >= %s
-                      AND COALESCE(snapshot_timestamp, fetched_at, created_at) <= %s
+                max(ts) FILTER (
+                    WHERE ts >= %s
+                      AND ts <= %s
                 ) AS last_ts_in_window,
                 count(*) FILTER (
-                    WHERE COALESCE(snapshot_timestamp, fetched_at, created_at) >= %s
-                      AND COALESCE(snapshot_timestamp, fetched_at, created_at) <= %s
+                    WHERE ts >= %s
+                      AND ts <= %s
                 ) AS rows_in_window,
                 count(DISTINCT market_id) FILTER (
-                    WHERE COALESCE(snapshot_timestamp, fetched_at, created_at) >= %s
-                      AND COALESCE(snapshot_timestamp, fetched_at, created_at) <= %s
+                    WHERE ts >= %s
+                      AND ts <= %s
                 ) AS markets_in_window,
-                count(*) FILTER (WHERE COALESCE(snapshot_timestamp, fetched_at, created_at) >= now() - interval '15 minutes') AS rows_15m,
+                count(*) FILTER (WHERE ts >= now() - interval '15 minutes') AS rows_15m,
                 count(*) FILTER (WHERE COALESCE(snapshot_source, source, payload->>'source') = 'websocket') AS websocket_rows,
                 count(*) FILTER (WHERE COALESCE(snapshot_source, source, payload->>'source') = 'registry') AS registry_rows,
                 count(*) FILTER (WHERE COALESCE(snapshot_source, source, payload->>'source') = 'rest-book') AS rest_rows
-            FROM quant.clob_orderbook_snapshots
-            WHERE market_slug LIKE ANY(%s)
+            FROM scoped
             """,
-            (window_start, window_end, window_start, window_end, window_start, window_end, window_start, window_end, _like_patterns(prefixes)),
+            (
+                _like_patterns(prefixes),
+                scan_start,
+                scan_end,
+                window_start,
+                window_end,
+                window_start,
+                window_end,
+                window_start,
+                window_end,
+                window_start,
+                window_end,
+            ),
         )
         row = cur.fetchone() or {}
     return {
@@ -422,7 +448,7 @@ def run_once(
             start = kickoff - timedelta(minutes=policy.pre_kickoff_minutes)
             end = kickoff + timedelta(minutes=policy.post_kickoff_minutes)
             market = market_stats(conn, prefixes)
-            snapshots = snapshot_stats(conn, prefixes, window_start=start, window_end=end)
+            snapshots = snapshot_stats(conn, prefixes, window_start=start, window_end=end, now=now)
             ch_stats = clickhouse_stats(prefixes) if policy.clickhouse_enabled else {"enabled": False}
             reports.append(
                 evaluate_match(
