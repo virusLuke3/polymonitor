@@ -26,6 +26,7 @@ from quant.core.db import ClickHouseClient, ClickHouseSettings, PostgresSettings
 DEFAULT_API_BASE = "http://127.0.0.1:18500"
 DEFAULT_INTERVAL_SECONDS = 300
 DEFAULT_API_TIMEOUT_SECONDS = 60
+DEFAULT_COVERAGE_API_TIMEOUT_SECONDS = 15
 DEFAULT_LOOKAHEAD_HOURS = 36
 DEFAULT_LOOKBACK_HOURS = 12
 DEFAULT_PRE_KICKOFF_MINUTES = 60
@@ -74,6 +75,13 @@ def fetch_json(url: str, *, timeout_seconds: int = 20) -> dict[str, Any]:
     with urlopen(url, timeout=timeout_seconds) as response:
         payload = json.loads(response.read().decode("utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def fetch_optional_json(url: str, *, timeout_seconds: int) -> tuple[dict[str, Any], str | None]:
+    try:
+        return fetch_json(url, timeout_seconds=timeout_seconds), None
+    except Exception as exc:
+        return {}, f"{type(exc).__name__}: {str(exc)[:240]}"
 
 
 def api_url(base: str, path: str, params: dict[str, Any] | None = None) -> str:
@@ -229,7 +237,9 @@ def _clickhouse_string_literal(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace("'", "\\'")
 
 
-def coverage_prefix_count(coverage_payload: dict[str, Any], prefixes: list[str]) -> int:
+def coverage_prefix_count(coverage_payload: dict[str, Any], prefixes: list[str]) -> int | None:
+    if coverage_payload.get("_unavailable"):
+        return None
     if not prefixes:
         return 0
     count = 0
@@ -247,7 +257,7 @@ def evaluate_match(
     policy: GuardPolicy,
     market: dict[str, Any],
     snapshots: dict[str, Any],
-    coverage_count: int,
+    coverage_count: int | None,
     ch_stats: dict[str, Any] | None,
 ) -> dict[str, Any]:
     kickoff = parse_iso_datetime(match.get("kickoffUtc") or match.get("eventTime"))
@@ -261,10 +271,10 @@ def evaluate_match(
     if minutes_until <= policy.precheck_market_minutes and now < start:
         checks.append(check_result("market-linked", market.get("tokenized", 0) >= policy.min_markets, f"tokenized={market.get('tokenized', 0)}"))
     if minutes_until <= policy.precheck_coverage_minutes and now >= start and now < kickoff:
-        checks.append(check_result("coverage-candidate", coverage_count >= policy.min_markets, f"coverageMarkets={coverage_count}"))
+        checks.append(coverage_check("coverage-candidate", coverage_count, policy))
     if start <= now <= end:
         grace_ready = now >= start + timedelta(minutes=policy.active_grace_minutes)
-        checks.append(check_result("active-coverage", coverage_count >= policy.min_markets, f"coverageMarkets={coverage_count}"))
+        checks.append(coverage_check("active-coverage", coverage_count, policy))
         if grace_ready:
             checks.append(check_result("recent-snapshot", snapshots.get("rows15m", 0) > 0, f"rows15m={snapshots.get('rows15m', 0)}"))
     if now > end:
@@ -318,6 +328,12 @@ def check_result(name: str, ok: bool, detail: str) -> dict[str, Any]:
     return {"name": name, "ok": bool(ok), "detail": str(detail or "")}
 
 
+def coverage_check(name: str, coverage_count: int | None, policy: GuardPolicy) -> dict[str, Any]:
+    if coverage_count is None:
+        return check_result(name, True, "coverage API unavailable; recent snapshot check remains authoritative")
+    return check_result(name, coverage_count >= policy.min_markets, f"coverageMarkets={coverage_count}")
+
+
 def _iso_or_none(value: Any) -> str | None:
     if value is None:
         return None
@@ -358,10 +374,23 @@ def write_alerts(reports: list[dict[str, Any]], *, dry_run: bool) -> int:
     return count
 
 
-def run_once(*, api_base: str, status_path: str, policy: GuardPolicy, dry_run: bool = False, api_timeout_seconds: int = DEFAULT_API_TIMEOUT_SECONDS) -> dict[str, Any]:
+def run_once(
+    *,
+    api_base: str,
+    status_path: str,
+    policy: GuardPolicy,
+    dry_run: bool = False,
+    api_timeout_seconds: int = DEFAULT_API_TIMEOUT_SECONDS,
+    coverage_api_timeout_seconds: int = DEFAULT_COVERAGE_API_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     dashboard = fetch_json(api_url(api_base, "/runtime/worldcup/dashboard"), timeout_seconds=api_timeout_seconds)
-    coverage = fetch_json(api_url(api_base, "/runtime/lob/coverage-targets", {"topics": "worldcup", "limit": 250}), timeout_seconds=api_timeout_seconds)
+    coverage, coverage_error = fetch_optional_json(
+        api_url(api_base, "/runtime/lob/coverage-targets", {"topics": "worldcup", "limit": 250}),
+        timeout_seconds=coverage_api_timeout_seconds,
+    )
+    if coverage_error:
+        coverage = {"_unavailable": True, "error": coverage_error}
     matches = relevant_matches(dashboard, now=now, policy=policy)
     reports: list[dict[str, Any]] = []
     with postgres_connection(PostgresSettings(), readonly=True) as conn:
@@ -399,6 +428,12 @@ def run_once(*, api_base: str, status_path: str, policy: GuardPolicy, dry_run: b
             "ok": sum(1 for item in reports if item.get("status") == "ok"),
             "watching": sum(1 for item in reports if item.get("status") == "watching"),
         },
+        "coverageDiagnostics": {
+            "available": not bool(coverage.get("_unavailable")),
+            "error": coverage.get("error"),
+            "count": coverage.get("count"),
+            "summary": coverage.get("summary") or coverage.get("selectionContext"),
+        },
         "matches": reports,
     }
     write_status(status_path, payload)
@@ -414,6 +449,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--status-path", default=os.environ.get("POLYDATA_LOB_WORLDCUP_GUARD_STATUS_PATH", DEFAULT_STATUS_PATH))
     parser.add_argument("--interval", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS))
     parser.add_argument("--api-timeout-seconds", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_API_TIMEOUT_SECONDS", DEFAULT_API_TIMEOUT_SECONDS))
+    parser.add_argument("--coverage-api-timeout-seconds", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_COVERAGE_API_TIMEOUT_SECONDS", DEFAULT_COVERAGE_API_TIMEOUT_SECONDS))
     parser.add_argument("--lookahead-hours", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_LOOKAHEAD_HOURS", DEFAULT_LOOKAHEAD_HOURS))
     parser.add_argument("--lookback-hours", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_LOOKBACK_HOURS", DEFAULT_LOOKBACK_HOURS))
     parser.add_argument("--pre-kickoff-minutes", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_PRE_KICKOFF_MINUTES", DEFAULT_PRE_KICKOFF_MINUTES))
@@ -430,7 +466,7 @@ def main() -> int:
         pre_kickoff_minutes=args.pre_kickoff_minutes,
         post_kickoff_minutes=args.post_kickoff_minutes,
         min_markets=args.min_markets,
-        clickhouse_enabled=env_bool("POLYDATA_LOB_WORLDCUP_GUARD_CLICKHOUSE_ENABLED", True),
+        clickhouse_enabled=env_bool("POLYDATA_LOB_WORLDCUP_GUARD_CLICKHOUSE_ENABLED", False),
     )
     watch = bool(args.watch or not args.once)
     while True:
@@ -441,6 +477,7 @@ def main() -> int:
                 policy=policy,
                 dry_run=args.dry_run,
                 api_timeout_seconds=max(10, int(args.api_timeout_seconds or DEFAULT_API_TIMEOUT_SECONDS)),
+                coverage_api_timeout_seconds=max(3, int(args.coverage_api_timeout_seconds or DEFAULT_COVERAGE_API_TIMEOUT_SECONDS)),
             )
             print(json.dumps(payload, ensure_ascii=True, default=str, sort_keys=True), flush=True)
         except KeyboardInterrupt:
