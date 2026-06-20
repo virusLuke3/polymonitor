@@ -25,6 +25,7 @@ from quant.core.db import ClickHouseClient, ClickHouseSettings, PostgresSettings
 
 DEFAULT_API_BASE = "http://127.0.0.1:18500"
 DEFAULT_INTERVAL_SECONDS = 300
+DEFAULT_API_TIMEOUT_SECONDS = 60
 DEFAULT_LOOKAHEAD_HOURS = 36
 DEFAULT_LOOKBACK_HOURS = 12
 DEFAULT_PRE_KICKOFF_MINUTES = 60
@@ -357,10 +358,10 @@ def write_alerts(reports: list[dict[str, Any]], *, dry_run: bool) -> int:
     return count
 
 
-def run_once(*, api_base: str, status_path: str, policy: GuardPolicy, dry_run: bool = False) -> dict[str, Any]:
+def run_once(*, api_base: str, status_path: str, policy: GuardPolicy, dry_run: bool = False, api_timeout_seconds: int = DEFAULT_API_TIMEOUT_SECONDS) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
-    dashboard = fetch_json(api_url(api_base, "/runtime/worldcup/dashboard"))
-    coverage = fetch_json(api_url(api_base, "/runtime/lob/coverage-targets", {"topics": "worldcup", "limit": 250}))
+    dashboard = fetch_json(api_url(api_base, "/runtime/worldcup/dashboard"), timeout_seconds=api_timeout_seconds)
+    coverage = fetch_json(api_url(api_base, "/runtime/lob/coverage-targets", {"topics": "worldcup", "limit": 250}), timeout_seconds=api_timeout_seconds)
     matches = relevant_matches(dashboard, now=now, policy=policy)
     reports: list[dict[str, Any]] = []
     with postgres_connection(PostgresSettings(), readonly=True) as conn:
@@ -412,6 +413,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-base", default=os.environ.get("POLYDATA_LOB_GUARD_API_BASE", DEFAULT_API_BASE))
     parser.add_argument("--status-path", default=os.environ.get("POLYDATA_LOB_WORLDCUP_GUARD_STATUS_PATH", DEFAULT_STATUS_PATH))
     parser.add_argument("--interval", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS))
+    parser.add_argument("--api-timeout-seconds", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_API_TIMEOUT_SECONDS", DEFAULT_API_TIMEOUT_SECONDS))
     parser.add_argument("--lookahead-hours", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_LOOKAHEAD_HOURS", DEFAULT_LOOKAHEAD_HOURS))
     parser.add_argument("--lookback-hours", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_GUARD_LOOKBACK_HOURS", DEFAULT_LOOKBACK_HOURS))
     parser.add_argument("--pre-kickoff-minutes", type=int, default=env_int("POLYDATA_LOB_WORLDCUP_PRE_KICKOFF_MINUTES", DEFAULT_PRE_KICKOFF_MINUTES))
@@ -433,7 +435,13 @@ def main() -> int:
     watch = bool(args.watch or not args.once)
     while True:
         try:
-            payload = run_once(api_base=args.api_base, status_path=args.status_path, policy=policy, dry_run=args.dry_run)
+            payload = run_once(
+                api_base=args.api_base,
+                status_path=args.status_path,
+                policy=policy,
+                dry_run=args.dry_run,
+                api_timeout_seconds=max(10, int(args.api_timeout_seconds or DEFAULT_API_TIMEOUT_SECONDS)),
+            )
             print(json.dumps(payload, ensure_ascii=True, default=str, sort_keys=True), flush=True)
         except KeyboardInterrupt:
             return 0
