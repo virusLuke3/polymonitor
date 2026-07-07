@@ -3172,6 +3172,13 @@ def main():
         help="与 --watch 联用：两次同步之间的等待秒数（默认 3600，即 1 小时）",
     )
     parser.add_argument(
+        "--watch-error-interval",
+        type=int,
+        default=int(os.environ.get("POLYDATA_MARKET_SYNC_ERROR_INTERVAL_SECONDS", "300")),
+        metavar="SECONDS",
+        help="与 --watch 联用：单轮同步因网络/数据库等异常失败后的退避秒数（默认 300）",
+    )
+    parser.add_argument(
         "--estimate",
         action="store_true",
         help="全量分页拉取并估算市场总数与 DB 大小，不写入文件",
@@ -3422,40 +3429,50 @@ def main():
         run_index = 0
         try:
             while True:
-                run_index += 1
-                ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-                print(f"\n[watch] Run #{run_index} at {ts}", file=sys.stderr)
-                pre_repair_max_id = _get_current_max_market_id(db_path) if db_path else 0
-                count = _run_once()
-                if db_path:
-                    print(f"[watch] Done. Stored/updated {count} markets.", file=sys.stderr)
-                    if args.post_canonical_repair:
-                        post_repair_max_id = _get_current_max_market_id(db_path)
-                        _run_post_discovery_canonical_repair(
-                            db_path,
-                            start_id=args.post_repair_start_id if args.post_repair_start_id is not None else pre_repair_max_id,
-                            max_id=post_repair_max_id,
-                            batch_size=args.post_repair_batch_size,
-                            workers=args.post_repair_workers,
-                            limit=args.post_repair_limit,
-                            run_retry=args.post_retry_fetch_failed,
-                        )
-                    if getattr(args, "post_refresh_category_tags", False):
-                        print("[watch] Refreshing category/tags for existing markets with empty data...", file=sys.stderr)
-                        refresh_category_tags_in_db(
-                            db_path=db_path,
-                            limit=args.refresh_category_tags_limit,
-                            requests_delay=requests_delay,
-                        )
-                else:
-                    print(f"[watch] Done. Saved {count} markets to JSON.", file=sys.stderr)
+                sleep_seconds = max(1, int(args.interval))
+                try:
+                    run_index += 1
+                    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    print(f"\n[watch] Run #{run_index} at {ts}", file=sys.stderr)
+                    pre_repair_max_id = _get_current_max_market_id(db_path) if db_path else 0
+                    count = _run_once()
+                    if db_path:
+                        print(f"[watch] Done. Stored/updated {count} markets.", file=sys.stderr)
+                        if args.post_canonical_repair:
+                            post_repair_max_id = _get_current_max_market_id(db_path)
+                            _run_post_discovery_canonical_repair(
+                                db_path,
+                                start_id=args.post_repair_start_id if args.post_repair_start_id is not None else pre_repair_max_id,
+                                max_id=post_repair_max_id,
+                                batch_size=args.post_repair_batch_size,
+                                workers=args.post_repair_workers,
+                                limit=args.post_repair_limit,
+                                run_retry=args.post_retry_fetch_failed,
+                            )
+                        if getattr(args, "post_refresh_category_tags", False):
+                            print("[watch] Refreshing category/tags for existing markets with empty data...", file=sys.stderr)
+                            refresh_category_tags_in_db(
+                                db_path=db_path,
+                                limit=args.refresh_category_tags_limit,
+                                requests_delay=requests_delay,
+                            )
+                    else:
+                        print(f"[watch] Done. Saved {count} markets to JSON.", file=sys.stderr)
+                except Exception as e:
+                    sleep_seconds = max(60, int(args.watch_error_interval))
+                    _invalidate_session(str(e))
+                    print(
+                        f"[watch] ERROR run failed: {type(e).__name__}: {e}; "
+                        f"sleeping {sleep_seconds}s before retry",
+                        file=sys.stderr,
+                    )
                 next_ts = datetime.now(timezone.utc)
                 print(
-                    f"[watch] Sleeping {args.interval}s until next run "
-                    f"(~{(next_ts.replace(second=0, microsecond=0)).strftime('%H:%M')} + {args.interval//60}m)...",
+                    f"[watch] Sleeping {sleep_seconds}s until next run "
+                    f"(~{(next_ts.replace(second=0, microsecond=0)).strftime('%H:%M')} + {sleep_seconds//60}m)...",
                     file=sys.stderr,
                 )
-                time.sleep(args.interval)
+                time.sleep(sleep_seconds)
         except KeyboardInterrupt:
             print("\n[watch] Interrupted by user. Exiting.", file=sys.stderr)
     else:

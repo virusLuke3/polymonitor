@@ -1,7 +1,7 @@
 [Unit]
 Description=polyData content topic refresh worker
-After=network-online.target polydata-db-tunnel.service
-Wants=network-online.target polydata-db-tunnel.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple

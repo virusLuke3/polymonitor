@@ -2,16 +2,18 @@
 Description=polyData reverse SSH tunnel for local AI agent gateway
 After=network-online.target polydata-agent-gateway.service
 Wants=network-online.target polydata-agent-gateway.service
+StartLimitIntervalSec=3600
+StartLimitBurst=12
 
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/bin/bash -lc 'exec ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R "127.0.0.1:${POLYDATA_AGENT_GATEWAY_REMOTE_PORT:-18700}:127.0.0.1:${POLYDATA_AGENT_GATEWAY_PORT:-18700}" "${POLYDATA_AGENT_GATEWAY_REMOTE}"'
+ExecCondition=/bin/bash -lc 'test -n "${POLYDATA_AGENT_GATEWAY_REMOTE:-}"'
+ExecStart=/bin/bash -lc 'exec ssh -N -R "127.0.0.1:${POLYDATA_AGENT_GATEWAY_REMOTE_PORT:-18700}:127.0.0.1:${POLYDATA_AGENT_GATEWAY_PORT:-18700}" -o BatchMode=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -o IPQoS=none -o KexAlgorithms=curve25519-sha256 "${POLYDATA_AGENT_GATEWAY_REMOTE}"'
 Restart=always
-RestartSec=10
+RestartSec=30
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=default.target
-

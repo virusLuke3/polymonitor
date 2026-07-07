@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from typing import Any
 
@@ -52,9 +53,27 @@ def run_queued_backtests_once(*, settings: PostgresSettings | None = None, limit
     return completed
 
 
-def run_daemon(*, settings: PostgresSettings | None = None, limit: int = 5, sleep_seconds: float = 2.0) -> None:
+def run_daemon(
+    *,
+    settings: PostgresSettings | None = None,
+    limit: int = 5,
+    sleep_seconds: float = 2.0,
+    error_sleep_seconds: float = 60.0,
+) -> None:
     while True:
-        completed = run_queued_backtests_once(settings=settings, limit=limit)
+        try:
+            completed = run_queued_backtests_once(settings=settings, limit=limit)
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:  # noqa: BLE001 - daemon must not restart storm on transient DB/tunnel failures.
+            print(
+                f"[quant-backtest-runner] loop error: {type(exc).__name__}: {exc}; "
+                f"sleeping {max(error_sleep_seconds, 1.0):.1f}s",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(max(error_sleep_seconds, 1.0))
+            continue
         if completed == 0:
             time.sleep(sleep_seconds)
 
@@ -66,6 +85,7 @@ def main() -> None:
     parser.add_argument("--daemon", action="store_true", help="Continuously poll queued runs.")
     parser.add_argument("--limit", type=int, default=5, help="Max queued runs to pick per pass.")
     parser.add_argument("--sleep-seconds", type=float, default=2.0, help="Daemon idle sleep interval.")
+    parser.add_argument("--error-sleep-seconds", type=float, default=60.0, help="Daemon sleep interval after a failed loop.")
     args = parser.parse_args()
 
     if args.run_id:
@@ -73,7 +93,7 @@ def main() -> None:
         print(row)
         return
     if args.daemon:
-        run_daemon(limit=args.limit, sleep_seconds=args.sleep_seconds)
+        run_daemon(limit=args.limit, sleep_seconds=args.sleep_seconds, error_sleep_seconds=args.error_sleep_seconds)
         return
     completed = run_queued_backtests_once(limit=args.limit)
     print({"completed": completed})

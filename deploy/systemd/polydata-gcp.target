@@ -1,6 +1,5 @@
 [Unit]
 Description=polyData GCP serving and seed-cache services
-Wants=polydata-db-tunnel.service
 Wants=polydata-api.service
 Wants=polydata-content-topic-refresh.service
 Wants=polydata-alpha-signal-seed.service
