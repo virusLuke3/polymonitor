@@ -4,6 +4,13 @@ set -euo pipefail
 ENV_FILE="${POLYDATA_ENV_FILE:-$HOME/.config/polydata/polydata.env}"
 TUNNEL_UNIT="${POLYDATA_TUNNEL_UNIT:-polydata-db-reverse-tunnel.service}"
 REMOTE_APP_DIR="${POLYDATA_REMOTE_APP_DIR:-/opt/polyData}"
+SSH_OPTS=(
+  -o BatchMode=yes
+  -o ConnectTimeout=8
+  -o ConnectionAttempts=1
+  -o IPQoS=none
+  -o KexAlgorithms=curve25519-sha256
+)
 
 load_env_file() {
   local file="$1"
@@ -27,10 +34,8 @@ log() {
 remote_pg_check() {
   local target="$1"
   local port="$2"
-  ssh \
-    -o BatchMode=yes \
-    -o ConnectTimeout=8 \
-    -o ConnectionAttempts=2 \
+  timeout 25s ssh \
+    "${SSH_OPTS[@]}" \
     "$target" \
     "cd '$REMOTE_APP_DIR' && POLYDATA_HEALTHCHECK_POSTGRES_PORT='$port' .venv/bin/python3 - <<'PY'
 import os
@@ -64,10 +69,8 @@ restart_tunnel() {
   local target="$1"
   local port="$2"
   log "restarting $TUNNEL_UNIT after failed remote PostgreSQL check"
-  ssh \
-    -o BatchMode=yes \
-    -o ConnectTimeout=8 \
-    -o ConnectionAttempts=2 \
+  timeout 20s ssh \
+    "${SSH_OPTS[@]}" \
     "$target" \
     "sudo -n fuser -k ${port}/tcp >/dev/null 2>&1 || fuser -k ${port}/tcp >/dev/null 2>&1 || true" || true
   systemctl --user restart "$TUNNEL_UNIT"
