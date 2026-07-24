@@ -52,7 +52,7 @@ jobs:
           done < <(git ls-files -z "*.sh")
 
       - name: Verify systemd units
-        run: systemd-analyze verify deploy/systemd/*.service deploy/systemd/*.timer deploy/systemd/*.target
+        run: bash scripts/qa/verify_systemd_units.sh
 
       - name: Run fatal Python lint checks
         run: ruff check agent quant scripts telegram tests

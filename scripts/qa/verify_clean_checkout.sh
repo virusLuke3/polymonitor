@@ -24,10 +24,7 @@ while IFS= read -r -d '' shell_file; do
 done < <(git -C "${ROOT_DIR}" ls-files -z "*.sh")
 
 if command -v systemd-analyze >/dev/null 2>&1; then
-  systemd-analyze verify \
-    "${ROOT_DIR}"/deploy/systemd/*.service \
-    "${ROOT_DIR}"/deploy/systemd/*.timer \
-    "${ROOT_DIR}"/deploy/systemd/*.target
+  bash "${ROOT_DIR}/scripts/qa/verify_systemd_units.sh"
 fi
 
 "${RUFF_BIN}" check \
