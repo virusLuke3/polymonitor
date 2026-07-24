@@ -47,6 +47,32 @@ fi
 REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
 TARGET_SHA="$(git -C "${ROOT_DIR}" rev-parse "${DEPLOY_TARGET_SHA}^{commit}")"
 REMOTE_STATE_PATH="${DEPLOY_STATE_DIR}/current.json"
+SSH_CONTROL_DIR="$(mktemp -d)"
+SSH_CONTROL_PATH="${SSH_CONTROL_DIR}/master-%C"
+SSH_OPTIONS+=(
+  -o ControlMaster=auto
+  -o ControlPersist=120
+  -o "ControlPath=${SSH_CONTROL_PATH}"
+)
+SCP_OPTIONS+=(
+  -o ControlMaster=auto
+  -o ControlPersist=120
+  -o "ControlPath=${SSH_CONTROL_PATH}"
+)
+RELEASE_DIR=""
+REMOTE_RELEASE_DIR=""
+
+cleanup() {
+  if [[ -n "${REMOTE_RELEASE_DIR}" ]]; then
+    ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "rm -rf -- '${REMOTE_RELEASE_DIR}'" >/dev/null 2>&1 || true
+  fi
+  ssh "${SSH_OPTIONS[@]}" -O exit "${REMOTE}" >/dev/null 2>&1 || true
+  if [[ -n "${RELEASE_DIR}" ]]; then
+    rm -rf -- "${RELEASE_DIR}"
+  fi
+  rm -rf -- "${SSH_CONTROL_DIR}"
+}
+trap cleanup EXIT
 
 BASE_SHA="$(
   ssh "${SSH_OPTIONS[@]}" "${REMOTE}" \
@@ -58,14 +84,6 @@ git -C "${ROOT_DIR}" merge-base --is-ancestor "${BASE_SHA}" "${TARGET_SHA}" || {
 }
 
 RELEASE_DIR="$(mktemp -d)"
-REMOTE_RELEASE_DIR=""
-cleanup() {
-  rm -rf -- "${RELEASE_DIR}"
-  if [[ -n "${REMOTE_RELEASE_DIR}" ]]; then
-    ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "rm -rf -- '${REMOTE_RELEASE_DIR}'" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT
 python3 "${ROOT_DIR}/scripts/deploy/gcp_release.py" build \
   --repo "${ROOT_DIR}" \
   --base "${BASE_SHA}" \
