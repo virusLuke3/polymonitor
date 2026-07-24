@@ -24,12 +24,15 @@ Route modules currently receive many dependencies through string keys. This make
   database, cache store, content provider, and LOB runtime dependencies.
 - Route registration receives an immutable `RouteContext` linked to that
   service context.
-- Legacy string-key consumers remain supported during incremental migration.
+- System, bootstrap, content, and market routes now use typed dependency
+  attributes instead of direct string-key lookups.
 - Dependency entries are immutable; private runtime statistics are stored
   separately from configured dependencies.
+- The legacy `build_route_helpers()` wrapper has been removed; runtime jobs
+  use the shared `get_route_context()` entrypoint.
 
-Remaining work is to migrate route and service modules from compatibility
-lookups to typed attributes, then remove the legacy helper wrapper.
+Remaining work is to migrate the other route and service modules from
+compatibility lookups to typed attributes.
 
 ## Verification
 

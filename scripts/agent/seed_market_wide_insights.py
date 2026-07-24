@@ -19,7 +19,7 @@ for path in (str(SCRIPTS_ROOT), str(REPO_ROOT)):
 os.environ["POLYDATA_SNAPSHOT_PREWARM"] = "0"
 
 from agent.market_wide.snapshot import DEFAULT_LENSES, seed_market_wide_snapshots, snapshot_response
-from api_server import build_route_helpers, initialize_runtime
+from api_server import get_route_context, initialize_runtime
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,7 +36,7 @@ def main() -> int:
     args = parse_args()
     initialize_runtime(skip_init_schema=not args.init_schema, log_startup=False)
     lenses = tuple(args.lens or DEFAULT_LENSES)
-    snapshots = seed_market_wide_snapshots(build_route_helpers(), lenses, live=not args.fallback_only, force=args.force)
+    snapshots = seed_market_wide_snapshots(get_route_context(), lenses, live=not args.fallback_only, force=args.force)
     summary = [
         {
             "lens": snapshot.get("lens"),

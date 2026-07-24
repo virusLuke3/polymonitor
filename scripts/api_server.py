@@ -135,6 +135,8 @@ _runtime_initialized = False
 _snapshot_prewarm_owner_fd = None
 _service_context_lock = threading.Lock()
 _service_context: Optional[ServiceContext] = None
+_route_context_lock = threading.Lock()
+_route_context: Optional[RouteContext] = None
 
 
 def _runtime_coordination_dir() -> Path:
@@ -221,7 +223,7 @@ def create_app() -> Flask:
     app.config["POLYDATA_API_HOST"] = SETTINGS.host
     app.config["POLYDATA_API_PORT"] = SETTINGS.port
     service_context = build_service_context()
-    route_context = build_route_context(service_context)
+    route_context = get_route_context()
     app.config["POLYDATA_SERVICE_CONTEXT"] = service_context
     app.config["POLYDATA_ROUTE_CONTEXT"] = route_context
     register_blueprints(app, route_context)
@@ -383,9 +385,14 @@ def build_route_context(service_context: ServiceContext) -> RouteContext:
     })
 
 
-def build_route_helpers() -> RouteContext:
-    """Compatibility wrapper for legacy runtime entrypoints."""
-    return build_route_context(build_service_context())
+def get_route_context() -> RouteContext:
+    global _route_context
+    if _route_context is not None:
+        return _route_context
+    with _route_context_lock:
+        if _route_context is None:
+            _route_context = build_route_context(build_service_context())
+    return _route_context
 
 
 def build_service_context() -> ServiceContext:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from flask import Flask
@@ -108,3 +108,26 @@ class RouteContext(Mapping[str, Any]):
 
     def __len__(self) -> int:
         return len(self.capabilities)
+
+
+def resolve_route_callable(context: Mapping[str, Any], name: str) -> Callable[..., Any]:
+    """Resolve one typed route dependency.
+
+    Production ``RouteContext`` instances fail during blueprint registration.
+    Partial plain mappings remain useful for focused unit tests; their missing
+    dependency fails only if the corresponding endpoint is exercised.
+    """
+
+    try:
+        dependency = context[name]
+    except KeyError as exc:
+        if isinstance(context, RouteContext):
+            raise RuntimeError(f"RouteContext is missing required callable: {name}") from exc
+
+        def missing_dependency(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError(f"Route dependency is unavailable: {name}")
+
+        return missing_dependency
+    if not callable(dependency):
+        raise TypeError(f"Route dependency is not callable: {name}")
+    return dependency

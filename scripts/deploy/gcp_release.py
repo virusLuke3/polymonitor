@@ -28,6 +28,7 @@ GCP_SOURCE_PREFIXES = (
 GCP_SOURCE_FILES = {
     ".python-version",
     "pyproject.toml",
+    "scripts/agent/seed_market_wide_insights.py",
     "scripts/api_server.py",
     "scripts/market/market_discovery.py",
     "scripts/market/market_identity.py",
