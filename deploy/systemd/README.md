@@ -27,6 +27,8 @@ not a separate code tree.
 - `polydata-db-tunnel.service` when installed by `scripts/deploy/setup_remote_readonly_api.sh`
 - `polydata-*-seed.service` runtime seed watchers
 - `polydata-new-market-signal.service`
+- `polydata-telegram-publisher.service`
+- `polydata-serving-healthcheck.timer` provides bounded recovery for a live-but-unresponsive API or publisher. It confirms consecutive failures, permits at most three recovery restarts per 30 minutes, then backs off automatically.
 - `polydata-geo-sanctions-shock.service`
 - `polydata-quant-backtest-runner.service`
 - `polydata-lob-maintenance.service`
@@ -118,6 +120,7 @@ cp deploy/systemd/polydata-content-topic-refresh.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-*-seed.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-geo-sanctions-shock.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-new-market-signal.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-telegram-publisher.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-quant-backtest-runner.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-lob-maintenance.service ~/.config/systemd/user/
 systemctl --user daemon-reload

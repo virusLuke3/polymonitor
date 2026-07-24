@@ -11,6 +11,10 @@ from .models import MessageCandidate
 RELATED_NEWS_GROUP_LIMIT = 2
 WORLDCUP_WORKSPACE_URL = "https://www.polymonitor.club/?workspace=worldcup"
 QUERY_BOT_URL = "https://t.me/PolyMonitorQuery_bot"
+NEW_MARKET_PLACEHOLDER_TITLE_PREFIXES = (
+    "On-chain recovered market ",
+    "Trade indexer placeholder market ",
+)
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -617,7 +621,7 @@ def format_new_market_signals(payload: Dict[str, Any]) -> List[MessageCandidate]
     messages: List[MessageCandidate] = []
     for item in _iter_items(payload):
         title = _text(item.get("title") or item.get("question") or item.get("marketTitle") or item.get("eventTitle"))
-        if not title:
+        if not title or any(title.startswith(prefix) for prefix in NEW_MARKET_PLACEHOLDER_TITLE_PREFIXES):
             continue
         status = _text(item.get("status") or item.get("signal") or item.get("reason"))
         probability = _text(item.get("initialYesProbability"))

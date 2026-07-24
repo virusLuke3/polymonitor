@@ -7,6 +7,14 @@ SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 POLYDATA_CONFIG_DIR="${HOME}/.config/polydata"
 POLYDATA_ENV_FILE="${POLYDATA_CONFIG_DIR}/polydata.env"
 SOURCE_ENV_FILE="${ROOT_DIR}/.env"
+ORDERFILLED_CLICKHOUSE_CONTAINER="polydata_clickhouse_orderfilled"
+ORDERFILLED_CLICKHOUSE_IMAGE="clickhouse/clickhouse-server:24.8"
+ORDERFILLED_CLICKHOUSE_DATA_DIR="${ORDERFILLED_CLICKHOUSE_DATA_DIR:-/data2/${USER}/clickhouse_orderfilled/data}"
+ORDERFILLED_CLICKHOUSE_LOG_DIR="${ORDERFILLED_CLICKHOUSE_LOG_DIR:-/data2/${USER}/clickhouse_orderfilled/logs}"
+ORDERFILLED_CLICKHOUSE_HTTP_PORT="18123"
+ORDERFILLED_CLICKHOUSE_NATIVE_PORT="19000"
+ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_SIZE="${ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_SIZE:-100m}"
+ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_FILE="${ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_FILE:-5}"
 
 LOCAL_COLLECTOR_TARGET="polydata-local-collector.target"
 LEGACY_CORE_TARGET="polydata-core.target"
@@ -181,6 +189,70 @@ docker_container_exists() {
   docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "${name}"
 }
 
+docker_container_running() {
+  local name="$1"
+  [[ "$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || true)" == "true" ]]
+}
+
+clickhouse_docker_log_rotation_ok() {
+  local name="$1"
+  local log_type max_size max_file
+  log_type="$(docker inspect -f '{{.HostConfig.LogConfig.Type}}' "${name}")"
+  max_size="$(docker inspect -f '{{index .HostConfig.LogConfig.Config "max-size"}}' "${name}")"
+  max_file="$(docker inspect -f '{{index .HostConfig.LogConfig.Config "max-file"}}' "${name}")"
+
+  [[ "${log_type}" == "json-file" \
+    && "${max_size}" == "${ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_SIZE}" \
+    && "${max_file}" == "${ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_FILE}" ]]
+}
+
+recreate_clickhouse_with_log_rotation() {
+  local name="${ORDERFILLED_CLICKHOUSE_CONTAINER}"
+  local env_file image
+
+  image="$(docker inspect -f '{{.Config.Image}}' "${name}" 2>/dev/null || true)"
+  image="${image:-${ORDERFILLED_CLICKHOUSE_IMAGE}}"
+  env_file="$(mktemp)"
+  trap 'rm -f "${env_file}"' RETURN
+
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${name}" > "${env_file}"
+
+  echo "Recreating ${name} with Docker json-file log rotation (${ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_SIZE} x ${ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_FILE})."
+  docker stop "${name}" >/dev/null
+  docker rm "${name}" >/dev/null
+
+  docker run -d \
+    --name "${name}" \
+    --restart unless-stopped \
+    --log-driver json-file \
+    --log-opt "max-size=${ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_SIZE}" \
+    --log-opt "max-file=${ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_FILE}" \
+    -p "127.0.0.1:${ORDERFILLED_CLICKHOUSE_HTTP_PORT}:8123" \
+    -p "127.0.0.1:${ORDERFILLED_CLICKHOUSE_NATIVE_PORT}:9000" \
+    -v "${ORDERFILLED_CLICKHOUSE_DATA_DIR}:/var/lib/clickhouse" \
+    -v "${ORDERFILLED_CLICKHOUSE_LOG_DIR}:/var/log/clickhouse-server" \
+    --env-file "${env_file}" \
+    "${image}" >/dev/null
+
+  rm -f "${env_file}"
+  trap - RETURN
+}
+
+ensure_clickhouse_docker_log_rotation() {
+  local name="${ORDERFILLED_CLICKHOUSE_CONTAINER}"
+
+  if ! docker_container_exists "${name}"; then
+    echo "${name} container not found; create/configure OrderFilled ClickHouse before starting trade sync." >&2
+    exit 1
+  fi
+
+  if clickhouse_docker_log_rotation_ok "${name}"; then
+    return
+  fi
+
+  recreate_clickhouse_with_log_rotation
+}
+
 start_docker_dependencies() {
   if ! command -v docker >/dev/null 2>&1; then
     echo "docker not found; skipping Docker dependency startup." >&2
@@ -203,13 +275,11 @@ start_docker_dependencies() {
     echo "Redis container created: polydata_redis"
   fi
 
-  if docker_container_exists "polydata_clickhouse_orderfilled"; then
-    docker start polydata_clickhouse_orderfilled >/dev/null
-    echo "ClickHouse container ready: polydata_clickhouse_orderfilled"
-  else
-    echo "polydata_clickhouse_orderfilled container not found; create/configure OrderFilled ClickHouse before starting trade sync." >&2
-    exit 1
+  ensure_clickhouse_docker_log_rotation
+  if ! docker_container_running "${ORDERFILLED_CLICKHOUSE_CONTAINER}"; then
+    docker start "${ORDERFILLED_CLICKHOUSE_CONTAINER}" >/dev/null
   fi
+  echo "ClickHouse container ready: ${ORDERFILLED_CLICKHOUSE_CONTAINER}"
 }
 
 stop_gcp_and_legacy_runtime() {

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Iterable, List
 
 from .api_client import PolyDataApiClient, resolve_polydata_api_base
@@ -48,9 +50,31 @@ class PublishResult:
     sent: int = 0
     skipped_seen: int = 0
     skipped_unconfigured: int = 0
+    failed_sends: int = 0
+    fetch_failed: int = 0
     dry_run: bool = False
     api_base: str = ""
     api_healthy: bool = False
+
+
+def _write_heartbeat(*, phase: str, result: PublishResult | None = None, error: str = "") -> None:
+    raw_path = str(os.environ.get("POLYDATA_TELEGRAM_HEARTBEAT_PATH") or "").strip()
+    if not raw_path:
+        return
+    path = Path(raw_path).expanduser()
+    payload = {
+        "timestamp": int(time.time()),
+        "phase": phase,
+        "error": str(error or "")[:500],
+        "result": result.__dict__ if result is not None else None,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(f"{path.suffix}.tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        print(f"[telegram-publisher] WARN heartbeat write failed path={path} error={exc}", file=sys.stderr)
 
 
 def fetch_snapshots(api: PolyDataApiClient, *, target: str) -> Dict[str, Dict]:
@@ -58,7 +82,10 @@ def fetch_snapshots(api: PolyDataApiClient, *, target: str) -> Dict[str, Dict]:
     snapshots: Dict[str, Dict] = {}
     for panel_id in panel_ids:
         path, params = PANEL_ENDPOINTS[panel_id]
-        snapshots[panel_id] = api.get_json(path, params=params)
+        try:
+            snapshots[panel_id] = api.get_json(path, params=params)
+        except Exception as exc:
+            print(f"[telegram-publisher] WARN fetch failed panel={panel_id} error={exc}", file=sys.stderr)
     return snapshots
 
 
@@ -94,14 +121,22 @@ def publish_candidates(
                 result.sent += 1
                 continue
             elif not prime:
-                telegram.send_message(
-                    chat_id=config.chat_id,
-                    text=candidate.text,
-                    message_thread_id=config.message_thread_id,
-                    disable_web_page_preview=not candidate.link_preview,
-                    disable_notification=settings.disable_notification,
-                    reply_markup=candidate.reply_markup,
-                )
+                try:
+                    telegram.send_message(
+                        chat_id=config.chat_id,
+                        text=candidate.text,
+                        message_thread_id=config.message_thread_id,
+                        disable_web_page_preview=not candidate.link_preview,
+                        disable_notification=settings.disable_notification,
+                        reply_markup=candidate.reply_markup,
+                    )
+                except Exception as exc:
+                    result.failed_sends += 1
+                    print(
+                        f"[telegram-publisher] WARN send failed target={target} dedupe={candidate.dedupe_key} error={exc}",
+                        file=sys.stderr,
+                    )
+                    continue
             state.mark(target, candidate.dedupe_key)
             result.sent += 1
     state.save()
@@ -133,6 +168,7 @@ def run_once(
         state = PublishState(settings.state_path)
         result = publish_candidates(candidates, settings=settings, state=state, telegram=telegram, dry_run=dry_run, prime=prime)
     result.fetched = len(snapshots)
+    result.fetch_failed = len(TARGET_PANELS.get(target, TARGET_PANELS["all"])) - len(snapshots)
     result.api_base = api.base_url
     result.api_healthy = resolution.healthy
     return result
@@ -160,14 +196,18 @@ def main() -> int:
         return 2
 
     interval = max(15, int(args.interval or settings.watch_interval_seconds))
+    _write_heartbeat(phase="starting")
     while True:
+        _write_heartbeat(phase="cycle-start")
         try:
             result = run_once(settings=settings, target=args.target, dry_run=dry_run, prime=bool(args.prime), api_base_override=str(args.api_base or ""))
             print(json.dumps(result.__dict__, ensure_ascii=True), file=sys.stderr)
+            _write_heartbeat(phase="cycle-complete", result=result)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
             print(f"[telegram-publisher] ERROR {exc}", file=sys.stderr)
+            _write_heartbeat(phase="cycle-error", error=str(exc))
             if not args.watch:
                 return 1
         if not args.watch:

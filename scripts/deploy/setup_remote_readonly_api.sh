@@ -183,6 +183,8 @@ cat > "${LOCAL_API_SERVICE}" <<EOF
 Description=polyData readonly API service
 After=network-online.target polydata-db-tunnel.service
 Wants=network-online.target polydata-db-tunnel.service
+StartLimitIntervalSec=1800
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -190,7 +192,14 @@ WorkingDirectory=${REMOTE_REPO_ROOT}
 EnvironmentFile=%h/.config/polydata/polydata.env
 ExecStart=/bin/bash -lc 'POLYDATA_LOB_WEBSOCKET_ENABLED="${POLYDATA_API_LOB_WEBSOCKET_ENABLED:-0}" exec "${REMOTE_REPO_ROOT}/.venv/bin/gunicorn" --workers "${POLYDATA_GUNICORN_WORKERS:-3}" --threads "${POLYDATA_GUNICORN_THREADS:-4}" --bind "${POLYDATA_API_HOST:-127.0.0.1}:${POLYDATA_API_PORT:-18500}" --timeout 180 --graceful-timeout 30 --max-requests "${POLYDATA_GUNICORN_MAX_REQUESTS:-300}" --max-requests-jitter "${POLYDATA_GUNICORN_MAX_REQUESTS_JITTER:-60}" scripts.api.app:app'
 Restart=always
-RestartSec=10
+RestartSec=15
+TimeoutStopSec=45
+KillMode=mixed
+OOMPolicy=kill
+CPUQuota=180%
+MemoryHigh=2G
+MemoryMax=3G
+TasksMax=128
 StandardOutput=journal
 StandardError=journal
 
@@ -284,11 +293,13 @@ GCP_UNITS=(
   polydata-quant-backtest-runner.service
   polydata-sports-odds-seed.service
   polydata-suspicious-trades-seed.service
+  polydata-serving-healthcheck.service
+  polydata-serving-healthcheck.timer
   polydata-tech-panels-seed.service
+  polydata-telegram-publisher.service
   polydata-telegram-query-bot.service
   polydata-weather-news-seed.service
   polydata-whale-trades-seed.service
-  polydata-worldcup-dashboard-seed.service
 )
 for unit in "${GCP_UNITS[@]}"; do
   src="${REMOTE_REPO_ROOT}/deploy/systemd/${unit}"
