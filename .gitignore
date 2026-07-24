@@ -75,6 +75,7 @@ document/
 /scripts/clickhouse/build_pnl_trade_cashflows.py
 /scripts/clickhouse/build_polysignal_serving.py
 /scripts/clickhouse/build_position_snapshots.py
+/scripts/clickhouse/import_block_timestamps_from_trade_times.py
 /scripts/clickhouse/run_conversion_ctf_net_classifications_live.sh
 /scripts/clickhouse/run_ctf_transfer_legs_rebuild.sh
 /scripts/clickhouse/run_non_trade_asset_deltas_live.sh
@@ -83,14 +84,21 @@ document/
 /scripts/clickhouse/sync_pnl_market_classifications.py
 /scripts/ops/apply_conversion_ctf_net_live.sh
 /scripts/ops/apply_non_trade_pnl_quota_safe_live.sh
+/scripts/ops/load_dotenv.sh
 /scripts/quant_api_server.py
 /scripts/trade/ctf_token_transfers_backfill.py
 /scripts/trade/orderfilled_erc20_compact_backfill.py
 /scripts/trade/run_non_trade_cashflows_clickhouse_live.sh
+/scripts/trade/run_trades_indexer_clickhouse_head.sh
 /scripts/trades/
+/start_full_stack.sh
 /webpage/quant.html
 /webpage/src/main-quant.tsx
 /webpage/src/services/quantApi.ts
+
+# Local near-head watcher experiment.
+/deploy/systemd/polydata-trade-head-sync.service
+/deploy/systemd/polydata-trade-head-sync.timer
 
 # Retired World Cup experiments remain available locally but are hidden from
 # the product and excluded from shared source control.
@@ -103,6 +111,9 @@ document/
 # Local dataset publishing workspace and generated Telegram state.
 /kaggle/
 /telegram/data/
+
+# Local planning/debug state.
+/.planning/
 
 # Local-only experimental tests associated with ignored pipelines.
 /tests/test_clickhouse_orderfilled_service.py
