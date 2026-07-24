@@ -202,7 +202,6 @@ DEFAULT_WORKSPACE_PANEL_IDS: List[str] = [
     "espn-matchup-predictor",
     "esports-intel",
     "sports-odds",
-    "world-cup-match-ops",
     "jin10-flash",
     "new-market-signals",
     "lob-depth",

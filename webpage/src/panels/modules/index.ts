@@ -196,5 +196,5 @@ const ALL_PANEL_MODULES: PanelModule[] = [
 // The tournament workspace is retired from the active product surface. Keep
 // the implementations available so they can be restored for a future event.
 export const PANEL_MODULES: PanelModule[] = ALL_PANEL_MODULES.filter(
-  (panel) => !panel.id.startsWith('worldcup-'),
+  (panel) => !panel.id.startsWith('worldcup-') && !panel.id.startsWith('world-cup-'),
 );
