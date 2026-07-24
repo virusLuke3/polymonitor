@@ -58,3 +58,58 @@ pnl/
 # 私有文档，禁止提交到 GitHub。公开文档请放 docs/。
 # 不要对 document/ 使用 git add -f。
 document/
+
+# Local-only experimental pipelines. These files are intentionally kept out of
+# the shared repository until their data contracts and operating model settle.
+/deploy/clickhouse/polysignal_serving.sql
+/deploy/systemd/polydata-non-trade-asset-deltas-live.service
+/deploy/systemd/polydata-non-trade-cashflows-live.service
+/deploy/systemd/polydata-pnl-trade-cashflows-live.service
+/quant/prices/backfill_block_close_timestamps.py
+/scripts/api/routes/runtime_polysignal.py
+/scripts/api/services/polysignal_agent_service.py
+/scripts/api/services/polysignal_service.py
+/scripts/clickhouse/build_conversion_ctf_net_classifications.py
+/scripts/clickhouse/build_ctf_token_transfer_legs.py
+/scripts/clickhouse/build_non_trade_asset_deltas.py
+/scripts/clickhouse/build_pnl_trade_cashflows.py
+/scripts/clickhouse/build_polysignal_serving.py
+/scripts/clickhouse/build_position_snapshots.py
+/scripts/clickhouse/run_conversion_ctf_net_classifications_live.sh
+/scripts/clickhouse/run_ctf_transfer_legs_rebuild.sh
+/scripts/clickhouse/run_non_trade_asset_deltas_live.sh
+/scripts/clickhouse/run_pnl_trade_cashflows_live.sh
+/scripts/clickhouse/run_position_snapshots_live.sh
+/scripts/clickhouse/sync_pnl_market_classifications.py
+/scripts/ops/apply_conversion_ctf_net_live.sh
+/scripts/ops/apply_non_trade_pnl_quota_safe_live.sh
+/scripts/quant_api_server.py
+/scripts/trade/ctf_token_transfers_backfill.py
+/scripts/trade/orderfilled_erc20_compact_backfill.py
+/scripts/trade/run_non_trade_cashflows_clickhouse_live.sh
+/scripts/trades/
+/webpage/quant.html
+/webpage/src/main-quant.tsx
+/webpage/src/services/quantApi.ts
+
+# Retired World Cup experiments remain available locally but are hidden from
+# the product and excluded from shared source control.
+/deploy/systemd/polydata-world-cup-match-ops-seed.service
+/scripts/api/runtime_panels/modules/world_cup_match_ops.py
+/scripts/api/services/world_cup_match_ops_service.py
+/scripts/runtime/world_cup_match_ops_watcher.py
+/webpage/src/panels/modules/world-cup-match-ops/
+
+# Local dataset publishing workspace and generated Telegram state.
+/kaggle/
+/telegram/data/
+
+# Local-only experimental tests associated with ignored pipelines.
+/tests/test_clickhouse_orderfilled_service.py
+/tests/test_gcp_serving_healthcheck.py
+/tests/test_live_evidence_panels.py
+/tests/test_orderfilled_registry_gap.py
+/tests/test_quant_build_runner.py
+/tests/test_serving_sync_write_stability.py
+/tests/test_telegram_runtime_bridge.py
+/tests/test_trades_indexer_address_filter.py
