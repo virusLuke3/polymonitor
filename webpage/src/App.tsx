@@ -148,6 +148,7 @@ const PANEL_MAX_COL_SPAN = 3;
 type PanelLayoutPrefs = Record<string, { rowSpan?: number; colSpan?: number }>;
 type PanelSizeHint = 'default' | 'wide' | 'tall' | undefined;
 type WorkspaceMode = 'world' | 'worldcup';
+const WORLD_CUP_WORKSPACE_VISIBLE = false;
 
 function clampSpan(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(value)));
@@ -527,7 +528,7 @@ function readMarketGroupSortStorage(): MarketGroupSort {
 
 function readWorkspaceMode(): WorkspaceMode {
   const override = readSearchParam('workspace');
-  if (override === 'worldcup') return 'worldcup';
+  if (WORLD_CUP_WORKSPACE_VISIBLE && override === 'worldcup') return 'worldcup';
   return 'world';
 }
 
@@ -2218,15 +2219,17 @@ function WorldMonitorApp() {
               <span className="wm-workspace-icon">◎</span>
               <span className="wm-workspace-label">World</span>
             </button>
-            <button
-              className={`wm-workspace-option wm-workspace-worldcup ${workspaceMode === 'worldcup' ? 'active' : ''}`}
-              type="button"
-              onClick={() => setWorkspaceMode('worldcup')}
-              title="World Cup"
-            >
-              <span className="wm-workspace-icon">⚽</span>
-              <span className="wm-workspace-label">World Cup</span>
-            </button>
+            {WORLD_CUP_WORKSPACE_VISIBLE ? (
+              <button
+                className={`wm-workspace-option wm-workspace-worldcup ${workspaceMode === 'worldcup' ? 'active' : ''}`}
+                type="button"
+                onClick={() => setWorkspaceMode('worldcup')}
+                title="World Cup"
+              >
+                <span className="wm-workspace-icon">⚽</span>
+                <span className="wm-workspace-label">World Cup</span>
+              </button>
+            ) : null}
             <button className="wm-nav-icon" type="button" onClick={() => setShowCommandPalette(true)} title="Command palette">⌨</button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowPanelLibrary((current) => !current)} title="Toggle panel library">◫</button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowSettings(true)} title="Open settings">⚒</button>

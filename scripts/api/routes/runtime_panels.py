@@ -14,6 +14,8 @@ except Exception:  # pragma: no cover
 
 
 def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
+    if request.headers.get("X-PolyData-Telegram-Publisher") == "1":
+        return
     try:
         from telegram.topics.runtime_bridge import publish_panel_snapshot
     except Exception:
@@ -148,6 +150,16 @@ def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
                 "errors": errors,
             }
         )
+
+    @bp.route("/runtime/panels/<panel_id>", methods=["GET"])
+    def api_runtime_panel_by_id(panel_id: str):
+        panel = get_panel_by_id(panel_id)
+        if panel is None:
+            return jsonify({"error": "unknown-panel", "panelId": panel_id}), 404
+        limit = panel.clamp_limit(request.args.get("limit"))
+        payload = _get_panel_snapshot(panel, helpers, limit)
+        _publish_runtime_panel(panel.panel_id, payload)
+        return jsonify(payload)
 
     for panel in RUNTIME_PANEL_MODULES:
         endpoint = f"api_runtime_panel_{panel.panel_id.replace('-', '_')}"

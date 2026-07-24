@@ -3171,7 +3171,7 @@ export function WeatherDeckMap({
         {conflictPoints.length ? <span><i className="ucdp" />UCDP</span> : null}
         {countryRisks.length ? <span><i className="country" />COUNTRY RISK</span> : null}
       </div>
-      <div className="wm-weather-deck-status">{mapDegraded ? 'Fallback tiles' : 'DeckGL'}</div>
+      <div className="wm-weather-deck-status">{mapDegraded ? 'Local basemap' : 'DeckGL'}</div>
     </div>
   );
 }
