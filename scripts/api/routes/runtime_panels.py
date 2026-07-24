@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, cast
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
+from api.context import resolve_route_callable
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
 from api.services import hls_proxy_service, youtube_embed_service, youtube_live_probe_service
 
@@ -11,6 +15,19 @@ try:
     import requests as requests_module
 except Exception:  # pragma: no cover
     requests_module = None
+
+
+@dataclass(frozen=True)
+class RuntimePanelRouteDependencies:
+    panel_context: Mapping[str, Any]
+    utc_now_iso: Callable[[], str]
+
+    @classmethod
+    def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelRouteDependencies:
+        return cls(
+            panel_context=context,
+            utc_now_iso=cast(Callable[[], str], resolve_route_callable(context, "utc_now_iso")),
+        )
 
 
 def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
@@ -26,7 +43,7 @@ def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
         return
 
 
-def _get_panel_snapshot(panel, helpers: dict, limit: int | None):
+def _get_panel_snapshot(panel, panel_context: Mapping[str, Any], limit: int | None):
     kwargs = {}
     if limit is not None:
         kwargs["limit"] = limit
@@ -34,10 +51,11 @@ def _get_panel_snapshot(panel, helpers: dict, limit: int | None):
         category = request.args.get("category")
         if category:
             kwargs["category"] = category
-    return panel.get_snapshot(helpers, **kwargs)
+    return panel.get_snapshot(panel_context, **kwargs)
 
 
-def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
+def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
+    dependencies = RuntimePanelRouteDependencies.from_context(context)
     bp = Blueprint("runtime_panel_routes", __name__)
 
     def _youtube_relay_token() -> str:
@@ -70,7 +88,7 @@ def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
         except hls_proxy_service.HlsProxyError as exc:
             return jsonify({"status": "error", "error": str(exc)}), exc.status_code
         except Exception as exc:
-            helpers["app"].logger.warning("runtime hls proxy failed url=%s error=%s", target_url[:160], exc)
+            current_app.logger.warning("runtime hls proxy failed url=%s error=%s", target_url[:160], exc)
             return jsonify({"status": "error", "error": "upstream HLS fetch failed"}), 502
         response = Response(data, status=status, content_type=content_type)
         response.headers["Cache-Control"] = hls_proxy_service.cache_control_for(content_type)
@@ -134,17 +152,17 @@ def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
             raw_limit = request.args.get(f"limit.{panel_id}") or request.args.get("limit")
             limit = panel.clamp_limit(raw_limit)
             try:
-                payload = _get_panel_snapshot(panel, helpers, limit)
+                payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
                 payloads[panel.panel_id] = payload
                 _publish_runtime_panel(panel.panel_id, payload)
             except Exception as exc:
-                helpers["app"].logger.exception("runtime-panels batch failed panel_id=%s", panel_id)
+                current_app.logger.exception("runtime-panels batch failed panel_id=%s", panel_id)
                 errors[panel_id] = exc.__class__.__name__
 
         status = "ok" if not errors else ("partial" if payloads else "error")
         return jsonify(
             {
-                "generatedAt": helpers["utc_now_iso"](),
+                "generatedAt": dependencies.utc_now_iso(),
                 "status": status,
                 "panels": payloads,
                 "errors": errors,
@@ -157,7 +175,7 @@ def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
         if panel is None:
             return jsonify({"error": "unknown-panel", "panelId": panel_id}), 404
         limit = panel.clamp_limit(request.args.get("limit"))
-        payload = _get_panel_snapshot(panel, helpers, limit)
+        payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
         _publish_runtime_panel(panel.panel_id, payload)
         return jsonify(payload)
 
@@ -166,7 +184,7 @@ def create_runtime_panels_blueprint(helpers: dict) -> Blueprint:
 
         def _handler(panel=panel):
             limit = panel.clamp_limit(request.args.get("limit"))
-            payload = _get_panel_snapshot(panel, helpers, limit)
+            payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
             _publish_runtime_panel(panel.panel_id, payload)
             return jsonify(payload)
 
