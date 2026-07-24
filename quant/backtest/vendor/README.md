@@ -22,18 +22,12 @@ NautilusTrader is not vendored here as raw source because it is a Rust/Cython
 engine. Copying `nautilus_trader/` alone does not produce importable extension
 modules such as `nautilus_trader.core.data`.
 
-This project runs Nautilus through a dedicated Python 3.12 worker process. The
-local development environment is:
-
-```text
-/home/jiahuaiyu/.conda/envs/polymonitor-nautilus312/bin/python
-```
-
-It was created with:
+This project runs Nautilus through a dedicated Python 3.12 worker process.
+Create an isolated environment with:
 
 ```text
 conda create -y -n polymonitor-nautilus312 python=3.12 pip
-/home/jiahuaiyu/.conda/envs/polymonitor-nautilus312/bin/python -m pip install -U nautilus_trader
+conda run -n polymonitor-nautilus312 python -m pip install -U nautilus_trader
 ```
 
 Override the worker interpreter with:
