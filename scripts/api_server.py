@@ -1876,8 +1876,11 @@ def initialize_runtime(
         if log_startup:
             app.logger.info("Starting API server at http://%s:%s", host or SETTINGS.host, port or SETTINGS.port)
             app.logger.info("Database: %s", describe_db_target())
-        if SNAPSHOT_PREWARM_ENABLED and _claim_startup_prewarm_slot():
-            prewarm_critical_payloads()
+        startup_prewarm_owner = _claim_startup_prewarm_slot()
+        if startup_prewarm_owner:
+            system_service.prewarm_system_health_payload(build_service_context())
+            if SNAPSHOT_PREWARM_ENABLED:
+                prewarm_critical_payloads()
         if SNAPSHOT_PREWARM_ENABLED and _claim_snapshot_prewarm_owner():
             start_snapshot_prewarm_thread()
         local_orderbook_websocket_watcher.start_background_worker(build_service_context(), lock_dir=_runtime_coordination_dir())

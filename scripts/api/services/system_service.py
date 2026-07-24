@@ -476,13 +476,33 @@ def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
     return payload
 
 
+def _build_system_health_warming_payload(ctx: dict) -> Dict[str, Any]:
+    """Return a dependency-free placeholder while the full health probe runs."""
+
+    return {
+        "database": ctx["describe_db_target"](),
+        "apiStatus": "warming",
+        "lobRuntime": {"status": "warming", "mode": "local-orderbook"},
+        "contentSync": {"status": "warming"},
+        "syncState": {},
+        "marketSync": None,
+        "tradeSync": None,
+        "oracleSync": None,
+        "priceSync": {"status": "warming", "updatedAt": None},
+    }
+
+
+def _store_local_system_health_payload(payload: Dict[str, Any], ttl_seconds: int) -> None:
+    with _SYSTEM_HEALTH_CACHE_LOCK:
+        _SYSTEM_HEALTH_CACHE["value"] = payload
+        _SYSTEM_HEALTH_CACHE["expires_at"] = time.monotonic() + ttl_seconds
+
+
 def _store_system_health_payload(ctx: dict, payload: Dict[str, Any], ttl_seconds: int) -> None:
     writer = ctx.get("set_cached_json")
     if callable(writer):
         writer(SYSTEM_HEALTH_CACHE_NAMESPACE, SYSTEM_HEALTH_CACHE_KEY, payload, ttl_seconds)
-    with _SYSTEM_HEALTH_CACHE_LOCK:
-        _SYSTEM_HEALTH_CACHE["value"] = payload
-        _SYSTEM_HEALTH_CACHE["expires_at"] = time.monotonic() + ttl_seconds
+    _store_local_system_health_payload(payload, ttl_seconds)
 
 
 def _schedule_system_health_refresh(ctx: dict, ttl_seconds: int) -> None:
@@ -531,17 +551,24 @@ def build_system_health_payload(ctx: dict) -> Dict[str, Any]:
         _schedule_system_health_refresh(ctx, ttl_seconds)
         return stale_payload
 
-    try:
-        payload = _build_system_health_payload_uncached(ctx)
-    except Exception:
-        with _SYSTEM_HEALTH_CACHE_LOCK:
-            cached = _SYSTEM_HEALTH_CACHE.get("value")
-            if isinstance(cached, dict):
-                return cached
-        raise
+    warming_payload = _build_system_health_warming_payload(ctx)
+    _store_local_system_health_payload(warming_payload, ttl_seconds)
+    _schedule_system_health_refresh(ctx, ttl_seconds)
+    return warming_payload
 
-    _store_system_health_payload(ctx, payload, ttl_seconds)
-    return payload
+
+def prewarm_system_health_payload(ctx: dict) -> None:
+    """Start the full health probe without extending API startup latency."""
+
+    ttl_seconds = _system_health_cache_ttl_seconds()
+    with _SYSTEM_HEALTH_CACHE_LOCK:
+        cached = _SYSTEM_HEALTH_CACHE.get("value")
+        expires_at = float(_SYSTEM_HEALTH_CACHE.get("expires_at") or 0.0)
+    if isinstance(cached, dict) and cached.get("apiStatus") != "warming" and expires_at > time.monotonic():
+        return
+    if not isinstance(cached, dict):
+        _store_local_system_health_payload(_build_system_health_warming_payload(ctx), ttl_seconds)
+    _schedule_system_health_refresh(ctx, ttl_seconds)
 
 
 def build_seed_health_payload(ctx: dict) -> Dict[str, Any]:
