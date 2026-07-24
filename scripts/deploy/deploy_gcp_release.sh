@@ -160,9 +160,17 @@ done
 REMOTE_RESTART_UNITS="${RESTART_UNITS[*]}"
 ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "
   set -eu
-  curl -fsS --max-time 15 http://127.0.0.1:18500/health >/dev/null
-  curl -fsS --max-time 20 'http://127.0.0.1:18500/content/latest?limit=1' >/dev/null
-  curl -fsS --max-time 15 http://127.0.0.1/wm-api/health >/dev/null
+  healthy=0
+  for attempt in \$(seq 1 30); do
+    if curl -fsS --max-time 10 http://127.0.0.1:18500/health >/dev/null \
+      && curl -fsS --max-time 15 'http://127.0.0.1:18500/content/latest?limit=1' >/dev/null \
+      && curl -fsS --max-time 10 http://127.0.0.1/wm-api/health >/dev/null; then
+      healthy=1
+      break
+    fi
+    sleep 2
+  done
+  test \"\$healthy\" = 1
   for unit in ${REMOTE_RESTART_UNITS}; do
     systemctl --user is-active --quiet \"\$unit\"
   done
