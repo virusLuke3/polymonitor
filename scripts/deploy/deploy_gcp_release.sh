@@ -11,6 +11,7 @@ DEPLOY_RESTART_UNITS="${DEPLOY_RESTART_UNITS:-polydata-api.service}"
 DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-.local/state/polydata-deploy}"
 DEPLOY_DRY_RUN="${DEPLOY_DRY_RUN:-0}"
 DEPLOY_SSH_KEY="${DEPLOY_SSH_KEY:-}"
+DEPLOY_INSTALL_DEPENDENCIES="${DEPLOY_INSTALL_DEPENDENCIES:-1}"
 
 : "${DEPLOY_HOST:?Set DEPLOY_HOST}"
 : "${DEPLOY_USER:?Set DEPLOY_USER}"
@@ -143,7 +144,7 @@ sync_systemd_units() {
 }
 sync_systemd_units
 
-if python3 -c '
+if [[ "${DEPLOY_INSTALL_DEPENDENCIES}" == "1" ]] && python3 -c '
 import json, sys
 paths = {entry["path"] for entry in json.load(open(sys.argv[1]))["entries"]}
 raise SystemExit(0 if "scripts/requirements.lock.txt" in paths else 1)

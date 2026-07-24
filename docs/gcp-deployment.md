@@ -38,6 +38,8 @@ Backend deployment is deliberately manual while the existing GCP worktree has
 live hotfixes. `Deploy GCP Backend` requires the `gcp-production` GitHub
 environment and an explicit `DEPLOY_GCP` confirmation. It always checks out the
 current `main`, reruns the backend quality contract, and defaults to a dry run.
+Installing the locked Python environment is a separate opt-in input so a source
+release cannot silently replace the live GCP environment.
 
 The backend release:
 

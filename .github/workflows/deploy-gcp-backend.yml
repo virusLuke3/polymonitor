@@ -17,6 +17,11 @@ on:
         required: true
         default: true
         type: boolean
+      install_dependencies:
+        description: Install the locked Python environment when the lock changed
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -72,6 +77,7 @@ jobs:
       DEPLOY_TARGET_SHA: HEAD
       DEPLOY_RESTART_UNITS: ${{ inputs.restart_units }}
       DEPLOY_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+      DEPLOY_INSTALL_DEPENDENCIES: ${{ inputs.install_dependencies && '1' || '0' }}
 
     steps:
       - name: Check out current main
