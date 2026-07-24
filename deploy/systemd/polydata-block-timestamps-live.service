@@ -2,6 +2,8 @@
 Description=polyData ClickHouse block timestamp live sync
 After=network-online.target polydata-trade-sync.service
 Wants=network-online.target
+StartLimitIntervalSec=3600
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -9,7 +11,8 @@ WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
 ExecStart=/bin/bash -lc 'exec scripts/clickhouse/run_block_timestamps_live.sh'
 Restart=always
-RestartSec=10
+RestartSec=600
+RestartPreventExitStatus=75
 StandardOutput=journal
 StandardError=journal
 

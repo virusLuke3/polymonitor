@@ -6,6 +6,8 @@ from flask import Blueprint, jsonify, request
 
 
 def _publish_latest_content(payload: dict) -> None:
+    if request.headers.get("X-PolyData-Telegram-Publisher") == "1":
+        return
     try:
         from telegram.topics.runtime_bridge import publish_panel_snapshot
     except Exception:
@@ -17,6 +19,8 @@ def _publish_latest_content(payload: dict) -> None:
 
 
 def _publish_related_content(payload: dict) -> None:
+    if request.headers.get("X-PolyData-Telegram-Publisher") == "1":
+        return
     try:
         from telegram.topics.runtime_bridge import publish_panel_snapshot
     except Exception:

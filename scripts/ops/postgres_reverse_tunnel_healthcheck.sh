@@ -4,6 +4,9 @@ set -euo pipefail
 ENV_FILE="${POLYDATA_ENV_FILE:-$HOME/.config/polydata/polydata.env}"
 TUNNEL_UNIT="${POLYDATA_TUNNEL_UNIT:-polydata-db-reverse-tunnel.service}"
 REMOTE_APP_DIR="${POLYDATA_REMOTE_APP_DIR:-/opt/polyData}"
+FAILURE_THRESHOLD="${POLYDATA_TUNNEL_HEALTH_FAILURE_THRESHOLD:-3}"
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/polydata-db-reverse-tunnel-healthcheck"
+FAILURE_FILE="${STATE_DIR}/consecutive-failures"
 SSH_OPTS=(
   -o BatchMode=yes
   -o ConnectTimeout=8
@@ -66,14 +69,24 @@ PY"
 }
 
 restart_tunnel() {
-  local target="$1"
-  local port="$2"
   log "restarting $TUNNEL_UNIT after failed remote PostgreSQL check"
-  timeout 20s ssh \
-    "${SSH_OPTS[@]}" \
-    "$target" \
-    "sudo -n fuser -k ${port}/tcp >/dev/null 2>&1 || fuser -k ${port}/tcp >/dev/null 2>&1 || true" || true
   systemctl --user restart "$TUNNEL_UNIT"
+}
+
+record_failure() {
+  local failures=0
+  mkdir -p "$STATE_DIR"
+  if [[ -f "$FAILURE_FILE" ]]; then
+    read -r failures < "$FAILURE_FILE" || failures=0
+  fi
+  [[ "$failures" =~ ^[0-9]+$ ]] || failures=0
+  failures=$((failures + 1))
+  printf '%s\n' "$failures" > "$FAILURE_FILE"
+  printf '%s\n' "$failures"
+}
+
+clear_failures() {
+  rm -f "$FAILURE_FILE"
 }
 
 main() {
@@ -86,14 +99,23 @@ main() {
   fi
 
   if remote_pg_check "$target" "$remote_port"; then
+    clear_failures
     log "remote PostgreSQL tunnel healthy"
     exit 0
   fi
 
-  restart_tunnel "$target" "$remote_port"
+  local failures
+  failures=$(record_failure)
+  if (( failures < FAILURE_THRESHOLD )); then
+    log "remote PostgreSQL check failed (${failures}/${FAILURE_THRESHOLD}); keeping the current tunnel"
+    exit 0
+  fi
+
+  restart_tunnel
   sleep 4
 
   if remote_pg_check "$target" "$remote_port"; then
+    clear_failures
     log "remote PostgreSQL tunnel recovered"
     exit 0
   fi

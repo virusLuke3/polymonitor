@@ -53,7 +53,13 @@ class PolyDataApiClient:
         self.timeout_seconds = max(1, int(timeout_seconds or 12))
         self.session = requests.Session()
         self.session.trust_env = False
-        self.session.headers.update({"Accept": "application/json", "User-Agent": "polydata-telegram-publisher/1.0"})
+        self.session.headers.update(
+            {
+                "Accept": "application/json",
+                "User-Agent": "polydata-telegram-publisher/1.0",
+                "X-PolyData-Telegram-Publisher": "1",
+            }
+        )
 
     def get_json(self, path: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/{str(path).lstrip('/')}"

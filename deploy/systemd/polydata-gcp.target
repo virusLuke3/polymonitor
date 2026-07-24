@@ -1,6 +1,7 @@
 [Unit]
 Description=polyData GCP serving and seed-cache services
 Wants=polydata-api.service
+Wants=polydata-serving-healthcheck.timer
 Wants=polydata-content-topic-refresh.service
 Wants=polydata-alpha-signal-seed.service
 Wants=polydata-breaking-event-radar-seed.service
@@ -39,11 +40,8 @@ Wants=polydata-suspicious-trades-seed.service
 Wants=polydata-tech-panels-seed.service
 Wants=polydata-weather-news-seed.service
 Wants=polydata-whale-trades-seed.service
-Wants=polydata-worldcup-core-seed.service
-Wants=polydata-worldcup-live-seed.service
-Wants=polydata-worldcup-lob-guard.service
-Wants=polydata-world-cup-match-ops-seed.service
 Wants=polydata-telegram-query-bot.service
+Wants=polydata-telegram-publisher.service
 After=network-online.target
 
 [Install]

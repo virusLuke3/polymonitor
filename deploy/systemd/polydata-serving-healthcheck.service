@@ -1,0 +1,17 @@
+[Unit]
+Description=polyData GCP serving bounded healthcheck
+After=network-online.target polydata-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/polydata.env
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/ops/gcp_serving_healthcheck.py'
+TimeoutStartSec=45
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=20%
+MemoryMax=96M
+StandardOutput=journal
+StandardError=journal

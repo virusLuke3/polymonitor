@@ -52,9 +52,9 @@ def publish_cached_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> int
                 telegram=telegram,
                 dry_run=settings.dry_run,
             )
-        if result.sent or result.skipped_seen:
+        if result.sent or result.skipped_seen or result.failed_sends:
             print(
-                f"[telegram-panel-publish] panel={panel_id} candidates={result.candidates} sent={result.sent} skipped_seen={result.skipped_seen}",
+                f"[telegram-panel-publish] panel={panel_id} candidates={result.candidates} sent={result.sent} failed_sends={result.failed_sends} skipped_seen={result.skipped_seen}",
                 file=sys.stderr,
             )
         return int(result.sent or 0)

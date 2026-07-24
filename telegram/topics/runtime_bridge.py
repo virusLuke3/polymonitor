@@ -26,10 +26,17 @@ def publish_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> None:
         return
     if not isinstance(payload, dict):
         return
-    candidates = format_panel_snapshot(panel_id, payload)
-    if not candidates:
+    _EXECUTOR.submit(_format_and_publish, panel_id, dict(payload), settings)
+
+
+def _format_and_publish(panel_id: str, payload: Dict[str, Any], settings: TelegramSettings) -> None:
+    try:
+        candidates = format_panel_snapshot(panel_id, payload)
+    except Exception as exc:
+        _log(f"format-failed panel={panel_id} error={exc}")
         return
-    _EXECUTOR.submit(_publish_candidates, tuple(candidates), settings, panel_id)
+    if candidates:
+        _publish_candidates(tuple(candidates), settings, panel_id)
 
 
 def _enabled(settings: TelegramSettings) -> bool:
@@ -52,10 +59,10 @@ def _publish_candidates(candidates: Iterable[MessageCandidate], settings: Telegr
                 telegram=telegram,
                 dry_run=settings.dry_run,
             )
-        if result.sent or result.skipped_seen or result.skipped_unconfigured:
+        if result.sent or result.skipped_seen or result.skipped_unconfigured or result.failed_sends:
             _log(
-                "panel=%s candidates=%s sent=%s skipped_seen=%s skipped_unconfigured=%s"
-                % (panel_id, result.candidates, result.sent, result.skipped_seen, result.skipped_unconfigured)
+                "panel=%s candidates=%s sent=%s failed_sends=%s skipped_seen=%s skipped_unconfigured=%s"
+                % (panel_id, result.candidates, result.sent, result.failed_sends, result.skipped_seen, result.skipped_unconfigured)
             )
     except Exception as exc:
         _log(f"publish-failed panel={panel_id} error={exc}")
