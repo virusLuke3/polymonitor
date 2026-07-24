@@ -1,0 +1,9 @@
+{
+  "base_sha": "e585a71072ba176667ecf3e6832f4b16310cfd47",
+  "paths": {
+    "deploy/systemd/polydata-gcp.target": "fe00c1619e1b4f19714bcd176a7debf49b4613ef216186d0864bdf1215ea54fa",
+    "deploy/systemd/polydata-quant-backtest-runner.service": "60a54d81ef777f218c14b27e474f84e661b7bb926994baab24c4d0e948d652cf",
+    "deploy/systemd/polydata-telegram-publisher.service": "2bb650f5e81b687d75f7720aacbc4c908c5038fe1ff3d97ebd57f8333a049a14",
+    "scripts/api/routes/runtime_panels.py": "49c2df0075085a58847259eaa851a0631ac52a675761369abaa55a20a64f6f7e"
+  }
+}

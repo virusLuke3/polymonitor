@@ -1,0 +1,104 @@
+name: Deploy GCP Backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type DEPLOY_GCP to confirm the production release
+        required: true
+        type: string
+      restart_units:
+        description: Space-separated GCP systemd units to restart
+        required: true
+        default: polydata-api.service
+        type: string
+      dry_run:
+        description: Run conflict preflight without changing GCP
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gcp-production-backend
+  cancel-in-progress: false
+
+jobs:
+  backend-quality:
+    if: inputs.confirmation == 'DEPLOY_GCP'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: scripts/requirements-dev.lock.txt
+
+      - name: Install locked quality dependencies
+        run: |
+          python -m pip install --upgrade "pip==25.3"
+          python -m pip install -r scripts/requirements-dev.lock.txt
+
+      - name: Verify backend release candidate
+        run: |
+          python scripts/qa/check_tracked_secrets.py
+          python scripts/qa/check_systemd_units.py
+          python -m compileall -q agent quant scripts telegram tests
+          ruff check agent quant scripts telegram tests
+          python scripts/qa/run_pytest.py
+
+  deploy:
+    needs: backend-quality
+    if: inputs.confirmation == 'DEPLOY_GCP'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    environment: gcp-production
+    env:
+      DEPLOY_HOST: ${{ secrets.GCP_DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.GCP_DEPLOY_PORT }}
+      DEPLOY_USER: ${{ secrets.GCP_DEPLOY_USER }}
+      DEPLOY_PATH: /opt/polyData
+      DEPLOY_TARGET_SHA: HEAD
+      DEPLOY_RESTART_UNITS: ${{ inputs.restart_units }}
+      DEPLOY_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Configure production SSH
+        env:
+          GCP_DEPLOY_SSH_KEY: ${{ secrets.GCP_DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$GCP_DEPLOY_SSH_KEY"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$GCP_DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy conflict-aware backend release
+        run: bash scripts/deploy/deploy_gcp_release.sh

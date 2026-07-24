@@ -1,23 +1,34 @@
 name: Deploy Frontend Dist
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows:
+      - Repository Quality
+    types:
+      - completed
+  workflow_dispatch:
 
 jobs:
   deploy-frontend-dist:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
+    environment: gcp-production
     env:
       DEPLOY_HOST: ${{ secrets.GCP_DEPLOY_HOST }}
       DEPLOY_PORT: ${{ secrets.GCP_DEPLOY_PORT }}
       DEPLOY_USER: ${{ secrets.GCP_DEPLOY_USER }}
       DEPLOY_PATH: ${{ secrets.GCP_DEPLOY_PATH }}
-      RELEASE_DIR: /tmp/polydata-dist-${{ github.sha }}
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      RELEASE_DIR: /tmp/polydata-dist-${{ github.event.workflow_run.head_sha || github.sha }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -77,4 +88,14 @@ jobs:
             rm -rf '$RELEASE_DIR'
             sudo nginx -t
             sudo systemctl reload nginx
+          "
+
+      - name: Verify production frontend and API
+        run: |
+          set -euo pipefail
+          ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "
+            set -euo pipefail
+            test -f '${DEPLOY_PATH:-/var/www/polydata}/index.html'
+            curl -fsS --max-time 15 http://127.0.0.1/ >/dev/null
+            curl -fsS --max-time 15 http://127.0.0.1/wm-api/health >/dev/null
           "
