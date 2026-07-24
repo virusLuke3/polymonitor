@@ -45,6 +45,8 @@ The backend release:
    `~/.local/state/polydata-deploy/current.json`, falling back to the GCP Git
    HEAD only for the first managed release;
 2. builds a payload containing only changed backend/runtime files;
+   systemd templates are limited to units owned by the target commit's
+   `polydata-gcp.target`, so local collector units are never installed on GCP;
 3. compares every destination file with both its expected old and new hashes;
 4. blocks the entire release if any changed destination contains an unknown
    remote edit;

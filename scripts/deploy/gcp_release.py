@@ -68,8 +68,23 @@ def _safe_relative_path(raw: str) -> str:
     return path.as_posix()
 
 
-def _deployable(path: str) -> bool:
-    return path in DEPLOYABLE_FILES or path.startswith(DEPLOYABLE_PREFIXES)
+def _target_gcp_units(repo: Path, target: str) -> set[str]:
+    content, _mode = _git_entry(repo, target, "deploy/systemd/polydata-gcp.target")
+    if content is None:
+        raise RuntimeError("target commit does not contain polydata-gcp.target")
+    units = {"polydata-gcp.target", "polydata.target"}
+    for raw_line in content.decode("utf-8").splitlines():
+        line = raw_line.strip()
+        if line.startswith(("Wants=", "Requires=")):
+            units.update(line.split("=", 1)[1].split())
+    return units
+
+
+def _deployable(path: str, *, gcp_units: set[str]) -> bool:
+    if path.startswith("deploy/systemd/"):
+        return PurePosixPath(path).name in gcp_units
+    runtime_prefixes = tuple(prefix for prefix in DEPLOYABLE_PREFIXES if prefix != "deploy/systemd/")
+    return path in DEPLOYABLE_FILES or path.startswith(runtime_prefixes)
 
 
 def _git_entry(repo: Path, ref: str, path: str) -> tuple[bytes | None, str | None]:
@@ -156,9 +171,10 @@ def build_release(repo: Path, base: str, target: str, output_dir: Path) -> dict[
     ignored: list[str] = []
     approved_overrides = _approved_remote_overrides(repo, base)
     used_overrides: set[str] = set()
+    gcp_units = _target_gcp_units(repo, target)
 
     for path in _changed_paths(repo, base, target):
-        if not _deployable(path):
+        if not _deployable(path, gcp_units=gcp_units):
             ignored.append(path)
             continue
         before, before_mode = _git_entry(repo, base, path)
