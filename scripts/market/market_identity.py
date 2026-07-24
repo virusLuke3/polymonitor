@@ -147,6 +147,14 @@ def get_market_identity_by_token_id(conn: Any, token_id: Any) -> Optional[Market
         FROM market_tokens mt
         JOIN markets m ON m.id = mt.market_id
         WHERE mt.token_id = ?
+        ORDER BY
+            CASE
+                WHEN COALESCE(m.category, '') = 'orderfilled-placeholder'
+                  OR COALESCE(m.slug, '') LIKE 'trade-indexer-placeholder-%%'
+                THEN 1 ELSE 0
+            END,
+            CASE WHEN COALESCE(m.gamma_market_id, '') = '' THEN 1 ELSE 0 END,
+            m.id DESC
         LIMIT 1
         """,
         (token,),
@@ -155,9 +163,17 @@ def get_market_identity_by_token_id(conn: Any, token_id: Any) -> Optional[Market
         return MarketIdentity.from_row(row)
     row = conn.execute(
         f"""
-        SELECT {select_market_identity_columns("")}
-        FROM markets
+        SELECT {select_market_identity_columns("m")}
+        FROM markets m
         WHERE yes_token_id = ? OR no_token_id = ?
+        ORDER BY
+            CASE
+                WHEN COALESCE(m.category, '') = 'orderfilled-placeholder'
+                  OR COALESCE(m.slug, '') LIKE 'trade-indexer-placeholder-%%'
+                THEN 1 ELSE 0
+            END,
+            CASE WHEN COALESCE(m.gamma_market_id, '') = '' THEN 1 ELSE 0 END,
+            m.id DESC
         LIMIT 1
         """,
         (token, token),
@@ -259,6 +275,17 @@ def resolve_local_market_id_by_token_id(conn: Any, token_id: Any) -> Optional[in
     token = _clean_text(token_id)
     if not token:
         return None
+    row = conn.execute(
+        """
+        SELECT market_id
+        FROM market_tokens
+        WHERE token_id = ?
+        LIMIT 1
+        """,
+        (token,),
+    ).fetchone()
+    if row:
+        return int(row[0])
     row = conn.execute(
         """
         SELECT id
