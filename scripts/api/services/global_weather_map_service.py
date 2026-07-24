@@ -70,6 +70,7 @@ WEATHER_CLOB_BOOK_TTL_SECONDS = 10
 
 _LIVE_REFRESH_LOCK = threading.Lock()
 _LIVE_REFRESHING: set[str] = set()
+_WEATHER_CONTEXT_STATE_LOCK = threading.Lock()
 _WEATHER_CLOB_BOOK_CACHE_LOCK = threading.Lock()
 _WEATHER_CLOB_BOOK_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -77,6 +78,19 @@ _WEATHER_CLOB_BOOK_CACHE: Dict[str, Dict[str, Any]] = {}
 def _utc_now_iso(ctx: dict) -> str:
     now = ctx.get("utc_now_iso")
     return now() if callable(now) else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _weather_context_state(ctx: dict, key: str, initial: Dict[str, Any]) -> Dict[str, Any]:
+    state = ctx.get(key)
+    if isinstance(state, dict):
+        return state
+    with _WEATHER_CONTEXT_STATE_LOCK:
+        state = ctx.get(key)
+        if isinstance(state, dict):
+            return state
+        state = dict(initial)
+        ctx[key] = state
+        return state
 
 
 def _float(value: Any) -> Optional[float]:
@@ -932,7 +946,8 @@ def _token_ids(market: Dict[str, Any]) -> List[str]:
 
 
 def _weather_clob_stats(ctx: dict) -> Dict[str, int]:
-    return ctx.setdefault(
+    return _weather_context_state(
+        ctx,
         "_weather_clob_stats",
         {"attempts": 0, "errors": 0, "quoted": 0, "noBook": 0, "cacheHits": 0, "missingToken": 0},
     )
@@ -1434,7 +1449,7 @@ def _sync_weather_markets_from_gamma(ctx: dict, cities: List[Dict[str, Any]], da
 def _fetch_gamma_market_by_id(ctx: dict, market_id: Any) -> Optional[Dict[str, Any]]:
     if not market_id:
         return None
-    cache = ctx.setdefault("_weather_gamma_market_cache", {})
+    cache = _weather_context_state(ctx, "_weather_gamma_market_cache", {})
     key = str(market_id)
     if key in cache:
         return cache[key]
@@ -1442,7 +1457,7 @@ def _fetch_gamma_market_by_id(ctx: dict, market_id: Any) -> Optional[Dict[str, A
     if not base_url:
         cache[key] = None
         return None
-    stats = ctx.setdefault("_weather_gamma_market_stats", {"attempts": 0, "errors": 0, "priced": 0})
+    stats = _weather_context_state(ctx, "_weather_gamma_market_stats", {"attempts": 0, "errors": 0, "priced": 0})
     stats["attempts"] = int(stats.get("attempts") or 0) + 1
     try:
         payload = ctx["http_json_get"](
@@ -1468,7 +1483,7 @@ def _gamma_price_fallback(ctx: dict, row: Dict[str, Any]) -> Tuple[Optional[floa
 
 
 def _prefetch_gamma_markets(ctx: dict, rows: Iterable[Dict[str, Any]]) -> None:
-    cache = ctx.setdefault("_weather_gamma_market_cache", {})
+    cache = _weather_context_state(ctx, "_weather_gamma_market_cache", {})
     ids: List[str] = []
     seen: set[str] = set()
     for row in rows:
