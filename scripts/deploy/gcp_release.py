@@ -18,16 +18,20 @@ from typing import Any
 
 
 MANIFEST_VERSION = 1
-DEPLOYABLE_PREFIXES = (
+GCP_SOURCE_PREFIXES = (
     "agent/",
     "quant/",
-    "scripts/",
     "telegram/",
-    "deploy/systemd/",
+    "scripts/api/",
+    "scripts/runtime/",
 )
-DEPLOYABLE_FILES = {
+GCP_SOURCE_FILES = {
     ".python-version",
     "pyproject.toml",
+    "scripts/market/market_discovery.py",
+    "scripts/market/market_identity.py",
+    "scripts/ops/gcp_serving_healthcheck.py",
+    "scripts/requirements.lock.txt",
 }
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 APPROVED_OVERRIDES_PATH = Path("deploy/gcp/accepted-remote-overrides.json")
@@ -83,8 +87,11 @@ def _target_gcp_units(repo: Path, target: str) -> set[str]:
 def _deployable(path: str, *, gcp_units: set[str]) -> bool:
     if path.startswith("deploy/systemd/"):
         return PurePosixPath(path).name in gcp_units
-    runtime_prefixes = tuple(prefix for prefix in DEPLOYABLE_PREFIXES if prefix != "deploy/systemd/")
-    return path in DEPLOYABLE_FILES or path.startswith(runtime_prefixes)
+    if path.startswith("quant/backtest/vendor/"):
+        return False
+    if path.startswith(("scripts/runtime/worldcup_", "scripts/runtime/world_cup_")):
+        return False
+    return path in GCP_SOURCE_FILES or path.startswith(GCP_SOURCE_PREFIXES)
 
 
 def _git_entry(repo: Path, ref: str, path: str) -> tuple[bytes | None, str | None]:

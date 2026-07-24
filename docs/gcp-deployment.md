@@ -49,6 +49,8 @@ The backend release:
 2. builds a payload containing only changed backend/runtime files;
    systemd templates are limited to units owned by the target commit's
    `polydata-gcp.target`, so local collector units are never installed on GCP;
+   source files are limited to the API, serving-side runtime workers, Telegram,
+   GCP quant workers, required market lookup modules, and the GCP healthcheck;
 3. compares every destination file with both its expected old and new hashes;
 4. blocks the entire release if any changed destination contains an unknown
    remote edit;
