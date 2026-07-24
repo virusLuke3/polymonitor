@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from api.runtime_panels.types import PanelPayload, RuntimePanelContext
 
 
 PANEL_ID = "esports-intel"
@@ -10,5 +10,9 @@ MIN_LIMIT = 2
 MAX_LIMIT = 20
 
 
-def get_snapshot(ctx: Dict[str, Any], *, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
-    return ctx["get_grid_esports_snapshot"](limit=limit)
+def get_snapshot(
+    ctx: RuntimePanelContext,
+    *,
+    limit: int = DEFAULT_LIMIT,
+) -> PanelPayload:
+    return ctx.sports.grid_esports_snapshot(limit=limit)

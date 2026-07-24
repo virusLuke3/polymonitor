@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from api.runtime_panels.types import PanelPayload, RuntimePanelContext
 
 PANEL_ID = "food-retail-basket-pressure"
 ROUTE = "/runtime/macro/food-retail-basket"
@@ -9,5 +9,9 @@ MIN_LIMIT = 3
 MAX_LIMIT = 10
 
 
-def get_snapshot(ctx: Dict[str, Any], *, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
-    return ctx["get_food_retail_basket_snapshot"](limit=limit)
+def get_snapshot(
+    ctx: RuntimePanelContext,
+    *,
+    limit: int = DEFAULT_LIMIT,
+) -> PanelPayload:
+    return ctx.macro.food_retail_basket_snapshot(limit=limit)
