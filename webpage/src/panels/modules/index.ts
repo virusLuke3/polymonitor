@@ -95,7 +95,7 @@ import { panel as worldcupHostVenue } from './worldcup-host-venue';
 import { panel as worldcupVenueRef } from './worldcup-venue-ref';
 import { panel as worldcupSourceAudit } from './worldcup-source-audit';
 
-export const PANEL_MODULES: PanelModule[] = [
+const ALL_PANEL_MODULES: PanelModule[] = [
   activeMarkets,
   globalOrderfilled,
   oracleFeed,
@@ -192,3 +192,9 @@ export const PANEL_MODULES: PanelModule[] = [
   worldcupVenueRef,
   worldcupSourceAudit,
 ];
+
+// The tournament workspace is retired from the active product surface. Keep
+// the implementations available so they can be restored for a future event.
+export const PANEL_MODULES: PanelModule[] = ALL_PANEL_MODULES.filter(
+  (panel) => !panel.id.startsWith('worldcup-'),
+);
