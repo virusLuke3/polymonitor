@@ -16,7 +16,7 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any, Iterable, List, Dict, Optional, Set, Tuple
+from typing import Any, Iterable, List, Dict, Optional, Sequence, Set, Tuple
 from decimal import Decimal
 
 # 保证 scripts 根目录在 path 中，以便 from db / config / market 可导入
@@ -59,6 +59,7 @@ from db.trade_v2 import (
 )
 from market.market_discovery import (
     batch_upsert_markets,
+    _upsert_market_from_activity_trade,
     fetch_and_upsert_markets_for_token_ids,
     fetch_and_upsert_markets_for_token_ids_via_onchain,
 )
@@ -68,14 +69,18 @@ from trade.trade_decoder import (
     get_order_filled_topics,
     CTF_EXCHANGE_ADDRESS,
     NEG_RISK_EXCHANGE_ADDRESS,
-    POLYMARKET_EXCHANGE_2026_ADDRESS,
-    POLYMARKET_EXCHANGE_2026_ALT_ADDRESS,
+    POLYMARKET_EXCHANGE_2026_ADDRESSES,
 )
 from trade.orderfilled_raw import (
     ensure_orderfilled_raw_schema,
     insert_orderfilled_raw_batch,
     orderfilled_raw_row,
     upsert_orderfilled_sync_window,
+)
+from trade.orderfilled_registry_gap import (
+    ensure_orderfilled_registry_gap_schema,
+    resolve_orderfilled_registry_gap,
+    upsert_orderfilled_registry_gap,
 )
 from trade.clickhouse_orderfilled_writer import (
     add_clickhouse_orderfilled_cli_args,
@@ -84,7 +89,12 @@ from trade.clickhouse_orderfilled_writer import (
     insert_orderfilled_fact_rows,
     settings_from_args as clickhouse_settings_from_args,
 )
-from trade.rpc_utils import build_web3 as build_shared_web3
+from trade.rpc_utils import (
+    RPC_FATAL_EXIT_CODE,
+    RpcAccessDeniedError,
+    build_web3 as build_shared_web3,
+    is_access_denied_rpc_error,
+)
 from config import get_rpc_url
 
 USDC_DIVISOR = 10**6
@@ -93,8 +103,8 @@ BATCH_BLOCKS = 5000
 MAX_RETRIES = 5
 RETRY_DELAY_BASE = 2
 MAX_WORKERS = 20
-TOKEN_ID_BACKFILL_MAX_PAGES = 0
-TRADE_INSERT_BATCH_SIZE = 2000
+TOKEN_ID_BACKFILL_MAX_PAGES = 2
+TRADE_INSERT_BATCH_SIZE = max(1, int(os.environ.get("POLYDATA_ORDERFILLED_TRADE_INSERT_BATCH_SIZE", "2000")))
 SQLITE_IN_MAX_VARS = 900
 _THREAD_LOCAL = threading.local()
 RPC_CONNECT_RETRIES = 3
@@ -103,10 +113,15 @@ RPC_RECOVERY_SLEEP_BASE_SECONDS = 30
 RPC_RECOVERY_SLEEP_MAX_SECONDS = 300
 DB_WRITE_MAX_RETRIES = 6
 DB_WRITE_RETRY_BASE_SECONDS = 1
-LOG_PROCESS_CHUNK_SIZE = 5000
+LOG_PROCESS_CHUNK_SIZE = max(1, int(os.environ.get("POLYDATA_ORDERFILLED_LOG_PROCESS_CHUNK_SIZE", "5000")))
+ACTIVITY_FALLBACK_WORKERS = max(1, int(os.environ.get("POLYDATA_ORDERFILLED_ACTIVITY_WORKERS", "1")))
 WATCH_ERROR_BACKOFF_BASE_SECONDS = 30
 WATCH_ERROR_BACKOFF_MAX_SECONDS = 300
 MARKET_BACKFILL_MODE = "api"
+ORDERFILLED_ACTIVITY_FALLBACK = os.environ.get(
+    "ORDERFILLED_LIVE_ACTIVITY_FALLBACK",
+    "1",
+).strip().lower() in {"1", "true", "yes", "y", "on"}
 MARKET_LOOKUP_BACKEND = os.environ.get("POLYDATA_ORDERFILLED_MARKET_LOOKUP_BACKEND", "auto").strip().lower()
 ENABLE_SLOW_CLOB_JSON_MARKET_LOOKUP = os.environ.get(
     "POLYDATA_ENABLE_SLOW_CLOB_JSON_MARKET_LOOKUP",
@@ -124,6 +139,79 @@ def iter_block_windows(from_block: int, to_block: int, window_blocks: int):
 def iter_chunks(items: List[Any], chunk_size: int) -> Iterable[Tuple[int, List[Any]]]:
     for start in range(0, len(items), chunk_size):
         yield start, items[start:start + chunk_size]
+
+
+def backfill_activity_markets_for_chunk(
+    decoded_chunk: Sequence[Dict[str, Any]],
+    *,
+    market_conn,
+    market_cache: Dict[str, Dict],
+    db_path: str,
+    lookup_backend: str,
+    block_ts_cache: Dict[int, Any],
+    attempted_tokens: Set[str],
+) -> Tuple[int, int]:
+    """Resolve missing chunk markets concurrently before the per-fill loop."""
+    targets: Dict[str, Dict[str, Any]] = {}
+    for decoded in decoded_chunk:
+        token_id = str(decoded.get("tokenId") or "")
+        if token_id and token_id not in market_cache and token_id not in attempted_tokens:
+            targets.setdefault(token_id, decoded)
+
+    # Combo outcomes are adjacent ERC1155 position IDs. One successful activity
+    # lookup stores both sides, so avoid racing duplicate lookups for the pair.
+    for token_id in list(targets):
+        try:
+            token_int = int(token_id)
+        except ValueError:
+            continue
+        if token_int % 2 and str(token_int - 1) in targets:
+            targets.pop(token_id)
+    if not targets or not ORDERFILLED_ACTIVITY_FALLBACK:
+        return 0, 0
+
+    def resolve(item: Tuple[str, Dict[str, Any]]) -> Tuple[str, bool]:
+        token_id, decoded = item
+        block_number = int(decoded.get("block_number") or 0)
+        cached_timestamp = block_ts_cache.get(block_number)
+        activity_timestamp = int(cached_timestamp) if cached_timestamp not in (None, "") else None
+        upserted = _upsert_market_from_activity_trade(
+            token_id=token_id,
+            tx_hash=decoded.get("txHash") or "",
+            maker=decoded.get("maker") or "",
+            taker=decoded.get("taker") or "",
+            db_path=db_path,
+            activity_timestamp=activity_timestamp,
+        )
+        return token_id, bool(upserted)
+
+    resolved: Set[str] = set()
+    with ThreadPoolExecutor(max_workers=min(ACTIVITY_FALLBACK_WORKERS, len(targets))) as executor:
+        futures = {executor.submit(resolve, item): item[0] for item in targets.items()}
+        for future in as_completed(futures):
+            token_id = futures[future]
+            try:
+                resolved_token, upserted = future.result()
+                if upserted:
+                    resolved.add(resolved_token)
+            except Exception as error:
+                print(f"Failed batched activity fallback for tokenId {token_id[:30]}...: {error}", file=sys.stderr)
+
+    if resolved:
+        attempted_tokens.update(resolved)
+        prefetch_market_cache_for_token_ids(
+            market_conn,
+            resolved,
+            market_cache,
+            lookup_backend=lookup_backend,
+        )
+    print(
+        f"  ... activity fallback batch attempted={len(targets)} resolved={len(resolved)} "
+        f"workers={min(ACTIVITY_FALLBACK_WORKERS, len(targets))}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return len(targets), len(resolved)
 
 
 def _build_web3(rpc_url: str) -> Web3:
@@ -279,17 +367,35 @@ def get_order_filled_topic_filter(w3: Web3) -> List[bytes]:
     return list(get_order_filled_topics(w3))
 
 
+def address_filter_topics(addresses: Sequence[str]) -> List[bytes]:
+    topics: List[bytes] = []
+    seen: Set[bytes] = set()
+    for raw in addresses:
+        for value in str(raw).replace(",", " ").split():
+            address = Web3.to_bytes(hexstr=Web3.to_checksum_address(value)).rjust(32, b"\x00")
+            if address not in seen:
+                seen.add(address)
+                topics.append(address)
+    return topics
+
+
+def _orderfilled_log_key(log: Dict) -> Tuple[str, int]:
+    tx_hash = log.get("transactionHash")
+    tx_hash_text = tx_hash.hex() if hasattr(tx_hash, "hex") else str(tx_hash or "")
+    return tx_hash_text.lower().removeprefix("0x"), int(log.get("logIndex") or 0)
+
+
 def fetch_logs_with_retry(
     rpc_url: str,
     from_block: int,
     to_block: int,
+    address_filters: Optional[Sequence[str]] = None,
 ) -> List[Dict]:
     """带指数退避的 getLogs"""
     addresses = [
         Web3.to_checksum_address(CTF_EXCHANGE_ADDRESS),
         Web3.to_checksum_address(NEG_RISK_EXCHANGE_ADDRESS),
-        Web3.to_checksum_address(POLYMARKET_EXCHANGE_2026_ADDRESS),
-        Web3.to_checksum_address(POLYMARKET_EXCHANGE_2026_ALT_ADDRESS),
+        *(Web3.to_checksum_address(item) for item in POLYMARKET_EXCHANGE_2026_ADDRESSES),
     ]
     recovery_attempt = 0
 
@@ -300,16 +406,25 @@ def fetch_logs_with_retry(
             try:
                 w3 = _get_thread_local_web3(rpc_url)
                 topics = get_order_filled_topic_filter(w3)
-                logs = w3.eth.get_logs(
-                    {
-                        "address": addresses,
-                        "topics": [topics],
-                        "fromBlock": from_block,
-                        "toBlock": to_block,
+                base_filter = {
+                    "address": addresses,
+                    "fromBlock": from_block,
+                    "toBlock": to_block,
+                }
+                wallet_topics = address_filter_topics(address_filters or [])
+                if wallet_topics:
+                    maker_logs = w3.eth.get_logs({**base_filter, "topics": [topics, None, wallet_topics]})
+                    taker_logs = w3.eth.get_logs({**base_filter, "topics": [topics, None, None, wallet_topics]})
+                    unique_logs = {
+                        _orderfilled_log_key(dict(log)): dict(log)
+                        for log in [*maker_logs, *taker_logs]
                     }
-                )
+                    return list(unique_logs.values())
+                logs = w3.eth.get_logs({**base_filter, "topics": [topics]})
                 return [dict(log) for log in logs]
             except Exception as e:
+                if is_access_denied_rpc_error(e):
+                    raise RpcAccessDeniedError("RPC access denied during OrderFilled getLogs") from e
                 last_err = e
                 _invalidate_thread_local_web3(rpc_url)
                 delay = RETRY_DELAY_BASE ** (attempt + 1)
@@ -349,6 +464,7 @@ def fetch_logs_parallel_with_retry(
     to_block: int,
     batch_blocks: int = BATCH_BLOCKS,
     max_workers: int = MAX_WORKERS,
+    address_filters: Optional[Sequence[str]] = None,
 ) -> List[Dict]:
     """并发批量抓取 OrderFilled 日志，风格对齐 oracle 抓取器。"""
     ranges = []
@@ -367,7 +483,10 @@ def fetch_logs_parallel_with_retry(
     logs: List[Dict] = []
     completed_tasks = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_range = {executor.submit(fetch_logs_with_retry, rpc_url, r[0], r[1]): r for r in ranges}
+        future_to_range = {
+            executor.submit(fetch_logs_with_retry, rpc_url, r[0], r[1], address_filters): r
+            for r in ranges
+        }
         for future in as_completed(future_to_range):
             res = future.result()
             if res:
@@ -597,6 +716,59 @@ def _has_market_tokens_table(conn) -> bool:
         return False
 
 
+def _market_is_placeholder(market: Dict[str, Any]) -> bool:
+    category = str(market.get("category") or "").strip().lower()
+    slug = str(market.get("slug") or "").strip().lower()
+    return category == "orderfilled-placeholder" or slug.startswith("trade-indexer-placeholder-")
+
+
+def _market_lookup_rank(market: Dict[str, Any]) -> Tuple[int, int, int]:
+    """Prefer real Gamma markets over synthetic placeholder rows for the same token."""
+    gamma_market_id = str(market.get("gamma_market_id") or "").strip()
+    try:
+        market_id = int(market.get("id") or 0)
+    except Exception:
+        market_id = 0
+    return (
+        1 if _market_is_placeholder(market) else 0,
+        1 if not gamma_market_id else 0,
+        -market_id,
+    )
+
+
+def _prefer_market(existing: Optional[Dict[str, Any]], candidate: Dict[str, Any]) -> Dict[str, Any]:
+    if existing is None:
+        return candidate
+    return candidate if _market_lookup_rank(candidate) < _market_lookup_rank(existing) else existing
+
+
+def _cache_market_for_token(market_cache: Dict[str, Dict], token_id: str, market: Dict[str, Any]) -> None:
+    token_text = str(token_id or "").strip()
+    if not token_text:
+        return
+    market_cache[token_text] = _prefer_market(market_cache.get(token_text), market)
+
+
+def _uncache_placeholder_markets(market_cache: Dict[str, Dict], token_ids: Iterable[str]) -> None:
+    for token_id in token_ids:
+        token_text = str(token_id or "").strip()
+        cached = market_cache.get(token_text)
+        if cached and _market_is_placeholder(cached):
+            market_cache.pop(token_text, None)
+
+
+def _market_preference_order_sql(alias: str = "m") -> str:
+    return f"""
+        CASE
+            WHEN COALESCE({alias}.category, '') = 'orderfilled-placeholder'
+              OR COALESCE({alias}.slug, '') LIKE 'trade-indexer-placeholder-%%'
+            THEN 1 ELSE 0
+        END,
+        CASE WHEN COALESCE({alias}.gamma_market_id, '') = '' THEN 1 ELSE 0 END,
+        {alias}.id DESC
+    """
+
+
 def find_market_by_token_id(conn, token_id: str, *, lookup_backend: Optional[str] = None) -> Optional[Dict]:
     """根据 OrderFilled tokenId 查找本地 market。返回的 id 是 local markets.id。"""
     token_text = str(token_id)
@@ -609,6 +781,14 @@ def find_market_by_token_id(conn, token_id: str, *, lookup_backend: Optional[str
             FROM market_tokens mt
             JOIN markets m ON m.id = mt.market_id
             WHERE mt.token_id = ?
+            ORDER BY
+                CASE
+                    WHEN COALESCE(m.category, '') = 'orderfilled-placeholder'
+                      OR COALESCE(m.slug, '') LIKE 'trade-indexer-placeholder-%%'
+                    THEN 1 ELSE 0
+                END,
+                CASE WHEN COALESCE(m.gamma_market_id, '') = '' THEN 1 ELSE 0 END,
+                m.id DESC
             LIMIT 1
             """,
             (token_text,),
@@ -618,7 +798,13 @@ def find_market_by_token_id(conn, token_id: str, *, lookup_backend: Optional[str
             return dict_from_row(row)
 
     cursor.execute(
-        "SELECT * FROM markets WHERE yes_token_id = ? OR no_token_id = ? LIMIT 1",
+        f"""
+        SELECT *
+        FROM markets
+        WHERE yes_token_id = ? OR no_token_id = ?
+        ORDER BY {_market_preference_order_sql("markets")}
+        LIMIT 1
+        """,
         (token_text, token_text),
     )
     row = cursor.fetchone()
@@ -631,17 +817,35 @@ def find_market_by_token_id(conn, token_id: str, *, lookup_backend: Optional[str
     backend = lookup_backend or get_backend()
     if backend in {"postgres", "postgresql"}:
         cursor.execute(
-            "SELECT * FROM markets WHERE clob_token_ids @> ?::jsonb LIMIT 1",
+            f"""
+            SELECT *
+            FROM markets
+            WHERE clob_token_ids @> ?::jsonb
+            ORDER BY {_market_preference_order_sql("markets")}
+            LIMIT 1
+            """,
             (json.dumps([token_text]),),
         )
     elif backend == "mysql":
         cursor.execute(
-            "SELECT * FROM markets WHERE JSON_CONTAINS(clob_token_ids, JSON_QUOTE(?)) LIMIT 1",
+            f"""
+            SELECT *
+            FROM markets
+            WHERE JSON_CONTAINS(clob_token_ids, JSON_QUOTE(?))
+            ORDER BY {_market_preference_order_sql("markets")}
+            LIMIT 1
+            """,
             (token_text,),
         )
     else:
         cursor.execute(
-            "SELECT * FROM markets WHERE clob_token_ids LIKE ? LIMIT 1",
+            f"""
+            SELECT *
+            FROM markets
+            WHERE clob_token_ids LIKE ?
+            ORDER BY {_market_preference_order_sql("markets")}
+            LIMIT 1
+            """,
             (f"%{token_text}%",),
         )
     row = cursor.fetchone()
@@ -672,6 +876,7 @@ def prefetch_market_cache_for_token_ids(
                 FROM market_tokens mt
                 JOIN markets m ON m.id = mt.market_id
                 WHERE mt.token_id IN ({placeholders})
+                ORDER BY mt.token_id, {_market_preference_order_sql("m")}
                 """,
                 chunk,
             )
@@ -679,30 +884,40 @@ def prefetch_market_cache_for_token_ids(
                 market = dict_from_row(row)
                 matched_token_id = str(market.get("matched_token_id") or "")
                 if matched_token_id:
-                    market_cache[matched_token_id] = market
+                    _cache_market_for_token(market_cache, matched_token_id, market)
 
         cursor.execute(
-            f"SELECT * FROM markets WHERE yes_token_id IN ({placeholders})",
+            f"""
+            SELECT *
+            FROM markets
+            WHERE yes_token_id IN ({placeholders})
+            ORDER BY yes_token_id, {_market_preference_order_sql("markets")}
+            """,
             chunk,
         )
         for row in cursor.fetchall():
             market = dict_from_row(row)
-            market_cache[str(market["yes_token_id"])] = market
+            _cache_market_for_token(market_cache, str(market["yes_token_id"]), market)
 
         cursor.execute(
-            f"SELECT * FROM markets WHERE no_token_id IN ({placeholders})",
+            f"""
+            SELECT *
+            FROM markets
+            WHERE no_token_id IN ({placeholders})
+            ORDER BY no_token_id, {_market_preference_order_sql("markets")}
+            """,
             chunk,
         )
         for row in cursor.fetchall():
             market = dict_from_row(row)
-            market_cache[str(market["no_token_id"])] = market
+            _cache_market_for_token(market_cache, str(market["no_token_id"]), market)
 
     # 只有少量未命中的 token 才走 JSON_CONTAINS 慢路径。
     still_missing = [token_id for token_id in unresolved if token_id not in market_cache]
     for token_id in still_missing:
         market = find_market_by_token_id(conn, token_id, lookup_backend=lookup_backend)
         if market:
-            market_cache[token_id] = market
+            _cache_market_for_token(market_cache, token_id, market)
 
 
 def _placeholder_condition_id(token_id: str) -> str:
@@ -811,6 +1026,28 @@ def backfill_market_cache_for_token_ids(
         return
     prefetch_market_cache_for_token_ids(conn, tokens, market_cache, lookup_backend=lookup_backend)
     missing = [token_id for token_id in tokens if token_id not in market_cache]
+    placeholder_tokens = [
+        token_id
+        for token_id in tokens
+        if token_id in market_cache and _market_is_placeholder(market_cache[token_id])
+    ]
+    refetch_placeholders = str(os.environ.get("ORDERFILLED_LIVE_REFETCH_PLACEHOLDERS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if (
+        placeholder_tokens
+        and create_placeholder_markets
+        and refetch_placeholders
+        and str(market_backfill_mode or "none").strip().lower() != "none"
+    ):
+        missing = sorted(set(missing) | set(placeholder_tokens))
+    elif placeholder_tokens and not create_placeholder_markets:
+        _uncache_placeholder_markets(market_cache, placeholder_tokens)
+        if str(market_backfill_mode or "none").strip().lower() != "none":
+            missing = sorted(set(missing) | set(placeholder_tokens))
     if not missing:
         return
 
@@ -838,9 +1075,15 @@ def backfill_market_cache_for_token_ids(
         else:
             raise ValueError(f"Unsupported market_backfill_mode={market_backfill_mode}")
         if upserted:
+            _uncache_placeholder_markets(market_cache, missing)
             prefetch_market_cache_for_token_ids(conn, missing, market_cache, lookup_backend=lookup_backend)
 
     missing = [token_id for token_id in tokens if token_id not in market_cache]
+    if not create_placeholder_markets:
+        # Existing synthetic placeholder rows are only a historical compatibility
+        # fallback. Live sync should skip unresolved tokens instead of writing new
+        # facts against old placeholder market_ids.
+        _uncache_placeholder_markets(market_cache, placeholder_tokens)
     if missing and create_placeholder_markets:
         created = create_placeholder_markets_for_token_ids(conn, missing, lookup_backend=lookup_backend)
         if created:
@@ -859,14 +1102,39 @@ def resolve_market_by_token_id(
     market_cache: Optional[Dict] = None,
     lookup_backend: Optional[str] = None,
 ) -> Optional[Dict]:
+    placeholder_fallback: Optional[Dict] = None
     if market_cache is not None and token_id in market_cache:
-        return market_cache[token_id]
+        cached = market_cache[token_id]
+        if _market_is_placeholder(cached) and not create_placeholder_markets:
+            market_cache.pop(token_id, None)
+            if token_id in backfill_attempted or not enable_market_backfill:
+                return None
+        elif (
+            not enable_market_backfill
+            or not _market_is_placeholder(cached)
+            or token_id in backfill_attempted
+        ):
+            return cached
+        elif create_placeholder_markets:
+            placeholder_fallback = cached
 
     market = find_market_by_token_id(conn, token_id, lookup_backend=lookup_backend)
     if market:
-        if market_cache is not None:
+        if _market_is_placeholder(market) and not create_placeholder_markets:
+            if market_cache is not None:
+                market_cache.pop(token_id, None)
+            if token_id in backfill_attempted or not enable_market_backfill:
+                return None
+        elif market_cache is not None:
             market_cache[token_id] = market
-        return market
+        if (
+            not enable_market_backfill
+            or not _market_is_placeholder(market)
+            or token_id in backfill_attempted
+        ):
+            return market
+        if create_placeholder_markets:
+            placeholder_fallback = market
 
     if token_id in backfill_attempted or not enable_market_backfill:
         return None
@@ -893,6 +1161,8 @@ def resolve_market_by_token_id(
                 f"Backfilled {inserted} market(s) for tokenId {token_id[:30]}...",
                 file=sys.stderr,
             )
+            if market_cache is not None:
+                _uncache_placeholder_markets(market_cache, [token_id])
             market = find_market_by_token_id(conn, token_id, lookup_backend=lookup_backend)
             if market and market_cache is not None:
                 market_cache[token_id] = market
@@ -907,10 +1177,36 @@ def resolve_market_by_token_id(
     except Exception as e:
         print(f"Failed to backfill market for tokenId {token_id[:30]}...: {e}", file=sys.stderr)
 
-    return None
+    return placeholder_fallback if create_placeholder_markets else None
 
 
-def decode_and_enrich(log: Dict, w3: Web3, event_decoder: Any, block_ts_cache: Dict[int, str]) -> Optional[Dict]:
+def _record_registry_gap_for_trade(conn, decoded: Dict[str, Any], token_id: str, *, sample_market_id: Optional[int] = None, note: str = "") -> None:
+    upsert_orderfilled_registry_gap(
+        conn,
+        token_id=token_id,
+        block_number=decoded.get("block_number"),
+        observed_at=decoded.get("timestamp"),
+        tx_hash=decoded.get("txHash"),
+        log_index=decoded.get("logIndex"),
+        sample_market_id=sample_market_id,
+        note=note,
+    )
+
+
+def _resolve_registry_gap_for_market(conn, token_id: str, market: Dict[str, Any], *, resolution_source: str) -> None:
+    market_id = market.get("id")
+    if market_id in (None, ""):
+        return
+    resolve_orderfilled_registry_gap(
+        conn,
+        token_id=token_id,
+        market_id=market_id,
+        condition_id=market.get("condition_id"),
+        resolution_source=resolution_source,
+    )
+
+
+def decode_and_enrich(log: Dict, w3: Web3, event_decoder: Any, block_ts_cache: Dict[int, Any]) -> Optional[Dict]:
     """解码日志并补充 block_number、size。
 
     不再通过 eth_getBlockByNumber 补链上 block timestamp；同步吞吐优先，
@@ -1083,6 +1379,8 @@ def run_indexer(
     market_lookup_backend: str = MARKET_LOOKUP_BACKEND,
     clickhouse_write_mode: str = "none",
     clickhouse_settings=None,
+    address_filters: Optional[Sequence[str]] = None,
+    write_registry_gaps: bool = True,
 ) -> Tuple[int, int]:
     """
     扫描 from_block 到 to_block 的 OrderFilled 日志，解码并写入数据库或 JSON 文件
@@ -1102,8 +1400,10 @@ def run_indexer(
     event_decoder = get_order_filled_event_decoders(w3)
 
     conn = get_connection(db_path)
-    if not test_mode and get_trade_write_mode() == "v2":
+    if not test_mode and get_trade_write_mode() == "v2" and clickhouse_write_mode in {"none", "dual"}:
         ensure_trade_v2_schema(conn)
+    if not test_mode and write_registry_gaps:
+        ensure_orderfilled_registry_gap_schema(conn)
     if not test_mode and write_orderfilled_raw:
         ensure_orderfilled_raw_schema(conn)
     lookup_backend = resolve_market_lookup_backend(market_lookup_backend)
@@ -1123,6 +1423,7 @@ def run_indexer(
     processed = 0
     unknown_tokens = set()
     backfill_attempted = set()
+    activity_backfill_attempted: Set[str] = set()
     market_cache: Dict[str, Dict] = {}
     trades_out: List[Dict] = []  # 测试模式收集
     window_blocks = max(batch_blocks, batch_blocks * max_workers)
@@ -1142,7 +1443,7 @@ def run_indexer(
             iter_block_windows(from_block, to_block, window_blocks),
             start=1,
         ):
-            block_ts_cache: Dict[int, str] = {}
+            block_ts_cache: Dict[int, Any] = {}
             pending_trade_rows: List[Dict[str, Any]] = []
             skipped_existing = 0
             window_inserted = 0
@@ -1159,6 +1460,7 @@ def run_indexer(
                 window_end,
                 batch_blocks=batch_blocks,
                 max_workers=max_workers,
+                address_filters=address_filters,
             )
 
             existing_trade_keys = set()
@@ -1193,14 +1495,13 @@ def run_indexer(
                     )
                     if skip_trade_insert:
                         skipped_existing += 1
+                        continue
                     decoded = decode_and_enrich(log, w3, event_decoder, block_ts_cache)
                     if not decoded:
                         continue
                     if log.get("topics"):
                         topic0 = log["topics"][0]
                         decoded["event_topic"] = topic0.hex() if hasattr(topic0, "hex") else str(topic0)
-                    if skip_trade_insert:
-                        decoded["_skip_trade_insert"] = True
                     decoded_chunk.append(decoded)
                     if not test_mode and not skip_trade_insert:
                         token_ids_in_chunk.add(str(decoded["tokenId"]))
@@ -1227,6 +1528,9 @@ def run_indexer(
                             create_placeholder_markets=create_placeholder_markets,
                             lookup_backend=lookup_backend,
                         )
+                        backfill_attempted.update(
+                            token_id for token_id in token_ids_in_chunk if token_id not in market_cache
+                        )
                     else:
                         prefetch_market_cache_for_token_ids(
                             market_conn,
@@ -1248,9 +1552,17 @@ def run_indexer(
                                 flush=True,
                             )
 
+                    backfill_activity_markets_for_chunk(
+                        decoded_chunk,
+                        market_conn=market_conn,
+                        market_cache=market_cache,
+                        db_path=db_path,
+                        lookup_backend=lookup_backend,
+                        block_ts_cache=block_ts_cache,
+                        attempted_tokens=activity_backfill_attempted,
+                    )
+
                 for decoded in decoded_chunk:
-                    if decoded.get("_skip_trade_insert"):
-                        continue
                     token_id = str(decoded["tokenId"])
                     market = None
                     if not test_mode:
@@ -1275,6 +1587,81 @@ def run_indexer(
                                     lookup_backend=lookup_backend,
                                 )
 
+                        if (
+                            not market
+                            and ORDERFILLED_ACTIVITY_FALLBACK
+                            and token_id not in activity_backfill_attempted
+                        ):
+                            activity_backfill_attempted.add(token_id)
+                            try:
+                                activity_timestamp = None
+                                block_number = decoded.get("block_number")
+                                if block_number not in (None, ""):
+                                    block_number = int(block_number)
+                                    cached_timestamp = block_ts_cache.get(block_number)
+                                    if cached_timestamp not in (None, ""):
+                                        activity_timestamp = int(cached_timestamp)
+                                    else:
+                                        block = w3.eth.get_block(block_number)
+                                        activity_timestamp = int(block.get("timestamp") or 0) or None
+                                        if activity_timestamp is not None:
+                                            block_ts_cache[block_number] = activity_timestamp
+                                activity_upserted = _upsert_market_from_activity_trade(
+                                    token_id=token_id,
+                                    tx_hash=decoded.get("txHash") or "",
+                                    maker=decoded.get("maker") or "",
+                                    taker=decoded.get("taker") or "",
+                                    db_path=db_path,
+                                    activity_timestamp=activity_timestamp,
+                                )
+                                if activity_upserted:
+                                    market = find_market_by_token_id(
+                                        market_conn,
+                                        token_id,
+                                        lookup_backend=lookup_backend,
+                                    )
+                                    if market:
+                                        market_cache[token_id] = market
+                                        print(
+                                            f"Backfilled market via Data API activity for tokenId {token_id[:30]}...",
+                                            file=sys.stderr,
+                                        )
+                                else:
+                                    print(
+                                        f"Data API activity fallback unresolved for tokenId {token_id[:30]}... "
+                                        f"block={block_number} activity_timestamp={activity_timestamp}",
+                                        file=sys.stderr,
+                                    )
+                            except Exception as e:
+                                print(
+                                    f"Failed Data API activity fallback for tokenId {token_id[:30]}...: {e}",
+                                    file=sys.stderr,
+                                )
+
+                        if market and write_registry_gaps:
+                            if _market_is_placeholder(market):
+                                _record_registry_gap_for_trade(
+                                    conn,
+                                    decoded,
+                                    token_id,
+                                    sample_market_id=market.get("id"),
+                                    note="token matched only an orderfilled-placeholder market; real registry metadata still missing",
+                                )
+                            else:
+                                _resolve_registry_gap_for_market(
+                                    conn,
+                                    token_id,
+                                    market,
+                                    resolution_source="trades_indexer_market_lookup",
+                                )
+
+                        if not market and write_registry_gaps:
+                            _record_registry_gap_for_trade(
+                                conn,
+                                decoded,
+                                token_id,
+                                note="token unresolved after dynamic market backfill; window left incomplete to avoid silent replay leakage",
+                            )
                         if not market and token_id not in unknown_tokens:
                             unknown_tokens.add(token_id)
                             window_unknown_tokens.add(token_id)
@@ -1457,7 +1844,7 @@ def _resolve_sync_range(args, rpc_url: str) -> Tuple[int, int]:
         last = get_last_synced_block(args.sqlite_path, sync_state_key=args.sync_state_key)
         from_block = (last + 1) if last is not None else 0
     if from_block is None:
-        from_block = max(0, to_block - args.batch)
+        from_block = max(0, to_block - max(1, args.batch) + 1)
 
     return from_block, to_block
 
@@ -1490,6 +1877,8 @@ def _run_once(args) -> Tuple[int, int]:
         market_lookup_backend=args.market_lookup_backend,
         clickhouse_write_mode=args.clickhouse_write_mode,
         clickhouse_settings=clickhouse_settings_from_args(args),
+        address_filters=args.address_filter,
+        write_registry_gaps=not args.disable_registry_gap_write,
     )
     if out_json:
         print(f"Processed {processed} logs, wrote {inserted} trades to {out_json}.", file=sys.stderr)
@@ -1511,6 +1900,17 @@ def main():
     parser.add_argument("--confirmations", type=int, default=20, help="自动追最新区块时保留的确认块数")
     parser.add_argument("--batch", type=int, default=BATCH_BLOCKS, help="每批区块数")
     parser.add_argument("--max-workers", type=int, default=MAX_WORKERS, help="并发线程数")
+    parser.add_argument(
+        "--address-filter",
+        action="append",
+        default=[],
+        help="只抓 maker/taker 命中这些地址的 OrderFilled；可重复或用逗号分隔。",
+    )
+    parser.add_argument(
+        "--disable-registry-gap-write",
+        action="store_true",
+        help="不维护全局 OrderFilled registry gap；用于与历史回补并行的低延迟地址过滤任务。",
+    )
     add_clickhouse_orderfilled_cli_args(parser)
     parser.add_argument("--sync-state-key", default=SYNC_STATE_KEY, help="sync_state 中用于读写进度的 key")
     parser.add_argument("--no-sync-state-update", action="store_true", help="写入 trades 但不更新 sync_state，用于历史补齐任务")
@@ -1589,6 +1989,9 @@ def main():
                     time.sleep(args.interval)
                 except KeyboardInterrupt:
                     raise
+                except RpcAccessDeniedError as exc:
+                    print(f"[trade] fatal RPC access/quota error: {exc}", file=sys.stderr)
+                    raise SystemExit(RPC_FATAL_EXIT_CODE) from exc
                 except Exception as exc:
                     consecutive_failures += 1
                     backoff_seconds = _compute_watch_error_backoff(args.interval, consecutive_failures)
@@ -1602,7 +2005,11 @@ def main():
         except KeyboardInterrupt:
             print("\n[trade] Interrupted by user. Exiting.", file=sys.stderr)
     else:
-        _run_once(args)
+        try:
+            _run_once(args)
+        except RpcAccessDeniedError as exc:
+            print(f"[trade] fatal RPC access/quota error: {exc}", file=sys.stderr)
+            raise SystemExit(RPC_FATAL_EXIT_CODE) from exc
 
 
 if __name__ == "__main__":

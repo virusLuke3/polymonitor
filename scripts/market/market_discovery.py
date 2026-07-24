@@ -58,6 +58,7 @@ from db import (
 from config import get_rpc_url
 from data_sources import POLYMARKET_CLOB_API_BASE
 from trade.trade_decoder import CTF_EXCHANGE_ADDRESS, NEG_RISK_EXCHANGE_ADDRESS
+from trade.orderfilled_raw import ORDERFILLED_RAW_TABLE, normalize_hex
 try:
     from .market_decoder import (
         calculate_market_tokens,
@@ -303,6 +304,42 @@ def fetch_market_by_condition_id_from_clob(condition_id: str) -> Optional[Dict]:
     return data
 
 
+def _normalize_clob_token_id_list(value: Any) -> List[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+            return _normalize_clob_token_id_list(parsed)
+        except Exception:
+            numeric_tokens = re.findall(r"\d{20,}", text)
+            return list(dict.fromkeys(numeric_tokens))
+    if isinstance(value, dict):
+        token = (
+            value.get("tokenId")
+            or value.get("token_id")
+            or value.get("asset_id")
+            or value.get("t")
+        )
+        return [str(token)] if token not in (None, "") else []
+    if isinstance(value, list):
+        if value and all(isinstance(item, str) and len(item) == 1 for item in value):
+            reparsed = _normalize_clob_token_id_list("".join(value))
+            if reparsed:
+                return reparsed
+        tokens: List[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                tokens.extend(_normalize_clob_token_id_list(item))
+            elif item not in (None, ""):
+                tokens.append(str(item))
+        return list(dict.fromkeys(token for token in tokens if token))
+    return [str(value)]
+
+
 def _fetch_tags_endpoint(url: str) -> List[str]:
     try:
         resp = requests.get(url, timeout=REQUEST_TIMEOUT)
@@ -390,6 +427,106 @@ def _normalize_market_record(m: Dict) -> Optional[Dict]:
     return normalize_market_from_gamma(m)
 
 
+def _token_lookup_candidates(token_id: Any) -> List[str]:
+    text = str(token_id or "").strip()
+    if not text:
+        return []
+    candidates = [text]
+    lowered = text.lower()
+    body = lowered[2:] if lowered.startswith("0x") else lowered
+    if body and not body.isdigit():
+        try:
+            candidates.append(str(int(body, 16)))
+        except Exception:
+            pass
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        normalized = str(item or "").strip()
+        if normalized and normalized not in seen:
+            deduped.append(normalized)
+            seen.add(normalized)
+    return deduped
+
+
+def _fetch_market_by_token_from_clob_once(token: str) -> Optional[Dict]:
+    token = str(token or "").strip()
+    if not token:
+        return None
+    if str(os.environ.get("POLYDATA_MARKET_BACKFILL_SKIP_HTTP") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return None
+    try:
+        resp = _get_session().get(f"{CLOB_API_BASE}/markets-by-token/{token}", timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        token_market = _response_json(resp, f"GET {CLOB_API_BASE}/markets-by-token/{token}")
+        resp.close()
+    except Exception as e:
+        _invalidate_session(str(e))
+        print(f"fetch_market_by_token_from_clob({token[:30]}...): {e}", file=sys.stderr)
+        return None
+    if not isinstance(token_market, dict):
+        return None
+    condition_id = token_market.get("condition_id") or token_market.get("conditionId")
+    if not condition_id:
+        return None
+    market = fetch_market_by_condition_id_from_clob(str(condition_id))
+    if not isinstance(market, dict):
+        return None
+    primary = token_market.get("primary_token_id") or token_market.get("primaryTokenId")
+    secondary = token_market.get("secondary_token_id") or token_market.get("secondaryTokenId")
+    merged_tokens: List[str] = _normalize_clob_token_id_list(
+        market.get("clobTokenIds") or market.get("clob_token_ids")
+    )
+    for item in (primary, secondary):
+        if item is not None:
+            merged_tokens.append(str(item))
+    if merged_tokens:
+        market["clobTokenIds"] = list(dict.fromkeys(token for token in merged_tokens if token))
+    return market
+
+
+def fetch_market_by_token_from_clob(token_id: str) -> Optional[Dict]:
+    for token in _token_lookup_candidates(token_id):
+        market = _fetch_market_by_token_from_clob_once(token)
+        if market:
+            return market
+    return None
+
+
+def fetch_and_upsert_markets_by_token_ids_via_clob_token_lookup(
+    token_ids: List[str],
+    db_path: str,
+) -> int:
+    if not token_ids:
+        return 0
+    seen_cid: set = set()
+    norms: List[Dict] = []
+    normalized_tokens: List[str] = []
+    for token_id in token_ids:
+        normalized_tokens.extend(_token_lookup_candidates(token_id))
+    for token_id in dict.fromkeys(normalized_tokens):
+        raw = fetch_market_by_token_from_clob(token_id)
+        if not raw:
+            continue
+        cid = raw.get("conditionId") or raw.get("condition_id")
+        if cid and cid in seen_cid:
+            continue
+        if cid:
+            seen_cid.add(cid)
+        raw.setdefault("_event_neg_risk", raw.get("negRisk", False))
+        raw.setdefault("_event_slug", raw.get("slug", ""))
+        norm = _normalize_market_record(raw)
+        if norm:
+            norms.append(norm)
+    if not norms:
+        return 0
+    conn = get_connection(db_path)
+    try:
+        return batch_upsert_markets(conn, norms)
+    finally:
+        conn.close()
+
+
 def _build_minimal_market_from_registry(
     condition_id: str,
     token0: str,
@@ -418,11 +555,21 @@ def _build_minimal_market_from_registry(
     }
 
 
-def _recompute_resolved_token_ids(db_path: str) -> set:
+def _real_market_filter_sql(alias: str = "markets") -> str:
+    return (
+        f"COALESCE({alias}.category, '') <> 'orderfilled-placeholder' "
+        f"AND COALESCE({alias}.slug, '') NOT LIKE 'trade-indexer-placeholder-%%'"
+    )
+
+
+def _recompute_resolved_token_ids(db_path: str, *, real_only: bool = False) -> set:
     conn = get_connection(db_path)
     try:
         cur = conn.cursor()
-        cur.execute("SELECT yes_token_id, no_token_id FROM markets WHERE yes_token_id IS NOT NULL AND no_token_id IS NOT NULL")
+        where = "WHERE yes_token_id IS NOT NULL AND no_token_id IS NOT NULL"
+        if real_only:
+            where += f" AND {_real_market_filter_sql('markets')}"
+        cur.execute(f"SELECT yes_token_id, no_token_id FROM markets {where}")
         resolved = set()
         for row in cur.fetchall():
             if row[0]:
@@ -432,6 +579,47 @@ def _recompute_resolved_token_ids(db_path: str) -> set:
         return resolved
     finally:
         conn.close()
+
+
+def _resolved_token_ids_for(token_ids: List[str], db_path: str, *, real_only: bool = False) -> set:
+    tokens: List[str] = []
+    for token_id in token_ids:
+        tokens.extend(_token_lookup_candidates(token_id))
+    tokens = list(dict.fromkeys(tokens))
+    if not tokens:
+        return set()
+    resolved: set = set()
+    conn = get_connection(db_path)
+    try:
+        cur = conn.cursor()
+        for start in range(0, len(tokens), 500):
+            chunk = tokens[start : start + 500]
+            placeholders = ",".join(["?"] * len(chunk))
+            cur.execute(
+                f"""
+                SELECT yes_token_id, no_token_id
+                FROM markets
+                WHERE (
+                    yes_token_id IN ({placeholders})
+                    OR no_token_id IN ({placeholders})
+                    OR EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements_text(clob_token_ids) AS token(value)
+                        WHERE token.value IN ({placeholders})
+                    )
+                )
+                  {"AND " + _real_market_filter_sql("markets") if real_only else ""}
+                """,
+                tuple(chunk + chunk + chunk),
+            )
+            for row in cur.fetchall():
+                if row[0]:
+                    resolved.add(str(row[0]))
+                if row[1]:
+                    resolved.add(str(row[1]))
+    finally:
+        conn.close()
+    return resolved
 
 
 def fetch_and_upsert_markets_for_token_ids_via_onchain(
@@ -466,8 +654,14 @@ def fetch_and_upsert_markets_for_token_ids_via_onchain(
 
     seen_conditions: set = set()
     norms: List[Dict] = []
-    for token_id in [str(t).strip() for t in token_ids if t and str(t).strip()]:
-        token_int = int(token_id)
+    normalized_tokens: List[str] = []
+    for token_id in token_ids:
+        normalized_tokens.extend(_token_lookup_candidates(token_id))
+    for token_id in dict.fromkeys(normalized_tokens):
+        try:
+            token_int = int(token_id)
+        except ValueError:
+            continue
         for exchange_name, exchange_address, _sync_key in CHAIN_REGISTRY_EVENTS:
             contract = w3.eth.contract(address=Web3.to_checksum_address(exchange_address), abi=abi)
             try:
@@ -578,12 +772,15 @@ def supplement_missing_markets_from_onchain_registry(
 # 默认请求间隔（秒）
 DEFAULT_REQUESTS_DELAY = 0.7
 # 重试次数与指数退避基数
-MAX_RETRIES = 5
-RETRY_BASE_DELAY = 2
+MAX_RETRIES = max(1, int(os.environ.get("POLYDATA_MARKET_HTTP_RETRIES", "5")))
+RETRY_BASE_DELAY = max(1, int(os.environ.get("POLYDATA_MARKET_HTTP_RETRY_BASE_DELAY", "2")))
 # 每 N 次请求后主动关闭并重建 Session，清除累积的僵死连接
 SESSION_RECYCLE_EVERY = 200
-# 请求超时：(连接超时秒, 读取超时秒)；分离两阶段，避免慢响应时无限等待
-REQUEST_TIMEOUT = (10, 45)
+# 请求超时：(连接超时秒, 读取超时秒)；分离两阶段，避免慢响应时无限等待。
+REQUEST_TIMEOUT = (
+    int(os.environ.get("POLYDATA_MARKET_HTTP_CONNECT_TIMEOUT", "10")),
+    int(os.environ.get("POLYDATA_MARKET_HTTP_READ_TIMEOUT", "45")),
+)
 
 SYNC_KEY_CLOSED_EVENTS_OFFSET = "closed_events_offset"
 # 记录最后一次 market discovery 的完成时间（ISO 字符串），用于增量同步起点
@@ -593,6 +790,16 @@ SYNC_KEY_LAST_DISCOVERY_AT = "last_market_discovery_at"
 def _create_session() -> requests.Session:
     """创建可复用连接的 Session，减轻长运行时的连接池耗尽与 SSL 断连"""
     session = requests.Session()
+    # 默认不要继承 shell 里的 HTTP(S)_PROXY/ALL_PROXY，避免 market backfill
+    # 在本机分析/修复任务里悄悄绕到 clash 或其他代理。
+    # 如需显式走代理，再设置 POLYDATA_MARKET_HTTP_TRUST_ENV_PROXY=1。
+    session.trust_env = str(os.environ.get("POLYDATA_MARKET_HTTP_TRUST_ENV_PROXY", "0")).strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    session.headers.update({"Connection": "close", "User-Agent": "polydata-market-discovery/1.0"})
     retries = Retry(
         total=MAX_RETRIES,
         backoff_factor=RETRY_BASE_DELAY,
@@ -1719,34 +1926,48 @@ def fetch_markets_by_clob_token_ids(token_ids: List[str]) -> List[Dict]:
     token_ids = [str(t).strip() for t in token_ids if t and str(t).strip()]
     if not token_ids:
         return []
-    try:
+    def _request(ids: List[str]) -> List[Dict]:
         # GET /markets 支持 clob_token_ids 数组，requests 会序列化为 clob_token_ids=id1&clob_token_ids=id2
         params: Dict[str, Any] = {
-            "limit": min(100, max(len(token_ids) * 2, 10)),
+            "limit": min(100, max(len(ids) * 2, 10)),
         }
         session = _get_session()
         resp = session.get(
             GAMMA_MARKETS_URL,
-            params={"clob_token_ids": token_ids[:50], **params},
+            params={"clob_token_ids": ids, **params},
             timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         data = _response_json(resp, f"GET {GAMMA_MARKETS_URL}")
         resp.close()
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and "markets" in data:
+            return data.get("markets") or []
+        return []
+
+    try:
+        data = _request(token_ids[:CLOB_TOKEN_IDS_BATCH])
     except Exception as e:
         _invalidate_session(str(e))
-        print(f"fetch_markets_by_clob_token_ids: {e}", file=sys.stderr)
-        return []
-    if isinstance(data, list):
-        if not data and token_ids:
+        print(f"fetch_markets_by_clob_token_ids batch failed: {e}", file=sys.stderr)
+        data = []
+        if len(token_ids) > 1:
+            for token_id in token_ids[:CLOB_TOKEN_IDS_BATCH]:
+                try:
+                    data.extend(_request([token_id]))
+                except Exception as item_error:
+                    _invalidate_session(str(item_error))
+                    print(
+                        f"fetch_markets_by_clob_token_ids item failed token={str(token_id)[:30]}...: {item_error}",
+                        file=sys.stderr,
+                    )
+    if not data and token_ids:
             print(
                 f"fetch_markets_by_clob_token_ids: GET /markets returned 0 markets for {len(token_ids)} token(s), will fall back to event-scan.",
                 file=sys.stderr,
             )
-        return data
-    if isinstance(data, dict) and "markets" in data:
-        return data.get("markets") or []
-    return []
+    return data
 
 
 def _enrich_market_with_event_by_slug(m: Dict) -> None:
@@ -1812,8 +2033,442 @@ def fetch_and_upsert_markets_for_slugs(
         conn.close()
 
 
-# 每批最多传多少个 token_id 给 GET /markets?clob_token_ids=...（API 承受能力）
-CLOB_TOKEN_IDS_BATCH = 50
+# 每批最多传多少个 token_id 给 GET /markets?clob_token_ids=...（API 承受能力）。
+# Gamma 在代理/长连接环境下偶发 SSL EOF，默认小批量能降低 live indexer 被单个长 URL 卡住的概率。
+CLOB_TOKEN_IDS_BATCH = max(1, int(os.environ.get("POLYDATA_CLOB_TOKEN_IDS_BATCH", "6")))
+DATA_API_BASE_URL = os.environ.get("POLYMARKET_DATA_API_BASE_URL", "https://data-api.polymarket.com")
+COMBO_DATA_API_BASE_URL = os.environ.get("POLYMARKET_COMBO_DATA_API_BASE_URL", DATA_API_BASE_URL)
+ORDERFILLED_EXCHANGE_ADDRESSES = {
+    "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+    "0xc5d563a36ae78145c45a50134d48a1215220f80a",
+    "0xe111180000d2663c0091e4f400237545b87b996b",
+    "0xe2222d279d744050d28e00520010520000310f59",
+    "0xe3333700ca9d93003f00f0f71f8515005f6c00aa",
+}
+
+ORDERFILLED_ACTIVITY_SAMPLE_LIMIT = max(1, int(os.environ.get("POLYDATA_ORDERFILLED_ACTIVITY_SAMPLE_LIMIT", "2")))
+ORDERFILLED_COMBO_ACTIVITY_LIMIT = min(
+    500,
+    max(1, int(os.environ.get("POLYDATA_ORDERFILLED_COMBO_ACTIVITY_LIMIT", "500"))),
+)
+ORDERFILLED_COMBO_ACTIVITY_MAX_PAGES = max(
+    1,
+    int(os.environ.get("POLYDATA_ORDERFILLED_COMBO_ACTIVITY_MAX_PAGES", "2")),
+)
+
+
+def _combo_category_from_title(title: str) -> str:
+    text = str(title or "").lower()
+    if any(term in text for term in ("nba", "nfl", "mlb", "nhl", "soccer", "tennis", "ufc", "wnba", "spread:", " o/u ", " vs. ")):
+        return "sports"
+    if any(term in text for term in ("bitcoin", "btc", "ethereum", "eth", "solana", "crypto")):
+        return "crypto"
+    if any(term in text for term in ("trump", "election", "senate", "president")):
+        return "politics"
+    return "combo"
+
+
+def _combo_tokens_from_activity(activity: Dict[str, Any], token_id: str) -> Tuple[str, str]:
+    # Data API combo activity exposes conditionId, but that is the market
+    # condition id, not the ERC1155 CTF position id. The traded asset is one of
+    # the adjacent position ids, so derive the pair from the observed token.
+    token_int = int(str(token_id))
+    base_int = token_int if token_int % 2 == 0 else token_int - 1
+    return str(base_int), str(base_int + 1)
+
+
+def _adjacent_combo_token_ids(token_id: str) -> set[str]:
+    try:
+        yes_token, no_token = _combo_tokens_from_activity({}, token_id)
+    except Exception:
+        return {str(token_id or "").strip()}
+    return {yes_token, no_token}
+
+
+def _combo_title_from_legs(activity: Dict[str, Any]) -> str:
+    titles: List[str] = []
+    for leg in activity.get("legs") or []:
+        if not isinstance(leg, dict):
+            continue
+        market = leg.get("market") if isinstance(leg.get("market"), dict) else {}
+        title = str(market.get("title") or "").strip()
+        outcome = str(market.get("outcome") or leg.get("leg_outcome_label") or "").strip()
+        if title and outcome and outcome.lower() not in title.lower():
+            title = f"{title}: {outcome}"
+        if title:
+            titles.append(title)
+    return " AND ".join(titles)
+
+
+def _combo_tags_from_legs(activity: Dict[str, Any]) -> List[str]:
+    tags: List[str] = ["combo", "data-api-combo-activity"]
+    for leg in activity.get("legs") or []:
+        if not isinstance(leg, dict):
+            continue
+        market = leg.get("market") if isinstance(leg.get("market"), dict) else {}
+        for value in (market.get("category"), market.get("subcategory")):
+            text = str(value or "").strip().lower()
+            if text and text not in tags:
+                tags.append(text)
+        for value in market.get("tags") or []:
+            text = str(value or "").strip().lower()
+            if text and text not in tags:
+                tags.append(text)
+        event = market.get("event") if isinstance(market.get("event"), dict) else {}
+        event_slug = str(event.get("event_slug") or "").strip().lower()
+        if event_slug:
+            if "fifwc" in event_slug and "soccer" not in tags:
+                tags.append("soccer")
+            if "sports" not in tags and any(item in event_slug for item in ("fifwc", "nba", "nfl", "mlb", "nhl", "ufc")):
+                tags.append("sports")
+    return tags
+
+
+def _build_combo_market_from_combo_activity(activity: Dict[str, Any], token_id: str) -> Optional[Dict[str, Any]]:
+    condition_id = str(activity.get("combo_condition_id") or activity.get("conditionId") or "").strip()
+    if not condition_id:
+        return None
+    yes_token, no_token = _combo_tokens_from_activity(activity, token_id)
+    title = _combo_title_from_legs(activity) or f"Combo market {condition_id[:18]}"
+    tags = _combo_tags_from_legs(activity)
+    event_slug = ""
+    event_title = ""
+    for leg in activity.get("legs") or []:
+        if not isinstance(leg, dict):
+            continue
+        market = leg.get("market") if isinstance(leg.get("market"), dict) else {}
+        event = market.get("event") if isinstance(market.get("event"), dict) else {}
+        event_slug = event_slug or str(event.get("event_slug") or "").strip()
+        event_title = event_title or str(event.get("event_title") or "").strip()
+    return {
+        "gamma_market_id": "",
+        "event_id": "",
+        "event_slug": event_slug,
+        "event_title": event_title,
+        "slug": f"combo-{condition_id[2:18]}",
+        "condition_id": condition_id,
+        "question_id": None,
+        "oracle": None,
+        "yes_token_id": yes_token,
+        "no_token_id": no_token,
+        "clob_token_ids": [yes_token, no_token],
+        "title": title,
+        "description": "Recovered from Polymarket combo activity for an OrderFilled combo asset.",
+        "enable_neg_risk": False,
+        "end_date": None,
+        "created_at": activity.get("tx_dttm"),
+        "category": _derive_category_from_tags(tags) or _combo_category_from_title(title),
+        "tags": tags,
+    }
+
+
+def _non_exchange_participants(maker: Any, taker: Any) -> List[str]:
+    participants: List[str] = []
+    for address in (maker, taker):
+        text = str(address or "").strip().lower()
+        if text and text not in ORDERFILLED_EXCHANGE_ADDRESSES and text not in participants:
+            participants.append(text)
+    return participants
+
+
+def _find_data_api_activity_trade(
+    *,
+    token_id: str,
+    tx_hash: str,
+    maker: str,
+    taker: str,
+    activity_timestamp: Optional[int] = None,
+    timeout: float = 5.0,
+) -> Optional[Dict[str, Any]]:
+    token_text = str(token_id or "").strip()
+    tx_text = normalize_hex(tx_hash)
+    combo_pair = _adjacent_combo_token_ids(token_text)
+    participants = _non_exchange_participants(maker, taker)
+    if not token_text or not tx_text or not participants:
+        return None
+
+    for user in participants:
+        params: Dict[str, Any] = {"user": user, "type": "TRADE", "limit": "100"}
+        if activity_timestamp is not None and int(activity_timestamp) > 0:
+            # Active wallets can have far more than 100 newer trades. Narrowing
+            # by the on-chain block timestamp makes the exact tx lookup both
+            # bounded and reliable; /activity officially supports start/end.
+            timestamp = int(activity_timestamp)
+            params.update(
+                {
+                    "limit": "500",
+                    "start": str(max(0, timestamp - 600)),
+                    "end": str(timestamp + 600),
+                }
+            )
+        try:
+            resp = _get_session().get(
+                f"{DATA_API_BASE_URL.rstrip('/')}/activity",
+                params=params,
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            payload = _response_json(resp, f"GET {DATA_API_BASE_URL}/activity")
+            resp.close()
+        except Exception as exc:
+            print(
+                f"Data API activity lookup failed for token {token_text[:30]}... "
+                f"user {user[:12]}...: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        if not isinstance(payload, list):
+            continue
+        tx_matches = 0
+        asset_matches = 0
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            item_tx_hash = normalize_hex(item.get("transactionHash"))
+            asset = str(item.get("asset") or "").strip()
+            if item_tx_hash == tx_text:
+                tx_matches += 1
+            if asset == token_text or (item.get("isCombo") and asset in combo_pair):
+                asset_matches += 1
+            if item_tx_hash != tx_text:
+                continue
+            if asset == token_text or (item.get("isCombo") and asset in combo_pair):
+                return item
+        if activity_timestamp is not None:
+            print(
+                f"Data API activity exact match missing for token {token_text[:30]}... "
+                f"user {user[:12]}... rows={len(payload)} tx_matches={tx_matches} "
+                f"asset_matches={asset_matches} timestamp={int(activity_timestamp)}",
+                file=sys.stderr,
+            )
+    return None
+
+
+def _find_data_api_combo_activity_trade(
+    *,
+    token_id: str,
+    tx_hash: str,
+    maker: str,
+    taker: str,
+    timeout: float = 10.0,
+) -> Optional[Dict[str, Any]]:
+    token_text = str(token_id or "").strip()
+    tx_text = normalize_hex(tx_hash)
+    combo_pair = _adjacent_combo_token_ids(token_text)
+    participants = _non_exchange_participants(maker, taker)
+    if not token_text or not tx_text or not participants:
+        return None
+
+    for user in participants:
+        cursor: Optional[str] = None
+        for page in range(ORDERFILLED_COMBO_ACTIVITY_MAX_PAGES):
+            params: Dict[str, Any] = {
+                "user": user,
+                "limit": ORDERFILLED_COMBO_ACTIVITY_LIMIT,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            elif page:
+                params["offset"] = page * ORDERFILLED_COMBO_ACTIVITY_LIMIT
+            try:
+                resp = _get_session().get(
+                    f"{COMBO_DATA_API_BASE_URL.rstrip('/')}/v1/activity/combos",
+                    params=params,
+                    timeout=timeout,
+                )
+                resp.raise_for_status()
+                payload = _response_json(resp, f"GET {COMBO_DATA_API_BASE_URL}/v1/activity/combos")
+                resp.close()
+            except Exception:
+                break
+            if not isinstance(payload, dict):
+                break
+            activity = payload.get("activity") or []
+            if not isinstance(activity, list):
+                break
+            for item in activity:
+                if not isinstance(item, dict):
+                    continue
+                if normalize_hex(item.get("tx_hash")) != tx_text:
+                    continue
+                if str(item.get("combo_position_id") or "").strip() not in combo_pair:
+                    continue
+                return item
+            pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+            cursor = str(pagination.get("next_cursor") or "").strip() or None
+            if not cursor and not pagination.get("has_more"):
+                break
+    return None
+
+
+def _upsert_market_from_activity_trade(
+    *,
+    token_id: str,
+    tx_hash: str,
+    maker: str,
+    taker: str,
+    db_path: str,
+    activity_timestamp: Optional[int] = None,
+    timeout: float = 5.0,
+) -> int:
+    activity = _find_data_api_activity_trade(
+        token_id=token_id,
+        tx_hash=tx_hash,
+        maker=maker,
+        taker=taker,
+        activity_timestamp=activity_timestamp,
+        timeout=timeout,
+    )
+    combo_activity: Optional[Dict[str, Any]] = None
+    if not activity:
+        combo_activity = _find_data_api_combo_activity_trade(
+            token_id=token_id,
+            tx_hash=tx_hash,
+            maker=maker,
+            taker=taker,
+            timeout=max(timeout, 10.0),
+        )
+        if not combo_activity:
+            return 0
+        market = _build_combo_market_from_combo_activity(combo_activity, token_id)
+        if not market:
+            return 0
+        conn = get_connection(db_path)
+        try:
+            return batch_upsert_markets(conn, [market])
+        finally:
+            conn.close()
+
+    condition_id = str(activity.get("conditionId") or activity.get("condition_id") or "").strip()
+    slug = str(activity.get("slug") or "").strip()
+    is_combo_activity = bool(activity.get("isCombo"))
+    raw: Optional[Dict[str, Any]] = None
+    if condition_id and not is_combo_activity:
+        raw = fetch_market_by_condition_id_from_clob(condition_id)
+    if not raw and slug and not is_combo_activity:
+        raw = fetch_market_by_slug(slug)
+    if raw:
+        if activity.get("eventSlug") and not raw.get("_event_slug"):
+            raw["_event_slug"] = str(activity.get("eventSlug") or "").strip()
+        raw["_event_neg_risk"] = raw.get("negRisk", False)
+        norm = _normalize_market_record(raw)
+        if norm:
+            conn = get_connection(db_path)
+            try:
+                return batch_upsert_markets(conn, [norm])
+            finally:
+                conn.close()
+
+    if not is_combo_activity or not condition_id:
+        return 0
+
+    yes_token, no_token = _combo_tokens_from_activity(activity, token_id)
+    title = str(activity.get("title") or f"Combo market {condition_id[:18]}").strip()
+    market = {
+        "gamma_market_id": "",
+        "event_id": "",
+        "event_slug": str(activity.get("eventSlug") or "").strip(),
+        "event_title": "",
+        "slug": slug or f"combo-{condition_id[2:18]}",
+        "condition_id": condition_id,
+        "question_id": None,
+        "oracle": None,
+        "yes_token_id": yes_token,
+        "no_token_id": no_token,
+        "clob_token_ids": [yes_token, no_token],
+        "title": title,
+        "description": "Recovered from Polymarket Data API activity for an OrderFilled asset.",
+        "enable_neg_risk": False,
+        "end_date": None,
+        "created_at": None,
+        "category": _combo_category_from_title(title),
+        "tags": ["combo", "data-api-activity"],
+    }
+    conn = get_connection(db_path)
+    try:
+        return batch_upsert_markets(conn, [market])
+    finally:
+        conn.close()
+
+
+def fetch_and_upsert_markets_by_token_ids_via_activity_fallback(
+    token_ids: List[str],
+    db_path: str,
+    *,
+    per_token_limit: int = ORDERFILLED_ACTIVITY_SAMPLE_LIMIT,
+) -> int:
+    if not token_ids or per_token_limit <= 0:
+        return 0
+
+    conn = get_connection(db_path)
+    try:
+        samples: List[tuple[str, str, str, str]] = []
+        for token_id in dict.fromkeys(str(item).strip() for item in token_ids if str(item or "").strip()):
+            cur = conn.execute(
+                f"""
+                SELECT token_id, tx_hash, maker, taker
+                FROM {ORDERFILLED_RAW_TABLE}
+                WHERE token_id = ?
+                ORDER BY block_number DESC, log_index DESC
+                LIMIT ?
+                """,
+                (token_id, int(per_token_limit)),
+            )
+            for row in cur.fetchall():
+                samples.append(
+                    (
+                        str(row[0] or ""),
+                        str(row[1] or ""),
+                        str(row[2] or ""),
+                        str(row[3] or ""),
+                    )
+                )
+    finally:
+        conn.close()
+
+    upserted = 0
+    tried: set[tuple[str, str]] = set()
+    for token_id, tx_hash, maker, taker in samples:
+        key = (token_id, tx_hash)
+        if key in tried:
+            continue
+        tried.add(key)
+        upserted += int(
+            _upsert_market_from_activity_trade(
+                token_id=token_id,
+                tx_hash=tx_hash,
+                maker=maker,
+                taker=taker,
+                db_path=db_path,
+            )
+            or 0
+        )
+    return upserted
+
+
+def fetch_and_upsert_combo_market_from_activity_trade(
+    *,
+    token_id: str,
+    tx_hash: str,
+    maker: str,
+    taker: str,
+    db_path: str,
+    timeout: float = 5.0,
+) -> int:
+    """Recover combo market metadata when CLOB /markets-by-token 404s.
+
+    Polymarket combo fills emitted by the 2026 Exchange can use CTF position IDs
+    that are present in Data API activity but not accepted by the CLOB token
+    lookup endpoint. This fallback matches on wallet + tx_hash + asset.
+    """
+    return _upsert_market_from_activity_trade(
+        token_id=token_id,
+        tx_hash=tx_hash,
+        maker=maker,
+        taker=taker,
+        db_path=db_path,
+        timeout=timeout,
+    )
 
 
 def fetch_and_upsert_markets_by_token_ids_via_api(
@@ -1828,8 +2483,12 @@ def fetch_and_upsert_markets_by_token_ids_via_api(
         return 0
     seen_cid: set = set()
     raw_list: List[Dict] = []
-    for i in range(0, len(token_ids), CLOB_TOKEN_IDS_BATCH):
-        chunk = token_ids[i : i + CLOB_TOKEN_IDS_BATCH]
+    normalized_tokens: List[str] = []
+    for token_id in token_ids:
+        normalized_tokens.extend(_token_lookup_candidates(token_id))
+    normalized_tokens = list(dict.fromkeys(normalized_tokens))
+    for i in range(0, len(normalized_tokens), CLOB_TOKEN_IDS_BATCH):
+        chunk = normalized_tokens[i : i + CLOB_TOKEN_IDS_BATCH]
         batch = fetch_markets_by_clob_token_ids(chunk)
         for m in batch or []:
             cid = m.get("conditionId")
@@ -1862,21 +2521,34 @@ def fetch_and_upsert_markets_for_token_ids(
     requests_delay: float = 0.0,
 ) -> int:
     """
-    根据缺失的 token_id 从 Gamma API 拉取对应市场（含已关闭/历史），并写入 DB。
-    优先用 GET /markets?clob_token_ids=... 一键查询；若无结果再分页扫 /events。
+    根据缺失的 token_id 拉取对应市场（含已关闭/历史），并写入 DB。
+    优先使用官方 CLOB GET /markets-by-token/{token_id}，因为这是只有 token_id
+    但不知道 condition_id 时的专用解析入口；Gamma 查询作为补充。
 
-    策略：1) GET /markets?clob_token_ids=id1&clob_token_ids=id2 一键查
-         2) 若无结果再分页 /events?closed=true 与 /events?active=true&closed=false
+    策略：1) CLOB GET /markets-by-token/{token_id} -> condition_id -> market
+         2) Gamma GET /markets?clob_token_ids=id1&clob_token_ids=id2 补充
+         3) on-chain registry 补充
+         4) 若无结果再分页 /events?closed=true 与 /events?active=true&closed=false
     """
     if not token_ids:
         return 0
-    # 1) 先按 token_id 直接查 Gamma（GET /markets?clob_token_ids=...）
-    total_upserted = fetch_and_upsert_markets_by_token_ids_via_api(token_ids, db_path)
-    # 计算仍未解析的 token（API 可能只返回了部分）
+    # 1) 先走官方 CLOB token 反查。
+    total_upserted = fetch_and_upsert_markets_by_token_ids_via_clob_token_lookup(token_ids, db_path)
+    # 计算仍未解析的 token（API 可能只返回了部分）。
+    # 注意：placeholder 不是“已解析”。如果这里把 placeholder 算作 resolved，
+    # 后面的官方 CLOB /markets-by-token 反查会被短路，真实 market 永远补不回来。
     conn = get_connection(db_path)
     try:
         cur = conn.cursor()
-        cur.execute("SELECT yes_token_id, no_token_id FROM markets WHERE yes_token_id IS NOT NULL AND no_token_id IS NOT NULL")
+        cur.execute(
+            f"""
+            SELECT yes_token_id, no_token_id
+            FROM markets
+            WHERE yes_token_id IS NOT NULL
+              AND no_token_id IS NOT NULL
+              AND {_real_market_filter_sql("markets")}
+            """
+        )
         resolved = set()
         for row in cur.fetchall():
             if row[0]:
@@ -1888,12 +2560,37 @@ def fetch_and_upsert_markets_for_token_ids(
     remaining = set(str(t) for t in token_ids) - resolved
     if not remaining:
         return total_upserted
-    # 2) 用链上 registry + CLOB condition 接口做确定性回填，覆盖 Gamma 漏掉的真实 market
-    total_upserted += fetch_and_upsert_markets_for_token_ids_via_onchain(list(remaining), db_path)
-    remaining = set(str(t) for t in token_ids) - _recompute_resolved_token_ids(db_path)
+
+    # 2) Gamma token 参数查询作为补充。部分新 sports/tennis token 当前会返回 0，
+    # 所以不能让它成为唯一 source of truth。
+    total_upserted += fetch_and_upsert_markets_by_token_ids_via_api(list(remaining), db_path)
+    remaining = set(str(t) for t in token_ids) - _resolved_token_ids_for(token_ids, db_path, real_only=True)
     if not remaining:
         return total_upserted
-    # 2) 仍未解析的再分页扫 /events
+
+    # 3) 用链上 registry + CLOB condition 接口做确定性回填，覆盖 Gamma/CLOB token lookup 漏掉的真实 market。
+    # live OrderFilled 同步可通过 POLYDATA_MARKET_BACKFILL_SKIP_ONCHAIN=1 跳过该步骤，
+    # 避免市场元数据修复消耗 RPC units 或拖慢实时交易写入。
+    skip_onchain = str(os.environ.get("POLYDATA_MARKET_BACKFILL_SKIP_ONCHAIN") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not skip_onchain:
+        total_upserted += fetch_and_upsert_markets_for_token_ids_via_onchain(list(remaining), db_path)
+        remaining = set(str(t) for t in token_ids) - _resolved_token_ids_for(token_ids, db_path, real_only=True)
+        if not remaining:
+            return total_upserted
+
+    # 4) 用真实 OrderFilled raw + Data API activity 做补齐。
+    # 这一步专门修复“raw fill 已到，但 token/market registry 还没对上”的长尾缺口。
+    total_upserted += fetch_and_upsert_markets_by_token_ids_via_activity_fallback(list(remaining), db_path)
+    remaining = set(str(t) for t in token_ids) - _resolved_token_ids_for(token_ids, db_path, real_only=True)
+    if not remaining:
+        return total_upserted
+
+    # 5) 仍未解析的再分页扫 /events
     seen_condition_ids: set = set()
     conn = get_connection(db_path)
     try:
@@ -2013,20 +2710,13 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
     if not oracle:
         oracle = m.get("resolvedBy") or m.get("resolved_by")
 
-    clob_token_ids = m.get("clobTokenIds", []) or m.get("clob_token_ids", [])
-    if isinstance(clob_token_ids, str):
-        try:
-            clob_token_ids = json.loads(clob_token_ids)
-        except Exception:
-            clob_token_ids = []
+    clob_token_ids = _normalize_clob_token_id_list(
+        m.get("clobTokenIds", []) or m.get("clob_token_ids", [])
+    )
 
     tokens = m.get("tokens", [])
     if tokens and not clob_token_ids:
-        clob_token_ids = [
-            t.get("tokenId") or t.get("token_id")
-            for t in tokens
-            if t.get("tokenId") or t.get("token_id")
-        ]
+        clob_token_ids = _normalize_clob_token_id_list(tokens)
 
     is_neg_risk = (
         m.get("_event_neg_risk", False)
@@ -2504,8 +3194,8 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
                     ELSE markets.tags
                 END,
                 clob_token_ids=CASE
-                    WHEN markets.clob_token_ids IS NULL OR markets.clob_token_ids = '[]'::jsonb THEN excluded.clob_token_ids
-                    ELSE markets.clob_token_ids
+                    WHEN excluded.clob_token_ids IS NULL OR excluded.clob_token_ids = '[]'::jsonb THEN markets.clob_token_ids
+                    ELSE excluded.clob_token_ids
                 END
             """,
             rows,
@@ -2708,8 +3398,8 @@ def upsert_market(conn, market: Dict) -> int:
                     ELSE markets.tags
                 END,
                 clob_token_ids=CASE
-                    WHEN markets.clob_token_ids IS NULL OR markets.clob_token_ids = '[]'::jsonb THEN excluded.clob_token_ids
-                    ELSE markets.clob_token_ids
+                    WHEN excluded.clob_token_ids IS NULL OR excluded.clob_token_ids = '[]'::jsonb THEN markets.clob_token_ids
+                    ELSE excluded.clob_token_ids
                 END
             """,
             row,
