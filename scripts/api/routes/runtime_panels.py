@@ -9,6 +9,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 from api.context import resolve_route_callable
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
+from api.runtime_panels.types import RuntimePanelContext
 from api.services import hls_proxy_service, youtube_embed_service, youtube_live_probe_service
 
 try:
@@ -19,13 +20,13 @@ except Exception:  # pragma: no cover
 
 @dataclass(frozen=True)
 class RuntimePanelRouteDependencies:
-    panel_context: Mapping[str, Any]
+    panel_context: RuntimePanelContext
     utc_now_iso: Callable[[], str]
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelRouteDependencies:
         return cls(
-            panel_context=context,
+            panel_context=RuntimePanelContext.from_context(context),
             utc_now_iso=cast(Callable[[], str], resolve_route_callable(context, "utc_now_iso")),
         )
 
@@ -43,7 +44,7 @@ def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
         return
 
 
-def _get_panel_snapshot(panel, panel_context: Mapping[str, Any], limit: int | None):
+def _get_panel_snapshot(panel, panel_context: RuntimePanelContext, limit: int | None):
     kwargs = {}
     if limit is not None:
         kwargs["limit"] = limit

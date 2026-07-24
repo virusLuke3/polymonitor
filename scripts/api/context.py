@@ -131,3 +131,14 @@ def resolve_route_callable(context: Mapping[str, Any], name: str) -> Callable[..
     if not callable(dependency):
         raise TypeError(f"Route dependency is not callable: {name}")
     return dependency
+
+
+def resolve_route_value(context: Mapping[str, Any], name: str, default: Any = None) -> Any:
+    """Resolve a non-callable route dependency with production fail-fast semantics."""
+
+    try:
+        return context[name]
+    except KeyError as exc:
+        if isinstance(context, RouteContext):
+            raise RuntimeError(f"RouteContext is missing required dependency: {name}") from exc
+        return default
