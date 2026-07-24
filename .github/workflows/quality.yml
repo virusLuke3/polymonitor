@@ -1,0 +1,90 @@
+name: Repository Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-quality:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: scripts/requirements-dev.lock.txt
+
+      - name: Install locked Python dependencies
+        run: |
+          python -m pip install --upgrade "pip==25.3"
+          python -m pip install -r scripts/requirements-dev.lock.txt
+
+      - name: Check tracked files for secrets and private paths
+        run: python scripts/qa/check_tracked_secrets.py
+
+      - name: Check systemd repository contracts
+        run: python scripts/qa/check_systemd_units.py
+
+      - name: Compile Python sources
+        run: python -m compileall -q agent quant scripts telegram tests
+
+      - name: Check shell syntax
+        run: |
+          while IFS= read -r -d '' shell_file; do
+            bash -n "$shell_file"
+          done < <(git ls-files -z "*.sh")
+
+      - name: Verify systemd units
+        run: systemd-analyze verify deploy/systemd/*.service deploy/systemd/*.timer deploy/systemd/*.target
+
+      - name: Run fatal Python lint checks
+        run: ruff check agent quant scripts telegram tests
+
+      - name: Run non-quarantined Python tests
+        run: python scripts/qa/run_pytest.py
+
+  frontend-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: webpage/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: webpage
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: webpage
+        run: npm run build
+
+      - name: Audit frontend dependencies
+        working-directory: webpage
+        run: npm audit --audit-level=high
+
+      - name: Verify frontend artifact
+        run: test -f webpage/dist/index.html

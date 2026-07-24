@@ -36,7 +36,13 @@ from db import (  # type: ignore
     init_schema,
     table_exists,
 )
-from db.trade_v2 import TRADE_V2_CORE_TABLE, get_trade_stats_source, sql_identifier, uint256_storage_to_text
+from db.trade_v2 import (
+    TRADE_V2_CORE_TABLE,
+    get_trade_read_source,
+    get_trade_stats_source,
+    sql_identifier,
+    uint256_storage_to_text,
+)
 from oracle.settlement_parser import (
     OUTCOME_UNKNOWN,
     SettlementResult,

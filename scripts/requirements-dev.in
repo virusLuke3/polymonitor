@@ -1,0 +1,5 @@
+-r requirements.lock.txt
+
+pip-tools==7.6.0
+pytest==8.4.2
+ruff==0.15.20

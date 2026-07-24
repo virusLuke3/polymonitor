@@ -314,7 +314,7 @@ if [[ ! -x "${REMOTE_REPO_ROOT}/.venv/bin/python" ]]; then
   python3 -m venv "${REMOTE_REPO_ROOT}/.venv"
 fi
 "${REMOTE_REPO_ROOT}/.venv/bin/pip" install -U pip
-"${REMOTE_REPO_ROOT}/.venv/bin/pip" install -r "${REMOTE_REPO_ROOT}/scripts/requirements.txt"
+"${REMOTE_REPO_ROOT}/.venv/bin/pip" install -r "${REMOTE_REPO_ROOT}/scripts/requirements.lock.txt"
 
 sudo mkdir -p "${REMOTE_WEB_ROOT}"
 cd "${REMOTE_REPO_ROOT}/webpage"

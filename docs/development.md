@@ -2,11 +2,52 @@
 
 This page documents stable public development commands for polyData.
 
+## Reproducible Runtime
+
+The repository pins:
+
+- Python `3.10.12` in `.python-version`
+- Node.js `20.19.1` in `.nvmrc`
+- frontend dependencies in `webpage/package-lock.json`
+- Python production dependencies in `scripts/requirements.lock.txt`
+- Python test and quality dependencies in `scripts/requirements-dev.lock.txt`
+
+With the pinned Python and Node versions active:
+
+```bash
+make bootstrap
+make quality
+```
+
+`make bootstrap` creates `.venv`, installs the locked Python environment, and
+runs `npm ci`. `make quality` performs the same repository contract, secret,
+syntax, lint, test, systemd, and frontend build checks used by CI.
+The frontend gate also rejects high or critical `npm audit` findings.
+
+Regenerate the Python locks only under the pinned Python version:
+
+```bash
+.venv/bin/pip-compile --resolver backtracking --strip-extras \
+  --output-file scripts/requirements.lock.txt scripts/requirements.txt
+.venv/bin/pip-compile --resolver backtracking --strip-extras \
+  --output-file scripts/requirements-dev.lock.txt scripts/requirements-dev.in
+```
+
+The first repository-wide pytest baseline exposed a small set of pre-existing
+contract-drift failures. Their exact node IDs are visible in
+`scripts/qa/pytest-quarantine.txt`. CI deselects only those IDs, reports the
+count, and continues to block every new failure. Run the full unfiltered suite
+with:
+
+```bash
+.venv/bin/python scripts/qa/run_pytest.py --include-quarantined
+```
+
 ## Frontend
 
 ```bash
 cd webpage
-npm install
+npm ci
 npm run dev
 npm run build
 ```
@@ -83,6 +124,7 @@ prints the frontend command to run separately.
 
 ## Refactor Safety Checklist
 
+- Run `make quality` before publishing a branch.
 - Keep `scripts/start_dashboard.sh` working as a local API helper until a better
   replacement is proven.
 - Keep `scripts/api_server.py` working as the compatibility API entrypoint.

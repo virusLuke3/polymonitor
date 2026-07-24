@@ -114,7 +114,6 @@ def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
 def _local_openflights_path(filename: str) -> Optional[Path]:
     roots = [
         os.environ.get("POLYDATA_OPENFLIGHTS_ROOT"),
-        "/home/jiahuaiyu/develop/polymarket/githubProjects/openflights",
         "/opt/openflights",
         "/opt/polyData/openflights",
     ]

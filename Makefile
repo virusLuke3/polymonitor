@@ -1,7 +1,16 @@
-.PHONY: dev api web-build status services-install services-start services-start-data services-restart services-restart-data services-stop services-status services-logs services-doctor
+.PHONY: bootstrap quality test dev api web-build status services-install services-start services-start-data services-restart services-restart-data services-stop services-status services-logs services-doctor
 
 API_HOST ?= 127.0.0.1
 API_PORT ?= 18500
+
+bootstrap:
+	bash scripts/dev/bootstrap.sh
+
+quality:
+	bash scripts/qa/verify_clean_checkout.sh
+
+test:
+	.venv/bin/python scripts/qa/run_pytest.py
 
 dev:
 	bash scripts/start_dashboard.sh
