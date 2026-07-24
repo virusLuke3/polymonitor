@@ -81,6 +81,7 @@ from runtime.snapshot_store import SnapshotStore
 from oracle.settlement_parser import parse_oracle_settlement_event
 from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
+from api.context import RouteContext, ServiceContext
 from api.clients import market_data_client
 from api.routes import register_blueprints
 from api.services import address_service, bootstrap_service, breaking_event_radar_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_transport_shipping_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, world_cup_match_ops_service, worldcup_dashboard_service, worldcup_intel_service
@@ -132,6 +133,8 @@ SNAPSHOT_STORE = SnapshotStore(SNAPSHOT_SQLITE_PATH)
 _runtime_init_lock = threading.Lock()
 _runtime_initialized = False
 _snapshot_prewarm_owner_fd = None
+_service_context_lock = threading.Lock()
+_service_context: Optional[ServiceContext] = None
 
 
 def _runtime_coordination_dir() -> Path:
@@ -217,7 +220,11 @@ def create_app() -> Flask:
     app.config["POLYDATA_SETTINGS"] = SETTINGS
     app.config["POLYDATA_API_HOST"] = SETTINGS.host
     app.config["POLYDATA_API_PORT"] = SETTINGS.port
-    register_blueprints(app, build_route_helpers())
+    service_context = build_service_context()
+    route_context = build_route_context(service_context)
+    app.config["POLYDATA_SERVICE_CONTEXT"] = service_context
+    app.config["POLYDATA_ROUTE_CONTEXT"] = route_context
+    register_blueprints(app, route_context)
     return app
 
 
@@ -226,8 +233,8 @@ def api_readonly_enabled() -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def build_route_helpers() -> Dict[str, Any]:
-    return {
+def build_route_context(service_context: ServiceContext) -> RouteContext:
+    return RouteContext(services=service_context, capabilities={
         "build_seed_health_payload": lambda: system_service.build_seed_health_payload(build_service_context()),
         "build_system_health_payload": build_system_health_payload,
         "app": app,
@@ -373,11 +380,26 @@ def build_route_helpers() -> Dict[str, Any]:
         "parse_json_list": parse_json_list,
         "query_all": query_all,
         "utc_now_iso": utc_now_iso,
-    }
+    })
 
 
-def build_service_context() -> Dict[str, Any]:
-    return {
+def build_route_helpers() -> RouteContext:
+    """Compatibility wrapper for legacy runtime entrypoints."""
+    return build_route_context(build_service_context())
+
+
+def build_service_context() -> ServiceContext:
+    global _service_context
+    if _service_context is not None:
+        return _service_context
+    with _service_context_lock:
+        if _service_context is None:
+            _service_context = _create_service_context()
+    return _service_context
+
+
+def _create_service_context() -> ServiceContext:
+    capabilities = {
         "ADDRESS_CACHE_TTL_SECONDS": ADDRESS_CACHE_TTL_SECONDS,
         "ADDRESS_HISTORY_SOURCE": ADDRESS_HISTORY_SOURCE,
         "BOOTSTRAP_CACHE_TTL_SECONDS": BOOTSTRAP_CACHE_TTL_SECONDS,
@@ -609,6 +631,15 @@ def build_service_context() -> Dict[str, Any]:
         "get_backend": get_backend,
         "get_clob_session": get_clob_session,
     }
+    return ServiceContext(
+        application=app,
+        settings=SETTINGS,
+        database_path=DB_PATH,
+        content_runtime_provider=CONTENT_RUNTIME_PROVIDER,
+        lob_runtime_manager=LOB_RUNTIME_MANAGER,
+        snapshot_store=SNAPSHOT_STORE,
+        capabilities=capabilities,
+    )
 
 
 def utc_now_iso() -> str:

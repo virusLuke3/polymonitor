@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from flask import Flask
 
 from .agent import create_agent_blueprint
@@ -18,7 +21,7 @@ from .runtime_sports import create_runtime_sports_blueprint
 from .system import create_system_blueprint
 
 
-def register_blueprints(app: Flask, helpers: dict) -> None:
+def register_blueprints(app: Flask, context: Mapping[str, Any]) -> None:
     if app.config.get("POLYDATA_BLUEPRINTS_REGISTERED"):
         return
     for factory in (
@@ -35,5 +38,5 @@ def register_blueprints(app: Flask, helpers: dict) -> None:
         create_system_blueprint,
         create_lob_blueprint,
     ):
-        app.register_blueprint(factory(helpers))
+        app.register_blueprint(factory(context))
     app.config["POLYDATA_BLUEPRINTS_REGISTERED"] = True
