@@ -6,13 +6,17 @@ import re
 import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List, Optional, cast
 from urllib.parse import unquote
 
-from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_service_callable,
+    resolve_service_value,
+)
 from api.services import clickhouse_orderfilled_service
 from api.services import market_group_service
 from market.market_identity import MarketIdentity, oracle_event_lookup_clause, oracle_event_lookup_terms
@@ -130,6 +134,61 @@ class MarketOraclePayloadDependencies:
                 "get_snapshot_payload",
             ),
         )
+
+
+@dataclass(frozen=True)
+class MarketTradeReadDependencies:
+    source: Mapping[str, Any] = field(repr=False)
+    get_existing_trade_read_source: Callable[..., Any]
+    identifier_name: Callable[..., Any]
+    trade_v2_core_table: Any
+    query_all: Callable[..., Any]
+    get_trade_market_projection_sql: Callable[..., Any]
+    normalize_trade: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MarketTradeReadDependencies:
+        return cls(
+            source=context,
+            get_existing_trade_read_source=_service_callable(
+                context,
+                "get_existing_trade_read_source",
+            ),
+            identifier_name=_service_callable(context, "_identifier_name"),
+            trade_v2_core_table=resolve_service_value(
+                context,
+                "TRADE_V2_CORE_TABLE",
+            ),
+            query_all=_service_callable(context, "query_all"),
+            get_trade_market_projection_sql=_service_callable(
+                context,
+                "get_trade_market_projection_sql",
+            ),
+            normalize_trade=_service_callable(context, "normalize_trade"),
+        )
+
+
+@dataclass(frozen=True)
+class RecentTradeDependencies:
+    get_snapshot_payload: Callable[..., Any]
+    get_recent_trades: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> RecentTradeDependencies:
+        return cls(
+            get_snapshot_payload=_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+            get_recent_trades=_service_callable(context, "get_recent_trades"),
+        )
+
 
 def _default_active_market_activity_sql(stats_alias: str) -> str:
     return f"""
@@ -1246,20 +1305,44 @@ def _get_market_by_id(
     return market or None
 
 
-def get_trades_by_market_id(ctx: dict, market_id: int, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-    clickhouse_rows = clickhouse_orderfilled_service.get_market_trades(ctx, market_id, limit=limit, offset=offset)
+def get_trades_by_market_id(
+    ctx: Mapping[str, Any],
+    market_id: int,
+    limit: int = 100,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    return _get_trades_by_market_id(
+        MarketTradeReadDependencies.from_context(ctx),
+        market_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+def _get_trades_by_market_id(
+    dependencies: MarketTradeReadDependencies,
+    market_id: int,
+    limit: int = 100,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    clickhouse_rows = clickhouse_orderfilled_service.get_market_trades(
+        dependencies.source,
+        market_id,
+        limit=limit,
+        offset=offset,
+    )
     if clickhouse_rows is not None:
         return clickhouse_rows
     if clickhouse_orderfilled_service.clickhouse_orderfilled_enabled():
         return []
-    trade_source = ctx["get_existing_trade_read_source"]()
+    trade_source = dependencies.get_existing_trade_read_source()
     if trade_source is None:
         return []
-    if ctx["_identifier_name"](trade_source) == ctx["TRADE_V2_CORE_TABLE"]:
-        rows = ctx["query_all"](
+    if dependencies.identifier_name(trade_source) == dependencies.trade_v2_core_table:
+        rows = dependencies.query_all(
             f"""
             SELECT
-                {ctx['get_trade_market_projection_sql']('t')}
+                {dependencies.get_trade_market_projection_sql('t')}
             FROM {trade_source} t
             WHERE t.market_id = ?
             ORDER BY t.block_time DESC, t.block_number DESC, t.log_index DESC
@@ -1268,7 +1351,7 @@ def get_trades_by_market_id(ctx: dict, market_id: int, limit: int = 100, offset:
             (market_id, limit, offset),
         )
     else:
-        rows = ctx["query_all"](
+        rows = dependencies.query_all(
             f"""
             SELECT
                 tx_hash, log_index, market_id, maker, taker, price, size, side, outcome,
@@ -1281,15 +1364,28 @@ def get_trades_by_market_id(ctx: dict, market_id: int, limit: int = 100, offset:
             """,
             (market_id, limit, offset),
         )
-    return [ctx["normalize_trade"](row) for row in rows]
+    return [dependencies.normalize_trade(row) for row in rows]
 
 
-def get_recent_trades_snapshot(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
+def get_recent_trades_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = 24,
+) -> List[Dict[str, Any]]:
+    return _get_recent_trades_snapshot(
+        RecentTradeDependencies.from_context(ctx),
+        limit=limit,
+    )
+
+
+def _get_recent_trades_snapshot(
+    dependencies: RecentTradeDependencies,
+    limit: int = 24,
+) -> List[Dict[str, Any]]:
     cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
-    return ctx["get_snapshot_payload"](
+    return dependencies.get_snapshot_payload(
         "snapshot:trades_recent",
         cache_key,
-        lambda: ctx["get_recent_trades"](limit=limit),
+        lambda: dependencies.get_recent_trades(limit=limit),
         ttl_seconds=15,
     )
 
