@@ -4,12 +4,15 @@ import json
 import os
 import re
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 from urllib.parse import unquote
 
+from api.context import resolve_optional_service_callable, resolve_service_callable
 from api.services import clickhouse_orderfilled_service
 from api.services import market_group_service
 from market.market_identity import MarketIdentity, oracle_event_lookup_clause, oracle_event_lookup_terms
@@ -32,6 +35,101 @@ DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%updown-15m%%'
     AND LOWER(COALESCE(CAST(m.title AS TEXT), '')) NOT LIKE '%% up or down - %%'
 """
+
+
+def _service_callable(
+    context: Mapping[str, Any],
+    name: str,
+) -> Callable[..., Any]:
+    return cast(Callable[..., Any], resolve_service_callable(context, name))
+
+
+@dataclass(frozen=True)
+class MarketLookupDependencies:
+    query_one: Callable[..., Any]
+    utc_now_iso: Callable[..., Any]
+    build_market_status_case: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MarketLookupDependencies:
+        return cls(
+            query_one=_service_callable(context, "query_one"),
+            utc_now_iso=_service_callable(context, "utc_now_iso"),
+            build_market_status_case=_service_callable(
+                context,
+                "build_market_status_case",
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class MarketOracleDependencies:
+    lookup: MarketLookupDependencies
+    query_all: Callable[..., Any]
+    normalize_oracle_event: Callable[..., Any]
+    get_backend: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MarketOracleDependencies:
+        return cls(
+            lookup=MarketLookupDependencies.from_context(context),
+            query_all=_service_callable(context, "query_all"),
+            normalize_oracle_event=_service_callable(
+                context,
+                "normalize_oracle_event",
+            ),
+            get_backend=resolve_optional_service_callable(
+                context,
+                "get_backend",
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class RecentOracleDependencies:
+    get_snapshot_payload: Callable[..., Any]
+    get_recent_oracle_events: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> RecentOracleDependencies:
+        return cls(
+            get_snapshot_payload=_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+            get_recent_oracle_events=_service_callable(
+                context,
+                "get_recent_oracle_events",
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class MarketOraclePayloadDependencies:
+    oracle: MarketOracleDependencies
+    get_snapshot_payload: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MarketOraclePayloadDependencies:
+        return cls(
+            oracle=MarketOracleDependencies.from_context(context),
+            get_snapshot_payload=_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+        )
 
 def _default_active_market_activity_sql(stats_alias: str) -> str:
     return f"""
@@ -1054,10 +1152,20 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
     return {"items": [_market_list_item(ctx, row) for row in rows[:limit]]}
 
 
-def get_market_by_slug(ctx: dict, slug: str) -> Optional[dict]:
-    now_iso = ctx["utc_now_iso"]()
-    status_case = ctx["build_market_status_case"](now_iso)
-    market = ctx["query_one"](
+def get_market_by_slug(
+    ctx: Mapping[str, Any],
+    slug: str,
+) -> Optional[dict]:
+    return _get_market_by_slug(MarketLookupDependencies.from_context(ctx), slug)
+
+
+def _get_market_by_slug(
+    dependencies: MarketLookupDependencies,
+    slug: str,
+) -> Optional[dict]:
+    now_iso = dependencies.utc_now_iso()
+    status_case = dependencies.build_market_status_case(now_iso)
+    market = dependencies.query_one(
         f"""
         SELECT
             m.*,
@@ -1091,10 +1199,20 @@ def get_market_by_slug(ctx: dict, slug: str) -> Optional[dict]:
     return market or None
 
 
-def get_market_by_id(ctx: dict, market_id: int) -> Optional[dict]:
-    now_iso = ctx["utc_now_iso"]()
-    status_case = ctx["build_market_status_case"](now_iso)
-    market = ctx["query_one"](
+def get_market_by_id(
+    ctx: Mapping[str, Any],
+    market_id: int,
+) -> Optional[dict]:
+    return _get_market_by_id(MarketLookupDependencies.from_context(ctx), market_id)
+
+
+def _get_market_by_id(
+    dependencies: MarketLookupDependencies,
+    market_id: int,
+) -> Optional[dict]:
+    now_iso = dependencies.utc_now_iso()
+    status_case = dependencies.build_market_status_case(now_iso)
+    market = dependencies.query_one(
         f"""
         SELECT
             m.*,
@@ -1176,18 +1294,39 @@ def get_recent_trades_snapshot(ctx: dict, limit: int = 24) -> List[Dict[str, Any
     )
 
 
-def get_oracle_events_by_market_id(ctx: dict, market_id: int, market: Optional[dict] = None) -> List[Dict[str, Any]]:
-    market = market if market is not None else get_market_by_id(ctx, market_id)
+def get_oracle_events_by_market_id(
+    ctx: Mapping[str, Any],
+    market_id: int,
+    market: Optional[dict] = None,
+) -> List[Dict[str, Any]]:
+    return _get_oracle_events_by_market_id(
+        MarketOracleDependencies.from_context(ctx),
+        market_id,
+        market=market,
+    )
+
+
+def _get_oracle_events_by_market_id(
+    dependencies: MarketOracleDependencies,
+    market_id: int,
+    market: Optional[dict] = None,
+) -> List[Dict[str, Any]]:
+    market = (
+        market
+        if market is not None
+        else _get_market_by_id(dependencies.lookup, market_id)
+    )
     identity = MarketIdentity.from_row(market) if market else None
-    backend_getter = ctx.get("get_backend")
-    backend = str(backend_getter() if callable(backend_getter) else "").strip().lower()
+    backend = str(
+        dependencies.get_backend() if dependencies.get_backend is not None else ""
+    ).strip().lower()
     if backend in {"postgres", "postgresql"} and identity:
         terms = oracle_event_lookup_terms(identity)
         union_sql = "\nUNION ALL\n".join(
             f"SELECT oe.* FROM oracle_events oe WHERE oe.{column_name} = ?"
             for column_name, _value in terms
         )
-        rows = ctx["query_all"](
+        rows = dependencies.query_all(
             f"""
             WITH matched_events AS (
                 {union_sql}
@@ -1219,13 +1358,13 @@ def get_oracle_events_by_market_id(ctx: dict, market_id: int, market: Optional[d
             """,
             (*[value for _column_name, value in terms], market_id),
         )
-        return [ctx["normalize_oracle_event"](row) for row in rows]
+        return [dependencies.normalize_oracle_event(row) for row in rows]
 
     if market:
         where_sql, where_params = oracle_event_lookup_clause(identity or MarketIdentity.from_row(market), "oe")
     else:
         where_sql, where_params = "oe.market_id = ?", (market_id,)
-    rows = ctx["query_all"](
+    rows = dependencies.query_all(
         f"""
         SELECT
             oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
@@ -1250,15 +1389,19 @@ def get_oracle_events_by_market_id(ctx: dict, market_id: int, market: Optional[d
         """,
         (market_id, *where_params),
     )
-    return [ctx["normalize_oracle_event"](row) for row in rows]
+    return [dependencies.normalize_oracle_event(row) for row in rows]
 
 
-def get_recent_oracle_snapshot(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
+def get_recent_oracle_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = 24,
+) -> List[Dict[str, Any]]:
+    dependencies = RecentOracleDependencies.from_context(ctx)
     cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
-    return ctx["get_snapshot_payload"](
+    return dependencies.get_snapshot_payload(
         "snapshot:oracle_recent",
         cache_key,
-        lambda: ctx["get_recent_oracle_events"](limit=limit),
+        lambda: dependencies.get_recent_oracle_events(limit=limit),
         ttl_seconds=30,
     )
 
@@ -1632,8 +1775,28 @@ def get_market_chart_payload(
     }
 
 
-def get_market_oracle_payload(ctx: dict, market_id: int, market: Optional[dict] = None) -> Dict[str, Any]:
-    market = market if market is not None else get_market_by_id(ctx, market_id)
+def get_market_oracle_payload(
+    ctx: Mapping[str, Any],
+    market_id: int,
+    market: Optional[dict] = None,
+) -> Dict[str, Any]:
+    return _get_market_oracle_payload(
+        MarketOraclePayloadDependencies.from_context(ctx),
+        market_id,
+        market=market,
+    )
+
+
+def _get_market_oracle_payload(
+    dependencies: MarketOraclePayloadDependencies,
+    market_id: int,
+    market: Optional[dict] = None,
+) -> Dict[str, Any]:
+    market = (
+        market
+        if market is not None
+        else _get_market_by_id(dependencies.oracle.lookup, market_id)
+    )
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
     cache_key = json.dumps({"marketId": int(market_id), "v": 2}, sort_keys=True, ensure_ascii=True)
@@ -1653,10 +1816,14 @@ def get_market_oracle_payload(ctx: dict, market_id: int, market: Optional[dict] 
             "isFinal": _truthy_flag(market.get("is_final")),
             "settlementOutcome": market.get("settlement_outcome"),
             "settlementSource": market.get("settlement_source"),
-            "timeline": get_oracle_events_by_market_id(ctx, market_id, market=market),
+            "timeline": _get_oracle_events_by_market_id(
+                dependencies.oracle,
+                market_id,
+                market=market,
+            ),
         }
 
-    return ctx["get_snapshot_payload"](
+    return dependencies.get_snapshot_payload(
         "snapshot:market_oracle_payload",
         cache_key,
         build_payload,
