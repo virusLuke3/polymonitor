@@ -422,18 +422,31 @@ def get_market_trades(ctx: dict, market_id: int, *, limit: int = 100, offset: in
         ctx,
         f"""
         WITH
-            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
+            selected AS (
+                SELECT *
+                FROM {_table_sql()}
+                WHERE market_id = {int(market_id)}
+                ORDER BY block_number DESC, log_index DESC
+                LIMIT {int(offset)}, {int(limit)}
+            ),
+            (SELECT ifNull(max(block_number), 0) FROM selected) AS market_max_block,
             (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
             (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time
+            if(market_max_block > max_ts_block + 7200, market_max_block, max_ts_block) AS anchor_block,
+            if(market_max_block > max_ts_block + 7200, now('UTC'), max_ts_time) AS anchor_time
         SELECT {_orderfilled_projection_sql()}
-        FROM {_table_sql()} f
-        LEFT JOIN block_timestamps bt ON bt.block_number = f.block_number
-        WHERE f.market_id = {int(market_id)}
+        FROM selected f
+        LEFT JOIN (
+            SELECT
+                block_number,
+                argMax(block_time, ingested_at) AS block_time
+            FROM block_timestamps
+            WHERE block_number IN (SELECT block_number FROM selected)
+            GROUP BY block_number
+        ) bt ON bt.block_number = f.block_number
         ORDER BY f.block_number DESC, f.log_index DESC
-        LIMIT {int(offset)}, {int(limit)}
         FORMAT JSONEachRow
+        SETTINGS join_use_nulls = 1
         """,
         timeout_seconds=5.0,
     )
