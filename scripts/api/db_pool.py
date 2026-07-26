@@ -132,7 +132,7 @@ def build_api_connection_factory(
 ) -> Callable[..., Any]:
     """Return a pooled API connector while retaining non-PostgreSQL behavior."""
 
-    pool_size = _env_int("POLYDATA_API_POSTGRES_POOL_SIZE", 4)
+    pool_size = _env_int("POLYDATA_API_POSTGRES_POOL_SIZE", 1)
     if pool_size <= 0:
         return connection_factory
     pool = ApiPostgresConnectionPool(
@@ -140,16 +140,16 @@ def build_api_connection_factory(
         max_size=pool_size,
         acquire_timeout_seconds=_env_float(
             "POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS",
-            15.0,
+            45.0,
         ),
         connect_attempts=_env_int(
             "POLYDATA_API_POSTGRES_POOL_CONNECT_ATTEMPTS",
-            3,
+            6,
             minimum=1,
         ),
         connect_retry_delay_seconds=_env_float(
             "POLYDATA_API_POSTGRES_POOL_CONNECT_RETRY_DELAY_SECONDS",
-            0.25,
+            0.5,
             minimum=0.0,
         ),
     )
