@@ -190,6 +190,40 @@ class RecentTradeDependencies:
         )
 
 
+@dataclass(frozen=True)
+class MarketSearchDependencies:
+    source: Mapping[str, Any] = field(repr=False)
+    utc_now_iso: Callable[..., Any]
+    query_all: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MarketSearchDependencies:
+        return cls(
+            source=context,
+            utc_now_iso=_service_callable(context, "utc_now_iso"),
+            query_all=_service_callable(context, "query_all"),
+        )
+
+
+@dataclass(frozen=True)
+class MarketServingReadDependencies:
+    table_exists: Callable[..., Any]
+    query_one: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MarketServingReadDependencies:
+        return cls(
+            table_exists=_service_callable(context, "table_exists"),
+            query_one=_service_callable(context, "query_one"),
+        )
+
+
 def _default_active_market_activity_sql(stats_alias: str) -> str:
     return f"""
     (
@@ -927,12 +961,28 @@ def _extract_market_chart_context(ctx: dict, market: Optional[Dict[str, Any]], r
     }
 
 
-def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
+def search_markets(
+    ctx: Mapping[str, Any],
+    query: str,
+    limit: int = 10,
+) -> Dict[str, Any]:
+    return _search_markets(
+        MarketSearchDependencies.from_context(ctx),
+        query,
+        limit=limit,
+    )
+
+
+def _search_markets(
+    dependencies: MarketSearchDependencies,
+    query: str,
+    limit: int = 10,
+) -> Dict[str, Any]:
     cleaned = str(query or "").strip()
     if not cleaned:
         return {"items": []}
     limit = min(50, max(1, int(limit or 10)))
-    now_iso = ctx["utc_now_iso"]()
+    now_iso = dependencies.utc_now_iso()
     tokens = re.findall(r"[a-zA-Z0-9]+", cleaned.lower())[:6]
     if not tokens:
         return {"items": []}
@@ -940,7 +990,7 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
     prefix_pattern = f"{cleaned.lower()}%"
     contains_pattern = f"%{cleaned.lower()}%"
     candidate_limit = max(limit * 2, 100)
-    rows = ctx["query_all"](
+    rows = dependencies.query_all(
         """
         WITH matched AS MATERIALIZED (
             SELECT
@@ -1125,7 +1175,7 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
             candidate_limit,
         ),
     )
-    rows = _merge_clickhouse_stats(ctx, rows)
+    rows = _merge_clickhouse_stats(dependencies.source, rows)
 
     def has_serving_data(row: Dict[str, Any]) -> bool:
         return (
@@ -1208,7 +1258,12 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
         )
 
     rows.sort(key=row_sort_key)
-    return {"items": [_market_list_item(ctx, row) for row in rows[:limit]]}
+    return {
+        "items": [
+            _market_list_item(dependencies.source, row)
+            for row in rows[:limit]
+        ]
+    }
 
 
 def get_market_by_slug(
@@ -1517,10 +1572,23 @@ def _json_payload(value: Any, expected_type: type) -> Optional[Any]:
     return None
 
 
-def _get_market_workspace_serving_row(ctx: dict, market_id: int) -> Optional[Dict[str, Any]]:
-    if not ctx["table_exists"]("market_workspace_serving"):
+def _get_market_workspace_serving_row(
+    ctx: Mapping[str, Any],
+    market_id: int,
+) -> Optional[Dict[str, Any]]:
+    return _read_market_workspace_serving_row(
+        MarketServingReadDependencies.from_context(ctx),
+        market_id,
+    )
+
+
+def _read_market_workspace_serving_row(
+    dependencies: MarketServingReadDependencies,
+    market_id: int,
+) -> Optional[Dict[str, Any]]:
+    if not dependencies.table_exists("market_workspace_serving"):
         return None
-    return ctx["query_one"](
+    return dependencies.query_one(
         """
         SELECT market_id, detail_payload, price_payload, oracle_summary, content_summary, updated_at
         FROM market_workspace_serving
@@ -1531,7 +1599,10 @@ def _get_market_workspace_serving_row(ctx: dict, market_id: int) -> Optional[Dic
     )
 
 
-def _get_market_workspace_detail_payload(ctx: dict, market_id: int) -> Optional[Dict[str, Any]]:
+def _get_market_workspace_detail_payload(
+    ctx: Mapping[str, Any],
+    market_id: int,
+) -> Optional[Dict[str, Any]]:
     row = _get_market_workspace_serving_row(ctx, market_id)
     if not row:
         return None
@@ -1543,7 +1614,10 @@ def _get_market_workspace_detail_payload(ctx: dict, market_id: int) -> Optional[
     return payload
 
 
-def _get_market_workspace_price_payload(ctx: dict, market_id: int) -> Optional[Dict[str, Any]]:
+def _get_market_workspace_price_payload(
+    ctx: Mapping[str, Any],
+    market_id: int,
+) -> Optional[Dict[str, Any]]:
     row = _get_market_workspace_serving_row(ctx, market_id)
     if not row:
         return None
@@ -1557,12 +1631,31 @@ def _get_market_workspace_price_payload(ctx: dict, market_id: int) -> Optional[D
     return payload
 
 
-def _get_market_chart_serving_payload(ctx: dict, market_id: int, range_name: str, interval: str) -> Optional[Dict[str, Any]]:
-    if not ctx["table_exists"]("market_chart_serving"):
+def _get_market_chart_serving_payload(
+    ctx: Mapping[str, Any],
+    market_id: int,
+    range_name: str,
+    interval: str,
+) -> Optional[Dict[str, Any]]:
+    return _read_market_chart_serving_payload(
+        MarketServingReadDependencies.from_context(ctx),
+        market_id,
+        range_name,
+        interval,
+    )
+
+
+def _read_market_chart_serving_payload(
+    dependencies: MarketServingReadDependencies,
+    market_id: int,
+    range_name: str,
+    interval: str,
+) -> Optional[Dict[str, Any]]:
+    if not dependencies.table_exists("market_chart_serving"):
         return None
     normalized_range = str(range_name or "1d").strip().lower()
     normalized_interval = str(interval or "5m").strip().lower()
-    row = ctx["query_one"](
+    row = dependencies.query_one(
         """
         SELECT market_id, range_name, interval_name, kind, history_status, point_count, points, updated_at
         FROM market_chart_serving
