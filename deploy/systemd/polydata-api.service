@@ -9,7 +9,7 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/bin/bash -lc 'POLYDATA_LOB_WEBSOCKET_ENABLED="${POLYDATA_API_LOB_WEBSOCKET_ENABLED:-0}" exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/api_server.py --backend postgres --skip-init-schema --host "${POLYDATA_API_HOST:-127.0.0.1}" --port "${POLYDATA_API_PORT:-18500}"'
+ExecStart=/bin/bash -lc 'POLYDATA_LOB_WEBSOCKET_ENABLED="$${POLYDATA_API_LOB_WEBSOCKET_ENABLED:-0}" exec "/__POLYDATA_REPO_ROOT__/.venv/bin/gunicorn" --workers "$${POLYDATA_GUNICORN_WORKERS:-3}" --threads "$${POLYDATA_GUNICORN_THREADS:-4}" --bind "$${POLYDATA_API_HOST:-127.0.0.1}:$${POLYDATA_API_PORT:-18500}" --timeout 180 --graceful-timeout 30 --max-requests "$${POLYDATA_GUNICORN_MAX_REQUESTS:-300}" --max-requests-jitter "$${POLYDATA_GUNICORN_MAX_REQUESTS_JITTER:-60}" scripts.api.app:app'
 Restart=always
 RestartSec=15
 TimeoutStopSec=45

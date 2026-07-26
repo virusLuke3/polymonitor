@@ -4,7 +4,7 @@ set -euo pipefail
 ENV_FILE="${POLYDATA_ENV_FILE:-$HOME/.config/polydata/polydata.env}"
 TUNNEL_UNIT="${POLYDATA_TUNNEL_UNIT:-polydata-db-reverse-tunnel.service}"
 REMOTE_APP_DIR="${POLYDATA_REMOTE_APP_DIR:-/opt/polyData}"
-FAILURE_THRESHOLD="${POLYDATA_TUNNEL_HEALTH_FAILURE_THRESHOLD:-3}"
+FAILURE_THRESHOLD="${POLYDATA_TUNNEL_HEALTH_FAILURE_THRESHOLD:-2}"
 STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/polydata-db-reverse-tunnel-healthcheck"
 FAILURE_FILE="${STATE_DIR}/consecutive-failures"
 SSH_OPTS=(
@@ -14,6 +14,13 @@ SSH_OPTS=(
   -o IPQoS=none
   -o KexAlgorithms=curve25519-sha256
 )
+
+append_identity_option() {
+  local identity_file="${POLYDATA_GCP_TUNNEL_HEALTH_SSH_IDENTITY_FILE:-${POLYDATA_GCP_TUNNEL_SSH_IDENTITY_FILE:-}}"
+  if [[ -n "$identity_file" ]]; then
+    SSH_OPTS+=(-i "$identity_file" -o IdentitiesOnly=yes)
+  fi
+}
 
 load_env_file() {
   local file="$1"
@@ -91,10 +98,11 @@ clear_failures() {
 
 main() {
   load_env_file "$ENV_FILE"
-  local target="${POLYDATA_GCP_SSH_TARGET:-}"
+  append_identity_option
+  local target="${POLYDATA_GCP_TUNNEL_HEALTH_SSH_TARGET:-${POLYDATA_GCP_TUNNEL_SSH_TARGET:-${POLYDATA_GCP_SSH_TARGET:-}}}"
   local remote_port="${POLYDATA_REMOTE_POSTGRES_PORT:-45432}"
   if [[ -z "$target" ]]; then
-    log "POLYDATA_GCP_SSH_TARGET is not set; skipping"
+    log "no GCP tunnel SSH target is set; skipping"
     exit 0
   fi
 

@@ -82,6 +82,7 @@ from oracle.settlement_parser import parse_oracle_settlement_event
 from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.context import RouteContext, ServiceContext
+from api.db_pool import build_api_connection_factory
 from api.clients import market_data_client
 from api.routes import register_blueprints
 from api.services import address_service, bootstrap_service, breaking_event_radar_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_transport_shipping_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, world_cup_match_ops_service, worldcup_dashboard_service, worldcup_intel_service
@@ -120,6 +121,7 @@ _redis_init_lock = threading.Lock()
 _clob_session = None
 _clob_session_lock = threading.Lock()
 _clob_price_cache_lock = threading.Lock()
+_api_connection_factory = build_api_connection_factory(get_connection, get_backend)
 _clob_price_cache: Dict[str, Dict[str, Any]] = {}
 TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
 TRADE_STATS_SOURCE = sql_identifier(get_trade_stats_source())
@@ -614,7 +616,7 @@ def _create_service_context() -> ServiceContext:
         "http_bytes_get": http_bytes_get,
         "xlrd": xlrd,
         "iso_days_before": iso_days_before,
-        "get_connection": get_connection,
+        "get_connection": _api_connection_factory,
         "get_redis_client_state": lambda: _redis_client,
         "normalize_market": normalize_market,
         "normalize_address": normalize_address,

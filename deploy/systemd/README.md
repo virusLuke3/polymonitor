@@ -155,6 +155,14 @@ systemctl --user enable --now polydata-quant-frontend-price-build-runner@0.servi
 systemctl --user enable --now polydata-db-reverse-tunnel-healthcheck.timer
 ```
 
+The reverse tunnel can use a different route from deployment SSH. Set
+`POLYDATA_GCP_TUNNEL_SSH_TARGET` and, when needed,
+`POLYDATA_GCP_TUNNEL_SSH_IDENTITY_FILE` in `~/.config/polydata/polydata.env`.
+The healthcheck inherits those values by default; its SSH target and identity
+can be overridden independently with the corresponding
+`POLYDATA_GCP_TUNNEL_HEALTH_SSH_*` variables. This keeps an unreliable private
+network route from affecting both the tunnel and its health probe.
+
 Keep user services alive after logout:
 
 ```bash
