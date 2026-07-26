@@ -177,6 +177,48 @@ class SportsRuntimePanelDependencies:
 
 
 @dataclass(frozen=True)
+class TechnologyRuntimePanelDependencies:
+    panel_snapshot: Callable[..., PanelPayload]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> TechnologyRuntimePanelDependencies:
+        return cls(
+            panel_snapshot=cast(
+                Callable[..., PanelPayload],
+                resolve_route_callable(context, "get_tech_panel_snapshot"),
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class WorldRuntimePanelDependencies:
+    geo_sanctions_shock_snapshot: Callable[..., PanelPayload]
+    global_transport_shipping_snapshot: Callable[..., PanelPayload]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> WorldRuntimePanelDependencies:
+        return cls(
+            geo_sanctions_shock_snapshot=cast(
+                Callable[..., PanelPayload],
+                resolve_route_callable(context, "get_geo_sanctions_shock_snapshot"),
+            ),
+            global_transport_shipping_snapshot=cast(
+                Callable[..., PanelPayload],
+                resolve_route_callable(
+                    context,
+                    "get_global_transport_shipping_snapshot",
+                ),
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class RuntimePanelContext(Mapping[str, Any]):
     """Typed dependencies for runtime panels during the module migration."""
 
@@ -192,6 +234,8 @@ class RuntimePanelContext(Mapping[str, Any]):
     finance: FinanceRuntimePanelDependencies
     macro: MacroRuntimePanelDependencies
     sports: SportsRuntimePanelDependencies
+    technology: TechnologyRuntimePanelDependencies
+    world: WorldRuntimePanelDependencies
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelContext:
@@ -232,6 +276,8 @@ class RuntimePanelContext(Mapping[str, Any]):
             finance=FinanceRuntimePanelDependencies.from_context(context),
             macro=MacroRuntimePanelDependencies.from_context(context),
             sports=SportsRuntimePanelDependencies.from_context(context),
+            technology=TechnologyRuntimePanelDependencies.from_context(context),
+            world=WorldRuntimePanelDependencies.from_context(context),
         )
 
     def __getitem__(self, name: str) -> Any:
