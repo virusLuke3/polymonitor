@@ -3,9 +3,12 @@ from __future__ import annotations
 import threading
 import time
 import os
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
+from api.context import resolve_service_callable, resolve_service_value
 from api.runtime_panels import get_default_panel_ids
 
 
@@ -41,13 +44,256 @@ _DASHBOARD_REFRESH_LOCK = threading.Lock()
 _DASHBOARD_REFRESHING = False
 
 
-def build_dashboard_payload(ctx: dict) -> Dict[str, Any]:
+def _service_callable(
+    context: Mapping[str, Any],
+    name: str,
+) -> Callable[..., Any]:
+    return cast(Callable[..., Any], resolve_service_callable(context, name))
+
+
+@dataclass(frozen=True)
+class DashboardBuildDependencies:
+    fetch_market_status: Callable[..., Any]
+    fetch_trade_volume: Callable[..., Any]
+    fetch_recent_markets: Callable[..., Any]
+    fetch_trade_window_bounds: Callable[..., Any]
+    fetch_trade_count_estimate: Callable[..., Any]
+    query_one: Callable[..., Any]
+    iso_days_before: Callable[..., Any]
+    utc_now_iso: Callable[..., Any]
+    recent_trade_window: int
+    cache_ttl_seconds: int
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> DashboardBuildDependencies:
+        return cls(
+            fetch_market_status=_service_callable(
+                context,
+                "fetch_dashboard_market_status",
+            ),
+            fetch_trade_volume=_service_callable(
+                context,
+                "fetch_dashboard_trade_volume",
+            ),
+            fetch_recent_markets=_service_callable(
+                context,
+                "fetch_dashboard_recent_markets",
+            ),
+            fetch_trade_window_bounds=_service_callable(
+                context,
+                "fetch_recent_trade_window_bounds",
+            ),
+            fetch_trade_count_estimate=_service_callable(
+                context,
+                "fetch_trade_count_estimate",
+            ),
+            query_one=_service_callable(context, "query_one"),
+            iso_days_before=_service_callable(context, "iso_days_before"),
+            utc_now_iso=_service_callable(context, "utc_now_iso"),
+            recent_trade_window=int(
+                resolve_service_value(context, "RECENT_TRADE_WINDOW", 0)
+            ),
+            cache_ttl_seconds=int(
+                resolve_service_value(context, "DASHBOARD_CACHE_TTL_SECONDS", 0)
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class DashboardCacheDependencies:
+    source: Mapping[str, Any] = field(repr=False)
+    application: Any
+    snapshot_store: Any
+    cache: dict[str, Any]
+    cache_lock: Any
+    threading_module: Any
+    get_cached_json: Callable[..., Any]
+    set_cached_json: Callable[..., Any]
+    utc_now_iso: Callable[..., Any]
+    recent_trade_window: int
+    cache_ttl_seconds: int
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> DashboardCacheDependencies:
+        return cls(
+            source=context,
+            application=resolve_service_value(context, "app"),
+            snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
+            cache=cast(
+                dict[str, Any],
+                resolve_service_value(context, "_dashboard_cache", {}),
+            ),
+            cache_lock=resolve_service_value(context, "_dashboard_cache_lock"),
+            threading_module=resolve_service_value(context, "threading"),
+            get_cached_json=_service_callable(context, "get_cached_json"),
+            set_cached_json=_service_callable(context, "set_cached_json"),
+            utc_now_iso=_service_callable(context, "utc_now_iso"),
+            recent_trade_window=int(
+                resolve_service_value(context, "RECENT_TRADE_WINDOW", 0)
+            ),
+            cache_ttl_seconds=int(
+                resolve_service_value(context, "DASHBOARD_CACHE_TTL_SECONDS", 0)
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class BootstrapCoreDependencies:
+    application: Any
+    commodity_symbols: Sequence[Any]
+    finance_runtime_ttl_seconds: int
+    query_all: Callable[..., Any]
+    query_one: Callable[..., Any]
+    utc_now_iso: Callable[..., Any]
+    utc_date_days_ago: Callable[..., Any]
+    parse_json_list: Callable[..., Any]
+    get_gamma_active_market_filter: Callable[..., Any]
+    enrich_market_rows_with_runtime_prices: Callable[..., Any]
+    get_bootstrap_component_cached: Callable[..., Any]
+    get_market_groups_payload: Callable[..., Any]
+    get_market_by_id: Callable[..., Any]
+    normalize_market: Callable[..., Any]
+    get_trades_by_market_id: Callable[..., Any]
+    get_oracle_events_by_market_id: Callable[..., Any]
+    table_exists: Callable[..., Any]
+    get_related_content_by_market_id: Callable[..., Any]
+    get_recent_trades_snapshot: Callable[..., Any]
+    get_recent_oracle_snapshot: Callable[..., Any]
+    get_latest_content_snapshot: Callable[..., Any]
+    get_market_group_snapshot: Callable[..., Any]
+    build_system_health_payload: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> BootstrapCoreDependencies:
+        return cls(
+            application=resolve_service_value(context, "app"),
+            commodity_symbols=cast(
+                Sequence[Any],
+                resolve_service_value(context, "COMMODITY_SYMBOLS", ()),
+            ),
+            finance_runtime_ttl_seconds=int(
+                resolve_service_value(context, "FINANCE_RUNTIME_TTL_SECONDS", 0)
+            ),
+            query_all=_service_callable(context, "query_all"),
+            query_one=_service_callable(context, "query_one"),
+            utc_now_iso=_service_callable(context, "utc_now_iso"),
+            utc_date_days_ago=_service_callable(context, "utc_date_days_ago"),
+            parse_json_list=_service_callable(context, "parse_json_list"),
+            get_gamma_active_market_filter=_service_callable(
+                context,
+                "get_gamma_active_market_filter",
+            ),
+            enrich_market_rows_with_runtime_prices=_service_callable(
+                context,
+                "enrich_market_rows_with_runtime_prices",
+            ),
+            get_bootstrap_component_cached=_service_callable(
+                context,
+                "get_bootstrap_component_cached",
+            ),
+            get_market_groups_payload=_service_callable(
+                context,
+                "get_market_groups_payload",
+            ),
+            get_market_by_id=_service_callable(context, "get_market_by_id"),
+            normalize_market=_service_callable(context, "normalize_market"),
+            get_trades_by_market_id=_service_callable(
+                context,
+                "get_trades_by_market_id",
+            ),
+            get_oracle_events_by_market_id=_service_callable(
+                context,
+                "get_oracle_events_by_market_id",
+            ),
+            table_exists=_service_callable(context, "table_exists"),
+            get_related_content_by_market_id=_service_callable(
+                context,
+                "get_related_content_by_market_id",
+            ),
+            get_recent_trades_snapshot=_service_callable(
+                context,
+                "get_recent_trades_snapshot",
+            ),
+            get_recent_oracle_snapshot=_service_callable(
+                context,
+                "get_recent_oracle_snapshot",
+            ),
+            get_latest_content_snapshot=_service_callable(
+                context,
+                "get_latest_content_snapshot",
+            ),
+            get_market_group_snapshot=_service_callable(
+                context,
+                "get_market_group_snapshot",
+            ),
+            build_system_health_payload=_service_callable(
+                context,
+                "build_system_health_payload",
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class BootstrapCacheDependencies:
+    source: Mapping[str, Any] = field(repr=False)
+    application: Any
+    snapshot_store: Any
+    cache: dict[str, Any]
+    cache_lock: Any
+    threading_module: Any
+    get_cached_json: Callable[..., Any]
+    set_cached_json: Callable[..., Any]
+    cache_ttl_seconds: int
+    component_ttl_seconds: int
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> BootstrapCacheDependencies:
+        return cls(
+            source=context,
+            application=resolve_service_value(context, "app"),
+            snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
+            cache=cast(
+                dict[str, Any],
+                resolve_service_value(context, "_bootstrap_cache", {}),
+            ),
+            cache_lock=resolve_service_value(context, "_bootstrap_cache_lock"),
+            threading_module=resolve_service_value(context, "threading"),
+            get_cached_json=_service_callable(context, "get_cached_json"),
+            set_cached_json=_service_callable(context, "set_cached_json"),
+            cache_ttl_seconds=int(
+                resolve_service_value(context, "BOOTSTRAP_CACHE_TTL_SECONDS", 0)
+            ),
+            component_ttl_seconds=int(
+                resolve_service_value(context, "BOOTSTRAP_COMPONENT_TTL_SECONDS", 0)
+            ),
+        )
+
+
+def build_dashboard_payload(ctx: Mapping[str, Any]) -> Dict[str, Any]:
+    return _build_dashboard_payload(DashboardBuildDependencies.from_context(ctx))
+
+
+def _build_dashboard_payload(
+    dependencies: DashboardBuildDependencies,
+) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat().replace("+00:00", "Z")
     last_24h = (now - timedelta(hours=24)).isoformat().replace("+00:00", "Z")
-    status_rows = ctx["fetch_dashboard_market_status"](now_iso)
+    status_rows = dependencies.fetch_market_status(now_iso)
     active_markets = sum(int(row.get("value") or 0) for row in status_rows if row.get("name") in {"Active", "Proposed"})
-    settlements_row = ctx["query_one"](
+    settlements_row = dependencies.query_one(
         """
         SELECT COUNT(*) AS settlements_24h
         FROM oracle_events
@@ -55,14 +301,21 @@ def build_dashboard_payload(ctx: dict) -> Dict[str, Any]:
         """,
         (last_24h,),
     )
-    trade_volume_rows = ctx["fetch_dashboard_trade_volume"](ctx["RECENT_TRADE_WINDOW"])
-    recent_rows = ctx["fetch_dashboard_recent_markets"](now_iso, ctx["RECENT_TRADE_WINDOW"])
-    trade_window = ctx["fetch_recent_trade_window_bounds"](ctx["RECENT_TRADE_WINDOW"])
-    trade_count_estimate = ctx["fetch_trade_count_estimate"]()
+    trade_volume_rows = dependencies.fetch_trade_volume(
+        dependencies.recent_trade_window
+    )
+    recent_rows = dependencies.fetch_recent_markets(
+        now_iso,
+        dependencies.recent_trade_window,
+    )
+    trade_window = dependencies.fetch_trade_window_bounds(
+        dependencies.recent_trade_window
+    )
+    trade_count_estimate = dependencies.fetch_trade_count_estimate()
     latest_trade_ts = trade_window.get("latest_timestamp")
     earliest_trade_ts = trade_window.get("earliest_timestamp")
-    coverage_7d_start = ctx["iso_days_before"](latest_trade_ts, 7)
-    coverage_30d_start = ctx["iso_days_before"](latest_trade_ts, 30)
+    coverage_7d_start = dependencies.iso_days_before(latest_trade_ts, 7)
+    coverage_30d_start = dependencies.iso_days_before(latest_trade_ts, 30)
     return {
         "metrics": {
             "activeMarkets": active_markets,
@@ -89,8 +342,8 @@ def build_dashboard_payload(ctx: dict) -> Dict[str, Any]:
         ],
         "metadata": {
             "generatedAt": now_iso,
-            "cacheTtlSeconds": ctx["DASHBOARD_CACHE_TTL_SECONDS"],
-            "tradeWindowSize": ctx["RECENT_TRADE_WINDOW"],
+            "cacheTtlSeconds": dependencies.cache_ttl_seconds,
+            "tradeWindowSize": dependencies.recent_trade_window,
             "tradeWindowEarliestTimestamp": earliest_trade_ts,
             "tradeWindowLatestTimestamp": latest_trade_ts,
             "tradeWindowSource": trade_window.get("source"),
@@ -102,8 +355,10 @@ def build_dashboard_payload(ctx: dict) -> Dict[str, Any]:
     }
 
 
-def _build_dashboard_fallback_payload(ctx: dict) -> Dict[str, Any]:
-    now_iso = ctx["utc_now_iso"]()
+def _build_dashboard_fallback_payload(
+    dependencies: DashboardCacheDependencies,
+) -> Dict[str, Any]:
+    now_iso = dependencies.utc_now_iso()
     return {
         "metrics": {"activeMarkets": 0, "totalTrades": 0, "settlements24h": 0},
         "volume7d": [],
@@ -112,8 +367,8 @@ def _build_dashboard_fallback_payload(ctx: dict) -> Dict[str, Any]:
         "recentActiveMarkets": [],
         "metadata": {
             "generatedAt": now_iso,
-            "cacheTtlSeconds": ctx["DASHBOARD_CACHE_TTL_SECONDS"],
-            "tradeWindowSize": ctx["RECENT_TRADE_WINDOW"],
+            "cacheTtlSeconds": dependencies.cache_ttl_seconds,
+            "tradeWindowSize": dependencies.recent_trade_window,
             "tradeWindowEarliestTimestamp": None,
             "tradeWindowLatestTimestamp": None,
             "tradeWindowSource": "warming",
@@ -127,7 +382,10 @@ def _build_dashboard_fallback_payload(ctx: dict) -> Dict[str, Any]:
     }
 
 
-def _schedule_dashboard_refresh(ctx: dict, reason: str) -> None:
+def _schedule_dashboard_refresh(
+    dependencies: DashboardCacheDependencies,
+    reason: str,
+) -> None:
     global _DASHBOARD_REFRESHING
     with _DASHBOARD_REFRESH_LOCK:
         if _DASHBOARD_REFRESHING:
@@ -138,55 +396,113 @@ def _schedule_dashboard_refresh(ctx: dict, reason: str) -> None:
         global _DASHBOARD_REFRESHING
         started_at = time.perf_counter()
         try:
-            ctx["app"].logger.info("dashboard-cache refresh-start reason=%s", reason)
-            payload = build_dashboard_payload(ctx)
-            ctx["SNAPSHOT_STORE"].set("snapshot:dashboard", "dashboard", payload, ctx["DASHBOARD_CACHE_TTL_SECONDS"])
-            ctx["_dashboard_cache"]["value"] = payload
-            ctx["_dashboard_cache"]["expires_at"] = time.monotonic() + ctx["DASHBOARD_CACHE_TTL_SECONDS"]
-            ctx["set_cached_json"]("dashboard", "dashboard", payload, ctx["DASHBOARD_CACHE_TTL_SECONDS"])
-            ctx["app"].logger.info("dashboard-cache refresh-done reason=%s duration_ms=%.2f", reason, (time.perf_counter() - started_at) * 1000)
+            dependencies.application.logger.info(
+                "dashboard-cache refresh-start reason=%s",
+                reason,
+            )
+            payload = build_dashboard_payload(dependencies.source)
+            dependencies.snapshot_store.set(
+                "snapshot:dashboard",
+                "dashboard",
+                payload,
+                dependencies.cache_ttl_seconds,
+            )
+            dependencies.cache["value"] = payload
+            dependencies.cache["expires_at"] = (
+                time.monotonic() + dependencies.cache_ttl_seconds
+            )
+            dependencies.set_cached_json(
+                "dashboard",
+                "dashboard",
+                payload,
+                dependencies.cache_ttl_seconds,
+            )
+            dependencies.application.logger.info(
+                "dashboard-cache refresh-done reason=%s duration_ms=%.2f",
+                reason,
+                (time.perf_counter() - started_at) * 1000,
+            )
         except Exception:
-            ctx["app"].logger.exception("dashboard-cache refresh-failed reason=%s", reason)
+            dependencies.application.logger.exception(
+                "dashboard-cache refresh-failed reason=%s",
+                reason,
+            )
         finally:
             with _DASHBOARD_REFRESH_LOCK:
                 _DASHBOARD_REFRESHING = False
 
-    ctx["threading"].Thread(target=refresh, name="dashboard-refresh", daemon=True).start()
+    dependencies.threading_module.Thread(
+        target=refresh,
+        name="dashboard-refresh",
+        daemon=True,
+    ).start()
 
 
-def get_dashboard_payload_cached(ctx: dict) -> Dict[str, Any]:
+def get_dashboard_payload_cached(ctx: Mapping[str, Any]) -> Dict[str, Any]:
+    dependencies = DashboardCacheDependencies.from_context(ctx)
     redis_cache_key = "dashboard"
-    redis_payload = ctx["get_cached_json"]("dashboard", redis_cache_key)
+    redis_payload = dependencies.get_cached_json("dashboard", redis_cache_key)
     if redis_payload is not None:
-        ctx["app"].logger.info("dashboard-cache redis-hit")
+        dependencies.application.logger.info("dashboard-cache redis-hit")
         return redis_payload
     now_monotonic = time.monotonic()
-    cached = ctx["_dashboard_cache"].get("value")
-    if cached is not None and ctx["_dashboard_cache"].get("expires_at", 0.0) > now_monotonic:
-        ctx["app"].logger.info("dashboard-cache hit ttl_remaining_ms=%.2f", (ctx["_dashboard_cache"].get("expires_at", 0.0) - now_monotonic) * 1000)
+    cached = dependencies.cache.get("value")
+    if (
+        cached is not None
+        and dependencies.cache.get("expires_at", 0.0) > now_monotonic
+    ):
+        dependencies.application.logger.info(
+            "dashboard-cache hit ttl_remaining_ms=%.2f",
+            (dependencies.cache.get("expires_at", 0.0) - now_monotonic) * 1000,
+        )
         return cached
-    with ctx["_dashboard_cache_lock"]:
-        cached = ctx["_dashboard_cache"].get("value")
-        if cached is not None and ctx["_dashboard_cache"].get("expires_at", 0.0) > time.monotonic():
-            ctx["app"].logger.info("dashboard-cache hit-after-lock")
+    with dependencies.cache_lock:
+        cached = dependencies.cache.get("value")
+        if (
+            cached is not None
+            and dependencies.cache.get("expires_at", 0.0) > time.monotonic()
+        ):
+            dependencies.application.logger.info("dashboard-cache hit-after-lock")
             return cached
-        ctx["app"].logger.info("dashboard-cache rebuild window_size=%s ttl_seconds=%s", ctx["RECENT_TRADE_WINDOW"], ctx["DASHBOARD_CACHE_TTL_SECONDS"])
-        snapshot_payload = ctx["SNAPSHOT_STORE"].get("snapshot:dashboard", redis_cache_key)
+        dependencies.application.logger.info(
+            "dashboard-cache rebuild window_size=%s ttl_seconds=%s",
+            dependencies.recent_trade_window,
+            dependencies.cache_ttl_seconds,
+        )
+        snapshot_payload = dependencies.snapshot_store.get(
+            "snapshot:dashboard",
+            redis_cache_key,
+        )
         if snapshot_payload is not None:
             payload = snapshot_payload
         else:
-            stale_payload = ctx["SNAPSHOT_STORE"].get_stale("snapshot:dashboard", redis_cache_key)
+            stale_payload = dependencies.snapshot_store.get_stale(
+                "snapshot:dashboard",
+                redis_cache_key,
+            )
             if stale_payload is not None:
-                ctx["app"].logger.info("dashboard-cache stale-hit scheduling_refresh=true")
-                _schedule_dashboard_refresh(ctx, "stale-hit")
+                dependencies.application.logger.info(
+                    "dashboard-cache stale-hit scheduling_refresh=true"
+                )
+                _schedule_dashboard_refresh(dependencies, "stale-hit")
                 payload = stale_payload
             else:
-                ctx["app"].logger.info("dashboard-cache cold-miss returning_fallback=true scheduling_refresh=true")
-                _schedule_dashboard_refresh(ctx, "cold-miss")
-                payload = _build_dashboard_fallback_payload(ctx)
-        ctx["_dashboard_cache"]["value"] = payload
-        ctx["_dashboard_cache"]["expires_at"] = time.monotonic() + ctx["DASHBOARD_CACHE_TTL_SECONDS"]
-        ctx["set_cached_json"]("dashboard", redis_cache_key, payload, ctx["DASHBOARD_CACHE_TTL_SECONDS"])
+                dependencies.application.logger.info(
+                    "dashboard-cache cold-miss returning_fallback=true "
+                    "scheduling_refresh=true"
+                )
+                _schedule_dashboard_refresh(dependencies, "cold-miss")
+                payload = _build_dashboard_fallback_payload(dependencies)
+        dependencies.cache["value"] = payload
+        dependencies.cache["expires_at"] = (
+            time.monotonic() + dependencies.cache_ttl_seconds
+        )
+        dependencies.set_cached_json(
+            "dashboard",
+            redis_cache_key,
+            payload,
+            dependencies.cache_ttl_seconds,
+        )
         return payload
 
 
@@ -232,7 +548,10 @@ def _is_tradeable_bootstrap_row(row: Dict[str, Any]) -> bool:
     return 0.01 < latest_price < 0.99
 
 
-def _normalize_bootstrap_market_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_bootstrap_market_item(
+    dependencies: BootstrapCoreDependencies,
+    row: Dict[str, Any],
+) -> Dict[str, Any]:
     yes_token_id = str(row.get("yes_token_id") or "").strip()
     no_token_id = str(row.get("no_token_id") or "").strip()
     return {
@@ -248,7 +567,7 @@ def _normalize_bootstrap_market_item(ctx: dict, row: Dict[str, Any]) -> Dict[str
         "latestPrice": row.get("latest_price"),
         "status": row.get("status"),
         "category": row.get("category") or "Uncategorized",
-        "tags": ctx["parse_json_list"](row.get("tags")),
+        "tags": dependencies.parse_json_list(row.get("tags")),
         "outcomeCount": int(bool(yes_token_id)) + int(bool(no_token_id)),
         "volume24h": row.get("volume_24h"),
         "tradeCount24h": _safe_int(row.get("trade_count_24h")),
@@ -257,13 +576,16 @@ def _normalize_bootstrap_market_item(ctx: dict, row: Dict[str, Any]) -> Dict[str
     }
 
 
-def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> Dict[str, Any]:
-    now_iso = ctx["utc_now_iso"]()
+def _build_bootstrap_active_markets_payload(
+    dependencies: BootstrapCoreDependencies,
+    page_size: int = 20,
+) -> Dict[str, Any]:
+    now_iso = dependencies.utc_now_iso()
     recent_trade_cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     recent_14d_iso = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat().replace("+00:00", "Z")
     recent_30d_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
     raw_limit = max(page_size * 6, 120)
-    candidate_rows = ctx["query_all"](
+    candidate_rows = dependencies.query_all(
         """
         SELECT
             m.id,
@@ -317,9 +639,16 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
             mlp.latest_trade_at DESC
         LIMIT ?
         """,
-        (ctx["utc_date_days_ago"](1), now_iso, recent_trade_cutoff, recent_14d_iso, recent_30d_iso, raw_limit),
+        (
+            dependencies.utc_date_days_ago(1),
+            now_iso,
+            recent_trade_cutoff,
+            recent_14d_iso,
+            recent_30d_iso,
+            raw_limit,
+        ),
     )
-    gamma_active_payload = ctx["get_gamma_active_market_filter"]() or {}
+    gamma_active_payload = dependencies.get_gamma_active_market_filter() or {}
     gamma_condition_ids = {
         str(value or "").strip().lower()
         for value in (gamma_active_payload.get("conditionIds") or [])
@@ -345,7 +674,7 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
     status_map: Dict[int, Dict[str, bool]] = {}
     if candidate_market_ids:
         placeholders = ", ".join("?" for _ in candidate_market_ids)
-        status_rows = ctx["query_all"](
+        status_rows = dependencies.query_all(
             f"""
             SELECT
                 market_id,
@@ -375,12 +704,18 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
         rows.append(normalized)
         if len(rows) >= max(page_size * 3, page_size):
             break
-    rows = ctx["enrich_market_rows_with_runtime_prices"](rows, max_updates=len(rows), force_refresh=True)
+    rows = dependencies.enrich_market_rows_with_runtime_prices(
+        rows,
+        max_updates=len(rows),
+        force_refresh=True,
+    )
     rows = [row for row in rows if _is_tradeable_bootstrap_row(row)]
     rows = rows[:page_size]
     return {
         "rows": rows,
-        "items": [_normalize_bootstrap_market_item(ctx, row) for row in rows],
+        "items": [
+            _normalize_bootstrap_market_item(dependencies, row) for row in rows
+        ],
     }
 
 
@@ -411,10 +746,12 @@ def _select_featured_market_id(preview_rows: List[Dict[str, Any]]) -> Optional[i
     return best_market_id
 
 
-def _get_fallback_featured_market_id(ctx: dict) -> Optional[int]:
-    now_iso = ctx["utc_now_iso"]()
+def _get_fallback_featured_market_id(
+    dependencies: BootstrapCoreDependencies,
+) -> Optional[int]:
+    now_iso = dependencies.utc_now_iso()
     recent_trade_cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat().replace("+00:00", "Z")
-    row = ctx["query_one"](
+    row = dependencies.query_one(
         """
         WITH settled_markets AS (
             SELECT DISTINCT market_id
@@ -462,7 +799,7 @@ def _get_fallback_featured_market_id(ctx: dict) -> Optional[int]:
             COALESCE(stats_24h.last_trade_at, mlp.latest_trade_at, m.created_at) DESC
         LIMIT 1
         """,
-        (ctx["utc_date_days_ago"](1), now_iso, recent_trade_cutoff),
+        (dependencies.utc_date_days_ago(1), now_iso, recent_trade_cutoff),
     )
     market_id = row.get("id") if row else None
     try:
@@ -471,8 +808,11 @@ def _get_fallback_featured_market_id(ctx: dict) -> Optional[int]:
         return None
 
 
-def _build_bootstrap_price_preview(ctx: dict, market_id: int) -> Dict[str, Any]:
-    summary_row = ctx["query_one"](
+def _build_bootstrap_price_preview(
+    dependencies: BootstrapCoreDependencies,
+    market_id: int,
+) -> Dict[str, Any]:
+    summary_row = dependencies.query_one(
         """
         SELECT
             market_id,
@@ -486,7 +826,7 @@ def _build_bootstrap_price_preview(ctx: dict, market_id: int) -> Dict[str, Any]:
         """,
         (market_id,),
     )
-    stats_row = ctx["query_one"](
+    stats_row = dependencies.query_one(
         """
         SELECT
             SUM(trade_count) AS trade_count_24h,
@@ -495,7 +835,7 @@ def _build_bootstrap_price_preview(ctx: dict, market_id: int) -> Dict[str, Any]:
         FROM market_trade_daily_stats
         WHERE market_id = ? AND trade_date >= ?
         """,
-        (market_id, ctx["utc_date_days_ago"](1)),
+        (market_id, dependencies.utc_date_days_ago(1)),
     )
     return {
         "marketId": market_id,
@@ -511,35 +851,60 @@ def _build_bootstrap_price_preview(ctx: dict, market_id: int) -> Dict[str, Any]:
     }
 
 
-def _get_bootstrap_latest_content_preview(ctx: dict, limit: int = 8) -> List[Dict[str, Any]]:
-    if not ctx["table_exists"]("content_items"):
+def _get_bootstrap_latest_content_preview(
+    dependencies: BootstrapCoreDependencies,
+    limit: int = 8,
+) -> List[Dict[str, Any]]:
+    if not dependencies.table_exists("content_items"):
         return []
-    return ctx["get_latest_content_snapshot"](limit=limit).get("items", [])
+    return dependencies.get_latest_content_snapshot(limit=limit).get("items", [])
 
 
-def _store_bootstrap_payload(ctx: dict, payload: Dict[str, Any]) -> Dict[str, Any]:
-    expires_at = time.monotonic() + ctx["BOOTSTRAP_CACHE_TTL_SECONDS"]
-    with ctx["_bootstrap_cache_lock"]:
-        ctx["_bootstrap_cache"]["value"] = payload
-        ctx["_bootstrap_cache"]["expires_at"] = expires_at
-        ctx["_bootstrap_cache"]["refresh_in_progress"] = False
-    ctx["SNAPSHOT_STORE"].set(BOOTSTRAP_SNAPSHOT_NAMESPACE, BOOTSTRAP_CACHE_KEY, payload, ctx["BOOTSTRAP_CACHE_TTL_SECONDS"])
-    ctx["set_cached_json"]("bootstrap", BOOTSTRAP_CACHE_KEY, payload, ctx["BOOTSTRAP_CACHE_TTL_SECONDS"])
+def _store_bootstrap_payload(
+    dependencies: BootstrapCacheDependencies,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    expires_at = time.monotonic() + dependencies.cache_ttl_seconds
+    with dependencies.cache_lock:
+        dependencies.cache["value"] = payload
+        dependencies.cache["expires_at"] = expires_at
+        dependencies.cache["refresh_in_progress"] = False
+    dependencies.snapshot_store.set(
+        BOOTSTRAP_SNAPSHOT_NAMESPACE,
+        BOOTSTRAP_CACHE_KEY,
+        payload,
+        dependencies.cache_ttl_seconds,
+    )
+    dependencies.set_cached_json(
+        "bootstrap",
+        BOOTSTRAP_CACHE_KEY,
+        payload,
+        dependencies.cache_ttl_seconds,
+    )
     return payload
 
 
-def _refresh_bootstrap_payload(ctx: dict, reason: str) -> Optional[Dict[str, Any]]:
+def _refresh_bootstrap_payload(
+    dependencies: BootstrapCacheDependencies,
+    reason: str,
+) -> Optional[Dict[str, Any]]:
     started_at = time.perf_counter()
-    ctx["app"].logger.info("bootstrap-cache refresh-start reason=%s", reason)
+    dependencies.application.logger.info(
+        "bootstrap-cache refresh-start reason=%s",
+        reason,
+    )
     try:
-        payload = build_bootstrap_payload(ctx)
+        payload = build_bootstrap_payload(dependencies.source)
     except Exception:
-        with ctx["_bootstrap_cache_lock"]:
-            ctx["_bootstrap_cache"]["refresh_in_progress"] = False
-        ctx["app"].logger.exception("bootstrap-cache refresh-failed reason=%s", reason)
+        with dependencies.cache_lock:
+            dependencies.cache["refresh_in_progress"] = False
+        dependencies.application.logger.exception(
+            "bootstrap-cache refresh-failed reason=%s",
+            reason,
+        )
         return None
-    _store_bootstrap_payload(ctx, payload)
-    ctx["app"].logger.info(
+    _store_bootstrap_payload(dependencies, payload)
+    dependencies.application.logger.info(
         "bootstrap-cache refresh-done reason=%s duration_ms=%.2f",
         reason,
         (time.perf_counter() - started_at) * 1000,
@@ -547,9 +912,12 @@ def _refresh_bootstrap_payload(ctx: dict, reason: str) -> Optional[Dict[str, Any
     return payload
 
 
-def _schedule_bootstrap_refresh(ctx: dict, reason: str) -> None:
-    thread = ctx["threading"].Thread(
-        target=lambda: _refresh_bootstrap_payload(ctx, reason),
+def _schedule_bootstrap_refresh(
+    dependencies: BootstrapCacheDependencies,
+    reason: str,
+) -> None:
+    thread = dependencies.threading_module.Thread(
+        target=lambda: _refresh_bootstrap_payload(dependencies, reason),
         name="polydata-bootstrap-refresh",
         daemon=True,
     )
@@ -566,30 +934,41 @@ def _claim_prewarm_slot(task_name: str, interval_seconds: int) -> bool:
     return True
 
 
-def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
-    preview_payload = ctx["get_bootstrap_component_cached"](
+def build_bootstrap_payload(ctx: Mapping[str, Any]) -> Dict[str, Any]:
+    return _build_bootstrap_payload(BootstrapCoreDependencies.from_context(ctx))
+
+
+def _build_bootstrap_payload(
+    dependencies: BootstrapCoreDependencies,
+) -> Dict[str, Any]:
+    preview_payload = dependencies.get_bootstrap_component_cached(
         "active-markets-preview-v11",
-        lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
+        lambda: _build_bootstrap_active_markets_payload(
+            dependencies,
+            page_size=20,
+        ),
         ttl_seconds=15,
     )
     preview_rows = preview_payload.get("rows", [])
     active_markets_preview = preview_payload.get("items", [])
     try:
-        active_market_groups_preview = ctx["get_market_groups_payload"](
+        active_market_groups_preview = dependencies.get_market_groups_payload(
             query="",
             page=1,
             page_size=20,
             sort="active",
         ).get("items", [])
     except Exception:
-        ctx["app"].logger.exception("bootstrap active market groups preview failed")
+        dependencies.application.logger.exception(
+            "bootstrap active market groups preview failed"
+        )
         active_market_groups_preview = []
     featured_market_id = _select_featured_market_id(preview_rows)
     if featured_market_id is None:
-        featured_market_id = _get_fallback_featured_market_id(ctx)
+        featured_market_id = _get_fallback_featured_market_id(dependencies)
     if featured_market_id is None:
-        now_iso = ctx["utc_now_iso"]()
-        row = ctx["query_one"](
+        now_iso = dependencies.utc_now_iso()
+        row = dependencies.query_one(
             """
             SELECT m.id
             FROM markets m
@@ -605,51 +984,81 @@ def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
         featured_market_id = row.get("id") if row else None
 
     featured_market = (
-        ctx["get_bootstrap_component_cached"](f"featured-market:{int(featured_market_id)}", lambda: ctx["normalize_market"](ctx["get_market_by_id"](int(featured_market_id))))
+        dependencies.get_bootstrap_component_cached(
+            f"featured-market:{int(featured_market_id)}",
+            lambda: dependencies.normalize_market(
+                dependencies.get_market_by_id(int(featured_market_id))
+            ),
+        )
         if featured_market_id is not None
         else None
     )
     recent_trade_preview = (
-        ctx["get_bootstrap_component_cached"](
+        dependencies.get_bootstrap_component_cached(
             f"recent-trades:{int(featured_market_id)}",
-            lambda: ctx["get_trades_by_market_id"](int(featured_market_id), limit=12, offset=0),
+            lambda: dependencies.get_trades_by_market_id(
+                int(featured_market_id),
+                limit=12,
+                offset=0,
+            ),
             ttl_seconds=30,
         )
         if featured_market_id is not None
         else []
     )
     oracle_preview = (
-        ctx["get_bootstrap_component_cached"](
+        dependencies.get_bootstrap_component_cached(
             f"oracle-preview:{int(featured_market_id)}",
-            lambda: ctx["get_oracle_events_by_market_id"](int(featured_market_id))[:8],
+            lambda: dependencies.get_oracle_events_by_market_id(
+                int(featured_market_id)
+            )[:8],
             ttl_seconds=60,
         )
         if featured_market_id is not None
         else []
     )
-    if featured_market_id is not None and ctx["table_exists"]("content_items") and ctx["table_exists"]("content_links"):
-        content_preview = ctx["get_bootstrap_component_cached"](
+    if (
+        featured_market_id is not None
+        and dependencies.table_exists("content_items")
+        and dependencies.table_exists("content_links")
+    ):
+        content_preview = dependencies.get_bootstrap_component_cached(
             f"content-preview:{int(featured_market_id)}",
-            lambda: ctx["get_related_content_by_market_id"](int(featured_market_id), limit=6).get("items", []),
+            lambda: dependencies.get_related_content_by_market_id(
+                int(featured_market_id),
+                limit=6,
+            ).get("items", []),
             ttl_seconds=300,
         )
     else:
         content_preview = []
-    global_trades_preview = ctx["get_recent_trades_snapshot"](limit=18)
-    global_oracle_preview = ctx["get_recent_oracle_snapshot"](limit=12)
-    latest_content_preview = ctx["get_bootstrap_component_cached"](
+    global_trades_preview = dependencies.get_recent_trades_snapshot(limit=18)
+    global_oracle_preview = dependencies.get_recent_oracle_snapshot(limit=12)
+    latest_content_preview = dependencies.get_bootstrap_component_cached(
         "latest-content-preview-v1",
-        lambda: {"items": _get_bootstrap_latest_content_preview(ctx, limit=8)},
+        lambda: {
+            "items": _get_bootstrap_latest_content_preview(
+                dependencies,
+                limit=8,
+            )
+        },
         ttl_seconds=300,
     ).get("items", [])
-    commodities_preview = ctx["get_bootstrap_component_cached"](
+    commodities_preview = dependencies.get_bootstrap_component_cached(
         "commodities-preview-v1",
-        lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities"),
-        ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
+        lambda: dependencies.get_market_group_snapshot(
+            dependencies.commodity_symbols,
+            kind="commodities",
+        ),
+        ttl_seconds=dependencies.finance_runtime_ttl_seconds,
     )
-    system_health = ctx["get_bootstrap_component_cached"]("system-health", ctx["build_system_health_payload"], ttl_seconds=15)
+    system_health = dependencies.get_bootstrap_component_cached(
+        "system-health",
+        dependencies.build_system_health_payload,
+        ttl_seconds=15,
+    )
     return {
-        "generatedAt": ctx["utc_now_iso"](),
+        "generatedAt": dependencies.utc_now_iso(),
         "defaultWorkspace": {
             "name": "Hackathon Demo",
             "panels": get_default_panel_ids(),
@@ -664,64 +1073,97 @@ def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
         "recentTradesPreview": recent_trade_preview,
         "oraclePreview": oracle_preview,
         "contentPreview": content_preview,
-        "pricePreview": _build_bootstrap_price_preview(ctx, int(featured_market_id)) if featured_market_id is not None else None,
+        "pricePreview": (
+            _build_bootstrap_price_preview(
+                dependencies,
+                int(featured_market_id),
+            )
+            if featured_market_id is not None
+            else None
+        ),
         "systemHealth": system_health,
     }
 
 
-def get_bootstrap_payload_cached(ctx: dict) -> Dict[str, Any]:
-    redis_payload = ctx["get_cached_json"]("bootstrap", BOOTSTRAP_CACHE_KEY)
+def get_bootstrap_payload_cached(ctx: Mapping[str, Any]) -> Dict[str, Any]:
+    dependencies = BootstrapCacheDependencies.from_context(ctx)
+    redis_payload = dependencies.get_cached_json("bootstrap", BOOTSTRAP_CACHE_KEY)
     if redis_payload is not None:
-        ctx["app"].logger.info("bootstrap-cache redis-hit")
-        ctx["SNAPSHOT_STORE"].set(BOOTSTRAP_SNAPSHOT_NAMESPACE, BOOTSTRAP_CACHE_KEY, redis_payload, ctx["BOOTSTRAP_CACHE_TTL_SECONDS"])
-        with ctx["_bootstrap_cache_lock"]:
-            ctx["_bootstrap_cache"]["value"] = redis_payload
-            ctx["_bootstrap_cache"]["expires_at"] = time.monotonic() + ctx["BOOTSTRAP_CACHE_TTL_SECONDS"]
+        dependencies.application.logger.info("bootstrap-cache redis-hit")
+        dependencies.snapshot_store.set(
+            BOOTSTRAP_SNAPSHOT_NAMESPACE,
+            BOOTSTRAP_CACHE_KEY,
+            redis_payload,
+            dependencies.cache_ttl_seconds,
+        )
+        with dependencies.cache_lock:
+            dependencies.cache["value"] = redis_payload
+            dependencies.cache["expires_at"] = (
+                time.monotonic() + dependencies.cache_ttl_seconds
+            )
         return redis_payload
     now_monotonic = time.monotonic()
-    cached = ctx["_bootstrap_cache"].get("value")
-    if cached is not None and ctx["_bootstrap_cache"].get("expires_at", 0.0) > now_monotonic:
-        ctx["app"].logger.info("bootstrap-cache hit ttl_remaining_ms=%.2f", (ctx["_bootstrap_cache"].get("expires_at", 0.0) - now_monotonic) * 1000)
+    cached = dependencies.cache.get("value")
+    if (
+        cached is not None
+        and dependencies.cache.get("expires_at", 0.0) > now_monotonic
+    ):
+        dependencies.application.logger.info(
+            "bootstrap-cache hit ttl_remaining_ms=%.2f",
+            (dependencies.cache.get("expires_at", 0.0) - now_monotonic) * 1000,
+        )
         return cached
-    with ctx["_bootstrap_cache_lock"]:
-        cached = ctx["_bootstrap_cache"].get("value")
-        if cached is not None and ctx["_bootstrap_cache"].get("expires_at", 0.0) > time.monotonic():
-            ctx["app"].logger.info("bootstrap-cache hit-after-lock")
+    with dependencies.cache_lock:
+        cached = dependencies.cache.get("value")
+        if (
+            cached is not None
+            and dependencies.cache.get("expires_at", 0.0) > time.monotonic()
+        ):
+            dependencies.application.logger.info("bootstrap-cache hit-after-lock")
             return cached
-        stale_payload = cached or ctx["SNAPSHOT_STORE"].get_stale(BOOTSTRAP_SNAPSHOT_NAMESPACE, BOOTSTRAP_CACHE_KEY)
+        stale_payload = cached or dependencies.snapshot_store.get_stale(
+            BOOTSTRAP_SNAPSHOT_NAMESPACE,
+            BOOTSTRAP_CACHE_KEY,
+        )
         if stale_payload is not None:
-            ctx["app"].logger.info("bootstrap-cache stale-hit scheduling_refresh=true")
+            dependencies.application.logger.info(
+                "bootstrap-cache stale-hit scheduling_refresh=true"
+            )
             if cached is None:
-                ctx["_bootstrap_cache"]["value"] = stale_payload
-                ctx["_bootstrap_cache"]["expires_at"] = now_monotonic
-            schedule_refresh = not ctx["_bootstrap_cache"].get("refresh_in_progress")
+                dependencies.cache["value"] = stale_payload
+                dependencies.cache["expires_at"] = now_monotonic
+            schedule_refresh = not dependencies.cache.get("refresh_in_progress")
         else:
             schedule_refresh = False
         if stale_payload is not None:
             if schedule_refresh:
-                ctx["_bootstrap_cache"]["refresh_in_progress"] = True
+                dependencies.cache["refresh_in_progress"] = True
             else:
-                ctx["app"].logger.info("bootstrap-cache stale-hit refresh_already_in_progress=true")
+                dependencies.application.logger.info(
+                    "bootstrap-cache stale-hit refresh_already_in_progress=true"
+                )
         else:
-            ctx["app"].logger.info(
+            dependencies.application.logger.info(
                 "bootstrap-cache cold-rebuild ttl_seconds=%s component_ttl_seconds=%s",
-                ctx["BOOTSTRAP_CACHE_TTL_SECONDS"],
-                ctx["BOOTSTRAP_COMPONENT_TTL_SECONDS"],
+                dependencies.cache_ttl_seconds,
+                dependencies.component_ttl_seconds,
             )
     if stale_payload is not None:
         if schedule_refresh:
-            _schedule_bootstrap_refresh(ctx, "stale-hit")
+            _schedule_bootstrap_refresh(dependencies, "stale-hit")
         return stale_payload
-    payload = _refresh_bootstrap_payload(ctx, "cold-miss")
+    payload = _refresh_bootstrap_payload(dependencies, "cold-miss")
     if payload is not None:
         return payload
-    cached = ctx["_bootstrap_cache"].get("value")
+    cached = dependencies.cache.get("value")
     if cached is not None:
         return cached
     raise RuntimeError("bootstrap payload refresh failed")
 
 
 def prewarm_snapshot_payloads(ctx: dict) -> None:
+    bootstrap_dependencies = BootstrapCoreDependencies.from_context(ctx)
+
     def _prewarm_active_market_group_charts() -> None:
         enabled = str(os.environ.get("POLYDATA_PREWARM_MARKET_GROUP_CHARTS") or "").strip().lower() in {
             "1",
@@ -741,7 +1183,10 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
         ("commodities", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
         ("bootstrap:active-markets-preview", 15, lambda: ctx["get_bootstrap_component_cached"](
             "active-markets-preview-v11",
-            lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
+            lambda: _build_bootstrap_active_markets_payload(
+                bootstrap_dependencies,
+                page_size=20,
+            ),
             ttl_seconds=15,
         )),
         ("markets:80", 15, lambda: ctx["get_active_markets_snapshot"](page_size=80)),
@@ -751,12 +1196,22 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
         ("trades:24", 15, lambda: ctx["get_recent_trades_snapshot"](limit=24)),
         ("content:8", 300, lambda: ctx["get_bootstrap_component_cached"](
             "latest-content-preview-v1",
-            lambda: {"items": _get_bootstrap_latest_content_preview(ctx, limit=8)},
+            lambda: {
+                "items": _get_bootstrap_latest_content_preview(
+                    bootstrap_dependencies,
+                    limit=8,
+                )
+            },
             ttl_seconds=300,
         )),
         ("content:12", 300, lambda: ctx["get_bootstrap_component_cached"](
             "latest-content-preview-v2",
-            lambda: {"items": _get_bootstrap_latest_content_preview(ctx, limit=12)},
+            lambda: {
+                "items": _get_bootstrap_latest_content_preview(
+                    bootstrap_dependencies,
+                    limit=12,
+                )
+            },
             ttl_seconds=300,
         )),
         ("bootstrap:commodities-preview", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_bootstrap_component_cached"](
