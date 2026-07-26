@@ -1175,7 +1175,10 @@ def _search_markets(
             candidate_limit,
         ),
     )
-    rows = _merge_clickhouse_stats(dependencies.source, rows)
+    # Search is an interactive serving path and already reads the materialized
+    # market_list_serving projection. Keep ClickHouse enrichment on market
+    # detail/list endpoints, but do not make typeahead wait for the remote
+    # OrderFilled transport or its timeout fallback.
 
     def has_serving_data(row: Dict[str, Any]) -> bool:
         return (
