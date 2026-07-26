@@ -3,8 +3,17 @@ from __future__ import annotations
 import os
 import threading
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Callable, Dict, cast
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 
 
 SYSTEM_HEALTH_CACHE_NAMESPACE = "system:health"
@@ -14,6 +23,86 @@ _SYSTEM_HEALTH_CACHE_LOCK = threading.Lock()
 _SYSTEM_HEALTH_REFRESH_LOCK = threading.Lock()
 _SYSTEM_HEALTH_CACHE: Dict[str, Any] = {}
 _SYSTEM_HEALTH_REFRESHING = False
+
+
+@dataclass(frozen=True)
+class SystemHealthDependencies:
+    application: Any
+    describe_db_target: Callable[..., Any]
+    get_redis_client: Callable[..., Any]
+    table_exists: Callable[..., Any]
+    query_all: Callable[..., Any]
+    query_one: Callable[..., Any]
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    get_lob_runtime_status: Callable[..., Any] | None
+    get_lob_storage_status: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(cls, context: Mapping[str, Any]) -> SystemHealthDependencies:
+        return cls(
+            application=resolve_service_value(context, "app"),
+            describe_db_target=cast(
+                Callable[..., Any],
+                resolve_service_callable(context, "describe_db_target"),
+            ),
+            get_redis_client=cast(
+                Callable[..., Any],
+                resolve_service_callable(context, "get_redis_client"),
+            ),
+            table_exists=cast(
+                Callable[..., Any],
+                resolve_service_callable(context, "table_exists"),
+            ),
+            query_all=cast(
+                Callable[..., Any],
+                resolve_service_callable(context, "query_all"),
+            ),
+            query_one=cast(
+                Callable[..., Any],
+                resolve_service_callable(context, "query_one"),
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            get_lob_runtime_status=resolve_optional_service_callable(
+                context,
+                "get_lob_runtime_status",
+            ),
+            get_lob_storage_status=resolve_optional_service_callable(
+                context,
+                "get_lob_storage_status",
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class SeedHealthDependencies:
+    snapshot_store: Any | None
+    get_cached_json: Callable[..., Any] | None
+    utc_now_iso: Callable[..., Any]
+
+    @classmethod
+    def from_context(cls, context: Mapping[str, Any]) -> SeedHealthDependencies:
+        return cls(
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            utc_now_iso=cast(
+                Callable[..., Any],
+                resolve_service_callable(context, "utc_now_iso"),
+            ),
+        )
 
 
 SEED_META_SPECS = [
@@ -362,15 +451,18 @@ SEED_META_SPECS = [
 ]
 
 
-def _read_seed_meta(ctx: dict, *, namespace: str, cache_key: str) -> Dict[str, Any] | None:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        payload = reader(namespace, cache_key)
+def _read_seed_meta(
+    dependencies: SeedHealthDependencies,
+    *,
+    namespace: str,
+    cache_key: str,
+) -> Dict[str, Any] | None:
+    if dependencies.get_cached_json is not None:
+        payload = dependencies.get_cached_json(namespace, cache_key)
         if isinstance(payload, dict):
             return payload
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
-    if snapshot_store is not None:
-        payload = snapshot_store.get_stale(namespace, cache_key)
+    if dependencies.snapshot_store is not None:
+        payload = dependencies.snapshot_store.get_stale(namespace, cache_key)
         if isinstance(payload, dict):
             return payload
     return None
@@ -403,20 +495,20 @@ def _system_health_cache_ttl_seconds() -> int:
         return SYSTEM_HEALTH_CACHE_TTL_SECONDS
 
 
-def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
+def _build_system_health_payload_uncached(
+    dependencies: SystemHealthDependencies,
+) -> Dict[str, Any]:
     lob_runtime: Dict[str, Any] = {"status": "ready", "mode": "local-orderbook"}
-    runtime_getter = ctx.get("get_lob_runtime_status")
-    if callable(runtime_getter):
+    if dependencies.get_lob_runtime_status is not None:
         try:
-            runtime_payload = runtime_getter()
+            runtime_payload = dependencies.get_lob_runtime_status()
             if isinstance(runtime_payload, dict):
                 lob_runtime.update(runtime_payload)
         except Exception as exc:
             lob_runtime.update({"status": "unavailable", "detail": str(exc)[:240]})
-    storage_getter = ctx.get("get_lob_storage_status")
-    if callable(storage_getter):
+    if dependencies.get_lob_storage_status is not None:
         try:
-            storage_payload = storage_getter()
+            storage_payload = dependencies.get_lob_storage_status()
             if isinstance(storage_payload, dict):
                 lob_runtime["storage"] = storage_payload
                 if storage_payload.get("rollupWatermark") is not None:
@@ -426,21 +518,22 @@ def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
         except Exception as exc:
             lob_runtime["storage"] = {"status": "unavailable", "detail": str(exc)[:240]}
     payload: Dict[str, Any] = {
-        "database": ctx["describe_db_target"](),
-        "redis": bool(ctx["get_redis_client"]()),
+        "database": dependencies.describe_db_target(),
+        "redis": bool(dependencies.get_redis_client()),
         "apiStatus": "ok",
         "lobRuntime": lob_runtime,
         "contentSync": {
             "status": "database-runtime-intel"
-            if ctx["table_exists"]("content_items") and ctx["table_exists"]("content_links")
+            if dependencies.table_exists("content_items")
+            and dependencies.table_exists("content_links")
             else "runtime-intel"
         },
     }
-    if not ctx["table_exists"]("sync_state"):
+    if not dependencies.table_exists("sync_state"):
         payload["syncState"] = {}
         return payload
 
-    sync_rows = ctx["query_all"](
+    sync_rows = dependencies.query_all(
         """
         SELECT `key`, value, last_block, updated_at
         FROM sync_state
@@ -469,18 +562,22 @@ def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
     payload["oracleSync"] = sync_state.get("oracle_sync_live") or sync_state.get("oracle_sync")
     payload["priceSync"] = {
         "status": "derived-from-trades",
-        "updatedAt": ctx["query_one"]("SELECT MAX(latest_trade_at) AS updated_at FROM market_latest_prices").get("updated_at")
-        if ctx["table_exists"]("market_latest_prices")
+        "updatedAt": dependencies.query_one(
+            "SELECT MAX(latest_trade_at) AS updated_at FROM market_latest_prices"
+        ).get("updated_at")
+        if dependencies.table_exists("market_latest_prices")
         else None,
     }
     return payload
 
 
-def _build_system_health_warming_payload(ctx: dict) -> Dict[str, Any]:
+def _build_system_health_warming_payload(
+    dependencies: SystemHealthDependencies,
+) -> Dict[str, Any]:
     """Return a dependency-free placeholder while the full health probe runs."""
 
     return {
-        "database": ctx["describe_db_target"](),
+        "database": dependencies.describe_db_target(),
         "apiStatus": "warming",
         "lobRuntime": {"status": "warming", "mode": "local-orderbook"},
         "contentSync": {"status": "warming"},
@@ -498,14 +595,25 @@ def _store_local_system_health_payload(payload: Dict[str, Any], ttl_seconds: int
         _SYSTEM_HEALTH_CACHE["expires_at"] = time.monotonic() + ttl_seconds
 
 
-def _store_system_health_payload(ctx: dict, payload: Dict[str, Any], ttl_seconds: int) -> None:
-    writer = ctx.get("set_cached_json")
-    if callable(writer):
-        writer(SYSTEM_HEALTH_CACHE_NAMESPACE, SYSTEM_HEALTH_CACHE_KEY, payload, ttl_seconds)
+def _store_system_health_payload(
+    dependencies: SystemHealthDependencies,
+    payload: Dict[str, Any],
+    ttl_seconds: int,
+) -> None:
+    if dependencies.set_cached_json is not None:
+        dependencies.set_cached_json(
+            SYSTEM_HEALTH_CACHE_NAMESPACE,
+            SYSTEM_HEALTH_CACHE_KEY,
+            payload,
+            ttl_seconds,
+        )
     _store_local_system_health_payload(payload, ttl_seconds)
 
 
-def _schedule_system_health_refresh(ctx: dict, ttl_seconds: int) -> None:
+def _schedule_system_health_refresh(
+    dependencies: SystemHealthDependencies,
+    ttl_seconds: int,
+) -> None:
     global _SYSTEM_HEALTH_REFRESHING
     with _SYSTEM_HEALTH_REFRESH_LOCK:
         if _SYSTEM_HEALTH_REFRESHING:
@@ -515,10 +623,10 @@ def _schedule_system_health_refresh(ctx: dict, ttl_seconds: int) -> None:
     def refresh() -> None:
         global _SYSTEM_HEALTH_REFRESHING
         try:
-            payload = _build_system_health_payload_uncached(ctx)
-            _store_system_health_payload(ctx, payload, ttl_seconds)
+            payload = _build_system_health_payload_uncached(dependencies)
+            _store_system_health_payload(dependencies, payload, ttl_seconds)
         except Exception:
-            ctx["app"].logger.exception("system-health refresh failed")
+            dependencies.application.logger.exception("system-health refresh failed")
         finally:
             with _SYSTEM_HEALTH_REFRESH_LOCK:
                 _SYSTEM_HEALTH_REFRESHING = False
@@ -527,7 +635,8 @@ def _schedule_system_health_refresh(ctx: dict, ttl_seconds: int) -> None:
     thread.start()
 
 
-def build_system_health_payload(ctx: dict) -> Dict[str, Any]:
+def build_system_health_payload(ctx: Mapping[str, Any]) -> Dict[str, Any]:
+    dependencies = SystemHealthDependencies.from_context(ctx)
     ttl_seconds = _system_health_cache_ttl_seconds()
     now = time.monotonic()
     stale_payload = None
@@ -538,9 +647,11 @@ def build_system_health_payload(ctx: dict) -> Dict[str, Any]:
         if isinstance(cached, dict):
             stale_payload = cached
 
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        redis_payload = reader(SYSTEM_HEALTH_CACHE_NAMESPACE, SYSTEM_HEALTH_CACHE_KEY)
+    if dependencies.get_cached_json is not None:
+        redis_payload = dependencies.get_cached_json(
+            SYSTEM_HEALTH_CACHE_NAMESPACE,
+            SYSTEM_HEALTH_CACHE_KEY,
+        )
         if isinstance(redis_payload, dict):
             with _SYSTEM_HEALTH_CACHE_LOCK:
                 _SYSTEM_HEALTH_CACHE["value"] = redis_payload
@@ -548,18 +659,19 @@ def build_system_health_payload(ctx: dict) -> Dict[str, Any]:
             return redis_payload
 
     if stale_payload is not None:
-        _schedule_system_health_refresh(ctx, ttl_seconds)
+        _schedule_system_health_refresh(dependencies, ttl_seconds)
         return stale_payload
 
-    warming_payload = _build_system_health_warming_payload(ctx)
+    warming_payload = _build_system_health_warming_payload(dependencies)
     _store_local_system_health_payload(warming_payload, ttl_seconds)
-    _schedule_system_health_refresh(ctx, ttl_seconds)
+    _schedule_system_health_refresh(dependencies, ttl_seconds)
     return warming_payload
 
 
-def prewarm_system_health_payload(ctx: dict) -> None:
+def prewarm_system_health_payload(ctx: Mapping[str, Any]) -> None:
     """Start the full health probe without extending API startup latency."""
 
+    dependencies = SystemHealthDependencies.from_context(ctx)
     ttl_seconds = _system_health_cache_ttl_seconds()
     with _SYSTEM_HEALTH_CACHE_LOCK:
         cached = _SYSTEM_HEALTH_CACHE.get("value")
@@ -567,14 +679,25 @@ def prewarm_system_health_payload(ctx: dict) -> None:
     if isinstance(cached, dict) and cached.get("apiStatus") != "warming" and expires_at > time.monotonic():
         return
     if not isinstance(cached, dict):
-        _store_local_system_health_payload(_build_system_health_warming_payload(ctx), ttl_seconds)
-    _schedule_system_health_refresh(ctx, ttl_seconds)
+        _store_local_system_health_payload(
+            _build_system_health_warming_payload(dependencies),
+            ttl_seconds,
+        )
+    _schedule_system_health_refresh(dependencies, ttl_seconds)
 
 
-def build_seed_health_payload(ctx: dict) -> Dict[str, Any]:
+def build_seed_health_payload(ctx: Mapping[str, Any]) -> Dict[str, Any]:
+    dependencies = SeedHealthDependencies.from_context(ctx)
     items = []
     for spec in SEED_META_SPECS:
-        payload = _read_seed_meta(ctx, namespace=spec["namespace"], cache_key=spec["cacheKey"]) or {}
+        payload = (
+            _read_seed_meta(
+                dependencies,
+                namespace=spec["namespace"],
+                cache_key=spec["cacheKey"],
+            )
+            or {}
+        )
         expected_interval_seconds = max(
             1,
             int(os.environ.get(spec["intervalEnv"], payload.get("expectedIntervalSeconds") or spec["defaultIntervalSeconds"])),
@@ -623,7 +746,7 @@ def build_seed_health_payload(ctx: dict) -> Dict[str, Any]:
     elif degraded_count:
         overall_status = "degraded"
     return {
-        "generatedAt": ctx["utc_now_iso"](),
+        "generatedAt": dependencies.utc_now_iso(),
         "status": overall_status,
         "summary": {
             "watcherCount": len(items),

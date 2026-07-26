@@ -142,3 +142,56 @@ def resolve_route_value(context: Mapping[str, Any], name: str, default: Any = No
         if isinstance(context, RouteContext):
             raise RuntimeError(f"RouteContext is missing required dependency: {name}") from exc
         return default
+
+
+def resolve_service_callable(context: Mapping[str, Any], name: str) -> Callable[..., Any]:
+    """Resolve one service dependency with production fail-fast semantics."""
+
+    try:
+        dependency = context[name]
+    except KeyError as exc:
+        if isinstance(context, ServiceContext):
+            raise RuntimeError(f"ServiceContext is missing required callable: {name}") from exc
+
+        def missing_dependency(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError(f"Service dependency is unavailable: {name}")
+
+        return missing_dependency
+    if not callable(dependency):
+        raise TypeError(f"Service dependency is not callable: {name}")
+    return dependency
+
+
+def resolve_optional_service_callable(
+    context: Mapping[str, Any],
+    name: str,
+) -> Callable[..., Any] | None:
+    """Resolve an optional service callable while rejecting invalid values."""
+
+    dependency = context.get(name)
+    if dependency is None:
+        return None
+    if not callable(dependency):
+        raise TypeError(f"Service dependency is not callable: {name}")
+    return dependency
+
+
+def resolve_service_value(context: Mapping[str, Any], name: str, default: Any = None) -> Any:
+    """Resolve a service value with production fail-fast semantics."""
+
+    try:
+        return context[name]
+    except KeyError as exc:
+        if isinstance(context, ServiceContext):
+            raise RuntimeError(f"ServiceContext is missing required dependency: {name}") from exc
+        return default
+
+
+def resolve_optional_service_value(
+    context: Mapping[str, Any],
+    name: str,
+    default: Any = None,
+) -> Any:
+    """Resolve an optional service value without making it a production requirement."""
+
+    return context.get(name, default)
