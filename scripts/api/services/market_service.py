@@ -14,6 +14,7 @@ from urllib.parse import unquote
 
 from api.context import (
     resolve_optional_service_callable,
+    resolve_optional_service_value,
     resolve_service_callable,
     resolve_service_value,
 )
@@ -352,6 +353,93 @@ class MarketWorkspaceDependencies:
         )
 
 
+@dataclass(frozen=True)
+class MarketListDependencies:
+    source: Mapping[str, Any] = field(repr=False)
+    application: Any
+    snapshot_store: Any
+    lob_runtime_manager: Any
+    utc_now_iso: Callable[..., Any]
+    parse_iso_datetime: Callable[..., Any]
+    get_market_clob_price_snapshot: Callable[..., Any]
+    get_existing_trade_read_source: Callable[..., Any]
+    utc_date_days_ago: Callable[..., Any]
+    identifier_name: Callable[..., Any]
+    trade_v2_core_table: Any
+    query_all: Callable[..., Any]
+    query_one: Callable[..., Any]
+    parse_json_list: Callable[..., Any]
+    format_trade_decimal: Callable[..., Any]
+    get_markets_payload_cached: Callable[..., Any]
+    set_cached_json: Callable[..., Any]
+    get_snapshot_payload: Callable[..., Any]
+    get_backend: Callable[..., Any] | None
+    table_exists: Callable[..., Any] | None
+    get_gamma_active_market_filter: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MarketListDependencies:
+        return cls(
+            source=context,
+            application=resolve_service_value(context, "app"),
+            snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
+            lob_runtime_manager=resolve_optional_service_value(
+                context,
+                "LOB_RUNTIME_MANAGER",
+            ),
+            utc_now_iso=_service_callable(context, "utc_now_iso"),
+            parse_iso_datetime=_service_callable(context, "parse_iso_datetime"),
+            get_market_clob_price_snapshot=_service_callable(
+                context,
+                "get_market_clob_price_snapshot",
+            ),
+            get_existing_trade_read_source=_service_callable(
+                context,
+                "get_existing_trade_read_source",
+            ),
+            utc_date_days_ago=_service_callable(
+                context,
+                "utc_date_days_ago",
+            ),
+            identifier_name=_service_callable(context, "_identifier_name"),
+            trade_v2_core_table=resolve_service_value(
+                context,
+                "TRADE_V2_CORE_TABLE",
+            ),
+            query_all=_service_callable(context, "query_all"),
+            query_one=_service_callable(context, "query_one"),
+            parse_json_list=_service_callable(context, "parse_json_list"),
+            format_trade_decimal=_service_callable(
+                context,
+                "format_trade_decimal",
+            ),
+            get_markets_payload_cached=_service_callable(
+                context,
+                "get_markets_payload_cached",
+            ),
+            set_cached_json=_service_callable(context, "set_cached_json"),
+            get_snapshot_payload=_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+            get_backend=resolve_optional_service_callable(
+                context,
+                "get_backend",
+            ),
+            table_exists=resolve_optional_service_callable(
+                context,
+                "table_exists",
+            ),
+            get_gamma_active_market_filter=resolve_optional_service_callable(
+                context,
+                "get_gamma_active_market_filter",
+            ),
+        )
+
+
 def _default_active_market_activity_sql(stats_alias: str) -> str:
     return f"""
     (
@@ -431,7 +519,10 @@ def active_market_clickhouse_primary_enabled() -> bool:
     return _env_flag("POLYDATA_ACTIVE_MARKET_CLICKHOUSE_PRIMARY", False)
 
 
-def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Optional[Dict[str, Any]]:
+def _trim_active_markets_payload(
+    payload: Any,
+    page_size: int,
+) -> Optional[Dict[str, Any]]:
     if not isinstance(payload, dict):
         return None
     items = payload.get("items")
@@ -469,11 +560,12 @@ def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Opt
     }
 
 
-def _normalized_gamma_active_keys(ctx: dict) -> tuple[set[str], set[str]]:
-    get_filter = ctx.get("get_gamma_active_market_filter")
-    if not callable(get_filter):
+def _normalized_gamma_active_keys(
+    dependencies: MarketListDependencies,
+) -> tuple[set[str], set[str]]:
+    if dependencies.get_gamma_active_market_filter is None:
         return set(), set()
-    payload = get_filter() or {}
+    payload = dependencies.get_gamma_active_market_filter() or {}
     condition_ids = {
         str(value or "").strip().lower()
         for value in (payload.get("conditionIds") or [])
@@ -487,8 +579,11 @@ def _normalized_gamma_active_keys(ctx: dict) -> tuple[set[str], set[str]]:
     return condition_ids, slugs
 
 
-def _filter_candidate_rows_to_gamma_active(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    condition_ids, slugs = _normalized_gamma_active_keys(ctx)
+def _filter_candidate_rows_to_gamma_active(
+    dependencies: MarketListDependencies,
+    rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    condition_ids, slugs = _normalized_gamma_active_keys(dependencies)
     if not condition_ids and not slugs:
         return rows
     filtered: List[Dict[str, Any]] = []
@@ -503,9 +598,13 @@ def _filter_candidate_rows_to_gamma_active(ctx: dict, rows: List[Dict[str, Any]]
     return filtered
 
 
-def _prefer_gamma_active_candidate_rows(ctx: dict, rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+def _prefer_gamma_active_candidate_rows(
+    dependencies: MarketListDependencies,
+    rows: List[Dict[str, Any]],
+    target_count: int,
+) -> List[Dict[str, Any]]:
     """Prefer Gamma-confirmed markets, then fill from DB-active rows like PolyWorld."""
-    gamma_rows = _filter_candidate_rows_to_gamma_active(ctx, rows)
+    gamma_rows = _filter_candidate_rows_to_gamma_active(dependencies, rows)
     if len(gamma_rows) >= target_count:
         return gamma_rows
     if not gamma_rows:
@@ -960,10 +1059,14 @@ def _lob_payload_has_levels(payload: Any) -> bool:
     return _book_side_has_levels(payload.get("yes")) or _book_side_has_levels(payload.get("no"))
 
 
-def _prefer_lob_ready_market_rows(ctx: dict, rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+def _prefer_lob_ready_market_rows(
+    dependencies: MarketListDependencies,
+    rows: List[Dict[str, Any]],
+    target_count: int,
+) -> List[Dict[str, Any]]:
     if not _env_flag("POLYDATA_ACTIVE_MARKET_PREFER_LOB_READY", True):
         return rows
-    manager = ctx.get("LOB_RUNTIME_MANAGER")
+    manager = dependencies.lob_runtime_manager
     if manager is None or not hasattr(manager, "get_market_snapshot"):
         return rows
     max_checks = min(len(rows), max(0, DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT), max(target_count * 3, target_count))
@@ -2356,7 +2459,22 @@ def _get_market_oracle_payload(
 
 
 def enrich_market_rows_with_runtime_prices(
-    ctx: dict,
+    ctx: Mapping[str, Any],
+    rows: List[Dict[str, Any]],
+    *,
+    max_updates: int = 18,
+    force_refresh: bool = False,
+) -> List[Dict[str, Any]]:
+    return _enrich_market_rows_with_runtime_prices(
+        MarketListDependencies.from_context(ctx),
+        rows,
+        max_updates=max_updates,
+        force_refresh=force_refresh,
+    )
+
+
+def _enrich_market_rows_with_runtime_prices(
+    dependencies: MarketListDependencies,
     rows: List[Dict[str, Any]],
     *,
     max_updates: int = 18,
@@ -2366,7 +2484,9 @@ def enrich_market_rows_with_runtime_prices(
     enriched_rows: List[Dict[str, Any]] = [dict(row) for row in rows]
     candidates: List[tuple[int, Dict[str, Any]]] = []
     for index, normalized in enumerate(enriched_rows):
-        latest_trade_at = ctx["parse_iso_datetime"](normalized.get("last_trade_at") or normalized.get("latest_trade_at"))
+        latest_trade_at = dependencies.parse_iso_datetime(
+            normalized.get("last_trade_at") or normalized.get("latest_trade_at")
+        )
         is_stale = latest_trade_at is None or (now - latest_trade_at) > timedelta(hours=6)
         needs_runtime_price = force_refresh or normalized.get("latest_price") in (None, "") or is_stale
         if needs_runtime_price and len(candidates) < max_updates:
@@ -2375,13 +2495,22 @@ def enrich_market_rows_with_runtime_prices(
         return enriched_rows
     max_workers = min(6, len(candidates))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {executor.submit(ctx["get_market_clob_price_snapshot"], candidate): index for index, candidate in candidates}
+        future_map = {
+            executor.submit(
+                dependencies.get_market_clob_price_snapshot,
+                candidate,
+            ): index
+            for index, candidate in candidates
+        }
         for future in as_completed(future_map):
             index = future_map[future]
             try:
                 snapshot = future.result()
             except Exception:
-                ctx["app"].logger.exception("runtime market price enrichment failed index=%s", index)
+                dependencies.application.logger.exception(
+                    "runtime market price enrichment failed index=%s",
+                    index,
+                )
                 continue
             runtime_price = snapshot.get("latestPrice") if snapshot else None
             if runtime_price not in (None, ""):
@@ -2389,17 +2518,30 @@ def enrich_market_rows_with_runtime_prices(
     return enriched_rows
 
 
-def enrich_market_rows_with_24h_change(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def enrich_market_rows_with_24h_change(
+    ctx: Mapping[str, Any],
+    rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    return _enrich_market_rows_with_24h_change(
+        MarketListDependencies.from_context(ctx),
+        rows,
+    )
+
+
+def _enrich_market_rows_with_24h_change(
+    dependencies: MarketListDependencies,
+    rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     market_ids = [int(row["id"]) for row in rows if row.get("id") is not None]
     if not market_ids:
         return rows
-    trade_source = ctx["get_existing_trade_read_source"]()
+    trade_source = dependencies.get_existing_trade_read_source()
     if trade_source is None:
         return rows
 
     placeholders = ", ".join("?" for _ in market_ids)
-    threshold = ctx["utc_date_days_ago"](1)
-    if ctx["_identifier_name"](trade_source) == ctx["TRADE_V2_CORE_TABLE"]:
+    threshold = dependencies.utc_date_days_ago(1)
+    if dependencies.identifier_name(trade_source) == dependencies.trade_v2_core_table:
         time_column = "block_time"
         order_columns = "block_time DESC, block_number DESC, log_index DESC"
         yes_price_expr = "CASE WHEN outcome_code = 2 THEN 1 - price ELSE price END"
@@ -2408,7 +2550,7 @@ def enrich_market_rows_with_24h_change(ctx: dict, rows: List[Dict[str, Any]]) ->
         order_columns = "timestamp DESC, block_number DESC, log_index DESC"
         yes_price_expr = "CASE WHEN UPPER(COALESCE(outcome, '')) = 'NO' THEN 1 - price ELSE price END"
 
-    price_rows = ctx["query_all"](
+    price_rows = dependencies.query_all(
         f"""
         SELECT market_id, price
         FROM (
@@ -2437,11 +2579,14 @@ def enrich_market_rows_with_24h_change(ctx: dict, rows: List[Dict[str, Any]]) ->
     return enriched_rows
 
 
-def _market_outcome_count(ctx: dict, row: Dict[str, Any]) -> int:
+def _market_outcome_count(
+    dependencies: MarketListDependencies,
+    row: Dict[str, Any],
+) -> int:
     native_count = int(row.get("native_outcome_count") or 0)
     if native_count > 1:
         return native_count
-    token_ids = ctx["parse_json_list"](row.get("clob_token_ids"))
+    token_ids = dependencies.parse_json_list(row.get("clob_token_ids"))
     if token_ids:
         return len(token_ids)
     yes_token = row.get("yes_token_id")
@@ -2449,14 +2594,18 @@ def _market_outcome_count(ctx: dict, row: Dict[str, Any]) -> int:
     return int(bool(yes_token)) + int(bool(no_token))
 
 
-def _market_change(ctx: dict, current: Any, past: Any) -> Any:
+def _market_change(
+    dependencies: MarketListDependencies,
+    current: Any,
+    past: Any,
+) -> Any:
     if current in (None, "") or past in (None, ""):
         return None
     try:
         delta = Decimal(str(current)) - Decimal(str(past))
     except (InvalidOperation, ValueError, TypeError):
         return None
-    return ctx["format_trade_decimal"](delta)
+    return dependencies.format_trade_decimal(delta)
 
 
 def _int_value(value: Any, default: int = 0) -> int:
@@ -2522,9 +2671,10 @@ def _market_status_from_snapshot(row: Dict[str, Any], now_iso: str) -> str:
     return "Active"
 
 
-def _is_postgres_ctx(ctx: dict) -> bool:
-    backend_getter = ctx.get("get_backend")
-    backend = str(backend_getter() if callable(backend_getter) else "").strip().lower()
+def _is_postgres_dependencies(dependencies: MarketListDependencies) -> bool:
+    backend = str(
+        dependencies.get_backend() if dependencies.get_backend is not None else ""
+    ).strip().lower()
     return backend in {"postgres", "postgresql"}
 
 
@@ -2538,16 +2688,22 @@ def _market_trade_count_24h(row: Dict[str, Any]) -> Optional[int]:
     return 0
 
 
-def _market_volume_24h(ctx: dict, row: Dict[str, Any]) -> Optional[str]:
+def _market_volume_24h(
+    dependencies: MarketListDependencies,
+    row: Dict[str, Any],
+) -> Optional[str]:
     volume = _decimal_from_any(row.get("volume_24h")) or Decimal("0")
     if volume > 0:
-        return ctx["format_trade_decimal"](volume)
+        return dependencies.format_trade_decimal(volume)
     if row.get("last_trade_at") not in (None, "") or row.get("latest_trade_at") not in (None, ""):
         return None
-    return ctx["format_trade_decimal"](volume)
+    return dependencies.format_trade_decimal(volume)
 
 
-def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
+def _market_list_item(
+    dependencies: MarketListDependencies,
+    row: Dict[str, Any],
+) -> Dict[str, Any]:
     return {
         "id": row.get("id"),
         "localMarketId": row.get("id"),
@@ -2562,19 +2718,31 @@ def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "price24hAgo": row.get("price_24h_ago"),
         "status": row.get("status"),
         "category": row.get("category") or "Uncategorized",
-        "tags": ctx["parse_json_list"](row.get("tags")),
-        "outcomeCount": _market_outcome_count(ctx, row),
-        "volume24h": _market_volume_24h(ctx, row),
+        "tags": dependencies.parse_json_list(row.get("tags")),
+        "outcomeCount": _market_outcome_count(dependencies, row),
+        "volume24h": _market_volume_24h(dependencies, row),
         "tradeCount24h": _market_trade_count_24h(row),
-        "change24h": row.get("change_24h") or _market_change(ctx, row.get("latest_price"), row.get("price_24h_ago")),
+        "change24h": row.get("change_24h")
+        or _market_change(
+            dependencies,
+            row.get("latest_price"),
+            row.get("price_24h_ago"),
+        ),
         "lastTradeAt": row.get("last_trade_at") or row.get("latest_trade_at"),
         **_settlement_payload(row),
     }
 
 
-def _merge_clickhouse_stats(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _merge_clickhouse_stats(
+    dependencies: MarketListDependencies,
+    rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     market_ids = [int(row["id"]) for row in rows if row.get("id") is not None]
-    stats = clickhouse_orderfilled_service.get_market_stats(ctx, market_ids, hours=24)
+    stats = clickhouse_orderfilled_service.get_market_stats(
+        dependencies.source,
+        market_ids,
+        hours=24,
+    )
     if not stats:
         return rows
     merged_rows: List[Dict[str, Any]] = []
@@ -2593,9 +2761,13 @@ def _merge_clickhouse_stats(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[
     return merged_rows
 
 
-def _clickhouse_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) -> List[Dict[str, Any]]:
+def _clickhouse_active_market_candidate_rows(
+    dependencies: MarketListDependencies,
+    now_iso: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
     activity_rows = clickhouse_orderfilled_service.get_recent_market_activity(
-        ctx,
+        dependencies.source,
         limit=max(int(limit) * 6, 200),
         hours=DEFAULT_ACTIVE_MARKET_ACTIVITY_HOURS,
     )
@@ -2611,7 +2783,7 @@ def _clickhouse_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int
         return []
     placeholders = ", ".join("?" for _ in market_ids)
     created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
-    detail_rows = ctx["query_all"](
+    detail_rows = dependencies.query_all(
         f"""
         SELECT
             m.id,
@@ -2725,12 +2897,18 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
         """
 
 
-def _event_serving_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) -> List[Dict[str, Any]]:
-    table_exists = ctx.get("table_exists")
-    if callable(table_exists) and not table_exists("event_market_serving"):
+def _event_serving_active_market_candidate_rows(
+    dependencies: MarketListDependencies,
+    now_iso: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    if (
+        dependencies.table_exists is not None
+        and not dependencies.table_exists("event_market_serving")
+    ):
         return []
     try:
-        rows = ctx["query_all"](
+        rows = dependencies.query_all(
             f"""
             WITH ranked_events AS (
                 SELECT
@@ -2808,31 +2986,37 @@ def _event_serving_active_market_candidate_rows(ctx: dict, now_iso: str, limit: 
             (now_iso, now_iso, int(limit)),
         )
     except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger:
             logger.exception("event-serving active market candidate query failed")
         return []
     return rows
 
 
-def _market_list_serving_has_rows(ctx: dict, min_rows: int = 1) -> bool:
-    table_exists = ctx.get("table_exists")
-    if not callable(table_exists):
+def _market_list_serving_has_rows(
+    dependencies: MarketListDependencies,
+    min_rows: int = 1,
+) -> bool:
+    if dependencies.table_exists is None:
         return True
-    if not table_exists("market_list_serving"):
+    if not dependencies.table_exists("market_list_serving"):
         return False
     min_rows = max(1, int(min_rows))
-    row = ctx["query_one"](
+    row = dependencies.query_one(
         "SELECT COUNT(*) AS c FROM market_list_serving WHERE volume_24h > 0 OR latest_price IS NOT NULL"
     )
     return bool(row and int(row.get("c") or 0) >= min_rows)
 
 
-def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) -> List[Dict[str, Any]]:
+def _fallback_active_market_candidate_rows(
+    dependencies: MarketListDependencies,
+    now_iso: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
     created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
-    if _is_postgres_ctx(ctx):
+    if _is_postgres_dependencies(dependencies):
         prelimit = max(int(limit) * 30, 5000)
-        return ctx["query_all"](
+        return dependencies.query_all(
             f"""
             WITH recent_markets AS MATERIALIZED (
                 SELECT
@@ -2887,7 +3071,7 @@ def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) 
             """,
             (now_iso, created_cutoff, prelimit, limit),
         )
-    return ctx["query_all"](
+    return dependencies.query_all(
         f"""
             SELECT
                 m.id,
@@ -2933,11 +3117,24 @@ def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) 
     )
 
 
-def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+def _get_market_detail_rows_by_ids(
+    ctx: Mapping[str, Any],
+    market_ids: List[int],
+) -> Dict[int, Dict[str, Any]]:
+    return _read_market_detail_rows_by_ids(
+        MarketListDependencies.from_context(ctx),
+        market_ids,
+    )
+
+
+def _read_market_detail_rows_by_ids(
+    dependencies: MarketListDependencies,
+    market_ids: List[int],
+) -> Dict[int, Dict[str, Any]]:
     if not market_ids:
         return {}
     placeholders = ", ".join("?" for _ in market_ids)
-    rows = ctx["query_all"](
+    rows = dependencies.query_all(
         f"""
             SELECT
                 m.id,
@@ -2987,14 +3184,31 @@ def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int
 
 
 def get_markets_payload(
-    ctx: dict,
+    ctx: Mapping[str, Any],
     *,
     status: str = "active",
     query: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> Dict[str, Any]:
-    now_iso = ctx["utc_now_iso"]()
+    return _get_markets_payload(
+        MarketListDependencies.from_context(ctx),
+        status=status,
+        query=query,
+        page=page,
+        page_size=page_size,
+    )
+
+
+def _get_markets_payload(
+    dependencies: MarketListDependencies,
+    *,
+    status: str = "active",
+    query: str = "",
+    page: int = 1,
+    page_size: int = 20,
+) -> Dict[str, Any]:
+    now_iso = dependencies.utc_now_iso()
     status = str(status or "active").strip().lower()
     query = str(query or "").strip()
     page = max(1, int(page))
@@ -3005,7 +3219,10 @@ def get_markets_payload(
     params: List[Any] = []
     recent_trade_cutoff = _iso_hours_before(now_iso, 24 * 7)
     created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
-    serving_has_rows = _market_list_serving_has_rows(ctx, min_rows=max(page_size * 10, 1000))
+    serving_has_rows = _market_list_serving_has_rows(
+        dependencies,
+        min_rows=max(page_size * 10, 1000),
+    )
     if status == "active":
         filters.append("(COALESCE(mss.is_trading_closed, FALSE) = FALSE AND COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))")
         params.append(now_iso)
@@ -3030,23 +3247,35 @@ def get_markets_payload(
     cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 7}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
-        return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=markets_runtime_prices_enabled())
+        return get_active_markets_snapshot(
+            dependencies.source,
+            page_size=page_size,
+            include_runtime_prices=markets_runtime_prices_enabled(),
+        )
 
     def build_payload() -> Dict[str, Any]:
         recent_14d_iso = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat().replace("+00:00", "Z")
         recent_30d_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
         raw_limit = min(5000, max((offset + page_size + 1) * 6, 180))
         clickhouse_candidate_rows = (
-            _clickhouse_active_market_candidate_rows(ctx, now_iso, raw_limit)
+            _clickhouse_active_market_candidate_rows(
+                dependencies,
+                now_iso,
+                raw_limit,
+            )
             if status == "active" and not query and active_market_clickhouse_primary_enabled()
             else []
         )
         if clickhouse_candidate_rows:
             candidate_rows = clickhouse_candidate_rows
         elif status == "active" and not query and not serving_has_rows:
-            candidate_rows = _fallback_active_market_candidate_rows(ctx, now_iso, raw_limit)
+            candidate_rows = _fallback_active_market_candidate_rows(
+                dependencies,
+                now_iso,
+                raw_limit,
+            )
         else:
-            candidate_rows = ctx["query_all"](
+            candidate_rows = dependencies.query_all(
                 f"""
                 SELECT
                     m.id,
@@ -3095,12 +3324,19 @@ def get_markets_payload(
                 [*params, recent_14d_iso, recent_30d_iso, raw_limit],
             )
         if status == "active" and serving_has_rows and not clickhouse_candidate_rows:
-            candidate_rows = _prefer_gamma_active_candidate_rows(ctx, candidate_rows, offset + page_size + 1)
+            candidate_rows = _prefer_gamma_active_candidate_rows(
+                dependencies,
+                candidate_rows,
+                offset + page_size + 1,
+            )
         working_candidates = candidate_rows[offset: offset + max(page_size * 3, page_size + 1)]
         if not working_candidates and candidate_rows:
             working_candidates = candidate_rows[: max(page_size * 3, page_size + 1)]
         visible_market_ids = [int(row["id"]) for row in working_candidates if row.get("id") is not None]
-        detail_rows = _get_market_detail_rows_by_ids(ctx, visible_market_ids)
+        detail_rows = _get_market_detail_rows_by_ids(
+            dependencies.source,
+            visible_market_ids,
+        )
         visible_rows: List[Dict[str, Any]] = []
         for candidate in working_candidates:
             market_id = candidate.get("id")
@@ -3138,12 +3374,12 @@ def get_markets_payload(
             visible_rows.append(normalized)
         max_runtime_updates = min(page_size, 40 if page_size >= 80 else (24 if page_size >= 40 else 16))
         visible_rows = enrich_market_rows_with_runtime_prices(
-            ctx,
+            dependencies.source,
             visible_rows,
             max_updates=max_runtime_updates,
         )
         if status == "active":
-            visible_rows = _merge_clickhouse_stats(ctx, visible_rows)
+            visible_rows = _merge_clickhouse_stats(dependencies, visible_rows)
         if status == "active":
             visible_rows = _prefer_tradeable_market_rows(visible_rows, page_size + 1)
             if not query:
@@ -3154,7 +3390,10 @@ def get_markets_payload(
         has_more = len(visible_rows) > page_size
         visible_rows = visible_rows[:page_size]
         return {
-            "items": [_market_list_item(ctx, row) for row in visible_rows],
+            "items": [
+                _market_list_item(dependencies, row)
+                for row in visible_rows
+            ],
             "pagination": {
                 "page": page,
                 "pageSize": page_size,
@@ -3164,31 +3403,57 @@ def get_markets_payload(
             },
         }
 
-    return ctx["get_markets_payload_cached"](cache_key, build_payload)
+    return dependencies.get_markets_payload_cached(cache_key, build_payload)
 
 
 def build_active_markets_payload(
-    ctx: dict,
+    ctx: Mapping[str, Any],
     page_size: int = 40,
     *,
     include_runtime_prices: bool = False,
     include_change_24h: bool = False,
 ) -> Dict[str, Any]:
-    now_iso = ctx["utc_now_iso"]()
+    return _build_active_markets_payload(
+        MarketListDependencies.from_context(ctx),
+        page_size=page_size,
+        include_runtime_prices=include_runtime_prices,
+        include_change_24h=include_change_24h,
+    )
+
+
+def _build_active_markets_payload(
+    dependencies: MarketListDependencies,
+    page_size: int = 40,
+    *,
+    include_runtime_prices: bool = False,
+    include_change_24h: bool = False,
+) -> Dict[str, Any]:
+    now_iso = dependencies.utc_now_iso()
     created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
     raw_limit = min(2500, max(page_size * 20, 300))
     clickhouse_candidate_rows = (
-        _clickhouse_active_market_candidate_rows(ctx, now_iso, raw_limit)
+        _clickhouse_active_market_candidate_rows(
+            dependencies,
+            now_iso,
+            raw_limit,
+        )
         if active_market_clickhouse_primary_enabled()
         else []
     )
-    event_candidate_rows = _event_serving_active_market_candidate_rows(ctx, now_iso, raw_limit)
+    event_candidate_rows = _event_serving_active_market_candidate_rows(
+        dependencies,
+        now_iso,
+        raw_limit,
+    )
     if clickhouse_candidate_rows:
         candidate_rows = clickhouse_candidate_rows
     elif event_candidate_rows:
         candidate_rows = event_candidate_rows
-    elif _market_list_serving_has_rows(ctx, min_rows=max(page_size * 10, 1000)):
-        volume_candidate_rows = ctx["query_all"](
+    elif _market_list_serving_has_rows(
+        dependencies,
+        min_rows=max(page_size * 10, 1000),
+    ):
+        volume_candidate_rows = dependencies.query_all(
             f"""
             {_active_market_candidate_select_sql("stats_24h")}
             ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
@@ -3196,7 +3461,7 @@ def build_active_markets_payload(
             """,
             (now_iso, created_cutoff, _iso_hours_before(now_iso, 24 * 7), raw_limit),
         )
-        recent_candidate_rows = ctx["query_all"](
+        recent_candidate_rows = dependencies.query_all(
             f"""
             {_active_market_candidate_select_sql("stats_24h")}
             ORDER BY m.created_at DESC, COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC
@@ -3206,7 +3471,11 @@ def build_active_markets_payload(
         )
         candidate_rows = _blend_recent_candidate_rows(volume_candidate_rows, recent_candidate_rows, page_size)
     else:
-        candidate_rows = _fallback_active_market_candidate_rows(ctx, now_iso, raw_limit)
+        candidate_rows = _fallback_active_market_candidate_rows(
+            dependencies,
+            now_iso,
+            raw_limit,
+        )
     candidate_stats_map = {
         int(row["id"]): {
             "trade_count_24h": row.get("trade_count_24h"),
@@ -3244,7 +3513,10 @@ def build_active_markets_payload(
         ordered_market_ids.append(int(market_id))
         if len(ordered_market_ids) >= max(page_size * 3, page_size):
             break
-    detail_rows = _get_market_detail_rows_by_ids(ctx, ordered_market_ids)
+    detail_rows = _get_market_detail_rows_by_ids(
+        dependencies.source,
+        ordered_market_ids,
+    )
     rows: List[Dict[str, Any]] = []
     for market_id in ordered_market_ids:
         detail_row = detail_rows.get(market_id)
@@ -3256,23 +3528,23 @@ def build_active_markets_payload(
         rows.append(normalized)
     if include_runtime_prices:
         rows = enrich_market_rows_with_runtime_prices(
-            ctx,
+            dependencies.source,
             rows,
             max_updates=min(page_size, 24),
             force_refresh=False,
         )
     if include_change_24h:
-        rows = enrich_market_rows_with_24h_change(ctx, rows)
-    rows = _merge_clickhouse_stats(ctx, rows)
+        rows = enrich_market_rows_with_24h_change(dependencies.source, rows)
+    rows = _merge_clickhouse_stats(dependencies, rows)
     rows = _prefer_tradeable_market_rows(rows, max(page_size * 3, page_size))
     rows = _rank_default_market_rows(rows, now_iso)
     rows = _interleave_market_category_rows(rows, max(page_size * 3, page_size))
     rows = _coalesce_native_market_rows(rows)
-    rows = _prefer_lob_ready_market_rows(ctx, rows, page_size)
+    rows = _prefer_lob_ready_market_rows(dependencies, rows, page_size)
     rows = _diversify_market_rows(rows, page_size, now_iso)
     rows = rows[:page_size]
     return {
-        "items": [_market_list_item(ctx, row) for row in rows],
+        "items": [_market_list_item(dependencies, row) for row in rows],
         "pagination": {"page": 1, "pageSize": page_size, "total": len(rows), "totalPages": 1, "hasMore": False},
     }
 
@@ -3294,7 +3566,22 @@ def _active_markets_payload_has_price_history_schema(payload: Any) -> bool:
 
 
 def get_active_markets_snapshot(
-    ctx: dict,
+    ctx: Mapping[str, Any],
+    page_size: int = 40,
+    *,
+    include_runtime_prices: bool = False,
+    include_change_24h: bool = False,
+) -> Dict[str, Any]:
+    return _get_active_markets_snapshot(
+        MarketListDependencies.from_context(ctx),
+        page_size=page_size,
+        include_runtime_prices=include_runtime_prices,
+        include_change_24h=include_change_24h,
+    )
+
+
+def _get_active_markets_snapshot(
+    dependencies: MarketListDependencies,
     page_size: int = 40,
     *,
     include_runtime_prices: bool = False,
@@ -3314,58 +3601,92 @@ def get_active_markets_snapshot(
         sort_keys=True,
         ensure_ascii=True,
     )
-    exact_payload = ctx["SNAPSHOT_STORE"].get(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key)
+    exact_payload = dependencies.snapshot_store.get(
+        ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
+        cache_key,
+    )
     exact_payload_was_empty = False
     if exact_payload is not None:
         exact_items = exact_payload.get("items") if isinstance(exact_payload, dict) else None
         if isinstance(exact_items, list) and exact_items:
-            ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, exact_payload, 60)
+            dependencies.set_cached_json(
+                ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
+                cache_key,
+                exact_payload,
+                60,
+            )
             return exact_payload
         exact_payload_was_empty = True
-        ctx["app"].logger.warning(
+        dependencies.application.logger.warning(
             "markets-active exact snapshot ignored because it is empty page_size=%s include_runtime_prices=%s",
             page_size,
             include_runtime_prices,
         )
 
     if markets_latest_snapshot_fallback_enabled() and not include_runtime_prices:
-        latest_payload = ctx["SNAPSHOT_STORE"].get_latest_stale(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, exclude_cache_key=cache_key)
-        fallback_payload = _trim_active_markets_payload(ctx, latest_payload, page_size)
+        latest_payload = dependencies.snapshot_store.get_latest_stale(
+            ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
+            exclude_cache_key=cache_key,
+        )
+        fallback_payload = _trim_active_markets_payload(
+            latest_payload,
+            page_size,
+        )
         if fallback_payload is not None and (
             not should_include_change_24h or _active_markets_payload_has_price_history_schema(fallback_payload)
         ):
-            ctx["app"].logger.info(
+            dependencies.application.logger.info(
                 "markets-active latest-snapshot-fallback page_size=%s include_runtime_prices=%s",
                 page_size,
                 include_runtime_prices,
             )
-            ctx["SNAPSHOT_STORE"].set(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, fallback_payload, 60)
-            ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, fallback_payload, 60)
+            dependencies.snapshot_store.set(
+                ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
+                cache_key,
+                fallback_payload,
+                60,
+            )
+            dependencies.set_cached_json(
+                ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
+                cache_key,
+                fallback_payload,
+                60,
+            )
             return fallback_payload
         if fallback_payload is not None:
-            ctx["app"].logger.info(
+            dependencies.application.logger.info(
                 "markets-active latest-snapshot-fallback skipped because cached schema lacks price24hAgo page_size=%s",
                 page_size,
             )
 
     if exact_payload_was_empty:
-        rebuilt_payload = build_active_markets_payload(
-            ctx,
+        rebuilt_payload = _build_active_markets_payload(
+            dependencies,
             page_size=page_size,
             include_runtime_prices=include_runtime_prices,
             include_change_24h=should_include_change_24h,
         )
         rebuilt_items = rebuilt_payload.get("items") if isinstance(rebuilt_payload, dict) else None
         if isinstance(rebuilt_items, list) and rebuilt_items:
-            ctx["SNAPSHOT_STORE"].set(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, rebuilt_payload, 60)
-            ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, rebuilt_payload, 60)
+            dependencies.snapshot_store.set(
+                ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
+                cache_key,
+                rebuilt_payload,
+                60,
+            )
+            dependencies.set_cached_json(
+                ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
+                cache_key,
+                rebuilt_payload,
+                60,
+            )
         return rebuilt_payload
 
-    return ctx["get_snapshot_payload"](
+    return dependencies.get_snapshot_payload(
         ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
         cache_key,
-        lambda: build_active_markets_payload(
-            ctx,
+        lambda: _build_active_markets_payload(
+            dependencies,
             page_size=page_size,
             include_runtime_prices=include_runtime_prices,
             include_change_24h=should_include_change_24h,
