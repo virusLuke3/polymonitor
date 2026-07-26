@@ -27,6 +27,8 @@ DEFAULT_ACTIVE_MARKET_ACTIVITY_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKE
 DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT = int(os.environ.get("POLYDATA_ACTIVE_MARKET_LOB_PREFETCH_LIMIT", "0"))
 DEFAULT_ACTIVE_MARKET_MIN_PRICE = Decimal(os.environ.get("POLYDATA_ACTIVE_MARKET_MIN_PRICE", "0.05"))
 DEFAULT_ACTIVE_MARKET_MAX_PRICE = Decimal(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_PRICE", "0.95"))
+DEFAULT_MARKET_SEARCH_ACTIVE_POOL_SIZE = 25000
+DEFAULT_MARKET_SEARCH_RECENT_POOL_SIZE = 20000
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
@@ -990,9 +992,66 @@ def _search_markets(
     prefix_pattern = f"{cleaned.lower()}%"
     contains_pattern = f"%{cleaned.lower()}%"
     candidate_limit = max(limit * 2, 100)
+    # Keep interactive searches bounded to active/recent markets. A zero-result
+    # query still falls back to the full GIN-indexed history, preserving lookup
+    # for old resolved markets without making common broad terms sort millions
+    # of registry rows.
     rows = dependencies.query_all(
-        """
-        WITH matched AS MATERIALIZED (
+        f"""
+        WITH candidate_ids AS MATERIALIZED (
+            SELECT market_id AS id
+            FROM (
+                SELECT mls.market_id
+                FROM market_list_serving mls
+                JOIN market_status_snapshot mss ON mss.market_id = mls.market_id
+                WHERE mss.is_trading_closed = FALSE
+                  AND mss.has_settle = FALSE
+                  AND mss.has_propose = FALSE
+                  AND mss.settlement_code = 0
+                  AND (
+                      mls.latest_price IS NOT NULL
+                      OR mls.volume_24h > 0
+                      OR mls.trade_count_24h > 0
+                      OR mls.last_trade_at IS NOT NULL
+                      OR mls.latest_trade_at IS NOT NULL
+                  )
+                ORDER BY
+                    mls.volume_24h DESC,
+                    mls.trade_count_24h DESC,
+                    mls.last_trade_at DESC NULLS LAST
+                LIMIT {DEFAULT_MARKET_SEARCH_ACTIVE_POOL_SIZE}
+            ) active_candidates
+            UNION
+            SELECT id
+            FROM (
+                SELECT m.id
+                FROM markets m
+                WHERE {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
+                ORDER BY m.created_at DESC NULLS LAST, m.id DESC
+                LIMIT {DEFAULT_MARKET_SEARCH_RECENT_POOL_SIZE}
+            ) recent_candidates
+        ),
+        priority_matched AS MATERIALIZED (
+            SELECT
+                m.id,
+                ts_rank_cd(
+                    to_tsvector(
+                        'simple',
+                        (((COALESCE(m.title, '') || ' ') || COALESCE(m.slug, '')) || ' ') || COALESCE(m.category, '')
+                    ),
+                    to_tsquery('simple', ?)
+                ) AS search_rank
+            FROM candidate_ids candidate
+            JOIN markets m ON m.id = candidate.id
+            WHERE to_tsvector(
+                'simple',
+                (((COALESCE(m.title, '') || ' ') || COALESCE(m.slug, '')) || ' ') || COALESCE(m.category, '')
+            ) @@ to_tsquery('simple', ?)
+              AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
+            ORDER BY search_rank DESC, m.created_at DESC
+            LIMIT 5000
+        ),
+        fallback_matched AS MATERIALIZED (
             SELECT
                 m.id,
                 ts_rank_cd(
@@ -1003,12 +1062,19 @@ def _search_markets(
                     to_tsquery('simple', ?)
                 ) AS search_rank
             FROM markets m
-            WHERE to_tsvector(
-                'simple',
-                (((COALESCE(m.title, '') || ' ') || COALESCE(m.slug, '')) || ' ') || COALESCE(m.category, '')
-            ) @@ to_tsquery('simple', ?)
+            WHERE NOT EXISTS (SELECT 1 FROM priority_matched)
+              AND to_tsvector(
+                  'simple',
+                  (((COALESCE(m.title, '') || ' ') || COALESCE(m.slug, '')) || ' ') || COALESCE(m.category, '')
+              ) @@ to_tsquery('simple', ?)
+              AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
             ORDER BY search_rank DESC, m.created_at DESC
             LIMIT 5000
+        ),
+        matched AS MATERIALIZED (
+            SELECT id, search_rank FROM priority_matched
+            UNION ALL
+            SELECT id, search_rank FROM fallback_matched
         )
         SELECT
             m.id,
@@ -1160,6 +1226,8 @@ def _search_markets(
         LIMIT ?
         """,
         (
+            ts_query,
+            ts_query,
             ts_query,
             ts_query,
             now_iso,
