@@ -32,12 +32,18 @@ SSH_OPTIONS=(
   -p "${DEPLOY_PORT}"
   -o BatchMode=yes
   -o ConnectTimeout=10
+  -o ConnectionAttempts=1
+  -o IPQoS=none
+  -o KexAlgorithms=curve25519-sha256
   -o StrictHostKeyChecking=yes
 )
 SCP_OPTIONS=(
   -P "${DEPLOY_PORT}"
   -o BatchMode=yes
   -o ConnectTimeout=10
+  -o ConnectionAttempts=1
+  -o IPQoS=none
+  -o KexAlgorithms=curve25519-sha256
   -o StrictHostKeyChecking=yes
 )
 if [[ -n "${DEPLOY_SSH_KEY}" ]]; then
