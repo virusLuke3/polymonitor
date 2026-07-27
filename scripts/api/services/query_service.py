@@ -5,13 +5,192 @@ import os
 import hashlib
 import re
 import threading
-from typing import Any, Dict, List
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, cast
 
+from api.context import resolve_service_callable, resolve_service_value
 from api.services import clickhouse_orderfilled_service
 
 
-def fetch_dashboard_market_status(ctx: dict, now_iso: str) -> List[Dict[str, Any]]:
-    return ctx["query_all"](
+def _service_callable(
+    context: Mapping[str, Any],
+    name: str,
+) -> Callable[..., Any]:
+    return cast(Callable[..., Any], resolve_service_callable(context, name))
+
+
+@dataclass(frozen=True)
+class DashboardStatusDependencies:
+    query_all: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> DashboardStatusDependencies:
+        return cls(
+            query_all=_service_callable(context, "query_all"),
+        )
+
+
+@dataclass(frozen=True)
+class RecentTradeWindowDependencies:
+    query_one: Callable[..., Any]
+    table_exists: Callable[..., Any]
+    get_existing_trade_read_source: Callable[..., Any]
+    identifier_name: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> RecentTradeWindowDependencies:
+        return cls(
+            query_one=_service_callable(context, "query_one"),
+            table_exists=_service_callable(context, "table_exists"),
+            get_existing_trade_read_source=_service_callable(
+                context,
+                "get_existing_trade_read_source",
+            ),
+            identifier_name=_service_callable(context, "_identifier_name"),
+        )
+
+
+@dataclass(frozen=True)
+class DashboardTradeVolumeDependencies:
+    query_all: Callable[..., Any]
+    get_existing_trade_read_source: Callable[..., Any]
+    utc_date_days_ago: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> DashboardTradeVolumeDependencies:
+        return cls(
+            query_all=_service_callable(context, "query_all"),
+            get_existing_trade_read_source=_service_callable(
+                context,
+                "get_existing_trade_read_source",
+            ),
+            utc_date_days_ago=_service_callable(
+                context,
+                "utc_date_days_ago",
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class DashboardRecentMarketsDependencies:
+    query_all: Callable[..., Any]
+    get_existing_trade_read_source: Callable[..., Any]
+    utc_date_days_ago: Callable[..., Any]
+    build_market_status_case: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> DashboardRecentMarketsDependencies:
+        return cls(
+            query_all=_service_callable(context, "query_all"),
+            get_existing_trade_read_source=_service_callable(
+                context,
+                "get_existing_trade_read_source",
+            ),
+            utc_date_days_ago=_service_callable(
+                context,
+                "utc_date_days_ago",
+            ),
+            build_market_status_case=_service_callable(
+                context,
+                "build_market_status_case",
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class TradeCountEstimateDependencies:
+    query_one: Callable[..., Any]
+    get_existing_trade_read_source: Callable[..., Any]
+    identifier_name: Callable[..., Any]
+    get_backend: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> TradeCountEstimateDependencies:
+        return cls(
+            query_one=_service_callable(context, "query_one"),
+            get_existing_trade_read_source=_service_callable(
+                context,
+                "get_existing_trade_read_source",
+            ),
+            identifier_name=_service_callable(context, "_identifier_name"),
+            get_backend=_service_callable(context, "get_backend"),
+        )
+
+
+@dataclass(frozen=True)
+class RecentTradeDependencies:
+    query_all: Callable[..., Any]
+    get_existing_trade_read_source: Callable[..., Any]
+    identifier_name: Callable[..., Any]
+    get_trade_market_projection_sql: Callable[..., Any]
+    normalize_trade: Callable[..., Any]
+    trade_v2_core_table: str
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> RecentTradeDependencies:
+        return cls(
+            query_all=_service_callable(context, "query_all"),
+            get_existing_trade_read_source=_service_callable(
+                context,
+                "get_existing_trade_read_source",
+            ),
+            identifier_name=_service_callable(context, "_identifier_name"),
+            get_trade_market_projection_sql=_service_callable(
+                context,
+                "get_trade_market_projection_sql",
+            ),
+            normalize_trade=_service_callable(context, "normalize_trade"),
+            trade_v2_core_table=cast(
+                str,
+                resolve_service_value(context, "TRADE_V2_CORE_TABLE"),
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class RecentOracleDependencies:
+    query_all: Callable[..., Any]
+    normalize_oracle_event: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> RecentOracleDependencies:
+        return cls(
+            query_all=_service_callable(context, "query_all"),
+            normalize_oracle_event=_service_callable(
+                context,
+                "normalize_oracle_event",
+            ),
+        )
+
+
+def fetch_dashboard_market_status(
+    ctx: Mapping[str, Any],
+    now_iso: str,
+) -> List[Dict[str, Any]]:
+    dependencies = DashboardStatusDependencies.from_context(ctx)
+    return dependencies.query_all(
         """
         SELECT status AS name, COUNT(*) AS value
         FROM (
@@ -32,10 +211,14 @@ def fetch_dashboard_market_status(ctx: dict, now_iso: str) -> List[Dict[str, Any
     )
 
 
-def fetch_recent_trade_window_bounds(ctx: dict, window_size: int) -> Dict[str, Any]:
-    if ctx["table_exists"]("market_trade_daily_stats"):
+def fetch_recent_trade_window_bounds(
+    ctx: Mapping[str, Any],
+    window_size: int,
+) -> Dict[str, Any]:
+    dependencies = RecentTradeWindowDependencies.from_context(ctx)
+    if dependencies.table_exists("market_trade_daily_stats"):
         summary_days = 30 if window_size >= 50000 else 7
-        summary_row = ctx["query_one"](
+        summary_row = dependencies.query_one(
             """
             SELECT
                 COALESCE(SUM(day_rows.trade_count), 0) AS trade_count,
@@ -58,10 +241,10 @@ def fetch_recent_trade_window_bounds(ctx: dict, window_size: int) -> Dict[str, A
             summary_row["source"] = f"market_trade_daily_stats:{summary_days}d"
             return summary_row
 
-    trade_source = ctx["get_existing_trade_read_source"]()
+    trade_source = dependencies.get_existing_trade_read_source()
     if trade_source is None:
         return {"trade_count": 0, "earliest_timestamp": None, "latest_timestamp": None, "source": "none"}
-    payload = ctx["query_one"](
+    payload = dependencies.query_one(
         f"""
         SELECT
             COUNT(*) AS trade_count,
@@ -76,13 +259,17 @@ def fetch_recent_trade_window_bounds(ctx: dict, window_size: int) -> Dict[str, A
         """,
         (window_size,),
     )
-    payload["source"] = ctx["_identifier_name"](trade_source)
+    payload["source"] = dependencies.identifier_name(trade_source)
     return payload
 
 
-def fetch_dashboard_trade_volume(ctx: dict, window_size: int) -> List[Dict[str, Any]]:
-    summary_threshold = ctx["utc_date_days_ago"](30)
-    summary_rows = ctx["query_all"](
+def fetch_dashboard_trade_volume(
+    ctx: Mapping[str, Any],
+    window_size: int,
+) -> List[Dict[str, Any]]:
+    dependencies = DashboardTradeVolumeDependencies.from_context(ctx)
+    summary_threshold = dependencies.utc_date_days_ago(30)
+    summary_rows = dependencies.query_all(
         """
         SELECT trade_date AS day, SUM(trade_count) AS trade_count
         FROM market_trade_daily_stats
@@ -94,10 +281,10 @@ def fetch_dashboard_trade_volume(ctx: dict, window_size: int) -> List[Dict[str, 
     )
     if summary_rows:
         return summary_rows
-    trade_source = ctx["get_existing_trade_read_source"]()
+    trade_source = dependencies.get_existing_trade_read_source()
     if trade_source is None:
         return []
-    return ctx["query_all"](
+    return dependencies.query_all(
         f"""
         SELECT day, COUNT(*) AS trade_count
         FROM (
@@ -113,10 +300,15 @@ def fetch_dashboard_trade_volume(ctx: dict, window_size: int) -> List[Dict[str, 
     )
 
 
-def fetch_dashboard_recent_markets(ctx: dict, now_iso: str, window_size: int) -> List[Dict[str, Any]]:
-    status_case = ctx["build_market_status_case"](now_iso)
-    summary_threshold = ctx["utc_date_days_ago"](30)
-    summary_rows = ctx["query_all"](
+def fetch_dashboard_recent_markets(
+    ctx: Mapping[str, Any],
+    now_iso: str,
+    window_size: int,
+) -> List[Dict[str, Any]]:
+    dependencies = DashboardRecentMarketsDependencies.from_context(ctx)
+    status_case = dependencies.build_market_status_case(now_iso)
+    summary_threshold = dependencies.utc_date_days_ago(30)
+    summary_rows = dependencies.query_all(
         f"""
         WITH activity AS (
             SELECT
@@ -149,10 +341,10 @@ def fetch_dashboard_recent_markets(ctx: dict, now_iso: str, window_size: int) ->
     if summary_rows:
         return summary_rows
 
-    trade_source = ctx["get_existing_trade_read_source"]()
+    trade_source = dependencies.get_existing_trade_read_source()
     if trade_source is None:
         return []
-    return ctx["query_all"](
+    return dependencies.query_all(
         f"""
         WITH recent_trades AS (
             SELECT market_id, timestamp, price, block_number, log_index
@@ -201,29 +393,35 @@ def fetch_dashboard_recent_markets(ctx: dict, now_iso: str, window_size: int) ->
     )
 
 
-def fetch_trade_count_estimate(ctx: dict) -> Dict[str, Any]:
-    trade_source = ctx["get_existing_trade_read_source"]()
+def fetch_trade_count_estimate(
+    ctx: Mapping[str, Any],
+) -> Dict[str, Any]:
+    dependencies = TradeCountEstimateDependencies.from_context(ctx)
+    trade_source = dependencies.get_existing_trade_read_source()
     if trade_source is None:
         return {"table_rows": 0, "auto_increment": 0}
-    if ctx["get_backend"]() == "sqlite":
-        return ctx["query_one"](
+    if dependencies.get_backend() == "sqlite":
+        return dependencies.query_one(
             f"""
             SELECT COUNT(*) AS table_rows, COALESCE(MAX(id), 0) AS auto_increment
             FROM {trade_source}
             """
         )
-    return ctx["query_one"](
+    return dependencies.query_one(
         f"""
         SELECT
             COALESCE(table_rows, 0) AS table_rows,
             COALESCE(auto_increment, 0) AS auto_increment
         FROM information_schema.tables
-        WHERE table_schema = DATABASE() AND table_name = '{ctx["_identifier_name"](trade_source)}'
+        WHERE table_schema = DATABASE() AND table_name = '{dependencies.identifier_name(trade_source)}'
         """
     )
 
 
-def get_recent_trades(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
+def get_recent_trades(
+    ctx: Mapping[str, Any],
+    limit: int = 24,
+) -> List[Dict[str, Any]]:
     clickhouse_rows = clickhouse_orderfilled_service.get_recent_trades(ctx, limit=limit)
     if clickhouse_rows is not None:
         return clickhouse_rows
@@ -236,14 +434,15 @@ def get_recent_trades(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
         }
         if not fallback_enabled:
             raise RuntimeError("ClickHouse OrderFilled read is enabled but unavailable")
-    trade_source = ctx["get_existing_trade_read_source"]()
+    dependencies = RecentTradeDependencies.from_context(ctx)
+    trade_source = dependencies.get_existing_trade_read_source()
     if trade_source is None:
         return []
-    if ctx["_identifier_name"](trade_source) == ctx["TRADE_V2_CORE_TABLE"]:
-        rows = ctx["query_all"](
+    if dependencies.identifier_name(trade_source) == dependencies.trade_v2_core_table:
+        rows = dependencies.query_all(
             f"""
             SELECT
-                {ctx['get_trade_market_projection_sql']('t')},
+                {dependencies.get_trade_market_projection_sql('t')},
                 m.title AS market_title
             FROM {trade_source} t
             LEFT JOIN markets m ON m.id = t.market_id
@@ -254,7 +453,7 @@ def get_recent_trades(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
             (limit,),
         )
     else:
-        rows = ctx["query_all"](
+        rows = dependencies.query_all(
             f"""
             SELECT
                 tx_hash, log_index, market_id, maker, taker, price, size, side, outcome,
@@ -268,11 +467,15 @@ def get_recent_trades(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
             """,
             (limit,),
         )
-    return [ctx["normalize_trade"](row) for row in rows]
+    return [dependencies.normalize_trade(row) for row in rows]
 
 
-def get_recent_oracle_events(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]:
-    rows = ctx["query_all"](
+def get_recent_oracle_events(
+    ctx: Mapping[str, Any],
+    limit: int = 24,
+) -> List[Dict[str, Any]]:
+    dependencies = RecentOracleDependencies.from_context(ctx)
+    rows = dependencies.query_all(
         """
         SELECT
             oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
@@ -295,7 +498,7 @@ def get_recent_oracle_events(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]
         """,
         (limit,),
     )
-    return [ctx["normalize_oracle_event"](row) for row in rows]
+    return [dependencies.normalize_oracle_event(row) for row in rows]
 
 
 def _api_readonly() -> bool:
