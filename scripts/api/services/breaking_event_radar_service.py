@@ -5,9 +5,16 @@ import json
 import os
 import re
 import threading
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import quote
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+)
 
 
 PANEL_ID = "breaking-event-radar"
@@ -73,11 +80,63 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
 ]
 
 
-def _utc_now_iso(ctx: dict | None = None) -> str:
-    if ctx:
-        getter = ctx.get("utc_now_iso")
-        if callable(getter):
-            return getter()
+@dataclass(frozen=True)
+class BreakingEventRadarDependencies:
+    utc_now_iso: Callable[..., Any] | None
+    settings: Any
+    http_json_get: Callable[..., Any] | None
+    search_markets: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+    set_cached_json: Callable[..., Any] | None
+    application: Any
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> BreakingEventRadarDependencies:
+        return cls(
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            settings=resolve_optional_service_value(
+                context,
+                "SETTINGS",
+            ),
+            http_json_get=resolve_optional_service_callable(
+                context,
+                "http_json_get",
+            ),
+            search_markets=resolve_optional_service_callable(
+                context,
+                "search_markets",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            application=resolve_optional_service_value(
+                context,
+                "app",
+            ),
+        )
+
+
+def _utc_now_iso(
+    dependencies: BreakingEventRadarDependencies | None = None,
+) -> str:
+    if dependencies is not None and dependencies.utc_now_iso is not None:
+        return dependencies.utc_now_iso()
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -128,30 +187,42 @@ def _load_topic_seeds() -> List[Dict[str, Any]]:
     return DEFAULT_TOPIC_SEEDS
 
 
-def _gdelt_url(ctx: dict) -> str:
-    settings = ctx.get("SETTINGS")
+def _gdelt_url(dependencies: BreakingEventRadarDependencies) -> str:
     return str(
         os.environ.get("POLYDATA_BREAKING_EVENT_GDELT_DOC_API_URL")
-        or getattr(settings, "breaking_event_gdelt_doc_api_url", "")
+        or getattr(
+            dependencies.settings,
+            "breaking_event_gdelt_doc_api_url",
+            "",
+        )
         or GDELT_DOC_API_URL
     ).strip()
 
 
-def _wikimedia_base_url(ctx: dict) -> str:
-    settings = ctx.get("SETTINGS")
+def _wikimedia_base_url(
+    dependencies: BreakingEventRadarDependencies,
+) -> str:
     return str(
         os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_PAGEVIEWS_BASE_URL")
-        or getattr(settings, "breaking_event_wikimedia_pageviews_base_url", "")
+        or getattr(
+            dependencies.settings,
+            "breaking_event_wikimedia_pageviews_base_url",
+            "",
+        )
         or WIKIMEDIA_PAGEVIEWS_BASE_URL
     ).rstrip("/")
 
 
-def _fetch_gdelt_articles(ctx: dict, seed: Dict[str, Any], *, max_records: int) -> List[Dict[str, Any]]:
-    getter = ctx.get("http_json_get")
-    if not callable(getter):
+def _fetch_gdelt_articles(
+    dependencies: BreakingEventRadarDependencies,
+    seed: Dict[str, Any],
+    *,
+    max_records: int,
+) -> List[Dict[str, Any]]:
+    if dependencies.http_json_get is None:
         raise RuntimeError("http_json_get helper missing")
-    payload = getter(
-        _gdelt_url(ctx),
+    payload = dependencies.http_json_get(
+        _gdelt_url(dependencies),
         params={
             "query": str(seed.get("query") or ""),
             "mode": "artlist",
@@ -166,16 +237,27 @@ def _fetch_gdelt_articles(ctx: dict, seed: Dict[str, Any], *, max_records: int) 
     return [row for row in articles if isinstance(row, dict)]
 
 
-def _fetch_pageviews(ctx: dict, title: str, *, days: int = 7) -> Dict[str, Any]:
-    getter = ctx.get("http_json_get")
-    if not callable(getter):
+def _fetch_pageviews(
+    dependencies: BreakingEventRadarDependencies,
+    title: str,
+    *,
+    days: int = 7,
+) -> Dict[str, Any]:
+    if dependencies.http_json_get is None:
         raise RuntimeError("http_json_get helper missing")
     end = datetime.now(timezone.utc).date()
     start = end - timedelta(days=max(2, days))
     encoded_title = quote(str(title or "").replace(" ", "_"), safe="")
-    url = f"{_wikimedia_base_url(ctx)}/{encoded_title}/daily/{start:%Y%m%d}/{end:%Y%m%d}"
+    url = f"{_wikimedia_base_url(dependencies)}/{encoded_title}/daily/{start:%Y%m%d}/{end:%Y%m%d}"
     timeout = max(2, min(int(os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_TIMEOUT_SECONDS", "4") or 4), 12))
-    payload = getter(url, timeout=timeout, headers={"Accept": "application/json", "User-Agent": "polydata-breaking-event-radar/1.0"})
+    payload = dependencies.http_json_get(
+        url,
+        timeout=timeout,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "polydata-breaking-event-radar/1.0",
+        },
+    )
     items = payload.get("items") if isinstance(payload, dict) else []
     views = [int(row.get("views") or 0) for row in items if isinstance(row, dict)]
     latest = views[-1] if views else 0
@@ -194,7 +276,12 @@ def _article_time(article: Dict[str, Any]) -> str:
     return parsed.isoformat().replace("+00:00", "Z") if parsed else ""
 
 
-def _build_event_item(ctx: dict, seed: Dict[str, Any], articles: List[Dict[str, Any]], pageviews: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_event_item(
+    dependencies: BreakingEventRadarDependencies,
+    seed: Dict[str, Any],
+    articles: List[Dict[str, Any]],
+    pageviews: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     domains = sorted({str(row.get("domain") or row.get("sourceCommonName") or "").strip() for row in articles if row.get("domain") or row.get("sourceCommonName")})
     countries = sorted({str(row.get("sourcecountry") or row.get("country") or "").strip() for row in articles if row.get("sourcecountry") or row.get("country")})
     latest_article = max(articles, key=lambda row: _timestamp(row.get("seendate") or row.get("datetime") or row.get("date")), default={})
@@ -205,7 +292,12 @@ def _build_event_item(ctx: dict, seed: Dict[str, Any], articles: List[Dict[str, 
     velocity = min(100, int(mention_count * 5 + source_diversity * 8 + country_spread * 3 + max(0.0, wiki_delta) * 0.15))
     confidence = min(0.98, 0.35 + min(mention_count, 20) * 0.02 + min(source_diversity, 8) * 0.04 + (0.08 if pageviews else 0.0))
     query = str(seed.get("entity") or seed.get("query") or "")
-    markets = _match_markets(ctx, query, topic=str(seed.get("topic") or ""), limit=4)
+    markets = _match_markets(
+        dependencies,
+        query,
+        topic=str(seed.get("topic") or ""),
+        limit=4,
+    )
     source_url = str(latest_article.get("url") or latest_article.get("shareurl") or GDELT_DOC_API_URL)
     return {
         "id": _stable_id(seed.get("id"), _article_title(latest_article), source_url),
@@ -215,7 +307,8 @@ def _build_event_item(ctx: dict, seed: Dict[str, Any], articles: List[Dict[str, 
         "team": None,
         "title": _article_title(latest_article) if latest_article else str(seed.get("entity") or "Source warming"),
         "summary": str(latest_article.get("description") or latest_article.get("summary") or seed.get("query") or "")[:260],
-        "eventTime": _article_time(latest_article) or _utc_now_iso(ctx),
+        "eventTime": _article_time(latest_article)
+        or _utc_now_iso(dependencies),
         "source": str(latest_article.get("domain") or latest_article.get("sourceCommonName") or "GDELT"),
         "sourceUrl": source_url,
         "evidenceType": "WIRE",
@@ -255,12 +348,17 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _match_markets(ctx: dict, query: str, *, topic: str, limit: int) -> List[Dict[str, Any]]:
-    search = ctx.get("search_markets")
-    if not callable(search) or not query:
+def _match_markets(
+    dependencies: BreakingEventRadarDependencies,
+    query: str,
+    *,
+    topic: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    if dependencies.search_markets is None or not query:
         return []
     try:
-        rows = search(query, limit=limit)
+        rows = dependencies.search_markets(query, limit=limit)
     except Exception:
         return []
     markets: List[Dict[str, Any]] = []
@@ -294,7 +392,22 @@ def _summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def build_breaking_event_radar_payload(ctx: dict, *, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
+def build_breaking_event_radar_payload(
+    ctx: Mapping[str, Any],
+    *,
+    limit: int = DEFAULT_LIMIT,
+) -> Dict[str, Any]:
+    return _build_breaking_event_radar_payload(
+        BreakingEventRadarDependencies.from_context(ctx),
+        limit=limit,
+    )
+
+
+def _build_breaking_event_radar_payload(
+    dependencies: BreakingEventRadarDependencies,
+    *,
+    limit: int,
+) -> Dict[str, Any]:
     max_records = max(5, min(int(os.environ.get("POLYDATA_BREAKING_EVENT_GDELT_MAX_RECORDS", "20") or 20), 50))
     wikimedia_enabled = str(os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "on"}
     max_wiki_titles = max(0, min(int(os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_TITLES_PER_TOPIC", "1") or 1), 4))
@@ -306,7 +419,11 @@ def build_breaking_event_radar_payload(ctx: dict, *, limit: int = DEFAULT_LIMIT)
         articles: List[Dict[str, Any]] = []
         pageviews: List[Dict[str, Any]] = []
         try:
-            articles = _fetch_gdelt_articles(ctx, seed, max_records=max_records)
+            articles = _fetch_gdelt_articles(
+                dependencies,
+                seed,
+                max_records=max_records,
+            )
             sources["gdelt"]["count"] += len(articles)
             sources["gdelt"]["status"] = "ok" if articles else sources["gdelt"]["status"]
         except Exception as exc:
@@ -315,7 +432,9 @@ def build_breaking_event_radar_payload(ctx: dict, *, limit: int = DEFAULT_LIMIT)
         if wikimedia_enabled and max_wiki_titles > 0:
             for title in (seed.get("wikiTitles") or [])[:max_wiki_titles]:
                 try:
-                    pageviews.append(_fetch_pageviews(ctx, str(title)))
+                    pageviews.append(
+                        _fetch_pageviews(dependencies, str(title))
+                    )
                     sources["wikimedia"]["count"] += 1
                     sources["wikimedia"]["status"] = "ok"
                 except Exception as exc:
@@ -325,18 +444,25 @@ def build_breaking_event_radar_payload(ctx: dict, *, limit: int = DEFAULT_LIMIT)
         elif not wikimedia_enabled:
             sources["wikimedia"]["status"] = "disabled"
         if articles or pageviews:
-            items.append(_build_event_item(ctx, seed, articles, pageviews))
+            items.append(
+                _build_event_item(
+                    dependencies,
+                    seed,
+                    articles,
+                    pageviews,
+                )
+            )
     items.sort(key=lambda row: (int(row.get("velocityScore") or 0), str(row.get("eventTime") or "")), reverse=True)
     limited = items[: max(1, min(int(limit or DEFAULT_LIMIT), 80))]
     status = "ok" if limited and not errors else "degraded" if limited else "empty" if not errors else "degraded"
     return {
         "panelId": PANEL_ID,
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "status": status,
         "cacheMode": "live-build",
         "freshness": "live" if status == "ok" else "degraded" if limited else "warming",
         "source": "GDELT + Wikimedia Pageviews",
-        "sourceUrl": _gdelt_url(ctx),
+        "sourceUrl": _gdelt_url(dependencies),
         "sources": sources,
         "summary": _summary(limited),
         "items": limited,
@@ -344,15 +470,20 @@ def build_breaking_event_radar_payload(ctx: dict, *, limit: int = DEFAULT_LIMIT)
     }
 
 
-def _empty_payload(ctx: dict, *, status: str = "warming", cache_mode: str = "warming") -> Dict[str, Any]:
+def _empty_payload(
+    dependencies: BreakingEventRadarDependencies,
+    *,
+    status: str = "warming",
+    cache_mode: str = "warming",
+) -> Dict[str, Any]:
     return {
         "panelId": PANEL_ID,
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "status": status,
         "cacheMode": cache_mode,
         "freshness": "warming",
         "source": "GDELT + Wikimedia Pageviews",
-        "sourceUrl": _gdelt_url(ctx),
+        "sourceUrl": _gdelt_url(dependencies),
         "sources": {},
         "summary": _summary([]),
         "items": [],
@@ -360,19 +491,45 @@ def _empty_payload(ctx: dict, *, status: str = "warming", cache_mode: str = "war
     }
 
 
-def normalize_breaking_event_radar_payload(payload: Any, *, ctx: dict, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
+def normalize_breaking_event_radar_payload(
+    payload: Any,
+    *,
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_LIMIT,
+) -> Dict[str, Any]:
+    return _normalize_breaking_event_radar_payload(
+        payload,
+        dependencies=BreakingEventRadarDependencies.from_context(ctx),
+        limit=limit,
+    )
+
+
+def _normalize_breaking_event_radar_payload(
+    payload: Any,
+    *,
+    dependencies: BreakingEventRadarDependencies,
+    limit: int,
+) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        return _empty_payload(ctx, status="invalid", cache_mode="invalid")
+        return _empty_payload(
+            dependencies,
+            status="invalid",
+            cache_mode="invalid",
+        )
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     items = [item for item in result.get("items") or [] if isinstance(item, dict)]
     result["items"] = items[: max(1, min(int(limit or DEFAULT_LIMIT), 80))]
     result["panelId"] = str(result.get("panelId") or PANEL_ID)
-    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["generatedAt"] = str(
+        result.get("generatedAt") or _utc_now_iso(dependencies)
+    )
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
     result["cacheMode"] = str(result.get("cacheMode") or "seeded")
     result["freshness"] = str(result.get("freshness") or ("live" if result["status"] == "ok" else "degraded"))
     result["source"] = str(result.get("source") or "GDELT + Wikimedia Pageviews")
-    result["sourceUrl"] = str(result.get("sourceUrl") or _gdelt_url(ctx))
+    result["sourceUrl"] = str(
+        result.get("sourceUrl") or _gdelt_url(dependencies)
+    )
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(result["items"])
     result["summary"] = {**_summary(result["items"]), **result["summary"]}
@@ -385,13 +542,17 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": cache_mode, "freshness": payload.get("freshness") or freshness}
 
 
-def _read_seeded_snapshot(ctx: dict) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        payload = reader(BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE, BREAKING_EVENT_RADAR_CACHE_KEY)
+def _read_seeded_snapshot(
+    dependencies: BreakingEventRadarDependencies,
+) -> Optional[Dict[str, Any]]:
+    if dependencies.get_cached_json is not None:
+        payload = dependencies.get_cached_json(
+            BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE,
+            BREAKING_EVENT_RADAR_CACHE_KEY,
+        )
         if isinstance(payload, dict):
             return _with_cache_mode(payload, "redis-seed")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is None:
         return None
     payload = store.get(BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE, BREAKING_EVENT_RADAR_CACHE_KEY)
@@ -403,16 +564,31 @@ def _read_seeded_snapshot(ctx: dict) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _store_live(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
-    store = ctx.get("SNAPSHOT_STORE")
+def _store_live(
+    dependencies: BreakingEventRadarDependencies,
+    payload: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+) -> None:
+    store = dependencies.snapshot_store
     if store is not None:
         store.set(BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE, BREAKING_EVENT_RADAR_CACHE_KEY, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
-        setter(BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE, BREAKING_EVENT_RADAR_CACHE_KEY, payload, ttl_seconds)
+    if dependencies.set_cached_json is not None:
+        dependencies.set_cached_json(
+            BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE,
+            BREAKING_EVENT_RADAR_CACHE_KEY,
+            payload,
+            ttl_seconds,
+        )
 
 
-def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: str) -> bool:
+def _schedule_live_refresh(
+    dependencies: BreakingEventRadarDependencies,
+    *,
+    limit: int,
+    ttl_seconds: int,
+    reason: str,
+) -> bool:
     refresh_key = f"{BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE}:{BREAKING_EVENT_RADAR_CACHE_KEY}"
     with _LIVE_REFRESH_LOCK:
         if refresh_key in _LIVE_REFRESHING:
@@ -420,11 +596,21 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
         _LIVE_REFRESHING.add(refresh_key)
 
     def refresh() -> None:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         try:
-            payload = {**build_breaking_event_radar_payload(ctx, limit=limit), "cacheMode": "live-build"}
+            payload = {
+                **_build_breaking_event_radar_payload(
+                    dependencies,
+                    limit=limit,
+                ),
+                "cacheMode": "live-build",
+            }
             if payload.get("items"):
-                _store_live(ctx, payload, ttl_seconds=ttl_seconds)
+                _store_live(
+                    dependencies,
+                    payload,
+                    ttl_seconds=ttl_seconds,
+                )
             elif logger is not None and hasattr(logger, "warning"):
                 logger.warning("breaking event radar refresh skipped empty payload reason=%s", reason)
         except Exception:
@@ -439,15 +625,43 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
     return True
 
 
-def get_breaking_event_radar_snapshot(ctx: dict, limit: int = DEFAULT_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
+def get_breaking_event_radar_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_LIMIT,
+    *,
+    allow_live_build: bool = True,
+) -> Dict[str, Any]:
+    dependencies = BreakingEventRadarDependencies.from_context(ctx)
     ttl_seconds = max(120, int(os.environ.get("POLYDATA_BREAKING_EVENT_RADAR_TTL_SECONDS", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
-    seeded = _read_seeded_snapshot(ctx)
+    seeded = _read_seeded_snapshot(dependencies)
     if seeded is not None:
         if allow_live_build and seeded.get("cacheMode") == "stale-seed":
-            _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="stale-seed")
-        return normalize_breaking_event_radar_payload(seeded, ctx=ctx, limit=limit)
+            _schedule_live_refresh(
+                dependencies,
+                limit=limit,
+                ttl_seconds=ttl_seconds,
+                reason="stale-seed",
+            )
+        return _normalize_breaking_event_radar_payload(
+            seeded,
+            dependencies=dependencies,
+            limit=limit,
+        )
     if not allow_live_build:
-        return normalize_breaking_event_radar_payload(_empty_payload(ctx, cache_mode="seed-miss"), ctx=ctx, limit=limit)
-    scheduled = _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="seed-miss")
+        return _normalize_breaking_event_radar_payload(
+            _empty_payload(dependencies, cache_mode="seed-miss"),
+            dependencies=dependencies,
+            limit=limit,
+        )
+    scheduled = _schedule_live_refresh(
+        dependencies,
+        limit=limit,
+        ttl_seconds=ttl_seconds,
+        reason="seed-miss",
+    )
     mode = "seed-miss-refreshing" if scheduled else "seed-miss-refresh-inflight"
-    return normalize_breaking_event_radar_payload(_empty_payload(ctx, cache_mode=mode), ctx=ctx, limit=limit)
+    return _normalize_breaking_event_radar_payload(
+        _empty_payload(dependencies, cache_mode=mode),
+        dependencies=dependencies,
+        limit=limit,
+    )
