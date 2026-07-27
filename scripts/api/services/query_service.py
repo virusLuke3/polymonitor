@@ -185,6 +185,104 @@ class RecentOracleDependencies:
         )
 
 
+@dataclass(frozen=True)
+class ContentStorageDependencies:
+    application: Any
+    database_path: str
+    get_backend: Callable[..., Any]
+    table_exists: Callable[..., Any]
+    get_connection: Callable[..., Any]
+    query_all: Callable[..., Any]
+    query_one: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> ContentStorageDependencies:
+        return cls(
+            application=resolve_service_value(context, "app"),
+            database_path=cast(
+                str,
+                resolve_service_value(context, "DB_PATH"),
+            ),
+            get_backend=_service_callable(context, "get_backend"),
+            table_exists=_service_callable(context, "table_exists"),
+            get_connection=_service_callable(context, "get_connection"),
+            query_all=_service_callable(context, "query_all"),
+            query_one=_service_callable(context, "query_one"),
+        )
+
+
+@dataclass(frozen=True)
+class ContentRefreshDependencies:
+    storage: ContentStorageDependencies
+    content_runtime_provider: Any
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> ContentRefreshDependencies:
+        return cls(
+            storage=ContentStorageDependencies.from_context(context),
+            content_runtime_provider=resolve_service_value(
+                context,
+                "CONTENT_RUNTIME_PROVIDER",
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class RelatedContentQueryDependencies:
+    storage: ContentStorageDependencies
+    content_runtime_provider: Any
+    get_market_by_id: Callable[..., Any]
+    parse_json_list: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> RelatedContentQueryDependencies:
+        return cls(
+            storage=ContentStorageDependencies.from_context(context),
+            content_runtime_provider=resolve_service_value(
+                context,
+                "CONTENT_RUNTIME_PROVIDER",
+            ),
+            get_market_by_id=_service_callable(
+                context,
+                "get_market_by_id",
+            ),
+            parse_json_list=_service_callable(context, "parse_json_list"),
+        )
+
+
+@dataclass(frozen=True)
+class LatestContentQueryDependencies:
+    storage: ContentStorageDependencies
+    content_runtime_provider: Any
+    get_snapshot_payload: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> LatestContentQueryDependencies:
+        return cls(
+            storage=ContentStorageDependencies.from_context(context),
+            content_runtime_provider=resolve_service_value(
+                context,
+                "CONTENT_RUNTIME_PROVIDER",
+            ),
+            get_snapshot_payload=_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+        )
+
+
 def fetch_dashboard_market_status(
     ctx: Mapping[str, Any],
     now_iso: str,
@@ -543,27 +641,32 @@ _CONTENT_TABLES_ENSURED_CACHE: set[str] = set()
 _CONTENT_TABLE_EXISTS_LOCK = threading.Lock()
 
 
-def _content_table_exists(ctx: dict, table_name: str) -> bool:
-    backend = str(ctx["get_backend"]() or "").lower()
+def _content_table_exists(
+    dependencies: ContentStorageDependencies,
+    table_name: str,
+) -> bool:
+    backend = str(dependencies.get_backend() or "").lower()
     key = (backend, table_name)
     with _CONTENT_TABLE_EXISTS_LOCK:
         cached = _CONTENT_TABLE_EXISTS_CACHE.get(key)
     if cached is not None:
         return cached
-    exists = bool(ctx["table_exists"](table_name))
+    exists = bool(dependencies.table_exists(table_name))
     with _CONTENT_TABLE_EXISTS_LOCK:
         _CONTENT_TABLE_EXISTS_CACHE[key] = exists
     return exists
 
 
-def _ensure_content_tables(ctx: dict) -> None:
+def _ensure_content_tables(
+    dependencies: ContentStorageDependencies,
+) -> None:
     if _api_readonly():
         return
-    backend = str(ctx["get_backend"]() or "").lower()
+    backend = str(dependencies.get_backend() or "").lower()
     with _CONTENT_TABLE_EXISTS_LOCK:
         if backend in _CONTENT_TABLES_ENSURED_CACHE:
             return
-    conn = ctx["get_connection"](ctx["DB_PATH"])
+    conn = dependencies.get_connection(dependencies.database_path)
     try:
         if backend == "sqlite":
             conn.execute(
@@ -692,24 +795,32 @@ def _ensure_content_tables(ctx: dict) -> None:
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_content_items_topic_url ON content_items (COALESCE(topic_id, ''), url)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_content_links_market_score ON content_links (market_id, link_score DESC, created_at DESC)")
         conn.commit()
-        backend_key = str(ctx["get_backend"]() or "").lower()
+        backend_key = str(dependencies.get_backend() or "").lower()
         with _CONTENT_TABLE_EXISTS_LOCK:
             _CONTENT_TABLE_EXISTS_CACHE[(backend_key, "content_items")] = True
             _CONTENT_TABLE_EXISTS_CACHE[(backend_key, "content_links")] = True
             _CONTENT_TABLES_ENSURED_CACHE.add(backend_key)
     except Exception:
         conn.rollback()
-        ctx["app"].logger.exception("content table ensure failed")
+        dependencies.application.logger.exception(
+            "content table ensure failed",
+        )
     finally:
         conn.close()
 
 
-def _persist_related_content(ctx: dict, *, market_id: int, market: Dict[str, Any], items: List[Dict[str, Any]]) -> None:
+def _persist_related_content(
+    dependencies: ContentStorageDependencies,
+    *,
+    market_id: int,
+    market: Dict[str, Any],
+    items: List[Dict[str, Any]],
+) -> None:
     if _api_readonly() or not items:
         return
-    _ensure_content_tables(ctx)
-    conn = ctx["get_connection"](ctx["DB_PATH"])
-    backend = str(ctx["get_backend"]() or "").lower()
+    _ensure_content_tables(dependencies)
+    conn = dependencies.get_connection(dependencies.database_path)
+    backend = str(dependencies.get_backend() or "").lower()
     try:
         for item in items:
             url = str(item.get("url") or "").strip()
@@ -824,17 +935,25 @@ def _persist_related_content(ctx: dict, *, market_id: int, market: Dict[str, Any
         conn.commit()
     except Exception:
         conn.rollback()
-        ctx["app"].logger.exception("content persistence failed market_id=%s", market_id)
+        dependencies.application.logger.exception(
+            "content persistence failed market_id=%s",
+            market_id,
+        )
     finally:
         conn.close()
 
 
-def _persist_topic_content(ctx: dict, *, topic_id: str, items: List[Dict[str, Any]]) -> int:
+def _persist_topic_content(
+    dependencies: ContentStorageDependencies,
+    *,
+    topic_id: str,
+    items: List[Dict[str, Any]],
+) -> int:
     if _api_readonly() or not items:
         return 0
-    _ensure_content_tables(ctx)
-    conn = ctx["get_connection"](ctx["DB_PATH"])
-    backend = str(ctx["get_backend"]() or "").lower()
+    _ensure_content_tables(dependencies)
+    conn = dependencies.get_connection(dependencies.database_path)
+    backend = str(dependencies.get_backend() or "").lower()
     stored = 0
     try:
         for item in items:
@@ -913,47 +1032,71 @@ def _persist_topic_content(ctx: dict, *, topic_id: str, items: List[Dict[str, An
         conn.commit()
     except Exception:
         conn.rollback()
-        ctx["app"].logger.exception("topic content persistence failed topic_id=%s", topic_id)
+        dependencies.application.logger.exception(
+            "topic content persistence failed topic_id=%s",
+            topic_id,
+        )
     finally:
         conn.close()
     return stored
 
 
-def _delete_topic_content(ctx: dict, *, topic_id: str) -> None:
+def _delete_topic_content(
+    dependencies: ContentStorageDependencies,
+    *,
+    topic_id: str,
+) -> None:
     if _api_readonly() or not topic_id:
         return
-    _ensure_content_tables(ctx)
-    conn = ctx["get_connection"](ctx["DB_PATH"])
+    _ensure_content_tables(dependencies)
+    conn = dependencies.get_connection(dependencies.database_path)
     try:
         conn.execute("DELETE FROM content_links WHERE topic_id = ?", (topic_id,))
         conn.execute("DELETE FROM content_items WHERE topic_id = ?", (topic_id,))
         conn.commit()
     except Exception:
         conn.rollback()
-        ctx["app"].logger.exception("topic content delete failed topic_id=%s", topic_id)
+        dependencies.application.logger.exception(
+            "topic content delete failed topic_id=%s",
+            topic_id,
+        )
     finally:
         conn.close()
 
 
-def _delete_market_content_links(ctx: dict, *, market_id: int) -> None:
+def _delete_market_content_links(
+    dependencies: ContentStorageDependencies,
+    *,
+    market_id: int,
+) -> None:
     if _api_readonly() or not market_id:
         return
-    _ensure_content_tables(ctx)
-    conn = ctx["get_connection"](ctx["DB_PATH"])
+    _ensure_content_tables(dependencies)
+    conn = dependencies.get_connection(dependencies.database_path)
     try:
         conn.execute("DELETE FROM content_links WHERE market_id = ?", (market_id,))
         conn.commit()
     except Exception:
         conn.rollback()
-        ctx["app"].logger.exception("market content links delete failed market_id=%s", market_id)
+        dependencies.application.logger.exception(
+            "market content links delete failed market_id=%s",
+            market_id,
+        )
     finally:
         conn.close()
 
 
-def _fetch_persisted_related_content(ctx: dict, market_id: int, limit: int) -> List[Dict[str, Any]]:
-    if not (_content_table_exists(ctx, "content_items") and _content_table_exists(ctx, "content_links")):
+def _fetch_persisted_related_content(
+    dependencies: ContentStorageDependencies,
+    market_id: int,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    if not (
+        _content_table_exists(dependencies, "content_items")
+        and _content_table_exists(dependencies, "content_links")
+    ):
         return []
-    return ctx["query_all"](
+    return dependencies.query_all(
         """
         SELECT
             ci.id,
@@ -979,11 +1122,18 @@ def _fetch_persisted_related_content(ctx: dict, market_id: int, limit: int) -> L
     )
 
 
-def _fetch_topic_content_candidates(ctx: dict, topic_ids: List[str], limit: int) -> List[Dict[str, Any]]:
-    if not topic_ids or not _content_table_exists(ctx, "content_items"):
+def _fetch_topic_content_candidates(
+    dependencies: ContentStorageDependencies,
+    topic_ids: List[str],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    if not topic_ids or not _content_table_exists(
+        dependencies,
+        "content_items",
+    ):
         return []
     placeholders = ",".join(["?"] * len(topic_ids))
-    return ctx["query_all"](
+    return dependencies.query_all(
         f"""
         SELECT
             id,
@@ -1122,13 +1272,21 @@ _RELATED_TAB_CONTENT_TYPES = ("news", "video", "report", "research")
 _RELATED_TAB_TARGET_COUNT = 6
 
 
-def _fetch_content_type_candidates(ctx: dict, topic_ids: List[str], content_type: str, limit: int) -> List[Dict[str, Any]]:
+def _fetch_content_type_candidates(
+    dependencies: ContentStorageDependencies,
+    topic_ids: List[str],
+    content_type: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
     topic_ids = [str(topic_id or "").strip() for topic_id in topic_ids if str(topic_id or "").strip()]
     content_type = str(content_type or "").strip().lower()
-    if not topic_ids or not content_type or not _content_table_exists(ctx, "content_items"):
+    if not topic_ids or not content_type or not _content_table_exists(
+        dependencies,
+        "content_items",
+    ):
         return []
     placeholders = ",".join(["?"] * len(topic_ids))
-    return ctx["query_all"](
+    return dependencies.query_all(
         f"""
         SELECT
             id,
@@ -1173,7 +1331,7 @@ def _content_payload_as_row(item: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _augment_related_content_tabs(
-    ctx: dict,
+    dependencies: ContentStorageDependencies,
     *,
     market_id: int,
     market: Dict[str, Any],
@@ -1185,7 +1343,12 @@ def _augment_related_content_tabs(
     primary_topic = str(topic_ids[0] if topic_ids else "").strip()
     if primary_topic:
         for content_type in _RELATED_TAB_CONTENT_TYPES:
-            primary_rows = _fetch_content_type_candidates(ctx, [primary_topic], content_type, 1)
+            primary_rows = _fetch_content_type_candidates(
+                dependencies,
+                [primary_topic],
+                content_type,
+                1,
+            )
             if primary_rows:
                 rows = [
                     row for row in rows
@@ -1213,7 +1376,13 @@ def _augment_related_content_tabs(
         candidate_rows: List[Dict[str, Any]] = []
         for topic_id in topic_ids:
             topic_rows = [
-                row for row in _fetch_content_type_candidates(ctx, [topic_id], content_type, max(12, needed_count * 4))
+                row
+                for row in _fetch_content_type_candidates(
+                    dependencies,
+                    [topic_id],
+                    content_type,
+                    max(12, needed_count * 4),
+                )
                 if str(row.get("url") or "").strip() not in seen_urls
             ]
             if topic_rows:
@@ -1236,23 +1405,60 @@ def _augment_related_content_tabs(
         return rows
     if _api_readonly():
         return [*rows, *(_content_payload_as_row(item) for item in supplemental_items)]
-    _persist_related_content(ctx, market_id=market_id, market=market, items=supplemental_items)
-    return _fetch_persisted_related_content(ctx, market_id, max(limit + len(supplemental_items) + 4, limit))
+    _persist_related_content(
+        dependencies,
+        market_id=market_id,
+        market=market,
+        items=supplemental_items,
+    )
+    return _fetch_persisted_related_content(
+        dependencies,
+        market_id,
+        max(limit + len(supplemental_items) + 4, limit),
+    )
 
 
-def refresh_topic_content(ctx: dict, *, topic_ids: List[str] | None = None, limit_per_topic: int = 24) -> Dict[str, Any]:
-    runtime_payload = ctx["CONTENT_RUNTIME_PROVIDER"].refresh_topics(topic_ids=topic_ids, limit_per_topic=limit_per_topic)
+def refresh_topic_content(
+    ctx: Mapping[str, Any],
+    *,
+    topic_ids: List[str] | None = None,
+    limit_per_topic: int = 24,
+) -> Dict[str, Any]:
+    return _refresh_topic_content(
+        ContentRefreshDependencies.from_context(ctx),
+        topic_ids=topic_ids,
+        limit_per_topic=limit_per_topic,
+    )
+
+
+def _refresh_topic_content(
+    dependencies: ContentRefreshDependencies,
+    *,
+    topic_ids: List[str] | None = None,
+    limit_per_topic: int = 24,
+) -> Dict[str, Any]:
+    runtime_payload = dependencies.content_runtime_provider.refresh_topics(
+        topic_ids=topic_ids,
+        limit_per_topic=limit_per_topic,
+    )
     stored_by_topic: Dict[str, int] = {}
     skipped_by_topic: Dict[str, Dict[str, int]] = {}
     for topic_id, items in runtime_payload.items():
-        existing_count = _count_topic_content(ctx, topic_id=topic_id)
+        existing_count = _count_topic_content(
+            dependencies.storage,
+            topic_id=topic_id,
+        )
         fresh_count = len(items)
         if existing_count > 0 and fresh_count < max(4, existing_count // 2):
             stored_by_topic[topic_id] = existing_count
             skipped_by_topic[topic_id] = {"existing": existing_count, "fresh": fresh_count}
             continue
-        _delete_topic_content(ctx, topic_id=topic_id)
-        stored_by_topic[topic_id] = _persist_topic_content(ctx, topic_id=topic_id, items=items)
+        _delete_topic_content(dependencies.storage, topic_id=topic_id)
+        stored_by_topic[topic_id] = _persist_topic_content(
+            dependencies.storage,
+            topic_id=topic_id,
+            items=items,
+        )
     return {
         "sourceMode": "topic-registry",
         "topicCount": len(runtime_payload),
@@ -1263,32 +1469,62 @@ def refresh_topic_content(ctx: dict, *, topic_ids: List[str] | None = None, limi
     }
 
 
-def _count_topic_content(ctx: dict, *, topic_id: str) -> int:
+def _count_topic_content(
+    dependencies: ContentStorageDependencies,
+    *,
+    topic_id: str,
+) -> int:
     topic_id = str(topic_id or "").strip()
-    if not topic_id or not _content_table_exists(ctx, "content_items"):
+    if not topic_id or not _content_table_exists(
+        dependencies,
+        "content_items",
+    ):
         return 0
-    row = ctx["query_one"]("SELECT COUNT(*) AS count FROM content_items WHERE topic_id = ?", (topic_id,)) or {}
+    row = dependencies.query_one(
+        "SELECT COUNT(*) AS count FROM content_items WHERE topic_id = ?",
+        (topic_id,),
+    ) or {}
     return int(row.get("count") or 0)
 
 
-def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) -> Dict[str, Any]:
-    market = ctx["get_market_by_id"](market_id)
+def get_related_content_by_market_id(
+    ctx: Mapping[str, Any],
+    market_id: int,
+    limit: int = 8,
+) -> Dict[str, Any]:
+    return _get_related_content_by_market_id(
+        RelatedContentQueryDependencies.from_context(ctx),
+        market_id,
+        limit=limit,
+    )
+
+
+def _get_related_content_by_market_id(
+    dependencies: RelatedContentQueryDependencies,
+    market_id: int,
+    limit: int = 8,
+) -> Dict[str, Any]:
+    market = dependencies.get_market_by_id(market_id)
     if not market:
         return {"marketId": market_id, "localMarketId": market_id, "items": []}
-    _ensure_content_tables(ctx)
-    tags = ctx["parse_json_list"](market.get("tags"))
-    topic_ids = ctx["CONTENT_RUNTIME_PROVIDER"].infer_market_topics(
+    _ensure_content_tables(dependencies.storage)
+    tags = dependencies.parse_json_list(market.get("tags"))
+    topic_ids = dependencies.content_runtime_provider.infer_market_topics(
         market_title=str(market.get("title") or ""),
         category=str(market.get("category") or ""),
         tags=tags,
     )
-    rows = _fetch_persisted_related_content(ctx, market_id, max(limit, 24))
+    rows = _fetch_persisted_related_content(
+        dependencies.storage,
+        market_id,
+        max(limit, 24),
+    )
     if rows:
         row_topics = {str(row.get("topic_id") or "").strip() for row in rows if str(row.get("topic_id") or "").strip()}
         primary_topic = str(topic_ids[0] if topic_ids else "").strip()
         if row_topics and primary_topic and primary_topic in row_topics:
             rows = _augment_related_content_tabs(
-                ctx,
+                dependencies.storage,
                 market_id=market_id,
                 market=market,
                 tags=tags,
@@ -1303,7 +1539,10 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
                 "sourceMode": "database",
                 "topicIds": topic_ids,
             }
-        _delete_market_content_links(ctx, market_id=market_id)
+        _delete_market_content_links(
+            dependencies.storage,
+            market_id=market_id,
+        )
         rows = []
     if rows:
         return {
@@ -1313,17 +1552,34 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
             "sourceMode": "database",
         }
     primary_topic_id = str(topic_ids[0] if topic_ids else "").strip()
-    primary_rows = _fetch_topic_content_candidates(ctx, [primary_topic_id], limit) if primary_topic_id else []
+    primary_rows = (
+        _fetch_topic_content_candidates(
+            dependencies.storage,
+            [primary_topic_id],
+            limit,
+        )
+        if primary_topic_id
+        else []
+    )
     primary_items = _merge_content_payloads(
         _rank_topic_candidates_for_market(primary_rows, market, tags, limit),
         _topic_rows_to_payloads(primary_rows, limit=limit, default_score=12),
         limit=limit,
     )
     if primary_items:
-        _persist_related_content(ctx, market_id=market_id, market=market, items=primary_items)
-        persisted_rows = _fetch_persisted_related_content(ctx, market_id, max(limit, 24))
+        _persist_related_content(
+            dependencies.storage,
+            market_id=market_id,
+            market=market,
+            items=primary_items,
+        )
+        persisted_rows = _fetch_persisted_related_content(
+            dependencies.storage,
+            market_id,
+            max(limit, 24),
+        )
         persisted_rows = _augment_related_content_tabs(
-            ctx,
+            dependencies.storage,
             market_id=market_id,
             market=market,
             tags=tags,
@@ -1338,13 +1594,26 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
             "sourceMode": "database:topic-pool",
             "topicIds": topic_ids,
         }
-    topic_rows = _fetch_topic_content_candidates(ctx, topic_ids, limit)
+    topic_rows = _fetch_topic_content_candidates(
+        dependencies.storage,
+        topic_ids,
+        limit,
+    )
     topic_items = _rank_topic_candidates_for_market(topic_rows, market, tags, limit)
     if topic_items:
-        _persist_related_content(ctx, market_id=market_id, market=market, items=topic_items)
-        persisted_rows = _fetch_persisted_related_content(ctx, market_id, max(limit, 24))
+        _persist_related_content(
+            dependencies.storage,
+            market_id=market_id,
+            market=market,
+            items=topic_items,
+        )
+        persisted_rows = _fetch_persisted_related_content(
+            dependencies.storage,
+            market_id,
+            max(limit, 24),
+        )
         persisted_rows = _augment_related_content_tabs(
-            ctx,
+            dependencies.storage,
             market_id=market_id,
             market=market,
             tags=tags,
@@ -1367,12 +1636,32 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
             "sourceMode": "database:topic-pool-miss",
             "topicIds": topic_ids,
         }
-    refresh_topic_content(ctx, topic_ids=topic_ids[:3], limit_per_topic=max(12, limit * 2))
-    topic_rows = _fetch_topic_content_candidates(ctx, topic_ids, limit)
+    _refresh_topic_content(
+        ContentRefreshDependencies(
+            storage=dependencies.storage,
+            content_runtime_provider=dependencies.content_runtime_provider,
+        ),
+        topic_ids=topic_ids[:3],
+        limit_per_topic=max(12, limit * 2),
+    )
+    topic_rows = _fetch_topic_content_candidates(
+        dependencies.storage,
+        topic_ids,
+        limit,
+    )
     topic_items = _rank_topic_candidates_for_market(topic_rows, market, tags, limit)
     if topic_items:
-        _persist_related_content(ctx, market_id=market_id, market=market, items=topic_items)
-        persisted_rows = _fetch_persisted_related_content(ctx, market_id, limit)
+        _persist_related_content(
+            dependencies.storage,
+            market_id=market_id,
+            market=market,
+            items=topic_items,
+        )
+        persisted_rows = _fetch_persisted_related_content(
+            dependencies.storage,
+            market_id,
+            limit,
+        )
         return {
             "marketId": market_id,
             "localMarketId": market_id,
@@ -1380,14 +1669,23 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
             "sourceMode": "database:topic-refresh",
             "topicIds": topic_ids,
         }
-    runtime_items = ctx["CONTENT_RUNTIME_PROVIDER"].get_related_news(
+    runtime_items = dependencies.content_runtime_provider.get_related_news(
         market_title=str(market.get("title") or ""),
         category=str(market.get("category") or ""),
         tags=tags,
         limit=limit,
     )
-    _persist_related_content(ctx, market_id=market_id, market=market, items=runtime_items)
-    persisted_rows = _fetch_persisted_related_content(ctx, market_id, limit)
+    _persist_related_content(
+        dependencies.storage,
+        market_id=market_id,
+        market=market,
+        items=runtime_items,
+    )
+    persisted_rows = _fetch_persisted_related_content(
+        dependencies.storage,
+        market_id,
+        limit,
+    )
     if persisted_rows:
         return {
             "marketId": market_id,
@@ -1403,29 +1701,33 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
     }
 
 
-def get_latest_content_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    _ensure_content_tables(ctx)
-    version_row: Dict[str, Any] = {}
-    if _content_table_exists(ctx, "content_items"):
-        try:
-            version_row = ctx["query_one"](
-                "SELECT COUNT(*) AS count, MAX(updated_at) AS updated_at FROM content_items"
-            ) or {}
-        except Exception:
-            version_row = {}
+def get_latest_content_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = 8,
+) -> Dict[str, Any]:
+    return _get_latest_content_snapshot(
+        LatestContentQueryDependencies.from_context(ctx),
+        limit=limit,
+    )
+
+
+def _get_latest_content_snapshot(
+    dependencies: LatestContentQueryDependencies,
+    limit: int = 8,
+) -> Dict[str, Any]:
+    _ensure_content_tables(dependencies.storage)
     cache_key = json.dumps(
         {
             "limit": limit,
-            "count": version_row.get("count"),
-            "updatedAt": str(version_row.get("updated_at") or ""),
+            "v": 2,
         },
         sort_keys=True,
         ensure_ascii=True,
     )
 
     def _builder() -> Dict[str, Any]:
-        if _content_table_exists(ctx, "content_items"):
-            rows = ctx["query_all"](
+        if _content_table_exists(dependencies.storage, "content_items"):
+            rows = dependencies.storage.query_all(
                 """
                 SELECT id, content_type, provider, source, category, topic_id, title, url, published_at, summary, source_count, relevance_score
                 FROM content_items
@@ -1441,7 +1743,9 @@ def get_latest_content_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
             }
         if _content_api_refresh_enabled():
             return {
-                "items": ctx["CONTENT_RUNTIME_PROVIDER"].get_latest_items(limit=limit),
+                "items": dependencies.content_runtime_provider.get_latest_items(
+                    limit=limit,
+                ),
                 "sourceMode": "runtime-rss-expanded",
             }
         return {
@@ -1449,4 +1753,9 @@ def get_latest_content_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
             "sourceMode": "database-empty",
         }
 
-    return ctx["get_snapshot_payload"]("snapshot:content:latest", cache_key, _builder, ttl_seconds=300)
+    return dependencies.get_snapshot_payload(
+        "snapshot:content:latest",
+        cache_key,
+        _builder,
+        ttl_seconds=300,
+    )
