@@ -3,10 +3,16 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+)
 from api.services import cpi_release_calendar_service, energy_gasoline_shock_service, food_retail_basket_service, macro_cpi_panels_service, runtime_service
 
 
@@ -83,10 +89,50 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _utc_now_iso(ctx: dict) -> str:
-    now = ctx.get("utc_now_iso")
-    if callable(now):
-        return now()
+@dataclass(frozen=True)
+class MacroCpiRegistryDependencies:
+    source: Mapping[str, Any]
+    utc_now_iso: Callable[..., Any] | None
+    settings: Any
+    http_text_get: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MacroCpiRegistryDependencies:
+        return cls(
+            source=context,
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            settings=resolve_optional_service_value(
+                context,
+                "SETTINGS",
+            ),
+            http_text_get=resolve_optional_service_callable(
+                context,
+                "http_text_get",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+        )
+
+
+def _utc_now_iso(
+    dependencies: MacroCpiRegistryDependencies,
+) -> str:
+    if dependencies.utc_now_iso is not None:
+        return dependencies.utc_now_iso()
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -106,9 +152,19 @@ def _snapshot_namespace(panel_id: str) -> str:
     return f"{SNAPSHOT_NAMESPACE_PREFIX}{panel_id}"
 
 
-def ttl_seconds(ctx: dict) -> int:
-    settings = ctx.get("SETTINGS")
-    return max(1800, int(getattr(settings, "macro_cpi_registry_ttl_seconds", 21600) or 21600))
+def ttl_seconds(ctx: Mapping[str, Any]) -> int:
+    dependencies = MacroCpiRegistryDependencies.from_context(ctx)
+    return max(
+        1800,
+        int(
+            getattr(
+                dependencies.settings,
+                "macro_cpi_registry_ttl_seconds",
+                21600,
+            )
+            or 21600
+        ),
+    )
 
 
 def _status_tone(value: Any) -> str:
@@ -421,15 +477,28 @@ def _nowcast_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _fred_url(ctx: dict, series_id: str) -> str:
-    settings = ctx.get("SETTINGS")
+def _fred_url(
+    dependencies: MacroCpiRegistryDependencies,
+    series_id: str,
+) -> str:
     template = getattr(
-        settings,
+        dependencies.settings,
         "finance_fred_csv_url_template",
-        getattr(settings, "food_basket_fred_csv_url_template", "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"),
+        getattr(
+            dependencies.settings,
+            "food_basket_fred_csv_url_template",
+            "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
+        ),
     )
     url = str(template).format(series_id=series_id)
-    lookback_years = int(getattr(settings, "fred_csv_lookback_years", FRED_CSV_LOOKBACK_YEARS) or FRED_CSV_LOOKBACK_YEARS)
+    lookback_years = int(
+        getattr(
+            dependencies.settings,
+            "fred_csv_lookback_years",
+            FRED_CSV_LOOKBACK_YEARS,
+        )
+        or FRED_CSV_LOOKBACK_YEARS
+    )
     start_date = f"{max(1900, datetime.now(timezone.utc).year - lookback_years)}-01-01"
     parts = urlsplit(url)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
@@ -448,16 +517,23 @@ def _series_candidates(series_id: str) -> List[str]:
     return [series_id]
 
 
-def _fetch_cpi_series_stats(ctx: dict) -> Dict[str, Dict[str, Any]]:
-    getter = ctx.get("http_text_get")
-    if not callable(getter):
+def _fetch_cpi_series_stats(
+    dependencies: MacroCpiRegistryDependencies,
+) -> Dict[str, Dict[str, Any]]:
+    if dependencies.http_text_get is None:
         return {}
     stats: Dict[str, Dict[str, Any]] = {}
     for primary_series_id in sorted({str(spec["seriesId"]) for spec in CPI_EVENT_SPECS}):
         for series_id in _series_candidates(primary_series_id):
             try:
-                url = _fred_url(ctx, series_id)
-                text = getter(url, timeout=12, headers={"User-Agent": "polydata-cpi-release-command/1.0"})
+                url = _fred_url(dependencies, series_id)
+                text = dependencies.http_text_get(
+                    url,
+                    timeout=12,
+                    headers={
+                        "User-Agent": "polydata-cpi-release-command/1.0"
+                    },
+                )
                 if not str(text or "").lstrip().lower().startswith("observation_date"):
                     continue
                 reader = csv.DictReader(io.StringIO(str(text or "")))
@@ -579,13 +655,16 @@ def _period_from_release(release: Dict[str, Any]) -> Optional[str]:
     return f"{year}-{month:02d}"
 
 
-def _compose_cpi_release_events(ctx: dict, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _compose_cpi_release_events(
+    dependencies: MacroCpiRegistryDependencies,
+    rows: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     release = _release_from_rows(rows)
     release_at = _parse_datetime(release.get("releaseAt"))
     is_released = bool(release_at and release_at <= datetime.now(timezone.utc))
     period = _period_from_release(release)
     nowcasts = _nowcast_lookup_from_rows(rows)
-    actual_series = _fetch_cpi_series_stats(ctx)
+    actual_series = _fetch_cpi_series_stats(dependencies)
     events: List[Dict[str, Any]] = []
     for spec in CPI_EVENT_SPECS:
         stat = actual_series.get(str(spec["seriesId"])) or {}
@@ -778,16 +857,27 @@ def _summarize(panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str
     }
 
 
-def _payload(ctx: dict, panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str], *, limit: int) -> Dict[str, Any]:
+def _payload(
+    dependencies: MacroCpiRegistryDependencies,
+    panel_id: str,
+    rows: List[Dict[str, Any]],
+    sources: Dict[str, str],
+    *,
+    limit: int,
+) -> Dict[str, Any]:
     config = PANEL_CONFIGS[panel_id]
     capped = _rank_rows(rows)[: _limit(limit)]
-    cpi_release = _compose_cpi_release_events(ctx, capped) if panel_id == "cpi-release-command-center" else {}
+    cpi_release = (
+        _compose_cpi_release_events(dependencies, capped)
+        if panel_id == "cpi-release-command-center"
+        else {}
+    )
     summary = _summarize(panel_id, capped, sources, config)
     if panel_id == "cpi-release-command-center":
         summary = {**summary, **(cpi_release.get("eventSummary") or {})}
     status = "ok" if capped and any(str(value).lower() in {"ok", "redis-seed", "sqlite-seed", "stale-seed"} for value in sources.values()) else ("degraded" if capped else "warming")
     payload = {
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "panelId": panel_id,
         "source": config.get("source"),
         "sourceUrl": "",
@@ -806,14 +896,16 @@ def _with_mode(payload: Dict[str, Any], mode: str) -> Dict[str, Any]:
     return {**payload, "cacheMode": mode}
 
 
-def _read_seeded(ctx: dict, panel_id: str) -> Optional[Dict[str, Any]]:
+def _read_seeded(
+    dependencies: MacroCpiRegistryDependencies,
+    panel_id: str,
+) -> Optional[Dict[str, Any]]:
     namespace = _snapshot_namespace(panel_id)
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        payload = reader(namespace, CACHE_KEY)
+    if dependencies.get_cached_json is not None:
+        payload = dependencies.get_cached_json(namespace, CACHE_KEY)
         if isinstance(payload, dict):
             return _with_mode(payload, "redis-seed")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is not None:
         payload = store.get(namespace, CACHE_KEY)
         if isinstance(payload, dict):
@@ -832,36 +924,88 @@ def _snapshot(fn, *args: Any, **kwargs: Any) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {"status": "invalid", "items": []}
 
 
-def _inflation_nowcast_seeded_snapshot(ctx: dict) -> Dict[str, Any]:
+def _inflation_nowcast_seeded_snapshot(
+    dependencies: MacroCpiRegistryDependencies,
+) -> Dict[str, Any]:
     payload = None
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        payload = reader(runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
+    if dependencies.get_cached_json is not None:
+        payload = dependencies.get_cached_json(
+            runtime_service.INFLATION_NOWCAST_NAMESPACE,
+            runtime_service.INFLATION_NOWCAST_CACHE_KEY,
+        )
     if not isinstance(payload, dict):
-        store = ctx.get("SNAPSHOT_STORE")
+        store = dependencies.snapshot_store
         if store is not None:
             payload = store.get(runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
             if not isinstance(payload, dict):
                 payload = store.get_stale(runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
     if isinstance(payload, dict):
-        return runtime_service.normalize_inflation_nowcast_payload(payload, ctx=ctx, generated_at=_utc_now_iso(ctx))
-    return runtime_service.normalize_inflation_nowcast_payload({"status": "seed-miss"}, ctx=ctx, generated_at=_utc_now_iso(ctx))
+        return runtime_service.normalize_inflation_nowcast_payload(
+            payload,
+            ctx=dependencies.source,
+            generated_at=_utc_now_iso(dependencies),
+        )
+    return runtime_service.normalize_inflation_nowcast_payload(
+        {"status": "seed-miss"},
+        ctx=dependencies.source,
+        generated_at=_utc_now_iso(dependencies),
+    )
 
 
-def build_cpi_release_command_center_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    calendar = _snapshot(cpi_release_calendar_service.get_cpi_release_calendar_snapshot, ctx, limit=20, allow_live_build=False)
-    nowcast = _snapshot(_inflation_nowcast_seeded_snapshot, ctx)
+def build_cpi_release_command_center_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = MacroCpiRegistryDependencies.from_context(ctx)
+    calendar = _snapshot(
+        cpi_release_calendar_service.get_cpi_release_calendar_snapshot,
+        dependencies.source,
+        limit=20,
+        allow_live_build=False,
+    )
+    nowcast = _snapshot(
+        _inflation_nowcast_seeded_snapshot,
+        dependencies,
+    )
     rows = _calendar_rows(calendar) + _nowcast_rows(nowcast)
     sources: Dict[str, str] = {"calendar": _snapshot_status(calendar), "nowcast": _snapshot_status(nowcast)}
     _merge_sources(sources, "calendar", calendar)
-    return _payload(ctx, "cpi-release-command-center", rows, sources, limit=limit)
+    return _payload(
+        dependencies,
+        "cpi-release-command-center",
+        rows,
+        sources,
+        limit=limit,
+    )
 
 
-def build_cpi_components_pressure_registry_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    energy = _snapshot(energy_gasoline_shock_service.get_energy_gasoline_shock_snapshot, ctx, limit=12, allow_live_build=False)
-    food = _snapshot(food_retail_basket_service.get_food_retail_basket_snapshot, ctx, limit=12, allow_live_build=False)
-    shelter = _snapshot(macro_cpi_panels_service.get_shelter_rent_oer_pressure_snapshot, ctx, limit=12)
-    goods = _snapshot(macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot, ctx, limit=16)
+def build_cpi_components_pressure_registry_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = MacroCpiRegistryDependencies.from_context(ctx)
+    energy = _snapshot(
+        energy_gasoline_shock_service.get_energy_gasoline_shock_snapshot,
+        dependencies.source,
+        limit=12,
+        allow_live_build=False,
+    )
+    food = _snapshot(
+        food_retail_basket_service.get_food_retail_basket_snapshot,
+        dependencies.source,
+        limit=12,
+        allow_live_build=False,
+    )
+    shelter = _snapshot(
+        macro_cpi_panels_service.get_shelter_rent_oer_pressure_snapshot,
+        dependencies.source,
+        limit=12,
+    )
+    goods = _snapshot(
+        macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot,
+        dependencies.source,
+        limit=16,
+    )
     rows = (
         _energy_rows(energy)
         + _food_rows(food)
@@ -873,29 +1017,80 @@ def build_cpi_components_pressure_registry_snapshot(ctx: dict, limit: int = DEFA
     _merge_sources(sources, "food", food)
     _merge_sources(sources, "shelter", shelter)
     _merge_sources(sources, "goods", goods)
-    return _payload(ctx, "cpi-components-pressure-registry", rows, sources, limit=limit)
+    return _payload(
+        dependencies,
+        "cpi-components-pressure-registry",
+        rows,
+        sources,
+        limit=limit,
+    )
 
 
-def build_goods_tariff_supply_watch_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    supply = _snapshot(macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot, ctx, limit=30)
+def build_goods_tariff_supply_watch_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = MacroCpiRegistryDependencies.from_context(ctx)
+    supply = _snapshot(
+        macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot,
+        dependencies.source,
+        limit=30,
+    )
     rows = _macro_driver_rows(supply, default_group="GOODS", implication="goods CPI / tariff pressure")
     sources: Dict[str, str] = {"supply": _snapshot_status(supply)}
     _merge_sources(sources, "supply", supply)
-    return _payload(ctx, "goods-tariff-supply-watch", rows, sources, limit=limit)
+    return _payload(
+        dependencies,
+        "goods-tariff-supply-watch",
+        rows,
+        sources,
+        limit=limit,
+    )
 
 
-def build_labor_services_inflation_monitor_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    labor = _snapshot(macro_cpi_panels_service.get_labor_wage_services_pressure_snapshot, ctx, limit=30)
+def build_labor_services_inflation_monitor_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = MacroCpiRegistryDependencies.from_context(ctx)
+    labor = _snapshot(
+        macro_cpi_panels_service.get_labor_wage_services_pressure_snapshot,
+        dependencies.source,
+        limit=30,
+    )
     rows = _macro_driver_rows(labor, default_group="LABOR", implication="services CPI / Fed wage pressure")
     sources: Dict[str, str] = {"labor": _snapshot_status(labor)}
     _merge_sources(sources, "labor", labor)
-    return _payload(ctx, "labor-services-inflation-monitor", rows, sources, limit=limit)
+    return _payload(
+        dependencies,
+        "labor-services-inflation-monitor",
+        rows,
+        sources,
+        limit=limit,
+    )
 
 
-def build_fed_reaction_growth_risk_board_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    fed = _snapshot(macro_cpi_panels_service.get_fed_rates_polymarket_gap_snapshot, ctx, limit=30)
-    growth = _snapshot(macro_cpi_panels_service.get_growth_demand_recession_tracker_snapshot, ctx, limit=30)
-    calendar = _snapshot(cpi_release_calendar_service.get_cpi_release_calendar_snapshot, ctx, limit=8, allow_live_build=False)
+def build_fed_reaction_growth_risk_board_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = MacroCpiRegistryDependencies.from_context(ctx)
+    fed = _snapshot(
+        macro_cpi_panels_service.get_fed_rates_polymarket_gap_snapshot,
+        dependencies.source,
+        limit=30,
+    )
+    growth = _snapshot(
+        macro_cpi_panels_service.get_growth_demand_recession_tracker_snapshot,
+        dependencies.source,
+        limit=30,
+    )
+    calendar = _snapshot(
+        cpi_release_calendar_service.get_cpi_release_calendar_snapshot,
+        dependencies.source,
+        limit=8,
+        allow_live_build=False,
+    )
     rows = (
         _macro_driver_rows(fed, default_group="FED", implication="Fed reaction path")
         + _macro_driver_rows(growth, default_group="GROWTH", implication="growth / recession risk")
@@ -905,7 +1100,13 @@ def build_fed_reaction_growth_risk_board_snapshot(ctx: dict, limit: int = DEFAUL
     _merge_sources(sources, "fed", fed)
     _merge_sources(sources, "growth", growth)
     _merge_sources(sources, "calendar", calendar)
-    return _payload(ctx, "fed-reaction-growth-risk-board", rows, sources, limit=limit)
+    return _payload(
+        dependencies,
+        "fed-reaction-growth-risk-board",
+        rows,
+        sources,
+        limit=limit,
+    )
 
 
 BUILDERS = {
@@ -920,45 +1121,106 @@ BUILDERS = {
 MACRO_CPI_REGISTRY_PANEL_IDS = tuple(BUILDERS.keys())
 
 
-def build_macro_cpi_registry_payload(ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def build_macro_cpi_registry_payload(
+    ctx: Mapping[str, Any],
+    panel_id: str,
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
     builder = BUILDERS[panel_id]
     return builder(ctx, limit=limit)
 
 
-def get_macro_cpi_registry_snapshot(ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    seeded = _read_seeded(ctx, panel_id)
+def get_macro_cpi_registry_snapshot(
+    ctx: Mapping[str, Any],
+    panel_id: str,
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = MacroCpiRegistryDependencies.from_context(ctx)
+    seeded = _read_seeded(dependencies, panel_id)
     if seeded is not None:
-        return normalize_macro_cpi_registry_payload(seeded, ctx=ctx, panel_id=panel_id, limit=limit)
-    return normalize_macro_cpi_registry_payload(build_macro_cpi_registry_payload(ctx, panel_id, limit=limit), ctx=ctx, panel_id=panel_id, limit=limit)
+        return _normalize_macro_cpi_registry_payload(
+            seeded,
+            dependencies=dependencies,
+            panel_id=panel_id,
+            limit=limit,
+        )
+    return _normalize_macro_cpi_registry_payload(
+        build_macro_cpi_registry_payload(
+            dependencies.source,
+            panel_id,
+            limit=limit,
+        ),
+        dependencies=dependencies,
+        panel_id=panel_id,
+        limit=limit,
+    )
 
 
-def get_cpi_release_command_center_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def get_cpi_release_command_center_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
     return get_macro_cpi_registry_snapshot(ctx, "cpi-release-command-center", limit=limit)
 
 
-def get_cpi_components_pressure_registry_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def get_cpi_components_pressure_registry_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
     return get_macro_cpi_registry_snapshot(ctx, "cpi-components-pressure-registry", limit=limit)
 
 
-def get_goods_tariff_supply_watch_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def get_goods_tariff_supply_watch_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
     return get_macro_cpi_registry_snapshot(ctx, "goods-tariff-supply-watch", limit=limit)
 
 
-def get_labor_services_inflation_monitor_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def get_labor_services_inflation_monitor_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
     return get_macro_cpi_registry_snapshot(ctx, "labor-services-inflation-monitor", limit=limit)
 
 
-def get_fed_reaction_growth_risk_board_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def get_fed_reaction_growth_risk_board_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
     return get_macro_cpi_registry_snapshot(ctx, "fed-reaction-growth-risk-board", limit=limit)
 
 
-def normalize_macro_cpi_registry_payload(payload: Any, *, ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def normalize_macro_cpi_registry_payload(
+    payload: Any,
+    *,
+    ctx: Mapping[str, Any],
+    panel_id: str,
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    return _normalize_macro_cpi_registry_payload(
+        payload,
+        dependencies=MacroCpiRegistryDependencies.from_context(ctx),
+        panel_id=panel_id,
+        limit=limit,
+    )
+
+
+def _normalize_macro_cpi_registry_payload(
+    payload: Any,
+    *,
+    dependencies: MacroCpiRegistryDependencies,
+    panel_id: str,
+    limit: int,
+) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     rows = [_enrich_row(row) for row in (result.get("items") or []) if isinstance(row, dict)]
     result["items"] = _rank_rows(rows)[: _limit(limit)]
-    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["generatedAt"] = str(
+        result.get("generatedAt") or _utc_now_iso(dependencies)
+    )
     result["panelId"] = str(result.get("panelId") or panel_id)
     result["status"] = str(result.get("status") or ("ok" if rows else "warming"))
     result["cacheMode"] = str(result.get("cacheMode") or "composed-seed")
@@ -966,7 +1228,10 @@ def normalize_macro_cpi_registry_payload(payload: Any, *, ctx: dict, panel_id: s
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     result["summary"] = _summarize(panel_id, result["items"], result["sources"], PANEL_CONFIGS.get(panel_id, {}))
     if panel_id == "cpi-release-command-center":
-        cpi_release = _compose_cpi_release_events(ctx, result["items"])
+        cpi_release = _compose_cpi_release_events(
+            dependencies,
+            result["items"],
+        )
         result.update(cpi_release)
         result["summary"] = {**result["summary"], **(cpi_release.get("eventSummary") or {})}
     return result
