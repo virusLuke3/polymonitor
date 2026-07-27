@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, time, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 from zoneinfo import ZoneInfo
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 
 
 CPI_CALENDAR_SNAPSHOT_NAMESPACE = "snapshot:macro:cpi-release-calendar"
@@ -73,10 +82,75 @@ BLS_2026_FALLBACK_ROWS: Dict[str, tuple[tuple[str, str, str], ...]] = {
 }
 
 
-def _utc_now_iso(ctx: dict) -> str:
-    now = ctx.get("utc_now_iso")
-    if callable(now):
-        return now()
+@dataclass(frozen=True)
+class CpiReleaseCalendarDependencies:
+    settings: Any
+    application: Any
+    http_text_get: Callable[..., str]
+    beautiful_soup: Any
+    get_polymarket_macro_map_snapshot: Callable[..., Any] | None
+    utc_now_iso: Callable[..., Any] | None
+    snapshot_store: Any
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> CpiReleaseCalendarDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_optional_service_value(context, "app"),
+            http_text_get=resolve_service_callable(
+                context,
+                "http_text_get",
+            ),
+            beautiful_soup=resolve_optional_service_value(
+                context,
+                "BeautifulSoup",
+            ),
+            get_polymarket_macro_map_snapshot=resolve_optional_service_callable(
+                context,
+                "get_polymarket_macro_map_snapshot",
+            ),
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+        )
+
+
+CpiReleaseCalendarContext = (
+    Mapping[str, Any] | CpiReleaseCalendarDependencies
+)
+
+
+def _dependencies(
+    context: CpiReleaseCalendarContext,
+) -> CpiReleaseCalendarDependencies:
+    if isinstance(context, CpiReleaseCalendarDependencies):
+        return context
+    return CpiReleaseCalendarDependencies.from_context(context)
+
+
+def _utc_now_iso(
+    dependencies: CpiReleaseCalendarDependencies,
+) -> str:
+    if dependencies.utc_now_iso is not None:
+        return str(dependencies.utc_now_iso())
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -92,8 +166,11 @@ def _parse_iso_ts(value: Any) -> float:
     return parsed.timestamp()
 
 
-def _html_to_lines(ctx: dict, html: str) -> List[str]:
-    soup_factory = ctx.get("BeautifulSoup")
+def _html_to_lines(
+    dependencies: CpiReleaseCalendarDependencies,
+    html: str,
+) -> List[str]:
+    soup_factory = dependencies.beautiful_soup
     if soup_factory is not None:
         soup = soup_factory(html, "html.parser")
         text = soup.get_text("\n", strip=True)
@@ -164,9 +241,24 @@ def _fallback_bls_schedule(*, kind: str, title: str, source: str, url: str) -> L
     return items
 
 
-def _parse_bls_schedule(ctx: dict, *, url: str, kind: str, title: str, source: str) -> tuple[List[Dict[str, Any]], str]:
+def _parse_bls_schedule(
+    ctx: CpiReleaseCalendarContext,
+    *,
+    url: str,
+    kind: str,
+    title: str,
+    source: str,
+) -> tuple[List[Dict[str, Any]], str]:
+    dependencies = _dependencies(ctx)
     try:
-        html = ctx["http_text_get"](url, timeout=12, headers={"Accept": "text/html", "User-Agent": "polydata-cpi-calendar/1.0"})
+        html = dependencies.http_text_get(
+            url,
+            timeout=12,
+            headers={
+                "Accept": "text/html",
+                "User-Agent": "polydata-cpi-calendar/1.0",
+            },
+        )
     except Exception:
         fallback = _fallback_bls_schedule(kind=kind, title=title, source=source, url=url)
         if fallback:
@@ -174,7 +266,7 @@ def _parse_bls_schedule(ctx: dict, *, url: str, kind: str, title: str, source: s
         raise
     if "Access Denied" in str(html or ""):
         return _fallback_bls_schedule(kind=kind, title=title, source=source, url=url), "fallback"
-    lines = _html_to_lines(ctx, str(html or ""))
+    lines = _html_to_lines(dependencies, str(html or ""))
     text = _lines_to_text(lines)
     pattern = re.compile(
         r"([A-Z][a-z]+)\s+(\d{4})\s+"
@@ -213,10 +305,26 @@ def _parse_date_without_year(raw: str, base_year: int) -> Optional[tuple[int, in
     return base_year, _month_number(match.group(1)), int(match.group(2))
 
 
-def _parse_bea_schedule(ctx: dict, *, url: str) -> tuple[List[Dict[str, Any]], str]:
-    html = ctx["http_text_get"](url, timeout=12, headers={"Accept": "text/html", "User-Agent": "polydata-cpi-calendar/1.0"})
-    lines = _html_to_lines(ctx, str(html or ""))
-    now = datetime.fromtimestamp(_parse_iso_ts(_utc_now_iso(ctx)) or datetime.now(timezone.utc).timestamp(), timezone.utc)
+def _parse_bea_schedule(
+    ctx: CpiReleaseCalendarContext,
+    *,
+    url: str,
+) -> tuple[List[Dict[str, Any]], str]:
+    dependencies = _dependencies(ctx)
+    html = dependencies.http_text_get(
+        url,
+        timeout=12,
+        headers={
+            "Accept": "text/html",
+            "User-Agent": "polydata-cpi-calendar/1.0",
+        },
+    )
+    lines = _html_to_lines(dependencies, str(html or ""))
+    now = datetime.fromtimestamp(
+        _parse_iso_ts(_utc_now_iso(dependencies))
+        or datetime.now(timezone.utc).timestamp(),
+        timezone.utc,
+    )
     items: List[Dict[str, Any]] = []
     for idx, line in enumerate(lines):
         date_parts = _parse_date_without_year(line, now.year)
@@ -251,11 +359,27 @@ def _parse_bea_schedule(ctx: dict, *, url: str) -> tuple[List[Dict[str, Any]], s
     return items, "ok" if items else "empty"
 
 
-def _parse_fomc_schedule(ctx: dict, *, url: str) -> tuple[List[Dict[str, Any]], str]:
-    html = ctx["http_text_get"](url, timeout=12, headers={"Accept": "text/html", "User-Agent": "polydata-cpi-calendar/1.0"})
-    lines = _html_to_lines(ctx, str(html or ""))
+def _parse_fomc_schedule(
+    ctx: CpiReleaseCalendarContext,
+    *,
+    url: str,
+) -> tuple[List[Dict[str, Any]], str]:
+    dependencies = _dependencies(ctx)
+    html = dependencies.http_text_get(
+        url,
+        timeout=12,
+        headers={
+            "Accept": "text/html",
+            "User-Agent": "polydata-cpi-calendar/1.0",
+        },
+    )
+    lines = _html_to_lines(dependencies, str(html or ""))
     items: List[Dict[str, Any]] = []
-    now_year = datetime.fromtimestamp(_parse_iso_ts(_utc_now_iso(ctx)) or datetime.now(timezone.utc).timestamp(), timezone.utc).year
+    now_year = datetime.fromtimestamp(
+        _parse_iso_ts(_utc_now_iso(dependencies))
+        or datetime.now(timezone.utc).timestamp(),
+        timezone.utc,
+    ).year
     current_year: Optional[int] = None
     current_month: Optional[str] = None
     for line in lines:
@@ -295,12 +419,13 @@ def _parse_fomc_schedule(ctx: dict, *, url: str) -> tuple[List[Dict[str, Any]], 
     return items, "ok" if items else "empty"
 
 
-def _baseline_from_macro_map(ctx: dict) -> Dict[str, Any]:
-    getter = ctx.get("get_polymarket_macro_map_snapshot")
-    if not callable(getter):
+def _baseline_from_macro_map(
+    dependencies: CpiReleaseCalendarDependencies,
+) -> Dict[str, Any]:
+    if dependencies.get_polymarket_macro_map_snapshot is None:
         return {"status": "unavailable", "label": "No Polymarket map snapshot"}
     try:
-        payload = getter(limit=20)
+        payload = dependencies.get_polymarket_macro_map_snapshot(limit=20)
     except Exception:
         return {"status": "error", "label": "Polymarket map unavailable"}
     candidates: List[Dict[str, Any]] = []
@@ -356,22 +481,39 @@ def _summary(events: List[Dict[str, Any]], baseline: Dict[str, Any], now_ts: flo
     }
 
 
-def _empty_payload(ctx: dict, *, status: str = "warming", sources: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+def _empty_payload(
+    dependencies: CpiReleaseCalendarDependencies,
+    *,
+    status: str = "warming",
+    sources: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    now_iso = _utc_now_iso(dependencies)
     return {
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": now_iso,
         "source": "BLS / BEA / Federal Reserve / Polymarket",
-        "sourceUrl": getattr(ctx["SETTINGS"], "cpi_calendar_source_url", ""),
+        "sourceUrl": getattr(
+            dependencies.settings,
+            "cpi_calendar_source_url",
+            "",
+        ),
         "status": status,
         "sources": sources or {},
-        "summary": _summary([], {"status": "unavailable", "label": "No baseline"}, _parse_iso_ts(_utc_now_iso(ctx))),
+        "summary": _summary(
+            [],
+            {"status": "unavailable", "label": "No baseline"},
+            _parse_iso_ts(now_iso),
+        ),
         "baseline": {"status": "unavailable", "label": "No Polymarket baseline"},
         "consensus": {"status": "optional-unavailable", "label": "Consensus feed not configured"},
         "items": [],
     }
 
 
-def build_cpi_release_calendar_payload(ctx: dict) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
+def build_cpi_release_calendar_payload(
+    ctx: CpiReleaseCalendarContext,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
     source_states: Dict[str, str] = {}
     events: List[Dict[str, Any]] = []
 
@@ -388,13 +530,13 @@ def build_cpi_release_calendar_payload(ctx: dict) -> Dict[str, Any]:
             source_states[key] = state
         except Exception as exc:
             source_states[key] = "error"
-            logger = getattr(ctx.get("app"), "logger", None)
+            logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
                 logger.exception("cpi release calendar source failed source=%s error=%s", key, exc)
 
-    baseline = _baseline_from_macro_map(ctx)
+    baseline = _baseline_from_macro_map(dependencies)
     source_states["pmktBaseline"] = str(baseline.get("status") or "unknown")
-    now_iso = _utc_now_iso(ctx)
+    now_iso = _utc_now_iso(dependencies)
     now_ts = _parse_iso_ts(now_iso)
     unique_events = {str(event.get("id") or len(events)): event for event in events if event.get("releaseAt")}
     items = sorted(unique_events.values(), key=lambda event: _parse_iso_ts(event.get("releaseAt")))
@@ -412,12 +554,23 @@ def build_cpi_release_calendar_payload(ctx: dict) -> Dict[str, Any]:
     }
 
 
-def normalize_cpi_release_calendar_payload(payload: Any, *, ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def normalize_cpi_release_calendar_payload(
+    payload: Any,
+    *,
+    ctx: CpiReleaseCalendarContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     if not isinstance(payload, dict):
-        return _empty_payload(ctx, status="invalid", sources={"payload": "invalid"})
+        return _empty_payload(
+            dependencies,
+            status="invalid",
+            sources={"payload": "invalid"},
+        )
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
-    now_ts = _parse_iso_ts(_utc_now_iso(ctx))
+    now_iso = _utc_now_iso(dependencies)
+    now_ts = _parse_iso_ts(now_iso)
     items.sort(key=lambda event: _parse_iso_ts(event.get("releaseAt")))
     visible = [item for item in items if _parse_iso_ts(item.get("releaseAt")) >= now_ts - 3600]
     if not visible:
@@ -427,9 +580,16 @@ def normalize_cpi_release_calendar_payload(payload: Any, *, ctx: dict, limit: in
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(items, result.get("baseline") or {}, now_ts)
     result["baseline"] = result.get("baseline") if isinstance(result.get("baseline"), dict) else {"status": "unavailable"}
     result["consensus"] = result.get("consensus") if isinstance(result.get("consensus"), dict) else {"status": "optional-unavailable"}
-    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["generatedAt"] = str(result.get("generatedAt") or now_iso)
     result["source"] = str(result.get("source") or "BLS / BEA / Federal Reserve / Polymarket")
-    result["sourceUrl"] = str(result.get("sourceUrl") or getattr(ctx["SETTINGS"], "cpi_calendar_source_url", ""))
+    result["sourceUrl"] = str(
+        result.get("sourceUrl")
+        or getattr(
+            dependencies.settings,
+            "cpi_calendar_source_url",
+            "",
+        )
+    )
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
     return result
 
@@ -438,51 +598,122 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": str(cache_mode)}
 
 
-def _read_seeded_snapshot(ctx: dict, *, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        redis_payload = reader(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY)
+def _read_seeded_snapshot(
+    dependencies: CpiReleaseCalendarDependencies,
+    *,
+    ttl_seconds: int,
+) -> Optional[Dict[str, Any]]:
+    if dependencies.get_cached_json is not None:
+        redis_payload = dependencies.get_cached_json(
+            CPI_CALENDAR_SNAPSHOT_NAMESPACE,
+            CPI_CALENDAR_CACHE_KEY,
+        )
         if isinstance(redis_payload, dict):
-            snapshot_store = ctx.get("SNAPSHOT_STORE")
-            if snapshot_store is not None:
-                snapshot_store.set(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY, redis_payload, ttl_seconds)
+            if dependencies.snapshot_store is not None:
+                dependencies.snapshot_store.set(
+                    CPI_CALENDAR_SNAPSHOT_NAMESPACE,
+                    CPI_CALENDAR_CACHE_KEY,
+                    redis_payload,
+                    ttl_seconds,
+                )
             return _with_cache_mode(redis_payload, "redis-seed")
 
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    snapshot_store = dependencies.snapshot_store
     if snapshot_store is None:
         return None
     sqlite_payload = snapshot_store.get(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY)
     if isinstance(sqlite_payload, dict):
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
-            setter(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY, sqlite_payload, ttl_seconds)
+        if dependencies.set_cached_json is not None:
+            dependencies.set_cached_json(
+                CPI_CALENDAR_SNAPSHOT_NAMESPACE,
+                CPI_CALENDAR_CACHE_KEY,
+                sqlite_payload,
+                ttl_seconds,
+            )
         return _with_cache_mode(sqlite_payload, "sqlite-seed")
     stale_payload = snapshot_store.get_stale(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY)
     if isinstance(stale_payload, dict):
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
-            setter(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY, stale_payload, min(60, ttl_seconds))
+        if dependencies.set_cached_json is not None:
+            dependencies.set_cached_json(
+                CPI_CALENDAR_SNAPSHOT_NAMESPACE,
+                CPI_CALENDAR_CACHE_KEY,
+                stale_payload,
+                min(60, ttl_seconds),
+            )
         return _with_cache_mode(stale_payload, "stale-seed")
     return None
 
 
-def _store_live_build_snapshot(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
-    if snapshot_store is not None:
-        snapshot_store.set(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
-        setter(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY, payload, ttl_seconds)
+def _store_live_build_snapshot(
+    dependencies: CpiReleaseCalendarDependencies,
+    payload: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+) -> None:
+    if dependencies.snapshot_store is not None:
+        dependencies.snapshot_store.set(
+            CPI_CALENDAR_SNAPSHOT_NAMESPACE,
+            CPI_CALENDAR_CACHE_KEY,
+            payload,
+            ttl_seconds,
+        )
+    if dependencies.set_cached_json is not None:
+        dependencies.set_cached_json(
+            CPI_CALENDAR_SNAPSHOT_NAMESPACE,
+            CPI_CALENDAR_CACHE_KEY,
+            payload,
+            ttl_seconds,
+        )
 
 
-def get_cpi_release_calendar_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
-    ttl_seconds = max(300, int(getattr(ctx["SETTINGS"], "cpi_calendar_ttl_seconds", 3600) or 3600))
-    seeded_payload = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
+def get_cpi_release_calendar_snapshot(
+    ctx: CpiReleaseCalendarContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+    *,
+    allow_live_build: bool = True,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    ttl_seconds = max(
+        300,
+        int(
+            getattr(
+                dependencies.settings,
+                "cpi_calendar_ttl_seconds",
+                3600,
+            )
+            or 3600
+        ),
+    )
+    seeded_payload = _read_seeded_snapshot(
+        dependencies,
+        ttl_seconds=ttl_seconds,
+    )
     if seeded_payload is not None:
-        return normalize_cpi_release_calendar_payload(seeded_payload, ctx=ctx, limit=limit)
+        return normalize_cpi_release_calendar_payload(
+            seeded_payload,
+            ctx=dependencies,
+            limit=limit,
+        )
     if not allow_live_build:
-        return normalize_cpi_release_calendar_payload({"status": "warming", "cacheMode": "seed-miss", "sources": {}, "items": []}, ctx=ctx, limit=limit)
+        return normalize_cpi_release_calendar_payload(
+            {
+                "status": "warming",
+                "cacheMode": "seed-miss",
+                "sources": {},
+                "items": [],
+            },
+            ctx=dependencies,
+            limit=limit,
+        )
     payload = _with_cache_mode(build_cpi_release_calendar_payload(ctx), "live-build")
     if payload.get("items"):
-        _store_live_build_snapshot(ctx, payload, ttl_seconds=ttl_seconds)
-    return normalize_cpi_release_calendar_payload(payload, ctx=ctx, limit=limit)
+        _store_live_build_snapshot(
+            dependencies,
+            payload,
+            ttl_seconds=ttl_seconds,
+        )
+    return normalize_cpi_release_calendar_payload(
+        payload,
+        ctx=dependencies,
+        limit=limit,
+    )
