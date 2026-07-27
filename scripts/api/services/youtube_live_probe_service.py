@@ -3,8 +3,15 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, Optional
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
 from urllib.parse import quote_plus, urlencode
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+)
 
 
 YOUTUBE_LIVE_PROBE_NAMESPACE = "probe:youtube-live"
@@ -19,6 +26,70 @@ CHROME_UA = (
     "Chrome/125.0.0.0 Safari/537.36"
 )
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+@dataclass(frozen=True)
+class YouTubeLiveProbeDependencies:
+    http_text_get: Callable[..., Any] | None
+    http_json_get: Callable[..., Any] | None
+    requests_module: Any
+    relay_base_url_configured: bool
+    relay_base_url: Any
+    relay_token: Any
+    relay_auth_header: Any
+    youtube_live_probe: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> YouTubeLiveProbeDependencies:
+        return cls(
+            http_text_get=resolve_optional_service_callable(
+                context,
+                "http_text_get",
+            ),
+            http_json_get=resolve_optional_service_callable(
+                context,
+                "http_json_get",
+            ),
+            requests_module=resolve_optional_service_value(
+                context,
+                "requests",
+            ),
+            relay_base_url_configured="youtube_live_relay_base_url" in context,
+            relay_base_url=resolve_optional_service_value(
+                context,
+                "youtube_live_relay_base_url",
+            ),
+            relay_token=resolve_optional_service_value(
+                context,
+                "youtube_live_relay_token",
+            ),
+            relay_auth_header=resolve_optional_service_value(
+                context,
+                "youtube_live_relay_auth_header",
+            ),
+            youtube_live_probe=resolve_optional_service_callable(
+                context,
+                "youtube_live_probe",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+        )
 
 
 def _string(value: Any) -> str:
@@ -124,59 +195,93 @@ def parse_channel_html(html: str) -> Dict[str, Any]:
     }
 
 
-def _http_text_get(ctx: dict, url: str, *, timeout: int) -> str:
-    getter = ctx.get("http_text_get")
+def _http_text_get(
+    dependencies: YouTubeLiveProbeDependencies,
+    url: str,
+    *,
+    timeout: int,
+) -> str:
     headers = {"User-Agent": CHROME_UA, "Accept-Language": "en-US,en;q=0.8"}
-    if callable(getter):
-        return getter(url, timeout=timeout, headers=headers)
-    requests_module = ctx.get("requests")
-    if requests_module is None:
+    if dependencies.http_text_get is not None:
+        return dependencies.http_text_get(
+            url,
+            timeout=timeout,
+            headers=headers,
+        )
+    if dependencies.requests_module is None:
         raise RuntimeError("http_text_get unavailable")
-    response = requests_module.get(url, timeout=timeout, headers=headers, allow_redirects=True)
+    response = dependencies.requests_module.get(
+        url,
+        timeout=timeout,
+        headers=headers,
+        allow_redirects=True,
+    )
     response.raise_for_status()
     return response.text
 
 
-def _http_json_get(ctx: dict, url: str, *, timeout: int) -> Dict[str, Any]:
-    getter = ctx.get("http_json_get")
+def _http_json_get(
+    dependencies: YouTubeLiveProbeDependencies,
+    url: str,
+    *,
+    timeout: int,
+) -> Dict[str, Any]:
     headers = {"User-Agent": CHROME_UA, "Accept-Language": "en-US,en;q=0.8"}
-    if callable(getter):
-        payload = getter(url, timeout=timeout, headers=headers)
+    if dependencies.http_json_get is not None:
+        payload = dependencies.http_json_get(
+            url,
+            timeout=timeout,
+            headers=headers,
+        )
         return payload if isinstance(payload, dict) else {}
-    requests_module = ctx.get("requests")
-    if requests_module is None:
+    if dependencies.requests_module is None:
         raise RuntimeError("http_json_get unavailable")
-    response = requests_module.get(url, timeout=timeout, headers=headers)
+    response = dependencies.requests_module.get(
+        url,
+        timeout=timeout,
+        headers=headers,
+    )
     response.raise_for_status()
     payload = response.json()
     return payload if isinstance(payload, dict) else {}
 
 
-def _relay_base_url(ctx: dict) -> str:
-    if "youtube_live_relay_base_url" in ctx:
-        return _string(ctx.get("youtube_live_relay_base_url")).rstrip("/")
+def _relay_base_url(
+    dependencies: YouTubeLiveProbeDependencies,
+) -> str:
+    if dependencies.relay_base_url_configured:
+        return _string(dependencies.relay_base_url).rstrip("/")
     return _string(os.environ.get(YOUTUBE_RELAY_BASE_ENV)).rstrip("/")
 
 
-def _relay_token(ctx: dict) -> str:
+def _relay_token(
+    dependencies: YouTubeLiveProbeDependencies,
+) -> str:
     return _string(
-        ctx.get("youtube_live_relay_token")
+        dependencies.relay_token
         or os.environ.get(YOUTUBE_RELAY_TOKEN_ENV)
         or os.environ.get("RELAY_SHARED_SECRET")
     )
 
 
-def _relay_auth_header(ctx: dict) -> str:
+def _relay_auth_header(
+    dependencies: YouTubeLiveProbeDependencies,
+) -> str:
     header = _string(
-        ctx.get("youtube_live_relay_auth_header")
+        dependencies.relay_auth_header
         or os.environ.get(YOUTUBE_RELAY_AUTH_HEADER_ENV)
         or os.environ.get("RELAY_AUTH_HEADER")
     )
     return header or "x-relay-key"
 
 
-def _try_relay(ctx: dict, *, channel: str = "", video_id: str = "") -> Optional[Dict[str, Any]]:
-    base_url = _relay_base_url(ctx)
+def _try_relay(
+    dependencies: YouTubeLiveProbeDependencies,
+    *,
+    channel: str = "",
+    video_id: str = "",
+) -> Optional[Dict[str, Any]]:
+    base_url = _relay_base_url(dependencies)
     if not base_url:
         return None
     relay_endpoint = base_url if base_url.rstrip("/").endswith(("/youtube-live", "/youtube/live")) else f"{base_url}/youtube-live"
@@ -190,38 +295,54 @@ def _try_relay(ctx: dict, *, channel: str = "", video_id: str = "") -> Optional[
     separator = "&" if "?" in relay_endpoint else "?"
     relay_url = f"{relay_endpoint}{separator}{urlencode(params)}"
     headers = {"User-Agent": CHROME_UA, "Accept": "application/json"}
-    token = _relay_token(ctx)
+    token = _relay_token(dependencies)
     if token:
-        relay_header = _relay_auth_header(ctx)
+        relay_header = _relay_auth_header(dependencies)
         headers[relay_header] = token
         if relay_header.lower() != "authorization":
             headers["Authorization"] = f"Bearer {token}"
-    getter = ctx.get("http_json_get")
-    if callable(getter):
-        payload = getter(relay_url, timeout=8, headers=headers)
+    if dependencies.http_json_get is not None:
+        payload = dependencies.http_json_get(
+            relay_url,
+            timeout=8,
+            headers=headers,
+        )
         return payload if isinstance(payload, dict) else None
-    requests_module = ctx.get("requests")
-    if requests_module is None:
+    if dependencies.requests_module is None:
         raise RuntimeError("http_json_get unavailable")
-    response = requests_module.get(relay_url, timeout=8, headers=headers)
+    response = dependencies.requests_module.get(
+        relay_url,
+        timeout=8,
+        headers=headers,
+    )
     response.raise_for_status()
     payload = response.json()
     return payload if isinstance(payload, dict) else None
 
 
-def _try_channel_scrape(ctx: dict, channel: str) -> Optional[Dict[str, Any]]:
+def _try_channel_scrape(
+    dependencies: YouTubeLiveProbeDependencies,
+    channel: str,
+) -> Optional[Dict[str, Any]]:
     normalized_channel = _normalize_channel(channel)
     if not normalized_channel:
         return None
-    html = _http_text_get(ctx, f"https://www.youtube.com/@{normalized_channel}/live", timeout=10)
+    html = _http_text_get(
+        dependencies,
+        f"https://www.youtube.com/@{normalized_channel}/live",
+        timeout=10,
+    )
     return parse_channel_html(html)
 
 
-def _try_oembed(ctx: dict, video_id: str) -> Optional[Dict[str, Any]]:
+def _try_oembed(
+    dependencies: YouTubeLiveProbeDependencies,
+    video_id: str,
+) -> Optional[Dict[str, Any]]:
     if not VIDEO_ID_RE.match(video_id):
         return None
     payload = _http_json_get(
-        ctx,
+        dependencies,
         f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={quote_plus(video_id)}&format=json",
         timeout=5,
     )
@@ -237,14 +358,40 @@ def _try_oembed(ctx: dict, video_id: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def _fetch_live_stream_info(ctx: dict, *, channel: str = "", video_id: str = "") -> Dict[str, Any]:
-    probe = ctx.get("youtube_live_probe")
-    if callable(probe):
-        return _normalize_probe(probe(channel=channel, video_id=video_id))
+def _fetch_live_stream_info(
+    ctx: Mapping[str, Any],
+    *,
+    channel: str = "",
+    video_id: str = "",
+) -> Dict[str, Any]:
+    return _fetch_live_stream_info_with_dependencies(
+        YouTubeLiveProbeDependencies.from_context(ctx),
+        channel=channel,
+        video_id=video_id,
+    )
+
+
+def _fetch_live_stream_info_with_dependencies(
+    dependencies: YouTubeLiveProbeDependencies,
+    *,
+    channel: str = "",
+    video_id: str = "",
+) -> Dict[str, Any]:
+    if dependencies.youtube_live_probe is not None:
+        return _normalize_probe(
+            dependencies.youtube_live_probe(
+                channel=channel,
+                video_id=video_id,
+            )
+        )
 
     relay_error = ""
     try:
-        relayed = _try_relay(ctx, channel=channel, video_id=video_id)
+        relayed = _try_relay(
+            dependencies,
+            channel=channel,
+            video_id=video_id,
+        )
         if relayed:
             normalized = _normalize_probe(relayed)
             if normalized.get("videoId") or (video_id and normalized.get("channelExists")):
@@ -256,7 +403,7 @@ def _fetch_live_stream_info(ctx: dict, *, channel: str = "", video_id: str = "")
 
     if video_id:
         try:
-            oembed = _try_oembed(ctx, video_id)
+            oembed = _try_oembed(dependencies, video_id)
             if oembed:
                 return _normalize_probe(oembed)
         except Exception as exc:
@@ -265,7 +412,7 @@ def _fetch_live_stream_info(ctx: dict, *, channel: str = "", video_id: str = "")
 
     if channel:
         try:
-            scraped = _try_channel_scrape(ctx, channel)
+            scraped = _try_channel_scrape(dependencies, channel)
             if scraped:
                 return _normalize_probe(scraped)
         except Exception as exc:
@@ -282,7 +429,25 @@ def _cache_key(channel: str = "", video_id: str = "") -> str:
     return f"vid:{normalized_video_id or '-'}:ch:{normalized_channel or '-'}:v1"
 
 
-def probe_youtube_live(ctx: dict, *, channel: str = "", video_id: str = "") -> Dict[str, Any]:
+def probe_youtube_live(
+    ctx: Mapping[str, Any],
+    *,
+    channel: str = "",
+    video_id: str = "",
+) -> Dict[str, Any]:
+    return _probe_youtube_live(
+        YouTubeLiveProbeDependencies.from_context(ctx),
+        channel=channel,
+        video_id=video_id,
+    )
+
+
+def _probe_youtube_live(
+    dependencies: YouTubeLiveProbeDependencies,
+    *,
+    channel: str = "",
+    video_id: str = "",
+) -> Dict[str, Any]:
     channel = _string(channel)
     video_id = _string(video_id)
     if not channel and not video_id:
@@ -291,12 +456,14 @@ def probe_youtube_live(ctx: dict, *, channel: str = "", video_id: str = "") -> D
         video_id = ""
 
     cache_key = _cache_key(channel, video_id)
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        cached = reader(YOUTUBE_LIVE_PROBE_NAMESPACE, cache_key)
+    if dependencies.get_cached_json is not None:
+        cached = dependencies.get_cached_json(
+            YOUTUBE_LIVE_PROBE_NAMESPACE,
+            cache_key,
+        )
         if isinstance(cached, dict):
             return _normalize_probe(cached)
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is not None:
         try:
             cached = store.get(YOUTUBE_LIVE_PROBE_NAMESPACE, cache_key)
@@ -305,7 +472,13 @@ def probe_youtube_live(ctx: dict, *, channel: str = "", video_id: str = "") -> D
         except Exception:
             pass
 
-    result = _normalize_probe(_fetch_live_stream_info(ctx, channel=channel, video_id=video_id))
+    result = _normalize_probe(
+        _fetch_live_stream_info_with_dependencies(
+            dependencies,
+            channel=channel,
+            video_id=video_id,
+        )
+    )
     if not result.get("videoId"):
         if store is not None:
             try:
@@ -318,10 +491,14 @@ def probe_youtube_live(ctx: dict, *, channel: str = "", video_id: str = "") -> D
             except Exception:
                 pass
     ttl = YOUTUBE_LIVE_POSITIVE_TTL_SECONDS if result.get("videoId") else YOUTUBE_LIVE_NEGATIVE_TTL_SECONDS
-    writer = ctx.get("set_cached_json")
-    if callable(writer):
+    if dependencies.set_cached_json is not None:
         try:
-            writer(YOUTUBE_LIVE_PROBE_NAMESPACE, cache_key, result, ttl)
+            dependencies.set_cached_json(
+                YOUTUBE_LIVE_PROBE_NAMESPACE,
+                cache_key,
+                result,
+                ttl,
+            )
         except Exception:
             pass
     if store is not None:
