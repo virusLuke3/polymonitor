@@ -281,6 +281,133 @@ class BootstrapCacheDependencies:
         )
 
 
+@dataclass(frozen=True)
+class BootstrapPrewarmDependencies:
+    bootstrap: BootstrapCoreDependencies
+    application: Any
+    threading_module: Any
+    commodity_symbols: Sequence[Any]
+    finance_runtime_ttl_seconds: int
+    signal_runtime_ttl_seconds: int
+    snapshot_prewarm_enabled: bool
+    get_market_groups_payload: Callable[..., Any]
+    get_market_group_chart_payload: Callable[..., Any]
+    get_market_group_snapshot: Callable[..., Any]
+    get_bootstrap_component_cached: Callable[..., Any]
+    get_active_markets_snapshot: Callable[..., Any]
+    get_recent_oracle_snapshot: Callable[..., Any]
+    get_recent_trades_snapshot: Callable[..., Any]
+    get_finance_market_atlas_snapshot: Callable[..., Any]
+    get_equity_event_command_snapshot: Callable[..., Any]
+    get_onchain_tradfi_perp_radar_snapshot: Callable[..., Any]
+    get_finance_liquidity_regime_snapshot: Callable[..., Any]
+    get_whale_trades_snapshot: Callable[..., Any]
+    get_suspicious_trades_snapshot: Callable[..., Any]
+    get_alpha_signal_snapshot: Callable[..., Any]
+    get_jin10_panel_snapshot: Callable[..., Any]
+    get_bootstrap_payload_cached: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> BootstrapPrewarmDependencies:
+        return cls(
+            bootstrap=BootstrapCoreDependencies.from_context(context),
+            application=resolve_service_value(context, "app"),
+            threading_module=resolve_service_value(context, "threading"),
+            commodity_symbols=cast(
+                Sequence[Any],
+                resolve_service_value(context, "COMMODITY_SYMBOLS", ()),
+            ),
+            finance_runtime_ttl_seconds=int(
+                resolve_service_value(
+                    context,
+                    "FINANCE_RUNTIME_TTL_SECONDS",
+                    0,
+                )
+            ),
+            signal_runtime_ttl_seconds=int(
+                resolve_service_value(
+                    context,
+                    "SIGNAL_RUNTIME_TTL_SECONDS",
+                    0,
+                )
+            ),
+            snapshot_prewarm_enabled=bool(
+                resolve_service_value(
+                    context,
+                    "SNAPSHOT_PREWARM_ENABLED",
+                    False,
+                )
+            ),
+            get_market_groups_payload=_service_callable(
+                context,
+                "get_market_groups_payload",
+            ),
+            get_market_group_chart_payload=_service_callable(
+                context,
+                "get_market_group_chart_payload",
+            ),
+            get_market_group_snapshot=_service_callable(
+                context,
+                "get_market_group_snapshot",
+            ),
+            get_bootstrap_component_cached=_service_callable(
+                context,
+                "get_bootstrap_component_cached",
+            ),
+            get_active_markets_snapshot=_service_callable(
+                context,
+                "get_active_markets_snapshot",
+            ),
+            get_recent_oracle_snapshot=_service_callable(
+                context,
+                "get_recent_oracle_snapshot",
+            ),
+            get_recent_trades_snapshot=_service_callable(
+                context,
+                "get_recent_trades_snapshot",
+            ),
+            get_finance_market_atlas_snapshot=_service_callable(
+                context,
+                "get_finance_market_atlas_snapshot",
+            ),
+            get_equity_event_command_snapshot=_service_callable(
+                context,
+                "get_equity_event_command_snapshot",
+            ),
+            get_onchain_tradfi_perp_radar_snapshot=_service_callable(
+                context,
+                "get_onchain_tradfi_perp_radar_snapshot",
+            ),
+            get_finance_liquidity_regime_snapshot=_service_callable(
+                context,
+                "get_finance_liquidity_regime_snapshot",
+            ),
+            get_whale_trades_snapshot=_service_callable(
+                context,
+                "get_whale_trades_snapshot",
+            ),
+            get_suspicious_trades_snapshot=_service_callable(
+                context,
+                "get_suspicious_trades_snapshot",
+            ),
+            get_alpha_signal_snapshot=_service_callable(
+                context,
+                "get_alpha_signal_snapshot",
+            ),
+            get_jin10_panel_snapshot=_service_callable(
+                context,
+                "get_jin10_panel_snapshot",
+            ),
+            get_bootstrap_payload_cached=_service_callable(
+                context,
+                "get_bootstrap_payload_cached",
+            ),
+        )
+
+
 def build_dashboard_payload(ctx: Mapping[str, Any]) -> Dict[str, Any]:
     return _build_dashboard_payload(DashboardBuildDependencies.from_context(ctx))
 
@@ -1161,11 +1288,19 @@ def get_bootstrap_payload_cached(ctx: Mapping[str, Any]) -> Dict[str, Any]:
     raise RuntimeError("bootstrap payload refresh failed")
 
 
-def prewarm_snapshot_payloads(ctx: dict) -> None:
-    bootstrap_dependencies = BootstrapCoreDependencies.from_context(ctx)
+def prewarm_snapshot_payloads(ctx: Mapping[str, Any]) -> None:
+    _prewarm_snapshot_payloads(
+        BootstrapPrewarmDependencies.from_context(ctx),
+    )
 
+
+def _prewarm_snapshot_payloads(
+    dependencies: BootstrapPrewarmDependencies,
+) -> None:
     def _prewarm_active_market_group_charts() -> None:
-        enabled = str(os.environ.get("POLYDATA_PREWARM_MARKET_GROUP_CHARTS") or "").strip().lower() in {
+        enabled = str(
+            os.environ.get("POLYDATA_PREWARM_MARKET_GROUP_CHARTS") or ""
+        ).strip().lower() in {
             "1",
             "true",
             "yes",
@@ -1173,63 +1308,174 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
         }
         if not enabled:
             return
-        payload = ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")
+        payload = dependencies.get_market_groups_payload(
+            query="",
+            page=1,
+            page_size=80,
+            sort="active",
+        )
         for group in (payload.get("items") or [])[:8]:
             event_id = group.get("eventId")
             if event_id is not None:
-                ctx["get_market_group_chart_payload"](str(event_id), "1d")
+                dependencies.get_market_group_chart_payload(
+                    str(event_id),
+                    "1d",
+                )
 
     tasks = [
-        ("commodities", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
-        ("bootstrap:active-markets-preview", 15, lambda: ctx["get_bootstrap_component_cached"](
-            "active-markets-preview-v11",
-            lambda: _build_bootstrap_active_markets_payload(
-                bootstrap_dependencies,
-                page_size=20,
+        (
+            "commodities",
+            dependencies.finance_runtime_ttl_seconds,
+            lambda: dependencies.get_market_group_snapshot(
+                dependencies.commodity_symbols,
+                kind="commodities",
             ),
-            ttl_seconds=15,
-        )),
-        ("markets:80", 15, lambda: ctx["get_active_markets_snapshot"](page_size=80)),
-        ("oracle:12", 15, lambda: ctx["get_recent_oracle_snapshot"](limit=12)),
-        ("oracle:16", 15, lambda: ctx["get_recent_oracle_snapshot"](limit=16)),
-        ("trades:18", 15, lambda: ctx["get_recent_trades_snapshot"](limit=18)),
-        ("trades:24", 15, lambda: ctx["get_recent_trades_snapshot"](limit=24)),
-        ("content:8", 300, lambda: ctx["get_bootstrap_component_cached"](
-            "latest-content-preview-v1",
-            lambda: {
-                "items": _get_bootstrap_latest_content_preview(
-                    bootstrap_dependencies,
-                    limit=8,
-                )
-            },
-            ttl_seconds=300,
-        )),
-        ("content:12", 300, lambda: ctx["get_bootstrap_component_cached"](
-            "latest-content-preview-v2",
-            lambda: {
-                "items": _get_bootstrap_latest_content_preview(
-                    bootstrap_dependencies,
-                    limit=12,
-                )
-            },
-            ttl_seconds=300,
-        )),
-        ("bootstrap:commodities-preview", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_bootstrap_component_cached"](
-            "commodities-preview-v1",
-            lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities"),
-            ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
-        )),
-        ("market-groups:active:80", 15, lambda: ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")),
-        ("finance:market-atlas", 60, lambda: ctx["get_finance_market_atlas_snapshot"](limit=16)),
-        ("finance:equity-event-command", 60, lambda: ctx["get_equity_event_command_snapshot"](limit=12)),
-        ("finance:onchain-tradfi-perp-radar", 45, lambda: ctx["get_onchain_tradfi_perp_radar_snapshot"](limit=12)),
-        ("finance:liquidity-regime", 45, lambda: ctx["get_finance_liquidity_regime_snapshot"](limit=12)),
-        ("market-groups:active-charts:1d", 300, _prewarm_active_market_group_charts),
-        ("whales", 30, lambda: ctx["get_whale_trades_snapshot"](limit=14)),
-        ("suspicious", 30, lambda: ctx["get_suspicious_trades_snapshot"](limit=12)),
-        ("alpha", 45, lambda: ctx["get_alpha_signal_snapshot"](limit=8)),
-        ("jin10", max(15, int(ctx["SIGNAL_RUNTIME_TTL_SECONDS"])), lambda: ctx["get_jin10_panel_snapshot"](limit=24)),
-        ("bootstrap", 15, ctx["get_bootstrap_payload_cached"]),
+        ),
+        (
+            "bootstrap:active-markets-preview",
+            15,
+            lambda: dependencies.get_bootstrap_component_cached(
+                "active-markets-preview-v11",
+                lambda: _build_bootstrap_active_markets_payload(
+                    dependencies.bootstrap,
+                    page_size=20,
+                ),
+                ttl_seconds=15,
+            ),
+        ),
+        (
+            "markets:80",
+            15,
+            lambda: dependencies.get_active_markets_snapshot(page_size=80),
+        ),
+        (
+            "oracle:12",
+            15,
+            lambda: dependencies.get_recent_oracle_snapshot(limit=12),
+        ),
+        (
+            "oracle:16",
+            15,
+            lambda: dependencies.get_recent_oracle_snapshot(limit=16),
+        ),
+        (
+            "trades:18",
+            15,
+            lambda: dependencies.get_recent_trades_snapshot(limit=18),
+        ),
+        (
+            "trades:24",
+            15,
+            lambda: dependencies.get_recent_trades_snapshot(limit=24),
+        ),
+        (
+            "content:8",
+            300,
+            lambda: dependencies.get_bootstrap_component_cached(
+                "latest-content-preview-v1",
+                lambda: {
+                    "items": _get_bootstrap_latest_content_preview(
+                        dependencies.bootstrap,
+                        limit=8,
+                    )
+                },
+                ttl_seconds=300,
+            ),
+        ),
+        (
+            "content:12",
+            300,
+            lambda: dependencies.get_bootstrap_component_cached(
+                "latest-content-preview-v2",
+                lambda: {
+                    "items": _get_bootstrap_latest_content_preview(
+                        dependencies.bootstrap,
+                        limit=12,
+                    )
+                },
+                ttl_seconds=300,
+            ),
+        ),
+        (
+            "bootstrap:commodities-preview",
+            dependencies.finance_runtime_ttl_seconds,
+            lambda: dependencies.get_bootstrap_component_cached(
+                "commodities-preview-v1",
+                lambda: dependencies.get_market_group_snapshot(
+                    dependencies.commodity_symbols,
+                    kind="commodities",
+                ),
+                ttl_seconds=dependencies.finance_runtime_ttl_seconds,
+            ),
+        ),
+        (
+            "market-groups:active:80",
+            15,
+            lambda: dependencies.get_market_groups_payload(
+                query="",
+                page=1,
+                page_size=80,
+                sort="active",
+            ),
+        ),
+        (
+            "finance:market-atlas",
+            60,
+            lambda: dependencies.get_finance_market_atlas_snapshot(
+                limit=16,
+            ),
+        ),
+        (
+            "finance:equity-event-command",
+            60,
+            lambda: dependencies.get_equity_event_command_snapshot(
+                limit=12,
+            ),
+        ),
+        (
+            "finance:onchain-tradfi-perp-radar",
+            45,
+            lambda: dependencies.get_onchain_tradfi_perp_radar_snapshot(
+                limit=12,
+            ),
+        ),
+        (
+            "finance:liquidity-regime",
+            45,
+            lambda: dependencies.get_finance_liquidity_regime_snapshot(
+                limit=12,
+            ),
+        ),
+        (
+            "market-groups:active-charts:1d",
+            300,
+            _prewarm_active_market_group_charts,
+        ),
+        (
+            "whales",
+            30,
+            lambda: dependencies.get_whale_trades_snapshot(limit=14),
+        ),
+        (
+            "suspicious",
+            30,
+            lambda: dependencies.get_suspicious_trades_snapshot(limit=12),
+        ),
+        (
+            "alpha",
+            45,
+            lambda: dependencies.get_alpha_signal_snapshot(limit=8),
+        ),
+        (
+            "jin10",
+            max(15, dependencies.signal_runtime_ttl_seconds),
+            lambda: dependencies.get_jin10_panel_snapshot(limit=24),
+        ),
+        (
+            "bootstrap",
+            15,
+            dependencies.get_bootstrap_payload_cached,
+        ),
     ]
     for name, interval_seconds, builder in tasks:
         if not _claim_prewarm_slot(name, interval_seconds):
@@ -1237,43 +1483,114 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
         started_at = time.perf_counter()
         try:
             builder()
-            ctx["app"].logger.info("snapshot-prewarm done task=%s duration_ms=%.2f", name, (time.perf_counter() - started_at) * 1000)
+            dependencies.application.logger.info(
+                "snapshot-prewarm done task=%s duration_ms=%.2f",
+                name,
+                (time.perf_counter() - started_at) * 1000,
+            )
         except Exception:
-            ctx["app"].logger.exception("snapshot-prewarm failed task=%s", name)
+            dependencies.application.logger.exception(
+                "snapshot-prewarm failed task=%s",
+                name,
+            )
 
 
-def prewarm_critical_payloads(ctx: dict) -> None:
+def prewarm_critical_payloads(ctx: Mapping[str, Any]) -> None:
+    _prewarm_critical_payloads(
+        BootstrapPrewarmDependencies.from_context(ctx),
+    )
+
+
+def _prewarm_critical_payloads(
+    dependencies: BootstrapPrewarmDependencies,
+) -> None:
     tasks = [
-        ("commodities", lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
-        ("bootstrap:commodities-preview", lambda: ctx["get_bootstrap_component_cached"](
-            "commodities-preview-v1",
-            lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities"),
-            ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
-        )),
-        ("market-groups:active:80", lambda: ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")),
-        ("finance:market-atlas", lambda: ctx["get_finance_market_atlas_snapshot"](limit=16)),
-        ("finance:equity-event-command", lambda: ctx["get_equity_event_command_snapshot"](limit=12)),
-        ("finance:onchain-tradfi-perp-radar", lambda: ctx["get_onchain_tradfi_perp_radar_snapshot"](limit=12)),
-        ("finance:liquidity-regime", lambda: ctx["get_finance_liquidity_regime_snapshot"](limit=12)),
-        ("bootstrap", ctx["get_bootstrap_payload_cached"]),
+        (
+            "commodities",
+            lambda: dependencies.get_market_group_snapshot(
+                dependencies.commodity_symbols,
+                kind="commodities",
+            ),
+        ),
+        (
+            "bootstrap:commodities-preview",
+            lambda: dependencies.get_bootstrap_component_cached(
+                "commodities-preview-v1",
+                lambda: dependencies.get_market_group_snapshot(
+                    dependencies.commodity_symbols,
+                    kind="commodities",
+                ),
+                ttl_seconds=dependencies.finance_runtime_ttl_seconds,
+            ),
+        ),
+        (
+            "market-groups:active:80",
+            lambda: dependencies.get_market_groups_payload(
+                query="",
+                page=1,
+                page_size=80,
+                sort="active",
+            ),
+        ),
+        (
+            "finance:market-atlas",
+            lambda: dependencies.get_finance_market_atlas_snapshot(
+                limit=16,
+            ),
+        ),
+        (
+            "finance:equity-event-command",
+            lambda: dependencies.get_equity_event_command_snapshot(
+                limit=12,
+            ),
+        ),
+        (
+            "finance:onchain-tradfi-perp-radar",
+            lambda: dependencies.get_onchain_tradfi_perp_radar_snapshot(
+                limit=12,
+            ),
+        ),
+        (
+            "finance:liquidity-regime",
+            lambda: dependencies.get_finance_liquidity_regime_snapshot(
+                limit=12,
+            ),
+        ),
+        (
+            "bootstrap",
+            dependencies.get_bootstrap_payload_cached,
+        ),
     ]
     for name, builder in tasks:
         started_at = time.perf_counter()
         try:
             builder()
-            ctx["app"].logger.info("startup-prewarm done task=%s duration_ms=%.2f", name, (time.perf_counter() - started_at) * 1000)
+            dependencies.application.logger.info(
+                "startup-prewarm done task=%s duration_ms=%.2f",
+                name,
+                (time.perf_counter() - started_at) * 1000,
+            )
         except Exception:
-            ctx["app"].logger.exception("startup-prewarm failed task=%s", name)
+            dependencies.application.logger.exception(
+                "startup-prewarm failed task=%s",
+                name,
+            )
 
 
-def start_snapshot_prewarm_thread(ctx: dict) -> None:
-    if not ctx["SNAPSHOT_PREWARM_ENABLED"]:
-        ctx["app"].logger.info("snapshot-prewarm disabled")
+def start_snapshot_prewarm_thread(ctx: Mapping[str, Any]) -> None:
+    dependencies = BootstrapPrewarmDependencies.from_context(ctx)
+    if not dependencies.snapshot_prewarm_enabled:
+        dependencies.application.logger.info("snapshot-prewarm disabled")
         return
+
     def _runner() -> None:
         while True:
-            prewarm_snapshot_payloads(ctx)
+            _prewarm_snapshot_payloads(dependencies)
             time.sleep(SNAPSHOT_PREWARM_INTERVAL_SECONDS)
 
-    thread = ctx["threading"].Thread(target=_runner, name="polydata-snapshot-prewarm", daemon=True)
+    thread = dependencies.threading_module.Thread(
+        target=_runner,
+        name="polydata-snapshot-prewarm",
+        daemon=True,
+    )
     thread.start()
