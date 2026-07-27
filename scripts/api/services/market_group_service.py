@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, cast
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_service_callable,
+    resolve_service_value,
+)
 
 MARKET_GROUPS_LIST_NAMESPACE = "snapshot:market-groups:list"
 MARKET_GROUPS_DETAIL_NAMESPACE = "snapshot:market-groups:detail"
@@ -63,6 +71,67 @@ GENERIC_TAGS = {
     "5m",
     "15m",
 }
+
+
+def _service_callable(
+    context: Mapping[str, Any],
+    name: str,
+) -> Callable[..., Any]:
+    return cast(Callable[..., Any], resolve_service_callable(context, name))
+
+
+@dataclass(frozen=True)
+class MarketGroupDependencies:
+    source: Mapping[str, Any]
+    application: Any
+    settings: Any
+    query_all: Callable[..., Any]
+    get_cached_runtime_payload: Callable[..., Any]
+    set_cached_runtime_payload: Callable[..., Any]
+    http_json_get: Callable[..., Any]
+    utc_now_iso: Callable[..., Any]
+    get_snapshot_payload: Callable[..., Any]
+    get_market_clob_price_series: Callable[..., Any]
+    get_backend: Callable[..., Any] | None
+    table_exists: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MarketGroupDependencies:
+        return cls(
+            source=context,
+            application=resolve_service_value(context, "app"),
+            settings=resolve_service_value(context, "SETTINGS"),
+            query_all=_service_callable(context, "query_all"),
+            get_cached_runtime_payload=_service_callable(
+                context,
+                "get_cached_runtime_payload",
+            ),
+            set_cached_runtime_payload=_service_callable(
+                context,
+                "set_cached_runtime_payload",
+            ),
+            http_json_get=_service_callable(context, "http_json_get"),
+            utc_now_iso=_service_callable(context, "utc_now_iso"),
+            get_snapshot_payload=_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+            get_market_clob_price_series=_service_callable(
+                context,
+                "get_market_clob_price_series",
+            ),
+            get_backend=resolve_optional_service_callable(
+                context,
+                "get_backend",
+            ),
+            table_exists=resolve_optional_service_callable(
+                context,
+                "table_exists",
+            ),
+        )
 
 
 def _as_list(value: Any) -> List[Any]:
@@ -278,13 +347,17 @@ def _chunk(values: Iterable[str], size: int = 450) -> Iterable[List[str]]:
         yield batch
 
 
-def _query_market_rows(ctx: dict, column_expr: str, values: Iterable[str]) -> List[Dict[str, Any]]:
+def _query_market_rows(
+    dependencies: MarketGroupDependencies,
+    column_expr: str,
+    values: Iterable[str],
+) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     unique_values = sorted({str(value).strip().lower() for value in values if str(value).strip()})
     for batch in _chunk(unique_values):
         placeholders = ",".join("?" for _ in batch)
         rows.extend(
-            ctx["query_all"](
+            dependencies.query_all(
                 f"""
                 SELECT
                     m.id,
@@ -312,7 +385,7 @@ def _query_market_rows(ctx: dict, column_expr: str, values: Iterable[str]) -> Li
 
 
 def _local_market_lookup(
-    ctx: dict,
+    dependencies: MarketGroupDependencies,
     events: List[Dict[str, Any]],
 ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     condition_ids: set[str] = set()
@@ -339,23 +412,39 @@ def _local_market_lookup(
     by_slug: Dict[str, Dict[str, Any]] = {}
     by_yes_token: Dict[str, Dict[str, Any]] = {}
     try:
-        for row in _query_market_rows(ctx, "m.condition_id", condition_ids):
+        for row in _query_market_rows(
+            dependencies,
+            "m.condition_id",
+            condition_ids,
+        ):
             by_condition.setdefault(str(row.get("condition_key") or ""), row)
-        for row in _query_market_rows(ctx, "m.gamma_market_id", gamma_market_ids):
+        for row in _query_market_rows(
+            dependencies,
+            "m.gamma_market_id",
+            gamma_market_ids,
+        ):
             by_gamma.setdefault(str(row.get("gamma_market_id") or ""), row)
-        for row in _query_market_rows(ctx, "m.slug", slugs):
+        for row in _query_market_rows(
+            dependencies,
+            "m.slug",
+            slugs,
+        ):
             by_slug.setdefault(str(row.get("slug_key") or ""), row)
-        for row in _query_market_rows(ctx, "m.yes_token_id", yes_token_ids):
+        for row in _query_market_rows(
+            dependencies,
+            "m.yes_token_id",
+            yes_token_ids,
+        ):
             by_yes_token.setdefault(str(row.get("yes_token_id") or ""), row)
     except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger:
             logger.exception("market-group local lookup failed; falling back to Gamma-only groups")
     return by_condition, by_gamma, by_slug, by_yes_token
 
 
 def _fetch_gamma_events(
-    ctx: dict,
+    dependencies: MarketGroupDependencies,
     *,
     max_pages: int = 10,
     target_events: int = 240,
@@ -372,7 +461,10 @@ def _fetch_gamma_events(
         },
         sort_keys=True,
     )
-    cached = ctx["get_cached_runtime_payload"]("market-groups", cache_key)
+    cached = dependencies.get_cached_runtime_payload(
+        "market-groups",
+        cache_key,
+    )
     if isinstance(cached, list):
         return cached
 
@@ -380,8 +472,8 @@ def _fetch_gamma_events(
     seen_ids: set[str] = set()
     limit = 100
     for page in range(max(1, int(max_pages))):
-        payload = ctx["http_json_get"](
-            f"{ctx['SETTINGS'].gamma_api_base.rstrip('/')}/events",
+        payload = dependencies.http_json_get(
+            f"{dependencies.settings.gamma_api_base.rstrip('/')}/events",
             params={
                 "active": "true",
                 "closed": "false",
@@ -410,7 +502,12 @@ def _fetch_gamma_events(
             break
         if len(page_events) < limit:
             break
-    return ctx["set_cached_runtime_payload"]("market-groups", cache_key, events, ttl_seconds=ttl_seconds)
+    return dependencies.set_cached_runtime_payload(
+        "market-groups",
+        cache_key,
+        events,
+        ttl_seconds=ttl_seconds,
+    )
 
 
 def _extract_events(payload: Any) -> List[Dict[str, Any]]:
@@ -420,14 +517,17 @@ def _extract_events(payload: Any) -> List[Dict[str, Any]]:
     return [event for event in events if isinstance(event, dict)]
 
 
-def _fetch_gamma_event_by_id(ctx: dict, event_id: str) -> Optional[Dict[str, Any]]:
+def _fetch_gamma_event_by_id(
+    dependencies: MarketGroupDependencies,
+    event_id: str,
+) -> Optional[Dict[str, Any]]:
     identifier = str(event_id or "").strip()
     if not identifier:
         return None
     for params in ({"id": identifier}, {"slug": identifier}):
         try:
-            payload = ctx["http_json_get"](
-                f"{ctx['SETTINGS'].gamma_api_base.rstrip('/')}/events",
+            payload = dependencies.http_json_get(
+                f"{dependencies.settings.gamma_api_base.rstrip('/')}/events",
                 params=params,
                 timeout=12,
                 headers={"Accept": "application/json", "User-Agent": "polydata-runtime/1.0"},
@@ -440,14 +540,26 @@ def _fetch_gamma_event_by_id(ctx: dict, event_id: str) -> Optional[Dict[str, Any
         if len(_extract_events(payload)) == 1:
             return _extract_events(payload)[0]
 
-    for event in _fetch_gamma_events(ctx, target_events=300):
+    for event in _fetch_gamma_events(
+        dependencies,
+        target_events=300,
+    ):
         if str(event.get("id") or "").strip() == identifier or str(event.get("slug") or "").strip() == identifier:
             return event
     return None
 
 
-def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
-    now_iso = ctx["utc_now_iso"]()
+def _normalize_group(
+    dependencies: MarketGroupDependencies,
+    event: Dict[str, Any],
+    lookups: Tuple[
+        Dict[str, Dict[str, Any]],
+        Dict[str, Dict[str, Any]],
+        Dict[str, Dict[str, Any]],
+        Dict[str, Dict[str, Any]],
+    ],
+) -> Optional[Dict[str, Any]]:
+    now_iso = dependencies.utc_now_iso()
     if _is_event_ended(event, now_iso) or _is_noisy_event(event):
         return None
     markets = [market for market in (event.get("markets") or []) if isinstance(market, dict) and _market_active(market)]
@@ -879,7 +991,7 @@ def _serving_select_sql(where_sql: str, order_sql: str) -> str:
 
 
 def _serving_active_rows(
-    ctx: dict,
+    dependencies: MarketGroupDependencies,
     *,
     where_sql: str,
     order_sql: str,
@@ -889,15 +1001,15 @@ def _serving_active_rows(
 ) -> List[Dict[str, Any]]:
     query_limit = max(page_size, min(500, max(page_size * ACTIVE_GROUP_LOOKAHEAD_MULTIPLIER, page_size + 120))) if offset == 0 else page_size
     try:
-        rows = ctx["query_all"](
+        rows = dependencies.query_all(
             _serving_select_sql(where_sql, order_sql),
             [*params, query_limit, offset],
         )
     except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger:
             logger.exception("market group active base query failed; retrying compact active-rank query")
-        rows = ctx["query_all"](
+        rows = dependencies.query_all(
             _serving_select_sql(where_sql, "active_rank DESC NULLS LAST, last_activity_at DESC NULLS LAST, volume_24h DESC"),
             [*params, query_limit, offset],
         )
@@ -906,24 +1018,30 @@ def _serving_active_rows(
     return rows
 
 
-def _serving_table_ready(ctx: dict) -> bool:
-    backend_getter = ctx.get("get_backend")
-    if callable(backend_getter):
+def _serving_table_ready(
+    dependencies: MarketGroupDependencies,
+) -> bool:
+    if dependencies.get_backend is not None:
         try:
-            if str(backend_getter()).lower() not in {"postgres", "postgresql"}:
+            if str(dependencies.get_backend()).lower() not in {
+                "postgres",
+                "postgresql",
+            }:
                 return False
         except Exception:
             return False
-    table_exists = ctx.get("table_exists")
-    if not callable(table_exists):
+    if dependencies.table_exists is None:
         return False
     try:
-        if not table_exists("event_market_serving"):
+        if not dependencies.table_exists("event_market_serving"):
             return False
-        rows = ctx["query_all"]("SELECT 1 FROM event_market_serving LIMIT 1", ())
+        rows = dependencies.query_all(
+            "SELECT 1 FROM event_market_serving LIMIT 1",
+            (),
+        )
         return bool(rows)
     except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger:
             logger.exception("event_market_serving readiness check failed")
         return False
@@ -942,7 +1060,10 @@ def _serving_json_list(value: Any) -> List[Any]:
     return items
 
 
-def _serving_group_from_row(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
+def _serving_group_from_row(
+    dependencies: MarketGroupDependencies,
+    row: Dict[str, Any],
+) -> Dict[str, Any]:
     outcomes = [item for item in _serving_json_list(row.get("outcomes")) if isinstance(item, dict)]
     top_outcomes = [item for item in _serving_json_list(row.get("top_outcomes")) if isinstance(item, dict)]
     if not top_outcomes:
@@ -971,7 +1092,7 @@ def _serving_group_from_row(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "completionStatus": row.get("completion_status") or "OPEN",
         "isTradingClosed": bool(row.get("is_trading_closed")),
         "sourceMode": "postgres-serving",
-        "generatedAt": ctx["utc_now_iso"](),
+        "generatedAt": dependencies.utc_now_iso(),
     }
 
 
@@ -1152,14 +1273,14 @@ def _filter_active_focus_groups(groups: List[Dict[str, Any]], *, require_activit
 
 
 def _serving_market_groups_payload(
-    ctx: dict,
+    dependencies: MarketGroupDependencies,
     *,
     query: str,
     page: int,
     page_size: int,
     sort: str,
 ) -> Optional[Dict[str, Any]]:
-    if not _serving_table_ready(ctx):
+    if not _serving_table_ready(dependencies):
         return None
     where = [
         "outcome_count > 0",
@@ -1173,7 +1294,7 @@ def _serving_market_groups_payload(
         where.append("is_trading_closed = FALSE")
         where.append("completion_status NOT IN ('SETTLED', 'CANCELLED', 'CLOSED_UNRESOLVED')")
         where.append("(end_date IS NULL OR end_date >= ?)")
-        params.append(ctx["utc_now_iso"]())
+        params.append(dependencies.utc_now_iso())
     if query:
         like = f"%{query}%"
         where.append("(title ILIKE ? OR COALESCE(event_slug, '') ILIKE ? OR COALESCE(category, '') ILIKE ? OR tags::text ILIKE ?)")
@@ -1188,7 +1309,7 @@ def _serving_market_groups_payload(
     offset = (page - 1) * page_size
     if sort == "active" and not query:
         rows = _serving_active_rows(
-            ctx,
+            dependencies,
             where_sql=where_sql,
             order_sql=order_sql,
             params=params,
@@ -1196,7 +1317,7 @@ def _serving_market_groups_payload(
             offset=offset,
         )
     else:
-        rows = ctx["query_all"](
+        rows = dependencies.query_all(
             _serving_select_sql(where_sql, order_sql),
             [*params, page_size, offset],
         )
@@ -1205,26 +1326,26 @@ def _serving_market_groups_payload(
     if fast_active:
         total = offset + min(len(rows), page_size)
     else:
-        total_row = ctx["query_all"](
+        total_row = dependencies.query_all(
             f"SELECT COUNT(*) AS total FROM event_market_serving WHERE {where_sql}",
             params,
         )
         total = int((total_row[0] or {}).get("total") or 0) if total_row else 0
-    items = [_serving_group_from_row(ctx, row) for row in rows]
+    items = [_serving_group_from_row(dependencies, row) for row in rows]
     if sort == "active":
         items = [item for item in items if _retarget_group_default_outcome(item)]
     if sort == "active" and not query:
-        now_ts = _parse_timestamp(ctx["utc_now_iso"]())
+        now_ts = _parse_timestamp(dependencies.utc_now_iso())
         items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
         items = _limit_group_category_dominance(items, page_size)
         items = items[: max(page_size * 2, page_size)]
-    _apply_latest_block_close_prices(ctx, items)
+    _apply_latest_block_close_prices(cast(dict[str, Any], dependencies.source), items)
     if sort == "active":
         items = [item for item in items if _retarget_group_default_outcome(item)]
         if not query:
             items = _filter_active_focus_groups(items, require_activity=True)
     if sort == "active" and not query:
-        now_ts = _parse_timestamp(ctx["utc_now_iso"]())
+        now_ts = _parse_timestamp(dependencies.utc_now_iso())
         items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
         items = _limit_group_category_dominance(items, page_size)
         total = max(total, offset + min(len(items), page_size) + (1 if len(rows) > page_size else 0))
@@ -1238,19 +1359,22 @@ def _serving_market_groups_payload(
             "totalPages": max(1, (total + page_size - 1) // page_size),
             "hasMore": (len(rows) > page_size) if fast_active else offset + len(items) < total,
         },
-        "generatedAt": ctx["utc_now_iso"](),
+        "generatedAt": dependencies.utc_now_iso(),
         "sourceMode": "postgres-serving",
     }
 
 
-def _serving_market_group_detail(ctx: dict, identifier: str) -> Optional[Dict[str, Any]]:
-    if not _serving_table_ready(ctx):
+def _serving_market_group_detail(
+    dependencies: MarketGroupDependencies,
+    identifier: str,
+) -> Optional[Dict[str, Any]]:
+    if not _serving_table_ready(dependencies):
         return None
     raw = str(identifier or "").strip()
     normalized = raw.removeprefix("event:")
     candidates = list(dict.fromkeys([raw, normalized, f"event:{normalized}", f"slug:{normalized}"]))
     placeholders = ",".join("?" for _ in candidates)
-    rows = ctx["query_all"](
+    rows = dependencies.query_all(
         f"""
         SELECT
           serving_key, group_id, event_id, event_slug, event_title, title, category, tags,
@@ -1269,12 +1393,18 @@ def _serving_market_group_detail(ctx: dict, identifier: str) -> Optional[Dict[st
     )
     if not rows:
         return None
-    group = _serving_group_from_row(ctx, rows[0])
+    group = _serving_group_from_row(dependencies, rows[0])
     group["status"] = "ok"
     return group
 
 
-def _empty_market_groups_payload(ctx: dict, *, page: int, page_size: int, status: str = "degraded") -> Dict[str, Any]:
+def _empty_market_groups_payload(
+    dependencies: MarketGroupDependencies,
+    *,
+    page: int,
+    page_size: int,
+    status: str = "degraded",
+) -> Dict[str, Any]:
     return {
         "items": [],
         "pagination": {
@@ -1284,13 +1414,30 @@ def _empty_market_groups_payload(ctx: dict, *, page: int, page_size: int, status
             "totalPages": 1,
             "hasMore": False,
         },
-        "generatedAt": ctx["utc_now_iso"](),
+        "generatedAt": dependencies.utc_now_iso(),
         "status": status,
     }
 
 
 def get_market_groups_payload(
-    ctx: dict,
+    ctx: Mapping[str, Any],
+    *,
+    query: str = "",
+    page: int = 1,
+    page_size: int = 80,
+    sort: str = "active",
+) -> Dict[str, Any]:
+    return _get_market_groups_payload(
+        MarketGroupDependencies.from_context(ctx),
+        query=query,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+    )
+
+
+def _get_market_groups_payload(
+    dependencies: MarketGroupDependencies,
     *,
     query: str = "",
     page: int = 1,
@@ -1307,7 +1454,13 @@ def get_market_groups_payload(
     cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 30}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
-        serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
+        serving_payload = _serving_market_groups_payload(
+            dependencies,
+            query=query,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+        )
         if serving_payload is not None:
             return serving_payload
 
@@ -1316,24 +1469,37 @@ def get_market_groups_payload(
             recent_events: List[Dict[str, Any]] = []
             volume_events: List[Dict[str, Any]] = []
             try:
-                recent_events = _fetch_gamma_events(ctx, target_events=fetch_target, order="startDate")
+                recent_events = _fetch_gamma_events(dependencies, target_events=fetch_target, order="startDate")
             except Exception:
-                ctx["app"].logger.exception("market-group list recent gamma fetch failed page=%s page_size=%s", page, page_size)
+                dependencies.application.logger.exception(
+                    "market-group list recent gamma fetch failed page=%s page_size=%s",
+                    page,
+                    page_size,
+                )
             try:
-                volume_events = _fetch_gamma_events(ctx, target_events=fetch_target, order="volume24hr")
+                volume_events = _fetch_gamma_events(dependencies, target_events=fetch_target, order="volume24hr")
             except Exception:
-                ctx["app"].logger.exception("market-group list volume gamma fetch failed page=%s page_size=%s", page, page_size)
+                dependencies.application.logger.exception(
+                    "market-group list volume gamma fetch failed page=%s page_size=%s",
+                    page,
+                    page_size,
+                )
             events = _merge_unique_events(recent_events, volume_events)
             if not events:
-                return _empty_market_groups_payload(ctx, page=page, page_size=page_size)
+                return _empty_market_groups_payload(dependencies, page=page, page_size=page_size)
         else:
             try:
                 gamma_order = "startDate" if sort == "new" else "volume24hr"
-                events = _fetch_gamma_events(ctx, target_events=fetch_target, order=gamma_order)
+                events = _fetch_gamma_events(dependencies, target_events=fetch_target, order=gamma_order)
             except Exception:
-                ctx["app"].logger.exception("market-group list gamma fetch failed sort=%s page=%s page_size=%s", sort, page, page_size)
-                return _empty_market_groups_payload(ctx, page=page, page_size=page_size)
-        now_iso = ctx["utc_now_iso"]()
+                dependencies.application.logger.exception(
+                    "market-group list gamma fetch failed sort=%s page=%s page_size=%s",
+                    sort,
+                    page,
+                    page_size,
+                )
+                return _empty_market_groups_payload(dependencies, page=page, page_size=page_size)
+        now_iso = dependencies.utc_now_iso()
         now_ts = _parse_timestamp(now_iso)
         candidate_events = [
             event
@@ -1373,16 +1539,16 @@ def get_market_groups_payload(
 
         offset = (page - 1) * page_size
         lookup_events = candidate_events[: offset + max(page_size * 3, page_size + 20)]
-        lookups = _local_market_lookup(ctx, lookup_events)
+        lookups = _local_market_lookup(dependencies, lookup_events)
         groups = [
             group
             for event in lookup_events
-            for group in [_normalize_group(ctx, event, lookups)]
+            for group in [_normalize_group(dependencies, event, lookups)]
             if group is not None and _matches_query(group, query)
         ]
         if sort == "active":
             groups.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
-            _apply_latest_block_close_prices(ctx, groups)
+            _apply_latest_block_close_prices(cast(dict[str, Any], dependencies.source), groups)
             groups = [group for group in groups if _retarget_group_default_outcome(group)]
             if not query:
                 groups = _filter_active_focus_groups(groups, require_activity=True)
@@ -1399,70 +1565,99 @@ def get_market_groups_payload(
                 "totalPages": max(1, (max(len(groups), len(candidate_events)) + page_size - 1) // page_size),
                 "hasMore": has_more,
             },
-            "generatedAt": ctx["utc_now_iso"](),
+            "generatedAt": dependencies.utc_now_iso(),
         }
         if not any((outcome.get("localMarketId") or outcome.get("marketId")) for group in visible for outcome in group.get("outcomes") or []):
             payload["status"] = "degraded"
             payload["sourceMode"] = "gamma-fallback"
         return payload
 
-    if "get_snapshot_payload" in ctx:
-        return ctx["get_snapshot_payload"](
-            MARKET_GROUPS_LIST_NAMESPACE,
-            cache_key,
-            _builder,
-            ttl_seconds=MARKET_GROUPS_LIST_TTL_SECONDS,
-        )
-    return _builder()
+    return dependencies.get_snapshot_payload(
+        MARKET_GROUPS_LIST_NAMESPACE,
+        cache_key,
+        _builder,
+        ttl_seconds=MARKET_GROUPS_LIST_TTL_SECONDS,
+    )
 
 
-def get_market_group_detail_payload(ctx: dict, event_id: str) -> Optional[Dict[str, Any]]:
+def get_market_group_detail_payload(
+    ctx: Mapping[str, Any],
+    event_id: str,
+) -> Optional[Dict[str, Any]]:
+    return _get_market_group_detail_payload(
+        MarketGroupDependencies.from_context(ctx),
+        event_id,
+    )
+
+
+def _get_market_group_detail_payload(
+    dependencies: MarketGroupDependencies,
+    event_id: str,
+) -> Optional[Dict[str, Any]]:
     identifier = str(event_id or "").strip()
     if not identifier:
         return None
     cache_key = json.dumps({"eventId": identifier, "v": 6}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
-        serving_payload = _serving_market_group_detail(ctx, identifier)
+        serving_payload = _serving_market_group_detail(dependencies, identifier)
         if serving_payload is not None:
             return serving_payload
 
         try:
-            event = _fetch_gamma_event_by_id(ctx, identifier)
+            event = _fetch_gamma_event_by_id(dependencies, identifier)
         except Exception:
-            ctx["app"].logger.exception("market-group detail gamma fetch failed event_id=%s", identifier)
+            dependencies.application.logger.exception(
+                "market-group detail gamma fetch failed event_id=%s",
+                identifier,
+            )
             return {
                 "groupId": f"event:{identifier}",
                 "eventId": identifier,
                 "title": "Market group unavailable",
                 "outcomes": [],
                 "topOutcomes": [],
-                "generatedAt": ctx["utc_now_iso"](),
+                "generatedAt": dependencies.utc_now_iso(),
                 "status": "degraded",
             }
         if not isinstance(event, dict):
             return None
-        lookups = _local_market_lookup(ctx, [event])
-        group = _normalize_group(ctx, event, lookups)
+        lookups = _local_market_lookup(dependencies, [event])
+        group = _normalize_group(dependencies, event, lookups)
         if group is None:
             return None
-        group["generatedAt"] = ctx["utc_now_iso"]()
+        group["generatedAt"] = dependencies.utc_now_iso()
         group["status"] = "ok"
         return group
 
-    if "get_snapshot_payload" in ctx:
-        payload = ctx["get_snapshot_payload"](
-            MARKET_GROUPS_DETAIL_NAMESPACE,
-            cache_key,
-            _builder,
-            ttl_seconds=MARKET_GROUPS_DETAIL_TTL_SECONDS,
-        )
-        return payload if isinstance(payload, dict) else None
-    payload = _builder()
+    payload = dependencies.get_snapshot_payload(
+        MARKET_GROUPS_DETAIL_NAMESPACE,
+        cache_key,
+        _builder,
+        ttl_seconds=MARKET_GROUPS_DETAIL_TTL_SECONDS,
+    )
     return payload if isinstance(payload, dict) else None
 
 
-def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str = "1d") -> Optional[Dict[str, Any]]:
+def get_market_group_chart_payload(
+    ctx: Mapping[str, Any],
+    event_id: str,
+    *,
+    range_name: str = "1d",
+) -> Optional[Dict[str, Any]]:
+    return _get_market_group_chart_payload(
+        MarketGroupDependencies.from_context(ctx),
+        event_id,
+        range_name=range_name,
+    )
+
+
+def _get_market_group_chart_payload(
+    dependencies: MarketGroupDependencies,
+    event_id: str,
+    *,
+    range_name: str = "1d",
+) -> Optional[Dict[str, Any]]:
     identifier = str(event_id or "").strip()
     normalized_range = str(range_name or "1d").strip().lower()
     if normalized_range not in CHART_RANGE_INTERVALS:
@@ -1470,7 +1665,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
     cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 9}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
-        detail = get_market_group_detail_payload(ctx, identifier)
+        detail = _get_market_group_detail_payload(dependencies, identifier)
         if not isinstance(detail, dict):
             return None
         if detail.get("status") == "degraded":
@@ -1482,7 +1677,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
                 "range": normalized_range,
                 "interval": CHART_RANGE_INTERVALS.get(normalized_range, "15m"),
                 "series": [],
-                "generatedAt": ctx["utc_now_iso"](),
+                "generatedAt": dependencies.utc_now_iso(),
                 "status": "degraded",
             }
         sorted_outcomes = sorted(
@@ -1500,7 +1695,11 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
                 "id": outcome.get("marketId") or f"{identifier}:{outcome.get('outcomeKey')}",
                 "yes_token_id": yes_token_id,
             }
-            points = ctx["get_market_clob_price_series"](pseudo_market, range_name=normalized_range, interval=interval)
+            points = dependencies.get_market_clob_price_series(
+                pseudo_market,
+                range_name=normalized_range,
+                interval=interval,
+            )
             normalized_points = []
             for point in points or []:
                 yes_price = _float_value(point.get("yesPrice"))
@@ -1530,16 +1729,13 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
             "series": series,
             "historyStatus": "ok" if series else "pending",
             "priceSource": "clob-history" if series else "missing",
-            "generatedAt": ctx["utc_now_iso"](),
+            "generatedAt": dependencies.utc_now_iso(),
         }
 
-    if "get_snapshot_payload" in ctx:
-        payload = ctx["get_snapshot_payload"](
-            MARKET_GROUPS_CHART_NAMESPACE,
-            cache_key,
-            _builder,
-            ttl_seconds=CHART_RANGE_TTLS.get(normalized_range, 60),
-        )
-        return payload if isinstance(payload, dict) else None
-    payload = _builder()
+    payload = dependencies.get_snapshot_payload(
+        MARKET_GROUPS_CHART_NAMESPACE,
+        cache_key,
+        _builder,
+        ttl_seconds=CHART_RANGE_TTLS.get(normalized_range, 60),
+    )
     return payload if isinstance(payload, dict) else None
