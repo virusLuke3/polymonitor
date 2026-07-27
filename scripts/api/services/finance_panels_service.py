@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+)
 
 from . import finance_external_sources_service
 
@@ -51,9 +58,56 @@ TRADFI_PERP_SYMBOLS: Tuple[str, ...] = (
 )
 
 
-def _now(ctx: dict) -> str:
+@dataclass(frozen=True)
+class FinancePanelDependencies:
+    source: Mapping[str, Any]
+    application: Any
+    utc_now_iso: Callable[..., Any] | None
+    get_market_groups_payload: Callable[..., Any] | None
+    get_snapshot_payload: Callable[..., Any] | None
+    get_yahoo_market_snapshot: Callable[..., Any] | None
+    get_crypto_funding_watch_snapshot: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> FinancePanelDependencies:
+        return cls(
+            source=context,
+            application=resolve_optional_service_value(context, "app"),
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            get_market_groups_payload=resolve_optional_service_callable(
+                context,
+                "get_market_groups_payload",
+            ),
+            get_snapshot_payload=resolve_optional_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+            get_yahoo_market_snapshot=resolve_optional_service_callable(
+                context,
+                "get_yahoo_market_snapshot",
+            ),
+            get_crypto_funding_watch_snapshot=resolve_optional_service_callable(
+                context,
+                "get_crypto_funding_watch_snapshot",
+            ),
+        )
+
+    @property
+    def logger(self) -> Any:
+        return getattr(self.application, "logger", None)
+
+
+def _now(dependencies: FinancePanelDependencies) -> str:
+    if dependencies.utc_now_iso is None:
+        return ""
     try:
-        return ctx["utc_now_iso"]()
+        return str(dependencies.utc_now_iso())
     except Exception:
         return ""
 
@@ -168,14 +222,23 @@ def _linked_market_from_group(group: Dict[str, Any], category_id: Optional[str] 
     }
 
 
-def _load_finance_groups(ctx: dict, *, page_size: int = 180) -> List[Dict[str, Any]]:
+def _load_finance_groups(
+    dependencies: FinancePanelDependencies,
+    *,
+    page_size: int = 180,
+) -> List[Dict[str, Any]]:
     try:
-        payload = ctx["get_market_groups_payload"](query="", page=1, page_size=page_size, sort="volume")
+        if dependencies.get_market_groups_payload is None:
+            raise RuntimeError("get_market_groups_payload helper missing")
+        payload = dependencies.get_market_groups_payload(
+            query="",
+            page=1,
+            page_size=page_size,
+            sort="volume",
+        )
     except Exception:
-        try:
-            ctx["app"].logger.exception("finance market group snapshot failed")
-        except Exception:
-            pass
+        if dependencies.logger is not None:
+            dependencies.logger.exception("finance market group snapshot failed")
         payload = {}
     items = [item for item in (payload or {}).get("items", []) if isinstance(item, dict)]
     finance_items = [item for item in items if _finance_category(item)]
@@ -188,21 +251,50 @@ def _load_finance_groups(ctx: dict, *, page_size: int = 180) -> List[Dict[str, A
     ][: max(20, page_size // 3)]
 
 
-def _cached(ctx: dict, namespace: str, cache_key: str, builder, ttl_seconds: int = FINANCE_PANEL_TTL_SECONDS) -> Dict[str, Any]:
-    if "get_snapshot_payload" in ctx:
-        return ctx["get_snapshot_payload"](namespace, cache_key, builder, ttl_seconds=ttl_seconds)
+def _cached(
+    dependencies: FinancePanelDependencies,
+    namespace: str,
+    cache_key: str,
+    builder: Callable[[], Dict[str, Any]],
+    ttl_seconds: int = FINANCE_PANEL_TTL_SECONDS,
+) -> Dict[str, Any]:
+    if dependencies.get_snapshot_payload is not None:
+        return dependencies.get_snapshot_payload(
+            namespace,
+            cache_key,
+            builder,
+            ttl_seconds=ttl_seconds,
+        )
     return builder()
 
 
-def _external_sources(ctx: dict) -> Dict[str, Any]:
-    return finance_external_sources_service.read_finance_external_sources(ctx)
+def _external_sources(
+    dependencies: FinancePanelDependencies,
+) -> Dict[str, Any]:
+    return finance_external_sources_service.read_finance_external_sources(
+        dependencies.source,
+    )
 
 
-def get_finance_market_atlas_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_ATLAS_LIMIT) -> Dict[str, Any]:
+def get_finance_market_atlas_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_MARKET_ATLAS_LIMIT,
+) -> Dict[str, Any]:
+    return _get_finance_market_atlas_snapshot(
+        FinancePanelDependencies.from_context(ctx),
+        limit=limit,
+    )
+
+
+def _get_finance_market_atlas_snapshot(
+    dependencies: FinancePanelDependencies,
+    *,
+    limit: int = DEFAULT_MARKET_ATLAS_LIMIT,
+) -> Dict[str, Any]:
     limit = max(4, min(40, int(limit or DEFAULT_MARKET_ATLAS_LIMIT)))
 
     def _builder() -> Dict[str, Any]:
-        groups = _load_finance_groups(ctx)
+        groups = _load_finance_groups(dependencies)
         rows: List[Dict[str, Any]] = []
         category_map: Dict[str, Dict[str, Any]] = {}
         for group in groups:
@@ -249,7 +341,7 @@ def get_finance_market_atlas_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_ATL
         categories.sort(key=lambda item: (_safe_int(item.get("activeCount")), _safe_float(item.get("volume24h")) or 0.0), reverse=True)
         top = rows[0] if rows else None
         return {
-            "generatedAt": _now(ctx),
+            "generatedAt": _now(dependencies),
             "status": "ok" if rows else "warming",
             "cacheMode": "snapshot",
             "sources": {"gamma": "ok" if groups else "empty", "clob": "linked", "coverage": "derived"},
@@ -264,20 +356,36 @@ def get_finance_market_atlas_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_ATL
             "items": rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:market-atlas", f"v2:{limit}", _builder)
+    return _cached(
+        dependencies,
+        "runtime:finance:market-atlas",
+        f"v2:{limit}",
+        _builder,
+    )
 
 
-def _quote_snapshots(ctx: dict, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+def _quote_snapshots(
+    dependencies: FinancePanelDependencies,
+    symbols: List[str],
+) -> Dict[str, Dict[str, Any]]:
     rows: Dict[str, Dict[str, Any]] = {}
 
     def _load(symbol: str) -> Tuple[str, Optional[Dict[str, Any]]]:
         try:
-            return symbol, ctx["get_yahoo_market_snapshot"](symbol, interval="30m", range_name="5d", ttl_seconds=60)
+            if dependencies.get_yahoo_market_snapshot is None:
+                raise RuntimeError("get_yahoo_market_snapshot helper missing")
+            return symbol, dependencies.get_yahoo_market_snapshot(
+                symbol,
+                interval="30m",
+                range_name="5d",
+                ttl_seconds=60,
+            )
         except Exception:
-            try:
-                ctx["app"].logger.exception("finance quote snapshot failed symbol=%s", symbol)
-            except Exception:
-                pass
+            if dependencies.logger is not None:
+                dependencies.logger.exception(
+                    "finance quote snapshot failed symbol=%s",
+                    symbol,
+                )
             return symbol, None
 
     with ThreadPoolExecutor(max_workers=min(6, max(1, len(symbols)))) as executor:
@@ -289,11 +397,25 @@ def _quote_snapshots(ctx: dict, symbols: List[str]) -> Dict[str, Dict[str, Any]]
     return rows
 
 
-def get_equity_event_command_snapshot(ctx: dict, limit: int = DEFAULT_EQUITY_EVENT_LIMIT) -> Dict[str, Any]:
+def get_equity_event_command_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_EQUITY_EVENT_LIMIT,
+) -> Dict[str, Any]:
+    return _get_equity_event_command_snapshot(
+        FinancePanelDependencies.from_context(ctx),
+        limit=limit,
+    )
+
+
+def _get_equity_event_command_snapshot(
+    dependencies: FinancePanelDependencies,
+    *,
+    limit: int = DEFAULT_EQUITY_EVENT_LIMIT,
+) -> Dict[str, Any]:
     limit = max(4, min(24, int(limit or DEFAULT_EQUITY_EVENT_LIMIT)))
 
     def _builder() -> Dict[str, Any]:
-        groups = _load_finance_groups(ctx)
+        groups = _load_finance_groups(dependencies)
         links_by_symbol: Dict[str, List[Dict[str, Any]]] = {symbol: [] for symbol, _, _ in WATCHLIST}
         for group in groups:
             text = _text_for_market(group)
@@ -304,7 +426,7 @@ def get_equity_event_command_snapshot(ctx: dict, limit: int = DEFAULT_EQUITY_EVE
         symbols = [symbol for symbol, links in links_by_symbol.items() if links][:limit]
         if len(symbols) < limit:
             symbols.extend([symbol for symbol, _, _ in WATCHLIST if symbol not in symbols][: max(0, limit - len(symbols))])
-        quotes = _quote_snapshots(ctx, symbols[:limit])
+        quotes = _quote_snapshots(dependencies, symbols[:limit])
         rows: List[Dict[str, Any]] = []
         for symbol, company, terms in WATCHLIST:
             linked = links_by_symbol.get(symbol, [])
@@ -345,7 +467,7 @@ def get_equity_event_command_snapshot(ctx: dict, limit: int = DEFAULT_EQUITY_EVE
         rows.sort(key=lambda item: (_safe_float(item.get("pmktGapScore")) or 0.0, abs(_safe_float(item.get("change1d")) or 0.0)), reverse=True)
         top = rows[0] if rows else None
         return {
-            "generatedAt": _now(ctx),
+            "generatedAt": _now(dependencies),
             "status": "ok" if rows else "warming",
             "sources": {"quotes": "ok" if quotes else "warming", "earnings": "marker", "filings": "marker", "pmkt": "ok" if groups else "empty"},
             "summary": {
@@ -357,18 +479,42 @@ def get_equity_event_command_snapshot(ctx: dict, limit: int = DEFAULT_EQUITY_EVE
             "items": rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:equity-event-command", f"v3:{limit}", _builder)
+    return _cached(
+        dependencies,
+        "runtime:finance:equity-event-command",
+        f"v3:{limit}",
+        _builder,
+    )
 
 
-def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADFI_PERP_LIMIT) -> Dict[str, Any]:
+def get_onchain_tradfi_perp_radar_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_TRADFI_PERP_LIMIT,
+) -> Dict[str, Any]:
+    return _get_onchain_tradfi_perp_radar_snapshot(
+        FinancePanelDependencies.from_context(ctx),
+        limit=limit,
+    )
+
+
+def _get_onchain_tradfi_perp_radar_snapshot(
+    dependencies: FinancePanelDependencies,
+    *,
+    limit: int = DEFAULT_TRADFI_PERP_LIMIT,
+) -> Dict[str, Any]:
     limit = max(4, min(24, int(limit or DEFAULT_TRADFI_PERP_LIMIT)))
 
     def _builder() -> Dict[str, Any]:
-        external = _external_sources(ctx)
-        equity_payload = get_equity_event_command_snapshot(ctx, limit=limit)
+        external = _external_sources(dependencies)
+        equity_payload = _get_equity_event_command_snapshot(
+            dependencies,
+            limit=limit,
+        )
         rows: List[Dict[str, Any]] = []
         try:
-            funding_payload = ctx["get_crypto_funding_watch_snapshot"](limit=8)
+            if dependencies.get_crypto_funding_watch_snapshot is None:
+                raise RuntimeError("get_crypto_funding_watch_snapshot helper missing")
+            funding_payload = dependencies.get_crypto_funding_watch_snapshot(limit=8)
         except Exception:
             funding_payload = {}
         crypto_assets = [asset for asset in (funding_payload or {}).get("assets", []) if isinstance(asset, dict)]
@@ -457,7 +603,7 @@ def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADF
         top = unique_rows[0] if unique_rows else None
         external_sources = external.get("sources") if isinstance(external.get("sources"), dict) else {}
         return {
-            "generatedAt": _now(ctx),
+            "generatedAt": _now(dependencies),
             "status": "ok" if unique_rows else "warming",
             "sources": {
                 "hyperliquid": external_sources.get("hyperliquid") or ("funding" if crypto_assets else "warming"),
@@ -474,16 +620,42 @@ def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADF
             "items": unique_rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:onchain-tradfi-perp-radar", f"v3:{limit}", _builder, ttl_seconds=45)
+    return _cached(
+        dependencies,
+        "runtime:finance:onchain-tradfi-perp-radar",
+        f"v3:{limit}",
+        _builder,
+        ttl_seconds=45,
+    )
 
 
-def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUIDITY_REGIME_LIMIT) -> Dict[str, Any]:
+def get_finance_liquidity_regime_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_LIQUIDITY_REGIME_LIMIT,
+) -> Dict[str, Any]:
+    return _get_finance_liquidity_regime_snapshot(
+        FinancePanelDependencies.from_context(ctx),
+        limit=limit,
+    )
+
+
+def _get_finance_liquidity_regime_snapshot(
+    dependencies: FinancePanelDependencies,
+    *,
+    limit: int = DEFAULT_LIQUIDITY_REGIME_LIMIT,
+) -> Dict[str, Any]:
     limit = max(4, min(24, int(limit or DEFAULT_LIQUIDITY_REGIME_LIMIT)))
 
     def _builder() -> Dict[str, Any]:
-        external = _external_sources(ctx)
-        atlas = get_finance_market_atlas_snapshot(ctx, limit=max(limit, 16))
-        perp = get_onchain_tradfi_perp_radar_snapshot(ctx, limit=limit)
+        external = _external_sources(dependencies)
+        atlas = _get_finance_market_atlas_snapshot(
+            dependencies,
+            limit=max(limit, 16),
+        )
+        perp = _get_onchain_tradfi_perp_radar_snapshot(
+            dependencies,
+            limit=limit,
+        )
         markets = [item for item in (atlas.get("items") or []) if isinstance(item, dict)]
         cot_items = [item for item in (((external.get("cot") or {}).get("items")) or []) if isinstance(item, dict)]
         etf_items = [item for item in (((external.get("etfFlow") or {}).get("items")) or []) if isinstance(item, dict)]
@@ -573,7 +745,7 @@ def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUID
             )
         external_sources = external.get("sources") if isinstance(external.get("sources"), dict) else {}
         return {
-            "generatedAt": _now(ctx),
+            "generatedAt": _now(dependencies),
             "status": "ok" if rows else "warming",
             "sources": {
                 "pmkt": "ok" if markets else "empty",
@@ -592,4 +764,10 @@ def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUID
             "items": rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:liquidity-regime", f"v3:{limit}", _builder, ttl_seconds=45)
+    return _cached(
+        dependencies,
+        "runtime:finance:liquidity-regime",
+        f"v3:{limit}",
+        _builder,
+        ttl_seconds=45,
+    )
