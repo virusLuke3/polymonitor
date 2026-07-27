@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, List, Optional, Protocol, cast
 from urllib.parse import unquote
 
 from api.context import (
@@ -198,6 +198,8 @@ class MarketSearchDependencies:
     source: Mapping[str, Any] = field(repr=False)
     utc_now_iso: Callable[..., Any]
     query_all: Callable[..., Any]
+    parse_json_list: Callable[..., Any]
+    format_trade_decimal: Callable[..., Any]
 
     @classmethod
     def from_context(
@@ -208,7 +210,17 @@ class MarketSearchDependencies:
             source=context,
             utc_now_iso=_service_callable(context, "utc_now_iso"),
             query_all=_service_callable(context, "query_all"),
+            parse_json_list=_service_callable(context, "parse_json_list"),
+            format_trade_decimal=_service_callable(
+                context,
+                "format_trade_decimal",
+            ),
         )
+
+
+class MarketListItemDependencies(Protocol):
+    parse_json_list: Callable[..., Any]
+    format_trade_decimal: Callable[..., Any]
 
 
 @dataclass(frozen=True)
@@ -1568,7 +1580,7 @@ def _search_markets(
     rows.sort(key=row_sort_key)
     return {
         "items": [
-            _market_list_item(dependencies.source, row)
+            _market_list_item(dependencies, row)
             for row in rows[:limit]
         ]
     }
@@ -2580,7 +2592,7 @@ def _enrich_market_rows_with_24h_change(
 
 
 def _market_outcome_count(
-    dependencies: MarketListDependencies,
+    dependencies: MarketListItemDependencies,
     row: Dict[str, Any],
 ) -> int:
     native_count = int(row.get("native_outcome_count") or 0)
@@ -2595,7 +2607,7 @@ def _market_outcome_count(
 
 
 def _market_change(
-    dependencies: MarketListDependencies,
+    dependencies: MarketListItemDependencies,
     current: Any,
     past: Any,
 ) -> Any:
@@ -2689,7 +2701,7 @@ def _market_trade_count_24h(row: Dict[str, Any]) -> Optional[int]:
 
 
 def _market_volume_24h(
-    dependencies: MarketListDependencies,
+    dependencies: MarketListItemDependencies,
     row: Dict[str, Any],
 ) -> Optional[str]:
     volume = _decimal_from_any(row.get("volume_24h")) or Decimal("0")
@@ -2701,7 +2713,7 @@ def _market_volume_24h(
 
 
 def _market_list_item(
-    dependencies: MarketListDependencies,
+    dependencies: MarketListItemDependencies,
     row: Dict[str, Any],
 ) -> Dict[str, Any]:
     return {
