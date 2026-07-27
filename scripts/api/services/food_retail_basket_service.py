@@ -3,9 +3,18 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 
 
 FOOD_BASKET_SNAPSHOT_NAMESPACE = "snapshot:macro:food-retail-basket-pressure"
@@ -24,9 +33,62 @@ SERIES = (
 )
 
 
-def _utc_now_iso(ctx: dict) -> str:
-    now = ctx.get("utc_now_iso")
-    return now() if callable(now) else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+@dataclass(frozen=True)
+class FoodRetailBasketDependencies:
+    settings: Any
+    application: Any
+    http_text_get: Callable[..., str]
+    utc_now_iso: Callable[..., Any] | None
+    snapshot_store: Any
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> FoodRetailBasketDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_optional_service_value(context, "app"),
+            http_text_get=resolve_service_callable(
+                context,
+                "http_text_get",
+            ),
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+        )
+
+
+FoodRetailBasketContext = Mapping[str, Any] | FoodRetailBasketDependencies
+
+
+def _dependencies(
+    context: FoodRetailBasketContext,
+) -> FoodRetailBasketDependencies:
+    if isinstance(context, FoodRetailBasketDependencies):
+        return context
+    return FoodRetailBasketDependencies.from_context(context)
+
+
+def _utc_now_iso(dependencies: FoodRetailBasketDependencies) -> str:
+    if dependencies.utc_now_iso is not None:
+        return str(dependencies.utc_now_iso())
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _float(value: Any) -> Optional[float]:
@@ -37,11 +99,24 @@ def _float(value: Any) -> Optional[float]:
     return n if n == n else None
 
 
-def _fred_url(ctx: dict, series_id: str) -> str:
-    settings = ctx["SETTINGS"]
-    template = getattr(settings, "food_basket_fred_csv_url_template", "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}")
+def _fred_url(
+    dependencies: FoodRetailBasketDependencies,
+    series_id: str,
+) -> str:
+    template = getattr(
+        dependencies.settings,
+        "food_basket_fred_csv_url_template",
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
+    )
     url = str(template).format(series_id=series_id)
-    lookback_years = int(getattr(settings, "fred_csv_lookback_years", FRED_CSV_LOOKBACK_YEARS) or FRED_CSV_LOOKBACK_YEARS)
+    lookback_years = int(
+        getattr(
+            dependencies.settings,
+            "fred_csv_lookback_years",
+            FRED_CSV_LOOKBACK_YEARS,
+        )
+        or FRED_CSV_LOOKBACK_YEARS
+    )
     start_date = f"{max(1900, datetime.now(timezone.utc).year - lookback_years)}-01-01"
     parts = urlsplit(url)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
@@ -53,9 +128,17 @@ def _fred_row_date(row: Dict[str, Any]) -> str:
     return str(row.get("observation_date") or row.get("DATE") or row.get("date") or "").strip()
 
 
-def _fetch_series(ctx: dict, spec: Dict[str, Any]) -> Dict[str, Any]:
-    url = _fred_url(ctx, spec["seriesId"])
-    text = ctx["http_text_get"](url, timeout=15, headers={"User-Agent": "polydata-food-basket/1.0"})
+def _fetch_series(
+    ctx: FoodRetailBasketContext,
+    spec: Dict[str, Any],
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    url = _fred_url(dependencies, spec["seriesId"])
+    text = dependencies.http_text_get(
+        url,
+        timeout=15,
+        headers={"User-Agent": "polydata-food-basket/1.0"},
+    )
     rows: List[Dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(str(text or "")))
     value_col = spec["seriesId"]
@@ -107,7 +190,10 @@ def _summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"signal": signal, "bias": bias, "pressureScore": round(score, 2), "topMover": top, "coverage": len(items)}
 
 
-def build_food_retail_basket_payload(ctx: dict) -> Dict[str, Any]:
+def build_food_retail_basket_payload(
+    ctx: FoodRetailBasketContext,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     items: List[Dict[str, Any]] = []
     sources: Dict[str, str] = {}
     for spec in SERIES:
@@ -116,14 +202,14 @@ def build_food_retail_basket_payload(ctx: dict) -> Dict[str, Any]:
             sources[spec["key"]] = "ok"
         except Exception as exc:
             sources[spec["key"]] = "error"
-            logger = getattr(ctx.get("app"), "logger", None)
+            logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
                 logger.exception("food basket source failed source=%s error=%s", spec["key"], exc)
     status = "ok" if len(items) >= 5 else ("degraded" if items else "warming")
     return {
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "source": "FRED CSV / BLS CPI food components",
-        "sourceUrl": ctx["SETTINGS"].food_basket_source_url,
+        "sourceUrl": dependencies.settings.food_basket_source_url,
         "status": status,
         "sources": sources,
         "summary": _summary(items),
@@ -131,21 +217,52 @@ def build_food_retail_basket_payload(ctx: dict) -> Dict[str, Any]:
     }
 
 
-def _empty(ctx: dict, status: str = "warming") -> Dict[str, Any]:
-    return {"generatedAt": _utc_now_iso(ctx), "source": "FRED CSV / BLS CPI food components", "sourceUrl": getattr(ctx["SETTINGS"], "food_basket_source_url", ""), "status": status, "sources": {}, "summary": _summary([]), "items": []}
+def _empty(
+    dependencies: FoodRetailBasketDependencies,
+    status: str = "warming",
+) -> Dict[str, Any]:
+    return {
+        "generatedAt": _utc_now_iso(dependencies),
+        "source": "FRED CSV / BLS CPI food components",
+        "sourceUrl": getattr(
+            dependencies.settings,
+            "food_basket_source_url",
+            "",
+        ),
+        "status": status,
+        "sources": {},
+        "summary": _summary([]),
+        "items": [],
+    }
 
 
-def normalize_food_retail_basket_payload(payload: Any, *, ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def normalize_food_retail_basket_payload(
+    payload: Any,
+    *,
+    ctx: FoodRetailBasketContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     if not isinstance(payload, dict):
-        return _empty(ctx, "invalid")
+        return _empty(dependencies, "invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
     result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), 24))]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(items)
-    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["generatedAt"] = str(
+        result.get("generatedAt")
+        or _utc_now_iso(dependencies)
+    )
     result["status"] = str(result.get("status") or ("ok" if items else "warming"))
     result["source"] = str(result.get("source") or "FRED CSV / BLS CPI food components")
-    result["sourceUrl"] = str(result.get("sourceUrl") or getattr(ctx["SETTINGS"], "food_basket_source_url", ""))
+    result["sourceUrl"] = str(
+        result.get("sourceUrl")
+        or getattr(
+            dependencies.settings,
+            "food_basket_source_url",
+            "",
+        )
+    )
     return result
 
 
@@ -153,13 +270,17 @@ def _with_mode(payload: Dict[str, Any], mode: str) -> Dict[str, Any]:
     return {**payload, "cacheMode": mode}
 
 
-def _read_seeded(ctx: dict, ttl: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        payload = reader(FOOD_BASKET_SNAPSHOT_NAMESPACE, FOOD_BASKET_CACHE_KEY)
+def _read_seeded(
+    dependencies: FoodRetailBasketDependencies,
+) -> Optional[Dict[str, Any]]:
+    if dependencies.get_cached_json is not None:
+        payload = dependencies.get_cached_json(
+            FOOD_BASKET_SNAPSHOT_NAMESPACE,
+            FOOD_BASKET_CACHE_KEY,
+        )
         if isinstance(payload, dict):
             return _with_mode(payload, "redis-seed")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is not None:
         payload = store.get(FOOD_BASKET_SNAPSHOT_NAMESPACE, FOOD_BASKET_CACHE_KEY)
         if isinstance(payload, dict):
@@ -170,19 +291,67 @@ def _read_seeded(ctx: dict, ttl: int) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_food_retail_basket_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
-    ttl = max(1800, int(getattr(ctx["SETTINGS"], "food_basket_ttl_seconds", 21600) or 21600))
-    seeded = _read_seeded(ctx, ttl)
+def _store_live(
+    dependencies: FoodRetailBasketDependencies,
+    payload: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+) -> None:
+    if dependencies.snapshot_store is not None:
+        dependencies.snapshot_store.set(
+            FOOD_BASKET_SNAPSHOT_NAMESPACE,
+            FOOD_BASKET_CACHE_KEY,
+            payload,
+            ttl_seconds,
+        )
+    if dependencies.set_cached_json is not None:
+        dependencies.set_cached_json(
+            FOOD_BASKET_SNAPSHOT_NAMESPACE,
+            FOOD_BASKET_CACHE_KEY,
+            payload,
+            ttl_seconds,
+        )
+
+
+def get_food_retail_basket_snapshot(
+    ctx: FoodRetailBasketContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+    *,
+    allow_live_build: bool = True,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    ttl = max(
+        1800,
+        int(
+            getattr(
+                dependencies.settings,
+                "food_basket_ttl_seconds",
+                21600,
+            )
+            or 21600
+        ),
+    )
+    seeded = _read_seeded(dependencies)
     if seeded is not None:
-        return normalize_food_retail_basket_payload(seeded, ctx=ctx, limit=limit)
+        return normalize_food_retail_basket_payload(
+            seeded,
+            ctx=dependencies,
+            limit=limit,
+        )
     if not allow_live_build:
-        return normalize_food_retail_basket_payload({**_empty(ctx), "cacheMode": "seed-miss"}, ctx=ctx, limit=limit)
+        return normalize_food_retail_basket_payload(
+            {
+                **_empty(dependencies),
+                "cacheMode": "seed-miss",
+            },
+            ctx=dependencies,
+            limit=limit,
+        )
     payload = _with_mode(build_food_retail_basket_payload(ctx), "live-build")
     if payload.get("items"):
-        store = ctx.get("SNAPSHOT_STORE")
-        if store is not None:
-            store.set(FOOD_BASKET_SNAPSHOT_NAMESPACE, FOOD_BASKET_CACHE_KEY, payload, ttl)
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
-            setter(FOOD_BASKET_SNAPSHOT_NAMESPACE, FOOD_BASKET_CACHE_KEY, payload, ttl)
-    return normalize_food_retail_basket_payload(payload, ctx=ctx, limit=limit)
+        _store_live(dependencies, payload, ttl_seconds=ttl)
+    return normalize_food_retail_basket_payload(
+        payload,
+        ctx=dependencies,
+        limit=limit,
+    )
