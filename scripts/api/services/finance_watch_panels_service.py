@@ -195,7 +195,8 @@ class FinanceWatchDependencies:
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
     get_snapshot_payload: Callable[..., Any] | None
-    get_crypto_funding_watch_snapshot: Callable[..., Any]
+    get_crypto_funding_watch_snapshot: Callable[..., Any] | None
+    crypto_funding: crypto_funding_service.CryptoFundingDependencies
     external_sources: finance_external_sources_service.FinanceExternalSourceDependencies
 
     @classmethod
@@ -203,17 +204,6 @@ class FinanceWatchDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> FinanceWatchDependencies:
-        get_crypto_funding_watch_snapshot = resolve_optional_service_callable(
-            context,
-            "get_crypto_funding_watch_snapshot",
-        )
-        if get_crypto_funding_watch_snapshot is None:
-            get_crypto_funding_watch_snapshot = lambda *, limit=16: (
-                crypto_funding_service.get_crypto_funding_watch_snapshot(
-                    context,
-                    limit=limit,
-                )
-            )
         return cls(
             settings=resolve_optional_service_value(context, "SETTINGS"),
             http_json_get=resolve_optional_service_callable(
@@ -245,7 +235,15 @@ class FinanceWatchDependencies:
                 "get_snapshot_payload",
             ),
             get_crypto_funding_watch_snapshot=(
-                get_crypto_funding_watch_snapshot
+                resolve_optional_service_callable(
+                    context,
+                    "get_crypto_funding_watch_snapshot",
+                )
+            ),
+            crypto_funding=(
+                crypto_funding_service.CryptoFundingDependencies.from_context(
+                    context,
+                )
             ),
             external_sources=(
                 finance_external_sources_service.FinanceExternalSourceDependencies.from_context(
@@ -1550,9 +1548,15 @@ def build_crypto_perps_payload(
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
     requested_limit = max(limit, len(CRYPTO_PERP_ORDER), 24)
-    base = dependencies.get_crypto_funding_watch_snapshot(
-        limit=requested_limit,
-    )
+    if dependencies.get_crypto_funding_watch_snapshot is not None:
+        base = dependencies.get_crypto_funding_watch_snapshot(
+            limit=requested_limit,
+        )
+    else:
+        base = crypto_funding_service.get_crypto_funding_watch_snapshot(
+            dependencies.crypto_funding,
+            limit=requested_limit,
+        )
     asset_map = {str(asset.get("asset") or asset.get("symbol") or "").upper(): asset for asset in (base.get("assets") or []) if isinstance(asset, dict)}
     ordered_assets = [asset_map[symbol] for symbol in CRYPTO_PERP_ORDER if symbol in asset_map]
     extras = [asset for symbol, asset in asset_map.items() if symbol not in CRYPTO_PERP_ORDER]

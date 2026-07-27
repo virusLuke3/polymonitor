@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -142,6 +151,61 @@ CRYPTO_FUNDING_NAMESPACE = "snapshot:crypto:funding-watch"
 DEFAULT_CRYPTO_FUNDING_LIMIT = 18
 
 
+@dataclass(frozen=True)
+class CryptoFundingDependencies:
+    settings: Any
+    application: Any
+    http_json_get: Callable[..., Any]
+    utc_now_iso: Callable[..., Any]
+    snapshot_store: Any
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    get_snapshot_payload: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> CryptoFundingDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_optional_service_value(context, "app"),
+            http_json_get=resolve_service_callable(context, "http_json_get"),
+            utc_now_iso=resolve_service_callable(context, "utc_now_iso"),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            get_snapshot_payload=resolve_optional_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+        )
+
+    @property
+    def logger(self) -> Any:
+        return getattr(self.application, "logger", None)
+
+
+CryptoFundingContext = Mapping[str, Any] | CryptoFundingDependencies
+
+
+def _dependencies(
+    context: CryptoFundingContext,
+) -> CryptoFundingDependencies:
+    if isinstance(context, CryptoFundingDependencies):
+        return context
+    return CryptoFundingDependencies.from_context(context)
+
+
 def _filter_symbols(items: Iterable[Dict[str, Any]], symbols: set[str]) -> List[Dict[str, Any]]:
     return [item for item in items if str(item.get("symbol") or "").upper().strip() in symbols]
 
@@ -232,12 +296,15 @@ def _group_asset_rows(items: List[Dict[str, Any]], *, limit: int) -> tuple[List[
     return venue_order, limited_rows, limited_items
 
 
-def _fetch_binance(ctx: dict, symbols: set[str]) -> tuple[List[Dict[str, Any]], str]:
-    settings = ctx["SETTINGS"]
+def _fetch_binance(
+    dependencies: CryptoFundingDependencies,
+    symbols: set[str],
+) -> tuple[List[Dict[str, Any]], str]:
+    settings = dependencies.settings
     url = str(settings.crypto_funding_watch_api_url or "").strip()
     if not url:
         return [], "missing-url"
-    payload = ctx["http_json_get"](
+    payload = dependencies.http_json_get(
         url,
         timeout=12,
         headers=_headers(settings.crypto_funding_watch_api_key),
@@ -260,12 +327,15 @@ def _fetch_binance(ctx: dict, symbols: set[str]) -> tuple[List[Dict[str, Any]], 
     return items, "ok" if items else "empty"
 
 
-def _fetch_bybit(ctx: dict, symbols: set[str]) -> tuple[List[Dict[str, Any]], str]:
-    settings = ctx["SETTINGS"]
+def _fetch_bybit(
+    dependencies: CryptoFundingDependencies,
+    symbols: set[str],
+) -> tuple[List[Dict[str, Any]], str]:
+    settings = dependencies.settings
     url = str(settings.crypto_funding_watch_bybit_api_url or "").strip()
     if not url:
         return [], "missing-url"
-    payload = ctx["http_json_get"](
+    payload = dependencies.http_json_get(
         url,
         params={"category": "linear"},
         timeout=12,
@@ -335,45 +405,83 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
 
 
-def _read_seeded_snapshot(ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        redis_payload = reader(namespace, cache_key)
+def _read_seeded_snapshot(
+    dependencies: CryptoFundingDependencies,
+    *,
+    namespace: str,
+    cache_key: str,
+    ttl_seconds: int,
+) -> Optional[Dict[str, Any]]:
+    if dependencies.get_cached_json is not None:
+        redis_payload = dependencies.get_cached_json(namespace, cache_key)
         if isinstance(redis_payload, dict):
-            snapshot_store = ctx.get("SNAPSHOT_STORE")
-            if snapshot_store is not None:
-                snapshot_store.set(namespace, cache_key, redis_payload, ttl_seconds)
+            if dependencies.snapshot_store is not None:
+                dependencies.snapshot_store.set(
+                    namespace,
+                    cache_key,
+                    redis_payload,
+                    ttl_seconds,
+                )
             return _with_cache_mode(redis_payload, "redis-seed")
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
-    if snapshot_store is None:
+    if dependencies.snapshot_store is None:
         return None
-    sqlite_payload = snapshot_store.get(namespace, cache_key)
+    sqlite_payload = dependencies.snapshot_store.get(namespace, cache_key)
     if isinstance(sqlite_payload, dict):
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
-            setter(namespace, cache_key, sqlite_payload, ttl_seconds)
+        if dependencies.set_cached_json is not None:
+            dependencies.set_cached_json(
+                namespace,
+                cache_key,
+                sqlite_payload,
+                ttl_seconds,
+            )
         return _with_cache_mode(sqlite_payload, "sqlite-seed")
-    stale_payload = snapshot_store.get_stale(namespace, cache_key)
+    stale_payload = dependencies.snapshot_store.get_stale(
+        namespace,
+        cache_key,
+    )
     if isinstance(stale_payload, dict):
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
-            setter(namespace, cache_key, stale_payload, min(15, ttl_seconds))
+        if dependencies.set_cached_json is not None:
+            dependencies.set_cached_json(
+                namespace,
+                cache_key,
+                stale_payload,
+                min(15, ttl_seconds),
+            )
         return _with_cache_mode(stale_payload, "stale-seed")
     return None
 
 
-def _store_seed_fallback(ctx: dict, *, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
-    if snapshot_store is not None:
-        snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
-        setter(namespace, cache_key, payload, ttl_seconds)
+def _store_seed_fallback(
+    dependencies: CryptoFundingDependencies,
+    *,
+    namespace: str,
+    cache_key: str,
+    payload: Dict[str, Any],
+    ttl_seconds: int,
+) -> Dict[str, Any]:
+    if dependencies.snapshot_store is not None:
+        dependencies.snapshot_store.set(
+            namespace,
+            cache_key,
+            payload,
+            ttl_seconds,
+        )
+    if dependencies.set_cached_json is not None:
+        dependencies.set_cached_json(
+            namespace,
+            cache_key,
+            payload,
+            ttl_seconds,
+        )
     return payload
 
 
-def fetch_live_crypto_funding_watch_payload(ctx: dict, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
+def fetch_live_crypto_funding_watch_payload(
+    ctx: CryptoFundingContext,
+    limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
     symbols = tuple(str(symbol).upper().strip() for symbol in settings.crypto_funding_watch_symbols if str(symbol).strip())
     symbol_set = set(symbols)
     source_status: Dict[str, str] = {}
@@ -381,11 +489,15 @@ def fetch_live_crypto_funding_watch_payload(ctx: dict, limit: int = DEFAULT_CRYP
 
     for source, fetcher in (("binance", _fetch_binance), ("bybit", _fetch_bybit)):
         try:
-            source_items, status = fetcher(ctx, symbol_set)
+            source_items, status = fetcher(dependencies, symbol_set)
             source_status[source] = status
             items.extend(source_items)
         except Exception:
-            ctx["app"].logger.exception("crypto funding source failed source=%s", source)
+            if dependencies.logger is not None:
+                dependencies.logger.exception(
+                    "crypto funding source failed source=%s",
+                    source,
+                )
             source_status[source] = "error"
 
     items.sort(
@@ -411,7 +523,7 @@ def fetch_live_crypto_funding_watch_payload(ctx: dict, limit: int = DEFAULT_CRYP
 
     return normalize_crypto_funding_payload(
         {
-            "generatedAt": ctx["utc_now_iso"](),
+            "generatedAt": dependencies.utc_now_iso(),
             "source": "binance/bybit-funding",
             "sourceUrl": str(settings.crypto_funding_watch_source_url or ""),
             "status": status,
@@ -429,26 +541,63 @@ def fetch_live_crypto_funding_watch_payload(ctx: dict, limit: int = DEFAULT_CRYP
     )
 
 
-def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
+def get_crypto_funding_watch_snapshot(
+    ctx: CryptoFundingContext,
+    limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
     ttl_seconds = max(10, int(settings.crypto_funding_watch_ttl_seconds or 15))
     cache_key = build_crypto_funding_cache_key(settings, limit=limit)
-    seeded_payload = _read_seeded_snapshot(ctx, namespace=CRYPTO_FUNDING_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    seeded_payload = _read_seeded_snapshot(
+        dependencies,
+        namespace=CRYPTO_FUNDING_NAMESPACE,
+        cache_key=cache_key,
+        ttl_seconds=ttl_seconds,
+    )
     if seeded_payload is None and int(limit or 0) != DEFAULT_CRYPTO_FUNDING_LIMIT:
         seeded_payload = _read_seeded_snapshot(
-            ctx,
+            dependencies,
             namespace=CRYPTO_FUNDING_NAMESPACE,
             cache_key=build_crypto_funding_cache_key(settings, limit=DEFAULT_CRYPTO_FUNDING_LIMIT),
             ttl_seconds=ttl_seconds,
         )
     if seeded_payload is not None:
-        return normalize_crypto_funding_payload(seeded_payload, settings=settings, limit=limit, generated_at=ctx["utc_now_iso"]())
+        return normalize_crypto_funding_payload(
+            seeded_payload,
+            settings=settings,
+            limit=limit,
+            generated_at=dependencies.utc_now_iso(),
+        )
 
     def _builder() -> Dict[str, Any]:
-        return fetch_live_crypto_funding_watch_payload(ctx, limit=limit)
+        return fetch_live_crypto_funding_watch_payload(
+            dependencies,
+            limit=limit,
+        )
 
-    if ctx.get("SNAPSHOT_STORE") is None and callable(ctx.get("get_snapshot_payload")):
-        return ctx["get_snapshot_payload"](CRYPTO_FUNDING_NAMESPACE, cache_key, _builder, ttl_seconds=ttl_seconds)
+    if (
+        dependencies.snapshot_store is None
+        and dependencies.get_snapshot_payload is not None
+    ):
+        return dependencies.get_snapshot_payload(
+            CRYPTO_FUNDING_NAMESPACE,
+            cache_key,
+            _builder,
+            ttl_seconds=ttl_seconds,
+        )
 
-    payload = _with_cache_mode(fetch_live_crypto_funding_watch_payload(ctx, limit=limit), "live-fallback")
-    return _store_seed_fallback(ctx, namespace=CRYPTO_FUNDING_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
+    payload = _with_cache_mode(
+        fetch_live_crypto_funding_watch_payload(
+            dependencies,
+            limit=limit,
+        ),
+        "live-fallback",
+    )
+    return _store_seed_fallback(
+        dependencies,
+        namespace=CRYPTO_FUNDING_NAMESPACE,
+        cache_key=cache_key,
+        payload=payload,
+        ttl_seconds=ttl_seconds,
+    )
