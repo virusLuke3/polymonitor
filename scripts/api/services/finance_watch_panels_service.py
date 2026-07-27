@@ -3,12 +3,19 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlencode, urlparse
 from xml.etree import ElementTree
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+)
 
 try:
     import requests
@@ -178,6 +185,87 @@ BROKER_NAMES = (
 )
 
 
+@dataclass(frozen=True)
+class FinanceWatchDependencies:
+    settings: Any
+    http_json_get: Callable[..., Any] | None
+    http_text_get: Callable[..., Any] | None
+    get_yahoo_market_snapshot: Callable[..., Any] | None
+    snapshot_store: Any
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    get_snapshot_payload: Callable[..., Any] | None
+    get_crypto_funding_watch_snapshot: Callable[..., Any]
+    external_sources: finance_external_sources_service.FinanceExternalSourceDependencies
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> FinanceWatchDependencies:
+        get_crypto_funding_watch_snapshot = resolve_optional_service_callable(
+            context,
+            "get_crypto_funding_watch_snapshot",
+        )
+        if get_crypto_funding_watch_snapshot is None:
+            get_crypto_funding_watch_snapshot = lambda *, limit=16: (
+                crypto_funding_service.get_crypto_funding_watch_snapshot(
+                    context,
+                    limit=limit,
+                )
+            )
+        return cls(
+            settings=resolve_optional_service_value(context, "SETTINGS"),
+            http_json_get=resolve_optional_service_callable(
+                context,
+                "http_json_get",
+            ),
+            http_text_get=resolve_optional_service_callable(
+                context,
+                "http_text_get",
+            ),
+            get_yahoo_market_snapshot=resolve_optional_service_callable(
+                context,
+                "get_yahoo_market_snapshot",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            get_snapshot_payload=resolve_optional_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+            get_crypto_funding_watch_snapshot=(
+                get_crypto_funding_watch_snapshot
+            ),
+            external_sources=(
+                finance_external_sources_service.FinanceExternalSourceDependencies.from_context(
+                    context,
+                )
+            ),
+        )
+
+
+FinanceWatchContext = Mapping[str, Any] | FinanceWatchDependencies
+
+
+def _dependencies(
+    context: FinanceWatchContext,
+) -> FinanceWatchDependencies:
+    if isinstance(context, FinanceWatchDependencies):
+        return context
+    return FinanceWatchDependencies.from_context(context)
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -217,15 +305,18 @@ def _field_text(value: Any) -> str:
     return _strip_html(value)
 
 
-def _setting(ctx: dict, name: str) -> str:
-    settings = ctx.get("SETTINGS")
-    value = getattr(settings, name, "") if settings is not None else ""
+def _setting(ctx: FinanceWatchContext, name: str) -> str:
+    dependencies = _dependencies(ctx)
+    value = getattr(dependencies.settings, name, "") if dependencies.settings is not None else ""
     return str(value or "").strip()
 
 
-def _setting_tuple(ctx: dict, name: str) -> tuple[str, ...]:
-    settings = ctx.get("SETTINGS")
-    value = getattr(settings, name, ()) if settings is not None else ()
+def _setting_tuple(
+    ctx: FinanceWatchContext,
+    name: str,
+) -> tuple[str, ...]:
+    dependencies = _dependencies(ctx)
+    value = getattr(dependencies.settings, name, ()) if dependencies.settings is not None else ()
     if isinstance(value, str):
         return tuple(part.strip() for part in value.split(",") if part.strip())
     try:
@@ -234,9 +325,9 @@ def _setting_tuple(ctx: dict, name: str) -> tuple[str, ...]:
         return ()
 
 
-def _setting_bool(ctx: dict, name: str) -> bool:
-    settings = ctx.get("SETTINGS")
-    value = getattr(settings, name, False) if settings is not None else False
+def _setting_bool(ctx: FinanceWatchContext, name: str) -> bool:
+    dependencies = _dependencies(ctx)
+    value = getattr(dependencies.settings, name, False) if dependencies.settings is not None else False
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() not in {"", "0", "false", "no", "off"}
@@ -255,11 +346,25 @@ def _tone(value: Any, *, inverted: bool = False) -> str:
     return "neutral"
 
 
-def _http_json_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = None, timeout: int = 12) -> Any:
-    getter = ctx.get("http_json_get")
-    if callable(getter):
+def _http_json_get(
+    ctx: FinanceWatchContext,
+    url: str,
+    *,
+    params: Optional[Dict[str, Any]] = None,
+    timeout: int = 12,
+) -> Any:
+    dependencies = _dependencies(ctx)
+    if dependencies.http_json_get is not None:
         try:
-            return getter(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/json"})
+            return dependencies.http_json_get(
+                url,
+                params=params,
+                timeout=timeout,
+                headers={
+                    "User-Agent": "polydata-finance-watch/1.0",
+                    "Accept": "application/json",
+                },
+            )
         except Exception:
             pass
     if requests is None:
@@ -274,14 +379,24 @@ def _http_json_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = No
         session.close()
 
 
-def _http_text_get(ctx: dict, url: str, *, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> str:
+def _http_text_get(
+    ctx: FinanceWatchContext,
+    url: str,
+    *,
+    timeout: int = 12,
+    headers: Optional[Dict[str, str]] = None,
+) -> str:
+    dependencies = _dependencies(ctx)
     request_headers = {"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/rss+xml,application/xml,text/xml"}
     if headers:
         request_headers.update(headers)
-    getter = ctx.get("http_text_get")
-    if callable(getter):
+    if dependencies.http_text_get is not None:
         try:
-            return getter(url, timeout=timeout, headers=request_headers)
+            return dependencies.http_text_get(
+                url,
+                timeout=timeout,
+                headers=request_headers,
+            )
         except Exception:
             pass
     if requests is None:
@@ -296,14 +411,28 @@ def _http_text_get(ctx: dict, url: str, *, timeout: int = 12, headers: Optional[
         session.close()
 
 
-def _news_url(ctx: dict, query: str) -> str:
+def _news_url(ctx: FinanceWatchContext, query: str) -> str:
     # URL is supplied through POLYDATA_FINANCE_GOOGLE_NEWS_RSS_URL.
     return f"{_setting(ctx, 'finance_google_news_rss_url')}?{urlencode({'q': query, 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'})}"
 
 
-def _fetch_yahoo_snapshot(ctx: dict, symbol: str, *, interval: str = "30m", range_name: str = "5d") -> Optional[Dict[str, Any]]:
+def _fetch_yahoo_snapshot(
+    ctx: FinanceWatchContext,
+    symbol: str,
+    *,
+    interval: str = "30m",
+    range_name: str = "5d",
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     try:
-        quote = ctx["get_yahoo_market_snapshot"](symbol, interval=interval, range_name=range_name, ttl_seconds=300)
+        if dependencies.get_yahoo_market_snapshot is None:
+            raise RuntimeError("get_yahoo_market_snapshot helper missing")
+        quote = dependencies.get_yahoo_market_snapshot(
+            symbol,
+            interval=interval,
+            range_name=range_name,
+            ttl_seconds=300,
+        )
     except Exception:
         quote = None
     if isinstance(quote, dict) and quote.get("price") is not None:
@@ -339,14 +468,22 @@ def _fetch_yahoo_snapshot(ctx: dict, symbol: str, *, interval: str = "30m", rang
     }
 
 
-def _fetch_yahoo_closes(ctx: dict, symbol: str, *, range_name: str = "1y") -> Dict[str, Any]:
+def _fetch_yahoo_closes(
+    ctx: FinanceWatchContext,
+    symbol: str,
+    *,
+    range_name: str = "1y",
+) -> Dict[str, Any]:
     snapshot = _fetch_yahoo_snapshot(ctx, symbol, interval="1d", range_name=range_name)
     points = [point for point in (snapshot or {}).get("points", []) if isinstance(point, dict)]
     closes = [_safe_float(point.get("value")) for point in points]
     return {**(snapshot or {}), "closes": [value for value in closes if value is not None]}
 
 
-def _fetch_fred_observations(ctx: dict, series_id: str) -> List[Dict[str, Any]]:
+def _fetch_fred_observations(
+    ctx: FinanceWatchContext,
+    series_id: str,
+) -> List[Dict[str, Any]]:
     try:
         text = _http_text_get(ctx, _setting(ctx, "finance_fred_csv_url_template").format(series_id=series_id), timeout=10)
     except Exception:
@@ -435,7 +572,10 @@ def _score_tone(score: Any) -> str:
     return "watch"
 
 
-def _fetch_barchart_last_price(ctx: dict, symbol: str) -> Optional[float]:
+def _fetch_barchart_last_price(
+    ctx: FinanceWatchContext,
+    symbol: str,
+) -> Optional[float]:
     try:
         html = _http_text_get(ctx, _setting(ctx, "finance_barchart_quote_url_template").format(symbol=symbol), timeout=10)
     except Exception:
@@ -446,7 +586,9 @@ def _fetch_barchart_last_price(ctx: dict, symbol: str) -> Optional[float]:
     return _safe_float(match.group(1)) if match else None
 
 
-def _fetch_cnn_fng(ctx: dict) -> Optional[Dict[str, Any]]:
+def _fetch_cnn_fng(
+    ctx: FinanceWatchContext,
+) -> Optional[Dict[str, Any]]:
     if requests is None:
         return None
     session = requests.Session()
@@ -472,7 +614,9 @@ def _fetch_cnn_fng(ctx: dict) -> Optional[Dict[str, Any]]:
     return {"score": round(score), "label": str(label or _score_label(score))} if score is not None else None
 
 
-def _fetch_aaii_sentiment(ctx: dict) -> Optional[Dict[str, float]]:
+def _fetch_aaii_sentiment(
+    ctx: FinanceWatchContext,
+) -> Optional[Dict[str, float]]:
     try:
         html = _http_text_get(ctx, _setting(ctx, "finance_aaii_sentiment_url"), timeout=10)
     except Exception:
@@ -869,7 +1013,7 @@ def _broker_priority(action: str, upside: Optional[float], target_change: Option
 
 
 def _broker_research_row(
-    ctx: dict,
+    ctx: FinanceWatchContext,
     *,
     title: str,
     summary: str,
@@ -1007,7 +1151,9 @@ def _candidate_links_for_provider(provider: str, html: str, source_url: str, lim
     return rows
 
 
-def _open_research_sources(ctx: dict) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+def _open_research_sources(
+    ctx: FinanceWatchContext,
+) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
     sources = (
         ("Eastmoney", _setting(ctx, "finance_broker_research_eastmoney_url"), ("eastmoney.com", "eastmoney.com.cn", "dfcfw.com")),
         ("Choice", _setting(ctx, "finance_broker_research_choice_url"), ("eastmoney.com", "eastmoney.com.cn", "dfcfw.com")),
@@ -1019,7 +1165,7 @@ def _open_research_sources(ctx: dict) -> tuple[tuple[str, str, tuple[str, ...]],
 
 
 def _build_broker_rows_from_open_sources(
-    ctx: dict,
+    ctx: FinanceWatchContext,
     *,
     limit: int,
     rows: List[Dict[str, Any]],
@@ -1081,7 +1227,10 @@ def _build_broker_rows_from_open_sources(
         sources[source_key] = "ok" if parsed_count else ("empty" if candidates else "no-links")
 
 
-def _build_broker_rows_from_configured_sources(ctx: dict, limit: int) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
+def _build_broker_rows_from_configured_sources(
+    ctx: FinanceWatchContext,
+    limit: int,
+) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
     rows: List[Dict[str, Any]] = []
     sources: Dict[str, str] = {}
     quote_cache: Dict[str, Dict[str, Any]] = {}
@@ -1173,7 +1322,10 @@ def _build_broker_rows_from_configured_sources(ctx: dict, limit: int) -> tuple[L
     return rows[:limit], sources
 
 
-def _build_broker_research_news_fallback(ctx: dict, limit: int) -> Dict[str, Any]:
+def _build_broker_research_news_fallback(
+    ctx: FinanceWatchContext,
+    limit: int,
+) -> Dict[str, Any]:
     try:
         xml_text = _http_text_get(ctx, _news_url(ctx, _broker_research_query()), timeout=14)
     except Exception as exc:
@@ -1269,7 +1421,10 @@ def _build_broker_research_news_fallback(ctx: dict, limit: int) -> Dict[str, Any
     )
 
 
-def build_broker_research_payload(ctx: dict, limit: int) -> Dict[str, Any]:
+def build_broker_research_payload(
+    ctx: FinanceWatchContext,
+    limit: int,
+) -> Dict[str, Any]:
     rows, sources = _build_broker_rows_from_configured_sources(ctx, limit)
     if rows:
         upgrades = sum(1 for row in rows if "UPGRADE" in (row.get("tags") or []))
@@ -1296,12 +1451,19 @@ def build_broker_research_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     )
 
 
-def _read_finance_external(ctx: dict) -> Dict[str, Any]:
-    payload = finance_external_sources_service.read_finance_external_sources(ctx)
+def _read_finance_external(
+    ctx: FinanceWatchContext,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    payload = finance_external_sources_service.read_finance_external_sources(
+        dependencies.external_sources,
+    )
     if isinstance(payload, dict) and payload:
         return payload
     try:
-        return finance_external_sources_service.build_finance_external_sources_payload(ctx)
+        return finance_external_sources_service.build_finance_external_sources_payload(
+            dependencies.external_sources,
+        )
     except Exception:
         return {}
 
@@ -1319,7 +1481,10 @@ def _payload(panel_id: str, *, title: str, items: List[Dict[str, Any]], summary:
     }
 
 
-def build_defi_yields_payload(ctx: dict, limit: int) -> Dict[str, Any]:
+def build_defi_yields_payload(
+    ctx: FinanceWatchContext,
+    limit: int,
+) -> Dict[str, Any]:
     raw = _http_json_get(ctx, _setting(ctx, "finance_defillama_yields_url"), timeout=16)
     pools = raw.get("data") if isinstance(raw, dict) else []
     rows: List[Dict[str, Any]] = []
@@ -1367,16 +1532,27 @@ def build_defi_yields_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     return _payload("defi-yield-monitor", title="DEFI YIELDS", items=rows[:limit], summary={"topLabel": rows[0]["label"] if rows else None, "rankBy": "protocol reliability + TVL"}, sources={"defillamaYields": "ok" if rows else "empty"})
 
 
-def build_news_payload(ctx: dict, panel_id: str, title: str, limit: int) -> Dict[str, Any]:
+def build_news_payload(
+    ctx: FinanceWatchContext,
+    panel_id: str,
+    title: str,
+    limit: int,
+) -> Dict[str, Any]:
     query = NEWS_QUERIES[panel_id]
     xml_text = _http_text_get(ctx, _news_url(ctx, query), timeout=16)
     rows = _parse_rss_items(xml_text, panel_id=panel_id, limit=limit)
     return _payload(panel_id, title=title, items=rows, summary={"query": query}, sources={"googleNewsRss": "ok" if rows else "empty"})
 
 
-def build_crypto_perps_payload(ctx: dict, limit: int) -> Dict[str, Any]:
+def build_crypto_perps_payload(
+    ctx: FinanceWatchContext,
+    limit: int,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     requested_limit = max(limit, len(CRYPTO_PERP_ORDER), 24)
-    base = crypto_funding_service.get_crypto_funding_watch_snapshot(ctx, limit=requested_limit)
+    base = dependencies.get_crypto_funding_watch_snapshot(
+        limit=requested_limit,
+    )
     asset_map = {str(asset.get("asset") or asset.get("symbol") or "").upper(): asset for asset in (base.get("assets") or []) if isinstance(asset, dict)}
     ordered_assets = [asset_map[symbol] for symbol in CRYPTO_PERP_ORDER if symbol in asset_map]
     extras = [asset for symbol, asset in asset_map.items() if symbol not in CRYPTO_PERP_ORDER]
@@ -1411,7 +1587,11 @@ def build_crypto_perps_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     return _payload("crypto-perp-funding", title="CRYPTO PERPS", items=rows, summary={"venues": len(base.get("venues") or [])}, sources=base.get("sources") if isinstance(base.get("sources"), dict) else {"funding": base.get("status") or "ok"})
 
 
-def build_tradfi_perps_payload(ctx: dict, limit: int, external: Dict[str, Any]) -> Dict[str, Any]:
+def build_tradfi_perps_payload(
+    ctx: FinanceWatchContext,
+    limit: int,
+    external: Dict[str, Any],
+) -> Dict[str, Any]:
     source = external.get("tradfiPerps") if isinstance(external.get("tradfiPerps"), dict) else {}
     rows: List[Dict[str, Any]] = []
     for item in source.get("items") or []:
@@ -1452,7 +1632,10 @@ def build_tradfi_perps_payload(ctx: dict, limit: int, external: Dict[str, Any]) 
     return _payload("tradfi-perp-radar", title="TRADFI PERPS", items=rows[:limit], sources={"financeExternal": source.get("status") or "seed"})
 
 
-def build_global_indices_payload(ctx: dict, limit: int) -> Dict[str, Any]:
+def build_global_indices_payload(
+    ctx: FinanceWatchContext,
+    limit: int,
+) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for label, symbol, region in GLOBAL_INDEX_SYMBOLS[:limit]:
         snapshot = _fetch_yahoo_snapshot(ctx, symbol, interval="30m", range_name="5d")
@@ -1478,7 +1661,10 @@ def build_global_indices_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     return _payload("global-index-monitor", title="GLOBAL INDICES", items=rows, summary={"riskTone": "RISK ON" if avg and avg > 0 else "RISK OFF" if avg and avg < 0 else "MIXED", "avgChange": avg}, sources={"yahoo": "ok" if rows else "empty"})
 
 
-def build_fear_greed_payload(ctx: dict, limit: int) -> Dict[str, Any]:
+def build_fear_greed_payload(
+    ctx: FinanceWatchContext,
+    limit: int,
+) -> Dict[str, Any]:
     raw = _http_json_get(ctx, _setting(ctx, "finance_alternative_fng_url"), params={"limit": 2, "format": "json"}, timeout=12)
     data = (raw.get("data") or []) if isinstance(raw, dict) else []
     item = data[0] if data and isinstance(data[0], dict) else {}
@@ -1570,9 +1756,12 @@ def build_fear_greed_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     if not any(not row.get("degraded") for row in category_rows):
         score = crypto_score
     previous_score = None
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
-    if snapshot_store is not None:
-        prior = snapshot_store.get_stale(finance_watch_namespace("crypto-fear-greed"), FINANCE_WATCH_CACHE_KEY)
+    dependencies = _dependencies(ctx)
+    if dependencies.snapshot_store is not None:
+        prior = dependencies.snapshot_store.get_stale(
+            finance_watch_namespace("crypto-fear-greed"),
+            FINANCE_WATCH_CACHE_KEY,
+        )
         if isinstance(prior, dict) and (prior.get("summary") or {}).get("categories"):
             previous_score = _safe_float((prior.get("headline") or {}).get("score"))
     delta = score - previous_score if score is not None and previous_score is not None else None
@@ -1635,7 +1824,11 @@ def build_fear_greed_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     return payload
 
 
-def build_crypto_etf_payload(ctx: dict, limit: int, external: Dict[str, Any]) -> Dict[str, Any]:
+def build_crypto_etf_payload(
+    ctx: FinanceWatchContext,
+    limit: int,
+    external: Dict[str, Any],
+) -> Dict[str, Any]:
     source = external.get("etfFlow") if isinstance(external.get("etfFlow"), dict) else {}
     rows = []
     for item in source.get("items") or []:
@@ -1668,7 +1861,11 @@ def build_crypto_etf_payload(ctx: dict, limit: int, external: Dict[str, Any]) ->
     return _payload("crypto-etf-flow", title="CRYPTO ETF", items=rows[:limit], summary={"netFlowProxyUsd": source.get("netFlowProxyUsd"), "totalVolume": total_volume, "inflowCount": inflows, "outflowCount": outflows}, sources={"financeExternal": source.get("status") or "seed"})
 
 
-def build_stablecoin_payload(ctx: dict, limit: int, external: Dict[str, Any]) -> Dict[str, Any]:
+def build_stablecoin_payload(
+    ctx: FinanceWatchContext,
+    limit: int,
+    external: Dict[str, Any],
+) -> Dict[str, Any]:
     source = external.get("stablecoin") if isinstance(external.get("stablecoin"), dict) else {}
     rows = []
     for item in source.get("items") or []:
@@ -1695,62 +1892,127 @@ def build_stablecoin_payload(ctx: dict, limit: int, external: Dict[str, Any]) ->
     return _payload("stablecoin-monitor", title="STABLECOINS", items=rows[:limit], summary={"totalSupplyUsd": source.get("totalSupplyUsd"), "supplyChange7dPct": source.get("supplyChange7dPct"), "stressedCount": source.get("stressedCount")}, sources={"financeExternal": source.get("status") or "seed"})
 
 
-def build_finance_watch_panel_payload(ctx: dict, panel_id: str, limit: int = 10, external: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def build_finance_watch_panel_payload(
+    ctx: FinanceWatchContext,
+    panel_id: str,
+    limit: int = 10,
+    external: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     limit = max(3, min(36, int(limit or 10)))
     if panel_id == "defi-yield-monitor":
-        return build_defi_yields_payload(ctx, limit)
+        return build_defi_yields_payload(dependencies, limit)
     if panel_id == "defi-security-watch":
-        return build_news_payload(ctx, panel_id, "DEFI SECURITY", limit)
+        return build_news_payload(
+            dependencies,
+            panel_id,
+            "DEFI SECURITY",
+            limit,
+        )
     if panel_id == "crypto-perp-funding":
-        return build_crypto_perps_payload(ctx, limit)
+        return build_crypto_perps_payload(dependencies, limit)
     if panel_id == "tradfi-perp-radar":
-        return build_tradfi_perps_payload(ctx, limit, external or _read_finance_external(ctx))
+        return build_tradfi_perps_payload(
+            dependencies,
+            limit,
+            external or _read_finance_external(dependencies),
+        )
     if panel_id == "ipo-news-watch":
-        return build_news_payload(ctx, panel_id, "IPO NEWS", limit)
+        return build_news_payload(
+            dependencies,
+            panel_id,
+            "IPO NEWS",
+            limit,
+        )
     if panel_id == "broker-research-watch":
-        return build_broker_research_payload(ctx, limit)
+        return build_broker_research_payload(dependencies, limit)
     if panel_id == "global-index-monitor":
-        return build_global_indices_payload(ctx, limit)
+        return build_global_indices_payload(dependencies, limit)
     if panel_id == "crypto-fear-greed":
-        return build_fear_greed_payload(ctx, limit)
+        return build_fear_greed_payload(dependencies, limit)
     if panel_id == "crypto-etf-flow":
-        return build_crypto_etf_payload(ctx, limit, external or _read_finance_external(ctx))
+        return build_crypto_etf_payload(
+            dependencies,
+            limit,
+            external or _read_finance_external(dependencies),
+        )
     if panel_id == "stablecoin-monitor":
-        return build_stablecoin_payload(ctx, limit, external or _read_finance_external(ctx))
+        return build_stablecoin_payload(
+            dependencies,
+            limit,
+            external or _read_finance_external(dependencies),
+        )
     if panel_id == "blockchain-policy-news":
-        return build_news_payload(ctx, panel_id, "CHAIN POLICY", limit)
+        return build_news_payload(
+            dependencies,
+            panel_id,
+            "CHAIN POLICY",
+            limit,
+        )
     raise KeyError(f"unknown finance watch panel: {panel_id}")
 
 
-def build_all_finance_watch_panel_payloads(ctx: dict, limit: int = 24) -> Dict[str, Dict[str, Any]]:
-    external = _read_finance_external(ctx)
+def build_all_finance_watch_panel_payloads(
+    ctx: FinanceWatchContext,
+    limit: int = 24,
+) -> Dict[str, Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
+    external = _read_finance_external(dependencies)
     payloads: Dict[str, Dict[str, Any]] = {}
     for panel_id in FINANCE_WATCH_PANEL_IDS:
         try:
-            payloads[panel_id] = build_finance_watch_panel_payload(ctx, panel_id, limit=limit, external=external)
+            payloads[panel_id] = build_finance_watch_panel_payload(
+                dependencies,
+                panel_id,
+                limit=limit,
+                external=external,
+            )
         except Exception as exc:
             payloads[panel_id] = _payload(panel_id, title=panel_id.upper(), items=[], status="error", sources={"builder": "error"}, summary={"error": str(exc)})
     return payloads
 
 
-def _read_seeded_snapshot(ctx: dict, panel_id: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+def _read_seeded_snapshot(
+    ctx: FinanceWatchContext,
+    panel_id: str,
+    ttl_seconds: int,
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     namespace = finance_watch_namespace(panel_id)
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        redis_payload = reader(namespace, FINANCE_WATCH_CACHE_KEY)
+    if dependencies.get_cached_json is not None:
+        redis_payload = dependencies.get_cached_json(
+            namespace,
+            FINANCE_WATCH_CACHE_KEY,
+        )
         if isinstance(redis_payload, dict):
-            ctx["SNAPSHOT_STORE"].set(namespace, FINANCE_WATCH_CACHE_KEY, redis_payload, ttl_seconds)
+            if dependencies.snapshot_store is None:
+                raise RuntimeError("SNAPSHOT_STORE dependency missing")
+            dependencies.snapshot_store.set(
+                namespace,
+                FINANCE_WATCH_CACHE_KEY,
+                redis_payload,
+                ttl_seconds,
+            )
             return {**redis_payload, "cacheMode": str(redis_payload.get("cacheMode") or "redis-seed")}
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
-    if snapshot_store is None:
+    if dependencies.snapshot_store is None:
         return None
-    sqlite_payload = snapshot_store.get(namespace, FINANCE_WATCH_CACHE_KEY)
+    sqlite_payload = dependencies.snapshot_store.get(
+        namespace,
+        FINANCE_WATCH_CACHE_KEY,
+    )
     if isinstance(sqlite_payload, dict):
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
-            setter(namespace, FINANCE_WATCH_CACHE_KEY, sqlite_payload, ttl_seconds)
+        if dependencies.set_cached_json is not None:
+            dependencies.set_cached_json(
+                namespace,
+                FINANCE_WATCH_CACHE_KEY,
+                sqlite_payload,
+                ttl_seconds,
+            )
         return {**sqlite_payload, "cacheMode": str(sqlite_payload.get("cacheMode") or "sqlite-seed")}
-    stale_payload = snapshot_store.get_stale(namespace, FINANCE_WATCH_CACHE_KEY)
+    stale_payload = dependencies.snapshot_store.get_stale(
+        namespace,
+        FINANCE_WATCH_CACHE_KEY,
+    )
     if isinstance(stale_payload, dict):
         return {**stale_payload, "cacheMode": "stale-seed"}
     return None
@@ -1761,18 +2023,36 @@ def _trim_payload(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
     return {**payload, "items": items[: max(0, int(limit or 10))], "summary": {**(payload.get("summary") if isinstance(payload.get("summary"), dict) else {}), "count": min(len(items), max(0, int(limit or 10))), "totalCount": len(items)}}
 
 
-def get_finance_watch_panel_snapshot(ctx: dict, panel_id: str, limit: int = 10) -> Dict[str, Any]:
+def get_finance_watch_panel_snapshot(
+    ctx: FinanceWatchContext,
+    panel_id: str,
+    limit: int = 10,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     limit = max(3, min(36, int(limit or 10)))
     ttl_seconds = FINANCE_WATCH_TTL_SECONDS
-    seeded = _read_seeded_snapshot(ctx, panel_id, ttl_seconds)
+    seeded = _read_seeded_snapshot(
+        dependencies,
+        panel_id,
+        ttl_seconds,
+    )
     if seeded is not None:
         return _trim_payload(seeded, limit)
 
     def _builder() -> Dict[str, Any]:
-        return build_finance_watch_panel_payload(ctx, panel_id, limit=max(limit, 24))
+        return build_finance_watch_panel_payload(
+            dependencies,
+            panel_id,
+            limit=max(limit, 24),
+        )
 
-    if "get_snapshot_payload" in ctx:
-        payload = ctx["get_snapshot_payload"](finance_watch_namespace(panel_id), FINANCE_WATCH_CACHE_KEY, _builder, ttl_seconds=ttl_seconds)
+    if dependencies.get_snapshot_payload is not None:
+        payload = dependencies.get_snapshot_payload(
+            finance_watch_namespace(panel_id),
+            FINANCE_WATCH_CACHE_KEY,
+            _builder,
+            ttl_seconds=ttl_seconds,
+        )
     else:
         payload = _builder()
     return _trim_payload(payload if isinstance(payload, dict) else {}, limit)
