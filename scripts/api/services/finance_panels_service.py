@@ -60,13 +60,13 @@ TRADFI_PERP_SYMBOLS: Tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class FinancePanelDependencies:
-    source: Mapping[str, Any]
     application: Any
     utc_now_iso: Callable[..., Any] | None
     get_market_groups_payload: Callable[..., Any] | None
     get_snapshot_payload: Callable[..., Any] | None
     get_yahoo_market_snapshot: Callable[..., Any] | None
     get_crypto_funding_watch_snapshot: Callable[..., Any] | None
+    external_sources: finance_external_sources_service.FinanceExternalSourceDependencies
 
     @classmethod
     def from_context(
@@ -74,7 +74,6 @@ class FinancePanelDependencies:
         context: Mapping[str, Any],
     ) -> FinancePanelDependencies:
         return cls(
-            source=context,
             application=resolve_optional_service_value(context, "app"),
             utc_now_iso=resolve_optional_service_callable(
                 context,
@@ -95,6 +94,11 @@ class FinancePanelDependencies:
             get_crypto_funding_watch_snapshot=resolve_optional_service_callable(
                 context,
                 "get_crypto_funding_watch_snapshot",
+            ),
+            external_sources=(
+                finance_external_sources_service.FinanceExternalSourceDependencies.from_context(
+                    context,
+                )
             ),
         )
 
@@ -272,7 +276,7 @@ def _external_sources(
     dependencies: FinancePanelDependencies,
 ) -> Dict[str, Any]:
     return finance_external_sources_service.read_finance_external_sources(
-        dependencies.source,
+        dependencies.external_sources,
     )
 
 

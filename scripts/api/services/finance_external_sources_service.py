@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+)
 
 try:
     import requests
@@ -70,6 +77,58 @@ COT_MARKETS: Tuple[Tuple[str, str, str], ...] = (
 STABLECOIN_SYMBOLS: Tuple[str, ...] = ("USDT", "USDC", "USDS", "DAI", "PYUSD", "FDUSD", "TUSD")
 
 
+@dataclass(frozen=True)
+class FinanceExternalSourceDependencies:
+    settings: Any
+    http_json_get: Callable[..., Any] | None
+    http_json_post: Callable[..., Any] | None
+    get_yahoo_market_snapshot: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> FinanceExternalSourceDependencies:
+        return cls(
+            settings=resolve_optional_service_value(context, "SETTINGS"),
+            http_json_get=resolve_optional_service_callable(
+                context,
+                "http_json_get",
+            ),
+            http_json_post=resolve_optional_service_callable(
+                context,
+                "http_json_post",
+            ),
+            get_yahoo_market_snapshot=resolve_optional_service_callable(
+                context,
+                "get_yahoo_market_snapshot",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+        )
+
+
+FinanceExternalSourceContext = (
+    Mapping[str, Any] | FinanceExternalSourceDependencies
+)
+
+
+def _dependencies(
+    context: FinanceExternalSourceContext,
+) -> FinanceExternalSourceDependencies:
+    if isinstance(context, FinanceExternalSourceDependencies):
+        return context
+    return FinanceExternalSourceDependencies.from_context(context)
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -86,9 +145,11 @@ def _safe_float(value: Any) -> Optional[float]:
     return number
 
 
-def _setting(ctx: dict, name: str) -> str:
-    settings = ctx.get("SETTINGS")
-    value = getattr(settings, name, "") if settings is not None else ""
+def _setting(
+    dependencies: FinanceExternalSourceDependencies,
+    name: str,
+) -> str:
+    value = getattr(dependencies.settings, name, "") if dependencies.settings is not None else ""
     return str(value or "").strip()
 
 
@@ -114,11 +175,21 @@ def _nested_usd(row: Dict[str, Any], key: str) -> Optional[float]:
     return _safe_float(payload.get("peggedUSD"))
 
 
-def _http_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = None, timeout: int = 12) -> Any:
-    getter = ctx.get("http_json_get")
-    if callable(getter):
+def _http_get(
+    dependencies: FinanceExternalSourceDependencies,
+    url: str,
+    *,
+    params: Optional[Dict[str, Any]] = None,
+    timeout: int = 12,
+) -> Any:
+    if dependencies.http_json_get is not None:
         try:
-            return getter(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
+            return dependencies.http_json_get(
+                url,
+                params=params,
+                timeout=timeout,
+                headers={"User-Agent": "polydata-finance-seed/1.0"},
+            )
         except Exception:
             pass
     if requests is None:
@@ -133,11 +204,21 @@ def _http_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = None, t
         session.close()
 
 
-def _http_post(ctx: dict, url: str, *, json_payload: Dict[str, Any], timeout: int = 12) -> Any:
-    poster = ctx.get("http_json_post")
-    if callable(poster):
+def _http_post(
+    dependencies: FinanceExternalSourceDependencies,
+    url: str,
+    *,
+    json_payload: Dict[str, Any],
+    timeout: int = 12,
+) -> Any:
+    if dependencies.http_json_post is not None:
         try:
-            return poster(url, json_payload=json_payload, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
+            return dependencies.http_json_post(
+                url,
+                json_payload=json_payload,
+                timeout=timeout,
+                headers={"User-Agent": "polydata-finance-seed/1.0"},
+            )
         except Exception:
             pass
     if requests is None:
@@ -152,16 +233,29 @@ def _http_post(ctx: dict, url: str, *, json_payload: Dict[str, Any], timeout: in
         session.close()
 
 
-def _fetch_yahoo_snapshot(ctx: dict, symbol: str) -> Optional[Dict[str, Any]]:
+def _fetch_yahoo_snapshot(
+    dependencies: FinanceExternalSourceDependencies,
+    symbol: str,
+) -> Optional[Dict[str, Any]]:
     try:
-        quote = ctx["get_yahoo_market_snapshot"](symbol, interval="30m", range_name="5d", ttl_seconds=300)
+        if dependencies.get_yahoo_market_snapshot is None:
+            raise RuntimeError("get_yahoo_market_snapshot helper missing")
+        quote = dependencies.get_yahoo_market_snapshot(
+            symbol,
+            interval="30m",
+            range_name="5d",
+            ttl_seconds=300,
+        )
     except Exception:
         quote = None
     if isinstance(quote, dict) and quote.get("price") is not None:
         return quote
     payload = _http_get(
-        ctx,
-        _setting(ctx, "finance_yahoo_chart_url_template").format(symbol=symbol),
+        dependencies,
+        _setting(
+            dependencies,
+            "finance_yahoo_chart_url_template",
+        ).format(symbol=symbol),
         params={"range": "5d", "interval": "1d"},
         timeout=12,
     )
@@ -182,15 +276,22 @@ def _fetch_yahoo_snapshot(ctx: dict, symbol: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def read_finance_external_sources(ctx: dict) -> Dict[str, Any]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        payload = reader(FINANCE_EXTERNAL_NAMESPACE, FINANCE_EXTERNAL_CACHE_KEY)
+def read_finance_external_sources(
+    ctx: FinanceExternalSourceContext,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    if dependencies.get_cached_json is not None:
+        payload = dependencies.get_cached_json(
+            FINANCE_EXTERNAL_NAMESPACE,
+            FINANCE_EXTERNAL_CACHE_KEY,
+        )
         if isinstance(payload, dict):
             return payload
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
-    if snapshot_store is not None:
-        payload = snapshot_store.get_stale(FINANCE_EXTERNAL_NAMESPACE, FINANCE_EXTERNAL_CACHE_KEY)
+    if dependencies.snapshot_store is not None:
+        payload = dependencies.snapshot_store.get_stale(
+            FINANCE_EXTERNAL_NAMESPACE,
+            FINANCE_EXTERNAL_CACHE_KEY,
+        )
         if isinstance(payload, dict):
             return payload
     return {}
@@ -203,9 +304,24 @@ def _source_status(items: Iterable[Any], *, degraded_if_empty: bool = True) -> s
     return "degraded" if degraded_if_empty else "empty"
 
 
-def fetch_hyperliquid_perp_source(ctx: dict) -> Dict[str, Any]:
-    source_url = _setting(ctx, "finance_hyperliquid_info_url")
-    payload = _http_post(ctx, source_url, json_payload={"type": "metaAndAssetCtxs"}, timeout=15)
+def fetch_hyperliquid_perp_source(
+    ctx: FinanceExternalSourceContext,
+) -> Dict[str, Any]:
+    return _fetch_hyperliquid_perp_source(
+        _dependencies(ctx),
+    )
+
+
+def _fetch_hyperliquid_perp_source(
+    dependencies: FinanceExternalSourceDependencies,
+) -> Dict[str, Any]:
+    source_url = _setting(dependencies, "finance_hyperliquid_info_url")
+    payload = _http_post(
+        dependencies,
+        source_url,
+        json_payload={"type": "metaAndAssetCtxs"},
+        timeout=15,
+    )
     if not isinstance(payload, list) or len(payload) < 2:
         return {"status": "degraded", "items": [], "error": "unexpected Hyperliquid response"}
     universe = (payload[0] or {}).get("universe") or []
@@ -237,12 +353,27 @@ def fetch_hyperliquid_perp_source(ctx: dict) -> Dict[str, Any]:
     return {"status": _source_status(rows), "items": rows, "sourceUrl": source_url}
 
 
-def fetch_okx_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
+def fetch_okx_tradfi_perp_source(
+    ctx: FinanceExternalSourceContext,
+) -> Dict[str, Any]:
+    return _fetch_okx_tradfi_perp_source(
+        _dependencies(ctx),
+    )
+
+
+def _fetch_okx_tradfi_perp_source(
+    dependencies: FinanceExternalSourceDependencies,
+) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
-    source_url = _setting(ctx, "finance_okx_market_ticker_url")
+    source_url = _setting(dependencies, "finance_okx_market_ticker_url")
     for inst_id, display, asset_class in TRADFI_PERP_SYMBOLS:
         try:
-            payload = _http_get(ctx, source_url, params={"instId": inst_id}, timeout=12)
+            payload = _http_get(
+                dependencies,
+                source_url,
+                params={"instId": inst_id},
+                timeout=12,
+            )
         except Exception:
             payload = None
         data = payload.get("data") if isinstance(payload, dict) else []
@@ -273,10 +404,20 @@ def fetch_okx_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
     return {"status": _source_status(rows), "items": rows, "sourceUrl": source_url}
 
 
-def fetch_reference_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
+def fetch_reference_tradfi_perp_source(
+    ctx: FinanceExternalSourceContext,
+) -> Dict[str, Any]:
+    return _fetch_reference_tradfi_perp_source(
+        _dependencies(ctx),
+    )
+
+
+def _fetch_reference_tradfi_perp_source(
+    dependencies: FinanceExternalSourceDependencies,
+) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for yahoo_symbol, display, asset_class in TRADFI_REFERENCE_SYMBOLS:
-        quote = _fetch_yahoo_snapshot(ctx, yahoo_symbol)
+        quote = _fetch_yahoo_snapshot(dependencies, yahoo_symbol)
         if not isinstance(quote, dict):
             continue
         price = _safe_float(quote.get("price"))
@@ -303,14 +444,26 @@ def fetch_reference_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
     return {
         "status": _source_status(rows),
         "items": rows,
-        "sourceUrl": _source_url_from_template(_setting(ctx, "finance_yahoo_chart_url_template")),
+        "sourceUrl": _source_url_from_template(
+            _setting(dependencies, "finance_yahoo_chart_url_template"),
+        ),
     }
 
 
-def fetch_etf_flow_source(ctx: dict) -> Dict[str, Any]:
+def fetch_etf_flow_source(
+    ctx: FinanceExternalSourceContext,
+) -> Dict[str, Any]:
+    return _fetch_etf_flow_source(
+        _dependencies(ctx),
+    )
+
+
+def _fetch_etf_flow_source(
+    dependencies: FinanceExternalSourceDependencies,
+) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for symbol, issuer in ETF_FLOW_SYMBOLS:
-        quote = _fetch_yahoo_snapshot(ctx, symbol)
+        quote = _fetch_yahoo_snapshot(dependencies, symbol)
         if not isinstance(quote, dict):
             continue
         change_pct = _safe_float(quote.get("changePercent"))
@@ -335,11 +488,26 @@ def fetch_etf_flow_source(ctx: dict) -> Dict[str, Any]:
         "status": _source_status(rows),
         "netFlowProxyUsd": net_flow_proxy,
         "items": sorted(rows, key=lambda item: abs(_safe_float(item.get("flowProxyUsd")) or 0.0), reverse=True),
-        "sourceUrl": _source_url_from_template(_setting(ctx, "finance_yahoo_chart_url_template")),
+        "sourceUrl": _source_url_from_template(
+            _setting(dependencies, "finance_yahoo_chart_url_template"),
+        ),
     }
 
 
-def build_etf_flow_proxy_from_perps(ctx: dict, hyperliquid_payload: Dict[str, Any]) -> Dict[str, Any]:
+def build_etf_flow_proxy_from_perps(
+    ctx: FinanceExternalSourceContext,
+    hyperliquid_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    return _build_etf_flow_proxy_from_perps(
+        _dependencies(ctx),
+        hyperliquid_payload,
+    )
+
+
+def _build_etf_flow_proxy_from_perps(
+    dependencies: FinanceExternalSourceDependencies,
+    hyperliquid_payload: Dict[str, Any],
+) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for item in hyperliquid_payload.get("items") or []:
         if not isinstance(item, dict):
@@ -365,18 +533,28 @@ def build_etf_flow_proxy_from_perps(ctx: dict, hyperliquid_payload: Dict[str, An
         "status": "proxy" if rows else "degraded",
         "netFlowProxyUsd": net_flow_proxy,
         "items": rows,
-        "sourceUrl": _setting(ctx, "finance_hyperliquid_info_url"),
+        "sourceUrl": _setting(dependencies, "finance_hyperliquid_info_url"),
         "note": "Yahoo ETF quotes unavailable; using BTC/ETH perp funding notional as an ETF demand proxy.",
     }
 
 
-def fetch_cot_source(ctx: dict) -> Dict[str, Any]:
+def fetch_cot_source(
+    ctx: FinanceExternalSourceContext,
+) -> Dict[str, Any]:
+    return _fetch_cot_source(
+        _dependencies(ctx),
+    )
+
+
+def _fetch_cot_source(
+    dependencies: FinanceExternalSourceDependencies,
+) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
-    source_url = _setting(ctx, "finance_cftc_legacy_cot_url")
+    source_url = _setting(dependencies, "finance_cftc_legacy_cot_url")
     for symbol, query_term, asset_class in COT_MARKETS:
         try:
             payload = _http_get(
-                ctx,
+                dependencies,
                 source_url,
                 params={
                     "$limit": 1,
@@ -416,9 +594,24 @@ def fetch_cot_source(ctx: dict) -> Dict[str, Any]:
     return {"status": _source_status(rows), "items": rows, "sourceUrl": source_url}
 
 
-def fetch_stablecoin_source(ctx: dict) -> Dict[str, Any]:
-    source_url = _setting(ctx, "finance_defillama_stablecoins_url")
-    payload = _http_get(ctx, source_url, params={"includePrices": "true"}, timeout=15)
+def fetch_stablecoin_source(
+    ctx: FinanceExternalSourceContext,
+) -> Dict[str, Any]:
+    return _fetch_stablecoin_source(
+        _dependencies(ctx),
+    )
+
+
+def _fetch_stablecoin_source(
+    dependencies: FinanceExternalSourceDependencies,
+) -> Dict[str, Any]:
+    source_url = _setting(dependencies, "finance_defillama_stablecoins_url")
+    payload = _http_get(
+        dependencies,
+        source_url,
+        params={"includePrices": "true"},
+        timeout=15,
+    )
     assets = payload.get("peggedAssets") if isinstance(payload, dict) else []
     rows: List[Dict[str, Any]] = []
     seen_symbols = set()
@@ -472,13 +665,26 @@ def fetch_stablecoin_source(ctx: dict) -> Dict[str, Any]:
     }
 
 
-def build_finance_external_sources_payload(ctx: dict) -> Dict[str, Any]:
+def build_finance_external_sources_payload(
+    ctx: FinanceExternalSourceContext,
+) -> Dict[str, Any]:
+    return _build_finance_external_sources_payload(
+        _dependencies(ctx),
+    )
+
+
+def _build_finance_external_sources_payload(
+    dependencies: FinanceExternalSourceDependencies,
+) -> Dict[str, Any]:
     sources: Dict[str, str] = {}
     errors: Dict[str, str] = {}
 
-    def capture(name: str, builder) -> Dict[str, Any]:
+    def capture(
+        name: str,
+        builder: Callable[[FinanceExternalSourceDependencies], Dict[str, Any]],
+    ) -> Dict[str, Any]:
         try:
-            payload = builder(ctx)
+            payload = builder(dependencies)
             status = str(payload.get("status") or "unknown")
             sources[name] = status
             return payload
@@ -487,9 +693,12 @@ def build_finance_external_sources_payload(ctx: dict) -> Dict[str, Any]:
             errors[name] = str(exc)
             return {"status": "error", "items": [], "error": str(exc)}
 
-    hyperliquid = capture("hyperliquid", fetch_hyperliquid_perp_source)
-    okx_tradfi = capture("okxTradfiPerps", fetch_okx_tradfi_perp_source)
-    reference_tradfi = capture("referenceTradfiPerps", fetch_reference_tradfi_perp_source)
+    hyperliquid = capture("hyperliquid", _fetch_hyperliquid_perp_source)
+    okx_tradfi = capture("okxTradfiPerps", _fetch_okx_tradfi_perp_source)
+    reference_tradfi = capture(
+        "referenceTradfiPerps",
+        _fetch_reference_tradfi_perp_source,
+    )
     tradfi_items = []
     seen_tradfi = set()
     for source in (okx_tradfi, reference_tradfi):
@@ -501,15 +710,18 @@ def build_finance_external_sources_payload(ctx: dict) -> Dict[str, Any]:
     tradfi_perps = {
         "status": _source_status(tradfi_items),
         "items": tradfi_items,
-        "sourceUrl": _setting(ctx, "finance_okx_market_ticker_url"),
+        "sourceUrl": _setting(dependencies, "finance_okx_market_ticker_url"),
         "sources": {"okx": okx_tradfi.get("status"), "reference": reference_tradfi.get("status")},
     }
-    etf_flow = capture("etfFlow", fetch_etf_flow_source)
+    etf_flow = capture("etfFlow", _fetch_etf_flow_source)
     if not (etf_flow.get("items") or []):
-        etf_flow = build_etf_flow_proxy_from_perps(ctx, hyperliquid)
+        etf_flow = _build_etf_flow_proxy_from_perps(
+            dependencies,
+            hyperliquid,
+        )
         sources["etfFlow"] = str(etf_flow.get("status") or "proxy")
-    cot = capture("cot", fetch_cot_source)
-    stablecoin = capture("stablecoin", fetch_stablecoin_source)
+    cot = capture("cot", _fetch_cot_source)
+    stablecoin = capture("stablecoin", _fetch_stablecoin_source)
     # trade.xyz does not currently expose a documented public market-data endpoint
     # in the same way Hyperliquid does; keep a seeded source state so the panel can
     # distinguish "seeded proxy" from "seed pending".
