@@ -1,9 +1,59 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Iterable, List, Optional
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+)
 
 
 PANEL_ID = "commodity-equity-transmission"
+
+
+@dataclass(frozen=True)
+class CommodityEquityTransmissionDependencies:
+    get_market_group_snapshot: Callable[..., Any] | None
+    commodity_symbols: Sequence[Any]
+    search_markets: Callable[..., Any] | None
+    application: Any
+    utc_now_iso: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> CommodityEquityTransmissionDependencies:
+        return cls(
+            get_market_group_snapshot=resolve_optional_service_callable(
+                context,
+                "get_market_group_snapshot",
+            ),
+            commodity_symbols=resolve_optional_service_value(
+                context,
+                "COMMODITY_SYMBOLS",
+                (),
+            ),
+            search_markets=resolve_optional_service_callable(
+                context,
+                "search_markets",
+            ),
+            application=resolve_optional_service_value(
+                context,
+                "app",
+            ),
+            utc_now_iso=resolve_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+        )
+
+    @property
+    def logger(self) -> Any:
+        return getattr(self.application, "logger", None)
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -178,13 +228,21 @@ CHAIN_SPECS: List[Dict[str, Any]] = [
 ]
 
 
-def _commodity_rows(ctx: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _commodity_rows(
+    dependencies: CommodityEquityTransmissionDependencies,
+) -> Dict[str, Dict[str, Any]]:
     try:
-        payload = ctx["get_market_group_snapshot"](ctx.get("COMMODITY_SYMBOLS", []), kind="commodities")
+        if dependencies.get_market_group_snapshot is None:
+            raise RuntimeError("get_market_group_snapshot helper missing")
+        payload = dependencies.get_market_group_snapshot(
+            dependencies.commodity_symbols,
+            kind="commodities",
+        )
     except Exception:
-        logger = ctx.get("app").logger if ctx.get("app") is not None else None
-        if logger is not None:
-            logger.exception("commodity transmission failed to load commodities snapshot")
+        if dependencies.logger is not None:
+            dependencies.logger.exception(
+                "commodity transmission failed to load commodities snapshot"
+            )
         payload = {"items": []}
     rows = {}
     for item in payload.get("items") or []:
@@ -214,8 +272,10 @@ def _quote_item(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _linked_markets(ctx: Dict[str, Any], queries: Iterable[str]) -> List[Dict[str, Any]]:
-    search = ctx.get("search_markets")
+def _linked_markets(
+    dependencies: CommodityEquityTransmissionDependencies,
+    queries: Iterable[str],
+) -> List[Dict[str, Any]]:
     linked: List[Dict[str, Any]] = []
     seen = set()
     for query in queries:
@@ -223,9 +283,15 @@ def _linked_markets(ctx: Dict[str, Any], queries: Iterable[str]) -> List[Dict[st
         if not query_text:
             continue
         found = False
-        if callable(search):
+        if dependencies.search_markets is not None:
             try:
-                payload = search(query_text, limit=2) or {}
+                payload = (
+                    dependencies.search_markets(
+                        query_text,
+                        limit=2,
+                    )
+                    or {}
+                )
                 for item in payload.get("items") or []:
                     market_id = item.get("id") or item.get("localMarketId") or item.get("slug")
                     if market_id in seen:
@@ -244,9 +310,11 @@ def _linked_markets(ctx: Dict[str, Any], queries: Iterable[str]) -> List[Dict[st
                     if len(linked) >= 2:
                         return linked
             except Exception:
-                logger = ctx.get("app").logger if ctx.get("app") is not None else None
-                if logger is not None:
-                    logger.exception("commodity transmission linked market search failed query=%s", query_text)
+                if dependencies.logger is not None:
+                    dependencies.logger.exception(
+                        "commodity transmission linked market search failed query=%s",
+                        query_text,
+                    )
         if not found and query_text not in seen:
             seen.add(query_text)
             linked.append({"query": query_text, "title": query_text, "source": "query"})
@@ -255,7 +323,11 @@ def _linked_markets(ctx: Dict[str, Any], queries: Iterable[str]) -> List[Dict[st
     return linked
 
 
-def _build_chain(ctx: Dict[str, Any], spec: Dict[str, Any], rows: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def _build_chain(
+    dependencies: CommodityEquityTransmissionDependencies,
+    spec: Dict[str, Any],
+    rows: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
     quote = _first_quote(rows, spec["commodityIds"])
     change = _safe_float(quote.get("changePercent")) if quote else None
     commodity_id = str(spec["commodityIds"][0])
@@ -274,12 +346,19 @@ def _build_chain(ctx: Dict[str, Any], spec: Dict[str, Any], rows: Dict[str, Dict
         "winners": spec["winners"],
         "losers": spec["losers"],
         "spreadWatch": spec["spreadWatch"],
-        "linkedMarkets": _linked_markets(ctx, spec.get("marketQueries") or []),
+        "linkedMarkets": _linked_markets(
+            dependencies,
+            spec.get("marketQueries") or [],
+        ),
     }
 
 
-def get_commodity_equity_transmission_snapshot(ctx: Dict[str, Any], limit: int = 8) -> Dict[str, Any]:
-    rows = _commodity_rows(ctx)
+def get_commodity_equity_transmission_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = 8,
+) -> Dict[str, Any]:
+    dependencies = CommodityEquityTransmissionDependencies.from_context(ctx)
+    rows = _commodity_rows(dependencies)
     commodity_ids = []
     for spec in CHAIN_SPECS:
         commodity_ids.extend(spec["commodityIds"])
@@ -288,7 +367,10 @@ def get_commodity_equity_transmission_snapshot(ctx: Dict[str, Any], limit: int =
         for item_id in dict.fromkeys(commodity_ids)
         if item_id in rows
     ]
-    chains = [_build_chain(ctx, spec, rows) for spec in CHAIN_SPECS]
+    chains = [
+        _build_chain(dependencies, spec, rows)
+        for spec in CHAIN_SPECS
+    ]
     chains.sort(key=lambda item: abs(_safe_float(item.get("shockPct")) or 0.0), reverse=True)
     limit_value = max(1, min(int(limit or 8), 12))
     chains = chains[:limit_value]
@@ -304,7 +386,7 @@ def get_commodity_equity_transmission_snapshot(ctx: Dict[str, Any], limit: int =
     )
 
     return {
-        "generatedAt": ctx["utc_now_iso"](),
+        "generatedAt": dependencies.utc_now_iso(),
         "panelId": PANEL_ID,
         "source": "Yahoo Finance commodity snapshot + curated exposure map",
         "cacheMode": "runtime-compose",
