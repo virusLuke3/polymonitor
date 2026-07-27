@@ -3,9 +3,18 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 
 
 SNAPSHOT_NAMESPACE_PREFIX = "snapshot:macro:"
@@ -133,9 +142,67 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _utc_now_iso(ctx: dict) -> str:
-    now = ctx.get("utc_now_iso")
-    return now() if callable(now) else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+@dataclass(frozen=True)
+class MacroCpiPanelsDependencies:
+    settings: Any
+    application: Any
+    http_text_get: Callable[..., str]
+    http_json_get: Callable[..., Any]
+    utc_now_iso: Callable[..., Any] | None
+    snapshot_store: Any
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MacroCpiPanelsDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_optional_service_value(context, "app"),
+            http_text_get=resolve_service_callable(
+                context,
+                "http_text_get",
+            ),
+            http_json_get=resolve_service_callable(
+                context,
+                "http_json_get",
+            ),
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+        )
+
+
+MacroCpiPanelsContext = Mapping[str, Any] | MacroCpiPanelsDependencies
+
+
+def _dependencies(
+    context: MacroCpiPanelsContext,
+) -> MacroCpiPanelsDependencies:
+    if isinstance(context, MacroCpiPanelsDependencies):
+        return context
+    return MacroCpiPanelsDependencies.from_context(context)
+
+
+def _utc_now_iso(dependencies: MacroCpiPanelsDependencies) -> str:
+    if dependencies.utc_now_iso is not None:
+        return str(dependencies.utc_now_iso())
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _float(value: Any) -> Optional[float]:
@@ -150,12 +217,26 @@ def _snapshot_namespace(panel_id: str) -> str:
     return f"{SNAPSHOT_NAMESPACE_PREFIX}{panel_id}"
 
 
-def ttl_seconds(ctx: dict) -> int:
-    return max(1800, int(getattr(ctx["SETTINGS"], "macro_cpi_panel_ttl_seconds", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
+def ttl_seconds(ctx: MacroCpiPanelsContext) -> int:
+    dependencies = _dependencies(ctx)
+    return max(
+        1800,
+        int(
+            getattr(
+                dependencies.settings,
+                "macro_cpi_panel_ttl_seconds",
+                DEFAULT_TTL_SECONDS,
+            )
+            or DEFAULT_TTL_SECONDS
+        ),
+    )
 
 
-def _fred_url(ctx: dict, series_id: str) -> str:
-    settings = ctx["SETTINGS"]
+def _fred_url(
+    dependencies: MacroCpiPanelsDependencies,
+    series_id: str,
+) -> str:
+    settings = dependencies.settings
     template = getattr(
         settings,
         "finance_fred_csv_url_template",
@@ -174,10 +255,18 @@ def _fred_row_date(row: Dict[str, Any]) -> str:
     return str(row.get("observation_date") or row.get("DATE") or row.get("date") or "").strip()
 
 
-def _fetch_fred_series(ctx: dict, spec: Dict[str, Any]) -> Dict[str, Any]:
+def _fetch_fred_series(
+    ctx: MacroCpiPanelsContext,
+    spec: Dict[str, Any],
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     series_id = spec["seriesId"]
-    url = _fred_url(ctx, series_id)
-    text = ctx["http_text_get"](url, timeout=15, headers={"User-Agent": "polydata-macro-cpi-panels/1.0"})
+    url = _fred_url(dependencies, series_id)
+    text = dependencies.http_text_get(
+        url,
+        timeout=15,
+        headers={"User-Agent": "polydata-macro-cpi-panels/1.0"},
+    )
     rows: List[Dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(str(text or "")))
     for row in reader:
@@ -232,12 +321,22 @@ def _series_tone(spec: Dict[str, Any], change: float, change_pct: Optional[float
     return "cool" if up_tone == "hot" else "hot"
 
 
-def _fetch_federal_register_items(ctx: dict, panel_id: str, config: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
+def _fetch_federal_register_items(
+    ctx: MacroCpiPanelsContext,
+    panel_id: str,
+    config: Dict[str, Any],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     query = config.get("federalRegisterQuery")
     if not query:
         return []
-    url = getattr(ctx["SETTINGS"], "geo_shock_federal_register_api_url", "https://www.federalregister.gov/api/v1/documents.json")
-    payload = ctx["http_json_get"](
+    url = getattr(
+        dependencies.settings,
+        "geo_shock_federal_register_api_url",
+        "https://www.federalregister.gov/api/v1/documents.json",
+    )
+    payload = dependencies.http_json_get(
         url,
         params={"conditions[term]": query, "order": "newest", "per_page": min(5, max(1, limit))},
         timeout=12,
@@ -306,7 +405,12 @@ def _summary(panel_id: str, config: Dict[str, Any], items: List[Dict[str, Any]],
     }
 
 
-def build_macro_cpi_panel_payload(ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def build_macro_cpi_panel_payload(
+    ctx: MacroCpiPanelsContext,
+    panel_id: str,
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     config = PANEL_CONFIGS[panel_id]
     items: List[Dict[str, Any]] = []
     sources: Dict[str, str] = {}
@@ -317,7 +421,7 @@ def build_macro_cpi_panel_payload(ctx: dict, panel_id: str, limit: int = DEFAULT
             sources[key] = "ok"
         except Exception as exc:
             sources[key] = "error"
-            logger = getattr(ctx.get("app"), "logger", None)
+            logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
                 logger.exception("macro cpi panel source failed panel=%s source=%s error=%s", panel_id, key, exc)
     if config.get("federalRegisterQuery"):
@@ -327,13 +431,13 @@ def build_macro_cpi_panel_payload(ctx: dict, panel_id: str, limit: int = DEFAULT
             sources["federal_register"] = "ok" if policy_items else "empty"
         except Exception as exc:
             sources["federal_register"] = "error"
-            logger = getattr(ctx.get("app"), "logger", None)
+            logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
                 logger.exception("macro cpi panel federal register failed panel=%s error=%s", panel_id, exc)
     status = "ok" if sources and all(value in {"ok", "empty"} for value in sources.values()) else ("degraded" if items else "warming")
     limited_items = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), MAX_ITEM_LIMIT))]
     return {
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "source": config.get("source") or FRED_SOURCE,
         "sourceUrl": config.get("sourceUrl") or "https://fred.stlouisfed.org/",
         "status": status,
@@ -343,10 +447,14 @@ def build_macro_cpi_panel_payload(ctx: dict, panel_id: str, limit: int = DEFAULT
     }
 
 
-def _empty(ctx: dict, panel_id: str, status: str = "warming") -> Dict[str, Any]:
+def _empty(
+    dependencies: MacroCpiPanelsDependencies,
+    panel_id: str,
+    status: str = "warming",
+) -> Dict[str, Any]:
     config = PANEL_CONFIGS[panel_id]
     return {
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "source": config.get("source") or FRED_SOURCE,
         "sourceUrl": config.get("sourceUrl") or "https://fred.stlouisfed.org/",
         "status": status,
@@ -356,15 +464,25 @@ def _empty(ctx: dict, panel_id: str, status: str = "warming") -> Dict[str, Any]:
     }
 
 
-def normalize_macro_cpi_panel_payload(payload: Any, *, ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def normalize_macro_cpi_panel_payload(
+    payload: Any,
+    *,
+    ctx: MacroCpiPanelsContext,
+    panel_id: str,
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     if not isinstance(payload, dict):
-        return _empty(ctx, panel_id, "invalid")
+        return _empty(dependencies, panel_id, "invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     config = PANEL_CONFIGS[panel_id]
     items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
     result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), MAX_ITEM_LIMIT))]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(panel_id, config, result["items"], result.get("sources") or {})
-    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["generatedAt"] = str(
+        result.get("generatedAt")
+        or _utc_now_iso(dependencies)
+    )
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
     result["source"] = str(result.get("source") or config.get("source") or FRED_SOURCE)
     result["sourceUrl"] = str(result.get("sourceUrl") or config.get("sourceUrl") or "https://fred.stlouisfed.org/")
@@ -376,14 +494,16 @@ def _with_mode(payload: Dict[str, Any], mode: str) -> Dict[str, Any]:
     return {**payload, "cacheMode": mode}
 
 
-def _read_seeded(ctx: dict, panel_id: str) -> Optional[Dict[str, Any]]:
+def _read_seeded(
+    dependencies: MacroCpiPanelsDependencies,
+    panel_id: str,
+) -> Optional[Dict[str, Any]]:
     namespace = _snapshot_namespace(panel_id)
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        payload = reader(namespace, CACHE_KEY)
+    if dependencies.get_cached_json is not None:
+        payload = dependencies.get_cached_json(namespace, CACHE_KEY)
         if isinstance(payload, dict):
             return _with_mode(payload, "redis-seed")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is not None:
         payload = store.get(namespace, CACHE_KEY)
         if isinstance(payload, dict):
@@ -394,40 +514,113 @@ def _read_seeded(ctx: dict, panel_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_macro_cpi_panel_snapshot(ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
-    ttl = ttl_seconds(ctx)
-    seeded = _read_seeded(ctx, panel_id)
+def _store_live(
+    dependencies: MacroCpiPanelsDependencies,
+    panel_id: str,
+    payload: Dict[str, Any],
+    *,
+    ttl: int,
+) -> None:
+    namespace = _snapshot_namespace(panel_id)
+    if dependencies.snapshot_store is not None:
+        dependencies.snapshot_store.set(
+            namespace,
+            CACHE_KEY,
+            payload,
+            ttl,
+        )
+    if dependencies.set_cached_json is not None:
+        dependencies.set_cached_json(
+            namespace,
+            CACHE_KEY,
+            payload,
+            ttl,
+        )
+
+
+def get_macro_cpi_panel_snapshot(
+    ctx: MacroCpiPanelsContext,
+    panel_id: str,
+    limit: int = DEFAULT_ITEM_LIMIT,
+    *,
+    allow_live_build: bool = False,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    ttl = ttl_seconds(dependencies)
+    seeded = _read_seeded(dependencies, panel_id)
     if seeded is not None:
-        return normalize_macro_cpi_panel_payload(seeded, ctx=ctx, panel_id=panel_id, limit=limit)
+        return normalize_macro_cpi_panel_payload(
+            seeded,
+            ctx=dependencies,
+            panel_id=panel_id,
+            limit=limit,
+        )
     if not allow_live_build:
-        return normalize_macro_cpi_panel_payload(_with_mode(_empty(ctx, panel_id, "warming"), "seed-miss"), ctx=ctx, panel_id=panel_id, limit=limit)
+        return normalize_macro_cpi_panel_payload(
+            _with_mode(
+                _empty(dependencies, panel_id, "warming"),
+                "seed-miss",
+            ),
+            ctx=dependencies,
+            panel_id=panel_id,
+            limit=limit,
+        )
     payload = _with_mode(build_macro_cpi_panel_payload(ctx, panel_id, limit=limit), "live-build")
     if payload.get("items"):
-        namespace = _snapshot_namespace(panel_id)
-        store = ctx.get("SNAPSHOT_STORE")
-        if store is not None:
-            store.set(namespace, CACHE_KEY, payload, ttl)
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
-            setter(namespace, CACHE_KEY, payload, ttl)
-    return normalize_macro_cpi_panel_payload(payload, ctx=ctx, panel_id=panel_id, limit=limit)
+        _store_live(
+            dependencies,
+            panel_id,
+            payload,
+            ttl=ttl,
+        )
+    return normalize_macro_cpi_panel_payload(
+        payload,
+        ctx=dependencies,
+        panel_id=panel_id,
+        limit=limit,
+    )
 
 
-def get_supply_tariff_import_watch_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+def get_supply_tariff_import_watch_snapshot(
+    ctx: MacroCpiPanelsContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+    *,
+    allow_live_build: bool = False,
+) -> Dict[str, Any]:
     return get_macro_cpi_panel_snapshot(ctx, "supply-tariff-import-watch", limit=limit, allow_live_build=allow_live_build)
 
 
-def get_shelter_rent_oer_pressure_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+def get_shelter_rent_oer_pressure_snapshot(
+    ctx: MacroCpiPanelsContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+    *,
+    allow_live_build: bool = False,
+) -> Dict[str, Any]:
     return get_macro_cpi_panel_snapshot(ctx, "shelter-rent-oer-pressure", limit=limit, allow_live_build=allow_live_build)
 
 
-def get_labor_wage_services_pressure_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+def get_labor_wage_services_pressure_snapshot(
+    ctx: MacroCpiPanelsContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+    *,
+    allow_live_build: bool = False,
+) -> Dict[str, Any]:
     return get_macro_cpi_panel_snapshot(ctx, "labor-wage-services-pressure", limit=limit, allow_live_build=allow_live_build)
 
 
-def get_growth_demand_recession_tracker_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+def get_growth_demand_recession_tracker_snapshot(
+    ctx: MacroCpiPanelsContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+    *,
+    allow_live_build: bool = False,
+) -> Dict[str, Any]:
     return get_macro_cpi_panel_snapshot(ctx, "growth-demand-recession-tracker", limit=limit, allow_live_build=allow_live_build)
 
 
-def get_fed_rates_polymarket_gap_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+def get_fed_rates_polymarket_gap_snapshot(
+    ctx: MacroCpiPanelsContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+    *,
+    allow_live_build: bool = False,
+) -> Dict[str, Any]:
     return get_macro_cpi_panel_snapshot(ctx, "fed-rates-polymarket-gap", limit=limit, allow_live_build=allow_live_build)
