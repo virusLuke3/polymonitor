@@ -4,12 +4,21 @@ import json
 import re
 import threading
 import time
+from collections.abc import Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote_plus
 
+from api.context import (
+    ServiceContext,
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 from weather.cities import load_weather_cities
 from weather.temperature_bins import parse_temperature_bin
 from weather.weather_codes import describe_weather_code
@@ -75,21 +84,111 @@ _WEATHER_CLOB_BOOK_CACHE_LOCK = threading.Lock()
 _WEATHER_CLOB_BOOK_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
-def _utc_now_iso(ctx: dict) -> str:
-    now = ctx.get("utc_now_iso")
-    return now() if callable(now) else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+@dataclass(frozen=True)
+class GlobalWeatherMapDependencies:
+    settings: Any
+    application: Any
+    http_json_get: Callable[..., Any]
+    utc_now_iso: Callable[..., Any] | None
+    snapshot_store: Any
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    get_cached_runtime_payload: Callable[..., Any] | None
+    set_cached_runtime_payload: Callable[..., Any] | None
+    get_clob_session: Callable[..., Any] | None
+    get_connection: Callable[..., Any] | None
+    database_path: Any
+    runtime_state: MutableMapping[str, Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> GlobalWeatherMapDependencies:
+        if isinstance(context, ServiceContext):
+            runtime_state = context.runtime_state
+        elif isinstance(context, MutableMapping):
+            runtime_state = context
+        else:
+            runtime_state = {}
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_optional_service_value(context, "app"),
+            http_json_get=resolve_service_callable(
+                context,
+                "http_json_get",
+            ),
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            get_cached_runtime_payload=resolve_optional_service_callable(
+                context,
+                "get_cached_runtime_payload",
+            ),
+            set_cached_runtime_payload=resolve_optional_service_callable(
+                context,
+                "set_cached_runtime_payload",
+            ),
+            get_clob_session=resolve_optional_service_callable(
+                context,
+                "get_clob_session",
+            ),
+            get_connection=resolve_optional_service_callable(
+                context,
+                "get_connection",
+            ),
+            database_path=resolve_optional_service_value(
+                context,
+                "DB_PATH",
+            ),
+            runtime_state=runtime_state,
+        )
 
 
-def _weather_context_state(ctx: dict, key: str, initial: Dict[str, Any]) -> Dict[str, Any]:
-    state = ctx.get(key)
+GlobalWeatherMapContext = Mapping[str, Any] | GlobalWeatherMapDependencies
+
+
+def _dependencies(
+    context: GlobalWeatherMapContext,
+) -> GlobalWeatherMapDependencies:
+    if isinstance(context, GlobalWeatherMapDependencies):
+        return context
+    return GlobalWeatherMapDependencies.from_context(context)
+
+
+def _utc_now_iso(dependencies: GlobalWeatherMapDependencies) -> str:
+    if dependencies.utc_now_iso is not None:
+        return str(dependencies.utc_now_iso())
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _weather_context_state(
+    dependencies: GlobalWeatherMapDependencies,
+    key: str,
+    initial: Dict[str, Any],
+) -> Dict[str, Any]:
+    state = dependencies.runtime_state.get(key)
     if isinstance(state, dict):
         return state
     with _WEATHER_CONTEXT_STATE_LOCK:
-        state = ctx.get(key)
+        state = dependencies.runtime_state.get(key)
         if isinstance(state, dict):
             return state
         state = dict(initial)
-        ctx[key] = state
+        dependencies.runtime_state[key] = state
         return state
 
 
@@ -163,8 +262,14 @@ def _parse_ts(value: Any) -> float:
     return parsed.timestamp()
 
 
-def _date_labels(ctx: dict, days: int) -> List[Dict[str, str]]:
-    now = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00"))
+def _date_labels(
+    ctx: GlobalWeatherMapContext,
+    days: int,
+) -> List[Dict[str, str]]:
+    dependencies = _dependencies(ctx)
+    now = datetime.fromisoformat(
+        _utc_now_iso(dependencies).replace("Z", "+00:00"),
+    )
     labels: List[Dict[str, str]] = []
     for offset in range(max(1, int(days or 4))):
         day = now + timedelta(days=offset)
@@ -403,11 +508,18 @@ def _matched_date_iso(text: str, dates: List[Dict[str, str]]) -> Optional[str]:
     return None
 
 
-def _weather_market_date_rank(ctx: dict, date_iso: str, date_order: Dict[str, int]) -> Tuple[int, int]:
+def _weather_market_date_rank(
+    ctx: GlobalWeatherMapContext,
+    date_iso: str,
+    date_order: Dict[str, int],
+) -> Tuple[int, int]:
+    dependencies = _dependencies(ctx)
     base_rank = date_order.get(date_iso, 999)
     try:
         market_date = datetime.fromisoformat(str(date_iso)).date()
-        today = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00")).date()
+        today = datetime.fromisoformat(
+            _utc_now_iso(dependencies).replace("Z", "+00:00"),
+        ).date()
     except Exception:
         return 3, base_rank
     delta = (market_date - today).days
@@ -418,8 +530,14 @@ def _weather_market_date_rank(ctx: dict, date_iso: str, date_order: Dict[str, in
     return 2, abs(delta)
 
 
-def _date_window_bounds(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[str, str]:
-    now = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00"))
+def _date_window_bounds(
+    ctx: GlobalWeatherMapContext,
+    dates: List[Dict[str, str]],
+) -> Tuple[str, str]:
+    dependencies = _dependencies(ctx)
+    now = datetime.fromisoformat(
+        _utc_now_iso(dependencies).replace("Z", "+00:00"),
+    )
     first = datetime.fromisoformat(dates[0]["iso"]).replace(tzinfo=timezone.utc) if dates else now
     last = datetime.fromisoformat(dates[-1]["iso"]).replace(tzinfo=timezone.utc) if dates else now
     start = min(now - timedelta(days=1), first - timedelta(hours=12))
@@ -427,9 +545,15 @@ def _date_window_bounds(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[str, st
     return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
 
 
-def _weather_market_window_bounds(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[str, str]:
+def _weather_market_window_bounds(
+    ctx: GlobalWeatherMapContext,
+    dates: List[Dict[str, str]],
+) -> Tuple[str, str]:
+    dependencies = _dependencies(ctx)
     start, end = _date_window_bounds(ctx, dates)
-    now = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00"))
+    now = datetime.fromisoformat(
+        _utc_now_iso(dependencies).replace("Z", "+00:00"),
+    )
     month_end = now + timedelta(days=45)
     parsed_end = datetime.fromisoformat(end.replace("Z", "+00:00"))
     if parsed_end < month_end:
@@ -437,10 +561,17 @@ def _weather_market_window_bounds(ctx: dict, dates: List[Dict[str, str]]) -> Tup
     return start, end
 
 
-def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def _weather_by_city(
+    ctx: GlobalWeatherMapContext,
+    cities: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     if not cities:
         return {}
-    base_url = str(getattr(ctx["SETTINGS"], "open_meteo_api_url", "") or "").strip()
+    base_url = str(
+        getattr(dependencies.settings, "open_meteo_api_url", "")
+        or ""
+    ).strip()
     if not base_url:
         raise RuntimeError("open meteo api url missing")
     by_city: Dict[str, Dict[str, Any]] = {}
@@ -449,7 +580,7 @@ def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[
     for offset in range(0, len(cities), chunk_size):
         chunk = cities[offset:offset + chunk_size]
         try:
-            payload = ctx["http_json_get"](
+            payload = dependencies.http_json_get(
                 base_url,
                 params={
                     "latitude": ",".join(str(city["lat"]) for city in chunk),
@@ -585,11 +716,15 @@ def _wttr_time_label(date_value: Any, time_value: Any) -> str:
     return f"{date_text}T{padded[:2]}:{padded[2:]}:00" if date_text else padded
 
 
-def _wttr_city_weather(ctx: dict, city: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _wttr_city_weather(
+    ctx: GlobalWeatherMapContext,
+    city: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     query = str(city.get("city") or "").split("/")[0].strip()
     if not query:
         return None
-    payload = ctx["http_json_get"](
+    payload = dependencies.http_json_get(
         f"{WTTR_URL}/{quote_plus(query)}",
         params={"format": "j1"},
         timeout=8,
@@ -660,13 +795,18 @@ def _wttr_city_weather(ctx: dict, city: Dict[str, Any]) -> Optional[Dict[str, An
         "precipitationUnit": "mm",
         "hourly": [row for row in hourly_rows[:24] if any(row.get(key) is not None for key in ("temp", "precipitation", "windSpeed", "windGust"))],
         "daily": [row for row in daily_rows if any(row.get(key) is not None for key in ("high", "low", "precipitationSum", "windSpeedMax", "windGustMax"))],
-        "weatherUpdatedAt": _utc_now_iso(ctx),
-        "updatedAt": _utc_now_iso(ctx),
+        "weatherUpdatedAt": _utc_now_iso(dependencies),
+        "updatedAt": _utc_now_iso(dependencies),
         "weatherProvider": "wttr.in",
     }
 
 
-def _wttr_weather_by_city(ctx: dict, cities: List[Dict[str, Any]], *, missing_ids: Optional[set[str]] = None) -> Dict[str, Dict[str, Any]]:
+def _wttr_weather_by_city(
+    ctx: GlobalWeatherMapContext,
+    cities: List[Dict[str, Any]],
+    *,
+    missing_ids: Optional[set[str]] = None,
+) -> Dict[str, Dict[str, Any]]:
     targets = [city for city in cities if missing_ids is None or str(city.get("city_id") or "") in missing_ids]
     if not targets:
         return {}
@@ -685,12 +825,23 @@ def _wttr_weather_by_city(ctx: dict, cities: List[Dict[str, Any]], *, missing_id
     return result
 
 
-def _metar_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def _metar_by_city(
+    ctx: GlobalWeatherMapContext,
+    cities: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     ids = [str(city.get("icao") or "").strip().upper() for city in cities if city.get("icao")]
     if not ids:
         return {}
-    base_url = str(getattr(ctx["SETTINGS"], "aviationweather_metar_api_url", "") or "").strip()
-    payload = ctx["http_json_get"](
+    base_url = str(
+        getattr(
+            dependencies.settings,
+            "aviationweather_metar_api_url",
+            "",
+        )
+        or ""
+    ).strip()
+    payload = dependencies.http_json_get(
         base_url,
         params={"ids": ",".join(ids), "format": "json", "hours": "24"},
         timeout=18,
@@ -713,19 +864,23 @@ def _metar_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[st
     return result
 
 
-def _fetch_gamma_events_for_query(ctx: dict, query: str) -> Tuple[List[Dict[str, Any]], str]:
-    base_url = str(ctx["SETTINGS"].gamma_api_base or "").rstrip("/")
+def _fetch_gamma_events_for_query(
+    ctx: GlobalWeatherMapContext,
+    query: str,
+) -> Tuple[List[Dict[str, Any]], str]:
+    dependencies = _dependencies(ctx)
+    base_url = str(dependencies.settings.gamma_api_base or "").rstrip("/")
     if not base_url:
         return [], "empty"
     try:
-        payload = ctx["http_json_get"](
+        payload = dependencies.http_json_get(
             f"{base_url}/events",
             params={"active": "true", "closed": "false", "limit": 80, "q": query},
             timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
             headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
         )
     except Exception as exc:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("global weather map gamma query failed query=%s error=%s", query, exc)
         return [], "error"
@@ -743,19 +898,23 @@ def _gamma_event_rows(payload: Any) -> List[Dict[str, Any]]:
     return [event for event in rows if isinstance(event, dict)] if isinstance(rows, list) else []
 
 
-def _fetch_gamma_events_for_params(ctx: dict, params: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
-    base_url = str(ctx["SETTINGS"].gamma_api_base or "").rstrip("/")
+def _fetch_gamma_events_for_params(
+    ctx: GlobalWeatherMapContext,
+    params: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], str]:
+    dependencies = _dependencies(ctx)
+    base_url = str(dependencies.settings.gamma_api_base or "").rstrip("/")
     if not base_url:
         return [], "empty"
     try:
-        payload = ctx["http_json_get"](
+        payload = dependencies.http_json_get(
             f"{base_url}/events",
             params=params,
             timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
             headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
         )
     except Exception as exc:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("global weather map gamma params query failed params=%s error=%s", params, exc)
         return [], "error"
@@ -763,15 +922,19 @@ def _fetch_gamma_events_for_params(ctx: dict, params: Dict[str, Any]) -> Tuple[L
     return events, "ok" if events else "empty"
 
 
-def _fetch_gamma_event_by_slug(ctx: dict, slug: str) -> Tuple[List[Dict[str, Any]], str]:
-    base_url = str(ctx["SETTINGS"].gamma_api_base or "").rstrip("/")
+def _fetch_gamma_event_by_slug(
+    ctx: GlobalWeatherMapContext,
+    slug: str,
+) -> Tuple[List[Dict[str, Any]], str]:
+    dependencies = _dependencies(ctx)
+    base_url = str(dependencies.settings.gamma_api_base or "").rstrip("/")
     slug = str(slug or "").strip("/")
     if not base_url or not slug:
         return [], "empty"
     statuses: List[str] = []
     for path in (f"/events/slug/{slug}", f"/events/{slug}"):
         try:
-            payload = ctx["http_json_get"](
+            payload = dependencies.http_json_get(
                 f"{base_url}{path}",
                 timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
                 headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
@@ -786,7 +949,10 @@ def _fetch_gamma_event_by_slug(ctx: dict, slug: str) -> Tuple[List[Dict[str, Any
     return [], "error" if statuses and all(status == "error" for status in statuses) else "empty"
 
 
-def _fetch_gamma_events(ctx: dict, queries: Iterable[str]) -> Tuple[List[Dict[str, Any]], str]:
+def _fetch_gamma_events(
+    ctx: GlobalWeatherMapContext,
+    queries: Iterable[str],
+) -> Tuple[List[Dict[str, Any]], str]:
     events: List[Dict[str, Any]] = []
     seen: set[str] = set()
     statuses: List[str] = []
@@ -822,9 +988,15 @@ def _dedupe_gamma_events(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any
     return result
 
 
-def _preferred_weather_date_iso(ctx: dict, dates: List[Dict[str, str]]) -> Optional[str]:
+def _preferred_weather_date_iso(
+    ctx: GlobalWeatherMapContext,
+    dates: List[Dict[str, str]],
+) -> Optional[str]:
+    dependencies = _dependencies(ctx)
     try:
-        today = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00")).date()
+        today = datetime.fromisoformat(
+            _utc_now_iso(dependencies).replace("Z", "+00:00"),
+        ).date()
     except Exception:
         today = datetime.now(timezone.utc).date()
     for item in dates:
@@ -837,7 +1009,10 @@ def _preferred_weather_date_iso(ctx: dict, dates: List[Dict[str, str]]) -> Optio
     return str(dates[0]["iso"]) if dates else None
 
 
-def _weather_sync_date_items(ctx: dict, dates: List[Dict[str, str]]) -> List[Dict[str, str]]:
+def _weather_sync_date_items(
+    ctx: GlobalWeatherMapContext,
+    dates: List[Dict[str, str]],
+) -> List[Dict[str, str]]:
     preferred = _preferred_weather_date_iso(ctx, dates)
     ordered: List[Dict[str, str]] = []
     for item in dates:
@@ -945,20 +1120,29 @@ def _token_ids(market: Dict[str, Any]) -> List[str]:
     return []
 
 
-def _weather_clob_stats(ctx: dict) -> Dict[str, int]:
+def _weather_clob_stats(
+    ctx: GlobalWeatherMapContext,
+) -> Dict[str, int]:
+    dependencies = _dependencies(ctx)
     return _weather_context_state(
-        ctx,
+        dependencies,
         "_weather_clob_stats",
         {"attempts": 0, "errors": 0, "quoted": 0, "noBook": 0, "cacheHits": 0, "missingToken": 0},
     )
 
 
-def _cached_clob_book(ctx: dict, token_id: str) -> Optional[Dict[str, Any]]:
+def _cached_clob_book(
+    ctx: GlobalWeatherMapContext,
+    token_id: str,
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     cache_key = str(token_id)
-    getter = ctx.get("get_cached_runtime_payload")
-    if callable(getter):
+    if dependencies.get_cached_runtime_payload is not None:
         try:
-            cached = getter(WEATHER_CLOB_BOOK_CACHE_NAMESPACE, cache_key)
+            cached = dependencies.get_cached_runtime_payload(
+                WEATHER_CLOB_BOOK_CACHE_NAMESPACE,
+                cache_key,
+            )
             if isinstance(cached, dict):
                 return cached
         except Exception:
@@ -975,15 +1159,29 @@ def _cached_clob_book(ctx: dict, token_id: str) -> Optional[Dict[str, Any]]:
         return payload if isinstance(payload, dict) else None
 
 
-def _set_cached_clob_book(ctx: dict, token_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _set_cached_clob_book(
+    ctx: GlobalWeatherMapContext,
+    token_id: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     cache_key = str(token_id)
-    setter = ctx.get("set_cached_runtime_payload")
-    if callable(setter):
+    if dependencies.set_cached_runtime_payload is not None:
         try:
-            setter(WEATHER_CLOB_BOOK_CACHE_NAMESPACE, cache_key, payload, ttl_seconds=WEATHER_CLOB_BOOK_TTL_SECONDS)
+            dependencies.set_cached_runtime_payload(
+                WEATHER_CLOB_BOOK_CACHE_NAMESPACE,
+                cache_key,
+                payload,
+                ttl_seconds=WEATHER_CLOB_BOOK_TTL_SECONDS,
+            )
         except TypeError:
             try:
-                setter(WEATHER_CLOB_BOOK_CACHE_NAMESPACE, cache_key, payload, WEATHER_CLOB_BOOK_TTL_SECONDS)
+                dependencies.set_cached_runtime_payload(
+                    WEATHER_CLOB_BOOK_CACHE_NAMESPACE,
+                    cache_key,
+                    payload,
+                    WEATHER_CLOB_BOOK_TTL_SECONDS,
+                )
             except Exception:
                 pass
         except Exception:
@@ -1006,15 +1204,29 @@ def _empty_clob_quote(status: str, token_id: Optional[str] = None) -> Dict[str, 
     }
 
 
-def _clob_book_payload(ctx: dict, base_url: str, token_id: str) -> Dict[str, Any]:
-    session_factory = ctx.get("get_clob_session")
-    if callable(session_factory):
-        session = session_factory()
+def _clob_book_payload(
+    ctx: GlobalWeatherMapContext,
+    base_url: str,
+    token_id: str,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    if dependencies.get_clob_session is not None:
+        session = dependencies.get_clob_session()
         if session is not None:
             response = session.get(
                 f"{base_url}/book",
                 params={"token_id": token_id},
-                timeout=min(4, int(getattr(ctx["SETTINGS"], "clob_timeout_seconds", 8) or 8)),
+                timeout=min(
+                    4,
+                    int(
+                        getattr(
+                            dependencies.settings,
+                            "clob_timeout_seconds",
+                            8,
+                        )
+                        or 8
+                    ),
+                ),
                 headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
             )
             if getattr(response, "status_code", None) == 404:
@@ -1022,25 +1234,39 @@ def _clob_book_payload(ctx: dict, base_url: str, token_id: str) -> Dict[str, Any
             response.raise_for_status()
             data = response.json() if getattr(response, "content", True) else {}
             return data if isinstance(data, dict) else {}
-    getter = ctx.get("http_json_get")
-    if not callable(getter):
-        return {"bookStatus": "disabled", "bids": [], "asks": []}
-    data = getter(
+    data = dependencies.http_json_get(
         f"{base_url}/book",
         params={"token_id": token_id},
-        timeout=min(4, int(getattr(ctx["SETTINGS"], "clob_timeout_seconds", 8) or 8)),
+        timeout=min(
+            4,
+            int(
+                getattr(
+                    dependencies.settings,
+                    "clob_timeout_seconds",
+                    8,
+                )
+                or 8
+            ),
+        ),
         headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
     )
     return data if isinstance(data, dict) else {}
 
 
-def _clob_yes_quote(ctx: dict, market: Dict[str, Any]) -> Dict[str, Optional[float] | Optional[str]]:
+def _clob_yes_quote(
+    ctx: GlobalWeatherMapContext,
+    market: Dict[str, Any],
+) -> Dict[str, Optional[float] | Optional[str]]:
+    dependencies = _dependencies(ctx)
     token_ids = _token_ids(market)
     if not token_ids:
         stats = _weather_clob_stats(ctx)
         stats["missingToken"] = int(stats.get("missingToken") or 0) + 1
         return _empty_clob_quote("missing-token")
-    base_url = str(getattr(ctx["SETTINGS"], "clob_api_base", "") or "").rstrip("/")
+    base_url = str(
+        getattr(dependencies.settings, "clob_api_base", "")
+        or ""
+    ).rstrip("/")
     if not base_url:
         return _empty_clob_quote("disabled", token_ids[0])
     stats = _weather_clob_stats(ctx)
@@ -1086,7 +1312,10 @@ def _clob_yes_quote(ctx: dict, market: Dict[str, Any]) -> Dict[str, Optional[flo
     return _set_cached_clob_book(ctx, token_ids[0], payload)
 
 
-def _apply_clob_quote_to_bin(ctx: dict, row: Dict[str, Any]) -> None:
+def _apply_clob_quote_to_bin(
+    ctx: GlobalWeatherMapContext,
+    row: Dict[str, Any],
+) -> None:
     market = row.get("_clobMarket")
     if not isinstance(market, dict):
         return
@@ -1107,7 +1336,11 @@ def _strip_internal_market(rows: List[Dict[str, Any]]) -> None:
         row.pop("_clobMarket", None)
 
 
-def _normalize_temperature_event(ctx: dict, event: Dict[str, Any], city: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _normalize_temperature_event(
+    ctx: GlobalWeatherMapContext,
+    event: Dict[str, Any],
+    city: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
     event_title = str(event.get("title") or "").strip()
     markets = [market for market in (event.get("markets") or []) if isinstance(market, dict) and market.get("closed") is not True]
     bins: List[Dict[str, Any]] = []
@@ -1155,17 +1388,23 @@ def _normalize_temperature_event(ctx: dict, event: Dict[str, Any], city: Dict[st
     }
 
 
-def _db_weather_market_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[List[Dict[str, Any]], str]:
-    connector = ctx.get("get_connection")
-    if not callable(connector):
+def _db_weather_market_rows(
+    ctx: GlobalWeatherMapContext,
+    dates: List[Dict[str, str]],
+) -> Tuple[List[Dict[str, Any]], str]:
+    dependencies = _dependencies(ctx)
+    if dependencies.get_connection is None:
         return [], "empty"
     start_iso, end_iso = _weather_market_window_bounds(ctx, dates)
     conn = None
     try:
         try:
-            conn = connector(ctx.get("DB_PATH"), readonly=True)
+            conn = dependencies.get_connection(
+                dependencies.database_path,
+                readonly=True,
+            )
         except TypeError:
-            conn = connector(ctx.get("DB_PATH"))
+            conn = dependencies.get_connection(dependencies.database_path)
         for statement in (
             "SET LOCAL max_parallel_workers_per_gather = 0",
             "SET LOCAL work_mem = '4MB'",
@@ -1235,7 +1474,7 @@ def _db_weather_market_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[Lis
         rows = [_row_to_dict(row) for row in cursor.fetchall()]
         return rows, "ok" if rows else "empty"
     except Exception as exc:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("global weather map market db query failed error=%s", exc)
         return [], "error"
@@ -1247,7 +1486,10 @@ def _db_weather_market_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[Lis
                 pass
 
 
-def _db_temperature_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[List[Dict[str, Any]], str]:
+def _db_temperature_rows(
+    ctx: GlobalWeatherMapContext,
+    dates: List[Dict[str, str]],
+) -> Tuple[List[Dict[str, Any]], str]:
     rows, status = _db_weather_market_rows(ctx, dates)
     filtered = [row for row in rows if _market_family(_normalize_text(row.get("title"), row.get("slug"))) == "highest_temperature"]
     return filtered, status if filtered else ("empty" if status == "ok" else status)
@@ -1369,15 +1611,23 @@ def _normalize_weather_gamma_markets(events: Iterable[Dict[str, Any]], cities: L
     return normalized
 
 
-def _sync_weather_markets_from_gamma(ctx: dict, cities: List[Dict[str, Any]], dates: List[Dict[str, str]]) -> Dict[str, Any]:
+def _sync_weather_markets_from_gamma(
+    ctx: GlobalWeatherMapContext,
+    cities: List[Dict[str, Any]],
+    dates: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     stats: Dict[str, Any] = {"events": 0, "markets": 0, "upserted": 0, "serving": 0, "status": "empty", "targets": len(cities)}
     if not cities or not dates:
         return stats
-    connector = ctx.get("get_connection")
-    if not callable(connector):
+    if dependencies.get_connection is None:
         stats["status"] = "no-db"
         return stats
-    if getattr(ctx["SETTINGS"], "global_weather_gamma_sync_enabled", True) is False:
+    if getattr(
+        dependencies.settings,
+        "global_weather_gamma_sync_enabled",
+        True,
+    ) is False:
         stats["status"] = "disabled"
         return stats
 
@@ -1417,7 +1667,7 @@ def _sync_weather_markets_from_gamma(ctx: dict, cities: List[Dict[str, Any]], da
     stats["markets"] = len(normalized_markets)
     if not normalized_markets:
         stats["status"] = "error" if statuses and all(status == "error" for status in statuses) else "empty"
-        ctx["_weather_gamma_sync_stats"] = stats
+        dependencies.runtime_state["_weather_gamma_sync_stats"] = stats
         return stats
 
     conn = None
@@ -1425,15 +1675,18 @@ def _sync_weather_markets_from_gamma(ctx: dict, cities: List[Dict[str, Any]], da
         from market import market_discovery
 
         try:
-            conn = connector(ctx.get("DB_PATH"), readonly=False)
+            conn = dependencies.get_connection(
+                dependencies.database_path,
+                readonly=False,
+            )
         except TypeError:
-            conn = connector(ctx.get("DB_PATH"))
+            conn = dependencies.get_connection(dependencies.database_path)
         stats["upserted"] = int(market_discovery.batch_upsert_markets(conn, normalized_markets) or 0)
         stats["serving"] = int(market_discovery._upsert_market_serving_from_gamma(conn, normalized_markets) or 0)
         stats["status"] = "ok" if stats["upserted"] else "empty"
     except Exception as exc:
         stats["status"] = "error"
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("global weather map gamma sync failed error=%s", exc)
     finally:
@@ -1442,25 +1695,37 @@ def _sync_weather_markets_from_gamma(ctx: dict, cities: List[Dict[str, Any]], da
                 conn.close()
             except Exception:
                 pass
-        ctx["_weather_gamma_sync_stats"] = stats
+        dependencies.runtime_state["_weather_gamma_sync_stats"] = stats
     return stats
 
 
-def _fetch_gamma_market_by_id(ctx: dict, market_id: Any) -> Optional[Dict[str, Any]]:
+def _fetch_gamma_market_by_id(
+    ctx: GlobalWeatherMapContext,
+    market_id: Any,
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     if not market_id:
         return None
-    cache = _weather_context_state(ctx, "_weather_gamma_market_cache", {})
+    cache = _weather_context_state(
+        dependencies,
+        "_weather_gamma_market_cache",
+        {},
+    )
     key = str(market_id)
     if key in cache:
         return cache[key]
-    base_url = str(ctx["SETTINGS"].gamma_api_base or "").rstrip("/")
+    base_url = str(dependencies.settings.gamma_api_base or "").rstrip("/")
     if not base_url:
         cache[key] = None
         return None
-    stats = _weather_context_state(ctx, "_weather_gamma_market_stats", {"attempts": 0, "errors": 0, "priced": 0})
+    stats = _weather_context_state(
+        dependencies,
+        "_weather_gamma_market_stats",
+        {"attempts": 0, "errors": 0, "priced": 0},
+    )
     stats["attempts"] = int(stats.get("attempts") or 0) + 1
     try:
-        payload = ctx["http_json_get"](
+        payload = dependencies.http_json_get(
             f"{base_url}/markets/{key}",
             timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
             headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
@@ -1476,14 +1741,25 @@ def _fetch_gamma_market_by_id(ctx: dict, market_id: Any) -> Optional[Dict[str, A
     return market
 
 
-def _gamma_price_fallback(ctx: dict, row: Dict[str, Any]) -> Tuple[Optional[float], Optional[Dict[str, Any]]]:
+def _gamma_price_fallback(
+    ctx: GlobalWeatherMapContext,
+    row: Dict[str, Any],
+) -> Tuple[Optional[float], Optional[Dict[str, Any]]]:
     market = _fetch_gamma_market_by_id(ctx, row.get("gamma_market_id"))
     price = _market_yes_price(market or {})
     return (round(price, 4) if price is not None else None), market
 
 
-def _prefetch_gamma_markets(ctx: dict, rows: Iterable[Dict[str, Any]]) -> None:
-    cache = _weather_context_state(ctx, "_weather_gamma_market_cache", {})
+def _prefetch_gamma_markets(
+    ctx: GlobalWeatherMapContext,
+    rows: Iterable[Dict[str, Any]],
+) -> None:
+    dependencies = _dependencies(ctx)
+    cache = _weather_context_state(
+        dependencies,
+        "_weather_gamma_market_cache",
+        {},
+    )
     ids: List[str] = []
     seen: set[str] = set()
     for row in rows:
@@ -1509,7 +1785,13 @@ def _prefetch_gamma_markets(ctx: dict, rows: Iterable[Dict[str, Any]]) -> None:
                 pass
 
 
-def _normalize_temperature_db_group(ctx: dict, city: Dict[str, Any], date_iso: str, rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _normalize_temperature_db_group(
+    ctx: GlobalWeatherMapContext,
+    city: Dict[str, Any],
+    date_iso: str,
+    rows: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     bins: List[Dict[str, Any]] = []
     for row in rows:
         market = _db_market_object(row)
@@ -1551,7 +1833,15 @@ def _normalize_temperature_db_group(ctx: dict, city: Dict[str, Any], date_iso: s
             top = min(bins, key=lambda row: abs(float(row.get("sortKey") or 0) - forecast_high))
         elif bins:
             top = bins[0]
-    targets = bins if str(ctx.get("_weather_clob_scope") or "top").lower() == "all" else ([top] if top is not None else [])
+    targets = (
+        bins
+        if str(
+            dependencies.runtime_state.get("_weather_clob_scope")
+            or "top"
+        ).lower()
+        == "all"
+        else ([top] if top is not None else [])
+    )
     for target in targets:
         _apply_clob_quote_to_bin(ctx, target)
     quoted = len([row for row in bins if row.get("midPriceYes") is not None])
@@ -1589,7 +1879,14 @@ def _normalize_temperature_db_group(ctx: dict, city: Dict[str, Any], date_iso: s
     }
 
 
-def _normalize_weather_db_group(ctx: dict, city: Optional[Dict[str, Any]], date_iso: str, family: str, rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _normalize_weather_db_group(
+    ctx: GlobalWeatherMapContext,
+    city: Optional[Dict[str, Any]],
+    date_iso: str,
+    family: str,
+    rows: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     if family == "highest_temperature" and city is not None:
         return _normalize_temperature_db_group(ctx, city, date_iso, rows)
     bins: List[Dict[str, Any]] = []
@@ -1629,7 +1926,15 @@ def _normalize_weather_db_group(ctx: dict, city: Optional[Dict[str, Any]], date_
         return None
     bins.sort(key=lambda item: float(item.get("sortKey") or 0))
     top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=bins[0])
-    targets = bins if str(ctx.get("_weather_clob_scope") or "top").lower() == "all" else ([top] if top is not None else [])
+    targets = (
+        bins
+        if str(
+            dependencies.runtime_state.get("_weather_clob_scope")
+            or "top"
+        ).lower()
+        == "all"
+        else ([top] if top is not None else [])
+    )
     for target in targets:
         _apply_clob_quote_to_bin(ctx, target)
     quoted = len([row for row in bins if row.get("midPriceYes") is not None])
@@ -1662,7 +1967,12 @@ def _normalize_weather_db_group(ctx: dict, city: Optional[Dict[str, Any]], date_
     }
 
 
-def _db_markets_by_city(ctx: dict, cities: List[Dict[str, Any]], dates: List[Dict[str, str]]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
+def _db_markets_by_city(
+    ctx: GlobalWeatherMapContext,
+    cities: List[Dict[str, Any]],
+    dates: List[Dict[str, str]],
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
+    dependencies = _dependencies(ctx)
     rows, db_status = _db_weather_market_rows(ctx, dates)
     if not rows:
         return {}, {str(city["city_id"]): db_status for city in cities}
@@ -1740,8 +2050,8 @@ def _db_markets_by_city(ctx: dict, cities: List[Dict[str, Any]], dates: List[Dic
             source_states[city_id] = "ok"
         else:
             source_states[city_id] = "partial"
-    ctx["_weather_family_counts"] = family_counts
-    ctx["_weather_unmapped_markets"] = unmapped[:80]
+    dependencies.runtime_state["_weather_family_counts"] = family_counts
+    dependencies.runtime_state["_weather_unmapped_markets"] = unmapped[:80]
     return result, source_states
 
 
@@ -1785,8 +2095,22 @@ def _weather_sync_targets(
     return targets[:GAMMA_SYNC_MAX_TARGET_CITIES]
 
 
-def _markets_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
-    dates = _date_labels(ctx, int(getattr(ctx["SETTINGS"], "global_weather_market_days", 4) or 4))
+def _markets_by_city(
+    ctx: GlobalWeatherMapContext,
+    cities: List[Dict[str, Any]],
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
+    dependencies = _dependencies(ctx)
+    dates = _date_labels(
+        dependencies,
+        int(
+            getattr(
+                dependencies.settings,
+                "global_weather_market_days",
+                4,
+            )
+            or 4
+        ),
+    )
     result, source_states = _db_markets_by_city(ctx, cities, dates)
     preferred_date = _preferred_weather_date_iso(ctx, dates)
     sync_targets = _weather_sync_targets(cities, result, preferred_date)
@@ -1985,7 +2309,12 @@ def merge_weather_series_from_previous(payload: Dict[str, Any], previous: Option
     return next_payload
 
 
-def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def build_global_weather_map_payload(
+    ctx: GlobalWeatherMapContext,
+    *,
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     cities = load_weather_cities(limit=max(limit or DEFAULT_ITEM_LIMIT, DEFAULT_ITEM_LIMIT))
     sources: Dict[str, str] = {}
     open_meteo_failed = False
@@ -1996,7 +2325,7 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         weather = {}
         open_meteo_failed = True
         sources["openMeteo"] = "error"
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("global weather map open-meteo fetch failed error=%s", exc)
     try:
@@ -2007,7 +2336,7 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         sources["wttr"] = "ok" if wttr and not missing_weather_ids - set(wttr.keys()) else ("partial" if wttr else "empty")
     except Exception as exc:
         sources["wttr"] = "error" if open_meteo_failed else "empty"
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("global weather map wttr fallback failed error=%s", exc)
     try:
@@ -2016,17 +2345,23 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
     except Exception as exc:
         metar = {}
         sources["aviationWeather"] = "error"
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("global weather map metar fetch failed error=%s", exc)
     try:
         markets, market_source_states = _markets_by_city(ctx, cities)
         sources["gamma"] = _aggregate_source(market_source_states.values())
-        gamma_sync_stats = ctx.get("_weather_gamma_sync_stats") or {}
+        gamma_sync_stats = (
+            dependencies.runtime_state.get("_weather_gamma_sync_stats")
+            or {}
+        )
         if gamma_sync_stats:
             sync_status = str(gamma_sync_stats.get("status") or "empty")
             sources["gammaSync"] = sync_status if sync_status != "empty" else ("ok" if int(gamma_sync_stats.get("upserted") or 0) > 0 else "empty")
-        clob_stats = ctx.get("_weather_clob_stats") or {}
+        clob_stats = (
+            dependencies.runtime_state.get("_weather_clob_stats")
+            or {}
+        )
         clob_attempts = int(clob_stats.get("attempts") or 0)
         clob_errors = int(clob_stats.get("errors") or 0)
         clob_quoted = int(clob_stats.get("quoted") or 0)
@@ -2049,7 +2384,7 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         market_source_states = {str(city["city_id"]): "error" for city in cities}
         sources["gamma"] = "error"
         sources["clob"] = "error"
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("global weather map polymarket fetch failed error=%s", exc)
 
@@ -2083,34 +2418,58 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
                 "metar": "ok" if metar_row else "empty",
                 "polymarket": "ok" if market_row else market_source_states.get(city_id, "empty"),
             },
-            "updatedAt": weather_row.get("updatedAt") or metar_row.get("updatedAt") or market_row.get("updatedAt") or _utc_now_iso(ctx),
+            "updatedAt": weather_row.get("updatedAt") or metar_row.get("updatedAt") or market_row.get("updatedAt") or _utc_now_iso(dependencies),
         }
         items.append(item)
     summary = build_summary(items)
-    summary["marketFamilyCounts"] = ctx.get("_weather_family_counts") or summary.get("marketFamilyCounts") or {}
-    summary["unmappedMarketCount"] = len(ctx.get("_weather_unmapped_markets") or [])
-    if ctx.get("_weather_gamma_sync_stats"):
-        summary["gammaSync"] = ctx.get("_weather_gamma_sync_stats")
+    summary["marketFamilyCounts"] = (
+        dependencies.runtime_state.get("_weather_family_counts")
+        or summary.get("marketFamilyCounts")
+        or {}
+    )
+    summary["unmappedMarketCount"] = len(
+        dependencies.runtime_state.get("_weather_unmapped_markets")
+        or []
+    )
+    if dependencies.runtime_state.get("_weather_gamma_sync_stats"):
+        summary["gammaSync"] = dependencies.runtime_state.get(
+            "_weather_gamma_sync_stats",
+        )
     status = "ok" if summary["mappedCount"] else "warming"
     if status == "ok" and any(value == "error" for value in sources.values()):
         status = "degraded"
     return {
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "source": "Open-Meteo/wttr + AviationWeather + Polymarket Gamma/CLOB",
-        "sourceUrl": getattr(ctx["SETTINGS"], "weather_source_url", "https://open-meteo.com/"),
+        "sourceUrl": getattr(
+            dependencies.settings,
+            "weather_source_url",
+            "https://open-meteo.com/",
+        ),
         "status": status,
         "sources": sources,
         "summary": summary,
         "items": items,
-        "unmappedMarkets": ctx.get("_weather_unmapped_markets") or [],
+        "unmappedMarkets": (
+            dependencies.runtime_state.get("_weather_unmapped_markets")
+            or []
+        ),
     }
 
 
-def _empty_payload(ctx: dict, *, status: str = "warming") -> Dict[str, Any]:
+def _empty_payload(
+    dependencies: GlobalWeatherMapDependencies,
+    *,
+    status: str = "warming",
+) -> Dict[str, Any]:
     return {
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "source": "Open-Meteo + AviationWeather + Polymarket Gamma/CLOB",
-        "sourceUrl": getattr(ctx["SETTINGS"], "weather_source_url", "https://open-meteo.com/"),
+        "sourceUrl": getattr(
+            dependencies.settings,
+            "weather_source_url",
+            "https://open-meteo.com/",
+        ),
         "status": status,
         "sources": {},
         "summary": {"cityCount": 0, "mappedCount": 0, "liveMarketCount": 0, "staleCount": 0, "hottestCity": None, "marketFamilyCounts": {}, "unmappedMarketCount": 0},
@@ -2119,17 +2478,33 @@ def _empty_payload(ctx: dict, *, status: str = "warming") -> Dict[str, Any]:
     }
 
 
-def normalize_global_weather_map_payload(payload: Any, *, ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def normalize_global_weather_map_payload(
+    payload: Any,
+    *,
+    ctx: GlobalWeatherMapContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     if not isinstance(payload, dict):
-        return _empty_payload(ctx, status="invalid")
+        return _empty_payload(dependencies, status="invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
     result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), 60))]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else build_summary(result["items"])
-    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["generatedAt"] = str(
+        result.get("generatedAt")
+        or _utc_now_iso(dependencies)
+    )
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
     result["source"] = str(result.get("source") or "Open-Meteo/wttr + AviationWeather + Polymarket Gamma/CLOB")
-    result["sourceUrl"] = str(result.get("sourceUrl") or getattr(ctx["SETTINGS"], "weather_source_url", "https://open-meteo.com/"))
+    result["sourceUrl"] = str(
+        result.get("sourceUrl")
+        or getattr(
+            dependencies.settings,
+            "weather_source_url",
+            "https://open-meteo.com/",
+        )
+    )
     result["unmappedMarkets"] = [item for item in (result.get("unmappedMarkets") or []) if isinstance(item, dict)][:120]
     return result
 
@@ -2138,13 +2513,19 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": cache_mode}
 
 
-def _read_seeded_snapshot(ctx: dict, *, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        payload = reader(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY)
+def _read_seeded_snapshot(
+    dependencies: GlobalWeatherMapDependencies,
+    *,
+    ttl_seconds: int,
+) -> Optional[Dict[str, Any]]:
+    if dependencies.get_cached_json is not None:
+        payload = dependencies.get_cached_json(
+            GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE,
+            GLOBAL_WEATHER_MAP_CACHE_KEY,
+        )
         if isinstance(payload, dict):
             return _with_cache_mode(payload, "redis-seed")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is None:
         return None
     payload = store.get(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY)
@@ -2156,16 +2537,36 @@ def _read_seeded_snapshot(ctx: dict, *, ttl_seconds: int) -> Optional[Dict[str, 
     return None
 
 
-def _store_live(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
-    store = ctx.get("SNAPSHOT_STORE")
-    if store is not None:
-        store.set(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
-        setter(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY, payload, ttl_seconds)
+def _store_live(
+    dependencies: GlobalWeatherMapDependencies,
+    payload: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+) -> None:
+    if dependencies.snapshot_store is not None:
+        dependencies.snapshot_store.set(
+            GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE,
+            GLOBAL_WEATHER_MAP_CACHE_KEY,
+            payload,
+            ttl_seconds,
+        )
+    if dependencies.set_cached_json is not None:
+        dependencies.set_cached_json(
+            GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE,
+            GLOBAL_WEATHER_MAP_CACHE_KEY,
+            payload,
+            ttl_seconds,
+        )
 
 
-def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: str) -> bool:
+def _schedule_live_refresh(
+    ctx: GlobalWeatherMapContext,
+    *,
+    limit: int,
+    ttl_seconds: int,
+    reason: str,
+) -> bool:
+    dependencies = _dependencies(ctx)
     refresh_key = f"{GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE}:{GLOBAL_WEATHER_MAP_CACHE_KEY}"
     with _LIVE_REFRESH_LOCK:
         if refresh_key in _LIVE_REFRESHING:
@@ -2173,13 +2574,26 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
         _LIVE_REFRESHING.add(refresh_key)
 
     def refresh() -> None:
-        logger = getattr(ctx.get("app"), "logger", None)
-        previous = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
+        logger = getattr(dependencies.application, "logger", None)
+        previous = _read_seeded_snapshot(
+            dependencies,
+            ttl_seconds=ttl_seconds,
+        )
         try:
-            payload = _with_cache_mode(build_global_weather_map_payload(ctx, limit=limit), "live-build")
+            payload = _with_cache_mode(
+                build_global_weather_map_payload(
+                    dependencies,
+                    limit=limit,
+                ),
+                "live-build",
+            )
             payload = merge_weather_series_from_previous(payload, previous)
             if payload.get("items"):
-                _store_live(ctx, payload, ttl_seconds=ttl_seconds)
+                _store_live(
+                    dependencies,
+                    payload,
+                    ttl_seconds=ttl_seconds,
+                )
                 if logger is not None and hasattr(logger, "info"):
                     logger.info("global weather map async refresh stored reason=%s items=%s", reason, len(payload.get("items") or []))
             elif logger is not None and hasattr(logger, "warning"):
@@ -2196,14 +2610,65 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
     return True
 
 
-def get_global_weather_map_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
-    ttl_seconds = max(60, int(getattr(ctx["SETTINGS"], "global_weather_map_ttl_seconds", 300) or 300))
-    seeded = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
+def get_global_weather_map_snapshot(
+    ctx: GlobalWeatherMapContext,
+    limit: int = DEFAULT_ITEM_LIMIT,
+    *,
+    allow_live_build: bool = True,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    ttl_seconds = max(
+        60,
+        int(
+            getattr(
+                dependencies.settings,
+                "global_weather_map_ttl_seconds",
+                300,
+            )
+            or 300
+        ),
+    )
+    seeded = _read_seeded_snapshot(
+        dependencies,
+        ttl_seconds=ttl_seconds,
+    )
     if seeded is not None:
         if allow_live_build and seeded.get("cacheMode") == "stale-seed":
-            _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="stale-seed")
-        return normalize_global_weather_map_payload(seeded, ctx=ctx, limit=limit)
+            _schedule_live_refresh(
+                dependencies,
+                limit=limit,
+                ttl_seconds=ttl_seconds,
+                reason="stale-seed",
+            )
+        return normalize_global_weather_map_payload(
+            seeded,
+            ctx=dependencies,
+            limit=limit,
+        )
     if not allow_live_build:
-        return normalize_global_weather_map_payload({**_empty_payload(ctx), "cacheMode": "seed-miss"}, ctx=ctx, limit=limit)
-    scheduled = _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="seed-miss")
-    return normalize_global_weather_map_payload({**_empty_payload(ctx), "cacheMode": "seed-miss-refreshing" if scheduled else "seed-miss-refresh-inflight"}, ctx=ctx, limit=limit)
+        return normalize_global_weather_map_payload(
+            {
+                **_empty_payload(dependencies),
+                "cacheMode": "seed-miss",
+            },
+            ctx=dependencies,
+            limit=limit,
+        )
+    scheduled = _schedule_live_refresh(
+        dependencies,
+        limit=limit,
+        ttl_seconds=ttl_seconds,
+        reason="seed-miss",
+    )
+    return normalize_global_weather_map_payload(
+        {
+            **_empty_payload(dependencies),
+            "cacheMode": (
+                "seed-miss-refreshing"
+                if scheduled
+                else "seed-miss-refresh-inflight"
+            ),
+        },
+        ctx=dependencies,
+        limit=limit,
+    )
