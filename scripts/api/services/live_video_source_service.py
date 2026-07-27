@@ -6,16 +6,22 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
 from api.config import PROJECT_ROOT
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+)
 from api.services import trusted_hls_sources, youtube_live_probe_service
 
 
@@ -148,15 +154,114 @@ TRUSTED_YOUTUBE_FALLBACK_SOURCE_IDS = {
 }
 
 
+@dataclass(frozen=True)
+class LiveVideoSourceDependencies:
+    source: Mapping[str, Any]
+    utc_now_iso: Callable[..., Any] | None
+    http_text_get: Callable[..., Any] | None
+    requests_module: Any
+    youtube_probe_enabled: Any
+    youtube_live_probe: Callable[..., Any] | None
+    youtube_rss_fallback_enabled: Any
+    youtube_rss_refresh_existing: Any
+    youtube_rss_refresh_existing_limit: Any
+    hls_probe_enabled: Any
+    hls_probe_timeout_seconds: Any
+    hls_probe_workers: Any
+    hls_stream_probe: Callable[..., Any] | None
+    ffprobe_path: Any
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+    settings: Any
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> LiveVideoSourceDependencies:
+        return cls(
+            source=context,
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            http_text_get=resolve_optional_service_callable(
+                context,
+                "http_text_get",
+            ),
+            requests_module=resolve_optional_service_value(
+                context,
+                "requests",
+            ),
+            youtube_probe_enabled=resolve_optional_service_value(
+                context,
+                "market_tv_youtube_probe_enabled",
+            ),
+            youtube_live_probe=resolve_optional_service_callable(
+                context,
+                "youtube_live_probe",
+            ),
+            youtube_rss_fallback_enabled=resolve_optional_service_value(
+                context,
+                "market_tv_youtube_rss_fallback_enabled",
+            ),
+            youtube_rss_refresh_existing=resolve_optional_service_value(
+                context,
+                "market_tv_youtube_rss_refresh_existing",
+            ),
+            youtube_rss_refresh_existing_limit=resolve_optional_service_value(
+                context,
+                "market_tv_youtube_rss_refresh_existing_limit",
+            ),
+            hls_probe_enabled=resolve_optional_service_value(
+                context,
+                "market_tv_hls_probe_enabled",
+            ),
+            hls_probe_timeout_seconds=resolve_optional_service_value(
+                context,
+                "market_tv_hls_probe_timeout_seconds",
+            ),
+            hls_probe_workers=resolve_optional_service_value(
+                context,
+                "market_tv_hls_probe_workers",
+            ),
+            hls_stream_probe=resolve_optional_service_callable(
+                context,
+                "hls_stream_probe",
+            ),
+            ffprobe_path=resolve_optional_service_value(
+                context,
+                "ffprobe_path",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            settings=resolve_optional_service_value(
+                context,
+                "SETTINGS",
+            ),
+        )
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _utc_now_iso(ctx: dict | None = None) -> str:
-    if ctx:
-        now = ctx.get("utc_now_iso")
-        if callable(now):
-            return now()
+def _utc_now_iso(
+    dependencies: LiveVideoSourceDependencies | None = None,
+) -> str:
+    if dependencies is not None and dependencies.utc_now_iso is not None:
+        return dependencies.utc_now_iso()
     return utc_now_iso()
 
 
@@ -384,14 +489,27 @@ def parse_m3u_playlist(text: str, *, category: str, source_url: str, generated_a
     return items
 
 
-def _http_text_get(ctx: dict, url: str, *, timeout: int = 10) -> str:
-    getter = ctx.get("http_text_get")
-    if callable(getter):
-        return getter(url, timeout=max(3, min(15, int(timeout or 10))), headers={"User-Agent": "polydata-market-tv-wire/1.0"})
-    requests_module = ctx.get("requests")
-    if requests_module is None:
+def _http_text_get(
+    dependencies: LiveVideoSourceDependencies,
+    url: str,
+    *,
+    timeout: int = 10,
+) -> str:
+    request_timeout = max(3, min(15, int(timeout or 10)))
+    headers = {"User-Agent": "polydata-market-tv-wire/1.0"}
+    if dependencies.http_text_get is not None:
+        return dependencies.http_text_get(
+            url,
+            timeout=request_timeout,
+            headers=headers,
+        )
+    if dependencies.requests_module is None:
         raise RuntimeError("http_text_get unavailable")
-    response = requests_module.get(url, timeout=max(3, min(15, int(timeout or 10))), headers={"User-Agent": "polydata-market-tv-wire/1.0"})
+    response = dependencies.requests_module.get(
+        url,
+        timeout=request_timeout,
+        headers=headers,
+    )
     response.raise_for_status()
     return response.text
 
@@ -450,36 +568,50 @@ def _trusted_youtube_fallback_items(existing_items: List[Dict[str, Any]], *, gen
     return output
 
 
-def _youtube_probe_enabled(ctx: dict) -> bool:
-    explicit = ctx.get("market_tv_youtube_probe_enabled")
+def _youtube_probe_enabled(
+    dependencies: LiveVideoSourceDependencies,
+) -> bool:
+    explicit = dependencies.youtube_probe_enabled
     if explicit is not None:
         return bool(explicit)
     value = str(os.environ.get(YOUTUBE_PROBE_ENABLED_ENV, "1")).strip().lower()
     return value not in {"0", "false", "no", "off"}
 
 
-def _youtube_probe_can_fetch(ctx: dict) -> bool:
-    return callable(ctx.get("youtube_live_probe")) or callable(ctx.get("http_text_get")) or ctx.get("requests") is not None
+def _youtube_probe_can_fetch(
+    dependencies: LiveVideoSourceDependencies,
+) -> bool:
+    return (
+        dependencies.youtube_live_probe is not None
+        or dependencies.http_text_get is not None
+        or dependencies.requests_module is not None
+    )
 
 
-def _youtube_rss_fallback_enabled(ctx: dict) -> bool:
-    explicit = ctx.get("market_tv_youtube_rss_fallback_enabled")
+def _youtube_rss_fallback_enabled(
+    dependencies: LiveVideoSourceDependencies,
+) -> bool:
+    explicit = dependencies.youtube_rss_fallback_enabled
     if explicit is not None:
         return bool(explicit)
     value = str(os.environ.get(YOUTUBE_RSS_FALLBACK_ENABLED_ENV, "0")).strip().lower()
     return value not in {"0", "false", "no", "off"}
 
 
-def _hls_probe_enabled(ctx: dict) -> bool:
-    explicit = ctx.get("market_tv_hls_probe_enabled")
+def _hls_probe_enabled(
+    dependencies: LiveVideoSourceDependencies,
+) -> bool:
+    explicit = dependencies.hls_probe_enabled
     if explicit is not None:
         return bool(explicit)
     value = str(os.environ.get(HLS_PROBE_ENABLED_ENV, "1")).strip().lower()
     return value not in {"0", "false", "no", "off"}
 
 
-def _hls_probe_timeout_seconds(ctx: dict) -> int:
-    explicit = ctx.get("market_tv_hls_probe_timeout_seconds")
+def _hls_probe_timeout_seconds(
+    dependencies: LiveVideoSourceDependencies,
+) -> int:
+    explicit = dependencies.hls_probe_timeout_seconds
     if explicit is not None:
         try:
             return max(3, min(20, int(explicit)))
@@ -491,8 +623,10 @@ def _hls_probe_timeout_seconds(ctx: dict) -> int:
         return 10
 
 
-def _hls_probe_workers(ctx: dict) -> int:
-    explicit = ctx.get("market_tv_hls_probe_workers")
+def _hls_probe_workers(
+    dependencies: LiveVideoSourceDependencies,
+) -> int:
+    explicit = dependencies.hls_probe_workers
     if explicit is not None:
         try:
             return max(1, min(32, int(explicit)))
@@ -562,8 +696,11 @@ def _first_hls_segment_uri(lines: List[str]) -> str | None:
     return None
 
 
-def _probe_hls_stream_http(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
-    timeout_seconds = _hls_probe_timeout_seconds(ctx)
+def _probe_hls_stream_http(
+    dependencies: LiveVideoSourceDependencies,
+    item: Dict[str, Any],
+) -> Dict[str, Any]:
+    timeout_seconds = _hls_probe_timeout_seconds(dependencies)
     hls_url = _string(item.get("hlsUrl")) or ""
     referer = _string(item.get("hlsProxyReferer"))
     try:
@@ -602,10 +739,22 @@ def _probe_hls_stream_http(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
         return _hls_probe_result(False, "timeout" if "timed out" in message.lower() else "blocked", error=message[:260])
 
 
-def _probe_hls_stream(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
-    probe = ctx.get("hls_stream_probe")
-    if callable(probe):
-        result = probe(item)
+def _probe_hls_stream(
+    ctx: Mapping[str, Any],
+    item: Dict[str, Any],
+) -> Dict[str, Any]:
+    return _probe_hls_stream_with_dependencies(
+        LiveVideoSourceDependencies.from_context(ctx),
+        item,
+    )
+
+
+def _probe_hls_stream_with_dependencies(
+    dependencies: LiveVideoSourceDependencies,
+    item: Dict[str, Any],
+) -> Dict[str, Any]:
+    if dependencies.hls_stream_probe is not None:
+        result = dependencies.hls_stream_probe(item)
         if isinstance(result, dict):
             status = str(result.get("status") or ("playable" if result.get("ok") else "blocked"))
             return _hls_probe_result(bool(result.get("ok")), status, error=_string(result.get("error")), streams=_string_list(result.get("streams")))
@@ -613,10 +762,10 @@ def _probe_hls_stream(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
     if not hls_url:
         return _hls_probe_result(False, "missing", error="missing hlsUrl")
     referer = _string(item.get("hlsProxyReferer"))
-    ffprobe = shutil.which(str(ctx.get("ffprobe_path") or "ffprobe"))
+    ffprobe = shutil.which(str(dependencies.ffprobe_path or "ffprobe"))
     if not ffprobe:
-        return _probe_hls_stream_http(ctx, item)
-    timeout_seconds = _hls_probe_timeout_seconds(ctx)
+        return _probe_hls_stream_http(dependencies, item)
+    timeout_seconds = _hls_probe_timeout_seconds(dependencies)
     cmd = [
         ffprobe,
         "-v",
@@ -655,11 +804,16 @@ def _probe_hls_stream(ctx: dict, item: Dict[str, Any]) -> Dict[str, Any]:
     return _hls_probe_result(ok, "playable" if ok else "empty", streams=streams)
 
 
-def _enrich_hls_watchability(ctx: dict, items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
+def _enrich_hls_watchability(
+    dependencies: LiveVideoSourceDependencies,
+    items: List[Dict[str, Any]],
+    *,
+    generated_at: str,
+) -> Dict[str, Any]:
     hls_items = [item for item in items if str(item.get("sourceType") or "").lower() == "hls"]
     if not hls_items:
         return {"status": "skipped", "count": 0, "playableCount": 0, "blockedCount": 0, "lastSuccessAt": None}
-    if not _hls_probe_enabled(ctx):
+    if not _hls_probe_enabled(dependencies):
         for item in hls_items:
             item.setdefault("hlsProbeStatus", "unverified")
         return {"status": "disabled", "count": len(hls_items), "playableCount": 0, "blockedCount": 0, "lastSuccessAt": None}
@@ -683,13 +837,23 @@ def _enrich_hls_watchability(ctx: dict, items: List[Dict[str, Any]], *, generate
             item["failureReason"] = probe.get("error") or probe["status"]
             item["relevanceScore"] = max(0, int(item.get("relevanceScore") or 0) - 30)
 
-    workers = min(len(hls_items), _hls_probe_workers(ctx))
+    workers = min(len(hls_items), _hls_probe_workers(dependencies))
     if workers <= 1:
         for item in hls_items:
-            apply_probe(item, _probe_hls_stream(ctx, item))
+            apply_probe(
+                item,
+                _probe_hls_stream_with_dependencies(dependencies, item),
+            )
     else:
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            for item, probe in zip(hls_items, executor.map(lambda source: _probe_hls_stream(ctx, source), hls_items)):
+            probes = executor.map(
+                lambda source: _probe_hls_stream_with_dependencies(
+                    dependencies,
+                    source,
+                ),
+                hls_items,
+            )
+            for item, probe in zip(hls_items, probes):
                 apply_probe(item, probe)
     return {
         "status": "ok" if playable_count else "error",
@@ -723,11 +887,18 @@ def _youtube_embed_url(video_id: str | None = None, channel_id: str | None = Non
     return None, None
 
 
-def _youtube_rss_latest_video(ctx: dict, channel_id: str) -> Dict[str, str] | None:
+def _youtube_rss_latest_video(
+    dependencies: LiveVideoSourceDependencies,
+    channel_id: str,
+) -> Dict[str, str] | None:
     clean_channel_id = _string(channel_id)
     if not clean_channel_id:
         return None
-    text = _http_text_get(ctx, f"https://www.youtube.com/feeds/videos.xml?channel_id={clean_channel_id}", timeout=5)
+    text = _http_text_get(
+        dependencies,
+        f"https://www.youtube.com/feeds/videos.xml?channel_id={clean_channel_id}",
+        timeout=5,
+    )
     root = ET.fromstring(text.encode("utf-8") if isinstance(text, str) else text)
     namespaces = {
         "atom": "http://www.w3.org/2005/Atom",
@@ -743,8 +914,10 @@ def _youtube_rss_latest_video(ctx: dict, channel_id: str) -> Dict[str, str] | No
     return {"videoId": video_id, "title": title or ""}
 
 
-def _youtube_rss_refresh_existing_limit(ctx: dict) -> int:
-    explicit = ctx.get("market_tv_youtube_rss_refresh_existing_limit")
+def _youtube_rss_refresh_existing_limit(
+    dependencies: LiveVideoSourceDependencies,
+) -> int:
+    explicit = dependencies.youtube_rss_refresh_existing_limit
     if explicit is not None:
         try:
             return max(0, min(64, int(explicit)))
@@ -762,8 +935,13 @@ def _daily_refresh_sort_key(item: Dict[str, Any], generated_at: str) -> str:
     return hashlib.sha1(f"{date_key}:{identity}".encode("utf-8")).hexdigest()
 
 
-def _enrich_youtube_rss_fallbacks(ctx: dict, items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
-    refresh_existing = bool(ctx.get("market_tv_youtube_rss_refresh_existing"))
+def _enrich_youtube_rss_fallbacks(
+    dependencies: LiveVideoSourceDependencies,
+    items: List[Dict[str, Any]],
+    *,
+    generated_at: str,
+) -> Dict[str, Any]:
+    refresh_existing = bool(dependencies.youtube_rss_refresh_existing)
     missing_items = [
         item for item in items
         if str(item.get("sourceType") or "").lower() == "youtube"
@@ -772,7 +950,7 @@ def _enrich_youtube_rss_fallbacks(ctx: dict, items: List[Dict[str, Any]], *, gen
     ]
     refresh_items: List[Dict[str, Any]] = []
     if refresh_existing:
-        refresh_limit = _youtube_rss_refresh_existing_limit(ctx)
+        refresh_limit = _youtube_rss_refresh_existing_limit(dependencies)
         refresh_candidates = [
             item for item in items
             if str(item.get("sourceType") or "").lower() == "youtube"
@@ -791,13 +969,19 @@ def _enrich_youtube_rss_fallbacks(ctx: dict, items: List[Dict[str, Any]], *, gen
         youtube_items.append(item)
     if not youtube_items:
         return {"status": "skipped", "count": 0, "readyCount": 0, "errorCount": 0, "lastSuccessAt": None}
-    if not _youtube_rss_fallback_enabled(ctx) or not callable(ctx.get("http_text_get")):
+    if (
+        not _youtube_rss_fallback_enabled(dependencies)
+        or dependencies.http_text_get is None
+    ):
         return {"status": "disabled", "count": len(youtube_items), "readyCount": 0, "errorCount": 0, "lastSuccessAt": None}
     ready_count = 0
     error_count = 0
     def fetch_latest(item: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str] | None, str | None]:
         try:
-            latest = _youtube_rss_latest_video(ctx, str(item.get("youtubeChannelId") or ""))
+            latest = _youtube_rss_latest_video(
+                dependencies,
+                str(item.get("youtubeChannelId") or ""),
+            )
         except Exception as exc:
             return item, None, str(exc)[:220]
         return item, latest, None
@@ -826,7 +1010,12 @@ def _enrich_youtube_rss_fallbacks(ctx: dict, items: List[Dict[str, Any]], *, gen
     }
 
 
-def _enrich_youtube_live_sources(ctx: dict, items: List[Dict[str, Any]], *, generated_at: str) -> Dict[str, Any]:
+def _enrich_youtube_live_sources(
+    dependencies: LiveVideoSourceDependencies,
+    items: List[Dict[str, Any]],
+    *,
+    generated_at: str,
+) -> Dict[str, Any]:
     youtube_items = [
         item for item in items
         if str(item.get("sourceType") or "").lower() == "youtube" and item.get("youtubeProbeEnabled") is not False
@@ -834,9 +1023,9 @@ def _enrich_youtube_live_sources(ctx: dict, items: List[Dict[str, Any]], *, gene
     skipped_count = sum(1 for item in items if str(item.get("sourceType") or "").lower() == "youtube" and item.get("youtubeProbeEnabled") is False)
     if not youtube_items:
         return {"status": "skipped", "count": 0, "skippedCount": skipped_count, "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
-    if not _youtube_probe_enabled(ctx):
+    if not _youtube_probe_enabled(dependencies):
         return {"status": "disabled", "count": len(youtube_items), "skippedCount": skipped_count, "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
-    if not _youtube_probe_can_fetch(ctx):
+    if not _youtube_probe_can_fetch(dependencies):
         return {"status": "skipped", "count": len(youtube_items), "skippedCount": skipped_count, "liveCount": 0, "errorCount": 0, "lastSuccessAt": None}
 
     live_count = 0
@@ -846,7 +1035,11 @@ def _enrich_youtube_live_sources(ctx: dict, items: List[Dict[str, Any]], *, gene
         channel = _string(item.get("youtubeHandle"))
         fallback_video_id = _string(item.get("fallbackVideoId"))
         try:
-            probe = youtube_live_probe_service.probe_youtube_live(ctx, channel=channel or "", video_id=fallback_video_id or "")
+            probe = youtube_live_probe_service.probe_youtube_live(
+                dependencies.source,
+                channel=channel or "",
+                video_id=fallback_video_id or "",
+            )
         except Exception as exc:
             error_count += 1
             item["youtubeProbeStatus"] = "error"
@@ -991,9 +1184,39 @@ def _youtube_categories(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [{"id": category, "label": CATEGORY_LABELS[category], "count": counts.get(category, 0)} for category in CATEGORY_ORDER if counts.get(category, 0)]
 
 
-def normalize_market_youtube_channels_payload(payload: Any, *, ctx: dict | None = None, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, category: str | None = None) -> Dict[str, Any]:
+def normalize_market_youtube_channels_payload(
+    payload: Any,
+    *,
+    ctx: Mapping[str, Any] | None = None,
+    limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT,
+    category: str | None = None,
+) -> Dict[str, Any]:
+    dependencies = (
+        LiveVideoSourceDependencies.from_context(ctx)
+        if ctx is not None
+        else None
+    )
+    return _normalize_market_youtube_channels_payload(
+        payload,
+        dependencies=dependencies,
+        limit=limit,
+        category=category,
+    )
+
+
+def _normalize_market_youtube_channels_payload(
+    payload: Any,
+    *,
+    dependencies: LiveVideoSourceDependencies | None,
+    limit: int,
+    category: str | None,
+) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        empty = _empty_payload(ctx, status="invalid", cache_mode="invalid")
+        empty = _empty_payload(
+            dependencies,
+            status="invalid",
+            cache_mode="invalid",
+        )
         empty["source"] = "market-youtube-channels"
         return empty
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
@@ -1004,7 +1227,7 @@ def normalize_market_youtube_channels_payload(payload: Any, *, ctx: dict | None 
         if not requested_category or _youtube_item_matches_topic(item, requested_category)
     ]
     max_items = max(1, min(int(limit or DEFAULT_MARKET_TV_WIRE_LIMIT), 80))
-    generated_at = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    generated_at = str(result.get("generatedAt") or _utc_now_iso(dependencies))
     status = str(result.get("status") or ("ok" if all_items else "warming"))
     cache_mode = str(result.get("cacheMode") or "seeded")
     return {
@@ -1048,8 +1271,13 @@ def _categories(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [{"id": category, "label": CATEGORY_LABELS[category], "count": counts.get(category, 0)} for category in CATEGORY_ORDER if counts.get(category, 0)]
 
 
-def _empty_payload(ctx: dict | None = None, *, status: str = "warming", cache_mode: str = "warming") -> Dict[str, Any]:
-    now = _utc_now_iso(ctx)
+def _empty_payload(
+    dependencies: LiveVideoSourceDependencies | None = None,
+    *,
+    status: str = "warming",
+    cache_mode: str = "warming",
+) -> Dict[str, Any]:
+    now = _utc_now_iso(dependencies)
     return {
         "generatedAt": now,
         "status": status,
@@ -1064,8 +1292,23 @@ def _empty_payload(ctx: dict | None = None, *, status: str = "warming", cache_mo
     }
 
 
-def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dict[str, Any]:
-    generated_at = _utc_now_iso(ctx)
+def build_market_tv_wire_payload(
+    ctx: Mapping[str, Any],
+    *,
+    include_iptv: bool = True,
+) -> Dict[str, Any]:
+    return _build_market_tv_wire_payload(
+        LiveVideoSourceDependencies.from_context(ctx),
+        include_iptv=include_iptv,
+    )
+
+
+def _build_market_tv_wire_payload(
+    dependencies: LiveVideoSourceDependencies,
+    *,
+    include_iptv: bool = True,
+) -> Dict[str, Any]:
+    generated_at = _utc_now_iso(dependencies)
     errors: List[str] = []
     source_states: Dict[str, Any] = {}
     items: List[Dict[str, Any]] = []
@@ -1081,8 +1324,16 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
                 manifest_items.append(item)
         trusted_youtube_fallbacks = _trusted_youtube_fallback_items(manifest_items, generated_at=generated_at)
         manifest_items.extend(trusted_youtube_fallbacks)
-        youtube_rss_fallback_state = _enrich_youtube_rss_fallbacks(ctx, manifest_items, generated_at=generated_at)
-        youtube_probe_state = _enrich_youtube_live_sources(ctx, manifest_items, generated_at=generated_at)
+        youtube_rss_fallback_state = _enrich_youtube_rss_fallbacks(
+            dependencies,
+            manifest_items,
+            generated_at=generated_at,
+        )
+        youtube_probe_state = _enrich_youtube_live_sources(
+            dependencies,
+            manifest_items,
+            generated_at=generated_at,
+        )
         source_states["trustedHls"] = {
             "status": "ok",
             "count": len([item for item in manifest_items if item.get("playbackTier") == "trusted-hls"]),
@@ -1108,7 +1359,7 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
         iptv_errors = 0
         for category, feed_url in IPTV_CATEGORY_FEEDS:
             try:
-                text = _http_text_get(ctx, feed_url)
+                text = _http_text_get(dependencies, feed_url)
                 parsed = parse_m3u_playlist(text, category=category, source_url=feed_url, generated_at=generated_at)
                 iptv_count += len(parsed)
                 items.extend(parsed)
@@ -1122,7 +1373,11 @@ def build_market_tv_wire_payload(ctx: dict, *, include_iptv: bool = True) -> Dic
             "error": "; ".join(errors[-iptv_errors:]) if iptv_errors else None,
         }
 
-    hls_probe_state = _enrich_hls_watchability(ctx, items, generated_at=generated_at)
+    hls_probe_state = _enrich_hls_watchability(
+        dependencies,
+        items,
+        generated_at=generated_at,
+    )
     if hls_probe_state.get("status") not in {"skipped"}:
         source_states["hlsWatchabilityProbe"] = hls_probe_state
 
@@ -1162,9 +1417,39 @@ def _requested_category(value: Any) -> str | None:
     return raw if raw in CATEGORY_LABELS else None
 
 
-def normalize_market_tv_wire_payload(payload: Any, *, ctx: dict | None = None, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, category: str | None = None) -> Dict[str, Any]:
+def normalize_market_tv_wire_payload(
+    payload: Any,
+    *,
+    ctx: Mapping[str, Any] | None = None,
+    limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT,
+    category: str | None = None,
+) -> Dict[str, Any]:
+    dependencies = (
+        LiveVideoSourceDependencies.from_context(ctx)
+        if ctx is not None
+        else None
+    )
+    return _normalize_market_tv_wire_payload(
+        payload,
+        dependencies=dependencies,
+        limit=limit,
+        category=category,
+    )
+
+
+def _normalize_market_tv_wire_payload(
+    payload: Any,
+    *,
+    dependencies: LiveVideoSourceDependencies | None,
+    limit: int,
+    category: str | None,
+) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        return _empty_payload(ctx, status="invalid", cache_mode="invalid")
+        return _empty_payload(
+            dependencies,
+            status="invalid",
+            cache_mode="invalid",
+        )
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     raw_items = result.get("items") if isinstance(result.get("items"), list) else []
     items = [
@@ -1190,7 +1475,10 @@ def normalize_market_tv_wire_payload(payload: Any, *, ctx: dict | None = None, l
     result["categories"] = _categories(items)
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     result["errors"] = result.get("errors") if isinstance(result.get("errors"), list) else []
-    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["generatedAt"] = str(
+        result.get("generatedAt")
+        or _utc_now_iso(dependencies)
+    )
     status = str(result.get("status") or ("ok" if items else "warming"))
     result["status"] = "empty" if status == "ok" and not items else status
     result["cacheMode"] = str(result.get("cacheMode") or "seeded")
@@ -1213,13 +1501,17 @@ def _with_mode(payload: Dict[str, Any], mode: str) -> Dict[str, Any]:
     return {**payload, "cacheMode": mode, "status": status}
 
 
-def _read_seeded(ctx: dict) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        payload = reader(MARKET_TV_WIRE_SNAPSHOT_NAMESPACE, MARKET_TV_WIRE_CACHE_KEY)
+def _read_seeded(
+    dependencies: LiveVideoSourceDependencies,
+) -> Optional[Dict[str, Any]]:
+    if dependencies.get_cached_json is not None:
+        payload = dependencies.get_cached_json(
+            MARKET_TV_WIRE_SNAPSHOT_NAMESPACE,
+            MARKET_TV_WIRE_CACHE_KEY,
+        )
         if isinstance(payload, dict):
             return _with_mode(payload, "seeded")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is not None:
         payload = store.get(MARKET_TV_WIRE_SNAPSHOT_NAMESPACE, MARKET_TV_WIRE_CACHE_KEY)
         if isinstance(payload, dict):
@@ -1230,30 +1522,99 @@ def _read_seeded(ctx: dict) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_market_tv_wire_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, *, category: str | None = None, allow_live_build: bool = False) -> Dict[str, Any]:
-    seeded = _read_seeded(ctx)
+def get_market_tv_wire_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT,
+    *,
+    category: str | None = None,
+    allow_live_build: bool = False,
+) -> Dict[str, Any]:
+    dependencies = LiveVideoSourceDependencies.from_context(ctx)
+    seeded = _read_seeded(dependencies)
     if seeded is not None:
-        return normalize_market_tv_wire_payload(seeded, ctx=ctx, limit=limit, category=category)
+        return _normalize_market_tv_wire_payload(
+            seeded,
+            dependencies=dependencies,
+            limit=limit,
+            category=category,
+        )
     if not allow_live_build:
-        return normalize_market_tv_wire_payload(_empty_payload(ctx, status="warming", cache_mode="warming"), ctx=ctx, limit=limit, category=category)
-    payload = build_market_tv_wire_payload(ctx)
+        return _normalize_market_tv_wire_payload(
+            _empty_payload(
+                dependencies,
+                status="warming",
+                cache_mode="warming",
+            ),
+            dependencies=dependencies,
+            limit=limit,
+            category=category,
+        )
+    payload = _build_market_tv_wire_payload(dependencies)
     if payload.get("items"):
-        ttl = max(60, int(getattr(ctx.get("SETTINGS"), "market_tv_wire_ttl_seconds", MARKET_TV_WIRE_TTL_SECONDS) or MARKET_TV_WIRE_TTL_SECONDS))
-        writer = ctx.get("set_cached_json")
-        if callable(writer):
-            writer(MARKET_TV_WIRE_SNAPSHOT_NAMESPACE, MARKET_TV_WIRE_CACHE_KEY, payload, ttl)
-        store = ctx.get("SNAPSHOT_STORE")
+        ttl = max(
+            60,
+            int(
+                getattr(
+                    dependencies.settings,
+                    "market_tv_wire_ttl_seconds",
+                    MARKET_TV_WIRE_TTL_SECONDS,
+                )
+                or MARKET_TV_WIRE_TTL_SECONDS
+            ),
+        )
+        if dependencies.set_cached_json is not None:
+            dependencies.set_cached_json(
+                MARKET_TV_WIRE_SNAPSHOT_NAMESPACE,
+                MARKET_TV_WIRE_CACHE_KEY,
+                payload,
+                ttl,
+            )
+        store = dependencies.snapshot_store
         if store is not None:
             store.set(MARKET_TV_WIRE_SNAPSHOT_NAMESPACE, MARKET_TV_WIRE_CACHE_KEY, payload, ttl)
-    return normalize_market_tv_wire_payload(payload, ctx=ctx, limit=limit, category=category)
+    return _normalize_market_tv_wire_payload(
+        payload,
+        dependencies=dependencies,
+        limit=limit,
+        category=category,
+    )
 
 
-def get_market_youtube_channels_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT, *, category: str | None = None, allow_live_build: bool = False) -> Dict[str, Any]:
-    seeded = _read_seeded(ctx)
+def get_market_youtube_channels_snapshot(
+    ctx: Mapping[str, Any],
+    limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT,
+    *,
+    category: str | None = None,
+    allow_live_build: bool = False,
+) -> Dict[str, Any]:
+    dependencies = LiveVideoSourceDependencies.from_context(ctx)
+    seeded = _read_seeded(dependencies)
     if seeded is not None:
-        return normalize_market_youtube_channels_payload(seeded, ctx=ctx, limit=limit, category=category)
+        return _normalize_market_youtube_channels_payload(
+            seeded,
+            dependencies=dependencies,
+            limit=limit,
+            category=category,
+        )
     if not allow_live_build:
-        empty = _empty_payload(ctx, status="warming", cache_mode="warming")
-        return normalize_market_youtube_channels_payload(empty, ctx=ctx, limit=limit, category=category)
-    payload = build_market_tv_wire_payload(ctx, include_iptv=False)
-    return normalize_market_youtube_channels_payload(payload, ctx=ctx, limit=limit, category=category)
+        empty = _empty_payload(
+            dependencies,
+            status="warming",
+            cache_mode="warming",
+        )
+        return _normalize_market_youtube_channels_payload(
+            empty,
+            dependencies=dependencies,
+            limit=limit,
+            category=category,
+        )
+    payload = _build_market_tv_wire_payload(
+        dependencies,
+        include_iptv=False,
+    )
+    return _normalize_market_youtube_channels_payload(
+        payload,
+        dependencies=dependencies,
+        limit=limit,
+        category=category,
+    )
