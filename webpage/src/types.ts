@@ -236,6 +236,18 @@ export type OraclePayload = {
   isFinal?: boolean | null;
   settlementOutcome?: string | null;
   settlementSource?: string | null;
+  summary?: {
+    completionStatus?: string | null;
+    isTradingClosed?: boolean | null;
+    isResolved?: boolean | null;
+    isFinal?: boolean | null;
+    settlementCode?: number | string | null;
+    settlementOutcome?: string | null;
+    settlementSource?: string | null;
+    settlementEventId?: number | string | null;
+    settlementEventTime?: string | null;
+    settlementTransaction?: string | null;
+  } | null;
   timeline: OracleEvent[];
 };
 
@@ -249,6 +261,7 @@ export type PriceSummary = {
   volume24h?: string | null;
   tradeCount24h?: number;
   updatedAt?: string | null;
+  priceSource?: string | null;
 };
 
 export type ChartPoint = {
@@ -916,11 +929,30 @@ export type MarketWorkspaceHealth = {
   level?: 'ok' | 'warn' | 'critical' | string;
 };
 
+export type MarketEvidenceClaim = {
+  id: 'identity' | 'price' | 'history' | 'trades' | 'oracle' | 'group' | string;
+  label: string;
+  status: string;
+  source: string;
+  observedAt?: string | null;
+  recordCount?: number | null;
+  detail?: string | null;
+  identifiers?: Record<string, string | number | null>;
+};
+
+export type MarketWorkspaceEvidence = {
+  contractVersion: 'market-workspace-evidence.v1' | string;
+  generatedAt?: string | null;
+  claims: MarketEvidenceClaim[];
+  issues?: string[];
+};
+
 export type WorkspaceBundle = {
   market: MarketSummary | null;
   identity?: WorkspaceIdentity | null;
   diagnostics?: WorkspaceDiagnostics | null;
   health?: MarketWorkspaceHealth | null;
+  evidence?: MarketWorkspaceEvidence | null;
   group?: MarketGroupDetail | null;
   selectedOutcome?: MarketGroupOutcome | null;
   trades: TradeRow[];
@@ -929,6 +961,9 @@ export type WorkspaceBundle = {
   chart: ChartPayload | null;
   content: ContentPayload | null;
   lob: LobPayload | null;
+  servingSource?: string | null;
+  servingUpdatedAt?: string | null;
+  generatedAt?: string | null;
 };
 
 export type MarketAiInsightFocus = {

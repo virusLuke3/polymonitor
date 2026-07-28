@@ -93,6 +93,7 @@ const GEO_SHOCK_STORAGE_KEY = 'polydata:seed:world:geo-sanctions-shock:v1';
 const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
 const QuantWorkspace = lazy(() => import('@/workspaces/quant/QuantWorkspace').then((module) => ({ default: module.QuantWorkspace })));
 const OperationsWorkspace = lazy(() => import('@/workspaces/operations/OperationsWorkspace').then((module) => ({ default: module.OperationsWorkspace })));
+const MarketWorkspace = lazy(() => import('@/workspaces/market/MarketWorkspace').then((module) => ({ default: module.MarketWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = [
@@ -713,6 +714,7 @@ function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: WorkspaceBund
     identity: patch.identity || current.identity,
     diagnostics: patch.diagnostics || current.diagnostics,
     health: patch.health || current.health,
+    evidence: patch.evidence || current.evidence,
     group: patch.group || current.group,
     selectedOutcome: patch.selectedOutcome || current.selectedOutcome,
     price: patch.price || current.price,
@@ -721,6 +723,9 @@ function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: WorkspaceBund
     oracle: patch.oracle || current.oracle,
     content: patch.content?.items?.length ? patch.content : current.content,
     lob: chooseWorkspaceLob(current.lob, patch.lob),
+    servingSource: patch.servingSource || current.servingSource,
+    servingUpdatedAt: patch.servingUpdatedAt || current.servingUpdatedAt,
+    generatedAt: patch.generatedAt || current.generatedAt,
   };
 }
 
@@ -2035,7 +2040,7 @@ function WorldMonitorApp() {
                         <div className="wm-command-preview-tags">
                           {(commandActiveMarket.tags || []).slice(0, 5).map((tag) => <span key={tag}>{tag}</span>)}
                         </div>
-                        <button type="button" className="wm-command-primary" onClick={() => focusCommandMarket(commandActiveMarket)}>Open Market Workspace</button>
+                        <a className="wm-command-primary" href={`/markets/${commandActiveMarket.id}`}>Open Market Workspace</a>
                       </>
                     ) : (
                       <div className="wm-command-empty">Search a market to preview live pricing, status, and flow.</div>
@@ -2151,6 +2156,13 @@ function WorldMonitorApp() {
 
 export function App() {
   const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
+  if (/^\/markets\/\d+(?:\/|$)/.test(pathname)) {
+    return (
+      <Suspense fallback={<PanelLoading label="Loading Market workspace" detail="Resolving market identity, probability and evidence sources" />}>
+        <MarketWorkspace />
+      </Suspense>
+    );
+  }
   if (pathname === '/operations' || pathname.startsWith('/operations/')) {
     return (
       <Suspense fallback={<PanelLoading label="Loading Operations workspace" detail="Reading production health and freshness metadata" />}>

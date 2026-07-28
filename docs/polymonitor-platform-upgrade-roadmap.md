@@ -462,7 +462,7 @@ discovered
 - Operations 不暴露 SSH、systemd 控制、凭据或修复写接口；watcher heartbeat 不冒充 host-level systemd 状态，生产发布仍独立使用 `systemctl --user` 验证。
 - World Cup 仍保持隐藏；本阶段未修改 Quant、LOB、PolySignal/PolyBeats、PnL/position/address、数据管道、Kaggle 或测试业务实现。
 
-下一批产品化工作：Market Workspace 信息架构与证据链统一，然后再推进 Address Workspace。
+本批已完成 Market Workspace 信息架构与证据链统一；后续产品化阶段见第三阶段边界说明。
 
 ### 第三阶段：预测市场产品化
 
@@ -472,6 +472,18 @@ discovered
 - 可解释 PolySignal
 - 可复现 Quant
 - 数据质量面板
+
+#### 3.1 Market Workspace 信息架构与证据链（已完成，2026-07-28）
+
+- 新增可分享的 `/markets/<localMarketId>` Market Dossier，将市场规则、Outcome/token、概率历史、CLOB、OrderFilled、Oracle、事件分组和关联情报组织到一个只读工作区。
+- `/markets/<localMarketId>/workspace` 新增 `market-workspace-evidence.v1` 契约，按 identity、price、history、trades、oracle 和 group 发布来源、状态、观测时间、记录数、标识符与问题清单。
+- 浏览器为独立加载的 CLOB 和 linked intelligence 补充证据节点；缺新闻不等同于缺市场证据，空 Oracle timeline 不冒充已结算。
+- Atlas command palette 和 focused market strip 均可进入 Market Dossier；Outcome 可以切换到对应本地 market ID，URL 可直接复制分享。
+- 页面统一显示 loading、empty、fresh、aging、stale、partial、missing 和 error；刷新失败保留最后一次成功数据。
+- 公共 Atlas 导航已隐藏 Operations 入口；`/operations` 仍保持只读，等待后续权限阶段纳入管理员访问控制。
+- 本阶段未改写 LOB runtime、Quant、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 或测试业务实现。
+
+下一批产品化工作按路线图是 Address Workspace；由于 PnL/position/address 仍属于明确排除域，进入该阶段前必须重新确认允许修改的只读 API 与前端边界。
 
 ### 第四阶段：用户与分发
 

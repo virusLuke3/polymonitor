@@ -1401,6 +1401,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <span className={suppressTerminalSnapshot ? 'flat' : signedClass(displayedChange)}>
                   {suppressTerminalSnapshot ? 'No live quote' : formatSignedPercent(displayedChange)}
                 </span>
+                {ctx.selectedMarketId ? (
+                  <a className="wm-focus-dossier-link" href={`/markets/${ctx.selectedMarketId}`}>
+                    Open dossier ↗
+                  </a>
+                ) : null}
               </div>
             </div>
 

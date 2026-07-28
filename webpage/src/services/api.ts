@@ -17,6 +17,7 @@ import type {
   MarketListItem,
   MarketsPayload,
   MarketWorkspaceHealth,
+  MarketWorkspaceEvidence,
   OraclePayload,
   PriceSummary,
   QuantBacktestBenchmarkArtifact,
@@ -869,6 +870,7 @@ type MarketDetailBundlePayload = {
   identity?: WorkspaceIdentity | null;
   diagnostics?: WorkspaceDiagnostics | null;
   health?: MarketWorkspaceHealth | null;
+  evidence?: MarketWorkspaceEvidence | null;
   group?: MarketGroupDetail | null;
   selectedOutcome?: MarketGroupOutcome | null;
   price?: PriceSummary | null;
@@ -901,6 +903,7 @@ function normalizeMarketBundlePayload(payload: MarketDetailBundlePayload, market
     identity: payload.identity || null,
     diagnostics: payload.diagnostics || null,
     health: payload.health || null,
+    evidence: payload.evidence || null,
     group: payload.group || null,
     selectedOutcome: payload.selectedOutcome || null,
     price: payload.price || null,
@@ -917,6 +920,9 @@ function normalizeMarketBundlePayload(payload: MarketDetailBundlePayload, market
     ),
     content: payload.content || null,
     lob: null,
+    servingSource: payload.servingSource || null,
+    servingUpdatedAt: payload.servingUpdatedAt || null,
+    generatedAt: payload.generatedAt || null,
   };
 }
 
@@ -1005,6 +1011,7 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
     identity: primary.identity || secondary.identity,
     diagnostics: primary.diagnostics || secondary.diagnostics,
     health: primary.health || secondary.health,
+    evidence: primary.evidence || secondary.evidence,
     group: primary.group || secondary.group,
     selectedOutcome: primary.selectedOutcome || secondary.selectedOutcome,
     price: primary.price || secondary.price,
@@ -1013,6 +1020,9 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
     oracle: primaryOracle ? primaryOracle : secondaryOracle,
     content: primary.content?.items?.length ? primary.content : secondary.content,
     lob: primary.lob || secondary.lob,
+    servingSource: primary.servingSource || secondary.servingSource,
+    servingUpdatedAt: primary.servingUpdatedAt || secondary.servingUpdatedAt,
+    generatedAt: primary.generatedAt || secondary.generatedAt,
   };
 }
 
@@ -1024,6 +1034,7 @@ function emptyWorkspaceBundle(): WorkspaceBundle {
     identity: null,
     diagnostics: null,
     health: null,
+    evidence: null,
     group: null,
     selectedOutcome: null,
     price: null,
@@ -1032,6 +1043,9 @@ function emptyWorkspaceBundle(): WorkspaceBundle {
     oracle: null,
     content: null,
     lob: null,
+    servingSource: null,
+    servingUpdatedAt: null,
+    generatedAt: null,
   };
 }
 
@@ -1067,6 +1081,7 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
       identity: null,
       diagnostics: null,
       health: null,
+      evidence: null,
       group: null,
       selectedOutcome: null,
       price: null,
@@ -1075,6 +1090,9 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
       oracle: null,
       content: contentResult.status === 'fulfilled' ? contentResult.value : null,
       lob: includeLob && lobResult.status === 'fulfilled' ? lobResult.value : null,
+      servingSource: null,
+      servingUpdatedAt: null,
+      generatedAt: null,
     };
     return preferLoadedBundle(detailBundle, secondary);
   })();
