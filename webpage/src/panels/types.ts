@@ -57,6 +57,9 @@ export type PanelRuntimeStatus = {
   lastAttemptAt: number | null;
   failureCount: number;
   error: string | null;
+  cacheMode?: string | null;
+  freshness?: string | null;
+  ageSeconds?: number | null;
 };
 
 export type PanelModule = PanelDefinition & {

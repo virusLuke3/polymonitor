@@ -12,6 +12,7 @@ import {
   type PanelRuntimeData,
   type PanelRuntimeStatus,
 } from './types';
+import type { RuntimePanelMetadata } from '@/services/api';
 
 const DEFAULT_STALE_AFTER_MS: Record<PanelRefreshTier, number> = {
   bootstrap: 5 * 60_000,
@@ -60,6 +61,18 @@ function payloadIsDegraded(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const status = String((value as { status?: unknown }).status || '').trim().toLowerCase();
   return status === 'degraded' || status === 'error' || status === 'failed' || status === 'warming';
+}
+
+function metadataTimestamp(metadata?: RuntimePanelMetadata): number | null {
+  const parsed = Date.parse(String(metadata?.freshness.observedAt || ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function metadataPhase(metadata?: RuntimePanelMetadata): PanelRuntimeStatus['phase'] | null {
+  const freshness = String(metadata?.freshness.state || '').trim().toLowerCase();
+  if (freshness === 'stale') return 'stale';
+  if (freshness === 'degraded' || freshness === 'error' || freshness === 'unavailable') return 'degraded';
+  return null;
 }
 
 function retryDelay(panel: PanelModule, failureCount: number): number | null {
@@ -151,14 +164,15 @@ export function usePanelRuntime({
       signal: controller.signal,
       reason,
       maxBatchSize: Math.min(12, ...eligible.map((panel) => Math.max(1, panel.maxBatchSize || 12))),
-      onPanelData: (panelId, value) => {
+      onPanelData: (panelId, value, metadata) => {
         const panel = eligible.find((entry) => entry.id === panelId);
         const policy = panel ? getPanelRefreshPolicy(panel) : undefined;
-        const updatedAt = payloadTimestamp(value);
+        const updatedAt = metadataTimestamp(metadata) ?? payloadTimestamp(value);
         const staleAfterMs = policy ? (policy.staleAfterMs ?? DEFAULT_STALE_AFTER_MS[policy.tier]) : Number.POSITIVE_INFINITY;
-        const phase = payloadIsDegraded(value)
-          ? 'degraded'
-          : (Number.isFinite(staleAfterMs) && Date.now() - updatedAt > staleAfterMs ? 'stale' : 'ready');
+        const phase = metadataPhase(metadata)
+          ?? (payloadIsDegraded(value)
+            ? 'degraded'
+            : (Number.isFinite(staleAfterMs) && Date.now() - updatedAt > staleAfterMs ? 'stale' : 'ready'));
         const retryTimer = retryTimersRef.current.get(panelId);
         if (retryTimer) {
           window.clearTimeout(retryTimer);
@@ -171,6 +185,9 @@ export function usePanelRuntime({
           lastAttemptAt: now,
           failureCount: 0,
           error: null,
+          cacheMode: metadata?.cache.mode || null,
+          freshness: metadata?.freshness.state || null,
+          ageSeconds: metadata?.freshness.ageSeconds ?? null,
         }));
       },
       onPanelError: (panelId, error) => {

@@ -5,7 +5,10 @@ import type {
   PanelRuntimeData,
 } from './types';
 import { getPanelRefreshPolicy } from './types';
-import { fetchRuntimePanels } from '@/services/api';
+import {
+  fetchRuntimePanels,
+  type RuntimePanelMetadata,
+} from '@/services/api';
 
 const PANEL_RUNTIME_LIMITS: Record<string, number> = {
   'alpha-signal': 8,
@@ -60,7 +63,7 @@ export type PanelRuntimeFetchOptions = {
   signal: AbortSignal;
   reason: PanelFetchContext['reason'];
   maxBatchSize?: number;
-  onPanelData?: (panelId: string, value: unknown) => void;
+  onPanelData?: (panelId: string, value: unknown, metadata?: RuntimePanelMetadata) => void;
   onPanelError?: (panelId: string, error: Error) => void;
   onPanelSettled?: (panelId: string) => void;
 };
@@ -68,6 +71,7 @@ export type PanelRuntimeFetchOptions = {
 export type PanelRuntimeFetchResult = {
   data: PanelRuntimeData;
   errors: Record<string, Error>;
+  metadata: Record<string, RuntimePanelMetadata>;
 };
 
 export async function fetchPanelRuntimeData(
@@ -77,11 +81,13 @@ export async function fetchPanelRuntimeData(
   const entries = panels.filter((panel) => typeof panel.fetchData === 'function');
   const data: PanelRuntimeData = {};
   const errors: Record<string, Error> = {};
+  const metadata: Record<string, RuntimePanelMetadata> = {};
   const maxBatchSize = Math.max(1, options.maxBatchSize || 12);
 
-  const recordData = (panelId: string, value: unknown) => {
+  const recordData = (panelId: string, value: unknown, panelMetadata?: RuntimePanelMetadata) => {
     data[panelId] = value;
-    options.onPanelData?.(panelId, value);
+    if (panelMetadata) metadata[panelId] = panelMetadata;
+    options.onPanelData?.(panelId, value, panelMetadata);
   };
   const recordError = (panelId: string, error: unknown) => {
     const normalized = error instanceof Error ? error : new Error(String(error || 'Panel refresh failed.'));
@@ -113,10 +119,11 @@ export async function fetchPanelRuntimeData(
       const payload = await fetchRuntimePanels(ids, PANEL_RUNTIME_LIMITS, options.signal);
       const values = payload.panels || {};
       const batchErrors = payload.errors || {};
+      const batchMetadata = payload.metadata || {};
       batch.forEach((panel) => {
         const value = values[panel.id];
         if (value !== undefined) {
-          recordData(panel.id, value);
+          recordData(panel.id, value, batchMetadata[panel.id]);
         } else {
           recordError(panel.id, new Error(batchErrors[panel.id] || `Batch response omitted panel ${panel.id}.`));
         }
@@ -134,7 +141,7 @@ export async function fetchPanelRuntimeData(
       await fetchIndividually(batch);
     }
   }
-  return { data, errors };
+  return { data, errors, metadata };
 }
 
 export function mergeRuntimeData(current: PanelRuntimeData, patch: PanelRuntimeData): PanelRuntimeData {

@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
+from api.contracts import api_envelope, api_error, runtime_panel_metadata
 from api.context import resolve_route_callable
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
 from api.runtime_panels.types import RuntimePanelContext
@@ -81,6 +82,55 @@ def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
         authorization = request.headers.get("Authorization") or ""
         return supplied == expected or authorization == f"Bearer {expected}"
 
+    def _requested_panel_ids() -> list[str]:
+        raw_ids = request.args.get("ids") or ""
+        panel_ids = [
+            panel_id.strip()
+            for panel_id in raw_ids.split(",")
+            if panel_id.strip()
+        ]
+        if not panel_ids:
+            panel_ids = [panel.panel_id for panel in RUNTIME_PANEL_MODULES]
+        return list(dict.fromkeys(panel_ids))
+
+    def _collect_runtime_panels(panel_ids: list[str]):
+        payloads: dict[str, Any] = {}
+        legacy_errors: dict[str, str] = {}
+        envelope_errors: list[dict[str, Any]] = []
+        panel_meta: dict[str, Any] = {}
+        for panel_id in panel_ids:
+            panel = get_panel_by_id(panel_id)
+            if panel is None:
+                legacy_errors[panel_id] = "unknown-panel"
+                envelope_errors.append(
+                    api_error(
+                        "unknown-panel",
+                        f"Runtime panel '{panel_id}' is not registered.",
+                        panel_id=panel_id,
+                    )
+                )
+                continue
+            raw_limit = request.args.get(f"limit.{panel_id}") or request.args.get("limit")
+            limit = panel.clamp_limit(raw_limit)
+            try:
+                payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
+                payloads[panel.panel_id] = payload
+                panel_meta[panel.panel_id] = runtime_panel_metadata(panel, payload)
+                _publish_runtime_panel(panel.panel_id, payload)
+            except Exception as exc:
+                current_app.logger.exception("runtime-panels batch failed panel_id=%s", panel_id)
+                legacy_errors[panel_id] = exc.__class__.__name__
+                envelope_errors.append(
+                    api_error(
+                        "panel-fetch-failed",
+                        f"Runtime panel '{panel_id}' could not be refreshed.",
+                        panel_id=panel_id,
+                        retryable=True,
+                    )
+                )
+        status = "ok" if not envelope_errors else ("partial" if payloads else "error")
+        return payloads, legacy_errors, envelope_errors, panel_meta, status
+
     @bp.route("/runtime/content/hls-proxy", methods=["GET"])
     def api_runtime_hls_proxy():
         target_url = request.args.get("url") or ""
@@ -134,33 +184,8 @@ def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
 
     @bp.route("/runtime/panels", methods=["GET"])
     def api_runtime_panels_batch():
-        raw_ids = request.args.get("ids") or ""
-        panel_ids = [
-            panel_id.strip()
-            for panel_id in raw_ids.split(",")
-            if panel_id.strip()
-        ]
-        if not panel_ids:
-            panel_ids = [panel.panel_id for panel in RUNTIME_PANEL_MODULES]
-
-        payloads = {}
-        errors = {}
-        for panel_id in dict.fromkeys(panel_ids):
-            panel = get_panel_by_id(panel_id)
-            if panel is None:
-                errors[panel_id] = "unknown-panel"
-                continue
-            raw_limit = request.args.get(f"limit.{panel_id}") or request.args.get("limit")
-            limit = panel.clamp_limit(raw_limit)
-            try:
-                payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
-                payloads[panel.panel_id] = payload
-                _publish_runtime_panel(panel.panel_id, payload)
-            except Exception as exc:
-                current_app.logger.exception("runtime-panels batch failed panel_id=%s", panel_id)
-                errors[panel_id] = exc.__class__.__name__
-
-        status = "ok" if not errors else ("partial" if payloads else "error")
+        panel_ids = _requested_panel_ids()
+        payloads, errors, _, _, status = _collect_runtime_panels(panel_ids)
         return jsonify(
             {
                 "generatedAt": dependencies.utc_now_iso(),
@@ -168,6 +193,25 @@ def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
                 "panels": payloads,
                 "errors": errors,
             }
+        )
+
+    @bp.route("/v1/runtime/panels", methods=["GET"])
+    def api_runtime_panels_batch_v1():
+        panel_ids = _requested_panel_ids()
+        payloads, _, errors, panel_meta, status = _collect_runtime_panels(panel_ids)
+        generated_at = dependencies.utc_now_iso()
+        return jsonify(
+            api_envelope(
+                data={"panels": payloads},
+                generated_at=generated_at,
+                status=status,
+                meta={
+                    "requestedPanelIds": panel_ids,
+                    "returnedPanelIds": list(payloads),
+                    "panels": panel_meta,
+                },
+                errors=errors,
+            )
         )
 
     @bp.route("/runtime/panels/<panel_id>", methods=["GET"])
@@ -179,6 +223,56 @@ def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
         payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
         _publish_runtime_panel(panel.panel_id, payload)
         return jsonify(payload)
+
+    @bp.route("/v1/runtime/panels/<panel_id>", methods=["GET"])
+    def api_runtime_panel_by_id_v1(panel_id: str):
+        panel = get_panel_by_id(panel_id)
+        generated_at = dependencies.utc_now_iso()
+        if panel is None:
+            return jsonify(
+                api_envelope(
+                    data=None,
+                    generated_at=generated_at,
+                    status="error",
+                    meta={"panelId": panel_id},
+                    errors=[
+                        api_error(
+                            "unknown-panel",
+                            f"Runtime panel '{panel_id}' is not registered.",
+                            panel_id=panel_id,
+                        )
+                    ],
+                )
+            ), 404
+        limit = panel.clamp_limit(request.args.get("limit"))
+        try:
+            payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
+            _publish_runtime_panel(panel.panel_id, payload)
+        except Exception:
+            current_app.logger.exception("runtime-panel failed panel_id=%s", panel_id)
+            return jsonify(
+                api_envelope(
+                    data=None,
+                    generated_at=generated_at,
+                    status="error",
+                    meta={"panelId": panel_id},
+                    errors=[
+                        api_error(
+                            "panel-fetch-failed",
+                            f"Runtime panel '{panel_id}' could not be refreshed.",
+                            panel_id=panel_id,
+                            retryable=True,
+                        )
+                    ],
+                )
+            ), 500
+        return jsonify(
+            api_envelope(
+                data=payload,
+                generated_at=generated_at,
+                meta={"panel": runtime_panel_metadata(panel, payload)},
+            )
+        )
 
     for panel in RUNTIME_PANEL_MODULES:
         endpoint = f"api_runtime_panel_{panel.panel_id.replace('-', '_')}"

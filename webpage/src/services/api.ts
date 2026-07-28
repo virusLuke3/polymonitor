@@ -781,16 +781,78 @@ export type RuntimePanelsPayload = {
   status?: string;
   panels?: Record<string, unknown>;
   errors?: Record<string, string>;
+  requestId?: string;
+  metadata?: Record<string, RuntimePanelMetadata>;
 };
 
-export function fetchRuntimePanels(panelIds: string[], limits: Record<string, number> = {}, signal?: AbortSignal) {
+export type ApiEnvelopeError = {
+  code: string;
+  message: string;
+  panelId?: string;
+  retryable: boolean;
+};
+
+export type ApiEnvelope<T> = {
+  apiVersion: 'v1';
+  requestId: string;
+  generatedAt: string;
+  status: 'ok' | 'partial' | 'error';
+  data: T;
+  meta: Record<string, unknown>;
+  errors: ApiEnvelopeError[];
+};
+
+export type RuntimePanelMetadata = {
+  panelId: string;
+  route: string;
+  status: string;
+  cache: {
+    mode: string;
+    ageSeconds: number | null;
+  };
+  freshness: {
+    state: string;
+    observedAt: string | null;
+    ageSeconds: number | null;
+  };
+  limits: {
+    default: number | null;
+    minimum: number | null;
+    maximum: number | null;
+  };
+};
+
+type RuntimePanelsEnvelopeData = {
+  panels: Record<string, unknown>;
+};
+
+type RuntimePanelsEnvelopeMeta = {
+  requestedPanelIds?: string[];
+  returnedPanelIds?: string[];
+  panels?: Record<string, RuntimePanelMetadata>;
+};
+
+export async function fetchRuntimePanels(panelIds: string[], limits: Record<string, number> = {}, signal?: AbortSignal) {
   const ids = [...new Set(panelIds.map((panelId) => panelId.trim()).filter(Boolean))];
   const params = new URLSearchParams({ ids: ids.join(',') });
   ids.forEach((panelId) => {
     const limit = limits[panelId];
     if (typeof limit === 'number' && Number.isFinite(limit)) params.set(`limit.${panelId}`, String(limit));
   });
-  return apiGet<RuntimePanelsPayload>(`/runtime/panels?${params.toString()}`, signal);
+  const envelope = await apiGet<ApiEnvelope<RuntimePanelsEnvelopeData>>(`/v1/runtime/panels?${params.toString()}`, signal);
+  const meta = envelope.meta as RuntimePanelsEnvelopeMeta;
+  return {
+    generatedAt: envelope.generatedAt,
+    status: envelope.status,
+    panels: envelope.data?.panels || {},
+    errors: Object.fromEntries(
+      (envelope.errors || [])
+        .filter((error) => error.panelId)
+        .map((error) => [error.panelId as string, error.code || error.message]),
+    ),
+    requestId: envelope.requestId,
+    metadata: meta.panels || {},
+  } satisfies RuntimePanelsPayload;
 }
 
 export function fetchMarketSummary(marketId: number, timeoutMs = 3500) {

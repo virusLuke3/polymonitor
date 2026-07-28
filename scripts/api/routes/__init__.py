@@ -18,6 +18,7 @@ from .markets import create_markets_blueprint
 from .quant import create_quant_blueprint
 from .runtime_panels import create_runtime_panels_blueprint
 from .runtime_sports import create_runtime_sports_blueprint
+from .schema import create_schema_blueprint
 from .system import create_system_blueprint
 
 
@@ -31,6 +32,7 @@ BLUEPRINT_FACTORIES: Final[tuple[BlueprintFactory, ...]] = (
     create_quant_blueprint,
     create_runtime_panels_blueprint,
     create_runtime_sports_blueprint,
+    create_schema_blueprint,
     create_content_blueprint,
     create_analytics_blueprint,
     create_system_blueprint,

@@ -22,6 +22,15 @@ Each panel owns a module under `webpage/src/panels/modules/<panel-id>/` and expo
 
 Runtime panels declare `fetchData` and `refresh.tier`; the dashboard loads those through the generic runtime store instead of adding per-panel `useState` and refresh code in `App.tsx`.
 
+The frontend runtime uses the versioned `/v1/runtime/panels` envelope. Legacy
+`/runtime/panels` and per-panel routes remain raw-payload compatibility
+endpoints. The v1 response always includes `apiVersion`, `requestId`,
+`generatedAt`, `status`, `data`, `meta`, and `errors`; per-panel cache and
+freshness observations live under `meta.panels`.
+
+The machine-readable OpenAPI 3.1 contract is served from `/openapi.json` and
+`/v1/openapi.json`.
+
 Minimal runtime panel shape:
 
 ```ts

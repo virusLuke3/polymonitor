@@ -443,6 +443,16 @@ discovered
 
 下一批平台骨架工作：建立 API schema/OpenAPI 与跨 panel 的统一响应 envelope，然后再统一错误、缓存和 freshness 语义。
 
+#### 2.3 API Schema、统一 Envelope 与 Freshness 元数据（已完成，2026-07-28）
+
+- 新增 OpenAPI 3.1 文档端点 `/openapi.json` 与 `/v1/openapi.json`，运行时从 panel registry 生成 panel ID、路由和 limit 契约。
+- 新增版本化 `/v1/runtime/panels` 与 `/v1/runtime/panels/{panelId}`；统一返回 `apiVersion`、`requestId`、`generatedAt`、`status`、`data`、`meta` 和结构化 `errors`。
+- batch 响应在 `meta.panels` 中统一发布 panel route、status、cache mode、age、freshness observation 和 limit 边界。
+- 前端 Panel Runtime 已迁移到 v1 envelope；旧 `/runtime/panels`、单 panel 与业务别名端点继续返回原始 payload，避免破坏外部消费者。
+- 本阶段只改变 API 平台契约，不改写 Quant、LOB、PolySignal/PolyBeats、PnL/position/address、数据管道、World Cup、Kaggle 或测试业务实现。
+
+下一批平台骨架工作：建立 Design System token/component 边界，然后建设面向数据与服务健康的 Operations Workspace。
+
 ### 第三阶段：预测市场产品化
 
 - Market Workspace
