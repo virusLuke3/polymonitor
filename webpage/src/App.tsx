@@ -92,9 +92,11 @@ const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
 const GEO_SHOCK_STORAGE_KEY = 'polydata:seed:world:geo-sanctions-shock:v1';
 const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
 const QuantWorkspace = lazy(() => import('@/workspaces/quant/QuantWorkspace').then((module) => ({ default: module.QuantWorkspace })));
-const OperationsWorkspace = lazy(() => import('@/workspaces/operations/OperationsWorkspace').then((module) => ({ default: module.OperationsWorkspace })));
 const MarketWorkspace = lazy(() => import('@/workspaces/market/MarketWorkspace').then((module) => ({ default: module.MarketWorkspace })));
 const DataQualityWorkspace = lazy(() => import('@/workspaces/data-quality/DataQualityWorkspace').then((module) => ({ default: module.DataQualityWorkspace })));
+const LoginWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.LoginWorkspace })));
+const AccountWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.AccountWorkspace })));
+const OperationsAccessWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.OperationsAccessWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = [
@@ -2157,6 +2159,20 @@ function WorldMonitorApp() {
 
 export function App() {
   const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
+  if (pathname === '/login' || pathname.startsWith('/login/')) {
+    return (
+      <Suspense fallback={<PanelLoading label="Loading secure access" detail="Preparing administrator sign in" />}>
+        <LoginWorkspace />
+      </Suspense>
+    );
+  }
+  if (pathname === '/account' || pathname.startsWith('/account/')) {
+    return (
+      <Suspense fallback={<PanelLoading label="Loading access control" detail="Reading session and credential registry" />}>
+        <AccountWorkspace />
+      </Suspense>
+    );
+  }
   if (pathname === '/data-quality' || pathname.startsWith('/data-quality/')) {
     return (
       <Suspense fallback={<PanelLoading label="Loading Data Quality workspace" detail="Auditing market identity, Oracle lifecycle and synchronization watermarks" />}>
@@ -2174,7 +2190,7 @@ export function App() {
   if (pathname === '/operations' || pathname.startsWith('/operations/')) {
     return (
       <Suspense fallback={<PanelLoading label="Loading Operations workspace" detail="Reading production health and freshness metadata" />}>
-        <OperationsWorkspace />
+        <OperationsAccessWorkspace />
       </Suspense>
     );
   }

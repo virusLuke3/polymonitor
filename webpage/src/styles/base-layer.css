@@ -7,3 +7,4 @@
 @import url('./operations-workspace.css') layer(components);
 @import url('./market-workspace.css') layer(components);
 @import url('./data-quality-workspace.css') layer(components);
+@import url('./auth-workspace.css') layer(components);
