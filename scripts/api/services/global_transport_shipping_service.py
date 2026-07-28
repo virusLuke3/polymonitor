@@ -7,9 +7,16 @@ import json
 import os
 import threading
 from collections import Counter, defaultdict
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+)
 
 
 PANEL_ID = "global-transport-shipping"
@@ -54,11 +61,80 @@ _LIVE_REFRESH_LOCK = threading.Lock()
 _LIVE_REFRESHING: set[str] = set()
 
 
-def _utc_now_iso(ctx: dict | None = None) -> str:
-    if ctx:
-        getter = ctx.get("utc_now_iso")
-        if callable(getter):
-            return getter()
+@dataclass(frozen=True)
+class GlobalTransportShippingDependencies:
+    application: Any
+    utc_now_iso: Callable[..., Any] | None
+    http_text_get: Callable[..., Any] | None
+    http_json_get: Callable[..., Any] | None
+    http_form_post: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+    search_markets: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> GlobalTransportShippingDependencies:
+        return cls(
+            application=resolve_optional_service_value(context, "app"),
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            http_text_get=resolve_optional_service_callable(
+                context,
+                "http_text_get",
+            ),
+            http_json_get=resolve_optional_service_callable(
+                context,
+                "http_json_get",
+            ),
+            http_form_post=resolve_optional_service_callable(
+                context,
+                "http_form_post",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            search_markets=resolve_optional_service_callable(
+                context,
+                "search_markets",
+            ),
+        )
+
+
+GlobalTransportShippingContext = (
+    Mapping[str, Any] | GlobalTransportShippingDependencies
+)
+
+
+def _dependencies(
+    context: GlobalTransportShippingContext,
+) -> GlobalTransportShippingDependencies:
+    if isinstance(context, GlobalTransportShippingDependencies):
+        return context
+    return GlobalTransportShippingDependencies.from_context(context)
+
+
+def _utc_now_iso(
+    ctx: GlobalTransportShippingContext | None = None,
+) -> str:
+    if ctx is not None:
+        getter = _dependencies(ctx).utc_now_iso
+        if getter is not None:
+            return str(getter())
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -126,16 +202,28 @@ def _local_openflights_path(filename: str) -> Optional[Path]:
     return None
 
 
-def _http_text(ctx: dict, url: str, *, timeout: int = 18) -> str:
-    getter = ctx.get("http_text_get")
-    if callable(getter):
+def _http_text(
+    ctx: GlobalTransportShippingContext,
+    url: str,
+    *,
+    timeout: int = 18,
+) -> str:
+    getter = _dependencies(ctx).http_text_get
+    if getter is not None:
         return str(getter(url, timeout=timeout, headers={"User-Agent": "polydata-global-transport/1.0"}))
     raise RuntimeError("http_text_get unavailable")
 
 
-def _http_json_get(ctx: dict, url: str, *, params: Dict[str, Any] | None = None, timeout: int = 18, headers: Dict[str, str] | None = None) -> Any:
-    getter = ctx.get("http_json_get")
-    if callable(getter):
+def _http_json_get(
+    ctx: GlobalTransportShippingContext,
+    url: str,
+    *,
+    params: Dict[str, Any] | None = None,
+    timeout: int = 18,
+    headers: Dict[str, str] | None = None,
+) -> Any:
+    getter = _dependencies(ctx).http_json_get
+    if getter is not None:
         return getter(url, params=params, timeout=timeout, headers=headers)
     import requests
 
@@ -144,9 +232,16 @@ def _http_json_get(ctx: dict, url: str, *, params: Dict[str, Any] | None = None,
     return response.json()
 
 
-def _http_form_post(ctx: dict, url: str, *, data: Dict[str, Any], timeout: int = 18, headers: Dict[str, str] | None = None) -> Any:
-    poster = ctx.get("http_form_post")
-    if callable(poster):
+def _http_form_post(
+    ctx: GlobalTransportShippingContext,
+    url: str,
+    *,
+    data: Dict[str, Any],
+    timeout: int = 18,
+    headers: Dict[str, str] | None = None,
+) -> Any:
+    poster = _dependencies(ctx).http_form_post
+    if poster is not None:
         return poster(url, data=data, timeout=timeout, headers=headers)
     import requests
 
@@ -801,11 +896,16 @@ def _aisstream_api_key() -> str:
     return str(os.environ.get("POLYDATA_AISSTREAM_API_KEY") or os.environ.get("AISSTREAM_API_KEY") or "").strip()
 
 
-def _read_aisstream_cache(ctx: dict, *, max_age_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    payload = reader(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY) if callable(reader) else None
+def _read_aisstream_cache(
+    ctx: GlobalTransportShippingContext,
+    *,
+    max_age_seconds: int,
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
+    reader = dependencies.get_cached_json
+    payload = reader(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY) if reader is not None else None
     if not isinstance(payload, dict):
-        store = ctx.get("SNAPSHOT_STORE")
+        store = dependencies.snapshot_store
         if store is not None:
             payload = store.get(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY)
     if not isinstance(payload, dict):
@@ -817,20 +917,33 @@ def _read_aisstream_cache(ctx: dict, *, max_age_seconds: int) -> Optional[Dict[s
     return {**payload, "cacheMode": "ais-cache", "ageSeconds": round(max(0, age))}
 
 
-def _store_aisstream_cache(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
-    store = ctx.get("SNAPSHOT_STORE")
+def _store_aisstream_cache(
+    ctx: GlobalTransportShippingContext,
+    payload: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+) -> None:
+    dependencies = _dependencies(ctx)
+    store = dependencies.snapshot_store
     if store is not None:
         store.set(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
+    setter = dependencies.set_cached_json
+    if setter is not None:
         setter(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY, payload, ttl_seconds)
 
 
-def _read_cached_payload(ctx: dict, namespace: str, cache_key: str, *, max_age_seconds: int | None = None) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    payload = reader(namespace, cache_key) if callable(reader) else None
+def _read_cached_payload(
+    ctx: GlobalTransportShippingContext,
+    namespace: str,
+    cache_key: str,
+    *,
+    max_age_seconds: int | None = None,
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
+    reader = dependencies.get_cached_json
+    payload = reader(namespace, cache_key) if reader is not None else None
     if not isinstance(payload, dict):
-        store = ctx.get("SNAPSHOT_STORE")
+        store = dependencies.snapshot_store
         if store is not None:
             payload = store.get(namespace, cache_key)
     if not isinstance(payload, dict):
@@ -844,12 +957,20 @@ def _read_cached_payload(ctx: dict, namespace: str, cache_key: str, *, max_age_s
     return payload
 
 
-def _store_cached_payload(ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
-    store = ctx.get("SNAPSHOT_STORE")
+def _store_cached_payload(
+    ctx: GlobalTransportShippingContext,
+    namespace: str,
+    cache_key: str,
+    payload: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+) -> None:
+    dependencies = _dependencies(ctx)
+    store = dependencies.snapshot_store
     if store is not None:
         store.set(namespace, cache_key, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
+    setter = dependencies.set_cached_json
+    if setter is not None:
         setter(namespace, cache_key, payload, ttl_seconds)
 
 
@@ -1222,9 +1343,12 @@ def _opensky_live_status(ctx: dict) -> Dict[str, Any]:
     return live_payload
 
 
-def _market_links(ctx: dict, query: str) -> List[Dict[str, Any]]:
-    search = ctx.get("search_markets")
-    if not callable(search):
+def _market_links(
+    ctx: GlobalTransportShippingContext,
+    query: str,
+) -> List[Dict[str, Any]]:
+    search = _dependencies(ctx).search_markets
+    if search is None:
         return []
     try:
         rows = search(query, limit=3) or []
@@ -1518,7 +1642,12 @@ def _empty_payload(ctx: dict, *, cache_mode: str = "seed-miss") -> Dict[str, Any
     }
 
 
-def normalize_global_transport_shipping_payload(payload: Dict[str, Any], *, ctx: dict, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
+def normalize_global_transport_shipping_payload(
+    payload: Dict[str, Any],
+    *,
+    ctx: GlobalTransportShippingContext,
+    limit: int = DEFAULT_LIMIT,
+) -> Dict[str, Any]:
     items = payload.get("items") if isinstance(payload.get("items"), list) else []
     return {
         **payload,
@@ -1532,13 +1661,16 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str, freshness: str = 
     return {**payload, "cacheMode": cache_mode, "freshness": payload.get("freshness") or freshness}
 
 
-def _read_seeded_snapshot(ctx: dict) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
+def _read_seeded_snapshot(
+    ctx: GlobalTransportShippingContext,
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
+    reader = dependencies.get_cached_json
+    if reader is not None:
         payload = reader(GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE, GLOBAL_TRANSPORT_CACHE_KEY)
         if isinstance(payload, dict):
             return _with_cache_mode(payload, "redis-seed")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is None:
         return None
     payload = store.get(GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE, GLOBAL_TRANSPORT_CACHE_KEY)
@@ -1550,16 +1682,29 @@ def _read_seeded_snapshot(ctx: dict) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _store_live(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
-    store = ctx.get("SNAPSHOT_STORE")
+def _store_live(
+    ctx: GlobalTransportShippingContext,
+    payload: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+) -> None:
+    dependencies = _dependencies(ctx)
+    store = dependencies.snapshot_store
     if store is not None:
         store.set(GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE, GLOBAL_TRANSPORT_CACHE_KEY, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
+    setter = dependencies.set_cached_json
+    if setter is not None:
         setter(GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE, GLOBAL_TRANSPORT_CACHE_KEY, payload, ttl_seconds)
 
 
-def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: str) -> bool:
+def _schedule_live_refresh(
+    ctx: GlobalTransportShippingContext,
+    *,
+    limit: int,
+    ttl_seconds: int,
+    reason: str,
+) -> bool:
+    dependencies = _dependencies(ctx)
     refresh_key = f"{GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE}:{GLOBAL_TRANSPORT_CACHE_KEY}"
     with _LIVE_REFRESH_LOCK:
         if refresh_key in _LIVE_REFRESHING:
@@ -1567,11 +1712,17 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
         _LIVE_REFRESHING.add(refresh_key)
 
     def refresh() -> None:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         try:
-            payload = {**build_global_transport_shipping_payload(ctx, limit=limit), "cacheMode": "live-build"}
+            payload = {
+                **build_global_transport_shipping_payload(
+                    dependencies,
+                    limit=limit,
+                ),
+                "cacheMode": "live-build",
+            }
             if payload.get("items"):
-                _store_live(ctx, payload, ttl_seconds=ttl_seconds)
+                _store_live(dependencies, payload, ttl_seconds=ttl_seconds)
             elif logger is not None and hasattr(logger, "warning"):
                 logger.warning("global transport refresh skipped empty payload reason=%s", reason)
         except Exception:
@@ -1586,15 +1737,29 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
     return True
 
 
-def get_global_transport_shipping_snapshot(ctx: dict, limit: int = DEFAULT_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
+def get_global_transport_shipping_snapshot(
+    ctx: GlobalTransportShippingContext,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    allow_live_build: bool = True,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     ttl_seconds = max(300, int(os.environ.get("POLYDATA_GLOBAL_TRANSPORT_TTL_SECONDS", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
-    seeded = _read_seeded_snapshot(ctx)
+    seeded = _read_seeded_snapshot(dependencies)
     if seeded is not None:
         if allow_live_build and seeded.get("cacheMode") == "stale-seed":
-            _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="stale-seed")
-        return normalize_global_transport_shipping_payload(seeded, ctx=ctx, limit=limit)
+            _schedule_live_refresh(dependencies, limit=limit, ttl_seconds=ttl_seconds, reason="stale-seed")
+        return normalize_global_transport_shipping_payload(seeded, ctx=dependencies, limit=limit)
     if not allow_live_build:
-        return normalize_global_transport_shipping_payload(_empty_payload(ctx, cache_mode="seed-miss"), ctx=ctx, limit=limit)
-    scheduled = _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="seed-miss")
+        return normalize_global_transport_shipping_payload(
+            _empty_payload(dependencies, cache_mode="seed-miss"),
+            ctx=dependencies,
+            limit=limit,
+        )
+    scheduled = _schedule_live_refresh(dependencies, limit=limit, ttl_seconds=ttl_seconds, reason="seed-miss")
     mode = "seed-miss-refreshing" if scheduled else "seed-miss-refresh-inflight"
-    return normalize_global_transport_shipping_payload(_empty_payload(ctx, cache_mode=mode), ctx=ctx, limit=limit)
+    return normalize_global_transport_shipping_payload(
+        _empty_payload(dependencies, cache_mode=mode),
+        ctx=dependencies,
+        limit=limit,
+    )

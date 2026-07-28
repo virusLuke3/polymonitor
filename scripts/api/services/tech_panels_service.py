@@ -3,12 +3,19 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 from xml.etree import ElementTree
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+)
 
 try:
     import requests
@@ -139,6 +146,73 @@ APP_STORE_CHART_FEEDS = (
 )
 
 
+@dataclass(frozen=True)
+class TechPanelsDependencies:
+    settings: Any
+    application: Any
+    http_text_get: Callable[..., Any] | None
+    http_text_post: Callable[..., Any] | None
+    http_json_get: Callable[..., Any] | None
+    get_yahoo_market_snapshot: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    get_snapshot_payload: Callable[..., Any] | None
+    snapshot_store: Any
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> TechPanelsDependencies:
+        return cls(
+            settings=resolve_optional_service_value(context, "SETTINGS"),
+            application=resolve_optional_service_value(context, "app"),
+            http_text_get=resolve_optional_service_callable(
+                context,
+                "http_text_get",
+            ),
+            http_text_post=resolve_optional_service_callable(
+                context,
+                "http_text_post",
+            ),
+            http_json_get=resolve_optional_service_callable(
+                context,
+                "http_json_get",
+            ),
+            get_yahoo_market_snapshot=resolve_optional_service_callable(
+                context,
+                "get_yahoo_market_snapshot",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            get_snapshot_payload=resolve_optional_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+        )
+
+
+TechPanelsContext = Mapping[str, Any] | TechPanelsDependencies
+
+
+def _dependencies(
+    context: TechPanelsContext,
+) -> TechPanelsDependencies:
+    if isinstance(context, TechPanelsDependencies):
+        return context
+    return TechPanelsDependencies.from_context(context)
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -241,9 +315,15 @@ def _payload(
     }
 
 
-def _http_text_get(ctx: dict, url: str, *, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> str:
-    getter = ctx.get("http_text_get")
-    if callable(getter):
+def _http_text_get(
+    ctx: TechPanelsContext,
+    url: str,
+    *,
+    timeout: int = 12,
+    headers: Optional[Dict[str, str]] = None,
+) -> str:
+    getter = _dependencies(ctx).http_text_get
+    if getter is not None:
         return getter(url, timeout=timeout, headers=headers)
     if requests is None:
         raise RuntimeError("requests package is required")
@@ -252,9 +332,16 @@ def _http_text_get(ctx: dict, url: str, *, timeout: int = 12, headers: Optional[
     return response.text
 
 
-def _http_text_post(ctx: dict, url: str, *, data: str, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> str:
-    poster = ctx.get("http_text_post")
-    if callable(poster):
+def _http_text_post(
+    ctx: TechPanelsContext,
+    url: str,
+    *,
+    data: str,
+    timeout: int = 12,
+    headers: Optional[Dict[str, str]] = None,
+) -> str:
+    poster = _dependencies(ctx).http_text_post
+    if poster is not None:
         return poster(url, data=data, timeout=timeout, headers=headers)
     if requests is None:
         raise RuntimeError("requests package is required")
@@ -263,9 +350,15 @@ def _http_text_post(ctx: dict, url: str, *, data: str, timeout: int = 12, header
     return response.text
 
 
-def _http_json_get(ctx: dict, url: str, *, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-    getter = ctx.get("http_json_get")
-    if callable(getter):
+def _http_json_get(
+    ctx: TechPanelsContext,
+    url: str,
+    *,
+    timeout: int = 12,
+    headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    getter = _dependencies(ctx).http_json_get
+    if getter is not None:
         return getter(url, timeout=timeout, headers=headers)
     if requests is None:
         raise RuntimeError("requests package is required")
@@ -275,8 +368,8 @@ def _http_json_get(ctx: dict, url: str, *, timeout: int = 12, headers: Optional[
     return payload if isinstance(payload, dict) else {}
 
 
-def _news_url(ctx: dict, query: str) -> str:
-    settings = ctx.get("SETTINGS")
+def _news_url(ctx: TechPanelsContext, query: str) -> str:
+    settings = _dependencies(ctx).settings
     base = str(
         getattr(settings, "tech_google_news_rss_url", "")
         or getattr(settings, "google_news_rss_url", "")
@@ -707,14 +800,18 @@ def build_ai_model_race_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     )
 
 
-def _fetch_quote(ctx: dict, symbol: str) -> Optional[Dict[str, Any]]:
-    getter = ctx.get("get_yahoo_market_snapshot")
-    if not callable(getter):
+def _fetch_quote(
+    ctx: TechPanelsContext,
+    symbol: str,
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
+    getter = dependencies.get_yahoo_market_snapshot
+    if getter is None:
         return None
     try:
         return getter(symbol, interval="30m", range_name="5d", ttl_seconds=300)
     except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger:
             logger.exception("tech quote fetch failed symbol=%s", symbol)
         return None
@@ -940,26 +1037,36 @@ def build_all_tech_panel_payloads(ctx: dict, limit: int = 24) -> Dict[str, Dict[
     return payloads
 
 
-def _read_seeded_snapshot(ctx: dict, panel_id: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+def _read_seeded_snapshot(
+    ctx: TechPanelsContext,
+    panel_id: str,
+    ttl_seconds: int,
+) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
     def usable(payload: Dict[str, Any]) -> bool:
         if str(payload.get("status") or "").lower() == "error" and not payload.get("items"):
             return False
         return True
 
     namespace = tech_panel_namespace(panel_id)
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
+    reader = dependencies.get_cached_json
+    if reader is not None:
         redis_payload = reader(namespace, TECH_PANEL_CACHE_KEY)
         if isinstance(redis_payload, dict) and usable(redis_payload):
-            ctx["SNAPSHOT_STORE"].set(namespace, TECH_PANEL_CACHE_KEY, redis_payload, ttl_seconds)
+            dependencies.snapshot_store.set(
+                namespace,
+                TECH_PANEL_CACHE_KEY,
+                redis_payload,
+                ttl_seconds,
+            )
             return {**redis_payload, "cacheMode": str(redis_payload.get("cacheMode") or "redis-seed")}
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    snapshot_store = dependencies.snapshot_store
     if snapshot_store is None:
         return None
     sqlite_payload = snapshot_store.get(namespace, TECH_PANEL_CACHE_KEY)
     if isinstance(sqlite_payload, dict) and usable(sqlite_payload):
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
+        setter = dependencies.set_cached_json
+        if setter is not None:
             setter(namespace, TECH_PANEL_CACHE_KEY, sqlite_payload, ttl_seconds)
         return {**sqlite_payload, "cacheMode": str(sqlite_payload.get("cacheMode") or "sqlite-seed")}
     stale_payload = snapshot_store.get_stale(namespace, TECH_PANEL_CACHE_KEY)
@@ -982,19 +1089,33 @@ def _trim_payload(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
     }
 
 
-def get_tech_panel_snapshot(ctx: dict, panel_id: str, limit: int = 10) -> Dict[str, Any]:
+def get_tech_panel_snapshot(
+    ctx: TechPanelsContext,
+    panel_id: str,
+    limit: int = 10,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     limit = max(3, min(60, int(limit or 10)))
-    settings = ctx.get("SETTINGS")
+    settings = dependencies.settings
     ttl_seconds = int(getattr(settings, "tech_runtime_ttl_seconds", TECH_PANEL_TTL_SECONDS) or TECH_PANEL_TTL_SECONDS)
-    seeded = _read_seeded_snapshot(ctx, panel_id, ttl_seconds)
+    seeded = _read_seeded_snapshot(dependencies, panel_id, ttl_seconds)
     if seeded is not None:
         return _trim_payload(seeded, limit)
 
     def _builder() -> Dict[str, Any]:
-        return build_tech_panel_payload(ctx, panel_id, limit=max(limit, 24))
+        return build_tech_panel_payload(
+            dependencies,
+            panel_id,
+            limit=max(limit, 24),
+        )
 
-    if "get_snapshot_payload" in ctx:
-        payload = ctx["get_snapshot_payload"](tech_panel_namespace(panel_id), TECH_PANEL_CACHE_KEY, _builder, ttl_seconds=ttl_seconds)
+    if dependencies.get_snapshot_payload is not None:
+        payload = dependencies.get_snapshot_payload(
+            tech_panel_namespace(panel_id),
+            TECH_PANEL_CACHE_KEY,
+            _builder,
+            ttl_seconds=ttl_seconds,
+        )
     else:
         payload = _builder()
     return _trim_payload(payload if isinstance(payload, dict) else {}, limit)

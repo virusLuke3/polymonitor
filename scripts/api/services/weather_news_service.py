@@ -5,12 +5,20 @@ import html
 import json
 import re
 import threading
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 from xml.etree import ElementTree
 
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 from weather.cities import load_weather_cities
 
 
@@ -49,9 +57,62 @@ WEATHER_TOPIC_QUERIES: List[Dict[str, str]] = [
 ]
 
 
-def _utc_now_iso(ctx: dict) -> str:
-    now = ctx.get("utc_now_iso")
-    return now() if callable(now) else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+@dataclass(frozen=True)
+class WeatherNewsDependencies:
+    settings: Any
+    application: Any
+    http_text_get: Callable[..., Any]
+    utc_now_iso: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> WeatherNewsDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_optional_service_value(context, "app"),
+            http_text_get=resolve_service_callable(
+                context,
+                "http_text_get",
+            ),
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+        )
+
+
+WeatherNewsContext = Mapping[str, Any] | WeatherNewsDependencies
+
+
+def _dependencies(
+    context: WeatherNewsContext,
+) -> WeatherNewsDependencies:
+    if isinstance(context, WeatherNewsDependencies):
+        return context
+    return WeatherNewsDependencies.from_context(context)
+
+
+def _utc_now_iso(dependencies: WeatherNewsDependencies) -> str:
+    if dependencies.utc_now_iso is not None:
+        return str(dependencies.utc_now_iso())
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _parse_pub_date(value: Any) -> str:
@@ -112,13 +173,21 @@ def _google_news_url(base_url: str, query: str) -> str:
     return f"{base_url}?{urlencode({'q': query, 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'})}"
 
 
-def fetch_google_news_rss(ctx: dict, city: Dict[str, Any]) -> List[Dict[str, Any]]:
-    base_url = str(getattr(ctx["SETTINGS"], "google_news_rss_url", "") or "").strip()
+def fetch_google_news_rss(
+    ctx: WeatherNewsContext,
+    city: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
+    base_url = str(getattr(dependencies.settings, "google_news_rss_url", "") or "").strip()
     if not base_url:
         raise RuntimeError("google news rss url missing")
     query = str(city.get("news_query") or f"{city.get('city')} weather OR forecast OR storm OR heatwave")
     rss_url = _google_news_url(base_url, query)
-    xml_text = ctx["http_text_get"](rss_url, timeout=14, headers={"Accept": "application/rss+xml,application/xml,text/xml", "User-Agent": "polydata-weather-news/1.0"})
+    xml_text = dependencies.http_text_get(
+        rss_url,
+        timeout=14,
+        headers={"Accept": "application/rss+xml,application/xml,text/xml", "User-Agent": "polydata-weather-news/1.0"},
+    )
     root = ElementTree.fromstring(xml_text)
     items: List[Dict[str, Any]] = []
     for item in root.findall("./channel/item"):
@@ -183,18 +252,23 @@ def build_news_summary(articles: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def build_weather_news_payload(ctx: dict, *, limit: int = DEFAULT_NEWS_LIMIT) -> Dict[str, Any]:
+def build_weather_news_payload(
+    ctx: WeatherNewsContext,
+    *,
+    limit: int = DEFAULT_NEWS_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     cities = [*load_weather_cities(), *WEATHER_TOPIC_QUERIES]
     articles: List[Dict[str, Any]] = []
     source_states: Dict[str, str] = {}
     for city in cities:
         try:
-            city_articles = fetch_google_news_rss(ctx, city)
+            city_articles = fetch_google_news_rss(dependencies, city)
             articles.extend(city_articles)
             source_states[str(city["city_id"])] = "ok" if city_articles else "empty"
         except Exception as exc:
             source_states[str(city["city_id"])] = "error"
-            logger = getattr(ctx.get("app"), "logger", None)
+            logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
                 logger.exception("weather news rss fetch failed city=%s error=%s", city.get("city"), exc)
     ranked = _dedupe_rank(articles)
@@ -202,9 +276,9 @@ def build_weather_news_payload(ctx: dict, *, limit: int = DEFAULT_NEWS_LIMIT) ->
     if ranked and any(value == "error" for value in source_states.values()):
         status = "degraded"
     return {
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "source": "Google News RSS",
-        "sourceUrl": getattr(ctx["SETTINGS"], "google_news_rss_url", "https://news.google.com/rss/search"),
+        "sourceUrl": getattr(dependencies.settings, "google_news_rss_url", "https://news.google.com/rss/search"),
         "status": status,
         "sources": source_states,
         "summary": build_news_summary(ranked),
@@ -212,11 +286,15 @@ def build_weather_news_payload(ctx: dict, *, limit: int = DEFAULT_NEWS_LIMIT) ->
     }
 
 
-def _empty_payload(ctx: dict, *, status: str = "warming") -> Dict[str, Any]:
+def _empty_payload(
+    dependencies: WeatherNewsDependencies,
+    *,
+    status: str = "warming",
+) -> Dict[str, Any]:
     return {
-        "generatedAt": _utc_now_iso(ctx),
+        "generatedAt": _utc_now_iso(dependencies),
         "source": "Google News RSS",
-        "sourceUrl": getattr(ctx["SETTINGS"], "google_news_rss_url", "https://news.google.com/rss/search"),
+        "sourceUrl": getattr(dependencies.settings, "google_news_rss_url", "https://news.google.com/rss/search"),
         "status": status,
         "sources": {},
         "summary": {"articleCount": 0, "cityCount": 0, "warningCount": 0, "topCity": None},
@@ -224,17 +302,30 @@ def _empty_payload(ctx: dict, *, status: str = "warming") -> Dict[str, Any]:
     }
 
 
-def normalize_weather_news_payload(payload: Any, *, ctx: dict, limit: int = DEFAULT_NEWS_LIMIT) -> Dict[str, Any]:
+def normalize_weather_news_payload(
+    payload: Any,
+    *,
+    ctx: WeatherNewsContext,
+    limit: int = DEFAULT_NEWS_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     if not isinstance(payload, dict):
-        return _empty_payload(ctx, status="invalid")
+        return _empty_payload(dependencies, status="invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
     result["items"] = items[: max(1, min(int(limit or DEFAULT_NEWS_LIMIT), 80))]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else build_news_summary(result["items"])
-    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(dependencies))
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
     result["source"] = str(result.get("source") or "Google News RSS")
-    result["sourceUrl"] = str(result.get("sourceUrl") or getattr(ctx["SETTINGS"], "google_news_rss_url", "https://news.google.com/rss/search"))
+    result["sourceUrl"] = str(
+        result.get("sourceUrl")
+        or getattr(
+            dependencies.settings,
+            "google_news_rss_url",
+            "https://news.google.com/rss/search",
+        )
+    )
     return result
 
 
@@ -242,13 +333,17 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": cache_mode}
 
 
-def _read_seeded_snapshot(ctx: dict, *, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
+def _read_seeded_snapshot(
+    dependencies: WeatherNewsDependencies,
+    *,
+    ttl_seconds: int,
+) -> Optional[Dict[str, Any]]:
+    reader = dependencies.get_cached_json
+    if reader is not None:
         payload = reader(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
         if isinstance(payload, dict):
             return _with_cache_mode(payload, "redis-seed")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is None:
         return None
     payload = store.get(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
@@ -260,16 +355,28 @@ def _read_seeded_snapshot(ctx: dict, *, ttl_seconds: int) -> Optional[Dict[str, 
     return None
 
 
-def _store_live(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
-    store = ctx.get("SNAPSHOT_STORE")
+def _store_live(
+    dependencies: WeatherNewsDependencies,
+    payload: Dict[str, Any],
+    *,
+    ttl_seconds: int,
+) -> None:
+    store = dependencies.snapshot_store
     if store is not None:
         store.set(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
+    setter = dependencies.set_cached_json
+    if setter is not None:
         setter(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY, payload, ttl_seconds)
 
 
-def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: str) -> bool:
+def _schedule_live_refresh(
+    ctx: WeatherNewsContext,
+    *,
+    limit: int,
+    ttl_seconds: int,
+    reason: str,
+) -> bool:
+    dependencies = _dependencies(ctx)
     refresh_key = f"{WEATHER_NEWS_SNAPSHOT_NAMESPACE}:{WEATHER_NEWS_CACHE_KEY}"
     with _LIVE_REFRESH_LOCK:
         if refresh_key in _LIVE_REFRESHING:
@@ -277,12 +384,12 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
         _LIVE_REFRESHING.add(refresh_key)
 
     def refresh() -> None:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         try:
-            build_limit = max(limit, int(getattr(ctx["SETTINGS"], "weather_news_limit", 40) or 40))
-            payload = _with_cache_mode(build_weather_news_payload(ctx, limit=build_limit), "live-build")
+            build_limit = max(limit, int(getattr(dependencies.settings, "weather_news_limit", 40) or 40))
+            payload = _with_cache_mode(build_weather_news_payload(dependencies, limit=build_limit), "live-build")
             if payload.get("items"):
-                _store_live(ctx, payload, ttl_seconds=ttl_seconds)
+                _store_live(dependencies, payload, ttl_seconds=ttl_seconds)
                 if logger is not None and hasattr(logger, "info"):
                     logger.info("weather news async refresh stored reason=%s items=%s", reason, len(payload.get("items") or []))
             elif logger is not None and hasattr(logger, "warning"):
@@ -299,14 +406,31 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
     return True
 
 
-def get_weather_news_snapshot(ctx: dict, limit: int = DEFAULT_NEWS_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
-    ttl_seconds = max(300, int(getattr(ctx["SETTINGS"], "weather_news_ttl_seconds", 900) or 900))
-    seeded = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
+def get_weather_news_snapshot(
+    ctx: WeatherNewsContext,
+    limit: int = DEFAULT_NEWS_LIMIT,
+    *,
+    allow_live_build: bool = True,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    ttl_seconds = max(300, int(getattr(dependencies.settings, "weather_news_ttl_seconds", 900) or 900))
+    seeded = _read_seeded_snapshot(dependencies, ttl_seconds=ttl_seconds)
     if seeded is not None:
         if allow_live_build and seeded.get("cacheMode") == "stale-seed":
-            _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="stale-seed")
-        return normalize_weather_news_payload(seeded, ctx=ctx, limit=limit)
+            _schedule_live_refresh(dependencies, limit=limit, ttl_seconds=ttl_seconds, reason="stale-seed")
+        return normalize_weather_news_payload(seeded, ctx=dependencies, limit=limit)
     if not allow_live_build:
-        return normalize_weather_news_payload({**_empty_payload(ctx), "cacheMode": "seed-miss"}, ctx=ctx, limit=limit)
-    scheduled = _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="seed-miss")
-    return normalize_weather_news_payload({**_empty_payload(ctx), "cacheMode": "seed-miss-refreshing" if scheduled else "seed-miss-refresh-inflight"}, ctx=ctx, limit=limit)
+        return normalize_weather_news_payload(
+            {**_empty_payload(dependencies), "cacheMode": "seed-miss"},
+            ctx=dependencies,
+            limit=limit,
+        )
+    scheduled = _schedule_live_refresh(dependencies, limit=limit, ttl_seconds=ttl_seconds, reason="seed-miss")
+    return normalize_weather_news_payload(
+        {
+            **_empty_payload(dependencies),
+            "cacheMode": "seed-miss-refreshing" if scheduled else "seed-miss-refresh-inflight",
+        },
+        ctx=dependencies,
+        limit=limit,
+    )
