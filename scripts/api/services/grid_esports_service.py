@@ -3,8 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_value,
+)
 
 
 GRID_ESPORTS_NAMESPACE = "snapshot:esports:esports-intel"
@@ -47,6 +55,76 @@ query EsportsIntelSeriesState($id: ID!) {
   }
 }
 """
+
+
+@dataclass(frozen=True)
+class GridEsportsDependencies:
+    settings: Any
+    application: Any
+    requests_lib: Any
+    http_json_post: Callable[..., Any] | None
+    search_markets: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    get_snapshot_payload: Callable[..., Any] | None
+    snapshot_store: Any
+    utc_now_iso: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> GridEsportsDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_optional_service_value(context, "app"),
+            requests_lib=resolve_optional_service_value(context, "requests"),
+            http_json_post=resolve_optional_service_callable(
+                context,
+                "http_json_post",
+            ),
+            search_markets=resolve_optional_service_callable(
+                context,
+                "search_markets",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            get_snapshot_payload=resolve_optional_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+        )
+
+
+GridEsportsContext = Mapping[str, Any] | GridEsportsDependencies
+
+
+def _dependencies(
+    context: GridEsportsContext,
+) -> GridEsportsDependencies:
+    if isinstance(context, GridEsportsDependencies):
+        return context
+    return GridEsportsDependencies.from_context(context)
+
+
+def _generated_at(dependencies: GridEsportsDependencies) -> str:
+    if dependencies.utc_now_iso is not None:
+        return str(dependencies.utc_now_iso())
+    return _iso(_utc_now())
 
 
 def _utc_now() -> datetime:
@@ -124,15 +202,27 @@ def _graphql_headers(settings: Any) -> Dict[str, str]:
     return headers
 
 
-def _post_graphql(ctx: dict, url: str, query: str, variables: Dict[str, Any], timeout: int = 15) -> Dict[str, Any]:
-    poster = ctx.get("http_json_post")
-    if callable(poster):
-        payload = poster(url, {"query": query, "variables": variables}, timeout=timeout, headers=_graphql_headers(ctx["SETTINGS"]))
+def _post_graphql(
+    ctx: GridEsportsContext,
+    url: str,
+    query: str,
+    variables: Dict[str, Any],
+    timeout: int = 15,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    poster = dependencies.http_json_post
+    if poster is not None:
+        payload = poster(
+            url,
+            {"query": query, "variables": variables},
+            timeout=timeout,
+            headers=_graphql_headers(dependencies.settings),
+        )
         if isinstance(payload, dict):
             return payload
         raise RuntimeError("GRID GraphQL returned non-object payload")
 
-    requests = ctx.get("requests")
+    requests = dependencies.requests_lib
     if requests is None:
         raise RuntimeError("requests is not available")
     close_client = False
@@ -146,7 +236,7 @@ def _post_graphql(ctx: dict, url: str, query: str, variables: Dict[str, Any], ti
             url,
             json={"query": query, "variables": variables},
             timeout=timeout,
-            headers=_graphql_headers(ctx["SETTINGS"]),
+            headers=_graphql_headers(dependencies.settings),
         )
         response.raise_for_status()
         payload = response.json()
@@ -242,18 +332,22 @@ def _context_tags(status: str, metrics: List[Dict[str, Any]], state: Optional[Di
     return tags[:4]
 
 
-def _series_state(ctx: dict, series_id: str) -> Tuple[Optional[Dict[str, Any]], str]:
-    settings = ctx["SETTINGS"]
+def _series_state(
+    ctx: GridEsportsContext,
+    series_id: str,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
     url = str(getattr(settings, "grid_series_state_graphql_url", "") or "").strip()
     if not url:
         return None, "missing-url"
     try:
-        payload = _post_graphql(ctx, url, SERIES_STATE_QUERY, {"id": series_id}, timeout=12)
+        payload = _post_graphql(dependencies, url, SERIES_STATE_QUERY, {"id": series_id}, timeout=12)
         _raise_graphql_errors(payload)
         state = (payload.get("data") or {}).get("seriesState") if isinstance(payload.get("data"), dict) else None
         return state if isinstance(state, dict) else None, "ok" if isinstance(state, dict) else "empty"
     except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("GRID series state fetch failed series_id=%s", series_id)
         return None, "error"
@@ -294,12 +388,16 @@ def _best_market(candidate_items: List[Any], team_names: List[str]) -> Dict[str,
     return max(enumerate(markets), key=lambda row: (_market_score(row[1], team_names), -row[0]))[1]
 
 
-def _pm_context(ctx: dict, team_names: List[str]) -> Dict[str, Any]:
-    settings = ctx.get("SETTINGS")
+def _pm_context(
+    ctx: GridEsportsContext,
+    team_names: List[str],
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
     if not bool(getattr(settings, "grid_esports_pm_search_enabled", False)):
         return {"status": "not-matched", "probability": None, "delta": None, "signal": "PM SEARCH OFF", "matchQuality": "none"}
-    search = ctx.get("search_markets")
-    if not callable(search) or len(team_names) < 2:
+    search = dependencies.search_markets
+    if search is None or len(team_names) < 2:
         return {"status": "not-matched", "probability": None, "delta": None, "signal": "NO PM MATCH", "matchQuality": "none"}
     try:
         query = f"{team_names[0]} {team_names[1]}"
@@ -327,7 +425,12 @@ def _pm_context(ctx: dict, team_names: List[str]) -> Dict[str, Any]:
     }
 
 
-def _normalize_series(node: Dict[str, Any], state: Optional[Dict[str, Any]], *, ctx: dict) -> Dict[str, Any]:
+def _normalize_series(
+    node: Dict[str, Any],
+    state: Optional[Dict[str, Any]],
+    *,
+    ctx: GridEsportsContext,
+) -> Dict[str, Any]:
     team_names = _team_names(node)
     title = node.get("title") if isinstance(node.get("title"), dict) else {}
     tournament = node.get("tournament") if isinstance(node.get("tournament"), dict) else {}
@@ -409,46 +512,63 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
 
 
-def _read_seeded_snapshot(ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
+def _read_seeded_snapshot(
+    dependencies: GridEsportsDependencies,
+    *,
+    namespace: str,
+    cache_key: str,
+    ttl_seconds: int,
+) -> Optional[Dict[str, Any]]:
+    reader = dependencies.get_cached_json
+    if reader is not None:
         redis_payload = reader(namespace, cache_key)
         if isinstance(redis_payload, dict):
-            store = ctx.get("SNAPSHOT_STORE")
+            store = dependencies.snapshot_store
             if store is not None:
                 store.set(namespace, cache_key, redis_payload, ttl_seconds)
             return _with_cache_mode(redis_payload, "redis-seed")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is None:
         return None
     sqlite_payload = store.get(namespace, cache_key)
     if isinstance(sqlite_payload, dict):
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
+        setter = dependencies.set_cached_json
+        if setter is not None:
             setter(namespace, cache_key, sqlite_payload, ttl_seconds)
         return _with_cache_mode(sqlite_payload, "sqlite-seed")
     stale_payload = store.get_stale(namespace, cache_key)
     if isinstance(stale_payload, dict):
-        setter = ctx.get("set_cached_json")
-        if callable(setter):
+        setter = dependencies.set_cached_json
+        if setter is not None:
             setter(namespace, cache_key, stale_payload, min(15, ttl_seconds))
         return _with_cache_mode(stale_payload, "stale-seed")
     return None
 
 
-def _store_seed_fallback(ctx: dict, *, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
-    store = ctx.get("SNAPSHOT_STORE")
+def _store_seed_fallback(
+    dependencies: GridEsportsDependencies,
+    *,
+    namespace: str,
+    cache_key: str,
+    payload: Dict[str, Any],
+    ttl_seconds: int,
+) -> Dict[str, Any]:
+    store = dependencies.snapshot_store
     if store is not None:
         store.set(namespace, cache_key, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
+    setter = dependencies.set_cached_json
+    if setter is not None:
         setter(namespace, cache_key, payload, ttl_seconds)
     return payload
 
 
-def fetch_live_grid_esports_payload(ctx: dict, limit: int = DEFAULT_GRID_ESPORTS_LIMIT) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
-    generated_at = ctx.get("utc_now_iso", lambda: _iso(_utc_now()))()
+def fetch_live_grid_esports_payload(
+    ctx: GridEsportsContext,
+    limit: int = DEFAULT_GRID_ESPORTS_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
+    generated_at = _generated_at(dependencies)
     api_key = str(getattr(settings, "grid_api_key", "") or "").strip()
     if not api_key:
         return normalize_grid_esports_payload(
@@ -470,7 +590,7 @@ def fetch_live_grid_esports_payload(ctx: dict, limit: int = DEFAULT_GRID_ESPORTS
     if not central_url:
         raise RuntimeError("GRID central data URL is missing")
 
-    payload = _post_graphql(ctx, central_url, ALL_SERIES_QUERY, {"gte": gte, "lte": lte}, timeout=20)
+    payload = _post_graphql(dependencies, central_url, ALL_SERIES_QUERY, {"gte": gte, "lte": lte}, timeout=20)
     _raise_graphql_errors(payload)
     nodes, total_count = _extract_series_nodes(payload)
     selected = nodes[: max(1, int(limit or DEFAULT_GRID_ESPORTS_LIMIT))]
@@ -478,9 +598,9 @@ def fetch_live_grid_esports_payload(ctx: dict, limit: int = DEFAULT_GRID_ESPORTS
     items: List[Dict[str, Any]] = []
     for node in selected:
         series_id = str(node.get("id") or "").strip()
-        state, state_status = _series_state(ctx, series_id) if series_id else (None, "missing-id")
+        state, state_status = _series_state(dependencies, series_id) if series_id else (None, "missing-id")
         state_statuses.append(state_status)
-        items.append(_normalize_series(node, state, ctx=ctx))
+        items.append(_normalize_series(node, state, ctx=dependencies))
 
     live_count = sum(1 for item in items if item.get("state") == "live")
     status = "ok" if items and all(status == "ok" for status in state_statuses) else "degraded" if items else "empty"
@@ -507,9 +627,15 @@ def fetch_live_grid_esports_payload(ctx: dict, limit: int = DEFAULT_GRID_ESPORTS
     )
 
 
-def _degraded_error_payload(ctx: dict, *, limit: int, error: Exception) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
-    generated_at = ctx.get("utc_now_iso", lambda: _iso(_utc_now()))()
+def _degraded_error_payload(
+    ctx: GridEsportsContext,
+    *,
+    limit: int,
+    error: Exception,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
+    generated_at = _generated_at(dependencies)
     message = str(error).strip()
     return normalize_grid_esports_payload(
         {
@@ -531,38 +657,61 @@ def _degraded_error_payload(ctx: dict, *, limit: int, error: Exception) -> Dict[
     )
 
 
-def _safe_live_grid_esports_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
+def _safe_live_grid_esports_payload(
+    ctx: GridEsportsContext,
+    *,
+    limit: int,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     try:
-        return fetch_live_grid_esports_payload(ctx, limit=limit)
+        return fetch_live_grid_esports_payload(dependencies, limit=limit)
     except Exception as exc:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("GRID esports live fallback failed")
-        return _degraded_error_payload(ctx, limit=limit, error=exc)
+        return _degraded_error_payload(dependencies, limit=limit, error=exc)
 
 
-def get_grid_esports_snapshot(ctx: dict, limit: int = DEFAULT_GRID_ESPORTS_LIMIT) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
+def get_grid_esports_snapshot(
+    ctx: GridEsportsContext,
+    limit: int = DEFAULT_GRID_ESPORTS_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
     ttl_seconds = max(30, int(getattr(settings, "grid_esports_ttl_seconds", 120) or 120))
     cache_key = build_grid_esports_cache_key(settings, limit=limit)
-    seeded = _read_seeded_snapshot(ctx, namespace=GRID_ESPORTS_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    seeded = _read_seeded_snapshot(dependencies, namespace=GRID_ESPORTS_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
     if seeded is None and int(limit or 0) != DEFAULT_GRID_ESPORTS_LIMIT:
         seeded = _read_seeded_snapshot(
-            ctx,
+            dependencies,
             namespace=GRID_ESPORTS_NAMESPACE,
             cache_key=build_grid_esports_cache_key(settings, limit=DEFAULT_GRID_ESPORTS_LIMIT),
             ttl_seconds=ttl_seconds,
         )
     if seeded is not None:
-        return normalize_grid_esports_payload(seeded, settings=settings, limit=limit, generated_at=ctx.get("utc_now_iso", lambda: "")())
+        return normalize_grid_esports_payload(
+            seeded,
+            settings=settings,
+            limit=limit,
+            generated_at=(
+                str(dependencies.utc_now_iso())
+                if dependencies.utc_now_iso is not None
+                else ""
+            ),
+        )
 
     def _builder() -> Dict[str, Any]:
-        return _safe_live_grid_esports_payload(ctx, limit=limit)
+        return _safe_live_grid_esports_payload(dependencies, limit=limit)
 
-    if ctx.get("SNAPSHOT_STORE") is None and callable(ctx.get("get_snapshot_payload")):
-        return ctx["get_snapshot_payload"](GRID_ESPORTS_NAMESPACE, cache_key, _builder, ttl_seconds=ttl_seconds)
+    if dependencies.snapshot_store is None and dependencies.get_snapshot_payload is not None:
+        return dependencies.get_snapshot_payload(
+            GRID_ESPORTS_NAMESPACE,
+            cache_key,
+            _builder,
+            ttl_seconds=ttl_seconds,
+        )
 
-    payload = _with_cache_mode(_safe_live_grid_esports_payload(ctx, limit=limit), "live-build")
+    payload = _with_cache_mode(_safe_live_grid_esports_payload(dependencies, limit=limit), "live-build")
     if payload.get("items"):
-        return _store_seed_fallback(ctx, namespace=GRID_ESPORTS_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
+        return _store_seed_fallback(dependencies, namespace=GRID_ESPORTS_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
     return payload

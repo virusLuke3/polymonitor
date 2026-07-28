@@ -4,10 +4,18 @@ import io
 import json
 import math
 from collections import defaultdict
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 from xml.etree import ElementTree as ET
 
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 
 GEO_SHOCK_SNAPSHOT_NAMESPACE = "snapshot:world:geo-sanctions-shock"
 GEO_SHOCK_CACHE_KEY = "panel-v1"
@@ -69,6 +77,75 @@ DEFAULT_SOURCE_STATES = {
     "federalRegister": "seed-missing",
     "conflictFeed": "seed-missing",
 }
+
+
+@dataclass(frozen=True)
+class GeoSanctionsShockDependencies:
+    settings: Any
+    application: Any
+    utc_now_iso: Callable[..., Any]
+    requests_lib: Any
+    http_json_get: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+    get_acled_auth_state: Callable[..., Any] | None
+    store_acled_auth_state: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> GeoSanctionsShockDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_service_value(context, "app"),
+            utc_now_iso=resolve_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            requests_lib=resolve_optional_service_value(
+                context,
+                "requests",
+            ),
+            http_json_get=resolve_optional_service_callable(
+                context,
+                "http_json_get",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            get_acled_auth_state=resolve_optional_service_callable(
+                context,
+                "get_acled_auth_state",
+            ),
+            store_acled_auth_state=resolve_optional_service_callable(
+                context,
+                "store_acled_auth_state",
+            ),
+        )
+
+
+GeoSanctionsShockContext = (
+    Mapping[str, Any] | GeoSanctionsShockDependencies
+)
+
+
+def _dependencies(
+    context: GeoSanctionsShockContext,
+) -> GeoSanctionsShockDependencies:
+    if isinstance(context, GeoSanctionsShockDependencies):
+        return context
+    return GeoSanctionsShockDependencies.from_context(context)
 
 
 def _local_name(tag: str) -> str:
@@ -160,13 +237,13 @@ def _has_keyword(*parts: Any, keywords: Iterable[str]) -> bool:
     return any(keyword in haystack for keyword in keywords)
 
 
-def _empty_payload(ctx: dict, *, status: str = "degraded", source_states: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+def _empty_payload(ctx: GeoSanctionsShockContext, *, status: str = "degraded", source_states: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     states = dict(DEFAULT_SOURCE_STATES)
     states.update(source_states or {})
     return {
-        "generatedAt": ctx["utc_now_iso"](),
+        "generatedAt": _dependencies(ctx).utc_now_iso(),
         "source": "OFAC / Federal Register / Conflict feed",
-        "sourceUrl": ctx["SETTINGS"].geo_shock_source_url,
+        "sourceUrl": _dependencies(ctx).settings.geo_shock_source_url,
         "status": status,
         "sources": states,
         "conflictProvider": None,
@@ -186,8 +263,8 @@ def _empty_payload(ctx: dict, *, status: str = "degraded", source_states: Option
     }
 
 
-def _seed_cache_ttl_seconds(ctx: dict) -> int:
-    return max(300, int(ctx["SETTINGS"].geo_shock_ttl_seconds or 900))
+def _seed_cache_ttl_seconds(ctx: GeoSanctionsShockContext) -> int:
+    return max(300, int(_dependencies(ctx).settings.geo_shock_ttl_seconds or 900))
 
 
 def _now_epoch() -> int:
@@ -198,12 +275,12 @@ def _copy_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return json.loads(json.dumps(payload, ensure_ascii=True, default=str))
 
 
-def _seeded_payload_from_cache(ctx: dict) -> Optional[Dict[str, Any]]:
-    getter = ctx.get("get_cached_json")
+def _seeded_payload_from_cache(ctx: GeoSanctionsShockContext) -> Optional[Dict[str, Any]]:
+    getter = _dependencies(ctx).get_cached_json
     if callable(getter):
         payload = getter(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
         if isinstance(payload, dict):
-            snapshot_store = ctx.get("SNAPSHOT_STORE")
+            snapshot_store = _dependencies(ctx).snapshot_store
             if snapshot_store is not None:
                 snapshot_store.set(
                     GEO_SHOCK_SNAPSHOT_NAMESPACE,
@@ -213,27 +290,27 @@ def _seeded_payload_from_cache(ctx: dict) -> Optional[Dict[str, Any]]:
                 )
             return payload
 
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    snapshot_store = _dependencies(ctx).snapshot_store
     if snapshot_store is None:
         return None
     payload = snapshot_store.get(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
     if isinstance(payload, dict):
-        setter = ctx.get("set_cached_json")
+        setter = _dependencies(ctx).set_cached_json
         if callable(setter):
             setter(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY, payload, _seed_cache_ttl_seconds(ctx))
         return payload
     return None
 
 
-def _stale_seeded_payload(ctx: dict) -> Optional[Dict[str, Any]]:
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
+def _stale_seeded_payload(ctx: GeoSanctionsShockContext) -> Optional[Dict[str, Any]]:
+    snapshot_store = _dependencies(ctx).snapshot_store
     if snapshot_store is None:
         return None
     payload = snapshot_store.get_stale(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
     return payload if isinstance(payload, dict) else None
 
 
-def _seeded_fallback_payload(ctx: dict) -> Dict[str, Any]:
+def _seeded_fallback_payload(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
     stale = _stale_seeded_payload(ctx)
     if isinstance(stale, dict):
         return stale
@@ -246,7 +323,7 @@ def _seeded_fallback_payload(ctx: dict) -> Dict[str, Any]:
     return payload
 
 
-def _previous_seed_payload(ctx: dict) -> Dict[str, Any]:
+def _previous_seed_payload(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
     payload = _seeded_payload_from_cache(ctx)
     if isinstance(payload, dict):
         return payload
@@ -376,9 +453,9 @@ def _parse_ofac_xml(xml_bytes: bytes, *, list_name: str) -> Dict[str, Any]:
     }
 
 
-def _fetch_ofac_snapshot(ctx: dict) -> Dict[str, Any]:
-    requests_lib = ctx.get("requests")
-    settings = ctx["SETTINGS"]
+def _fetch_ofac_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
+    requests_lib = _dependencies(ctx).requests_lib
+    settings = _dependencies(ctx).settings
     sources = {
         "ofacSdn": settings.geo_shock_ofac_sdn_url,
         "ofacConsolidated": settings.geo_shock_ofac_consolidated_url,
@@ -412,7 +489,7 @@ def _fetch_ofac_snapshot(ctx: dict) -> Dict[str, Any]:
             for target, score in (parsed.get("targetScores") or {}).items():
                 target_scores[target] += int(score or 0)
         except Exception:
-            ctx["app"].logger.exception("geo shock ofac fetch failed source=%s", name)
+            _dependencies(ctx).application.logger.exception("geo shock ofac fetch failed source=%s", name)
             source_states[name] = "error"
     return {
         "states": source_states,
@@ -446,11 +523,11 @@ def _normalize_notice(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def _fetch_federal_register_snapshot(ctx: dict) -> Dict[str, Any]:
-    url = ctx["SETTINGS"].geo_shock_federal_register_api_url
+def _fetch_federal_register_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
+    url = _dependencies(ctx).settings.geo_shock_federal_register_api_url
     if not url:
         return {"state": "missing-url", "items": [], "targetScores": {}}
-    http_json_get = ctx.get("http_json_get")
+    http_json_get = _dependencies(ctx).http_json_get
     if not callable(http_json_get):
         return {"state": "requests-missing", "items": [], "targetScores": {}}
 
@@ -472,7 +549,7 @@ def _fetch_federal_register_snapshot(ctx: dict) -> Dict[str, Any]:
             )
             any_ok = True
         except Exception:
-            ctx["app"].logger.exception("geo shock federal register fetch failed term=%s", term)
+            _dependencies(ctx).application.logger.exception("geo shock federal register fetch failed term=%s", term)
             continue
         for raw in (payload or {}).get("results") or []:
             key = str(raw.get("document_number") or raw.get("html_url") or raw.get("title") or "")
@@ -577,9 +654,9 @@ def _normalize_gdelt_article(raw: Dict[str, Any], index: int) -> Optional[Dict[s
     }
 
 
-def _fetch_gdelt_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
-    http_json_get = ctx.get("http_json_get")
-    url = ctx["SETTINGS"].geo_shock_gdelt_doc_api_url
+def _fetch_gdelt_conflict_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
+    http_json_get = _dependencies(ctx).http_json_get
+    url = _dependencies(ctx).settings.geo_shock_gdelt_doc_api_url
     if not callable(http_json_get) or not url:
         return {"state": "missing-url", "provider": "GDELT", "items": [], "targetScores": {}, "hotspotCount": 0}
     try:
@@ -598,9 +675,9 @@ def _fetch_gdelt_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     except Exception as exc:
         status_code = _exception_http_status(exc)
         if status_code == 429:
-            ctx["app"].logger.warning("geo shock gdelt fallback rate limited")
+            _dependencies(ctx).application.logger.warning("geo shock gdelt fallback rate limited")
             return {"state": "rate-limited", "provider": "GDELT", "items": [], "targetScores": {}, "hotspotCount": 0}
-        ctx["app"].logger.exception("geo shock gdelt fallback fetch failed")
+        _dependencies(ctx).application.logger.exception("geo shock gdelt fallback fetch failed")
         return {"state": "error", "provider": "GDELT", "items": [], "targetScores": {}, "hotspotCount": 0}
 
     items: List[Dict[str, Any]] = []
@@ -725,8 +802,8 @@ def _ucdp_url_for_version(configured_url: str, version: str) -> str:
     return f"{base}/{version}"
 
 
-def _fetch_ucdp_page(ctx: dict, *, api_url: str, token: str, version: str, page: int) -> Dict[str, Any]:
-    requests_lib = ctx.get("requests")
+def _fetch_ucdp_page(ctx: GeoSanctionsShockContext, *, api_url: str, token: str, version: str, page: int) -> Dict[str, Any]:
+    requests_lib = _dependencies(ctx).requests_lib
     headers = {
         "Accept": "application/json",
         "User-Agent": "polydata-runtime/1.0",
@@ -750,7 +827,7 @@ def _fetch_ucdp_page(ctx: dict, *, api_url: str, token: str, version: str, page:
     return payload
 
 
-def _discover_ucdp_version(ctx: dict, *, api_url: str, token: str) -> tuple[str, Dict[str, Any]]:
+def _discover_ucdp_version(ctx: GeoSanctionsShockContext, *, api_url: str, token: str) -> tuple[str, Dict[str, Any]]:
     errors: List[str] = []
     for version in _ucdp_version_candidates(api_url):
         try:
@@ -781,9 +858,9 @@ def _latest_ucdp_event_datetime(rows: Iterable[Dict[str, Any]]) -> Optional[date
     return latest
 
 
-def _fetch_ucdp_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
-    requests_lib = ctx.get("requests")
+def _fetch_ucdp_conflict_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
+    settings = _dependencies(ctx).settings
+    requests_lib = _dependencies(ctx).requests_lib
     api_url = str(getattr(settings, "geo_shock_ucdp_api_url", "") or "").strip()
     token = str(getattr(settings, "geo_shock_ucdp_access_token", "") or "").strip()
     if not api_url:
@@ -807,19 +884,19 @@ def _fetch_ucdp_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
                 page_payloads.append(page0 if page == 0 else _fetch_ucdp_page(ctx, api_url=api_url, token=token, version=version, page=page))
             except Exception as exc:
                 failed_pages += 1
-                ctx["app"].logger.warning("geo shock ucdp page fetch failed version=%s page=%s error=%s", version, page, exc)
+                _dependencies(ctx).application.logger.warning("geo shock ucdp page fetch failed version=%s page=%s error=%s", version, page, exc)
     except Exception as exc:
         text = str(exc)
         if text == "ucdp-rate-limited":
-            ctx["app"].logger.warning("geo shock ucdp rate limited")
+            _dependencies(ctx).application.logger.warning("geo shock ucdp rate limited")
             return {"state": "rate-limited", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
         if text.startswith("ucdp-access-denied"):
-            ctx["app"].logger.warning("geo shock ucdp access denied error=%s", text)
+            _dependencies(ctx).application.logger.warning("geo shock ucdp access denied error=%s", text)
             return {"state": "access-denied", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
         status_code = _exception_http_status(exc)
         if status_code == 429:
             return {"state": "rate-limited", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
-        ctx["app"].logger.exception("geo shock ucdp fetch failed")
+        _dependencies(ctx).application.logger.exception("geo shock ucdp fetch failed")
         return {"state": "error", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
 
     rows: List[Dict[str, Any]] = []
@@ -885,16 +962,16 @@ def _normalize_acled_auth_state(payload: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def _get_acled_auth_state(ctx: dict) -> Optional[Dict[str, Any]]:
-    getter = ctx.get("get_acled_auth_state")
+def _get_acled_auth_state(ctx: GeoSanctionsShockContext) -> Optional[Dict[str, Any]]:
+    getter = _dependencies(ctx).get_acled_auth_state
     if not callable(getter):
         return None
     return _normalize_acled_auth_state(getter())
 
 
-def _store_acled_auth_state(ctx: dict, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _store_acled_auth_state(ctx: GeoSanctionsShockContext, payload: Dict[str, Any]) -> Dict[str, Any]:
     normalized = _normalize_acled_auth_state(payload) or {"access_token": None, "refresh_token": None, "access_expires_at": 0}
-    setter = ctx.get("store_acled_auth_state")
+    setter = _dependencies(ctx).store_acled_auth_state
     if callable(setter):
         setter(normalized)
     return normalized
@@ -916,9 +993,9 @@ def _build_acled_auth_state(token_payload: Dict[str, Any], *, fallback_refresh_t
     }
 
 
-def _acled_login_with_password(ctx: dict) -> Optional[Dict[str, Any]]:
-    settings = ctx["SETTINGS"]
-    requests_lib = ctx.get("requests")
+def _acled_login_with_password(ctx: GeoSanctionsShockContext) -> Optional[Dict[str, Any]]:
+    settings = _dependencies(ctx).settings
+    requests_lib = _dependencies(ctx).requests_lib
     token_url = str(getattr(settings, "geo_shock_acled_token_url", "") or "").strip()
     if requests_lib is None or not token_url or not _has_acled_credentials(settings):
         return None
@@ -947,13 +1024,13 @@ def _acled_login_with_password(ctx: dict) -> Optional[Dict[str, Any]]:
             return None
         return _store_acled_auth_state(ctx, state)
     except Exception:
-        ctx["app"].logger.exception("geo shock acled token fetch failed")
+        _dependencies(ctx).application.logger.exception("geo shock acled token fetch failed")
         return None
 
 
-def _acled_refresh_access_token(ctx: dict, current_state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    settings = ctx["SETTINGS"]
-    requests_lib = ctx.get("requests")
+def _acled_refresh_access_token(ctx: GeoSanctionsShockContext, current_state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    settings = _dependencies(ctx).settings
+    requests_lib = _dependencies(ctx).requests_lib
     token_url = str(getattr(settings, "geo_shock_acled_token_url", "") or "").strip()
     refresh_token = _text_or_none((current_state or {}).get("refresh_token"))
     if requests_lib is None or not token_url or not refresh_token:
@@ -975,7 +1052,7 @@ def _acled_refresh_access_token(ctx: dict, current_state: Optional[Dict[str, Any
             },
         )
         if int(getattr(response, "status_code", 500) or 500) != 200:
-            ctx["app"].logger.warning("geo shock acled refresh failed status=%s falling back to password login", getattr(response, "status_code", None))
+            _dependencies(ctx).application.logger.warning("geo shock acled refresh failed status=%s falling back to password login", getattr(response, "status_code", None))
             return _acled_login_with_password(ctx)
         payload = response.json() if hasattr(response, "json") else {}
         state = _build_acled_auth_state(payload or {}, fallback_refresh_token=refresh_token)
@@ -983,11 +1060,11 @@ def _acled_refresh_access_token(ctx: dict, current_state: Optional[Dict[str, Any
             return _acled_login_with_password(ctx)
         return _store_acled_auth_state(ctx, state)
     except Exception:
-        ctx["app"].logger.exception("geo shock acled refresh failed")
+        _dependencies(ctx).application.logger.exception("geo shock acled refresh failed")
         return _acled_login_with_password(ctx)
 
 
-def _fetch_acled_access_token(ctx: dict) -> Optional[str]:
+def _fetch_acled_access_token(ctx: GeoSanctionsShockContext) -> Optional[str]:
     current_state = _get_acled_auth_state(ctx)
     access_token = _text_or_none((current_state or {}).get("access_token"))
     if not access_token:
@@ -1058,9 +1135,9 @@ def _normalize_acled_item(raw: Dict[str, Any], index: int) -> Optional[Dict[str,
     }
 
 
-def _fetch_acled_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
-    requests_lib = ctx.get("requests")
+def _fetch_acled_conflict_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
+    settings = _dependencies(ctx).settings
+    requests_lib = _dependencies(ctx).requests_lib
     api_url = str(getattr(settings, "geo_shock_acled_api_url", "") or "").strip()
     if not api_url:
         return {"state": "missing-url", "items": [], "targetScores": {}, "hotspotCount": 0}
@@ -1105,12 +1182,12 @@ def _fetch_acled_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
                     headers={**headers, "Authorization": f"Bearer {refreshed_token}"},
                 )
         if int(getattr(response, "status_code", 500) or 500) == 403:
-            ctx["app"].logger.warning("geo shock acled access denied")
+            _dependencies(ctx).application.logger.warning("geo shock acled access denied")
             return {"state": "access-denied", "items": [], "targetScores": {}, "hotspotCount": 0}
         response.raise_for_status()
         payload = response.json() if hasattr(response, "json") else {}
     except Exception:
-        ctx["app"].logger.exception("geo shock acled read failed")
+        _dependencies(ctx).application.logger.exception("geo shock acled read failed")
         return {"state": "error", "items": [], "targetScores": {}, "hotspotCount": 0}
 
     rows = _coerce_conflict_rows(payload if isinstance(payload, list) else ((payload or {}).get("data") or payload))
@@ -1173,15 +1250,15 @@ def _has_ucdp_token(settings: Any) -> bool:
     return bool(str(getattr(settings, "geo_shock_ucdp_access_token", "") or "").strip())
 
 
-def _fetch_conflict_snapshot(ctx: dict, *, previous: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    url = ctx["SETTINGS"].geo_shock_conflict_api_url
+def _fetch_conflict_snapshot(ctx: GeoSanctionsShockContext, *, previous: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    url = _dependencies(ctx).settings.geo_shock_conflict_api_url
     if not url:
         ucdp_snapshot: Dict[str, Any] = {"state": "auth-missing", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
-        if _has_ucdp_token(ctx["SETTINGS"]):
+        if _has_ucdp_token(_dependencies(ctx).settings):
             ucdp_snapshot = _fetch_ucdp_conflict_snapshot(ctx)
             if _conflict_snapshot_has_items(ucdp_snapshot):
                 return ucdp_snapshot
-        if _has_acled_credentials(ctx["SETTINGS"]):
+        if _has_acled_credentials(_dependencies(ctx).settings):
             acled_snapshot = _fetch_acled_conflict_snapshot(ctx)
             if _conflict_snapshot_has_items(acled_snapshot):
                 return acled_snapshot
@@ -1196,7 +1273,7 @@ def _fetch_conflict_snapshot(ctx: dict, *, previous: Optional[Dict[str, Any]] = 
         if stale_snapshot.get("state") == "stale":
             return stale_snapshot
         return gdelt_snapshot if gdelt_snapshot.get("state") != "missing-url" else ucdp_snapshot
-    http_json_get = ctx.get("http_json_get")
+    http_json_get = _dependencies(ctx).http_json_get
     if not callable(http_json_get):
         return {"state": "requests-missing", "provider": "custom", "items": [], "targetScores": {}, "hotspotCount": 0}
     try:
@@ -1209,7 +1286,7 @@ def _fetch_conflict_snapshot(ctx: dict, *, previous: Optional[Dict[str, Any]] = 
         status_code = _exception_http_status(exc)
         if status_code == 429:
             return {"state": "rate-limited", "provider": "custom", "items": [], "targetScores": {}, "hotspotCount": 0}
-        ctx["app"].logger.exception("geo shock conflict fetch failed")
+        _dependencies(ctx).application.logger.exception("geo shock conflict fetch failed")
         return {"state": "error", "provider": "custom", "items": [], "targetScores": {}, "hotspotCount": 0}
 
     items: List[Dict[str, Any]] = []
@@ -1354,12 +1431,21 @@ def _payload_status(source_states: Dict[str, str], items: List[Dict[str, Any]]) 
     return "degraded"
 
 
-def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict[str, Any]] = None, item_limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def build_geo_sanctions_shock_seed_payload(
+    ctx: GeoSanctionsShockContext,
+    *,
+    previous: Optional[Dict[str, Any]] = None,
+    item_limit: int = DEFAULT_ITEM_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     previous_payload = previous or {}
-    payload = _empty_payload(ctx, status="degraded")
-    ofac_snapshot = _fetch_ofac_snapshot(ctx)
-    notices_snapshot = _fetch_federal_register_snapshot(ctx)
-    conflict_snapshot = _fetch_conflict_snapshot(ctx, previous=previous_payload)
+    payload = _empty_payload(dependencies, status="degraded")
+    ofac_snapshot = _fetch_ofac_snapshot(dependencies)
+    notices_snapshot = _fetch_federal_register_snapshot(dependencies)
+    conflict_snapshot = _fetch_conflict_snapshot(
+        dependencies,
+        previous=previous_payload,
+    )
 
     source_states = {
         **(ofac_snapshot.get("states") or {}),
@@ -1390,8 +1476,8 @@ def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict
 
     payload.update(
         {
-            "generatedAt": ctx["utc_now_iso"](),
-            "sourceUrl": ctx["SETTINGS"].geo_shock_source_url,
+            "generatedAt": dependencies.utc_now_iso(),
+            "sourceUrl": dependencies.settings.geo_shock_source_url,
             "status": _payload_status(source_states, items),
             "sources": source_states,
             "conflictProvider": conflict_snapshot.get("provider"),
@@ -1415,8 +1501,9 @@ def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict
     return payload
 
 
-def get_geo_sanctions_shock_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    payload = _seeded_payload_from_cache(ctx)
+def get_geo_sanctions_shock_snapshot(ctx: GeoSanctionsShockContext, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    payload = _seeded_payload_from_cache(dependencies)
     if payload is None:
-        payload = _seeded_fallback_payload(ctx)
+        payload = _seeded_fallback_payload(dependencies)
     return _with_limit(payload, limit)

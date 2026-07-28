@@ -3,16 +3,87 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 
 SPORTS_ODDS_NAMESPACE = "snapshot:sports:sports-odds"
 DEFAULT_SPORTS_ODDS_LIMIT = 8
 
 
+@dataclass(frozen=True)
+class SportsOddsDependencies:
+    settings: Any
+    application: Any
+    search_markets: Callable[..., Any] | None
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+    utc_now_iso: Callable[..., Any] | None
+    http_json_get: Callable[..., Any]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> SportsOddsDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_optional_service_value(context, "app"),
+            search_markets=resolve_optional_service_callable(
+                context,
+                "search_markets",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            utc_now_iso=resolve_optional_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            http_json_get=resolve_service_callable(
+                context,
+                "http_json_get",
+            ),
+        )
+
+
+SportsOddsContext = Mapping[str, Any] | SportsOddsDependencies
+
+
+def _dependencies(
+    context: SportsOddsContext,
+) -> SportsOddsDependencies:
+    if isinstance(context, SportsOddsDependencies):
+        return context
+    return SportsOddsDependencies.from_context(context)
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _generated_at(dependencies: SportsOddsDependencies) -> str:
+    if dependencies.utc_now_iso is not None:
+        return str(dependencies.utc_now_iso())
+    return _utc_now_iso()
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -42,12 +113,16 @@ def _headers() -> Dict[str, str]:
     return {"Accept": "application/json", "User-Agent": "polydata-runtime/1.0"}
 
 
-def _pm_context(ctx: dict, event_name: str) -> Dict[str, Any]:
-    settings = ctx.get("SETTINGS")
+def _pm_context(
+    ctx: SportsOddsContext,
+    event_name: str,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
     if not bool(getattr(settings, "sports_odds_pm_search_enabled", False)):
         return {"status": "not-matched", "probability": None, "delta": None, "signal": "PM SEARCH OFF", "matchQuality": "none"}
-    search = ctx.get("search_markets")
-    if not callable(search):
+    search = dependencies.search_markets
+    if search is None:
         return {"status": "not-matched", "probability": None, "delta": None, "signal": "NO PM MATCH", "matchQuality": "none"}
     try:
         matches = search(event_name, limit=3)
@@ -107,7 +182,10 @@ def _h2h_quotes(event: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _normalize_event(ctx: dict, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _normalize_event(
+    ctx: SportsOddsContext,
+    event: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
     event_id = str(event.get("id") or "").strip()
     home = str(event.get("home_team") or "").strip()
     away = str(event.get("away_team") or "").strip()
@@ -186,16 +264,22 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
 
 
-def _read_seeded_snapshot(ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
+def _read_seeded_snapshot(
+    dependencies: SportsOddsDependencies,
+    *,
+    namespace: str,
+    cache_key: str,
+    ttl_seconds: int,
+) -> Optional[Dict[str, Any]]:
+    reader = dependencies.get_cached_json
+    if reader is not None:
         redis_payload = reader(namespace, cache_key)
         if isinstance(redis_payload, dict):
-            store = ctx.get("SNAPSHOT_STORE")
+            store = dependencies.snapshot_store
             if store is not None:
                 store.set(namespace, cache_key, redis_payload, ttl_seconds)
             return _with_cache_mode(redis_payload, "redis-seed")
-    store = ctx.get("SNAPSHOT_STORE")
+    store = dependencies.snapshot_store
     if store is None:
         return None
     sqlite_payload = store.get(namespace, cache_key)
@@ -207,19 +291,30 @@ def _read_seeded_snapshot(ctx: dict, *, namespace: str, cache_key: str, ttl_seco
     return None
 
 
-def _store_seed_fallback(ctx: dict, *, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
-    store = ctx.get("SNAPSHOT_STORE")
+def _store_seed_fallback(
+    dependencies: SportsOddsDependencies,
+    *,
+    namespace: str,
+    cache_key: str,
+    payload: Dict[str, Any],
+    ttl_seconds: int,
+) -> Dict[str, Any]:
+    store = dependencies.snapshot_store
     if store is not None:
         store.set(namespace, cache_key, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
-    if callable(setter):
+    setter = dependencies.set_cached_json
+    if setter is not None:
         setter(namespace, cache_key, payload, ttl_seconds)
     return payload
 
 
-def fetch_live_sports_odds_payload(ctx: dict, limit: int = DEFAULT_SPORTS_ODDS_LIMIT) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
-    generated_at = ctx.get("utc_now_iso", _utc_now_iso)()
+def fetch_live_sports_odds_payload(
+    ctx: SportsOddsContext,
+    limit: int = DEFAULT_SPORTS_ODDS_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
+    generated_at = _generated_at(dependencies)
     api_key = str(getattr(settings, "the_odds_api_key", "") or "").strip()
     if not api_key:
         return normalize_sports_odds_payload(
@@ -236,9 +331,15 @@ def fetch_live_sports_odds_payload(ctx: dict, limit: int = DEFAULT_SPORTS_ODDS_L
         "oddsFormat": "decimal",
         "dateFormat": "iso",
     }
-    payload = ctx["http_json_get"](url, params=params, timeout=12, headers=_headers())
+    payload = dependencies.http_json_get(url, params=params, timeout=12, headers=_headers())
     events = payload if isinstance(payload, list) else []
-    items = [item for event in events if isinstance(event, dict) for item in [_normalize_event(ctx, event)] if item is not None]
+    items = [
+        item
+        for event in events
+        if isinstance(event, dict)
+        for item in [_normalize_event(dependencies, event)]
+        if item is not None
+    ]
     items.sort(
         key=lambda item: (item.get("signal") in {"PM RICH", "PM CHEAP"}, float(item.get("dispersion") or 0), int(item.get("bookmakerCount") or 0)),
         reverse=True,
@@ -256,15 +357,20 @@ def fetch_live_sports_odds_payload(ctx: dict, limit: int = DEFAULT_SPORTS_ODDS_L
     )
 
 
-def _safe_live_sports_odds_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
+def _safe_live_sports_odds_payload(
+    ctx: SportsOddsContext,
+    *,
+    limit: int,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     try:
-        return fetch_live_sports_odds_payload(ctx, limit=limit)
+        return fetch_live_sports_odds_payload(dependencies, limit=limit)
     except Exception as exc:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
             logger.exception("sports odds live fallback failed")
-        settings = ctx["SETTINGS"]
-        generated_at = ctx.get("utc_now_iso", _utc_now_iso)()
+        settings = dependencies.settings
+        generated_at = _generated_at(dependencies)
         return normalize_sports_odds_payload(
             {"generatedAt": generated_at, "status": "degraded", "sources": {"theOddsApi": "error", "polymarket": "optional-local-match"}, "error": str(exc)[:240], "items": []},
             settings=settings,
@@ -273,16 +379,29 @@ def _safe_live_sports_odds_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
         )
 
 
-def get_sports_odds_snapshot(ctx: dict, limit: int = DEFAULT_SPORTS_ODDS_LIMIT) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
+def get_sports_odds_snapshot(
+    ctx: SportsOddsContext,
+    limit: int = DEFAULT_SPORTS_ODDS_LIMIT,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    settings = dependencies.settings
     ttl_seconds = max(30, int(getattr(settings, "sports_odds_ttl_seconds", 180) or 180))
     cache_key = build_sports_odds_cache_key(settings, limit=limit)
-    seeded = _read_seeded_snapshot(ctx, namespace=SPORTS_ODDS_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    seeded = _read_seeded_snapshot(dependencies, namespace=SPORTS_ODDS_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
     if seeded is None and int(limit or 0) != DEFAULT_SPORTS_ODDS_LIMIT:
-        seeded = _read_seeded_snapshot(ctx, namespace=SPORTS_ODDS_NAMESPACE, cache_key=build_sports_odds_cache_key(settings, limit=DEFAULT_SPORTS_ODDS_LIMIT), ttl_seconds=ttl_seconds)
+        seeded = _read_seeded_snapshot(dependencies, namespace=SPORTS_ODDS_NAMESPACE, cache_key=build_sports_odds_cache_key(settings, limit=DEFAULT_SPORTS_ODDS_LIMIT), ttl_seconds=ttl_seconds)
     if seeded is not None:
-        return normalize_sports_odds_payload(seeded, settings=settings, limit=limit, generated_at=ctx.get("utc_now_iso", lambda: "")())
-    payload = _with_cache_mode(_safe_live_sports_odds_payload(ctx, limit=limit), "live-build")
+        return normalize_sports_odds_payload(
+            seeded,
+            settings=settings,
+            limit=limit,
+            generated_at=(
+                str(dependencies.utc_now_iso())
+                if dependencies.utc_now_iso is not None
+                else ""
+            ),
+        )
+    payload = _with_cache_mode(_safe_live_sports_odds_payload(dependencies, limit=limit), "live-build")
     if payload.get("items"):
-        return _store_seed_fallback(ctx, namespace=SPORTS_ODDS_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
+        return _store_seed_fallback(dependencies, namespace=SPORTS_ODDS_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
     return payload
