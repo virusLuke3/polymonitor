@@ -433,6 +433,16 @@ discovered
 
 下一批平台骨架工作：继续拆分 `App.tsx` 与巨型 `panels.css`，随后建立 API schema/OpenAPI 和跨 panel 的统一响应 envelope。
 
+#### 2.2 Panel Workspace 与共享 CSS 模块化（已完成，2026-07-28）
+
+- `PanelWorkspaceSlot`、`PanelRuntimeBoundary`、panel layout 类型、拖拽和缩放生命周期已从 `App.tsx` 迁入独立组件；App 只保留工作区状态与面板编排。
+- 拖拽与缩放的 document listener、animation frame、ghost、drop indicator 和 body 状态在取消、完成与组件卸载时统一回收。
+- loading、runtime notice、slot layout、drag 与 resize 样式已从 `panels.css` 迁入 `panel-workspace.css`，保留原媒体查询和 CSS layer 顺序。
+- 共享 `panels.css` 中 984 条已停载 World Cup 规则、1570 个 World Cup selector 以及 layout stability 中的旧 panel slot 已清除；World Cup 业务源码和 workspace 私有样式仍保留，但不进入活动构建。
+- 本阶段未改动 Quant、LOB、PolySignal、PnL/position、address、non-trade/CTF/ERC20/Data API trades、Kaggle 或测试文件。
+
+下一批平台骨架工作：建立 API schema/OpenAPI 与跨 panel 的统一响应 envelope，然后再统一错误、缓存和 freshness 语义。
+
 ### 第三阶段：预测市场产品化
 
 - Market Workspace

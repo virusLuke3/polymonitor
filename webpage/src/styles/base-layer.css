@@ -1,2 +1,3 @@
 @import url('./main.css') layer(base);
 @import url('./panels.css') layer(base);
+@import url('./panel-workspace.css') layer(base);

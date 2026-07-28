@@ -25,7 +25,6 @@
 }
 
 .wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='breaking-event-radar'],
-.wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='world-cup-match-ops'],
 .wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='global-transport-shipping'] {
   grid-column: span 2 !important;
 }
