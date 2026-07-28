@@ -38,11 +38,11 @@ GCP_SOURCE_FILES = {
 EXTERNAL_RELEASE_PREFIXES = (
     ".github/",
     "docs/",
+    "scripts/deploy/",
     "webpage/",
 )
 EXTERNAL_RELEASE_FILES = {
     "deploy/systemd/polydata.env.example",
-    "scripts/deploy/gcp_release.py",
 }
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 APPROVED_OVERRIDES_PATH = Path("deploy/gcp/accepted-remote-overrides.json")
