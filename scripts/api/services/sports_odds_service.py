@@ -3,10 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
+from zoneinfo import ZoneInfo
 
 from api.context import (
     resolve_optional_service_callable,
@@ -17,6 +20,12 @@ from api.context import (
 
 SPORTS_ODDS_NAMESPACE = "snapshot:sports:sports-odds"
 DEFAULT_SPORTS_ODDS_LIMIT = 8
+MAX_PM_SEARCH_ITEMS = 8
+POLYMARKET_SPORT_PRIORITY = (
+    (3, ("mlb", "wnba", "nba", "nfl", "nhl")),
+    (2, ("fifa_world_cup", "uefa_champs_league", "mls")),
+    (1, ("tennis", "atp", "wta", "ufc")),
+)
 
 
 @dataclass(frozen=True)
@@ -29,6 +38,7 @@ class SportsOddsDependencies:
     snapshot_store: Any
     utc_now_iso: Callable[..., Any] | None
     http_json_get: Callable[..., Any]
+    get_http_quota: Callable[..., Any] | None
 
     @classmethod
     def from_context(
@@ -61,6 +71,10 @@ class SportsOddsDependencies:
             http_json_get=resolve_service_callable(
                 context,
                 "http_json_get",
+            ),
+            get_http_quota=resolve_optional_service_callable(
+                context,
+                "get_http_quota",
             ),
         )
 
@@ -113,34 +127,171 @@ def _headers() -> Dict[str, str]:
     return {"Accept": "application/json", "User-Agent": "polydata-runtime/1.0"}
 
 
+def _not_matched(reason: str, signal: str = "NO PM MATCH") -> Dict[str, Any]:
+    return {
+        "status": "not-matched",
+        "probability": None,
+        "delta": None,
+        "signal": signal,
+        "matchQuality": "none",
+        "reason": reason,
+    }
+
+
+def _name_tokens(value: Any) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
+        if token not in {"at", "cf", "fc", "the", "vs"}
+    }
+
+
+def _team_matches(team: str, title: str) -> bool:
+    team_tokens = _name_tokens(team)
+    title_tokens = _name_tokens(title)
+    if not team_tokens:
+        return False
+    normalized_team = " ".join(sorted(team_tokens))
+    normalized_title = " ".join(sorted(title_tokens))
+    if normalized_team and normalized_team in normalized_title:
+        return True
+    overlap = len(team_tokens & title_tokens)
+    required = 1 if len(team_tokens) == 1 else min(2, len(team_tokens))
+    return overlap >= required
+
+
+def _parse_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _is_compound_market(title: str) -> bool:
+    return bool(re.search(r"\bAND\b|\bPARLAY\b", title, re.IGNORECASE))
+
+
+def _market_scheduled_at(market: Dict[str, Any], reference: datetime | None) -> datetime | None:
+    corpus = " ".join(str(market.get(key) or "") for key in ("description", "rules"))
+    match = re.search(
+        r"scheduled\s+for\s+([A-Za-z]+)\s+(\d{1,2})(?:,\s*(\d{4}))?\s+at\s+"
+        r"(\d{1,2}):(\d{2})\s*(AM|PM)\s*(?:ET|EST|EDT)\b",
+        corpus,
+        re.IGNORECASE,
+    )
+    if match:
+        month_text, day_text, year_text, hour_text, minute_text, meridiem = match.groups()
+        try:
+            month = datetime.strptime(month_text[:3].title(), "%b").month
+            hour = int(hour_text) % 12 + (12 if meridiem.upper() == "PM" else 0)
+            local = datetime(
+                int(year_text or (reference.year if reference else datetime.now(timezone.utc).year)),
+                month,
+                int(day_text),
+                hour,
+                int(minute_text),
+                tzinfo=ZoneInfo("America/New_York"),
+            )
+            return local.astimezone(timezone.utc)
+        except (ValueError, TypeError):
+            pass
+    return _parse_time(market.get("endDate"))
+
+
+def _candidate_match_score(
+    market: Dict[str, Any],
+    *,
+    home: str,
+    away: str,
+    sport_key: str,
+    commence_time: Any,
+) -> tuple[float, str] | None:
+    title = str(market.get("title") or "").strip()
+    if not title or _is_compound_market(title):
+        return None
+    if not (_team_matches(home, title) and _team_matches(away, title)):
+        return None
+    status = str(market.get("status") or "").lower()
+    if status and status not in {"active", "open_no_data", "open_terminal"}:
+        return None
+
+    corpus = " ".join(
+        str(value or "")
+        for value in (title, market.get("category"), market.get("tags"))
+    ).lower()
+    expected_league = str(sport_key or "").lower().rsplit("_", 1)[-1]
+    known_leagues = {"mlb", "nba", "nfl", "nhl", "npb", "ufc", "wnba"}
+    explicit_leagues = _name_tokens(corpus) & known_leagues
+    if explicit_leagues and expected_league in known_leagues and expected_league not in explicit_leagues:
+        return None
+
+    event_at = _parse_time(commence_time)
+    market_at = _market_scheduled_at(market, event_at)
+    if event_at and market_at:
+        delta_hours = abs((market_at - event_at).total_seconds()) / 3600
+        if delta_hours > 12:
+            return None
+        return 4.0 - min(1.0, delta_hours / 12), "high"
+    return 2.0, "medium"
+
+
 def _pm_context(
     ctx: SportsOddsContext,
     event_name: str,
+    *,
+    home: str,
+    away: str,
+    sport_key: str,
+    commence_time: Any,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
     settings = dependencies.settings
     if not bool(getattr(settings, "sports_odds_pm_search_enabled", False)):
-        return {"status": "not-matched", "probability": None, "delta": None, "signal": "PM SEARCH OFF", "matchQuality": "none"}
+        return _not_matched("search-disabled", "PM SEARCH OFF")
     search = dependencies.search_markets
     if search is None:
-        return {"status": "not-matched", "probability": None, "delta": None, "signal": "NO PM MATCH", "matchQuality": "none"}
+        return _not_matched("search-unavailable")
     try:
-        matches = search(event_name, limit=3)
+        matches = search(event_name, limit=10)
     except Exception:
         return {"status": "error", "probability": None, "delta": None, "signal": "PM SEARCH ERR", "matchQuality": "low"}
     rows = matches.get("items") if isinstance(matches, dict) else matches
     if not isinstance(rows, list) or not rows:
-        return {"status": "not-matched", "probability": None, "delta": None, "signal": "NO PM MATCH", "matchQuality": "none"}
-    market = rows[0] if isinstance(rows[0], dict) else {}
+        return _not_matched("search-empty")
+    ranked = []
+    for market in rows:
+        if not isinstance(market, dict):
+            continue
+        match = _candidate_match_score(
+            market,
+            home=home,
+            away=away,
+            sport_key=sport_key,
+            commence_time=commence_time,
+        )
+        if match is not None:
+            ranked.append((match[0], match[1], market))
+    if not ranked:
+        return _not_matched("no-exact-single-game-match")
+    _, quality, market = max(ranked, key=lambda item: item[0])
     price = _safe_float(market.get("latestYesPrice") or market.get("latestPrice"))
     return {
         "status": "matched",
         "marketId": market.get("id"),
         "title": market.get("title"),
-        "probability": price,
+        "probability": None,
+        "rawMarketPrice": price,
+        "probabilityAlignment": "unknown-outcome",
         "delta": None,
-        "signal": "PM LINKED" if price is not None else "PM MATCH",
-        "matchQuality": "medium",
+        "signal": "PM MATCH",
+        "matchQuality": quality,
+        "reason": "both-teams-single-game",
     }
 
 
@@ -197,9 +348,6 @@ def _normalize_event(
     dispersion_values = [float(row["dispersion"]) for row in quotes if row.get("dispersion") is not None]
     consensus = _mean(consensus_values)
     dispersion = max(dispersion_values) if dispersion_values else None
-    pm = _pm_context(ctx, event_name)
-    delta = float(pm["probability"]) - consensus if consensus is not None and pm.get("probability") is not None else None
-    signal = "WATCH" if delta is None else "PM RICH" if delta > 0.04 else "PM CHEAP" if delta < -0.04 else "IN LINE"
     bookmakers = [book for book in event.get("bookmakers") or [] if isinstance(book, dict)]
     return {
         "id": event_id,
@@ -215,10 +363,36 @@ def _normalize_event(
         "consensusProbability": consensus,
         "dispersion": dispersion,
         "quotes": quotes[:4],
-        "pm": {**pm, "delta": delta},
-        "signal": signal,
+        "pm": _not_matched("not-evaluated"),
+        "signal": "WATCH",
         "lastUpdate": max((str(book.get("last_update") or "") for book in bookmakers), default=None),
     }
+
+
+def _attach_pm_context(
+    ctx: SportsOddsContext,
+    item: Dict[str, Any],
+) -> Dict[str, Any]:
+    pm = _pm_context(
+        ctx,
+        str(item.get("event") or ""),
+        home=str(item.get("homeTeam") or ""),
+        away=str(item.get("awayTeam") or ""),
+        sport_key=str(item.get("sportKey") or ""),
+        commence_time=item.get("commenceTime"),
+    )
+    consensus = item.get("consensusProbability")
+    delta = float(pm["probability"]) - float(consensus) if consensus is not None and pm.get("probability") is not None else None
+    signal = "WATCH" if delta is None else "PM RICH" if delta > 0.04 else "PM CHEAP" if delta < -0.04 else "IN LINE"
+    return {**item, "pm": {**pm, "delta": delta}, "signal": signal}
+
+
+def _polymarket_relevance(item: Dict[str, Any]) -> int:
+    sport_key = str(item.get("sportKey") or "").lower()
+    for priority, hints in POLYMARKET_SPORT_PRIORITY:
+        if any(hint in sport_key for hint in hints):
+            return priority
+    return 0
 
 
 def build_sports_odds_cache_key(settings: Any, *, limit: int = DEFAULT_SPORTS_ODDS_LIMIT) -> str:
@@ -315,7 +489,12 @@ def fetch_live_sports_odds_payload(
     dependencies = _dependencies(ctx)
     settings = dependencies.settings
     generated_at = _generated_at(dependencies)
-    api_key = str(getattr(settings, "the_odds_api_key", "") or "").strip()
+    api_key = str(
+        os.environ.get("POLYDATA_SPORTS_ODDS_API_KEY")
+        or os.environ.get("POLYDATA_THE_ODDS_API_KEY")
+        or getattr(settings, "the_odds_api_key", "")
+        or ""
+    ).strip()
     if not api_key:
         return normalize_sports_odds_payload(
             {"generatedAt": generated_at, "status": "degraded", "sources": {"theOddsApi": "missing-key", "polymarket": "optional-local-match"}, "items": []},
@@ -332,6 +511,8 @@ def fetch_live_sports_odds_payload(
         "dateFormat": "iso",
     }
     payload = dependencies.http_json_get(url, params=params, timeout=12, headers=_headers())
+    quota_getter = dependencies.get_http_quota
+    quota = quota_getter() if callable(quota_getter) else {}
     events = payload if isinstance(payload, list) else []
     items = [
         item
@@ -341,15 +522,27 @@ def fetch_live_sports_odds_payload(
         if item is not None
     ]
     items.sort(
-        key=lambda item: (item.get("signal") in {"PM RICH", "PM CHEAP"}, float(item.get("dispersion") or 0), int(item.get("bookmakerCount") or 0)),
+        key=lambda item: (
+            _polymarket_relevance(item),
+            float(item.get("dispersion") or 0),
+            int(item.get("bookmakerCount") or 0),
+        ),
         reverse=True,
     )
+    items = items[:limit]
+    items = [
+        _attach_pm_context(dependencies, item)
+        if index < MAX_PM_SEARCH_ITEMS
+        else item
+        for index, item in enumerate(items)
+    ]
     return normalize_sports_odds_payload(
         {
             "generatedAt": generated_at,
             "status": "ok" if items else "empty",
             "sources": {"theOddsApi": "ok", "polymarket": "optional-local-match"},
-            "items": items[:limit],
+            "quota": quota if isinstance(quota, dict) else {},
+            "items": items,
         },
         settings=settings,
         limit=limit,
@@ -387,9 +580,23 @@ def get_sports_odds_snapshot(
     settings = dependencies.settings
     ttl_seconds = max(30, int(getattr(settings, "sports_odds_ttl_seconds", 180) or 180))
     cache_key = build_sports_odds_cache_key(settings, limit=limit)
-    seeded = _read_seeded_snapshot(dependencies, namespace=SPORTS_ODDS_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
-    if seeded is None and int(limit or 0) != DEFAULT_SPORTS_ODDS_LIMIT:
-        seeded = _read_seeded_snapshot(dependencies, namespace=SPORTS_ODDS_NAMESPACE, cache_key=build_sports_odds_cache_key(settings, limit=DEFAULT_SPORTS_ODDS_LIMIT), ttl_seconds=ttl_seconds)
+    seeded = _read_seeded_snapshot(
+        dependencies,
+        namespace=SPORTS_ODDS_NAMESPACE,
+        cache_key=cache_key,
+        ttl_seconds=ttl_seconds,
+    )
+    try:
+        seed_limit = max(DEFAULT_SPORTS_ODDS_LIMIT, int(os.environ.get("POLYDATA_SPORTS_ODDS_LIMIT", "0") or 0))
+    except ValueError:
+        seed_limit = DEFAULT_SPORTS_ODDS_LIMIT
+    if seeded is None and int(limit or 0) != seed_limit:
+        seeded = _read_seeded_snapshot(
+            dependencies,
+            namespace=SPORTS_ODDS_NAMESPACE,
+            cache_key=build_sports_odds_cache_key(settings, limit=seed_limit),
+            ttl_seconds=ttl_seconds,
+        )
     if seeded is not None:
         return normalize_sports_odds_payload(
             seeded,

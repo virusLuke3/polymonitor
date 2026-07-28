@@ -18,10 +18,12 @@ from api.context import (
 GRID_ESPORTS_NAMESPACE = "snapshot:esports:esports-intel"
 DEFAULT_GRID_ESPORTS_LIMIT = 10
 DEFAULT_GRID_PM_SEARCH_LIMIT = 12
+DEFAULT_GRID_SERIES_CANDIDATE_LIMIT = 50
 
 ALL_SERIES_QUERY = """
-query EsportsIntelSeries($gte: String!, $lte: String!) {
+query EsportsIntelSeries($gte: String!, $lte: String!, $first: Int!) {
   allSeries(
+    first: $first
     filter: { startTimeScheduled: { gte: $gte, lte: $lte } }
     orderBy: StartTimeScheduled
   ) {
@@ -468,6 +470,24 @@ def _window(settings: Any, now_iso: str | None = None) -> Tuple[str, str]:
     return _iso(now - timedelta(days=lookback)), _iso(now + timedelta(days=lookahead))
 
 
+def _select_relevant_series(
+    nodes: List[Dict[str, Any]],
+    *,
+    limit: int,
+    reference_at: str,
+) -> List[Dict[str, Any]]:
+    reference = _parse_iso(reference_at) or _utc_now()
+
+    def distance(row: Tuple[int, Dict[str, Any]]) -> Tuple[float, int]:
+        index, node = row
+        scheduled = _parse_iso(node.get("startTimeScheduled"))
+        seconds = abs((scheduled - reference).total_seconds()) if scheduled else float("inf")
+        return seconds, index
+
+    ranked = sorted(enumerate(nodes), key=distance)
+    return [node for _, node in ranked[: max(1, int(limit or DEFAULT_GRID_ESPORTS_LIMIT))]]
+
+
 def build_grid_esports_cache_key(settings: Any, *, limit: int = DEFAULT_GRID_ESPORTS_LIMIT) -> str:
     fingerprint = hashlib.sha256(
         "|".join(
@@ -590,10 +610,17 @@ def fetch_live_grid_esports_payload(
     if not central_url:
         raise RuntimeError("GRID central data URL is missing")
 
-    payload = _post_graphql(dependencies, central_url, ALL_SERIES_QUERY, {"gte": gte, "lte": lte}, timeout=20)
+    candidate_limit = max(DEFAULT_GRID_SERIES_CANDIDATE_LIMIT, int(limit or DEFAULT_GRID_ESPORTS_LIMIT) * 5)
+    payload = _post_graphql(
+        dependencies,
+        central_url,
+        ALL_SERIES_QUERY,
+        {"gte": gte, "lte": lte, "first": candidate_limit},
+        timeout=20,
+    )
     _raise_graphql_errors(payload)
     nodes, total_count = _extract_series_nodes(payload)
-    selected = nodes[: max(1, int(limit or DEFAULT_GRID_ESPORTS_LIMIT))]
+    selected = _select_relevant_series(nodes, limit=limit, reference_at=generated_at)
     state_statuses: List[str] = []
     items: List[Dict[str, Any]] = []
     for node in selected:
