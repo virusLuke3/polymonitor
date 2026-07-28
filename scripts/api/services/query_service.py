@@ -576,7 +576,7 @@ def get_recent_oracle_events(
     rows = dependencies.query_all(
         """
         SELECT
-            oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
+            oe.id, oe.tx_hash, oe.log_index, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
             oe.market_id, COALESCE(m.title, oe.market_title) AS market_title, oe.matched_by,
             oe.question_id, oe.condition_id, oe.proposed_price, oe.settled_price, oe.payout,
             oe.requester, oe.proposer, oe.disputer, oe.proposal_transaction, oe.settlement_transaction,

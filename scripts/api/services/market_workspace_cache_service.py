@@ -377,7 +377,7 @@ def get_market_detail_payload(
     market_id: int,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(context)
-    key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 2})
+    key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 3})
     result = _cached_layer(
         dependencies,
         layer="detail",

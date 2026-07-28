@@ -1948,7 +1948,7 @@ def _get_oracle_events_by_market_id(
                 ORDER BY id
             )
             SELECT
-                oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
+                oe.id, oe.tx_hash, oe.log_index, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
                 COALESCE(oe.market_id, m.id) AS market_id, COALESCE(m.title, oe.market_title) AS market_title,
                 oe.matched_by, COALESCE(NULLIF(oe.question_id, ''), m.question_id) AS question_id,
                 COALESCE(NULLIF(oe.condition_id, ''), m.condition_id) AS condition_id,
@@ -1978,7 +1978,7 @@ def _get_oracle_events_by_market_id(
     rows = dependencies.query_all(
         f"""
         SELECT
-            oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
+            oe.id, oe.tx_hash, oe.log_index, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
             COALESCE(oe.market_id, m.id) AS market_id, COALESCE(m.title, oe.market_title) AS market_title,
             oe.matched_by, COALESCE(NULLIF(oe.question_id, ''), m.question_id) AS question_id,
             COALESCE(NULLIF(oe.condition_id, ''), m.condition_id) AS condition_id,
@@ -2008,7 +2008,7 @@ def get_recent_oracle_snapshot(
     limit: int = 24,
 ) -> List[Dict[str, Any]]:
     dependencies = RecentOracleDependencies.from_context(ctx)
-    cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"limit": limit, "v": 2}, sort_keys=True, ensure_ascii=True)
     return dependencies.get_snapshot_payload(
         "snapshot:oracle_recent",
         cache_key,
@@ -2578,7 +2578,7 @@ def _get_market_oracle_payload(
     )
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    cache_key = json.dumps({"marketId": int(market_id), "v": 2}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"marketId": int(market_id), "v": 3}, sort_keys=True, ensure_ascii=True)
 
     def build_payload() -> Dict[str, Any]:
         return {

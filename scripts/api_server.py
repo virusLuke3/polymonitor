@@ -85,7 +85,7 @@ from api.context import RouteContext, ServiceContext
 from api.db_pool import build_api_connection_factory
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, breaking_event_radar_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_transport_shipping_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, world_cup_match_ops_service, worldcup_dashboard_service, worldcup_intel_service
+from api.services import address_service, bootstrap_service, breaking_event_radar_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_transport_shipping_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_quality_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, world_cup_match_ops_service, worldcup_dashboard_service, worldcup_intel_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -300,6 +300,7 @@ def build_route_context(service_context: ServiceContext) -> RouteContext:
         ),
         "get_gamma_active_market_filter": lambda: market_data_client.get_gamma_active_market_filter(build_service_context()),
         "get_market_detail_payload": lambda market_id: market_workspace_cache_service.get_market_detail_payload(build_service_context(), market_id),
+        "get_market_data_quality_payload": lambda: market_quality_service.get_market_data_quality_payload(build_service_context()),
         "get_market_workspace_payload": lambda market_id: market_workspace_cache_service.get_market_workspace_payload(build_service_context(), market_id),
         "get_market_group_snapshot": get_market_group_snapshot,
         "get_market_groups_payload": lambda query="", page=1, page_size=80, sort="active": market_group_service.get_market_groups_payload(
@@ -1415,6 +1416,7 @@ def normalize_oracle_event(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("id"),
         "txHash": row.get("tx_hash"),
+        "logIndex": row.get("log_index"),
         "blockNumber": row.get("block_number"),
         "eventTime": row.get("event_time"),
         "eventStatus": row.get("event_status"),

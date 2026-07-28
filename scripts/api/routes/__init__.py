@@ -12,6 +12,7 @@ from .agent_snapshots import create_agent_snapshot_blueprint
 from .analytics import create_analytics_blueprint
 from .bootstrap import create_bootstrap_blueprint
 from .content import create_content_blueprint
+from .data_quality import create_data_quality_blueprint
 from .lob import create_lob_blueprint
 from .market_groups import create_market_groups_blueprint
 from .markets import create_markets_blueprint
@@ -34,6 +35,7 @@ BLUEPRINT_FACTORIES: Final[tuple[BlueprintFactory, ...]] = (
     create_runtime_sports_blueprint,
     create_schema_blueprint,
     create_content_blueprint,
+    create_data_quality_blueprint,
     create_analytics_blueprint,
     create_system_blueprint,
     create_lob_blueprint,
