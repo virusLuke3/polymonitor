@@ -422,6 +422,17 @@ discovered
 - Design System
 - Operations Workspace
 
+#### 2.1 Panel Runtime 2.0 与 App Shell（已完成，2026-07-28）
+
+- Panel contract 已增加 workspace、data source、permission、batch limit、refresh policy、retry 和 AbortSignal 边界。
+- 单一 `usePanelRuntime` 已接管 batch/single fallback、inflight 去重、后台暂停、interval、指数退避、stale/degraded/error 状态与 last-updated。
+- App 不再维护独立的 fast、slow、interval runtime 调度；公共 promo、header 和 navigation 已迁入 `AppShell`。
+- panel slot 已统一 loading、stale、degraded、error、suspended 和手动重试状态；旧数据会在瞬时失败时继续显示。
+- 已隐藏的 World Cup workspace 和 panels 不再进入活动模块注册表、JavaScript chunk 或独立 CSS import，源码仍保留以便未来赛事复用。
+- 本阶段继续保留 Quant、LOB、PolySignal、PnL/position、address 和数据管道边界，不在平台骨架重构中改写其业务实现。
+
+下一批平台骨架工作：继续拆分 `App.tsx` 与巨型 `panels.css`，随后建立 API schema/OpenAPI 和跨 panel 的统一响应 envelope。
+
 ### 第三阶段：预测市场产品化
 
 - Market Workspace

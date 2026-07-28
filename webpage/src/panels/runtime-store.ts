@@ -1,4 +1,10 @@
-import type { PanelModule, PanelRefreshTier, PanelRuntimeData } from './types';
+import type {
+  PanelFetchContext,
+  PanelModule,
+  PanelRefreshTier,
+  PanelRuntimeData,
+} from './types';
+import { getPanelRefreshPolicy } from './types';
 import { fetchRuntimePanels } from '@/services/api';
 
 const PANEL_RUNTIME_LIMITS: Record<string, number> = {
@@ -47,46 +53,88 @@ export function buildRuntimeDataPatch(panelId: string, value: unknown): PanelRun
 }
 
 export function getRefreshablePanels(panels: PanelModule[], tier: PanelRefreshTier): PanelModule[] {
-  return panels.filter((panel) => panel.refresh?.tier === tier && typeof panel.fetchData === 'function');
+  return panels.filter((panel) => getPanelRefreshPolicy(panel)?.tier === tier && typeof panel.fetchData === 'function');
 }
+
+export type PanelRuntimeFetchOptions = {
+  signal: AbortSignal;
+  reason: PanelFetchContext['reason'];
+  maxBatchSize?: number;
+  onPanelData?: (panelId: string, value: unknown) => void;
+  onPanelError?: (panelId: string, error: Error) => void;
+  onPanelSettled?: (panelId: string) => void;
+};
+
+export type PanelRuntimeFetchResult = {
+  data: PanelRuntimeData;
+  errors: Record<string, Error>;
+};
 
 export async function fetchPanelRuntimeData(
   panels: PanelModule[],
-  onPanelData?: (panelId: string, value: unknown) => void,
-  onPanelSettled?: (panelId: string) => void,
-): Promise<PanelRuntimeData> {
+  options: PanelRuntimeFetchOptions,
+): Promise<PanelRuntimeFetchResult> {
   const entries = panels.filter((panel) => typeof panel.fetchData === 'function');
-  const patch: PanelRuntimeData = {};
-  if (entries.length > 1) {
+  const data: PanelRuntimeData = {};
+  const errors: Record<string, Error> = {};
+  const maxBatchSize = Math.max(1, options.maxBatchSize || 12);
+
+  const recordData = (panelId: string, value: unknown) => {
+    data[panelId] = value;
+    options.onPanelData?.(panelId, value);
+  };
+  const recordError = (panelId: string, error: unknown) => {
+    const normalized = error instanceof Error ? error : new Error(String(error || 'Panel refresh failed.'));
+    errors[panelId] = normalized;
+    options.onPanelError?.(panelId, normalized);
+  };
+  const fetchIndividually = async (individualEntries: PanelModule[]) => {
+    await Promise.all(individualEntries.map(async (panel) => {
+      try {
+        const value = await panel.fetchData!({ signal: options.signal, reason: options.reason });
+        if (value !== undefined) recordData(panel.id, value);
+        else recordError(panel.id, new Error(`Panel ${panel.id} returned no data.`));
+      } catch (error) {
+        recordError(panel.id, error);
+      } finally {
+        options.onPanelSettled?.(panel.id);
+      }
+    }));
+  };
+
+  for (let offset = 0; offset < entries.length; offset += maxBatchSize) {
+    const batch = entries.slice(offset, offset + maxBatchSize);
+    if (batch.length <= 1) {
+      await fetchIndividually(batch);
+      continue;
+    }
     try {
-      const ids = entries.map((panel) => panel.id);
-      const payload = await fetchRuntimePanels(ids, PANEL_RUNTIME_LIMITS);
+      const ids = batch.map((panel) => panel.id);
+      const payload = await fetchRuntimePanels(ids, PANEL_RUNTIME_LIMITS, options.signal);
       const values = payload.panels || {};
-      entries.forEach((panel) => {
+      const batchErrors = payload.errors || {};
+      batch.forEach((panel) => {
         const value = values[panel.id];
         if (value !== undefined) {
-          patch[panel.id] = value;
-          onPanelData?.(panel.id, value);
+          recordData(panel.id, value);
+        } else {
+          recordError(panel.id, new Error(batchErrors[panel.id] || `Batch response omitted panel ${panel.id}.`));
         }
-        onPanelSettled?.(panel.id);
+        options.onPanelSettled?.(panel.id);
       });
-      return patch;
-    } catch {
+    } catch (error) {
+      if (options.signal.aborted) {
+        batch.forEach((panel) => {
+          recordError(panel.id, error);
+          options.onPanelSettled?.(panel.id);
+        });
+        continue;
+      }
       // Fall back to individual panel requests if the batch route is unavailable.
+      await fetchIndividually(batch);
     }
   }
-  await Promise.all(entries.map(async (panel) => {
-    try {
-      const value = await panel.fetchData!();
-      patch[panel.id] = value;
-      onPanelData?.(panel.id, value);
-    } catch {
-      // Runtime panels are opportunistic; keep the last visible seed on transient misses.
-    } finally {
-      onPanelSettled?.(panel.id);
-    }
-  }));
-  return patch;
+  return { data, errors };
 }
 
 export function mergeRuntimeData(current: PanelRuntimeData, patch: PanelRuntimeData): PanelRuntimeData {

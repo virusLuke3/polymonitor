@@ -66,36 +66,12 @@ import { panel as nbaIntel } from './nba-intel';
 import { panel as espnMatchupPredictor } from './espn-matchup-predictor';
 import { panel as esportsIntel } from './esports-intel';
 import { panel as sportsOdds } from './sports-odds';
-import { panel as worldCupMatchOps } from './world-cup-match-ops';
 import { panel as inflationNowcast } from './inflation-nowcast';
 import { panel as jin10Flash } from './jin10-flash';
 import { panel as newMarketSignals } from './new-market-signals';
 import { panel as lobDepth } from './lob-depth';
 import { panel as f1Trackside } from './f1-trackside';
-import { panel as worldcupCalendar } from './worldcup-calendar';
-import { panel as worldcupMatchControl } from './worldcup-match-control';
-import { panel as worldcupWinProbability } from './worldcup-win-probability';
-import { panel as worldcupVenueRisk } from './worldcup-venue-risk';
-import { panel as worldcupMarketBoard } from './worldcup-market-board';
-import { panel as worldcupGroupAdvance } from './worldcup-group-advance';
-import { panel as worldcupTeamPower } from './worldcup-team-power';
-import { panel as worldcupInjuryLoad } from './worldcup-injury-load';
-import { panel as worldcupMatchTempo } from './worldcup-match-tempo';
-import { panel as worldcupOddsLiquidity } from './worldcup-odds-liquidity';
-import { panel as worldcupRefCards } from './worldcup-ref-cards';
-import { panel as worldcupTravelLoad } from './worldcup-travel-load';
-import { panel as worldcupNewsImpact } from './worldcup-news-impact';
-import { panel as worldcupNews } from './worldcup-news';
-import { panel as worldcupTeamStatus } from './worldcup-team-status';
-import { panel as worldcupLineupBoard } from './worldcup-lineup-board';
-import { panel as worldcupMatchModel } from './worldcup-match-model';
-import { panel as worldcupGroupTable } from './worldcup-group-table';
-import { panel as worldcupMediaWire } from './worldcup-media-wire';
-import { panel as worldcupHostVenue } from './worldcup-host-venue';
-import { panel as worldcupVenueRef } from './worldcup-venue-ref';
-import { panel as worldcupSourceAudit } from './worldcup-source-audit';
-
-const ALL_PANEL_MODULES: PanelModule[] = [
+export const PANEL_MODULES: PanelModule[] = [
   activeMarkets,
   globalOrderfilled,
   oracleFeed,
@@ -164,37 +140,8 @@ const ALL_PANEL_MODULES: PanelModule[] = [
   espnMatchupPredictor,
   esportsIntel,
   sportsOdds,
-  worldCupMatchOps,
   jin10Flash,
   newMarketSignals,
   lobDepth,
   f1Trackside,
-  worldcupCalendar,
-  worldcupMatchControl,
-  worldcupWinProbability,
-  worldcupVenueRisk,
-  worldcupMarketBoard,
-  worldcupGroupAdvance,
-  worldcupTeamPower,
-  worldcupInjuryLoad,
-  worldcupMatchTempo,
-  worldcupOddsLiquidity,
-  worldcupRefCards,
-  worldcupTravelLoad,
-  worldcupNewsImpact,
-  worldcupNews,
-  worldcupTeamStatus,
-  worldcupLineupBoard,
-  worldcupMatchModel,
-  worldcupGroupTable,
-  worldcupMediaWire,
-  worldcupHostVenue,
-  worldcupVenueRef,
-  worldcupSourceAudit,
 ];
-
-// The tournament workspace is retired from the active product surface. Keep
-// the implementations available so they can be restored for a future event.
-export const PANEL_MODULES: PanelModule[] = ALL_PANEL_MODULES.filter(
-  (panel) => !panel.id.startsWith('worldcup-') && !panel.id.startsWith('world-cup-'),
-);

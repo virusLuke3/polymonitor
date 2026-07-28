@@ -1,13 +1,15 @@
 import { type ComponentChildren } from 'preact';
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { AppShell } from '@/components/AppShell';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
 import { PanelLoading } from '@/components/Panel';
 import WeatherDeckMap from '@/components/WeatherDeckMap';
 import { WeatherMapCityInspector } from '@/components/WeatherMapCityInspector';
 import { WorldGlobe, type WorldGlobeStatusMetrics } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
-import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
+import { mergeRuntimeData } from '@/panels/runtime-store';
+import { usePanelRuntime } from '@/panels/usePanelRuntime';
 import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative } from '@/panels/shared/formatters';
 import {
   fetchAllActiveMarkets,
@@ -60,7 +62,7 @@ import type {
   TradeRow,
   WorkspaceBundle,
 } from '@/types';
-import type { PanelRuntimeData } from '@/panels/types';
+import type { PanelRuntimeData, PanelRuntimeStatus } from '@/panels/types';
 
 type LayerToggle = {
   id: string;
@@ -80,30 +82,14 @@ const PROMOTED_WIDE_PANEL_IDS = ['breaking-event-radar', 'global-transport-shipp
 const MARKET_GROUP_SORT_STORAGE_KEY = 'wm:marketGroupSort:v1';
 const DEFAULT_MAP_VIEW_MODE: MapViewMode = '2d';
 const VIEW_STORAGE_KEY = 'polydata:map-view:v4';
-const WORKSPACE_MODE_STORAGE_KEY = 'polydata:workspace-mode:v1';
 const REGION_STORAGE_KEY = 'polydata:region:v1';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
 const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
 const GEO_SHOCK_STORAGE_KEY = 'polydata:seed:world:geo-sanctions-shock:v1';
 const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
-const APP_VERSION = 'v0.2.1';
 const QuantWorkspace = lazy(() => import('@/workspaces/quant/QuantWorkspace').then((module) => ({ default: module.QuantWorkspace })));
-const WorldCupWorkspace = lazy(() => import('@/workspaces/worldcup/WorldCupWorkspace').then((module) => ({ default: module.WorldCupWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
-const SITE_NAV_LINKS = [
-  { label: 'Blog', href: '/blog/' },
-  { label: 'Docs', href: '/docs/documentation/' },
-  { label: 'Paper', href: 'https://arxiv.org/pdf/2604.20421', external: true },
-  { label: 'GitHub', href: 'https://github.com/virusLuke3/polymonitor', external: true },
-  { label: 'Quant', href: '/quant' },
-];
-const INTERVAL_RUNTIME_PANELS = RUNTIME_PANEL_MODULES.filter(
-  (panel) => typeof panel.fetchData === 'function' && Number(panel.refresh?.intervalMs || 0) > 0,
-);
-const FAST_RUNTIME_PANELS = getRefreshablePanels(RUNTIME_PANEL_MODULES, 'fast').filter((panel) => !panel.refresh?.intervalMs);
-const SLOW_RUNTIME_PANELS = getRefreshablePanels(RUNTIME_PANEL_MODULES, 'slow').filter((panel) => !panel.refresh?.intervalMs);
-
 const INITIAL_LAYERS: LayerToggle[] = [
   { id: 'markets', label: 'Polymarket Markets', icon: '◎', enabled: true, hint: 'ACTIVE' },
   { id: 'oracle', label: 'Oracle Events', icon: '◌', enabled: true, hint: 'LIVE' },
@@ -147,8 +133,6 @@ const PANEL_MAX_COL_SPAN = 3;
 
 type PanelLayoutPrefs = Record<string, { rowSpan?: number; colSpan?: number }>;
 type PanelSizeHint = 'default' | 'wide' | 'tall' | undefined;
-type WorkspaceMode = 'world' | 'worldcup';
-const WORLD_CUP_WORKSPACE_VISIBLE = false;
 
 function clampSpan(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(value)));
@@ -526,12 +510,6 @@ function readMarketGroupSortStorage(): MarketGroupSort {
     : 'active';
 }
 
-function readWorkspaceMode(): WorkspaceMode {
-  const override = readSearchParam('workspace');
-  if (WORLD_CUP_WORKSPACE_VISIBLE && override === 'worldcup') return 'worldcup';
-  return 'world';
-}
-
 function findGroupForMarketId(groups: MarketGroupItem[], marketId: number | null) {
   if (!marketId) return null;
   return groups.find((group) => (group.outcomes || []).some((outcome) => Number(outcome.marketId) === marketId)) || null;
@@ -551,30 +529,6 @@ type RuntimePanelRefreshOptions = {
   bootstrapPayload?: BootstrapPayload | null;
   activePanelIds?: string[];
 };
-
-type IdleSchedulerWindow = Window & typeof globalThis & {
-  requestIdleCallback?: (
-    callback: (deadline: IdleDeadline) => void,
-    options?: { timeout: number },
-  ) => number;
-  cancelIdleCallback?: (handle: number) => void;
-};
-
-function scheduleIdleTask(task: () => void) {
-  if (typeof window === 'undefined') return () => undefined;
-  const idleWindow = window as IdleSchedulerWindow;
-  if (typeof idleWindow.requestIdleCallback === 'function') {
-    // Give slow runtime panels a bounded delay so animated views do not starve them forever.
-    const handle = idleWindow.requestIdleCallback(() => task(), { timeout: 1200 });
-    return () => {
-      if (typeof idleWindow.cancelIdleCallback === 'function') {
-        idleWindow.cancelIdleCallback(handle);
-      }
-    };
-  }
-  const handle = window.setTimeout(task, 0);
-  return () => window.clearTimeout(handle);
-}
 
 function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
   const latest = market.latestPrice ?? null;
@@ -802,6 +756,8 @@ function PanelWorkspaceSlot({
   layoutPrefs,
   children,
   loading = false,
+  runtimeStatus,
+  onRetry,
   className = '',
   layoutManaged = true,
   resizeEnabled = true,
@@ -814,6 +770,8 @@ function PanelWorkspaceSlot({
   layoutPrefs: PanelLayoutPrefs;
   children: ComponentChildren;
   loading?: boolean;
+  runtimeStatus?: PanelRuntimeStatus;
+  onRetry?: () => void;
   className?: string;
   layoutManaged?: boolean;
   resizeEnabled?: boolean;
@@ -1088,12 +1046,9 @@ function PanelWorkspaceSlot({
         '--wm-panel-col-span': String(layout.colSpan),
       } as Record<string, string>}
   >
-      {children}
-      {loading ? (
-        <div className="wm-panel-slot-loading">
-          <PanelLoading detail="正在同步这个 panel 的实时数据" />
-        </div>
-      ) : null}
+      <PanelRuntimeBoundary loading={loading} status={runtimeStatus} onRetry={onRetry}>
+        {children}
+      </PanelRuntimeBoundary>
       {resizeEnabled ? (
         <>
           <button
@@ -1116,6 +1071,47 @@ function PanelWorkspaceSlot({
   );
 }
 
+function PanelRuntimeBoundary({
+  children,
+  loading,
+  status,
+  onRetry,
+}: {
+  children: ComponentChildren;
+  loading: boolean;
+  status?: PanelRuntimeStatus;
+  onRetry?: () => void;
+}) {
+  const phase = status?.phase || 'idle';
+  const showNotice = phase === 'stale' || phase === 'degraded' || phase === 'error' || phase === 'suspended';
+  const updatedLabel = status?.updatedAt
+    ? new Date(status.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null;
+  const label = phase === 'degraded'
+    ? '实时刷新失败，继续显示上一份数据'
+    : phase === 'stale'
+      ? '数据已过 freshness 窗口'
+      : phase === 'suspended'
+        ? '后台刷新已暂停'
+        : '实时数据暂不可用';
+  return (
+    <>
+      {children}
+      {loading ? (
+        <div className="wm-panel-slot-loading">
+          <PanelLoading detail="正在同步这个 panel 的实时数据" />
+        </div>
+      ) : null}
+      {showNotice && !loading ? (
+        <div className={`wm-panel-runtime-notice is-${phase}`} role="status">
+          <span>{label}{updatedLabel ? ` · 上次更新 ${updatedLabel}` : ''}</span>
+          {onRetry && phase !== 'suspended' ? <button type="button" onClick={onRetry}>重试</button> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function WorldMonitorApp() {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [markets, setMarkets] = useState<MarketListItem[]>([]);
@@ -1132,8 +1128,18 @@ function WorldMonitorApp() {
   const [globalTrades, setGlobalTrades] = useState<TradeRow[]>([]);
   const [globalOracle, setGlobalOracle] = useState<OracleEvent[]>([]);
   const [latestContent, setLatestContent] = useState<ContentItem[]>([]);
-  const [runtimeData, setRuntimeData] = useState<PanelRuntimeData>(() => readGeoShockRuntimeSeed());
-  const [panelLoadingIds, setPanelLoadingIds] = useState<Set<string>>(() => new Set());
+  const [activePanelIds, setActivePanelIds] = useState<string[]>([]);
+  const {
+    runtimeData,
+    setRuntimeData,
+    getStatus: getPanelRuntimeStatus,
+    refreshPanels,
+    refreshTier,
+  } = usePanelRuntime({
+    panels: RUNTIME_PANEL_MODULES,
+    activePanelIds,
+    initialData: readGeoShockRuntimeSeed(),
+  });
   const [marketQuery] = useState('');
   const [layerQuery, setLayerQuery] = useState('');
   const [commandQuery, setCommandQuery] = useState('');
@@ -1143,14 +1149,11 @@ function WorldMonitorApp() {
   const [commandMarketSearchLoading, setCommandMarketSearchLoading] = useState(false);
   const [commandMarketSearchError, setCommandMarketSearchError] = useState('');
   const [layers, setLayers] = useState<LayerToggle[]>(INITIAL_LAYERS);
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => readWorkspaceMode());
-  const [activePanelIds, setActivePanelIds] = useState<string[]>([]);
   const [panelLayoutPrefs, setPanelLayoutPrefs] = useState<PanelLayoutPrefs>(() => readJsonStorage<PanelLayoutPrefs>(PANEL_LAYOUT_STORAGE_KEY, {}));
   const [panelPrefsLoaded, setPanelPrefsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [bundleLoading, setBundleLoading] = useState(false);
-  const [now, setNow] = useState(() => new Date());
   const [viewMode, setViewMode] = useState<MapViewMode>(() => {
     const override = readSearchParam('view');
     if (isMapViewMode(override)) return override;
@@ -1182,22 +1185,8 @@ function WorldMonitorApp() {
   const selectedMarketIdRef = useRef<number | null>(null);
   const selectedMarketGroupIdRef = useRef<string | null>(null);
   const marketGroupSortRef = useRef<MarketGroupSort>(marketGroupSort);
-  const slowRefreshCancelRef = useRef<(() => void) | null>(null);
-  const slowRefreshInFlightRef = useRef<Set<string>>(new Set());
   const bundleRequestSeqRef = useRef(0);
   const bundleCacheRef = useRef<Map<number, WorkspaceBundle>>(new Map());
-
-  const setPanelsLoading = (panelIds: string[], nextLoading: boolean) => {
-    if (!panelIds.length) return;
-    setPanelLoadingIds((current) => {
-      const next = new Set(current);
-      panelIds.forEach((panelId) => {
-        if (nextLoading) next.add(panelId);
-        else next.delete(panelId);
-      });
-      return next;
-    });
-  };
 
   const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
     const eventId = group.eventId != null ? String(group.eventId) : null;
@@ -1221,8 +1210,6 @@ function WorldMonitorApp() {
 
   async function refreshFastRuntimePanels(options: RuntimePanelRefreshOptions = {}): Promise<{ marketsPayload: MarketsPayload | null; marketGroupsPayload: MarketGroupsPayload | null }> {
     const bootstrapPayload = options.bootstrapPayload || bootstrapRef.current;
-    const fastRuntimePanelIds = FAST_RUNTIME_PANELS.map((panel) => panel.id);
-    setPanelsLoading(fastRuntimePanelIds, true);
     const settled = await Promise.allSettled([
       fetchSystemHealth(),
       fetchRecentTrades(24),
@@ -1230,13 +1217,7 @@ function WorldMonitorApp() {
       fetchLatestContent(12),
       fetchMarketGroups('', FAST_MARKETS_PAGE_SIZE, marketGroupSortRef.current),
       fetchAllActiveMarkets('', FAST_MARKETS_PAGE_SIZE),
-      fetchPanelRuntimeData(
-        FAST_RUNTIME_PANELS,
-        (panelId, value) => {
-          setRuntimeData((current) => mergeRuntimeData(current, { [panelId]: value }));
-        },
-        (panelId) => setPanelsLoading([panelId], false),
-      ),
+      refreshTier('fast', { panelIds: options.activePanelIds, reason: bootstrapPayload ? 'bootstrap' : 'refresh' }),
     ]);
 
     const fallbackMarkets = bootstrapPayload?.activeMarketsPreview || [];
@@ -1263,60 +1244,20 @@ function WorldMonitorApp() {
     } else if (bootstrapPayload?.commoditiesPreview) {
       setRuntimeData((current) => mergeRuntimeData(current, { 'commodities-watch': bootstrapPayload.commoditiesPreview }));
     }
-    setPanelsLoading(fastRuntimePanelIds, false);
-
     return {
       marketsPayload: settled[5].status === 'fulfilled' ? settled[5].value : null,
       marketGroupsPayload: settled[4].status === 'fulfilled' ? settled[4].value : null,
     };
   }
 
-  async function refreshSlowRuntimePanels(panels: typeof SLOW_RUNTIME_PANELS = SLOW_RUNTIME_PANELS) {
-    const eligible = panels.filter((panel) => !slowRefreshInFlightRef.current.has(panel.id));
-    if (!eligible.length) return;
-    eligible.forEach((panel) => slowRefreshInFlightRef.current.add(panel.id));
-    setPanelsLoading(eligible.map((panel) => panel.id), true);
-    try {
-      const patch = await fetchPanelRuntimeData(eligible, (panelId, value) => {
-        setRuntimeData((current) => mergeRuntimeData(current, { [panelId]: value }));
-      }, (panelId) => setPanelsLoading([panelId], false));
-      setRuntimeData((current) => mergeRuntimeData(current, patch));
-    } finally {
-      eligible.forEach((panel) => slowRefreshInFlightRef.current.delete(panel.id));
-      setPanelsLoading(eligible.map((panel) => panel.id), false);
-    }
-  }
-
-  function scheduleSlowRuntimePanels(activePanelSet = new Set(activePanelIds), excludedPanelIds = new Set<string>()) {
-    const panels = SLOW_RUNTIME_PANELS.filter((panel) => activePanelSet.has(panel.id) && !excludedPanelIds.has(panel.id));
-    if (!panels.length || slowRefreshCancelRef.current) return;
-    slowRefreshCancelRef.current = scheduleIdleTask(() => {
-      slowRefreshCancelRef.current = null;
-      void refreshSlowRuntimePanels(panels)
-        .catch((loadError) => {
-          setError((previous) => previous || (loadError instanceof Error ? loadError.message : 'Failed to refresh slow runtime panels.'));
-        });
-    });
-  }
-
   async function refreshRuntimePanels(options: RuntimePanelRefreshOptions = {}) {
     const fastResult = await refreshFastRuntimePanels(options);
-    const activePanelSet = new Set(options.activePanelIds || activePanelIds);
-    const visibleSlowPanels = SLOW_RUNTIME_PANELS.filter((panel) => activePanelSet.has(panel.id));
-    if (visibleSlowPanels.length) {
-      void refreshSlowRuntimePanels(visibleSlowPanels).catch((loadError) => {
-        setError((previous) => previous || (loadError instanceof Error ? loadError.message : 'Failed to refresh visible runtime panels.'));
-      });
-    }
-    scheduleSlowRuntimePanels(activePanelSet, new Set(visibleSlowPanels.map((panel) => panel.id)));
+    void refreshTier('slow', {
+      panelIds: options.activePanelIds,
+      reason: options.bootstrapPayload ? 'bootstrap' : 'refresh',
+    });
     return fastResult;
   }
-
-  useEffect(() => {
-    if (workspaceMode !== 'worldcup') return undefined;
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, [workspaceMode]);
 
   useEffect(() => {
     const savedPanelIds = sanitizePanelIds(readJsonStorage<string[]>(PANEL_STORAGE_KEY, []));
@@ -1375,18 +1316,6 @@ function WorldMonitorApp() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(MARKET_GROUP_SORT_STORAGE_KEY, marketGroupSort);
   }, [marketGroupSort]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, workspaceMode);
-    const url = new URL(window.location.href);
-    if (workspaceMode === 'worldcup') {
-      url.searchParams.set('workspace', 'worldcup');
-    } else {
-      url.searchParams.delete('workspace');
-    }
-    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [workspaceMode]);
 
   useEffect(() => {
     writeGeoShockRuntimeSeed(runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined);
@@ -1459,11 +1388,6 @@ function WorldMonitorApp() {
     selectedMarketGroupOutcomeKey,
     selectedMarketId,
   ]);
-
-  useEffect(() => () => {
-    slowRefreshCancelRef.current?.();
-    slowRefreshCancelRef.current = null;
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1573,41 +1497,6 @@ function WorldMonitorApp() {
     return () => {
       cancelled = true;
       window.clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const timers: number[] = [];
-
-    async function refreshRuntimePanel(panelId: string) {
-      try {
-        const panel = PANEL_REGISTRY[panelId];
-        setPanelsLoading([panelId], true);
-        const payload = await panel?.fetchData?.();
-        if (!cancelled && payload !== undefined) {
-          setRuntimeData((current) => mergeRuntimeData(current, { [panelId]: payload }));
-        }
-      } catch {
-        // Keep the latest visible runtime snapshot rather than flashing empty on transient upstream misses.
-      } finally {
-        if (!cancelled) setPanelsLoading([panelId], false);
-      }
-    }
-
-    for (const panel of INTERVAL_RUNTIME_PANELS) {
-      void refreshRuntimePanel(panel.id);
-      const intervalMs = Number(panel.refresh?.intervalMs || 0);
-      if (intervalMs > 0) {
-        timers.push(window.setInterval(() => {
-          void refreshRuntimePanel(panel.id);
-        }, intervalMs));
-      }
-    }
-
-    return () => {
-      cancelled = true;
-      timers.forEach((timer) => window.clearInterval(timer));
     };
   }, []);
 
@@ -1980,8 +1869,14 @@ function WorldMonitorApp() {
   const runtimePayloadLoaded = (panelId: string) => runtimeData[panelId] !== undefined && runtimeData[panelId] !== null;
   const panelShouldShowLoading = (panelId: string) => {
     if (loading && !bootstrap) return true;
-    if (panelLoadingIds.has(panelId) && !runtimePayloadLoaded(panelId)) return true;
+    if (getPanelRuntimeStatus(panelId).phase === 'loading' && !runtimePayloadLoaded(panelId)) return true;
     return false;
+  };
+  const retryRuntimePanel = (panelId: string) => {
+    const panel = PANEL_REGISTRY[panelId];
+    if (panel?.fetchData) {
+      void refreshPanels([panel], { panelIds: [panelId], reason: 'manual', force: true });
+    }
   };
 
   const panelContext: PanelRenderContext = {
@@ -2148,7 +2043,6 @@ function WorldMonitorApp() {
   const focusCommandMarket = (market: MarketListItem) => {
     selectedMarketGroupIdRef.current = null;
     selectedMarketIdRef.current = market.id;
-    setWorkspaceMode('world');
     setSelectedMarketGroupId(null);
     setSelectedMarketGroupOutcomeKey(null);
     setSelectedMarketId(market.id);
@@ -2197,84 +2091,17 @@ function WorldMonitorApp() {
   const zoomOut = () => setMapZoom((current) => clampMapZoom(current - 1));
 
   return (
-    <div className={`wm-shell${workspaceMode === 'worldcup' ? ' wm-shell-worldcup' : ''}`}>
-      <div className="wm-promo">
-        <span className="wm-pro-badge">PRO</span>
-        <span className="wm-promo-copy">PolyMonitor Pro is coming - sharper Polymarket signal, less noise, AI briefs for flow, oracle risk, and macro context.</span>
-        <button className="wm-promo-cta" type="button">Reserve your spot</button>
-      </div>
+    <AppShell
+      regionLabel={REGION_OPTIONS.find((item) => item.value === region)?.label || 'Global'}
+      orderFilledCount={liveMetrics[1]?.value || 0}
+      onCycleRegion={cycleRegion}
+      onResetWorkspace={resetWorkspace}
+      onOpenCommandPalette={() => setShowCommandPalette(true)}
+      onTogglePanelLibrary={() => setShowPanelLibrary((current) => !current)}
+      onOpenSettings={() => setShowSettings(true)}
+      onCopyLink={() => void copyLink()}
+    >
 
-      <header className="wm-toolbar">
-        <div className="wm-toolbar-left">
-          <div className="wm-nav-cluster">
-            <button
-              className={`wm-workspace-option ${workspaceMode === 'world' ? 'active' : ''}`}
-              type="button"
-              onClick={() => {
-                setWorkspaceMode('world');
-                resetWorkspace();
-              }}
-              title="World workspace"
-            >
-              <span className="wm-workspace-icon">◎</span>
-              <span className="wm-workspace-label">World</span>
-            </button>
-            {WORLD_CUP_WORKSPACE_VISIBLE ? (
-              <button
-                className={`wm-workspace-option wm-workspace-worldcup ${workspaceMode === 'worldcup' ? 'active' : ''}`}
-                type="button"
-                onClick={() => setWorkspaceMode('worldcup')}
-                title="World Cup"
-              >
-                <span className="wm-workspace-icon">⚽</span>
-                <span className="wm-workspace-label">World Cup</span>
-              </button>
-            ) : null}
-            <button className="wm-nav-icon" type="button" onClick={() => setShowCommandPalette(true)} title="Command palette">⌨</button>
-            <button className="wm-nav-icon" type="button" onClick={() => setShowPanelLibrary((current) => !current)} title="Toggle panel library">◫</button>
-            <button className="wm-nav-icon" type="button" onClick={() => setShowSettings(true)} title="Open settings">⚒</button>
-            <button className="wm-nav-icon" type="button" onClick={cycleRegion} title="Cycle region">◌</button>
-          </div>
-          <div className="wm-brand">{workspaceMode === 'worldcup' ? 'MONITOR' : 'POLYDATA MONITOR'} <span>{APP_VERSION}</span></div>
-          <div className="wm-live-dot">Live</div>
-          <button className="wm-select-pill" type="button" onClick={cycleRegion}>
-            {REGION_OPTIONS.find((item) => item.value === region)?.label || 'Global'} ▾
-          </button>
-          <div className="wm-defcon-pill">POLYMARKET <span>LIVE</span></div>
-        </div>
-        <nav className="wm-site-nav" aria-label="polyData resources">
-          {SITE_NAV_LINKS.map((link) => (
-            <a
-              key={link.label}
-              className={link.label === 'Quant' ? 'wm-site-nav-quant' : undefined}
-              href={link.href}
-              target={link.external ? '_blank' : undefined}
-              rel={link.external ? 'noopener noreferrer' : undefined}
-            >
-              {link.label}
-            </a>
-          ))}
-        </nav>
-        <div className="wm-toolbar-right">
-          <button className="wm-counter-pill" type="button">{liveMetrics[1]?.value || 0}</button>
-          <button className="wm-tool-button" type="button" onClick={() => setShowCommandPalette(true)}>⌘K Search</button>
-          <button className="wm-tool-button" type="button" onClick={() => void copyLink()}>Copy Link</button>
-          <button className="wm-tool-icon" type="button" onClick={resetWorkspace}>⌂</button>
-          <button className="wm-tool-icon" type="button" onClick={() => setShowSettings(true)}>⚙</button>
-        </div>
-      </header>
-
-      {workspaceMode === 'worldcup' ? (
-        <Suspense fallback={<PanelLoading label="Loading World Cup workspace" detail="Opening schedule, venues and markets" />}>
-          <WorldCupWorkspace
-            now={now}
-            marketGroups={marketGroups}
-            latestContent={currentLatestContent}
-            weatherPayload={(runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined) || null}
-            geoShockPayload={(runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined) || null}
-          />
-        </Suspense>
-      ) : (
       <main className="wm-dashboard">
         <div className="wm-main-content">
         <section className="wm-map-section">
@@ -2396,12 +2223,13 @@ function WorldMonitorApp() {
               const sizeClass = entry.size ? `size-${entry.size}` : '';
               return (
                 <div className={`wm-panel-slot ${sizeClass}`.trim()} key={`bottom-${panelId}`}>
-                  {entry.render(panelContext)}
-                  {panelShouldShowLoading(panelId) ? (
-                    <div className="wm-panel-slot-loading">
-                      <PanelLoading detail="正在同步这个 panel 的实时数据" />
-                    </div>
-                  ) : null}
+                  <PanelRuntimeBoundary
+                    loading={panelShouldShowLoading(panelId)}
+                    status={getPanelRuntimeStatus(panelId)}
+                    onRetry={() => retryRuntimePanel(panelId)}
+                  >
+                    {entry.render(panelContext)}
+                  </PanelRuntimeBoundary>
                 </div>
               );
             })}
@@ -2418,6 +2246,8 @@ function WorldMonitorApp() {
               layoutManaged={false}
               resizeEnabled={false}
               loading={panelShouldShowLoading('active-markets')}
+              runtimeStatus={getPanelRuntimeStatus('active-markets')}
+              onRetry={() => retryRuntimePanel('active-markets')}
               onMovePanel={moveWorkspacePanel}
               onResizePanel={resizeWorkspacePanel}
               onResetPanelLayout={resetWorkspacePanelLayout}
@@ -2440,6 +2270,8 @@ function WorldMonitorApp() {
                     layoutManaged={false}
                     resizeEnabled={false}
                     loading={panelShouldShowLoading(panelId)}
+                    runtimeStatus={getPanelRuntimeStatus(panelId)}
+                    onRetry={() => retryRuntimePanel(panelId)}
                     onMovePanel={moveWorkspacePanel}
                     onResizePanel={resizeWorkspacePanel}
                     onResetPanelLayout={resetWorkspacePanelLayout}
@@ -2459,6 +2291,8 @@ function WorldMonitorApp() {
               layoutManaged={false}
               resizeEnabled={false}
               loading={panelShouldShowLoading('oracle-feed')}
+              runtimeStatus={getPanelRuntimeStatus('oracle-feed')}
+              onRetry={() => retryRuntimePanel('oracle-feed')}
               onMovePanel={moveWorkspacePanel}
               onResizePanel={resizeWorkspacePanel}
               onResetPanelLayout={resetWorkspacePanelLayout}
@@ -2479,6 +2313,8 @@ function WorldMonitorApp() {
                 size={entry.size}
                 layoutPrefs={panelLayoutPrefs}
                 loading={panelShouldShowLoading(panelId)}
+                runtimeStatus={getPanelRuntimeStatus(panelId)}
+                onRetry={() => retryRuntimePanel(panelId)}
                 onMovePanel={moveWorkspacePanel}
                 onResizePanel={resizeWorkspacePanel}
                 onResetPanelLayout={resetWorkspacePanelLayout}
@@ -2490,7 +2326,6 @@ function WorldMonitorApp() {
         </section>
         </div>
       </main>
-      )}
 
       {showCommandPalette ? (
         <div className="wm-modal-backdrop" onClick={() => setShowCommandPalette(false)}>
@@ -2698,7 +2533,7 @@ function WorldMonitorApp() {
         </div>
       ) : null}
 
-    </div>
+    </AppShell>
   );
 }
 

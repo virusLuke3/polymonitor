@@ -2245,6 +2245,46 @@
   min-height: 100%;
 }
 
+.wm-panel-runtime-notice {
+  align-items: center;
+  backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--wm-panel-bg, #07111d) 88%, transparent);
+  border: 1px solid rgba(245, 178, 79, 0.32);
+  border-radius: 5px;
+  bottom: 9px;
+  color: #dfc58f;
+  display: flex;
+  font-size: 10px;
+  gap: 8px;
+  justify-content: space-between;
+  left: 10px;
+  letter-spacing: 0.03em;
+  padding: 5px 7px;
+  position: absolute;
+  right: 10px;
+  z-index: 7;
+}
+
+.wm-panel-runtime-notice.is-error {
+  border-color: rgba(244, 103, 103, 0.42);
+  color: #ffaaa4;
+}
+
+.wm-panel-runtime-notice.is-suspended {
+  border-color: rgba(130, 165, 197, 0.28);
+  color: #9eb6ca;
+}
+
+.wm-panel-runtime-notice button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 2px 6px;
+}
+
 .wm-empty-state {
   min-height: 94px;
   display: grid;

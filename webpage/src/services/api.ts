@@ -109,20 +109,25 @@ export function isAbortLikeError(error: unknown) {
     || String(maybe.message || '').toLowerCase().includes('signal is aborted');
 }
 
-async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000): Promise<T> {
+async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: AbortSignal): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromExternal = () => controller.abort();
+  externalSignal?.addEventListener('abort', abortFromExternal, { once: true });
   let response: Response;
   try {
+    if (externalSignal?.aborted) controller.abort();
     response = await fetch(`${API_BASE}${path}`, {
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
   } catch (error) {
+    if (externalSignal?.aborted) throw error;
     if (isAbortLikeError(error)) throw new ApiTimeoutError(path, timeoutMs);
     throw error;
   } finally {
     window.clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', abortFromExternal);
   }
   if (!response.ok) {
     throw new Error(`API ${response.status} for ${path}`);
@@ -130,8 +135,8 @@ async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000): Promise<T>
   return response.json() as Promise<T>;
 }
 
-async function apiGet<T>(path: string): Promise<T> {
-  return apiGetWithTimeout<T>(path, 12000);
+async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return apiGetWithTimeout<T>(path, 12000, signal);
 }
 
 async function apiPostWithTimeout<T>(path: string, body: unknown, timeoutMs = 18000): Promise<T> {
@@ -778,14 +783,14 @@ export type RuntimePanelsPayload = {
   errors?: Record<string, string>;
 };
 
-export function fetchRuntimePanels(panelIds: string[], limits: Record<string, number> = {}) {
+export function fetchRuntimePanels(panelIds: string[], limits: Record<string, number> = {}, signal?: AbortSignal) {
   const ids = [...new Set(panelIds.map((panelId) => panelId.trim()).filter(Boolean))];
   const params = new URLSearchParams({ ids: ids.join(',') });
   ids.forEach((panelId) => {
     const limit = limits[panelId];
     if (typeof limit === 'number' && Number.isFinite(limit)) params.set(`limit.${panelId}`, String(limit));
   });
-  return apiGet<RuntimePanelsPayload>(`/runtime/panels?${params.toString()}`);
+  return apiGet<RuntimePanelsPayload>(`/runtime/panels?${params.toString()}`, signal);
 }
 
 export function fetchMarketSummary(marketId: number, timeoutMs = 3500) {
