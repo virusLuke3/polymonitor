@@ -4,11 +4,14 @@ import copy
 import json
 import os
 import threading
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 from api import cache as api_cache
+from api.context import resolve_service_callable, resolve_service_value
 from api.services import lob_service, market_service
 
 
@@ -19,6 +22,39 @@ FLOW_TTL_SECONDS = int(os.environ.get("POLYDATA_MARKET_WORKSPACE_FLOW_TTL_SECOND
 
 _REFRESH_LOCK = threading.Lock()
 _REFRESHING: set[str] = set()
+
+
+@dataclass(frozen=True)
+class MarketWorkspaceCacheDependencies:
+    source: Mapping[str, Any]
+    application: Any
+    snapshot_store: Any
+    utc_now_iso: Callable[..., str]
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> MarketWorkspaceCacheDependencies:
+        return cls(
+            source=context,
+            application=resolve_service_value(context, "app"),
+            snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
+            utc_now_iso=resolve_service_callable(context, "utc_now_iso"),
+        )
+
+
+MarketWorkspaceCacheContext = (
+    Mapping[str, Any] | MarketWorkspaceCacheDependencies
+)
+
+
+def _dependencies(
+    context: MarketWorkspaceCacheContext,
+) -> MarketWorkspaceCacheDependencies:
+    if isinstance(context, MarketWorkspaceCacheDependencies):
+        return context
+    return MarketWorkspaceCacheDependencies.from_context(context)
 
 
 def _utc_now_iso() -> str:
@@ -93,31 +129,80 @@ def _is_empty_replacement(layer: str, payload: Any) -> bool:
     return payload in (None, {}, [])
 
 
-def _read_redis(ctx: dict, namespace: str, cache_key: str) -> Optional[Any]:
+def _read_redis(
+    context: MarketWorkspaceCacheContext,
+    namespace: str,
+    cache_key: str,
+) -> Optional[Any]:
+    dependencies = _dependencies(context)
     try:
-        return api_cache.get_cached_payload(ctx, namespace, cache_key)
+        return api_cache.get_cached_payload(
+            dependencies.source,
+            namespace,
+            cache_key,
+        )
     except Exception:
-        ctx["app"].logger.exception("market-workspace-cache redis-read failed namespace=%s key=%s", namespace, cache_key)
+        dependencies.application.logger.exception(
+            "market-workspace-cache redis-read failed namespace=%s key=%s",
+            namespace,
+            cache_key,
+        )
         return None
 
 
-def _write_cache(ctx: dict, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
+def _write_cache(
+    context: MarketWorkspaceCacheContext,
+    namespace: str,
+    cache_key: str,
+    payload: Any,
+    ttl_seconds: int,
+) -> None:
+    dependencies = _dependencies(context)
     try:
-        api_cache.set_cached_runtime_payload(ctx, namespace, cache_key, payload, ttl_seconds)
+        api_cache.set_cached_runtime_payload(
+            dependencies.source,
+            namespace,
+            cache_key,
+            payload,
+            ttl_seconds,
+        )
     except Exception:
-        ctx["app"].logger.exception("market-workspace-cache memory-write failed namespace=%s key=%s", namespace, cache_key)
+        dependencies.application.logger.exception(
+            "market-workspace-cache memory-write failed namespace=%s key=%s",
+            namespace,
+            cache_key,
+        )
     try:
-        api_cache.set_cached_payload(ctx, namespace, cache_key, payload, ttl_seconds)
+        api_cache.set_cached_payload(
+            dependencies.source,
+            namespace,
+            cache_key,
+            payload,
+            ttl_seconds,
+        )
     except Exception:
-        ctx["app"].logger.exception("market-workspace-cache redis-write failed namespace=%s key=%s", namespace, cache_key)
+        dependencies.application.logger.exception(
+            "market-workspace-cache redis-write failed namespace=%s key=%s",
+            namespace,
+            cache_key,
+        )
     try:
-        ctx["SNAPSHOT_STORE"].set(namespace, cache_key, payload, ttl_seconds)
+        dependencies.snapshot_store.set(
+            namespace,
+            cache_key,
+            payload,
+            ttl_seconds,
+        )
     except Exception:
-        ctx["app"].logger.exception("market-workspace-cache sqlite-write failed namespace=%s key=%s", namespace, cache_key)
+        dependencies.application.logger.exception(
+            "market-workspace-cache sqlite-write failed namespace=%s key=%s",
+            namespace,
+            cache_key,
+        )
 
 
 def _refresh_async(
-    ctx: dict,
+    context: MarketWorkspaceCacheContext,
     *,
     layer: str,
     namespace: str,
@@ -126,6 +211,7 @@ def _refresh_async(
     ttl_seconds: int,
     stale_payload: Any,
 ) -> None:
+    dependencies = _dependencies(context)
     refresh_key = f"{namespace}:{cache_key}"
     with _REFRESH_LOCK:
         if refresh_key in _REFRESHING:
@@ -136,15 +222,25 @@ def _refresh_async(
         try:
             payload = builder()
             if _is_empty_replacement(layer, payload) and not _is_empty_replacement(layer, stale_payload):
-                ctx["app"].logger.warning(
+                dependencies.application.logger.warning(
                     "market-workspace-cache refresh skipped empty layer=%s key=%s",
                     layer,
                     cache_key,
                 )
                 return
-            _write_cache(ctx, namespace, cache_key, _with_cache_meta(payload, layer, "refresh", cache_key), ttl_seconds)
+            _write_cache(
+                dependencies,
+                namespace,
+                cache_key,
+                _with_cache_meta(payload, layer, "refresh", cache_key),
+                ttl_seconds,
+            )
         except Exception:
-            ctx["app"].logger.exception("market-workspace-cache refresh failed layer=%s key=%s", layer, cache_key)
+            dependencies.application.logger.exception(
+                "market-workspace-cache refresh failed layer=%s key=%s",
+                layer,
+                cache_key,
+            )
         finally:
             with _REFRESH_LOCK:
                 _REFRESHING.discard(refresh_key)
@@ -154,7 +250,7 @@ def _refresh_async(
 
 
 def _cached_layer(
-    ctx: dict,
+    context: MarketWorkspaceCacheContext,
     *,
     layer: str,
     cache_key: str,
@@ -162,29 +258,59 @@ def _cached_layer(
     builder: Callable[[], Any],
     allow_stale_refresh: bool = True,
 ) -> Dict[str, Any]:
+    dependencies = _dependencies(context)
     namespace = _namespace(layer)
 
-    runtime_payload = api_cache.get_cached_runtime_payload(ctx, namespace, cache_key)
+    runtime_payload = api_cache.get_cached_runtime_payload(
+        dependencies.source,
+        namespace,
+        cache_key,
+    )
     if runtime_payload is not None:
         return {"payload": _with_cache_meta(runtime_payload, layer, "memory-hit", cache_key), "mode": "memory-hit"}
 
-    redis_payload = _read_redis(ctx, namespace, cache_key)
+    redis_payload = _read_redis(dependencies, namespace, cache_key)
     if redis_payload is not None:
-        api_cache.set_cached_runtime_payload(ctx, namespace, cache_key, redis_payload, min(ttl_seconds, 30))
+        api_cache.set_cached_runtime_payload(
+            dependencies.source,
+            namespace,
+            cache_key,
+            redis_payload,
+            min(ttl_seconds, 30),
+        )
         return {"payload": _with_cache_meta(redis_payload, layer, "redis-hit", cache_key), "mode": "redis-hit"}
 
-    sqlite_payload = ctx["SNAPSHOT_STORE"].get(namespace, cache_key)
+    sqlite_payload = dependencies.snapshot_store.get(namespace, cache_key)
     if sqlite_payload is not None:
-        _write_cache(ctx, namespace, cache_key, sqlite_payload, ttl_seconds)
+        _write_cache(
+            dependencies,
+            namespace,
+            cache_key,
+            sqlite_payload,
+            ttl_seconds,
+        )
         return {"payload": _with_cache_meta(sqlite_payload, layer, "sqlite-hit", cache_key), "mode": "sqlite-hit"}
 
-    stale_payload = ctx["SNAPSHOT_STORE"].get_stale(namespace, cache_key)
+    stale_payload = dependencies.snapshot_store.get_stale(
+        namespace,
+        cache_key,
+    )
     if stale_payload is not None:
-        ctx["app"].logger.info("market-workspace-cache stale-hit layer=%s key=%s", layer, cache_key)
-        api_cache.set_cached_payload(ctx, namespace, cache_key, stale_payload, min(15, ttl_seconds))
+        dependencies.application.logger.info(
+            "market-workspace-cache stale-hit layer=%s key=%s",
+            layer,
+            cache_key,
+        )
+        api_cache.set_cached_payload(
+            dependencies.source,
+            namespace,
+            cache_key,
+            stale_payload,
+            min(15, ttl_seconds),
+        )
         if allow_stale_refresh:
             _refresh_async(
-                ctx,
+                dependencies,
                 layer=layer,
                 namespace=namespace,
                 cache_key=cache_key,
@@ -197,14 +323,18 @@ def _cached_layer(
     try:
         payload = builder()
     except Exception:
-        ctx["app"].logger.exception("market-workspace-cache live-build failed layer=%s key=%s", layer, cache_key)
+        dependencies.application.logger.exception(
+            "market-workspace-cache live-build failed layer=%s key=%s",
+            layer,
+            cache_key,
+        )
         payload = _fallback_payload(layer, cache_key)
         return {"payload": _with_cache_meta(payload, layer, "live-error", cache_key), "mode": "live-error"}
 
     mode = "live-build"
     wrapped = _with_cache_meta(payload, layer, mode, cache_key)
     ttl = ttl_seconds if not _is_empty_replacement(layer, payload) else min(ttl_seconds, 10)
-    _write_cache(ctx, namespace, cache_key, wrapped, ttl)
+    _write_cache(dependencies, namespace, cache_key, wrapped, ttl)
     return {"payload": _copy_payload(wrapped), "mode": mode}
 
 
@@ -223,32 +353,50 @@ def _fallback_payload(layer: str, cache_key: str) -> Any:
     return {"status": "warming", "cacheKey": cache_key}
 
 
-def _build_detail(ctx: dict, market_id: int) -> Dict[str, Any]:
-    payload = market_service.get_market_workspace_payload(ctx, market_id)
+def _build_detail(
+    context: MarketWorkspaceCacheContext,
+    market_id: int,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(context)
+    payload = market_service.get_market_workspace_payload(
+        dependencies.source,
+        market_id,
+    )
     if not isinstance(payload, dict):
         return {"error": "Invalid market workspace payload", "marketId": market_id, "_status": 502}
     detail = dict(payload)
     detail.pop("chart", None)
     detail.pop("trades", None)
     detail.pop("lob", None)
-    detail["generatedAt"] = ctx["utc_now_iso"]()
+    detail["generatedAt"] = dependencies.utc_now_iso()
     return detail
 
 
-def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
+def get_market_detail_payload(
+    context: MarketWorkspaceCacheContext,
+    market_id: int,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(context)
     key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 1})
     result = _cached_layer(
-        ctx,
+        dependencies,
         layer="detail",
         cache_key=key,
         ttl_seconds=DETAIL_TTL_SECONDS,
-        builder=lambda: _build_detail(ctx, market_id),
+        builder=lambda: _build_detail(dependencies, market_id),
     )
     payload = result["payload"]
     return payload if isinstance(payload, dict) else {"error": "Invalid detail cache payload", "marketId": market_id, "_status": 502}
 
 
-def get_market_chart_payload(ctx: dict, market_id: int, *, range_name: str = "1d", interval: str = "5m") -> Dict[str, Any]:
+def get_market_chart_payload(
+    context: MarketWorkspaceCacheContext,
+    market_id: int,
+    *,
+    range_name: str = "1d",
+    interval: str = "5m",
+) -> Dict[str, Any]:
+    dependencies = _dependencies(context)
     normalized_range = str(range_name or "1d").strip().lower()
     normalized_interval = str(interval or "5m").strip().lower()
     key = _cache_key(
@@ -261,12 +409,12 @@ def get_market_chart_payload(ctx: dict, market_id: int, *, range_name: str = "1d
         }
     )
     result = _cached_layer(
-        ctx,
+        dependencies,
         layer="chart",
         cache_key=key,
         ttl_seconds=CHART_TTL_SECONDS,
         builder=lambda: market_service.get_market_chart_payload(
-            ctx,
+            dependencies.source,
             market_id,
             range_name=normalized_range,
             interval=normalized_interval,
@@ -282,7 +430,14 @@ def get_market_chart_payload(ctx: dict, market_id: int, *, range_name: str = "1d
     return {"marketId": market_id, "localMarketId": market_id, "range": normalized_range, "interval": normalized_interval, "points": []}
 
 
-def get_market_flow_payload(ctx: dict, market_id: int, *, limit: int = 24, offset: int = 0) -> Dict[str, Any]:
+def get_market_flow_payload(
+    context: MarketWorkspaceCacheContext,
+    market_id: int,
+    *,
+    limit: int = 24,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(context)
     safe_limit = min(max(int(limit), 1), 500)
     safe_offset = max(int(offset), 0)
     key = _cache_key(
@@ -299,11 +454,22 @@ def get_market_flow_payload(ctx: dict, market_id: int, *, limit: int = 24, offse
         return {
             "marketId": market_id,
             "localMarketId": market_id,
-            "items": market_service.get_trades_by_market_id(ctx, market_id, limit=safe_limit, offset=safe_offset),
-            "generatedAt": ctx["utc_now_iso"](),
+            "items": market_service.get_trades_by_market_id(
+                dependencies.source,
+                market_id,
+                limit=safe_limit,
+                offset=safe_offset,
+            ),
+            "generatedAt": dependencies.utc_now_iso(),
         }
 
-    result = _cached_layer(ctx, layer="flow", cache_key=key, ttl_seconds=FLOW_TTL_SECONDS, builder=build)
+    result = _cached_layer(
+        dependencies,
+        layer="flow",
+        cache_key=key,
+        ttl_seconds=FLOW_TTL_SECONDS,
+        builder=build,
+    )
     payload = result["payload"]
     if isinstance(payload, dict):
         payload.setdefault("marketId", market_id)
@@ -313,20 +479,38 @@ def get_market_flow_payload(ctx: dict, market_id: int, *, limit: int = 24, offse
     return {"marketId": market_id, "localMarketId": market_id, "items": []}
 
 
-def get_market_flow_rows(ctx: dict, market_id: int, *, limit: int = 24, offset: int = 0) -> list[Dict[str, Any]]:
-    payload = get_market_flow_payload(ctx, market_id, limit=limit, offset=offset)
+def get_market_flow_rows(
+    context: MarketWorkspaceCacheContext,
+    market_id: int,
+    *,
+    limit: int = 24,
+    offset: int = 0,
+) -> list[Dict[str, Any]]:
+    payload = get_market_flow_payload(
+        context,
+        market_id,
+        limit=limit,
+        offset=offset,
+    )
     rows = payload.get("items") if isinstance(payload, dict) else []
     return rows if isinstance(rows, list) else []
 
 
-def get_market_orderbook_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
+def get_market_orderbook_payload(
+    context: MarketWorkspaceCacheContext,
+    market_id: int,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(context)
     key = _cache_key({"marketId": int(market_id), "layer": "orderbook", "v": 1})
     result = _cached_layer(
-        ctx,
+        dependencies,
         layer="orderbook",
         cache_key=key,
         ttl_seconds=ORDERBOOK_TTL_SECONDS,
-        builder=lambda: lob_service.get_runtime_lob_payload(ctx, market_id),
+        builder=lambda: lob_service.get_runtime_lob_payload(
+            dependencies.source,
+            market_id,
+        ),
     )
     payload = result["payload"]
     if isinstance(payload, dict):
@@ -339,15 +523,35 @@ def get_market_orderbook_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
     return fallback
 
 
-def get_market_workspace_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
-    detail_result = get_market_detail_payload(ctx, market_id)
+def get_market_workspace_payload(
+    context: MarketWorkspaceCacheContext,
+    market_id: int,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(context)
+    detail_result = get_market_detail_payload(dependencies, market_id)
     if detail_result.get("_status") == 404:
         return detail_result
 
     with ThreadPoolExecutor(max_workers=3) as executor:
-        chart_future = executor.submit(get_market_chart_payload, ctx, market_id, range_name="1d", interval="5m")
-        flow_future = executor.submit(get_market_flow_payload, ctx, market_id, limit=24, offset=0)
-        orderbook_future = executor.submit(get_market_orderbook_payload, ctx, market_id)
+        chart_future = executor.submit(
+            get_market_chart_payload,
+            dependencies,
+            market_id,
+            range_name="1d",
+            interval="5m",
+        )
+        flow_future = executor.submit(
+            get_market_flow_payload,
+            dependencies,
+            market_id,
+            limit=24,
+            offset=0,
+        )
+        orderbook_future = executor.submit(
+            get_market_orderbook_payload,
+            dependencies,
+            market_id,
+        )
         chart = chart_future.result()
         flow = flow_future.result()
         orderbook = orderbook_future.result()

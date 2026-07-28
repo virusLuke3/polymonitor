@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
 
 
 MACRO_MAP_SNAPSHOT_NAMESPACE = "snapshot:macro:polymarket-macro-map"
@@ -62,6 +71,60 @@ MACRO_CATEGORIES = (
         "terms": ("oil", "wti", "brent", "gasoline", "energy", "crude", "diesel"),
     },
 )
+
+
+@dataclass(frozen=True)
+class PolymarketMacroMapDependencies:
+    settings: Any
+    application: Any
+    http_json_get: Callable[..., Any]
+    utc_now_iso: Callable[..., Any]
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> PolymarketMacroMapDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_service_value(context, "app"),
+            http_json_get=resolve_service_callable(
+                context,
+                "http_json_get",
+            ),
+            utc_now_iso=resolve_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+        )
+
+
+PolymarketMacroMapContext = (
+    Mapping[str, Any] | PolymarketMacroMapDependencies
+)
+
+
+def _dependencies(
+    context: PolymarketMacroMapContext,
+) -> PolymarketMacroMapDependencies:
+    if isinstance(context, PolymarketMacroMapDependencies):
+        return context
+    return PolymarketMacroMapDependencies.from_context(context)
 
 
 def _as_list(value: Any) -> List[Any]:
@@ -208,15 +271,15 @@ def _label_for_market(event_title: str, market: Dict[str, Any]) -> str:
     return question or str(market.get("slug") or market.get("id") or "Outcome")
 
 
-def _fetch_gamma_events(ctx: dict, *, order: str, target_events: int = 300, max_pages: int = 4) -> List[Dict[str, Any]]:
-    base_url = str(ctx["SETTINGS"].gamma_api_base or "").rstrip("/")
+def _fetch_gamma_events(ctx: PolymarketMacroMapContext, *, order: str, target_events: int = 300, max_pages: int = 4) -> List[Dict[str, Any]]:
+    base_url = str(_dependencies(ctx).settings.gamma_api_base or "").rstrip("/")
     if not base_url:
         raise RuntimeError("gamma api base missing")
     events: List[Dict[str, Any]] = []
     seen: set[str] = set()
     limit = 100
     for page in range(max(1, int(max_pages))):
-        payload = ctx["http_json_get"](
+        payload = _dependencies(ctx).http_json_get(
             f"{base_url}/events",
             params={
                 "active": "true",
@@ -262,8 +325,8 @@ def _merge_unique_events(event_lists: Iterable[List[Dict[str, Any]]]) -> List[Di
     return merged
 
 
-def _search_terms(ctx: dict) -> tuple[str, ...]:
-    configured = getattr(ctx["SETTINGS"], "polymarket_macro_map_search_terms", ())
+def _search_terms(ctx: PolymarketMacroMapContext) -> tuple[str, ...]:
+    configured = getattr(_dependencies(ctx).settings, "polymarket_macro_map_search_terms", ())
     terms = tuple(str(term).strip().lower() for term in configured if str(term).strip())
     return terms or DEFAULT_SEARCH_TERMS
 
@@ -388,11 +451,11 @@ def _summary(items: List[Dict[str, Any]], categories: List[Dict[str, Any]], now_
     }
 
 
-def _empty_payload(ctx: dict, *, status: str = "degraded", source_state: str = "warming") -> Dict[str, Any]:
+def _empty_payload(ctx: PolymarketMacroMapContext, *, status: str = "degraded", source_state: str = "warming") -> Dict[str, Any]:
     return {
-        "generatedAt": ctx["utc_now_iso"](),
+        "generatedAt": _dependencies(ctx).utc_now_iso(),
         "source": "Polymarket Gamma API",
-        "sourceUrl": getattr(ctx["SETTINGS"], "polymarket_macro_map_source_url", "") or ctx["SETTINGS"].gamma_api_base,
+        "sourceUrl": getattr(_dependencies(ctx).settings, "polymarket_macro_map_source_url", "") or _dependencies(ctx).settings.gamma_api_base,
         "status": status,
         "sources": {"gammaEvents": source_state},
         "summary": {
@@ -407,7 +470,7 @@ def _empty_payload(ctx: dict, *, status: str = "degraded", source_state: str = "
     }
 
 
-def normalize_polymarket_macro_map_payload(payload: Any, *, ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def normalize_polymarket_macro_map_payload(payload: Any, *, ctx: PolymarketMacroMapContext, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return _empty_payload(ctx, status="invalid", source_state="invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
@@ -415,9 +478,9 @@ def normalize_polymarket_macro_map_payload(payload: Any, *, ctx: dict, limit: in
     result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), DEFAULT_ITEM_LIMIT))]
     result["categories"] = [row for row in (result.get("categories") or []) if isinstance(row, dict)]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else {}
-    result["generatedAt"] = str(result.get("generatedAt") or ctx["utc_now_iso"]())
+    result["generatedAt"] = str(result.get("generatedAt") or _dependencies(ctx).utc_now_iso())
     result["source"] = str(result.get("source") or "Polymarket Gamma API")
-    result["sourceUrl"] = str(result.get("sourceUrl") or getattr(ctx["SETTINGS"], "polymarket_macro_map_source_url", "") or ctx["SETTINGS"].gamma_api_base)
+    result["sourceUrl"] = str(result.get("sourceUrl") or getattr(_dependencies(ctx).settings, "polymarket_macro_map_source_url", "") or _dependencies(ctx).settings.gamma_api_base)
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "empty"))
     return result
 
@@ -426,61 +489,69 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": str(cache_mode)}
 
 
-def _read_seeded_snapshot(ctx: dict, *, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
+def _read_seeded_snapshot(ctx: PolymarketMacroMapContext, *, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    reader = _dependencies(ctx).get_cached_json
     if callable(reader):
         redis_payload = reader(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
         if isinstance(redis_payload, dict):
-            snapshot_store = ctx.get("SNAPSHOT_STORE")
+            snapshot_store = _dependencies(ctx).snapshot_store
             if snapshot_store is not None:
                 snapshot_store.set(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, redis_payload, ttl_seconds)
             return _with_cache_mode(redis_payload, "redis-seed")
 
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    snapshot_store = _dependencies(ctx).snapshot_store
     if snapshot_store is None:
         return None
 
     sqlite_payload = snapshot_store.get(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
     if isinstance(sqlite_payload, dict):
-        setter = ctx.get("set_cached_json")
+        setter = _dependencies(ctx).set_cached_json
         if callable(setter):
             setter(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, sqlite_payload, ttl_seconds)
         return _with_cache_mode(sqlite_payload, "sqlite-seed")
 
     stale_payload = snapshot_store.get_stale(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
     if isinstance(stale_payload, dict):
-        setter = ctx.get("set_cached_json")
+        setter = _dependencies(ctx).set_cached_json
         if callable(setter):
             setter(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, stale_payload, min(15, ttl_seconds))
         return _with_cache_mode(stale_payload, "stale-seed")
     return None
 
 
-def _store_live_build_snapshot(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
+def _store_live_build_snapshot(ctx: PolymarketMacroMapContext, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
+    snapshot_store = _dependencies(ctx).snapshot_store
     if snapshot_store is not None:
         snapshot_store.set(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
+    setter = _dependencies(ctx).set_cached_json
     if callable(setter):
         setter(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, payload, ttl_seconds)
 
 
-def build_polymarket_macro_map_payload(ctx: dict) -> Dict[str, Any]:
+def build_polymarket_macro_map_payload(ctx: PolymarketMacroMapContext) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
     errors: Dict[str, str] = {}
     event_batches: List[List[Dict[str, Any]]] = []
     for order in ("volume24hr", "startDate"):
         try:
-            event_batches.append(_fetch_gamma_events(ctx, order=order))
+            event_batches.append(_fetch_gamma_events(dependencies, order=order))
         except Exception as exc:
             errors[order] = type(exc).__name__
-            ctx["app"].logger.exception("polymarket macro map gamma fetch failed order=%s", order)
+            dependencies.application.logger.exception(
+                "polymarket macro map gamma fetch failed order=%s",
+                order,
+            )
     events = _merge_unique_events(event_batches)
     if not events:
-        return _empty_payload(ctx, status="degraded" if errors else "empty", source_state="error" if errors else "empty")
+        return _empty_payload(
+            dependencies,
+            status="degraded" if errors else "empty",
+            source_state="error" if errors else "empty",
+        )
 
-    now_iso = ctx["utc_now_iso"]()
+    now_iso = dependencies.utc_now_iso()
     now_ts = _parse_timestamp(now_iso)
-    terms = _search_terms(ctx)
+    terms = _search_terms(dependencies)
     items: List[Dict[str, Any]] = []
     for event in events:
         if _is_event_ended(event, now_iso) or not _event_matches_terms(event, terms):
@@ -499,7 +570,12 @@ def build_polymarket_macro_map_payload(ctx: dict) -> Dict[str, Any]:
     return {
         "generatedAt": now_iso,
         "source": "Polymarket Gamma API",
-        "sourceUrl": getattr(ctx["SETTINGS"], "polymarket_macro_map_source_url", "") or ctx["SETTINGS"].gamma_api_base,
+        "sourceUrl": getattr(
+            dependencies.settings,
+            "polymarket_macro_map_source_url",
+            "",
+        )
+        or dependencies.settings.gamma_api_base,
         "status": status,
         "sources": {"gammaEvents": "partial" if errors and items else ("ok" if items else "empty")},
         "summary": _summary(items, categories, now_ts),
@@ -508,13 +584,42 @@ def build_polymarket_macro_map_payload(ctx: dict) -> Dict[str, Any]:
     }
 
 
-def get_polymarket_macro_map_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    ttl_seconds = max(60, int(getattr(ctx["SETTINGS"], "polymarket_macro_map_ttl_seconds", 180) or 180))
-    seeded_payload = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
+def get_polymarket_macro_map_snapshot(ctx: PolymarketMacroMapContext, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    ttl_seconds = max(
+        60,
+        int(
+            getattr(
+                dependencies.settings,
+                "polymarket_macro_map_ttl_seconds",
+                180,
+            )
+            or 180
+        ),
+    )
+    seeded_payload = _read_seeded_snapshot(
+        dependencies,
+        ttl_seconds=ttl_seconds,
+    )
     if seeded_payload is not None:
-        return normalize_polymarket_macro_map_payload(seeded_payload, ctx=ctx, limit=limit)
+        return normalize_polymarket_macro_map_payload(
+            seeded_payload,
+            ctx=dependencies,
+            limit=limit,
+        )
 
-    payload = _with_cache_mode(build_polymarket_macro_map_payload(ctx), "live-build")
+    payload = _with_cache_mode(
+        build_polymarket_macro_map_payload(dependencies),
+        "live-build",
+    )
     if payload.get("items"):
-        _store_live_build_snapshot(ctx, payload, ttl_seconds=ttl_seconds)
-    return normalize_polymarket_macro_map_payload(payload, ctx=ctx, limit=limit)
+        _store_live_build_snapshot(
+            dependencies,
+            payload,
+            ttl_seconds=ttl_seconds,
+        )
+    return normalize_polymarket_macro_map_payload(
+        payload,
+        ctx=dependencies,
+        limit=limit,
+    )

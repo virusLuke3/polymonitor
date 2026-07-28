@@ -82,7 +82,6 @@ def _service_callable(
 
 @dataclass(frozen=True)
 class MarketGroupDependencies:
-    source: Mapping[str, Any]
     application: Any
     settings: Any
     query_all: Callable[..., Any]
@@ -101,7 +100,6 @@ class MarketGroupDependencies:
         context: Mapping[str, Any],
     ) -> MarketGroupDependencies:
         return cls(
-            source=context,
             application=resolve_service_value(context, "app"),
             settings=resolve_service_value(context, "SETTINGS"),
             query_all=_service_callable(context, "query_all"),
@@ -1117,18 +1115,31 @@ def _group_market_ids(group: Dict[str, Any]) -> List[int]:
     return list(dict.fromkeys(ids))
 
 
-def _latest_block_close_by_market_id(ctx: dict, market_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
+def _latest_block_close_by_market_id(
+    context: Mapping[str, Any] | MarketGroupDependencies,
+    market_ids: Iterable[int],
+) -> Dict[int, Dict[str, Any]]:
+    if isinstance(context, MarketGroupDependencies):
+        table_exists = context.table_exists
+        query_all = context.query_all
+        application = context.application
+    else:
+        table_exists = resolve_optional_service_callable(
+            context,
+            "table_exists",
+        )
+        query_all = _service_callable(context, "query_all")
+        application = resolve_service_value(context, "app")
     ids = [int(market_id) for market_id in dict.fromkeys(market_ids) if market_id is not None]
     if not ids:
         return {}
-    table_exists = ctx.get("table_exists")
     if not callable(table_exists):
         return {}
     try:
         if not table_exists("quant.market_token_block_close"):
             return {}
         placeholders = ",".join("?" for _ in ids)
-        rows = ctx["query_all"](
+        rows = query_all(
             f"""
             SELECT DISTINCT ON (market_id)
                 market_id,
@@ -1149,7 +1160,7 @@ def _latest_block_close_by_market_id(ctx: dict, market_ids: Iterable[int]) -> Di
             ids,
         )
     except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
+        logger = getattr(application, "logger", None)
         if logger:
             logger.exception("market group latest block-close lookup failed")
         return {}
@@ -1170,9 +1181,12 @@ def _latest_block_close_by_market_id(ctx: dict, market_ids: Iterable[int]) -> Di
     return latest
 
 
-def _apply_latest_block_close_prices(ctx: dict, items: List[Dict[str, Any]]) -> None:
+def _apply_latest_block_close_prices(
+    context: Mapping[str, Any] | MarketGroupDependencies,
+    items: List[Dict[str, Any]],
+) -> None:
     latest_by_market_id = _latest_block_close_by_market_id(
-        ctx,
+        context,
         [market_id for item in items for market_id in _group_market_ids(item)],
     )
     if not latest_by_market_id:
@@ -1339,7 +1353,7 @@ def _serving_market_groups_payload(
         items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
         items = _limit_group_category_dominance(items, page_size)
         items = items[: max(page_size * 2, page_size)]
-    _apply_latest_block_close_prices(cast(dict[str, Any], dependencies.source), items)
+    _apply_latest_block_close_prices(dependencies, items)
     if sort == "active":
         items = [item for item in items if _retarget_group_default_outcome(item)]
         if not query:
@@ -1548,7 +1562,7 @@ def _get_market_groups_payload(
         ]
         if sort == "active":
             groups.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
-            _apply_latest_block_close_prices(cast(dict[str, Any], dependencies.source), groups)
+            _apply_latest_block_close_prices(dependencies, groups)
             groups = [group for group in groups if _retarget_group_default_outcome(group)]
             if not query:
                 groups = _filter_active_focus_groups(groups, require_activity=True)

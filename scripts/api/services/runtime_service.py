@@ -1,9 +1,111 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+from api.context import (
+    resolve_optional_service_callable,
+    resolve_optional_service_value,
+    resolve_service_callable,
+    resolve_service_value,
+)
+
+
+@dataclass(frozen=True)
+class RuntimeServiceDependencies:
+    settings: Any
+    application: Any
+    get_yahoo_market_snapshot: Callable[..., Any]
+    crypto_coingecko_ids: Dict[str, str]
+    http_json_get: Callable[..., Any]
+    safe_float: Callable[..., Any] | None
+    utc_now_iso: Callable[..., Any]
+    finance_runtime_ttl_seconds: int | None
+    sports_runtime_ttl_seconds: int | None
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    snapshot_store: Any
+    requests_lib: Any
+    beautiful_soup: Any
+    get_snapshot_payload: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> RuntimeServiceDependencies:
+        return cls(
+            settings=resolve_service_value(context, "SETTINGS"),
+            application=resolve_service_value(context, "app"),
+            get_yahoo_market_snapshot=resolve_service_callable(
+                context,
+                "get_yahoo_market_snapshot",
+            ),
+            crypto_coingecko_ids=resolve_service_value(
+                context,
+                "CRYPTO_COINGECKO_IDS",
+                {},
+            ),
+            http_json_get=resolve_service_callable(
+                context,
+                "http_json_get",
+            ),
+            safe_float=resolve_optional_service_callable(
+                context,
+                "_safe_float",
+            ),
+            utc_now_iso=resolve_service_callable(
+                context,
+                "utc_now_iso",
+            ),
+            finance_runtime_ttl_seconds=resolve_service_value(
+                context,
+                "FINANCE_RUNTIME_TTL_SECONDS",
+            ),
+            sports_runtime_ttl_seconds=resolve_service_value(
+                context,
+                "SPORTS_RUNTIME_TTL_SECONDS",
+            ),
+            get_cached_json=resolve_optional_service_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=resolve_optional_service_callable(
+                context,
+                "set_cached_json",
+            ),
+            snapshot_store=resolve_optional_service_value(
+                context,
+                "SNAPSHOT_STORE",
+            ),
+            requests_lib=resolve_optional_service_value(
+                context,
+                "requests",
+            ),
+            beautiful_soup=resolve_optional_service_value(
+                context,
+                "BeautifulSoup",
+            ),
+            get_snapshot_payload=resolve_optional_service_callable(
+                context,
+                "get_snapshot_payload",
+            ),
+        )
+
+
+RuntimeServiceContext = Mapping[str, Any] | RuntimeServiceDependencies
+
+
+def _dependencies(
+    context: RuntimeServiceContext,
+) -> RuntimeServiceDependencies:
+    if isinstance(context, RuntimeServiceDependencies):
+        return context
+    return RuntimeServiceDependencies.from_context(context)
 
 
 def build_market_group_cache_key(items: List[tuple[str, str, str]], *, kind: str) -> str:
@@ -33,14 +135,14 @@ def normalize_market_group_payload(payload: Any, *, kind: str, limit: Optional[i
     }
 
 
-def fetch_live_market_group_payload(ctx: dict, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
+def fetch_live_market_group_payload(ctx: RuntimeServiceContext, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
     rows_by_symbol: Dict[str, Dict[str, Any]] = {}
 
     def _load_row(entry: tuple[str, str, str]) -> tuple[str, Optional[Dict[str, Any]]]:
         key, label, symbol = entry
         is_crypto = kind == "crypto"
         try:
-            snapshot = ctx["get_yahoo_market_snapshot"](
+            snapshot = _dependencies(ctx).get_yahoo_market_snapshot(
                 symbol,
                 interval="5m" if is_crypto else "30m",
                 range_name="1d" if is_crypto else "5d",
@@ -49,7 +151,7 @@ def fetch_live_market_group_payload(ctx: dict, items: List[tuple[str, str, str]]
                 ttl_seconds=5,
             )
         except Exception:
-            ctx["app"].logger.exception("yahoo snapshot failed symbol=%s", symbol)
+            _dependencies(ctx).application.logger.exception("yahoo snapshot failed symbol=%s", symbol)
             snapshot = None
         if not snapshot:
             return symbol, None
@@ -75,9 +177,9 @@ def fetch_live_market_group_payload(ctx: dict, items: List[tuple[str, str, str]]
     rows = [rows_by_symbol[symbol] for _, _, symbol in items if symbol in rows_by_symbol]
     if kind == "crypto" and len(rows) < len(items):
         try:
-            ids = [ctx["CRYPTO_COINGECKO_IDS"][symbol] for _, _, symbol in items if symbol in ctx["CRYPTO_COINGECKO_IDS"]]
-            payload = ctx["http_json_get"](
-                f"{ctx['SETTINGS'].coingecko_base_url.rstrip('/')}/coins/markets",
+            ids = [_dependencies(ctx).crypto_coingecko_ids[symbol] for _, _, symbol in items if symbol in _dependencies(ctx).crypto_coingecko_ids]
+            payload = _dependencies(ctx).http_json_get(
+                f"{_dependencies(ctx).settings.coingecko_base_url.rstrip('/')}/coins/markets",
                 params={
                     "vs_currency": "usd",
                     "ids": ",".join(ids),
@@ -95,44 +197,44 @@ def fetch_live_market_group_payload(ctx: dict, items: List[tuple[str, str, str]]
                 if existing:
                     merged_rows.append(existing)
                     continue
-                coin = by_id.get(ctx["CRYPTO_COINGECKO_IDS"].get(symbol, ""))
+                coin = by_id.get(_dependencies(ctx).crypto_coingecko_ids.get(symbol, ""))
                 if not coin:
                     continue
                 spark = (((coin.get("sparkline_in_7d") or {}).get("price")) or [])[-48:]
                 points = [
                     {
                         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                        "value": ctx["_safe_float"](value),
+                        "value": _dependencies(ctx).safe_float(value),
                     }
                     for value in spark
-                    if ctx["_safe_float"](value) is not None
+                    if _dependencies(ctx).safe_float(value) is not None
                 ]
                 merged_rows.append(
                     {
                         "id": key,
                         "label": label,
                         "symbol": symbol,
-                        "price": ctx["_safe_float"](coin.get("current_price")),
-                        "changePercent": ctx["_safe_float"](coin.get("price_change_percentage_24h")),
+                        "price": _dependencies(ctx).safe_float(coin.get("current_price")),
+                        "changePercent": _dependencies(ctx).safe_float(coin.get("price_change_percentage_24h")),
                         "currency": "USD",
-                        "marketCap": ctx["_safe_float"](coin.get("market_cap")),
-                        "volume24h": ctx["_safe_float"](coin.get("total_volume")),
+                        "marketCap": _dependencies(ctx).safe_float(coin.get("market_cap")),
+                        "volume24h": _dependencies(ctx).safe_float(coin.get("total_volume")),
                         "points": points,
                     }
                 )
             rows = merged_rows
         except Exception:
-            ctx["app"].logger.exception("coingecko crypto fallback failed")
-    return normalize_market_group_payload({"kind": kind, "items": rows, "generatedAt": ctx["utc_now_iso"]()}, kind=kind)
+            _dependencies(ctx).application.logger.exception("coingecko crypto fallback failed")
+    return normalize_market_group_payload({"kind": kind, "items": rows, "generatedAt": _dependencies(ctx).utc_now_iso()}, kind=kind)
 
 
-def get_market_group_snapshot(ctx: dict, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
-    ttl_seconds = 10 if kind == "crypto" else ctx["FINANCE_RUNTIME_TTL_SECONDS"]
+def get_market_group_snapshot(ctx: RuntimeServiceContext, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
+    ttl_seconds = 10 if kind == "crypto" else _dependencies(ctx).finance_runtime_ttl_seconds
     cache_key = build_market_group_cache_key(items, kind=kind)
     namespace = f"snapshot:markets:{kind}"
     seeded_payload = _read_seeded_snapshot(ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds)
     if seeded_payload is not None:
-        return normalize_market_group_payload(seeded_payload, kind=kind, generated_at=ctx["utc_now_iso"]())
+        return normalize_market_group_payload(seeded_payload, kind=kind, generated_at=_dependencies(ctx).utc_now_iso())
 
     payload = _with_cache_mode(fetch_live_market_group_payload(ctx, items, kind=kind), "live-fallback")
     return _store_seed_fallback(ctx, namespace=namespace, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
@@ -159,37 +261,37 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
 
 
-def _read_seeded_snapshot(ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
+def _read_seeded_snapshot(ctx: RuntimeServiceContext, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    reader = _dependencies(ctx).get_cached_json
     if callable(reader):
         redis_payload = reader(namespace, cache_key)
         if isinstance(redis_payload, dict):
-            ctx["SNAPSHOT_STORE"].set(namespace, cache_key, redis_payload, ttl_seconds)
+            _dependencies(ctx).snapshot_store.set(namespace, cache_key, redis_payload, ttl_seconds)
             return _with_cache_mode(redis_payload, "redis-seed")
 
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    snapshot_store = _dependencies(ctx).snapshot_store
     if snapshot_store is None:
         return None
     sqlite_payload = snapshot_store.get(namespace, cache_key)
     if isinstance(sqlite_payload, dict):
-        setter = ctx.get("set_cached_json")
+        setter = _dependencies(ctx).set_cached_json
         if callable(setter):
             setter(namespace, cache_key, sqlite_payload, ttl_seconds)
         return _with_cache_mode(sqlite_payload, "sqlite-seed")
     stale_payload = snapshot_store.get_stale(namespace, cache_key)
     if isinstance(stale_payload, dict):
-        setter = ctx.get("set_cached_json")
+        setter = _dependencies(ctx).set_cached_json
         if callable(setter):
             setter(namespace, cache_key, stale_payload, min(15, ttl_seconds))
         return _with_cache_mode(stale_payload, "stale-seed")
     return None
 
 
-def _store_seed_fallback(ctx: dict, *, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
+def _store_seed_fallback(ctx: RuntimeServiceContext, *, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
+    snapshot_store = _dependencies(ctx).snapshot_store
     if snapshot_store is not None:
         snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
-    setter = ctx.get("set_cached_json")
+    setter = _dependencies(ctx).set_cached_json
     if callable(setter):
         setter(namespace, cache_key, payload, ttl_seconds)
     return payload
@@ -208,9 +310,9 @@ def normalize_nba_scoreboard_payload(payload: Any, *, limit: int = 10, generated
     }
 
 
-def fetch_live_nba_scoreboard_payload(ctx: dict, limit: int = 10) -> Dict[str, Any]:
-    payload = ctx["http_json_get"](
-        f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/scoreboard",
+def fetch_live_nba_scoreboard_payload(ctx: RuntimeServiceContext, limit: int = 10) -> Dict[str, Any]:
+    payload = _dependencies(ctx).http_json_get(
+        f"{_dependencies(ctx).settings.espn_nba_base_url.rstrip('/')}/scoreboard",
         params={"limit": limit},
         timeout=12,
     ) or {}
@@ -237,11 +339,11 @@ def fetch_live_nba_scoreboard_payload(ctx: dict, limit: int = 10) -> Dict[str, A
                 "broadcast": (((competition.get("broadcasts") or [None])[0]) or {}).get("names", [None])[0],
             }
         )
-    return normalize_nba_scoreboard_payload({"items": games, "generatedAt": ctx["utc_now_iso"]()}, limit=limit)
+    return normalize_nba_scoreboard_payload({"items": games, "generatedAt": _dependencies(ctx).utc_now_iso()}, limit=limit)
 
 
-def get_nba_scoreboard_snapshot(ctx: dict, limit: int = 10) -> Dict[str, Any]:
-    ttl_seconds = int(ctx["SPORTS_RUNTIME_TTL_SECONDS"])
+def get_nba_scoreboard_snapshot(ctx: RuntimeServiceContext, limit: int = 10) -> Dict[str, Any]:
+    ttl_seconds = int(_dependencies(ctx).sports_runtime_ttl_seconds)
     cache_key = build_nba_scoreboard_cache_key(limit=limit)
     seeded_payload = _read_seeded_snapshot(ctx, namespace=NBA_SCOREBOARD_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
     if seeded_payload is None and int(limit or 0) != 10:
@@ -252,14 +354,14 @@ def get_nba_scoreboard_snapshot(ctx: dict, limit: int = 10) -> Dict[str, Any]:
             ttl_seconds=ttl_seconds,
         )
     if seeded_payload is not None:
-        return normalize_nba_scoreboard_payload(seeded_payload, limit=limit, generated_at=ctx["utc_now_iso"]())
+        return normalize_nba_scoreboard_payload(seeded_payload, limit=limit, generated_at=_dependencies(ctx).utc_now_iso())
 
     payload = _with_cache_mode(fetch_live_nba_scoreboard_payload(ctx, limit=limit), "live-fallback")
     return _store_seed_fallback(ctx, namespace=NBA_SCOREBOARD_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
 
 
-def _runtime_float(ctx: dict, value: Any) -> Optional[float]:
-    safe_float = ctx.get("_safe_float")
+def _runtime_float(ctx: RuntimeServiceContext, value: Any) -> Optional[float]:
+    safe_float = _dependencies(ctx).safe_float
     if callable(safe_float):
         return safe_float(value)
     if value in (None, ""):
@@ -270,7 +372,7 @@ def _runtime_float(ctx: dict, value: Any) -> Optional[float]:
         return None
 
 
-def _espn_stat_value(ctx: dict, stats: List[Dict[str, Any]], name: str) -> Optional[float]:
+def _espn_stat_value(ctx: RuntimeServiceContext, stats: List[Dict[str, Any]], name: str) -> Optional[float]:
     for stat in stats:
         if stat.get("name") == name:
             return _runtime_float(ctx, stat.get("value"))
@@ -290,9 +392,9 @@ def normalize_nba_matchup_predictor_payload(payload: Any, *, limit: int = 8, gen
     }
 
 
-def fetch_live_nba_matchup_predictor_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    scoreboard = ctx["http_json_get"](
-        f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/scoreboard",
+def fetch_live_nba_matchup_predictor_payload(ctx: RuntimeServiceContext, limit: int = 8) -> Dict[str, Any]:
+    scoreboard = _dependencies(ctx).http_json_get(
+        f"{_dependencies(ctx).settings.espn_nba_base_url.rstrip('/')}/scoreboard",
         params={"limit": limit},
         timeout=12,
     ) or {}
@@ -311,9 +413,9 @@ def fetch_live_nba_matchup_predictor_payload(ctx: dict, limit: int = 8) -> Dict[
         home = next((item for item in competitors if item.get("homeAway") == "home"), None)
         status = (((competition.get("status") or {}).get("type")) or {})
         try:
-            predictor = ctx["http_json_get"](
+            predictor = _dependencies(ctx).http_json_get(
                 (
-                    ctx["SETTINGS"].espn_core_nba_base_url.rstrip("/")
+                    _dependencies(ctx).settings.espn_core_nba_base_url.rstrip("/")
                     + f"/events/{event_id}/competitions/{competition_id}/predictor"
                 ),
                 params={"lang": "en", "region": "us"},
@@ -321,7 +423,7 @@ def fetch_live_nba_matchup_predictor_payload(ctx: dict, limit: int = 8) -> Dict[
                 headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
             ) or {}
         except Exception:
-            ctx["app"].logger.exception("nba matchup predictor fetch failed event_id=%s", event_id)
+            _dependencies(ctx).application.logger.exception("nba matchup predictor fetch failed event_id=%s", event_id)
             return event_id, None
 
         away_stats = ((predictor.get("awayTeam") or {}).get("statistics") or [])
@@ -386,15 +488,15 @@ def fetch_live_nba_matchup_predictor_payload(ctx: dict, limit: int = 8) -> Dict[
     return normalize_nba_matchup_predictor_payload(
         {
             "items": ordered_items,
-            "generatedAt": ctx["utc_now_iso"](),
+            "generatedAt": _dependencies(ctx).utc_now_iso(),
             "source": "ESPN Matchup Predictor",
         },
         limit=limit,
     )
 
 
-def get_nba_matchup_predictor_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    ttl_seconds = int(ctx["SPORTS_RUNTIME_TTL_SECONDS"])
+def get_nba_matchup_predictor_snapshot(ctx: RuntimeServiceContext, limit: int = 8) -> Dict[str, Any]:
+    ttl_seconds = int(_dependencies(ctx).sports_runtime_ttl_seconds)
     cache_key = build_nba_matchup_predictor_cache_key(limit=limit)
     seeded_payload = _read_seeded_snapshot(ctx, namespace=NBA_MATCHUP_PREDICTOR_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
     if seeded_payload is None and int(limit or 0) != 8:
@@ -405,7 +507,7 @@ def get_nba_matchup_predictor_snapshot(ctx: dict, limit: int = 8) -> Dict[str, A
             ttl_seconds=ttl_seconds,
         )
     if seeded_payload is not None:
-        return normalize_nba_matchup_predictor_payload(seeded_payload, limit=limit, generated_at=ctx["utc_now_iso"]())
+        return normalize_nba_matchup_predictor_payload(seeded_payload, limit=limit, generated_at=_dependencies(ctx).utc_now_iso())
 
     payload = _with_cache_mode(fetch_live_nba_matchup_predictor_payload(ctx, limit=limit), "live-fallback")
     return _store_seed_fallback(ctx, namespace=NBA_MATCHUP_PREDICTOR_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
@@ -426,12 +528,12 @@ def normalize_nba_intel_payload(payload: Any, *, limit: int = 12, generated_at: 
     }
 
 
-def fetch_live_nba_intel_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
+def fetch_live_nba_intel_payload(ctx: RuntimeServiceContext, limit: int = 12) -> Dict[str, Any]:
     news_items: List[Dict[str, Any]] = []
     lineup_items: List[Dict[str, Any]] = []
     try:
-        payload = ctx["http_json_get"](
-            f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/news",
+        payload = _dependencies(ctx).http_json_get(
+            f"{_dependencies(ctx).settings.espn_nba_base_url.rstrip('/')}/news",
             timeout=12,
             headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
         ) or {}
@@ -454,7 +556,7 @@ def fetch_live_nba_intel_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
                 }
             )
     except Exception:
-        ctx["app"].logger.exception("nba intel news fetch failed")
+        _dependencies(ctx).application.logger.exception("nba intel news fetch failed")
 
     try:
         lineup_date = datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -465,13 +567,13 @@ def fetch_live_nba_intel_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
             ),
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "en-US,en;q=0.9",
-            "Referer": f"{ctx['SETTINGS'].nba_official_base_url.rstrip('/')}/",
-            "Origin": ctx["SETTINGS"].nba_official_base_url.rstrip("/"),
+            "Referer": f"{_dependencies(ctx).settings.nba_official_base_url.rstrip('/')}/",
+            "Origin": _dependencies(ctx).settings.nba_official_base_url.rstrip("/"),
             "x-nba-stats-origin": "stats",
             "x-nba-stats-token": "true",
         }
-        payload = ctx["http_json_get"](
-            f"{ctx['SETTINGS'].nba_lineups_base_url.rstrip('/')}/00_daily_lineups_{lineup_date}.json",
+        payload = _dependencies(ctx).http_json_get(
+            f"{_dependencies(ctx).settings.nba_lineups_base_url.rstrip('/')}/00_daily_lineups_{lineup_date}.json",
             timeout=8,
             headers=nba_headers,
         ) or {}
@@ -502,7 +604,7 @@ def fetch_live_nba_intel_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
                 }
             )
     except Exception:
-        ctx["app"].logger.exception("nba intel lineup fetch failed")
+        _dependencies(ctx).application.logger.exception("nba intel lineup fetch failed")
     if not lineup_items:
         try:
             scoreboard = fetch_live_nba_scoreboard_payload(ctx, limit=min(limit, 8))
@@ -517,12 +619,12 @@ def fetch_live_nba_intel_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
                     }
                 )
         except Exception:
-            ctx["app"].logger.exception("nba intel scoreboard lineup fallback failed")
-    return normalize_nba_intel_payload({"items": news_items, "lineups": lineup_items, "generatedAt": ctx["utc_now_iso"]()}, limit=limit)
+            _dependencies(ctx).application.logger.exception("nba intel scoreboard lineup fallback failed")
+    return normalize_nba_intel_payload({"items": news_items, "lineups": lineup_items, "generatedAt": _dependencies(ctx).utc_now_iso()}, limit=limit)
 
 
-def get_nba_intel_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
-    ttl_seconds = int(ctx["SPORTS_RUNTIME_TTL_SECONDS"])
+def get_nba_intel_snapshot(ctx: RuntimeServiceContext, limit: int = 12) -> Dict[str, Any]:
+    ttl_seconds = int(_dependencies(ctx).sports_runtime_ttl_seconds)
     cache_key = build_nba_intel_cache_key(limit=limit)
     seeded_payload = _read_seeded_snapshot(ctx, namespace=NBA_INTEL_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
     if seeded_payload is None and int(limit or 0) != 12:
@@ -533,7 +635,7 @@ def get_nba_intel_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
             ttl_seconds=ttl_seconds,
         )
     if seeded_payload is not None:
-        return normalize_nba_intel_payload(seeded_payload, limit=limit, generated_at=ctx["utc_now_iso"]())
+        return normalize_nba_intel_payload(seeded_payload, limit=limit, generated_at=_dependencies(ctx).utc_now_iso())
 
     payload = _with_cache_mode(fetch_live_nba_intel_payload(ctx, limit=limit), "live-fallback")
     return _store_seed_fallback(ctx, namespace=NBA_INTEL_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
@@ -543,7 +645,7 @@ INFLATION_NOWCAST_NAMESPACE = "snapshot:macro:inflation-nowcast"
 INFLATION_NOWCAST_CACHE_KEY = "latest"
 
 
-def normalize_inflation_nowcast_payload(payload: Any, *, ctx: dict, generated_at: str | None = None) -> Dict[str, Any]:
+def normalize_inflation_nowcast_payload(payload: Any, *, ctx: RuntimeServiceContext, generated_at: str | None = None) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
     has_data = bool(payload.get("monthOverMonth") or payload.get("yearOverYear") or payload.get("quarterly"))
@@ -552,32 +654,32 @@ def normalize_inflation_nowcast_payload(payload: Any, *, ctx: dict, generated_at
         "monthOverMonth": payload.get("monthOverMonth"),
         "yearOverYear": payload.get("yearOverYear"),
         "quarterly": payload.get("quarterly") if isinstance(payload.get("quarterly"), list) else [],
-        "generatedAt": str(payload.get("generatedAt") or generated_at or ctx["utc_now_iso"]()),
+        "generatedAt": str(payload.get("generatedAt") or generated_at or _dependencies(ctx).utc_now_iso()),
         "source": str(payload.get("source") or "Cleveland Fed Inflation Nowcasting"),
-        "url": str(payload.get("url") or ctx["SETTINGS"].cleveland_fed_nowcast_url),
+        "url": str(payload.get("url") or _dependencies(ctx).settings.cleveland_fed_nowcast_url),
         "status": str(payload.get("status") or ("ok" if has_data else "empty")),
     }
 
 
-def fetch_live_inflation_nowcast_payload(ctx: dict) -> Dict[str, Any]:
+def fetch_live_inflation_nowcast_payload(ctx: RuntimeServiceContext) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "monthOverMonth": None,
         "yearOverYear": None,
         "quarterly": [],
-        "generatedAt": ctx["utc_now_iso"](),
+        "generatedAt": _dependencies(ctx).utc_now_iso(),
         "source": "Cleveland Fed Inflation Nowcasting",
-        "url": ctx["SETTINGS"].cleveland_fed_nowcast_url,
+        "url": _dependencies(ctx).settings.cleveland_fed_nowcast_url,
     }
-    if ctx["requests"] is None or ctx["BeautifulSoup"] is None:
+    if _dependencies(ctx).requests_lib is None or _dependencies(ctx).beautiful_soup is None:
         return normalize_inflation_nowcast_payload(payload, ctx=ctx)
     try:
-        response = ctx["requests"].get(
+        response = _dependencies(ctx).requests_lib.get(
             payload["url"],
             timeout=15,
             headers={"User-Agent": "polydata-runtime/1.0", "Accept": "text/html,application/xhtml+xml"},
         )
         response.raise_for_status()
-        soup = ctx["BeautifulSoup"](response.text, "html.parser")
+        soup = _dependencies(ctx).beautiful_soup(response.text, "html.parser")
         for table in soup.find_all("table"):
             caption = table.find("caption")
             caption_text = " ".join(caption.get_text(" ", strip=True).split()).lower() if caption else ""
@@ -597,12 +699,12 @@ def fetch_live_inflation_nowcast_payload(ctx: dict) -> Dict[str, Any]:
             elif "quarterly annualized percent change" in caption_text:
                 payload["quarterly"] = rows[:4]
     except Exception:
-        ctx["app"].logger.exception("inflation nowcast fetch failed")
+        _dependencies(ctx).application.logger.exception("inflation nowcast fetch failed")
     return normalize_inflation_nowcast_payload(payload, ctx=ctx)
 
 
-def get_inflation_nowcast_snapshot(ctx: dict) -> Dict[str, Any]:
-    ttl_seconds = max(ctx["FINANCE_RUNTIME_TTL_SECONDS"], 1800)
+def get_inflation_nowcast_snapshot(ctx: RuntimeServiceContext) -> Dict[str, Any]:
+    ttl_seconds = max(_dependencies(ctx).finance_runtime_ttl_seconds, 1800)
     seeded_payload = _read_seeded_snapshot(
         ctx,
         namespace=INFLATION_NOWCAST_NAMESPACE,
@@ -610,13 +712,13 @@ def get_inflation_nowcast_snapshot(ctx: dict) -> Dict[str, Any]:
         ttl_seconds=ttl_seconds,
     )
     if seeded_payload is not None:
-        return normalize_inflation_nowcast_payload(seeded_payload, ctx=ctx, generated_at=ctx["utc_now_iso"]())
+        return normalize_inflation_nowcast_payload(seeded_payload, ctx=ctx, generated_at=_dependencies(ctx).utc_now_iso())
 
     def _builder() -> Dict[str, Any]:
         return fetch_live_inflation_nowcast_payload(ctx)
 
-    if ctx.get("SNAPSHOT_STORE") is None and callable(ctx.get("get_snapshot_payload")):
-        return ctx["get_snapshot_payload"](INFLATION_NOWCAST_NAMESPACE, INFLATION_NOWCAST_CACHE_KEY, _builder, ttl_seconds=ttl_seconds)
+    if _dependencies(ctx).snapshot_store is None and callable(_dependencies(ctx).get_snapshot_payload):
+        return _dependencies(ctx).get_snapshot_payload(INFLATION_NOWCAST_NAMESPACE, INFLATION_NOWCAST_CACHE_KEY, _builder, ttl_seconds=ttl_seconds)
 
     payload = _with_cache_mode(fetch_live_inflation_nowcast_payload(ctx), "live-fallback")
     return _store_seed_fallback(
