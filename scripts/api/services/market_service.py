@@ -799,6 +799,146 @@ def _workspace_health(
     }
 
 
+def _workspace_evidence(
+    *,
+    market_id: int,
+    identity: Dict[str, Any],
+    price: Optional[Dict[str, Any]],
+    chart: Optional[Dict[str, Any]],
+    trades: List[Dict[str, Any]],
+    oracle_payload: Optional[Dict[str, Any]],
+    group: Optional[Dict[str, Any]],
+    health: Dict[str, Any],
+    serving_source: Optional[str],
+    serving_updated_at: Optional[str],
+    generated_at: str,
+) -> Dict[str, Any]:
+    points = (chart or {}).get("points") or []
+    if not isinstance(points, list):
+        points = []
+    timeline = (oracle_payload or {}).get("timeline") or []
+    if not isinstance(timeline, list):
+        timeline = []
+    outcomes = (group or {}).get("outcomes") or []
+    if not isinstance(outcomes, list):
+        outcomes = []
+
+    latest_chart_at = max(
+        (
+            str(point.get("timestamp"))
+            for point in points
+            if isinstance(point, dict) and point.get("timestamp")
+        ),
+        default=None,
+    )
+    latest_trade_at = max(
+        (
+            str(trade.get("timestamp"))
+            for trade in trades
+            if isinstance(trade, dict) and trade.get("timestamp")
+        ),
+        default=None,
+    )
+    latest_oracle_at = max(
+        (
+            str(event.get("eventTime"))
+            for event in timeline
+            if isinstance(event, dict) and event.get("eventTime")
+        ),
+        default=None,
+    )
+    identifiers = {
+        key: value
+        for key, value in {
+            "localMarketId": identity.get("localMarketId") or market_id,
+            "gammaMarketId": identity.get("gammaMarketId"),
+            "conditionId": identity.get("conditionId"),
+            "questionId": identity.get("questionId"),
+        }.items()
+        if value not in (None, "")
+    }
+    has_price = bool(
+        price
+        and (
+            price.get("latestYesPrice") not in (None, "")
+            or price.get("latestPrice") not in (None, "")
+        )
+    )
+    claims = [
+        {
+            "id": "identity",
+            "label": "Market identity",
+            "status": "ok" if identity.get("conditionId") else "partial",
+            "source": serving_source or "market-registry",
+            "observedAt": serving_updated_at or generated_at,
+            "recordCount": 1,
+            "detail": "Local, Gamma, condition and question identifiers",
+            "identifiers": identifiers,
+        },
+        {
+            "id": "price",
+            "label": "Current probability",
+            "status": str(health.get("priceStatus") or ("ok" if has_price else "missing")),
+            "source": str((price or {}).get("priceSource") or serving_source or "market-serving"),
+            "observedAt": (price or {}).get("updatedAt") or serving_updated_at,
+            "recordCount": 1 if has_price else 0,
+            "detail": "Latest YES and NO probability observation",
+        },
+        {
+            "id": "history",
+            "label": "Probability history",
+            "status": str(health.get("chartStatus") or "missing"),
+            "source": str((chart or {}).get("priceSource") or "market-chart"),
+            "observedAt": latest_chart_at or (chart or {}).get("servingUpdatedAt"),
+            "recordCount": len(points),
+            "detail": f"{(chart or {}).get('range') or 'unknown'} range · {(chart or {}).get('interval') or 'unknown'} interval",
+        },
+        {
+            "id": "trades",
+            "label": "OrderFilled evidence",
+            "status": "ok" if trades else "missing",
+            "source": "polygon-orderfilled",
+            "observedAt": latest_trade_at,
+            "recordCount": len(trades),
+            "detail": "Canonical transaction hash and log index rows",
+        },
+        {
+            "id": "oracle",
+            "label": "Oracle lifecycle",
+            "status": str(health.get("oracleStatus") or "unbound"),
+            "source": str(
+                next(
+                    (
+                        event.get("sourceAdapter") or event.get("sourceOracle")
+                        for event in timeline
+                        if isinstance(event, dict)
+                        and (event.get("sourceAdapter") or event.get("sourceOracle"))
+                    ),
+                    identity.get("oracle") or "uma-oracle",
+                )
+            ),
+            "observedAt": latest_oracle_at,
+            "recordCount": len(timeline),
+            "detail": "Proposal, dispute and settlement observations",
+        },
+        {
+            "id": "group",
+            "label": "Event and outcomes",
+            "status": str(health.get("groupStatus") or "single-market"),
+            "source": "gamma-market-group",
+            "observedAt": (group or {}).get("generatedAt") or generated_at,
+            "recordCount": len(outcomes) if group else 1,
+            "detail": "Event membership and outcome-token mapping",
+        },
+    ]
+    return {
+        "contractVersion": "market-workspace-evidence.v1",
+        "generatedAt": generated_at,
+        "claims": claims,
+        "issues": list(health.get("issues") or []),
+    }
+
+
 def _workspace_diagnostics(
     market_id: int,
     market: Dict[str, Any],
@@ -3902,11 +4042,26 @@ def _get_market_workspace_payload(
         selected_outcome=selected_outcome,
         serving_source=detail_payload.get("servingSource"),
     )
+    generated_at = dependencies.utc_now_iso()
+    evidence = _workspace_evidence(
+        market_id=market_id,
+        identity=identity,
+        price=price,
+        chart=chart,
+        trades=trades,
+        oracle_payload=oracle_payload,
+        group=group,
+        health=health,
+        serving_source=detail_payload.get("servingSource"),
+        serving_updated_at=detail_payload.get("servingUpdatedAt"),
+        generated_at=generated_at,
+    )
     return {
         "market": detail_payload.get("market") or dependencies.normalize_market(market),
         "identity": identity,
         "diagnostics": diagnostics,
         "health": health,
+        "evidence": evidence,
         "group": group,
         "selectedOutcome": selected_outcome,
         "price": price,
@@ -3917,5 +4072,5 @@ def _get_market_workspace_payload(
         "lob": None,
         "servingSource": detail_payload.get("servingSource") or "fallback",
         "servingUpdatedAt": detail_payload.get("servingUpdatedAt"),
-        "generatedAt": dependencies.utc_now_iso(),
+        "generatedAt": generated_at,
     }
