@@ -1,6 +1,6 @@
 # Operations Workspace
 
-`/operations` is PolyMonitor's read-only operational view. It combines application health,
+`/operations` is PolyMonitor's administrator-only, read-only operational view. It combines application health,
 synchronization checkpoints and seed watcher metadata without exposing SSH, systemd control,
 credentials or mutation endpoints to the browser.
 
@@ -17,6 +17,10 @@ The workspace refreshes every 30 seconds and keeps the last good observation vis
 endpoint temporarily fails. Watcher status is application heartbeat evidence, not a claim that
 the corresponding host-level systemd unit is active. Production service truth must still be
 verified with `systemctl --user` during deployments.
+
+The two operational health endpoints require an administrator session or an API key with the
+`operations:read` scope. The generic `/wm-api/health` endpoint remains public for deployment
+probes. Identity, API-key and audit details are documented in `docs/access-control.md`.
 
 ## Design system boundary
 

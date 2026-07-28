@@ -502,15 +502,24 @@ discovered
 - 分享和 briefing
 - PWA、国际化和 MCP
 
+#### 4.1 身份、角色与 Operations 管理员访问控制（已完成，2026-07-28）
+
+- 新增 PostgreSQL `product` schema，建立用户、服务端 session、API key、分钟/日配额、登录限速和安全审计模型；生产 API 在启用 auth 后若 schema 或 audit pepper 缺失会启动失败。
+- 密码采用逐用户 salt 的 scrypt；浏览器只持有 `Secure`、`HttpOnly`、`SameSite=Lax` 的 `__Host-` 不透明 cookie，数据库只保存 session、CSRF 和 API key 哈希。
+- 新增 `/login` 与 `/account`，支持 bootstrap 密码强制更换、登出、管理员 API key 一次性签发/吊销和审计事件查看；API key 当前只允许 `operations:read`。
+- `/system/health`、`/system/seed-health` 与 `/operations` 已纳入管理员保护；普通 `/health` 保持公开，继续服务 GCP 发布探针。
+- Operations 仍是只读应用控制面，不提供 SSH、systemd、凭据回显或修复写操作；原有 Quant、LOB、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试业务文件保持不动。
+
+下一批用户产品能力：Watchlist、市场/Oracle gap 告警与通知偏好。
+
 ## 下一步执行建议
 
 工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
 Workspace 以及 Oracle/data-quality 阶段均已建立。保持现有排除边界时，下一阶段是：
 
-1. 登录、角色与 Operations 管理员访问控制。
-2. Watchlist、市场/Oracle gap 告警和通知偏好。
-3. 服务端布局同步与可分享 briefing。
-4. PWA、国际化和 MCP 分发。
+1. Watchlist、市场/Oracle gap 告警和通知偏好。
+2. 服务端布局同步与可分享 briefing。
+3. PWA、国际化和 MCP 分发。
 
 若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
 PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。
