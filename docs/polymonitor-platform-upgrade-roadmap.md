@@ -453,6 +453,17 @@ discovered
 
 下一批平台骨架工作：建立 Design System token/component 边界，然后建设面向数据与服务健康的 Operations Workspace。
 
+#### 2.4 Design System 与 Operations Workspace（已完成，2026-07-28）
+
+- 新增统一设计 token 层，覆盖 canvas/surface/border/text、单一主色、语义状态色、字体、间距、圆角、阴影、动效与 reduced-motion。
+- 原有 `--wm-*` 变量映射到平台 token，允许现存 panel 渐进迁移，避免一次性重写全部业务样式。
+- 新增共享 Status、Freshness、Runtime Status 与 Metric primitives；Panel Runtime 的 ready/stale/degraded/error/suspended、cache mode 和 age 已形成统一可视状态。
+- 新增只读 `/operations` 工作台，消费 system health 和 seed health，展示 API/Redis/数据库类型、同步水位、watcher heartbeat、source states、records、freshness 与 active gaps。
+- Operations 不暴露 SSH、systemd 控制、凭据或修复写接口；watcher heartbeat 不冒充 host-level systemd 状态，生产发布仍独立使用 `systemctl --user` 验证。
+- World Cup 仍保持隐藏；本阶段未修改 Quant、LOB、PolySignal/PolyBeats、PnL/position/address、数据管道、Kaggle 或测试业务实现。
+
+下一批产品化工作：Market Workspace 信息架构与证据链统一，然后再推进 Address Workspace。
+
 ### 第三阶段：预测市场产品化
 
 - Market Workspace

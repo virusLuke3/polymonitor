@@ -765,16 +765,59 @@ export type ContentPayload = {
   topicIds?: string[];
 };
 
+export type SyncCheckpoint = {
+  value?: string | number | null;
+  lastBlock?: string | number | null;
+  updatedAt?: string | null;
+};
+
 export type SystemHealth = {
   database?: string;
   redis?: boolean;
   apiStatus?: string;
-  lobRuntime?: { status?: string; mode?: string };
+  lobRuntime?: {
+    status?: string;
+    mode?: string;
+    rollupWatermark?: string | number | null;
+    deadLetters1h?: string | number | null;
+    detail?: string | null;
+  };
   contentSync?: { status?: string };
-  marketSync?: { updatedAt?: string | null };
-  tradeSync?: { updatedAt?: string | null };
-  oracleSync?: { updatedAt?: string | null };
+  syncState?: Record<string, SyncCheckpoint>;
+  marketSync?: SyncCheckpoint | null;
+  tradeSync?: SyncCheckpoint | null;
+  oracleSync?: SyncCheckpoint | null;
   priceSync?: { status?: string; updatedAt?: string | null };
+};
+
+export type SeedHealthItem = {
+  panelId: string;
+  serviceName: string;
+  status: string;
+  freshness: string;
+  expectedIntervalSeconds: number;
+  lastAttemptAt?: string | null;
+  lastSuccessAt?: string | null;
+  attemptAgeSeconds?: number | null;
+  successAgeSeconds?: number | null;
+  recordCount?: number;
+  sourceStates?: Record<string, string>;
+  errorSummary?: string | null;
+  cacheMode?: string | null;
+  payloadStatus?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type SeedHealthPayload = {
+  generatedAt: string;
+  status: string;
+  summary: {
+    watcherCount: number;
+    okCount: number;
+    degradedCount: number;
+    errorCount: number;
+  };
+  items: SeedHealthItem[];
 };
 
 export type L2Level = {

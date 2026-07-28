@@ -1,3 +1,7 @@
+@layer tokens, base, components;
+
+@import url('./design-system.css') layer(components);
 @import url('./main.css') layer(base);
 @import url('./panels.css') layer(base);
 @import url('./panel-workspace.css') layer(base);
+@import url('./operations-workspace.css') layer(components);

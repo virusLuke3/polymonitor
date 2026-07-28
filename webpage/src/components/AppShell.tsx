@@ -6,6 +6,7 @@ const SITE_NAV_LINKS = [
   { label: 'Docs', href: '/docs/documentation/' },
   { label: 'Paper', href: 'https://arxiv.org/pdf/2604.20421', external: true },
   { label: 'GitHub', href: 'https://github.com/virusLuke3/polymonitor', external: true },
+  { label: 'Ops', href: '/operations' },
   { label: 'Quant', href: '/quant' },
 ];
 
@@ -68,7 +69,11 @@ export function AppShell({
           {SITE_NAV_LINKS.map((link) => (
             <a
               key={link.label}
-              className={link.label === 'Quant' ? 'wm-site-nav-quant' : undefined}
+              className={
+                link.label === 'Quant'
+                  ? 'wm-site-nav-quant'
+                  : (link.label === 'Ops' ? 'ops-site-nav-link' : undefined)
+              }
               href={link.href}
               target={link.external ? '_blank' : undefined}
               rel={link.external ? 'noopener noreferrer' : undefined}

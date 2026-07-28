@@ -74,6 +74,7 @@ import type {
   RuntimeTechPanelPayload,
   RuntimeWeatherNewsPayload,
   RuntimeWorldCupMatchOpsPayload,
+  SeedHealthPayload,
   SystemHealth,
   TradeRow,
   WorkspaceBundle,
@@ -268,8 +269,12 @@ export function fetchMarketGroupChart(eventId: string, range: '1h' | '6h' | '1d'
   );
 }
 
-export function fetchSystemHealth() {
-  return apiGet<SystemHealth>('/system/health');
+export function fetchSystemHealth(signal?: AbortSignal) {
+  return apiGet<SystemHealth>('/system/health', signal);
+}
+
+export function fetchSeedHealth(signal?: AbortSignal) {
+  return apiGet<SeedHealthPayload>('/system/seed-health', signal);
 }
 
 export function fetchRecentTrades(limit = 24) {

@@ -1,21 +1,21 @@
 :root {
-  --wm-bg: #090909;
-  --wm-surface: #151515;
-  --wm-surface-2: #101010;
-  --wm-border: #2a2a2a;
-  --wm-border-soft: #1d1d1d;
-  --wm-text: #f3f3f3;
-  --wm-text-dim: #8f8f8f;
-  --wm-green: #39ff73;
-  --wm-yellow: #f6b61f;
-  --wm-red: #ff4b4b;
-  --wm-blue: #5b98ff;
+  --wm-bg: var(--ds-color-canvas);
+  --wm-surface: var(--ds-color-surface-2);
+  --wm-surface-2: var(--ds-color-surface-1);
+  --wm-border: var(--ds-color-border);
+  --wm-border-soft: var(--ds-color-border-soft);
+  --wm-text: var(--ds-color-text);
+  --wm-text-dim: var(--ds-color-text-muted);
+  --wm-green: var(--ds-color-accent);
+  --wm-yellow: var(--ds-color-warning);
+  --wm-red: var(--ds-color-critical);
+  --wm-blue: var(--ds-color-info);
   --wm-orange: #ff8f24;
   --wm-grid: rgba(57, 255, 115, 0.06);
   --wm-glow: rgba(57, 255, 115, 0.18);
   --wm-shadow: rgba(0, 0, 0, 0.38);
-  --font-body: 'Inter', 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
+  --font-body: var(--ds-font-body);
+  --font-mono: var(--ds-font-mono);
 }
 
 .qtv-shell {

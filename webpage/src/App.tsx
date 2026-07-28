@@ -92,6 +92,7 @@ const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
 const GEO_SHOCK_STORAGE_KEY = 'polydata:seed:world:geo-sanctions-shock:v1';
 const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
 const QuantWorkspace = lazy(() => import('@/workspaces/quant/QuantWorkspace').then((module) => ({ default: module.QuantWorkspace })));
+const OperationsWorkspace = lazy(() => import('@/workspaces/operations/OperationsWorkspace').then((module) => ({ default: module.OperationsWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = [
@@ -2150,6 +2151,13 @@ function WorldMonitorApp() {
 
 export function App() {
   const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
+  if (pathname === '/operations' || pathname.startsWith('/operations/')) {
+    return (
+      <Suspense fallback={<PanelLoading label="Loading Operations workspace" detail="Reading production health and freshness metadata" />}>
+        <OperationsWorkspace />
+      </Suspense>
+    );
+  }
   return pathname === '/quant' || pathname.startsWith('/quant/')
     ? (
       <Suspense fallback={<PanelLoading label="Loading Quant workspace" detail="Opening chart, command palette and backtest tools" />}>

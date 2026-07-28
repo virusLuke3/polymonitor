@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { PanelLoading } from '@/components/Panel';
+import { RuntimeStatusBadge } from '@/components/design-system/StatusPrimitives';
 import type { PanelRuntimeStatus } from '@/panels/types';
 
 const PANEL_ROW_RESIZE_STEP = 200;
@@ -358,6 +359,7 @@ export function PanelWorkspaceSlot({
     <div
       className={`wm-panel-slot ${layoutManaged ? 'is-layout-managed' : ''} ${className}`.trim()}
       data-workspace-panel-id={panelId}
+      data-runtime-phase={runtimeStatus?.phase || 'idle'}
       ref={slotRef}
       onMouseDown={startDrag}
       style={{
@@ -397,6 +399,7 @@ export function PanelRuntimeBoundary({
   onRetry,
 }: PanelRuntimeBoundaryProps) {
   const phase = status?.phase || 'idle';
+  const showBadge = Boolean(status) && phase !== 'idle' && phase !== 'loading';
   const showNotice = phase === 'stale' || phase === 'degraded' || phase === 'error' || phase === 'suspended';
   const updatedLabel = status?.updatedAt
     ? new Date(status.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -412,6 +415,11 @@ export function PanelRuntimeBoundary({
   return (
     <>
       {children}
+      {showBadge && status ? (
+        <div className="ds-panel-status-anchor">
+          <RuntimeStatusBadge status={status} compact />
+        </div>
+      ) : null}
       {loading ? (
         <div className="wm-panel-slot-loading">
           <PanelLoading detail="正在同步这个 panel 的实时数据" />
