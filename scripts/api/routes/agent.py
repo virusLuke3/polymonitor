@@ -7,10 +7,13 @@ import json
 import os
 import threading
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from flask import Blueprint, jsonify, request
 
+from api.context import resolve_route_value
 from agent.common.budget import claim_agent_live_call
 from agent.common.gateway_client import call_market_insight_gateway, call_market_wide_insight_gateway, gateway_configured
 from agent.market_insight import build_market_insight, build_market_insight_fallback
@@ -24,6 +27,47 @@ _REFRESHING_KEYS: set[str] = set()
 _RATE_LOCK = threading.Lock()
 _RATE_WINDOW_SECONDS = 60
 _RATE_BUCKETS: dict[str, list[float]] = {}
+
+
+@dataclass(frozen=True)
+class AgentRouteDependencies:
+    application: Any
+    get_cached_json: Callable[..., Any] | None
+    set_cached_json: Callable[..., Any] | None
+    get_redis_client: Callable[..., Any] | None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, Any],
+    ) -> AgentRouteDependencies:
+        return cls(
+            application=resolve_route_value(context, "app"),
+            get_cached_json=_optional_route_callable(
+                context,
+                "get_cached_json",
+            ),
+            set_cached_json=_optional_route_callable(
+                context,
+                "set_cached_json",
+            ),
+            get_redis_client=_optional_route_callable(
+                context,
+                "get_redis_client",
+            ),
+        )
+
+
+def _optional_route_callable(
+    context: Mapping[str, Any],
+    name: str,
+) -> Callable[..., Any] | None:
+    dependency = resolve_route_value(context, name)
+    if dependency is None:
+        return None
+    if not callable(dependency):
+        raise TypeError(f"Route dependency is not callable: {name}")
+    return dependency
 
 
 def _agent_enabled() -> bool:
@@ -199,9 +243,18 @@ def _event_identity(value: Any) -> dict[str, Any]:
     }
 
 
-def _cached_response(helpers: dict, cache_key: str) -> dict[str, Any] | None:
-    reader = helpers.get("get_cached_json")
-    cached = reader(AGENT_CACHE_NAMESPACE, cache_key) if callable(reader) else _direct_redis_get(helpers, cache_key)
+def _cached_response(
+    dependencies: AgentRouteDependencies,
+    cache_key: str,
+) -> dict[str, Any] | None:
+    reader = dependencies.get_cached_json
+    cached = (
+        reader(AGENT_CACHE_NAMESPACE, cache_key)
+        if callable(reader)
+        else None
+    )
+    if not isinstance(cached, dict):
+        cached = _direct_redis_get(dependencies, cache_key)
     if not isinstance(cached, dict):
         return None
     response = dict(cached)
@@ -209,14 +262,19 @@ def _cached_response(helpers: dict, cache_key: str) -> dict[str, Any] | None:
     return response
 
 
-def _store_response(helpers: dict, cache_key: str, response: dict[str, Any], ttl_seconds: int) -> None:
-    setter = helpers.get("set_cached_json")
+def _store_response(
+    dependencies: AgentRouteDependencies,
+    cache_key: str,
+    response: dict[str, Any],
+    ttl_seconds: int,
+) -> None:
     payload = dict(response)
     payload.pop("cacheStatus", None)
+    setter = dependencies.set_cached_json
     if callable(setter):
         setter(AGENT_CACHE_NAMESPACE, cache_key, payload, ttl_seconds)
         return
-    _direct_redis_set(helpers, cache_key, payload, ttl_seconds)
+    _direct_redis_set(dependencies, cache_key, payload, ttl_seconds)
 
 
 def _direct_redis_key(cache_key: str) -> str:
@@ -224,8 +282,11 @@ def _direct_redis_key(cache_key: str) -> str:
     return f"{prefix}{AGENT_CACHE_NAMESPACE}:{cache_key}"
 
 
-def _direct_redis_get(helpers: dict, cache_key: str) -> dict[str, Any] | None:
-    getter = helpers.get("get_redis_client")
+def _direct_redis_get(
+    dependencies: AgentRouteDependencies,
+    cache_key: str,
+) -> dict[str, Any] | None:
+    getter = dependencies.get_redis_client
     if not callable(getter):
         return None
     client = getter()
@@ -235,12 +296,21 @@ def _direct_redis_get(helpers: dict, cache_key: str) -> dict[str, Any] | None:
         raw = client.get(_direct_redis_key(cache_key))
         return json.loads(raw) if raw else None
     except Exception:
-        _log_exception(helpers, "agent-cache redis-get failed key=%s", cache_key)
+        _log_exception(
+            dependencies,
+            "agent-cache redis-get failed key=%s",
+            cache_key,
+        )
         return None
 
 
-def _direct_redis_set(helpers: dict, cache_key: str, payload: dict[str, Any], ttl_seconds: int) -> None:
-    getter = helpers.get("get_redis_client")
+def _direct_redis_set(
+    dependencies: AgentRouteDependencies,
+    cache_key: str,
+    payload: dict[str, Any],
+    ttl_seconds: int,
+) -> None:
+    getter = dependencies.get_redis_client
     if not callable(getter):
         return
     client = getter()
@@ -249,11 +319,20 @@ def _direct_redis_set(helpers: dict, cache_key: str, payload: dict[str, Any], tt
     try:
         client.setex(_direct_redis_key(cache_key), ttl_seconds, json.dumps(payload, ensure_ascii=True, default=str))
     except Exception:
-        _log_exception(helpers, "agent-cache redis-set failed key=%s ttl=%s", cache_key, ttl_seconds)
+        _log_exception(
+            dependencies,
+            "agent-cache redis-set failed key=%s ttl=%s",
+            cache_key,
+            ttl_seconds,
+        )
 
 
-def _log_exception(helpers: dict, message: str, *args: Any) -> None:
-    logger = getattr(helpers.get("app"), "logger", None)
+def _log_exception(
+    dependencies: AgentRouteDependencies,
+    message: str,
+    *args: Any,
+) -> None:
+    logger = getattr(dependencies.application, "logger", None)
     if logger is not None:
         logger.exception(message, *args)
 
@@ -272,7 +351,7 @@ def _leave_singleflight(cache_key: str) -> None:
 
 
 def _serve_agent_with_cache(
-    helpers: dict,
+    dependencies: AgentRouteDependencies,
     *,
     kind: str,
     payload: dict[str, Any],
@@ -280,7 +359,7 @@ def _serve_agent_with_cache(
     fallback_builder: Callable[[], dict[str, Any]],
 ) -> dict[str, Any]:
     cache_key = _cache_key(kind, payload)
-    cached = _cached_response(helpers, cache_key)
+    cached = _cached_response(dependencies, cache_key)
     if cached is not None:
         return cached
 
@@ -297,7 +376,12 @@ def _serve_agent_with_cache(
             fallback["cacheStatus"] = "budget-fallback"
             fallback["cacheKey"] = cache_key
             fallback["dailyBudget"] = budget
-            _store_response(helpers, cache_key, fallback, _fallback_cache_ttl())
+            _store_response(
+                dependencies,
+                cache_key,
+                fallback,
+                _fallback_cache_ttl(),
+            )
             return fallback
         response = live_builder()
         if isinstance(response, dict) and response.get("brief") and isinstance(response.get("focus"), list):
@@ -305,25 +389,40 @@ def _serve_agent_with_cache(
             response["cacheStatus"] = "miss"
             response["cacheKey"] = cache_key
             response["dailyBudget"] = budget
-            _store_response(helpers, cache_key, response, ttl)
+            _store_response(dependencies, cache_key, response, ttl)
             return response
         fallback = fallback_builder()
         fallback["cacheStatus"] = "fallback"
         fallback["cacheKey"] = cache_key
-        _store_response(helpers, cache_key, fallback, _fallback_cache_ttl())
+        _store_response(
+            dependencies,
+            cache_key,
+            fallback,
+            _fallback_cache_ttl(),
+        )
         return fallback
     except Exception:
-        _log_exception(helpers, "agent-cache live call failed key=%s", cache_key)
+        _log_exception(
+            dependencies,
+            "agent-cache live call failed key=%s",
+            cache_key,
+        )
         fallback = fallback_builder()
         fallback["cacheStatus"] = "error-fallback"
         fallback["cacheKey"] = cache_key
-        _store_response(helpers, cache_key, fallback, _fallback_cache_ttl())
+        _store_response(
+            dependencies,
+            cache_key,
+            fallback,
+            _fallback_cache_ttl(),
+        )
         return fallback
     finally:
         _leave_singleflight(cache_key)
 
 
-def create_agent_blueprint(helpers: dict) -> Blueprint:
+def create_agent_blueprint(context: Mapping[str, Any]) -> Blueprint:
+    dependencies = AgentRouteDependencies.from_context(context)
     bp = Blueprint("agent_routes", __name__)
 
     @bp.route("/agent/market-insights", methods=["POST"])
@@ -343,7 +442,7 @@ def create_agent_blueprint(helpers: dict) -> Blueprint:
         if request.headers.get("X-PolyData-Agent-Gateway-Attempt") == "1":
             return jsonify(build_market_insight(payload))
         return jsonify(_serve_agent_with_cache(
-            helpers,
+            dependencies,
             kind="market",
             payload=payload,
             live_builder=lambda: call_market_insight_gateway(payload) if gateway_configured() else build_market_insight(payload),
@@ -367,7 +466,7 @@ def create_agent_blueprint(helpers: dict) -> Blueprint:
         if request.headers.get("X-PolyData-Agent-Gateway-Attempt") == "1":
             return jsonify(build_market_wide_insight(payload))
         return jsonify(_serve_agent_with_cache(
-            helpers,
+            dependencies,
             kind="market-wide",
             payload=payload,
             live_builder=lambda: call_market_wide_insight_gateway(payload) if gateway_configured() else build_market_wide_insight(payload),

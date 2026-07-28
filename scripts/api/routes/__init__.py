@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, Final
 
 from flask import Flask
 
@@ -21,22 +21,26 @@ from .runtime_sports import create_runtime_sports_blueprint
 from .system import create_system_blueprint
 
 
+BlueprintFactory = Callable[[Mapping[str, Any]], Any]
+BLUEPRINT_FACTORIES: Final[tuple[BlueprintFactory, ...]] = (
+    create_agent_blueprint,
+    create_agent_snapshot_blueprint,
+    create_bootstrap_blueprint,
+    create_market_groups_blueprint,
+    create_markets_blueprint,
+    create_quant_blueprint,
+    create_runtime_panels_blueprint,
+    create_runtime_sports_blueprint,
+    create_content_blueprint,
+    create_analytics_blueprint,
+    create_system_blueprint,
+    create_lob_blueprint,
+)
+
+
 def register_blueprints(app: Flask, context: Mapping[str, Any]) -> None:
     if app.config.get("POLYDATA_BLUEPRINTS_REGISTERED"):
         return
-    for factory in (
-        create_agent_blueprint,
-        create_agent_snapshot_blueprint,
-        create_bootstrap_blueprint,
-        create_market_groups_blueprint,
-        create_markets_blueprint,
-        create_quant_blueprint,
-        create_runtime_panels_blueprint,
-        create_runtime_sports_blueprint,
-        create_content_blueprint,
-        create_analytics_blueprint,
-        create_system_blueprint,
-        create_lob_blueprint,
-    ):
+    for factory in BLUEPRINT_FACTORIES:
         app.register_blueprint(factory(context))
     app.config["POLYDATA_BLUEPRINTS_REGISTERED"] = True
