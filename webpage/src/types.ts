@@ -185,6 +185,7 @@ export type TradeRow = {
 export type OracleEvent = {
   id?: number;
   txHash?: string | null;
+  logIndex?: number | null;
   blockNumber?: number | null;
   eventTime?: string | null;
   eventStatus?: string | null;
@@ -831,6 +832,93 @@ export type SeedHealthPayload = {
     errorCount: number;
   };
   items: SeedHealthItem[];
+};
+
+export type MarketDataQualityDimension = {
+  id: string;
+  label: string;
+  status: string;
+  numerator?: number | null;
+  denominator?: number | null;
+  coveragePct?: number | null;
+  source: string;
+  observedAt?: string | null;
+  ageSeconds?: number | null;
+  detail?: string | null;
+};
+
+export type MarketDataQualityLifecycleStage = {
+  id: string;
+  label: string;
+  count?: number | null;
+  source: string;
+  detail?: string | null;
+  status?: string | null;
+};
+
+export type MarketDataQualityGap = {
+  id: string;
+  severity: string;
+  label: string;
+  count: number;
+  detail?: string | null;
+  observedAt?: string | null;
+  source: string;
+};
+
+export type MarketDataQualityGapMarket = {
+  marketId: number;
+  title: string;
+  slug?: string | null;
+  category?: string | null;
+  endDate?: string | null;
+  completionStatus?: string | null;
+  observedAt?: string | null;
+};
+
+export type MarketDataQualityWatermark = {
+  id: string;
+  key: string;
+  lastBlock?: number | string | null;
+  updatedAt?: string | null;
+  state?: unknown;
+};
+
+export type MarketDataQualityPayload = {
+  contractVersion: 'prediction-market-data-quality.v1' | string;
+  generatedAt: string;
+  status: string;
+  score: number;
+  summary: {
+    marketCount: number;
+    servingMarketCount: number;
+    recentlyTradedMarketCount: number;
+    oracleEventCount: number;
+    oracleBoundMarketCount: number;
+    activeGapCount: number;
+    criticalDimensionCount: number;
+    warningDimensionCount: number;
+    latestTradeAt?: string | null;
+    latestOracleAt?: string | null;
+  };
+  dimensions: MarketDataQualityDimension[];
+  lifecycle: MarketDataQualityLifecycleStage[];
+  oracleLifecycle: {
+    source: string;
+    latestEventAt?: string | null;
+    latestBlock?: number | string | null;
+    stages: Array<{ id: string; label: string; count: number }>;
+    recentEvents: OracleEvent[];
+  };
+  gaps: MarketDataQualityGap[];
+  gapMarkets: MarketDataQualityGapMarket[];
+  watermarks: MarketDataQualityWatermark[];
+  semantics?: {
+    eventIdentity?: string;
+    canonicalOrder?: string;
+    marketBridge?: string;
+    score?: string;
+  };
 };
 
 export type L2Level = {

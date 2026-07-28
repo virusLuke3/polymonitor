@@ -6,6 +6,7 @@ const SITE_NAV_LINKS = [
   { label: 'Docs', href: '/docs/documentation/' },
   { label: 'Paper', href: 'https://arxiv.org/pdf/2604.20421', external: true },
   { label: 'GitHub', href: 'https://github.com/virusLuke3/polymonitor', external: true },
+  { label: 'Quality', href: '/data-quality' },
   { label: 'Quant', href: '/quant' },
 ];
 

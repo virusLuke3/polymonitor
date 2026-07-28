@@ -483,7 +483,16 @@ discovered
 - 公共 Atlas 导航已隐藏 Operations 入口；`/operations` 仍保持只读，等待后续权限阶段纳入管理员访问控制。
 - 本阶段未改写 LOB runtime、Quant、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 或测试业务实现。
 
-下一批产品化工作按路线图是 Address Workspace；由于 PnL/position/address 仍属于明确排除域，进入该阶段前必须重新确认允许修改的只读 API 与前端边界。
+#### 3.2 Oracle lifecycle 与数据质量面板（已完成，2026-07-28）
+
+- 新增公共 `/data-quality` 工作台及 `prediction-market-data-quality.v1` 只读 API，集中展示市场身份、token registry、serving price、Oracle binding、closed-market finality 与 trade/Oracle freshness。
+- 市场全生命周期按 Discovered、Tradeable、Recently active、Closed、Proposed、Disputed、Resolved 和 Redeemed 展示；不同来源的历史 universe 不冒充转化漏斗，尚未采集的 Redeemed 明确标记为 `not-collected`。
+- Oracle lifecycle 独立展示 Request、Propose、Dispute 和 Settle；事件身份固定为 `tx_hash + log_index`，规范顺序为 `block_number + log_index`，未绑定本地市场的链上事件仍作为可审计 gap 保留。
+- 建立加权质量分数、七项维度阈值、active gap ledger、代表性 awaiting-Oracle 市场、同步水位和刷新失败保留 last-good 的降级语义。
+- Market Dossier 同步增加四阶段 Oracle rail 与 `logIndex`，公共 Atlas 导航增加 Quality 入口；Operations 仍不在公共导航展示。
+- 本阶段只读现有数据，不启动或修改已停止的 Oracle collector，也未改写 LOB runtime、Quant、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 或测试业务实现。
+
+第三阶段在当前允许边界内已经完成 Market Workspace、Oracle lifecycle 和数据质量面板。Address Workspace、可解释 PolySignal 与可复现 Quant 仍属于明确排除域；不改变该边界时，下一阶段应进入用户与分发能力。
 
 ### 第四阶段：用户与分发
 
@@ -495,12 +504,13 @@ discovered
 
 ## 下一步执行建议
 
-下一步不应继续增加业务面板，而应启动“工程基线与 CI”阶段：
+工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
+Workspace 以及 Oracle/data-quality 阶段均已建立。保持现有排除边界时，下一阶段是：
 
-1. 将当前已审核的 6 个提交推送到远端，形成最新可追溯基线。
-2. 对仍在本地的实验改动建立正式的保留/迁移清单。
-3. 新建最小后端 CI：Python 编译、pytest、shell/systemd 检查和 secret scan。
-4. 固定 Python/Node 版本并建立依赖锁。
-5. 增加“从全新 checkout 构建成功”的验收脚本。
+1. 登录、角色与 Operations 管理员访问控制。
+2. Watchlist、市场/Oracle gap 告警和通知偏好。
+3. 服务端布局同步与可分享 briefing。
+4. PWA、国际化和 MCP 分发。
 
-这一阶段完成后，再开始 Panel Runtime 或 Design System；否则前端平台化仍会建立在不可复现的运行基础上。
+若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
+PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。

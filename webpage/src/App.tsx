@@ -94,6 +94,7 @@ const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
 const QuantWorkspace = lazy(() => import('@/workspaces/quant/QuantWorkspace').then((module) => ({ default: module.QuantWorkspace })));
 const OperationsWorkspace = lazy(() => import('@/workspaces/operations/OperationsWorkspace').then((module) => ({ default: module.OperationsWorkspace })));
 const MarketWorkspace = lazy(() => import('@/workspaces/market/MarketWorkspace').then((module) => ({ default: module.MarketWorkspace })));
+const DataQualityWorkspace = lazy(() => import('@/workspaces/data-quality/DataQualityWorkspace').then((module) => ({ default: module.DataQualityWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = [
@@ -2156,6 +2157,13 @@ function WorldMonitorApp() {
 
 export function App() {
   const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
+  if (pathname === '/data-quality' || pathname.startsWith('/data-quality/')) {
+    return (
+      <Suspense fallback={<PanelLoading label="Loading Data Quality workspace" detail="Auditing market identity, Oracle lifecycle and synchronization watermarks" />}>
+        <DataQualityWorkspace />
+      </Suspense>
+    );
+  }
   if (/^\/markets\/\d+(?:\/|$)/.test(pathname)) {
     return (
       <Suspense fallback={<PanelLoading label="Loading Market workspace" detail="Resolving market identity, probability and evidence sources" />}>

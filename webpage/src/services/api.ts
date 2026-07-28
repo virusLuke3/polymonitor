@@ -15,6 +15,7 @@ import type {
   MarketGroupsPayload,
   MarketGroupSort,
   MarketListItem,
+  MarketDataQualityPayload,
   MarketsPayload,
   MarketWorkspaceHealth,
   MarketWorkspaceEvidence,
@@ -276,6 +277,10 @@ export function fetchSystemHealth(signal?: AbortSignal) {
 
 export function fetchSeedHealth(signal?: AbortSignal) {
   return apiGet<SeedHealthPayload>('/system/seed-health', signal);
+}
+
+export function fetchMarketDataQuality(signal?: AbortSignal) {
+  return apiGetWithTimeout<MarketDataQualityPayload>('/data-quality/markets', 45_000, signal);
 }
 
 export function fetchRecentTrades(limit = 24) {

@@ -10,6 +10,9 @@ Private notes, credentials, deployment journals, and non-public research should 
 - `development.md` - local development, build, and verification commands.
 - `worldmonitor-polymonitor-comparison.md` - WorldMonitor/Polymonitor product, data, architecture, and engineering comparison.
 - `polymonitor-platform-upgrade-roadmap.md` - staged platform upgrade roadmap that preserves Polymarket specialization.
+- `market-workspace.md` - evidence contract and source boundaries for shareable market dossiers.
+- `operations-workspace.md` - read-only application health and freshness workspace.
+- `data-quality-workspace.md` - Oracle lifecycle, data-quality contract and gap semantics.
 - `updates.md` - daily public progress log and reusable update template.
 - `../deploy/README.md` - deployment templates for local `systemd` runtime and remote frontend hosting.
 

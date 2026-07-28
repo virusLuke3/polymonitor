@@ -446,6 +446,15 @@ function TradeTable({ trades }: { trades: TradeRow[] }) {
 
 function OracleTimeline({ events, bundle }: { events: OracleEvent[]; bundle: WorkspaceBundle }) {
   const current = bundle.oracle?.summary?.completionStatus || bundle.oracle?.completionStatus || 'OPEN';
+  const oracleStages = [
+    { id: 'request', label: 'Request', matcher: /request/i },
+    { id: 'propose', label: 'Propose', matcher: /propos/i },
+    { id: 'dispute', label: 'Dispute', matcher: /disput/i },
+    { id: 'settle', label: 'Settle', matcher: /settle|resolve/i },
+  ].map((stage) => ({
+    ...stage,
+    event: events.find((event) => stage.matcher.test(String(event.eventStatus || event.completionStatus || ''))),
+  }));
   return (
     <section className="market-card market-oracle-card">
       <div className="market-section-heading">
@@ -455,16 +464,27 @@ function OracleTimeline({ events, bundle }: { events: OracleEvent[]; bundle: Wor
         </div>
         <StatusBadge label={String(current).toUpperCase()} tone={statusTone(current)} />
       </div>
+      <div className="market-oracle-phase-rail" aria-label="Oracle lifecycle phases">
+        {oracleStages.map((stage, index) => (
+          <article className={stage.event ? 'is-observed' : 'is-pending'} key={stage.id}>
+            <span>{String(index + 1).padStart(2, '0')}</span>
+            <div>
+              <strong>{stage.label}</strong>
+              <em>{stage.event ? formatRelative(stage.event.eventTime) : 'Not observed'}</em>
+            </div>
+          </article>
+        ))}
+      </div>
       <div className="market-timeline">
         {events.map((event, index) => (
-          <article className="market-timeline-row" key={`${event.txHash || event.id || 'oracle'}-${index}`}>
+          <article className="market-timeline-row" key={`${event.txHash || event.id || 'oracle'}-${event.logIndex ?? index}`}>
             <span className="market-timeline-node" />
             <div>
               <strong>{event.eventStatus || event.completionStatus || 'Oracle observation'}</strong>
               <span>{event.settlementOutcome || event.proposedPrice || event.settledPrice || 'No outcome value published'}</span>
               <em>{formatDate(event.eventTime)} · {cleanSource(event.sourceAdapter || event.sourceOracle || 'oracle')}</em>
             </div>
-            <code>{shortHash(event.txHash, 9, 5)}</code>
+            <code>{shortHash(event.txHash, 9, 5)}<small>log {event.logIndex ?? '--'}</small></code>
           </article>
         ))}
         {!events.length ? (
@@ -671,6 +691,7 @@ export function MarketWorkspace() {
       <header className="market-topbar">
         <div className="market-brand-cluster">
           <a className="market-home-link" href="/">◎ Atlas</a>
+          <a className="market-home-link" href="/data-quality">Quality</a>
           <div className="market-brand">POLYDATA MARKET DOSSIER <span>EVIDENCE-FIRST WORKSPACE</span></div>
         </div>
         <div className="market-actions">
