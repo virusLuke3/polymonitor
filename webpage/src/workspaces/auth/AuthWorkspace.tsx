@@ -80,7 +80,6 @@ function SignInPanel({ next = '/account' }: { next?: string }) {
           <span>Username</span>
           <input
             autoComplete="username"
-            autoFocus
             value={username}
             onInput={(event) => setUsername(event.currentTarget.value)}
             placeholder="admin"
