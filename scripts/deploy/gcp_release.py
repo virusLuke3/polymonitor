@@ -35,6 +35,15 @@ GCP_SOURCE_FILES = {
     "scripts/ops/gcp_serving_healthcheck.py",
     "scripts/requirements.lock.txt",
 }
+EXTERNAL_RELEASE_PREFIXES = (
+    ".github/",
+    "docs/",
+    "webpage/",
+)
+EXTERNAL_RELEASE_FILES = {
+    "deploy/systemd/polydata.env.example",
+    "scripts/deploy/gcp_release.py",
+}
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 APPROVED_OVERRIDES_PATH = Path("deploy/gcp/accepted-remote-overrides.json")
 
@@ -94,6 +103,12 @@ def _deployable(path: str, *, gcp_units: set[str]) -> bool:
     if path.startswith(("scripts/runtime/worldcup_", "scripts/runtime/world_cup_")):
         return False
     return path in GCP_SOURCE_FILES or path.startswith(GCP_SOURCE_PREFIXES)
+
+
+def _externally_owned(path: str) -> bool:
+    """Classify assets released by GitHub/frontend/docs workflows, not GCP backend."""
+
+    return path in EXTERNAL_RELEASE_FILES or path.startswith(EXTERNAL_RELEASE_PREFIXES)
 
 
 def _git_entry(repo: Path, ref: str, path: str) -> tuple[bytes | None, str | None]:
@@ -177,6 +192,7 @@ def build_release(repo: Path, base: str, target: str, output_dir: Path) -> dict[
     payload_root = output_dir / "payload"
     payload_root.mkdir()
     entries: list[dict[str, Any]] = []
+    external: list[str] = []
     ignored: list[str] = []
     approved_overrides = _approved_remote_overrides(repo, base)
     used_overrides: set[str] = set()
@@ -184,7 +200,7 @@ def build_release(repo: Path, base: str, target: str, output_dir: Path) -> dict[
 
     for path in _changed_paths(repo, base, target):
         if not _deployable(path, gcp_units=gcp_units):
-            ignored.append(path)
+            (external if _externally_owned(path) else ignored).append(path)
             continue
         before, before_mode = _git_entry(repo, base, path)
         after, after_mode = _git_entry(repo, target, path)
@@ -220,6 +236,7 @@ def build_release(repo: Path, base: str, target: str, output_dir: Path) -> dict[
         "base_sha": base,
         "target_sha": target,
         "entries": entries,
+        "external_paths": external,
         "ignored_paths": ignored,
         "approved_remote_overrides": sorted(used_overrides),
     }
@@ -388,7 +405,8 @@ def _command_build(args: argparse.Namespace) -> int:
     manifest = build_release(args.repo.resolve(), args.base, args.target, args.output.resolve())
     print(
         f"release-built base={manifest['base_sha'][:12]} target={manifest['target_sha'][:12]} "
-        f"entries={len(manifest['entries'])} ignored={len(manifest['ignored_paths'])}"
+        f"entries={len(manifest['entries'])} external={len(manifest['external_paths'])} "
+        f"ignored={len(manifest['ignored_paths'])}"
     )
     return 0
 

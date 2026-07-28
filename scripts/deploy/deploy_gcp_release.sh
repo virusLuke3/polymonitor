@@ -100,6 +100,16 @@ ENTRY_COUNT="$(
   python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["entries"]))' \
     "${RELEASE_DIR}/release/manifest.json"
 )"
+IGNORED_COUNT="$(
+  python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1])).get("ignored_paths", [])))' \
+    "${RELEASE_DIR}/release/manifest.json"
+)"
+if [[ "${IGNORED_COUNT}" != "0" ]]; then
+  echo "GCP backend release contains ${IGNORED_COUNT} unclassified changed path(s); refusing deployment." >&2
+  python3 -c 'import json,sys; print("\\n".join(json.load(open(sys.argv[1])).get("ignored_paths", [])))' \
+    "${RELEASE_DIR}/release/manifest.json" >&2
+  exit 1
+fi
 if [[ "${ENTRY_COUNT}" == "0" ]]; then
   echo "No GCP backend files changed between ${BASE_SHA:0:12} and ${TARGET_SHA:0:12}."
   exit 0
