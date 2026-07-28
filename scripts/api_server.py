@@ -85,7 +85,7 @@ from api.context import RouteContext, ServiceContext
 from api.db_pool import build_api_connection_factory
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, breaking_event_radar_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_transport_shipping_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_quality_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, world_cup_match_ops_service, worldcup_dashboard_service, worldcup_intel_service
+from api.services import address_service, auth_service, bootstrap_service, breaking_event_radar_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_transport_shipping_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_quality_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, world_cup_match_ops_service, worldcup_dashboard_service, worldcup_intel_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -221,6 +221,7 @@ configure_logging()
 
 
 def create_app() -> Flask:
+    auth_service.validate_runtime_config()
     app.config["POLYDATA_SETTINGS"] = SETTINGS
     app.config["POLYDATA_API_HOST"] = SETTINGS.host
     app.config["POLYDATA_API_PORT"] = SETTINGS.port
@@ -239,6 +240,21 @@ def api_readonly_enabled() -> bool:
 
 def build_route_context(service_context: ServiceContext) -> RouteContext:
     return RouteContext(services=service_context, capabilities={
+        "AUTH_ALLOWED_SCOPES": tuple(sorted(auth_service.ALLOWED_SCOPES)),
+        "auth_cookie_secure": auth_service.cookie_secure,
+        "auth_enabled": auth_service.auth_enabled,
+        "auth_login": auth_service.login,
+        "auth_logout": auth_service.logout,
+        "auth_request_metadata": auth_service.request_metadata,
+        "authenticate_request": auth_service.authenticate_request,
+        "change_password": auth_service.change_password,
+        "create_api_key": auth_service.create_api_key,
+        "list_api_keys": auth_service.list_api_keys,
+        "list_audit_log": auth_service.list_audit_log,
+        "revoke_api_key": auth_service.revoke_api_key,
+        "session_cookie_name": auth_service.session_cookie_name,
+        "session_snapshot": auth_service.session_snapshot,
+        "session_ttl_seconds": auth_service.session_ttl_seconds,
         "build_seed_health_payload": lambda: system_service.build_seed_health_payload(build_service_context()),
         "build_system_health_payload": build_system_health_payload,
         "app": app,
@@ -1154,8 +1170,14 @@ def log_request_end(response):
     if origin and origin in ALLOWED_ORIGINS:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Vary"] = "Origin"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, X-Requested-With"
-        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, X-Requested-With, X-CSRF-Token, Authorization"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if request.path.startswith("/auth/") or request.path.startswith("/system/") or request.path.startswith("/runtime/system/"):
+        response.headers["Cache-Control"] = "no-store"
     app.logger.info(
         "request-end request_id=%s method=%s path=%s status=%s duration_ms=%.2f",
         request_id,
@@ -1179,6 +1201,31 @@ def handle_http_exception(error: HTTPException):
         getattr(error, "description", str(error)),
     )
     return jsonify({"error": getattr(error, "description", "HTTP error"), "requestId": request_id}), getattr(error, "code", 500)
+
+
+@app.errorhandler(auth_service.AuthError)
+def handle_auth_error(error: auth_service.AuthError):
+    request_id = getattr(g, "request_id", "-")
+    app.logger.warning(
+        "auth-error request_id=%s method=%s path=%s status=%s code=%s",
+        request_id,
+        request.method,
+        request.path,
+        error.status_code,
+        error.code,
+    )
+    response = jsonify(
+        {
+            "error": {"code": error.code, "message": error.message},
+            "requestId": request_id,
+        }
+    )
+    response.status_code = error.status_code
+    if error.retry_after:
+        response.headers["Retry-After"] = str(error.retry_after)
+    if error.status_code == 401:
+        response.headers["WWW-Authenticate"] = 'Bearer realm="polymonitor"'
+    return response
 
 
 @app.errorhandler(Exception)

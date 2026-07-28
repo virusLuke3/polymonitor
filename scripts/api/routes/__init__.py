@@ -10,6 +10,7 @@ from flask import Flask
 from .agent import create_agent_blueprint
 from .agent_snapshots import create_agent_snapshot_blueprint
 from .analytics import create_analytics_blueprint
+from .auth import create_auth_blueprint
 from .bootstrap import create_bootstrap_blueprint
 from .content import create_content_blueprint
 from .data_quality import create_data_quality_blueprint
@@ -25,6 +26,7 @@ from .system import create_system_blueprint
 
 BlueprintFactory = Callable[[Mapping[str, Any]], Any]
 BLUEPRINT_FACTORIES: Final[tuple[BlueprintFactory, ...]] = (
+    create_auth_blueprint,
     create_agent_blueprint,
     create_agent_snapshot_blueprint,
     create_bootstrap_blueprint,
