@@ -10,3 +10,4 @@
 @import url('./auth-workspace.css') layer(components);
 @import url('./watchlist-workspace.css') layer(components);
 @import url('./briefing-workspace.css') layer(components);
+@import url('./developer-workspace.css') layer(components);

@@ -1,7 +1,10 @@
 import { render } from 'preact';
 import { App } from './App';
+import { LocaleProvider } from '@/services/i18n';
+import { registerPwa } from '@/services/pwa';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './styles/base-layer.css';
 import './styles/panel-layout-stability.css';
 
-render(<App />, document.getElementById('app')!);
+registerPwa();
+render(<LocaleProvider><App /></LocaleProvider>, document.getElementById('app')!);

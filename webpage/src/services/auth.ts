@@ -116,7 +116,7 @@ export async function login(username: string, password: string): Promise<AuthSes
     authenticated: response.authenticated,
     user: response.user,
     csrfToken: response.csrfToken,
-    allowedScopes: ['operations:read'],
+    allowedScopes: ['mcp:read', 'operations:read'],
   });
 }
 
@@ -138,14 +138,14 @@ export async function fetchApiKeys(): Promise<ProductApiKey[]> {
   return response.items || [];
 }
 
-export async function createApiKey(name: string): Promise<ProductApiKey> {
+export async function createApiKey(name: string, scopes: string[] = ['operations:read']): Promise<ProductApiKey> {
   const response = await authRequest<{ item: ProductApiKey }>(
     '/auth/api-keys',
     {
       method: 'POST',
       body: JSON.stringify({
         name,
-        scopes: ['operations:read'],
+        scopes,
         rateLimitPerMinute: 60,
         dailyQuota: 5000,
       }),

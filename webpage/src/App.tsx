@@ -36,6 +36,7 @@ import {
   fetchWorkspaceBundle,
 } from '@/services/api';
 import { AuthApiError, fetchAuthSession } from '@/services/auth';
+import { useI18n, type MessageKey } from '@/services/i18n';
 import { fetchWorkspaceLayout, saveWorkspaceLayout, type WorkspaceLayout } from '@/services/product';
 import { buildWorldClockRows, CORE_WORLD_CLOCKS, normalizeTimezone, type WorldClockLocation } from '@/utils/worldClock';
 import type {
@@ -103,6 +104,7 @@ const OperationsAccessWorkspace = lazy(() => import('@/workspaces/auth/AuthWorks
 const WatchlistWorkspace = lazy(() => import('@/workspaces/watchlist/WatchlistWorkspace').then((module) => ({ default: module.WatchlistWorkspace })));
 const BriefingManagerWorkspace = lazy(() => import('@/workspaces/briefing/BriefingWorkspace').then((module) => ({ default: module.BriefingManagerWorkspace })));
 const PublicBriefingWorkspace = lazy(() => import('@/workspaces/briefing/BriefingWorkspace').then((module) => ({ default: module.PublicBriefingWorkspace })));
+const DeveloperWorkspace = lazy(() => import('@/workspaces/developers/DeveloperWorkspace').then((module) => ({ default: module.DeveloperWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = [
@@ -131,6 +133,22 @@ const MAP_VIEW_OPTIONS: Array<{ value: MapViewMode; label: string }> = [
   { value: 'heatmap', label: 'Heatmap' },
   { value: 'density', label: 'Risk Density' },
 ];
+const REGION_MESSAGE_KEYS: Record<RegionKey, MessageKey> = {
+  global: 'region.global',
+  america: 'region.america',
+  mena: 'region.mena',
+  eu: 'region.eu',
+  asia: 'region.asia',
+  latam: 'region.latam',
+  africa: 'region.africa',
+  oceania: 'region.oceania',
+};
+const MAP_VIEW_MESSAGE_KEYS: Record<MapViewMode, MessageKey> = {
+  '2d': 'map.2d',
+  '3d': 'map.3d',
+  heatmap: 'map.heatmap',
+  density: 'map.density',
+};
 
 function isMapViewMode(value: unknown): value is MapViewMode {
   return value === '3d' || value === '2d' || value === 'heatmap' || value === 'density';
@@ -741,6 +759,7 @@ function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: WorkspaceBund
 }
 
 function WorldMonitorApp() {
+  const { locale, setLocale, t, formatDateTime } = useI18n();
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [markets, setMarkets] = useState<MarketListItem[]>([]);
   const [marketGroups, setMarketGroups] = useState<MarketGroupItem[]>([]);
@@ -1856,7 +1875,7 @@ function WorldMonitorApp() {
 
   return (
     <AppShell
-      regionLabel={REGION_OPTIONS.find((item) => item.value === region)?.label || 'Global'}
+      regionLabel={t(REGION_MESSAGE_KEYS[region])}
       orderFilledCount={liveMetrics[1]?.value || 0}
       onCycleRegion={cycleRegion}
       onResetWorkspace={resetWorkspace}
@@ -2267,59 +2286,66 @@ function WorldMonitorApp() {
       {showSettings ? (
         <div className="wm-modal-backdrop" onClick={() => setShowSettings(false)}>
           <div className="wm-modal wm-settings-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="wm-modal-title">Workspace Settings</div>
+            <div className="wm-modal-title">{t('settings.title')}</div>
             <label className="wm-settings-row">
-              <span>Region</span>
+              <span>{t('settings.language')}</span>
+              <select value={locale} onChange={(event) => setLocale(event.currentTarget.value === 'zh' ? 'zh' : 'en')}>
+                <option value="en">{t('language.english')}</option>
+                <option value="zh">{t('language.chinese')}</option>
+              </select>
+            </label>
+            <label className="wm-settings-row">
+              <span>{t('settings.region')}</span>
               <select value={region} onChange={(event) => setRegion((event.currentTarget as HTMLSelectElement).value as RegionKey)}>
                 {REGION_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>{t(REGION_MESSAGE_KEYS[option.value])}</option>
                 ))}
               </select>
             </label>
             <label className="wm-settings-row">
-              <span>Map Mode</span>
+              <span>{t('settings.mapMode')}</span>
               <select value={viewMode} onChange={(event) => setViewMode((event.currentTarget as HTMLSelectElement).value as MapViewMode)}>
                 {MAP_VIEW_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>{t(MAP_VIEW_MESSAGE_KEYS[option.value])}</option>
                 ))}
               </select>
             </label>
             <label className="wm-settings-row">
-              <span>Map Zoom</span>
+              <span>{t('settings.mapZoom')}</span>
               <input type="range" min="1" max="4" step="1" value={String(mapZoom)} onInput={(event) => setMapZoom(clampMapZoom((event.currentTarget as HTMLInputElement).value))} />
             </label>
             <section className={`wm-settings-sync is-${workspaceSyncStatus}`} aria-live="polite">
               <div>
-                <span>WORKSPACE CLOUD</span>
+                <span>{t('settings.cloud')}</span>
                 <strong>
-                  {workspaceSyncStatus === 'synced' ? 'Synced'
-                    : workspaceSyncStatus === 'saving' ? 'Saving changes…'
-                    : workspaceSyncStatus === 'local' ? 'Local browser only'
-                    : workspaceSyncStatus === 'checking' ? 'Checking account…'
-                    : workspaceSyncStatus === 'conflict' ? 'Another device changed this layout'
-                    : 'Sync unavailable'}
+                  {workspaceSyncStatus === 'synced' ? t('settings.synced')
+                    : workspaceSyncStatus === 'saving' ? t('settings.saving')
+                    : workspaceSyncStatus === 'local' ? t('settings.local')
+                    : workspaceSyncStatus === 'checking' ? t('settings.checking')
+                    : workspaceSyncStatus === 'conflict' ? t('settings.conflict')
+                    : t('settings.unavailable')}
                 </strong>
                 <small>
                   {workspaceSyncUpdatedAt
-                    ? `Server revision observed ${new Date(workspaceSyncUpdatedAt).toLocaleString()}`
-                    : 'Panel order, sizes, map mode and region are synchronized for signed-in users.'}
+                    ? t('settings.serverObserved', { date: formatDateTime(workspaceSyncUpdatedAt) })
+                    : t('settings.syncDescription')}
                 </small>
               </div>
               <div>
-                {workspaceSyncStatus === 'local' ? <a href="/login?next=/">Sign in to sync</a> : null}
+                {workspaceSyncStatus === 'local' ? <a href="/login?next=/">{t('settings.signIn')}</a> : null}
                 {workspaceSyncStatus === 'error' || workspaceSyncStatus === 'conflict'
                   ? <button type="button" onClick={() => {
                     if (workspaceSyncStatus === 'conflict') window.localStorage.removeItem(WORKSPACE_SYNC_META_KEY);
                     setWorkspaceSyncEpoch((current) => current + 1);
-                  }}>{workspaceSyncStatus === 'conflict' ? 'Use latest cloud layout' : 'Retry sync'}</button>
+                  }}>{workspaceSyncStatus === 'conflict' ? t('settings.latestCloud') : t('settings.retry')}</button>
                   : null}
-                <a href="/briefings">Briefing registry</a>
+                <a href="/briefings">{t('settings.briefings')}</a>
               </div>
             </section>
             <div className="wm-settings-actions">
-              <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(sanitizePanelIds(PANEL_LIBRARY.map((panel) => panel.id)))}>Enable All Panels</button>
-              <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(defaultWorkspacePanelIds(bootstrap))}>Restore Default Panels</button>
-              <button type="button" className="wm-settings-btn primary" onClick={() => { resetWorkspace(); setShowSettings(false); }}>Reset Workspace</button>
+              <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(sanitizePanelIds(PANEL_LIBRARY.map((panel) => panel.id)))}>{t('settings.enableAll')}</button>
+              <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(defaultWorkspacePanelIds(bootstrap))}>{t('settings.restore')}</button>
+              <button type="button" className="wm-settings-btn primary" onClick={() => { resetWorkspace(); setShowSettings(false); }}>{t('settings.reset')}</button>
             </div>
           </div>
         </div>
@@ -2356,6 +2382,13 @@ export function App() {
     return (
       <Suspense fallback={<PanelLoading label="Loading briefings" detail="Reading revocable share registry" />}>
         <BriefingManagerWorkspace />
+      </Suspense>
+    );
+  }
+  if (pathname === '/developers' || pathname.startsWith('/developers/')) {
+    return (
+      <Suspense fallback={<PanelLoading label="Loading developer surface" detail="Reading MCP discovery and security contracts" />}>
+        <DeveloperWorkspace />
       </Suspense>
     );
   }

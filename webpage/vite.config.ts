@@ -1,6 +1,45 @@
-import { defineConfig, loadEnv } from 'vite';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import preact from '@preact/preset-vite';
 import { resolve } from 'path';
+
+function repositorySha() {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return 'development';
+  }
+}
+
+function pwaServiceWorker(buildId: string): Plugin {
+  return {
+    name: 'polydata-pwa-service-worker',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const generatedAssets = Object.keys(bundle)
+        .filter((name) => /\.(?:css|js)$/.test(name))
+        .map((name) => `/${name}`);
+      const precache = [
+        '/',
+        '/offline.html',
+        '/site.webmanifest',
+        '/icons/polydata-monitor.svg',
+        '/icons/polydata-monitor-192.png',
+        '/icons/polydata-monitor-512.png',
+        ...generatedAssets,
+      ];
+      const template = readFileSync(resolve(__dirname, 'src/pwa/sw-template.js'), 'utf8');
+      this.emitFile({
+        type: 'asset',
+        fileName: 'sw.js',
+        source: template
+          .replace("'__POLYDATA_BUILD_ID__'", JSON.stringify(buildId))
+          .replace("'__POLYDATA_PRECACHE__'", JSON.stringify(precache)),
+      });
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => {
   const env = {
@@ -13,9 +52,13 @@ export default defineConfig(({ mode }) => {
   const apiBase = env.VITE_POLYDATA_API_BASE_URL || '';
   const target = env.VITE_POLYDATA_PROXY_TARGET
     || (apiBase.startsWith('http') ? apiBase : `http://${apiHost}:${apiPort}`);
+  const buildId = String(env.GITHUB_SHA || env.POLYDATA_BUILD_SHA || repositorySha()).slice(0, 40);
 
   return {
-    plugins: [preact()],
+    plugins: [preact(), pwaServiceWorker(buildId)],
+    define: {
+      __BUILD_ID__: JSON.stringify(buildId),
+    },
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

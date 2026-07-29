@@ -20,8 +20,9 @@ from api.auth_schema import schema_is_ready
 
 SESSION_COOKIE_DEFAULT = "__Host-polydata-session"
 SESSION_SCOPE = "operations:read"
+MCP_SCOPE = "mcp:read"
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
-ALLOWED_SCOPES = frozenset({SESSION_SCOPE})
+ALLOWED_SCOPES = frozenset({SESSION_SCOPE, MCP_SCOPE})
 PASSWORD_N = 2**15
 PASSWORD_R = 8
 PASSWORD_P = 3
@@ -454,7 +455,7 @@ def authenticate_request(
     require_csrf: bool = False,
 ) -> Principal:
     if not auth_enabled():
-        return Principal("system", 0, "local-disabled", "admin", False, frozenset({SESSION_SCOPE}))
+        return Principal("system", 0, "local-disabled", "admin", False, ALLOWED_SCOPES)
     authorization = str(request.headers.get("Authorization", "")).strip()
     raw_cookie = str(request.cookies.get(session_cookie_name(), "")).strip()
     conn = get_connection()

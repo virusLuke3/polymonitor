@@ -241,6 +241,7 @@ def api_readonly_enabled() -> bool:
 def build_route_context(service_context: ServiceContext) -> RouteContext:
     return RouteContext(services=service_context, capabilities={
         "AUTH_ALLOWED_SCOPES": tuple(sorted(auth_service.ALLOWED_SCOPES)),
+        "MCP_ALLOWED_ORIGINS": tuple(sorted(ALLOWED_ORIGINS)),
         "auth_cookie_secure": auth_service.cookie_secure,
         "auth_enabled": auth_service.auth_enabled,
         "auth_login": auth_service.login,
@@ -1193,7 +1194,7 @@ def log_request_end(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    if request.path.startswith("/auth/") or request.path.startswith("/product/") or request.path.startswith("/briefings/") or request.path.startswith("/system/") or request.path.startswith("/runtime/system/"):
+    if request.path == "/mcp" or request.path.startswith("/auth/") or request.path.startswith("/product/") or request.path.startswith("/briefings/") or request.path.startswith("/system/") or request.path.startswith("/runtime/system/"):
         response.headers["Cache-Control"] = "no-store"
     app.logger.info(
         "request-end request_id=%s method=%s path=%s status=%s duration_ms=%.2f",

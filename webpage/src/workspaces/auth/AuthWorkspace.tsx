@@ -143,6 +143,7 @@ export function AccountWorkspace() {
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [newKey, setNewKey] = useState<ProductApiKey | null>(null);
   const [keyName, setKeyName] = useState('operations-read');
+  const [keyScope, setKeyScope] = useState('operations:read');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -193,7 +194,7 @@ export function AccountWorkspace() {
     setBusy(true);
     setError(null);
     try {
-      const item = await createApiKey(keyName);
+      const item = await createApiKey(keyName, [keyScope]);
       setNewKey(item);
       setMessage('API key issued. Copy it now; the raw value will not be shown again.');
       setKeys(await fetchApiKeys());
@@ -248,8 +249,15 @@ export function AccountWorkspace() {
 
           {session.user?.role === 'admin' ? (
             <form className="auth-card auth-form" onSubmit={issueKey}>
-              <div><span className="auth-card-kicker">Machine access</span><h2>Issue scoped API key</h2><p>Fixed to <code>operations:read</code>, 60 requests/minute and 5,000/day.</p></div>
+              <div><span className="auth-card-kicker">Machine access</span><h2>Issue scoped API key</h2><p>Choose one read-only boundary. Each key is limited to 60 requests/minute and 5,000/day.</p></div>
               <label><span>Credential name</span><input value={keyName} maxLength={80} onInput={(event) => setKeyName(event.currentTarget.value)} required /></label>
+              <label>
+                <span>Read-only scope</span>
+                <select value={keyScope} onChange={(event) => setKeyScope(event.currentTarget.value)}>
+                  <option value="operations:read">operations:read — protected health and freshness</option>
+                  <option value="mcp:read">mcp:read — public prediction-market tools</option>
+                </select>
+              </label>
               <button className="auth-primary" type="submit" disabled={busy}>Create one-time key</button>
               {newKey?.key ? <output className="auth-secret"><span>Copy once</span><code>{newKey.key}</code></output> : null}
             </form>
