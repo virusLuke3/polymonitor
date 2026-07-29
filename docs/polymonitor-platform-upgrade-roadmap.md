@@ -537,18 +537,6 @@ discovered
 - 数据工具统一要求独立 `mcp:read` Bearer API key，并继承分钟限速、日配额、一次性密钥显示、吊销和审计；输出使用字段白名单，排除私人布局、私人 Watchlist、notes、提醒规则/事件、session、凭据、管理员接口和任意 API 代理。
 - 保持 Quant、LOB runtime 控制、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件不动。
 
-## 下一步执行建议
-
-工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
-Workspace 以及 Oracle/data-quality 阶段均已建立。保持现有排除边界时，下一阶段是：
-
-1. 移动端信息架构与专业面板逐步国际化。
-2. 开放 API 契约、SDK 与 MCP OAuth/标准注册能力。
-3. Web Push 与可控通知分发。
-
-若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
-PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。
-
 #### 4.5 移动端信息架构、专业页面国际化与公开 SDK（已完成，2026-07-29）
 
 - 新增移动端五入口工作区导航，统一 Atlas、Data Quality、Watchlist、Briefings 和 Developers；使用 62px 触控区域、safe-area、当前页状态和 reduced-motion，避免把桌面链接横向塞入小屏。
@@ -558,8 +546,15 @@ PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实
 - 按 MCP 官方授权规范和 RFC 9728 核验后，未在没有真实 OAuth 2.1 authorization server 的情况下伪造 Protected Resource Metadata；当前生产仍明确使用受配额和审计约束的 API Key。
 - Web Push 尚未启用；它必须与 VAPID 私钥托管、subscription 撤销/清理、quiet hours/digest、失败退订和后台 publisher 一次落地，不能只增加一个浏览器按钮。
 
-下一批在现有边界内的工作：
+## 下一步执行建议
+
+工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
+Workspace、Oracle/data-quality、PWA、基础国际化、MCP、移动端导航和公开 SDK
+均已建立。下一批在现有边界内的工作：
 
 1. 选择并接入真实 OAuth 2.1 issuer，完成 MCP Protected Resource Metadata、PKCE 和客户端注册。
 2. 建立 Web Push 的 VAPID、subscription 和可控 publisher 闭环。
 3. 继续迁移 Market/Data Quality 内层证据表，以及 Watchlist/Briefing/Auth 的正文国际化。
+
+若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
+PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。
