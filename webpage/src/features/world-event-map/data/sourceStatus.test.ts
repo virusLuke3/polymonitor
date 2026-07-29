@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { HazardMapResponse } from '../domain/types';
-import { sourceStatusFromAdapter, sourceStatusesFromHazardResponse } from './sourceStatus';
+import {
+  sourceStatusFromAdapter,
+  sourceStatusesAfterHazardRefreshFailure,
+  sourceStatusesFromHazardResponse,
+} from './sourceStatus';
 
 describe('map source status', () => {
   it('keeps loading distinct from an empty successful source', () => {
@@ -71,5 +75,23 @@ describe('map source status', () => {
       eventCount: 0,
     });
     expect(sourceStatusesFromHazardResponse(response)[0]?.message).toContain('configuration-required');
+  });
+
+  it('shows an initial failure and degrades retained snapshots on refresh failure', () => {
+    expect(sourceStatusesAfterHazardRefreshFailure([], 'API 503', false)[0]).toMatchObject({
+      key: 'natural-hazards',
+      status: 'error',
+      eventCount: 0,
+      message: 'API 503',
+    });
+    const retained = sourceStatusesAfterHazardRefreshFailure([{
+      key: 'usgs',
+      label: 'USGS',
+      status: 'ok',
+      eventCount: 10,
+      rejectedCount: 0,
+    }], 'timeout', true);
+    expect(retained[0]).toMatchObject({ status: 'degraded', eventCount: 10 });
+    expect(retained[0]?.message).toContain('retaining the last successful snapshot');
   });
 });

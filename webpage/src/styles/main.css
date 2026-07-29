@@ -10001,6 +10001,13 @@ body {
   color: rgba(186, 199, 213, 0.6);
 }
 
+@media (max-width: 1500px) and (min-width: 1101px) {
+  .wm-map-status-strip > .wm-status-chip,
+  .wm-map-status-strip > .wm-map-clock {
+    display: none;
+  }
+}
+
 .wm-world-event-map-toolbar {
   display: flex;
   align-items: center;

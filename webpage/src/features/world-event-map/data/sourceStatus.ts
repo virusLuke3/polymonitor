@@ -106,3 +106,25 @@ export function sourceStatusesFromHazardResponse(
     };
   });
 }
+
+export function sourceStatusesAfterHazardRefreshFailure(
+  current: WorldEventSourceStatus[],
+  message: string,
+  hasSnapshot: boolean,
+): WorldEventSourceStatus[] {
+  if (!hasSnapshot) {
+    return [{
+      key: 'natural-hazards',
+      label: 'HAZARDS',
+      status: 'error',
+      eventCount: 0,
+      rejectedCount: 0,
+      message,
+    }];
+  }
+  return current.map((source) => ({
+    ...source,
+    status: source.status === 'error' ? 'error' : 'degraded',
+    message: `${source.message ? `${source.message} · ` : ''}Refresh failed; retaining the last successful snapshot: ${message}`,
+  }));
+}

@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { fetchNaturalHazards, isAbortLikeError } from '@/services/api';
 import type { HazardEvent, HazardMapResponse } from '../domain/types';
 import type { WorldEventSourceStatus } from './sourceStatus';
-import { sourceStatusesFromHazardResponse } from './sourceStatus';
+import {
+  sourceStatusesAfterHazardRefreshFailure,
+  sourceStatusesFromHazardResponse,
+} from './sourceStatus';
 import { parseNaturalHazardsResponse } from './naturalHazards';
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -52,13 +55,11 @@ export function useNaturalHazards(): NaturalHazardsState {
         const message = error instanceof Error ? error.message : String(error);
         setState((current) => ({
           ...current,
-          sources: current.response
-            ? current.sources.map((source) => ({
-                ...source,
-                status: source.status === 'error' ? 'error' : 'degraded',
-                message: `${source.message ? `${source.message} · ` : ''}Refresh failed; retaining the last successful snapshot`,
-              }))
-            : [],
+          sources: sourceStatusesAfterHazardRefreshFailure(
+            current.sources,
+            message,
+            Boolean(current.response),
+          ),
           loading: false,
           error: message,
         }));
