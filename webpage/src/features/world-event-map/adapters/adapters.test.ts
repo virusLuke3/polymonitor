@@ -1,10 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { adaptBreakingEventPayload } from './breakingEventAdapter';
-import { adaptGeoShockPayload } from './geoShockAdapter';
+import type { FeatureCollection } from 'geojson';
+import { buildCountryGeometryIndex } from '../domain/countryGeometry';
+import { adaptBreakingEventMapPayload, adaptBreakingEventPayload } from './breakingEventAdapter';
+import { adaptGeoShockCountryRiskPayload, adaptGeoShockPayload } from './geoShockAdapter';
 import { adaptTransportDisruptions } from './transportDisruptionAdapter';
 import { adaptTransportReference } from './transportReferenceAdapter';
 
 describe('World Event Map adapters', () => {
+  const countries = buildCountryGeometryIndex({
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: {
+        name: 'Japan',
+        'ISO3166-1-Alpha-2': 'JP',
+        'ISO3166-1-Alpha-3': 'JPN',
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[130, 30], [145, 30], [145, 45], [130, 30]]],
+      },
+    }, {
+      type: 'Feature',
+      properties: {
+        name: 'Ukraine',
+        'ISO3166-1-Alpha-2': 'UA',
+        'ISO3166-1-Alpha-3': 'UKR',
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[22, 44], [40, 44], [40, 53], [22, 44]]],
+      },
+    }],
+  } satisfies FeatureCollection);
+
   it('normalizes UCDP data into stable canonical conflict events', () => {
     const result = adaptGeoShockPayload({
       source: 'UCDP',
@@ -69,6 +98,80 @@ describe('World Event Map adapters', () => {
       relatedMarketIds: ['42'],
     });
     expect(result.events[0]?.geometry).toBeUndefined();
+  });
+
+  it('renders only corroborated, time-bounded Intel as a country polygon', () => {
+    const result = adaptBreakingEventMapPayload({
+      source: 'Breaking Radar',
+      status: 'ok',
+      items: [{
+        id: 'news-2',
+        title: 'Corroborated event',
+        country: 'Japan',
+        eventTime: '2026-07-29T00:00:00Z',
+        severity: 'watch',
+        confidence: 0.72,
+        sourceDiversity: 3,
+        evidence: { articles: [{}, {}, {}] },
+      }],
+    }, countries);
+    expect(result.rejected).toHaveLength(0);
+    expect(result.events[0]).toMatchObject({
+      category: 'intel',
+      countryCode: 'JP',
+      locationPrecision: 'country',
+      geometry: { type: 'Polygon' },
+      properties: { evidenceGate: 'intel-map-evidence.v1', evidenceArticleCount: 3 },
+    });
+  });
+
+  it('rejects low-confidence proxies and global Intel instead of drawing them', () => {
+    const result = adaptBreakingEventMapPayload({
+      source: 'Breaking Radar',
+      items: [{
+        id: 'proxy',
+        country: 'Global',
+        eventTime: '2026-07-29T00:00:00Z',
+        confidence: 0.43,
+        sourceDiversity: 0,
+        evidence: { pageviews: [{}], articles: [] },
+      }],
+    }, countries);
+    expect(result.events).toHaveLength(0);
+    expect(result.rejected[0]?.code).toBe('unresolved-country-geometry');
+  });
+
+  it('renders verified geo-shock targets as countries, never capital markers', () => {
+    const result = adaptGeoShockCountryRiskPayload({
+      source: 'OFAC / Federal Register / UCDP',
+      status: 'partial',
+      generatedAt: '2026-07-29T00:00:00Z',
+      ofacRecordCountTotal: 120,
+      summary: { newSanctionsCount: 2 },
+      targetBreakdown: [{
+        label: 'Ukraine',
+        count: 18,
+        latestHeadline: 'Verified source evidence',
+        latestOccurredAt: '2026-07-28T00:00:00Z',
+        latestSource: 'Federal Register',
+      }],
+    }, countries);
+    expect(result.rejected).toHaveLength(0);
+    expect(result.events[0]).toMatchObject({
+      id: 'geo-sanctions-shock:UA',
+      category: 'sanctions',
+      countryCode: 'UA',
+      geometry: { type: 'Polygon' },
+      properties: { riskMappingVersion: 'geo-shock-country-risk.v1', evidenceCount: 18 },
+    });
+  });
+
+  it('rejects non-country sanctions targets', () => {
+    const result = adaptGeoShockCountryRiskPayload({
+      targetBreakdown: [{ label: 'Acme Corporation', count: 4 }],
+    }, countries);
+    expect(result.events).toHaveLength(0);
+    expect(result.rejected[0]?.code).toBe('unresolved-country-geometry');
   });
 
   it('only emits transport disruptions at watch severity or above', () => {

@@ -16,7 +16,9 @@ describe('World Event Map layer registry', () => {
       'wildfires',
       'extreme-temperature',
       'climate-anomalies',
+      'intel-hotspots',
       'ucdp',
+      'sanctions-country-risk',
       'air-routes',
     ]);
     expect(selectableWorldEventLayers().filter((layer) => layer.defaultEnabled).map((layer) => layer.id)).toEqual([
@@ -28,9 +30,11 @@ describe('World Event Map layer registry', () => {
     ]);
   });
 
-  it('keeps incomplete country/intel rendering registered but unavailable', () => {
-    expect(worldEventLayerById('intel-hotspots')?.selectable).toBe(false);
-    expect(worldEventLayerById('sanctions-country-risk')?.selectable).toBe(false);
+  it('exposes evidence-gated country layers as real optional controls', () => {
+    expect(worldEventLayerById('intel-hotspots')?.selectable).toBe(true);
+    expect(worldEventLayerById('sanctions-country-risk')?.selectable).toBe(true);
+    expect(worldEventLayerById('intel-hotspots')?.defaultEnabled).toBe(false);
+    expect(worldEventLayerById('sanctions-country-risk')?.defaultEnabled).toBe(false);
   });
 
   it('declares source, legend and limitations for every layer', () => {

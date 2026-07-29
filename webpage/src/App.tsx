@@ -36,6 +36,8 @@ import { useI18n, type MessageKey } from '@/services/i18n';
 import { specialistPanelMeta } from '@/services/specialist-i18n';
 import { fetchWorkspaceLayout, saveWorkspaceLayout, type WorkspaceLayout } from '@/services/product';
 import {
+  adaptBreakingEventMapPayload,
+  adaptGeoShockCountryRiskPayload,
   adaptGeoShockPayload,
   adaptTransportReference,
   filterWorldEventMapEvents,
@@ -44,6 +46,7 @@ import {
   MapToolbar,
   selectableWorldEventLayers,
   sourceStatusFromAdapter,
+  useCountryGeometry,
   useNaturalHazards,
   useWorldEventMapState,
   WorldEventMap,
@@ -67,6 +70,7 @@ import type {
   OracleEvent,
   PanelRenderContext,
   RuntimeF1Payload,
+  RuntimeBreakingEventRadarPayload,
   RuntimeGeoSanctionsShockItem,
   RuntimeGeoSanctionsShockPayload,
   RuntimeGlobalTransportShippingPayload,
@@ -1077,9 +1081,11 @@ function WorldMonitorApp() {
   }, [runtimeData]);
 
   useEffect(() => {
-    const ucdpEnabled = layers.some((layer) => layer.id === 'ucdp' && layer.enabled);
+    const geoShockEnabled = layers.some(
+      (layer) => (layer.id === 'ucdp' || layer.id === 'sanctions-country-risk') && layer.enabled,
+    );
     const geoShockPayload = runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined;
-    if (!ucdpEnabled || hasRenderableGeoShockPayload(geoShockPayload) || geoShockHydratingRef.current) return;
+    if (!geoShockEnabled || hasRenderableGeoShockPayload(geoShockPayload) || geoShockHydratingRef.current) return;
     geoShockHydratingRef.current = true;
     let cancelled = false;
     void fetchRuntimeGeoSanctionsShock(2000)
@@ -1095,6 +1101,16 @@ function WorldMonitorApp() {
       cancelled = true;
     };
   }, [layers, runtimeData]);
+
+  useEffect(() => {
+    const intelEnabled = layers.some((layer) => layer.id === 'intel-hotspots' && layer.enabled);
+    if (!intelEnabled || runtimeData['breaking-event-radar'] !== undefined) return;
+    void refreshPanels(RUNTIME_PANEL_MODULES, {
+      panelIds: ['breaking-event-radar'],
+      reason: 'refresh',
+      force: true,
+    });
+  }, [layers, refreshPanels, runtimeData]);
 
   useEffect(() => {
     bootstrapRef.current = bootstrap;
@@ -1614,11 +1630,23 @@ function WorldMonitorApp() {
   const activeLayerCount = enabledLayerIds.length;
   const geoShockPayload = runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined;
   const ucdpLayerEnabled = enabledLayerIds.includes('ucdp');
+  const intelLayerEnabled = enabledLayerIds.includes('intel-hotspots');
+  const countryRiskLayerEnabled = enabledLayerIds.includes('sanctions-country-risk');
+  const countryGeometry = useCountryGeometry(intelLayerEnabled || countryRiskLayerEnabled);
+  const breakingEventPayload = runtimeData['breaking-event-radar'] as RuntimeBreakingEventRadarPayload | undefined;
   const ucdpRawMapEvents = useMemo(
     () => (ucdpLayerEnabled ? (geoShockPayload?.items || []).filter(hasGeoConflictCoordinates) : []),
     [geoShockPayload, ucdpLayerEnabled],
   );
   const geoShockAdapterResult = useMemo(() => adaptGeoShockPayload(geoShockPayload), [geoShockPayload]);
+  const intelAdapterResult = useMemo(
+    () => adaptBreakingEventMapPayload(breakingEventPayload, countryGeometry.index),
+    [breakingEventPayload, countryGeometry.index],
+  );
+  const countryRiskAdapterResult = useMemo(
+    () => adaptGeoShockCountryRiskPayload(geoShockPayload, countryGeometry.index),
+    [countryGeometry.index, geoShockPayload],
+  );
   const hazardMapEvents = useMemo(
     () => filterWorldEventMapEventsForLayers(naturalHazards.events, worldEventMap.state),
     [naturalHazards.events, worldEventMap.state],
@@ -1632,6 +1660,18 @@ function WorldMonitorApp() {
       : [],
     [geoShockAdapterResult, ucdpLayerEnabled, worldEventMap.state],
   );
+  const intelMapEvents = useMemo(
+    () => intelLayerEnabled
+      ? filterWorldEventMapEvents(intelAdapterResult.events, worldEventMap.state)
+      : [],
+    [intelAdapterResult.events, intelLayerEnabled, worldEventMap.state],
+  );
+  const countryRiskMapEvents = useMemo(
+    () => countryRiskLayerEnabled
+      ? filterWorldEventMapEvents(countryRiskAdapterResult.events, worldEventMap.state)
+      : [],
+    [countryRiskAdapterResult.events, countryRiskLayerEnabled, worldEventMap.state],
+  );
   const showAirRoutes = enabledLayerIds.includes('air-routes');
   const transportPayload = runtimeData['global-transport-shipping'] as RuntimeGlobalTransportShippingPayload | undefined;
   const airReferenceEvents = useMemo(
@@ -1639,8 +1679,14 @@ function WorldMonitorApp() {
     [showAirRoutes, transportPayload],
   );
   const worldEventMapEvents = useMemo(
-    () => [...hazardMapEvents, ...ucdpMapEvents, ...airReferenceEvents],
-    [airReferenceEvents, hazardMapEvents, ucdpMapEvents],
+    () => [
+      ...hazardMapEvents,
+      ...intelMapEvents,
+      ...ucdpMapEvents,
+      ...countryRiskMapEvents,
+      ...airReferenceEvents,
+    ],
+    [airReferenceEvents, countryRiskMapEvents, hazardMapEvents, intelMapEvents, ucdpMapEvents],
   );
   const mapSourceStatuses = useMemo(() => {
     const activeSourceKeys = new Set(
@@ -1657,11 +1703,51 @@ function WorldMonitorApp() {
         loaded: Boolean(geoShockPayload),
       }));
     }
+    if (intelLayerEnabled) {
+      const runtimeStatus = getPanelRuntimeStatus('breaking-event-radar');
+      const status = sourceStatusFromAdapter({
+        key: 'breaking-event-radar',
+        label: 'INTEL',
+        payloadStatus: countryGeometry.error
+          ? 'error'
+          : breakingEventPayload?.status || runtimeStatus.phase,
+        generatedAt: breakingEventPayload?.generatedAt,
+        result: intelAdapterResult,
+        loaded: Boolean(countryGeometry.error)
+          || (Boolean(breakingEventPayload) && Boolean(countryGeometry.index)),
+      });
+      if (countryGeometry.error) status.message = countryGeometry.error;
+      statuses.push(status);
+    }
+    if (countryRiskLayerEnabled) {
+      const runtimeStatus = getPanelRuntimeStatus('geo-sanctions-shock');
+      const status = sourceStatusFromAdapter({
+        key: 'geo-sanctions-shock-risk',
+        label: 'COUNTRY RISK',
+        payloadStatus: countryGeometry.error
+          ? 'error'
+          : geoShockPayload?.status || runtimeStatus.phase,
+        generatedAt: geoShockPayload?.generatedAt,
+        result: countryRiskAdapterResult,
+        loaded: Boolean(countryGeometry.error)
+          || (Boolean(geoShockPayload) && Boolean(countryGeometry.index)),
+      });
+      if (countryGeometry.error) status.message = countryGeometry.error;
+      statuses.push(status);
+    }
     return statuses;
   }, [
+    breakingEventPayload,
+    countryGeometry.error,
+    countryGeometry.index,
+    countryRiskAdapterResult,
+    countryRiskLayerEnabled,
     enabledLayerIds,
+    getPanelRuntimeStatus,
     geoShockAdapterResult,
     geoShockPayload,
+    intelAdapterResult,
+    intelLayerEnabled,
     naturalHazards.sources,
     ucdpLayerEnabled,
   ]);

@@ -73,6 +73,36 @@ export function eventTimeFields(event: GeoEvent): InspectorField[] {
   ]);
 }
 
+export function eventContextFields(event: GeoEvent): InspectorField[] {
+  if (event.category === 'intel') {
+    return compact([
+      field('Velocity score', event.properties.velocityScore),
+      field('Source diversity', event.properties.sourceDiversity),
+      field('Evidence articles', event.properties.evidenceArticleCount),
+      field('Evidence gate', event.properties.evidenceGate),
+      field('Linked markets', event.relatedMarketIds.length),
+    ]);
+  }
+  if (event.category === 'sanctions' || event.category === 'country-risk') {
+    return compact([
+      field('Evidence count', event.properties.evidenceCount),
+      field('Latest source', event.properties.latestSource),
+      field('OFAC records in snapshot', event.properties.ofacRecordCountTotal),
+      field('Global new sanctions', event.properties.globalNewSanctionsCount),
+      field('Risk mapping', event.properties.riskMappingVersion),
+    ]);
+  }
+  if (event.category === 'conflict' || event.category === 'unrest') {
+    return compact([
+      field('Best death estimate', event.properties.deathsBest),
+      field('Low estimate', event.properties.deathsLow),
+      field('High estimate', event.properties.deathsHigh),
+      field('Violence type', event.properties.violenceType),
+    ]);
+  }
+  return [];
+}
+
 export function hazardMetricFields(event: HazardEvent): InspectorField[] {
   const metrics = event.metrics;
   if (metrics.kind === 'earthquake') {
