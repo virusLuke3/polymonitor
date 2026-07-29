@@ -11,6 +11,7 @@ Private notes, credentials, deployment journals, and non-public research should 
 - `worldmonitor-polymonitor-comparison.md` - WorldMonitor/Polymonitor product, data, architecture, and engineering comparison.
 - `polymonitor-platform-upgrade-roadmap.md` - staged platform upgrade roadmap that preserves Polymarket specialization.
 - `market-workspace.md` - evidence contract and source boundaries for shareable market dossiers.
+- `layout-sync-briefings.md` - revisioned workspace synchronization and canonical public briefing boundaries.
 - `operations-workspace.md` - read-only application health and freshness workspace.
 - `data-quality-workspace.md` - Oracle lifecycle, data-quality contract and gap semantics.
 - `updates.md` - daily public progress log and reusable update template.

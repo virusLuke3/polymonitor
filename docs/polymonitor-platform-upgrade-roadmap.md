@@ -518,15 +518,22 @@ discovered
 - 新增 in-app inbox、read/read-all、digest cadence、quiet hours 与 timezone；Telegram 继续由原隔离 runtime 管理，email 明确为 unavailable。
 - 保持 Quant、LOB、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件不动。
 
-下一批用户产品能力：服务端布局同步与可分享 briefing。
+#### 4.3 服务端布局同步与可分享 briefing（已完成，2026-07-29）
+
+- 匿名用户继续使用 localStorage；登录用户自动同步 panel ID/顺序、row/column span、region、map mode、zoom、panel library 和 market-group sort。
+- 服务端 layout 使用单调 revision 与乐观锁；旧 revision 写入返回 conflict，不静默覆盖其他设备。离线本地布局只在 client timestamp 更新时回写。
+- 新增 `/briefings` registry；浏览器只提交可选标题，服务端从 canonical market serving、Oracle status、用户 watchlist 和 workspace lens 生成 `prediction-market-briefing.v1` 快照。
+- 公共 `/briefings/<publicId>` 为只读页面，明确 generated-at、expiry、来源契约和非交易建议；192-bit 随机链接 30 天过期、可撤销、每用户最多 20 个 active links。
+- 私人 notes、alert rules/events、session、credential 不进入快照；原排除域和测试文件保持不动。
+
+下一批用户产品能力：PWA、国际化和 MCP 分发。
 
 ## 下一步执行建议
 
 工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
 Workspace 以及 Oracle/data-quality 阶段均已建立。保持现有排除边界时，下一阶段是：
 
-1. 服务端布局同步与可分享 briefing。
-2. PWA、国际化和 MCP 分发。
+1. PWA、国际化和 MCP 分发。
 
 若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
 PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。

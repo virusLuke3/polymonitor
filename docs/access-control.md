@@ -7,7 +7,7 @@ an explicit product identity boundary.
 
 - Anonymous visitors can use the World monitor, Market Dossiers and Data Quality workspace.
 - Users receive server-side sessions, can manage their own password, and own private watchlists,
-  alert rules, in-app events and notification preferences.
+  alert rules, in-app events, notification preferences and synchronized workspace layouts.
 - Administrators can open `/operations`, inspect the audit trail and issue scoped API keys.
 - API keys currently support only `operations:read`; every key has a per-minute rate limit and
   daily quota.
@@ -26,6 +26,8 @@ with `operations:read`.
 - Login attempts, session changes, password changes, API-key lifecycle events and product
   preference changes are audited.
   Client addresses and user agents are stored only as peppered hashes.
+- Briefing creation and revocation require a session and CSRF. Public briefing links expose only
+  server-generated canonical snapshots, expire after 30 days and can be revoked by their owner.
 - Authentication is fail-closed at API startup when enabled but the schema or audit pepper is
   missing.
 
