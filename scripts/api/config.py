@@ -256,6 +256,9 @@ class ApiSettings:
     geo_shock_acled_password: str
     geo_shock_source_url: str
     geo_shock_ttl_seconds: int
+    natural_hazards_usgs_url: str
+    natural_hazards_eonet_url: str
+    natural_hazards_nws_url: str
     open_meteo_api_url: str
     aviationweather_metar_api_url: str
     google_news_rss_url: str
@@ -541,6 +544,18 @@ def load_api_settings() -> ApiSettings:
             GEO_SHOCK_SOURCE_URL or "https://ofac.treasury.gov/sanctions-list-service",
         ),
         geo_shock_ttl_seconds=_get_int("POLYDATA_GEO_SHOCK_TTL_SECONDS", 900),
+        natural_hazards_usgs_url=_get_str(
+            "POLYDATA_NATURAL_HAZARDS_USGS_URL",
+            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_week.geojson",
+        ),
+        natural_hazards_eonet_url=_get_str(
+            "POLYDATA_NATURAL_HAZARDS_EONET_URL",
+            "https://eonet.gsfc.nasa.gov/api/v3/events",
+        ),
+        natural_hazards_nws_url=_get_str(
+            "POLYDATA_NATURAL_HAZARDS_NWS_URL",
+            "https://api.weather.gov/alerts/active",
+        ),
         open_meteo_api_url=_get_str("POLYDATA_OPEN_METEO_API_URL", OPEN_METEO_API_URL or "https://api.open-meteo.com/v1/forecast"),
         aviationweather_metar_api_url=_get_str(
             "POLYDATA_AVIATIONWEATHER_METAR_API_URL",

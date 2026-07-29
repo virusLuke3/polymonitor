@@ -4,6 +4,7 @@ import type { WorldEventMapState } from '../state/mapState';
 import { DeckMapRenderer } from '../renderer/DeckMapRenderer';
 import type { BasemapState, MapRenderer } from '../renderer/MapRenderer';
 import { isHazardEvent } from '../renderer/layerFactories';
+import { worldEventLayerById } from '../config/layerRegistry';
 
 export type WorldEventMapProps = {
   events: GeoEvent[];
@@ -54,6 +55,10 @@ export function WorldEventMap({
   const hoveredEvent = useMemo(
     () => events.find((event) => event.id === state.hoveredEventId) || null,
     [events, state.hoveredEventId],
+  );
+  const legendItems = useMemo(
+    () => state.activeLayerIds.flatMap((layerId) => worldEventLayerById(layerId)?.legend || []),
+    [state.activeLayerIds],
   );
 
   callbackRef.current = { onCameraChange, onEventSelect, onEventHover };
@@ -125,11 +130,13 @@ export function WorldEventMap({
           ) : null}
         </aside>
       ) : null}
-      <div className="wm-weather-deck-legend" aria-hidden="true">
-        <span><i className="cool" />INFO</span>
-        <span><i className="country" />WATCH</span>
-        <span><i className="hot" />WARNING</span>
-        <span><i className="ucdp" />CRITICAL</span>
+      <div className="wm-weather-deck-legend" aria-label="Active hazard legend">
+        {legendItems.map((item) => (
+          <span key={`${item.label}:${item.color}`}>
+            <i style={{ background: item.color }} />
+            {item.label.toUpperCase()}
+          </span>
+        ))}
       </div>
       <div className="wm-weather-deck-status">
         {basemapState === 'local-fallback-ready' ? 'LOCAL BASEMAP' : basemapState.replace(/-/g, ' ').toUpperCase()}

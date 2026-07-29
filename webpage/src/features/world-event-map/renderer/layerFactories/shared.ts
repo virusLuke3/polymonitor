@@ -1,4 +1,9 @@
-import type { GeoEvent, GeoEventSeverity, HazardEvent } from '../../domain/types';
+import type {
+  GeoEvent,
+  GeoEventSeverity,
+  HazardEvent,
+  HazardKind,
+} from '../../domain/types';
 
 export const SEVERITY_COLORS: Record<GeoEventSeverity, [number, number, number, number]> = {
   info: [85, 196, 224, 185],
@@ -7,8 +12,27 @@ export const SEVERITY_COLORS: Record<GeoEventSeverity, [number, number, number, 
   critical: [255, 76, 70, 235],
 };
 
+const HAZARD_COLORS: Record<HazardKind, [number, number, number, number]> = {
+  'severe-storm': [167, 139, 250, 210],
+  tornado: [192, 132, 252, 220],
+  'tropical-cyclone': [56, 189, 248, 220],
+  flood: [45, 212, 191, 210],
+  'extreme-heat': [255, 77, 79, 220],
+  'extreme-cold': [96, 165, 250, 215],
+  earthquake: [251, 146, 60, 220],
+  volcano: [244, 63, 94, 220],
+  tsunami: [34, 211, 238, 220],
+  wildfire: [255, 107, 53, 225],
+  'fire-detection': [249, 115, 22, 205],
+  'temperature-anomaly': [232, 121, 249, 210],
+  'precipitation-anomaly': [129, 140, 248, 210],
+  'other-weather-anomaly': [217, 70, 239, 210],
+};
+
 export function eventColor(event: GeoEvent, alpha?: number): [number, number, number, number] {
-  const color = [...SEVERITY_COLORS[event.severity]] as [number, number, number, number];
+  const color = isHazardEvent(event)
+    ? [...HAZARD_COLORS[event.hazardKind]] as [number, number, number, number]
+    : [...SEVERITY_COLORS[event.severity]] as [number, number, number, number];
   if (alpha != null) color[3] = alpha;
   return color;
 }

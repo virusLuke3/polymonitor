@@ -1,4 +1,10 @@
-import type { GeoEventCategory, GeoEventSeverity } from '../domain/types';
+import type {
+  GeoEvent,
+  GeoEventCategory,
+  GeoEventSeverity,
+  HazardEvent,
+  HazardKind,
+} from '../domain/types';
 
 export type MapLayerDefinition = {
   id: string;
@@ -26,6 +32,131 @@ export type MapLayerDefinition = {
 };
 
 export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
+  {
+    id: 'weather-alerts',
+    label: 'Storms, Cyclones & Floods',
+    icon: '◉',
+    hint: 'ALERTS',
+    categories: ['weather', 'natural-hazard'],
+    sourceKeys: ['nws', 'eonet'],
+    defaultEnabled: true,
+    selectable: true,
+    minZoom: 0,
+    labelMinZoom: 3,
+    cluster: true,
+    timeFilter: true,
+    severities: ['info', 'watch', 'warning', 'critical'],
+    legend: [
+      { label: 'Storm / tornado', color: '#a78bfa' },
+      { label: 'Cyclone', color: '#38bdf8' },
+      { label: 'Flood / tsunami', color: '#2dd4bf' },
+    ],
+    explanation: {
+      purpose: 'Active severe storms, tornadoes, tropical cyclones, floods and tsunamis.',
+      sources: ['NWS active CAP alerts', 'NASA EONET'],
+      freshness: 'NWS refreshes every 60 seconds; EONET refreshes every five minutes.',
+      confidence: 'Provider-native alert geometry, advisory identity and event tracks.',
+      limitations: ['NWS coverage is United States focused.', 'EONET is a discovery feed, not an exhaustive global alert service.'],
+    },
+  },
+  {
+    id: 'earthquakes-volcanoes',
+    label: 'Earthquakes & Volcanoes',
+    icon: '◇',
+    hint: 'GEO',
+    categories: ['natural-hazard'],
+    sourceKeys: ['usgs', 'eonet'],
+    defaultEnabled: true,
+    selectable: true,
+    minZoom: 0,
+    labelMinZoom: 3,
+    cluster: true,
+    timeFilter: true,
+    severities: ['info', 'watch', 'warning', 'critical'],
+    legend: [
+      { label: 'Earthquake', color: '#fb923c' },
+      { label: 'Volcano', color: '#f43f5e' },
+    ],
+    explanation: {
+      purpose: 'Recent earthquakes and reported volcanic events.',
+      sources: ['USGS Earthquake Hazards Program', 'NASA EONET'],
+      freshness: 'USGS refreshes every 60 seconds; EONET refreshes every five minutes.',
+      confidence: 'Magnitude, depth, PAGER and provider-native event identity are retained.',
+      limitations: ['Volcano coverage follows EONET discovery and is not a complete eruption registry.'],
+    },
+  },
+  {
+    id: 'wildfires',
+    label: 'Wildfires',
+    icon: '▲',
+    hint: 'FIRE',
+    categories: ['natural-hazard'],
+    sourceKeys: ['eonet', 'firms'],
+    defaultEnabled: true,
+    selectable: true,
+    minZoom: 0,
+    labelMinZoom: 3,
+    cluster: true,
+    timeFilter: true,
+    severities: ['info', 'watch', 'warning', 'critical'],
+    legend: [{ label: 'Wildfire event', color: '#ff6b35' }],
+    explanation: {
+      purpose: 'Active wildfire events, with aggregated satellite detections when configured.',
+      sources: ['NASA EONET', 'NASA FIRMS'],
+      freshness: 'EONET refreshes every five minutes; FIRMS availability is source-configured.',
+      confidence: 'Event and detection evidence remains source-native.',
+      limitations: ['FIRMS raw detections must be spatially aggregated before rendering.', 'FIRMS is unavailable without a MAP_KEY.'],
+    },
+  },
+  {
+    id: 'extreme-temperature',
+    label: 'Extreme Temperature Alerts',
+    icon: '◆',
+    hint: 'TEMP',
+    categories: ['weather', 'natural-hazard'],
+    sourceKeys: ['nws', 'eonet'],
+    defaultEnabled: true,
+    selectable: true,
+    minZoom: 0,
+    labelMinZoom: 3,
+    cluster: true,
+    timeFilter: true,
+    severities: ['info', 'watch', 'warning', 'critical'],
+    legend: [
+      { label: 'Extreme heat', color: '#ff4d4f' },
+      { label: 'Extreme cold', color: '#60a5fa' },
+    ],
+    explanation: {
+      purpose: 'Active extreme heat and extreme cold alerts.',
+      sources: ['NWS active CAP alerts', 'NASA EONET'],
+      freshness: 'NWS refreshes every 60 seconds; EONET refreshes every five minutes.',
+      confidence: 'Provider severity, urgency and certainty are retained.',
+      limitations: ['Global coverage is incomplete and varies by provider.'],
+    },
+  },
+  {
+    id: 'climate-anomalies',
+    label: 'Major Weather Anomalies',
+    icon: '≈',
+    hint: 'ANOMALY',
+    categories: ['weather', 'natural-hazard'],
+    sourceKeys: ['eonet', 'climate-anomaly'],
+    defaultEnabled: true,
+    selectable: true,
+    minZoom: 0,
+    labelMinZoom: 3,
+    cluster: true,
+    timeFilter: true,
+    severities: ['info', 'watch', 'warning', 'critical'],
+    legend: [{ label: 'Major anomaly', color: '#e879f9' }],
+    explanation: {
+      purpose: 'Major observed weather anomalies and quantitative climate departures.',
+      sources: ['NASA EONET', 'Versioned anomaly baseline pipeline'],
+      freshness: 'Source-specific runtime freshness.',
+      confidence: 'Quantitative anomalies require a declared baseline period and calculation version.',
+      limitations: ['The quantitative baseline pipeline is not yet configured.', 'Discovery events are not presented as calculated anomalies.'],
+    },
+  },
   {
     id: 'intel-hotspots',
     label: 'Intel Hotspots',
@@ -57,7 +188,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     hint: 'CONFLICT',
     categories: ['conflict', 'unrest'],
     sourceKeys: ['geo-sanctions-shock'],
-    defaultEnabled: true,
+    defaultEnabled: false,
     selectable: true,
     minZoom: 0,
     labelMinZoom: 3,
@@ -132,4 +263,34 @@ export function selectableWorldEventLayers() {
 
 export function worldEventLayerById(id: string) {
   return WORLD_EVENT_LAYER_REGISTRY.find((layer) => layer.id === id);
+}
+
+const HAZARD_LAYER_KINDS: Record<string, readonly HazardKind[]> = {
+  'weather-alerts': ['severe-storm', 'tornado', 'tropical-cyclone', 'flood', 'tsunami'],
+  'earthquakes-volcanoes': ['earthquake', 'volcano'],
+  wildfires: ['wildfire', 'fire-detection'],
+  'extreme-temperature': ['extreme-heat', 'extreme-cold'],
+  'climate-anomalies': ['temperature-anomaly', 'precipitation-anomaly', 'other-weather-anomaly'],
+};
+
+export function isHazardGeoEvent(event: GeoEvent): event is HazardEvent {
+  return (event.category === 'natural-hazard' || event.category === 'weather')
+    && typeof (event as Partial<HazardEvent>).hazardKind === 'string';
+}
+
+export function worldEventLayerIdForEvent(event: GeoEvent): string | null {
+  if (isHazardGeoEvent(event)) {
+    return Object.entries(HAZARD_LAYER_KINDS)
+      .find(([, kinds]) => kinds.includes(event.hazardKind))?.[0] || null;
+  }
+  if (event.category === 'conflict' || event.category === 'unrest') return 'ucdp';
+  if (event.category === 'infrastructure') return 'air-routes';
+  if (event.category === 'sanctions' || event.category === 'country-risk') return 'sanctions-country-risk';
+  if (event.category === 'intel') return 'intel-hotspots';
+  return null;
+}
+
+export function eventMatchesWorldEventLayers(event: GeoEvent, activeLayerIds: readonly string[]) {
+  const layerId = worldEventLayerIdForEvent(event);
+  return layerId != null && activeLayerIds.includes(layerId);
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { sourceStatusFromAdapter } from './sourceStatus';
+import type { HazardMapResponse } from '../domain/types';
+import { sourceStatusFromAdapter, sourceStatusesFromHazardResponse } from './sourceStatus';
 
 describe('map source status', () => {
   it('keeps loading distinct from an empty successful source', () => {
@@ -42,5 +43,33 @@ describe('map source status', () => {
       loaded: true,
     });
     expect(status).toMatchObject({ status: 'partial', eventCount: 1, rejectedCount: 1 });
+  });
+
+  it('preserves provider degradation and coverage reasons', () => {
+    const response = {
+      schemaVersion: 'natural-hazards.v1',
+      generatedAt: '2026-07-29T12:00:00Z',
+      events: [],
+      sources: [{
+        key: 'firms',
+        status: 'degraded',
+        coverage: {
+          scope: 'global',
+          label: 'NASA FIRMS satellite fire detections',
+          isComplete: false,
+          gaps: ['MAP_KEY is not configured'],
+        },
+        errorCode: 'configuration-required',
+      }],
+      isPartial: true,
+      errors: [{ source: 'firms', code: 'configuration-required' }],
+      counts: { events: 0, byHazardKind: {} },
+    } satisfies HazardMapResponse;
+    expect(sourceStatusesFromHazardResponse(response)[0]).toMatchObject({
+      label: 'FIRMS',
+      status: 'degraded',
+      eventCount: 0,
+    });
+    expect(sourceStatusesFromHazardResponse(response)[0]?.message).toContain('configuration-required');
   });
 });

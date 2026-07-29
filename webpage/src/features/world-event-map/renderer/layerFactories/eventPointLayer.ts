@@ -1,6 +1,7 @@
 import { ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import type { Layer, LayersList } from '@deck.gl/core';
 import type { GeoEvent, GeoEventSeverity } from '../../domain/types';
+import { worldEventLayerIdForEvent } from '../../config/layerRegistry';
 import { eventColor, eventLabel, pointRadiusMeters, SEVERITY_COLORS } from './shared';
 
 export type EventCluster = {
@@ -11,6 +12,7 @@ export type EventCluster = {
   count: number;
   severity: GeoEventSeverity;
   bounds: [number, number, number, number];
+  color: [number, number, number, number];
 };
 
 const SEVERITY_RANK: Record<GeoEventSeverity, number> = {
@@ -31,7 +33,8 @@ function clusterPoints(events: GeoEvent[], zoom: number, selectedEventId: string
       continue;
     }
     const [lon, lat] = event.geometry.coordinates;
-    const key = `${Math.floor((lon + 180) / cellSize)}:${Math.floor((lat + 90) / cellSize)}`;
+    const layerId = worldEventLayerIdForEvent(event) || event.category;
+    const key = `${layerId}:${Math.floor((lon + 180) / cellSize)}:${Math.floor((lat + 90) / cellSize)}`;
     const bucket = buckets.get(key) || [];
     bucket.push(event);
     buckets.set(key, bucket);
@@ -49,6 +52,7 @@ function clusterPoints(events: GeoEvent[], zoom: number, selectedEventId: string
     let south = 90;
     let north = -90;
     let severity: GeoEventSeverity = 'info';
+    let representative = bucket[0]!;
     for (const event of bucket) {
       const coordinates = event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0];
       const lon = coordinates[0] ?? 0;
@@ -59,7 +63,10 @@ function clusterPoints(events: GeoEvent[], zoom: number, selectedEventId: string
       east = Math.max(east, lon);
       south = Math.min(south, lat);
       north = Math.max(north, lat);
-      if (SEVERITY_RANK[event.severity] > SEVERITY_RANK[severity]) severity = event.severity;
+      if (SEVERITY_RANK[event.severity] > SEVERITY_RANK[severity]) {
+        severity = event.severity;
+        representative = event;
+      }
     }
     clusters.push({
       kind: 'event-cluster',
@@ -69,6 +76,7 @@ function clusterPoints(events: GeoEvent[], zoom: number, selectedEventId: string
       count: bucket.length,
       severity,
       bounds: [west, south, east, north],
+      color: eventColor(representative),
     });
   }
   return { singles, clusters };
@@ -95,10 +103,7 @@ export function createEventPointLayers({
       data: clusters,
       getPosition: (cluster) => cluster.coordinates,
       getRadius: (cluster) => Math.max(36_000, Math.log2(cluster.count + 1) * 34_000),
-      getFillColor: (cluster) => {
-        const [r, g, b] = SEVERITY_COLORS[cluster.severity];
-        return [r, g, b, 105];
-      },
+      getFillColor: (cluster) => [cluster.color[0], cluster.color[1], cluster.color[2], 115],
       getLineColor: (cluster) => {
         const [r, g, b] = SEVERITY_COLORS[cluster.severity];
         return [r, g, b, 220];

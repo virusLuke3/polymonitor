@@ -152,6 +152,30 @@ export interface HazardEvent extends GeoEvent {
       };
 }
 
+export interface HazardMapSource {
+  key: string;
+  status: GeoEventSourceStatus;
+  coverage: HazardCoverage;
+  fetchedAt?: string | null;
+  dataUpdatedAt?: string | null;
+  staleAfter?: string | null;
+  lastSuccessAt?: string | null;
+  errorCode?: string | null;
+}
+
+export interface HazardMapResponse {
+  schemaVersion: 'natural-hazards.v1';
+  generatedAt: string;
+  events: HazardEvent[];
+  sources: HazardMapSource[];
+  isPartial: boolean;
+  errors: Array<{ source: string; code?: string | null }>;
+  counts: {
+    events: number;
+    byHazardKind: Partial<Record<HazardKind, number>>;
+  };
+}
+
 export type GeoEventAdapterIssue = {
   index: number;
   code: string;

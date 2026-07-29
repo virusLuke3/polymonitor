@@ -3,6 +3,8 @@ export * from './domain/validation';
 export * from './config/layerRegistry';
 export * from './config/regions';
 export * from './data/sourceStatus';
+export * from './data/naturalHazards';
+export * from './data/useNaturalHazards';
 export * from './components/MapStatus';
 export * from './components/MapToolbar';
 export * from './components/WorldEventMap';

@@ -117,9 +117,11 @@ function hazardMetricsMatch(event: HazardEvent) {
     return event.metrics.kind === 'wildfire';
   }
   if (event.hazardKind === 'temperature-anomaly'
-    || event.hazardKind === 'precipitation-anomaly'
-    || event.hazardKind === 'other-weather-anomaly') {
+    || event.hazardKind === 'precipitation-anomaly') {
     return event.metrics.kind === 'climate-anomaly';
+  }
+  if (event.hazardKind === 'other-weather-anomaly') {
+    return event.metrics.kind === 'climate-anomaly' || event.metrics.kind === 'volcano-or-other';
   }
   return event.metrics.kind === 'volcano-or-other';
 }

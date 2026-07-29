@@ -84,6 +84,7 @@ import type {
   WorkspaceIdentity,
 } from '@/types';
 import type { WorldCupDashboardPayload, WorldCupIntelPayload } from '@/workspaces/worldcup/types';
+import type { HazardMapResponse } from '@/features/world-event-map/domain/types';
 
 const RAW_BASE = import.meta.env.VITE_POLYDATA_API_BASE_URL || '/wm-api';
 const API_BASE = RAW_BASE.endsWith('/') ? RAW_BASE.slice(0, -1) : RAW_BASE;
@@ -737,6 +738,10 @@ export function fetchRuntimeFedReactionGrowthRiskBoard(limit = 36) {
 
 export function fetchRuntimeGeoSanctionsShock(limit = 2000) {
   return apiGet<RuntimeGeoSanctionsShockPayload>(`/runtime/world/geo-sanctions-shock?limit=${limit}`);
+}
+
+export function fetchNaturalHazards(signal?: AbortSignal) {
+  return apiGetWithTimeout<HazardMapResponse>('/runtime/world/natural-hazards?limit=1200', 25000, signal);
 }
 
 export function fetchRuntimeAlpha(limit = 8) {

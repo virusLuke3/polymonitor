@@ -1,4 +1,5 @@
 import type { GeoEvent } from '../domain/types';
+import { eventMatchesWorldEventLayers } from '../config/layerRegistry';
 import type { WorldEventMapState, WorldEventTimeRange } from './mapState';
 
 const TIME_RANGE_MS: Record<Exclude<WorldEventTimeRange, 'all'>, number> = {
@@ -24,4 +25,16 @@ export function filterWorldEventMapEvents(
     const parsed = Date.parse(timestamp);
     return Number.isFinite(parsed) && parsed >= cutoff && parsed <= now;
   });
+}
+
+export function filterWorldEventMapEventsForLayers(
+  events: GeoEvent[],
+  state: Pick<WorldEventMapState, 'activeLayerIds' | 'timeRange' | 'severities'>,
+  now = Date.now(),
+) {
+  return filterWorldEventMapEvents(
+    events.filter((event) => eventMatchesWorldEventLayers(event, state.activeLayerIds)),
+    state,
+    now,
+  );
 }

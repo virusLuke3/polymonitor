@@ -1,4 +1,8 @@
-import type { GeoEventAdapterResult, GeoEventSourceStatus } from '../domain/types';
+import type {
+  GeoEventAdapterResult,
+  GeoEventSourceStatus,
+  HazardMapResponse,
+} from '../domain/types';
 
 export type WorldEventSourceStatus = {
   key: string;
@@ -54,4 +58,51 @@ export function sourceStatusFromAdapter({
       ? `${result.rejected.length} record${result.rejected.length === 1 ? '' : 's'} rejected by the map contract`
       : undefined,
   };
+}
+
+const HAZARD_SOURCE_LABELS: Record<string, string> = {
+  usgs: 'USGS',
+  eonet: 'EONET',
+  nws: 'NWS',
+  firms: 'FIRMS',
+  'climate-anomaly': 'ANOMALY',
+};
+
+export function sourceStatusesFromHazardResponse(
+  response: HazardMapResponse | null,
+  rejectedCount = 0,
+  loading = false,
+): WorldEventSourceStatus[] {
+  if (!response) {
+    return loading
+      ? ['usgs', 'eonet', 'nws', 'firms', 'climate-anomaly'].map((key) => ({
+          key,
+          label: HAZARD_SOURCE_LABELS[key] || key.toUpperCase(),
+          status: 'loading' as const,
+          eventCount: 0,
+          rejectedCount: 0,
+        }))
+      : [];
+  }
+  return response.sources.map((source) => {
+    const providerKey = source.key.toLowerCase();
+    const eventCount = response.events.filter((event) => event.sources.some(
+      (item) => item.provider.toLowerCase().includes(providerKey),
+    )).length;
+    const details = [
+      source.coverage.label,
+      ...source.coverage.gaps,
+      source.errorCode ? `Source condition: ${source.errorCode}` : '',
+    ].filter(Boolean);
+    const status = source.status === 'ok' && rejectedCount > 0 ? 'partial' : source.status;
+    return {
+      key: source.key,
+      label: HAZARD_SOURCE_LABELS[source.key] || source.key.toUpperCase(),
+      status,
+      eventCount,
+      rejectedCount: source.status === 'ok' ? rejectedCount : 0,
+      generatedAt: source.dataUpdatedAt || source.fetchedAt || response.generatedAt,
+      message: details.join(' · '),
+    };
+  });
 }

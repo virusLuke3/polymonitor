@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { worldEventMapReducer } from './mapReducer';
 import { defaultWorldEventMapState } from './mapState';
-import { filterWorldEventMapEvents } from './selectors';
+import { filterWorldEventMapEvents, filterWorldEventMapEventsForLayers } from './selectors';
 import {
   parseWorldEventMapState,
   readStoredWorldEventMapState,
@@ -84,6 +84,34 @@ describe('World Event Map state', () => {
       [{ ...base, occurredAt: '2026-07-29T08:00:00Z' }],
       { timeRange: '1h', severities: ['warning'] },
       now,
+    )).toHaveLength(0);
+  });
+
+  it('filters broad hazard categories through the active hazard layer mapping', () => {
+    const earthquake = {
+      id: 'earthquake:usgs:test',
+      category: 'natural-hazard' as const,
+      title: 'Earthquake',
+      severity: 'warning' as const,
+      locationPrecision: 'exact' as const,
+      sources: [{ provider: 'USGS' }],
+      limitations: [],
+      relatedMarketIds: [],
+      properties: {},
+      hazardKind: 'earthquake' as const,
+      lifecycle: 'observed' as const,
+      coverage: { scope: 'global' as const, label: 'USGS', isComplete: false, gaps: [] },
+      severityEvidence: { provider: 'USGS', mappingVersion: 'v1', reason: 'magnitude' },
+      revision: { nativeEventId: 'test' },
+      metrics: { kind: 'earthquake' as const, magnitude: 5 },
+    };
+    expect(filterWorldEventMapEventsForLayers(
+      [earthquake],
+      { activeLayerIds: ['earthquakes-volcanoes'], timeRange: 'all', severities: ['warning'] },
+    )).toHaveLength(1);
+    expect(filterWorldEventMapEventsForLayers(
+      [earthquake],
+      { activeLayerIds: ['weather-alerts'], timeRange: 'all', severities: ['warning'] },
     )).toHaveLength(0);
   });
 });

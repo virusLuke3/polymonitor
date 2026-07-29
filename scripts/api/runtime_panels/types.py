@@ -197,6 +197,7 @@ class TechnologyRuntimePanelDependencies:
 class WorldRuntimePanelDependencies:
     geo_sanctions_shock_snapshot: Callable[..., PanelPayload]
     global_transport_shipping_snapshot: Callable[..., PanelPayload]
+    natural_hazards_snapshot: Callable[..., PanelPayload]
 
     @classmethod
     def from_context(
@@ -214,6 +215,10 @@ class WorldRuntimePanelDependencies:
                     context,
                     "get_global_transport_shipping_snapshot",
                 ),
+            ),
+            natural_hazards_snapshot=cast(
+                Callable[..., PanelPayload],
+                resolve_route_callable(context, "get_natural_hazards_snapshot"),
             ),
         )
 

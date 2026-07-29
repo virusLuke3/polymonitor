@@ -39,10 +39,12 @@ import {
   adaptGeoShockPayload,
   adaptTransportReference,
   filterWorldEventMapEvents,
+  filterWorldEventMapEventsForLayers,
   MapStatus,
   MapToolbar,
   selectableWorldEventLayers,
   sourceStatusFromAdapter,
+  useNaturalHazards,
   useWorldEventMapState,
   WorldEventMap,
   worldEventLayerById,
@@ -764,6 +766,7 @@ function WorldMonitorApp() {
   const [commandMarketSearchLoading, setCommandMarketSearchLoading] = useState(false);
   const [commandMarketSearchError, setCommandMarketSearchError] = useState('');
   const worldEventMap = useWorldEventMapState();
+  const naturalHazards = useNaturalHazards();
   const layers = useMemo<LayerToggle[]>(
     () => INITIAL_LAYERS.map((layer) => ({
       ...layer,
@@ -1613,6 +1616,10 @@ function WorldMonitorApp() {
     [geoShockPayload, ucdpLayerEnabled],
   );
   const geoShockAdapterResult = useMemo(() => adaptGeoShockPayload(geoShockPayload), [geoShockPayload]);
+  const hazardMapEvents = useMemo(
+    () => filterWorldEventMapEventsForLayers(naturalHazards.events, worldEventMap.state),
+    [naturalHazards.events, worldEventMap.state],
+  );
   const ucdpMapEvents = useMemo(
     () => ucdpLayerEnabled
       ? filterWorldEventMapEvents(
@@ -1629,20 +1636,33 @@ function WorldMonitorApp() {
     [showAirRoutes, transportPayload],
   );
   const worldEventMapEvents = useMemo(
-    () => [...ucdpMapEvents, ...airReferenceEvents],
-    [airReferenceEvents, ucdpMapEvents],
+    () => [...hazardMapEvents, ...ucdpMapEvents, ...airReferenceEvents],
+    [airReferenceEvents, hazardMapEvents, ucdpMapEvents],
   );
-  const mapSourceStatuses = useMemo(() => [
-    sourceStatusFromAdapter({
-      key: 'geo-sanctions-shock',
-      label: 'UCDP',
-      payloadStatus: geoShockPayload?.conflictState || geoShockPayload?.status,
-      generatedAt: geoShockPayload?.generatedAt,
-      result: geoShockAdapterResult,
-      loaded: Boolean(geoShockPayload),
-    }),
-  ], [geoShockAdapterResult, geoShockPayload]);
-  const mapVisibleEventCount = viewMode === '3d' ? globeStatus.markerVisible : ucdpMapEvents.length;
+  const mapSourceStatuses = useMemo(() => {
+    const activeSourceKeys = new Set(
+      enabledLayerIds.flatMap((layerId) => worldEventLayerById(layerId)?.sourceKeys || []),
+    );
+    const statuses = naturalHazards.sources.filter((source) => activeSourceKeys.has(source.key));
+    if (ucdpLayerEnabled) {
+      statuses.push(sourceStatusFromAdapter({
+        key: 'geo-sanctions-shock',
+        label: 'UCDP',
+        payloadStatus: geoShockPayload?.conflictState || geoShockPayload?.status,
+        generatedAt: geoShockPayload?.generatedAt,
+        result: geoShockAdapterResult,
+        loaded: Boolean(geoShockPayload),
+      }));
+    }
+    return statuses;
+  }, [
+    enabledLayerIds,
+    geoShockAdapterResult,
+    geoShockPayload,
+    naturalHazards.sources,
+    ucdpLayerEnabled,
+  ]);
+  const mapVisibleEventCount = viewMode === '3d' ? globeStatus.markerVisible : worldEventMapEvents.length;
   const mapQualityLabel = viewMode === '3d'
     ? `${globeStatus.qualitySetting.toUpperCase()} · ${globeStatus.fps ? Math.round(globeStatus.fps) : '--'} FPS`
     : `${t(MAP_VIEW_MESSAGE_KEYS[viewMode])} · Z${mapZoom.toFixed(2)}`;
@@ -1888,7 +1908,7 @@ function WorldMonitorApp() {
               <span className="wm-status-chip">{t('atlas.liveStatus')}</span>
               <LiveUtcClock />
               <MapStatus sources={mapSourceStatuses} />
-              <span className="wm-map-status-metric">{t('atlas.events')} <b>{formatNumber(ucdpMapEvents.length)}</b></span>
+              <span className="wm-map-status-metric">{t('atlas.events')} <b>{formatNumber(worldEventMapEvents.length)}</b></span>
               <span className="wm-map-status-metric">{t('atlas.visible')} <b>{formatNumber(mapVisibleEventCount)}</b></span>
               <span className="wm-map-status-metric">{t('atlas.quality')} <b>{mapQualityLabel}</b></span>
             </div>

@@ -16,7 +16,7 @@ export interface WorldEventMapState {
   basemapTheme: string;
 }
 
-export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v1';
+export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v2';
 export const WORLD_EVENT_TIME_RANGES: readonly WorldEventTimeRange[] = ['1h', '6h', '24h', '48h', '7d', 'all'];
 export const WORLD_EVENT_SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 
