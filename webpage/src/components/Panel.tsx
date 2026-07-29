@@ -1,4 +1,5 @@
 import { type ComponentChildren } from 'preact';
+import { useI18n } from '@/services/i18n';
 
 type PanelProps = {
   title: string;
@@ -22,15 +23,18 @@ type PanelLoadingProps = {
   className?: string;
 };
 
-export function PanelLoading({ label = '加载中...', detail = '正在同步实时数据', className }: PanelLoadingProps) {
+export function PanelLoading({ label, detail, className }: PanelLoadingProps) {
+  const { t } = useI18n();
+  const resolvedLabel = label ?? t('panelRuntime.loading');
+  const resolvedDetail = detail ?? t('panelRuntime.syncing');
   return (
     <div className={`wm-panel-loading${className ? ` ${className}` : ''}`} role="status" aria-live="polite">
       <div className="wm-panel-loading-radar" aria-hidden="true">
         <span className="wm-panel-loading-sweep" />
         <span className="wm-panel-loading-dot" />
       </div>
-      <strong>{label}</strong>
-      {detail ? <em>{detail}</em> : null}
+      <strong>{resolvedLabel}</strong>
+      {resolvedDetail ? <em>{resolvedDetail}</em> : null}
       <div className="wm-panel-loading-dots" aria-hidden="true">
         <span />
         <span />

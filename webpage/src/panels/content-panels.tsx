@@ -4,17 +4,18 @@ import { useMemo, useState } from 'preact/hooks';
 import type { PanelRenderMap, PanelRuntimeContext } from './types';
 import { contentList } from './shared/renderers';
 import { contentByType, focusedContent } from './shared/selectors';
+import { useI18n, type MessageKey } from '@/services/i18n';
 
 type IntelTab = {
   id: 'news' | 'video' | 'report' | 'research';
-  label: string;
+  labelKey: MessageKey;
 };
 
 const INTEL_TABS: IntelTab[] = [
-  { id: 'news', label: 'News' },
-  { id: 'video', label: 'Video' },
-  { id: 'report', label: 'Reports' },
-  { id: 'research', label: 'Research' },
+  { id: 'news', labelKey: 'atlasIntel.news' },
+  { id: 'video', labelKey: 'atlasIntel.video' },
+  { id: 'report', labelKey: 'atlasIntel.reports' },
+  { id: 'research', labelKey: 'atlasIntel.research' },
 ];
 
 function explicitContentType(item: ContentItem) {
@@ -39,25 +40,27 @@ function smartContentByType(items: ContentItem[], tab: IntelTab['id']) {
 }
 
 function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
+  const i18n = useI18n();
+  const { t } = i18n;
   const [activeTab, setActiveTab] = useState<IntelTab['id']>('news');
   const items = focusedContent(ctx);
   const tabItems = useMemo(() => Object.fromEntries(
     INTEL_TABS.map((tab) => [tab.id, smartContentByType(items, tab.id)]),
   ) as Record<IntelTab['id'], ReturnType<typeof contentByType>>, [items]);
   const visibleItems = tabItems[activeTab] || [];
-  const activeLabel = INTEL_TABS.find((tab) => tab.id === activeTab)?.label || 'Intel';
+  const activeLabel = t(INTEL_TABS.find((tab) => tab.id === activeTab)?.labelKey || 'atlasIntel.intel');
   const emptyMessage = activeTab === 'news'
-    ? 'No news intel for this market yet.'
-    : `No explicit ${activeLabel.toLowerCase()} intel for this market yet. Runtime RSS news stays under News.`;
+    ? t('atlasIntel.noNews')
+    : t('atlasIntel.noType', { type: activeLabel });
 
   return (
     <Panel
-      title="RELATED INTEL"
+      title={t('atlasIntel.title')}
       status="live"
       count={items.length}
       className="wm-market-panel wm-content-feed-panel wm-related-news-panel wm-related-intel-panel"
     >
-      <div className="wm-intel-filter-tabs" role="tablist" aria-label="Related intel content types">
+      <div className="wm-intel-filter-tabs" role="tablist" aria-label={t('atlasIntel.types')}>
         {INTEL_TABS.map((tab) => (
           <button
             aria-selected={activeTab === tab.id}
@@ -67,12 +70,20 @@ function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
             role="tab"
             type="button"
           >
-            <span>{tab.label}</span>
-            <b>{tabItems[tab.id]?.length || 0}</b>
+            <span>{t(tab.labelKey)}</span>
+            <b>{i18n.formatNumber(tabItems[tab.id]?.length || 0)}</b>
           </button>
         ))}
       </div>
-      {contentList(visibleItems, emptyMessage, 20)}
+      {contentList(visibleItems, emptyMessage, 20, {
+        untitled: t('atlasIntel.untitled'),
+        readSource: t('atlasIntel.readSource'),
+        formatDate: (value) => value ? i18n.formatDateTime(value) : '--',
+        empty: {
+          label: t('atlasShared.standby'),
+          detail: t('atlasShared.emptyDetail'),
+        },
+      })}
     </Panel>
   );
 }

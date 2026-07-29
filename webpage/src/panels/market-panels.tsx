@@ -3,9 +3,38 @@ import { Panel } from '@/components/Panel';
 import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem, PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
 import { AiMarketWidePanel } from './shared/ai-market-wide';
-import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative, shortHash } from './shared/formatters';
+import { shortHash } from './shared/formatters';
 import { emptyState, priceLine } from './shared/renderers';
 import { globalMarkets } from './shared/selectors';
+import { useI18n } from '@/services/i18n';
+
+type MarketI18n = Pick<ReturnType<typeof useI18n>, 't' | 'formatDateTime' | 'formatNumber' | 'formatPercent' | 'formatRelativeTime'>;
+
+function localizedPercent(value: string | number | null | undefined, i18n: MarketI18n) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? i18n.formatPercent(numeric) : '--';
+}
+
+function localizedCompact(value: string | number | null | undefined, i18n: MarketI18n) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? i18n.formatNumber(numeric, { notation: 'compact', maximumFractionDigits: 1 })
+    : '--';
+}
+
+function localizedCurrency(value: string | number | null | undefined, i18n: MarketI18n) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? i18n.formatNumber(numeric, { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 })
+    : '--';
+}
+
+function localizedEmptyCopy(i18n: MarketI18n) {
+  return {
+    label: i18n.t('atlasShared.standby'),
+    detail: i18n.t('atlasShared.emptyDetail'),
+  };
+}
 
 const GENERIC_MARKET_TAGS = new Set([
   'all',
@@ -75,30 +104,30 @@ function groupTopic(group: MarketGroupItem) {
   return category || 'market';
 }
 
-function marketTiming(market: MarketListItem) {
-  if (market.createdAt) return formatRelative(market.createdAt);
-  if (market.lastTradeAt) return `${formatRelative(market.lastTradeAt)} trade`;
-  if (market.endDate) return `closes ${formatRelative(market.endDate)}`;
+function marketTiming(market: MarketListItem, i18n: MarketI18n) {
+  if (market.createdAt) return i18n.formatRelativeTime(market.createdAt);
+  if (market.lastTradeAt) return i18n.t('atlasMarket.tradeTiming', { time: i18n.formatRelativeTime(market.lastTradeAt) });
+  if (market.endDate) return i18n.t('atlasMarket.closeTiming', { time: i18n.formatRelativeTime(market.endDate) });
   return '--';
 }
 
-function groupTiming(group: MarketGroupItem) {
-  if (group.lastActivityAt) return `${formatRelative(group.lastActivityAt)} active`;
-  if (group.createdAt) return `${formatRelative(group.createdAt)} listed`;
-  if (group.endDate) return `closes ${formatRelative(group.endDate)}`;
+function groupTiming(group: MarketGroupItem, i18n: MarketI18n) {
+  if (group.lastActivityAt) return i18n.t('atlasMarket.activeTiming', { time: i18n.formatRelativeTime(group.lastActivityAt) });
+  if (group.createdAt) return i18n.t('atlasMarket.listedTiming', { time: i18n.formatRelativeTime(group.createdAt) });
+  if (group.endDate) return i18n.t('atlasMarket.closeTiming', { time: i18n.formatRelativeTime(group.endDate) });
   return '--';
 }
 
-function marketOutcomeLabel(market: MarketListItem) {
+function marketOutcomeLabel(market: MarketListItem, i18n: MarketI18n) {
   const count = Number(market.outcomeCount || 0);
-  if (count > 0) return `${count} outcomes`;
-  return 'binary';
+  if (count > 0) return i18n.t('atlasMarket.outcomes', { count: i18n.formatNumber(count) });
+  return i18n.t('atlasMarket.binary');
 }
 
-function groupOutcomeLabel(group: MarketGroupItem) {
+function groupOutcomeLabel(group: MarketGroupItem, i18n: MarketI18n) {
   const count = Number(group.outcomeCount || group.outcomes?.length || 0);
-  if (count > 0) return `${count} outcomes`;
-  return 'event';
+  if (count > 0) return i18n.t('atlasMarket.outcomes', { count: i18n.formatNumber(count) });
+  return i18n.t('atlasMarket.event');
 }
 
 function marketAccent(market: MarketListItem) {
@@ -275,11 +304,11 @@ function groupHasMarketCoverage(group: MarketGroupItem) {
   return false;
 }
 
-function groupActivityLabel(group: MarketGroupItem) {
+function groupActivityLabel(group: MarketGroupItem, i18n: MarketI18n) {
   const tradeCount = Number(groupDisplayTradeCount(group) || 0);
-  if (tradeCount > 0) return `${formatCompact(tradeCount)} tx`;
-  if (Number(groupDisplayVolume(group) || 0) > 0) return 'impact';
-  return groupOutcomeLabel(group);
+  if (tradeCount > 0) return i18n.t('atlasMarket.transactions', { count: localizedCompact(tradeCount, i18n) });
+  if (Number(groupDisplayVolume(group) || 0) > 0) return i18n.t('atlasMarket.impact');
+  return groupOutcomeLabel(group, i18n);
 }
 
 function groupActivityTimestamp(group: MarketGroupItem) {
@@ -388,18 +417,22 @@ function statusTone(status?: string | null) {
   return 'neutral';
 }
 
-function marketSummaryOracleHint(ctx: PanelRenderContext, endDate?: string | null) {
+function marketSummaryOracleHint(ctx: PanelRenderContext, endDate: string | null | undefined, i18n: MarketI18n) {
   const timeline = ctx.bundle?.oracle?.timeline || [];
   const latest = timeline[0] || null;
   if (latest?.settledPrice !== null && latest?.settledPrice !== undefined && latest?.settledPrice !== '') {
-    return `Settled at ${formatPercent(latest.settledPrice)}`;
+    return i18n.t('atlasMarket.settledAt', { price: localizedPercent(latest.settledPrice, i18n) });
   }
   if (latest?.proposedPrice !== null && latest?.proposedPrice !== undefined && latest?.proposedPrice !== '') {
-    return `Oracle proposed ${formatPercent(latest.proposedPrice)}`;
+    return i18n.t('atlasMarket.oracleProposed', { price: localizedPercent(latest.proposedPrice, i18n) });
   }
-  if (ctx.bundle?.oracle?.currentStatus) return `Oracle status: ${ctx.bundle.oracle.currentStatus}`;
-  if (endDate) return `Awaiting oracle proposal after ${formatDate(endDate)}`;
-  return 'Oracle resolution pending';
+  if (ctx.bundle?.oracle?.currentStatus) {
+    return i18n.t('atlasMarket.oracleStatus', { status: ctx.bundle.oracle.currentStatus });
+  }
+  if (endDate) {
+    return i18n.t('atlasMarket.awaitingAfter', { date: i18n.formatDateTime(endDate) });
+  }
+  return i18n.t('atlasMarket.oraclePending');
 }
 
 function activeMarketGroupsList(
@@ -407,8 +440,9 @@ function activeMarketGroupsList(
   selectedMarketId: number | null,
   selectedMarketGroupId: string | null,
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void,
+  i18n: MarketI18n,
 ) {
-  if (!groups.length) return emptyState('No active market groups yet.');
+  if (!groups.length) return emptyState(i18n.t('atlasMarket.noGroups'), localizedEmptyCopy(i18n));
   return (
     <div className="wm-poly-market-list">
       {groups.map((group) => {
@@ -433,15 +467,15 @@ function activeMarketGroupsList(
                 <span className="wm-poly-market-dot" />
                 <span>{groupTopic(group)}</span>
                 <span>·</span>
-                <span>{groupTiming(group)}</span>
+                <span>{groupTiming(group, i18n)}</span>
                 <span>·</span>
-                <span>{groupOutcomeLabel(group)}</span>
+                <span>{groupOutcomeLabel(group, i18n)}</span>
               </div>
               <strong className="wm-poly-market-title">{group.title}</strong>
               <div className="wm-poly-market-bottom">
-                <span className="wm-poly-market-prob">{formatPercent(groupBestLivePrice(group))}</span>
-                <span className="wm-poly-market-volume">Vol {formatCurrencyCompact(groupDisplayVolume(group))}</span>
-                <span className="wm-poly-market-trades">{groupActivityLabel(group)}</span>
+                <span className="wm-poly-market-prob">{localizedPercent(groupBestLivePrice(group), i18n)}</span>
+                <span className="wm-poly-market-volume">{i18n.t('atlasMarket.volume', { value: localizedCurrency(groupDisplayVolume(group), i18n) })}</span>
+                <span className="wm-poly-market-trades">{groupActivityLabel(group, i18n)}</span>
               </div>
             </div>
             <span className="wm-poly-market-star" aria-hidden="true">☆</span>
@@ -452,8 +486,8 @@ function activeMarketGroupsList(
   );
 }
 
-function activeMarketsList(markets: MarketListItem[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number | null) => void) {
-  if (!markets.length) return emptyState('No active markets yet.');
+function activeMarketsList(markets: MarketListItem[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number | null) => void, i18n: MarketI18n) {
+  if (!markets.length) return emptyState(i18n.t('atlasMarket.noMarkets'), localizedEmptyCopy(i18n));
   return (
     <div className="wm-poly-market-list">
       {markets.map((market) => (
@@ -471,15 +505,15 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
               <span className="wm-poly-market-dot" />
               <span>{marketTopic(market)}</span>
               <span>·</span>
-              <span>{marketTiming(market)}</span>
+              <span>{marketTiming(market, i18n)}</span>
               <span>·</span>
-              <span>{marketOutcomeLabel(market)}</span>
+              <span>{marketOutcomeLabel(market, i18n)}</span>
             </div>
             <strong className="wm-poly-market-title">{market.title}</strong>
             <div className="wm-poly-market-bottom">
-              <span className="wm-poly-market-prob">{formatPercent(market.latestPrice)}</span>
-              <span className="wm-poly-market-volume">Vol {formatCurrencyCompact(market.volume24h)}</span>
-              <span className="wm-poly-market-trades">{formatCompact(market.tradeCount24h)} tx</span>
+              <span className="wm-poly-market-prob">{localizedPercent(market.latestPrice, i18n)}</span>
+              <span className="wm-poly-market-volume">{i18n.t('atlasMarket.volume', { value: localizedCurrency(market.volume24h, i18n) })}</span>
+              <span className="wm-poly-market-trades">{i18n.t('atlasMarket.transactions', { count: localizedCompact(market.tradeCount24h, i18n) })}</span>
             </div>
           </div>
           <span className="wm-poly-market-star" aria-hidden="true">☆</span>
@@ -508,6 +542,8 @@ function ActiveMarketsPanel({
   setSelectedMarketId: (marketId: number | null) => void;
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
 }) {
+  const i18n = useI18n();
+  const { t } = i18n;
   const [search, setSearch] = useState('');
 
   const visibleGroups = useMemo(() => {
@@ -571,8 +607,8 @@ function ActiveMarketsPanel({
 
   return (
     <Panel
-      title="Markets"
-      badge={marketGroupSort === 'new' ? 'Newest' : marketGroupSort === 'volume' ? 'Volume' : marketGroupSort === 'close' ? 'Close' : marketGroupSort === 'move' ? 'Move' : marketGroupSort === 'trades' ? 'Tx' : 'Live'}
+      title={t('atlasMarket.markets')}
+      badge={marketGroupSort === 'new' ? t('atlasMarket.badge.newest') : marketGroupSort === 'volume' ? t('atlasMarket.badge.volume') : marketGroupSort === 'close' ? t('atlasMarket.badge.close') : marketGroupSort === 'move' ? t('atlasMarket.badge.move') : marketGroupSort === 'trades' ? t('atlasMarket.badge.transactions') : t('atlasMarket.badge.live')}
       status="live"
       count={panelCount}
       className="wm-market-panel"
@@ -582,19 +618,19 @@ function ActiveMarketsPanel({
             className="wm-market-sort"
             value={marketGroupSort}
             onInput={(event) => setMarketGroupSort(event.currentTarget.value as MarketGroupSort)}
-            aria-label="Sort markets"
+            aria-label={t('atlasMarket.sort')}
           >
-            <option value="active">Active impact</option>
-            <option value="volume">Volume</option>
-            <option value="close">Close time</option>
-            <option value="move">Probability move</option>
-            <option value="trades">Transactions</option>
-            <option value="new">Newest</option>
+            <option value="active">{t('atlasMarket.sort.active')}</option>
+            <option value="volume">{t('atlasMarket.sort.volume')}</option>
+            <option value="close">{t('atlasMarket.sort.close')}</option>
+            <option value="move">{t('atlasMarket.sort.move')}</option>
+            <option value="trades">{t('atlasMarket.sort.transactions')}</option>
+            <option value="new">{t('atlasMarket.sort.newest')}</option>
           </select>
         </div>
       }
     >
-      <label className="wm-market-search wm-market-search-body" aria-label="Search markets">
+      <label className="wm-market-search wm-market-search-body" aria-label={t('atlasMarket.search')}>
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
           <circle cx="7" cy="7" r="4.8" />
           <path d="M10.8 10.8 14 14" />
@@ -603,12 +639,12 @@ function ActiveMarketsPanel({
           type="search"
           value={search}
           onInput={(event) => setSearch(event.currentTarget.value)}
-          placeholder="Search markets..."
+          placeholder={t('atlasMarket.searchPlaceholder')}
         />
       </label>
       {hasGroups
-        ? activeMarketGroupsList(visibleGroups, selectedMarketId, selectedMarketGroupId, focusMarketGroup)
-        : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId)}
+        ? activeMarketGroupsList(visibleGroups, selectedMarketId, selectedMarketGroupId, focusMarketGroup, i18n)
+        : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId, i18n)}
     </Panel>
   );
 }
@@ -643,6 +679,143 @@ function resolveFocusedMarketContext(ctx: PanelRenderContext) {
   return { selectedGroup, selectedOutcome, selected, listMarket, price };
 }
 
+function FeaturedMarketPanel({ ctx }: { ctx: PanelRenderContext }) {
+  const { t } = useI18n();
+  const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;
+  const tags = (selected?.tags || []).filter(Boolean).slice(0, 4);
+  const resolutionText = selected?.description || ctx.bundle?.chart?.referenceRule || t('atlasMarket.resolutionLoading');
+  return (
+    <Panel title={t('atlasMarket.context')} badge={t('atlasMarket.rules')} status="live" className="wm-market-panel wm-market-context-panel">
+      <div className="wm-feature-panel">
+        <section className="wm-feature-hero">
+          <span className="wm-feature-kicker">{t('atlasMarket.resolutionContext')}</span>
+          <p>{resolutionText}</p>
+        </section>
+
+        <div className="wm-feature-tags" aria-label={t('atlasMarket.tags')}>
+          <span>{selected?.category || t('atlasOracle.market')}</span>
+          {tags.length ? tags.map((tag) => <span key={tag}>{tag}</span>) : <span>{t('atlasMarket.untagged')}</span>}
+        </div>
+
+        <div className="wm-feature-grid">
+          <article className="wm-feature-stat">
+            <span>ORACLE</span>
+            <strong>{shortHash(selected?.oracle || ctx.bundle?.oracle?.oracle || '', 8, 5)}</strong>
+          </article>
+          <article className="wm-feature-stat">
+            <span>CONDITION</span>
+            <strong>{shortHash(selected?.conditionId || '', 8, 5)}</strong>
+          </article>
+          <article className="wm-feature-stat">
+            <span>QUESTION ID</span>
+            <strong>{shortHash(selected?.questionId || ctx.bundle?.oracle?.questionId || '', 8, 5)}</strong>
+          </article>
+          <article className="wm-feature-stat">
+            <span>GAMMA ID</span>
+            <strong>{selected?.gammaMarketId || '--'}</strong>
+          </article>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function MarketSummaryPanel({ ctx }: { ctx: PanelRenderContext }) {
+  const i18n = useI18n();
+  const { t } = i18n;
+  const { selectedGroup, selectedOutcome, selected, listMarket, price } = resolveFocusedMarketContext(ctx);
+  const yesPrice = selectedOutcome?.yesPrice ?? price?.latestYesPrice ?? selected?.latestYesPrice ?? price?.latestPrice ?? selected?.latestPrice;
+  const noPrice = selectedOutcome?.noPrice ?? price?.latestNoPrice ?? selected?.latestNoPrice ?? complementPrice(yesPrice);
+  const groupOutcomes = selectedGroup ? uniqueGroupOutcomes([...(selectedGroup.outcomes || []), ...(selectedGroup.topOutcomes || [])]) : [];
+  const groupOutcomeVolume24h = sumFiniteValues(groupOutcomes.map((outcome) => outcome.volume24h));
+  const groupOutcomeTradeCount24h = sumFiniteValues(groupOutcomes.map((outcome) => outcome.tradeCount24h));
+  const volume24h = firstFiniteValue(selectedOutcome?.volume24h, selectedGroup ? groupDisplayVolume(selectedGroup) : null, groupOutcomeVolume24h, listMarket?.volume24h, price?.volume24h);
+  const tradeCount24h = firstFiniteValue(selectedOutcome?.tradeCount24h, selectedGroup ? groupDisplayTradeCount(selectedGroup) : null, groupOutcomeTradeCount24h, listMarket?.tradeCount24h, price?.tradeCount24h);
+  const status = selected?.status || listMarket?.status || t('atlasOracle.market');
+  const endDate = selectedGroup?.endDate || selected?.endDate || listMarket?.endDate || null;
+  const oracleHint = marketSummaryOracleHint(ctx, endDate, i18n);
+  const statusClass = statusTone(status);
+  return (
+    <Panel title={t('atlasMarket.summary')} badge={status} status="live" className="wm-market-panel wm-market-summary-panel">
+      <div className="wm-market-summary">
+        <section className="wm-market-summary-hero">
+          <div className="wm-market-summary-kicker">
+            <span>{selectedGroup?.category || selected?.category || listMarket?.category || t('atlasOracle.market')}</span>
+            <em>{endDate ? i18n.formatRelativeTime(endDate) : t('atlasMarket.rolling')}</em>
+          </div>
+          <strong>{selectedGroup?.title || selected?.title || t('atlasMarket.noSelection')}</strong>
+        </section>
+
+        <div className="wm-market-summary-prices" aria-label={t('atlasMarket.currentPrices')}>
+          <article className="yes">
+            <span>YES</span>
+            <strong>{localizedPercent(yesPrice, i18n)}</strong>
+          </article>
+          <article className="no">
+            <span>NO</span>
+            <strong>{localizedPercent(noPrice, i18n)}</strong>
+          </article>
+        </div>
+
+        <div className="wm-market-summary-grid">
+          <article>
+            <span>{t('atlasMarket.volume24h')}</span>
+            <strong>{localizedCurrency(volume24h, i18n)}</strong>
+          </article>
+          <article>
+            <span>{t('atlasMarket.trades24h')}</span>
+            <strong>{localizedCompact(tradeCount24h, i18n)}</strong>
+          </article>
+          <article>
+            <span>{t('atlasMarket.ends')}</span>
+            <strong>{endDate ? i18n.formatDateTime(endDate) : '--'}</strong>
+          </article>
+          <article>
+            <span>{t('atlasMarket.status')}</span>
+            <strong className={`wm-market-status-value ${statusClass}`}>{status}</strong>
+          </article>
+        </div>
+
+        <div className="wm-market-summary-oracle">
+          <span>{t('atlasMarket.oracleResolution')}</span>
+          <strong>{oracleHint}</strong>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function PriceSurfacePanel({ ctx }: { ctx: PanelRenderContext }) {
+  const i18n = useI18n();
+  const { t } = i18n;
+  return (
+    <Panel title={t('atlasMarket.priceSurface')} badge="YES" status="live" count={ctx.bundle?.chart?.points.length || 0}>
+      <div className="wm-price-surface">
+        <div className="wm-price-surface-head">
+          <article>
+            <span>{t('atlasMarket.last')}</span>
+            <strong>{localizedPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice, i18n)}</strong>
+          </article>
+          <article>
+            <span>1H</span>
+            <strong>{localizedPercent(ctx.bundle?.price?.change1h, i18n)}</strong>
+          </article>
+          <article>
+            <span>{t('atlasMarket.trades24h')}</span>
+            <strong>{i18n.formatNumber(Number(ctx.bundle?.price?.tradeCount24h || 0))}</strong>
+          </article>
+        </div>
+        {priceLine(ctx.bundle?.chart?.points || [], {
+          noHistory: t('atlasMarket.noPriceHistory'),
+          low: (value) => t('atlasMarket.low', { value }),
+          high: (value) => t('atlasMarket.high', { value }),
+          empty: localizedEmptyCopy(i18n),
+        })}
+      </div>
+    </Panel>
+  );
+}
+
 export const marketPanelRenderers: PanelRenderMap = {
   'active-markets': {
     render: (ctx) => (
@@ -659,134 +832,15 @@ export const marketPanelRenderers: PanelRenderMap = {
     ),
   },
   'featured-market': {
-    render: (ctx) => {
-      const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;
-      const tags = (selected?.tags || []).filter(Boolean).slice(0, 4);
-      const resolutionText = selected?.description || ctx.bundle?.chart?.referenceRule || 'Resolution context is loading for the selected market.';
-      return (
-        <Panel title="MARKET CONTEXT" badge="RULES" status="live" className="wm-market-panel wm-market-context-panel">
-          <div className="wm-feature-panel">
-            <section className="wm-feature-hero">
-              <span className="wm-feature-kicker">Resolution Context</span>
-              <p>{resolutionText}</p>
-            </section>
-
-            <div className="wm-feature-tags" aria-label="market tags">
-              <span>{selected?.category || 'market'}</span>
-              {tags.length ? tags.map((tag) => <span key={tag}>{tag}</span>) : <span>untagged</span>}
-            </div>
-
-            <div className="wm-feature-grid">
-              <article className="wm-feature-stat">
-                <span>ORACLE</span>
-                <strong>{shortHash(selected?.oracle || ctx.bundle?.oracle?.oracle || '', 8, 5)}</strong>
-              </article>
-              <article className="wm-feature-stat">
-                <span>CONDITION</span>
-                <strong>{shortHash(selected?.conditionId || '', 8, 5)}</strong>
-              </article>
-              <article className="wm-feature-stat">
-                <span>QUESTION ID</span>
-                <strong>{shortHash(selected?.questionId || ctx.bundle?.oracle?.questionId || '', 8, 5)}</strong>
-              </article>
-              <article className="wm-feature-stat">
-                <span>GAMMA ID</span>
-                <strong>{selected?.gammaMarketId || '--'}</strong>
-              </article>
-            </div>
-          </div>
-        </Panel>
-      );
-    },
+    render: (ctx) => <FeaturedMarketPanel ctx={ctx} />,
   },
   'market-summary': {
-    render: (ctx) => {
-      const { selectedGroup, selectedOutcome, selected, listMarket, price } = resolveFocusedMarketContext(ctx);
-      const yesPrice = selectedOutcome?.yesPrice ?? price?.latestYesPrice ?? selected?.latestYesPrice ?? price?.latestPrice ?? selected?.latestPrice;
-      const noPrice = selectedOutcome?.noPrice ?? price?.latestNoPrice ?? selected?.latestNoPrice ?? complementPrice(yesPrice);
-      const groupOutcomes = selectedGroup ? uniqueGroupOutcomes([...(selectedGroup.outcomes || []), ...(selectedGroup.topOutcomes || [])]) : [];
-      const groupOutcomeVolume24h = sumFiniteValues(groupOutcomes.map((outcome) => outcome.volume24h));
-      const groupOutcomeTradeCount24h = sumFiniteValues(groupOutcomes.map((outcome) => outcome.tradeCount24h));
-      const volume24h = firstFiniteValue(selectedOutcome?.volume24h, selectedGroup ? groupDisplayVolume(selectedGroup) : null, groupOutcomeVolume24h, listMarket?.volume24h, price?.volume24h);
-      const tradeCount24h = firstFiniteValue(selectedOutcome?.tradeCount24h, selectedGroup ? groupDisplayTradeCount(selectedGroup) : null, groupOutcomeTradeCount24h, listMarket?.tradeCount24h, price?.tradeCount24h);
-      const status = selected?.status || listMarket?.status || 'market';
-      const endDate = selectedGroup?.endDate || selected?.endDate || listMarket?.endDate || null;
-      const oracleHint = marketSummaryOracleHint(ctx, endDate);
-      const statusClass = statusTone(status);
-      return (
-        <Panel title="MARKET SUMMARY" badge={status} status="live" className="wm-market-panel wm-market-summary-panel">
-          <div className="wm-market-summary">
-            <section className="wm-market-summary-hero">
-              <div className="wm-market-summary-kicker">
-                <span>{selectedGroup?.category || selected?.category || listMarket?.category || 'market'}</span>
-                <em>{endDate ? formatRelative(endDate) : 'rolling'}</em>
-              </div>
-              <strong>{selectedGroup?.title || selected?.title || 'No market selected.'}</strong>
-            </section>
-
-            <div className="wm-market-summary-prices" aria-label="current market prices">
-              <article className="yes">
-                <span>YES</span>
-                <strong>{formatPercent(yesPrice)}</strong>
-              </article>
-              <article className="no">
-                <span>NO</span>
-                <strong>{formatPercent(noPrice)}</strong>
-              </article>
-            </div>
-
-            <div className="wm-market-summary-grid">
-              <article>
-                <span>24H VOL</span>
-                <strong>{formatCurrencyCompact(volume24h)}</strong>
-              </article>
-              <article>
-                <span>24H TRADES</span>
-                <strong>{formatCompact(tradeCount24h)}</strong>
-              </article>
-              <article>
-                <span>ENDS</span>
-                <strong>{formatDate(endDate)}</strong>
-              </article>
-              <article>
-                <span>STATUS</span>
-                <strong className={`wm-market-status-value ${statusClass}`}>{status}</strong>
-              </article>
-            </div>
-
-            <div className="wm-market-summary-oracle">
-              <span>ORACLE RESOLUTION</span>
-              <strong>{oracleHint}</strong>
-            </div>
-          </div>
-        </Panel>
-      );
-    },
+    render: (ctx) => <MarketSummaryPanel ctx={ctx} />,
   },
   'price-implications': {
     render: (ctx) => <AiMarketWidePanel ctx={ctx} lens="overview" title="AI INSIGHTS" badge="LIVE" />,
   },
   'price-chart': {
-    render: (ctx) => (
-      <Panel title="PRICE SURFACE" badge="YES" status="live" count={ctx.bundle?.chart?.points.length || 0}>
-        <div className="wm-price-surface">
-          <div className="wm-price-surface-head">
-            <article>
-              <span>LAST</span>
-              <strong>{formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice)}</strong>
-            </article>
-            <article>
-              <span>1H</span>
-              <strong>{formatPercent(ctx.bundle?.price?.change1h)}</strong>
-            </article>
-            <article>
-              <span>24H TRADES</span>
-              <strong>{String(ctx.bundle?.price?.tradeCount24h || 0)}</strong>
-            </article>
-          </div>
-          {priceLine(ctx.bundle?.chart?.points || [])}
-        </div>
-      </Panel>
-    ),
+    render: (ctx) => <PriceSurfacePanel ctx={ctx} />,
   },
 };

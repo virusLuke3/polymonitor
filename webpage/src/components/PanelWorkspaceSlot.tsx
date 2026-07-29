@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'preact/hooks';
 import { PanelLoading } from '@/components/Panel';
 import { RuntimeStatusBadge } from '@/components/design-system/StatusPrimitives';
 import type { PanelRuntimeStatus } from '@/panels/types';
+import { useI18n } from '@/services/i18n';
 
 const PANEL_ROW_RESIZE_STEP = 200;
 const PANEL_COL_RESIZE_STEP = 260;
@@ -117,6 +118,7 @@ export function PanelWorkspaceSlot({
   onResizePanel,
   onResetPanelLayout,
 }: PanelWorkspaceSlotProps) {
+  const { t } = useI18n();
   const slotRef = useRef<HTMLDivElement | null>(null);
   const layout = getPanelLayout(layoutPrefs, panelId, size);
   const dragRef = useRef<DragState>({
@@ -373,14 +375,14 @@ export function PanelWorkspaceSlot({
       {resizeEnabled ? (
         <>
           <button
-            aria-label="Resize panel height"
+            aria-label={t('panelRuntime.resizeHeight')}
             className="wm-panel-resize-handle"
             type="button"
             onDblClick={() => onResetPanelLayout(panelId)}
             onMouseDown={(resizeEvent) => startResize('row', resizeEvent)}
           />
           <button
-            aria-label="Resize panel width"
+            aria-label={t('panelRuntime.resizeWidth')}
             className="wm-panel-col-resize-handle"
             type="button"
             onDblClick={() => onResetPanelLayout(panelId)}
@@ -398,19 +400,20 @@ export function PanelRuntimeBoundary({
   status,
   onRetry,
 }: PanelRuntimeBoundaryProps) {
+  const { t, formatDateTime } = useI18n();
   const phase = status?.phase || 'idle';
   const showBadge = Boolean(status) && phase !== 'idle' && phase !== 'loading';
   const showNotice = phase === 'stale' || phase === 'degraded' || phase === 'error' || phase === 'suspended';
   const updatedLabel = status?.updatedAt
-    ? new Date(status.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    ? formatDateTime(status.updatedAt)
     : null;
   const label = phase === 'degraded'
-    ? '实时刷新失败，继续显示上一份数据'
+    ? t('panelRuntime.degraded')
     : phase === 'stale'
-      ? '数据已过 freshness 窗口'
+      ? t('panelRuntime.stale')
       : phase === 'suspended'
-        ? '后台刷新已暂停'
-        : '实时数据暂不可用';
+        ? t('panelRuntime.suspended')
+        : t('panelRuntime.unavailable');
 
   return (
     <>
@@ -422,13 +425,13 @@ export function PanelRuntimeBoundary({
       ) : null}
       {loading ? (
         <div className="wm-panel-slot-loading">
-          <PanelLoading detail="正在同步这个 panel 的实时数据" />
+          <PanelLoading detail={t('panelRuntime.syncingPanel')} />
         </div>
       ) : null}
       {showNotice && !loading ? (
         <div className={`wm-panel-runtime-notice is-${phase}`} role="status">
-          <span>{label}{updatedLabel ? ` · 上次更新 ${updatedLabel}` : ''}</span>
-          {onRetry && phase !== 'suspended' ? <button type="button" onClick={onRetry}>重试</button> : null}
+          <span>{label}{updatedLabel ? ` · ${t('panelRuntime.updated', { time: updatedLabel })}` : ''}</span>
+          {onRetry && phase !== 'suspended' ? <button type="button" onClick={onRetry}>{t('panelRuntime.retry')}</button> : null}
         </div>
       ) : null}
     </>

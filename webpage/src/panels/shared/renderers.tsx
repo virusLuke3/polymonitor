@@ -1,23 +1,62 @@
 import type { ChartPoint, ContentItem, L2Level, OracleEvent, RuntimeMarketTicker, RuntimeTradeSignal, TradeRow } from '@/types';
 import { formatCompact, formatDate, formatPercent, formatRelative, shortHash } from './formatters';
 
-function emptyState(message: string) {
+type EmptyStateCopy = {
+  label?: string;
+  detail?: string;
+};
+
+type PriceLineCopy = {
+  noHistory?: string;
+  low?: (value: string) => string;
+  high?: (value: string) => string;
+  empty?: EmptyStateCopy;
+};
+
+type OracleListCopy = {
+  noActivity?: string;
+  finalCount?: (count: number) => string;
+  proposedCount?: (count: number) => string;
+  boundCount?: (count: number) => string;
+  finalized?: string;
+  finalizedOutcome?: (outcome: string) => string;
+  disputed?: string;
+  proposed?: string;
+  requested?: string;
+  event?: string;
+  pending?: string;
+  unboundEvent?: string;
+  unbound?: string;
+  marketNumber?: (id: number | string) => string;
+  formatRelative?: (value?: string | null) => string;
+  formatDate?: (value?: string | null) => string;
+  empty?: EmptyStateCopy;
+};
+
+type ContentListCopy = {
+  untitled?: string;
+  readSource?: string;
+  formatDate?: (value?: string | null) => string;
+  empty?: EmptyStateCopy;
+};
+
+function emptyState(message: string, copy: EmptyStateCopy = {}) {
   return (
     <div className="wm-empty wm-empty-card">
-      <span>Standby</span>
+      <span>{copy.label || 'Standby'}</span>
       <strong>{message}</strong>
-      <em>The panel will update automatically when this source has rows for the selected market.</em>
+      <em>{copy.detail || 'The panel will update automatically when this source has rows for the selected market.'}</em>
     </div>
   );
 }
 
-function priceLine(points: ChartPoint[]) {
+function priceLine(points: ChartPoint[], copy: PriceLineCopy = {}) {
   const isRawValueSeries = points.some((point) => point.value !== undefined && point.value !== null);
   const clean = points
     .map((point, index) => ({ index, value: Number(isRawValueSeries ? point.value : point.yesPrice) }))
     .filter((point) => Number.isFinite(point.value));
 
-  if (clean.length < 2) return emptyState('No price history loaded yet.');
+  if (clean.length < 2) return emptyState(copy.noHistory || 'No price history loaded yet.', copy.empty);
 
   const width = 520;
   const height = 180;
@@ -52,8 +91,8 @@ function priceLine(points: ChartPoint[]) {
         <path d={path} fill="none" stroke="url(#wmPriceLine)" strokeWidth="2.8" strokeLinecap="round" />
       </svg>
       <div className="wm-line-axis">
-        <span>LOW {axisValue(min)}</span>
-        <span>HIGH {axisValue(max)}</span>
+        <span>{copy.low?.(axisValue(min)) || `LOW ${axisValue(min)}`}</span>
+        <span>{copy.high?.(axisValue(max)) || `HIGH ${axisValue(max)}`}</span>
       </div>
     </div>
   );
@@ -263,17 +302,19 @@ function oracleTone(status?: string | null) {
   return 'muted';
 }
 
-function oracleStageLabel(event: OracleEvent) {
+function oracleStageLabel(event: OracleEvent, copy: OracleListCopy = {}) {
   const status = String(event.eventStatus || '').toLowerCase();
   const outcome = String(event.effectiveSettlementOutcome || event.settlementOutcome || '').toUpperCase();
-  if (status.includes('settle')) return outcome && outcome !== 'UNKNOWN' ? `Finalized ${outcome}` : 'Finalized';
-  if (status.includes('dispute')) return 'Disputed';
-  if (status.includes('propose')) return 'Proposed';
-  if (status.includes('request')) return 'Requested';
-  return event.eventStatus || 'Oracle event';
+  if (status.includes('settle')) return outcome && outcome !== 'UNKNOWN'
+    ? copy.finalizedOutcome?.(outcome) || `Finalized ${outcome}`
+    : copy.finalized || 'Finalized';
+  if (status.includes('dispute')) return copy.disputed || 'Disputed';
+  if (status.includes('propose')) return copy.proposed || 'Proposed';
+  if (status.includes('request')) return copy.requested || 'Requested';
+  return event.eventStatus || copy.event || 'Oracle event';
 }
 
-function oracleOutcomeLabel(event: OracleEvent) {
+function oracleOutcomeLabel(event: OracleEvent, copy: OracleListCopy = {}) {
   const outcome = String(event.effectiveSettlementOutcome || event.settlementOutcome || '').toUpperCase();
   if (outcome && outcome !== 'UNKNOWN') return outcome;
   const price = event.settledPrice ?? event.proposedPrice;
@@ -284,7 +325,7 @@ function oracleOutcomeLabel(event: OracleEvent) {
     if (Math.abs(numeric - 0.5) < 0.001) return 'CANCELLED';
     return formatPercent(numeric);
   }
-  return 'Pending';
+  return copy.pending || 'Pending';
 }
 
 function oracleActor(event: OracleEvent) {
@@ -295,8 +336,8 @@ function oracleTx(event: OracleEvent) {
   return event.settlementTransaction || event.proposalTransaction || event.txHash || '';
 }
 
-function oracleList(events: OracleEvent[], limit = 8, mode: 'feed' | 'timeline' = 'feed') {
-  if (!events.length) return emptyState('No oracle activity loaded.');
+function oracleList(events: OracleEvent[], limit = 8, mode: 'feed' | 'timeline' = 'feed', copy: OracleListCopy = {}) {
+  if (!events.length) return emptyState(copy.noActivity || 'No oracle activity loaded.', copy.empty);
   const visible = events.slice(0, limit);
   const settledCount = visible.filter((event) => String(event.eventStatus || '').toLowerCase().includes('settle')).length;
   const proposedCount = visible.filter((event) => String(event.eventStatus || '').toLowerCase().includes('propose')).length;
@@ -304,16 +345,16 @@ function oracleList(events: OracleEvent[], limit = 8, mode: 'feed' | 'timeline' 
   return (
     <div className={`wm-oracle-shell ${mode}`}>
       <div className="wm-oracle-summary-strip">
-        <span><strong>{settledCount}</strong> final</span>
-        <span><strong>{proposedCount}</strong> proposed</span>
-        <span><strong>{boundCount}</strong> bound</span>
+        <span>{copy.finalCount?.(settledCount) || <><strong>{settledCount}</strong> final</>}</span>
+        <span>{copy.proposedCount?.(proposedCount) || <><strong>{proposedCount}</strong> proposed</>}</span>
+        <span>{copy.boundCount?.(boundCount) || <><strong>{boundCount}</strong> bound</>}</span>
       </div>
       <div className="wm-oracle-list">
       {visible.map((event, index) => {
         const status = String(event.eventStatus || '').toLowerCase();
         const tone = oracleTone(event.eventStatus);
-        const stage = oracleStageLabel(event);
-        const outcome = oracleOutcomeLabel(event);
+        const stage = oracleStageLabel(event, copy);
+        const outcome = oracleOutcomeLabel(event, copy);
         const actor = oracleActor(event);
         const tx = oracleTx(event);
         const lifecycleClass = status.includes('settle') ? 'settle' : status.includes('dispute') ? 'dispute' : status.includes('propose') ? 'propose' : 'request';
@@ -326,15 +367,17 @@ function oracleList(events: OracleEvent[], limit = 8, mode: 'feed' | 'timeline' 
               </div>
               <span className={`wm-status-pill ${tone}`}>{event.eventStatus || 'event'}</span>
             </div>
-            <div className="wm-oracle-market-title">{event.marketTitle || event.marketSlug || 'Unbound oracle event'}</div>
+            <div className="wm-oracle-market-title">{event.marketTitle || event.marketSlug || copy.unboundEvent || 'Unbound oracle event'}</div>
             <div className="wm-oracle-result-row">
               <span className={`wm-oracle-outcome ${String(outcome).toLowerCase()}`}>{outcome}</span>
               <span>{event.completionStatus || (event.isFinal ? 'SETTLED' : 'PENDING')}</span>
-              <span>{event.isBound === false || !event.marketId ? 'UNBOUND' : `MKT #${event.marketId}`}</span>
+              <span>{event.isBound === false || !event.marketId
+                ? copy.unbound || 'UNBOUND'
+                : copy.marketNumber?.(event.marketId) || `MKT #${event.marketId}`}</span>
             </div>
             <div className="wm-oracle-event-meta">
-              <span>{formatRelative(event.eventTime || null)}</span>
-              <span>{formatDate(event.eventTime || null)}</span>
+              <span>{copy.formatRelative?.(event.eventTime || null) || formatRelative(event.eventTime || null)}</span>
+              <span>{copy.formatDate?.(event.eventTime || null) || formatDate(event.eventTime || null)}</span>
             </div>
             <div className="wm-oracle-proof-grid">
               <span>Oracle <strong>{shortHash(actor, 8, 5) || '--'}</strong></span>
@@ -430,8 +473,8 @@ function cleanIntelSource(value?: string | null, fallback?: string | null) {
   return parts[parts.length - 1] || withoutProvider || raw;
 }
 
-function contentList(items: ContentItem[], emptyMessage: string, maxItems = 20) {
-  if (!items.length) return emptyState(emptyMessage);
+function contentList(items: ContentItem[], emptyMessage: string, maxItems = 20, copy: ContentListCopy = {}) {
+  if (!items.length) return emptyState(emptyMessage, copy.empty);
   return (
     <div className="wm-intel-list">
       {items.slice(0, maxItems).map((item, index) => {
@@ -452,11 +495,11 @@ function contentList(items: ContentItem[], emptyMessage: string, maxItems = 20) 
                 ))}
               </div>
             </div>
-            <div className="wm-news-title">{item.title || 'Untitled item'}</div>
+            <div className="wm-news-title">{item.title || copy.untitled || 'Untitled item'}</div>
             {summary ? <p className="wm-intel-summary">{summary}</p> : null}
             <div className="wm-news-meta">
-              <span>{formatDate(item.publishedAt || null)}</span>
-              <b>Read source</b>
+              <span>{copy.formatDate?.(item.publishedAt || null) || formatDate(item.publishedAt || null)}</span>
+              <b>{copy.readSource || 'Read source'}</b>
             </div>
           </a>
         );

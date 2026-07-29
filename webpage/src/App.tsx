@@ -14,7 +14,6 @@ import { WorldGlobe, type WorldGlobeStatusMetrics } from '@/components/WorldGlob
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { mergeRuntimeData } from '@/panels/runtime-store';
 import { usePanelRuntime } from '@/panels/usePanelRuntime';
-import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative } from '@/panels/shared/formatters';
 import {
   fetchAllActiveMarkets,
   fetchBootstrap,
@@ -149,6 +148,36 @@ const MAP_VIEW_MESSAGE_KEYS: Record<MapViewMode, MessageKey> = {
   heatmap: 'map.heatmap',
   density: 'map.density',
 };
+const LAYER_MESSAGE_KEYS: Record<string, MessageKey> = {
+  markets: 'atlas.layer.markets',
+  oracle: 'atlas.layer.oracle',
+  trade: 'atlas.layer.trade',
+  lob: 'atlas.layer.lob',
+  intel: 'atlas.layer.intel',
+  ucdp: 'atlas.layer.ucdp',
+  'air-routes': 'atlas.layer.airRoutes',
+};
+const CORE_PANEL_META_KEYS: Record<string, { title: MessageKey; description: MessageKey }> = {
+  'active-markets': { title: 'panelMeta.activeMarkets.title', description: 'panelMeta.activeMarkets.description' },
+  'market-summary': { title: 'panelMeta.marketSummary.title', description: 'panelMeta.marketSummary.description' },
+  'featured-market': { title: 'panelMeta.marketContext.title', description: 'panelMeta.marketContext.description' },
+  'price-chart': { title: 'panelMeta.priceSurface.title', description: 'panelMeta.priceSurface.description' },
+  'oracle-feed': { title: 'panelMeta.oracleFeed.title', description: 'panelMeta.oracleFeed.description' },
+  'related-news': { title: 'panelMeta.relatedIntel.title', description: 'panelMeta.relatedIntel.description' },
+};
+
+function localizedLayerLabel(layer: LayerToggle, t: (key: MessageKey, params?: Record<string, string | number>) => string) {
+  const key = LAYER_MESSAGE_KEYS[layer.id];
+  return key ? t(key) : layer.label;
+}
+
+function localizedPanelMeta(
+  panel: (typeof PANEL_LIBRARY)[number],
+  t: (key: MessageKey, params?: Record<string, string | number>) => string,
+) {
+  const keys = CORE_PANEL_META_KEYS[panel.id];
+  return keys ? { title: t(keys.title), description: t(keys.description) } : { title: panel.title, description: panel.description };
+}
 
 function isMapViewMode(value: unknown): value is MapViewMode {
   return value === '3d' || value === '2d' || value === 'heatmap' || value === 'density';
@@ -332,10 +361,6 @@ function commandMarketStatusClass(market: MarketListItem) {
   return 'neutral';
 }
 
-function commandMarketFreshness(market: MarketListItem) {
-  return formatRelative(market.lastTradeAt || null);
-}
-
 function hasGeoConflictCoordinates(item: RuntimeGeoSanctionsShockItem) {
   const lat = Number(item.latitude);
   const lon = Number(item.longitude);
@@ -363,6 +388,7 @@ function WeatherInlineMap({
   onSelectCity: (cityId: string) => void;
   onRefresh: () => void;
 }) {
+  const { t } = useI18n();
   const [detailOpen, setDetailOpen] = useState(false);
   const [clockNow, setClockNow] = useState(() => new Date());
   const items = payload?.items || [];
@@ -390,13 +416,13 @@ function WeatherInlineMap({
   }, []);
   return (
     <div className="wm-inline-weather-map">
-      <div className="wm-inline-weather-map-hint">Use the mouse wheel to zoom and drag to pan the map.</div>
-      <div className="wm-inline-weather-clock-strip" aria-label="World clock overlay">
+      <div className="wm-inline-weather-map-hint">{t('atlas.weatherHint')}</div>
+      <div className="wm-inline-weather-clock-strip" aria-label={t('atlas.worldClock')}>
         {mapClocks.map((clock) => (
           <span key={clock.id} className={clock.open ? 'open' : ''}>
             <b>{clock.city}</b>
             <strong>{clock.time}</strong>
-            <em>{clock.open ? 'OPEN' : 'CLSD'} · {clock.gmtLabel}</em>
+            <em>{clock.open ? t('atlas.marketOpen') : t('atlas.marketClosed')} · {clock.gmtLabel}</em>
           </span>
         ))}
       </div>
@@ -417,7 +443,7 @@ function WeatherInlineMap({
         height={620}
       />
       {!items.length ? (
-        <div className="wm-weather-map-data-loading"><span>{loading ? 'LOADING WEATHER DATA' : 'WEATHER DATA WARMING'}</span></div>
+        <div className="wm-weather-map-data-loading"><span>{loading ? t('atlas.weatherLoading') : t('atlas.weatherWarming')}</span></div>
       ) : null}
       {detailOpen && selected ? <WeatherMapCityInspector city={selected} onClose={() => setDetailOpen(false)} /> : null}
     </div>
@@ -759,7 +785,7 @@ function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: WorkspaceBund
 }
 
 function WorldMonitorApp() {
-  const { locale, setLocale, t, formatDateTime } = useI18n();
+  const { locale, setLocale, t, formatDateTime, formatNumber, formatPercent, formatRelativeTime } = useI18n();
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [markets, setMarkets] = useState<MarketListItem[]>([]);
   const [marketGroups, setMarketGroups] = useState<MarketGroupItem[]>([]);
@@ -1535,7 +1561,10 @@ function WorldMonitorApp() {
 
   const toggleLayer = (layerId: string) => {
     const target = layers.find((layer) => layer.id === layerId);
-    if (target) setNotice(`${target.label} ${target.enabled ? 'hidden' : 'enabled'}`);
+    if (target) {
+      const label = localizedLayerLabel(target, t);
+      setNotice(t(target.enabled ? 'atlas.hideLayer' : 'atlas.showLayer', { layer: label }));
+    }
     setLayers((current) => current.map((layer) => (layer.id === layerId ? { ...layer, enabled: !layer.enabled } : layer)));
   };
 
@@ -1633,8 +1662,8 @@ function WorldMonitorApp() {
   const visibleLayers = useMemo(() => {
     const query = layerQuery.trim().toLowerCase();
     if (!query) return layers;
-    return layers.filter((layer) => `${layer.label} ${layer.hint || ''} ${layer.id}`.toLowerCase().includes(query));
-  }, [layerQuery, layers]);
+    return layers.filter((layer) => `${localizedLayerLabel(layer, t)} ${layer.label} ${layer.hint || ''} ${layer.id}`.toLowerCase().includes(query));
+  }, [layerQuery, layers, t]);
   const enabledLayerIds = useMemo(() => layers.filter((layer) => layer.enabled).map((layer) => layer.id), [layers]);
   const activeLayerCount = enabledLayerIds.length;
   const geoShockPayload = runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined;
@@ -1646,7 +1675,7 @@ function WorldMonitorApp() {
   const mapVisibleEventCount = viewMode === '3d' ? globeStatus.markerVisible : ucdpMapEvents.length;
   const mapQualityLabel = viewMode === '3d'
     ? `${globeStatus.qualitySetting.toUpperCase()} · ${globeStatus.fps ? Math.round(globeStatus.fps) : '--'} FPS`
-    : MAP_VIEW_OPTIONS.find((option) => option.value === viewMode)?.label || '2D Map';
+    : t(MAP_VIEW_MESSAGE_KEYS[viewMode]);
 
   const runtimeValue = <T,>(panelId: string): T | null => (runtimeData[panelId] as T | undefined) || null;
   const runtimePayloadLoaded = (panelId: string) => runtimeData[panelId] !== undefined && runtimeData[panelId] !== null;
@@ -1724,7 +1753,7 @@ function WorldMonitorApp() {
         .catch(() => {
           if (!cancelled) {
             setCommandMarketHits([]);
-            setCommandMarketSearchError('PostgreSQL market search is unavailable.');
+            setCommandMarketSearchError(t('atlas.commandSearchUnavailable'));
           }
         })
         .finally(() => {
@@ -1736,12 +1765,13 @@ function WorldMonitorApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [commandQuery, showCommandPalette]);
+  }, [commandQuery, showCommandPalette, t]);
 
   const commandResults = useMemo(() => {
     const query = commandQuery.trim().toLowerCase();
     const panelHits = PANEL_LIBRARY.filter((panel) => {
-      const text = `${panel.title} ${panel.description} ${panel.eyebrow} ${panel.id} ${panel.size || 'default'}`.toLowerCase();
+      const meta = localizedPanelMeta(panel, t);
+      const text = `${meta.title} ${meta.description} ${panel.title} ${panel.description} ${panel.eyebrow} ${panel.id} ${panel.size || 'default'}`.toLowerCase();
       return !query || text.includes(query);
     });
     const localMarketHits = availableMarkets.filter((market) => {
@@ -1750,7 +1780,7 @@ function WorldMonitorApp() {
     }).slice(0, 30);
     const marketHits = query && commandMarketHits.length ? commandMarketHits : localMarketHits;
     return { panelHits, marketHits };
-  }, [availableMarkets, commandMarketHits, commandQuery]);
+  }, [availableMarkets, commandMarketHits, commandQuery, t]);
 
   const commandPanelStats = useMemo(() => ({
     enabled: PANEL_LIBRARY.filter((panel) => displayPanelIds.includes(panel.id)).length,
@@ -1805,7 +1835,7 @@ function WorldMonitorApp() {
       setSelectedMarketGroupOutcomeKey(null);
       setSelectedMarketId(nextMarketId);
     }
-    setNotice('Workspace reset');
+    setNotice(t('atlas.workspaceReset'));
   };
 
   const cycleRegion = () => {
@@ -1817,9 +1847,9 @@ function WorldMonitorApp() {
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      setNotice('Link copied');
+      setNotice(t('atlas.linkCopied'));
     } catch {
-      setNotice('Copy failed');
+      setNotice(t('atlas.copyFailed'));
     }
   };
 
@@ -1830,7 +1860,7 @@ function WorldMonitorApp() {
     setSelectedMarketGroupOutcomeKey(null);
     setSelectedMarketId(market.id);
     setShowCommandPalette(false);
-    setNotice(`Focused market: ${market.title.slice(0, 72)}${market.title.length > 72 ? '...' : ''}`);
+    setNotice(t('atlas.focusedMarket', { title: `${market.title.slice(0, 72)}${market.title.length > 72 ? '...' : ''}` }));
     window.setTimeout(() => {
       document.querySelector('.wm-focused-market-row')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }, 0);
@@ -1839,8 +1869,7 @@ function WorldMonitorApp() {
   const changeViewMode = (nextMode: MapViewMode) => {
     setViewMode(nextMode);
     setMapZoom((current) => clampMapZoom(nextMode === '3d' ? current : Math.min(2, current)));
-    const label = MAP_VIEW_OPTIONS.find((option) => option.value === nextMode)?.label || nextMode;
-    setNotice(`${label} enabled`);
+    setNotice(t('atlas.viewEnabled', { view: t(MAP_VIEW_MESSAGE_KEYS[nextMode]) }));
   };
 
   const loadWeatherMap = async (force = false) => {
@@ -1858,7 +1887,7 @@ function WorldMonitorApp() {
       setRuntimeData((current) => mergeRuntimeData(current, { 'global-temperature-monitor': payload }));
       setSelectedWeatherCityId((current) => current || String(payload.items?.[0]?.cityId || ''));
     } catch (loadError) {
-      setWeatherMapError(loadError instanceof Error ? loadError.message : 'Failed to load weather map.');
+      setWeatherMapError(loadError instanceof Error ? loadError.message : t('atlas.weatherLoadFailed'));
     } finally {
       setWeatherMapLoading(false);
     }
@@ -1872,6 +1901,20 @@ function WorldMonitorApp() {
 
   const zoomIn = () => setMapZoom((current) => clampMapZoom(current + 1));
   const zoomOut = () => setMapZoom((current) => clampMapZoom(current - 1));
+  const formatMarketPercent = (value?: string | number | null) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? formatPercent(numeric) : '--';
+  };
+  const formatMarketCompact = (value?: string | number | null) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? formatNumber(numeric, { notation: 'compact', maximumFractionDigits: 1 }) : '--';
+  };
+  const formatMarketCurrency = (value?: string | number | null) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+      ? formatNumber(numeric, { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 })
+      : '--';
+  };
 
   return (
     <AppShell
@@ -1890,17 +1933,17 @@ function WorldMonitorApp() {
         <section className="wm-map-section">
           <div className="wm-map-header">
             <div className="wm-map-heading">
-              <span className="wm-map-kicker">Live Odds & Oracle Monitor</span>
-              <div className="wm-map-title">Polymarket Signal Atlas</div>
+              <span className="wm-map-kicker">{t('atlas.kicker')}</span>
+              <div className="wm-map-title">{t('atlas.title')}</div>
             </div>
-            <div className="wm-map-status-strip" aria-label="Global map status">
-              <span className="wm-status-chip">POLYDATA MONITOR · LIVE</span>
+            <div className="wm-map-status-strip" aria-label={t('atlas.mapStatus')}>
+              <span className="wm-status-chip">{t('atlas.liveStatus')}</span>
               <LiveUtcClock />
-              <span className="wm-map-status-metric">Events <b>{ucdpMapEvents.length}</b></span>
-              <span className="wm-map-status-metric">Visible <b>{mapVisibleEventCount}</b></span>
-              <span className="wm-map-status-metric">Quality <b>{mapQualityLabel}</b></span>
+              <span className="wm-map-status-metric">{t('atlas.events')} <b>{formatNumber(ucdpMapEvents.length)}</b></span>
+              <span className="wm-map-status-metric">{t('atlas.visible')} <b>{formatNumber(mapVisibleEventCount)}</b></span>
+              <span className="wm-map-status-metric">{t('atlas.quality')} <b>{mapQualityLabel}</b></span>
             </div>
-            <div className="wm-map-view-toggle" role="tablist" aria-label="Map view mode">
+            <div className="wm-map-view-toggle" role="tablist" aria-label={t('atlas.viewMode')}>
               {MAP_VIEW_OPTIONS.map((option) => (
                 <button
                   key={option.value}
@@ -1910,7 +1953,7 @@ function WorldMonitorApp() {
                   className={viewMode === option.value ? 'active' : ''}
                   onClick={() => changeViewMode(option.value)}
                 >
-                  {option.label}
+                  {t(MAP_VIEW_MESSAGE_KEYS[option.value])}
                 </button>
               ))}
             </div>
@@ -1920,39 +1963,43 @@ function WorldMonitorApp() {
             <div className={`wm-globe-area ${viewMode !== '3d' ? 'wm-globe-area-flat' : ''}`}>
               <aside className={`wm-layer-sidebar ${showPanelLibrary ? '' : 'collapsed'}`}>
                 <div className="wm-toggle-header">
-                  <span>Layers</span>
+                  <span>{t('atlas.layers')}</span>
                   <button type="button" className="wm-toggle-collapse" onClick={() => setShowPanelLibrary(false)}>▼</button>
                 </div>
                 <input
                   className="wm-layer-search"
                   value={layerQuery}
                   onInput={(event) => setLayerQuery((event.currentTarget as HTMLInputElement).value)}
-                  placeholder="Search layers..."
+                  placeholder={t('atlas.searchLayers')}
                 />
 
                 <div className="wm-layer-list">
-                  {visibleLayers.length ? visibleLayers.map((layer) => (
-                    <label
-                      key={layer.id}
-                      className={`wm-layer-row ${layer.enabled ? 'enabled' : ''}`}
-                      title={`${layer.enabled ? 'Hide' : 'Show'} ${layer.label}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={layer.enabled}
-                        onChange={() => toggleLayer(layer.id)}
-                        aria-label={`${layer.enabled ? 'Hide' : 'Show'} ${layer.label}`}
-                      />
-                      <span className="wm-layer-icon">{layer.icon}</span>
-                      <span>{layer.label}</span>
-                      {layer.hint ? <em className="wm-layer-hint">{layer.hint}</em> : null}
-                    </label>
-                  )) : (
-                    <div className="wm-layer-empty">No matching layers</div>
+                  {visibleLayers.length ? visibleLayers.map((layer) => {
+                    const layerLabel = localizedLayerLabel(layer, t);
+                    const actionLabel = t(layer.enabled ? 'atlas.hideLayer' : 'atlas.showLayer', { layer: layerLabel });
+                    return (
+                      <label
+                        key={layer.id}
+                        className={`wm-layer-row ${layer.enabled ? 'enabled' : ''}`}
+                        title={actionLabel}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={layer.enabled}
+                          onChange={() => toggleLayer(layer.id)}
+                          aria-label={actionLabel}
+                        />
+                        <span className="wm-layer-icon">{layer.icon}</span>
+                        <span>{layerLabel}</span>
+                        {layer.hint ? <em className="wm-layer-hint">{layer.hint}</em> : null}
+                      </label>
+                    );
+                  }) : (
+                    <div className="wm-layer-empty">{t('atlas.noLayers')}</div>
                   )}
                 </div>
 
-                <div className="wm-sidebar-footer">{activeLayerCount}/{layers.length} layers active</div>
+                <div className="wm-sidebar-footer">{t('atlas.layersActive', { active: formatNumber(activeLayerCount), total: formatNumber(layers.length) })}</div>
               </aside>
 
               <div className="wm-globe-hero">
@@ -1992,8 +2039,8 @@ function WorldMonitorApp() {
                 <button type="button" onClick={resetWorkspace}>⌂</button>
               </div>
 
-              {loading ? <div className="wm-banner">Bootstrapping monitor...</div> : null}
-              {bundleLoading ? <div className="wm-banner secondary">Switching market workspace...</div> : null}
+              {loading ? <div className="wm-banner">{t('atlas.bootstrapping')}</div> : null}
+              {bundleLoading ? <div className="wm-banner secondary">{t('atlas.switchingMarket')}</div> : null}
               {error ? <div className="wm-banner error">{error}</div> : null}
               {notice ? <div className="wm-banner notice">{notice}</div> : null}
             </div>
@@ -2115,8 +2162,8 @@ function WorldMonitorApp() {
           <div className="wm-modal wm-command-modal" onClick={(event) => event.stopPropagation()} onKeyDown={handleCommandKeyDown}>
             <div className="wm-command-header">
               <div>
-                <span>Market Command Center</span>
-                <strong>Search Markets</strong>
+                <span>{t('atlas.commandTitle')}</span>
+                <strong>{t('atlas.commandSearchTitle')}</strong>
               </div>
               <div className="wm-command-source">
                 <span>PostgreSQL</span>
@@ -2131,27 +2178,27 @@ function WorldMonitorApp() {
                 className="wm-command-input"
                 value={commandQuery}
                 onInput={(event) => setCommandQuery((event.currentTarget as HTMLInputElement).value)}
-                placeholder="Search markets, tickers, categories, or panels..."
+                placeholder={t('atlas.commandPlaceholder')}
               />
               <kbd>⌘K</kbd>
             </div>
-            <div className="wm-command-tabs" role="tablist" aria-label="Command palette sections">
-              <button type="button" className={commandTab === 'markets' ? 'active' : ''} onClick={() => setCommandTab('markets')}>Markets <span>{commandResults.marketHits.length}</span></button>
-              <button type="button" className={commandTab === 'panels' ? 'active' : ''} onClick={() => setCommandTab('panels')}>Panels <span>{commandPanelStats.matching}/{commandPanelStats.total}</span></button>
-              <button type="button" className={commandTab === 'commands' ? 'active' : ''} onClick={() => setCommandTab('commands')}>Commands <span>3</span></button>
+            <div className="wm-command-tabs" role="tablist" aria-label={t('atlas.commandSections')}>
+              <button type="button" className={commandTab === 'markets' ? 'active' : ''} onClick={() => setCommandTab('markets')}>{t('atlas.commandMarkets')} <span>{formatNumber(commandResults.marketHits.length)}</span></button>
+              <button type="button" className={commandTab === 'panels' ? 'active' : ''} onClick={() => setCommandTab('panels')}>{t('atlas.commandPanels')} <span>{formatNumber(commandPanelStats.matching)}/{formatNumber(commandPanelStats.total)}</span></button>
+              <button type="button" className={commandTab === 'commands' ? 'active' : ''} onClick={() => setCommandTab('commands')}>{t('atlas.commandCommands')} <span>{formatNumber(3)}</span></button>
             </div>
             <div className="wm-command-body">
               {commandTab === 'markets' ? (
                 <div className="wm-command-market-layout">
                   <div className="wm-command-group wm-command-market-list">
                     <div className="wm-command-list-head">
-                      <span>Market</span>
+                      <span>{t('atlas.commandMarket')}</span>
                       <span>YES</span>
-                      <span>VOL</span>
-                      <span>TX</span>
-                      <span>AGE</span>
+                      <span>{t('atlas.commandVolume')}</span>
+                      <span>{t('atlas.commandTransactions')}</span>
+                      <span>{t('atlas.commandAge')}</span>
                     </div>
-                    {commandMarketSearchLoading ? <div className="wm-command-empty">Searching PostgreSQL market index...</div> : null}
+                    {commandMarketSearchLoading ? <div className="wm-command-empty">{t('atlas.commandSearching')}</div> : null}
                     {!commandMarketSearchLoading && commandMarketSearchError ? (
                       <div className="wm-command-empty error">{commandMarketSearchError}</div>
                     ) : null}
@@ -2170,46 +2217,46 @@ function WorldMonitorApp() {
                             <strong>{market.title}</strong>
                             <span>
                               <i className={`wm-command-status ${commandMarketStatusClass(market)}`}>{commandMarketStatus(market)}</i>
-                              <em>{market.category || 'Uncategorized'}</em>
+                              <em>{market.category || t('atlas.commandUncategorized')}</em>
                             </span>
                           </div>
-                          <b>{formatPercent(market.latestPrice)}</b>
-                          <b>{formatCurrencyCompact(market.volume24h)}</b>
-                          <b>{formatCompact(market.tradeCount24h)}</b>
-                          <b>{commandMarketFreshness(market)}</b>
+                          <b>{formatMarketPercent(market.latestPrice)}</b>
+                          <b>{formatMarketCurrency(market.volume24h)}</b>
+                          <b>{formatMarketCompact(market.tradeCount24h)}</b>
+                          <b>{formatRelativeTime(market.lastTradeAt || null)}</b>
                         </button>
                       );
                     })}
                     {!commandMarketSearchLoading && !commandMarketSearchError && commandQuery.trim() && !commandResults.marketHits.length ? (
-                      <div className="wm-command-empty">No matching markets in PostgreSQL.</div>
+                      <div className="wm-command-empty">{t('atlas.commandNoMarkets')}</div>
                     ) : null}
                   </div>
-                  <aside className="wm-command-preview" aria-label="Selected market preview">
+                  <aside className="wm-command-preview" aria-label={t('atlas.commandPreview')}>
                     {commandActiveMarket ? (
                       <>
                         <div className="wm-command-preview-top">
                           <span className={`wm-command-status ${commandMarketStatusClass(commandActiveMarket)}`}>{commandMarketStatus(commandActiveMarket)}</span>
-                          <em>{commandActiveMarket.category || 'Market'}</em>
+                          <em>{commandActiveMarket.category || t('atlas.commandMarket')}</em>
                         </div>
                         <strong>{commandActiveMarket.title}</strong>
                         <div className="wm-command-preview-price">
-                          <span><em>YES</em><b>{formatPercent(commandActiveMarket.latestPrice)}</b></span>
-                          <span><em>24H VOL</em><b>{formatCurrencyCompact(commandActiveMarket.volume24h)}</b></span>
-                          <span><em>24H TX</em><b>{formatCompact(commandActiveMarket.tradeCount24h)}</b></span>
-                          <span><em>LAST TRADE</em><b>{commandMarketFreshness(commandActiveMarket)}</b></span>
+                          <span><em>YES</em><b>{formatMarketPercent(commandActiveMarket.latestPrice)}</b></span>
+                          <span><em>{t('atlasMarket.volume24h')}</em><b>{formatMarketCurrency(commandActiveMarket.volume24h)}</b></span>
+                          <span><em>{t('atlasMarket.trades24h')}</em><b>{formatMarketCompact(commandActiveMarket.tradeCount24h)}</b></span>
+                          <span><em>{t('atlas.commandLastTrade')}</em><b>{formatRelativeTime(commandActiveMarket.lastTradeAt || null)}</b></span>
                         </div>
                         <div className="wm-command-preview-meta">
-                          <span><em>Market ID</em><b>{commandActiveMarket.id}</b></span>
-                          <span><em>Outcomes</em><b>{commandActiveMarket.outcomeCount || 2}</b></span>
-                          <span><em>Closes</em><b>{formatDate(commandActiveMarket.endDate)}</b></span>
+                          <span><em>{t('atlas.commandMarketId')}</em><b>{formatNumber(commandActiveMarket.id)}</b></span>
+                          <span><em>{t('atlas.commandOutcomes')}</em><b>{formatNumber(commandActiveMarket.outcomeCount || 2)}</b></span>
+                          <span><em>{t('atlas.commandCloses')}</em><b>{commandActiveMarket.endDate ? formatDateTime(commandActiveMarket.endDate) : '--'}</b></span>
                         </div>
                         <div className="wm-command-preview-tags">
                           {(commandActiveMarket.tags || []).slice(0, 5).map((tag) => <span key={tag}>{tag}</span>)}
                         </div>
-                        <a className="wm-command-primary" href={`/markets/${commandActiveMarket.id}`}>Open Market Workspace</a>
+                        <a className="wm-command-primary" href={`/markets/${commandActiveMarket.id}`}>{t('atlas.commandOpenMarket')}</a>
                       </>
                     ) : (
-                      <div className="wm-command-empty">Search a market to preview live pricing, status, and flow.</div>
+                      <div className="wm-command-empty">{t('atlas.commandPreviewHelp')}</div>
                     )}
                   </aside>
                 </div>
@@ -2217,35 +2264,38 @@ function WorldMonitorApp() {
               {commandTab === 'panels' ? (
                 <div className="wm-command-panel-section">
                   <div className="wm-command-panel-summary">
-                    <span>Showing <b>{commandPanelStats.matching}</b> of <b>{commandPanelStats.total}</b> panels</span>
-                    <span>Enabled <b>{commandPanelStats.enabled}</b></span>
-                    {commandQuery.trim() ? <em>Filtered by "{commandQuery.trim()}"</em> : <em>Full panel library</em>}
+                    <span>{t('atlas.commandShowingPanels', { matching: formatNumber(commandPanelStats.matching), total: formatNumber(commandPanelStats.total) })}</span>
+                    <span>{t('atlas.commandEnabledCount', { count: formatNumber(commandPanelStats.enabled) })}</span>
+                    {commandQuery.trim() ? <em>{t('atlas.commandFilteredBy', { query: commandQuery.trim() })}</em> : <em>{t('atlas.commandFullLibrary')}</em>}
                   </div>
                   <div className="wm-command-panel-grid">
-                    {commandResults.panelHits.map((panel) => (
-                      <button
-                        key={panel.id}
-                        type="button"
-                        className={`wm-command-result wm-command-panel-result ${displayPanelIds.includes(panel.id) ? 'enabled' : ''}`}
-                        onClick={() => {
-                          if (!displayPanelIds.includes(panel.id)) togglePanel(panel.id);
-                          setShowCommandPalette(false);
-                        }}
-                      >
-                        <div className="wm-command-panel-main">
-                          <strong>{panel.title}</strong>
-                          <small>{panel.id}</small>
-                        </div>
-                        <span>{panel.description}</span>
-                        <div className="wm-command-panel-meta">
-                          <i>{panel.eyebrow || 'panel'}</i>
-                          <i>{panel.size || 'default'}</i>
-                          <em>{displayPanelIds.includes(panel.id) ? 'Enabled' : 'Add panel'}</em>
-                        </div>
-                      </button>
-                    ))}
+                    {commandResults.panelHits.map((panel) => {
+                      const meta = localizedPanelMeta(panel, t);
+                      return (
+                        <button
+                          key={panel.id}
+                          type="button"
+                          className={`wm-command-result wm-command-panel-result ${displayPanelIds.includes(panel.id) ? 'enabled' : ''}`}
+                          onClick={() => {
+                            if (!displayPanelIds.includes(panel.id)) togglePanel(panel.id);
+                            setShowCommandPalette(false);
+                          }}
+                        >
+                          <div className="wm-command-panel-main">
+                            <strong>{meta.title}</strong>
+                            <small>{panel.id}</small>
+                          </div>
+                          <span>{meta.description}</span>
+                          <div className="wm-command-panel-meta">
+                            <i>{panel.eyebrow || t('atlas.commandPanel')}</i>
+                            <i>{panel.size || t('atlas.commandDefaultSize')}</i>
+                            <em>{displayPanelIds.includes(panel.id) ? t('atlas.commandEnabled') : t('atlas.commandAddPanel')}</em>
+                          </div>
+                        </button>
+                      );
+                    })}
                     {!commandResults.panelHits.length ? (
-                      <div className="wm-command-empty">No panels match the current query.</div>
+                      <div className="wm-command-empty">{t('atlas.commandNoPanels')}</div>
                     ) : null}
                   </div>
                 </div>
@@ -2256,25 +2306,25 @@ function WorldMonitorApp() {
                     resetWorkspace();
                     setShowCommandPalette(false);
                   }}>
-                    <strong>Reset Workspace</strong>
-                    <span>Return to the default market workspace and global region.</span>
-                    <em>Run</em>
+                    <strong>{t('atlas.commandReset')}</strong>
+                    <span>{t('atlas.commandResetDetail')}</span>
+                    <em>{t('atlas.commandRun')}</em>
                   </button>
                   <button type="button" className="wm-command-result wm-command-panel-result" onClick={() => {
                     setShowCommandPalette(false);
                     setShowSettings(true);
                   }}>
-                    <strong>Workspace Settings</strong>
-                    <span>Open panel, region, and monitor preferences.</span>
-                    <em>Open</em>
+                    <strong>{t('atlas.commandSettings')}</strong>
+                    <span>{t('atlas.commandSettingsDetail')}</span>
+                    <em>{t('atlas.commandOpen')}</em>
                   </button>
                   <button type="button" className="wm-command-result wm-command-panel-result" onClick={() => {
                     void copyLink();
                     setShowCommandPalette(false);
                   }}>
-                    <strong>Copy Link</strong>
-                    <span>Copy the current monitor URL.</span>
-                    <em>Copy</em>
+                    <strong>{t('atlas.commandCopyLink')}</strong>
+                    <span>{t('atlas.commandCopyLinkDetail')}</span>
+                    <em>{t('atlas.commandCopy')}</em>
                   </button>
                 </div>
               ) : null}
