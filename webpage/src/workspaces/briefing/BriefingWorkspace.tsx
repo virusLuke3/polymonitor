@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import { fetchAuthSession, type AuthSession } from '@/services/auth';
+import { useI18n } from '@/services/i18n';
 import {
   createBriefing,
   fetchBriefings,
@@ -12,9 +13,6 @@ import {
 } from '@/services/product';
 import { AuthFrame, LoadingAccess, SignInPanel, errorMessage } from '@/workspaces/auth/AuthWorkspace';
 
-const percent = (value: number | null) => value == null ? '—' : `${(value * 100).toFixed(1)}%`;
-const compact = (value: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value || 0);
-
 function briefingPublicId() {
   if (typeof window === 'undefined') return null;
   const match = window.location.pathname.match(/^\/briefings\/([A-Za-z0-9_-]{32})(?:\/|$)/);
@@ -22,6 +20,7 @@ function briefingPublicId() {
 }
 
 function MarketRows({ items, empty }: { items: BriefingMarket[]; empty: string }) {
+  const { t, formatNumber, formatPercent } = useI18n();
   if (!items.length) return <div className="brief-empty">{empty}</div>;
   return (
     <div className="brief-market-list">
@@ -30,14 +29,14 @@ function MarketRows({ items, empty }: { items: BriefingMarket[]; empty: string }
           <div>
             <span className={`brief-stage is-${market.oracleStage}`}>{market.oracleStage}</span>
             <strong>{market.title}</strong>
-            <small>#{market.marketId} · {market.category || 'Uncategorized'} · {market.completionStatus}</small>
+            <small>#{market.marketId} · {market.category || t('briefing.uncategorized')} · {market.completionStatus}</small>
           </div>
           <div className="brief-price">
-            <strong>{percent(market.latestPrice)}</strong>
+            <strong>{market.latestPrice == null ? '—' : formatPercent(market.latestPrice)}</strong>
             <span className={(market.change24h || 0) >= 0 ? 'is-positive' : 'is-negative'}>
-              {market.change24h == null ? 'No 24h baseline' : `${market.change24h >= 0 ? '+' : ''}${percent(market.change24h)}`}
+              {market.change24h == null ? t('briefing.noBaseline') : `${market.change24h >= 0 ? '+' : ''}${formatPercent(market.change24h)}`}
             </span>
-            <small>${compact(market.volume24h)} volume</small>
+            <small>${formatNumber(market.volume24h || 0, { notation: 'compact', maximumFractionDigits: 1 })} {t('briefing.volume')}</small>
           </div>
         </a>
       ))}
@@ -46,63 +45,64 @@ function MarketRows({ items, empty }: { items: BriefingMarket[]; empty: string }
 }
 
 export function PublicBriefingWorkspace() {
+  const { t, formatDateTime } = useI18n();
   const publicId = briefingPublicId();
   const [briefing, setBriefing] = useState<PublicBriefing | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!publicId) {
-      setError('This briefing URL is invalid.');
+      setError(t('briefing.invalidUrl'));
       return;
     }
     fetchPublicBriefing(publicId).then(setBriefing).catch((caught) => setError(errorMessage(caught)));
-  }, [publicId]);
+  }, [publicId, t]);
 
   if (!briefing && !error) {
-    return <div className="brief-shell"><main className="brief-loading"><span>CANONICAL SNAPSHOT</span><h1>Opening prediction-market briefing…</h1></main></div>;
+    return <div className="brief-shell"><main className="brief-loading"><span>{t('briefing.canonicalSnapshot')}</span><h1>{t('briefing.opening')}</h1></main></div>;
   }
   if (!briefing) {
-    return <div className="brief-shell"><main className="brief-loading"><span>BRIEFING UNAVAILABLE</span><h1>{error}</h1><a href="/">Return to Atlas</a></main></div>;
+    return <div className="brief-shell"><main className="brief-loading"><span>{t('briefing.unavailable')}</span><h1>{error}</h1><a href="/">{t('briefing.returnAtlas')}</a></main></div>;
   }
   const snapshot = briefing.snapshot;
   return (
     <div className="brief-shell">
       <header className="brief-topbar">
         <a href="/">◎ Atlas</a>
-        <div>POLYDATA BRIEFING <span>READ-ONLY CANONICAL SNAPSHOT</span></div>
-        <button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href)}>Copy link</button>
+        <div>{t('briefing.brand')} <span>{t('briefing.readOnly')}</span></div>
+        <button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href)}>{t('briefing.copyLink')}</button>
       </header>
       <main className="brief-main">
         <section className="brief-hero">
           <div>
-            <span>PREDICTION MARKET INTELLIGENCE / GENERATED {new Date(snapshot.generatedAt).toLocaleString()}</span>
+            <span>{t('briefing.generated', { date: formatDateTime(snapshot.generatedAt) })}</span>
             <h1>{briefing.title}</h1>
-            <p>A point-in-time view of tracked markets, active liquidity and unresolved Oracle attention.</p>
+            <p>{t('briefing.description')}</p>
           </div>
-          <div className="brief-validity"><span>LINK VALID UNTIL</span><strong>{new Date(briefing.expiresAt).toLocaleDateString()}</strong><small>Revocable by its owner</small></div>
+          <div className="brief-validity"><span>{t('briefing.validUntil')}</span><strong>{formatDateTime(briefing.expiresAt)}</strong><small>{t('briefing.revocable')}</small></div>
         </section>
         <section className="brief-metrics">
-          <div><span>TRACKED</span><strong>{snapshot.summary.trackedMarkets}</strong></div>
-          <div><span>LIQUID MARKETS</span><strong>{snapshot.summary.topMarkets}</strong></div>
-          <div><span>ORACLE ATTENTION</span><strong>{snapshot.summary.oracleAttention}</strong></div>
-          <div><span>WORKSPACE REV</span><strong>{snapshot.workspaceLens.revision || '—'}</strong></div>
+          <div><span>{t('briefing.tracked')}</span><strong>{snapshot.summary.trackedMarkets}</strong></div>
+          <div><span>{t('briefing.liquidMarkets')}</span><strong>{snapshot.summary.topMarkets}</strong></div>
+          <div><span>{t('briefing.oracleAttention')}</span><strong>{snapshot.summary.oracleAttention}</strong></div>
+          <div><span>{t('briefing.workspaceRev')}</span><strong>{snapshot.workspaceLens.revision || '—'}</strong></div>
         </section>
         <div className="brief-grid">
           <section className="brief-card brief-card-wide">
-            <header><div><span>PERSONAL LENS</span><h2>Tracked markets</h2></div><em>{snapshot.trackedMarkets.length} observed</em></header>
-            <MarketRows items={snapshot.trackedMarkets} empty="No tracked markets were present when this briefing was generated." />
+            <header><div><span>{t('briefing.personalLens')}</span><h2>{t('briefing.trackedMarkets')}</h2></div><em>{t('briefing.observed', { count: snapshot.trackedMarkets.length })}</em></header>
+            <MarketRows items={snapshot.trackedMarkets} empty={t('briefing.noTracked')} />
           </section>
           <section className="brief-card">
-            <header><div><span>ORACLE LIFECYCLE</span><h2>Attention ledger</h2></div><em>Unresolved</em></header>
-            <MarketRows items={snapshot.oracleAttention} empty="No unresolved Oracle gaps or disputes were selected." />
+            <header><div><span>{t('briefing.oracleLifecycle')}</span><h2>{t('briefing.attentionLedger')}</h2></div><em>{t('briefing.unresolved')}</em></header>
+            <MarketRows items={snapshot.oracleAttention} empty={t('briefing.noOracleAttention')} />
           </section>
           <section className="brief-card">
-            <header><div><span>MARKET ACTIVITY</span><h2>Highest 24h volume</h2></div><em>Canonical serving</em></header>
-            <MarketRows items={snapshot.topMarkets} empty="No active market volume was available." />
+            <header><div><span>{t('briefing.marketActivity')}</span><h2>{t('briefing.highestVolume')}</h2></div><em>{t('briefing.canonicalServing')}</em></header>
+            <MarketRows items={snapshot.topMarkets} empty={t('briefing.noVolume')} />
           </section>
         </div>
         <section className="brief-provenance">
-          <div><span>SOURCE CONTRACT</span><strong>{snapshot.source.kind}</strong></div>
+          <div><span>{t('briefing.sourceContract')}</span><strong>{snapshot.source.kind}</strong></div>
           <p>{snapshot.source.markets}<br />{snapshot.source.oracle}</p>
           <p>{snapshot.source.warning}</p>
         </section>
@@ -113,6 +113,7 @@ export function PublicBriefingWorkspace() {
 }
 
 export function BriefingManagerWorkspace() {
+  const { t, formatDateTime } = useI18n();
   const [session, setSession] = useState<AuthSession | null>(null);
   const [items, setItems] = useState<BriefingRegistryItem[]>([]);
   const [title, setTitle] = useState('');
@@ -153,14 +154,14 @@ export function BriefingManagerWorkspace() {
 
   if (!ready) return <LoadingAccess />;
   if (!session?.authenticated) return <AuthFrame><SignInPanel next="/briefings" /></AuthFrame>;
-  if (session.user?.forcePasswordChange) return <AuthFrame><main className="brief-manager-main brief-gate"><h1>Replace the bootstrap password first.</h1><a href="/account">Open access control</a></main></AuthFrame>;
+  if (session.user?.forcePasswordChange) return <AuthFrame><main className="brief-manager-main brief-gate"><h1>{t('briefing.replacePassword')}</h1><a href="/account">{t('briefing.openAccess')}</a></main></AuthFrame>;
 
   return (
     <AuthFrame>
       <main className="brief-manager-main">
         <section className="brief-manager-hero">
-          <div><span>SNAPSHOT DESK / SHARE CONTROL</span><h1>Briefing Registry</h1><p>Create a revocable, 30-day snapshot from canonical market and Oracle facts. Shared readers never receive your alert rules, notes or credentials.</p></div>
-          <div><strong>{activeCount}/20</strong><span>ACTIVE LINKS</span></div>
+          <div><span>{t('briefing.managerKicker')}</span><h1>{t('briefing.registry')}</h1><p>{t('briefing.managerDescription')}</p></div>
+          <div><strong>{activeCount}/20</strong><span>{t('briefing.activeLinks')}</span></div>
         </section>
         {error ? <div className="brief-alert is-error">{error}</div> : null}
         {notice ? <div className="brief-alert">{notice}</div> : null}
@@ -170,21 +171,21 @@ export function BriefingManagerWorkspace() {
             const item = (await createBriefing(title)).item;
             const url = `${window.location.origin}/briefings/${item.publicId}`;
             await navigator.clipboard.writeText(url);
-            setNotice('Briefing created and share URL copied.');
+            setNotice(t('briefing.created'));
             setTitle('');
           });
         }}>
-          <label><span>Briefing title</span><input value={title} maxLength={120} onInput={(event) => setTitle(event.currentTarget.value)} placeholder={`Prediction Market Brief · ${new Date().toLocaleDateString()}`} /></label>
-          <button type="submit" disabled={busy || activeCount >= 20}>{busy ? 'Generating snapshot…' : 'Generate & copy link'}</button>
+          <label><span>{t('briefing.titleLabel')}</span><input value={title} maxLength={120} onInput={(event) => setTitle(event.currentTarget.value)} placeholder={t('briefing.titlePlaceholder')} /></label>
+          <button type="submit" disabled={busy || activeCount >= 20}>{busy ? t('briefing.generating') : t('briefing.generate')}</button>
         </form>
         <section className="brief-registry">
-          <header><div><span>CAPABILITY LINKS</span><h2>Recent briefings</h2></div><em>Newest first</em></header>
-          {!items.length ? <div className="brief-empty">No briefings yet. Generate the first canonical snapshot above.</div> :
+          <header><div><span>{t('briefing.capabilityLinks')}</span><h2>{t('briefing.recent')}</h2></div><em>{t('briefing.newestFirst')}</em></header>
+          {!items.length ? <div className="brief-empty">{t('briefing.noneYet')}</div> :
             <div className="brief-registry-list">{items.map((item) => {
               const url = `${window.location.origin}/briefings/${item.publicId}`;
               return <article key={item.id} className={item.active ? '' : 'is-inactive'}>
-                <div><span>{item.active ? '● ACTIVE' : item.revokedAt ? '○ REVOKED' : '○ EXPIRED'}</span><strong>{item.title}</strong><small>Created {new Date(item.createdAt).toLocaleString()} · expires {new Date(item.expiresAt).toLocaleString()}</small></div>
-                <div>{item.active ? <><a href={url} target="_blank" rel="noreferrer">Open</a><button type="button" onClick={() => void navigator.clipboard.writeText(url).then(() => setNotice('Share URL copied.'))}>Copy</button><button type="button" onClick={() => void run(() => revokeBriefing(item.id))}>Revoke</button></> : null}</div>
+                <div><span>{item.active ? `● ${t('briefing.active')}` : item.revokedAt ? `○ ${t('briefing.revoked')}` : `○ ${t('briefing.expired')}`}</span><strong>{item.title}</strong><small>{t('briefing.createdExpires', { created: formatDateTime(item.createdAt), expires: formatDateTime(item.expiresAt) })}</small></div>
+                <div>{item.active ? <><a href={url} target="_blank" rel="noreferrer">{t('briefing.open')}</a><button type="button" onClick={() => void navigator.clipboard.writeText(url).then(() => setNotice(t('briefing.copied')))}>{t('briefing.copy')}</button><button type="button" onClick={() => void run(() => revokeBriefing(item.id))}>{t('briefing.revoke')}</button></> : null}</div>
               </article>;
             })}</div>}
         </section>

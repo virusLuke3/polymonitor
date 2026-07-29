@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useState } from 'preact/hooks';
 import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
+import { useI18n } from '@/services/i18n';
 import {
   AuthApiError,
   changePassword,
@@ -25,11 +26,12 @@ export function errorMessage(error: unknown) {
 }
 
 export function AuthFrame({ children }: { children: ComponentChildren }) {
+  const { t } = useI18n();
   return (
     <div className="auth-shell">
       <header className="auth-topbar">
-        <a className="auth-home-link" href="/">◎ World</a>
-        <div className="auth-brand">POLYDATA ACCESS <span>IDENTITY CONTROL PLANE</span></div>
+        <a className="auth-home-link" href="/">◎ {t('auth.world')}</a>
+        <div className="auth-brand">{t('auth.brand')} <span>{t('auth.controlPlane')}</span></div>
       </header>
       {children}
       <MobileWorkspaceNav />
@@ -38,6 +40,7 @@ export function AuthFrame({ children }: { children: ComponentChildren }) {
 }
 
 export function SignInPanel({ next = '/account' }: { next?: string }) {
+  const { t } = useI18n();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -60,26 +63,23 @@ export function SignInPanel({ next = '/account' }: { next?: string }) {
   return (
     <main className="auth-main auth-login-layout">
       <section className="auth-intro">
-        <span className="auth-kicker">Protected workspace / Administrator access</span>
-        <h1>Operational truth stays behind a deliberate boundary.</h1>
-        <p>
-          Sign in to inspect system dependencies, watcher freshness, scoped API keys and the security audit trail.
-          Public market intelligence remains available without an account.
-        </p>
-        <div className="auth-boundary-list" aria-label="Access boundary">
-          <span><b>PUBLIC</b> World monitor, markets and data quality</span>
-          <span><b>ADMIN</b> Operations, credentials and audit events</span>
-          <span><b>API</b> Explicit scope, rate limit and daily quota</span>
+        <span className="auth-kicker">{t('auth.loginKicker')}</span>
+        <h1>{t('auth.loginTitle')}</h1>
+        <p>{t('auth.loginDescription')}</p>
+        <div className="auth-boundary-list" aria-label={t('auth.accessBoundary')}>
+          <span><b>{t('auth.public')}</b> {t('auth.publicDetail')}</span>
+          <span><b>{t('auth.admin')}</b> {t('auth.adminDetail')}</span>
+          <span><b>API</b> {t('auth.apiDetail')}</span>
         </div>
       </section>
       <form className="auth-card auth-form" onSubmit={submit}>
         <div>
-          <span className="auth-card-kicker">Secure session</span>
-          <h2>Administrator sign in</h2>
-          <p>Sessions expire automatically and the browser never receives a reusable password or API credential.</p>
+          <span className="auth-card-kicker">{t('auth.secureSession')}</span>
+          <h2>{t('auth.signIn')}</h2>
+          <p>{t('auth.sessionDetail')}</p>
         </div>
         <label>
-          <span>Username</span>
+          <span>{t('auth.username')}</span>
           <input
             autoComplete="username"
             value={username}
@@ -89,7 +89,7 @@ export function SignInPanel({ next = '/account' }: { next?: string }) {
           />
         </label>
         <label>
-          <span>Password</span>
+          <span>{t('auth.password')}</span>
           <input
             type="password"
             autoComplete="current-password"
@@ -100,20 +100,21 @@ export function SignInPanel({ next = '/account' }: { next?: string }) {
         </label>
         {error ? <div className="auth-alert" role="alert">{error}</div> : null}
         <button className="auth-primary" type="submit" disabled={busy}>
-          {busy ? 'Verifying…' : 'Enter control plane'}
+          {busy ? t('auth.verifying') : t('auth.enter')}
         </button>
-        <small>Protected by an HttpOnly, Secure, SameSite session and CSRF verification.</small>
+        <small>{t('auth.protection')}</small>
       </form>
     </main>
   );
 }
 
 export function LoadingAccess() {
+  const { t } = useI18n();
   return (
     <AuthFrame>
       <main className="auth-main auth-loading">
-        <span className="auth-kicker">Identity boundary</span>
-        <h1>Checking session…</h1>
+        <span className="auth-kicker">{t('auth.identityBoundary')}</span>
+        <h1>{t('auth.checking')}</h1>
       </main>
     </AuthFrame>
   );
@@ -140,6 +141,7 @@ export function OperationsAccessWorkspace() {
 }
 
 export function AccountWorkspace() {
+  const { t, formatDateTime } = useI18n();
   const [session, setSession] = useState<AuthSession | null>(null);
   const [keys, setKeys] = useState<ProductApiKey[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
@@ -182,7 +184,7 @@ export function AccountWorkspace() {
       await changePassword(currentPassword, newPassword);
       setCurrentPassword('');
       setNewPassword('');
-      setMessage('Password updated. Other active sessions were revoked.');
+      setMessage(t('auth.passwordUpdated'));
       await refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -198,7 +200,7 @@ export function AccountWorkspace() {
     try {
       const item = await createApiKey(keyName, [keyScope]);
       setNewKey(item);
-      setMessage('API key issued. Copy it now; the raw value will not be shown again.');
+      setMessage(t('auth.keyIssued'));
       setKeys(await fetchApiKeys());
     } catch (caught) {
       setError(errorMessage(caught));
@@ -223,45 +225,45 @@ export function AccountWorkspace() {
       <main className="auth-main auth-account">
         <section className="auth-account-hero">
           <div>
-            <span className="auth-kicker">Identity / Role / Credential governance</span>
-            <h1>Access Control</h1>
-            <p>Signed in as <b>{session.user?.username}</b> with the <b>{session.user?.role}</b> role.</p>
+            <span className="auth-kicker">{t('auth.accountKicker')}</span>
+            <h1>{t('auth.accessControl')}</h1>
+            <p>{t('auth.signedInAs')} <b>{session.user?.username}</b> · <b>{session.user?.role}</b></p>
           </div>
           <div className="auth-account-actions">
-            <a href="/watchlist">Open Watchlist</a>
-            <a href="/briefings">Open Briefings</a>
-            {session.user?.role === 'admin' ? <a href="/operations">Open Operations</a> : null}
-            <button type="button" onClick={signOut} disabled={busy}>Sign out</button>
+            <a href="/watchlist">{t('auth.openWatchlist')}</a>
+            <a href="/briefings">{t('auth.openBriefings')}</a>
+            {session.user?.role === 'admin' ? <a href="/operations">{t('auth.openOperations')}</a> : null}
+            <button type="button" onClick={signOut} disabled={busy}>{t('auth.signOut')}</button>
           </div>
         </section>
 
         {session.user?.forcePasswordChange ? (
-          <div className="auth-alert is-warning">This bootstrap credential must be replaced before normal use.</div>
+          <div className="auth-alert is-warning">{t('auth.bootstrapWarning')}</div>
         ) : null}
         {message ? <div className="auth-alert is-success">{message}</div> : null}
         {error ? <div className="auth-alert" role="alert">{error}</div> : null}
 
         <div className="auth-account-grid">
           <form className="auth-card auth-form" onSubmit={updatePassword}>
-            <div><span className="auth-card-kicker">Session security</span><h2>Change password</h2></div>
-            <label><span>Current password</span><input type="password" autoComplete="current-password" value={currentPassword} onInput={(event) => setCurrentPassword(event.currentTarget.value)} required /></label>
-            <label><span>New password</span><input type="password" minLength={12} maxLength={256} autoComplete="new-password" value={newPassword} onInput={(event) => setNewPassword(event.currentTarget.value)} required /></label>
-            <button className="auth-primary" type="submit" disabled={busy}>Update password</button>
+            <div><span className="auth-card-kicker">{t('auth.sessionSecurity')}</span><h2>{t('auth.changePassword')}</h2></div>
+            <label><span>{t('auth.currentPassword')}</span><input type="password" autoComplete="current-password" value={currentPassword} onInput={(event) => setCurrentPassword(event.currentTarget.value)} required /></label>
+            <label><span>{t('auth.newPassword')}</span><input type="password" minLength={12} maxLength={256} autoComplete="new-password" value={newPassword} onInput={(event) => setNewPassword(event.currentTarget.value)} required /></label>
+            <button className="auth-primary" type="submit" disabled={busy}>{t('auth.updatePassword')}</button>
           </form>
 
           {session.user?.role === 'admin' ? (
             <form className="auth-card auth-form" onSubmit={issueKey}>
-              <div><span className="auth-card-kicker">Machine access</span><h2>Issue scoped API key</h2><p>Choose one read-only boundary. Each key is limited to 60 requests/minute and 5,000/day.</p></div>
-              <label><span>Credential name</span><input value={keyName} maxLength={80} onInput={(event) => setKeyName(event.currentTarget.value)} required /></label>
+              <div><span className="auth-card-kicker">{t('auth.machineAccess')}</span><h2>{t('auth.issueKey')}</h2><p>{t('auth.issueKeyDetail')}</p></div>
+              <label><span>{t('auth.credentialName')}</span><input value={keyName} maxLength={80} onInput={(event) => setKeyName(event.currentTarget.value)} required /></label>
               <label>
-                <span>Read-only scope</span>
+                <span>{t('auth.readOnlyScope')}</span>
                 <select value={keyScope} onChange={(event) => setKeyScope(event.currentTarget.value)}>
-                  <option value="operations:read">operations:read — protected health and freshness</option>
-                  <option value="mcp:read">mcp:read — public prediction-market tools</option>
+                  <option value="operations:read">operations:read — {t('auth.operationsScope')}</option>
+                  <option value="mcp:read">mcp:read — {t('auth.mcpScope')}</option>
                 </select>
               </label>
-              <button className="auth-primary" type="submit" disabled={busy}>Create one-time key</button>
-              {newKey?.key ? <output className="auth-secret"><span>Copy once</span><code>{newKey.key}</code></output> : null}
+              <button className="auth-primary" type="submit" disabled={busy}>{t('auth.createKey')}</button>
+              {newKey?.key ? <output className="auth-secret"><span>{t('auth.copyOnce')}</span><code>{newKey.key}</code></output> : null}
             </form>
           ) : null}
         </div>
@@ -269,18 +271,18 @@ export function AccountWorkspace() {
         {session.user?.role === 'admin' ? (
           <>
             <section className="auth-card auth-table-card">
-              <div className="auth-section-head"><div><span className="auth-card-kicker">Credentials</span><h2>API key registry</h2></div><span>{keys.length} total</span></div>
+              <div className="auth-section-head"><div><span className="auth-card-kicker">{t('auth.credentials')}</span><h2>{t('auth.keyRegistry')}</h2></div><span>{t('auth.total', { count: keys.length })}</span></div>
               <div className="auth-table-wrap">
-                <table><thead><tr><th>Name</th><th>Prefix</th><th>Scope</th><th>Last used</th><th>Status</th><th /></tr></thead>
-                  <tbody>{keys.map((key) => <tr key={key.id}><td>{key.name}</td><td><code>{key.prefix}…</code></td><td>{key.scopes.join(', ')}</td><td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : 'Never'}</td><td>{key.revokedAt ? 'Revoked' : 'Active'}</td><td>{!key.revokedAt ? <button type="button" onClick={() => revokeApiKey(key.id).then(refresh).catch((caught) => setError(errorMessage(caught)))}>Revoke</button> : null}</td></tr>)}</tbody>
+                <table><thead><tr><th>{t('auth.name')}</th><th>{t('auth.prefix')}</th><th>{t('auth.scope')}</th><th>{t('auth.lastUsed')}</th><th>{t('auth.status')}</th><th /></tr></thead>
+                  <tbody>{keys.map((key) => <tr key={key.id}><td>{key.name}</td><td><code>{key.prefix}…</code></td><td>{key.scopes.join(', ')}</td><td>{key.lastUsedAt ? formatDateTime(key.lastUsedAt) : t('auth.never')}</td><td>{key.revokedAt ? t('auth.revoked') : t('auth.active')}</td><td>{!key.revokedAt ? <button type="button" onClick={() => revokeApiKey(key.id).then(refresh).catch((caught) => setError(errorMessage(caught)))}>{t('auth.revoke')}</button> : null}</td></tr>)}</tbody>
                 </table>
               </div>
             </section>
             <section className="auth-card auth-table-card">
-              <div className="auth-section-head"><div><span className="auth-card-kicker">Security events</span><h2>Audit trail</h2></div><span>{audit.length} latest</span></div>
+              <div className="auth-section-head"><div><span className="auth-card-kicker">{t('auth.securityEvents')}</span><h2>{t('auth.auditTrail')}</h2></div><span>{t('auth.latest', { count: audit.length })}</span></div>
               <div className="auth-table-wrap">
-                <table><thead><tr><th>Observed</th><th>Actor</th><th>Action</th><th>Target</th><th>Result</th></tr></thead>
-                  <tbody>{audit.map((event) => <tr key={event.id}><td>{new Date(event.occurredAt).toLocaleString()}</td><td>{event.username || event.actorKind}</td><td>{event.action}</td><td>{event.targetType || '—'}</td><td>{event.result}</td></tr>)}</tbody>
+                <table><thead><tr><th>{t('auth.observed')}</th><th>{t('auth.actor')}</th><th>{t('auth.action')}</th><th>{t('auth.target')}</th><th>{t('auth.result')}</th></tr></thead>
+                  <tbody>{audit.map((event) => <tr key={event.id}><td>{formatDateTime(event.occurredAt)}</td><td>{event.username || event.actorKind}</td><td>{event.action}</td><td>{event.targetType || '—'}</td><td>{event.result}</td></tr>)}</tbody>
                 </table>
               </div>
             </section>
