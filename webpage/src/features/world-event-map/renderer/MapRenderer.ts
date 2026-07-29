@@ -1,0 +1,28 @@
+import type { GeoEvent } from '../domain/types';
+import type { WorldEventMapState } from '../state/mapState';
+
+export type BasemapState =
+  | 'idle'
+  | 'initializing'
+  | 'primary-ready'
+  | 'local-fallback-ready'
+  | 'renderer-fallback-ready'
+  | 'failed';
+
+export interface MapRendererCallbacks {
+  onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
+  onEventSelect: (eventId: string | null) => void;
+  onEventHover: (eventId: string | null) => void;
+  onBasemapStateChange: (state: BasemapState) => void;
+  onError: (error: Error) => void;
+}
+
+export interface MapRenderer {
+  mount(container: HTMLElement, callbacks: MapRendererCallbacks): Promise<void>;
+  setState(state: WorldEventMapState): void;
+  setEvents(events: GeoEvent[]): void;
+  resize(): void;
+  pause(): void;
+  resume(): void;
+  destroy(): void;
+}

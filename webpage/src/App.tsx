@@ -8,7 +8,6 @@ import {
   PanelWorkspaceSlot,
   type PanelLayoutPrefs,
 } from '@/components/PanelWorkspaceSlot';
-import WeatherDeckMap from '@/components/WeatherDeckMap';
 import { WorldGlobe, type WorldGlobeStatusMetrics } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { mergeRuntimeData } from '@/panels/runtime-store';
@@ -45,8 +44,10 @@ import {
   selectableWorldEventLayers,
   sourceStatusFromAdapter,
   useWorldEventMapState,
+  WorldEventMap,
   worldEventLayerById,
   type GeoEvent,
+  type WorldEventMapState,
   type WorldEventRegion,
 } from '@/features/world-event-map';
 import type {
@@ -364,25 +365,27 @@ function hasGeoConflictCoordinates(item: RuntimeGeoSanctionsShockItem) {
 
 function WorldEventInlineMap({
   events,
-  camera,
+  state,
   onCameraChange,
-  showAirRoutes,
+  onEventSelect,
+  onEventHover,
 }: {
   events: GeoEvent[];
-  camera: { center: { lon: number; lat: number }; zoom: number };
-  onCameraChange: (camera: { center: { lon: number; lat: number }; zoom: number }) => void;
-  showAirRoutes: boolean;
+  state: WorldEventMapState;
+  onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
+  onEventSelect: (eventId: string | null) => void;
+  onEventHover: (eventId: string | null) => void;
 }) {
   const { t } = useI18n();
   return (
     <div className="wm-inline-weather-map">
       <div className="wm-inline-weather-map-hint">{t('atlas.weatherHint')}</div>
-      <WeatherDeckMap
+      <WorldEventMap
         events={events}
-        camera={camera}
-        onCameraChange={(nextCamera) => onCameraChange(nextCamera)}
-        showAirRoutes={showAirRoutes}
-        selectedCityId={null}
+        state={state}
+        onCameraChange={onCameraChange}
+        onEventSelect={onEventSelect}
+        onEventHover={onEventHover}
         height={620}
       />
     </div>
@@ -1971,9 +1974,10 @@ function WorldMonitorApp() {
                 ) : (
                   <WorldEventInlineMap
                     events={worldEventMapEvents}
-                    camera={{ center: worldEventMap.state.center, zoom: worldEventMap.state.zoom }}
+                    state={worldEventMap.state}
                     onCameraChange={(nextCamera) => worldEventMap.setCamera(nextCamera.center, nextCamera.zoom)}
-                    showAirRoutes={showAirRoutes}
+                    onEventSelect={worldEventMap.selectEvent}
+                    onEventHover={worldEventMap.hoverEvent}
                   />
                 )}
 
