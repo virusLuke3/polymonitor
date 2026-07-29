@@ -153,7 +153,7 @@ export function WorldEventMap({
         className="wm-weather-deck-basemap ready"
         role="application"
         tabIndex={0}
-        aria-label="World event map. Use pointer or keyboard controls to explore active hazard events."
+        aria-label="World event map. Use pointer or keyboard controls to explore active real-world events."
       />
       {hoveredEvent && !selectedEvent ? (
         <div className="wm-deck-tooltip" role="status">
