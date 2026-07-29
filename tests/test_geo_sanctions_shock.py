@@ -283,6 +283,9 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertTrue(payload["items"])
         self.assertTrue(payload["targetBreakdown"])
         self.assertEqual("IRAN", payload["targetBreakdown"][0]["label"])
+        self.assertEqual("IRAN", payload["sanctionsTargetBreakdown"][0]["label"])
+        self.assertEqual("IRAN", payload["countryRiskBreakdown"][0]["label"])
+        self.assertTrue(any(item.get("source", "").startswith("OFAC") for item in payload["items"]))
         self.assertEqual([], payload["linkedMarkets"])
 
     def test_seed_builder_returns_renderable_degraded_payload_when_sources_fail(self):
@@ -296,6 +299,8 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
 
         self.assertEqual("degraded", payload["status"])
         self.assertEqual([], payload["items"])
+        self.assertEqual([], payload["sanctionsTargetBreakdown"])
+        self.assertEqual([], payload["countryRiskBreakdown"])
         self.assertEqual("requests-missing", payload["sources"]["ofacSdn"])
         self.assertEqual("error", payload["sources"]["conflictFeed"])
 

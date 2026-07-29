@@ -85,11 +85,13 @@ export function eventContextFields(event: GeoEvent): InspectorField[] {
   }
   if (event.category === 'sanctions' || event.category === 'country-risk') {
     return compact([
-      field('Evidence count', event.properties.evidenceCount),
+      field('Sanctions evidence', event.properties.sanctionsEvidenceCount),
+      field('Country-risk evidence', event.properties.countryRiskEvidenceCount),
       field('Latest source', event.properties.latestSource),
       field('OFAC records in snapshot', event.properties.ofacRecordCountTotal),
       field('Global new sanctions', event.properties.globalNewSanctionsCount),
       field('Risk mapping', event.properties.riskMappingVersion),
+      field('Source contract', event.properties.sourceContract),
     ]);
   }
   if (event.category === 'conflict' || event.category === 'unrest') {

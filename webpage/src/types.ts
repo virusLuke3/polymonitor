@@ -1601,6 +1601,8 @@ export type RuntimeGeoSanctionsShockPayload = {
   summary?: RuntimeGeoSanctionsShockSummary | null;
   items?: RuntimeGeoSanctionsShockItem[];
   targetBreakdown?: RuntimeGeoSanctionsShockTargetBreakdown[];
+  sanctionsTargetBreakdown?: RuntimeGeoSanctionsShockTargetBreakdown[];
+  countryRiskBreakdown?: RuntimeGeoSanctionsShockTargetBreakdown[];
   linkedMarkets?: RuntimeGeoSanctionsShockLinkedMarket[];
   ofacRecordCountTotal?: number;
   publishDates?: string[];

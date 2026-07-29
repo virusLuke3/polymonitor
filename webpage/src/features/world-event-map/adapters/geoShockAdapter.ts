@@ -82,13 +82,6 @@ function countryRiskSeverity(count: number) {
   return 'watch' as const;
 }
 
-function countryRiskCategory(source?: string | null) {
-  const normalized = String(source || '').toLowerCase();
-  return normalized.includes('ofac') || normalized.includes('federal register')
-    ? 'sanctions' as const
-    : 'country-risk' as const;
-}
-
 export function adaptGeoShockCountryRiskPayload(
   payload: RuntimeGeoSanctionsShockPayload | null | undefined,
   countries: CountryGeometryIndex | null,
@@ -98,8 +91,25 @@ export function adaptGeoShockCountryRiskPayload(
   const sourceStatus = normalizedSourceStatus(payload.status);
   const candidates: GeoEvent[] = [];
   const rejected: GeoEventAdapterResult['rejected'] = [];
+  type Breakdown = NonNullable<RuntimeGeoSanctionsShockPayload['targetBreakdown']>[number];
+  type CountryEvidence = {
+    country: NonNullable<ReturnType<CountryGeometryIndex['resolve']>>;
+    sanctions?: Breakdown;
+    countryRisk?: Breakdown;
+    legacyMixedEvidence: boolean;
+  };
+  const byCountry = new Map<string, CountryEvidence>();
+  const hasSplitContract = Array.isArray(payload.sanctionsTargetBreakdown)
+    || Array.isArray(payload.countryRiskBreakdown);
+  const sanctionsBreakdown = payload.sanctionsTargetBreakdown || [];
+  const countryRiskBreakdown = payload.countryRiskBreakdown
+    || (hasSplitContract ? [] : payload.targetBreakdown || []);
 
-  (payload.targetBreakdown || []).forEach((target, index) => {
+  const addBreakdown = (
+    target: Breakdown,
+    kind: 'sanctions' | 'countryRisk',
+    index: number,
+  ) => {
     const label = nonEmpty(target.label);
     const country = countries.resolve(label);
     if (!label || !country) {
@@ -119,45 +129,89 @@ export function adaptGeoShockCountryRiskPayload(
       });
       return;
     }
-    const latestSource = nonEmpty(target.latestSource);
-    const category = countryRiskCategory(latestSource);
+    const current = byCountry.get(country.iso2) || {
+      country,
+      legacyMixedEvidence: !hasSplitContract,
+    };
+    current[kind] = target;
+    byCountry.set(country.iso2, current);
+  };
+  sanctionsBreakdown.forEach((target, index) => addBreakdown(target, 'sanctions', index));
+  countryRiskBreakdown.forEach((target, index) => addBreakdown(
+    target,
+    'countryRisk',
+    sanctionsBreakdown.length + index,
+  ));
+
+  byCountry.forEach(({ country, sanctions, countryRisk, legacyMixedEvidence }) => {
+    const sanctionsCount = Math.max(0, finiteNumber(sanctions?.count) ?? 0);
+    const countryRiskCount = Math.max(0, finiteNumber(countryRisk?.count) ?? 0);
+    const category = sanctions ? 'sanctions' as const : 'country-risk' as const;
+    const records = [sanctions, countryRisk].filter((item): item is Breakdown => Boolean(item));
+    const latest = [...records].sort((left, right) => (
+      Date.parse(String(right.latestOccurredAt || '')) - Date.parse(String(left.latestOccurredAt || ''))
+    ))[0];
+    const sourceRecords = [
+      sanctions ? {
+        provider: nonEmpty(sanctions.latestSource) || 'OFAC / Federal Register',
+        nativeId: `sanctions-country:${country.iso2}`,
+        observedAt: isoTimestamp(sanctions.latestOccurredAt),
+      } : null,
+      countryRisk ? {
+        provider: nonEmpty(countryRisk.latestSource) || nonEmpty(payload.conflictProvider) || 'Conflict feed',
+        nativeId: `country-risk:${country.iso2}`,
+        observedAt: isoTimestamp(countryRisk.latestOccurredAt),
+      } : null,
+    ].filter((source): source is NonNullable<typeof source> => source !== null);
     candidates.push({
       id: `geo-sanctions-shock:${country.iso2}`,
       category,
-      title: category === 'sanctions'
-        ? `Sanctions activity: ${country.name}`
+      title: sanctions && countryRisk
+        ? `Sanctions & country risk: ${country.name}`
+        : sanctions
+          ? `Sanctions activity: ${country.name}`
         : `Country risk evidence: ${country.name}`,
-      summary: nonEmpty(target.latestHeadline) || nonEmpty(payload.summary?.targetSummary),
-      severity: countryRiskSeverity(count),
-      occurredAt: isoTimestamp(target.latestOccurredAt),
+      summary: records
+        .map((record) => nonEmpty(record.latestHeadline))
+        .filter((headline): headline is string => Boolean(headline))
+        .filter((headline, index, values) => values.indexOf(headline) === index)
+        .join(' · ') || nonEmpty(payload.summary?.targetSummary),
+      severity: countryRiskSeverity(Math.max(sanctionsCount, countryRiskCount)),
+      occurredAt: isoTimestamp(latest?.latestOccurredAt),
       updatedAt: isoTimestamp(payload.generatedAt),
       geometry: country.geometry,
       locationPrecision: 'country',
       countryCode: country.iso2,
       locationLabel: country.name,
-      sources: [{
-        provider: latestSource || provider,
+      sources: sourceRecords.map((source) => ({
+        provider: source.provider || provider,
         url: nonEmpty(payload.sourceUrl),
-        nativeId: `country:${country.iso2}`,
-        observedAt: isoTimestamp(target.latestOccurredAt),
+        nativeId: source.nativeId,
+        observedAt: source.observedAt,
         status: sourceStatus,
-      }],
+      })),
       limitations: [
-        'The polygon is a country-level evidence aggregate, not an incident footprint.',
-        'Counts combine configured OFAC, Federal Register and conflict feeds and are not legal advice.',
-        'A global new-sanctions count is not attributed to a country unless the source target is explicit.',
+        'The polygon is country-level evidence, not an incident footprint.',
+        'Sanctions evidence and conflict evidence use separate counts; the values are not added or compared as one metric.',
+        'Sanctions records are source monitoring evidence and are not legal advice.',
+        ...(legacyMixedEvidence
+          ? ['This cached payload predates the split-source contract; its mixed target score is shown only as country-risk evidence.']
+          : []),
       ],
       relatedMarketIds: [],
       properties: {
         mapEntity: 'country-risk-area',
         country: country.name,
         countryCode: country.iso2,
-        evidenceCount: count,
-        latestHeadline: nonEmpty(target.latestHeadline),
-        latestSource,
+        evidenceCount: Math.max(sanctionsCount, countryRiskCount),
+        sanctionsEvidenceCount: sanctionsCount,
+        countryRiskEvidenceCount: countryRiskCount,
+        latestHeadline: nonEmpty(latest?.latestHeadline),
+        latestSource: nonEmpty(latest?.latestSource),
         ofacRecordCountTotal: finiteNumber(payload.ofacRecordCountTotal),
         globalNewSanctionsCount: finiteNumber(payload.summary?.newSanctionsCount),
         riskMappingVersion: 'geo-shock-country-risk.v1',
+        sourceContract: hasSplitContract ? 'geo-shock-split-evidence.v1' : 'geo-shock-legacy-mixed',
       },
     });
   });

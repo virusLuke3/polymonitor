@@ -148,7 +148,7 @@ describe('World Event Map adapters', () => {
       generatedAt: '2026-07-29T00:00:00Z',
       ofacRecordCountTotal: 120,
       summary: { newSanctionsCount: 2 },
-      targetBreakdown: [{
+      sanctionsTargetBreakdown: [{
         label: 'Ukraine',
         count: 18,
         latestHeadline: 'Verified source evidence',
@@ -162,7 +162,39 @@ describe('World Event Map adapters', () => {
       category: 'sanctions',
       countryCode: 'UA',
       geometry: { type: 'Polygon' },
-      properties: { riskMappingVersion: 'geo-shock-country-risk.v1', evidenceCount: 18 },
+      properties: {
+        riskMappingVersion: 'geo-shock-country-risk.v1',
+        sanctionsEvidenceCount: 18,
+        countryRiskEvidenceCount: 0,
+        sourceContract: 'geo-shock-split-evidence.v1',
+      },
+    });
+  });
+
+  it('keeps sanctions and conflict evidence as separate country metrics', () => {
+    const result = adaptGeoShockCountryRiskPayload({
+      sanctionsTargetBreakdown: [{
+        label: 'Ukraine',
+        count: 3,
+        latestSource: 'OFAC SDN',
+      }],
+      countryRiskBreakdown: [{
+        label: 'Ukraine',
+        count: 28,
+        latestSource: 'UCDP',
+      }],
+    }, countries);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      category: 'sanctions',
+      properties: {
+        sanctionsEvidenceCount: 3,
+        countryRiskEvidenceCount: 28,
+      },
+      sources: [
+        expect.objectContaining({ provider: 'OFAC SDN' }),
+        expect.objectContaining({ provider: 'UCDP' }),
+      ],
     });
   });
 

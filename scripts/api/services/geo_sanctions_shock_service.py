@@ -258,6 +258,8 @@ def _empty_payload(ctx: GeoSanctionsShockContext, *, status: str = "degraded", s
         },
         "items": [],
         "targetBreakdown": [],
+        "sanctionsTargetBreakdown": [],
+        "countryRiskBreakdown": [],
         "linkedMarkets": [],
         "ofacRecordCountTotal": 0,
     }
@@ -1453,21 +1455,28 @@ def build_geo_sanctions_shock_seed_payload(
         "conflictFeed": conflict_snapshot.get("state") or "error",
     }
 
-    all_items = [
+    sanctions_items = [
+        *(ofac_snapshot.get("focusEntries") or []),
         *(notices_snapshot.get("items") or []),
+    ]
+    conflict_items = [
         *(conflict_snapshot.get("items") or []),
     ]
+    all_items = [*sanctions_items, *conflict_items]
     items = _select_geo_shock_items(
         all_items,
-        [item for item in (conflict_snapshot.get("items") or []) if isinstance(item, dict)],
+        [item for item in conflict_items if isinstance(item, dict)],
         item_limit=item_limit,
     )
 
-    target_scores = _merge_target_scores(
+    sanctions_target_scores = _merge_target_scores(
         ofac_snapshot.get("targetScores") or {},
         notices_snapshot.get("targetScores") or {},
+    )
+    country_risk_scores = _merge_target_scores(
         conflict_snapshot.get("targetScores") or {},
     )
+    target_scores = _merge_target_scores(sanctions_target_scores, country_risk_scores)
     targets = _top_targets(target_scores)
     record_total = int(ofac_snapshot.get("recordCountTotal") or 0)
     previous_record_total = int(previous_payload.get("ofacRecordCountTotal") or 0)
@@ -1492,6 +1501,14 @@ def build_geo_sanctions_shock_seed_payload(
             },
             "items": items,
             "targetBreakdown": _build_target_breakdown(all_items, target_scores),
+            "sanctionsTargetBreakdown": _build_target_breakdown(
+                sanctions_items,
+                sanctions_target_scores,
+            ),
+            "countryRiskBreakdown": _build_target_breakdown(
+                conflict_items,
+                country_risk_scores,
+            ),
             "linkedMarkets": [],
             "ofacRecordCountTotal": record_total,
             "publishDates": ofac_snapshot.get("publishDates") or [],
