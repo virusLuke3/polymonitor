@@ -59,6 +59,61 @@ export type NotificationPreferences = {
   channels: Record<string, { available: boolean; connected: boolean; detail?: string }>;
 };
 
+export type WorkspaceLayout = {
+  exists: boolean;
+  revision: number;
+  activePanelIds: string[];
+  panelLayout: Record<string, { rowSpan?: number; colSpan?: number }>;
+  preferences: {
+    region?: string;
+    viewMode?: string;
+    mapZoom?: number;
+    showPanelLibrary?: boolean;
+    marketGroupSort?: string;
+  };
+  clientUpdatedAt: string | null;
+  updatedAt: string | null;
+};
+
+export type BriefingRegistryItem = {
+  id: string;
+  publicId: string;
+  title: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  active: boolean;
+};
+
+export type BriefingMarket = {
+  marketId: number;
+  title: string;
+  category?: string | null;
+  latestPrice: number | null;
+  change24h: number | null;
+  volume24h: number;
+  tradeCount24h: number;
+  completionStatus: string;
+  oracleStage: string;
+  observedAt?: string | null;
+};
+
+export type PublicBriefing = {
+  title: string;
+  createdAt: string;
+  expiresAt: string;
+  snapshot: {
+    schema: string;
+    generatedAt: string;
+    summary: { trackedMarkets: number; topMarkets: number; oracleAttention: number };
+    trackedMarkets: BriefingMarket[];
+    topMarkets: BriefingMarket[];
+    oracleAttention: BriefingMarket[];
+    workspaceLens: { revision: number; activePanelIds: string[]; updatedAt: string | null };
+    source: { kind: string; markets: string; oracle: string; warning: string };
+  };
+};
+
 export const fetchWatchlist = () => authRequest<Watchlist>('/product/watchlist');
 export const addWatchlistMarket = (marketId: number, note = '') =>
   authRequest<{ item: unknown }>('/product/watchlist/markets', {
@@ -86,3 +141,21 @@ export const updateNotificationPreferences = (value: Omit<NotificationPreference
     method: 'PUT',
     body: JSON.stringify(value),
   }, { csrf: true });
+
+export const fetchWorkspaceLayout = () => authRequest<WorkspaceLayout>('/product/workspace-layout');
+export const saveWorkspaceLayout = (value: Omit<WorkspaceLayout, 'exists' | 'updatedAt'>) =>
+  authRequest<WorkspaceLayout>('/product/workspace-layout', {
+    method: 'PUT',
+    body: JSON.stringify(value),
+  }, { csrf: true });
+export const fetchBriefings = () =>
+  authRequest<{ items: BriefingRegistryItem[] }>('/product/briefings');
+export const createBriefing = (title: string) =>
+  authRequest<{ item: BriefingRegistryItem }>('/product/briefings', {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  }, { csrf: true });
+export const revokeBriefing = (id: string) =>
+  authRequest<{ status: string }>(`/product/briefings/${encodeURIComponent(id)}`, { method: 'DELETE' }, { csrf: true });
+export const fetchPublicBriefing = (publicId: string) =>
+  authRequest<PublicBriefing>(`/briefings/${encodeURIComponent(publicId)}`);

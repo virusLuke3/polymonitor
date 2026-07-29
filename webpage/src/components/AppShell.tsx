@@ -8,6 +8,7 @@ const SITE_NAV_LINKS = [
   { label: 'GitHub', href: 'https://github.com/virusLuke3/polymonitor', external: true },
   { label: 'Quality', href: '/data-quality' },
   { label: 'Watchlist', href: '/watchlist' },
+  { label: 'Briefings', href: '/briefings' },
   { label: 'Access', href: '/account' },
   { label: 'Quant', href: '/quant' },
 ];

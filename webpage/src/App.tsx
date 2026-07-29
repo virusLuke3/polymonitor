@@ -35,6 +35,8 @@ import {
   fetchSystemHealth,
   fetchWorkspaceBundle,
 } from '@/services/api';
+import { AuthApiError, fetchAuthSession } from '@/services/auth';
+import { fetchWorkspaceLayout, saveWorkspaceLayout, type WorkspaceLayout } from '@/services/product';
 import { buildWorldClockRows, CORE_WORLD_CLOCKS, normalizeTimezone, type WorldClockLocation } from '@/utils/worldClock';
 import type {
   BootstrapPayload,
@@ -89,6 +91,7 @@ const VIEW_STORAGE_KEY = 'polydata:map-view:v4';
 const REGION_STORAGE_KEY = 'polydata:region:v1';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
 const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
+const WORKSPACE_SYNC_META_KEY = 'polydata:workspace-sync-meta:v1';
 const GEO_SHOCK_STORAGE_KEY = 'polydata:seed:world:geo-sanctions-shock:v1';
 const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
 const QuantWorkspace = lazy(() => import('@/workspaces/quant/QuantWorkspace').then((module) => ({ default: module.QuantWorkspace })));
@@ -98,6 +101,8 @@ const LoginWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then
 const AccountWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.AccountWorkspace })));
 const OperationsAccessWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.OperationsAccessWorkspace })));
 const WatchlistWorkspace = lazy(() => import('@/workspaces/watchlist/WatchlistWorkspace').then((module) => ({ default: module.WatchlistWorkspace })));
+const BriefingManagerWorkspace = lazy(() => import('@/workspaces/briefing/BriefingWorkspace').then((module) => ({ default: module.BriefingManagerWorkspace })));
+const PublicBriefingWorkspace = lazy(() => import('@/workspaces/briefing/BriefingWorkspace').then((module) => ({ default: module.PublicBriefingWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = [
@@ -439,6 +444,8 @@ type GeoShockLocalSeed = {
   storedAt: number;
   payload: RuntimeGeoSanctionsShockPayload;
 };
+
+type WorkspaceSyncStatus = 'checking' | 'local' | 'saving' | 'synced' | 'conflict' | 'error';
 
 function hasRenderableGeoShockPayload(payload?: RuntimeGeoSanctionsShockPayload | null) {
   return Boolean((payload?.items || []).some(hasGeoConflictCoordinates));
@@ -798,6 +805,9 @@ function WorldMonitorApp() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [workspaceSyncStatus, setWorkspaceSyncStatus] = useState<WorkspaceSyncStatus>('checking');
+  const [workspaceSyncUpdatedAt, setWorkspaceSyncUpdatedAt] = useState<string | null>(null);
+  const [workspaceSyncEpoch, setWorkspaceSyncEpoch] = useState(0);
   const [weatherMapPayload, setWeatherMapPayload] = useState<RuntimeGlobalWeatherMapPayload | null>(null);
   const [weatherMapLoading, setWeatherMapLoading] = useState(false);
   const [weatherMapError, setWeatherMapError] = useState<string | null>(null);
@@ -808,6 +818,11 @@ function WorldMonitorApp() {
   const marketGroupSortRef = useRef<MarketGroupSort>(marketGroupSort);
   const bundleRequestSeqRef = useRef(0);
   const bundleCacheRef = useRef<Map<number, WorkspaceBundle>>(new Map());
+  const workspaceSyncRevisionRef = useRef(0);
+  const workspaceSyncReadyRef = useRef(false);
+  const workspaceSyncApplyingRef = useRef(false);
+  const workspaceSyncSnapshotRef = useRef('');
+  const workspaceLocalChangeHydratedRef = useRef(false);
 
   const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
     const eventId = group.eventId != null ? String(group.eventId) : null;
@@ -937,6 +952,134 @@ function WorldMonitorApp() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(MARKET_GROUP_SORT_STORAGE_KEY, marketGroupSort);
   }, [marketGroupSort]);
+
+  const workspaceSyncValue = useMemo(
+    () => ({
+      activePanelIds,
+      panelLayout: panelLayoutPrefs,
+      preferences: {
+        region,
+        viewMode,
+        mapZoom,
+        showPanelLibrary,
+        marketGroupSort,
+      },
+    }),
+    [activePanelIds, mapZoom, marketGroupSort, panelLayoutPrefs, region, showPanelLibrary, viewMode],
+  );
+  const workspaceSyncSnapshot = useMemo(() => JSON.stringify(workspaceSyncValue), [workspaceSyncValue]);
+
+  const applySyncedWorkspace = (layout: WorkspaceLayout) => {
+    workspaceSyncApplyingRef.current = true;
+    setActivePanelIds(sanitizePanelIds(layout.activePanelIds));
+    const validPanels = new Set(PANEL_LIBRARY.map((panel) => panel.id));
+    setPanelLayoutPrefs(
+      Object.fromEntries(Object.entries(layout.panelLayout || {}).filter(([panelId]) => validPanels.has(panelId))),
+    );
+    const preferences = layout.preferences || {};
+    if (!readSearchParam('region') && REGION_OPTIONS.some((option) => option.value === preferences.region)) {
+      setRegion(preferences.region as RegionKey);
+    }
+    if (!readSearchParam('view') && isMapViewMode(preferences.viewMode || '')) {
+      setViewMode(preferences.viewMode as MapViewMode);
+    }
+    if (preferences.mapZoom != null) setMapZoom(clampMapZoom(preferences.mapZoom));
+    if (typeof preferences.showPanelLibrary === 'boolean') setShowPanelLibrary(preferences.showPanelLibrary);
+    if (['active', 'new', 'volume', 'close', 'move', 'trades'].includes(preferences.marketGroupSort || '')) {
+      setMarketGroupSort(preferences.marketGroupSort as MarketGroupSort);
+    }
+    workspaceSyncRevisionRef.current = layout.revision;
+    setWorkspaceSyncUpdatedAt(layout.updatedAt);
+    window.setTimeout(() => {
+      workspaceSyncApplyingRef.current = false;
+    }, 0);
+  };
+
+  useEffect(() => {
+    if (!panelPrefsLoaded || typeof window === 'undefined') return;
+    let cancelled = false;
+    workspaceSyncReadyRef.current = false;
+    setWorkspaceSyncStatus('checking');
+    const synchronize = async () => {
+      const session = await fetchAuthSession();
+      if (cancelled) return;
+      if (!session.authenticated || session.user?.forcePasswordChange) {
+        setWorkspaceSyncStatus('local');
+        return;
+      }
+      const server = await fetchWorkspaceLayout();
+      if (cancelled) return;
+      const localMeta = readJsonStorage<{ updatedAt?: string }>(WORKSPACE_SYNC_META_KEY, {});
+      const localTimestamp = Date.parse(localMeta.updatedAt || '');
+      const serverTimestamp = Date.parse(server.clientUpdatedAt || '');
+      const localIsNewer = Number.isFinite(localTimestamp)
+        && (!Number.isFinite(serverTimestamp) || localTimestamp > serverTimestamp);
+      if (!server.exists || localIsNewer) {
+        const clientUpdatedAt = localMeta.updatedAt || new Date().toISOString();
+        const saved = await saveWorkspaceLayout({
+          revision: server.revision,
+          ...workspaceSyncValue,
+          clientUpdatedAt,
+        });
+        if (cancelled) return;
+        workspaceSyncRevisionRef.current = saved.revision;
+        workspaceSyncSnapshotRef.current = workspaceSyncSnapshot;
+        setWorkspaceSyncUpdatedAt(saved.updatedAt);
+      } else {
+        applySyncedWorkspace(server);
+      }
+      workspaceSyncReadyRef.current = true;
+      setWorkspaceSyncStatus('synced');
+    };
+    synchronize().catch((caught) => {
+      if (cancelled) return;
+      setWorkspaceSyncStatus(caught instanceof AuthApiError && caught.status === 409 ? 'conflict' : 'error');
+    });
+    return () => {
+      cancelled = true;
+    };
+  // The epoch is an explicit retry. Current workspace values are captured after local hydration.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelPrefsLoaded, workspaceSyncEpoch]);
+
+  useEffect(() => {
+    if (!panelPrefsLoaded || typeof window === 'undefined') return;
+    if (!workspaceLocalChangeHydratedRef.current) {
+      workspaceLocalChangeHydratedRef.current = true;
+      return;
+    }
+    if (workspaceSyncApplyingRef.current) return;
+    window.localStorage.setItem(WORKSPACE_SYNC_META_KEY, JSON.stringify({ updatedAt: new Date().toISOString() }));
+  }, [panelPrefsLoaded, workspaceSyncSnapshot]);
+
+  useEffect(() => {
+    if (!workspaceSyncReadyRef.current) return;
+    if (workspaceSyncApplyingRef.current) {
+      workspaceSyncApplyingRef.current = false;
+      workspaceSyncSnapshotRef.current = workspaceSyncSnapshot;
+      return;
+    }
+    if (workspaceSyncSnapshotRef.current === workspaceSyncSnapshot) return;
+    setWorkspaceSyncStatus('saving');
+    const timer = window.setTimeout(() => {
+      const localMeta = readJsonStorage<{ updatedAt?: string }>(WORKSPACE_SYNC_META_KEY, {});
+      const clientUpdatedAt = localMeta.updatedAt || new Date().toISOString();
+      saveWorkspaceLayout({
+        revision: workspaceSyncRevisionRef.current,
+        ...workspaceSyncValue,
+        clientUpdatedAt,
+      }).then((saved) => {
+        workspaceSyncRevisionRef.current = saved.revision;
+        workspaceSyncSnapshotRef.current = workspaceSyncSnapshot;
+        setWorkspaceSyncUpdatedAt(saved.updatedAt);
+        setWorkspaceSyncStatus('synced');
+      }).catch((caught) => {
+        setWorkspaceSyncStatus(caught instanceof AuthApiError && caught.status === 409 ? 'conflict' : 'error');
+        workspaceSyncReadyRef.current = false;
+      });
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [workspaceSyncSnapshot, workspaceSyncValue]);
 
   useEffect(() => {
     writeGeoShockRuntimeSeed(runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined);
@@ -2145,6 +2288,34 @@ function WorldMonitorApp() {
               <span>Map Zoom</span>
               <input type="range" min="1" max="4" step="1" value={String(mapZoom)} onInput={(event) => setMapZoom(clampMapZoom((event.currentTarget as HTMLInputElement).value))} />
             </label>
+            <section className={`wm-settings-sync is-${workspaceSyncStatus}`} aria-live="polite">
+              <div>
+                <span>WORKSPACE CLOUD</span>
+                <strong>
+                  {workspaceSyncStatus === 'synced' ? 'Synced'
+                    : workspaceSyncStatus === 'saving' ? 'Saving changes…'
+                    : workspaceSyncStatus === 'local' ? 'Local browser only'
+                    : workspaceSyncStatus === 'checking' ? 'Checking account…'
+                    : workspaceSyncStatus === 'conflict' ? 'Another device changed this layout'
+                    : 'Sync unavailable'}
+                </strong>
+                <small>
+                  {workspaceSyncUpdatedAt
+                    ? `Server revision observed ${new Date(workspaceSyncUpdatedAt).toLocaleString()}`
+                    : 'Panel order, sizes, map mode and region are synchronized for signed-in users.'}
+                </small>
+              </div>
+              <div>
+                {workspaceSyncStatus === 'local' ? <a href="/login?next=/">Sign in to sync</a> : null}
+                {workspaceSyncStatus === 'error' || workspaceSyncStatus === 'conflict'
+                  ? <button type="button" onClick={() => {
+                    if (workspaceSyncStatus === 'conflict') window.localStorage.removeItem(WORKSPACE_SYNC_META_KEY);
+                    setWorkspaceSyncEpoch((current) => current + 1);
+                  }}>{workspaceSyncStatus === 'conflict' ? 'Use latest cloud layout' : 'Retry sync'}</button>
+                  : null}
+                <a href="/briefings">Briefing registry</a>
+              </div>
+            </section>
             <div className="wm-settings-actions">
               <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(sanitizePanelIds(PANEL_LIBRARY.map((panel) => panel.id)))}>Enable All Panels</button>
               <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(defaultWorkspacePanelIds(bootstrap))}>Restore Default Panels</button>
@@ -2171,6 +2342,20 @@ export function App() {
     return (
       <Suspense fallback={<PanelLoading label="Loading access control" detail="Reading session and credential registry" />}>
         <AccountWorkspace />
+      </Suspense>
+    );
+  }
+  if (/^\/briefings\/[A-Za-z0-9_-]{32}(?:\/|$)/.test(pathname)) {
+    return (
+      <Suspense fallback={<PanelLoading label="Loading briefing" detail="Opening canonical prediction-market snapshot" />}>
+        <PublicBriefingWorkspace />
+      </Suspense>
+    );
+  }
+  if (pathname === '/briefings' || pathname === '/briefings/') {
+    return (
+      <Suspense fallback={<PanelLoading label="Loading briefings" detail="Reading revocable share registry" />}>
+        <BriefingManagerWorkspace />
       </Suspense>
     );
   }

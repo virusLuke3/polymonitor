@@ -226,6 +226,7 @@ export function AccountWorkspace() {
           </div>
           <div className="auth-account-actions">
             <a href="/watchlist">Open Watchlist</a>
+            <a href="/briefings">Open Briefings</a>
             {session.user?.role === 'admin' ? <a href="/operations">Open Operations</a> : null}
             <button type="button" onClick={signOut} disabled={busy}>Sign out</button>
           </div>

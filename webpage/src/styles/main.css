@@ -14852,6 +14852,73 @@ body {
   flex-wrap: wrap;
 }
 
+.wm-settings-sync {
+  margin: 18px 20px 0;
+  padding: 15px;
+  border: 1px solid #283a30;
+  background: #09100c;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+}
+
+.wm-settings-sync > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.wm-settings-sync > div:first-child > span {
+  color: #42f57b;
+  font: 650 10px var(--font-mono);
+  letter-spacing: .12em;
+}
+
+.wm-settings-sync strong {
+  color: var(--wm-text);
+}
+
+.wm-settings-sync small {
+  color: var(--wm-text-dim);
+  line-height: 1.45;
+}
+
+.wm-settings-sync > div:last-child {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wm-settings-sync a,
+.wm-settings-sync button {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #2c4936;
+  background: #0c1710;
+  color: #dce9df;
+  text-decoration: none;
+  font: 600 11px var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.wm-settings-sync.is-error,
+.wm-settings-sync.is-conflict {
+  border-color: #7a4a2c;
+}
+
+@media (max-width: 640px) {
+  .wm-settings-sync {
+    grid-template-columns: 1fr;
+  }
+
+  .wm-settings-sync > div:last-child {
+    justify-content: flex-start;
+  }
+}
+
 .wm-settings-btn {
   border: 1px solid #2a3830;
   background: #121614;
