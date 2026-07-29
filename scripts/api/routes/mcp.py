@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -60,6 +61,15 @@ def _error(request_id: Any, code: int, message: str, data: Any = None) -> dict[s
     return {"jsonrpc": "2.0", "id": request_id, "error": error}
 
 
+def _origin_allowed(origin: str, request_host: str, configured_origins: frozenset[str]) -> bool:
+    if not origin:
+        return True
+    if origin in configured_origins:
+        return True
+    parsed = urlsplit(origin)
+    return parsed.scheme in {"http", "https"} and parsed.netloc == request_host
+
+
 def create_mcp_blueprint(context: Mapping[str, Any]) -> Blueprint:
     dependencies = McpRouteDependencies.from_context(context)
     service_dependencies = dependencies.service_dependencies()
@@ -79,7 +89,7 @@ def create_mcp_blueprint(context: Mapping[str, Any]) -> Blueprint:
             response.headers["MCP-Protocol-Version"] = MCP_PROTOCOL_VERSION
             return response
         origin = request.headers.get("Origin", "").strip()
-        if origin and origin not in dependencies.allowed_origins:
+        if not _origin_allowed(origin, request.host, dependencies.allowed_origins):
             response = jsonify(_error(None, -32002, "Origin is not allowed"))
             response.status_code = 403
             response.headers["MCP-Protocol-Version"] = MCP_PROTOCOL_VERSION
