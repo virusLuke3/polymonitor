@@ -6,6 +6,9 @@ import time
 from datetime import datetime
 from typing import Any, Dict
 
+from scripts.ops.lib.snapshot import age_seconds, operations_state_dir, read_json, utc_now_iso
+from scripts.ops.lib.status import Status, aggregate, normalize
+
 
 SYSTEM_HEALTH_CACHE_NAMESPACE = "system:health"
 SYSTEM_HEALTH_CACHE_KEY = "payload-v1"
@@ -605,4 +608,72 @@ def build_seed_health_payload(ctx: dict) -> Dict[str, Any]:
             "errorCount": error_count,
         },
         "items": items,
+    }
+
+
+def _read_operations_snapshot(filename: str, *, max_age_seconds: int) -> Dict[str, Any]:
+    path = operations_state_dir() / filename
+    try:
+        payload = read_json(path)
+    except FileNotFoundError:
+        return {
+            "status": Status.UNKNOWN.value,
+            "availability": "missing",
+            "generatedAt": None,
+            "ageSeconds": None,
+        }
+    except (OSError, ValueError):
+        return {
+            "status": Status.UNHEALTHY.value,
+            "availability": "invalid",
+            "generatedAt": None,
+            "ageSeconds": None,
+        }
+    generated_at = payload.get("generatedAt")
+    age = age_seconds(generated_at)
+    freshness = Status.UNKNOWN
+    if age is not None:
+        freshness = Status.HEALTHY if age <= max_age_seconds else Status.DEGRADED
+    payload["sourceStatus"] = normalize(payload.get("status")).value
+    payload["status"] = aggregate([payload.get("status"), freshness]).value
+    payload["availability"] = "available"
+    payload["ageSeconds"] = age
+    payload["snapshotAgeSeconds"] = age
+    payload["stale"] = freshness is Status.DEGRADED
+    return payload
+
+
+def build_operations_payload() -> Dict[str, Any]:
+    try:
+        max_age = max(30, int(os.environ.get("POLYDATA_OPERATIONS_SNAPSHOT_MAX_AGE_SECONDS", "180")))
+    except (TypeError, ValueError):
+        max_age = 180
+    runtime = _read_operations_snapshot("runtime-health.json", max_age_seconds=max_age)
+    panels = _read_operations_snapshot("panel-health.json", max_age_seconds=max_age * 2)
+    return {
+        "schemaVersion": "polymonitor.operations-api.v1",
+        "generatedAt": utc_now_iso(),
+        "status": aggregate([runtime["status"], panels["status"]]).value,
+        "runtime": runtime,
+        "panels": panels,
+    }
+
+
+def build_incidents_payload() -> Dict[str, Any]:
+    path = operations_state_dir() / "incidents.json"
+    try:
+        payload = read_json(path)
+    except (OSError, ValueError):
+        return {
+            "schemaVersion": "polymonitor.incidents.v1",
+            "generatedAt": utc_now_iso(),
+            "status": Status.UNKNOWN.value,
+            "items": [],
+        }
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    return {
+        "schemaVersion": "polymonitor.incidents.v1",
+        "generatedAt": payload.get("generatedAt"),
+        "status": Status.HEALTHY.value,
+        "items": items[:50],
     }

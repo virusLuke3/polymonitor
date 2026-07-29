@@ -1,0 +1,13 @@
+[Unit]
+Description=Probe Polymonitor public availability from an external host
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=5s
+RandomizedDelaySec=5s
+Persistent=true
+Unit=polydata-external-availability.service
+
+[Install]
+WantedBy=timers.target

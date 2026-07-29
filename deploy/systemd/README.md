@@ -29,6 +29,8 @@ not a separate code tree.
 - `polydata-new-market-signal.service`
 - `polydata-telegram-publisher.service`
 - `polydata-serving-healthcheck.timer` provides bounded recovery for a live-but-unresponsive API or publisher. It confirms consecutive failures, permits at most three recovery restarts per 30 minutes, then backs off automatically.
+- `polydata-operations-runtime-health.timer` records a redacted, atomic runtime snapshot once per minute. It is read-only and never restarts services.
+- `polydata-operations-panel-health.timer` evaluates every active Panel against its declared data/freshness contract once per two minutes.
 - `polydata-geo-sanctions-shock.service`
 - `polydata-quant-backtest-runner.service`
 - `polydata-lob-maintenance.service`
@@ -121,6 +123,7 @@ cp deploy/systemd/polydata-*-seed.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-geo-sanctions-shock.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-new-market-signal.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-telegram-publisher.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-operations-*.service deploy/systemd/polydata-operations-*.timer ~/.config/systemd/user/
 cp deploy/systemd/polydata-quant-backtest-runner.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-lob-maintenance.service ~/.config/systemd/user/
 systemctl --user daemon-reload
@@ -159,6 +162,23 @@ Keep user services alive after logout:
 
 ```bash
 loginctl enable-linger "$USER"
+```
+
+## External availability monitor
+
+Install `polydata-external-availability.service` and its timer only on a host
+outside the monitored GCP VM. The probe refuses to run when it detects the
+`gcp-api` role or the Google Compute metadata service. It checks the public
+website and `/wm-api/health`; it never receives the operations token.
+
+After a deployment, run the read-only concentrated verifier from an operator
+host. Supplying the expected commit and SSH target additionally checks the
+remote SHA, public-vs-remote `index.html` hash, required timers, detailed
+operations API and representative prediction-market endpoints:
+
+```bash
+python3 scripts/ops/verify_production_deployment.py \
+  --expected-sha "$(git rev-parse HEAD)"
 ```
 
 ## Safety Checks

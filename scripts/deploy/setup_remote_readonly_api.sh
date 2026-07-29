@@ -34,6 +34,7 @@ SERVER_NAME="${SERVER_NAME:-${REMOTE_HOST}}"
 PYTHON_BIN="${PYTHON_BIN:-${REMOTE_REPO_ROOT}/.venv/bin/python}"
 SNAPSHOT_SQLITE_PATH="${SNAPSHOT_SQLITE_PATH:-${REMOTE_REPO_ROOT}/data/panel_snapshots.sqlite3}"
 REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379/0}"
+OPERATIONS_API_TOKEN="${OPERATIONS_API_TOKEN:-}"
 
 : "${REMOTE_USER:?Set REMOTE_USER to the SSH user for the remote API host}"
 : "${REMOTE_HOST:?Set REMOTE_HOST to the remote API host}"
@@ -100,6 +101,8 @@ POLYDATA_GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS}
 POLYDATA_GUNICORN_MAX_REQUESTS_JITTER=${GUNICORN_MAX_REQUESTS_JITTER}
 POLYDATA_REDIS_URL=${REDIS_URL}
 POLYDATA_REDIS_PREFIX=polydata:
+POLYDATA_OPERATIONS_API_TOKEN=${OPERATIONS_API_TOKEN}
+POLYDATA_OPERATIONS_API_BASE=http://127.0.0.1:${API_PORT}
 POLYDATA_SNAPSHOT_SQLITE_PATH=${SNAPSHOT_SQLITE_PATH}
 POLYDATA_RUNTIME_TRUST_ENV=0
 POLYDATA_CONTENT_API_REFRESH_ENABLED=false
@@ -295,6 +298,10 @@ GCP_UNITS=(
   polydata-suspicious-trades-seed.service
   polydata-serving-healthcheck.service
   polydata-serving-healthcheck.timer
+  polydata-operations-runtime-health.service
+  polydata-operations-runtime-health.timer
+  polydata-operations-panel-health.service
+  polydata-operations-panel-health.timer
   polydata-tech-panels-seed.service
   polydata-telegram-publisher.service
   polydata-telegram-query-bot.service

@@ -6,5 +6,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 EnvironmentFile=%h/.config/polydata/polydata.env
-WorkingDirectory=%h/develop/polymarket/githubProjects/polymonitor
-ExecStart=%h/develop/polymarket/githubProjects/polymonitor/scripts/ops/postgres_reverse_tunnel_healthcheck.sh
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+ExecStart=/__POLYDATA_REPO_ROOT__/scripts/ops/postgres_reverse_tunnel_healthcheck.sh
+TimeoutStartSec=90
+UMask=0077

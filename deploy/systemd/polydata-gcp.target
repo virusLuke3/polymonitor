@@ -2,6 +2,8 @@
 Description=polyData GCP serving and seed-cache services
 Wants=polydata-api.service
 Wants=polydata-serving-healthcheck.timer
+Wants=polydata-operations-runtime-health.timer
+Wants=polydata-operations-panel-health.timer
 Wants=polydata-content-topic-refresh.service
 Wants=polydata-alpha-signal-seed.service
 Wants=polydata-breaking-event-radar-seed.service
