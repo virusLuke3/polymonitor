@@ -3165,8 +3165,8 @@ export function WeatherDeckMap({
       {selectedCountryRisk ? <CountryRiskInspector risk={selectedCountryRisk} onClose={() => { setSelectedCountryRisk(null); highlightCountry(null); }} /> : null}
       {selectedConflict ? <ConflictInspector point={selectedConflict} onClose={() => { setSelectedConflict(null); selectedConflictIdRef.current = null; highlightCountry(null); scheduleDeckUpdate(); }} /> : null}
       <div className="wm-weather-deck-legend" aria-hidden="true">
-        <span><i className="hot" />HOT</span>
-        <span><i className="cool" />COOL</span>
+        {points.length ? <span><i className="hot" />HOT</span> : null}
+        {points.length ? <span><i className="cool" />COOL</span> : null}
         {showAirRoutes && airRoutes.length ? <span><i className="air" />AIR ROUTES</span> : null}
         {conflictPoints.length ? <span><i className="ucdp" />UCDP</span> : null}
         {countryRisks.length ? <span><i className="country" />COUNTRY RISK</span> : null}

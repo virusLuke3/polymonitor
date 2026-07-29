@@ -9,7 +9,6 @@ import {
   type PanelLayoutPrefs,
 } from '@/components/PanelWorkspaceSlot';
 import WeatherDeckMap from '@/components/WeatherDeckMap';
-import { WeatherMapCityInspector } from '@/components/WeatherMapCityInspector';
 import { WorldGlobe, type WorldGlobeStatusMetrics } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { mergeRuntimeData } from '@/panels/runtime-store';
@@ -30,7 +29,6 @@ import {
   fetchRecentOracle,
   fetchRecentTrades,
   fetchRuntimeGeoSanctionsShock,
-  fetchRuntimeGlobalWeatherMap,
   fetchSystemHealth,
   fetchWorkspaceBundle,
 } from '@/services/api';
@@ -38,7 +36,6 @@ import { AuthApiError, fetchAuthSession } from '@/services/auth';
 import { useI18n, type MessageKey } from '@/services/i18n';
 import { specialistPanelMeta } from '@/services/specialist-i18n';
 import { fetchWorkspaceLayout, saveWorkspaceLayout, type WorkspaceLayout } from '@/services/product';
-import { buildWorldClockRows, CORE_WORLD_CLOCKS, normalizeTimezone, type WorldClockLocation } from '@/utils/worldClock';
 import type {
   BootstrapPayload,
   ContentItem,
@@ -57,7 +54,6 @@ import type {
   RuntimeGeoSanctionsShockItem,
   RuntimeGeoSanctionsShockPayload,
   RuntimeGlobalTransportShippingPayload,
-  RuntimeGlobalWeatherMapPayload,
   RuntimeInflationNowcastPayload,
   RuntimeJin10Payload,
   RuntimeMarketGroup,
@@ -80,7 +76,7 @@ type LayerToggle = {
 };
 
 type RegionKey = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
-type MapViewMode = '3d' | '2d' | 'heatmap' | 'density';
+type MapViewMode = '3d' | '2d';
 type CommandPaletteTab = 'markets' | 'panels' | 'commands';
 const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
 const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v4';
@@ -108,13 +104,8 @@ const DeveloperWorkspace = lazy(() => import('@/workspaces/developers/DeveloperW
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = [
-  { id: 'markets', label: 'Polymarket Markets', icon: '◎', enabled: true, hint: 'ACTIVE' },
-  { id: 'oracle', label: 'Oracle Events', icon: '◌', enabled: true, hint: 'LIVE' },
-  { id: 'trade', label: 'OrderFilled Tape', icon: '↗', enabled: true, hint: 'CHAIN' },
-  { id: 'lob', label: 'Runtime LOB', icon: '▦', enabled: true, hint: 'BOOK' },
-  { id: 'intel', label: 'Linked Intel', icon: '✦', enabled: true, hint: 'NEWS' },
   { id: 'ucdp', label: 'UCDP Conflicts', icon: '△', enabled: true, hint: 'CONFLICT' },
-  { id: 'air-routes', label: 'Air Routes', icon: '✈', enabled: true, hint: 'AIR' },
+  { id: 'air-routes', label: 'Air Routes', icon: '✈', enabled: false, hint: 'REFERENCE' },
 ];
 
 const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
@@ -130,8 +121,6 @@ const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
 const MAP_VIEW_OPTIONS: Array<{ value: MapViewMode; label: string }> = [
   { value: '2d', label: '2D Map' },
   { value: '3d', label: '3D Globe' },
-  { value: 'heatmap', label: 'Heatmap' },
-  { value: 'density', label: 'Risk Density' },
 ];
 const REGION_MESSAGE_KEYS: Record<RegionKey, MessageKey> = {
   global: 'region.global',
@@ -146,15 +135,8 @@ const REGION_MESSAGE_KEYS: Record<RegionKey, MessageKey> = {
 const MAP_VIEW_MESSAGE_KEYS: Record<MapViewMode, MessageKey> = {
   '2d': 'map.2d',
   '3d': 'map.3d',
-  heatmap: 'map.heatmap',
-  density: 'map.density',
 };
 const LAYER_MESSAGE_KEYS: Record<string, MessageKey> = {
-  markets: 'atlas.layer.markets',
-  oracle: 'atlas.layer.oracle',
-  trade: 'atlas.layer.trade',
-  lob: 'atlas.layer.lob',
-  intel: 'atlas.layer.intel',
   ucdp: 'atlas.layer.ucdp',
   'air-routes': 'atlas.layer.airRoutes',
 };
@@ -183,7 +165,7 @@ function localizedPanelMeta(
 }
 
 function isMapViewMode(value: unknown): value is MapViewMode {
-  return value === '3d' || value === '2d' || value === 'heatmap' || value === 'density';
+  return value === '3d' || value === '2d';
 }
 
 const MAP_BOTTOM_PANEL_IDS: string[] = [];
@@ -370,85 +352,27 @@ function hasGeoConflictCoordinates(item: RuntimeGeoSanctionsShockItem) {
   return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
 }
 
-function WeatherInlineMap({
-  payload,
+function WorldEventInlineMap({
   ucdpEvents,
   transportPayload,
   showAirRoutes,
-  loading,
-  error,
-  selectedCityId,
-  onSelectCity,
-  onRefresh,
 }: {
-  payload?: RuntimeGlobalWeatherMapPayload | null;
   ucdpEvents: RuntimeGeoSanctionsShockItem[];
   transportPayload?: RuntimeGlobalTransportShippingPayload | null;
   showAirRoutes: boolean;
-  loading: boolean;
-  error?: string | null;
-  selectedCityId: string | null;
-  onSelectCity: (cityId: string) => void;
-  onRefresh: () => void;
 }) {
   const { t } = useI18n();
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [clockNow, setClockNow] = useState(() => new Date());
-  const items = payload?.items || [];
-  const selected = items.find((item) => item.cityId === selectedCityId) || items[0] || null;
-  const mappedCount = payload?.summary?.mappedCount ?? items.length;
-  const cityCount = payload?.summary?.cityCount ?? items.length;
-  const cacheMode = payload?.cacheMode || (loading ? 'loading' : 'seed');
-  const selectCity = (cityId: string) => {
-    onSelectCity(cityId);
-    setDetailOpen(true);
-  };
-  const selectedTimezone = normalizeTimezone(selected?.timezone);
-  const selectedClock: WorldClockLocation | null = selected && selectedTimezone
-    ? { id: `map-selected-${selected.cityId || selected.city}`, city: String(selected.city || 'Selected'), venue: 'LOCAL', timezone: selectedTimezone, market: 'generic' }
-    : null;
-  const mapClocks = buildWorldClockRows(
-    clockNow,
-    selectedClock && !CORE_WORLD_CLOCKS.some((row) => row.timezone === selectedClock.timezone)
-      ? [selectedClock, ...CORE_WORLD_CLOCKS.slice(0, 3)]
-      : CORE_WORLD_CLOCKS.slice(0, 3),
-  );
-  useEffect(() => {
-    const timer = window.setInterval(() => setClockNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
   return (
     <div className="wm-inline-weather-map">
       <div className="wm-inline-weather-map-hint">{t('atlas.weatherHint')}</div>
-      <div className="wm-inline-weather-clock-strip" aria-label={t('atlas.worldClock')}>
-        {mapClocks.map((clock) => (
-          <span key={clock.id} className={clock.open ? 'open' : ''}>
-            <b>{clock.city}</b>
-            <strong>{clock.time}</strong>
-            <em>{clock.open ? t('atlas.marketOpen') : t('atlas.marketClosed')} · {clock.gmtLabel}</em>
-          </span>
-        ))}
-      </div>
-      <button type="button" className="wm-inline-weather-map-cache" onClick={onRefresh}>
-        {cacheMode}
-      </button>
-      <div className="wm-inline-weather-map-count" aria-hidden="true">
-        {mappedCount}/{cityCount}
-      </div>
-      {error ? <div className="wm-inline-weather-map-error">{error}</div> : null}
       <WeatherDeckMap
-        items={items}
+        items={[]}
         ucdpEvents={ucdpEvents}
         transportPayload={transportPayload}
         showAirRoutes={showAirRoutes}
-        selectedCityId={selected?.cityId || null}
-        onSelectCity={selectCity}
+        selectedCityId={null}
         height={620}
       />
-      {!items.length ? (
-        <div className="wm-weather-map-data-loading"><span>{loading ? t('atlas.weatherLoading') : t('atlas.weatherWarming')}</span></div>
-      ) : null}
-      {detailOpen && selected ? <WeatherMapCityInspector city={selected} onClose={() => setDetailOpen(false)} /> : null}
     </div>
   );
 }
@@ -856,9 +780,6 @@ function WorldMonitorApp() {
   const [workspaceSyncStatus, setWorkspaceSyncStatus] = useState<WorkspaceSyncStatus>('checking');
   const [workspaceSyncUpdatedAt, setWorkspaceSyncUpdatedAt] = useState<string | null>(null);
   const [workspaceSyncEpoch, setWorkspaceSyncEpoch] = useState(0);
-  const [weatherMapPayload, setWeatherMapPayload] = useState<RuntimeGlobalWeatherMapPayload | null>(null);
-  const [weatherMapLoading, setWeatherMapLoading] = useState(false);
-  const [weatherMapError, setWeatherMapError] = useState<string | null>(null);
   const [selectedWeatherCityId, setSelectedWeatherCityId] = useState<string | null>(null);
   const bootstrapRef = useRef<BootstrapPayload | null>(null);
   const selectedMarketIdRef = useRef<number | null>(null);
@@ -1875,33 +1796,6 @@ function WorldMonitorApp() {
     setNotice(t('atlas.viewEnabled', { view: t(MAP_VIEW_MESSAGE_KEYS[nextMode]) }));
   };
 
-  const loadWeatherMap = async (force = false) => {
-    const panelPayload = runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined;
-    if (!force && panelPayload?.items?.length) {
-      setWeatherMapPayload(panelPayload);
-      setSelectedWeatherCityId((current) => current || String(panelPayload.items?.[0]?.cityId || ''));
-      return;
-    }
-    setWeatherMapLoading(true);
-    setWeatherMapError(null);
-    try {
-      const payload = await fetchRuntimeGlobalWeatherMap(60);
-      setWeatherMapPayload(payload);
-      setRuntimeData((current) => mergeRuntimeData(current, { 'global-temperature-monitor': payload }));
-      setSelectedWeatherCityId((current) => current || String(payload.items?.[0]?.cityId || ''));
-    } catch (loadError) {
-      setWeatherMapError(loadError instanceof Error ? loadError.message : t('atlas.weatherLoadFailed'));
-    } finally {
-      setWeatherMapLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (viewMode !== '3d') {
-      void loadWeatherMap(false);
-    }
-  }, [viewMode]);
-
   const zoomIn = () => setMapZoom((current) => clampMapZoom(current + 1));
   const zoomOut = () => setMapZoom((current) => clampMapZoom(current - 1));
   const formatMarketPercent = (value?: string | number | null) => {
@@ -2020,16 +1914,10 @@ function WorldMonitorApp() {
                     onMetricsChange={setGlobeStatus}
                   />
                 ) : (
-                  <WeatherInlineMap
-                    payload={weatherMapPayload || (runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined) || null}
+                  <WorldEventInlineMap
                     ucdpEvents={ucdpMapEvents}
                     transportPayload={(runtimeData['global-transport-shipping'] as RuntimeGlobalTransportShippingPayload | undefined) || null}
                     showAirRoutes={enabledLayerIds.includes('air-routes')}
-                    loading={weatherMapLoading}
-                    error={weatherMapError}
-                    selectedCityId={selectedWeatherCityId}
-                    onSelectCity={setSelectedWeatherCityId}
-                    onRefresh={() => void loadWeatherMap(true)}
                   />
                 )}
 

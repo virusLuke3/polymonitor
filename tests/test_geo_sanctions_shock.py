@@ -16,6 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT = REPO_ROOT / "scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.config import load_api_settings
@@ -122,7 +124,7 @@ class FakeRequests:
                     ]
                 },
             )
-        if url == "ucdp-api-url":
+        if url.startswith("ucdp-api-url/"):
             return FakeResponse(
                 b"{}",
                 json_data={
@@ -315,7 +317,7 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
 
         self.assertEqual("ok", payload["sources"]["conflictFeed"])
         self.assertEqual("UCDP", payload["conflictProvider"])
-        self.assertEqual("ucdp-api-url", requests_lib.last_get_url)
+        self.assertTrue((requests_lib.last_get_url or "").startswith("ucdp-api-url/"))
         self.assertEqual("ucdp-token", (requests_lib.last_get_headers or {}).get("x-ucdp-access-token"))
         self.assertTrue(any(item.get("source") == "UCDP" for item in payload["items"]))
         ucdp_items = [item for item in payload["items"] if item.get("source") == "UCDP"]
@@ -474,7 +476,7 @@ class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
         self.assertEqual("warming", payload["sources"]["ofacSdn"])
         self.assertEqual([], payload["items"])
 
-    def test_runtime_panel_route_clamps_invalid_and_large_limits(self):
+    def test_runtime_panel_route_uses_map_scale_default_and_clamps_to_maximum(self):
         seen_limits = []
         app = Flask(__name__)
         helpers = {
@@ -502,11 +504,11 @@ class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
 
         with app.test_client() as client:
             invalid = client.get("/runtime/world/geo-sanctions-shock?limit=oops")
-            large = client.get("/runtime/world/geo-sanctions-shock?limit=999")
+            large = client.get("/runtime/world/geo-sanctions-shock?limit=9999")
 
         self.assertEqual(200, invalid.status_code)
         self.assertEqual(200, large.status_code)
-        self.assertEqual([6, 12], seen_limits)
+        self.assertEqual([2000, 2000], seen_limits)
 
 
 class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
