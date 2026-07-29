@@ -102,6 +102,24 @@ def test_eonet_provider_preserves_observed_storm_track() -> None:
     assert event["severity"] == "warning"
 
 
+def test_eonet_provider_does_not_turn_wildfire_observations_into_a_track() -> None:
+    payload = {
+        "events": [{
+            "id": "EONET_FIRE_1",
+            "title": "Named Fire",
+            "categories": [{"id": "wildfires", "title": "Wildfires"}],
+            "sources": [{"id": "source", "url": "https://example.test/fire"}],
+            "geometry": [
+                {"date": "2026-07-28T00:00:00Z", "type": "Point", "coordinates": [10, 20]},
+                {"date": "2026-07-29T00:00:00Z", "type": "Point", "coordinates": [11, 21]},
+            ],
+        }],
+    }
+    event = eonet.fetch(lambda *_args, **_kwargs: payload)["events"][0]
+    assert event["hazardKind"] == "wildfire"
+    assert event["geometry"] == {"type": "Point", "coordinates": [11.0, 21.0]}
+
+
 def test_nws_provider_keeps_polygon_and_does_not_fabricate_missing_geometry() -> None:
     base_properties = {
         "id": "urn:test:flood",

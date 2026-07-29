@@ -32,10 +32,13 @@ def _hazard_kind(category_id: str, title: str) -> str | None:
     }.get(category_id)
 
 
-def _geometry(observations: list[Dict[str, Any]]) -> tuple[Dict[str, Any] | None, str | None]:
-    points: list[list[float]] = []
+def _geometry(
+    observations: list[Dict[str, Any]],
+    hazard_kind: str,
+) -> tuple[Dict[str, Any] | None, str | None]:
+    points: list[tuple[str, list[float]]] = []
     latest_at: str | None = None
-    latest_area: Dict[str, Any] | None = None
+    latest_area: tuple[str, Dict[str, Any]] | None = None
     for observation in observations:
         observed_at = iso_timestamp(observation.get("date"))
         if observed_at and (latest_at is None or observed_at > latest_at):
@@ -44,16 +47,20 @@ def _geometry(observations: list[Dict[str, Any]]) -> tuple[Dict[str, Any] | None
         coordinates = observation.get("coordinates")
         if geometry_type == "Point":
             point = valid_point(coordinates)
-            if point and point not in points:
-                points.append(point)
+            timestamp = observed_at or ""
+            if point and not any(existing == point for _, existing in points):
+                points.append((timestamp, point))
         elif geometry_type in {"Polygon", "MultiPolygon"} and isinstance(coordinates, list):
-            latest_area = {"type": geometry_type, "coordinates": coordinates}
+            timestamp = observed_at or ""
+            if latest_area is None or timestamp >= latest_area[0]:
+                latest_area = (timestamp, {"type": geometry_type, "coordinates": coordinates})
     if latest_area:
-        return latest_area, latest_at
-    if len(points) >= 2:
-        return {"type": "LineString", "coordinates": points}, latest_at
+        return latest_area[1], latest_at
+    points.sort(key=lambda item: item[0])
+    if hazard_kind == "tropical-cyclone" and len(points) >= 2:
+        return {"type": "LineString", "coordinates": [point for _, point in points]}, latest_at
     if points:
-        return {"type": "Point", "coordinates": points[-1]}, latest_at
+        return {"type": "Point", "coordinates": points[-1][1]}, latest_at
     return None, latest_at
 
 
@@ -81,7 +88,7 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 300) -> Provide
         category_id = str((categories[0] if categories else {}).get("id") or "")
         hazard_kind = _hazard_kind(category_id, title)
         observations = [item for item in (raw.get("geometry") or []) if isinstance(item, dict)]
-        geometry, updated_at = _geometry(observations)
+        geometry, updated_at = _geometry(observations, hazard_kind or "")
         if not native_id or not title or hazard_kind is None:
             continue
         if updated_at and (newest is None or updated_at > newest):

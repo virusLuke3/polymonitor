@@ -7,7 +7,7 @@ import {
   readStoredWorldEventMapState,
   serializeWorldEventMapUrl,
 } from './urlState';
-import type { GeoEvent } from '../domain/types';
+import type { GeoEvent, HazardEvent } from '../domain/types';
 
 describe('World Event Map state', () => {
   it('applies URL state after stored state and round-trips canonical fields', () => {
@@ -113,5 +113,38 @@ describe('World Event Map state', () => {
       [earthquake],
       { activeLayerIds: ['weather-alerts'], timeRange: 'all', severities: ['warning'] },
     )).toHaveLength(0);
+  });
+
+  it('excludes expired, ended and cancelled hazards even when their update is recent', () => {
+    const now = Date.parse('2026-07-29T12:00:00Z');
+    const base: HazardEvent = {
+      id: 'flood:nws:test',
+      category: 'weather',
+      title: 'Flood warning',
+      severity: 'warning',
+      updatedAt: '2026-07-29T11:30:00Z',
+      expiresAt: '2026-07-29T13:00:00Z',
+      locationPrecision: 'region',
+      sources: [{ provider: 'NWS' }],
+      limitations: [],
+      relatedMarketIds: [],
+      properties: {},
+      hazardKind: 'flood',
+      lifecycle: 'active',
+      coverage: { scope: 'provider-area', label: 'NWS', isComplete: false, gaps: [] },
+      severityEvidence: { provider: 'NWS', mappingVersion: 'v1', reason: 'CAP' },
+      revision: { nativeEventId: 'test', cancelled: false },
+      metrics: { kind: 'weather-alert' },
+    };
+    const state = { activeLayerIds: ['weather-alerts'], timeRange: '24h' as const, severities: ['warning' as const] };
+    const expired: HazardEvent = { ...base, id: 'expired', expiresAt: '2026-07-29T11:59:00Z' };
+    const ended: HazardEvent = { ...base, id: 'ended', lifecycle: 'ended' };
+    const cancelled: HazardEvent = {
+      ...base,
+      id: 'cancelled',
+      revision: { ...base.revision, cancelled: true },
+    };
+    expect(filterWorldEventMapEventsForLayers([base], state, now)).toHaveLength(1);
+    expect(filterWorldEventMapEventsForLayers([expired, ended, cancelled], state, now)).toHaveLength(0);
   });
 });

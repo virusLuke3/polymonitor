@@ -16,7 +16,7 @@ export interface WorldEventMapState {
   basemapTheme: string;
 }
 
-export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v2';
+export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v3';
 export const WORLD_EVENT_TIME_RANGES: readonly WorldEventTimeRange[] = ['1h', '6h', '24h', '48h', '7d', 'all'];
 export const WORLD_EVENT_SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 
@@ -27,7 +27,7 @@ export function defaultWorldEventMapState(): WorldEventMapState {
     zoom: global.zoom,
     region: 'global',
     activeLayerIds: selectableWorldEventLayers().filter((layer) => layer.defaultEnabled).map((layer) => layer.id),
-    timeRange: 'all',
+    timeRange: '24h',
     severities: [...WORLD_EVENT_SEVERITIES],
     selectedEventId: null,
     hoveredEventId: null,

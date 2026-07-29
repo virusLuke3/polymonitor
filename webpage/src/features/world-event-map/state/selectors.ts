@@ -1,5 +1,5 @@
 import type { GeoEvent } from '../domain/types';
-import { eventMatchesWorldEventLayers } from '../config/layerRegistry';
+import { eventMatchesWorldEventLayers, isHazardGeoEvent } from '../config/layerRegistry';
 import type { WorldEventMapState, WorldEventTimeRange } from './mapState';
 
 const TIME_RANGE_MS: Record<Exclude<WorldEventTimeRange, 'all'>, number> = {
@@ -19,6 +19,11 @@ export function filterWorldEventMapEvents(
   const severities = new Set(state.severities);
   return events.filter((event) => {
     if (!severities.has(event.severity)) return false;
+    if (isHazardGeoEvent(event)) {
+      if (event.lifecycle === 'ended' || event.revision.cancelled) return false;
+      const expiresAt = event.expiresAt ? Date.parse(event.expiresAt) : Number.NaN;
+      if (Number.isFinite(expiresAt) && expiresAt <= now) return false;
+    }
     if (cutoff == null) return true;
     const timestamp = event.updatedAt || event.occurredAt;
     if (!timestamp) return false;
