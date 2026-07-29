@@ -284,6 +284,7 @@ def build_route_context(service_context: ServiceContext) -> RouteContext:
         "CRYPTO_SYMBOLS": CRYPTO_SYMBOLS,
         "LOB_RUNTIME_MANAGER": LOB_RUNTIME_MANAGER,
         "describe_db_target": describe_db_target,
+        "table_exists": table_exists,
         "enrich_market_rows_with_runtime_prices": enrich_market_rows_with_runtime_prices,
         "get_active_markets_snapshot": get_active_markets_snapshot,
         "get_active_addresses_cached": lambda days=30: address_service.get_active_addresses_cached(build_service_context(), days),
