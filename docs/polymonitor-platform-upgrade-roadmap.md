@@ -531,7 +531,7 @@ discovered
 #### 4.4 PWA、国际化和 MCP 分发（已完成，2026-07-29）
 
 - 新增可安装 PWA、按构建 SHA 版本化的静态壳缓存、显式更新提示和中英双语断网降级页；所有 `/wm-api` 请求保持严格 `NetworkOnly`，实时市场、Oracle、流动性、账户与 MCP 数据不会从 Service Worker 缓存返回。
-- 建立 `en`/`zh` 稳定词条、浏览器语言检测、用户语言持久化、`html lang` 同步以及日期、数字、百分比格式化服务；构建前完整性门禁会拒绝非法 key、空翻译和两种语言的 key 漂移。
+- 建立 `en`/`zh` 稳定词条、默认英文、用户主动语言切换与持久化、`html lang` 同步以及日期、数字、百分比格式化服务；构建前完整性门禁会拒绝非法 key、空翻译和两种语言的 key 漂移。
 - 公共 Shell、设置、PWA 状态和 Developer Workspace 已完成双语接入；其余专业面板按同一契约逐步迁移，不以本阶段伪装成全站翻译完成。
 - 新增 `/wm-api/mcp` 的无状态 Streamable HTTP JSON-RPC 入口，工具只覆盖市场搜索、市场概览、Oracle 生命周期、有限深度流动性、数据质量、公开 Briefing 和其中主动发布的 Watchlist 快照。
 - 数据工具统一要求独立 `mcp:read` Bearer API key，并继承分钟限速、日配额、一次性密钥显示、吊销和审计；输出使用字段白名单，排除私人布局、私人 Watchlist、notes、提醒规则/事件、session、凭据、管理员接口和任意 API 代理。

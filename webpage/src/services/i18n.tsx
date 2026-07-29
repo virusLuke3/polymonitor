@@ -15,9 +15,9 @@ function detectLocale(): Locale {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored === 'en' || stored === 'zh') return stored;
   } catch {
-    // Storage may be blocked. Browser detection remains a safe fallback.
+    // Storage may be blocked. English remains the deterministic default.
   }
-  return navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  return 'en';
 }
 
 function interpolate(message: string, params?: MessageParams) {

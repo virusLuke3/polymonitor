@@ -17,7 +17,7 @@ The PWA control in the shared header exposes install, connectivity, and update s
 The initial locale set is English (`en`) and Simplified Chinese (`zh`).
 
 - Stable flat keys live in `webpage/src/locales/en.json` and `zh.json`.
-- `LocaleProvider` owns language detection, `localStorage` persistence, `<html lang>`, translation lookup, and locale-aware date, relative-time, duration, number, currency, and percent formatting.
+- `LocaleProvider` defaults to English, owns explicit user-language persistence in `localStorage`, and manages `<html lang>`, translation lookup, and locale-aware date, relative-time, duration, number, currency, and percent formatting.
 - `npm run check:locales` rejects invalid keys, empty translations, or key drift between catalogs.
 - The build runs the locale gate before TypeScript and Vite.
 
