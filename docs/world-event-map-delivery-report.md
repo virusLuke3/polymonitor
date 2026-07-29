@@ -94,7 +94,7 @@ webpage npm run build
 - Headless 软件渲染环境自动进入 SVG FALLBACK；32 个事件元素可交互，无横向溢出、无前端 error overlay。
 - 生产 Inspector 能同时展示 Russia 的 OFAC sanctions evidence 与 UCDP country-risk evidence，且不显示 Related Weather Markets。
 
-测试期间观察到现有外部流程会主动停止 `polydata-api.service`，造成短暂 502；日志显示停止前 natural-hazards 请求为 HTTP 200 / 89ms。使用既有 `reset-failed` + `start` 恢复后，内部 `/health`、自然灾害、Intel 和 geo/sanctions 接口恢复。此次没有擅自修改 systemd 或外部控制流程。
+测试期间同时保留多组持续刷新整套 dashboard 的无头浏览器会话，叠加 LOB 与 panel batch 请求后，API health probe 连续超时。现有 `polydata-serving-healthcheck` 按 2 次确认、3 次/30 分钟预算和 warmup/backoff 规则执行了有界恢复，因此窗口内出现短暂 502。关闭验收会话后，GCP 本机 `/health` 恢复为 HTTP 200 / 3ms，自然灾害、Intel 和 geo/sanctions 接口恢复。此次没有通过扩大 worker、关闭 watchdog 或修改 systemd 来掩盖测试负载。
 
 ## 6. 当前明确的覆盖缺口
 
@@ -102,6 +102,6 @@ webpage npm run build
 - 定量气候异常 baseline pipeline 未配置，因此不能声称重大气象异常已具备全球定量覆盖。
 - GDELT 当前降级，Intel 只展示通过证据门槛的记录，不把弱 proxy 作为热点。
 - Headless 验收覆盖了 SVG fallback；真实硬件 GPU 的长时间 FPS/功耗基准不在本次环境中完成。
-- GCP API 被外部流程周期性停止的问题属于共享运行链路，已记录但未在本次地图变更中改写其控制策略。
+- 多个完整 dashboard 并发持续刷新会给共享 API 带来明显容量压力；本轮验证了 bounded recovery，但没有把短时 smoke 扩大为正式容量基准。
 
 以上缺口都以 source health、coverage gap 或 rejected count 呈现，不会被包装成完整覆盖或成功状态。
