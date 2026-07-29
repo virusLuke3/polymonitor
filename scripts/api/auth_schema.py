@@ -6,7 +6,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = "2026-07-28-auth-v1"
-PRODUCT_SCHEMA_VERSION = "2026-07-29-watchlist-alerts-v1"
+PRODUCT_SCHEMA_VERSION = "2026-07-29-layout-briefings-v1"
 
 DDL = """
 CREATE SCHEMA IF NOT EXISTS product;
@@ -203,12 +203,44 @@ CREATE TABLE IF NOT EXISTS product.runtime_state (
     details JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS product.workspace_layouts (
+    user_id BIGINT PRIMARY KEY REFERENCES product.users(id) ON DELETE CASCADE,
+    revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0),
+    active_panel_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+        CHECK (jsonb_typeof(active_panel_ids) = 'array'),
+    panel_layout JSONB NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(panel_layout) = 'object'),
+    preferences JSONB NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(preferences) = 'object'),
+    client_updated_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS product.briefings (
+    id UUID PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES product.users(id) ON DELETE CASCADE,
+    public_id VARCHAR(48) NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    snapshot JSONB NOT NULL CHECK (jsonb_typeof(snapshot) = 'object'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS briefings_user_recent_idx
+    ON product.briefings (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS briefings_public_active_idx
+    ON product.briefings (public_id, expires_at) WHERE revoked_at IS NULL;
+
 INSERT INTO product.schema_migrations (version)
 VALUES ('2026-07-28-auth-v1')
 ON CONFLICT (version) DO NOTHING;
 
 INSERT INTO product.schema_migrations (version)
 VALUES ('2026-07-29-watchlist-alerts-v1')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO product.schema_migrations (version)
+VALUES ('2026-07-29-layout-briefings-v1')
 ON CONFLICT (version) DO NOTHING;
 """
 

@@ -85,7 +85,7 @@ from api.context import RouteContext, ServiceContext
 from api.db_pool import build_api_connection_factory
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, auth_service, bootstrap_service, breaking_event_radar_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_transport_shipping_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_quality_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, product_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, world_cup_match_ops_service, worldcup_dashboard_service, worldcup_intel_service
+from api.services import address_service, auth_service, bootstrap_service, breaking_event_radar_service, briefing_service, clickhouse_orderfilled_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_transport_shipping_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, live_video_source_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_quality_service, market_service, market_workspace_cache_service, new_market_signal_service, polybeats_service, polymarket_macro_map_service, product_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, tech_panels_service, weather_news_service, workspace_layout_service, world_cup_match_ops_service, worldcup_dashboard_service, worldcup_intel_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -258,6 +258,12 @@ def build_route_context(service_context: ServiceContext) -> RouteContext:
         "mark_all_product_alerts_read": product_service.mark_all_alerts_read,
         "get_product_notification_preferences": product_service.get_notification_preferences,
         "update_product_notification_preferences": product_service.update_notification_preferences,
+        "get_workspace_layout": workspace_layout_service.get_workspace_layout,
+        "put_workspace_layout": workspace_layout_service.put_workspace_layout,
+        "list_briefings": briefing_service.list_briefings,
+        "create_briefing": briefing_service.create_briefing,
+        "revoke_briefing": briefing_service.revoke_briefing,
+        "get_public_briefing": briefing_service.get_public_briefing,
         "change_password": auth_service.change_password,
         "create_api_key": auth_service.create_api_key,
         "list_api_keys": auth_service.list_api_keys,
@@ -1187,7 +1193,7 @@ def log_request_end(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    if request.path.startswith("/auth/") or request.path.startswith("/product/") or request.path.startswith("/system/") or request.path.startswith("/runtime/system/"):
+    if request.path.startswith("/auth/") or request.path.startswith("/product/") or request.path.startswith("/briefings/") or request.path.startswith("/system/") or request.path.startswith("/runtime/system/"):
         response.headers["Cache-Control"] = "no-store"
     app.logger.info(
         "request-end request_id=%s method=%s path=%s status=%s duration_ms=%.2f",

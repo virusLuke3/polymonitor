@@ -23,12 +23,14 @@ from .runtime_panels import create_runtime_panels_blueprint
 from .runtime_sports import create_runtime_sports_blueprint
 from .schema import create_schema_blueprint
 from .system import create_system_blueprint
+from .workspace_product import create_workspace_product_blueprint
 
 
 BlueprintFactory = Callable[[Mapping[str, Any]], Any]
 BLUEPRINT_FACTORIES: Final[tuple[BlueprintFactory, ...]] = (
     create_auth_blueprint,
     create_product_blueprint,
+    create_workspace_product_blueprint,
     create_agent_blueprint,
     create_agent_snapshot_blueprint,
     create_bootstrap_blueprint,
