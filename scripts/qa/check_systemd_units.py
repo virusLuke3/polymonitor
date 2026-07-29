@@ -36,8 +36,11 @@ def _template_name(unit: str) -> str:
 
 
 def _module_exists(root: Path, module: str) -> bool:
-    module_path = root.joinpath(*module.split("."))
-    return module_path.with_suffix(".py").is_file() or (module_path / "__init__.py").is_file()
+    for import_root in (root, root / "scripts"):
+        module_path = import_root.joinpath(*module.split("."))
+        if module_path.with_suffix(".py").is_file() or (module_path / "__init__.py").is_file():
+            return True
+    return False
 
 
 def validate(root: Path) -> list[str]:
