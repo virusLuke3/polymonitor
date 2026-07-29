@@ -220,7 +220,8 @@
   font-family: var(--ds-font-mono);
 }
 
-.developer-quickstart pre {
+.developer-quickstart pre,
+.developer-sdk pre {
   overflow: auto;
   margin: var(--ds-space-5) 0 0;
   border: 1px solid var(--ds-color-border);
@@ -228,6 +229,10 @@
   color: var(--ds-color-accent);
   font: 11px/1.7 var(--ds-font-mono);
   padding: var(--ds-space-4);
+}
+
+.developer-sdk {
+  margin-top: var(--ds-space-3);
 }
 
 .developer-security-list li {

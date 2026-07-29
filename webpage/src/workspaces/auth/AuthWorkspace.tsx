@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useState } from 'preact/hooks';
+import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import {
   AuthApiError,
   changePassword,
@@ -31,6 +32,7 @@ export function AuthFrame({ children }: { children: ComponentChildren }) {
         <div className="auth-brand">POLYDATA ACCESS <span>IDENTITY CONTROL PLANE</span></div>
       </header>
       {children}
+      <MobileWorkspaceNav />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
+import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import { fetchAuthSession, type AuthSession } from '@/services/auth';
 import {
   createBriefing,
@@ -106,6 +107,7 @@ export function PublicBriefingWorkspace() {
           <p>{snapshot.source.warning}</p>
         </section>
       </main>
+      <MobileWorkspaceNav />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from 'preact/hooks';
+import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import { useI18n, type MessageKey } from '@/services/i18n';
 
 const TOOL_KEYS: MessageKey[] = [
@@ -59,6 +60,8 @@ export function DeveloperWorkspace() {
             <div className="developer-actions">
               <a href="/account">{t('developer.issueKey')}</a>
               <a href="/.well-known/mcp/server-card.json">{t('developer.discovery')}</a>
+              <a href="/wm-api/openapi.json">{t('developer.openapi')}</a>
+              <a href="/sdk/polymonitor-v1.mjs">{t('developer.sdk')}</a>
             </div>
           </article>
           <article className="developer-panel">
@@ -96,7 +99,23 @@ export function DeveloperWorkspace() {
             </ul>
           </article>
         </section>
+
+        <section className="developer-panel developer-sdk">
+          <span>{t('developer.sdkKicker')}</span>
+          <h2>{t('developer.sdkTitle')}</h2>
+          <p>{t('developer.sdkDetail')}</p>
+          <pre><code>{`import { PolyMonitorClient } from '${origin}/sdk/polymonitor-v1.mjs';
+
+const client = new PolyMonitorClient();
+const markets = await client.searchMarkets({ q: 'election', pageSize: 10 });
+const quality = await client.getDataQuality();`}</code></pre>
+          <div className="developer-actions">
+            <a href="/sdk/polymonitor-v1.d.ts">{t('developer.types')}</a>
+            <a href="/wm-api/v1/openapi.json">{t('developer.openapiV1')}</a>
+          </div>
+        </section>
       </main>
+      <MobileWorkspaceNav />
     </div>
   );
 }

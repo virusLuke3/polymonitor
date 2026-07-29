@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import {
   formatAge,
   MetricCard,
@@ -12,6 +13,7 @@ import {
   shortHash,
 } from '@/panels/shared/formatters';
 import { fetchMarketDataQuality } from '@/services/api';
+import { useI18n } from '@/services/i18n';
 import type {
   MarketDataQualityDimension,
   MarketDataQualityGap,
@@ -317,6 +319,7 @@ function GapMarkets({ payload }: { payload: MarketDataQualityPayload }) {
 }
 
 export function DataQualityWorkspace() {
+  const { locale, t } = useI18n();
   const [payload, setPayload] = useState<MarketDataQualityPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -333,11 +336,11 @@ export function DataQualityWorkspace() {
       setError(null);
     } catch (caught) {
       if (requestId !== requestRef.current) return;
-      setError(caught instanceof Error ? caught.message : 'Data quality contract unavailable');
+      setError(caught instanceof Error ? caught.message : t('quality.loadError'));
     } finally {
       if (requestId === requestRef.current) setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -350,11 +353,11 @@ export function DataQualityWorkspace() {
 
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = 'Prediction Market Data Quality · PolyData';
+    document.title = t('quality.documentTitle');
     return () => {
       document.title = previousTitle;
     };
-  }, []);
+  }, [locale, t]);
 
   const dimensions = payload?.dimensions || [];
   const criticalCount = useMemo(
@@ -368,13 +371,13 @@ export function DataQualityWorkspace() {
     <div className="quality-shell">
       <header className="quality-topbar">
         <div className="quality-brand-cluster">
-          <a className="quality-home-link" href="/">◎ Atlas</a>
-          <div className="quality-brand">POLYDATA DATA QUALITY <span>ORACLE + MARKET LIFECYCLE</span></div>
+          <a className="quality-home-link" href="/">◎ {t('mobileNav.atlas')}</a>
+          <div className="quality-brand">{t('quality.brand')} <span>{t('quality.brandDetail')}</span></div>
         </div>
         <div className="quality-actions">
-          <a href="/docs/documentation/">Project docs</a>
+          <a href="/docs/documentation/">{t('quality.docs')}</a>
           <button type="button" disabled={loading} onClick={() => void refresh()}>
-            {loading ? 'Refreshing…' : 'Refresh audit'}
+            {loading ? t('quality.refreshing') : t('quality.refresh')}
           </button>
         </div>
       </header>
@@ -383,27 +386,24 @@ export function DataQualityWorkspace() {
         <section className="quality-hero">
           <div className="quality-hero-copy">
             <div className="quality-kicker-row">
-              <span>Prediction market truth plane</span>
+              <span>{t('quality.kicker')}</span>
               <StatusBadge label={qualityStateLabel(payload)} tone={statusTone(payload?.status || 'loading')} />
             </div>
-            <h1>ORACLE LIFECYCLE<br />&amp; DATA QUALITY</h1>
-            <p>
-              One read-only audit surface for canonical identity, market coverage, Oracle finality,
-              synchronization watermarks and known data gaps.
-            </p>
+            <h1>{t('quality.titleLineOne')}<br />{t('quality.titleLineTwo')}</h1>
+            <p>{t('quality.description')}</p>
             <div className="quality-hero-contract">
-              <span>Contract <b>{payload?.contractVersion || 'prediction-market-data-quality.v1'}</b></span>
-              <span>Generated <b>{payload ? formatRelative(payload.generatedAt) : 'waiting'}</b></span>
+              <span>{t('quality.contract')} <b>{payload?.contractVersion || 'prediction-market-data-quality.v1'}</b></span>
+              <span>{t('quality.generated')} <b>{payload ? formatRelative(payload.generatedAt) : t('quality.waiting')}</b></span>
             </div>
           </div>
           <div className="quality-score-lockup">
-            <span>Weighted readiness</span>
+            <span>{t('quality.weightedReadiness')}</span>
             <strong>{payload ? payload.score.toFixed(1) : '--'}</strong>
             <em>/ 100</em>
             <progress max={100} value={payload?.score || 0}>{payload?.score || 0}</progress>
             <div>
-              <span>Critical <b>{criticalCount}</b></span>
-              <span>Gaps <b>{payload?.summary.activeGapCount ?? '--'}</b></span>
+              <span>{t('quality.critical')} <b>{criticalCount}</b></span>
+              <span>{t('quality.gaps')} <b>{payload?.summary.activeGapCount ?? '--'}</b></span>
             </div>
           </div>
         </section>
@@ -411,39 +411,39 @@ export function DataQualityWorkspace() {
         {error ? (
           <div className="quality-error-banner" role="alert">
             <span>{error}</span>
-            <em>{payload ? 'Last good audit remains visible.' : 'Retry when the API is available.'}</em>
+            <em>{payload ? t('quality.lastGood') : t('quality.retryApi')}</em>
           </div>
         ) : null}
 
         {payload ? (
           <>
-            <section className="quality-metric-grid" aria-label="Data quality summary">
+            <section className="quality-metric-grid" aria-label={t('quality.summary')}>
               <MetricCard
-                eyebrow="Canonical markets"
+                eyebrow={t('quality.canonicalMarkets')}
                 value={formatCompact(payload.summary.marketCount)}
                 detail={`${formatCompact(payload.summary.servingMarketCount)} in serving universe`}
                 tone="info"
               />
               <MetricCard
-                eyebrow="Oracle events"
+                eyebrow={t('quality.oracleEvents')}
                 value={formatCompact(payload.summary.oracleEventCount)}
                 detail={`${formatCompact(payload.summary.oracleBoundMarketCount)} bound markets`}
                 tone="info"
               />
               <MetricCard
-                eyebrow="Recently traded"
+                eyebrow={t('quality.recentlyTraded')}
                 value={formatCompact(payload.summary.recentlyTradedMarketCount)}
                 detail={`Latest OrderFilled ${formatAge(tradeAge)} ago`}
                 tone={tradeAge != null && tradeAge <= 900 ? 'positive' : 'warning'}
               />
               <MetricCard
-                eyebrow="Oracle watermark"
+                eyebrow={t('quality.oracleWatermark')}
                 value={formatAge(oracleAge)}
                 detail={`Latest event ${formatDate(payload.summary.latestOracleAt)}`}
                 tone={oracleAge != null && oracleAge <= 7 * 86_400 ? 'warning' : 'critical'}
               />
               <MetricCard
-                eyebrow="Published gaps"
+                eyebrow={t('quality.publishedGaps')}
                 value={String(payload.summary.activeGapCount)}
                 detail={`${payload.summary.criticalDimensionCount} critical · ${payload.summary.warningDimensionCount} warning`}
                 tone={payload.summary.criticalDimensionCount ? 'critical' : (payload.summary.warningDimensionCount ? 'warning' : 'positive')}
@@ -454,10 +454,10 @@ export function DataQualityWorkspace() {
               <section className="quality-card quality-dimensions-card">
                 <div className="quality-section-heading">
                   <div>
-                    <span>Coverage + freshness contract</span>
-                    <h2>Quality dimensions</h2>
+                    <span>{t('quality.coverageContract')}</span>
+                    <h2>{t('quality.dimensions')}</h2>
                   </div>
-                  <span>{dimensions.length} declared checks</span>
+                  <span>{t('quality.declaredChecks', { count: dimensions.length })}</span>
                 </div>
                 <div className="quality-dimension-grid">
                   {dimensions.map((item) => <DimensionCard item={item} key={item.id} />)}
@@ -479,8 +479,8 @@ export function DataQualityWorkspace() {
             <section className="quality-card quality-semantics-card">
               <div className="quality-section-heading">
                 <div>
-                  <span>Interpretation boundary</span>
-                  <h2>Audit semantics</h2>
+                  <span>{t('quality.interpretationBoundary')}</span>
+                  <h2>{t('quality.auditSemantics')}</h2>
                 </div>
               </div>
               <div className="quality-semantics-grid">
@@ -492,11 +492,12 @@ export function DataQualityWorkspace() {
             </section>
           </>
         ) : (
-          <section className="quality-loading-grid" aria-label="Loading data quality audit">
+          <section className="quality-loading-grid" aria-label={t('quality.loading')}>
             {Array.from({ length: 10 }, (_, index) => <div className="quality-skeleton" key={index} />)}
           </section>
         )}
       </main>
+      <MobileWorkspaceNav />
     </div>
   );
 }

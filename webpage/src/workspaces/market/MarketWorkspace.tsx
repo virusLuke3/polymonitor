@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import {
   MetricCard,
   operationalTone,
@@ -17,6 +18,7 @@ import {
 } from '@/panels/shared/formatters';
 import { fetchMarketLobByToken, fetchWorkspaceBundle } from '@/services/api';
 import { fetchAuthSession } from '@/services/auth';
+import { useI18n } from '@/services/i18n';
 import { addWatchlistMarket } from '@/services/product';
 import type {
   ChartPoint,
@@ -594,6 +596,7 @@ function OutcomeRail({
 }
 
 export function MarketWorkspace() {
+  const { t, formatDateTime } = useI18n();
   const marketId = readMarketId();
   const [bundle, setBundle] = useState<WorkspaceBundle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -604,7 +607,7 @@ export function MarketWorkspace() {
 
   const refresh = useCallback(async () => {
     if (!marketId) {
-      setError('The market URL does not contain a valid numeric market ID.');
+      setError(t('market.invalidUrlDetail'));
       setLoading(false);
       return;
     }
@@ -631,11 +634,11 @@ export function MarketWorkspace() {
       setLastRefreshedAt(Date.now());
     } catch (loadError) {
       if (requestId !== requestRef.current) return;
-      setError(loadError instanceof Error ? loadError.message : 'Unable to load this market workspace.');
+      setError(loadError instanceof Error ? loadError.message : t('market.loadError'));
     } finally {
       if (requestId === requestRef.current) setLoading(false);
     }
-  }, [marketId]);
+  }, [marketId, t]);
 
   useEffect(() => {
     void refresh();
@@ -668,7 +671,7 @@ export function MarketWorkspace() {
       await addWatchlistMarket(marketId);
       setWatchState('watched');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to add this market to the watchlist.');
+      setError(caught instanceof Error ? caught.message : t('market.watchError'));
       setWatchState('idle');
     }
   };
@@ -701,10 +704,10 @@ export function MarketWorkspace() {
     return (
       <div className="market-shell">
         <main className="market-fatal-state">
-          <StatusBadge label="INVALID MARKET URL" tone="critical" />
-          <h1>Market workspace unavailable</h1>
-          <p>Use a URL such as <code>/markets/2784982</code> or open a market from the Atlas search.</p>
-          <a href="/">Return to Atlas</a>
+          <StatusBadge label={t('market.invalidUrl')} tone="critical" />
+          <h1>{t('market.unavailable')}</h1>
+          <p>{t('market.invalidUrlHelp')} <code>/markets/2784982</code></p>
+          <a href="/">{t('market.returnAtlas')}</a>
         </main>
       </div>
     );
@@ -714,20 +717,20 @@ export function MarketWorkspace() {
     <div className="market-shell">
       <header className="market-topbar">
         <div className="market-brand-cluster">
-          <a className="market-home-link" href="/">◎ Atlas</a>
-          <a className="market-home-link" href="/data-quality">Quality</a>
-          <div className="market-brand">POLYDATA MARKET DOSSIER <span>EVIDENCE-FIRST WORKSPACE</span></div>
+          <a className="market-home-link" href="/">◎ {t('mobileNav.atlas')}</a>
+          <a className="market-home-link" href="/data-quality">{t('mobileNav.quality')}</a>
+          <div className="market-brand">{t('market.brand')} <span>{t('market.brandDetail')}</span></div>
         </div>
         <div className="market-actions">
           <span className="market-refresh-note">
-            {lastRefreshedAt ? `Observed ${new Date(lastRefreshedAt).toLocaleTimeString()}` : 'Awaiting first observation'}
+            {lastRefreshedAt ? t('market.observedAt', { date: formatDateTime(lastRefreshedAt) }) : t('market.awaitingObservation')}
           </span>
           <button type="button" disabled={watchState !== 'idle'} onClick={() => void watchMarket()}>
-            {watchState === 'busy' ? 'Adding…' : watchState === 'watched' ? 'Watching ✓' : 'Watch market'}
+            {watchState === 'busy' ? t('market.adding') : watchState === 'watched' ? t('market.watching') : t('market.watch')}
           </button>
-          <button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href)}>Copy link</button>
+          <button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href)}>{t('market.copyLink')}</button>
           <button type="button" className="primary" disabled={loading} onClick={() => void refresh()}>
-            {loading ? 'Refreshing…' : 'Refresh evidence'}
+            {loading ? t('market.refreshing') : t('market.refresh')}
           </button>
         </div>
       </header>
@@ -736,7 +739,7 @@ export function MarketWorkspace() {
         <section className="market-hero">
           <div className="market-hero-copy">
             <div className="market-kicker-row">
-              <span>Market / {marketId}</span>
+              <span>{t('market.marketId', { id: marketId })}</span>
               <StatusBadge
                 label={String(market?.status || (loading ? 'loading' : 'unknown')).toUpperCase()}
                 tone={statusTone(market?.status || (loading ? 'loading' : 'unknown'))}
@@ -744,11 +747,11 @@ export function MarketWorkspace() {
               />
               <StatusBadge label={freshness.toUpperCase()} tone={statusTone(freshness)} compact />
             </div>
-            <h1>{market?.title || (loading ? 'Loading market dossier…' : `Market #${marketId}`)}</h1>
+            <h1>{market?.title || (loading ? t('market.loading') : t('market.marketNumber', { id: marketId }))}</h1>
             <p>
               {outcome?.label && outcome.label !== market?.title
-                ? `Focused outcome: ${outcome.label}`
-                : 'One auditable surface for probability, execution, resolution and real-world evidence.'}
+                ? t('market.focusedOutcome', { outcome: outcome.label })
+                : t('market.description')}
             </p>
             <div className="market-hero-tags">
               {tags.map((tag) => (
@@ -757,12 +760,12 @@ export function MarketWorkspace() {
             </div>
           </div>
           <div className="market-probability-lockup">
-            <span>Current YES probability</span>
+            <span>{t('market.currentYes')}</span>
             <strong>{formatPercent(yesPrice)}</strong>
             <em className={signedClass(price?.change24h)}>{formatSignedPercent(price?.change24h)} / 24h</em>
             <div>
-              <span>NO <b>{formatPercent(noPrice)}</b></span>
-              <span>Closes <b>{formatRelative(market?.endDate)}</b></span>
+              <span>{t('market.no')} <b>{formatPercent(noPrice)}</b></span>
+              <span>{t('market.closes')} <b>{formatRelative(market?.endDate)}</b></span>
             </div>
           </div>
         </section>
@@ -770,39 +773,39 @@ export function MarketWorkspace() {
         {error ? (
           <div className="market-error-banner" role="alert">
             <span>{error}</span>
-            <em>{bundle ? 'Last good evidence remains visible.' : 'Retry when the API is available.'}</em>
+            <em>{bundle ? t('market.lastGood') : t('market.retryApi')}</em>
           </div>
         ) : null}
 
         {bundle ? (
           <>
-            <section className="market-metric-grid" aria-label="Market summary">
+            <section className="market-metric-grid" aria-label={t('market.summary')}>
               <MetricCard
-                eyebrow="YES probability"
+                eyebrow={t('market.yesProbability')}
                 value={formatPercent(yesPrice)}
                 detail={`${cleanSource(price?.priceSource || bundle.servingSource)} · ${longAge(observedAt)}`}
                 tone={yesPrice == null ? 'warning' : 'positive'}
               />
               <MetricCard
-                eyebrow="24h volume"
+                eyebrow={t('market.volume24h')}
                 value={formatCurrencyCompact(volume)}
                 detail={`${bundle.trades.length} local OrderFilled rows · ${formatCompact(trades24h)} reported 24h`}
                 tone={Number(volume || 0) > 0 ? 'info' : 'neutral'}
               />
               <MetricCard
-                eyebrow="Evidence readiness"
+                eyebrow={t('market.evidenceReadiness')}
                 value={`${readyClaims}/${sourceClaims.length}`}
                 detail={`${issueCount} active contract issues`}
                 tone={issueCount ? 'warning' : (readyClaims ? 'positive' : 'neutral')}
               />
               <MetricCard
-                eyebrow="Resolution"
+                eyebrow={t('market.resolution')}
                 value={String(bundle.oracle?.summary?.completionStatus || bundle.oracle?.completionStatus || market?.status || '--').toUpperCase()}
                 detail={`${bundle.oracle?.timeline?.length || 0} Oracle lifecycle events`}
                 tone={statusTone(bundle.oracle?.summary?.completionStatus || bundle.oracle?.completionStatus || market?.status)}
               />
               <MetricCard
-                eyebrow="Workspace health"
+                eyebrow={t('market.workspaceHealth')}
                 value={healthLevel.toUpperCase()}
                 detail={`${bundle.servingSource || 'fallback'} serving · contract v1`}
                 tone={statusTone(healthLevel)}
@@ -819,8 +822,8 @@ export function MarketWorkspace() {
               <section className="market-card market-chart-card">
                 <div className="market-section-heading">
                   <div>
-                    <span>Probability Evidence</span>
-                    <h2>Market history</h2>
+                    <span>{t('market.probabilityEvidence')}</span>
+                    <h2>{t('market.history')}</h2>
                   </div>
                   <StatusBadge
                     label={String(bundle.health?.chartStatus || bundle.chart?.historyStatus || 'unknown').toUpperCase()}
@@ -845,11 +848,12 @@ export function MarketWorkspace() {
             </div>
           </>
         ) : (
-          <section className="market-loading-grid" aria-label="Loading market workspace">
+          <section className="market-loading-grid" aria-label={t('market.loading')}>
             {Array.from({ length: 8 }, (_, index) => <div className="market-skeleton" key={index} />)}
           </section>
         )}
       </main>
+      <MobileWorkspaceNav />
     </div>
   );
 }

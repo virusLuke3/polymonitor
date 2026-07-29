@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import { PwaControl } from '@/components/PwaControl';
 import { useI18n, type MessageKey } from '@/services/i18n';
 
@@ -95,6 +96,7 @@ export function AppShell({
         </div>
       </header>
       {children}
+      <MobileWorkspaceNav />
     </div>
   );
 }

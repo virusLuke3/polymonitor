@@ -11,3 +11,4 @@
 @import url('./watchlist-workspace.css') layer(components);
 @import url('./briefing-workspace.css') layer(components);
 @import url('./developer-workspace.css') layer(components);
+@import url('./mobile-workspace-nav.css') layer(components);
