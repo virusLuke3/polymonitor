@@ -14,6 +14,7 @@ RECOVERY_STATE="${LOCAL_STATE_DIR}/tunnel-recovery.json"
 HEARTBEAT_FILE="${LOCAL_STATE_DIR}/tunnel-health.json"
 REMOTE_HEARTBEAT_RELATIVE=".local/state/polydata-operations/tunnel-health.json"
 PYTHON_BIN="${POLYDATA_PYTHON_BIN:-python3}"
+DRY_RUN="${POLYDATA_TUNNEL_HEALTH_DRY_RUN:-false}"
 SSH_OPTS=(
   -o BatchMode=yes
   -o ConnectTimeout=8
@@ -39,6 +40,13 @@ load_env_file() {
 
 log() {
   printf '[tunnel-health] %s\n' "$*" >&2
+}
+
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 validate_positive_integer() {
@@ -280,6 +288,10 @@ restart_tunnel() {
     log "refusing recovery for non-allowlisted unit"
     return 1
   fi
+  if is_truthy "$DRY_RUN"; then
+    log "dry-run: would restart allowlisted reverse tunnel"
+    return 0
+  fi
   systemctl --user restart "$EXPECTED_TUNNEL_UNIT"
 }
 
@@ -292,6 +304,10 @@ record_and_publish() {
   local heartbeat
   heartbeat="$(build_heartbeat "$overall" "$postgres" "$clickhouse" "$unit_status")"
   write_local_heartbeat "$heartbeat"
+  if is_truthy "$DRY_RUN"; then
+    log "dry-run: remote heartbeat publish suppressed"
+    return 0
+  fi
   if ! publish_remote_heartbeat "$target" "$heartbeat"; then
     log "remote heartbeat publish unavailable"
   fi

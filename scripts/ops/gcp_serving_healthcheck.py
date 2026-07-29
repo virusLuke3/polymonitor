@@ -36,10 +36,10 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
         return max(minimum, default)
 
 
-API_UNIT = os.environ.get("POLYDATA_SERVING_HEALTH_API_UNIT", "polydata-api.service")
-PUBLISHER_UNIT = os.environ.get(
-    "POLYDATA_SERVING_HEALTH_PUBLISHER_UNIT", "polydata-telegram-publisher.service"
-)
+EXPECTED_API_UNIT = "polydata-api.service"
+EXPECTED_PUBLISHER_UNIT = "polydata-telegram-publisher.service"
+API_UNIT = os.environ.get("POLYDATA_SERVING_HEALTH_API_UNIT", EXPECTED_API_UNIT)
+PUBLISHER_UNIT = os.environ.get("POLYDATA_SERVING_HEALTH_PUBLISHER_UNIT", EXPECTED_PUBLISHER_UNIT)
 API_BASE = os.environ.get(
     "POLYDATA_SERVING_HEALTH_API_BASE",
     f"http://127.0.0.1:{os.environ.get('POLYDATA_API_PORT', '18500')}",
@@ -52,6 +52,7 @@ BACKOFF_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_BACKOFF_SECONDS", 1800)
 API_WARMUP_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_API_WARMUP_SECONDS", 180)
 PUBLISHER_WARMUP_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_PUBLISHER_WARMUP_SECONDS", 120)
 PUBLISHER_STALE_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_PUBLISHER_STALE_SECONDS", 300)
+SYSTEMCTL_TIMEOUT_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_SYSTEMCTL_TIMEOUT_SECONDS", 60)
 
 STATE_DIR = Path(
     os.environ.get(
@@ -113,18 +114,42 @@ def _unit_state(state: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["systemctl", "--user", *args],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-        timeout=30,
-    )
+    command = ["systemctl", "--user", *args]
+    try:
+        return subprocess.run(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=SYSTEMCTL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        return subprocess.CompletedProcess(
+            command,
+            124,
+            stdout=f"{output}\nsystemctl timed out after {SYSTEMCTL_TIMEOUT_SECONDS}s".strip(),
+        )
 
 
 def _unit_active(unit: str) -> bool:
     return _systemctl("is-active", "--quiet", unit).returncode == 0
+
+
+def _unit_uptime_seconds(unit: str) -> int | None:
+    result = _systemctl("show", unit, "--property=ActiveEnterTimestampMonotonic", "--value")
+    if result.returncode != 0:
+        return None
+    try:
+        active_since_usec = int(result.stdout.strip())
+    except (TypeError, ValueError):
+        return None
+    if active_since_usec <= 0:
+        return None
+    return max(0, int(time.monotonic() - (active_since_usec / 1_000_000)))
 
 
 def _probe_json(path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -202,6 +227,13 @@ def _recover(
     warmup_seconds: int,
 ) -> None:
     current = _unit_state(state, key)
+    unit_uptime = _unit_uptime_seconds(unit)
+    if unit_uptime is not None and unit_uptime < warmup_seconds:
+        current["consecutive_failures"] = 0
+        current["last_failure"] = reason
+        _log(f"{key} unhealthy during unit warmup ({unit_uptime}s/{warmup_seconds}s): {reason}")
+        return
+
     last_recovery_at = int(current.get("last_recovery_at") or 0)
     if last_recovery_at and now - last_recovery_at < warmup_seconds:
         _log(
@@ -309,6 +341,9 @@ def run_once(*, now: int | None = None) -> int:
 
 
 def main() -> int:
+    if API_UNIT != EXPECTED_API_UNIT or PUBLISHER_UNIT != EXPECTED_PUBLISHER_UNIT:
+        _log("refusing to manage a non-allowlisted systemd unit")
+        return 2
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     with LOCK_PATH.open("a+", encoding="utf-8") as lock_file:
         try:

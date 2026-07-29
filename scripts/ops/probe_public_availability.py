@@ -155,12 +155,21 @@ def _notification_message(
 
 
 def _send_telegram(message: str) -> dict[str, str]:
-    token = os.environ.get("POLYDATA_EXTERNAL_ALERT_TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.environ.get("POLYDATA_EXTERNAL_ALERT_TELEGRAM_CHAT_ID", "")
+    token = (
+        os.environ.get("POLYDATA_EXTERNAL_ALERT_TELEGRAM_BOT_TOKEN", "")
+        or os.environ.get("POLYDATA_TELEGRAM_BOT_TOKEN", "")
+    )
+    chat_id = (
+        os.environ.get("POLYDATA_EXTERNAL_ALERT_TELEGRAM_CHAT_ID", "")
+        or os.environ.get("POLYDATA_TELEGRAM_CHANNEL_MONITOR", "")
+    )
     if not token or not chat_id:
         return {"status": "not-configured"}
     form = {"chat_id": chat_id, "text": message, "disable_web_page_preview": "true"}
-    thread_id = os.environ.get("POLYDATA_EXTERNAL_ALERT_TELEGRAM_THREAD_ID", "")
+    thread_id = (
+        os.environ.get("POLYDATA_EXTERNAL_ALERT_TELEGRAM_THREAD_ID", "")
+        or os.environ.get("POLYDATA_TELEGRAM_THREAD_MONITOR", "")
+    )
     if thread_id:
         form["message_thread_id"] = thread_id
     try:
@@ -170,7 +179,9 @@ def _send_telegram(message: str) -> dict[str, str]:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             method="POST",
         )
-        response = build_opener(ProxyHandler({})).open(request, timeout=15)
+        # Public availability probes deliberately bypass local proxies, but
+        # Telegram delivery must honor the operator's configured egress proxy.
+        response = build_opener().open(request, timeout=15)
         try:
             code = int(getattr(response, "status", 200))
             response.read(1024)

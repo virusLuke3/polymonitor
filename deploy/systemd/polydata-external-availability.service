@@ -8,16 +8,16 @@ ConditionEnvironment=!POLYDATA_DEPLOY_ROLE=gcp-api
 Type=oneshot
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/ops/probe_public_availability.py --output "${POLYDATA_EXTERNAL_MONITOR_OUTPUT:-%S/polydata-external-monitor/availability.json}"'
+Environment=POLYDATA_EXTERNAL_MONITOR_OUTPUT=%h/.local/state/polydata-external-monitor/availability.json
+ExecStartPre=/usr/bin/install -d -m 0700 %h/.local/state/polydata-external-monitor
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/ops/probe_public_availability.py --output "${POLYDATA_EXTERNAL_MONITOR_OUTPUT}"'
 TimeoutStartSec=45
 UMask=0077
-StateDirectory=polydata-external-monitor
-StateDirectoryMode=0700
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%S/polydata-external-monitor
+ReadWritePaths=%h/.local/state/polydata-external-monitor
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 StandardOutput=journal
 StandardError=journal
