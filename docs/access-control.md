@@ -6,7 +6,8 @@ an explicit product identity boundary.
 ## Access model
 
 - Anonymous visitors can use the World monitor, Market Dossiers and Data Quality workspace.
-- Users receive server-side sessions and can manage their own password.
+- Users receive server-side sessions, can manage their own password, and own private watchlists,
+  alert rules, in-app events and notification preferences.
 - Administrators can open `/operations`, inspect the audit trail and issue scoped API keys.
 - API keys currently support only `operations:read`; every key has a per-minute rate limit and
   daily quota.
@@ -22,7 +23,8 @@ with `operations:read`.
 - The production cookie is `Secure`, `HttpOnly`, `SameSite=Lax` and uses the `__Host-` prefix.
 - State-changing browser requests require a session-bound CSRF token in `X-CSRF-Token`.
 - Raw API keys are returned once. PostgreSQL stores only their hashes and non-secret prefixes.
-- Login attempts, session changes, password changes and API-key lifecycle events are audited.
+- Login attempts, session changes, password changes, API-key lifecycle events and product
+  preference changes are audited.
   Client addresses and user agents are stored only as peppered hashes.
 - Authentication is fail-closed at API startup when enabled but the schema or audit pepper is
   missing.

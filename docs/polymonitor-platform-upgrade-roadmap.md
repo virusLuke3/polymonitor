@@ -510,16 +510,23 @@ discovered
 - `/system/health`、`/system/seed-health` 与 `/operations` 已纳入管理员保护；普通 `/health` 保持公开，继续服务 GCP 发布探针。
 - Operations 仍是只读应用控制面，不提供 SSH、systemd、凭据回显或修复写操作；原有 Quant、LOB、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试业务文件保持不动。
 
-下一批用户产品能力：Watchlist、市场/Oracle gap 告警与通知偏好。
+#### 4.2 Watchlist、市场/Oracle 告警与通知偏好（已完成，2026-07-29）
+
+- 新增受 session 与 CSRF 保护的 `/watchlist`，支持按 canonical local market ID 跟踪市场，并从 Market Dossier 一键加入。
+- `product` schema 只保存用户选择、规则、事件与通知偏好；价格、市场状态和 Oracle lifecycle 继续读取 canonical `core` 数据，不建立第二份事实表。
+- 自动规则覆盖 Oracle gap 与 dispute；可配置规则覆盖价格上下穿、proposal、resolution 和 market close。独立 evaluator 仅在 false→true 转换时生成事件，支持 rearm、cooldown、去重和运行状态记录。
+- 新增 in-app inbox、read/read-all、digest cadence、quiet hours 与 timezone；Telegram 继续由原隔离 runtime 管理，email 明确为 unavailable。
+- 保持 Quant、LOB、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件不动。
+
+下一批用户产品能力：服务端布局同步与可分享 briefing。
 
 ## 下一步执行建议
 
 工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
 Workspace 以及 Oracle/data-quality 阶段均已建立。保持现有排除边界时，下一阶段是：
 
-1. Watchlist、市场/Oracle gap 告警和通知偏好。
-2. 服务端布局同步与可分享 briefing。
-3. PWA、国际化和 MCP 分发。
+1. 服务端布局同步与可分享 briefing。
+2. PWA、国际化和 MCP 分发。
 
 若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
 PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。
