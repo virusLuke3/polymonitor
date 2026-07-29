@@ -16,6 +16,7 @@ Private notes, credentials, deployment journals, and non-public research should 
 - `data-quality-workspace.md` - Oracle lifecycle, data-quality contract and gap semantics.
 - `pwa-i18n.md` - install/update behavior, offline shell boundary, locale contracts, and completeness gate.
 - `mcp-distribution.md` - read-only prediction-market MCP tools, authentication, and privacy boundary.
+- `mobile-open-api-sdk.md` - mobile workspace rail, specialist i18n scope, OpenAPI/SDK distribution, and OAuth/Web Push boundaries.
 - `updates.md` - daily public progress log and reusable update template.
 - `../deploy/README.md` - deployment templates for local `systemd` runtime and remote frontend hosting.
 

@@ -548,3 +548,18 @@ Workspace 以及 Oracle/data-quality 阶段均已建立。保持现有排除边�
 
 若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
 PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。
+
+#### 4.5 移动端信息架构、专业页面国际化与公开 SDK（已完成，2026-07-29）
+
+- 新增移动端五入口工作区导航，统一 Atlas、Data Quality、Watchlist、Briefings 和 Developers；使用 62px 触控区域、safe-area、当前页状态和 reduced-motion，避免把桌面链接横向塞入小屏。
+- Market Dossier 与 Data Quality 的导航、Hero、刷新/错误状态和核心指标接入稳定 `en`/`zh` key；嵌套证据表继续按专业面板逐步迁移，不宣称全站正文已经全部翻译。
+- OpenAPI 升级到 1.1，除原 Panel Runtime 外，新增市场搜索、市场身份、Market Workspace、Oracle lifecycle、数据质量、公开 Briefing 与 MCP 的只读契约；私人产品和管理员端点继续排除。
+- 发布零依赖 ESM JavaScript SDK 与 TypeScript 声明，公共读取无需凭据，MCP 工具调用必须由调用方显式提供 `mcp:read` Key。
+- 按 MCP 官方授权规范和 RFC 9728 核验后，未在没有真实 OAuth 2.1 authorization server 的情况下伪造 Protected Resource Metadata；当前生产仍明确使用受配额和审计约束的 API Key。
+- Web Push 尚未启用；它必须与 VAPID 私钥托管、subscription 撤销/清理、quiet hours/digest、失败退订和后台 publisher 一次落地，不能只增加一个浏览器按钮。
+
+下一批在现有边界内的工作：
+
+1. 选择并接入真实 OAuth 2.1 issuer，完成 MCP Protected Resource Metadata、PKCE 和客户端注册。
+2. 建立 Web Push 的 VAPID、subscription 和可控 publisher 闭环。
+3. 继续迁移 Market/Data Quality 内层证据表，以及 Watchlist/Briefing/Auth 的正文国际化。

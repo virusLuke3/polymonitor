@@ -11,7 +11,7 @@ from api.runtime_panels.types import RuntimePanelModule
 
 API_VERSION = "v1"
 OPENAPI_VERSION = "3.1.0"
-OPENAPI_DOCUMENT_VERSION = "1.0.0"
+OPENAPI_DOCUMENT_VERSION = "1.1.0"
 ENVELOPE_STATUSES = frozenset({"ok", "partial", "error"})
 
 
@@ -212,14 +212,40 @@ def build_openapi_document(panels: Sequence[RuntimePanelModule]) -> dict[str, An
         },
         "additionalProperties": False,
     }
+    json_response = {
+        "200": {
+            "description": "Successful read-only response",
+            "content": {
+                "application/json": {
+                    "schema": {"type": "object", "additionalProperties": True}
+                }
+            },
+        },
+        "404": {
+            "description": "Resource not found",
+            "content": {
+                "application/json": {
+                    "schema": {"type": "object", "additionalProperties": True}
+                }
+            },
+        },
+    }
+    market_id_parameter = {
+        "name": "marketId",
+        "in": "path",
+        "required": True,
+        "schema": {"type": "integer", "minimum": 1},
+        "description": "Canonical local market ID.",
+    }
     return {
         "openapi": OPENAPI_VERSION,
         "info": {
             "title": "PolyMonitor Runtime API",
             "version": OPENAPI_DOCUMENT_VERSION,
             "description": (
-                "Versioned API contract for the PolyMonitor panel runtime. "
-                "Legacy /runtime routes remain available during migration."
+                "Read-only contract for canonical PolyMonitor market, Oracle, data-quality, "
+                "public briefing, MCP and panel-runtime surfaces. Private layouts, Watchlists, "
+                "alerts, credentials and administrator routes are intentionally excluded."
             ),
         },
         "servers": [{"url": "/wm-api"}],
@@ -227,6 +253,18 @@ def build_openapi_document(panels: Sequence[RuntimePanelModule]) -> dict[str, An
             {
                 "name": "Runtime Panels",
                 "description": "Versioned batch and single-panel runtime payloads.",
+            },
+            {
+                "name": "Prediction Markets",
+                "description": "Canonical market identity, evidence workspace and Oracle lifecycle.",
+            },
+            {
+                "name": "Data Quality",
+                "description": "Public market and Oracle quality contract.",
+            },
+            {
+                "name": "Public Distribution",
+                "description": "Revocable public briefings and bounded MCP transport.",
             },
             {
                 "name": "Schema",
@@ -247,6 +285,121 @@ def build_openapi_document(panels: Sequence[RuntimePanelModule]) -> dict[str, An
                                 }
                             },
                         }
+                    },
+                }
+            },
+            "/markets": {
+                "get": {
+                    "tags": ["Prediction Markets"],
+                    "operationId": "searchMarkets",
+                    "parameters": [
+                        {
+                            "name": "q",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "maxLength": 240},
+                            "description": "Title or market identifier search text.",
+                        },
+                        {
+                            "name": "status",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "string", "default": "active"},
+                        },
+                        {
+                            "name": "page",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "integer", "minimum": 1, "default": 1},
+                        },
+                        {
+                            "name": "pageSize",
+                            "in": "query",
+                            "required": False,
+                            "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 20},
+                        },
+                    ],
+                    "responses": json_response,
+                }
+            },
+            "/markets/{marketId}": {
+                "get": {
+                    "tags": ["Prediction Markets"],
+                    "operationId": "getMarket",
+                    "parameters": [market_id_parameter],
+                    "responses": json_response,
+                }
+            },
+            "/markets/{marketId}/workspace": {
+                "get": {
+                    "tags": ["Prediction Markets"],
+                    "operationId": "getMarketWorkspace",
+                    "parameters": [market_id_parameter],
+                    "responses": json_response,
+                }
+            },
+            "/markets/{marketId}/oracle": {
+                "get": {
+                    "tags": ["Prediction Markets"],
+                    "operationId": "getMarketOracleLifecycle",
+                    "parameters": [market_id_parameter],
+                    "responses": json_response,
+                }
+            },
+            "/data-quality/markets": {
+                "get": {
+                    "tags": ["Data Quality"],
+                    "operationId": "getPredictionMarketDataQuality",
+                    "responses": json_response,
+                }
+            },
+            "/briefings/{publicId}": {
+                "get": {
+                    "tags": ["Public Distribution"],
+                    "operationId": "getPublicBriefing",
+                    "parameters": [
+                        {
+                            "name": "publicId",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]{32}$"},
+                            "description": "Revocable public capability identifier.",
+                        }
+                    ],
+                    "responses": json_response,
+                }
+            },
+            "/mcp": {
+                "post": {
+                    "tags": ["Public Distribution"],
+                    "operationId": "callPredictionMarketMcp",
+                    "description": (
+                        "Stateless Streamable HTTP JSON-RPC endpoint. Discovery is public; "
+                        "tools/call requires an mcp:read Bearer API key."
+                    ),
+                    "security": [{"McpApiKey": []}],
+                    "parameters": [
+                        {
+                            "name": "MCP-Protocol-Version",
+                            "in": "header",
+                            "required": True,
+                            "schema": {"type": "string", "const": "2025-06-18"},
+                        }
+                    ],
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"type": "object", "additionalProperties": True}
+                            }
+                        },
+                    },
+                    "responses": {
+                        **json_response,
+                        "401": {
+                            "description": "Missing, expired, revoked or incorrectly scoped API key"
+                        },
+                        "403": {"description": "Origin is not allowed"},
                     },
                 }
             },
@@ -333,6 +486,13 @@ def build_openapi_document(panels: Sequence[RuntimePanelModule]) -> dict[str, An
             },
         },
         "components": {
+            "securitySchemes": {
+                "McpApiKey": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "description": "One-time-issued API key containing only the mcp:read scope.",
+                }
+            },
             "schemas": {
                 "ApiError": error_schema,
                 "PanelMetadata": panel_metadata_schema,
