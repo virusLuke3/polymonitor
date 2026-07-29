@@ -86,10 +86,25 @@ the honest production contract. See the
 [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
 and [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728).
 
-## Web Push boundary
+## Web Push
 
-Web Push is not enabled by this change. It requires production VAPID key
-custody, subscription storage and revocation, expiry cleanup, quiet-hour and
-digest enforcement, delivery retry/disable semantics, and a background
-publisher. The existing in-app evaluator remains unchanged until those
-controls are implemented together.
+Authenticated Watchlist users can opt into standards-based browser push. The
+browser registers its native `PushSubscription`; the server stores it per user
+and never exposes subscription endpoints or key material through public APIs,
+MCP, briefings, logs, or audit details.
+
+The product-alert service now owns a durable delivery outbox:
+
+- realtime, hourly, daily, and off cadence;
+- IANA timezone and overnight quiet-hour enforcement;
+- bounded exponential retries with a five-attempt terminal state;
+- automatic subscription revocation on push-service `404` or `410`;
+- VAPID configuration validated at API and publisher startup; and
+- an explicit allowlist of browser push-service hosts to prevent arbitrary
+  outbound requests.
+
+The three production secrets are
+`POLYDATA_WEB_PUSH_PUBLIC_KEY`, `POLYDATA_WEB_PUSH_PRIVATE_KEY`, and
+`POLYDATA_WEB_PUSH_SUBJECT`. They must be configured together. The private key
+belongs only in the protected production environment file, never in Git or the
+frontend bundle.

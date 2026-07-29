@@ -21,7 +21,23 @@ The initial locale set is English (`en`) and Simplified Chinese (`zh`).
 - `npm run check:locales` rejects invalid keys, empty translations, or key drift between catalogs.
 - The build runs the locale gate before TypeScript and Vite.
 
-The shared shell, settings, PWA state, and developer surface are bilingual. Existing specialist panels can migrate progressively without changing their data contracts.
+The shared shell, settings, PWA state, developer surface, Watchlist, Briefing,
+and Access workspaces are bilingual. Market Dossier and Data Quality use the
+same catalog for their navigation, hero, status, and headline metrics.
+Remaining specialist evidence tables can migrate progressively without
+changing their data contracts.
+
+## Notification boundary
+
+The service worker accepts encrypted Web Push payloads and displays
+user-visible notifications only. Notification clicks resolve to a same-origin
+Watchlist or Market Dossier route; external and malformed URLs fall back to
+`/watchlist`. Live `/wm-api` reads remain `NetworkOnly`.
+
+Browser permission is requested only from the authenticated Watchlist control.
+Unsupported, denied, unavailable, and connected states are shown explicitly.
+Disabling push revokes the server subscription before unregistering the local
+browser subscription.
 
 ## Verification
 

@@ -544,17 +544,27 @@ discovered
 - OpenAPI 升级到 1.1，除原 Panel Runtime 外，新增市场搜索、市场身份、Market Workspace、Oracle lifecycle、数据质量、公开 Briefing 与 MCP 的只读契约；私人产品和管理员端点继续排除。
 - 发布零依赖 ESM JavaScript SDK 与 TypeScript 声明，公共读取无需凭据，MCP 工具调用必须由调用方显式提供 `mcp:read` Key。
 - 按 MCP 官方授权规范和 RFC 9728 核验后，未在没有真实 OAuth 2.1 authorization server 的情况下伪造 Protected Resource Metadata；当前生产仍明确使用受配额和审计约束的 API Key。
-- Web Push 尚未启用；它必须与 VAPID 私钥托管、subscription 撤销/清理、quiet hours/digest、失败退订和后台 publisher 一次落地，不能只增加一个浏览器按钮。
+- Web Push 在本小节完成时尚未启用；后续 4.6 已把 VAPID、subscription、quiet hours/digest、失败退订和后台 publisher 作为一个闭环落地。
+
+#### 4.6 Web Push 闭环与专业工作区国际化（已完成，2026-07-29）
+
+- 新增按用户存储和撤销的浏览器 Push subscription；API 只返回可用性、公钥和连接计数，不向公共 API、MCP、Briefing、日志或审计明细泄露 endpoint、`p256dh`、auth secret 或 VAPID 私钥。
+- 新增持久化 delivery outbox；realtime/hourly/daily/off、IANA timezone、跨午夜 quiet hours、最多五次指数退避、`404/410` 自动撤销和 publisher runtime state 均由独立 product-alert 服务执行。
+- API 和 publisher 启动时验证成组 VAPID 配置；systemd 在启动受影响服务前幂等执行 product schema migration，避免代码与表结构短暂错配。
+- subscription endpoint 仅允许标准浏览器推送服务的 HTTPS 主机，拒绝 localhost、云元数据地址和任意主机，避免形成 SSRF 出口。
+- Service Worker 新增加密 push 展示与同源 notification click 路由；实时 `/wm-api` 继续严格 `NetworkOnly`。
+- Watchlist、Briefing 和 Auth/Access 正文接入 `en`/`zh` 稳定目录；当前两种语言各 381 个 key，由同一完整性门禁校验。
+- Quant、LOB runtime 控制、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件继续保持不动。
 
 ## 下一步执行建议
 
 工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
-Workspace、Oracle/data-quality、PWA、基础国际化、MCP、移动端导航和公开 SDK
-均已建立。下一批在现有边界内的工作：
+Workspace、Oracle/data-quality、PWA、MCP、移动端导航、公开 SDK、Web Push
+以及 Watchlist/Briefing/Auth 双语正文均已建立。下一批在现有边界内的工作：
 
 1. 选择并接入真实 OAuth 2.1 issuer，完成 MCP Protected Resource Metadata、PKCE 和客户端注册。
-2. 建立 Web Push 的 VAPID、subscription 和可控 publisher 闭环。
-3. 继续迁移 Market/Data Quality 内层证据表，以及 Watchlist/Briefing/Auth 的正文国际化。
+2. 继续迁移 Market/Data Quality 内层证据表和其余专业 panel 正文，保留市场术语与来源字段原义。
+3. 为 Web Push 增加真实浏览器端到端验收与投递 SLO 看板；这需要至少一个用户在生产浏览器中主动授权通知。
 
 若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
 PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。
