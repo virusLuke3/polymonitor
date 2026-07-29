@@ -564,14 +564,23 @@ discovered
 - 当前两种语言各 599 个稳定 key，由同一完整性门禁校验；本阶段不宣称其余 Atlas 专业 panel 已全部翻译。
 - Quant、LOB runtime 控制、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件继续保持不动。
 
+#### 4.8 Atlas 核心事实面国际化（已完成，2026-07-29）
+
+- Atlas 地图标题、实时状态、视图切换、图层选择、天气地图提示、启动/切换状态与 Command Palette 全部接入稳定 `en`/`zh` key；图层和核心 panel 继续使用原稳定 ID，仅在渲染与搜索层映射双语标题。
+- 默认事实面 Active Markets、Market Context、Market Summary、Price Surface、Oracle Feed 和 Related Intelligence 已完成正文双语化，公共 loading、stale、degraded、suspended、retry 与空状态也由统一目录提供。
+- 日期、相对时间、数量、百分比和美元金额跟随语言环境；市场标题、分类、标签、来源、原始状态、Oracle/condition/question/Gamma ID、交易哈希与链值继续原样展示。
+- Command Palette 同时索引中英文核心 panel 元数据，不改变面板注册表、用户布局持久化或后端 API 契约。
+- 当前两种语言各 800 个稳定 key，并通过相同完整性门禁；本阶段不宣称宏观、天气、运输、体育等其余公共专业 panel 已全部翻译。
+- Quant、LOB runtime 控制、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件继续保持不动。
+
 ## 下一步执行建议
 
 工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
 Workspace、Oracle/data-quality、PWA、MCP、移动端导航、公开 SDK、Web Push
-以及 Watchlist/Briefing/Auth、Market Dossier、Data Quality 双语正文均已建立。下一批在现有边界内的工作：
+以及 Watchlist/Briefing/Auth、Market Dossier、Data Quality 和 Atlas 核心事实面双语正文均已建立。下一批在现有边界内的工作：
 
 1. 选择并接入真实 OAuth 2.1 issuer，完成 MCP Protected Resource Metadata、PKCE 和客户端注册。
-2. 继续迁移 Atlas 中尚未双语化的公共专业 panel 正文，按业务域逐批完成，并保留市场术语与来源字段原义。
+2. 继续迁移 Atlas 中尚未双语化的公共专业 panel 正文，优先按宏观/行情、天气/运输、Breaking Event、体育/电竞等业务域分批完成，并保留市场术语与来源字段原义。
 3. 为 Web Push 增加真实浏览器端到端验收与投递 SLO 看板；这需要至少一个用户在生产浏览器中主动授权通知。
 
 若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认

@@ -22,10 +22,14 @@ The initial locale set is English (`en`) and Simplified Chinese (`zh`).
 - The build runs the locale gate before TypeScript and Vite.
 
 The shared shell, settings, PWA state, developer surface, Watchlist, Briefing,
-Access, Market Dossier, and Data Quality workspaces are bilingual. Market and
-quality evidence tables translate stable contract identifiers at render time
-while leaving market titles, source names, hashes, chain keys, and unknown
-provider values unchanged. Remaining specialist panels can migrate
+Access, Market Dossier, Data Quality, and the Atlas core factual surface are
+bilingual. The Atlas scope includes its map shell, layer controls, command
+palette, runtime states, Active Markets, Market Context, Market Summary, Price
+Surface, Oracle Feed, and Related Intelligence. Stable layer and panel IDs are
+translated only at render/search time. Market and quality evidence tables
+translate stable contract identifiers while leaving market titles, source
+names, statuses, hashes, chain keys, and unknown provider values unchanged.
+Macro, weather, transport, sports, and other specialist panels can migrate
 progressively without changing their data contracts.
 
 ## Notification boundary
