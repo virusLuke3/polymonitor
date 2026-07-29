@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,8 +12,8 @@ SCRIPTS_ROOT = REPO_ROOT / "scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
-from api.services.natural_hazards import service
-from api.services.natural_hazards.providers import eonet, nws, usgs
+from api.services.natural_hazards import service, snapshots
+from api.services.natural_hazards.providers import eonet, firms, nws, usgs
 
 
 class FakeSnapshotStore:
@@ -30,6 +32,11 @@ class FakeSnapshotStore:
 
 class FakeLogger:
     def exception(self, *_args, **_kwargs) -> None:
+        return None
+
+
+class StaleOnlySnapshotStore(FakeSnapshotStore):
+    def get(self, namespace: str, key: str):
         return None
 
 
@@ -142,6 +149,121 @@ def test_nws_provider_keeps_polygon_and_does_not_fabricate_missing_geometry() ->
     assert events[1]["geometry"] is None
     assert events[1]["locationPrecision"] == "region"
     assert any("no point location was fabricated" in item for item in events[1]["limitations"])
+
+
+def test_firms_provider_aggregates_pixels_without_upgrading_them_to_wildfires() -> None:
+    csv_payload = "\n".join([
+        "latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,bright_ti5,frp,daynight",
+        "10.10,20.10,340,0.4,0.4,2026-07-29,0315,N20,VIIRS,h,2.0NRT,300,12.5,D",
+        "10.20,20.20,345,0.4,0.4,2026-07-29,0320,N20,VIIRS,n,2.0NRT,301,17.5,D",
+        "11.20,21.20,350,0.4,0.4,2026-07-29,0410,N20,VIIRS,l,2.0NRT,302,4.0,N",
+    ])
+    captured: dict[str, str] = {}
+
+    def fake_text(url: str, **_kwargs) -> str:
+        captured["url"] = url
+        return csv_payload
+
+    events = firms.fetch(fake_text, map_key="secret-key", source="VIIRS_NOAA20_NRT")["events"]
+    assert len(events) == 2
+    aggregate = next(event for event in events if event["metrics"]["detectionCount"] == 2)
+    assert aggregate["hazardKind"] == "fire-detection"
+    assert aggregate["properties"]["observationType"] == "satellite-thermal-anomaly"
+    assert aggregate["metrics"]["fireRadiativePowerMw"] == 30.0
+    assert aggregate["geometry"]["coordinates"] == [20.15, 10.15]
+    assert aggregate["locationPrecision"] == "region"
+    assert "secret-key" in captured["url"]
+    assert all(event["hazardKind"] != "wildfire" for event in events)
+
+
+def test_firms_provider_rejects_missing_map_key() -> None:
+    try:
+        firms.fetch(lambda *_args, **_kwargs: "", map_key="")
+    except ValueError as exc:
+        assert str(exc) == "firms-map-key-required"
+    else:
+        raise AssertionError("missing FIRMS MAP_KEY must fail closed")
+
+
+def test_provider_snapshot_lock_prevents_same_process_cache_stampede() -> None:
+    store = FakeSnapshotStore()
+    calls: list[int] = []
+
+    def fetcher():
+        calls.append(1)
+        time.sleep(0.03)
+        return {"events": [], "data_updated_at": "2026-07-29T00:00:00Z"}
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(executor.map(
+            lambda _index: snapshots.fetch_with_snapshot(
+                key="usgs",
+                snapshot_store=store,
+                fetcher=fetcher,
+                ttl_seconds=60,
+            ),
+            range(5),
+        ))
+    assert len(calls) == 1
+    assert {result["status"] for result in results} == {"ok"}
+
+
+def test_provider_deadline_returns_partial_error_without_waiting_for_slow_source() -> None:
+    store = FakeSnapshotStore()
+    settings = SimpleNamespace(
+        natural_hazards_usgs_url="usgs",
+        natural_hazards_eonet_url="eonet",
+        natural_hazards_nws_url="nws",
+    )
+    dependencies = service.NaturalHazardDependencies.from_context({
+        "http_json_get": lambda *_args, **_kwargs: {},
+        "SNAPSHOT_STORE": store,
+        "SETTINGS": settings,
+        "app": SimpleNamespace(logger=FakeLogger()),
+    })
+
+    def slow_fetcher():
+        time.sleep(0.15)
+        return {"events": [], "data_updated_at": None}
+
+    started = time.monotonic()
+    results = service._fetch_provider_results(
+        dependencies=dependencies,
+        source_specs={"nws": (60, slow_fetcher)},
+        deadline_seconds=0.01,
+    )
+    assert time.monotonic() - started < 0.1
+    assert results["nws"]["status"] == "error"
+    assert results["nws"]["errorCode"] == "nws-provider-deadline-exceeded"
+
+
+def test_provider_deadline_retains_last_successful_snapshot() -> None:
+    store = StaleOnlySnapshotStore()
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, "nws")] = {
+        "events": [{"id": "flood:nws:stale"}],
+        "fetchedAt": "2026-07-29T00:00:00Z",
+        "dataUpdatedAt": "2026-07-29T00:00:00Z",
+        "staleAfter": "2026-07-29T00:01:00Z",
+    }
+    settings = SimpleNamespace(
+        natural_hazards_usgs_url="usgs",
+        natural_hazards_eonet_url="eonet",
+        natural_hazards_nws_url="nws",
+    )
+    dependencies = service.NaturalHazardDependencies.from_context({
+        "http_json_get": lambda *_args, **_kwargs: {},
+        "SNAPSHOT_STORE": store,
+        "SETTINGS": settings,
+        "app": SimpleNamespace(logger=FakeLogger()),
+    })
+    results = service._fetch_provider_results(
+        dependencies=dependencies,
+        source_specs={"nws": (60, lambda: (time.sleep(0.15), {})[1])},
+        deadline_seconds=0.01,
+    )
+    assert results["nws"]["status"] == "degraded"
+    assert results["nws"]["events"] == [{"id": "flood:nws:stale"}]
+    assert results["nws"]["lastSuccessAt"] == "2026-07-29T00:00:00Z"
 
 
 def test_service_returns_partial_data_when_one_provider_fails(monkeypatch) -> None:

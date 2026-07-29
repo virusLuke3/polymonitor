@@ -28,7 +28,11 @@ SOURCE_COVERAGE: dict[str, Dict[str, Any]] = {
         scope="global",
         label="NASA FIRMS satellite fire detections",
         complete=False,
-        gaps=["FIRMS MAP_KEY is not configured; named EONET wildfire events remain available."],
+        gaps=[
+            "Thermal detections are not confirmed wildfire perimeters.",
+            "Cloud, smoke, sensor coverage and overpass timing can create gaps.",
+            "Global detections are spatially aggregated and display-capped.",
+        ],
     ),
     "climate-anomaly": coverage(
         scope="global",

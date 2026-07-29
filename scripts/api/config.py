@@ -259,6 +259,8 @@ class ApiSettings:
     natural_hazards_usgs_url: str
     natural_hazards_eonet_url: str
     natural_hazards_nws_url: str
+    natural_hazards_firms_base_url: str
+    natural_hazards_firms_source: str
     open_meteo_api_url: str
     aviationweather_metar_api_url: str
     google_news_rss_url: str
@@ -555,6 +557,14 @@ def load_api_settings() -> ApiSettings:
         natural_hazards_nws_url=_get_str(
             "POLYDATA_NATURAL_HAZARDS_NWS_URL",
             "https://api.weather.gov/alerts/active",
+        ),
+        natural_hazards_firms_base_url=_get_str(
+            "POLYDATA_NATURAL_HAZARDS_FIRMS_BASE_URL",
+            "https://firms.modaps.eosdis.nasa.gov/api/area/csv",
+        ),
+        natural_hazards_firms_source=_get_str(
+            "POLYDATA_NATURAL_HAZARDS_FIRMS_SOURCE",
+            "VIIRS_NOAA20_NRT",
         ),
         open_meteo_api_url=_get_str("POLYDATA_OPEN_METEO_API_URL", OPEN_METEO_API_URL or "https://api.open-meteo.com/v1/forecast"),
         aviationweather_metar_api_url=_get_str(
