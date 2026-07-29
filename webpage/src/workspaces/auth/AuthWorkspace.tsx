@@ -16,14 +16,14 @@ import {
 } from '@/services/auth';
 import { OperationsWorkspace } from '@/workspaces/operations/OperationsWorkspace';
 
-function errorMessage(error: unknown) {
+export function errorMessage(error: unknown) {
   if (error instanceof AuthApiError) {
     return error.requestId ? `${error.message} · Request ${error.requestId}` : error.message;
   }
   return error instanceof Error ? error.message : 'The request could not be completed.';
 }
 
-function AuthFrame({ children }: { children: ComponentChildren }) {
+export function AuthFrame({ children }: { children: ComponentChildren }) {
   return (
     <div className="auth-shell">
       <header className="auth-topbar">
@@ -35,7 +35,7 @@ function AuthFrame({ children }: { children: ComponentChildren }) {
   );
 }
 
-function SignInPanel({ next = '/account' }: { next?: string }) {
+export function SignInPanel({ next = '/account' }: { next?: string }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -106,7 +106,7 @@ function SignInPanel({ next = '/account' }: { next?: string }) {
   );
 }
 
-function LoadingAccess() {
+export function LoadingAccess() {
   return (
     <AuthFrame>
       <main className="auth-main auth-loading">
@@ -225,6 +225,7 @@ export function AccountWorkspace() {
             <p>Signed in as <b>{session.user?.username}</b> with the <b>{session.user?.role}</b> role.</p>
           </div>
           <div className="auth-account-actions">
+            <a href="/watchlist">Open Watchlist</a>
             {session.user?.role === 'admin' ? <a href="/operations">Open Operations</a> : null}
             <button type="button" onClick={signOut} disabled={busy}>Sign out</button>
           </div>

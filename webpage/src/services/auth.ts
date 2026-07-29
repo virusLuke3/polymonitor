@@ -67,7 +67,7 @@ export class AuthApiError extends Error {
 
 let csrfToken: string | null = null;
 
-async function authRequest<T>(
+export async function authRequest<T>(
   path: string,
   init: RequestInit = {},
   options: { csrf?: boolean } = {},

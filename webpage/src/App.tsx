@@ -97,6 +97,7 @@ const DataQualityWorkspace = lazy(() => import('@/workspaces/data-quality/DataQu
 const LoginWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.LoginWorkspace })));
 const AccountWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.AccountWorkspace })));
 const OperationsAccessWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.OperationsAccessWorkspace })));
+const WatchlistWorkspace = lazy(() => import('@/workspaces/watchlist/WatchlistWorkspace').then((module) => ({ default: module.WatchlistWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = [
@@ -2170,6 +2171,13 @@ export function App() {
     return (
       <Suspense fallback={<PanelLoading label="Loading access control" detail="Reading session and credential registry" />}>
         <AccountWorkspace />
+      </Suspense>
+    );
+  }
+  if (pathname === '/watchlist' || pathname.startsWith('/watchlist/')) {
+    return (
+      <Suspense fallback={<PanelLoading label="Loading Watchlist" detail="Reading tracked markets, Oracle rules and alert events" />}>
+        <WatchlistWorkspace />
       </Suspense>
     );
   }

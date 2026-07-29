@@ -16,6 +16,8 @@ import {
   signedClass,
 } from '@/panels/shared/formatters';
 import { fetchMarketLobByToken, fetchWorkspaceBundle } from '@/services/api';
+import { fetchAuthSession } from '@/services/auth';
+import { addWatchlistMarket } from '@/services/product';
 import type {
   ChartPoint,
   ContentItem,
@@ -597,6 +599,7 @@ export function MarketWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const [watchState, setWatchState] = useState<'idle' | 'busy' | 'watched'>('idle');
   const requestRef = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -648,6 +651,27 @@ export function MarketWorkspace() {
 
   const outcome = useMemo(() => selectedOutcome(bundle), [bundle]);
   const market = bundle?.market;
+
+  const watchMarket = async () => {
+    if (!marketId) return;
+    setWatchState('busy');
+    try {
+      const session = await fetchAuthSession();
+      if (!session.authenticated) {
+        window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+        return;
+      }
+      if (session.user?.forcePasswordChange) {
+        window.location.assign('/account');
+        return;
+      }
+      await addWatchlistMarket(marketId);
+      setWatchState('watched');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to add this market to the watchlist.');
+      setWatchState('idle');
+    }
+  };
   const price = bundle?.price;
   const yesPrice = price?.latestYesPrice ?? price?.latestPrice ?? outcome?.yesPrice ?? market?.latestYesPrice ?? market?.latestPrice;
   const noPrice = price?.latestNoPrice ?? outcome?.noPrice ?? market?.latestNoPrice;
@@ -698,6 +722,9 @@ export function MarketWorkspace() {
           <span className="market-refresh-note">
             {lastRefreshedAt ? `Observed ${new Date(lastRefreshedAt).toLocaleTimeString()}` : 'Awaiting first observation'}
           </span>
+          <button type="button" disabled={watchState !== 'idle'} onClick={() => void watchMarket()}>
+            {watchState === 'busy' ? 'Adding…' : watchState === 'watched' ? 'Watching ✓' : 'Watch market'}
+          </button>
           <button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href)}>Copy link</button>
           <button type="button" className="primary" disabled={loading} onClick={() => void refresh()}>
             {loading ? 'Refreshing…' : 'Refresh evidence'}
