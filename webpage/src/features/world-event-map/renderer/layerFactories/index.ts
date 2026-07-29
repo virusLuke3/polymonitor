@@ -11,6 +11,7 @@ export function createWorldEventLayers(
   events: GeoEvent[],
   state: WorldEventMapState,
   showLabels = true,
+  viewport?: [number, number, number, number],
 ): LayersList {
   return [
     ...createEventGeometryLayers(events, state.selectedEventId),
@@ -19,6 +20,7 @@ export function createWorldEventLayers(
       zoom: state.zoom,
       selectedEventId: state.selectedEventId,
       showLabels,
+      viewport,
     }),
   ];
 }

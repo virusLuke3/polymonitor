@@ -11115,6 +11115,74 @@ a.wm-orderfilled-row {
   display: none;
 }
 
+.wm-world-event-svg-map {
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 50% 34%, rgba(24, 45, 55, 0.34), transparent 52%),
+    #05080a;
+  cursor: grab;
+  touch-action: none;
+}
+
+.wm-world-event-svg-map:active {
+  cursor: grabbing;
+}
+
+.wm-world-event-svg-countries path {
+  fill: #162127;
+  stroke: #53636b;
+  stroke-width: 0.65;
+  vector-effect: non-scaling-stroke;
+}
+
+.wm-world-event-svg-shape {
+  fill-opacity: 0.26;
+  stroke-opacity: 0.9;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+
+.wm-world-event-svg-point {
+  cursor: pointer;
+  vector-effect: non-scaling-stroke;
+}
+
+.wm-world-event-svg-cluster {
+  cursor: pointer;
+}
+
+.wm-world-event-svg-cluster circle {
+  fill-opacity: 0.56;
+  stroke: rgba(255, 250, 222, 0.72);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.wm-world-event-svg-cluster text {
+  fill: #fffade;
+  font: 800 10px var(--font-mono);
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.wm-world-event-svg-cluster:focus {
+  outline: none;
+}
+
+.wm-world-event-svg-cluster:focus circle {
+  stroke: #fff;
+  stroke-width: 3;
+}
+
+.wm-world-event-svg-shape:focus,
+.wm-world-event-svg-point:focus {
+  outline: none;
+  stroke: #fffade;
+  stroke-width: 3;
+}
+
 .wm-air-map-controls {
   position: absolute;
   top: 12px;
@@ -11569,6 +11637,147 @@ a.wm-orderfilled-row {
   font-weight: 900;
   letter-spacing: 0.6px;
   text-transform: uppercase;
+}
+
+.wm-world-event-attribution {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 5;
+  max-width: min(310px, calc(50% - 80px));
+  color: rgba(176, 188, 190, 0.68);
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.25px;
+  pointer-events: none;
+}
+
+.wm-world-event-list {
+  position: absolute;
+  right: 8px;
+  bottom: 34px;
+  z-index: 11;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  font-family: var(--font-mono);
+}
+
+.wm-world-event-list-toggle {
+  display: block;
+  margin-left: auto;
+  padding: 5px 8px;
+  border: 1px solid rgba(115, 216, 255, 0.28);
+  border-radius: 4px;
+  background: rgba(4, 10, 14, 0.9);
+  color: #73d8ff;
+  font: 800 8px/1.2 var(--font-mono);
+  letter-spacing: 0.6px;
+  cursor: pointer;
+}
+
+.wm-world-event-list > section {
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(390px, 48vh);
+  margin-bottom: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(115, 216, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(5, 10, 13, 0.96);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.58);
+}
+
+.wm-world-event-list > section > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 11px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-world-event-list h2 {
+  margin: 0;
+  color: #e9f3f4;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.wm-world-event-list header span,
+.wm-world-event-list > section > p {
+  color: #849094;
+  font-size: 8px;
+}
+
+.wm-world-event-list ol {
+  max-height: min(345px, 42vh);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.wm-world-event-list li + li {
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.wm-world-event-list li button {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 3px 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: #dfe8e8;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wm-world-event-list li button:hover,
+.wm-world-event-list li button:focus-visible,
+.wm-world-event-list li button.is-selected {
+  outline: none;
+  background: rgba(115, 216, 255, 0.1);
+}
+
+.wm-world-event-list li span {
+  grid-row: span 2;
+  align-self: start;
+  padding: 2px 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 7px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.wm-world-event-list .severity-critical { color: #ff7474; }
+.wm-world-event-list .severity-warning { color: #ffac50; }
+.wm-world-event-list .severity-watch { color: #efd56a; }
+.wm-world-event-list .severity-info { color: #73d8ff; }
+
+.wm-world-event-list li strong {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-world-event-list li small {
+  overflow: hidden;
+  color: #879195;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-world-event-list > section > p {
+  margin: 0;
+  padding: 14px;
 }
 
 .wm-weather-deck-legend {
@@ -12291,6 +12500,21 @@ a.wm-orderfilled-row {
   color: #ff8d8d !important;
 }
 
+.wm-event-inspector-market-error p {
+  margin: 0 0 8px;
+}
+
+.wm-event-inspector-market-error button {
+  padding: 5px 7px;
+  border: 1px solid rgba(255, 141, 141, 0.45);
+  border-radius: 4px;
+  background: rgba(255, 80, 80, 0.08);
+  color: #ffaaaa;
+  font: 800 8px/1.2 var(--font-mono);
+  letter-spacing: 0.4px;
+  cursor: pointer;
+}
+
 .wm-event-inspector-market-audit {
   color: #797f7c !important;
   font-size: 8px !important;
@@ -12298,6 +12522,20 @@ a.wm-orderfilled-row {
 }
 
 @media (max-width: 860px) {
+  .wm-world-event-list {
+    right: 74px;
+    bottom: 124px;
+  }
+
+  .wm-world-event-list > section {
+    width: min(320px, calc(100vw - 100px));
+    max-height: min(260px, 34vh);
+  }
+
+  .wm-world-event-list ol {
+    max-height: min(215px, 28vh);
+  }
+
   .wm-map-risk-inspector {
     left: 14px;
     right: 14px;

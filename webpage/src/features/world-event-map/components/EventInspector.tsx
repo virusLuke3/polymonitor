@@ -195,9 +195,10 @@ export function EventInspector({
         <h3 id="wm-related-markets-heading">Related Weather Markets</h3>
         {relatedMarkets.loading ? <p role="status">Evaluating type, space, time and settlement metric…</p> : null}
         {relatedMarkets.error ? (
-          <p className="wm-event-inspector-market-error" role="alert">
-            Related markets unavailable: {relatedMarkets.error}
-          </p>
+          <div className="wm-event-inspector-market-error" role="alert">
+            <p>Related markets unavailable: {relatedMarkets.error}</p>
+            <button type="button" onClick={relatedMarkets.retry}>RETRY MARKET LINK</button>
+          </div>
         ) : null}
         {!relatedMarkets.loading && !relatedMarkets.error && relatedMarkets.response?.markets.length === 0 ? (
           <p>

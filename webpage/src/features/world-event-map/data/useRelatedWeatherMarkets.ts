@@ -1,21 +1,27 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
-import { fetchNaturalHazardRelatedMarkets, isAbortLikeError } from '@/services/api';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
+import { fetchNaturalHazardRelatedMarkets } from '@/services/api';
 import type { HazardMarketLinksResponse } from '../domain/types';
 import { parseRelatedWeatherMarkets } from './relatedMarkets';
 
-export type RelatedWeatherMarketsState = {
+type RelatedWeatherMarketsData = {
   response: HazardMarketLinksResponse | null;
   loading: boolean;
   error: string | null;
 };
 
+export type RelatedWeatherMarketsState = RelatedWeatherMarketsData & {
+  retry: () => void;
+};
+
 export function useRelatedWeatherMarkets(eventId: string | null): RelatedWeatherMarketsState {
-  const [state, setState] = useState<RelatedWeatherMarketsState>({
+  const [state, setState] = useState<RelatedWeatherMarketsData>({
     response: null,
     loading: false,
     error: null,
   });
+  const [retrySequence, setRetrySequence] = useState(0);
   const requestIdRef = useRef(0);
+  const retry = useCallback(() => setRetrySequence((value) => value + 1), []);
 
   useEffect(() => {
     const requestId = ++requestIdRef.current;
@@ -32,7 +38,7 @@ export function useRelatedWeatherMarkets(eventId: string | null): RelatedWeather
         setState({ response, loading: false, error: null });
       })
       .catch((error: unknown) => {
-        if (requestId !== requestIdRef.current || isAbortLikeError(error)) return;
+        if (requestId !== requestIdRef.current || controller.signal.aborted) return;
         setState({
           response: null,
           loading: false,
@@ -43,8 +49,7 @@ export function useRelatedWeatherMarkets(eventId: string | null): RelatedWeather
       requestIdRef.current += 1;
       controller.abort();
     };
-  }, [eventId]);
+  }, [eventId, retrySequence]);
 
-  return state;
+  return { ...state, retry };
 }
-

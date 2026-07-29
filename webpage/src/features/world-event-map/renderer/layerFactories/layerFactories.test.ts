@@ -3,6 +3,7 @@ import type { Layer } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import { defaultWorldEventMapState } from '../../state/mapState';
 import { createWorldEventLayers } from '.';
+import { clusterEventPoints } from './eventPointLayer';
 
 const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['severity'] = 'watch'): GeoEvent => ({
   id,
@@ -54,5 +55,18 @@ describe('world event layer factories', () => {
     };
     expect((createWorldEventLayers([area, line], defaultWorldEventMapState()) as Layer[]).map((layer) => layer.id))
       .toEqual(['world-event-areas', 'world-event-paths']);
+  });
+
+  it('clusters a 2,000 event fixture within the viewport and retains selection', () => {
+    const events = Array.from({ length: 2_000 }, (_, index) => pointEvent(
+      `fixture-${index}`,
+      -179 + (index % 180) * 2,
+      -70 + (index % 70) * 2,
+      index % 97 === 0 ? 'critical' : 'watch',
+    ));
+    const clustered = clusterEventPoints(events, 1.25, 'fixture-1999', [-80, -60, 80, 75]);
+    expect(clustered.singles.some((event) => event.id === 'fixture-1999')).toBe(true);
+    expect(clustered.clusters.length).toBeGreaterThan(0);
+    expect(clustered.singles.length + clustered.clusters.length).toBeLessThan(500);
   });
 });

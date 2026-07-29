@@ -19,6 +19,7 @@ export type MapLayerDefinition = {
   minZoom: number;
   labelMinZoom: number;
   cluster: boolean;
+  clusterRadius: number;
   timeFilter: boolean;
   severities: GeoEventSeverity[];
   legend: Array<{ label: string; color: string }>;
@@ -44,6 +45,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
+    clusterRadius: 58,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
@@ -71,6 +73,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
+    clusterRadius: 52,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
@@ -97,6 +100,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
+    clusterRadius: 62,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [{ label: 'Wildfire event', color: '#ff6b35' }],
@@ -120,6 +124,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
+    clusterRadius: 58,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
@@ -146,6 +151,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
+    clusterRadius: 54,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [{ label: 'Major anomaly', color: '#e879f9' }],
@@ -169,6 +175,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
+    clusterRadius: 55,
     timeFilter: true,
     severities: ['watch', 'warning', 'critical'],
     legend: [],
@@ -193,6 +200,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
+    clusterRadius: 52,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
@@ -220,6 +228,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 2,
     cluster: false,
+    clusterRadius: 0,
     timeFilter: true,
     severities: ['watch', 'warning', 'critical'],
     legend: [],
@@ -244,6 +253,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 1,
     labelMinZoom: 4,
     cluster: false,
+    clusterRadius: 0,
     timeFilter: false,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [],

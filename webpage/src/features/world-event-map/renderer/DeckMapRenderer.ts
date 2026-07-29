@@ -30,10 +30,13 @@ export class DeckMapRenderer implements MapRenderer {
   private events: GeoEvent[] = [];
   private fallbackApplied = false;
   private fallbackTimer: number | null = null;
+  private contextRecoveryTimer: number | null = null;
+  private contextRecoveryAttempts = 0;
   private overlayMounted = false;
   private paused = false;
   private destroyed = false;
   private applyingCamera = false;
+  private reducedMotion = false;
 
   async mount(container: HTMLElement, callbacks: MapRendererCallbacks) {
     if (this.map) return;
@@ -71,9 +74,16 @@ export class DeckMapRenderer implements MapRenderer {
         if (cluster) {
           const [west, south, east, north] = cluster.bounds;
           if (west === east && south === north) {
-            map.easeTo({ center: cluster.coordinates, zoom: Math.min(6, map.getZoom() + 1.5), duration: 420 });
+            map.easeTo({
+              center: cluster.coordinates,
+              zoom: Math.min(6, cluster.expansionZoom || map.getZoom() + 1.5),
+              duration: this.reducedMotion ? 0 : 420,
+            });
           } else {
-            map.fitBounds([[west, south], [east, north]], { padding: 70, maxZoom: 6, duration: 480 });
+            map.fitBounds(
+              [[west, south], [east, north]],
+              { padding: 70, maxZoom: 6, duration: this.reducedMotion ? 0 : 480 },
+            );
           }
           return;
         }
@@ -96,6 +106,7 @@ export class DeckMapRenderer implements MapRenderer {
     map.on('moveend', this.handleMoveEnd);
     map.on('error', this.handleMapError);
     map.getCanvas().addEventListener('webglcontextlost', this.handleContextLost);
+    map.getCanvas().addEventListener('webglcontextrestored', this.handleContextRestored);
 
     this.fallbackTimer = window.setTimeout(() => {
       if (!this.map || this.fallbackApplied || this.destroyed) return;
@@ -119,7 +130,7 @@ export class DeckMapRenderer implements MapRenderer {
         map.easeTo({
           center: [state.center.lon, state.center.lat],
           zoom: state.zoom,
-          duration: 260,
+          duration: this.reducedMotion ? 0 : 260,
           essential: true,
         });
       }
@@ -137,6 +148,10 @@ export class DeckMapRenderer implements MapRenderer {
     this.render();
   }
 
+  setReducedMotion(reduced: boolean) {
+    this.reducedMotion = reduced;
+  }
+
   pause() {
     this.paused = true;
     this.overlay?.setProps({ layers: [] });
@@ -151,12 +166,14 @@ export class DeckMapRenderer implements MapRenderer {
   destroy() {
     this.destroyed = true;
     this.clearFallbackTimer();
+    this.clearContextRecoveryTimer();
     const map = this.map;
     if (map) {
       map.off('style.load', this.handleStyleLoad);
       map.off('moveend', this.handleMoveEnd);
       map.off('error', this.handleMapError);
       map.getCanvas().removeEventListener('webglcontextlost', this.handleContextLost);
+      map.getCanvas().removeEventListener('webglcontextrestored', this.handleContextRestored);
       if (this.overlay) {
         try {
           map.removeControl(this.overlay as unknown as maplibregl.IControl);
@@ -174,7 +191,20 @@ export class DeckMapRenderer implements MapRenderer {
 
   private render() {
     if (this.paused || !this.overlay || !this.state) return;
-    this.overlay.setProps({ layers: createWorldEventLayers(this.events, this.state) });
+    const bounds = this.map?.getBounds();
+    const viewport: [number, number, number, number] | undefined = bounds
+      ? bounds.getWest() <= bounds.getEast()
+        ? [
+            Math.max(-180, bounds.getWest() - 8),
+            Math.max(-85, bounds.getSouth() - 5),
+            Math.min(180, bounds.getEast() + 8),
+            Math.min(85, bounds.getNorth() + 5),
+          ]
+        : [-180, -85, 180, 85]
+      : undefined;
+    this.overlay.setProps({
+      layers: createWorldEventLayers(this.events, this.state, true, viewport),
+    });
     this.map?.triggerRepaint();
   }
 
@@ -212,8 +242,27 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleContextLost = (event: Event) => {
     event.preventDefault();
+    this.paused = true;
+    this.overlay?.setProps({ layers: [] });
     this.emitBasemapState('renderer-fallback-ready');
-    this.callbacks?.onError(new Error('WebGL context lost. Renderer fallback is required.'));
+    this.callbacks?.onError(new Error('WebGL context lost. Waiting for one bounded recovery attempt.'));
+    this.clearContextRecoveryTimer();
+    this.contextRecoveryTimer = window.setTimeout(() => {
+      this.contextRecoveryTimer = null;
+      this.requestRendererFallback(new Error('WebGL context did not recover within 1.5 seconds.'));
+    }, 1_500);
+  };
+
+  private handleContextRestored = () => {
+    this.clearContextRecoveryTimer();
+    this.contextRecoveryAttempts += 1;
+    if (this.contextRecoveryAttempts > 1) {
+      this.requestRendererFallback(new Error('WebGL context was lost more than once.'));
+      return;
+    }
+    this.paused = false;
+    this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
+    this.render();
   };
 
   private applyLocalFallback(error: Error) {
@@ -224,9 +273,15 @@ export class DeckMapRenderer implements MapRenderer {
     try {
       this.map.setStyle(getWeatherMapFallbackStyle('dark'), { diff: false });
     } catch (caught) {
-      this.emitBasemapState('failed');
-      this.callbacks?.onError(caught instanceof Error ? caught : new Error(String(caught)));
+      this.requestRendererFallback(caught instanceof Error ? caught : new Error(String(caught)));
     }
+  }
+
+  private requestRendererFallback(error: Error) {
+    if (this.destroyed) return;
+    this.clearContextRecoveryTimer();
+    this.emitBasemapState('renderer-fallback-ready');
+    this.callbacks?.onRendererFallbackRequested(error);
   }
 
   private emitBasemapState(state: BasemapState) {
@@ -237,6 +292,13 @@ export class DeckMapRenderer implements MapRenderer {
     if (this.fallbackTimer != null) {
       window.clearTimeout(this.fallbackTimer);
       this.fallbackTimer = null;
+    }
+  }
+
+  private clearContextRecoveryTimer() {
+    if (this.contextRecoveryTimer != null) {
+      window.clearTimeout(this.contextRecoveryTimer);
+      this.contextRecoveryTimer = null;
     }
   }
 }

@@ -14,6 +14,7 @@ export interface MapRendererCallbacks {
   onEventSelect: (eventId: string | null) => void;
   onEventHover: (eventId: string | null) => void;
   onBasemapStateChange: (state: BasemapState) => void;
+  onRendererFallbackRequested: (error: Error) => void;
   onError: (error: Error) => void;
 }
 
@@ -22,6 +23,7 @@ export interface MapRenderer {
   setState(state: WorldEventMapState): void;
   setEvents(events: GeoEvent[]): void;
   resize(): void;
+  setReducedMotion(reduced: boolean): void;
   pause(): void;
   resume(): void;
   destroy(): void;

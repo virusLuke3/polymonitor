@@ -2,9 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { GeoEvent } from '../domain/types';
 import type { WorldEventMapState } from '../state/mapState';
 import { DeckMapRenderer } from '../renderer/DeckMapRenderer';
-import type { BasemapState, MapRenderer } from '../renderer/MapRenderer';
+import { SvgMapRenderer } from '../renderer/SvgMapRenderer';
+import type { BasemapState, MapRenderer, MapRendererCallbacks } from '../renderer/MapRenderer';
+import { inspectWebGL2Support } from '../renderer/webglSupport';
 import { worldEventLayerById } from '../config/layerRegistry';
 import { EventInspector } from './EventInspector';
+import { EventList } from './EventList';
 
 export type WorldEventMapProps = {
   events: GeoEvent[];
@@ -27,8 +30,11 @@ export function WorldEventMap({
 }: WorldEventMapProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
+  const stateRef = useRef(state);
+  const eventsRef = useRef(events);
   const callbackRef = useRef({ onCameraChange, onEventSelect, onEventHover });
   const [basemapState, setBasemapState] = useState<BasemapState>('idle');
+  const [rendererKind, setRendererKind] = useState<'webgl' | 'svg'>('webgl');
   const [rendererError, setRendererError] = useState<string | null>(null);
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === state.selectedEventId) || null,
@@ -44,32 +50,90 @@ export function WorldEventMap({
   );
 
   callbackRef.current = { onCameraChange, onEventSelect, onEventHover };
+  stateRef.current = state;
+  eventsRef.current = events;
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host || rendererRef.current) return;
-    const renderer = new DeckMapRenderer();
-    rendererRef.current = renderer;
-    renderer.setState(state);
-    renderer.setEvents(events);
-    void renderer.mount(host, {
+    let disposed = false;
+    let inViewport = true;
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    const updatePauseState = () => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      if (document.hidden || !inViewport) renderer.pause();
+      else renderer.resume();
+    };
+
+    let installRenderer: (kind: 'webgl' | 'svg', reason?: Error) => Promise<void>;
+    const callbacks: MapRendererCallbacks = {
       onCameraChange: (camera) => callbackRef.current.onCameraChange(camera),
       onEventSelect: (eventId) => callbackRef.current.onEventSelect(eventId),
       onEventHover: (eventId) => callbackRef.current.onEventHover(eventId),
-      onBasemapStateChange: setBasemapState,
+      onBasemapStateChange: (nextState) => {
+        if (!disposed) setBasemapState(nextState);
+      },
+      onRendererFallbackRequested: (error) => {
+        if (disposed) return;
+        setRendererError(error.message);
+        void installRenderer('svg', error);
+      },
       onError: (error) => setRendererError(error.message),
-    });
-    const observer = new ResizeObserver(() => renderer.resize());
+    };
+
+    installRenderer = async (kind, reason) => {
+      if (disposed) return;
+      rendererRef.current?.destroy();
+      const renderer: MapRenderer = kind === 'webgl'
+        ? new DeckMapRenderer()
+        : new SvgMapRenderer();
+      rendererRef.current = renderer;
+      setRendererKind(kind);
+      if (reason) setRendererError(reason.message);
+      renderer.setReducedMotion(motionQuery.matches);
+      renderer.setState(stateRef.current);
+      renderer.setEvents(eventsRef.current);
+      try {
+        await renderer.mount(host, callbacks);
+        updatePauseState();
+      } catch (error) {
+        if (disposed || rendererRef.current !== renderer) return;
+        const failure = error instanceof Error ? error : new Error(String(error));
+        if (kind === 'webgl') {
+          await installRenderer('svg', failure);
+          return;
+        }
+        setBasemapState('failed');
+        setRendererError(failure.message);
+      }
+    };
+
+    const support = inspectWebGL2Support();
+    if (support.supported) void installRenderer('webgl');
+    else void installRenderer('svg', new Error(support.reason || 'WebGL2 is unavailable.'));
+
+    const observer = new ResizeObserver(() => rendererRef.current?.resize());
     observer.observe(host);
-    const handleVisibility = () => {
-      if (document.hidden) renderer.pause();
-      else renderer.resume();
+    const intersectionObserver = new IntersectionObserver((entries) => {
+      inViewport = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0);
+      updatePauseState();
+    }, { threshold: [0, 0.01] });
+    intersectionObserver.observe(host);
+    const handleVisibility = () => updatePauseState();
+    const handleMotionPreference = () => {
+      rendererRef.current?.setReducedMotion(motionQuery.matches);
     };
     document.addEventListener('visibilitychange', handleVisibility);
+    motionQuery.addEventListener('change', handleMotionPreference);
     return () => {
+      disposed = true;
       document.removeEventListener('visibilitychange', handleVisibility);
+      motionQuery.removeEventListener('change', handleMotionPreference);
       observer.disconnect();
-      renderer.destroy();
+      intersectionObserver.disconnect();
+      rendererRef.current?.destroy();
       rendererRef.current = null;
     };
     // Renderer lifetime follows the host only; state and events use the effects below.
@@ -106,6 +170,11 @@ export function WorldEventMap({
           returnFocusTarget={hostRef.current}
         />
       ) : null}
+      <EventList
+        events={events}
+        selectedEventId={state.selectedEventId}
+        onSelect={onEventSelect}
+      />
       <div className="wm-weather-deck-legend" aria-label="Active hazard legend">
         {legendItems.map((item) => (
           <span key={`${item.label}:${item.color}`}>
@@ -115,7 +184,18 @@ export function WorldEventMap({
         ))}
       </div>
       <div className="wm-weather-deck-status">
-        {basemapState === 'local-fallback-ready' ? 'LOCAL BASEMAP' : basemapState.replace(/-/g, ' ').toUpperCase()}
+        {rendererKind === 'svg'
+          ? 'SVG FALLBACK'
+          : basemapState === 'local-fallback-ready'
+            ? 'LOCAL BASEMAP'
+            : basemapState === 'primary-ready'
+              ? 'PRIMARY BASEMAP'
+              : basemapState.replace(/-/g, ' ').toUpperCase()}
+      </div>
+      <div className="wm-world-event-attribution">
+        {rendererKind === 'webgl' && basemapState === 'primary-ready'
+          ? '© CARTO · © OpenStreetMap contributors'
+          : 'LOCAL COUNTRY GEOMETRY · EVENT SOURCES IN INSPECTOR'}
       </div>
       {rendererError && basemapState === 'failed' ? (
         <div className="wm-banner error" role="alert">{rendererError}</div>

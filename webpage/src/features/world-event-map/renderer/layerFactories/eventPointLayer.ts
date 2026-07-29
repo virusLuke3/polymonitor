@@ -1,7 +1,12 @@
 import { ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import type { Layer, LayersList } from '@deck.gl/core';
+import type { Feature, Point } from 'geojson';
+import Supercluster from 'supercluster';
 import type { GeoEvent, GeoEventSeverity } from '../../domain/types';
-import { worldEventLayerIdForEvent } from '../../config/layerRegistry';
+import {
+  worldEventLayerById,
+  worldEventLayerIdForEvent,
+} from '../../config/layerRegistry';
 import { eventColor, eventLabel, pointRadiusMeters, SEVERITY_COLORS } from './shared';
 
 export type EventCluster = {
@@ -12,9 +17,20 @@ export type EventCluster = {
   count: number;
   severity: GeoEventSeverity;
   bounds: [number, number, number, number];
+  expansionZoom: number;
   color: [number, number, number, number];
 };
 
+type ClusterPointProperties = {
+  eventId: string;
+  severityRank: number;
+};
+
+type ClusterAggregateProperties = {
+  severityRank: number;
+};
+
+const SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 const SEVERITY_RANK: Record<GeoEventSeverity, number> = {
   info: 0,
   watch: 1,
@@ -22,62 +38,107 @@ const SEVERITY_RANK: Record<GeoEventSeverity, number> = {
   critical: 3,
 };
 
-function clusterPoints(events: GeoEvent[], zoom: number, selectedEventId: string | null) {
-  if (zoom >= 4.5) return { singles: events, clusters: [] as EventCluster[] };
-  const cellSize = Math.max(3, 28 / Math.pow(1.7, Math.max(0, zoom - 0.75)));
-  const buckets = new Map<string, GeoEvent[]>();
-  const singles: GeoEvent[] = [];
+function severityFromRank(rank: number): GeoEventSeverity {
+  return SEVERITIES[Math.max(0, Math.min(SEVERITIES.length - 1, Math.round(rank)))] || 'info';
+}
+
+function pointFeature(event: GeoEvent): Feature<Point, ClusterPointProperties> {
+  return {
+    type: 'Feature',
+    geometry: event.geometry as Point,
+    properties: {
+      eventId: event.id,
+      severityRank: SEVERITY_RANK[event.severity],
+    },
+  };
+}
+
+function clusterBounds(events: GeoEvent[]): [number, number, number, number] {
+  let west = 180;
+  let east = -180;
+  let south = 90;
+  let north = -90;
   for (const event of events) {
-    if (event.id === selectedEventId || event.geometry?.type !== 'Point') {
-      singles.push(event);
-      continue;
-    }
+    if (event.geometry?.type !== 'Point') continue;
     const [lon, lat] = event.geometry.coordinates;
-    const layerId = worldEventLayerIdForEvent(event) || event.category;
-    const key = `${layerId}:${Math.floor((lon + 180) / cellSize)}:${Math.floor((lat + 90) / cellSize)}`;
-    const bucket = buckets.get(key) || [];
-    bucket.push(event);
-    buckets.set(key, bucket);
+    west = Math.min(west, lon);
+    east = Math.max(east, lon);
+    south = Math.min(south, lat);
+    north = Math.max(north, lat);
   }
+  return [west, south, east, north];
+}
+
+export function clusterEventPoints(
+  events: GeoEvent[],
+  zoom: number,
+  selectedEventId: string | null,
+  viewport: [number, number, number, number] = [-180, -85, 180, 85],
+) {
+  const selected = events.filter((event) => event.id === selectedEventId);
+  const grouped = new Map<string, GeoEvent[]>();
+  for (const event of events) {
+    if (event.id === selectedEventId || event.geometry?.type !== 'Point') continue;
+    const layerId = worldEventLayerIdForEvent(event);
+    if (!layerId) continue;
+    const layer = worldEventLayerById(layerId);
+    if (!layer || zoom < layer.minZoom) continue;
+    const bucket = grouped.get(layerId) || [];
+    bucket.push(event);
+    grouped.set(layerId, bucket);
+  }
+
+  const singles = [...selected];
   const clusters: EventCluster[] = [];
-  for (const [key, bucket] of buckets) {
-    if (bucket.length < 3) {
-      singles.push(...bucket);
+  for (const [layerId, layerEvents] of grouped) {
+    const layer = worldEventLayerById(layerId);
+    if (!layer?.cluster || layer.clusterRadius <= 0) {
+      singles.push(...layerEvents);
       continue;
     }
-    let lonTotal = 0;
-    let latTotal = 0;
-    let west = 180;
-    let east = -180;
-    let south = 90;
-    let north = -90;
-    let severity: GeoEventSeverity = 'info';
-    let representative = bucket[0]!;
-    for (const event of bucket) {
-      const coordinates = event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0];
-      const lon = coordinates[0] ?? 0;
-      const lat = coordinates[1] ?? 0;
-      lonTotal += lon;
-      latTotal += lat;
-      west = Math.min(west, lon);
-      east = Math.max(east, lon);
-      south = Math.min(south, lat);
-      north = Math.max(north, lat);
-      if (SEVERITY_RANK[event.severity] > SEVERITY_RANK[severity]) {
-        severity = event.severity;
-        representative = event;
-      }
-    }
-    clusters.push({
-      kind: 'event-cluster',
-      id: `cluster:${key}:${bucket.length}`,
-      coordinates: [lonTotal / bucket.length, latTotal / bucket.length],
-      eventIds: bucket.map((event) => event.id),
-      count: bucket.length,
-      severity,
-      bounds: [west, south, east, north],
-      color: eventColor(representative),
+    const eventById = new Map(layerEvents.map((event) => [event.id, event]));
+    const index = new Supercluster<ClusterPointProperties, ClusterAggregateProperties>({
+      radius: layer.clusterRadius,
+      minPoints: 3,
+      maxZoom: 7,
+      map: (properties) => ({ severityRank: properties.severityRank }),
+      reduce: (accumulated, properties) => {
+        accumulated.severityRank = Math.max(accumulated.severityRank, properties.severityRank);
+      },
     });
+    index.load(layerEvents.map(pointFeature));
+    for (const feature of index.getClusters(viewport, Math.max(0, Math.floor(zoom)))) {
+      if (!('cluster' in feature.properties)) {
+        const event = eventById.get(feature.properties.eventId);
+        if (event && (zoom >= 3 || event.severity === 'warning' || event.severity === 'critical')) {
+          singles.push(event);
+        }
+        continue;
+      }
+      const clusterId = Number(feature.properties.cluster_id);
+      const leaves = index
+        .getLeaves(clusterId, Infinity)
+        .flatMap((leaf) => {
+          const event = eventById.get(leaf.properties.eventId);
+          return event ? [event] : [];
+        });
+      const severity = severityFromRank(Number(feature.properties.severityRank || 0));
+      const representative = leaves.reduce(
+        (best, event) => SEVERITY_RANK[event.severity] > SEVERITY_RANK[best.severity] ? event : best,
+        leaves[0]!,
+      );
+      clusters.push({
+        kind: 'event-cluster',
+        id: `cluster:${layerId}:${clusterId}`,
+        coordinates: feature.geometry.coordinates as [number, number],
+        eventIds: leaves.map((event) => event.id),
+        count: Number(feature.properties.point_count),
+        severity,
+        bounds: clusterBounds(leaves),
+        expansionZoom: index.getClusterExpansionZoom(clusterId),
+        color: eventColor(representative),
+      });
+    }
   }
   return { singles, clusters };
 }
@@ -87,14 +148,16 @@ export function createEventPointLayers({
   zoom,
   selectedEventId,
   showLabels,
+  viewport,
 }: {
   events: GeoEvent[];
   zoom: number;
   selectedEventId: string | null;
   showLabels: boolean;
+  viewport?: [number, number, number, number];
 }): LayersList {
   const pointEvents = events.filter((event) => event.geometry?.type === 'Point');
-  const { singles, clusters } = clusterPoints(pointEvents, zoom, selectedEventId);
+  const { singles, clusters } = clusterEventPoints(pointEvents, zoom, selectedEventId, viewport);
   const layers: Layer[] = [];
 
   if (clusters.length) {
@@ -105,8 +168,8 @@ export function createEventPointLayers({
       getRadius: (cluster) => Math.max(36_000, Math.log2(cluster.count + 1) * 34_000),
       getFillColor: (cluster) => [cluster.color[0], cluster.color[1], cluster.color[2], 115],
       getLineColor: (cluster) => {
-        const [r, g, b] = SEVERITY_COLORS[cluster.severity];
-        return [r, g, b, 220];
+        const [red, green, blue] = SEVERITY_COLORS[cluster.severity];
+        return [red, green, blue, 220];
       },
       getLineWidth: 1.5,
       radiusMinPixels: 7,
@@ -149,9 +212,14 @@ export function createEventPointLayers({
     }));
   }
 
-  const labeled = showLabels && zoom >= 3.4
+  const labeled = showLabels
     ? singles
-      .filter((event) => event.id === selectedEventId || event.severity === 'critical' || event.category === 'natural-hazard')
+      .filter((event) => {
+        const layerId = worldEventLayerIdForEvent(event);
+        const labelMinZoom = layerId ? worldEventLayerById(layerId)?.labelMinZoom ?? 3 : 3;
+        return zoom >= labelMinZoom
+          && (event.id === selectedEventId || event.severity === 'critical' || event.category === 'natural-hazard');
+      })
       .slice(0, zoom < 5 ? 80 : 220)
     : [];
   if (labeled.length) {

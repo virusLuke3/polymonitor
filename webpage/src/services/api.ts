@@ -751,7 +751,7 @@ export function fetchNaturalHazardRelatedMarkets(eventId: string, signal?: Abort
   const params = new URLSearchParams({ eventId, limit: '8' });
   return apiGetWithTimeout<HazardMarketLinksResponse>(
     `/runtime/world/natural-hazards/related-markets?${params.toString()}`,
-    25000,
+    6000,
     signal,
   );
 }

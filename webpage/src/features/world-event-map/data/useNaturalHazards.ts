@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { fetchNaturalHazards, isAbortLikeError } from '@/services/api';
+import { fetchNaturalHazards } from '@/services/api';
 import type { HazardEvent, HazardMapResponse } from '../domain/types';
 import type { WorldEventSourceStatus } from './sourceStatus';
 import {
@@ -9,6 +9,7 @@ import {
 import { parseNaturalHazardsResponse } from './naturalHazards';
 
 const REFRESH_INTERVAL_MS = 60_000;
+const RETRY_DELAYS_MS = [5_000, 10_000, 20_000] as const;
 
 export type NaturalHazardsState = {
   events: HazardEvent[];
@@ -33,6 +34,8 @@ export function useNaturalHazards(): NaturalHazardsState {
   useEffect(() => {
     let disposed = false;
     let controller: AbortController | null = null;
+    let timer: number | null = null;
+    let consecutiveFailures = 0;
 
     const load = async () => {
       controller?.abort();
@@ -50,8 +53,10 @@ export function useNaturalHazards(): NaturalHazardsState {
           error: null,
           rejectedCount: parsed.rejected.length,
         });
+        consecutiveFailures = 0;
       } catch (error) {
-        if (disposed || requestId !== requestIdRef.current || isAbortLikeError(error)) return;
+        if (disposed || requestId !== requestIdRef.current || controller.signal.aborted) return;
+        consecutiveFailures += 1;
         const message = error instanceof Error ? error.message : String(error);
         setState((current) => ({
           ...current,
@@ -63,16 +68,26 @@ export function useNaturalHazards(): NaturalHazardsState {
           loading: false,
           error: message,
         }));
+      } finally {
+        if (disposed) return;
+        const retryDelay = RETRY_DELAYS_MS[Math.min(
+          Math.max(0, consecutiveFailures - 1),
+          RETRY_DELAYS_MS.length - 1,
+        )] ?? 20_000;
+        const baseDelay = consecutiveFailures > 0 && consecutiveFailures <= RETRY_DELAYS_MS.length
+          ? retryDelay
+          : REFRESH_INTERVAL_MS;
+        const jitter = consecutiveFailures > 0 ? Math.floor(Math.random() * 1_000) : 0;
+        timer = window.setTimeout(() => void load(), baseDelay + jitter);
       }
     };
 
     void load();
-    const timer = window.setInterval(() => void load(), REFRESH_INTERVAL_MS);
     return () => {
       disposed = true;
       requestIdRef.current += 1;
       controller?.abort();
-      window.clearInterval(timer);
+      if (timer != null) window.clearTimeout(timer);
     };
   }, []);
 
