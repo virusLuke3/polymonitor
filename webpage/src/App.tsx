@@ -88,7 +88,6 @@ const GEO_SHOCK_STORAGE_KEY = 'polydata:seed:world:geo-sanctions-shock:v1';
 const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
 const APP_VERSION = 'v0.2.1';
 const QuantWorkspace = lazy(() => import('@/workspaces/quant/QuantWorkspace').then((module) => ({ default: module.QuantWorkspace })));
-const OperationsWorkspace = lazy(() => import('@/workspaces/operations/OperationsWorkspace').then((module) => ({ default: module.OperationsWorkspace })));
 const WorldCupWorkspace = lazy(() => import('@/workspaces/worldcup/WorldCupWorkspace').then((module) => ({ default: module.WorldCupWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
@@ -97,7 +96,6 @@ const SITE_NAV_LINKS = [
   { label: 'Docs', href: '/docs/documentation/' },
   { label: 'Paper', href: 'https://arxiv.org/pdf/2604.20421', external: true },
   { label: 'GitHub', href: 'https://github.com/virusLuke3/polymonitor', external: true },
-  { label: 'Operations', href: '/operations' },
   { label: 'Quant', href: '/quant' },
 ];
 const INTERVAL_RUNTIME_PANELS = RUNTIME_PANEL_MODULES.filter(
@@ -2706,14 +2704,6 @@ function WorldMonitorApp() {
 
 export function App() {
   const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
-  if (pathname === '/operations' || pathname.startsWith('/operations/')) {
-    return (
-      <Suspense fallback={<PanelLoading label="Loading Operations workspace" detail="Reading production health snapshots" />}>
-        <OperationsWorkspace />
-      </Suspense>
-    );
-  }
-
   return pathname === '/quant' || pathname.startsWith('/quant/')
     ? (
       <Suspense fallback={<PanelLoading label="Loading Quant workspace" detail="Opening chart, command palette and backtest tools" />}>
