@@ -361,7 +361,7 @@
   "atlas.layer.trade": "OrderFilled tape",
   "atlas.layer.lob": "Runtime LOB",
   "atlas.layer.intel": "Linked intelligence",
-  "atlas.layer.ucdp": "UCDP conflicts",
+  "atlas.layer.ucdp": "Conflict & Unrest",
   "atlas.layer.airRoutes": "Air routes",
   "atlas.commandTitle": "Market Command Center",
   "atlas.commandSearchTitle": "Search markets",

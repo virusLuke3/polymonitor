@@ -9957,6 +9957,50 @@ body {
   text-overflow: ellipsis;
 }
 
+.wm-map-source-statuses,
+.wm-map-source-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.wm-map-source-statuses {
+  gap: 5px;
+}
+
+.wm-map-source-status {
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid rgba(83, 218, 255, 0.22);
+  border-radius: 5px;
+  color: #b6c9d7;
+  font: 800 9px/1 var(--mono);
+  white-space: nowrap;
+}
+
+.wm-map-source-status b,
+.wm-map-source-status em,
+.wm-map-source-status small {
+  font: inherit;
+}
+
+.wm-map-source-status em {
+  color: #53daff;
+  font-style: normal;
+}
+
+.wm-map-source-status.is-partial em,
+.wm-map-source-status.is-degraded em {
+  color: #ffb82f;
+}
+
+.wm-map-source-status.is-error em {
+  color: #ff625f;
+}
+
+.wm-map-source-status.is-loading em {
+  color: rgba(186, 199, 213, 0.6);
+}
+
 .wm-map-view-toggle {
   display: inline-flex;
   align-items: center;

@@ -4,7 +4,7 @@ import { MapboxOverlay } from '@deck.gl/mapbox';
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import type { Layer, LayersList, PickingInfo } from '@deck.gl/core';
 import { getWeatherMapFallbackStyle, getWeatherMapStyle } from '@/config/weatherBasemap';
-import type { RuntimeGeoSanctionsShockItem, RuntimeGlobalTransportShippingPayload, RuntimeGlobalWeatherCity } from '@/types';
+import type { GeoEvent } from '@/features/world-event-map';
 
 type WeatherTone = 'hot' | 'cool' | 'neutral';
 type MarketTone = 'market' | 'watch' | 'none';
@@ -38,10 +38,10 @@ type WeatherMapPoint = {
   weatherImpact: number;
 };
 
+const EMPTY_WEATHER_POINTS: WeatherMapPoint[] = [];
+
 type WeatherDeckMapProps = {
-  items: RuntimeGlobalWeatherCity[];
-  ucdpEvents?: RuntimeGeoSanctionsShockItem[];
-  transportPayload?: RuntimeGlobalTransportShippingPayload | null;
+  events: GeoEvent[];
   showAirRoutes?: boolean;
   selectedCityId?: string | null;
   onSelectCity?: (cityId: string) => void;
@@ -414,7 +414,7 @@ const AIR_FOCUS_PRESETS: AirFocusPreset[] = [
 
 const AIR_FOCUS_PRESET_MAP = new Map(AIR_FOCUS_PRESETS.map((preset) => [preset.id, preset]));
 
-function numberValue(value?: string | number | null) {
+function numberValue(value?: unknown) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -432,7 +432,14 @@ function iso2ForCountry(country?: string | null) {
   return COUNTRY_ISO2_ALIASES[normalized] || null;
 }
 
-function violenceTone(item: RuntimeGeoSanctionsShockItem | ConflictMapPoint): ConflictTone {
+type ConflictSeverityInput = {
+  violenceType?: unknown;
+  severity?: unknown;
+  deathsBest?: unknown;
+  deaths?: unknown;
+};
+
+function violenceTone(item: ConflictSeverityInput): ConflictTone {
   const type = String(item.violenceType || '').trim();
   if (type === '1') return 'state';
   if (type === '2') return 'nonstate';
@@ -448,7 +455,7 @@ function violenceLabel(type?: string | number | null) {
   return 'CONFLICT';
 }
 
-function conflictColor(item: RuntimeGeoSanctionsShockItem | ConflictMapPoint) {
+function conflictColor(item: ConflictSeverityInput) {
   const tone = violenceTone(item);
   if (tone === 'state') return '#ff4d4d';
   if (tone === 'nonstate') return '#ff9f1c';
@@ -459,7 +466,7 @@ function conflictColor(item: RuntimeGeoSanctionsShockItem | ConflictMapPoint) {
   return '#ffd400';
 }
 
-function conflictSeverityScore(item: RuntimeGeoSanctionsShockItem | ConflictMapPoint) {
+function conflictSeverityScore(item: ConflictSeverityInput) {
   const severity = String(item.severity || '').toLowerCase();
   const severityBase = severity === 'critical'
     ? 0.92
@@ -470,7 +477,7 @@ function conflictSeverityScore(item: RuntimeGeoSanctionsShockItem | ConflictMapP
         : severity === 'low'
           ? 0.34
           : 0.42;
-  const deaths = Math.max(0, numberValue((item as RuntimeGeoSanctionsShockItem).deathsBest ?? (item as ConflictMapPoint).deaths) ?? 0);
+  const deaths = Math.max(0, numberValue(item.deathsBest ?? item.deaths) ?? 0);
   const deathBoost = clamp01(Math.log10(deaths + 1) / 2.5);
   const toneBoost = violenceTone(item) === 'state' ? 0.1 : violenceTone(item) === 'onesided' ? 0.05 : 0;
   return clamp01(severityBase * 0.62 + deathBoost * 0.28 + toneBoost);
@@ -528,16 +535,6 @@ function emptyCountryRisk(iso2: string, name: string): CountryRisk {
   };
 }
 
-function temperatureLabel(value: number | null, unit: string) {
-  if (value == null) return '--';
-  return `${Math.round(value)}°${unit || ''}`;
-}
-
-function probabilityLabel(value: number | null) {
-  if (value == null) return '--';
-  return `${Math.round(value * 100)}%`;
-}
-
 function airRouteLayerLabel(layer: string) {
   if (layer === 'trunk') return 'TRUNK';
   if (layer === 'international') return 'INTERNATIONAL';
@@ -555,175 +552,8 @@ function airRiskSourceLabel(source: AirRiskSource) {
   return 'ALL RISK';
 }
 
-function binTemperatureLabel(bin: RuntimeGlobalWeatherCity['topBin'], fallbackUnit: string) {
-  if (!bin) return null;
-  const unit = String(bin.unit || fallbackUnit || '').toUpperCase();
-  const min = numberValue(bin.minTemp);
-  const max = numberValue(bin.maxTemp);
-  const minValue = numberValue(bin.minValue);
-  const maxValue = numberValue(bin.maxValue);
-  if (minValue != null || maxValue != null) {
-    const suffix = unit ? unit.toLowerCase() : '';
-    if (bin.bucketType === 'below' && maxValue != null) return `${Math.round(maxValue)}${suffix}-`;
-    if (bin.bucketType === 'above' && minValue != null) return `${Math.round(minValue)}${suffix}+`;
-    if (minValue != null && maxValue != null && minValue !== maxValue) return `${Math.round(minValue)}-${Math.round(maxValue)}${suffix}`;
-    if (minValue != null) return `${Math.round(minValue)}${suffix}`;
-    if (maxValue != null) return `${Math.round(maxValue)}${suffix}`;
-  }
-  if (bin.bucketType === 'below' && max != null) return `${Math.round(max)}°${unit}-`;
-  if (bin.bucketType === 'above' && min != null) return `${Math.round(min)}°${unit}+`;
-  if (min != null && max != null && min !== max) return `${Math.round(min)}-${Math.round(max)}°${unit}`;
-  if (min != null) return `${Math.round(min)}°${unit}`;
-  if (max != null) return `${Math.round(max)}°${unit}`;
-  return null;
-}
-
-function temperatureTone(city: RuntimeGlobalWeatherCity): WeatherTone {
-  const temp = numberValue(city.forecastHigh ?? city.currentTemp);
-  if (temp == null) return 'neutral';
-  if (String(city.unit || '').toUpperCase() === 'F') {
-    if (temp >= 90) return 'hot';
-    if (temp <= 45) return 'cool';
-    return 'neutral';
-  }
-  if (temp >= 32) return 'hot';
-  if (temp <= 7) return 'cool';
-  return 'neutral';
-}
-
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
-}
-
-function conditionStormScore(condition?: string | null) {
-  const normalized = String(condition || '').toLowerCase().trim();
-  if (!normalized) return 0.08;
-  if (/(hurricane|typhoon|cyclone|tornado|supercell|blizzard|ice storm)/.test(normalized)) return 1;
-  if (/(thunder|lightning|storm|squall|hail)/.test(normalized)) return 0.88;
-  if (/(heavy rain|heavy snow|freezing rain|snowstorm)/.test(normalized)) return 0.78;
-  if (/(rain|showers|snow|sleet|drizzle)/.test(normalized)) return 0.56;
-  if (/(wind|gust|fog|mist|smoke|dust)/.test(normalized)) return 0.42;
-  if (/(overcast|cloudy)/.test(normalized)) return 0.16;
-  if (/(partly cloudy|mainly clear)/.test(normalized)) return 0.1;
-  if (/(clear|sunny)/.test(normalized)) return 0.06;
-  return 0.18;
-}
-
-function normalizeTemperatureToCelsius(value: number, unit: string) {
-  return String(unit || '').toUpperCase() === 'F' ? (value - 32) * (5 / 9) : value;
-}
-
-function numericMax(values: Array<number | null | undefined>) {
-  const filtered = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-  return filtered.length ? Math.max(...filtered) : null;
-}
-
-function hourlySwingScore(city: RuntimeGlobalWeatherCity) {
-  const unit = String(city.unit || '').toUpperCase();
-  const hourly = (city.hourly || [])
-    .map((entry) => numberValue(entry?.temp))
-    .filter((value): value is number => value != null);
-  if (hourly.length < 2) return 0;
-  const min = Math.min(...hourly);
-  const max = Math.max(...hourly);
-  const swingC = Math.abs(normalizeTemperatureToCelsius(max, unit) - normalizeTemperatureToCelsius(min, unit));
-  return clamp01(swingC / 8);
-}
-
-function temperatureExtremityScore(city: RuntimeGlobalWeatherCity) {
-  const unit = String(city.unit || '').toUpperCase();
-  const reference = numberValue(city.forecastHigh ?? city.currentTemp ?? city.todayHigh ?? city.todayLow);
-  if (reference == null) return 0;
-  const tempC = normalizeTemperatureToCelsius(reference, unit);
-  if (tempC >= 40 || tempC <= -8) return 1;
-  if (tempC >= 35 || tempC <= -2) return 0.78;
-  if (tempC >= 31 || tempC <= 3) return 0.52;
-  if (tempC >= 28 || tempC <= 7) return 0.3;
-  return 0.08;
-}
-
-function windImpactScore(city: RuntimeGlobalWeatherCity) {
-  const hourlyWind = (city.hourly || [])
-    .map((entry) => numberValue(entry?.windSpeed))
-    .filter((value): value is number => value != null);
-  const hourlyGust = (city.hourly || [])
-    .map((entry) => numberValue(entry?.windGust))
-    .filter((value): value is number => value != null);
-  const peakWind = numericMax([
-    numberValue(city.currentWindSpeed),
-    numberValue(city.todayWindSpeed),
-    numberValue(city.forecastWindSpeedMax),
-    ...hourlyWind,
-  ]);
-  const peakGust = numericMax([
-    numberValue(city.currentWindGust),
-    numberValue(city.todayWindGust),
-    numberValue(city.forecastWindGustMax),
-    ...hourlyGust,
-  ]);
-  const windScore = peakWind == null ? 0 : clamp01(peakWind / 52);
-  const gustScore = peakGust == null ? 0 : clamp01(peakGust / 82);
-  return clamp01(Math.max(windScore * 0.8, gustScore));
-}
-
-function precipitationImpactScore(city: RuntimeGlobalWeatherCity) {
-  const hourlyPrecip = (city.hourly || [])
-    .map((entry) => numberValue(entry?.precipitation))
-    .filter((value): value is number => value != null);
-  const hourlyProbability = (city.hourly || [])
-    .map((entry) => numberValue(entry?.precipitationProbability))
-    .filter((value): value is number => value != null);
-  const peakRate = numericMax([numberValue(city.currentPrecipitation), ...hourlyPrecip]);
-  const dailySum = numericMax([
-    numberValue(city.todayPrecipitationSum),
-    numberValue(city.forecastPrecipitationSum),
-    ...(city.daily || []).map((entry) => numberValue(entry?.precipitationSum)),
-  ]);
-  const peakProbability = numericMax([
-    numberValue(city.todayPrecipitationProbability),
-    numberValue(city.forecastPrecipitationProbabilityMax),
-    ...hourlyProbability,
-    ...(city.daily || []).map((entry) => numberValue(entry?.precipitationProbabilityMax)),
-  ]);
-  const rateScore = peakRate == null ? 0 : clamp01(peakRate / 9);
-  const sumScore = dailySum == null ? 0 : clamp01(dailySum / 34);
-  const probabilityScore = peakProbability == null ? 0 : clamp01(peakProbability / 100);
-  return clamp01(Math.max(rateScore * 0.9, sumScore * 0.82, probabilityScore * 0.72));
-}
-
-function weatherImpactScore(city: RuntimeGlobalWeatherCity) {
-  const condition = conditionStormScore(city.condition);
-  const extremity = temperatureExtremityScore(city);
-  const swing = hourlySwingScore(city);
-  const wind = windImpactScore(city);
-  const precipitation = precipitationImpactScore(city);
-  const toneBoost = temperatureTone(city) === 'neutral' ? 0 : 0.08;
-  const hasObservedSeverity = wind > 0 || precipitation > 0;
-  if (hasObservedSeverity) {
-    return clamp01(
-      0.02
-      + wind * 0.38
-      + precipitation * 0.34
-      + condition * 0.14
-      + extremity * 0.07
-      + swing * 0.03
-      + toneBoost * 0.5,
-    );
-  }
-  return clamp01(0.04 + condition * 0.64 + extremity * 0.2 + swing * 0.12 + toneBoost);
-}
-
-function marketTone(city: RuntimeGlobalWeatherCity): MarketTone {
-  if (!city.eventSlug) return 'none';
-  const coverageParts = String(city.quoteCoverage || '').split('/').map((part) => Number(part));
-  const quotedRaw = coverageParts[0];
-  const totalRaw = coverageParts[1];
-  const quoted = typeof quotedRaw === 'number' && Number.isFinite(quotedRaw) ? quotedRaw : 0;
-  const total = typeof totalRaw === 'number' && Number.isFinite(totalRaw) ? totalRaw : 0;
-  if (total > 0 && quoted / total >= 0.7) {
-    return 'market';
-  }
-  return 'watch';
 }
 
 function shouldShowLabel(point: WeatherMapPoint, selectedCityId?: string | null) {
@@ -736,68 +566,26 @@ function shouldShowLabel(point: WeatherMapPoint, selectedCityId?: string | null)
     || IMPORTANT_CITY_IDS.has(point.id);
 }
 
-function normalizePoints(items: RuntimeGlobalWeatherCity[]): WeatherMapPoint[] {
-  return items.flatMap((city) => {
-    const lat = numberValue(city.lat);
-    const lon = numberValue(city.lon);
-    const id = String(city.cityId || '').trim();
-    if (!id || lat == null || lon == null) return [];
-    const unit = String(city.unit || '').toUpperCase();
-    const currentTemp = numberValue(city.currentTemp);
-    const forecastHigh = numberValue(city.forecastHigh ?? city.todayHigh);
-    const topBinPrice = numberValue(city.topBin?.midPriceYes);
-    const topBinBid = numberValue(city.topBin?.bestBidYes);
-    const topBinAsk = numberValue(city.topBin?.bestAskYes);
-    const topBinLabel = city.topBin?.label ? String(city.topBin.label) : null;
-    const topBinTemperature = binTemperatureLabel(city.topBin, unit);
-    const weatherTemperature = temperatureLabel(forecastHigh ?? currentTemp, unit);
-    const priceSuffix = topBinPrice != null ? ` · ${probabilityLabel(topBinPrice)}` : '';
-    const sublabel = `${topBinTemperature || weatherTemperature}${priceSuffix}`;
-    const impact = weatherImpactScore(city);
-    return [{
-      id,
-      city: String(city.city || id),
-      country: String(city.country || ''),
-      lon,
-      lat,
-      unit,
-      currentTemp,
-      forecastHigh,
-      condition: String(city.condition || 'Condition pending'),
-      quoteCoverage: String(city.quoteCoverage || '0/0'),
-      topBinLabel,
-      topBinPrice,
-      topBinBid,
-      topBinAsk,
-      priceSource: city.topBin?.priceSource ? String(city.topBin.priceSource) : null,
-      bookStatus: city.topBin?.bookStatus ? String(city.topBin.bookStatus) : null,
-      marketUrl: city.marketUrl ? String(city.marketUrl) : null,
-      temperatureTone: temperatureTone(city),
-      marketTone: marketTone(city),
-      label: `${String(city.city || id)}\n${sublabel}`,
-      sublabel,
-      labelDx: numberValue(city.labelDx) ?? 8,
-      labelDy: numberValue(city.labelDy) ?? -16,
-      weatherImpact: impact,
-    }];
-  });
-}
-
-function normalizeConflictPoints(items: RuntimeGeoSanctionsShockItem[] = []): ConflictMapPoint[] {
-  return items.slice(0, 1200).flatMap((item, index): ConflictMapPoint[] => {
-    const lat = numberValue(item.latitude);
-    const lon = numberValue(item.longitude);
-    if (lat == null || lon == null || lat < -90 || lat > 90 || lon < -180 || lon > 180) return [];
-    const deaths = Math.max(0, numberValue(item.deathsBest) ?? 0);
-    const country = String(item.country || item.locationLabel || 'UCDP');
-    const sideA = String(item.sideA || '').trim();
-    const sideB = String(item.sideB || '').trim();
+function normalizeConflictPoints(events: GeoEvent[] = []): ConflictMapPoint[] {
+  return events.slice(0, 1200).flatMap((item): ConflictMapPoint[] => {
+    if ((item.category !== 'conflict' && item.category !== 'unrest') || item.geometry?.type !== 'Point') return [];
+    const [lon, lat] = item.geometry.coordinates;
+    const properties = item.properties;
+    const deaths = Math.max(0, numberValue(properties.deathsBest) ?? 0);
+    const country = String(properties.country || item.locationLabel || 'UCDP');
+    const sideA = String(properties.sideA || '').trim();
+    const sideB = String(properties.sideB || '').trim();
     const actors = [sideA, sideB].filter(Boolean).join(' vs ');
-    const tone = violenceTone(item);
-    const color = conflictColor(item);
+    const conflictInput = {
+      violenceType: properties.violenceType,
+      severity: item.severity,
+      deathsBest: deaths,
+    };
+    const tone = violenceTone(conflictInput);
+    const color = conflictColor(conflictInput);
     const size = Math.min(20, 7 + Math.log10(deaths + 1) * 5);
     return [{
-      id: String(item.id || `ucdp-${index}`),
+      id: item.id,
       lon,
       lat,
       iso2: iso2ForCountry(country),
@@ -807,27 +595,20 @@ function normalizeConflictPoints(items: RuntimeGeoSanctionsShockItem[] = []): Co
       sideA,
       sideB,
       deaths,
-      deathsLow: numberValue(item.deathsLow),
-      deathsHigh: numberValue(item.deathsHigh),
-      violenceType: String(item.violenceType || ''),
-      violenceLabel: violenceLabel(item.violenceType),
-      occurredAt: item.occurredAt ? String(item.occurredAt) : null,
-      source: item.source ? String(item.source) : null,
-      sourceUrl: item.sourceUrl ? String(item.sourceUrl) : null,
-      severity: item.severity ? String(item.severity) : null,
+      deathsLow: numberValue(properties.deathsLow),
+      deathsHigh: numberValue(properties.deathsHigh),
+      violenceType: String(properties.violenceType || ''),
+      violenceLabel: violenceLabel(properties.violenceType as string | number | null | undefined),
+      occurredAt: item.occurredAt || null,
+      source: item.sources[0]?.provider || null,
+      sourceUrl: item.sources[0]?.url || null,
+      severity: item.severity,
       tone,
       color,
       size,
       label: `${country}${deaths ? ` · ${deaths} deaths` : ''}${actors ? ` · ${actors}` : ''}`,
     }];
   });
-}
-
-function airCoord(lonValue?: number | string | null, latValue?: number | string | null): [number, number] | null {
-  const lon = numberValue(lonValue);
-  const lat = numberValue(latValue);
-  if (lon == null || lat == null || lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
-  return [lon, lat];
 }
 
 function wrapDeltaLon(delta: number) {
@@ -1070,16 +851,18 @@ function buildAirMotionPoints(routes: AirRoutePath[], animationTime: number, len
   return points;
 }
 
-function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | null): AirRoutePath[] {
-  return (payload?.aviation?.routes || []).flatMap((route, index): AirRoutePath[] => {
-    const from = airCoord(route.fromLon, route.fromLat);
-    const to = airCoord(route.toLon, route.toLat);
+function normalizeAirRoutes(events: GeoEvent[]): AirRoutePath[] {
+  return events.flatMap((event): AirRoutePath[] => {
+    if (event.properties.mapEntity !== 'air-route' || event.geometry?.type !== 'LineString') return [];
+    const route = event.properties;
+    const from = event.geometry.coordinates[0] || null;
+    const to = event.geometry.coordinates[event.geometry.coordinates.length - 1] || null;
     const fromCode = String(route.fromCode || '').trim();
     const toCode = String(route.toCode || '').trim();
     if (!from || !to || !fromCode || !toCode) return [];
-    const id = String(route.id || `${fromCode}-${toCode}-${index}`);
+    const id = event.id;
     const routeKey = `${fromCode}-${toCode}`;
-    const backendRiskSources = normalizeAirRiskSources(route.riskSources);
+    const backendRiskSources = normalizeAirRiskSources(Array.isArray(route.riskSources) ? route.riskSources.map(String) : []);
     return splitWrappedAirPath(airArcPath(from, to)).map((path, segmentIndex) => ({
       id: `${id}-${segmentIndex}`,
       routeKey,
@@ -1098,8 +881,8 @@ function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | nu
         : ((numberValue(route.trafficScore) ?? 0) >= 70 ? 'trunk' : 'regional'),
       riskSources: backendRiskSources,
       riskReason: String(route.riskReason || ''),
-      sourceUrl: String(route.sourceUrl || ''),
-      trend: normalizeAirTrend(route.trend),
+      sourceUrl: String(event.sources[0]?.url || ''),
+      trend: normalizeAirTrend(Array.isArray(route.trend) ? route.trend as Array<number | string | null> : []),
       weatherAnchors: [],
       conflictAnchors: [],
       weatherIntensity: backendRiskSources.includes('weather') ? Math.max(0.18, (numberValue(route.riskScore) ?? 0) / 180) : 0,
@@ -1108,9 +891,11 @@ function normalizeAirRoutes(payload?: RuntimeGlobalTransportShippingPayload | nu
   });
 }
 
-function normalizeAirHubs(payload?: RuntimeGlobalTransportShippingPayload | null): AirHubPoint[] {
-  return (payload?.aviation?.hubs || []).flatMap((hub): AirHubPoint[] => {
-    const coord = airCoord(hub.lon, hub.lat);
+function normalizeAirHubs(events: GeoEvent[]): AirHubPoint[] {
+  return events.flatMap((event): AirHubPoint[] => {
+    if (event.properties.mapEntity !== 'air-hub' || event.geometry?.type !== 'Point') return [];
+    const hub = event.properties;
+    const coord = event.geometry.coordinates;
     const code = String(hub.code || '').trim();
     if (!coord || !code) return [];
     return [{
@@ -1127,13 +912,15 @@ function normalizeAirHubs(payload?: RuntimeGlobalTransportShippingPayload | null
   });
 }
 
-function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | null | undefined, routes: AirRoutePath[], animationTime: number): AirFlightPoint[] {
+function normalizeAirFlights(events: GeoEvent[], routes: AirRoutePath[], animationTime: number): AirFlightPoint[] {
   const routeByKey = new Map<string, AirRoutePath>();
   routes.forEach((route) => {
     const existing = routeByKey.get(route.routeKey);
     if (!existing || route.path.length > existing.path.length) routeByKey.set(route.routeKey, route);
   });
-  return (payload?.aviation?.flights || []).flatMap((flight, index): AirFlightPoint[] => {
+  return events.flatMap((event, index): AirFlightPoint[] => {
+    if (event.properties.mapEntity !== 'air-flight') return [];
+    const flight = event.properties;
     const fromCode = String(flight.fromCode || '').trim();
     const toCode = String(flight.toCode || '').trim();
     const route = routeByKey.get(`${fromCode}-${toCode}`);
@@ -1142,7 +929,7 @@ function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | nu
     const speed = numberValue(flight.speed) ?? 0.06;
     const progress = (phase + animationTime * speed) % 1;
     return [{
-      id: String(flight.id || `aircraft-${fromCode}-${toCode}-${index}`),
+      id: event.id || `aircraft-${fromCode}-${toCode}-${index}`,
       fromCode,
       toCode,
       path: route.path,
@@ -1153,14 +940,15 @@ function normalizeAirFlights(payload: RuntimeGlobalTransportShippingPayload | nu
   });
 }
 
-function normalizeLiveAircraft(payload?: RuntimeGlobalTransportShippingPayload | null): LiveAircraftPoint[] {
-  return (payload?.aviation?.liveFlights || []).flatMap((row, index): LiveAircraftPoint[] => {
-    const coord = airCoord(row.lon, row.lat);
-    if (!coord) return [];
+function normalizeLiveAircraft(events: GeoEvent[]): LiveAircraftPoint[] {
+  return events.flatMap((event, index): LiveAircraftPoint[] => {
+    if (event.properties.mapEntity !== 'live-aircraft' || event.geometry?.type !== 'Point') return [];
+    const row = event.properties;
+    const coord = event.geometry.coordinates;
     return [{
-      id: String(row.id || row.icao24 || `opensky-${index}`),
+      id: event.id || String(row.icao24 || `opensky-${index}`),
       callsign: String(row.callsign || row.icao24 || 'OPEN'),
-      source: String(row.source || 'OpenSky'),
+      source: String(event.sources[0]?.provider || 'OpenSky'),
       originCountry: String(row.originCountry || 'Unknown'),
       regionLabel: String(row.regionLabel || row.region || 'OpenSky'),
       lon: coord[0],
@@ -2549,9 +2337,7 @@ function ConflictInspector({ point, onClose }: { point: ConflictMapPoint; onClos
 }
 
 export function WeatherDeckMap({
-  items,
-  ucdpEvents = [],
-  transportPayload = null,
+  events,
   showAirRoutes = false,
   selectedCityId = null,
   onSelectCity,
@@ -2601,13 +2387,13 @@ export function WeatherDeckMap({
   const [airLensMode, setAirLensMode] = useState<AirLensMode>('all');
   const [airFocusRegion, setAirFocusRegion] = useState<AirFocusRegion>('global');
   const [airRiskSource, setAirRiskSource] = useState<AirRiskSource>('all');
-  const points = useMemo(() => normalizePoints(items), [items]);
-  const conflictPoints = useMemo(() => normalizeConflictPoints(ucdpEvents), [ucdpEvents]);
+  const points = EMPTY_WEATHER_POINTS;
+  const conflictPoints = useMemo(() => normalizeConflictPoints(events), [events]);
   const densityPoints = useMemo(() => buildSignalDensityPoints(points, conflictPoints), [conflictPoints, points]);
   const countryRisks = useMemo(() => buildCountryRisks(conflictPoints), [conflictPoints]);
   const countryRiskByIso = useMemo(() => new Map(countryRisks.map((risk) => [risk.iso2, risk])), [countryRisks]);
-  const baseAirRoutes = useMemo(() => showAirRoutes ? normalizeAirRoutes(transportPayload) : [], [showAirRoutes, transportPayload]);
-  const allAirHubs = useMemo(() => showAirRoutes ? normalizeAirHubs(transportPayload) : [], [showAirRoutes, transportPayload]);
+  const baseAirRoutes = useMemo(() => showAirRoutes ? normalizeAirRoutes(events) : [], [events, showAirRoutes]);
+  const allAirHubs = useMemo(() => showAirRoutes ? normalizeAirHubs(events) : [], [events, showAirRoutes]);
   const allAirRoutes = useMemo(
     () => showAirRoutes ? enrichedAirRoutes(baseAirRoutes, points, conflictPoints) : [],
     [baseAirRoutes, conflictPoints, points, showAirRoutes],
@@ -2653,12 +2439,12 @@ export function WeatherDeckMap({
     [airFocusRegion, allAirHubs, primaryHubCodes, showAirRoutes],
   );
   const airFlights = useMemo(
-    () => showAirRoutes ? normalizeAirFlights(transportPayload, airRoutes, animationTimeRef.current) : [],
-    [airRoutes, showAirRoutes, transportPayload],
+    () => showAirRoutes ? normalizeAirFlights(events, airRoutes, animationTimeRef.current) : [],
+    [airRoutes, events, showAirRoutes],
   );
   const liveAircraft = useMemo(
-    () => showAirRoutes ? normalizeLiveAircraft(transportPayload) : [],
-    [showAirRoutes, transportPayload],
+    () => showAirRoutes ? normalizeLiveAircraft(events) : [],
+    [events, showAirRoutes],
   );
 
   const updateDeckLayers = () => {
@@ -2726,8 +2512,8 @@ export function WeatherDeckMap({
       const previous = airAnimationLastRef.current ?? timestamp;
       airAnimationLastRef.current = timestamp;
       animationTimeRef.current += Math.min(0.08, Math.max(0, timestamp - previous) / 1000);
-      airFlightsRef.current = normalizeAirFlights(transportPayload, airRoutesRef.current, animationTimeRef.current);
-      liveAircraftRef.current = normalizeLiveAircraft(transportPayload);
+      airFlightsRef.current = normalizeAirFlights(events, airRoutesRef.current, animationTimeRef.current);
+      liveAircraftRef.current = normalizeLiveAircraft(events);
       scheduleDeckUpdate();
       airAnimationRafRef.current = window.requestAnimationFrame(tick);
     };

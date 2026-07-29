@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "check:locales": "node scripts/check-locales.mjs",
+    "test:map": "vitest run src/features/world-event-map",
     "build": "npm run check:locales && tsc && vite build",
     "preview": "vite preview"
   },
@@ -33,6 +34,7 @@
     "@types/d3-geo": "^3.1.0",
     "@types/topojson-client": "^3.1.5",
     "typescript": "^5.8.2",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vitest": "^4.1.10"
   }
 }

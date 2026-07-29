@@ -361,7 +361,7 @@
   "atlas.layer.trade": "OrderFilled 流水",
   "atlas.layer.lob": "Runtime LOB",
   "atlas.layer.intel": "关联情报",
-  "atlas.layer.ucdp": "UCDP 冲突",
+  "atlas.layer.ucdp": "冲突与动荡",
   "atlas.layer.airRoutes": "航空路线",
   "atlas.commandTitle": "市场指挥中心",
   "atlas.commandSearchTitle": "搜索市场",

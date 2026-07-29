@@ -36,6 +36,15 @@ import { AuthApiError, fetchAuthSession } from '@/services/auth';
 import { useI18n, type MessageKey } from '@/services/i18n';
 import { specialistPanelMeta } from '@/services/specialist-i18n';
 import { fetchWorkspaceLayout, saveWorkspaceLayout, type WorkspaceLayout } from '@/services/product';
+import {
+  adaptGeoShockPayload,
+  adaptTransportReference,
+  MapStatus,
+  selectableWorldEventLayers,
+  sourceStatusFromAdapter,
+  worldEventLayerById,
+  type GeoEvent,
+} from '@/features/world-event-map';
 import type {
   BootstrapPayload,
   ContentItem,
@@ -103,10 +112,13 @@ const PublicBriefingWorkspace = lazy(() => import('@/workspaces/briefing/Briefin
 const DeveloperWorkspace = lazy(() => import('@/workspaces/developers/DeveloperWorkspace').then((module) => ({ default: module.DeveloperWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
-const INITIAL_LAYERS: LayerToggle[] = [
-  { id: 'ucdp', label: 'UCDP Conflicts', icon: '△', enabled: true, hint: 'CONFLICT' },
-  { id: 'air-routes', label: 'Air Routes', icon: '✈', enabled: false, hint: 'REFERENCE' },
-];
+const INITIAL_LAYERS: LayerToggle[] = selectableWorldEventLayers().map((layer) => ({
+  id: layer.id,
+  label: layer.label,
+  icon: layer.icon,
+  enabled: layer.defaultEnabled,
+  hint: layer.hint,
+}));
 
 const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
   { value: 'global', label: 'Global' },
@@ -136,10 +148,6 @@ const MAP_VIEW_MESSAGE_KEYS: Record<MapViewMode, MessageKey> = {
   '2d': 'map.2d',
   '3d': 'map.3d',
 };
-const LAYER_MESSAGE_KEYS: Record<string, MessageKey> = {
-  ucdp: 'atlas.layer.ucdp',
-  'air-routes': 'atlas.layer.airRoutes',
-};
 const CORE_PANEL_META_KEYS: Record<string, { title: MessageKey; description: MessageKey }> = {
   'active-markets': { title: 'panelMeta.activeMarkets.title', description: 'panelMeta.activeMarkets.description' },
   'market-summary': { title: 'panelMeta.marketSummary.title', description: 'panelMeta.marketSummary.description' },
@@ -150,8 +158,8 @@ const CORE_PANEL_META_KEYS: Record<string, { title: MessageKey; description: Mes
 };
 
 function localizedLayerLabel(layer: LayerToggle, t: (key: MessageKey, params?: Record<string, string | number>) => string) {
-  const key = LAYER_MESSAGE_KEYS[layer.id];
-  return key ? t(key) : layer.label;
+  const messageKey = worldEventLayerById(layer.id)?.messageKey as MessageKey | undefined;
+  return messageKey ? t(messageKey) : layer.label;
 }
 
 function localizedPanelMeta(
@@ -353,12 +361,10 @@ function hasGeoConflictCoordinates(item: RuntimeGeoSanctionsShockItem) {
 }
 
 function WorldEventInlineMap({
-  ucdpEvents,
-  transportPayload,
+  events,
   showAirRoutes,
 }: {
-  ucdpEvents: RuntimeGeoSanctionsShockItem[];
-  transportPayload?: RuntimeGlobalTransportShippingPayload | null;
+  events: GeoEvent[];
   showAirRoutes: boolean;
 }) {
   const { t } = useI18n();
@@ -366,9 +372,7 @@ function WorldEventInlineMap({
     <div className="wm-inline-weather-map">
       <div className="wm-inline-weather-map-hint">{t('atlas.weatherHint')}</div>
       <WeatherDeckMap
-        items={[]}
-        ucdpEvents={ucdpEvents}
-        transportPayload={transportPayload}
+        events={events}
         showAirRoutes={showAirRoutes}
         selectedCityId={null}
         height={620}
@@ -1592,10 +1596,37 @@ function WorldMonitorApp() {
   const activeLayerCount = enabledLayerIds.length;
   const geoShockPayload = runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined;
   const ucdpLayerEnabled = enabledLayerIds.includes('ucdp');
-  const ucdpMapEvents = useMemo(
+  const ucdpRawMapEvents = useMemo(
     () => (ucdpLayerEnabled ? (geoShockPayload?.items || []).filter(hasGeoConflictCoordinates) : []),
     [geoShockPayload, ucdpLayerEnabled],
   );
+  const geoShockAdapterResult = useMemo(() => adaptGeoShockPayload(geoShockPayload), [geoShockPayload]);
+  const ucdpMapEvents = useMemo(
+    () => ucdpLayerEnabled
+      ? geoShockAdapterResult.events.filter((event) => event.geometry?.type === 'Point')
+      : [],
+    [geoShockAdapterResult, ucdpLayerEnabled],
+  );
+  const showAirRoutes = enabledLayerIds.includes('air-routes');
+  const transportPayload = runtimeData['global-transport-shipping'] as RuntimeGlobalTransportShippingPayload | undefined;
+  const airReferenceEvents = useMemo(
+    () => showAirRoutes ? adaptTransportReference(transportPayload).events : [],
+    [showAirRoutes, transportPayload],
+  );
+  const worldEventMapEvents = useMemo(
+    () => [...ucdpMapEvents, ...airReferenceEvents],
+    [airReferenceEvents, ucdpMapEvents],
+  );
+  const mapSourceStatuses = useMemo(() => [
+    sourceStatusFromAdapter({
+      key: 'geo-sanctions-shock',
+      label: 'UCDP',
+      payloadStatus: geoShockPayload?.conflictState || geoShockPayload?.status,
+      generatedAt: geoShockPayload?.generatedAt,
+      result: geoShockAdapterResult,
+      loaded: Boolean(geoShockPayload),
+    }),
+  ], [geoShockAdapterResult, geoShockPayload]);
   const mapVisibleEventCount = viewMode === '3d' ? globeStatus.markerVisible : ucdpMapEvents.length;
   const mapQualityLabel = viewMode === '3d'
     ? `${globeStatus.qualitySetting.toUpperCase()} · ${globeStatus.fps ? Math.round(globeStatus.fps) : '--'} FPS`
@@ -1836,6 +1867,7 @@ function WorldMonitorApp() {
             <div className="wm-map-status-strip" aria-label={t('atlas.mapStatus')}>
               <span className="wm-status-chip">{t('atlas.liveStatus')}</span>
               <LiveUtcClock />
+              <MapStatus sources={mapSourceStatuses} />
               <span className="wm-map-status-metric">{t('atlas.events')} <b>{formatNumber(ucdpMapEvents.length)}</b></span>
               <span className="wm-map-status-metric">{t('atlas.visible')} <b>{formatNumber(mapVisibleEventCount)}</b></span>
               <span className="wm-map-status-metric">{t('atlas.quality')} <b>{mapQualityLabel}</b></span>
@@ -1907,7 +1939,7 @@ function WorldMonitorApp() {
                     recentTrades={currentGlobalTrades}
                     recentOracle={currentGlobalOracle}
                     contentItems={currentLatestContent}
-                    ucdpEvents={ucdpMapEvents}
+                    ucdpEvents={ucdpRawMapEvents}
                     region={region}
                     zoomLevel={mapZoom}
                     enabledLayerIds={enabledLayerIds}
@@ -1915,9 +1947,8 @@ function WorldMonitorApp() {
                   />
                 ) : (
                   <WorldEventInlineMap
-                    ucdpEvents={ucdpMapEvents}
-                    transportPayload={(runtimeData['global-transport-shipping'] as RuntimeGlobalTransportShippingPayload | undefined) || null}
-                    showAirRoutes={enabledLayerIds.includes('air-routes')}
+                    events={worldEventMapEvents}
+                    showAirRoutes={showAirRoutes}
                   />
                 )}
 
