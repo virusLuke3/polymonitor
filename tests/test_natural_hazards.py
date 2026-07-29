@@ -315,3 +315,38 @@ def test_service_returns_partial_data_when_one_provider_fails(monkeypatch) -> No
     assert statuses["nws"] == "error"
     assert statuses["firms"] == "degraded"
     assert statuses["climate-anomaly"] == "degraded"
+
+
+def test_cached_service_mode_never_calls_live_providers(monkeypatch) -> None:
+    store = StaleOnlySnapshotStore()
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, "usgs")] = {
+        "events": [{"id": "earthquake:usgs:cached", "hazardKind": "earthquake"}],
+        "fetchedAt": "2026-07-29T00:00:00Z",
+        "dataUpdatedAt": "2026-07-29T00:00:00Z",
+        "staleAfter": "2026-07-29T00:01:00Z",
+    }
+    settings = SimpleNamespace(
+        natural_hazards_usgs_url="usgs",
+        natural_hazards_eonet_url="eonet",
+        natural_hazards_nws_url="nws",
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("cached mode must not call a live provider")
+
+    monkeypatch.delenv("POLYDATA_FIRMS_MAP_KEY", raising=False)
+    payload = service.get_natural_hazards_snapshot(
+        {
+            "http_json_get": fail_if_called,
+            "SNAPSHOT_STORE": store,
+            "SETTINGS": settings,
+            "app": SimpleNamespace(logger=FakeLogger()),
+        },
+        allow_provider_fetch=False,
+    )
+
+    assert payload["events"] == [{"id": "earthquake:usgs:cached", "hazardKind": "earthquake"}]
+    statuses = {source["key"]: source["status"] for source in payload["sources"]}
+    assert statuses["usgs"] == "degraded"
+    assert statuses["eonet"] == "error"
+    assert statuses["nws"] == "error"

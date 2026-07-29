@@ -47,6 +47,23 @@ def stale_source_result(snapshot_store: Any, key: str, error_code: str) -> Sourc
     }
 
 
+def cached_source_result(snapshot_store: Any, key: str) -> SourceFetchResult | None:
+    fresh = snapshot_store.get(SNAPSHOT_NAMESPACE, key)
+    if isinstance(fresh, dict) and isinstance(fresh.get("events"), list):
+        return {
+            "key": key,
+            "status": "ok",
+            "coverage": SOURCE_COVERAGE[key],
+            "events": fresh["events"],
+            "fetchedAt": fresh.get("fetchedAt"),
+            "dataUpdatedAt": fresh.get("dataUpdatedAt"),
+            "staleAfter": fresh.get("staleAfter"),
+            "lastSuccessAt": fresh.get("fetchedAt"),
+            "errorCode": None,
+        }
+    return stale_source_result(snapshot_store, key, f"{key}-cached-stale")
+
+
 def fetch_with_snapshot(
     *,
     key: str,

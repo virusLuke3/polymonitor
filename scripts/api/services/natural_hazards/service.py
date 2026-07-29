@@ -14,7 +14,7 @@ from api.context import (
 from .contracts import SCHEMA_VERSION, SourceFetchResult
 from .dedupe import latest_revision
 from .providers import eonet, firms, nws, usgs
-from .snapshots import fetch_with_snapshot, stale_source_result
+from .snapshots import cached_source_result, fetch_with_snapshot, stale_source_result
 from .source_health import unavailable_source
 
 
@@ -123,6 +123,7 @@ def get_natural_hazards_snapshot(
     context: Mapping[str, Any],
     *,
     limit: int = DEFAULT_EVENT_LIMIT,
+    allow_provider_fetch: bool = True,
 ) -> Dict[str, Any]:
     dependencies = NaturalHazardDependencies.from_context(context)
     bounded_limit = max(1, min(DEFAULT_EVENT_LIMIT, int(limit)))
@@ -163,10 +164,20 @@ def get_natural_hazards_snapshot(
                 limit=min(firms.MAX_AGGREGATES, bounded_limit),
             ),
         )
-    results = _fetch_provider_results(
-        dependencies=dependencies,
-        source_specs=source_specs,
-    )
+    if allow_provider_fetch:
+        results = _fetch_provider_results(
+            dependencies=dependencies,
+            source_specs=source_specs,
+        )
+    else:
+        results = {}
+        for key in source_specs:
+            cached = cached_source_result(dependencies.snapshot_store, key)
+            results[key] = cached or {
+                **unavailable_source(key, f"{key}-snapshot-unavailable"),
+                "status": "error",
+                "events": [],
+            }
 
     events = latest_revision(
         event

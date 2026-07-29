@@ -489,6 +489,16 @@ def link_weather_markets(
         reverse=True,
     )
     bounded_limit = max(1, min(25, int(limit)))
+    limitations = [
+        "Only structured weather-market targets available in the current weather map snapshot are evaluated.",
+        "Title similarity alone never creates a link.",
+        "Oracle lifecycle is reported as unknown until a dedicated oracle join is available.",
+    ]
+    if not weather_map_payload.get("items"):
+        limitations.insert(
+            0,
+            "No cached structured weather-market snapshot was available; no live provider refresh was attempted.",
+        )
     return {
         "schemaVersion": LINKER_SCHEMA_VERSION,
         "generatedAt": _iso_now(),
@@ -501,11 +511,7 @@ def link_weather_markets(
             "returned": min(len(links), bounded_limit),
             "rejected": rejected,
         },
-        "limitations": [
-            "Only structured weather-market targets available in the current weather map snapshot are evaluated.",
-            "Title similarity alone never creates a link.",
-            "Oracle lifecycle is reported as unknown until a dedicated oracle join is available.",
-        ],
+        "limitations": limitations,
     }
 
 

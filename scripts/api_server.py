@@ -1108,10 +1108,12 @@ def get_natural_hazard_related_markets(
     hazards = natural_hazards.get_natural_hazards_snapshot(
         build_service_context(),
         limit=natural_hazards.DEFAULT_EVENT_LIMIT,
+        allow_provider_fetch=False,
     )
     weather_markets = global_weather_map_service.get_global_weather_map_snapshot(
         build_service_context(),
         limit=100,
+        allow_live_build=False,
     )
     return natural_hazards.related_weather_markets_snapshot(
         event_id=event_id,
