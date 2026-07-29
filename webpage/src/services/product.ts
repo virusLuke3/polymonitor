@@ -51,12 +51,21 @@ export type AlertEvent = {
 
 export type NotificationPreferences = {
   inAppEnabled: boolean;
+  webPushEnabled: boolean;
   digestMode: 'realtime' | 'hourly' | 'daily' | 'off';
   quietStartMinute: number | null;
   quietEndMinute: number | null;
   timezone: string;
   updatedAt?: string | null;
   channels: Record<string, { available: boolean; connected: boolean; detail?: string }>;
+};
+
+export type WebPushStatus = {
+  available: boolean;
+  publicKey: string | null;
+  enabled: boolean;
+  connected: boolean;
+  subscriptionCount: number;
 };
 
 export type WorkspaceLayout = {
@@ -140,6 +149,17 @@ export const updateNotificationPreferences = (value: Omit<NotificationPreference
   authRequest<NotificationPreferences>('/product/notification-preferences', {
     method: 'PUT',
     body: JSON.stringify(value),
+  }, { csrf: true });
+export const fetchWebPushStatus = () => authRequest<WebPushStatus>('/product/web-push');
+export const registerWebPushSubscription = (subscription: PushSubscriptionJSON) =>
+  authRequest<WebPushStatus>('/product/web-push/subscriptions', {
+    method: 'POST',
+    body: JSON.stringify(subscription),
+  }, { csrf: true });
+export const revokeWebPushSubscription = (endpoint: string) =>
+  authRequest<WebPushStatus>('/product/web-push/subscriptions', {
+    method: 'DELETE',
+    body: JSON.stringify({ endpoint }),
   }, { csrf: true });
 
 export const fetchWorkspaceLayout = () => authRequest<WorkspaceLayout>('/product/workspace-layout');
