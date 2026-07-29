@@ -30,6 +30,7 @@ export class DeckMapRenderer implements MapRenderer {
   private events: GeoEvent[] = [];
   private fallbackApplied = false;
   private fallbackTimer: number | null = null;
+  private overlayMounted = false;
   private paused = false;
   private destroyed = false;
   private applyingCamera = false;
@@ -83,7 +84,10 @@ export class DeckMapRenderer implements MapRenderer {
 
     map.once('load', () => {
       if (this.destroyed) return;
-      map.addControl(overlay as unknown as maplibregl.IControl);
+      if (!this.overlayMounted) {
+        map.addControl(overlay as unknown as maplibregl.IControl);
+        this.overlayMounted = true;
+      }
       this.clearFallbackTimer();
       this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
       this.render();
@@ -164,6 +168,7 @@ export class DeckMapRenderer implements MapRenderer {
     }
     this.map = null;
     this.overlay = null;
+    this.overlayMounted = false;
     this.callbacks = null;
   }
 
@@ -191,9 +196,6 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleStyleLoad = () => {
     if (!this.map || this.destroyed) return;
-    if (this.overlay && !this.map.hasControl(this.overlay as unknown as maplibregl.IControl)) {
-      this.map.addControl(this.overlay as unknown as maplibregl.IControl);
-    }
     this.clearFallbackTimer();
     this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
     this.render();
