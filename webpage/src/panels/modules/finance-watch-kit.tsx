@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeFinanceWatchPanel } from '@/services/api';
 import type { RuntimeFinanceWatchItem, RuntimeFinanceWatchPayload } from '@/types';
-import { formatRelative } from '../shared/formatters';
 import type { PanelRenderMap } from '../types';
 import { runtimePanelFromRenderer } from './helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type FinancePanelMode = 'rows' | 'feed' | 'grid' | 'sentiment' | 'etf' | 'research';
 
@@ -80,10 +80,11 @@ function ValueBlock({ item }: { item: RuntimeFinanceWatchItem }) {
 }
 
 function QuoteRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh?: boolean }) {
+  const { shared } = useSpecialistCopy('finance-shared');
   return (
     <article className={`wm-finance-row${fresh ? ' is-fresh' : ''}`}>
       <div className="wm-finance-main">
-        <strong>{item.label || item.title || 'Finance item'}</strong>
+        <strong>{item.label || item.title || shared('financeItem', 'Finance item')}</strong>
         <span>{item.symbol || item.metricUnit || '--'}</span>
       </div>
       <ValueBlock item={item} />
@@ -96,19 +97,20 @@ function QuoteRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fres
 }
 
 function FeedRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh?: boolean }) {
+  const { shared, formatRelativeTime } = useSpecialistCopy('finance-shared');
   const content = (
     <>
       <div className="wm-finance-feed-meta">
         <span className="wm-finance-dot" />
-        <b>{item.label || item.source || 'SOURCE'}</b>
+        <b>{item.label || item.source || shared('source', 'SOURCE')}</b>
         <span>{item.source || item.symbol || 'RSS'}</span>
         <FinanceTags tags={item.tags} />
       </div>
-      <strong>{item.title || item.label || 'Headline pending'}</strong>
-      <em>{item.summary || item.title || 'Summary pending'}</em>
+      <strong>{item.title || item.label || shared('headlinePending', 'Headline pending')}</strong>
+      <em>{item.summary || item.title || shared('summaryPending', 'Summary pending')}</em>
       <div className="wm-finance-feed-foot">
-        <span>{formatRelative(item.publishedAt || undefined)}</span>
-        {item.url ? <b>Read source</b> : null}
+        <span>{formatRelativeTime(item.publishedAt || undefined)}</span>
+        {item.url ? <b>{shared('readSource', 'Read source')}</b> : null}
       </div>
     </>
   );
@@ -119,13 +121,14 @@ function FeedRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh
 }
 
 function ResearchRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh?: boolean }) {
+  const { shared, formatRelativeTime } = useSpecialistCopy('finance-shared');
   const fields = [
-    { label: 'CODE', value: item.label },
-    { label: 'RATING', value: item.rating || item.metricLabel },
-    { label: 'TARGET', value: item.targetPriceLabel || item.secondaryLabel },
-    { label: 'FIRM', value: item.institution || item.source },
-    { label: 'ANALYST', value: item.analyst },
-    { label: 'TIME', value: formatRelative(item.publishedAt || undefined) },
+    { label: shared('code', 'CODE'), value: item.label },
+    { label: shared('rating', 'RATING'), value: item.rating || item.metricLabel },
+    { label: shared('target', 'TARGET'), value: item.targetPriceLabel || item.secondaryLabel },
+    { label: shared('firm', 'FIRM'), value: item.institution || item.source },
+    { label: shared('analyst', 'ANALYST'), value: item.analyst },
+    { label: shared('time', 'TIME'), value: formatRelativeTime(item.publishedAt || undefined) },
   ].filter((field) => field.value);
   const content = (
     <>
@@ -136,7 +139,7 @@ function ResearchRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; f
           <span>{item.institution || item.source || item.symbol || 'BROKER'}</span>
           <FinanceTags tags={item.tags} />
         </div>
-        <strong>{item.title || item.summary || 'Research note pending'}</strong>
+        <strong>{item.title || item.summary || shared('researchPending', 'Research note pending')}</strong>
         <div className="wm-finance-research-fields">
           {fields.slice(0, 6).map((field) => (
             <span key={field.label}>
@@ -145,10 +148,10 @@ function ResearchRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; f
             </span>
           ))}
         </div>
-        <em>{item.summary || item.company || 'Original research metadata pending'}</em>
+        <em>{item.summary || item.company || shared('researchMetadataPending', 'Original research metadata pending')}</em>
         <div className="wm-finance-feed-foot">
-          <span>{formatRelative(item.publishedAt || undefined)}</span>
-          {item.url ? <b>{item.reportPageLabel || 'Read report'}</b> : null}
+          <span>{formatRelativeTime(item.publishedAt || undefined)}</span>
+          {item.url ? <b>{item.reportPageLabel || shared('readReport', 'Read report')}</b> : null}
         </div>
       </div>
       <div className="wm-finance-research-metric">
@@ -186,10 +189,13 @@ function summaryList<T>(payload: RuntimeFinanceWatchPayload | null | undefined, 
 }
 
 function SentimentView({ payload, freshKeys }: { payload?: RuntimeFinanceWatchPayload | null; freshKeys?: Set<string> }) {
+  const { shared } = useSpecialistCopy('finance-shared');
   const headline = payload?.headline || {};
   const score = headline.score ?? '--';
   const delta = headline.delta;
-  const deltaLabel = typeof delta === 'number' ? `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} vs prev` : null;
+  const deltaLabel = typeof delta === 'number'
+    ? shared('versusPrevious', '{value} vs prev', { value: `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}` })
+    : null;
   const deltaTone = typeof delta === 'number' && delta >= 0 ? 'up' : 'down';
   const scoreNumber = Number(score);
   const angle = Number.isFinite(scoreNumber) ? Math.max(0, Math.min(100, scoreNumber)) * 1.8 - 90 : 0;
@@ -198,7 +204,7 @@ function SentimentView({ payload, freshKeys }: { payload?: RuntimeFinanceWatchPa
   return (
     <div className="wm-finance-sentiment">
       <section className={`wm-finance-sentiment-gauge ${toneClass(headline.tone)}`}>
-        <b>{headline.regime || 'NEUTRAL'}</b>
+        <b>{headline.regime || shared('neutral', 'NEUTRAL')}</b>
         <div className="wm-finance-gauge-arc">
           <span className="zone z1" />
           <span className="zone z2" />
@@ -207,7 +213,7 @@ function SentimentView({ payload, freshKeys }: { payload?: RuntimeFinanceWatchPa
           <span className="zone z5" />
           <i style={{ transform: `rotate(${angle}deg)` }} />
           <strong>{score}</strong>
-          <em>{headline.label || 'NEUTRAL'}</em>
+          <em>{headline.label || shared('neutral', 'NEUTRAL')}</em>
         </div>
         {deltaLabel ? <small className={toneClass(deltaTone)}>{deltaLabel}</small> : null}
       </section>
@@ -232,7 +238,10 @@ function SentimentView({ payload, freshKeys }: { payload?: RuntimeFinanceWatchPa
                   <b className={toneClass(category.tone)}>{category.score}</b>
                 </div>
                 <span><i className={toneClass(category.tone)} style={{ width: `${Math.max(0, Math.min(100, scoreValue))}%` }} /></span>
-                <em>{Math.round(Number(category.weight || 0) * 100)}% weight · +{category.contribution} pts{category.degraded ? ' · degraded' : ''}</em>
+                <em>{shared('weightContribution', '{weight}% weight · +{points} pts', {
+                  weight: Math.round(Number(category.weight || 0) * 100),
+                  points: category.contribution || 0,
+                })}{category.degraded ? ` · ${shared('degraded', 'degraded')}` : ''}</em>
               </article>
             );
           })}
@@ -257,6 +266,7 @@ function compactMoney(value: unknown) {
 }
 
 function EtfView({ payload, freshKeys }: { payload?: RuntimeFinanceWatchPayload | null; freshKeys?: Set<string> }) {
+  const { shared } = useSpecialistCopy('finance-shared');
   const items = payload?.items || [];
   const summary = payload?.summary || {};
   const net = Number(summary.netFlowProxyUsd || 0);
@@ -264,14 +274,14 @@ function EtfView({ payload, freshKeys }: { payload?: RuntimeFinanceWatchPayload 
   return (
     <div className="wm-finance-etf">
       <div className="wm-finance-etf-summary">
-        <span>NET FLOW<b className={dirClass}>{net > 0 ? 'INFLOW' : net < 0 ? 'OUTFLOW' : 'NEUTRAL'}</b></span>
-        <span>EST FLOW<b>{compactMoney(summary.netFlowProxyUsd)}</b></span>
-        <span>TOTAL VOL<b>{compactMoney(summary.totalVolume)}</b></span>
+        <span>{shared('netFlow', 'NET FLOW')}<b className={dirClass}>{net > 0 ? shared('inflow', 'INFLOW') : net < 0 ? shared('outflow', 'OUTFLOW') : shared('neutral', 'NEUTRAL')}</b></span>
+        <span>{shared('estimatedFlow', 'EST FLOW')}<b>{compactMoney(summary.netFlowProxyUsd)}</b></span>
+        <span>{shared('totalVolume', 'TOTAL VOL')}<b>{compactMoney(summary.totalVolume)}</b></span>
         <span>ETFS<b>{summary.inflowCount || 0}↑ {summary.outflowCount || 0}↓</b></span>
       </div>
       <div className="wm-finance-etf-table">
         <div className="wm-finance-etf-head">
-          <span>CODE</span><span>ISSUER</span><span>EST FLOW</span><span>VOLUME</span><span>CHG</span>
+          <span>{shared('code', 'CODE')}</span><span>{shared('issuer', 'ISSUER')}</span><span>{shared('estimatedFlow', 'EST FLOW')}</span><span>{shared('volume', 'VOLUME')}</span><span>{shared('change', 'CHG')}</span>
         </div>
         {items.map((item, index) => (
           <article className={`wm-finance-etf-row${itemFreshClass(item, index, freshKeys)}`} key={itemKey(item, index)}>
@@ -288,14 +298,15 @@ function EtfView({ payload, freshKeys }: { payload?: RuntimeFinanceWatchPayload 
 }
 
 function FinanceWatchView({ payload, mode, freshKeys }: { payload?: RuntimeFinanceWatchPayload | null; mode: FinancePanelMode; freshKeys?: Set<string> }) {
+  const { shared } = useSpecialistCopy('finance-shared');
   const items = payload?.items || [];
   if (mode === 'sentiment') return <SentimentView payload={payload} freshKeys={freshKeys} />;
   if (mode === 'etf') return <EtfView payload={payload} freshKeys={freshKeys} />;
   if (!items.length) {
     return (
       <div className="wm-finance-empty">
-        <span>STANDBY</span>
-        <strong>{payload?.title || 'Finance panel'} warming</strong>
+        <span>{shared('standby', 'STANDBY')}</span>
+        <strong>{shared('panelWarmingTitle', '{title} warming', { title: payload?.title || shared('financePanel', 'Finance panel') })}</strong>
       </div>
     );
   }
@@ -312,6 +323,7 @@ function FinanceWatchView({ payload, mode, freshKeys }: { payload?: RuntimeFinan
 }
 
 function FinanceWatchPanel({ config, payload }: { config: FinancePanelConfig; payload?: RuntimeFinanceWatchPayload | null }) {
+  const { copy, shared } = useSpecialistCopy(config.id);
   const [showHelp, setShowHelp] = useState(false);
   const [freshKeys, setFreshKeys] = useState<Set<string>>(new Set());
   const [updatePulse, setUpdatePulse] = useState(0);
@@ -321,6 +333,7 @@ function FinanceWatchPanel({ config, payload }: { config: FinancePanelConfig; pa
   const count = useMemo(() => payload?.items?.length || 0, [payload?.items]);
   const items = payload?.items || [];
   const itemStamp = useMemo(() => items.map((item, index) => `${itemKey(item, index)}=${itemSignature(item)}`).join('|'), [items]);
+  const title = copy('title', config.title);
 
   useEffect(() => {
     if (!payload) return;
@@ -352,15 +365,15 @@ function FinanceWatchPanel({ config, payload }: { config: FinancePanelConfig; pa
 
   return (
     <Panel
-      title={config.title}
-      titleControls={<button type="button" className="wm-panel-help-button" aria-label={`Explain ${config.title}`} aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>}
+      title={title}
+      titleControls={<button type="button" className="wm-panel-help-button" aria-label={shared('explainPanel', 'Explain {title}', { title })} aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>}
       badge={statusBadge(payload)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
       count={count}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>{config.title}</strong>
-          <p>{config.question}</p>
+          <strong>{title}</strong>
+          <p>{copy('question', config.question)}</p>
         </div>
       ) : null}
       className={`wm-market-panel wm-finance-watch-panel mode-${mode}${updatePulse > 0 ? ` is-dynamic refresh-pulse-${updatePulse % 2}` : ''}`}

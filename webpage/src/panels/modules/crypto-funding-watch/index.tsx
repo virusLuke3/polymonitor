@@ -4,6 +4,7 @@ import { fetchRuntimeCryptoFundingWatch } from '@/services/api';
 import type { RuntimeCryptoFundingAsset, RuntimeCryptoFundingPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function absolutePercentLabel(value?: number | null, digits = 4) {
   const numeric = Number(value);
@@ -132,6 +133,7 @@ function fundingVenueSummary(asset: RuntimeCryptoFundingAsset) {
 }
 
 function FundingSummary({ payload, assets }: { payload?: RuntimeCryptoFundingPayload | null; assets: RuntimeCryptoFundingAsset[] }) {
+  const { copy, shared } = useSpecialistCopy('crypto-funding-watch');
   const stats = fundingPressureStats(payload, assets);
   const topAssetName = stats.topAsset?.asset || stats.topAsset?.symbol || 'watchlist';
   return (
@@ -139,15 +141,15 @@ function FundingSummary({ payload, assets }: { payload?: RuntimeCryptoFundingPay
       <div className="wm-market-radar-strip wm-funding-radar-strip">
         <span>
           <strong>{topAssetName}</strong>
-          <em>top move</em>
+          <em>{shared('topMove', 'top move')}</em>
         </span>
         <span>
           <strong>{averageAbsFundingValue(assets)}</strong>
-          <em>avg abs</em>
+          <em>{copy('averageAbsolute', 'avg abs')}</em>
         </span>
         <span>
           <strong>{stats.alertCount}/{assets.length}</strong>
-          <em>alerts</em>
+          <em>{shared('alerts', 'alerts')}</em>
         </span>
       </div>
     </section>
@@ -181,12 +183,13 @@ function FundingRow({ asset }: { asset: RuntimeCryptoFundingAsset }) {
 }
 
 function FundingList({ payload }: { payload?: RuntimeCryptoFundingPayload | null }) {
+  const { copy } = useSpecialistCopy('crypto-funding-watch');
   const assets = groupedAssets(payload);
   if (!assets.length) {
     return (
       <div className="wm-funding-empty-state">
-        <span>Standby</span>
-        <strong>No funding rates loaded yet.</strong>
+        <span>{copy('standby', 'Standby')}</span>
+        <strong>{copy('empty', 'No funding rates loaded yet.')}</strong>
         <em>{sourceStatus(payload).toUpperCase()}</em>
       </div>
     );
@@ -204,6 +207,7 @@ function FundingList({ payload }: { payload?: RuntimeCryptoFundingPayload | null
 }
 
 function FundingRatePanel({ payload }: { payload?: RuntimeCryptoFundingPayload | null }) {
+  const { copy } = useSpecialistCopy('crypto-funding-watch');
   const [showHelp, setShowHelp] = useState(false);
   const assets = payload?.assets || [];
   const degraded = sourceStatus(payload) !== 'ok' && sourceStatus(payload) !== 'live';
@@ -211,12 +215,12 @@ function FundingRatePanel({ payload }: { payload?: RuntimeCryptoFundingPayload |
 
   return (
     <Panel
-      title="FUNDING RATE"
+      title={copy('title', 'FUNDING RATE')}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain perpetual funding rate"
+          aria-label={copy('explainAria', 'Explain perpetual funding rate')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -228,8 +232,8 @@ function FundingRatePanel({ payload }: { payload?: RuntimeCryptoFundingPayload |
       count={assets.length ? stats.alertCount || assets.length : 0}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Funding Rate</strong>
-          <p>Perpetual funding keeps perp prices anchored near spot. Positive funding means longs pay shorts. Negative funding means shorts pay longs.</p>
+          <strong>{copy('helpTitle', 'Funding Rate')}</strong>
+          <p>{copy('helpText', 'Perpetual funding keeps perp prices anchored near spot. Positive funding means longs pay shorts. Negative funding means shorts pay longs.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-funding-panel"

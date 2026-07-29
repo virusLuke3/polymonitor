@@ -3,6 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { RuntimeMacroDriverItem, RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import { MacroAlertStrip, PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from './macro-intel';
 import type { PanelGlyphName } from './macro-intel';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 export type MacroDriverConfig = {
   panelId: string;
@@ -59,13 +60,14 @@ function asGlyph(icon?: string | null): PanelGlyphName {
 }
 
 function MacroDriverRow({ item }: { item: RuntimeMacroDriverItem }) {
+  const { shared } = useSpecialistCopy('macro-driver');
   const tone = rowTone(item);
   return (
     <div className={`wm-macro-driver-row ${tone}`}>
-      <RowGlyph icon={asGlyph(item.icon)} tone={tone} label={item.label || item.group || 'Macro driver'} />
+      <RowGlyph icon={asGlyph(item.icon)} tone={tone} label={item.label || item.group || shared('macroDriver', 'Macro driver')} />
       <div className="wm-macro-driver-main">
         <span>{String(item.group || item.seriesId || item.key || 'macro').toUpperCase()}</span>
-        <strong>{item.label || 'Macro driver'}</strong>
+        <strong>{item.label || shared('macroDriver', 'Macro driver')}</strong>
       </div>
       <strong className="wm-macro-driver-value">{valueLabel(item)}</strong>
       <StatusBadge tone={tone}>{changeLabel(item)}</StatusBadge>
@@ -74,20 +76,23 @@ function MacroDriverRow({ item }: { item: RuntimeMacroDriverItem }) {
 }
 
 export function MacroDriverPanel({ config, payload, macroPayload: _macroPayload }: { config: MacroDriverConfig; payload?: RuntimeMacroDriverPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+  const { copy, shared } = useSpecialistCopy(config.panelId);
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
   const signalTone = signalToneClass(summary?.signal || summary?.bias || payload?.status);
   const status = String(payload?.status || 'warming').toLowerCase();
   const badge = status === 'ok' ? undefined : status === 'degraded' ? 'PARTIAL' : 'WARMING';
+  const title = copy('title', config.title);
+  const emptyTitle = copy('emptyTitle', config.emptyTitle);
   return (
     <Panel
-      title={config.title}
+      title={title}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label={`Explain ${config.title}`}
+          aria-label={shared('explainPanel', 'Explain {title}', { title })}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -99,8 +104,8 @@ export function MacroDriverPanel({ config, payload, macroPayload: _macroPayload 
       count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>{config.helpTitle}</strong>
-          <p>{config.helpText}</p>
+          <strong>{copy('helpTitle', config.helpTitle)}</strong>
+          <p>{copy('helpText', config.helpText)}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-macro-driver-panel"
@@ -110,8 +115,8 @@ export function MacroDriverPanel({ config, payload, macroPayload: _macroPayload 
         <div className="wm-intel-signal-main">
           <PanelGlyph icon={config.glyph} tone={signalTone} />
           <div className="wm-intel-signal-copy">
-            <span>{config.driverLabel}</span>
-            <strong>{summary?.signal || config.emptyTitle}</strong>
+            <span>{copy('driverLabel', config.driverLabel)}</span>
+            <strong>{summary?.signal || emptyTitle}</strong>
           </div>
         </div>
         <em>{config.badge}</em>
@@ -120,8 +125,8 @@ export function MacroDriverPanel({ config, payload, macroPayload: _macroPayload 
       <div className="wm-macro-driver-list">
         {items.length ? items.map((item) => <MacroDriverRow key={item.key || item.seriesId || item.label || 'macro-driver'} item={item} />) : (
           <div className="wm-empty-state">
-            <strong>{config.emptyTitle}</strong>
-            <em>Seed cache has not warmed this panel yet.</em>
+            <strong>{emptyTitle}</strong>
+            <em>{shared('panelWarming', 'Seed cache has not warmed this panel yet.')}</em>
           </div>
         )}
       </div>

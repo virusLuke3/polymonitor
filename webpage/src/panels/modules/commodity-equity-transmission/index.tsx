@@ -9,6 +9,7 @@ import type {
 } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function statusBadge(payload?: RuntimeCommodityTransmissionPayload | null) {
   const status = String(payload?.status || '').toLowerCase();
@@ -116,6 +117,7 @@ function LinkedMarketStrip({ chain }: { chain: RuntimeTransmissionChain }) {
 }
 
 function TransmissionRow({ chain }: { chain: RuntimeTransmissionChain }) {
+  const { copy } = useSpecialistCopy('commodity-equity-transmission');
   const shock = typeof chain.shockPct === 'number' && Number.isFinite(chain.shockPct)
     ? `${chain.shockPct >= 0 ? '+' : ''}${chain.shockPct.toFixed(2)}%`
     : chain.shockLabel || '--';
@@ -131,15 +133,15 @@ function TransmissionRow({ chain }: { chain: RuntimeTransmissionChain }) {
           </div>
           <div className="wm-transmission-value">
             <strong className={toneClass(chain.tone)}>{shock}</strong>
-            <span>{chain.demandRegime || 'mixed demand'}</span>
+            <span>{chain.demandRegime || copy('mixedDemand', 'mixed demand')}</span>
           </div>
         </div>
         <strong title={chain.chainLabel}>{chain.chainLabel}</strong>
-        <p title={chain.formula || undefined}>{chain.formula || 'commodity move * exposure * pass-through * pricing power'}</p>
+        <p title={chain.formula || undefined}>{chain.formula || copy('formula', 'commodity move * exposure * pass-through * pricing power')}</p>
         <div className="wm-transmission-columns">
-          <ExposureColumn title="WINNERS" items={chain.winners} empty="none" />
-          <ExposureColumn title="LOSERS" items={chain.losers} empty="none" />
-          <ExposureColumn title="SPREAD" items={chain.spreadWatch} empty="not modeled" />
+          <ExposureColumn title={copy('winners', 'WINNERS')} items={chain.winners} empty={copy('none', 'none')} />
+          <ExposureColumn title={copy('losers', 'LOSERS')} items={chain.losers} empty={copy('none', 'none')} />
+          <ExposureColumn title={copy('spread', 'SPREAD')} items={chain.spreadWatch} empty={copy('notModeled', 'not modeled')} />
         </div>
         <LinkedMarketStrip chain={chain} />
       </div>
@@ -148,6 +150,7 @@ function TransmissionRow({ chain }: { chain: RuntimeTransmissionChain }) {
 }
 
 function CommodityEquityTransmissionPanel({ payload }: { payload?: RuntimeCommodityTransmissionPayload | null }) {
+  const { copy, shared } = useSpecialistCopy('commodity-equity-transmission');
   const [showHelp, setShowHelp] = useState(false);
   const transmissions = payload?.transmissions || [];
   const commodities = payload?.commodities || [];
@@ -159,12 +162,12 @@ function CommodityEquityTransmissionPanel({ payload }: { payload?: RuntimeCommod
 
   return (
     <Panel
-      title="COMMODITY FLOW"
+      title={copy('title', 'COMMODITY FLOW')}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain commodity equity transmission"
+          aria-label={copy('explainAria', 'Explain commodity equity transmission')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -176,8 +179,8 @@ function CommodityEquityTransmissionPanel({ payload }: { payload?: RuntimeCommod
       count={transmissions.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Commodity Equity Transmission</strong>
-          <p>Maps live commodity moves into curated equity winners, losers, and spread-dependent names. It is a transmission model, not a chokepoint map or investment advice.</p>
+          <strong>{copy('helpTitle', 'Commodity Equity Transmission')}</strong>
+          <p>{copy('helpText', 'Maps live commodity moves into curated equity winners, losers, and spread-dependent names. It is a transmission model, not a chokepoint map or investment advice.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-commodity-transmission-panel wm-monitor-panel"
@@ -185,17 +188,17 @@ function CommodityEquityTransmissionPanel({ payload }: { payload?: RuntimeCommod
     >
       <div className={`wm-transmission-signal ${toneClass(bias)}`}>
         <div>
-          <span>{summary?.signalLabel || 'COMMODITY SHOCK MAP'}</span>
-          <strong>{summary?.signal || 'Transmission model warming'}</strong>
+          <span>{summary?.signalLabel || copy('signalLabel', 'COMMODITY SHOCK MAP')}</span>
+          <strong>{summary?.signal || copy('signalWarming', 'Transmission model warming')}</strong>
         </div>
         <em>{summary?.topShockLabel || '--'} {summary?.topShockChangeLabel || ''}</em>
       </div>
 
       <div className="wm-transmission-scanbar">
-        <span><b>{summary?.positiveCount ?? 0}</b><em>BENEFIT</em></span>
-        <span><b>{summary?.negativeCount ?? 0}</b><em>PRESSURE</em></span>
-        <span><b>{summary?.spreadCount ?? 0}</b><em>SPREAD</em></span>
-        <span><b>{summary?.liveCommodityCount ?? 0}</b><em>LIVE</em></span>
+        <span><b>{summary?.positiveCount ?? 0}</b><em>{copy('benefit', 'BENEFIT')}</em></span>
+        <span><b>{summary?.negativeCount ?? 0}</b><em>{copy('pressure', 'PRESSURE')}</em></span>
+        <span><b>{summary?.spreadCount ?? 0}</b><em>{copy('spread', 'SPREAD')}</em></span>
+        <span><b>{summary?.liveCommodityCount ?? 0}</b><em>{shared('live', 'LIVE')}</em></span>
       </div>
 
       {commodities.length ? (
@@ -207,8 +210,8 @@ function CommodityEquityTransmissionPanel({ payload }: { payload?: RuntimeCommod
       <div className="wm-transmission-list">
         {sortedTransmissions.length ? sortedTransmissions.map((chain) => <TransmissionRow chain={chain} key={chain.id} />) : (
           <div className="wm-empty-state">
-            <strong>TRANSMISSION MODEL WARMING</strong>
-            <em>Commodity quotes are unavailable; curated exposure map will appear once the runtime snapshot returns.</em>
+            <strong>{copy('warming', 'TRANSMISSION MODEL WARMING')}</strong>
+            <em>{copy('warmingText', 'Commodity quotes are unavailable; curated exposure map will appear once the runtime snapshot returns.')}</em>
           </div>
         )}
       </div>

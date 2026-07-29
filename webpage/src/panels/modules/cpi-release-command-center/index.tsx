@@ -4,6 +4,7 @@ import { fetchRuntimeCpiReleaseCommandCenter } from '@/services/api';
 import type { RuntimeCpiReleaseCommandEvent, RuntimeCpiReleaseCommandPayload, RuntimeMacroRegistryItem } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function panelStatus(status?: string | null): 'live' | 'muted' {
   return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
@@ -61,34 +62,36 @@ function Metric({ label, value, tone }: { label: string; value?: number | string
 }
 
 function EventCard({ event }: { event: RuntimeCpiReleaseCommandEvent }) {
+  const { copy, shared } = useSpecialistCopy('cpi-release-command-center');
   const tone = eventTone(event);
   return (
     <article className={`wm-cpi-event-card ${tone}`}>
       <div className="wm-cpi-event-head">
-        <strong>{event.title || 'CPI event'}</strong>
+        <strong>{event.title || copy('event', 'CPI event')}</strong>
         <span>{event.period || event.asOf || '--'}</span>
       </div>
       <div className="wm-cpi-event-grid">
-        <Metric label="Actual" value={event.actualLabel || event.actual || '--'} />
-        <Metric label={event.forecastKind || 'Forecast'} value={event.forecastLabel || event.forecast || '--'} tone={tone} />
-        <Metric label="Previous" value={event.previousLabel || event.previous || '--'} />
-        <Metric label="Surprise" value={event.surpriseLabel || '--'} tone={tone} />
+        <Metric label={shared('actual', 'Actual')} value={event.actualLabel || event.actual || '--'} />
+        <Metric label={event.forecastKind || shared('forecast', 'Forecast')} value={event.forecastLabel || event.forecast || '--'} tone={tone} />
+        <Metric label={shared('previous', 'Previous')} value={event.previousLabel || event.previous || '--'} />
+        <Metric label={shared('surprise', 'Surprise')} value={event.surpriseLabel || '--'} tone={tone} />
       </div>
       <div className="wm-cpi-event-foot">
         <span>{event.seriesId || 'BLS'}</span>
-        <span>{event.forecastSource ? 'Forecast: ' : ''}{event.forecastSource || 'No consensus feed'}</span>
+        <span>{event.forecastSource ? `${shared('forecast', 'Forecast')}: ` : ''}{event.forecastSource || copy('noConsensus', 'No consensus feed')}</span>
       </div>
     </article>
   );
 }
 
 function ReleaseQueue({ items }: { items: RuntimeMacroRegistryItem[] }) {
+  const { copy } = useSpecialistCopy('cpi-release-command-center');
   const releases = items
     .filter((item) => String(item.type || '').toLowerCase() === 'release')
     .slice(0, 5);
   if (!releases.length) return null;
   return (
-    <div className="wm-cpi-release-queue" aria-label="Upcoming macro releases">
+    <div className="wm-cpi-release-queue" aria-label={copy('upcomingAria', 'Upcoming macro releases')}>
       {releases.map((item) => (
         <div className="wm-cpi-release-row" key={item.key || `${item.group}-${item.date}`}>
           <span>{display(item.group)}</span>
@@ -101,14 +104,15 @@ function ReleaseQueue({ items }: { items: RuntimeMacroRegistryItem[] }) {
 }
 
 function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseCommandPayload | null }) {
+  const { copy, shared } = useSpecialistCopy('cpi-release-command-center');
   const [showHelp, setShowHelp] = useState(false);
   const events = payload?.events || [];
   const release = payload?.release;
   const summary = payload?.summary;
   const rows = payload?.items || [];
   const badge = String(payload?.status || '').toLowerCase() === 'ok' ? 'EVENT' : display(payload?.status || 'WARMING').toUpperCase();
-  const sourceLine = summary?.sourceLabel || 'BLS calendar / Cleveland Fed nowcast / FRED actuals';
-  const releaseTitle = release?.title || 'Consumer Price Index';
+  const sourceLine = summary?.sourceLabel || copy('sourceLine', 'BLS calendar / Cleveland Fed nowcast / FRED actuals');
+  const releaseTitle = release?.title || copy('consumerPriceIndex', 'Consumer Price Index');
   const releaseAt = release?.releaseAt || events[0]?.releaseAt || null;
   const releaseTime = release?.releaseTimeEt || formatReleaseTime(releaseAt);
   const eventCount = summary?.eventCount ?? events.length;
@@ -116,12 +120,12 @@ function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseComman
 
   return (
     <Panel
-      title="CPI RELEASE COMMAND"
+      title={copy('title', 'CPI RELEASE COMMAND')}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain CPI release command"
+          aria-label={copy('explainAria', 'Explain CPI release command')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -133,8 +137,8 @@ function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseComman
       count={eventCount}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>CPI Release Command</strong>
-          <p>Shows official release timing, Cleveland Fed nowcast as forecast signal, and BLS/FRED latest actuals as previous values. Actual stays blank before the release.</p>
+          <strong>{copy('helpTitle', 'CPI Release Command')}</strong>
+          <p>{copy('helpText', 'Shows official release timing, Cleveland Fed nowcast as forecast signal, and BLS/FRED latest actuals as previous values. Actual stays blank before the release.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-cpi-command-panel"
@@ -142,9 +146,9 @@ function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseComman
     >
       <div className="wm-cpi-command-hero">
         <div>
-          <span>NEXT CPI PRINT</span>
+          <span>{copy('nextPrint', 'NEXT CPI PRINT')}</span>
           <strong>{releaseTitle}</strong>
-          <em>{summary?.period ? `Reference ${summary.period}` : sourceLine}</em>
+          <em>{summary?.period ? copy('reference', 'Reference {period}', { period: summary.period }) : sourceLine}</em>
         </div>
         <div className="wm-cpi-command-clock">
           <strong>{formatHours(summary?.hoursToEvent)}</strong>
@@ -153,10 +157,10 @@ function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseComman
       </div>
 
       <div className="wm-cpi-command-strip">
-        <Metric label="Actual" value={`${display(summary?.actualCount)}/${display(summary?.eventCount)}`} />
-        <Metric label="Forecast" value={`${display(summary?.forecastCount)}/${display(summary?.eventCount)}`} tone="watch" />
-        <Metric label="Previous" value={`${display(summary?.previousCount)}/${display(summary?.eventCount)}`} />
-        <Metric label="Source" value={payload?.cacheMode || payload?.status || '--'} />
+        <Metric label={shared('actual', 'Actual')} value={`${display(summary?.actualCount)}/${display(summary?.eventCount)}`} />
+        <Metric label={shared('forecast', 'Forecast')} value={`${display(summary?.forecastCount)}/${display(summary?.eventCount)}`} tone="watch" />
+        <Metric label={shared('previous', 'Previous')} value={`${display(summary?.previousCount)}/${display(summary?.eventCount)}`} />
+        <Metric label={shared('source', 'Source')} value={payload?.cacheMode || payload?.status || '--'} />
       </div>
 
       {cards.length ? (
@@ -165,8 +169,8 @@ function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseComman
         </div>
       ) : (
         <div className="wm-empty-state">
-          <strong>CPI RELEASE WARMING</strong>
-          <em>Waiting for calendar, nowcast, and BLS/FRED CPI series.</em>
+          <strong>{copy('warming', 'CPI RELEASE WARMING')}</strong>
+          <em>{copy('warmingText', 'Waiting for calendar, nowcast, and BLS/FRED CPI series.')}</em>
         </div>
       )}
 

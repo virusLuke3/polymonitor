@@ -3,6 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
 import './styles.css';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type TabId = 'tariffs' | 'flows' | 'barriers' | 'revenue' | 'strategic';
 type Severity = 'red' | 'amber' | 'green';
@@ -230,9 +231,15 @@ function severityClass(severity: Severity) {
 }
 
 function TradePolicyRadarPanel() {
+  const { copy } = useSpecialistCopy('trade-policy-radar');
   const [activeTab, setActiveTab] = useState<TabId>('tariffs');
   const [showHelp, setShowHelp] = useState(false);
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab) || DEFAULT_TAB_META;
+  const tabCopy = (tab: typeof DEFAULT_TAB_META) => ({
+    label: copy(`tab.${tab.id}.label`, tab.label),
+    hint: copy(`tab.${tab.id}.hint`, tab.hint),
+  });
+  const activeTabCopy = tabCopy(activeTabMeta);
   const activeItems = useMemo(
     () => ALERTS.filter((item) => item.tab === activeTab),
     [activeTab],
@@ -240,7 +247,7 @@ function TradePolicyRadarPanel() {
 
   return (
     <Panel
-      title="Trade Policy"
+      title={copy('title', 'Trade Policy')}
       badge="LIVE"
       status="live"
       count={activeItems.length}
@@ -248,7 +255,7 @@ function TradePolicyRadarPanel() {
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain trade policy panel"
+          aria-label={copy('explainAria', 'Explain trade policy panel')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -257,15 +264,15 @@ function TradePolicyRadarPanel() {
       )}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Trade Policy</strong>
-          <p>High-signal watchlist for tariff burden, trade-flow breaks, non-tariff barriers, customs revenue, and strategic export controls.</p>
+          <strong>{copy('helpTitle', 'Trade Policy')}</strong>
+          <p>{copy('helpText', 'High-signal watchlist for tariff burden, trade-flow breaks, non-tariff barriers, customs revenue, and strategic export controls.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-trade-policy-radar-panel"
       dataPanelId="trade-policy-radar"
     >
       <div className="wm-trade-terminal">
-        <div className="wm-trade-tabs" role="tablist" aria-label="Trade policy views">
+        <div className="wm-trade-tabs" role="tablist" aria-label={copy('viewsAria', 'Trade policy views')}>
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -274,14 +281,14 @@ function TradePolicyRadarPanel() {
               aria-selected={activeTab === tab.id}
               onClick={() => setActiveTab(tab.id)}
             >
-              {tab.label}
+              {tabCopy(tab).label}
             </button>
           ))}
         </div>
 
         <div className="wm-trade-section-head">
-          <span>{activeTabMeta.label}</span>
-          <em>{activeTabMeta.hint}</em>
+          <span>{activeTabCopy.label}</span>
+          <em>{activeTabCopy.hint}</em>
         </div>
 
         <div className="wm-trade-alert-list">

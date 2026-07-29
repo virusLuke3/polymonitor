@@ -5,14 +5,16 @@ import type { RuntimeDefiTokenRow, RuntimeDefiTokenWatchPayload } from '@/types'
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { formatMoney, formatPercent, StatusDots, toneFromValue } from '../market-monitor-kit';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function TokenRow({ item }: { item: RuntimeDefiTokenRow }) {
+  const { copy } = useSpecialistCopy('defi-token-watch');
   const dayTone = toneFromValue(item.change24h);
   const weekTone = toneFromValue(item.change7d);
   return (
     <article className="wm-monitor-row wm-defi-token-row">
       <div className="wm-monitor-entity">
-        <strong>{item.name || item.symbol || 'DeFi token'}</strong>
+        <strong>{item.name || item.symbol || copy('token', 'DeFi token')}</strong>
         <span>{item.symbol || '--'}</span>
       </div>
       <div className="wm-monitor-values">
@@ -32,17 +34,18 @@ function sourceState(payload?: RuntimeDefiTokenWatchPayload | null) {
 }
 
 function DefiTokenWatchPanel({ payload }: { payload?: RuntimeDefiTokenWatchPayload | null }) {
+  const { copy, shared } = useSpecialistCopy('defi-token-watch');
   const [showHelp, setShowHelp] = useState(false);
   const items = payload?.items || [];
   const badge = sourceState(payload);
   return (
     <Panel
-      title="DEFI TOKENS"
+      title={copy('title', 'DEFI TOKENS')}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain DeFi token watch"
+          aria-label={copy('explainAria', 'Explain DeFi token watch')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -53,8 +56,8 @@ function DefiTokenWatchPanel({ payload }: { payload?: RuntimeDefiTokenWatchPaylo
       status={badge ? 'muted' : 'live'}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>DeFi Tokens</strong>
-          <p>CoinGecko-backed DeFi token tape. Rows rank the configured DeFi watchlist with price, 24h move, and 7d move.</p>
+          <strong>{copy('helpTitle', 'DeFi Tokens')}</strong>
+          <p>{copy('helpText', 'CoinGecko-backed DeFi token tape. Rows rank the configured DeFi watchlist with price, 24h move, and 7d move.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-monitor-panel wm-defi-token-panel"
@@ -67,8 +70,8 @@ function DefiTokenWatchPanel({ payload }: { payload?: RuntimeDefiTokenWatchPaylo
         </div>
       ) : (
         <div className="wm-monitor-empty">
-          <span>STANDBY</span>
-          <strong>No DeFi token tape cached yet.</strong>
+          <span>{shared('standby', 'STANDBY')}</span>
+          <strong>{copy('empty', 'No DeFi token tape cached yet.')}</strong>
           <em>{payload?.cacheMode || payload?.status || 'warming'}</em>
         </div>
       )}

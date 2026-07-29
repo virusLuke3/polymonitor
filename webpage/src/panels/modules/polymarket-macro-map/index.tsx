@@ -5,11 +5,11 @@ import type {
   RuntimePolymarketMacroMapItem,
   RuntimePolymarketMacroMapPayload,
 } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -38,10 +38,10 @@ function probabilityLabel(value?: string | number | null) {
   return `${Math.round(numeric * 100)}%`;
 }
 
-function catalystLabel(payload?: RuntimePolymarketMacroMapPayload | null) {
+function catalystLabel(payload: RuntimePolymarketMacroMapPayload | null | undefined, copy: ReturnType<typeof useSpecialistCopy>['copy'], formatRelativeTime: ReturnType<typeof useSpecialistCopy>['formatRelativeTime']) {
   const catalyst = payload?.summary?.topCatalyst;
-  if (!catalyst?.endDate) return 'No dated catalyst';
-  return formatRelative(catalyst.endDate);
+  if (!catalyst?.endDate) return copy('noDatedCatalyst', 'No dated catalyst');
+  return formatRelativeTime(catalyst.endDate);
 }
 
 function categoryIcon(value?: string | null): PanelGlyphName {
@@ -67,6 +67,7 @@ function clusterLabel(value?: string | null) {
 }
 
 function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
+  const { copy, shared, formatRelativeTime } = useSpecialistCopy('polymarket-macro-map');
   const topOutcome = item.topOutcomes?.[0];
   const category = item.categoryLabels?.[0] || 'Macro';
   const outcomeLabel = String(topOutcome?.label || '').trim();
@@ -78,13 +79,13 @@ function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
         <div className="wm-macro-map-meta">
           <span>{category.toUpperCase()}</span>
           <span>/</span>
-          <span>{item.endDate ? formatRelative(item.endDate) : 'OPEN'}</span>
+          <span>{item.endDate ? formatRelativeTime(item.endDate) : shared('open', 'OPEN')}</span>
           <span>/</span>
           <span>VOL {numberLabel(item.volume24h)}</span>
         </div>
-        <strong>{item.title || 'Untitled macro market'}</strong>
+        <strong>{item.title || copy('untitledMarket', 'Untitled macro market')}</strong>
         <div className="wm-macro-map-subline">
-          {(item.marketTypes || []).slice(0, 2).join(' / ') || 'Polymarket macro route'}
+          {(item.marketTypes || []).slice(0, 2).join(' / ') || copy('macroRoute', 'Polymarket macro route')}
         </div>
       </div>
       <div className="wm-macro-map-prob">
@@ -96,11 +97,12 @@ function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
 }
 
 function MacroMarketList({ items }: { items: RuntimePolymarketMacroMapItem[] }) {
+  const { copy } = useSpecialistCopy('polymarket-macro-map');
   if (!items.length) {
     return (
       <div className="wm-empty-state wm-registry-empty">
-        <strong>No macro market cluster found.</strong>
-        <em>Gamma feed is available, but no active CPI/Fed/GDP/oil markets matched the current terms.</em>
+        <strong>{copy('empty', 'No macro market cluster found.')}</strong>
+        <em>{copy('emptyText', 'Gamma feed is available, but no active CPI/Fed/GDP/oil markets matched the current terms.')}</em>
       </div>
     );
   }
@@ -114,17 +116,18 @@ function MacroMarketList({ items }: { items: RuntimePolymarketMacroMapItem[] }) 
 }
 
 function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacroMapPayload | null }) {
+  const { copy, formatRelativeTime } = useSpecialistCopy('polymarket-macro-map');
   const [showHelp, setShowHelp] = useState(false);
   const items = payload?.items || [];
   const summary = payload?.summary;
   return (
     <Panel
-      title="PMKT MACRO MAP"
+      title={copy('title', 'PMKT MACRO MAP')}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain macro market map"
+          aria-label={copy('explainAria', 'Explain macro market map')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -136,8 +139,8 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
       count={summary?.activeCount ?? items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Macro Market Map</strong>
-          <p>Routes active Polymarket events into CPI, Fed, growth, labor, and energy clusters so macro signals can be tied back to tradable markets.</p>
+          <strong>{copy('helpTitle', 'Macro Market Map')}</strong>
+          <p>{copy('helpText', 'Routes active Polymarket events into CPI, Fed, growth, labor, and energy clusters so macro signals can be tied back to tradable markets.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-macro-map-panel"
@@ -147,23 +150,23 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
         <div className="wm-intel-signal-main">
           <PanelGlyph icon="radar" tone={signalToneClass(summary?.signal)} />
           <div className="wm-intel-signal-copy">
-            <span>Signal</span>
+            <span>{copy('signal', 'Signal')}</span>
             <strong>{signalLabel(summary?.signal)}</strong>
           </div>
         </div>
-        <em>Polymarket macro route / {summary?.activeCount ?? items.length} active</em>
+        <em>{copy('activeRoute', 'Polymarket macro route / {count} active', { count: summary?.activeCount ?? items.length })}</em>
       </div>
       <div className="wm-macro-map-summary">
         <div>
-          <span><i>◎</i> PMKT Coverage</span>
+          <span><i>◎</i> {copy('coverage', 'PMKT Coverage')}</span>
           <strong>{summary?.activeCount ?? items.length}</strong>
         </div>
         <div>
-          <span><i>◷</i> Top Catalyst</span>
-          <strong>{catalystLabel(payload)}</strong>
+          <span><i>◷</i> {copy('topCatalyst', 'Top Catalyst')}</span>
+          <strong>{catalystLabel(payload, copy, formatRelativeTime)}</strong>
         </div>
         <div>
-          <span><i>◎</i> Top Cluster</span>
+          <span><i>◎</i> {copy('topCluster', 'Top Cluster')}</span>
           <strong>{clusterLabel(summary?.topCategory || 'Macro')}</strong>
         </div>
       </div>

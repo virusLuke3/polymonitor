@@ -2,8 +2,8 @@ import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeJin10Item } from '@/types';
 import type { PanelRenderMap } from './types';
-import { formatRelative } from './shared/formatters';
 import { emptyState } from './shared/renderers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type Jin10Filter = 'impact' | 'latest' | 'vip';
 type Jin10Tag = {
@@ -116,8 +116,8 @@ function splitFlashText(item: RuntimeJin10Item) {
   };
 }
 
-function jin10CardList(items: RuntimeJin10Item[]) {
-  if (!items.length) return emptyState('No Jin10 panel data loaded yet.');
+function jin10CardList(items: RuntimeJin10Item[], copy: ReturnType<typeof useSpecialistCopy>['copy'], formatRelativeTime: ReturnType<typeof useSpecialistCopy>['formatRelativeTime']) {
+  if (!items.length) return emptyState(copy('empty', 'No Jin10 panel data loaded yet.'));
   return (
     <div className="wm-jin10-market-list">
       {items.map((item) => {
@@ -131,16 +131,16 @@ function jin10CardList(items: RuntimeJin10Item[]) {
             target="_blank"
             rel="noreferrer"
             key={item.id}
-            title={item.headline || 'Jin10 flash'}
+            title={item.headline || copy('flash', 'Jin10 flash')}
           >
             <div className="wm-jin10-card-head">
               <div className="wm-jin10-card-meta">
                 <span className="wm-jin10-card-dot" />
                 <span>{cardTopic(item)}</span>
                 <span>·</span>
-                <span>{formatRelative(item.timestamp || null)}</span>
+                <span>{formatRelativeTime(item.timestamp || '')}</span>
               </div>
-              <div className="wm-jin10-card-tags" aria-label="Jin10 labels">
+              <div className="wm-jin10-card-tags" aria-label={copy('labelsAria', 'Jin10 labels')}>
                 {tags.map((tag) => (
                   <span className={`wm-jin10-tag ${tag.tone}`} key={`${item.id}-${tag.label}`}>{tag.label}</span>
                 ))}
@@ -161,12 +161,13 @@ function jin10CardList(items: RuntimeJin10Item[]) {
 }
 
 function Jin10FlashPanel({ items }: { items: RuntimeJin10Item[] }) {
+  const { copy, shared, formatRelativeTime } = useSpecialistCopy('jin10-flash');
   const [filter, setFilter] = useState<Jin10Filter>('impact');
   const visibleItems = useMemo(() => filterItems(items, filter), [items, filter]);
 
   return (
     <Panel
-      title="JIN10"
+      title={copy('title', 'JIN10')}
       badge="LIVE"
       status="live"
       count={visibleItems.length}
@@ -176,15 +177,15 @@ function Jin10FlashPanel({ items }: { items: RuntimeJin10Item[] }) {
           className="wm-market-sort wm-jin10-sort"
           value={filter}
           onInput={(event) => setFilter(event.currentTarget.value as Jin10Filter)}
-          aria-label="Filter Jin10 feed"
+          aria-label={copy('filterAria', 'Filter Jin10 feed')}
         >
-          <option value="impact">Impact</option>
-          <option value="latest">Latest</option>
+          <option value="impact">{shared('impact', 'Impact')}</option>
+          <option value="latest">{shared('latest', 'Latest')}</option>
           <option value="vip">VIP</option>
         </select>
       )}
     >
-      {jin10CardList(visibleItems)}
+      {jin10CardList(visibleItems, copy, formatRelativeTime)}
     </Panel>
   );
 }

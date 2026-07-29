@@ -3,6 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { RuntimeMacroRegistryItem, RuntimeMacroRegistryPayload } from '@/types';
 import { RowGlyph, StatusBadge, signalToneClass } from './macro-intel';
 import type { PanelGlyphName } from './macro-intel';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 export type MacroRegistryConfig = {
   panelId: string;
@@ -60,7 +61,8 @@ function DataMetric({ label, value, tone }: { label: string; value?: number | st
   );
 }
 
-function RegistryRow({ item }: { item: RuntimeMacroRegistryItem }) {
+function RegistryRow({ item, panelId }: { item: RuntimeMacroRegistryItem; panelId: string }) {
+  const { shared } = useSpecialistCopy(panelId);
   const tone = rowTone(item);
   const meta = String(item.group || item.domainTag || item.type || 'macro').toUpperCase();
   const source = String(item.sourceLabel || item.source || 'SOURCE').toUpperCase();
@@ -68,7 +70,7 @@ function RegistryRow({ item }: { item: RuntimeMacroRegistryItem }) {
   const rank = item.rank ? String(item.rank).padStart(2, '0') : null;
   return (
     <div className={`wm-macro-registry-row ${tone}`}>
-      <RowGlyph icon={rowGlyph(item)} tone={tone} label={item.label || item.group || 'Macro row'} />
+      <RowGlyph icon={rowGlyph(item)} tone={tone} label={item.label || item.group || shared('macroRow', 'Macro row')} />
       <div className="wm-macro-registry-main">
         <div className="wm-macro-registry-meta">
           {rank ? <span className="wm-macro-registry-rank">{rank}</span> : null}
@@ -77,7 +79,7 @@ function RegistryRow({ item }: { item: RuntimeMacroRegistryItem }) {
           <span className={`wm-macro-registry-tag ${tone}`}>{domain}</span>
           {item.ageLabel ? <span className="wm-macro-registry-age">{item.ageLabel}</span> : null}
         </div>
-        <strong>{item.label || 'Macro registry row'}</strong>
+        <strong>{item.label || shared('macroRegistryRow', 'Macro registry row')}</strong>
       </div>
       <div className="wm-macro-registry-right">
         <strong className="wm-macro-registry-value">{displayValue(item.valueLabel || item.value)}</strong>
@@ -88,6 +90,7 @@ function RegistryRow({ item }: { item: RuntimeMacroRegistryItem }) {
 }
 
 export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryConfig; payload?: RuntimeMacroRegistryPayload | null }) {
+  const { copy, shared } = useSpecialistCopy(config.panelId);
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
@@ -95,14 +98,15 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
   const status = String(payload?.status || '').toLowerCase();
   const badge = status && status !== 'ok' ? String(payload?.status || 'WARMING').toUpperCase() : undefined;
   const topMover = summary?.topMover;
+  const title = copy('title', config.title);
   return (
     <Panel
-      title={config.title}
+      title={title}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label={`Explain ${config.title}`}
+          aria-label={shared('explainPanel', 'Explain {title}', { title })}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -114,28 +118,28 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
       count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>{config.helpTitle}</strong>
-          <p>{config.helpText}</p>
+          <strong>{copy('helpTitle', config.helpTitle)}</strong>
+          <p>{copy('helpText', config.helpText)}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-macro-registry-panel"
       dataPanelId={config.panelId}
     >
-      <div className="wm-macro-registry-data-strip" aria-label={`${config.title} data summary`}>
-        <DataMetric label="Top" value={topMover?.label || summary?.topLabel || '--'} />
-        <DataMetric label="Value" value={topMover?.valueLabel || topMover?.value || summary?.topValueLabel || '--'} />
-        <DataMetric label="Move" value={topMover?.changeLabel || summary?.topChangeLabel || '--'} tone={tone} />
-        <DataMetric label="Sources" value={`${compactNumber(summary?.coverage)}/${compactNumber(summary?.sourceCount)}`} />
-        <DataMetric label="Alert" value={summary?.hotCount ?? 0} tone="hot" />
-        <DataMetric label="Cool" value={summary?.coolCount ?? 0} tone="cool" />
-        <DataMetric label="Watch" value={summary?.watchCount ?? 0} tone="watch" />
-        <DataMetric label="Rows" value={summary?.rowCount ?? items.length} />
+      <div className="wm-macro-registry-data-strip" aria-label={shared('dataSummary', '{title} data summary', { title })}>
+        <DataMetric label={shared('top', 'Top')} value={topMover?.label || summary?.topLabel || '--'} />
+        <DataMetric label={shared('value', 'Value')} value={topMover?.valueLabel || topMover?.value || summary?.topValueLabel || '--'} />
+        <DataMetric label={shared('move', 'Move')} value={topMover?.changeLabel || summary?.topChangeLabel || '--'} tone={tone} />
+        <DataMetric label={shared('sources', 'Sources')} value={`${compactNumber(summary?.coverage)}/${compactNumber(summary?.sourceCount)}`} />
+        <DataMetric label={shared('alert', 'Alert')} value={summary?.hotCount ?? 0} tone="hot" />
+        <DataMetric label={shared('cool', 'Cool')} value={summary?.coolCount ?? 0} tone="cool" />
+        <DataMetric label={shared('watch', 'Watch')} value={summary?.watchCount ?? 0} tone="watch" />
+        <DataMetric label={shared('rows', 'Rows')} value={summary?.rowCount ?? items.length} />
       </div>
       <div className="wm-macro-registry-list">
-        {items.length ? items.map((item) => <RegistryRow key={item.key || `${item.group}-${item.label}`} item={item} />) : (
+        {items.length ? items.map((item) => <RegistryRow key={item.key || `${item.group}-${item.label}`} item={item} panelId={config.panelId} />) : (
           <div className="wm-empty-state">
-            <strong>{config.emptyTitle}</strong>
-            <em>Seed cache has not composed this registry yet.</em>
+            <strong>{copy('emptyTitle', config.emptyTitle)}</strong>
+            <em>{shared('registryWarming', 'Seed cache has not composed this registry yet.')}</em>
           </div>
         )}
       </div>

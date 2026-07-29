@@ -2,11 +2,11 @@ import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeCpiReleaseCalendar } from '@/services/api';
 import type { RuntimeCpiCalendarItem, RuntimeCpiReleaseCalendarPayload, RuntimePolymarketMacroMapPayload } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -63,6 +63,7 @@ function compactHours(value?: string | number | null) {
 }
 
 function EventRow({ item }: { item: RuntimeCpiCalendarItem }) {
+  const { copy, formatRelativeTime } = useSpecialistCopy('cpi-release-calendar');
   const kind = String(item.kind || '').toLowerCase();
   return (
     <div className={`wm-cpi-calendar-row ${kind}`}>
@@ -72,31 +73,32 @@ function EventRow({ item }: { item: RuntimeCpiCalendarItem }) {
         <strong>{dateShortLabel(item.releaseAt)}</strong>
       </div>
       <div className="wm-cpi-calendar-row-main">
-        <strong>{item.title || 'Macro release'}</strong>
+        <strong>{item.title || copy('macroRelease', 'Macro release')}</strong>
         <div>
-          <span>{item.referencePeriod || 'Reference period pending'}</span>
+          <span>{item.referencePeriod || copy('referencePending', 'Reference period pending')}</span>
           <span>/</span>
-          <span>{item.marketRelevance || 'Macro market relevance'}</span>
+          <span>{item.marketRelevance || copy('marketRelevance', 'Macro market relevance')}</span>
         </div>
       </div>
-      <StatusBadge tone={kind === 'fomc' ? 'watch' : 'official'}>{formatRelative(item.releaseAt)}</StatusBadge>
+      <StatusBadge tone={kind === 'fomc' ? 'watch' : 'official'}>{formatRelativeTime(item.releaseAt)}</StatusBadge>
     </div>
   );
 }
 
 function CpiReleaseCalendarPanel({ payload, macroPayload: _macroPayload }: { payload?: RuntimeCpiReleaseCalendarPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+  const { copy } = useSpecialistCopy('cpi-release-calendar');
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
   const riskTone = signalToneClass(summary?.signal || summary?.risk);
   return (
     <Panel
-      title="CPI CALENDAR"
+      title={copy('title', 'CPI CALENDAR')}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain CPI calendar baseline"
+          aria-label={copy('explainAria', 'Explain CPI calendar baseline')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -108,8 +110,8 @@ function CpiReleaseCalendarPanel({ payload, macroPayload: _macroPayload }: { pay
       count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>CPI Calendar</strong>
-          <p>Tracks official BLS, BEA, and Fed release times, then anchors the panel to the top CPI market outcome from the macro map. Consensus is optional and not assumed.</p>
+          <strong>{copy('helpTitle', 'CPI Calendar')}</strong>
+          <p>{copy('helpText', 'Tracks official BLS, BEA, and Fed release times, then anchors the panel to the top CPI market outcome from the macro map. Consensus is optional and not assumed.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-cpi-calendar-panel"
@@ -119,19 +121,19 @@ function CpiReleaseCalendarPanel({ payload, macroPayload: _macroPayload }: { pay
         <div className="wm-intel-signal-main">
           <PanelGlyph icon="calendar" tone={riskTone} />
           <div className="wm-intel-signal-copy">
-            <span>Event Risk</span>
-            <strong>{summary?.signal || 'CALENDAR WARMING'}</strong>
+            <span>{copy('eventRisk', 'Event Risk')}</span>
+            <strong>{summary?.signal || copy('signalWarming', 'CALENDAR WARMING')}</strong>
           </div>
         </div>
-        <em>Release timing / baseline probability</em>
+        <em>{copy('signalHint', 'Release timing / baseline probability')}</em>
       </div>
       <div className={`wm-cpi-calendar-hero compact ${summary?.risk || 'unknown'}`}>
         <div>
-          <span>Time To Event</span>
+          <span>{copy('timeToEvent', 'Time To Event')}</span>
           <strong>{compactHours(summary?.hoursToEvent)}</strong>
         </div>
         <div>
-          <span>PMKT Baseline</span>
+          <span>{copy('pmktBaseline', 'PMKT Baseline')}</span>
           <strong>{probabilityLabel(summary?.baselineProbability)}</strong>
         </div>
       </div>
@@ -143,8 +145,8 @@ function CpiReleaseCalendarPanel({ payload, macroPayload: _macroPayload }: { pay
         </div>
       ) : (
         <div className="wm-empty-state">
-          <strong>Calendar snapshot warming.</strong>
-          <em>No upcoming CPI/PCE/FOMC/NFP rows are cached yet.</em>
+          <strong>{copy('warming', 'Calendar snapshot warming.')}</strong>
+          <em>{copy('warmingText', 'No upcoming CPI/PCE/FOMC/NFP rows are cached yet.')}</em>
         </div>
       )}
     </Panel>

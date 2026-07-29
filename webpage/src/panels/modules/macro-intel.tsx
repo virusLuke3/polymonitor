@@ -1,5 +1,5 @@
 import type { RuntimePolymarketMacroMapItem, RuntimePolymarketMacroMapPayload } from '@/types';
-import { formatRelative } from '../shared/formatters';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 export type PanelGlyphName =
   | 'geo'
@@ -79,9 +79,11 @@ function glyphMeta(icon: PanelGlyphName) {
 }
 
 export function PanelGlyph({ icon, tone = 'neutral' }: { icon: PanelGlyphName; tone?: string }) {
+  const { shared } = useSpecialistCopy('macro-shared');
   const meta = glyphMeta(icon);
+  const label = shared(`glyph.${icon}`, meta.label);
   return (
-    <span className={`wm-intel-mark ${tone}`} aria-label={meta.label} title={meta.label}>
+    <span className={`wm-intel-mark ${tone}`} aria-label={label} title={label}>
       <i />
       <em>{meta.token}</em>
     </span>
@@ -89,9 +91,11 @@ export function PanelGlyph({ icon, tone = 'neutral' }: { icon: PanelGlyphName; t
 }
 
 export function RowGlyph({ icon, tone = 'neutral', label }: { icon: PanelGlyphName; tone?: string; label?: string }) {
+  const { shared } = useSpecialistCopy('macro-shared');
   const meta = glyphMeta(icon);
+  const localizedLabel = label || shared(`glyph.${icon}`, meta.label);
   return (
-    <span className={`wm-row-marker ${tone}`} aria-label={label || meta.label} title={label || meta.label}>
+    <span className={`wm-row-marker ${tone}`} aria-label={localizedLabel} title={localizedLabel}>
       <i />
       <em>{meta.token}</em>
     </span>
@@ -111,11 +115,12 @@ export function MacroAlertStrip({
   cool?: string | number | null;
   watch?: string | number | null;
 }) {
+  const { shared } = useSpecialistCopy('macro-shared');
   return (
     <div className="wm-macro-alert-strip">
-      <span className="wm-macro-alert-chip alert"><strong>ALERT</strong><em>{Number(hot) || 0}</em></span>
-      <span className="wm-macro-alert-chip cool"><strong>COOL</strong><em>{Number(cool) || 0}</em></span>
-      <span className="wm-macro-alert-chip watch"><strong>WATCH</strong><em>{Number(watch) || 0}</em></span>
+      <span className="wm-macro-alert-chip alert"><strong>{shared('alert', 'ALERT')}</strong><em>{Number(hot) || 0}</em></span>
+      <span className="wm-macro-alert-chip cool"><strong>{shared('cool', 'COOL')}</strong><em>{Number(cool) || 0}</em></span>
+      <span className="wm-macro-alert-chip watch"><strong>{shared('watch', 'WATCH')}</strong><em>{Number(watch) || 0}</em></span>
     </div>
   );
 }
@@ -163,19 +168,22 @@ export function LinkedMarketRegistry({
   items: RuntimePolymarketMacroMapItem[];
   emptyLabel?: string;
 }) {
+  const { shared, formatRelativeTime } = useSpecialistCopy('macro-shared');
+  const resolvedTitle = title === 'Linked PMKT' ? shared('linkedMarkets', title) : title;
+  const resolvedEmpty = emptyLabel === 'No linked market seeded' ? shared('noLinkedMarkets', emptyLabel) : emptyLabel;
   return (
     <div className="wm-linked-market-registry">
       <div className="wm-linked-market-header">
-        <span>{title}</span>
-        <em>{items.length ? `${items.length} markets` : emptyLabel}</em>
+        <span>{resolvedTitle}</span>
+        <em>{items.length ? shared('marketCount', '{count} markets', { count: items.length }) : resolvedEmpty}</em>
       </div>
       {items.slice(0, 3).map((item, index) => {
         const top = item.topOutcomes?.[0];
         return (
           <div className="wm-linked-market-row" key={`${item.eventId || item.slug || 'market'}-${index}`}>
             <div>
-              <span>{(item.categoryLabels?.[0] || 'PMKT').toUpperCase()} / {item.endDate ? formatRelative(item.endDate) : 'OPEN'}</span>
-              <strong>{item.title || 'Macro market'}</strong>
+              <span>{(item.categoryLabels?.[0] || 'PMKT').toUpperCase()} / {item.endDate ? formatRelativeTime(item.endDate) : shared('open', 'OPEN')}</span>
+              <strong>{item.title || shared('macroMarket', 'Macro market')}</strong>
             </div>
             <em>{probabilityLabel(top?.yesPrice)}</em>
           </div>
@@ -183,7 +191,7 @@ export function LinkedMarketRegistry({
       })}
       {items.length ? (
         <div className="wm-linked-market-volume">
-          <span>VOL</span>
+          <span>{shared('volume', 'VOL')}</span>
           <strong>{numberLabel(items.reduce((sum, item) => sum + (Number(item.volume24h) || 0), 0))}</strong>
         </div>
       ) : null}

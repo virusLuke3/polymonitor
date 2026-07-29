@@ -4,6 +4,7 @@ import type { PanelRenderContext, RuntimeMarketGroup, RuntimeMarketTicker } from
 import type { PanelRenderMap } from './types';
 import { emptyState } from './shared/renderers';
 import { formatCompact } from './shared/formatters';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type CommoditiesTab = 'commodities' | 'fx';
 
@@ -144,6 +145,7 @@ function cryptoBoard(
   items: RuntimeMarketTicker[],
   emptyMessage: string,
   tickDirections: Record<string, CryptoTickDirection | undefined>,
+  labels: { topMove: string; average24h: string; green: string; volume24h: string; marketCap: string; flow: string },
 ) {
   if (!items.length) return emptyState(emptyMessage);
   const leader = topMover(items);
@@ -152,9 +154,9 @@ function cryptoBoard(
   return (
     <div className="wm-crypto-watch-shell">
       <div className="wm-market-radar-strip">
-        <span><b>{leader?.label || '--'}</b><em>top move</em></span>
-        <span><b>{avg == null ? '--' : formatCommodityChange(avg)}</b><em>avg 24h</em></span>
-        <span><b>{upCount}/{items.length}</b><em>green</em></span>
+        <span><b>{leader?.label || '--'}</b><em>{labels.topMove}</em></span>
+        <span><b>{avg == null ? '--' : formatCommodityChange(avg)}</b><em>{labels.average24h}</em></span>
+        <span><b>{upCount}/{items.length}</b><em>{labels.green}</em></span>
       </div>
       <div className="wm-crypto-watch-list">
       {items.map((item) => {
@@ -174,7 +176,7 @@ function cryptoBoard(
             </div>
             <div className="wm-crypto-market-flow">
               <b>{item.volume24h ? `$${formatCompact(item.volume24h)}` : item.marketCap ? `$${formatCompact(item.marketCap)}` : '--'}</b>
-              <em>{item.volume24h ? '24h vol' : item.marketCap ? 'mcap' : 'flow'}</em>
+              <em>{item.volume24h ? labels.volume24h : item.marketCap ? labels.marketCap : labels.flow}</em>
             </div>
             <span className={`wm-market-signal-chip ${tone}`}>{tickerMoveTag(item, 'crypto')}</span>
           </article>
@@ -186,6 +188,7 @@ function cryptoBoard(
 }
 
 function CryptoWatchPanel({ crypto }: { crypto?: RuntimeMarketGroup | null }) {
+  const { copy, shared } = useSpecialistCopy('crypto-watch');
   const items = sortTickers(crypto?.items || [], CRYPTO_SORT_INDEX);
   const previousPricesRef = useRef<Record<string, number>>({});
   const clearTickTimerRef = useRef<number | null>(null);
@@ -228,8 +231,15 @@ function CryptoWatchPanel({ crypto }: { crypto?: RuntimeMarketGroup | null }) {
   }, []);
 
   return (
-    <Panel title="CRYPTO" badge="LIVE" status="live" count={items.length} className="wm-market-panel wm-crypto-market-panel">
-      {cryptoBoard(items, 'No crypto prices loaded yet.', tickDirections)}
+    <Panel title={copy('title', 'CRYPTO')} badge={shared('live', 'LIVE')} status="live" count={items.length} className="wm-market-panel wm-crypto-market-panel">
+      {cryptoBoard(items, copy('empty', 'No crypto prices loaded yet.'), tickDirections, {
+        topMove: shared('topMove', 'top move'),
+        average24h: shared('average24h', 'avg 24h'),
+        green: shared('green', 'green'),
+        volume24h: shared('volume24h', '24h vol'),
+        marketCap: shared('marketCap', 'mcap'),
+        flow: shared('flow', 'flow'),
+      })}
     </Panel>
   );
 }
@@ -278,7 +288,11 @@ function formatCommodityChange(changePercent?: number | null) {
   return `${numeric > 0 ? '+' : ''}${numeric.toFixed(2)}%`;
 }
 
-function commodityBoard(items: RuntimeMarketTicker[], emptyMessage: string) {
+function commodityBoard(
+  items: RuntimeMarketTicker[],
+  emptyMessage: string,
+  labels: { topMove: string; averageMove: string; alerts: string },
+) {
   if (!items.length) {
     return (
       <div className="wm-commodity-empty">
@@ -292,9 +306,9 @@ function commodityBoard(items: RuntimeMarketTicker[], emptyMessage: string) {
   return (
     <div className="wm-commodity-board">
       <div className="wm-market-radar-strip">
-        <span><b>{leader?.label || '--'}</b><em>top move</em></span>
-        <span><b>{avg == null ? '--' : formatCommodityChange(avg)}</b><em>avg move</em></span>
-        <span><b>{alertCount}</b><em>alerts</em></span>
+        <span><b>{leader?.label || '--'}</b><em>{labels.topMove}</em></span>
+        <span><b>{avg == null ? '--' : formatCommodityChange(avg)}</b><em>{labels.averageMove}</em></span>
+        <span><b>{alertCount}</b><em>{labels.alerts}</em></span>
       </div>
       <div className="commodities-grid">
       {items.map((item) => {
@@ -327,6 +341,7 @@ function commodityBoard(items: RuntimeMarketTicker[], emptyMessage: string) {
 }
 
 function CommoditiesWatchPanel({ commodities }: { commodities?: RuntimeMarketGroup | null }) {
+  const { copy, shared, formatNumber } = useSpecialistCopy('commodities-watch');
   const [tab, setTab] = useState<CommoditiesTab>('commodities');
 
   const tabItems = useMemo(() => {
@@ -342,14 +357,14 @@ function CommoditiesWatchPanel({ commodities }: { commodities?: RuntimeMarketGro
 
   return (
     <Panel
-      title="COMMODITIES"
-      badge="MACRO"
+      title={copy('title', 'COMMODITIES')}
+      badge={shared('macro', 'MACRO')}
       status="live"
       count={visibleItems.length}
       className="wm-market-panel wm-commodities-panel"
     >
       <div className="wm-commodity-panel-stack">
-        <div className="wm-commodity-tabbar" role="tablist" aria-label="Commodity market views">
+        <div className="wm-commodity-tabbar" role="tablist" aria-label={copy('views', 'Commodity market views')}>
           <button
             type="button"
             className={`panel-tab${safeTab === 'commodities' ? ' active' : ''}`}
@@ -357,7 +372,7 @@ function CommoditiesWatchPanel({ commodities }: { commodities?: RuntimeMarketGro
             role="tab"
             aria-selected={safeTab === 'commodities'}
           >
-            Commodities <b>{tabItems.commodities.length}</b>
+            {copy('commodities', 'Commodities')} <b>{formatNumber(tabItems.commodities.length)}</b>
           </button>
           {hasFx ? (
             <button
@@ -367,22 +382,28 @@ function CommoditiesWatchPanel({ commodities }: { commodities?: RuntimeMarketGro
               role="tab"
               aria-selected={safeTab === 'fx'}
             >
-              FX <b>{tabItems.fx.length}</b>
+              FX <b>{formatNumber(tabItems.fx.length)}</b>
             </button>
           ) : null}
         </div>
         {commodityBoard(
           visibleItems,
-          safeTab === 'fx' ? 'No FX quotes loaded yet.' : 'No commodity quotes loaded yet.',
+          safeTab === 'fx' ? copy('noFx', 'No FX quotes loaded yet.') : copy('empty', 'No commodity quotes loaded yet.'),
+          {
+            topMove: shared('topMove', 'top move'),
+            averageMove: shared('averageMove', 'avg move'),
+            alerts: shared('alerts', 'alerts'),
+          },
         )}
       </div>
     </Panel>
   );
 }
 
-function inflationNowcastPanel(ctx: PanelRenderContext) {
+function InflationNowcastPanel({ ctx }: { ctx: PanelRenderContext }) {
+  const { copy } = useSpecialistCopy('inflation-nowcast');
   const nowcast = ctx.inflationNowcast;
-  if (!nowcast) return emptyState('No inflation nowcast loaded.');
+  if (!nowcast) return emptyState(copy('empty', 'No inflation nowcast loaded.'));
   const mom = nowcast.monthOverMonth || {};
   const yoy = nowcast.yearOverYear || {};
   const monthlyLabel = mom['Month'] || yoy['Month'] || '--';
@@ -390,12 +411,12 @@ function inflationNowcastPanel(ctx: PanelRenderContext) {
     <div className="wm-panel-stack">
       <section className="wm-nowcast-grid">
         {[
-          { label: 'MONTH', value: monthlyLabel },
+          { label: copy('month', 'MONTH'), value: monthlyLabel },
           { label: 'CPI MOM', value: mom['CPI'] || '--' },
-          { label: 'CORE CPI', value: mom['Core CPI'] || '--' },
+          { label: copy('coreCpi', 'CORE CPI'), value: mom['Core CPI'] || '--' },
           { label: 'PCE MOM', value: mom['PCE'] || '--' },
           { label: 'CPI YOY', value: yoy['CPI'] || '--' },
-          { label: 'CORE PCE', value: yoy['Core PCE'] || '--' },
+          { label: copy('corePce', 'CORE PCE'), value: yoy['Core PCE'] || '--' },
         ].map((row) => (
           <article className="wm-nowcast-card" key={row.label}>
             <span>{row.label}</span>
@@ -405,7 +426,7 @@ function inflationNowcastPanel(ctx: PanelRenderContext) {
       </section>
       {!!nowcast.quarterly?.length && (
         <section className="wm-subpanel">
-          <div className="wm-subpanel-title">QUARTERLY ANNUALIZED</div>
+          <div className="wm-subpanel-title">{copy('quarterlyAnnualized', 'QUARTERLY ANNUALIZED')}</div>
           <div className="wm-panel-list">
             {nowcast.quarterly.slice(0, 3).map((row, index) => (
               <article className="wm-oracle-card" key={`${row['Quarter'] || row['Quarter '] || row['Date'] || index}`}>
@@ -415,9 +436,9 @@ function inflationNowcastPanel(ctx: PanelRenderContext) {
                 </div>
                 <div className="wm-summary-grid">
                   <div className="wm-summary-row"><span>CPI</span><strong>{row['CPI'] || '--'}</strong></div>
-                  <div className="wm-summary-row"><span>CORE CPI</span><strong>{row['Core CPI'] || '--'}</strong></div>
+                  <div className="wm-summary-row"><span>{copy('coreCpi', 'CORE CPI')}</span><strong>{row['Core CPI'] || '--'}</strong></div>
                   <div className="wm-summary-row"><span>PCE</span><strong>{row['PCE'] || '--'}</strong></div>
-                  <div className="wm-summary-row"><span>CORE PCE</span><strong>{row['Core PCE'] || '--'}</strong></div>
+                  <div className="wm-summary-row"><span>{copy('corePce', 'CORE PCE')}</span><strong>{row['Core PCE'] || '--'}</strong></div>
                 </div>
               </article>
             ))}
@@ -428,6 +449,14 @@ function inflationNowcastPanel(ctx: PanelRenderContext) {
   );
 }
 
+function InflationNowcastWorkspacePanel({ ctx }: { ctx: PanelRenderContext }) {
+  const { copy } = useSpecialistCopy('inflation-nowcast');
+  return (
+    <Panel title={copy('title', 'INFLATION NOWCAST')} badge="FED" status="live">
+      <InflationNowcastPanel ctx={ctx} />
+    </Panel>
+  );
+}
 
 export const macroPanelRenderers: PanelRenderMap = {
   'commodities-watch': {
@@ -437,10 +466,6 @@ export const macroPanelRenderers: PanelRenderMap = {
     render: (ctx) => <CryptoWatchPanel crypto={ctx.crypto} />,
   },
   'inflation-nowcast': {
-    render: (ctx) => (
-      <Panel title="INFLATION NOWCAST" badge="FED" status="live">
-        {inflationNowcastPanel(ctx)}
-      </Panel>
-    ),
+    render: (ctx) => <InflationNowcastWorkspacePanel ctx={ctx} />,
   },
 };

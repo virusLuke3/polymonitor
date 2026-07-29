@@ -6,6 +6,7 @@ import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -55,13 +56,14 @@ function componentIcon(item: RuntimeFoodBasketItem): PanelGlyphName {
 }
 
 function FoodBasketRow({ item }: { item: RuntimeFoodBasketItem }) {
+  const { copy } = useSpecialistCopy('food-retail-basket-pressure');
   const tone = toneClass(item.momPct);
   return (
     <div className={`wm-food-basket-row ${tone}`}>
       <RowGlyph icon={componentIcon(item)} tone={tone === 'flat' ? 'neutral' : tone} label={item.label || 'Food component'} />
       <div>
         <span>{componentCode(item)}</span>
-        <strong>{item.label || 'Food CPI component'}</strong>
+        <strong>{item.label || copy('component', 'Food CPI component')}</strong>
       </div>
       <StatusBadge tone={tone === 'flat' ? 'neutral' : tone}>{pctLabel(item.momPct)}</StatusBadge>
       <em>{pctLabel(item.yoyPct)} Y</em>
@@ -70,6 +72,7 @@ function FoodBasketRow({ item }: { item: RuntimeFoodBasketItem }) {
 }
 
 function FoodRetailBasketPanel({ payload, macroPayload: _macroPayload }: { payload?: RuntimeFoodRetailBasketPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+  const { copy } = useSpecialistCopy('food-retail-basket-pressure');
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
@@ -77,12 +80,12 @@ function FoodRetailBasketPanel({ payload, macroPayload: _macroPayload }: { paylo
   const signalTone = signalToneClass(summary?.signal);
   return (
     <Panel
-      title="FOOD / RETAIL"
+      title={copy('title', 'FOOD / RETAIL')}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain food basket data source"
+          aria-label={copy('explainAria', 'Explain food basket data source')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -94,8 +97,8 @@ function FoodRetailBasketPanel({ payload, macroPayload: _macroPayload }: { paylo
       count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Food Basket Pressure</strong>
-          <p>Uses free official FRED/BLS CPI food components as a seed-first pressure gauge. It is not a live retailer price scraper, so it is best for CPI basket direction and Polymarket macro context.</p>
+          <strong>{copy('helpTitle', 'Food Basket Pressure')}</strong>
+          <p>{copy('helpText', 'Uses free official FRED/BLS CPI food components as a seed-first pressure gauge. It is not a live retailer price scraper, so it is best for CPI basket direction and Polymarket macro context.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-food-basket-panel"
@@ -105,11 +108,11 @@ function FoodRetailBasketPanel({ payload, macroPayload: _macroPayload }: { paylo
         <div className="wm-intel-signal-main">
           <PanelGlyph icon="basket" tone={signalTone} />
           <div className="wm-intel-signal-copy">
-            <span>Food CPI Driver</span>
-            <strong>{summary?.signal || 'FOOD WARMING'}</strong>
+            <span>{copy('driver', 'Food CPI Driver')}</span>
+            <strong>{summary?.signal || copy('signalWarming', 'FOOD WARMING')}</strong>
           </div>
         </div>
-        <em>{`Coverage ${summary?.coverage ?? items.length}`}</em>
+        <em>{copy('coverage', 'Coverage {count}', { count: summary?.coverage ?? items.length })}</em>
       </div>
       <div className="wm-food-basket-metrics">
         <StatusBadge tone={Number(summary?.pressureScore) > 0 ? 'hot' : Number(summary?.pressureScore) < 0 ? 'cool' : 'neutral'}>{`PRESSURE ${pctLabel(summary?.pressureScore)}`}</StatusBadge>
@@ -121,13 +124,13 @@ function FoodRetailBasketPanel({ payload, macroPayload: _macroPayload }: { paylo
         </div>
       ) : (
         <div className="wm-empty-state">
-          <strong>Food basket snapshot warming.</strong>
-          <em>Food component data has not been seeded yet.</em>
+          <strong>{copy('warming', 'Food basket snapshot warming.')}</strong>
+          <em>{copy('warmingText', 'Food component data has not been seeded yet.')}</em>
         </div>
       )}
       <div className="wm-food-basket-top">
-        <span>Top mover</span>
-        <strong>{topMover?.label || 'Awaiting CPI component data'}</strong>
+        <span>{copy('topMover', 'Top mover')}</span>
+        <strong>{topMover?.label || copy('awaitingData', 'Awaiting CPI component data')}</strong>
         <em>{topMover ? `${pctLabel(topMover.momPct)} MoM / ${indexLabel(topMover.value)} idx` : '--'}</em>
       </div>
     </Panel>

@@ -5,6 +5,7 @@ import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badge(status?: string | null) {
   return String(status || '').toLowerCase() === 'ok' ? undefined : 'PARTIAL';
@@ -52,12 +53,13 @@ function EnergyRow({ item }: { item: RuntimeEnergyShockItem }) {
 }
 
 function EnergyGasolineShockPanel({ payload, macroPayload: _macroPayload }: { payload?: RuntimeEnergyGasolineShockPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+  const { copy } = useSpecialistCopy('energy-gasoline-shock');
   const summary = payload?.summary;
   const items = payload?.items || [];
   const signalTone = signalToneClass(summary?.signal);
   return (
     <Panel
-      title="ENERGY / GAS"
+      title={copy('title', 'ENERGY / GAS')}
       badge={badge(payload?.status)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
       count={items.length}
@@ -68,11 +70,11 @@ function EnergyGasolineShockPanel({ payload, macroPayload: _macroPayload }: { pa
         <div className="wm-intel-signal-main">
           <PanelGlyph icon="energy" tone={signalTone} />
           <div className="wm-intel-signal-copy">
-            <span>Headline CPI Driver</span>
-            <strong>{summary?.signal || 'ENERGY WARMING'}</strong>
+            <span>{copy('driver', 'Headline CPI Driver')}</span>
+            <strong>{summary?.signal || copy('warming', 'ENERGY WARMING')}</strong>
           </div>
         </div>
-        <em>Headline CPI impulse {summary?.headlineImpulsePp ?? '--'}pp</em>
+        <em>{copy('impulse', 'Headline CPI impulse {value}pp', { value: summary?.headlineImpulsePp ?? '--' })}</em>
       </div>
       <div className="wm-energy-grid">
         {items.map((item) => <EnergyRow key={item.key || item.label || 'energy'} item={item} />)}
