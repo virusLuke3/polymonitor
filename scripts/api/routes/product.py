@@ -23,6 +23,9 @@ class ProductRouteDependencies:
     mark_all_read: Callable[..., int]
     get_preferences: Callable[..., dict[str, Any]]
     update_preferences: Callable[..., dict[str, Any]]
+    get_web_push: Callable[..., dict[str, Any]]
+    subscribe_web_push: Callable[..., dict[str, Any]]
+    unsubscribe_web_push: Callable[..., dict[str, Any]]
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> ProductRouteDependencies:
@@ -39,6 +42,9 @@ class ProductRouteDependencies:
             mark_all_read=resolve_route_callable(context, "mark_all_product_alerts_read"),
             get_preferences=resolve_route_callable(context, "get_product_notification_preferences"),
             update_preferences=resolve_route_callable(context, "update_product_notification_preferences"),
+            get_web_push=resolve_route_callable(context, "get_product_web_push"),
+            subscribe_web_push=resolve_route_callable(context, "subscribe_product_web_push"),
+            unsubscribe_web_push=resolve_route_callable(context, "unsubscribe_product_web_push"),
         )
 
 
@@ -125,5 +131,25 @@ def create_product_blueprint(context: Mapping[str, Any]) -> Blueprint:
     def update_notification_preferences():
         principal = dependencies.authenticate(request, require_csrf=True)
         return jsonify(dependencies.update_preferences(principal, _payload(), _metadata(dependencies)))
+
+    @bp.get("/product/web-push")
+    def web_push_status():
+        return jsonify(dependencies.get_web_push(dependencies.authenticate(request)))
+
+    @bp.post("/product/web-push/subscriptions")
+    def subscribe_web_push():
+        principal = dependencies.authenticate(request, require_csrf=True)
+        return jsonify(dependencies.subscribe_web_push(principal, _payload(), _metadata(dependencies))), 201
+
+    @bp.delete("/product/web-push/subscriptions")
+    def unsubscribe_web_push():
+        principal = dependencies.authenticate(request, require_csrf=True)
+        return jsonify(
+            dependencies.unsubscribe_web_push(
+                principal,
+                _payload().get("endpoint"),
+                _metadata(dependencies),
+            )
+        )
 
     return bp

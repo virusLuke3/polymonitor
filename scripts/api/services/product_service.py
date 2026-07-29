@@ -14,6 +14,8 @@ from db import get_connection
 
 from api.auth_schema import product_schema_is_ready
 from api.services.auth_service import AuthError, Principal, audit_action
+from api.services.web_push_service import configured as web_push_configured
+from api.services.web_push_service import queue_alert_deliveries, validate_timezone
 
 
 ALERT_KINDS = frozenset(
@@ -600,21 +602,46 @@ def get_notification_preferences(principal: Principal) -> dict[str, Any]:
         _ensure_schema(conn)
         row = conn.execute(
             """
-            SELECT in_app_enabled, digest_mode, quiet_start_minute, quiet_end_minute, timezone, updated_at
+            SELECT
+                in_app_enabled,
+                web_push_enabled,
+                digest_mode,
+                quiet_start_minute,
+                quiet_end_minute,
+                timezone,
+                updated_at,
+                (
+                    SELECT COUNT(*)
+                    FROM product.web_push_subscriptions s
+                    WHERE s.user_id = product.notification_preferences.user_id
+                      AND s.revoked_at IS NULL
+                ) AS web_push_subscription_count
             FROM product.notification_preferences
             WHERE user_id = ?
             """,
             (principal.user_id,),
         ).fetchone()
+        subscription_count = int(row[7]) if row else 0
         return {
             "inAppEnabled": bool(row[0]) if row else True,
-            "digestMode": str(row[1]) if row else "realtime",
-            "quietStartMinute": int(row[2]) if row and row[2] is not None else None,
-            "quietEndMinute": int(row[3]) if row and row[3] is not None else None,
-            "timezone": str(row[4]) if row else "UTC",
-            "updatedAt": _iso(row[5]) if row else None,
+            "webPushEnabled": bool(row[1]) if row else False,
+            "digestMode": str(row[2]) if row else "realtime",
+            "quietStartMinute": int(row[3]) if row and row[3] is not None else None,
+            "quietEndMinute": int(row[4]) if row and row[4] is not None else None,
+            "timezone": str(row[5]) if row else "UTC",
+            "updatedAt": _iso(row[6]) if row else None,
             "channels": {
                 "inApp": {"available": True, "connected": True},
+                "webPush": {
+                    "available": web_push_configured(),
+                    "connected": subscription_count > 0,
+                    "detail": (
+                        f"{subscription_count} active browser subscription"
+                        f"{'' if subscription_count == 1 else 's'}."
+                        if web_push_configured()
+                        else "Web Push is not configured on this deployment."
+                    ),
+                },
                 "telegram": {"available": False, "connected": False, "detail": "Managed by the existing Telegram runtime boundary."},
                 "email": {"available": False, "connected": False, "detail": "Email delivery is not configured."},
             },
@@ -634,6 +661,7 @@ def update_notification_preferences(
     timezone_name = str(payload.get("timezone") or "UTC").strip()
     if not TIMEZONE_PATTERN.fullmatch(timezone_name):
         raise AuthError(400, "INVALID_TIMEZONE", "Timezone must be a compact IANA timezone name.")
+    validate_timezone(timezone_name)
 
     def _minute(name: str) -> int | None:
         value = payload.get(name)
@@ -650,6 +678,11 @@ def update_notification_preferences(
     raw_in_app = payload.get("inAppEnabled", True)
     if not isinstance(raw_in_app, bool):
         raise AuthError(400, "INVALID_NOTIFICATION_PREFERENCE", "inAppEnabled must be a boolean.")
+    raw_web_push = payload.get("webPushEnabled", False)
+    if not isinstance(raw_web_push, bool):
+        raise AuthError(400, "INVALID_NOTIFICATION_PREFERENCE", "webPushEnabled must be a boolean.")
+    if raw_web_push and not web_push_configured():
+        raise AuthError(503, "WEB_PUSH_UNAVAILABLE", "Web Push is not configured on this deployment.")
     quiet_start = _minute("quietStartMinute")
     quiet_end = _minute("quietEndMinute")
     conn = get_connection()
@@ -658,11 +691,13 @@ def update_notification_preferences(
         conn.execute(
             """
             INSERT INTO product.notification_preferences (
-                user_id, in_app_enabled, digest_mode, quiet_start_minute, quiet_end_minute, timezone
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                user_id, in_app_enabled, web_push_enabled, digest_mode,
+                quiet_start_minute, quiet_end_minute, timezone
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id)
             DO UPDATE SET
                 in_app_enabled = EXCLUDED.in_app_enabled,
+                web_push_enabled = EXCLUDED.web_push_enabled,
                 digest_mode = EXCLUDED.digest_mode,
                 quiet_start_minute = EXCLUDED.quiet_start_minute,
                 quiet_end_minute = EXCLUDED.quiet_end_minute,
@@ -672,6 +707,7 @@ def update_notification_preferences(
             (
                 principal.user_id,
                 raw_in_app,
+                raw_web_push,
                 digest_mode,
                 quiet_start,
                 quiet_end,
@@ -686,7 +722,11 @@ def update_notification_preferences(
             metadata=metadata,
             target_type="user",
             target_id=str(principal.user_id),
-            details={"digestMode": digest_mode, "inAppEnabled": raw_in_app},
+            details={
+                "digestMode": digest_mode,
+                "inAppEnabled": raw_in_app,
+                "webPushEnabled": raw_web_push,
+            },
         )
         conn.commit()
     except AuthError:
@@ -766,7 +806,7 @@ def _condition(rule: Any) -> tuple[bool, str, str, str, Decimal | None, str | No
 
 def evaluate_alert_rules() -> dict[str, int]:
     conn = get_connection()
-    evaluated = triggered = rearmed = 0
+    evaluated = triggered = rearmed = queued = 0
     try:
         _ensure_schema(conn)
         rows = conn.execute(
@@ -807,7 +847,10 @@ def evaluate_alert_rules() -> dict[str, int]:
             LEFT JOIN core.market_status_snapshot mss ON mss.market_id = r.market_id
             WHERE r.enabled = TRUE
               AND u.active = TRUE
-              AND COALESCE(np.in_app_enabled, TRUE) = TRUE
+              AND (
+                    COALESCE(np.in_app_enabled, TRUE) = TRUE
+                    OR COALESCE(np.web_push_enabled, FALSE) = TRUE
+                  )
               AND COALESCE(np.digest_mode, 'realtime') <> 'off'
             ORDER BY r.created_at ASC
             """
@@ -883,10 +926,21 @@ def evaluate_alert_rules() -> dict[str, int]:
                 (rule[2], rule[3]),
             )
             triggered += max(0, int(cursor.rowcount))
+            if int(cursor.rowcount) > 0:
+                queued += queue_alert_deliveries(
+                    conn,
+                    alert_event_id=event_id,
+                    user_id=int(rule[1]),
+                )
         conn.execute(
             "DELETE FROM product.alert_events WHERE read_at IS NOT NULL AND read_at < NOW() - INTERVAL '90 days'"
         )
-        result = {"evaluated": evaluated, "triggered": triggered, "rearmed": rearmed}
+        result = {
+            "evaluated": evaluated,
+            "triggered": triggered,
+            "rearmed": rearmed,
+            "webPushQueued": queued,
+        }
         conn.execute(
             """
             INSERT INTO product.runtime_state (key, status, updated_at, details)

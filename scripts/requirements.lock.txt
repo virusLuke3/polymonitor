@@ -134,6 +134,8 @@ httpx==0.28.1
     #   openai
 httpx-sse==0.4.3
     # via mcp
+http-ece==1.2.1
+    # via pywebpush
 idna==3.18
     # via
     #   anyio
@@ -250,6 +252,8 @@ psycopg-binary==3.3.4
     # via psycopg
 pyarrow==25.0.0
     # via -r scripts/requirements.txt
+py-vapid==1.9.4
+    # via pywebpush
 pycparser==3.0
     # via cffi
 pycryptodome==3.23.0
@@ -313,6 +317,8 @@ requests==2.34.2
     #   web3
 requests-toolbelt==1.0.0
     # via langsmith
+pywebpush==2.3.0
+    # via -r scripts/requirements.txt
 rlp==4.1.0
     # via
     #   eth-account

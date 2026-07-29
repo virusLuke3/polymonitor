@@ -199,6 +199,8 @@ httpx-sse==0.4.3
     # via
     #   -r scripts/requirements.lock.txt
     #   mcp
+http-ece==1.2.1
+    # via -r scripts/requirements.lock.txt
 idna==3.18
     # via
     #   -r scripts/requirements.lock.txt
@@ -373,6 +375,8 @@ psycopg-binary==3.3.4
     # via -r scripts/requirements.lock.txt
 pyarrow==25.0.0
     # via -r scripts/requirements.lock.txt
+py-vapid==1.9.4
+    # via -r scripts/requirements.lock.txt
 pycparser==3.0
     # via
     #   -r scripts/requirements.lock.txt
@@ -472,6 +476,8 @@ requests-toolbelt==1.0.0
     # via
     #   -r scripts/requirements.lock.txt
     #   langsmith
+pywebpush==2.3.0
+    # via -r scripts/requirements.lock.txt
 rlp==4.1.0
     # via
     #   -r scripts/requirements.lock.txt

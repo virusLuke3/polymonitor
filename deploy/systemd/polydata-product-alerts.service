@@ -1,6 +1,7 @@
 [Unit]
 Description=polyData product watchlist alert evaluator
-After=network-online.target
+After=network-online.target polydata-api.service
+Requires=polydata-api.service
 
 [Service]
 Type=simple

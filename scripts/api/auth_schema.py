@@ -6,7 +6,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = "2026-07-28-auth-v1"
-PRODUCT_SCHEMA_VERSION = "2026-07-29-layout-briefings-v1"
+PRODUCT_SCHEMA_VERSION = "2026-07-29-web-push-v1"
 
 DDL = """
 CREATE SCHEMA IF NOT EXISTS product;
@@ -166,12 +166,15 @@ CREATE INDEX IF NOT EXISTS alert_rules_enabled_idx
 CREATE TABLE IF NOT EXISTS product.notification_preferences (
     user_id BIGINT PRIMARY KEY REFERENCES product.users(id) ON DELETE CASCADE,
     in_app_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    web_push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     digest_mode TEXT NOT NULL DEFAULT 'realtime' CHECK (digest_mode IN ('realtime', 'hourly', 'daily', 'off')),
     quiet_start_minute SMALLINT CHECK (quiet_start_minute BETWEEN 0 AND 1439),
     quiet_end_minute SMALLINT CHECK (quiet_end_minute BETWEEN 0 AND 1439),
     timezone TEXT NOT NULL DEFAULT 'UTC',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE product.notification_preferences
+    ADD COLUMN IF NOT EXISTS web_push_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS product.alert_events (
     id UUID PRIMARY KEY,
@@ -195,6 +198,41 @@ CREATE INDEX IF NOT EXISTS alert_events_user_unread_idx
     ON product.alert_events (user_id, occurred_at DESC) WHERE read_at IS NULL;
 CREATE INDEX IF NOT EXISTS alert_events_user_recent_idx
     ON product.alert_events (user_id, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS product.web_push_subscriptions (
+    id UUID PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES product.users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth_secret TEXT NOT NULL,
+    expiration_time BIGINT,
+    user_agent_hash CHAR(64),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ,
+    failure_count INTEGER NOT NULL DEFAULT 0 CHECK (failure_count >= 0),
+    last_success_at TIMESTAMPTZ,
+    last_failure_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS web_push_subscriptions_user_active_idx
+    ON product.web_push_subscriptions (user_id, updated_at DESC) WHERE revoked_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS product.web_push_deliveries (
+    id UUID PRIMARY KEY,
+    alert_event_id UUID NOT NULL REFERENCES product.alert_events(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES product.users(id) ON DELETE CASCADE,
+    subscription_id UUID NOT NULL REFERENCES product.web_push_subscriptions(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'retry', 'sent', 'failed', 'cancelled')),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    sent_at TIMESTAMPTZ,
+    UNIQUE (alert_event_id, subscription_id)
+);
+CREATE INDEX IF NOT EXISTS web_push_deliveries_due_idx
+    ON product.web_push_deliveries (next_attempt_at, created_at)
+    WHERE status IN ('pending', 'retry');
 
 CREATE TABLE IF NOT EXISTS product.runtime_state (
     key TEXT PRIMARY KEY,
@@ -241,6 +279,10 @@ ON CONFLICT (version) DO NOTHING;
 
 INSERT INTO product.schema_migrations (version)
 VALUES ('2026-07-29-layout-briefings-v1')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO product.schema_migrations (version)
+VALUES ('2026-07-29-web-push-v1')
 ON CONFLICT (version) DO NOTHING;
 """
 
