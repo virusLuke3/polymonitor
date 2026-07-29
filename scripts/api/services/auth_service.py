@@ -491,6 +491,39 @@ def authenticate_request(
         conn.close()
 
 
+def authenticate_user_request(request: Any, *, require_csrf: bool = False) -> Principal:
+    principal = authenticate_request(request, require_csrf=require_csrf)
+    if principal.kind != "session":
+        raise AuthError(403, "SESSION_REQUIRED", "This user workspace requires a browser session.")
+    if principal.force_password_change:
+        raise AuthError(403, "PASSWORD_CHANGE_REQUIRED", "Change the bootstrap password before opening user workspaces.")
+    return principal
+
+
+def audit_action(
+    conn: Any,
+    principal: Principal,
+    *,
+    action: str,
+    result: str,
+    metadata: Mapping[str, Any],
+    target_type: str | None = None,
+    target_id: str | None = None,
+    details: Mapping[str, Any] | None = None,
+) -> None:
+    _audit(
+        conn,
+        actor_user_id=principal.user_id,
+        actor_kind=principal.kind,
+        action=action,
+        result=result,
+        metadata=metadata,
+        target_type=target_type,
+        target_id=target_id,
+        details=details,
+    )
+
+
 def session_snapshot(request: Any) -> tuple[Principal | None, str | None]:
     if not auth_enabled():
         return None, None

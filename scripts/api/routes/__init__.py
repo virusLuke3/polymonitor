@@ -17,6 +17,7 @@ from .data_quality import create_data_quality_blueprint
 from .lob import create_lob_blueprint
 from .market_groups import create_market_groups_blueprint
 from .markets import create_markets_blueprint
+from .product import create_product_blueprint
 from .quant import create_quant_blueprint
 from .runtime_panels import create_runtime_panels_blueprint
 from .runtime_sports import create_runtime_sports_blueprint
@@ -27,6 +28,7 @@ from .system import create_system_blueprint
 BlueprintFactory = Callable[[Mapping[str, Any]], Any]
 BLUEPRINT_FACTORIES: Final[tuple[BlueprintFactory, ...]] = (
     create_auth_blueprint,
+    create_product_blueprint,
     create_agent_blueprint,
     create_agent_snapshot_blueprint,
     create_bootstrap_blueprint,

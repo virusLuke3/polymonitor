@@ -9,7 +9,7 @@ import sys
 
 from db import get_connection
 
-from api.auth_schema import SCHEMA_VERSION, apply_schema, schema_is_ready
+from api.auth_schema import PRODUCT_SCHEMA_VERSION, SCHEMA_VERSION, apply_schema, product_schema_is_ready, schema_is_ready
 from api.services.auth_service import create_or_update_user
 
 
@@ -37,17 +37,26 @@ def main() -> int:
             apply_schema(connection)
         finally:
             connection.close()
-        print(json.dumps({"status": "ok", "schemaVersion": SCHEMA_VERSION}))
+        print(json.dumps({"status": "ok", "schemaVersion": SCHEMA_VERSION, "productSchemaVersion": PRODUCT_SCHEMA_VERSION}))
         return 0
 
     if args.command == "status":
         connection = get_connection()
         try:
             ready = schema_is_ready(connection)
+            product_ready = product_schema_is_ready(connection) if ready else False
         finally:
             connection.close()
-        print(json.dumps({"status": "ok" if ready else "missing", "schemaVersion": SCHEMA_VERSION}))
-        return 0 if ready else 1
+        print(
+            json.dumps(
+                {
+                    "status": "ok" if ready and product_ready else "missing",
+                    "schemaVersion": SCHEMA_VERSION,
+                    "productSchemaVersion": PRODUCT_SCHEMA_VERSION,
+                }
+            )
+        )
+        return 0 if ready and product_ready else 1
 
     user = create_or_update_user(
         args.username,

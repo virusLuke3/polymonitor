@@ -6,6 +6,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = "2026-07-28-auth-v1"
+PRODUCT_SCHEMA_VERSION = "2026-07-29-watchlist-alerts-v1"
 
 DDL = """
 CREATE SCHEMA IF NOT EXISTS product;
@@ -99,8 +100,115 @@ CREATE INDEX IF NOT EXISTS audit_log_occurred_idx
 CREATE INDEX IF NOT EXISTS audit_log_actor_idx
     ON product.audit_log (actor_user_id, occurred_at DESC);
 
+CREATE TABLE IF NOT EXISTS product.watchlists (
+    id UUID PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES product.users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT 'Primary Watchlist',
+    is_default BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS watchlists_default_user_uq
+    ON product.watchlists (user_id) WHERE is_default = TRUE;
+
+CREATE TABLE IF NOT EXISTS product.watchlist_markets (
+    watchlist_id UUID NOT NULL REFERENCES product.watchlists(id) ON DELETE CASCADE,
+    market_id BIGINT NOT NULL,
+    market_title TEXT NOT NULL,
+    market_slug TEXT,
+    note TEXT,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_evaluated_at TIMESTAMPTZ,
+    PRIMARY KEY (watchlist_id, market_id)
+);
+CREATE INDEX IF NOT EXISTS watchlist_markets_market_idx
+    ON product.watchlist_markets (market_id);
+
+CREATE TABLE IF NOT EXISTS product.alert_rules (
+    id UUID PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES product.users(id) ON DELETE CASCADE,
+    watchlist_id UUID NOT NULL REFERENCES product.watchlists(id) ON DELETE CASCADE,
+    market_id BIGINT NOT NULL,
+    kind TEXT NOT NULL CHECK (
+        kind IN (
+            'price_above',
+            'price_below',
+            'oracle_gap',
+            'oracle_proposed',
+            'oracle_disputed',
+            'oracle_resolved',
+            'market_closed'
+        )
+    ),
+    threshold NUMERIC(18, 10),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    cooldown_seconds INTEGER NOT NULL DEFAULT 3600 CHECK (cooldown_seconds BETWEEN 60 AND 2592000),
+    is_condition_active BOOLEAN NOT NULL DEFAULT FALSE,
+    last_triggered_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (
+        (kind IN ('price_above', 'price_below') AND threshold IS NOT NULL AND threshold BETWEEN 0 AND 1)
+        OR
+        (kind NOT IN ('price_above', 'price_below') AND threshold IS NULL)
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS alert_rules_market_kind_threshold_uq
+    ON product.alert_rules (
+        user_id,
+        market_id,
+        kind,
+        COALESCE(threshold, -1::numeric)
+    );
+CREATE INDEX IF NOT EXISTS alert_rules_enabled_idx
+    ON product.alert_rules (enabled, market_id) WHERE enabled = TRUE;
+
+CREATE TABLE IF NOT EXISTS product.notification_preferences (
+    user_id BIGINT PRIMARY KEY REFERENCES product.users(id) ON DELETE CASCADE,
+    in_app_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    digest_mode TEXT NOT NULL DEFAULT 'realtime' CHECK (digest_mode IN ('realtime', 'hourly', 'daily', 'off')),
+    quiet_start_minute SMALLINT CHECK (quiet_start_minute BETWEEN 0 AND 1439),
+    quiet_end_minute SMALLINT CHECK (quiet_end_minute BETWEEN 0 AND 1439),
+    timezone TEXT NOT NULL DEFAULT 'UTC',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS product.alert_events (
+    id UUID PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES product.users(id) ON DELETE CASCADE,
+    rule_id UUID REFERENCES product.alert_rules(id) ON DELETE SET NULL,
+    market_id BIGINT NOT NULL,
+    event_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical', 'positive')),
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    observed_price NUMERIC(18, 10),
+    oracle_status TEXT,
+    source_observed_at TIMESTAMPTZ,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    read_at TIMESTAMPTZ,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    UNIQUE (user_id, event_key)
+);
+CREATE INDEX IF NOT EXISTS alert_events_user_unread_idx
+    ON product.alert_events (user_id, occurred_at DESC) WHERE read_at IS NULL;
+CREATE INDEX IF NOT EXISTS alert_events_user_recent_idx
+    ON product.alert_events (user_id, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS product.runtime_state (
+    key TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    details JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
 INSERT INTO product.schema_migrations (version)
 VALUES ('2026-07-28-auth-v1')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO product.schema_migrations (version)
+VALUES ('2026-07-29-watchlist-alerts-v1')
 ON CONFLICT (version) DO NOTHING;
 """
 
@@ -124,5 +232,19 @@ def schema_is_ready(connection: Any) -> bool:
         ) AS ready
         """,
         (SCHEMA_VERSION,),
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def product_schema_is_ready(connection: Any) -> bool:
+    row = connection.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM product.schema_migrations
+            WHERE version = ?
+        ) AS ready
+        """,
+        (PRODUCT_SCHEMA_VERSION,),
     ).fetchone()
     return bool(row and row[0])
