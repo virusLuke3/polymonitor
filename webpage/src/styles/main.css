@@ -10006,6 +10006,11 @@ body {
   .wm-map-status-strip > .wm-map-clock {
     display: none;
   }
+
+  .wm-map-source-status.is-ok em,
+  .wm-map-source-status small {
+    display: none;
+  }
 }
 
 .wm-world-event-map-toolbar {
