@@ -6,16 +6,7 @@ import {
   StatusBadge,
   type OperationalTone,
 } from '@/components/design-system/StatusPrimitives';
-import {
-  formatCompact,
-  formatCurrencyCompact,
-  formatDate,
-  formatPercent,
-  formatRelative,
-  formatSignedPercent,
-  shortHash,
-  signedClass,
-} from '@/panels/shared/formatters';
+import { shortHash, signedClass } from '@/panels/shared/formatters';
 import { fetchMarketLobByToken, fetchWorkspaceBundle } from '@/services/api';
 import { fetchAuthSession } from '@/services/auth';
 import { useI18n } from '@/services/i18n';
@@ -38,6 +29,9 @@ const MAX_VISIBLE_CONTENT = 8;
 const MAX_BOOK_LEVELS = 8;
 
 type BookSide = 'yes' | 'no';
+type Translator = ReturnType<typeof useI18n>['t'];
+type NumberFormatter = ReturnType<typeof useI18n>['formatNumber'];
+type PercentFormatter = ReturnType<typeof useI18n>['formatPercent'];
 
 function readMarketId(): number | null {
   if (typeof window === 'undefined') return null;
@@ -64,15 +58,6 @@ function freshnessFromTimestamp(value?: string | null, staleAfterSeconds = 300):
   return 'stale';
 }
 
-function longAge(value?: string | null): string {
-  const age = ageSeconds(value);
-  if (age == null) return 'No timestamp';
-  if (age < 60) return `${age}s ago`;
-  if (age < 3_600) return `${Math.round(age / 60)}m ago`;
-  if (age < 86_400) return `${Math.round(age / 3_600)}h ago`;
-  return `${Math.round(age / 86_400)}d ago`;
-}
-
 function statusTone(status?: string | null): OperationalTone {
   const normalized = String(status || '').toLowerCase();
   if (normalized.includes('mismatch') || normalized.includes('missing') || normalized === 'error') return 'critical';
@@ -94,21 +79,93 @@ function formatProbabilityCents(value?: string | number | null): string {
   return `${Math.round(numeric * 100)}¢`;
 }
 
-function formatShares(value?: string | number | null): string {
+function statusLabel(value: string | null | undefined, t: Translator): string {
+  const normalized = String(value || 'unknown').trim().toLowerCase().replace(/_/g, '-');
+  const known = {
+    loading: 'status.loading',
+    unknown: 'status.unknown',
+    fresh: 'status.fresh',
+    aging: 'status.aging',
+    stale: 'status.stale',
+    ok: 'status.ok',
+    missing: 'status.missing',
+    partial: 'status.partial',
+    critical: 'status.critical',
+    degraded: 'status.degraded',
+    warning: 'status.warning',
+    ready: 'status.ready',
+    observed: 'status.observed',
+    bound: 'status.bound',
+    unbound: 'status.unbound',
+    pending: 'status.pending',
+    open: 'status.open',
+    closed: 'status.closed',
+    proposed: 'status.proposed',
+    disputed: 'status.disputed',
+    resolved: 'status.resolved',
+    error: 'status.error',
+    snapshot: 'status.snapshot',
+    'single-market': 'status.singleMarket',
+    'open-no-events': 'status.openNoEvents',
+    'not-loaded': 'status.notLoaded',
+    'ended-awaiting-oracle': 'status.endedAwaitingOracle',
+  } as const;
+  const key = known[normalized as keyof typeof known];
+  return key ? t(key) : cleanSource(value);
+}
+
+function formatShares(value: string | number | null | undefined, formatNumber: NumberFormatter): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
-  return numeric.toLocaleString('en-US', {
+  return formatNumber(numeric, {
     maximumFractionDigits: numeric >= 100 ? 0 : 2,
   });
 }
 
-function formatNotional(price?: string | number | null, size?: string | number | null): string {
+function formatNotional(
+  price: string | number | null | undefined,
+  size: string | number | null | undefined,
+  formatNumber: NumberFormatter,
+): string {
   const numericPrice = Number(price);
   const numericSize = Number(size);
   if (!Number.isFinite(numericPrice) || !Number.isFinite(numericSize)) return '--';
-  return `$${(numericPrice * numericSize).toLocaleString('en-US', {
+  return formatNumber(numericPrice * numericSize, {
+    style: 'currency',
+    currency: 'USD',
     maximumFractionDigits: numericPrice * numericSize >= 100 ? 0 : 2,
-  })}`;
+  });
+}
+
+function formatMarketPercent(value: string | number | null | undefined, formatPercent: PercentFormatter): string {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? formatPercent(numeric) : '--';
+}
+
+function formatMarketSignedPercent(value: string | number | null | undefined, formatPercent: PercentFormatter): string {
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? formatPercent(numeric, { signDisplay: numeric === 0 ? 'auto' : 'always' })
+    : '--';
+}
+
+function formatMarketCompact(value: string | number | null | undefined, formatNumber: NumberFormatter): string {
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? formatNumber(numeric, { notation: 'compact', maximumFractionDigits: 1 })
+    : '--';
+}
+
+function formatMarketCurrency(value: string | number | null | undefined, formatNumber: NumberFormatter): string {
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? formatNumber(numeric, {
+      notation: 'compact',
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 1,
+    })
+    : '--';
 }
 
 function cleanSource(value?: string | null): string {
@@ -165,13 +222,14 @@ function chartGeometry(points: ChartPoint[]) {
 }
 
 function ProbabilityChart({ bundle }: { bundle: WorkspaceBundle }) {
+  const { t, formatDateTime, formatPercent } = useI18n();
   const points = bundle.chart?.points || [];
   const geometry = chartGeometry(points);
   if (!geometry || points.length < 2) {
     return (
       <div className="market-empty-state">
-        <strong>No probability curve</strong>
-        <span>The latest quote remains visible, but local history is not available.</span>
+        <strong>{t('market.noProbabilityCurve')}</strong>
+        <span>{t('market.noProbabilityCurveDetail')}</span>
       </div>
     );
   }
@@ -181,14 +239,14 @@ function ProbabilityChart({ bundle }: { bundle: WorkspaceBundle }) {
     <div className="market-chart-shell">
       <div className="market-chart-meta">
         <span>{cleanSource(bundle.chart?.priceSource || 'market history')}</span>
-        <span>{points.length} observations</span>
+        <span>{t('market.observations', { count: points.length })}</span>
         <span>{bundle.chart?.range || '--'} / {bundle.chart?.interval || '--'}</span>
       </div>
       <svg
         className="market-probability-chart"
         viewBox={`0 0 ${geometry.width} ${geometry.height}`}
         role="img"
-        aria-label={`YES probability history with ${points.length} observations`}
+        aria-label={t('market.chartAria', { count: points.length })}
       >
         <defs>
           <linearGradient id="marketProbabilityArea" x1="0" x2="0" y1="0" y2="1">
@@ -210,9 +268,9 @@ function ProbabilityChart({ bundle }: { bundle: WorkspaceBundle }) {
         {geometry.last ? <circle cx={geometry.last.x} cy={geometry.last.y} r="5" className="market-chart-endpoint" /> : null}
       </svg>
       <div className="market-chart-axis">
-        <span>{formatDate(firstTimestamp)}</span>
-        <strong>{formatPercent(geometry.latest)} YES</strong>
-        <span>{formatDate(lastTimestamp)}</span>
+        <span>{firstTimestamp ? formatDateTime(firstTimestamp) : '—'}</span>
+        <strong>{geometry.latest == null ? '--' : formatPercent(geometry.latest)} YES</strong>
+        <span>{lastTimestamp ? formatDateTime(lastTimestamp) : '—'}</span>
       </div>
     </div>
   );
@@ -229,58 +287,60 @@ function topLevels(levels?: L2Level[], side: 'bid' | 'ask' = 'bid') {
 }
 
 function BookTable({ title, levels, side }: { title: string; levels?: L2Level[]; side: 'bid' | 'ask' }) {
+  const { t, formatNumber } = useI18n();
   const visible = topLevels(levels, side);
   return (
     <div className={`market-book-side is-${side}`}>
       <div className="market-book-side-title">
         <strong>{title}</strong>
-        <span>{visible.length} levels</span>
+        <span>{t('market.levels', { count: visible.length })}</span>
       </div>
       <div className="market-table market-book-table" role="table">
         <div className="market-table-head" role="row">
-          <span>Price</span><span>Shares</span><span>Notional</span>
+          <span>{t('market.price')}</span><span>{t('market.shares')}</span><span>{t('market.notional')}</span>
         </div>
         {visible.map((level, index) => (
           <div className="market-table-row" role="row" key={`${side}-${index}-${level.price}-${level.size}`}>
             <strong>{formatProbabilityCents(level.price)}</strong>
-            <span>{formatShares(level.size)}</span>
-            <span>{formatNotional(level.price, level.size)}</span>
+            <span>{formatShares(level.size, formatNumber)}</span>
+            <span>{formatNotional(level.price, level.size, formatNumber)}</span>
           </div>
         ))}
-        {!visible.length ? <div className="market-table-empty">No {side} levels observed</div> : null}
+        {!visible.length ? <div className="market-table-empty">{t('market.noBookLevels', { side: side === 'bid' ? t('market.bidSide') : t('market.askSide') })}</div> : null}
       </div>
     </div>
   );
 }
 
 function OrderBook({ lob }: { lob?: LobPayload | null }) {
+  const { t, formatRelativeTime } = useI18n();
   const [side, setSide] = useState<BookSide>('yes');
   const active = side === 'yes' ? lob?.yes : lob?.no;
   return (
     <section className="market-card market-orderbook-card">
       <div className="market-section-heading">
         <div>
-          <span>Execution Evidence</span>
-          <h2>Live order book</h2>
+          <span>{t('market.executionEvidence')}</span>
+          <h2>{t('market.liveOrderBook')}</h2>
         </div>
-        <div className="market-segmented-control" role="tablist" aria-label="Order book outcome">
+        <div className="market-segmented-control" role="tablist" aria-label={t('market.orderBookOutcome')}>
           <button type="button" className={side === 'yes' ? 'active' : ''} onClick={() => setSide('yes')}>YES</button>
           <button type="button" className={side === 'no' ? 'active' : ''} onClick={() => setSide('no')}>NO</button>
         </div>
       </div>
       <div className="market-quote-strip">
-        <span><em>Best bid</em><strong>{formatProbabilityCents(active?.bestBid)}</strong></span>
-        <span><em>Best ask</em><strong>{formatProbabilityCents(active?.bestAsk)}</strong></span>
-        <span><em>Spread</em><strong>{formatProbabilityCents(active?.spread)}</strong></span>
-        <span><em>Observed</em><strong>{longAge(lob?.fetchedAt)}</strong></span>
+        <span><em>{t('market.bestBid')}</em><strong>{formatProbabilityCents(active?.bestBid)}</strong></span>
+        <span><em>{t('market.bestAsk')}</em><strong>{formatProbabilityCents(active?.bestAsk)}</strong></span>
+        <span><em>{t('market.spread')}</em><strong>{formatProbabilityCents(active?.spread)}</strong></span>
+        <span><em>{t('market.observed')}</em><strong>{formatRelativeTime(lob?.fetchedAt)}</strong></span>
       </div>
       <div className="market-book-grid">
-        <BookTable title={`${side.toUpperCase()} bids`} levels={active?.bids} side="bid" />
-        <BookTable title={`${side.toUpperCase()} asks`} levels={active?.asks} side="ask" />
+        <BookTable title={t('market.bids', { outcome: side.toUpperCase() })} levels={active?.bids} side="bid" />
+        <BookTable title={t('market.asks', { outcome: side.toUpperCase() })} levels={active?.asks} side="ask" />
       </div>
       {!lob ? (
         <div className="market-inline-notice">
-          No CLOB snapshot is available. The identity and probability evidence remain usable.
+          {t('market.noClob')}
         </div>
       ) : null}
     </section>
@@ -319,46 +379,74 @@ function evidenceClaims(bundle: WorkspaceBundle): MarketEvidenceClaim[] {
   return claims;
 }
 
+function localizedClaim(claim: MarketEvidenceClaim, t: Translator): Pick<MarketEvidenceClaim, 'label' | 'detail'> {
+  switch (claim.id) {
+    case 'identity':
+      return { label: t('market.claim.identity'), detail: t('market.claim.identityDetail') };
+    case 'price':
+      return { label: t('market.claim.price'), detail: t('market.claim.priceDetail') };
+    case 'history':
+      return { label: t('market.claim.history'), detail: claim.detail };
+    case 'trades':
+      return { label: t('market.claim.trades'), detail: t('market.claim.tradesDetail') };
+    case 'oracle':
+      return { label: t('market.claim.oracle'), detail: t('market.claim.oracleDetail') };
+    case 'group':
+      return { label: t('market.claim.group'), detail: t('market.claim.groupDetail') };
+    case 'lob':
+      return { label: t('market.claim.lob'), detail: t('market.claim.lobDetail') };
+    case 'content':
+      return { label: t('market.claim.content'), detail: t('market.claim.contentDetail') };
+    default:
+      return { label: claim.label, detail: claim.detail };
+  }
+}
+
 function EvidenceChain({ bundle }: { bundle: WorkspaceBundle }) {
+  const { t, formatNumber, formatRelativeTime } = useI18n();
   const claims = evidenceClaims(bundle);
   return (
     <section className="market-card market-evidence-card">
       <div className="market-section-heading">
         <div>
-          <span>Audit Trail</span>
-          <h2>Evidence chain</h2>
+          <span>{t('market.auditTrail')}</span>
+          <h2>{t('market.evidenceChain')}</h2>
         </div>
         <StatusBadge
-          label={bundle.evidence?.contractVersion || 'CLIENT DERIVED'}
+          label={bundle.evidence?.contractVersion || t('market.clientDerived')}
           tone={bundle.evidence ? 'positive' : 'warning'}
           compact
         />
       </div>
       <p className="market-section-intro">
-        Every headline number is paired with its source, observation time and local coverage.
+        {t('market.evidenceIntro')}
       </p>
       <div className="market-evidence-list">
-        {claims.map((claim, index) => (
-          <article className="market-evidence-row" key={`${claim.id}-${index}`}>
-            <span className="market-evidence-step">{String(index + 1).padStart(2, '0')}</span>
-            <div className="market-evidence-copy">
-              <strong>{claim.label}</strong>
-              <span>{claim.detail || 'No additional source detail'}</span>
-              <em>{cleanSource(claim.source)} · {longAge(claim.observedAt)}</em>
-            </div>
-            <div className="market-evidence-result">
-              <StatusBadge label={claim.status.toUpperCase()} tone={statusTone(claim.status)} compact />
-              <strong>{claim.recordCount ?? '--'}</strong>
-              <span>records</span>
-            </div>
-          </article>
-        ))}
+        {claims.map((claim, index) => {
+          const localized = localizedClaim(claim, t);
+          return (
+            <article className="market-evidence-row" key={`${claim.id}-${index}`}>
+              <span className="market-evidence-step">{String(index + 1).padStart(2, '0')}</span>
+              <div className="market-evidence-copy">
+                <strong>{localized.label}</strong>
+                <span>{localized.detail || t('market.noSourceDetail')}</span>
+                <em>{cleanSource(claim.source)} · {formatRelativeTime(claim.observedAt)}</em>
+              </div>
+              <div className="market-evidence-result">
+                <StatusBadge label={statusLabel(claim.status, t)} tone={statusTone(claim.status)} compact />
+                <strong>{claim.recordCount == null ? '--' : formatNumber(claim.recordCount)}</strong>
+                <span>{t('market.records')}</span>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </section>
   );
 }
 
 function IdentifierRow({ label, value }: { label: string; value?: string | number | null }) {
+  const { t } = useI18n();
   const stringValue = String(value || '');
   return (
     <div className="market-identifier-row">
@@ -368,9 +456,9 @@ function IdentifierRow({ label, value }: { label: string; value?: string | numbe
         <button
           type="button"
           onClick={() => void navigator.clipboard.writeText(stringValue)}
-          aria-label={`Copy ${label}`}
+          aria-label={t('market.copyIdentifier', { label })}
         >
-          Copy
+          {t('market.copy')}
         </button>
       ) : null}
     </div>
@@ -378,83 +466,86 @@ function IdentifierRow({ label, value }: { label: string; value?: string | numbe
 }
 
 function ResolutionContract({ bundle }: { bundle: WorkspaceBundle }) {
+  const { t } = useI18n();
   const market = bundle.market;
   const oracleSummary = bundle.oracle?.summary;
   return (
     <section className="market-card market-resolution-card">
       <div className="market-section-heading">
         <div>
-          <span>Resolution Contract</span>
-          <h2>What decides this market</h2>
+          <span>{t('market.resolutionContract')}</span>
+          <h2>{t('market.whatDecides')}</h2>
         </div>
         <StatusBadge
-          label={String(oracleSummary?.completionStatus || bundle.oracle?.completionStatus || market?.status || 'unknown').toUpperCase()}
+          label={statusLabel(oracleSummary?.completionStatus || bundle.oracle?.completionStatus || market?.status, t)}
           tone={statusTone(oracleSummary?.completionStatus || bundle.oracle?.completionStatus || market?.status)}
         />
       </div>
       <div className="market-resolution-copy">
-        {market?.description || 'No resolution criteria were included in the local market registry.'}
+        {market?.description || t('market.noResolutionCriteria')}
       </div>
       <div className="market-identifier-grid">
-        <IdentifierRow label="Local market" value={bundle.identity?.localMarketId || market?.id} />
-        <IdentifierRow label="Gamma market" value={bundle.identity?.gammaMarketId || market?.gammaMarketId} />
-        <IdentifierRow label="Condition ID" value={bundle.identity?.conditionId || market?.conditionId} />
-        <IdentifierRow label="Question ID" value={bundle.identity?.questionId || market?.questionId} />
-        <IdentifierRow label="YES token" value={bundle.identity?.yesTokenId || market?.yesTokenId} />
-        <IdentifierRow label="NO token" value={bundle.identity?.noTokenId || market?.noTokenId} />
+        <IdentifierRow label={t('market.localMarket')} value={bundle.identity?.localMarketId || market?.id} />
+        <IdentifierRow label={t('market.gammaMarket')} value={bundle.identity?.gammaMarketId || market?.gammaMarketId} />
+        <IdentifierRow label={t('market.conditionId')} value={bundle.identity?.conditionId || market?.conditionId} />
+        <IdentifierRow label={t('market.questionId')} value={bundle.identity?.questionId || market?.questionId} />
+        <IdentifierRow label={t('market.yesToken')} value={bundle.identity?.yesTokenId || market?.yesTokenId} />
+        <IdentifierRow label={t('market.noToken')} value={bundle.identity?.noTokenId || market?.noTokenId} />
       </div>
     </section>
   );
 }
 
 function TradeTable({ trades }: { trades: TradeRow[] }) {
+  const { t, formatDateTime, formatNumber, formatRelativeTime } = useI18n();
   return (
     <section className="market-card market-trades-card">
       <div className="market-section-heading">
         <div>
-          <span>On-chain Execution</span>
-          <h2>OrderFilled tape</h2>
+          <span>{t('market.onChainExecution')}</span>
+          <h2>{t('market.orderFilledTape')}</h2>
         </div>
-        <StatusBadge label={`${trades.length} ROWS`} tone={trades.length ? 'positive' : 'warning'} compact />
+        <StatusBadge label={t('market.rows', { count: trades.length })} tone={trades.length ? 'positive' : 'warning'} compact />
       </div>
       <div className="market-data-table-wrap">
         <table className="market-data-table">
           <thead>
             <tr>
-              <th>Observed</th>
-              <th>Side / outcome</th>
-              <th>Price</th>
-              <th>Size</th>
-              <th>Maker → taker</th>
-              <th>Event key</th>
+              <th>{t('market.observed')}</th>
+              <th>{t('market.sideOutcome')}</th>
+              <th>{t('market.price')}</th>
+              <th>{t('market.size')}</th>
+              <th>{t('market.makerTaker')}</th>
+              <th>{t('market.eventKey')}</th>
             </tr>
           </thead>
           <tbody>
             {trades.slice(0, MAX_VISIBLE_TRADES).map((trade, index) => (
               <tr key={`${trade.txHash || 'trade'}-${trade.logIndex ?? index}`}>
-                <td><time>{formatDate(trade.timestamp)}</time><small>{formatRelative(trade.timestamp)}</small></td>
-                <td><strong className={String(trade.side || '').toLowerCase()}>{trade.side || '--'}</strong><small>{trade.outcome || 'Outcome unknown'}</small></td>
+                <td><time>{trade.timestamp ? formatDateTime(trade.timestamp) : '—'}</time><small>{formatRelativeTime(trade.timestamp)}</small></td>
+                <td><strong className={String(trade.side || '').toLowerCase()}>{trade.side || '--'}</strong><small>{trade.outcome || t('market.outcomeUnknown')}</small></td>
                 <td>{formatProbabilityCents(trade.price)}</td>
-                <td>{formatShares(trade.size)}</td>
+                <td>{formatShares(trade.size, formatNumber)}</td>
                 <td><code>{shortHash(trade.maker, 7, 4)}</code><small>→ {shortHash(trade.taker, 7, 4)}</small></td>
-                <td><code>{shortHash(trade.txHash, 8, 5)}</code><small>log {trade.logIndex ?? '--'}</small></td>
+                <td><code>{shortHash(trade.txHash, 8, 5)}</code><small>{t('market.logIndex', { index: trade.logIndex ?? '--' })}</small></td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!trades.length ? <div className="market-table-empty">No local OrderFilled rows are available for this market.</div> : null}
+        {!trades.length ? <div className="market-table-empty">{t('market.noOrderFilled')}</div> : null}
       </div>
     </section>
   );
 }
 
 function OracleTimeline({ events, bundle }: { events: OracleEvent[]; bundle: WorkspaceBundle }) {
+  const { t, formatDateTime, formatRelativeTime } = useI18n();
   const current = bundle.oracle?.summary?.completionStatus || bundle.oracle?.completionStatus || 'OPEN';
   const oracleStages = [
-    { id: 'request', label: 'Request', matcher: /request/i },
-    { id: 'propose', label: 'Propose', matcher: /propos/i },
-    { id: 'dispute', label: 'Dispute', matcher: /disput/i },
-    { id: 'settle', label: 'Settle', matcher: /settle|resolve/i },
+    { id: 'request', label: t('market.stage.request'), matcher: /request/i },
+    { id: 'propose', label: t('market.stage.propose'), matcher: /propos/i },
+    { id: 'dispute', label: t('market.stage.dispute'), matcher: /disput/i },
+    { id: 'settle', label: t('market.stage.settle'), matcher: /settle|resolve/i },
   ].map((stage) => ({
     ...stage,
     event: events.find((event) => stage.matcher.test(String(event.eventStatus || event.completionStatus || ''))),
@@ -463,18 +554,18 @@ function OracleTimeline({ events, bundle }: { events: OracleEvent[]; bundle: Wor
     <section className="market-card market-oracle-card">
       <div className="market-section-heading">
         <div>
-          <span>Resolution Lifecycle</span>
-          <h2>Oracle timeline</h2>
+          <span>{t('market.resolutionLifecycle')}</span>
+          <h2>{t('market.oracleTimeline')}</h2>
         </div>
-        <StatusBadge label={String(current).toUpperCase()} tone={statusTone(current)} />
+        <StatusBadge label={statusLabel(current, t)} tone={statusTone(current)} />
       </div>
-      <div className="market-oracle-phase-rail" aria-label="Oracle lifecycle phases">
+      <div className="market-oracle-phase-rail" aria-label={t('market.oraclePhases')}>
         {oracleStages.map((stage, index) => (
           <article className={stage.event ? 'is-observed' : 'is-pending'} key={stage.id}>
             <span>{String(index + 1).padStart(2, '0')}</span>
             <div>
               <strong>{stage.label}</strong>
-              <em>{stage.event ? formatRelative(stage.event.eventTime) : 'Not observed'}</em>
+              <em>{stage.event ? formatRelativeTime(stage.event.eventTime) : t('market.notObserved')}</em>
             </div>
           </article>
         ))}
@@ -484,17 +575,17 @@ function OracleTimeline({ events, bundle }: { events: OracleEvent[]; bundle: Wor
           <article className="market-timeline-row" key={`${event.txHash || event.id || 'oracle'}-${event.logIndex ?? index}`}>
             <span className="market-timeline-node" />
             <div>
-              <strong>{event.eventStatus || event.completionStatus || 'Oracle observation'}</strong>
-              <span>{event.settlementOutcome || event.proposedPrice || event.settledPrice || 'No outcome value published'}</span>
-              <em>{formatDate(event.eventTime)} · {cleanSource(event.sourceAdapter || event.sourceOracle || 'oracle')}</em>
+              <strong>{event.eventStatus || event.completionStatus || t('market.oracleObservation')}</strong>
+              <span>{event.settlementOutcome || event.proposedPrice || event.settledPrice || t('market.noOutcomeValue')}</span>
+              <em>{event.eventTime ? formatDateTime(event.eventTime) : '—'} · {cleanSource(event.sourceAdapter || event.sourceOracle || 'oracle')}</em>
             </div>
-            <code>{shortHash(event.txHash, 9, 5)}<small>log {event.logIndex ?? '--'}</small></code>
+            <code>{shortHash(event.txHash, 9, 5)}<small>{t('market.logIndex', { index: event.logIndex ?? '--' })}</small></code>
           </article>
         ))}
         {!events.length ? (
           <div className="market-empty-state is-compact">
-            <strong>No proposal or settlement event yet</strong>
-            <span>The market is identity-bound, but its Oracle lifecycle has not started.</span>
+            <strong>{t('market.noOracleEvent')}</strong>
+            <span>{t('market.noOracleEventDetail')}</span>
           </div>
         ) : null}
       </div>
@@ -503,17 +594,18 @@ function OracleTimeline({ events, bundle }: { events: OracleEvent[]; bundle: Wor
 }
 
 function ContentCard({ item }: { item: ContentItem }) {
+  const { t, formatRelativeTime } = useI18n();
   const body = (
     <>
       <div className="market-content-meta">
         <span>{cleanSource(item.provider || item.source || item.contentType)}</span>
-        <time>{formatRelative(item.publishedAt)}</time>
+        <time>{formatRelativeTime(item.publishedAt)}</time>
       </div>
-      <strong>{item.title || 'Untitled market intelligence'}</strong>
+      <strong>{item.title || t('market.untitledIntelligence')}</strong>
       {item.summary ? <p>{item.summary}</p> : null}
       <div className="market-content-footer">
-        <span>{item.category || 'Market context'}</span>
-        {item.relevanceScore != null ? <em>Relevance {Math.round(Number(item.relevanceScore) * 100)}%</em> : null}
+        <span>{item.category || t('market.marketContext')}</span>
+        {item.relevanceScore != null ? <em>{t('market.relevance', { score: Math.round(Number(item.relevanceScore) * 100) })}</em> : null}
       </div>
     </>
   );
@@ -525,14 +617,15 @@ function ContentCard({ item }: { item: ContentItem }) {
 }
 
 function LinkedIntelligence({ items }: { items: ContentItem[] }) {
+  const { t } = useI18n();
   return (
     <section className="market-card market-content-card">
       <div className="market-section-heading">
         <div>
-          <span>Reality Layer</span>
-          <h2>Linked intelligence</h2>
+          <span>{t('market.realityLayer')}</span>
+          <h2>{t('market.linkedIntelligence')}</h2>
         </div>
-        <StatusBadge label={`${items.length} ITEMS`} tone={items.length ? 'info' : 'warning'} compact />
+        <StatusBadge label={t('market.items', { count: items.length })} tone={items.length ? 'info' : 'warning'} compact />
       </div>
       <div className="market-content-grid">
         {items.slice(0, MAX_VISIBLE_CONTENT).map((item, index) => (
@@ -541,8 +634,8 @@ function LinkedIntelligence({ items }: { items: ContentItem[] }) {
       </div>
       {!items.length ? (
         <div className="market-empty-state is-compact">
-          <strong>No linked reporting</strong>
-          <span>This does not change the market evidence; it means no contextual content is indexed.</span>
+          <strong>{t('market.noLinkedReporting')}</strong>
+          <span>{t('market.noLinkedReportingDetail')}</span>
         </div>
       ) : null}
     </section>
@@ -558,12 +651,13 @@ function OutcomeRail({
   activeMarketId?: number | null;
   activeYesPrice?: string | number | null;
 }) {
+  const { t, formatNumber, formatPercent } = useI18n();
   if (!outcomes.length) return null;
   return (
-    <section className="market-outcome-rail" aria-label="Event outcomes">
+    <section className="market-outcome-rail" aria-label={t('market.eventOutcomes')}>
       <div className="market-outcome-rail-heading">
-        <span>Event outcomes</span>
-        <strong>{outcomes.length} contracts</strong>
+        <span>{t('market.eventOutcomes')}</span>
+        <strong>{t('market.contracts', { count: outcomes.length })}</strong>
       </div>
       <div className="market-outcome-list">
         {outcomes.map((outcome, index) => {
@@ -572,9 +666,9 @@ function OutcomeRail({
           const displayedPrice = active && activeYesPrice != null ? activeYesPrice : outcome.yesPrice;
           const content = (
             <>
-              <span>{outcome.label || outcome.title || `Outcome ${index + 1}`}</span>
-              <strong>{formatPercent(displayedPrice)}</strong>
-              <em>{formatCurrencyCompact(outcome.volume24h)} · {formatCompact(outcome.tradeCount24h)} tx</em>
+              <span>{outcome.label || outcome.title || t('market.outcome', { index: index + 1 })}</span>
+              <strong>{formatMarketPercent(displayedPrice, formatPercent)}</strong>
+              <em>{formatMarketCurrency(outcome.volume24h, formatNumber)} · {t('market.transactions', { count: formatMarketCompact(outcome.tradeCount24h, formatNumber) })}</em>
             </>
           );
           return Number.isFinite(marketId) && marketId > 0 ? (
@@ -596,7 +690,13 @@ function OutcomeRail({
 }
 
 export function MarketWorkspace() {
-  const { t, formatDateTime } = useI18n();
+  const {
+    t,
+    formatDateTime,
+    formatNumber,
+    formatPercent,
+    formatRelativeTime,
+  } = useI18n();
   const marketId = readMarketId();
   const [bundle, setBundle] = useState<WorkspaceBundle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -616,7 +716,7 @@ export function MarketWorkspace() {
     try {
       const next = await fetchWorkspaceBundle(marketId, { includeContent: true, includeLob: true });
       if (!next.market) {
-        throw new Error(`Market #${marketId} returned no market identity.`);
+        throw new Error(t('market.noIdentity', { id: marketId }));
       }
       const outcome = selectedOutcome(next);
       const tokenId = String(outcome?.yesTokenId || next.identity?.yesTokenId || next.market?.yesTokenId || '').trim();
@@ -694,11 +794,11 @@ export function MarketWorkspace() {
   useEffect(() => {
     if (!market?.title) return;
     const previousTitle = document.title;
-    document.title = `${market.title} · PolyData Market Dossier`;
+    document.title = `${market.title} · ${t('market.documentSuffix')}`;
     return () => {
       document.title = previousTitle;
     };
-  }, [market?.title]);
+  }, [market?.title, t]);
 
   if (!marketId) {
     return (
@@ -741,11 +841,11 @@ export function MarketWorkspace() {
             <div className="market-kicker-row">
               <span>{t('market.marketId', { id: marketId })}</span>
               <StatusBadge
-                label={String(market?.status || (loading ? 'loading' : 'unknown')).toUpperCase()}
+                label={statusLabel(market?.status || (loading ? 'loading' : 'unknown'), t)}
                 tone={statusTone(market?.status || (loading ? 'loading' : 'unknown'))}
                 compact
               />
-              <StatusBadge label={freshness.toUpperCase()} tone={statusTone(freshness)} compact />
+              <StatusBadge label={statusLabel(freshness, t)} tone={statusTone(freshness)} compact />
             </div>
             <h1>{market?.title || (loading ? t('market.loading') : t('market.marketNumber', { id: marketId }))}</h1>
             <p>
@@ -761,11 +861,11 @@ export function MarketWorkspace() {
           </div>
           <div className="market-probability-lockup">
             <span>{t('market.currentYes')}</span>
-            <strong>{formatPercent(yesPrice)}</strong>
-            <em className={signedClass(price?.change24h)}>{formatSignedPercent(price?.change24h)} / 24h</em>
+            <strong>{formatMarketPercent(yesPrice, formatPercent)}</strong>
+            <em className={signedClass(price?.change24h)}>{formatMarketSignedPercent(price?.change24h, formatPercent)} / 24h</em>
             <div>
-              <span>{t('market.no')} <b>{formatPercent(noPrice)}</b></span>
-              <span>{t('market.closes')} <b>{formatRelative(market?.endDate)}</b></span>
+              <span>{t('market.no')} <b>{formatMarketPercent(noPrice, formatPercent)}</b></span>
+              <span>{t('market.closes')} <b>{formatRelativeTime(market?.endDate)}</b></span>
             </div>
           </div>
         </section>
@@ -782,32 +882,35 @@ export function MarketWorkspace() {
             <section className="market-metric-grid" aria-label={t('market.summary')}>
               <MetricCard
                 eyebrow={t('market.yesProbability')}
-                value={formatPercent(yesPrice)}
-                detail={`${cleanSource(price?.priceSource || bundle.servingSource)} · ${longAge(observedAt)}`}
+                value={formatMarketPercent(yesPrice, formatPercent)}
+                detail={`${cleanSource(price?.priceSource || bundle.servingSource)} · ${formatRelativeTime(observedAt)}`}
                 tone={yesPrice == null ? 'warning' : 'positive'}
               />
               <MetricCard
                 eyebrow={t('market.volume24h')}
-                value={formatCurrencyCompact(volume)}
-                detail={`${bundle.trades.length} local OrderFilled rows · ${formatCompact(trades24h)} reported 24h`}
+                value={formatMarketCurrency(volume, formatNumber)}
+                detail={t('market.localTradesDetail', {
+                  local: formatNumber(bundle.trades.length),
+                  reported: formatMarketCompact(trades24h, formatNumber),
+                })}
                 tone={Number(volume || 0) > 0 ? 'info' : 'neutral'}
               />
               <MetricCard
                 eyebrow={t('market.evidenceReadiness')}
                 value={`${readyClaims}/${sourceClaims.length}`}
-                detail={`${issueCount} active contract issues`}
+                detail={t('market.activeIssuesDetail', { count: formatNumber(issueCount) })}
                 tone={issueCount ? 'warning' : (readyClaims ? 'positive' : 'neutral')}
               />
               <MetricCard
                 eyebrow={t('market.resolution')}
-                value={String(bundle.oracle?.summary?.completionStatus || bundle.oracle?.completionStatus || market?.status || '--').toUpperCase()}
-                detail={`${bundle.oracle?.timeline?.length || 0} Oracle lifecycle events`}
+                value={statusLabel(bundle.oracle?.summary?.completionStatus || bundle.oracle?.completionStatus || market?.status, t)}
+                detail={t('market.oracleEventsDetail', { count: formatNumber(bundle.oracle?.timeline?.length || 0) })}
                 tone={statusTone(bundle.oracle?.summary?.completionStatus || bundle.oracle?.completionStatus || market?.status)}
               />
               <MetricCard
                 eyebrow={t('market.workspaceHealth')}
-                value={healthLevel.toUpperCase()}
-                detail={`${bundle.servingSource || 'fallback'} serving · contract v1`}
+                value={statusLabel(healthLevel, t)}
+                detail={t('market.servingDetail', { source: bundle.servingSource || 'fallback' })}
                 tone={statusTone(healthLevel)}
               />
             </section>
@@ -826,7 +929,7 @@ export function MarketWorkspace() {
                     <h2>{t('market.history')}</h2>
                   </div>
                   <StatusBadge
-                    label={String(bundle.health?.chartStatus || bundle.chart?.historyStatus || 'unknown').toUpperCase()}
+                    label={statusLabel(bundle.health?.chartStatus || bundle.chart?.historyStatus, t)}
                     tone={statusTone(bundle.health?.chartStatus || bundle.chart?.historyStatus)}
                   />
                 </div>

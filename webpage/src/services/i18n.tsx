@@ -33,6 +33,8 @@ type I18nValue = {
   setLocale: (locale: Locale) => void;
   t: (key: MessageKey, params?: MessageParams) => string;
   formatDateTime: (value: string | number | Date) => string;
+  formatRelativeTime: (value?: string | number | Date | null) => string;
+  formatDuration: (seconds?: number | null) => string;
   formatNumber: (value: number, options?: Intl.NumberFormatOptions) => string;
   formatPercent: (value: number, options?: Intl.NumberFormatOptions) => string;
 };
@@ -62,6 +64,38 @@ export function LocaleProvider({ children }: { children: ComponentChildren }) {
         return Number.isNaN(date.getTime())
           ? '—'
           : new Intl.DateTimeFormat(intlLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+      },
+      formatRelativeTime: (input) => {
+        if (input == null || input === '') return '—';
+        const date = input instanceof Date ? input : new Date(input);
+        if (Number.isNaN(date.getTime())) return '—';
+        const diffSeconds = (date.getTime() - Date.now()) / 1_000;
+        const absoluteSeconds = Math.abs(diffSeconds);
+        const [divisor, unit]: [number, Intl.RelativeTimeFormatUnit] = absoluteSeconds < 60
+          ? [1, 'second']
+          : absoluteSeconds < 3_600
+            ? [60, 'minute']
+            : absoluteSeconds < 86_400
+              ? [3_600, 'hour']
+              : [86_400, 'day'];
+        return new Intl.RelativeTimeFormat(intlLocale, { numeric: 'auto', style: 'short' })
+          .format(Math.round(diffSeconds / divisor), unit);
+      },
+      formatDuration: (seconds) => {
+        if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '—';
+        const [value, unit]: [number, Intl.NumberFormatOptions['unit']] = seconds < 60
+          ? [seconds, 'second']
+          : seconds < 3_600
+            ? [seconds / 60, 'minute']
+            : seconds < 86_400
+              ? [seconds / 3_600, 'hour']
+              : [seconds / 86_400, 'day'];
+        return new Intl.NumberFormat(intlLocale, {
+          style: 'unit',
+          unit,
+          unitDisplay: 'narrow',
+          maximumFractionDigits: 0,
+        }).format(Math.round(value));
       },
       formatNumber: (input, options) => new Intl.NumberFormat(intlLocale, options).format(input),
       formatPercent: (input, options) => new Intl.NumberFormat(intlLocale, {
