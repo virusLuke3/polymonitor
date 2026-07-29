@@ -43,6 +43,8 @@ EXTERNAL_RELEASE_PREFIXES = (
 )
 EXTERNAL_RELEASE_FILES = {
     "deploy/systemd/polydata.env.example",
+    "scripts/requirements-dev.lock.txt",
+    "scripts/requirements.txt",
 }
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 APPROVED_OVERRIDES_PATH = Path("deploy/gcp/accepted-remote-overrides.json")
