@@ -94,4 +94,18 @@ describe('map source status', () => {
     expect(retained[0]).toMatchObject({ status: 'degraded', eventCount: 10 });
     expect(retained[0]?.message).toContain('retaining the last successful snapshot');
   });
+
+  it('keeps provider identities visible when the initial aggregate request fails', () => {
+    const initial = sourceStatusesFromHazardResponse(null, 0, true);
+    const failed = sourceStatusesAfterHazardRefreshFailure(initial, 'API timeout', false);
+    expect(failed.map((source) => source.key)).toEqual([
+      'usgs',
+      'eonet',
+      'nws',
+      'firms',
+      'climate-anomaly',
+    ]);
+    expect(failed.every((source) => source.status === 'error')).toBe(true);
+    expect(failed[0]?.message).toContain('Initial source load failed');
+  });
 });

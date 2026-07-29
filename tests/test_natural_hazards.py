@@ -255,6 +255,10 @@ def test_provider_deadline_returns_partial_error_without_waiting_for_slow_source
     assert results["nws"]["errorCode"] == "nws-provider-deadline-exceeded"
 
 
+def test_default_provider_deadline_fits_inside_browser_request_budget() -> None:
+    assert service.PROVIDER_DEADLINE_SECONDS < 25
+
+
 def test_provider_deadline_retains_last_successful_snapshot() -> None:
     store = StaleOnlySnapshotStore()
     store.values[(snapshots.SNAPSHOT_NAMESPACE, "nws")] = {

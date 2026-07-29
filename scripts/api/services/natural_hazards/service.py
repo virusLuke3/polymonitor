@@ -19,7 +19,10 @@ from .source_health import unavailable_source
 
 
 DEFAULT_EVENT_LIMIT = 1200
-PROVIDER_DEADLINE_SECONDS = 35
+# Keep the aggregate deadline below the browser's 25 second map request budget.
+# Individual provider workers may finish later, but stale snapshots are returned
+# immediately once this bounded deadline expires.
+PROVIDER_DEADLINE_SECONDS = 12
 
 
 @dataclass(frozen=True)

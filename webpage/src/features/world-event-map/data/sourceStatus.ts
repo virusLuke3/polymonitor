@@ -113,6 +113,14 @@ export function sourceStatusesAfterHazardRefreshFailure(
   hasSnapshot: boolean,
 ): WorldEventSourceStatus[] {
   if (!hasSnapshot) {
+    if (current.length) {
+      return current.map((source) => ({
+        ...source,
+        status: 'error',
+        eventCount: 0,
+        message: `Initial source load failed: ${message}`,
+      }));
+    }
     return [{
       key: 'natural-hazards',
       label: 'HAZARDS',
