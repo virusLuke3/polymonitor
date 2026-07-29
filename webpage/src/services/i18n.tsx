@@ -2,13 +2,16 @@ import { createContext, type ComponentChildren } from 'preact';
 import { useContext, useMemo, useState } from 'preact/hooks';
 import en from '@/locales/en.json';
 import zh from '@/locales/zh.json';
+import { specialistEn, specialistZh } from '@/locales/specialist';
 
 export type Locale = 'en' | 'zh';
-export type MessageKey = keyof typeof en;
+const enCatalog = { ...en, ...specialistEn };
+const zhCatalog: Record<keyof typeof enCatalog, string> = { ...zh, ...specialistZh };
+export type MessageKey = keyof typeof enCatalog;
 type MessageParams = Record<string, string | number>;
 
 const STORAGE_KEY = 'polydata:locale:v1';
-const catalogs: Record<Locale, Record<MessageKey, string>> = { en, zh };
+const catalogs: Record<Locale, Record<MessageKey, string>> = { en: enCatalog, zh: zhCatalog };
 
 function detectLocale(): Locale {
   try {

@@ -34,4 +34,43 @@ for (const name of localeNames.slice(1)) {
   }
 }
 if (failed) process.exit(1);
-console.log(`Locale contract OK: ${localeNames.length} locales, ${reference.length} stable keys each.`);
+
+const specialistRaw = await readFile(resolve(root, 'specialist.ts'), 'utf8');
+const specialistMarker = 'export const specialistZh';
+const markerIndex = specialistRaw.indexOf(specialistMarker);
+if (markerIndex < 0) throw new Error('specialist.ts must export specialistZh');
+const specialistSections = {
+  en: specialistRaw.slice(0, markerIndex),
+  zh: specialistRaw.slice(markerIndex),
+};
+const specialistCatalogs = Object.fromEntries(Object.entries(specialistSections).map(([name, source]) => {
+  const entries = [...source.matchAll(/^\s*'([^']+)':\s*'((?:\\'|[^'])*)',?$/gm)]
+    .map((match) => [match[1], match[2]]);
+  const catalog = Object.fromEntries(entries);
+  for (const [key, message] of entries) {
+    if (!/^[a-z][a-zA-Z0-9-]*(?:\.[a-zA-Z0-9-]+)+$/.test(key)) {
+      throw new Error(`specialist ${name} contains unstable message key: ${key}`);
+    }
+    if (!message.trim()) throw new Error(`specialist ${name} contains an empty message: ${key}`);
+  }
+  return [name, catalog];
+}));
+const specialistReference = Object.keys(specialistCatalogs.en).sort();
+for (const name of localeNames.slice(1)) {
+  const keys = Object.keys(specialistCatalogs[name]).sort();
+  const missing = specialistReference.filter((key) => !keys.includes(key));
+  const extra = keys.filter((key) => !specialistReference.includes(key));
+  if (missing.length || extra.length) {
+    console.error(`specialist ${name}: missing=${missing.join(',') || 'none'} extra=${extra.join(',') || 'none'}`);
+    process.exit(1);
+  }
+  for (const key of specialistReference) {
+    const placeholders = (message) => [...message.matchAll(/\{([a-zA-Z0-9_]+)\}/g)].map((match) => match[1]).sort().join(',');
+    if (placeholders(specialistCatalogs.en[key]) !== placeholders(specialistCatalogs[name][key])) {
+      console.error(`specialist ${name}: placeholder mismatch for ${key}`);
+      process.exit(1);
+    }
+  }
+}
+
+console.log(`Locale contract OK: ${localeNames.length} locales, ${reference.length} core keys and ${specialistReference.length} specialist keys each.`);

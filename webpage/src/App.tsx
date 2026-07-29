@@ -36,6 +36,7 @@ import {
 } from '@/services/api';
 import { AuthApiError, fetchAuthSession } from '@/services/auth';
 import { useI18n, type MessageKey } from '@/services/i18n';
+import { specialistPanelMeta } from '@/services/specialist-i18n';
 import { fetchWorkspaceLayout, saveWorkspaceLayout, type WorkspaceLayout } from '@/services/product';
 import { buildWorldClockRows, CORE_WORLD_CLOCKS, normalizeTimezone, type WorldClockLocation } from '@/utils/worldClock';
 import type {
@@ -176,7 +177,9 @@ function localizedPanelMeta(
   t: (key: MessageKey, params?: Record<string, string | number>) => string,
 ) {
   const keys = CORE_PANEL_META_KEYS[panel.id];
-  return keys ? { title: t(keys.title), description: t(keys.description) } : { title: panel.title, description: panel.description };
+  return keys
+    ? { title: t(keys.title), description: t(keys.description) }
+    : specialistPanelMeta(panel.id, panel.title, panel.description, t);
 }
 
 function isMapViewMode(value: unknown): value is MapViewMode {
