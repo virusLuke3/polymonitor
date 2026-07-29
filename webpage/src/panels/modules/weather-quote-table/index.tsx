@@ -18,6 +18,7 @@ import {
   tempLabel,
   useLiveWeatherQuoteBins,
 } from '../weather-detail-utils';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function sourceLabel(value?: string | null) {
   if (value === 'clob-book') return 'CLOB';
@@ -26,11 +27,11 @@ function sourceLabel(value?: string | null) {
   return '--';
 }
 
-function bookLabel(value?: string | null) {
+function bookLabel(value: string | null | undefined, shared: ReturnType<typeof useSpecialistCopy>['shared']) {
   if (!value) return '--';
   if (value === 'not-queried') return '--';
-  if (value === 'no-book') return 'NO BOOK';
-  if (value === 'missing-token') return 'NO TOKEN';
+  if (value === 'no-book') return shared('noBook', 'NO BOOK');
+  if (value === 'missing-token') return shared('noToken', 'NO TOKEN');
   return String(value).toUpperCase();
 }
 
@@ -42,15 +43,17 @@ function quoteState(bin: RuntimeWeatherQuoteBin) {
 }
 
 function QuoteRow({ bin, active }: { bin: RuntimeWeatherQuoteBin; active: boolean }) {
+  const { shared } = useSpecialistCopy('weather-quote-table');
   const state = quoteState(bin);
+  const stateLabel = state === 'QUOTED' ? shared('quoted', 'QUOTED') : state === 'MISSING' ? shared('missing', 'MISSING') : state;
   return (
     <tr className={active ? 'active' : ''}>
       <td>{bin.label || tempLabel(bin.minTemp, bin.unit)}</td>
       <td>{priceLabel(bin.bestBidYes)}</td>
       <td>{priceLabel(bin.bestAskYes)}</td>
       <td>{priceLabel(bin.midPriceYes)}</td>
-      <td><span className={`wm-weather-quote-state ${state.toLowerCase().replace(/\s+/g, '-')}`}>{state}</span></td>
-      <td>{bookLabel(bin.bookStatus)}</td>
+      <td><span className={`wm-weather-quote-state ${state.toLowerCase().replace(/\s+/g, '-')}`}>{stateLabel}</span></td>
+      <td>{bookLabel(bin.bookStatus, shared)}</td>
     </tr>
   );
 }
@@ -62,6 +65,7 @@ function WeatherQuoteTablePanel({
   payload?: RuntimeGlobalWeatherMapPayload | null;
   selectedCityId?: string | null;
 }) {
+  const { copy, shared } = useSpecialistCopy('weather-quote-table');
   const city = selectedWeatherCity(payload, selectedCityId);
   const { bins, loading } = useLiveWeatherQuoteBins(city);
   const liveCity = city ? { ...city, bins } : null;
@@ -71,7 +75,7 @@ function WeatherQuoteTablePanel({
   const topLabel = topBin?.label || bins[Math.floor(bins.length / 2)]?.label || '--';
   return (
     <Panel
-      title="WEATHER QUOTE TABLE"
+      title={copy('title', 'WEATHER QUOTE TABLE')}
       badge={loading ? 'BOOK' : statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
       className="wm-market-panel wm-weather-quote-table-only-panel"
@@ -81,29 +85,29 @@ function WeatherQuoteTablePanel({
         <section className="wm-weather-quote-table-panel">
           <div className="wm-weather-quote-table-head">
             <div>
-              <span>{city.city || '--'} Quote Table</span>
+              <span>{copy('tableTitle', '{city} Quote Table', { city: city.city || '--' })}</span>
               <strong>{topLabel}</strong>
             </div>
             <b>{priceLabel(topBookPrice)}</b>
           </div>
           <div className="wm-weather-quote-meta">
-            <span><i>Book</i><strong>{bookCoverage(liveCity)}</strong></span>
-            <span><i>Bid/Ask Mid</i><strong>{bookMidCoverage(liveCity)}</strong></span>
-            <span><i>Last</i><strong>{midCoverage(liveCity)}</strong></span>
-            <span><i>Market</i><strong>{marketSourceLabel(city)}</strong></span>
-            <span><i>Bid</i><strong>{priceLabel(topBookBin?.bestBidYes)}</strong></span>
-            <span><i>Ask</i><strong>{priceLabel(topBookBin?.bestAskYes)}</strong></span>
+            <span><i>{shared('book', 'Book')}</i><strong>{bookCoverage(liveCity)}</strong></span>
+            <span><i>{shared('bidAskMid', 'Bid/Ask Mid')}</i><strong>{bookMidCoverage(liveCity)}</strong></span>
+            <span><i>{shared('last', 'Last')}</i><strong>{midCoverage(liveCity)}</strong></span>
+            <span><i>{shared('market', 'Market')}</i><strong>{marketSourceLabel(city)}</strong></span>
+            <span><i>{shared('bid', 'Bid')}</i><strong>{priceLabel(topBookBin?.bestBidYes)}</strong></span>
+            <span><i>{shared('ask', 'Ask')}</i><strong>{priceLabel(topBookBin?.bestAskYes)}</strong></span>
           </div>
           <div className="wm-weather-quote-table-wrap">
             <table className="wm-weather-quote-table">
               <thead>
                 <tr>
-                  <th>Bin</th>
-                  <th>Bid</th>
-                  <th>Ask</th>
-                  <th>Last/Mid</th>
-                  <th>Source</th>
-                  <th>Book</th>
+                  <th>{shared('bin', 'Bin')}</th>
+                  <th>{shared('bid', 'Bid')}</th>
+                  <th>{shared('ask', 'Ask')}</th>
+                  <th>{shared('lastMid', 'Last/Mid')}</th>
+                  <th>{shared('source', 'Source')}</th>
+                  <th>{shared('book', 'Book')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -115,7 +119,7 @@ function WeatherQuoteTablePanel({
           </div>
         </section>
       ) : (
-        <div className="wm-weather-detail-empty">Select a city to inspect quote bins.</div>
+        <div className="wm-weather-detail-empty">{copy('empty', 'Select a city to inspect quote bins.')}</div>
       )}
     </Panel>
   );

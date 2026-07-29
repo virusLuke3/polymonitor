@@ -2,9 +2,10 @@ import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGlobalTransportShipping } from '@/services/api';
 import type { RuntimeGlobalTransportShippingItem, RuntimeGlobalTransportShippingPayload } from '@/types';
-import { formatCompact, formatRelative } from '../../shared/formatters';
+import { formatCompact } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type TransportTab = 'ops' | 'flights' | 'airlines' | 'track' | 'news';
 type AviationIconKind = 'airport' | 'flight' | 'airline' | 'track' | 'news';
@@ -145,12 +146,13 @@ function AviationIcon({ kind }: { kind: AviationIconKind }) {
 }
 
 function OpsRow({ row }: { row: Record<string, unknown> }) {
+  const { shared } = useSpecialistCopy('global-transport-shipping');
   const status = statusClass(row.status);
   const risk = clampPercent((row.riskScore ?? row.delayScore) as number | string | null);
   return (
     <div className="wm-aviation-intel-row ops">
       <span className="wm-aviation-code"><AviationIcon kind="airport" /><b>{String(row.code || '--')}</b></span>
-      <span><strong>{String(row.name || 'Airport')}</strong><em>{String(row.city || row.country || 'Global')}</em></span>
+      <span><strong>{String(row.name || shared('airport', 'Airport'))}</strong><em>{String(row.city || row.country || shared('global', 'Global'))}</em></span>
       <Sparkline values={trendValues(row.trend, String(row.code || row.name || 'hub'))} />
       <i className={status}>{statusLabel(row.status)}</i>
       <small>{risk}</small>
@@ -159,6 +161,7 @@ function OpsRow({ row }: { row: Record<string, unknown> }) {
 }
 
 function FlightRow({ route }: { route: AviationRoute }) {
+  const { shared } = useSpecialistCopy('global-transport-shipping');
   const risk = numeric(route.riskScore);
   const status = statusClass(route.status);
   return (
@@ -166,7 +169,7 @@ function FlightRow({ route }: { route: AviationRoute }) {
       <span className="wm-aviation-code"><AviationIcon kind="flight" /><b>{route.fromCode || '--'}</b></span>
       <span>
         <strong>{route.fromCode} &gt; {route.toCode}</strong>
-        <em>{riskSourcesLabel(route.riskSources)} · {route.corridor || route.airline || 'air corridor'}</em>
+        <em>{riskSourcesLabel(route.riskSources)} · {route.corridor || route.airline || shared('airCorridor', 'air corridor')}</em>
       </span>
       <RiskMeter value={risk} className={status} />
       <i className={status}>{risk || statusLabel(route.status)}</i>
@@ -176,12 +179,13 @@ function FlightRow({ route }: { route: AviationRoute }) {
 }
 
 function AirlineRow({ row }: { row: { name?: string | null; routeCount?: number | string | null; status?: string | null; exposureScore?: number | string | null; trend?: Array<number | string | null> } }) {
+  const { copy, shared } = useSpecialistCopy('global-transport-shipping');
   const exposure = row.exposureScore ?? row.routeCount;
   const status = statusClass(row.status);
   return (
     <div className="wm-aviation-intel-row airline">
       <span className="wm-aviation-code"><AviationIcon kind="airline" /><b>AL</b></span>
-      <span><strong>{row.name || 'Airline'}</strong><em>OpenFlights route coverage</em></span>
+      <span><strong>{row.name || shared('airline', 'Airline')}</strong><em>{copy('routeCoverage', 'OpenFlights route coverage')}</em></span>
       <Sparkline values={trendValues(row.trend, row.name || 'airline')} />
       <i className={status}>{statusLabel(row.status)}</i>
       <small>{formatCompact(exposure)}</small>
@@ -203,13 +207,14 @@ function FlightSampleRow({ row }: { row: Record<string, unknown> }) {
 }
 
 function LiveAircraftRow({ row }: { row: NonNullable<AviationPayload['liveFlights']>[number] }) {
+  const { shared } = useSpecialistCopy('global-transport-shipping');
   const status = statusClass(row.status);
   const speed = numeric(row.velocity);
   const altitude = numeric(row.baroAltitude);
   return (
     <div className="wm-aviation-intel-row flight live">
       <span className="wm-aviation-code"><AviationIcon kind="flight" /><b>{String(row.callsign || row.icao24 || 'OPEN')}</b></span>
-      <span><strong>{row.regionLabel || row.region || 'OpenSky'}</strong><em>{row.originCountry || 'Unknown'} · {row.onGround ? 'GROUND' : 'AIRBORNE'}</em></span>
+      <span><strong>{row.regionLabel || row.region || 'OpenSky'}</strong><em>{row.originCountry || shared('unknown', 'Unknown')} · {row.onGround ? shared('ground', 'GROUND') : shared('airborne', 'AIRBORNE')}</em></span>
       <RiskMeter value={row.riskScore || speed / 3} className={status} />
       <i className={status}>{Math.round(speed)}M/S</i>
       <small>{altitude ? `${Math.round(altitude / 100) / 10}K` : '--'}</small>
@@ -231,11 +236,12 @@ function TrackRow({ item }: { item: RuntimeGlobalTransportShippingItem }) {
 }
 
 function NewsRow({ row }: { row: Record<string, unknown> }) {
+  const { copy } = useSpecialistCopy('global-transport-shipping');
   const status = statusClass(row.status);
   return (
     <div className="wm-aviation-intel-row news">
       <span className="wm-aviation-code"><AviationIcon kind="news" /><b>NW</b></span>
-      <span><strong>{String(row.title || 'Aviation signal')}</strong><em>{riskSourcesLabel(row.riskSources)} · {String(row.riskReason || row.corridor || row.source || 'route intelligence')}</em></span>
+      <span><strong>{String(row.title || copy('aviationSignal', 'Aviation signal'))}</strong><em>{riskSourcesLabel(row.riskSources)} · {String(row.riskReason || row.corridor || row.source || copy('routeIntelligence', 'route intelligence'))}</em></span>
       <RiskMeter value={row.riskScore as number | string | null} className={status} />
       <i className={status}>{compactUnknown(row.riskScore)}</i>
       <small>{String(row.source || 'seed')}</small>
@@ -244,6 +250,7 @@ function NewsRow({ row }: { row: Record<string, unknown> }) {
 }
 
 function AviationStatusDeck({ payload }: { payload?: RuntimeGlobalTransportShippingPayload | null }) {
+  const { copy } = useSpecialistCopy('global-transport-shipping');
   const summary = payload?.summary || {};
   const liveFlights = aviationLiveFlights(payload);
   const liveCount = summaryNumber(summary.liveFlightSamples) || liveFlights.length;
@@ -276,13 +283,13 @@ function AviationStatusDeck({ payload }: { payload?: RuntimeGlobalTransportShipp
         </div>
       </div>
       <div className="wm-aviation-status-copy">
-        <span>LIVE AIR PICTURE</span>
-        <strong>{topHub} terminal net</strong>
-        <em>{formatCompact(visibleRoutes)} visible corridors / {formatCompact(routeCount)} OpenFlights edges</em>
+        <span>{copy('liveAirPicture', 'LIVE AIR PICTURE')}</span>
+        <strong>{copy('terminalNet', '{hub} terminal net', { hub: topHub })}</strong>
+        <em>{copy('corridorSummary', '{visible} visible corridors / {routes} OpenFlights edges', { visible: formatCompact(visibleRoutes), routes: formatCompact(routeCount) })}</em>
         <div className="wm-aviation-stat-row">
-          <i><b>{formatCompact(liveCount)}</b><small>live aircraft</small></i>
-          <i><b>{statusLabel(summary.adsbStatus)}</b><small>adsb fallback</small></i>
-          <i><b>{statusLabel(summary.openSkyStatus)}</b><small>opensky</small></i>
+          <i><b>{formatCompact(liveCount)}</b><small>{copy('liveAircraft', 'live aircraft')}</small></i>
+          <i><b>{statusLabel(summary.adsbStatus)}</b><small>{copy('adsbFallback', 'adsb fallback')}</small></i>
+          <i><b>{statusLabel(summary.openSkyStatus)}</b><small>{copy('openSky', 'opensky')}</small></i>
         </div>
       </div>
     </div>
@@ -290,6 +297,7 @@ function AviationStatusDeck({ payload }: { payload?: RuntimeGlobalTransportShipp
 }
 
 function SourceHealthStrip({ payload }: { payload?: RuntimeGlobalTransportShippingPayload | null }) {
+  const { copy } = useSpecialistCopy('global-transport-shipping');
   const health = payload?.sourceHealth || {};
   const rows: Array<[string, unknown]> = [
     ['OpenFlights', health.openflights || payload?.sources?.openflights],
@@ -299,7 +307,7 @@ function SourceHealthStrip({ payload }: { payload?: RuntimeGlobalTransportShippi
     ['AIS', health.aisstream || payload?.summary?.aisStatus],
   ];
   return (
-    <div className="wm-aviation-source-strip" aria-label="Aviation evidence source health">
+    <div className="wm-aviation-source-strip" aria-label={copy('sourceHealthAria', 'Aviation evidence source health')}>
       {rows.map(([label, value]) => {
         const text = typeof value === 'string' ? value : (value ? 'ok' : 'warming');
         return <span key={label} className={statusClass(text)}><b>{label}</b><em>{String(text).toUpperCase()}</em></span>;
@@ -309,15 +317,16 @@ function SourceHealthStrip({ payload }: { payload?: RuntimeGlobalTransportShippi
 }
 
 function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTransportShippingPayload | null }) {
+  const { copy, formatRelativeTime } = useSpecialistCopy('global-transport-shipping');
   const [showHelp, setShowHelp] = useState(false);
   const [tab, setTab] = useState<TransportTab>('ops');
   const items = payload?.items || [];
   const tabs: Array<{ id: TransportTab; label: string; count: number; icon: AviationIconKind }> = [
-    { id: 'ops', label: 'Ops', count: aviationOps(payload).length, icon: 'airport' },
-    { id: 'flights', label: 'Flights', count: aviationLiveFlights(payload).length || aviationRoutes(payload).length, icon: 'flight' },
-    { id: 'airlines', label: 'Airlines', count: aviationAirlines(payload).length, icon: 'airline' },
-    { id: 'track', label: 'Track', count: items.length, icon: 'track' },
-    { id: 'news', label: 'News', count: aviationNews(payload).length, icon: 'news' },
+    { id: 'ops', label: copy('tabOps', 'Ops'), count: aviationOps(payload).length, icon: 'airport' },
+    { id: 'flights', label: copy('tabFlights', 'Flights'), count: aviationLiveFlights(payload).length || aviationRoutes(payload).length, icon: 'flight' },
+    { id: 'airlines', label: copy('tabAirlines', 'Airlines'), count: aviationAirlines(payload).length, icon: 'airline' },
+    { id: 'track', label: copy('tabTrack', 'Track'), count: items.length, icon: 'track' },
+    { id: 'news', label: copy('tabNews', 'News'), count: aviationNews(payload).length, icon: 'news' },
   ];
   const rows = useMemo(() => {
     if (tab === 'ops') return aviationOps(payload).slice(0, 8).map((row, index) => <OpsRow key={`${row.code || index}`} row={row} />);
@@ -334,16 +343,16 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
   }, [items, payload, tab]);
   return (
     <Panel
-      title="航空公司情报"
-      titleControls={<button type="button" className="wm-panel-help-button" aria-label="Explain transport ops" aria-expanded={showHelp} onClick={() => setShowHelp((value) => !value)}>?</button>}
-      controls={<button type="button" className="wm-evidence-sort-button wm-aviation-refresh-button" aria-label="Open aviation source" onClick={() => openSource(payload?.sourceUrl)}>↻</button>}
+      title={copy('title', 'AIRLINE INTELLIGENCE')}
+      titleControls={<button type="button" className="wm-panel-help-button" aria-label={copy('explainAria', 'Explain transport ops')} aria-expanded={showHelp} onClick={() => setShowHelp((value) => !value)}>?</button>}
+      controls={<button type="button" className="wm-evidence-sort-button wm-aviation-refresh-button" aria-label={copy('openSourceAria', 'Open aviation source')} onClick={() => openSource(payload?.sourceUrl)}>↻</button>}
       badge={statusBadge(payload)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
       count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>航空公司情报</strong>
-          <p>Air evidence radar: OpenFlights route graph, Transitland feed coverage, AIS sample state, and runtime weather/conflict route joins.</p>
+          <strong>{copy('helpTitle', 'Airline Intelligence')}</strong>
+          <p>{copy('helpText', 'Air evidence radar: OpenFlights route graph, Transitland feed coverage, AIS sample state, and runtime weather/conflict route joins.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-evidence-panel wm-global-transport-panel"
@@ -351,7 +360,7 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
     >
       <AviationStatusDeck payload={payload} />
       <SourceHealthStrip payload={payload} />
-      <div className="wm-aviation-tabs" role="tablist" aria-label="Airline intel views">
+      <div className="wm-aviation-tabs" role="tablist" aria-label={copy('viewsAria', 'Airline intel views')}>
         {tabs.map((item) => (
           <button key={item.id} type="button" className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>
             <AviationIcon kind={item.icon} /><strong>{item.label}</strong><span>{item.count}</span>
@@ -360,7 +369,7 @@ function GlobalTransportShippingPanel({ payload }: { payload?: RuntimeGlobalTran
       </div>
       <div className="wm-aviation-intel-list">
         {rows.length ? rows : (
-          <div className="wm-registry-empty"><strong>Transport evidence seed warming</strong><span>{formatRelative(payload?.generatedAt)}</span></div>
+          <div className="wm-registry-empty"><strong>{copy('warming', 'Transport evidence seed warming')}</strong><span>{formatRelativeTime(payload?.generatedAt)}</span></div>
         )}
       </div>
     </Panel>

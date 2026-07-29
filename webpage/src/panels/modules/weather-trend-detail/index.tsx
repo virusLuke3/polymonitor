@@ -5,6 +5,7 @@ import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
 import { forecastSourceLabel, num, panelStatus, selectedWeatherCity, statusBadge, tempLabel } from '../weather-detail-utils';
 import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '../weather-live-chart';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type TrendPoint = {
   label: string;
@@ -60,6 +61,7 @@ function TrendChart({
   city?: RuntimeGlobalWeatherCity | null;
   points: TrendPoint[];
 }) {
+  const { shared } = useSpecialistCopy('weather-trend-detail');
   const unit = city?.unit || '';
   const chartSeries = useMemo<WeatherLiveChartSeries[]>(() => {
     return [
@@ -80,8 +82,8 @@ function TrendChart({
   if (points.length < 2) {
     return (
       <section className="wm-weather-trend-card">
-        <div className="wm-weather-trend-title"><strong>{title}</strong><span>Avg</span><span>High</span></div>
-        <div className="wm-weather-detail-empty-line">No trend data</div>
+        <div className="wm-weather-trend-title"><strong>{title}</strong><span>{shared('average', 'Avg')}</span><span>{shared('high', 'High')}</span></div>
+        <div className="wm-weather-detail-empty-line">{shared('noTrendData', 'No trend data')}</div>
       </section>
     );
   }
@@ -90,8 +92,8 @@ function TrendChart({
       <div className="wm-weather-trend-title">
         <strong>{title}</strong>
         <span className="source">{forecastSourceLabel(city)}</span>
-        <span className="avg">Avg</span>
-        <span className="high">High</span>
+        <span className="avg">{shared('average', 'Avg')}</span>
+        <span className="high">{shared('high', 'High')}</span>
       </div>
       <WeatherLiveChart
         className="wm-weather-trend-chart"
@@ -109,19 +111,20 @@ function WeatherTrendDetailPanel({
   payload?: RuntimeGlobalWeatherMapPayload | null;
   selectedCityId?: string | null;
 }) {
+  const { copy } = useSpecialistCopy('weather-trend-detail');
   const city = selectedWeatherCity(payload, selectedCityId);
   return (
     <Panel
-      title="WU 1 DAY"
+      title={copy('title', 'WU 1 DAY')}
       badge={statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
       className="wm-market-panel wm-weather-trend-detail-panel wm-weather-trend-single-panel"
       dataPanelId="weather-trend-detail"
     >
       {city ? (
-        <TrendChart title="WU 1 Day" city={city} points={oneDayPoints(city)} />
+        <TrendChart title={copy('chartTitle', 'WU 1 Day')} city={city} points={oneDayPoints(city)} />
       ) : (
-        <div className="wm-weather-detail-empty">Select a city to inspect temperature trend.</div>
+        <div className="wm-weather-detail-empty">{copy('empty', 'Select a city to inspect temperature trend.')}</div>
       )}
     </Panel>
   );

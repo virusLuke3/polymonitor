@@ -2,9 +2,9 @@ import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeWeatherNews } from '@/services/api';
 import type { RuntimeWeatherNewsItem, RuntimeWeatherNewsPayload } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'latest' | 'severity' | 'city';
 
@@ -43,26 +43,26 @@ function nextMode(mode: SortMode): SortMode {
   return 'latest';
 }
 
-function modeLabel(mode: SortMode) {
-  if (mode === 'latest') return 'Latest';
-  if (mode === 'severity') return 'Alerts';
-  return 'City';
+function modeLabel(mode: SortMode, shared: ReturnType<typeof useSpecialistCopy>['shared']) {
+  if (mode === 'latest') return shared('latest', 'Latest');
+  if (mode === 'severity') return shared('alerts', 'Alerts');
+  return shared('city', 'City');
 }
 
-function emptyMessage(payload?: RuntimeWeatherNewsPayload | null) {
-  if (!payload) return 'Weather news API unavailable';
+function emptyMessage(payload: RuntimeWeatherNewsPayload | null | undefined, copy: ReturnType<typeof useSpecialistCopy>['copy']) {
+  if (!payload) return copy('apiUnavailable', 'Weather news API unavailable');
   const cacheMode = String(payload.cacheMode || '').toLowerCase();
   const status = String(payload.status || '').toLowerCase();
-  if (cacheMode.includes('refresh')) return 'Weather headlines warming';
-  if (cacheMode === 'seed-miss') return 'Weather headlines seed missing';
-  if (status === 'degraded') return 'Weather news source degraded';
-  return 'No weather headlines seeded';
+  if (cacheMode.includes('refresh')) return copy('warming', 'Weather headlines warming');
+  if (cacheMode === 'seed-miss') return copy('seedMissing', 'Weather headlines seed missing');
+  if (status === 'degraded') return copy('degraded', 'Weather news source degraded');
+  return copy('empty', 'No weather headlines seeded');
 }
 
-function displaySeverity(severity: string) {
-  if (severity === 'warning') return 'Alert';
-  if (severity === 'watch') return 'Watch';
-  return 'Forecast';
+function displaySeverity(severity: string, shared: ReturnType<typeof useSpecialistCopy>['shared']) {
+  if (severity === 'warning') return shared('alert', 'Alert');
+  if (severity === 'watch') return shared('watch', 'Watch');
+  return shared('forecast', 'Forecast');
 }
 
 function HighlightedText({ text, city }: { text?: string | null; city?: string | null }) {
@@ -82,50 +82,52 @@ function HighlightedText({ text, city }: { text?: string | null; city?: string |
 }
 
 function NewsItem({ item }: { item: RuntimeWeatherNewsItem }) {
+  const { copy, shared, formatRelativeTime } = useSpecialistCopy('weather-news');
   const severity = String(item.severity || 'normal').toLowerCase();
   const tags = (item.tags || []).slice(0, 2);
-  const city = item.city || 'Global';
+  const city = item.city || shared('global', 'Global');
   return (
     <a className={`wm-weather-news-item ${severity}`} href={item.url || '#'} target="_blank" rel="noreferrer">
       <div className="wm-weather-news-card-head">
         <div className="wm-weather-news-meta">
           <span className="wm-weather-news-dot" aria-hidden="true" />
           <span className="wm-weather-news-city">{city}</span>
-          <span className="wm-weather-news-source">{item.source || 'Weather source'}</span>
-          <span className={`wm-weather-news-severity ${severity}`}>{displaySeverity(severity)}</span>
+          <span className="wm-weather-news-source">{item.source || copy('weatherSource', 'Weather source')}</span>
+          <span className={`wm-weather-news-severity ${severity}`}>{displaySeverity(severity, shared)}</span>
           {tags.map((tag) => <span className="wm-weather-news-tag" key={tag}>{tag}</span>)}
         </div>
       </div>
-      <strong><HighlightedText text={item.title || 'Weather update'} city={city} /></strong>
-      <em><HighlightedText text={item.summary || 'Weather summary pending'} city={city} /></em>
+      <strong><HighlightedText text={item.title || copy('weatherUpdate', 'Weather update')} city={city} /></strong>
+      <em><HighlightedText text={item.summary || copy('summaryPending', 'Weather summary pending')} city={city} /></em>
       <div className="wm-weather-news-card-foot">
-        <span>{formatRelative(item.publishedAt)}</span>
-        <b>Read source</b>
+        <span>{formatRelativeTime(item.publishedAt)}</span>
+        <b>{shared('readSource', 'Read source')}</b>
       </div>
     </a>
   );
 }
 
 function WeatherNewsPanel({ payload }: { payload?: RuntimeWeatherNewsPayload | null }) {
+  const { copy, shared } = useSpecialistCopy('weather-news');
   const [showHelp, setShowHelp] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>('latest');
   const items = useMemo(() => sortItems(payload?.items || [], sortMode), [payload?.items, sortMode]);
   return (
     <Panel
-      title="WEATHER NEWS"
+      title={copy('title', 'WEATHER NEWS')}
       titleControls={(
-        <button type="button" className="wm-panel-help-button" aria-label="Explain weather news source" aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>
+        <button type="button" className="wm-panel-help-button" aria-label={copy('explainAria', 'Explain weather news source')} aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>
       )}
       controls={(
-        <button type="button" className="wm-weather-sort-button" aria-label="Change weather news sort" onClick={() => setSortMode((current) => nextMode(current))}>{modeLabel(sortMode)}</button>
+        <button type="button" className="wm-weather-sort-button" aria-label={copy('sortAria', 'Change weather news sort')} onClick={() => setSortMode((current) => nextMode(current))}>{modeLabel(sortMode, shared)}</button>
       )}
       badge={statusBadge(payload?.status, payload?.cacheMode)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
       count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Weather News</strong>
-          <p>Seeded Google News RSS results filtered to city weather, forecasts, storms, heat, rain, wind, snow, floods, and alerts. Header sort changes the visible order.</p>
+          <strong>{copy('helpTitle', 'Weather News')}</strong>
+          <p>{copy('helpText', 'Seeded Google News RSS results filtered to city weather, forecasts, storms, heat, rain, wind, snow, floods, and alerts. Header sort changes the visible order.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-weather-news-panel"
@@ -133,7 +135,7 @@ function WeatherNewsPanel({ payload }: { payload?: RuntimeWeatherNewsPayload | n
     >
       <div className="wm-weather-news-list">
         {items.length ? items.map((item) => <NewsItem key={item.id || `${item.city}-${item.title}`} item={item} />) : (
-          <div className="wm-registry-empty"><strong>{emptyMessage(payload)}</strong></div>
+          <div className="wm-registry-empty"><strong>{emptyMessage(payload, copy)}</strong></div>
         )}
       </div>
     </Panel>

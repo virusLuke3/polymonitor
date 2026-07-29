@@ -1,10 +1,10 @@
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGlobalTemperatureMonitor } from '@/services/api';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { bookCoverage as liveBookCoverage, WeatherCanvasSparkline, weatherSourceLabel } from '../weather-detail-utils';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function statusBadge(status?: string | null) {
   const text = String(status || '').toLowerCase();
@@ -88,6 +88,7 @@ function TemperatureCard({
   selected: boolean;
   onSelectCity: (cityId: string) => void;
 }) {
+  const { shared, formatRelativeTime } = useSpecialistCopy('weather-shared');
   const top = bestBin(city);
   const unit = city.unit || top?.unit || '';
   const coverage = liveBookCoverage(city);
@@ -112,20 +113,20 @@ function TemperatureCard({
       <div className="wm-temp-city-main">
         <div>
           <strong>{city.city || '--'}</strong>
-          <span>{city.condition || 'Weather update'} · {weatherSourceLabel(city)}</span>
+          <span>{city.condition || shared('weatherUpdate', 'Weather update')} · {weatherSourceLabel(city)}</span>
         </div>
         <b>{tempLabel(currentTempValue(city), unit)}</b>
       </div>
       <MiniSpark city={city} />
       <div className="wm-temp-city-stats">
-        <span><i>High</i>{tempLabel(highTempValue(city), unit)}</span>
-        <span><i>Low</i>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)}</span>
-        <span><i>Updated</i>{formatRelative(city.updatedAt || city.hourly?.[0]?.time || null)}</span>
+        <span><i>{shared('high', 'High')}</i>{tempLabel(highTempValue(city), unit)}</span>
+        <span><i>{shared('low', 'Low')}</i>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)}</span>
+        <span><i>{shared('updated', 'Updated')}</i>{formatRelativeTime(city.updatedAt || city.hourly?.[0]?.time || null)}</span>
       </div>
       {hasMarket ? (
         <div className="wm-temp-city-market">
-          {city.marketUrl ? <a href={city.marketUrl} target="_blank" rel="noreferrer">Polymarket</a> : <span>Market</span>}
-        <span>{top?.label || 'Quote bins'}</span>
+          {city.marketUrl ? <a href={city.marketUrl} target="_blank" rel="noreferrer">Polymarket</a> : <span>{shared('market', 'Market')}</span>}
+        <span>{top?.label || shared('quoteBins', 'Quote bins')}</span>
         <b>{priceLabel(top?.midPriceYes)}</b>
         <em>{coverage}</em>
       </div>
@@ -143,13 +144,14 @@ function TemperatureMonitorPanel({
   selectedWeatherCityId?: string | null;
   onSelectCity: (cityId: string | null) => void;
 }) {
+  const { copy } = useSpecialistCopy('global-temperature-monitor');
   const items = [...(payload?.items || [])].sort((a, b) => {
     return citySortValue(b) - citySortValue(a);
   });
   const selectedId = selectedWeatherCityId || items[0]?.cityId || null;
   return (
     <Panel
-      title="GLOBAL TEMP MONITOR"
+      title={copy('title', 'GLOBAL TEMP MONITOR')}
       badge={statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
       className="wm-market-panel wm-global-temperature-monitor-panel"
@@ -164,7 +166,7 @@ function TemperatureMonitorPanel({
             onSelectCity={onSelectCity}
           />
         )) : (
-          <div className="wm-weather-table-empty">Weather seed warming. Live city temperatures will appear automatically.</div>
+          <div className="wm-weather-table-empty">{copy('empty', 'Weather seed warming. Live city temperatures will appear automatically.')}</div>
         )}
       </div>
     </Panel>

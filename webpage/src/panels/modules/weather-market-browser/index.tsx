@@ -5,6 +5,7 @@ import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload } from '@
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { bookCoverage, panelStatus, priceLabel, statusBadge } from '../weather-detail-utils';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 const FAMILY_LABELS: Record<string, string> = {
   highest_temperature: 'High',
@@ -18,9 +19,10 @@ const FAMILY_LABELS: Record<string, string> = {
   weather_binary: 'Weather',
 };
 
-function familyLabel(value?: string | null) {
+function familyLabel(value: string | null | undefined, translate?: (field: string, fallback: string) => string) {
   const key = String(value || '').trim();
-  return FAMILY_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()) || 'Weather';
+  const fallback = FAMILY_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()) || 'Weather';
+  return translate ? translate(`family.${key || 'weather'}`, fallback) : fallback;
 }
 
 function familyTone(value?: string | null) {
@@ -49,6 +51,7 @@ function MarketRow({
   selected: boolean;
   onSelectCity: (cityId: string) => void;
 }) {
+  const { shared } = useSpecialistCopy('weather-shared');
   const cityId = String(city.cityId || '');
   const family = String(market.marketFamily || city.marketFamily || 'weather_binary');
   const top = market.topBin || city.topBin || null;
@@ -58,9 +61,9 @@ function MarketRow({
       className={`wm-weather-market-row ${familyTone(family)} ${selected ? 'selected' : ''}`}
       onClick={() => cityId && onSelectCity(cityId)}
     >
-      <span className="wm-weather-market-family">{familyLabel(family)}</span>
-      <strong>{city.city || 'Global'}</strong>
-      <em>{top?.label || market.eventTitle || 'Weather market'}</em>
+      <span className="wm-weather-market-family">{familyLabel(family, shared)}</span>
+      <strong>{city.city || shared('global', 'Global')}</strong>
+      <em>{top?.label || market.eventTitle || shared('weatherMarket', 'Weather market')}</em>
       <b>{priceLabel(top?.midPriceYes)}</b>
       <i>{bookCoverage(city)}</i>
     </button>
@@ -76,6 +79,7 @@ function WeatherMarketBrowserPanel({
   selectedCityId?: string | null;
   onSelectCity: (cityId: string | null) => void;
 }) {
+  const { copy, shared, formatNumber } = useSpecialistCopy('weather-market-browser');
   const [familyFilter, setFamilyFilter] = useState<string>('all');
   const familyCounts = payload?.summary?.marketFamilyCounts || {};
   const families = Object.entries(familyCounts)
@@ -91,7 +95,7 @@ function WeatherMarketBrowserPanel({
   }, [payload?.items, familyFilter]);
   return (
     <Panel
-      title="WEATHER MARKETS"
+      title={copy('title', 'WEATHER MARKETS')}
       badge={statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
       count={rows.length}
@@ -99,10 +103,10 @@ function WeatherMarketBrowserPanel({
       dataPanelId="weather-market-browser"
     >
       <div className="wm-weather-market-tabs">
-        <button type="button" className={familyFilter === 'all' ? 'active' : ''} onClick={() => setFamilyFilter('all')}>All</button>
+        <button type="button" className={familyFilter === 'all' ? 'active' : ''} onClick={() => setFamilyFilter('all')}>{shared('all', 'All')}</button>
         {families.slice(0, 8).map(([family, count]) => (
           <button type="button" className={familyFilter === family ? 'active' : ''} key={family} onClick={() => setFamilyFilter(family)}>
-            {familyLabel(family)} <span>{count}</span>
+            {familyLabel(family, shared)} <span>{formatNumber(Number(count))}</span>
           </button>
         ))}
       </div>
@@ -116,7 +120,7 @@ function WeatherMarketBrowserPanel({
             onSelectCity={onSelectCity}
           />
         )) : (
-          <div className="wm-weather-detail-empty">Weather markets are warming.</div>
+          <div className="wm-weather-detail-empty">{copy('empty', 'Weather markets are warming.')}</div>
         )}
       </div>
     </Panel>
