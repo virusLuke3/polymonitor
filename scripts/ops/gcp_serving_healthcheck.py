@@ -225,13 +225,16 @@ def _recover(
     now: int,
     state: dict[str, Any],
     warmup_seconds: int,
+    unit_uptime_seconds: int | None = None,
 ) -> None:
     current = _unit_state(state, key)
-    unit_uptime = _unit_uptime_seconds(unit)
-    if unit_uptime is not None and unit_uptime < warmup_seconds:
+    if unit_uptime_seconds is not None and unit_uptime_seconds < warmup_seconds:
         current["consecutive_failures"] = 0
         current["last_failure"] = reason
-        _log(f"{key} unhealthy during unit warmup ({unit_uptime}s/{warmup_seconds}s): {reason}")
+        _log(
+            f"{key} unhealthy during unit warmup "
+            f"({unit_uptime_seconds}s/{warmup_seconds}s): {reason}"
+        )
         return
 
     last_recovery_at = int(current.get("last_recovery_at") or 0)
@@ -298,7 +301,12 @@ def run_once(*, now: int | None = None) -> int:
     timestamp = int(time.time() if now is None else now)
     state = _load_state()
 
-    api_ok, dependencies_ready, api_detail = _api_healthy()
+    api_result = _api_healthy()
+    if len(api_result) == 2:
+        api_ok, api_detail = api_result
+        dependencies_ready = api_ok
+    else:
+        api_ok, dependencies_ready, api_detail = api_result
     api_state = _unit_state(state, "api")
     if api_ok:
         _mark_healthy(api_state, timestamp)
@@ -312,6 +320,7 @@ def run_once(*, now: int | None = None) -> int:
             now=timestamp,
             state=state,
             warmup_seconds=API_WARMUP_SECONDS,
+            unit_uptime_seconds=_unit_uptime_seconds(API_UNIT),
         )
 
     # The publisher depends on the API. Restarting it while the API is down only
@@ -332,6 +341,7 @@ def run_once(*, now: int | None = None) -> int:
                 now=timestamp,
                 state=state,
                 warmup_seconds=PUBLISHER_WARMUP_SECONDS,
+                unit_uptime_seconds=_unit_uptime_seconds(PUBLISHER_UNIT),
             )
     else:
         _log("publisher recovery deferred until API and its dependencies are healthy")

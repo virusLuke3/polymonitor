@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -158,6 +159,72 @@ def _freshness_status(updated_at: Any, max_age: int) -> Status:
     return Status.DEGRADED
 
 
+def _service_states(contract: dict[str, Any]) -> dict[str, dict[str, str]]:
+    names = sorted(
+        {
+            str(name)
+            for group in contract.get("groups", [])
+            if isinstance(group, dict)
+            for name in group.get("serviceNames", [])
+            if str(name).startswith("polydata-") and str(name).endswith(".service")
+        }
+    )
+    states: dict[str, dict[str, str]] = {}
+    for name in names:
+        try:
+            result = subprocess.run(
+                [
+                    "systemctl",
+                    "--user",
+                    "show",
+                    name,
+                    "--property=LoadState",
+                    "--property=ActiveState",
+                    "--property=SubState",
+                    "--property=Result",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+            values = {}
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if "=" in line:
+                        key, value = line.split("=", 1)
+                        values[key] = value
+            load_state = values.get("LoadState") or "unknown"
+            active_state = values.get("ActiveState") or "unknown"
+            if load_state == "not-found":
+                status = Status.UNKNOWN
+            elif active_state == "active":
+                status = Status.HEALTHY
+            elif active_state in {"activating", "reloading"}:
+                status = Status.WARNING
+            elif active_state == "inactive":
+                status = Status.DEGRADED
+            elif active_state == "failed":
+                status = Status.UNHEALTHY
+            else:
+                status = Status.UNKNOWN
+            states[name] = {
+                "status": status.value,
+                "activeState": active_state,
+                "subState": values.get("SubState") or "unknown",
+                "result": values.get("Result") or "unknown",
+            }
+        except (OSError, subprocess.SubprocessError):
+            states[name] = {
+                "status": Status.UNKNOWN.value,
+                "activeState": "unknown",
+                "subState": "unknown",
+                "result": "unknown",
+            }
+    return states
+
+
 def _seed_evidence(
     panel_id: str,
     group: dict[str, Any],
@@ -240,10 +307,32 @@ def build_panel_snapshot(
     *,
     system: dict[str, Any],
     seed: dict[str, Any],
+    service_states: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     seed_items = seed.get("items") if isinstance(seed.get("items"), list) else []
+    observed_services = service_states or {}
     panels = []
     for group in contract["groups"]:
+        group_services = [
+            {
+                "name": str(name),
+                **observed_services.get(
+                    str(name),
+                    {
+                        "status": Status.UNKNOWN.value,
+                        "activeState": "unknown",
+                        "subState": "unknown",
+                        "result": "unknown",
+                    },
+                ),
+            }
+            for name in group.get("serviceNames", [])
+        ]
+        service_status = (
+            aggregate(item["status"] for item in group_services)
+            if group_services
+            else Status.DISABLED
+        )
         for panel_id in group["panelIds"]:
             strategy = str(group["healthStrategy"])
             if strategy in {"seed", "external-api"}:
@@ -272,8 +361,14 @@ def build_panel_snapshot(
                     "serviceNames": group.get("serviceNames", []),
                     "expectedFreshnessSeconds": group.get("expectedFreshnessSeconds"),
                     "degradationPolicy": group["degradationPolicy"],
+                    "serviceStatus": service_status.value,
+                    "services": group_services,
                 }
             )
+            if group_services:
+                panels[-1]["status"] = aggregate(
+                    [panels[-1]["status"], service_status]
+                ).value
     watermarks = {
         name: system.get(name)
         for name in ("marketSync", "tradeSync", "oracleSync", "priceSync")
@@ -326,7 +421,13 @@ def main() -> int:
             return 0 if validation["status"] == Status.HEALTHY.value else 1
         system = _request_json("/system/health")
         seed = _request_json("/system/seed-health")
-        payload = build_panel_snapshot(contract, validation, system=system, seed=seed)
+        payload = build_panel_snapshot(
+            contract,
+            validation,
+            system=system,
+            seed=seed,
+            service_states=_service_states(contract),
+        )
         output = args.output or operations_state_dir() / "panel-health.json"
         atomic_write_json(output, payload)
         update_incident_history(

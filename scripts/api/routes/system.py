@@ -70,7 +70,9 @@ def create_system_blueprint(helpers: Mapping[str, Any]) -> Blueprint:
         except Exception:
             database_ready = False
         try:
-            redis_ready = bool(helpers["get_redis_client"]())
+            redis_client = helpers["get_redis_client"]()
+            ping = getattr(redis_client, "ping", None)
+            redis_ready = bool(ping()) if callable(ping) else bool(redis_client)
         except Exception:
             redis_ready = False
         return jsonify(
