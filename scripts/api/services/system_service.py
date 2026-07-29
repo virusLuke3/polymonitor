@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict
 
+from scripts.ops.lib.redaction import redact, redact_text
 from scripts.ops.lib.snapshot import age_seconds, operations_state_dir, read_json, utc_now_iso
 from scripts.ops.lib.status import Status, aggregate, normalize
 
@@ -415,7 +416,7 @@ def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
             if isinstance(runtime_payload, dict):
                 lob_runtime.update(runtime_payload)
         except Exception as exc:
-            lob_runtime.update({"status": "unavailable", "detail": str(exc)[:240]})
+            lob_runtime.update({"status": "unavailable", "detail": redact_text(exc)})
     storage_getter = ctx.get("get_lob_storage_status")
     if callable(storage_getter):
         try:
@@ -427,9 +428,11 @@ def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
                 if storage_payload.get("deadLetters1h") is not None:
                     lob_runtime["deadLetters1h"] = storage_payload.get("deadLetters1h")
         except Exception as exc:
-            lob_runtime["storage"] = {"status": "unavailable", "detail": str(exc)[:240]}
+            lob_runtime["storage"] = {"status": "unavailable", "detail": redact_text(exc)}
     payload: Dict[str, Any] = {
-        "database": ctx["describe_db_target"](),
+        "schemaVersion": "polymonitor.system-health.v1",
+        "generatedAt": ctx["utc_now_iso"](),
+        "database": "available",
         "redis": bool(ctx["get_redis_client"]()),
         "apiStatus": "ok",
         "lobRuntime": lob_runtime,
@@ -582,8 +585,8 @@ def build_seed_health_payload(ctx: dict) -> Dict[str, Any]:
             "attemptAgeSeconds": attempt_age_seconds,
             "successAgeSeconds": success_age_seconds,
             "recordCount": int(payload.get("recordCount") or 0),
-            "sourceStates": payload.get("sourceStates") if isinstance(payload.get("sourceStates"), dict) else {},
-            "errorSummary": payload.get("errorSummary"),
+            "sourceStates": redact(payload.get("sourceStates")) if isinstance(payload.get("sourceStates"), dict) else {},
+            "errorSummary": redact_text(payload.get("errorSummary")) if payload.get("errorSummary") else None,
             "cacheMode": payload.get("cacheMode"),
             "payloadStatus": payload.get("payloadStatus"),
             "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
