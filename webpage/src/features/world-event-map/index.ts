@@ -7,6 +7,7 @@ export * from './data/naturalHazards';
 export * from './data/useNaturalHazards';
 export * from './components/MapStatus';
 export * from './components/MapToolbar';
+export * from './components/EventInspector';
 export * from './components/WorldEventMap';
 export * from './state/mapState';
 export * from './state/mapReducer';

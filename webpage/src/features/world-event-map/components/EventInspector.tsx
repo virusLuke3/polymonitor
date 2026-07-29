@@ -1,0 +1,199 @@
+import { useEffect, useRef } from 'preact/hooks';
+import type { GeoEvent, GeoEventSource } from '../domain/types';
+import { isHazardGeoEvent } from '../config/layerRegistry';
+import {
+  eventTimeFields,
+  formatTimestamp,
+  geometryLabel,
+  hazardLabel,
+  hazardMetricFields,
+  type InspectorField,
+} from './eventInspectorModel';
+
+export type EventInspectorProps = {
+  event: GeoEvent;
+  onClose: () => void;
+  returnFocusTarget?: HTMLElement | null;
+};
+
+function FieldList({ fields }: { fields: InspectorField[] }) {
+  if (!fields.length) return null;
+  return (
+    <dl className="wm-event-inspector-fields">
+      {fields.map((item) => (
+        <div key={item.label}>
+          <dt>{item.label}</dt>
+          <dd>{item.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function SourceCard({ source }: { source: GeoEventSource }) {
+  return (
+    <article className="wm-event-inspector-source">
+      <div>
+        <strong>{source.provider}</strong>
+        <span className={`tone-${source.status || 'unknown'}`}>
+          {(source.status || 'unknown').toUpperCase()} · {(source.freshness || 'unknown').toUpperCase()}
+        </span>
+      </div>
+      {source.nativeId ? <code>{source.nativeId}</code> : null}
+      {source.observedAt ? <span>Observed {formatTimestamp(source.observedAt)}</span> : null}
+      {source.ingestedAt ? <span>Ingested {formatTimestamp(source.ingestedAt)}</span> : null}
+      {source.url ? (
+        <a href={source.url} target="_blank" rel="noreferrer">
+          OPEN NATIVE SOURCE ↗
+        </a>
+      ) : null}
+    </article>
+  );
+}
+
+export function EventInspector({
+  event,
+  onClose,
+  returnFocusTarget,
+}: EventInspectorProps) {
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const hazard = isHazardGeoEvent(event) ? event : null;
+
+  useEffect(() => {
+    const active = document.activeElement;
+    restoreFocusRef.current = active instanceof HTMLElement && active !== document.body
+      ? active
+      : returnFocusTarget || null;
+    titleRef.current?.focus();
+    return () => {
+      const target = restoreFocusRef.current;
+      if (target?.isConnected) target.focus({ preventScroll: true });
+    };
+  }, [event.id, returnFocusTarget]);
+
+  useEffect(() => {
+    const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
+      if (keyboardEvent.key !== 'Escape') return;
+      keyboardEvent.preventDefault();
+      onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  const commonFields: InspectorField[] = [
+    { label: 'Severity', value: event.severity.toUpperCase() },
+    ...(hazard ? [{ label: 'Lifecycle', value: hazard.lifecycle.toUpperCase() }] : []),
+    { label: 'Location', value: event.locationLabel || 'Location label unavailable' },
+    { label: 'Precision', value: event.locationPrecision.toUpperCase() },
+    { label: 'Geometry', value: geometryLabel(event) },
+    ...(event.confidence == null
+      ? []
+      : [{ label: 'Confidence', value: `${Math.round(event.confidence * 100)}%` }]),
+  ];
+
+  return (
+    <aside
+      className={`wm-event-inspector level-${event.severity}`}
+      aria-labelledby="wm-event-inspector-title"
+      data-event-id={event.id}
+    >
+      <button
+        type="button"
+        className="wm-event-inspector-close"
+        aria-label="Close event details"
+        onClick={onClose}
+      >
+        ×
+      </button>
+      <header className="wm-event-inspector-header">
+        <div className="wm-event-inspector-kickers">
+          <span>{hazard ? hazardLabel(hazard) : event.category}</span>
+          <span>{event.severity}</span>
+          {hazard ? <span>{hazard.lifecycle}</span> : null}
+        </div>
+        <h2 id="wm-event-inspector-title" ref={titleRef} tabIndex={-1}>{event.title}</h2>
+        {event.summary ? <p>{event.summary}</p> : null}
+      </header>
+
+      <section className="wm-event-inspector-section" aria-labelledby="wm-event-evidence-heading">
+        <h3 id="wm-event-evidence-heading">Event evidence</h3>
+        <FieldList fields={commonFields} />
+        <FieldList fields={eventTimeFields(event)} />
+      </section>
+
+      {hazard ? (
+        <section className="wm-event-inspector-section" aria-labelledby="wm-hazard-metrics-heading">
+          <h3 id="wm-hazard-metrics-heading">{hazardLabel(hazard)} metrics</h3>
+          <FieldList fields={hazardMetricFields(hazard)} />
+          {hazard.metrics.kind === 'weather-alert' && hazard.metrics.instruction ? (
+            <div className="wm-event-inspector-callout">
+              <strong>Official instruction</strong>
+              <p>{hazard.metrics.instruction}</p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {hazard ? (
+        <section className="wm-event-inspector-section" aria-labelledby="wm-severity-evidence-heading">
+          <h3 id="wm-severity-evidence-heading">Severity normalization</h3>
+          <FieldList fields={[
+            { label: 'Provider', value: hazard.severityEvidence.provider },
+            {
+              label: 'Raw level',
+              value: hazard.severityEvidence.rawLevel || 'Provider did not publish a level',
+            },
+            { label: 'Mapping version', value: hazard.severityEvidence.mappingVersion },
+          ]} />
+          <div className="wm-event-inspector-callout">
+            <strong>Why this level</strong>
+            <p>{hazard.severityEvidence.reason}</p>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="wm-event-inspector-section" aria-labelledby="wm-event-sources-heading">
+        <h3 id="wm-event-sources-heading">Sources & freshness</h3>
+        <div className="wm-event-inspector-sources">
+          {event.sources.map((source, index) => (
+            <SourceCard key={`${source.provider}:${source.nativeId || index}`} source={source} />
+          ))}
+        </div>
+      </section>
+
+      {hazard ? (
+        <section className="wm-event-inspector-section" aria-labelledby="wm-event-coverage-heading">
+          <h3 id="wm-event-coverage-heading">Coverage</h3>
+          <p className="wm-event-inspector-coverage">
+            <strong>{hazard.coverage.isComplete ? 'COMPLETE' : 'PARTIAL'} · {hazard.coverage.scope}</strong>
+            <span>{hazard.coverage.label}</span>
+          </p>
+          {hazard.coverage.gaps.length ? (
+            <ul>
+              {hazard.coverage.gaps.map((gap) => <li key={gap}>{gap}</li>)}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+
+      {event.limitations.length ? (
+        <section className="wm-event-inspector-section" aria-labelledby="wm-event-limitations-heading">
+          <h3 id="wm-event-limitations-heading">Limitations</h3>
+          <ul>
+            {event.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+          </ul>
+        </section>
+      ) : null}
+
+      <section className="wm-event-inspector-section wm-event-inspector-markets" aria-labelledby="wm-related-markets-heading">
+        <h3 id="wm-related-markets-heading">Related Weather Markets</h3>
+        <p>
+          No evidence-qualified related weather markets were found. Markets appear here only after
+          type, location, time window and settlement metric all pass the linker threshold.
+        </p>
+      </section>
+    </aside>
+  );
+}

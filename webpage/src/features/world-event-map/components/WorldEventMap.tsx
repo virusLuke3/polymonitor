@@ -3,8 +3,8 @@ import type { GeoEvent } from '../domain/types';
 import type { WorldEventMapState } from '../state/mapState';
 import { DeckMapRenderer } from '../renderer/DeckMapRenderer';
 import type { BasemapState, MapRenderer } from '../renderer/MapRenderer';
-import { isHazardEvent } from '../renderer/layerFactories';
 import { worldEventLayerById } from '../config/layerRegistry';
+import { EventInspector } from './EventInspector';
 
 export type WorldEventMapProps = {
   events: GeoEvent[];
@@ -14,26 +14,6 @@ export type WorldEventMapProps = {
   onEventHover: (eventId: string | null) => void;
   height?: number;
 };
-
-function eventMetric(event: GeoEvent) {
-  if (!isHazardEvent(event)) return null;
-  if (event.metrics.kind === 'earthquake') {
-    return `M${event.metrics.magnitude.toFixed(1)} · ${event.metrics.depthKm ?? '--'} km deep`;
-  }
-  if (event.metrics.kind === 'tropical-cyclone') {
-    const wind = event.metrics.maximumWind;
-    return wind ? `${wind.value} ${wind.unit} maximum wind` : event.metrics.categoryLabel || null;
-  }
-  if (event.metrics.kind === 'wildfire') {
-    return `${event.metrics.detectionCount ?? '--'} detections`;
-  }
-  if (event.metrics.kind === 'climate-anomaly') {
-    return `${event.metrics.anomaly >= 0 ? '+' : ''}${event.metrics.anomaly} ${event.metrics.unit} anomaly`;
-  }
-  if (event.metrics.kind === 'volcano-or-other') return event.metrics.statusLabel || null;
-  if (event.metrics.kind === 'weather-alert') return event.metrics.providerSeverity || event.metrics.urgency || null;
-  return null;
-}
 
 export function WorldEventMap({
   events,
@@ -102,7 +82,13 @@ export function WorldEventMap({
       className={`wm-weather-deck-map map-ready ${events.length ? 'has-screen-points' : 'no-screen-points'} map-state-${basemapState}`}
       style={{ height: `${height}px` }}
     >
-      <div ref={hostRef} className="wm-weather-deck-basemap ready" aria-label="World event map" />
+      <div
+        ref={hostRef}
+        className="wm-weather-deck-basemap ready"
+        role="application"
+        tabIndex={0}
+        aria-label="World event map. Use pointer or keyboard controls to explore active hazard events."
+      />
       {hoveredEvent && !selectedEvent ? (
         <div className="wm-deck-tooltip" role="status">
           <strong>{hoveredEvent.title}</strong>
@@ -110,25 +96,12 @@ export function WorldEventMap({
         </div>
       ) : null}
       {selectedEvent ? (
-        <aside className="wm-map-risk-inspector" aria-label={`${selectedEvent.title} details`}>
-          <button type="button" className="wm-map-risk-close" onClick={() => onEventSelect(null)}>×</button>
-          <span className="wm-map-risk-kicker">{isHazardEvent(selectedEvent) ? selectedEvent.hazardKind : selectedEvent.category}</span>
-          <strong>{selectedEvent.title}</strong>
-          {eventMetric(selectedEvent) ? <p>{eventMetric(selectedEvent)}</p> : null}
-          <div className="wm-map-conflict-body">
-            <span>Severity</span>
-            <strong>{selectedEvent.severity}</strong>
-            <span>Location</span>
-            <strong>{selectedEvent.locationLabel || selectedEvent.locationPrecision}</strong>
-            <span>Observed</span>
-            <strong>{selectedEvent.updatedAt || selectedEvent.occurredAt || '--'}</strong>
-          </div>
-          {selectedEvent.sources[0]?.url ? (
-            <a className="wm-map-risk-link" href={selectedEvent.sources[0].url} target="_blank" rel="noreferrer">
-              OPEN SOURCE
-            </a>
-          ) : null}
-        </aside>
+        <EventInspector
+          key={selectedEvent.id}
+          event={selectedEvent}
+          onClose={() => onEventSelect(null)}
+          returnFocusTarget={hostRef.current}
+        />
       ) : null}
       <div className="wm-weather-deck-legend" aria-label="Active hazard legend">
         {legendItems.map((item) => (
