@@ -556,14 +556,22 @@ discovered
 - Watchlist、Briefing 和 Auth/Access 正文接入 `en`/`zh` 稳定目录；当前两种语言各 381 个 key，由同一完整性门禁校验。
 - Quant、LOB runtime 控制、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件继续保持不动。
 
+#### 4.7 Market Dossier 与 Data Quality 证据正文国际化（已完成，2026-07-29）
+
+- Market Dossier 的概率曲线、CLOB 深度、证据链、身份键、OrderFilled 流水、Oracle 时间线、关联情报、结果合约和指标解释全部接入稳定 `en`/`zh` key。
+- Data Quality 的质量维度、活跃缺口、市场生命周期、Oracle 阶段、同步水位、事件流水、缺口样本和审计语义全部接入稳定 `en`/`zh` key；已知后端契约 ID 在渲染层映射，不修改 API 数据契约。
+- `LocaleProvider` 新增相对时间和持续时长格式化；两个专业工作区的日期、数量、百分比和美元金额跟随语言环境，市场标题、来源字段、哈希、链上持久键和未知状态原值保持不变。
+- 当前两种语言各 599 个稳定 key，由同一完整性门禁校验；本阶段不宣称其余 Atlas 专业 panel 已全部翻译。
+- Quant、LOB runtime 控制、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件继续保持不动。
+
 ## 下一步执行建议
 
 工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
 Workspace、Oracle/data-quality、PWA、MCP、移动端导航、公开 SDK、Web Push
-以及 Watchlist/Briefing/Auth 双语正文均已建立。下一批在现有边界内的工作：
+以及 Watchlist/Briefing/Auth、Market Dossier、Data Quality 双语正文均已建立。下一批在现有边界内的工作：
 
 1. 选择并接入真实 OAuth 2.1 issuer，完成 MCP Protected Resource Metadata、PKCE 和客户端注册。
-2. 继续迁移 Market/Data Quality 内层证据表和其余专业 panel 正文，保留市场术语与来源字段原义。
+2. 继续迁移 Atlas 中尚未双语化的公共专业 panel 正文，按业务域逐批完成，并保留市场术语与来源字段原义。
 3. 为 Web Push 增加真实浏览器端到端验收与投递 SLO 看板；这需要至少一个用户在生产浏览器中主动授权通知。
 
 若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
