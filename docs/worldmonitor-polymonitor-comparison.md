@@ -144,15 +144,17 @@ Polymonitor 的前端优势是业务表达直接；主要技术债是巨型组�
 
 WorldMonitor 的地图是全球情报数据底座，覆盖军事、冲突、航班、船舶、基础设施、灾害、气候、疾病、网络安全、能源、供应链和金融风险等大量图层。
 
-Polymonitor 的地图重点是解释：
+Polymonitor 的 2D 地图不应把 Markets、Oracle、OrderFilled、LOB、钱包或“存在天气市场的城市”强行地理化。它应以真实世界事件为地图主实体，优先展示具有可靠位置、时间、来源和证据的情报热点、冲突与社会动荡、制裁与国家风险。Natural Hazards 阶段的地图主体必须是强风暴、飓风、洪水、极端温度警报、地震、火山、野火和有明确 baseline 的重大气象异常。
 
-- 预测市场与现实事件的关系
-- Oracle 和结算状态
-- OrderFilled 与大额资金行为
-- LOB 和流动性
-- 外部情报与市场定价变化
+Polymarket 数据属于事件下钻后的关联分析：用户选中现实事件后，再查看相关市场、概率变化、成交异动、LOB freshness 和 Oracle 状态。
 
-因此，Polymonitor 不需要复制 WorldMonitor 的全部全球图层，而应优先建设“现实事件如何影响市场定价”的关联能力。
+因此，Polymonitor 不复制 WorldMonitor 的全部全球图层，而应：
+
+- 吸收统一图层注册表、时间过滤、URL 状态、聚类、渐进披露、Popup、fallback 和视觉测试等地图平台能力。
+- 建设“现实事件如何影响市场定价”的关联能力。
+- 明确禁止伪坐标和没有空间意义的预测市场图层。
+
+详细产品、架构、鲁棒性和实施约束见 [`world-event-map-implementation-guide.md`](world-event-map-implementation-guide.md)。
 
 ## 7. World Cup 专项能力
 
