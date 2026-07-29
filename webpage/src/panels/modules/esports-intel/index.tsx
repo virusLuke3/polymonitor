@@ -5,6 +5,7 @@ import type { RuntimeGridEsportsItem, RuntimeGridEsportsPayload } from '@/types'
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'state' | 'start' | 'momentum';
 
@@ -81,24 +82,25 @@ function nextSortMode(current: SortMode): SortMode {
   return 'state';
 }
 
-function topSignal(payload?: RuntimeGridEsportsPayload | null, items: RuntimeGridEsportsItem[] = []) {
+function topSignal(payload: RuntimeGridEsportsPayload | null | undefined, items: RuntimeGridEsportsItem[], copy: ReturnType<typeof useSpecialistCopy>['copy']) {
   const status = sourceStatus(payload);
-  if (status === 'missing-key') return 'GRID key missing from runtime environment';
-  if (!items.length) return 'No GRID series in the configured window';
+  if (status === 'missing-key') return copy('keyMissing', 'GRID key missing from runtime environment');
+  if (!items.length) return copy('noneInWindow', 'No GRID series in the configured window');
   const live = items.filter((item) => item.state === 'live').length;
   const pmLinked = Number(payload?.summary?.pmLinked || 0);
-  if (live > 0) return `${live} live GRID state ${live === 1 ? 'feed' : 'feeds'}`;
-  if (pmLinked > 0) return `${pmLinked} PMKT-linked GRID series`;
-  return `${items.length} GRID series ready`;
+  if (live > 0) return copy('liveFeeds', '{count} live GRID state feeds', { count: live });
+  if (pmLinked > 0) return copy('linkedSeries', '{count} PMKT-linked GRID series', { count: pmLinked });
+  return copy('seriesReady', '{count} GRID series ready', { count: items.length });
 }
 
 function EsportsSummary({ payload, items }: { payload?: RuntimeGridEsportsPayload | null; items: RuntimeGridEsportsItem[] }) {
+  const { copy, shared } = useSpecialistCopy('esports-intel');
   const summary = payload?.summary || {};
   return (
     <div className="wm-esports-summary">
       <div className="wm-esports-hero-icon">GRID</div>
       <div className="wm-esports-hero-main">
-        <strong>{topSignal(payload, items)}</strong>
+        <strong>{topSignal(payload, items, copy)}</strong>
         <span>
           <em>OFFICIAL</em>
           <em>{(payload?.cacheMode || 'live-build').toUpperCase()}</em>
@@ -106,8 +108,8 @@ function EsportsSummary({ payload, items }: { payload?: RuntimeGridEsportsPayloa
         </span>
       </div>
       <div className="wm-esports-hero-metrics">
-        <span>Series <strong>{summary.visibleSeries ?? items.length}</strong></span>
-        <span>State <strong>{summary.officialSnapshots ?? 0}</strong></span>
+        <span>{shared('series', 'Series')} <strong>{summary.visibleSeries ?? items.length}</strong></span>
+        <span>{shared('state', 'State')} <strong>{summary.officialSnapshots ?? 0}</strong></span>
         <span>PMKT <strong>{summary.pmLinked ?? 0}</strong></span>
       </div>
     </div>
@@ -157,13 +159,14 @@ function EsportsRow({ item, index }: { item: RuntimeGridEsportsItem; index: numb
 }
 
 function EsportsList({ payload, sortMode }: { payload?: RuntimeGridEsportsPayload | null; sortMode: SortMode }) {
+  const { copy } = useSpecialistCopy('esports-intel');
   const items = useMemo(() => sortItems(payload?.items || [], sortMode), [payload, sortMode]);
   if (!items.length) {
     return (
       <div className="wm-esports-empty-state">
         <span>{sourceStatus(payload).toUpperCase()}</span>
-        <strong>GRID esports feed is warming.</strong>
-        <em>Central Data and Series State will render here after the watcher seeds a snapshot.</em>
+        <strong>{copy('warming', 'GRID esports feed is warming.')}</strong>
+        <em>{copy('warmingText', 'Central Data and Series State will render here after the watcher seeds a snapshot.')}</em>
       </div>
     );
   }
@@ -175,6 +178,7 @@ function EsportsList({ payload, sortMode }: { payload?: RuntimeGridEsportsPayloa
 }
 
 function EsportsIntelPanel({ payload }: { payload?: RuntimeGridEsportsPayload | null }) {
+  const { copy } = useSpecialistCopy('esports-intel');
   const [showHelp, setShowHelp] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>('state');
   const items = payload?.items || [];
@@ -182,12 +186,12 @@ function EsportsIntelPanel({ payload }: { payload?: RuntimeGridEsportsPayload | 
 
   return (
     <Panel
-      title="ESPORTS INTEL"
+      title={copy('title', 'ESPORTS INTEL')}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain GRID esports intelligence"
+          aria-label={copy('explainAria', 'Explain GRID esports intelligence')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -201,7 +205,7 @@ function EsportsIntelPanel({ payload }: { payload?: RuntimeGridEsportsPayload | 
         <button
           type="button"
           className="wm-panel-action-button"
-          aria-label={`Sort esports series by ${nextSortMode(sortMode)}`}
+          aria-label={copy('sortAria', 'Sort esports series by {mode}', { mode: nextSortMode(sortMode) })}
           onClick={() => setSortMode((current) => nextSortMode(current))}
         >
           {sortMode.toUpperCase()}
@@ -209,8 +213,8 @@ function EsportsIntelPanel({ payload }: { payload?: RuntimeGridEsportsPayload | 
       )}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>GRID Esports Intel</strong>
-          <p>Uses GRID Open Access Central Data for series discovery and Series State for official in-game context. PMKT badges are local Polymarket match candidates, not sportsbook odds.</p>
+          <strong>{copy('helpTitle', 'GRID Esports Intel')}</strong>
+          <p>{copy('helpText', 'Uses GRID Open Access Central Data for series discovery and Series State for official in-game context. PMKT badges are local Polymarket match candidates, not sportsbook odds.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-esports-panel"

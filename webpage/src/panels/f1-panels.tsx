@@ -2,6 +2,7 @@ import { Panel } from '@/components/Panel';
 import type { RuntimeF1PanelCard } from '@/types';
 import type { PanelRenderMap } from './types';
 import { emptyState } from './shared/renderers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type BweTag = {
   label: string;
@@ -80,8 +81,8 @@ function splitFlashText(card: RuntimeF1PanelCard) {
   };
 }
 
-function f1CardList(cards: RuntimeF1PanelCard[]) {
-  if (!cards.length) return emptyState('No BWENews feed items loaded yet.');
+function f1CardList(cards: RuntimeF1PanelCard[], copy: ReturnType<typeof useSpecialistCopy>['copy']) {
+  if (!cards.length) return emptyState(copy('empty', 'No BWENews feed items loaded yet.'));
   return (
     <div className="wm-f1-market-list">
       {cards.map((card, index) => {
@@ -110,7 +111,7 @@ function f1CardList(cards: RuntimeF1PanelCard[]) {
                   </>
                 ) : null}
               </div>
-              <div className="wm-f1-card-tags" aria-label="BWE labels">
+              <div className="wm-f1-card-tags" aria-label={copy('labelsAria', 'BWE labels')}>
                 {tags.map((tag) => (
                   <span className={`wm-f1-tag ${tag.tone}`} key={`${card.id || index}-${tag.label}`}>{tag.label}</span>
                 ))}
@@ -130,12 +131,13 @@ function f1CardList(cards: RuntimeF1PanelCard[]) {
   );
 }
 
+function F1TracksidePanel({ cards }: { cards: RuntimeF1PanelCard[] }) {
+  const { copy } = useSpecialistCopy('f1-trackside');
+  return <Panel title={copy('title', 'BWE NEWS')} badge="LIVE" status="live" count={cards.length} className="wm-market-panel wm-f1-panel">{f1CardList(cards, copy)}</Panel>;
+}
+
 export const f1PanelRenderers: PanelRenderMap = {
   'f1-trackside': {
-    render: (ctx) => (
-      <Panel title="BWE NEWS" badge="LIVE" status="live" count={ctx.f1?.cards.length || 0} className="wm-market-panel wm-f1-panel">
-        {f1CardList(ctx.f1?.cards || [])}
-      </Panel>
-    ),
+    render: (ctx) => <F1TracksidePanel cards={ctx.f1?.cards || []} />,
   },
 };

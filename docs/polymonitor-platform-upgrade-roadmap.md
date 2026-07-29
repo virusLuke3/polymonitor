@@ -573,6 +573,16 @@ discovered
 - 当前两种语言各 800 个稳定 key，并通过相同完整性门禁；本阶段不宣称宏观、天气、运输、体育等其余公共专业 panel 已全部翻译。
 - Quant、LOB runtime 控制、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件继续保持不动。
 
+#### 4.9 Atlas 公共专业面板国际化（已完成，2026-07-29）
+
+- 宏观与行情批次完成 CPI 发布中心/日历、Fed/利率/就业/住房/商品与关税注册表、Inflation nowcast、Jin10、Crypto/DeFi、商品权益传导、贸易政策和 Polymarket 宏观地图的稳定双语文案接入。
+- 天气与运输批次完成全球气温、天气市场、城市快照、报价曲线/表格、一日/七日趋势、天气新闻、世界时钟和航空运输情报；同时修正英文默认环境中运输面板仍硬编码中文标题的问题。
+- 内容与突发事件批次完成 Breaking Event Radar、Market TV Wire 和 YouTube Market TV；只翻译界面控件、帮助、空状态和运行状态，不改新闻标题、频道名、视频来源或市场关联数据。
+- 体育批次完成 NBA Scoreboard、NBA Intel、ESPN Matchup Predictor、Sports Odds、GRID Esports 和当前注册的 F1/BWENews 面板；队名、赛事名、原始状态与来源字段保持原义。
+- 新增 442 个 Atlas specialist 稳定 key，与原有 800 个 core key 分开维护；完整性门禁同时检查两套中英文 key 和插值占位符一致性，TypeScript 进一步约束 specialist 两种语言的键集合。
+- 默认语言仍固定为英文；只有用户主动选择中文后才持久化为中文。面板 ID、注册顺序、布局、CSS、API 请求、数据契约与 Service Worker `/wm-api` `NetworkOnly` 边界均未改变。
+- Quant、LOB runtime 控制、PolySignal/PolyBeats、PnL/position/address、non-trade/CTF/ERC20/Data API trades、World Cup、Kaggle 和测试文件继续保持不动。
+
 ## 下一步执行建议
 
 工程基线、CI、类型化路由、Panel Runtime、Design System、Operations、Market
@@ -580,8 +590,7 @@ Workspace、Oracle/data-quality、PWA、MCP、移动端导航、公开 SDK、Web
 以及 Watchlist/Briefing/Auth、Market Dossier、Data Quality 和 Atlas 核心事实面双语正文均已建立。下一批在现有边界内的工作：
 
 1. 选择并接入真实 OAuth 2.1 issuer，完成 MCP Protected Resource Metadata、PKCE 和客户端注册。
-2. 继续迁移 Atlas 中尚未双语化的公共专业 panel 正文，优先按宏观/行情、天气/运输、Breaking Event、体育/电竞等业务域分批完成，并保留市场术语与来源字段原义。
-3. 为 Web Push 增加真实浏览器端到端验收与投递 SLO 看板；这需要至少一个用户在生产浏览器中主动授权通知。
+2. 为 Web Push 增加真实浏览器端到端验收与投递 SLO 看板；这需要至少一个用户在生产浏览器中主动授权通知。
 
 若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
 PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。

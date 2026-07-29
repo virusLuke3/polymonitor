@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketYoutubeChannels } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketYoutubeChannelsPayload } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import { useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const YOUTUBE_PANEL_LIMIT = 80;
@@ -119,6 +119,7 @@ function nextYoutubeItem(items: RuntimeMarketTvWireItem[], currentId?: string | 
 }
 
 function MarketYoutubePlayer({ item, onEnded }: { item: RuntimeMarketTvWireItem; onEnded?: () => void }) {
+  const { copy, shared } = useSpecialistCopy('market-youtube-channels');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const endedRef = useRef(false);
   const embedUrl = youtubeEmbedUrl(item);
@@ -189,7 +190,7 @@ function MarketYoutubePlayer({ item, onEnded }: { item: RuntimeMarketTvWireItem;
           <strong>{itemTitle(item)}</strong>
         </div>
         <button type="button" onClick={() => openExternal(externalUrl)}>
-          OPEN
+          {shared('open', 'OPEN')}
         </button>
       </header>
       {embedUrl && shouldLoad ? (
@@ -206,26 +207,26 @@ function MarketYoutubePlayer({ item, onEnded }: { item: RuntimeMarketTvWireItem;
       ) : embedUrl ? (
         <div className="wm-market-youtube-fallback">
           <strong>{channelName(item)}</strong>
-          <em>Preparing embedded playback.</em>
+          <em>{copy('preparingPlayback', 'Preparing embedded playback.')}</em>
           <button type="button" onClick={() => openExternal(externalUrl)}>
-            OPEN
+            {shared('open', 'OPEN')}
           </button>
         </div>
       ) : (
         <div className="wm-market-youtube-fallback">
           <strong>{channelName(item)}</strong>
-          <em>{item.marketUseCase || 'Open the YouTube channel externally. Current live embed is not verified.'}</em>
+          <em>{item.marketUseCase || copy('openExternal', 'Open the YouTube channel externally. Current live embed is not verified.')}</em>
           <button type="button" onClick={() => openExternal(externalUrl)}>
-            OPEN
+            {shared('open', 'OPEN')}
           </button>
         </div>
       )}
       {embedUrl && frameState === 'blocked' ? (
         <div className="wm-market-youtube-blocked">
-          <strong>YOUTUBE EMBED BLOCKED</strong>
-          <em>This channel or video does not allow embedded playback. Open the source page.</em>
+          <strong>{copy('embedBlocked', 'YOUTUBE EMBED BLOCKED')}</strong>
+          <em>{copy('embedBlockedText', 'This channel or video does not allow embedded playback. Open the source page.')}</em>
           <button type="button" onClick={() => openExternal(externalUrl)}>
-            OPEN
+            {shared('open', 'OPEN')}
           </button>
         </div>
       ) : null}
@@ -242,6 +243,7 @@ function MarketYoutubeRow({
   active: boolean;
   onSelect: () => void;
 }) {
+  const { copy } = useSpecialistCopy('market-youtube-channels');
   const tags = (item.matchedTerms?.length ? item.matchedTerms : item.marketTags || []).slice(0, 3);
   return (
     <button type="button" className={`wm-market-youtube-row ${active ? 'active' : ''}`} onClick={onSelect}>
@@ -249,7 +251,7 @@ function MarketYoutubeRow({
       <div>
         <small>{categoryLabel(item.category)} / {probeLabel(item)}</small>
         <strong>{channelName(item)}</strong>
-        <em>{item.marketUseCase || item.sourceName || 'Live video context.'}</em>
+        <em>{item.marketUseCase || item.sourceName || copy('liveContext', 'Live video context.')}</em>
         {tags.length ? (
           <span className="wm-market-youtube-tags">
             {tags.map((tag) => <i key={`${item.id}-${tag}`}>{String(tag).toUpperCase()}</i>)}
@@ -262,6 +264,7 @@ function MarketYoutubeRow({
 }
 
 function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutubeChannelsPayload | null }) {
+  const { copy, shared, formatRelativeTime } = useSpecialistCopy('market-youtube-channels');
   const [activeCategory, setActiveCategory] = useState('all');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [categoryPayload, setCategoryPayload] = useState<{ category: string; payload: RuntimeMarketYoutubeChannelsPayload } | null>(null);
@@ -305,7 +308,7 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
       })
       .catch((error) => {
         if (cancelled) return;
-        setCategoryError(error instanceof Error ? error.message : 'Failed to load YouTube category');
+        setCategoryError(error instanceof Error ? error.message : copy('loadCategoryFailed', 'Failed to load YouTube category'));
       })
       .finally(() => {
         if (!cancelled) setCategoryLoading(false);
@@ -334,7 +337,7 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
 
   return (
     <Panel
-      title="YOUTUBE MARKET TV"
+      title={copy('title', 'YOUTUBE MARKET TV')}
       badge={badgeLabel(payload)}
       status={panelStatus(payload)}
       count={items.length || undefined}
@@ -349,7 +352,7 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
               className={`${categoryToneClass('all')} ${activeCategory === 'all' ? 'active' : ''}`}
               onClick={() => setActiveCategory('all')}
             >
-              ALL <span>{Number.isFinite(totalCount) ? totalCount : items.length}</span>
+              {shared('all', 'ALL')} <span>{Number.isFinite(totalCount) ? totalCount : items.length}</span>
             </button>
             {categories.map((category) => (
               <button
@@ -363,14 +366,14 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
             ))}
           </div>
           <div className="wm-market-youtube-summary">
-            <span><strong>{summary.liveReady ?? 0}</strong> LIVE</span>
-            <span><strong>{summary.embedReady ?? 0}</strong> EMBED</span>
+            <span><strong>{summary.liveReady ?? 0}</strong> {shared('live', 'LIVE')}</span>
+            <span><strong>{summary.embedReady ?? 0}</strong> {shared('embed', 'EMBED')}</span>
             <button
               type="button"
               className={autoRotate ? 'active' : ''}
               onClick={() => setAutoRotate((value) => !value)}
             >
-              AUTO
+              {shared('auto', 'AUTO')}
             </button>
           </div>
           <div className="wm-market-youtube-list">
@@ -386,13 +389,13 @@ function MarketYoutubeChannelsPanel({ payload }: { payload?: RuntimeMarketYoutub
         </aside>
         {playerItem ? <MarketYoutubePlayer item={playerItem} onEnded={autoRotate ? advanceToNextItem : undefined} /> : (
           <div className="wm-empty-state">
-            <strong>{categoryLoading ? 'YouTube TV loading.' : 'YouTube TV warming.'}</strong>
-            <em>{categoryError || 'GCP seeded YouTube channel snapshot is not ready yet.'}</em>
+            <strong>{categoryLoading ? copy('loading', 'YouTube TV loading.') : copy('warming', 'YouTube TV warming.')}</strong>
+            <em>{categoryError || copy('notReady', 'GCP seeded YouTube channel snapshot is not ready yet.')}</em>
           </div>
         )}
       </div>
       <footer className="wm-market-youtube-foot">
-        <span>{formatRelative(selectedPayload?.generatedAt || payload?.generatedAt)}</span>
+        <span>{formatRelativeTime(selectedPayload?.generatedAt || payload?.generatedAt)}</span>
         <em>{selectedPayload?.cacheMode || payload?.cacheMode || 'seeded'}</em>
       </footer>
     </Panel>

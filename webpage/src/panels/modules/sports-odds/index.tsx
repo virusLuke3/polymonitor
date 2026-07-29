@@ -5,6 +5,7 @@ import type { RuntimeSportsOddsItem, RuntimeSportsOddsPayload } from '@/types';
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'signal' | 'start' | 'dispersion';
 
@@ -57,21 +58,22 @@ function nextSortMode(current: SortMode): SortMode {
   return 'signal';
 }
 
-function summaryLine(payload?: RuntimeSportsOddsPayload | null, items: RuntimeSportsOddsItem[] = []) {
-  if (sourceStatus(payload) === 'missing-key') return 'The Odds API key missing';
-  if (!items.length) return 'No sportsbook odds loaded';
+function summaryLine(payload: RuntimeSportsOddsPayload | null | undefined, items: RuntimeSportsOddsItem[], copy: ReturnType<typeof useSpecialistCopy>['copy']) {
+  if (sourceStatus(payload) === 'missing-key') return copy('keyMissing', 'The Odds API key missing');
+  if (!items.length) return copy('noneLoaded', 'No sportsbook odds loaded');
   const wide = Number(payload?.summary?.wideCount || 0);
-  if (wide > 0) return `${wide} wide consensus checks`;
-  return `${items.length} sportsbook events ready`;
+  if (wide > 0) return copy('wideChecks', '{count} wide consensus checks', { count: wide });
+  return copy('eventsReady', '{count} sportsbook events ready', { count: items.length });
 }
 
 function OddsSummary({ payload, items }: { payload?: RuntimeSportsOddsPayload | null; items: RuntimeSportsOddsItem[] }) {
+  const { copy, shared } = useSpecialistCopy('sports-odds');
   const summary = payload?.summary || {};
   return (
     <div className="wm-odds-summary">
       <div className="wm-odds-hero-icon">ODDS</div>
       <div className="wm-odds-hero-main">
-        <strong>{summaryLine(payload, items)}</strong>
+        <strong>{summaryLine(payload, items, copy)}</strong>
         <span>
           <em>BOOK</em>
           <em>{(payload?.cacheMode || 'live-build').toUpperCase()}</em>
@@ -79,8 +81,8 @@ function OddsSummary({ payload, items }: { payload?: RuntimeSportsOddsPayload | 
         </span>
       </div>
       <div className="wm-odds-hero-metrics">
-        <span>Events <strong>{summary.eventCount ?? items.length}</strong></span>
-        <span>Books <strong>{summary.bookmakerCount ?? 0}</strong></span>
+        <span>{shared('events', 'Events')} <strong>{summary.eventCount ?? items.length}</strong></span>
+        <span>{copy('books', 'Books')} <strong>{summary.bookmakerCount ?? 0}</strong></span>
         <span>PMKT <strong>{summary.pmLinked ?? 0}</strong></span>
       </div>
     </div>
@@ -88,6 +90,7 @@ function OddsSummary({ payload, items }: { payload?: RuntimeSportsOddsPayload | 
 }
 
 function OddsRow({ item, index }: { item: RuntimeSportsOddsItem; index: number }) {
+  const { copy } = useSpecialistCopy('sports-odds');
   const topQuote = (item.quotes || [])[0];
   const signal = item.signal || 'WATCH';
   return (
@@ -101,7 +104,7 @@ function OddsRow({ item, index }: { item: RuntimeSportsOddsItem; index: number }
         <div className="wm-odds-row-meta">
           <span>{String(index + 1).padStart(2, '0')}</span>
           <span>{timeLabel(item.commenceTime)}</span>
-          <span>{item.bookmakerCount || 0} books</span>
+          <span>{copy('bookCount', '{count} books', { count: item.bookmakerCount || 0 })}</span>
         </div>
         <div className="wm-odds-quote-strip">
           <em>{compact(topQuote?.name || 'market', 16)}</em>
@@ -118,13 +121,14 @@ function OddsRow({ item, index }: { item: RuntimeSportsOddsItem; index: number }
 }
 
 function OddsList({ payload, sortMode }: { payload?: RuntimeSportsOddsPayload | null; sortMode: SortMode }) {
+  const { copy } = useSpecialistCopy('sports-odds');
   const items = useMemo(() => sortItems(payload?.items || [], sortMode), [payload, sortMode]);
   if (!items.length) {
     return (
       <div className="wm-odds-empty-state">
         <span>{sourceStatus(payload).toUpperCase()}</span>
-        <strong>Sportsbook feed is warming.</strong>
-        <em>Set POLYDATA_THE_ODDS_API_KEY to enable live bookmaker odds.</em>
+        <strong>{copy('warming', 'Sportsbook feed is warming.')}</strong>
+        <em>{copy('keyHelp', 'Set POLYDATA_THE_ODDS_API_KEY to enable live bookmaker odds.')}</em>
       </div>
     );
   }
@@ -132,22 +136,23 @@ function OddsList({ payload, sortMode }: { payload?: RuntimeSportsOddsPayload | 
 }
 
 function SportsOddsPanel({ payload }: { payload?: RuntimeSportsOddsPayload | null }) {
+  const { copy } = useSpecialistCopy('sports-odds');
   const [showHelp, setShowHelp] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>('signal');
   const items = payload?.items || [];
   const degraded = sourceStatus(payload) !== 'ok';
   return (
     <Panel
-      title="SPORTS ODDS"
-      titleControls={<button type="button" className="wm-panel-help-button" aria-label="Explain sportsbook odds monitor" aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>}
+      title={copy('title', 'SPORTS ODDS')}
+      titleControls={<button type="button" className="wm-panel-help-button" aria-label={copy('explainAria', 'Explain sportsbook odds monitor')} aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>}
       badge={degraded ? 'CACHED' : 'LIVE'}
       status={degraded ? 'muted' : 'live'}
       count={items.length}
-      controls={<button type="button" className="wm-panel-action-button" aria-label={`Sort sports odds by ${nextSortMode(sortMode)}`} onClick={() => setSortMode((current) => nextSortMode(current))}>{sortMode.toUpperCase()}</button>}
+      controls={<button type="button" className="wm-panel-action-button" aria-label={copy('sortAria', 'Sort sports odds by {mode}', { mode: nextSortMode(sortMode) })} onClick={() => setSortMode((current) => nextSortMode(current))}>{sortMode.toUpperCase()}</button>}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Sports Odds</strong>
-          <p>Uses The Odds API h2h decimal odds, converts prices into implied probability, and leaves PMKT comparison disabled until local matching is enabled.</p>
+          <strong>{copy('helpTitle', 'Sports Odds')}</strong>
+          <p>{copy('helpText', 'Uses The Odds API h2h decimal odds, converts prices into implied probability, and leaves PMKT comparison disabled until local matching is enabled.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-odds-panel"

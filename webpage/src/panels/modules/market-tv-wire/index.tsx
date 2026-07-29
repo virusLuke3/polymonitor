@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { buildRuntimeHlsProxyUrl, buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketTvWire } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketTvWirePayload } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import { useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type PlaybackState = 'connecting' | 'playing' | 'waiting' | 'blocked' | 'external';
 const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
@@ -140,6 +140,7 @@ function MarketTvPreview({
   item: RuntimeMarketTvWireItem;
   onPlaybackBlocked?: (item: RuntimeMarketTvWireItem) => void;
 }) {
+  const { copy, shared } = useSpecialistCopy('market-tv-wire');
   const videoRef = useRef<HTMLVideoElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const sourceType = String(item.sourceType || '').toLowerCase();
@@ -309,10 +310,10 @@ function MarketTvPreview({
             <span>{categoryLabel(item.category)} / {sourceLocation(item)} / {youtubeProbeLabel(item)}</span>
           </div>
           <em className={`wm-market-tv-playback ${youtubeFrameState === 'blocked' ? 'blocked' : 'playing'}`}>
-            {youtubeFrameState === 'blocked' ? 'BLOCKED' : youtubeProbeLabel(item)}
+            {youtubeFrameState === 'blocked' ? shared('blocked', 'BLOCKED') : youtubeProbeLabel(item)}
           </em>
           <button type="button" onClick={() => openExternal(item.externalUrl || item.sourceUrl || `https://www.youtube.com/watch?v=${youtubeId}`)}>
-            OPEN
+            {shared('open', 'OPEN')}
           </button>
         </div>
         <div className="wm-market-tv-stage">
@@ -328,7 +329,7 @@ function MarketTvPreview({
               onLoad={() => setYoutubeFrameState('waiting')}
             />
           ) : (
-            <div className="wm-market-tv-fallback passive">STREAM PAUSED · STANDBY</div>
+            <div className="wm-market-tv-fallback passive">{copy('streamStandby', 'STREAM PAUSED · STANDBY')}</div>
           )}
           {youtubeFrameState === 'blocked' ? (
             <button
@@ -336,7 +337,7 @@ function MarketTvPreview({
               className="wm-market-tv-fallback"
               onClick={() => openExternal(item.externalUrl || item.sourceUrl || `https://www.youtube.com/watch?v=${youtubeId}`)}
             >
-              YOUTUBE EMBED BLOCKED · OPEN
+              {copy('youtubeBlockedOpen', 'YOUTUBE EMBED BLOCKED · OPEN')}
             </button>
           ) : null}
         </div>
@@ -350,10 +351,10 @@ function MarketTvPreview({
         <div>
           <span>{sourceTypeLabel(item.sourceType)}</span>
           <strong>{itemTitle(item)}</strong>
-          <em>{item.marketUseCase || item.sourceName || 'Open official live source.'}</em>
+          <em>{item.marketUseCase || item.sourceName || copy('openOfficialSource', 'Open official live source.')}</em>
         </div>
         <button type="button" onClick={() => openExternal(item.externalUrl || item.sourceUrl)}>
-          OPEN
+          {shared('open', 'OPEN')}
         </button>
       </div>
     );
@@ -368,7 +369,7 @@ function MarketTvPreview({
         </div>
         <em className={`wm-market-tv-playback ${playbackState}`}>{playbackState.toUpperCase()}</em>
         <button type="button" onClick={() => openExternal(item.externalUrl || item.sourceUrl || rawHlsUrl)}>
-          OPEN
+          {shared('open', 'OPEN')}
         </button>
       </div>
       <div className="wm-market-tv-stage">
@@ -379,7 +380,7 @@ function MarketTvPreview({
             className="wm-market-tv-fallback"
             onClick={() => openExternal(item.externalUrl || item.sourceUrl || rawHlsUrl)}
           >
-            STREAM BLOCKED · OPEN SOURCE
+            {copy('streamBlockedOpen', 'STREAM BLOCKED · OPEN SOURCE')}
           </button>
         ) : null}
       </div>
@@ -398,6 +399,7 @@ function MarketTvRow({
   onPreview: () => void;
   cooldowns?: Record<string, number>;
 }) {
+  const { copy, shared, formatRelativeTime } = useSpecialistCopy('market-tv-wire');
   const previewReady = isEmbeddedPreviewable(item, cooldowns || {});
   const tags = (item.matchedTerms?.length ? item.matchedTerms : item.marketTags || []).slice(0, 3);
   return (
@@ -412,7 +414,7 @@ function MarketTvRow({
             <span>{sourceLocation(item)}</span>
           </div>
           <strong>{itemTitle(item)}</strong>
-          <p>{item.marketUseCase || item.sourceName || 'Live source for market context.'}</p>
+          <p>{item.marketUseCase || item.sourceName || copy('liveContext', 'Live source for market context.')}</p>
           {tags.length ? (
             <div className="wm-market-tv-tags">
               {tags.map((tag) => <span key={`${item.id}-${tag}`}>{String(tag).toUpperCase()}</span>)}
@@ -421,8 +423,8 @@ function MarketTvRow({
         </div>
         <div className="wm-market-tv-score">
           <strong>{scoreLabel(item.relevanceScore)}</strong>
-          <span>{previewReady ? 'WATCH' : 'OPEN'}</span>
-          <em>{formatRelative(item.lastCheckedAt)}</em>
+          <span>{previewReady ? shared('watch', 'WATCH') : shared('open', 'OPEN')}</span>
+          <em>{formatRelativeTime(item.lastCheckedAt)}</em>
         </div>
       </button>
     </article>
@@ -430,6 +432,7 @@ function MarketTvRow({
 }
 
 function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload | null }) {
+  const { copy, shared } = useSpecialistCopy('market-tv-wire');
   const [showHelp, setShowHelp] = useState(false);
   const [activeCategory, setActiveCategory] = useState('all');
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -473,7 +476,7 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
       })
       .catch((error) => {
         if (cancelled) return;
-        setCategoryError(error instanceof Error ? error.message : 'Failed to load category');
+        setCategoryError(error instanceof Error ? error.message : copy('loadCategoryFailed', 'Failed to load category'));
       })
       .finally(() => {
         if (!cancelled) setCategoryLoading(false);
@@ -503,12 +506,12 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
 
   return (
     <Panel
-      title="MARKET TV WIRE"
+      title={copy('title', 'MARKET TV WIRE')}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain Market TV Wire panel"
+          aria-label={copy('explainAria', 'Explain Market TV Wire panel')}
           aria-expanded={showHelp}
           onClick={() => setShowHelp((value) => !value)}
         >
@@ -520,8 +523,8 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
       count={items.length || undefined}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Market TV Wire</strong>
-          <p>GCP-seeded live video sources ranked for Polymarket context. Stale snapshots stay visible when source refresh fails.</p>
+          <strong>{copy('helpTitle', 'Market TV Wire')}</strong>
+          <p>{copy('helpText', 'GCP-seeded live video sources ranked for Polymarket context. Stale snapshots stay visible when source refresh fails.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-market-tv-panel"
@@ -535,7 +538,7 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
               className={`${categoryToneClass('all')} ${activeCategory === 'all' ? 'active' : ''}`}
               onClick={() => setActiveCategory('all')}
             >
-              ALL <span>{Number.isFinite(totalCount) ? totalCount : items.length}</span>
+              {shared('all', 'ALL')} <span>{Number.isFinite(totalCount) ? totalCount : items.length}</span>
             </button>
             {categories.map((category) => (
               <button
@@ -549,10 +552,10 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
             ))}
           </div>
           <div className="wm-market-tv-summary">
-            <span><strong>{summary.liveReady ?? 0}</strong> READY</span>
-            <span><strong>{summary.marketMatched ?? 0}</strong> MATCHED</span>
-            <span><strong>{summary.regions ?? 0}</strong> REGIONS</span>
-            <span><strong>{summary.staleCount ?? 0}</strong> STALE</span>
+            <span><strong>{summary.liveReady ?? 0}</strong> {shared('ready', 'READY')}</span>
+            <span><strong>{summary.marketMatched ?? 0}</strong> {shared('matched', 'MATCHED')}</span>
+            <span><strong>{summary.regions ?? 0}</strong> {shared('regions', 'REGIONS')}</span>
+            <span><strong>{summary.staleCount ?? 0}</strong> {shared('stale', 'STALE')}</span>
           </div>
           {visibleItems.length ? (
             <div className="wm-market-tv-list">
@@ -570,8 +573,8 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
         </div>
         {previewItem ? <MarketTvPreview item={previewItem} onPlaybackBlocked={handlePlaybackBlocked} /> : (
           <div className="wm-empty-state">
-            <strong>{categoryLoading ? 'Market TV Wire loading.' : 'Market TV Wire warming.'}</strong>
-            <em>{categoryError || 'GCP seed snapshot or selected channel category is not ready yet.'}</em>
+            <strong>{categoryLoading ? copy('loading', 'Market TV Wire loading.') : copy('warming', 'Market TV Wire warming.')}</strong>
+            <em>{categoryError || copy('notReady', 'GCP seed snapshot or selected channel category is not ready yet.')}</em>
           </div>
         )}
       </div>

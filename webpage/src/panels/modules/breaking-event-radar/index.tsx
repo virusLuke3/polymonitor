@@ -2,9 +2,9 @@ import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeBreakingEventRadar } from '@/services/api';
 import type { RuntimeBreakingEventRadarItem, RuntimeBreakingEventRadarPayload } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'velocity' | 'latest' | 'markets';
 
@@ -57,10 +57,10 @@ function nextMode(mode: SortMode): SortMode {
   return 'velocity';
 }
 
-function modeLabel(mode: SortMode) {
-  if (mode === 'latest') return 'Latest';
+function modeLabel(mode: SortMode, shared: ReturnType<typeof useSpecialistCopy>['shared']) {
+  if (mode === 'latest') return shared('latest', 'Latest');
   if (mode === 'markets') return 'PMKT';
-  return 'Heat';
+  return shared('heat', 'Heat');
 }
 
 function openSource(url?: string | null) {
@@ -78,6 +78,7 @@ function topicInitial(value?: string | null) {
 }
 
 function RadarScope({ items, payload }: { items: RuntimeBreakingEventRadarItem[]; payload?: RuntimeBreakingEventRadarPayload | null }) {
+  const { copy } = useSpecialistCopy('breaking-event-radar');
   const top = items[0];
   const heat = clamp(Number(payload?.summary?.topVelocity || top?.velocityScore || 0));
   const alerts = clamp(Number(payload?.summary?.alerts || 0), 0, 9);
@@ -102,15 +103,16 @@ function RadarScope({ items, payload }: { items: RuntimeBreakingEventRadarItem[]
         ))}
       </div>
       <div className="wm-breaking-scope-copy">
-        <em>TOP EVENT</em>
+        <em>{copy('topEvent', 'TOP EVENT')}</em>
         <strong>{payload?.summary?.topEntity || top?.entity || '--'}</strong>
-        <span>{alerts} alert{alerts === 1 ? '' : 's'} / {items.length} tracked</span>
+        <span>{copy('trackedSummary', '{alerts} alerts / {count} tracked', { alerts, count: items.length })}</span>
       </div>
     </div>
   );
 }
 
 function RadarRow({ item }: { item: RuntimeBreakingEventRadarItem }) {
+  const { copy, shared } = useSpecialistCopy('breaking-event-radar');
   const severity = severityClass(item);
   const tags = (item.tags || []).slice(0, 2);
   const points = [
@@ -128,13 +130,13 @@ function RadarRow({ item }: { item: RuntimeBreakingEventRadarItem }) {
       </span>
       <span className="wm-breaking-card-main">
         <span className="wm-evidence-meta">
-          <b>{item.entity || 'Event'}</b>
+          <b>{item.entity || shared('event', 'Event')}</b>
           <em>{item.source || item.country || 'GDELT'}</em>
           <i className={severity}>{severity.toUpperCase()}</i>
           {tags.map((tag) => <i key={tag}>{tag.toUpperCase()}</i>)}
         </span>
-        <strong>{item.title || 'Breaking source warming'}</strong>
-        <small>{item.summary || `${item.country || 'Global'} evidence stream`}</small>
+        <strong>{item.title || copy('sourceWarming', 'Breaking source warming')}</strong>
+        <small>{item.summary || copy('evidenceStream', '{region} evidence stream', { region: item.country || shared('global', 'Global') })}</small>
       </span>
       <span className="wm-breaking-card-viz" aria-hidden="true">
         {points.map((value, index) => <i key={index} style={{ height: `${value}%` }} />)}
@@ -145,21 +147,22 @@ function RadarRow({ item }: { item: RuntimeBreakingEventRadarItem }) {
 }
 
 function BreakingEventRadarPanel({ payload }: { payload?: RuntimeBreakingEventRadarPayload | null }) {
+  const { copy, shared, formatRelativeTime } = useSpecialistCopy('breaking-event-radar');
   const [showHelp, setShowHelp] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>('velocity');
   const items = useMemo(() => sortItems(payload?.items || [], sortMode), [payload?.items, sortMode]);
   return (
     <Panel
-      title="BREAKING RADAR"
-      titleControls={<button type="button" className="wm-panel-help-button" aria-label="Explain breaking radar" aria-expanded={showHelp} onClick={() => setShowHelp((value) => !value)}>?</button>}
-      controls={<button type="button" className="wm-evidence-sort-button" aria-label="Change breaking radar sort" onClick={() => setSortMode((value) => nextMode(value))}>{modeLabel(sortMode)}</button>}
+      title={copy('title', 'BREAKING RADAR')}
+      titleControls={<button type="button" className="wm-panel-help-button" aria-label={copy('explainAria', 'Explain breaking radar')} aria-expanded={showHelp} onClick={() => setShowHelp((value) => !value)}>?</button>}
+      controls={<button type="button" className="wm-evidence-sort-button" aria-label={copy('sortAria', 'Change breaking radar sort')} onClick={() => setSortMode((value) => nextMode(value))}>{modeLabel(sortMode, shared)}</button>}
       badge={statusBadge(payload)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
       count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>Breaking Event Radar</strong>
-          <p>Seeded GDELT headlines plus Wikimedia pageview proxies, ranked by velocity and linked to related Polymarket markets when available.</p>
+          <strong>{copy('helpTitle', 'Breaking Event Radar')}</strong>
+          <p>{copy('helpText', 'Seeded GDELT headlines plus Wikimedia pageview proxies, ranked by velocity and linked to related Polymarket markets when available.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-evidence-panel wm-breaking-radar-panel"
@@ -168,7 +171,7 @@ function BreakingEventRadarPanel({ payload }: { payload?: RuntimeBreakingEventRa
       <RadarScope items={items} payload={payload} />
       <div className="wm-breaking-feed">
         {items.length ? items.map((item) => <RadarRow key={item.id || `${item.entity}-${item.title}`} item={item} />) : (
-          <div className="wm-registry-empty"><strong>Breaking evidence seed warming</strong><span>{formatRelative(payload?.generatedAt)}</span></div>
+          <div className="wm-registry-empty"><strong>{copy('warming', 'Breaking evidence seed warming')}</strong><span>{formatRelativeTime(payload?.generatedAt)}</span></div>
         )}
       </div>
     </Panel>

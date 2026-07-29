@@ -16,9 +16,12 @@ The PWA control in the shared header exposes install, connectivity, and update s
 
 The initial locale set is English (`en`) and Simplified Chinese (`zh`).
 
-- Stable flat keys live in `webpage/src/locales/en.json` and `zh.json`.
+- Stable core keys live in `webpage/src/locales/en.json` and `zh.json`. Atlas
+  specialist copy lives in `webpage/src/locales/specialist.ts`, where the
+  Chinese catalog is compile-time constrained to the complete English key set.
 - `LocaleProvider` defaults to English, owns explicit user-language persistence in `localStorage`, and manages `<html lang>`, translation lookup, and locale-aware date, relative-time, duration, number, currency, and percent formatting.
-- `npm run check:locales` rejects invalid keys, empty translations, or key drift between catalogs.
+- `npm run check:locales` rejects invalid keys, empty translations, key drift,
+  and placeholder drift in both the core and specialist catalogs.
 - The build runs the locale gate before TypeScript and Vite.
 
 The shared shell, settings, PWA state, developer surface, Watchlist, Briefing,
@@ -29,8 +32,11 @@ Surface, Oracle Feed, and Related Intelligence. Stable layer and panel IDs are
 translated only at render/search time. Market and quality evidence tables
 translate stable contract identifiers while leaving market titles, source
 names, statuses, hashes, chain keys, and unknown provider values unchanged.
-Macro, weather, transport, sports, and other specialist panels can migrate
-progressively without changing their data contracts.
+The public Atlas macro/rates/CPI, commodity/crypto, weather/transport,
+Breaking Event Radar, Market TV/YouTube, NBA/ESPN, Sports Odds, GRID esports,
+Jin10, and registered F1/BWENews surfaces now use the same contract. Their
+source-provided market titles, headlines, channel names, team names, raw
+statuses, identifiers, and provider fields remain unchanged.
 
 ## Notification boundary
 
