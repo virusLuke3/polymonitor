@@ -51,7 +51,7 @@ validate_positive_integer() {
 }
 
 configure_ssh_identity() {
-  local identity="${POLYDATA_GCP_SSH_IDENTITY_FILE:-${POLYDATA_GCP_SSH_KEY_PATH:-}}"
+  local identity="${POLYDATA_GCP_SSH_IDENTITY_FILE:-${POLYDATA_GCP_TUNNEL_HEALTH_SSH_IDENTITY_FILE:-${POLYDATA_GCP_TUNNEL_SSH_IDENTITY_FILE:-${POLYDATA_GCP_SSH_KEY_PATH:-}}}}"
   if [[ -n "$identity" ]]; then
     SSH_OPTS+=(-o IdentitiesOnly=yes -i "$identity")
   fi
@@ -305,11 +305,11 @@ main() {
   validate_positive_integer POLYDATA_TUNNEL_HEALTH_MAX_RESTARTS "$MAX_RESTARTS"
   validate_positive_integer POLYDATA_TUNNEL_HEALTH_BACKOFF_SECONDS "$BACKOFF_SECONDS"
 
-  local target="${POLYDATA_GCP_SSH_TARGET:-}"
+  local target="${POLYDATA_GCP_SSH_TARGET:-${POLYDATA_GCP_TUNNEL_HEALTH_SSH_TARGET:-${POLYDATA_GCP_TUNNEL_SSH_TARGET:-}}}"
   local postgres_port="${POLYDATA_REMOTE_POSTGRES_PORT:-45432}"
-  local clickhouse_port="${POLYDATA_REMOTE_CLICKHOUSE_PORT:-18123}"
+  local clickhouse_port="${POLYDATA_REMOTE_CLICKHOUSE_HTTP_PORT:-${POLYDATA_REMOTE_CLICKHOUSE_PORT:-18123}}"
   if [[ -z "$target" ]]; then
-    log "POLYDATA_GCP_SSH_TARGET is not set; no remote probe performed"
+    log "no supported GCP SSH target is configured; no remote probe performed"
     exit 1
   fi
 

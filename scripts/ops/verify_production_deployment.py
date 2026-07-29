@@ -32,7 +32,6 @@ REPRESENTATIVE_ENDPOINTS = (
 EXPECTED_REMOTE_UNITS = (
     "polydata-gcp.target",
     "polydata-api.service",
-    "polydata-db-tunnel.service",
     "polydata-operations-runtime-health.timer",
     "polydata-operations-panel-health.timer",
 )
@@ -121,7 +120,12 @@ def _ssh(target: str, command: str) -> subprocess.CompletedProcess[str]:
         "-o",
         "ConnectionAttempts=1",
     ]
-    identity = os.environ.get("POLYDATA_GCP_SSH_IDENTITY_FILE")
+    identity = (
+        os.environ.get("POLYDATA_GCP_SSH_IDENTITY_FILE")
+        or os.environ.get("POLYDATA_GCP_TUNNEL_HEALTH_SSH_IDENTITY_FILE")
+        or os.environ.get("POLYDATA_GCP_TUNNEL_SSH_IDENTITY_FILE")
+        or os.environ.get("POLYDATA_GCP_SSH_KEY_PATH")
+    )
     if identity:
         ssh_command.extend(["-o", "IdentitiesOnly=yes", "-i", identity])
     return subprocess.run(
@@ -183,7 +187,7 @@ printf '%s\\n%s\\n%s\\n%s\\n' "$sha" "$index_hash" "$units" "$system_units"
 def verify(
     *,
     base_url: str,
-    token: str,
+    api_key: str,
     ssh_target: str,
     remote_app_dir: str,
     expected_sha: str,
@@ -200,16 +204,16 @@ def verify(
             required_statuses={"ok"} if name == "health" else None,
             require_nonempty=name in {"markets", "oracle"},
         )
-    if token:
+    if api_key:
         endpoints["operations"] = _http_json(
             urljoin(normalized, "wm-api/system/operations"),
-            token=token,
+            token=api_key,
             timeout=timeout,
             required_statuses={"healthy"},
         )
         endpoints["incidents"] = _http_json(
             urljoin(normalized, "wm-api/system/incidents"),
-            token=token,
+            token=api_key,
             timeout=timeout,
         )
     remote = _remote_snapshot(ssh_target, remote_app_dir) if ssh_target else {
@@ -243,8 +247,16 @@ def verify(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=os.environ.get("POLYDATA_PUBLIC_BASE_URL", "https://polymonitor.club"))
-    parser.add_argument("--token", default=os.environ.get("POLYDATA_OPERATIONS_API_TOKEN", ""))
-    parser.add_argument("--ssh-target", default=os.environ.get("POLYDATA_GCP_SSH_TARGET", ""))
+    parser.add_argument("--api-key", default=os.environ.get("POLYDATA_OPERATIONS_API_KEY", ""))
+    parser.add_argument(
+        "--ssh-target",
+        default=(
+            os.environ.get("POLYDATA_GCP_SSH_TARGET")
+            or os.environ.get("POLYDATA_GCP_TUNNEL_HEALTH_SSH_TARGET")
+            or os.environ.get("POLYDATA_GCP_TUNNEL_SSH_TARGET")
+            or ""
+        ),
+    )
     parser.add_argument("--remote-app-dir", default=os.environ.get("POLYDATA_REMOTE_APP_DIR", "/opt/polyData"))
     parser.add_argument("--expected-sha", default="")
     parser.add_argument("--timeout", type=int, default=20)
@@ -253,7 +265,7 @@ def main() -> int:
     try:
         payload = verify(
             base_url=args.base_url,
-            token=args.token,
+            api_key=args.api_key,
             ssh_target=args.ssh_target,
             remote_app_dir=args.remote_app_dir,
             expected_sha=args.expected_sha,

@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-import hmac
-import os
+from collections.abc import Mapping
+from typing import Any
 
 from flask import Blueprint, jsonify, request
 
 from scripts.api.services import system_service
 
 
-def _operations_authorized() -> bool:
-    configured = os.environ.get("POLYDATA_OPERATIONS_API_TOKEN", "")
-    supplied = request.headers.get("Authorization", "")
-    if configured:
-        expected = f"Bearer {configured}"
-        return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+def _operations_authorized(helpers: Mapping[str, Any]) -> bool:
+    authenticate_request = helpers.get("authenticate_request")
+    if callable(authenticate_request):
+        authenticate_request(
+            request,
+            required_role="admin",
+            required_scope="operations:read",
+        )
+        return True
     forwarded = request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP")
     return not forwarded and request.remote_addr in {"127.0.0.1", "::1"}
 
@@ -30,31 +33,31 @@ def _authorization_error():
     return response
 
 
-def create_system_blueprint(helpers: dict) -> Blueprint:
+def create_system_blueprint(helpers: Mapping[str, Any]) -> Blueprint:
     bp = Blueprint("system_routes", __name__)
 
     @bp.route("/system/health", methods=["GET"])
     def api_system_health():
-        if not _operations_authorized():
+        if not _operations_authorized(helpers):
             return _authorization_error()
         return jsonify(helpers["build_system_health_payload"]())
 
     @bp.route("/system/seed-health", methods=["GET"])
     @bp.route("/runtime/system/seed-health", methods=["GET"])
     def api_seed_health():
-        if not _operations_authorized():
+        if not _operations_authorized(helpers):
             return _authorization_error()
         return jsonify(helpers["build_seed_health_payload"]())
 
     @bp.route("/system/operations", methods=["GET"])
     def api_operations():
-        if not _operations_authorized():
+        if not _operations_authorized(helpers):
             return _authorization_error()
         return jsonify(system_service.build_operations_payload())
 
     @bp.route("/system/incidents", methods=["GET"])
     def api_operations_incidents():
-        if not _operations_authorized():
+        if not _operations_authorized(helpers):
             return _authorization_error()
         return jsonify(system_service.build_incidents_payload())
 

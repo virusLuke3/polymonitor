@@ -28,8 +28,8 @@ PANEL_INDEX = REPO_ROOT / "webpage" / "src" / "panels" / "modules" / "index.ts"
 IMPORT_RE = re.compile(
     r"import\s+\{\s*panel\s+as\s+([A-Za-z0-9_]+)\s*\}\s+from\s+['\"]\./([^'\"]+)['\"]"
 )
-ALL_MODULES_RE = re.compile(
-    r"const\s+ALL_PANEL_MODULES[^=]*=\s*\[(.*?)\]\s*;",
+PANEL_MODULES_RE = re.compile(
+    r"const\s+(?:ALL_)?PANEL_MODULES[^=]*=\s*\[(.*?)\]\s*;",
     re.DOTALL,
 )
 PANEL_ID_RE = re.compile(
@@ -50,9 +50,9 @@ def _module_file(relative: str) -> Path:
 def discover_registered_panel_ids() -> list[str]:
     index_text = PANEL_INDEX.read_text(encoding="utf-8")
     imports = dict(IMPORT_RE.findall(index_text))
-    all_match = ALL_MODULES_RE.search(index_text)
+    all_match = PANEL_MODULES_RE.search(index_text)
     if not all_match:
-        raise ValueError("ALL_PANEL_MODULES registry not found")
+        raise ValueError("PANEL_MODULES registry not found")
     aliases = [
         token.strip()
         for token in all_match.group(1).split(",")
@@ -131,9 +131,9 @@ def _request_json(path: str) -> dict[str, Any]:
         f"http://127.0.0.1:{os.environ.get('POLYDATA_API_PORT', '18500')}",
     ).rstrip("/")
     headers = {"Accept": "application/json"}
-    token = os.environ.get("POLYDATA_OPERATIONS_API_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    api_key = os.environ.get("POLYDATA_OPERATIONS_API_KEY")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     request = Request(f"{base}/{path.lstrip('/')}", headers=headers)
     response = build_opener(ProxyHandler({})).open(request, timeout=15)
     try:
