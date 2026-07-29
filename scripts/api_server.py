@@ -312,6 +312,7 @@ def build_route_context(service_context: ServiceContext) -> RouteContext:
         "get_f1_panel_snapshot": get_f1_panel_snapshot,
         "get_geo_sanctions_shock_snapshot": get_geo_sanctions_shock_snapshot,
         "get_natural_hazards_snapshot": get_natural_hazards_snapshot,
+        "get_natural_hazard_related_markets": get_natural_hazard_related_markets,
         "get_global_transport_shipping_snapshot": lambda limit=14: global_transport_shipping_service.get_global_transport_shipping_snapshot(build_service_context(), limit=limit),
         "get_global_weather_map_snapshot": get_global_weather_map_snapshot,
         "get_grid_esports_snapshot": lambda limit=10: grid_esports_service.get_grid_esports_snapshot(build_service_context(), limit=limit),
@@ -544,6 +545,7 @@ def _create_service_context() -> ServiceContext:
         "get_f1_panel_snapshot": lambda limit=10: f1_runtime_service.get_f1_panel_snapshot(build_service_context(), limit=limit),
         "get_geo_sanctions_shock_snapshot": lambda limit=geo_sanctions_shock_service.DEFAULT_ITEM_LIMIT: geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit),
         "get_natural_hazards_snapshot": lambda limit=natural_hazards.DEFAULT_EVENT_LIMIT: natural_hazards.get_natural_hazards_snapshot(build_service_context(), limit=limit),
+        "get_natural_hazard_related_markets": lambda event_id, limit=natural_hazards.DEFAULT_RELATED_MARKET_LIMIT: get_natural_hazard_related_markets(event_id=event_id, limit=limit),
         "get_global_transport_shipping_snapshot": lambda limit=14: global_transport_shipping_service.get_global_transport_shipping_snapshot(build_service_context(), limit=limit),
         "get_global_weather_map_snapshot": lambda limit=34: global_weather_map_service.get_global_weather_map_snapshot(build_service_context(), limit=limit),
         "get_grid_esports_snapshot": lambda limit=10: grid_esports_service.get_grid_esports_snapshot(build_service_context(), limit=limit),
@@ -1096,6 +1098,26 @@ def get_energy_gasoline_shock_snapshot(limit: int = 6) -> Dict[str, Any]:
 
 def get_global_weather_map_snapshot(limit: int = 34) -> Dict[str, Any]:
     return global_weather_map_service.get_global_weather_map_snapshot(build_service_context(), limit=limit)
+
+
+def get_natural_hazard_related_markets(
+    event_id: str,
+    limit: int = natural_hazards.DEFAULT_RELATED_MARKET_LIMIT,
+) -> Dict[str, Any] | None:
+    hazards = natural_hazards.get_natural_hazards_snapshot(
+        build_service_context(),
+        limit=natural_hazards.DEFAULT_EVENT_LIMIT,
+    )
+    weather_markets = global_weather_map_service.get_global_weather_map_snapshot(
+        build_service_context(),
+        limit=100,
+    )
+    return natural_hazards.related_weather_markets_snapshot(
+        event_id=event_id,
+        natural_hazards_payload=hazards,
+        weather_map_payload=weather_markets,
+        limit=limit,
+    )
 
 
 def get_weather_news_snapshot(limit: int = 24) -> Dict[str, Any]:

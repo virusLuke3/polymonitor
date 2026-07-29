@@ -371,12 +371,14 @@ function WorldEventInlineMap({
   onCameraChange,
   onEventSelect,
   onEventHover,
+  onOpenMarket,
 }: {
   events: GeoEvent[];
   state: WorldEventMapState;
   onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
   onEventSelect: (eventId: string | null) => void;
   onEventHover: (eventId: string | null) => void;
+  onOpenMarket: (marketId: number) => void;
 }) {
   const { t } = useI18n();
   return (
@@ -388,6 +390,7 @@ function WorldEventInlineMap({
         onCameraChange={onCameraChange}
         onEventSelect={onEventSelect}
         onEventHover={onEventHover}
+        onOpenMarket={onOpenMarket}
         height={620}
       />
     </div>
@@ -1862,6 +1865,23 @@ function WorldMonitorApp() {
     }, 0);
   };
 
+  const focusRelatedMarket = (marketId: number) => {
+    const group = findGroupForMarketId(marketGroups, marketId);
+    if (group) {
+      focusMarketGroup(group, outcomeKeyForGroupMarket(group, marketId), marketId);
+    } else {
+      selectedMarketGroupIdRef.current = null;
+      selectedMarketIdRef.current = marketId;
+      setSelectedMarketGroupId(null);
+      setSelectedMarketGroupOutcomeKey(null);
+      setSelectedMarketId(marketId);
+    }
+    setNotice(`Focused evidence-linked market ${marketId}.`);
+    window.setTimeout(() => {
+      document.querySelector('.wm-map-bottom-grid')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }, 0);
+  };
+
   const changeViewMode = (nextMode: MapViewMode) => {
     setViewMode(nextMode);
     setNotice(t('atlas.viewEnabled', { view: t(MAP_VIEW_MESSAGE_KEYS[nextMode]) }));
@@ -1998,6 +2018,7 @@ function WorldMonitorApp() {
                     onCameraChange={(nextCamera) => worldEventMap.setCamera(nextCamera.center, nextCamera.zoom)}
                     onEventSelect={worldEventMap.selectEvent}
                     onEventHover={worldEventMap.hoverEvent}
+                    onOpenMarket={focusRelatedMarket}
                   />
                 )}
 

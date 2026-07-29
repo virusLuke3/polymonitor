@@ -12,6 +12,7 @@ export type WorldEventMapProps = {
   onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
   onEventSelect: (eventId: string | null) => void;
   onEventHover: (eventId: string | null) => void;
+  onOpenMarket?: (marketId: number) => void;
   height?: number;
 };
 
@@ -21,6 +22,7 @@ export function WorldEventMap({
   onCameraChange,
   onEventSelect,
   onEventHover,
+  onOpenMarket,
   height = 620,
 }: WorldEventMapProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -100,6 +102,7 @@ export function WorldEventMap({
           key={selectedEvent.id}
           event={selectedEvent}
           onClose={() => onEventSelect(null)}
+          onOpenMarket={onOpenMarket}
           returnFocusTarget={hostRef.current}
         />
       ) : null}

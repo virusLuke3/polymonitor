@@ -9,10 +9,12 @@ import {
   hazardMetricFields,
   type InspectorField,
 } from './eventInspectorModel';
+import { useRelatedWeatherMarkets } from '../data/useRelatedWeatherMarkets';
 
 export type EventInspectorProps = {
   event: GeoEvent;
   onClose: () => void;
+  onOpenMarket?: (marketId: number) => void;
   returnFocusTarget?: HTMLElement | null;
 };
 
@@ -54,11 +56,13 @@ function SourceCard({ source }: { source: GeoEventSource }) {
 export function EventInspector({
   event,
   onClose,
+  onOpenMarket,
   returnFocusTarget,
 }: EventInspectorProps) {
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const hazard = isHazardGeoEvent(event) ? event : null;
+  const relatedMarkets = useRelatedWeatherMarkets(hazard?.id || null);
 
   useEffect(() => {
     const active = document.activeElement;
@@ -189,10 +193,71 @@ export function EventInspector({
 
       <section className="wm-event-inspector-section wm-event-inspector-markets" aria-labelledby="wm-related-markets-heading">
         <h3 id="wm-related-markets-heading">Related Weather Markets</h3>
-        <p>
-          No evidence-qualified related weather markets were found. Markets appear here only after
-          type, location, time window and settlement metric all pass the linker threshold.
-        </p>
+        {relatedMarkets.loading ? <p role="status">Evaluating type, space, time and settlement metric…</p> : null}
+        {relatedMarkets.error ? (
+          <p className="wm-event-inspector-market-error" role="alert">
+            Related markets unavailable: {relatedMarkets.error}
+          </p>
+        ) : null}
+        {!relatedMarkets.loading && !relatedMarkets.error && relatedMarkets.response?.markets.length === 0 ? (
+          <p>
+            No evidence-qualified related weather markets were found. Markets appear here only after
+            type, location, time window and settlement metric all pass the linker threshold.
+          </p>
+        ) : null}
+        <div className="wm-event-inspector-market-list">
+          {relatedMarkets.response?.markets.map((market) => (
+            <article key={market.eventSlug || market.marketId || market.title}>
+              <div className="wm-event-inspector-market-head">
+                <span className={`relationship-${market.relationship}`}>{market.relationship}</span>
+                <span>{Math.round(market.matchScore * 100)}% evidence</span>
+              </div>
+              <strong>{market.title}</strong>
+              <p>
+                {[market.target.city, market.target.country, market.target.date].filter(Boolean).join(' · ')}
+              </p>
+              {market.quote.leadingOutcome ? (
+                <div className="wm-event-inspector-market-quote">
+                  <span>{market.quote.leadingOutcome}</span>
+                  <strong>
+                    {market.quote.probability == null
+                      ? '--'
+                      : `${(market.quote.probability * 100).toFixed(1)}%`}
+                  </strong>
+                  <em>
+                    {market.quote.spread == null ? 'NO LIVE SPREAD' : `SPREAD ${(market.quote.spread * 100).toFixed(1)}¢`}
+                  </em>
+                </div>
+              ) : null}
+              <details>
+                <summary>Why this is linked</summary>
+                <ul>
+                  {Object.entries(market.matchReasons).map(([dimension, evidence]) => (
+                    <li key={dimension}>
+                      <strong>{dimension}</strong> — {evidence.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              <div className="wm-event-inspector-market-actions">
+                {market.marketId != null && onOpenMarket ? (
+                  <button type="button" onClick={() => onOpenMarket(market.marketId as number)}>
+                    OPEN MARKET WORKSPACE
+                  </button>
+                ) : null}
+                {market.url ? (
+                  <a href={market.url} target="_blank" rel="noreferrer">POLYMARKET ↗</a>
+                ) : null}
+              </div>
+            </article>
+          ))}
+        </div>
+        {relatedMarkets.response ? (
+          <p className="wm-event-inspector-market-audit">
+            LINKER {relatedMarkets.response.linkerVersion} · {relatedMarkets.response.counts.matched}/
+            {relatedMarkets.response.counts.candidates} CANDIDATES PASSED
+          </p>
+        ) : null}
       </section>
     </aside>
   );

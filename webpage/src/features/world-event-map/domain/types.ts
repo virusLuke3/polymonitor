@@ -176,6 +176,69 @@ export interface HazardMapResponse {
   };
 }
 
+export type HazardMarketEvidence = {
+  passed: boolean;
+  level?: 'direct' | 'contextual';
+  reason: string;
+  distanceKm?: number;
+  targetDate?: string | null;
+};
+
+export interface RelatedWeatherMarket {
+  marketId?: number | null;
+  eventSlug?: string | null;
+  title: string;
+  url?: string | null;
+  marketFamily: string;
+  relationship: 'direct' | 'contextual';
+  matchScore: number;
+  matchReasons: {
+    type: HazardMarketEvidence;
+    space: HazardMarketEvidence;
+    time: HazardMarketEvidence;
+    metric: HazardMarketEvidence;
+  };
+  matchedAt: string;
+  linkerVersion: string;
+  target: {
+    cityId?: string | null;
+    city?: string | null;
+    country?: string | null;
+    lat?: number | null;
+    lon?: number | null;
+    date?: string | null;
+  };
+  quote: {
+    leadingOutcome?: string | null;
+    probability?: number | null;
+    bestBid?: number | null;
+    bestAsk?: number | null;
+    spread?: number | null;
+    bookStatus?: string | null;
+    priceSource?: string | null;
+    updatedAt?: string | null;
+  };
+  oracle: {
+    status: string;
+    reason: string;
+  };
+}
+
+export interface HazardMarketLinksResponse {
+  schemaVersion: 'hazard-market-links.v1';
+  generatedAt: string;
+  eventId: string;
+  linkerVersion: string;
+  markets: RelatedWeatherMarket[];
+  counts: {
+    candidates: number;
+    matched: number;
+    returned: number;
+    rejected: number;
+  };
+  limitations: string[];
+}
+
 export type GeoEventAdapterIssue = {
   index: number;
   code: string;

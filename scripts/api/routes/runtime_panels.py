@@ -23,12 +23,17 @@ except Exception:  # pragma: no cover
 class RuntimePanelRouteDependencies:
     panel_context: RuntimePanelContext
     utc_now_iso: Callable[[], str]
+    natural_hazard_related_markets: Callable[..., dict[str, Any] | None] | None
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelRouteDependencies:
         return cls(
             panel_context=RuntimePanelContext.from_context(context),
             utc_now_iso=cast(Callable[[], str], resolve_route_callable(context, "utc_now_iso")),
+            natural_hazard_related_markets=cast(
+                Callable[..., dict[str, Any] | None] | None,
+                context.get("get_natural_hazard_related_markets"),
+            ),
         )
 
 
@@ -194,6 +199,37 @@ def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
                 "errors": errors,
             }
         )
+
+    @bp.route("/runtime/world/natural-hazards/related-markets", methods=["GET"])
+    def api_natural_hazard_related_markets():
+        event_id = str(request.args.get("eventId") or "").strip()
+        if not event_id:
+            return jsonify({
+                "status": "error",
+                "error": "event-id-required",
+            }), 400
+        if dependencies.natural_hazard_related_markets is None:
+            return jsonify({
+                "status": "error",
+                "error": "hazard-market-linker-unavailable",
+            }), 503
+        try:
+            limit = max(1, min(25, int(request.args.get("limit") or 8)))
+        except (TypeError, ValueError):
+            limit = 8
+        payload = dependencies.natural_hazard_related_markets(
+            event_id=event_id,
+            limit=limit,
+        )
+        if payload is None:
+            return jsonify({
+                "status": "error",
+                "error": "hazard-event-not-found",
+                "eventId": event_id,
+            }), 404
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, max-age=30"
+        return response
 
     @bp.route("/v1/runtime/panels", methods=["GET"])
     def api_runtime_panels_batch_v1():
