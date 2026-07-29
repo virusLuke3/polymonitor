@@ -39,11 +39,15 @@ import { fetchWorkspaceLayout, saveWorkspaceLayout, type WorkspaceLayout } from 
 import {
   adaptGeoShockPayload,
   adaptTransportReference,
+  filterWorldEventMapEvents,
   MapStatus,
+  MapToolbar,
   selectableWorldEventLayers,
   sourceStatusFromAdapter,
+  useWorldEventMapState,
   worldEventLayerById,
   type GeoEvent,
+  type WorldEventRegion,
 } from '@/features/world-event-map';
 import type {
   BootstrapPayload,
@@ -84,7 +88,7 @@ type LayerToggle = {
   hint?: string;
 };
 
-type RegionKey = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
+type RegionKey = WorldEventRegion;
 type MapViewMode = '3d' | '2d';
 type CommandPaletteTab = 'markets' | 'panels' | 'commands';
 const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
@@ -94,9 +98,7 @@ const PROMOTED_WIDE_PANEL_IDS = ['breaking-event-radar', 'global-transport-shipp
 const MARKET_GROUP_SORT_STORAGE_KEY = 'wm:marketGroupSort:v1';
 const DEFAULT_MAP_VIEW_MODE: MapViewMode = '2d';
 const VIEW_STORAGE_KEY = 'polydata:map-view:v4';
-const REGION_STORAGE_KEY = 'polydata:region:v1';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
-const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
 const WORKSPACE_SYNC_META_KEY = 'polydata:workspace-sync-meta:v1';
 const GEO_SHOCK_STORAGE_KEY = 'polydata:seed:world:geo-sanctions-shock:v1';
 const GEO_SHOCK_LOCAL_STALE_MS = 24 * 60 * 60 * 1000;
@@ -189,8 +191,8 @@ function reorderPanelIds(panelIds: string[], draggedPanelId: string, targetPanel
 
 function clampMapZoom(value: unknown) {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 1;
-  return Math.max(1, Math.min(4, Math.round(numeric)));
+  if (!Number.isFinite(numeric)) return 1.25;
+  return Math.max(0.75, Math.min(8, Math.round(numeric * 4) / 4));
 }
 
 function isLiveStatus(status?: string | null) {
@@ -362,9 +364,13 @@ function hasGeoConflictCoordinates(item: RuntimeGeoSanctionsShockItem) {
 
 function WorldEventInlineMap({
   events,
+  camera,
+  onCameraChange,
   showAirRoutes,
 }: {
   events: GeoEvent[];
+  camera: { center: { lon: number; lat: number }; zoom: number };
+  onCameraChange: (camera: { center: { lon: number; lat: number }; zoom: number }) => void;
   showAirRoutes: boolean;
 }) {
   const { t } = useI18n();
@@ -373,6 +379,8 @@ function WorldEventInlineMap({
       <div className="wm-inline-weather-map-hint">{t('atlas.weatherHint')}</div>
       <WeatherDeckMap
         events={events}
+        camera={camera}
+        onCameraChange={(nextCamera) => onCameraChange(nextCamera)}
         showAirRoutes={showAirRoutes}
         selectedCityId={null}
         height={620}
@@ -752,7 +760,21 @@ function WorldMonitorApp() {
   const [commandMarketHits, setCommandMarketHits] = useState<MarketListItem[]>([]);
   const [commandMarketSearchLoading, setCommandMarketSearchLoading] = useState(false);
   const [commandMarketSearchError, setCommandMarketSearchError] = useState('');
-  const [layers, setLayers] = useState<LayerToggle[]>(INITIAL_LAYERS);
+  const worldEventMap = useWorldEventMapState();
+  const layers = useMemo<LayerToggle[]>(
+    () => INITIAL_LAYERS.map((layer) => ({
+      ...layer,
+      enabled: worldEventMap.state.activeLayerIds.includes(layer.id),
+    })),
+    [worldEventMap.state.activeLayerIds],
+  );
+  const region = worldEventMap.state.region;
+  const mapZoom = worldEventMap.state.zoom;
+  const setRegion = (nextRegion: RegionKey) => worldEventMap.setRegion(nextRegion);
+  const setMapZoom = (nextZoom: number | ((current: number) => number)) => {
+    const value = typeof nextZoom === 'function' ? nextZoom(worldEventMap.state.zoom) : nextZoom;
+    worldEventMap.setZoom(clampMapZoom(value));
+  };
   const [panelLayoutPrefs, setPanelLayoutPrefs] = useState<PanelLayoutPrefs>(() => readJsonStorage<PanelLayoutPrefs>(PANEL_LAYOUT_STORAGE_KEY, {}));
   const [panelPrefsLoaded, setPanelPrefsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -772,11 +794,6 @@ function WorldMonitorApp() {
     dpr: 1,
   });
   const geoShockHydratingRef = useRef(false);
-  const [region, setRegion] = useState<RegionKey>(() => {
-    const override = readSearchParam('region');
-    return REGION_OPTIONS.some((option) => option.value === override) ? (override as RegionKey) : readStringStorage(REGION_STORAGE_KEY, 'global');
-  });
-  const [mapZoom, setMapZoom] = useState<number>(() => clampMapZoom(readJsonStorage(ZOOM_STORAGE_KEY, 1)));
   const [showPanelLibrary, setShowPanelLibrary] = useState<boolean>(() => Boolean(readJsonStorage(LIBRARY_STORAGE_KEY, true)));
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -908,18 +925,8 @@ function WorldMonitorApp() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(REGION_STORAGE_KEY, region);
-  }, [region]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
     window.localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(showPanelLibrary));
   }, [showPanelLibrary]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(ZOOM_STORAGE_KEY, JSON.stringify(mapZoom));
-  }, [mapZoom]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -956,7 +963,9 @@ function WorldMonitorApp() {
     if (!readSearchParam('view') && isMapViewMode(preferences.viewMode || '')) {
       setViewMode(preferences.viewMode as MapViewMode);
     }
-    if (preferences.mapZoom != null) setMapZoom(clampMapZoom(preferences.mapZoom));
+    if (!readSearchParam('zoom') && !readSearchParam('center') && preferences.mapZoom != null) {
+      setMapZoom(clampMapZoom(preferences.mapZoom));
+    }
     if (typeof preferences.showPanelLibrary === 'boolean') setShowPanelLibrary(preferences.showPanelLibrary);
     if (['active', 'new', 'volume', 'close', 'move', 'trades'].includes(preferences.marketGroupSort || '')) {
       setMarketGroupSort(preferences.marketGroupSort as MarketGroupSort);
@@ -1493,7 +1502,7 @@ function WorldMonitorApp() {
       const label = localizedLayerLabel(target, t);
       setNotice(t(target.enabled ? 'atlas.hideLayer' : 'atlas.showLayer', { layer: label }));
     }
-    setLayers((current) => current.map((layer) => (layer.id === layerId ? { ...layer, enabled: !layer.enabled } : layer)));
+    worldEventMap.toggleLayer(layerId);
   };
 
   const togglePanel = (panelId: string) => {
@@ -1603,9 +1612,12 @@ function WorldMonitorApp() {
   const geoShockAdapterResult = useMemo(() => adaptGeoShockPayload(geoShockPayload), [geoShockPayload]);
   const ucdpMapEvents = useMemo(
     () => ucdpLayerEnabled
-      ? geoShockAdapterResult.events.filter((event) => event.geometry?.type === 'Point')
+      ? filterWorldEventMapEvents(
+        geoShockAdapterResult.events.filter((event) => event.geometry?.type === 'Point'),
+        worldEventMap.state,
+      )
       : [],
-    [geoShockAdapterResult, ucdpLayerEnabled],
+    [geoShockAdapterResult, ucdpLayerEnabled, worldEventMap.state],
   );
   const showAirRoutes = enabledLayerIds.includes('air-routes');
   const transportPayload = runtimeData['global-transport-shipping'] as RuntimeGlobalTransportShippingPayload | undefined;
@@ -1630,7 +1642,7 @@ function WorldMonitorApp() {
   const mapVisibleEventCount = viewMode === '3d' ? globeStatus.markerVisible : ucdpMapEvents.length;
   const mapQualityLabel = viewMode === '3d'
     ? `${globeStatus.qualitySetting.toUpperCase()} · ${globeStatus.fps ? Math.round(globeStatus.fps) : '--'} FPS`
-    : t(MAP_VIEW_MESSAGE_KEYS[viewMode]);
+    : `${t(MAP_VIEW_MESSAGE_KEYS[viewMode])} · Z${mapZoom.toFixed(2)}`;
 
   const runtimeValue = <T,>(panelId: string): T | null => (runtimeData[panelId] as T | undefined) || null;
   const runtimePayloadLoaded = (panelId: string) => runtimeData[panelId] !== undefined && runtimeData[panelId] !== null;
@@ -1776,8 +1788,7 @@ function WorldMonitorApp() {
   };
 
   const resetWorkspace = () => {
-    setRegion('global');
-    setMapZoom(1);
+    worldEventMap.reset();
     setViewMode(DEFAULT_MAP_VIEW_MODE);
     const firstGroup = pickDefaultMarketGroup(marketGroups);
     if (firstGroup) {
@@ -1793,6 +1804,11 @@ function WorldMonitorApp() {
     setNotice(t('atlas.workspaceReset'));
   };
 
+  const resetMap = () => {
+    worldEventMap.reset();
+    setNotice(t('atlas.workspaceReset'));
+  };
+
   const cycleRegion = () => {
     const currentIndex = REGION_OPTIONS.findIndex((item) => item.value === region);
     const next = REGION_OPTIONS[(currentIndex + 1) % REGION_OPTIONS.length];
@@ -1801,7 +1817,9 @@ function WorldMonitorApp() {
 
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      const shareUrl = new URL(worldEventMap.shareUrl(window.location.href));
+      shareUrl.searchParams.set('view', viewMode);
+      await navigator.clipboard.writeText(shareUrl.toString());
       setNotice(t('atlas.linkCopied'));
     } catch {
       setNotice(t('atlas.copyFailed'));
@@ -1823,7 +1841,6 @@ function WorldMonitorApp() {
 
   const changeViewMode = (nextMode: MapViewMode) => {
     setViewMode(nextMode);
-    setMapZoom((current) => clampMapZoom(nextMode === '3d' ? current : Math.min(2, current)));
     setNotice(t('atlas.viewEnabled', { view: t(MAP_VIEW_MESSAGE_KEYS[nextMode]) }));
   };
 
@@ -1888,6 +1905,12 @@ function WorldMonitorApp() {
             </div>
           </div>
 
+          <MapToolbar
+            state={worldEventMap.state}
+            onTimeRangeChange={worldEventMap.setTimeRange}
+            onSeveritiesChange={worldEventMap.setSeverities}
+          />
+
           <div className="wm-map-stage">
             <div className={`wm-globe-area ${viewMode !== '3d' ? 'wm-globe-area-flat' : ''}`}>
               <aside className={`wm-layer-sidebar ${showPanelLibrary ? '' : 'collapsed'}`}>
@@ -1941,13 +1964,15 @@ function WorldMonitorApp() {
                     contentItems={currentLatestContent}
                     ucdpEvents={ucdpRawMapEvents}
                     region={region}
-                    zoomLevel={mapZoom}
+                    zoomLevel={Math.min(4, mapZoom)}
                     enabledLayerIds={enabledLayerIds}
                     onMetricsChange={setGlobeStatus}
                   />
                 ) : (
                   <WorldEventInlineMap
                     events={worldEventMapEvents}
+                    camera={{ center: worldEventMap.state.center, zoom: worldEventMap.state.zoom }}
+                    onCameraChange={(nextCamera) => worldEventMap.setCamera(nextCamera.center, nextCamera.zoom)}
                     showAirRoutes={showAirRoutes}
                   />
                 )}
@@ -1958,7 +1983,7 @@ function WorldMonitorApp() {
                 <button type="button" className="wm-side-beta" onClick={() => setShowSettings(true)}>BETA</button>
                 <button type="button" onClick={zoomIn}>＋</button>
                 <button type="button" onClick={zoomOut}>－</button>
-                <button type="button" onClick={resetWorkspace}>⌂</button>
+                <button type="button" onClick={resetMap}>⌂</button>
               </div>
 
               {loading ? <div className="wm-banner">{t('atlas.bootstrapping')}</div> : null}
@@ -2284,7 +2309,7 @@ function WorldMonitorApp() {
             </label>
             <label className="wm-settings-row">
               <span>{t('settings.mapZoom')}</span>
-              <input type="range" min="1" max="4" step="1" value={String(mapZoom)} onInput={(event) => setMapZoom(clampMapZoom((event.currentTarget as HTMLInputElement).value))} />
+              <input type="range" min="0.75" max="8" step="0.25" value={String(mapZoom)} onInput={(event) => setMapZoom(clampMapZoom((event.currentTarget as HTMLInputElement).value))} />
             </label>
             <section className={`wm-settings-sync is-${workspaceSyncStatus}`} aria-live="polite">
               <div>

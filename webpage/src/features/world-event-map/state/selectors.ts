@@ -1,0 +1,27 @@
+import type { GeoEvent } from '../domain/types';
+import type { WorldEventMapState, WorldEventTimeRange } from './mapState';
+
+const TIME_RANGE_MS: Record<Exclude<WorldEventTimeRange, 'all'>, number> = {
+  '1h': 60 * 60 * 1000,
+  '6h': 6 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '48h': 48 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+};
+
+export function filterWorldEventMapEvents(
+  events: GeoEvent[],
+  state: Pick<WorldEventMapState, 'timeRange' | 'severities'>,
+  now = Date.now(),
+) {
+  const cutoff = state.timeRange === 'all' ? null : now - TIME_RANGE_MS[state.timeRange];
+  const severities = new Set(state.severities);
+  return events.filter((event) => {
+    if (!severities.has(event.severity)) return false;
+    if (cutoff == null) return true;
+    const timestamp = event.updatedAt || event.occurredAt;
+    if (!timestamp) return false;
+    const parsed = Date.parse(timestamp);
+    return Number.isFinite(parsed) && parsed >= cutoff && parsed <= now;
+  });
+}

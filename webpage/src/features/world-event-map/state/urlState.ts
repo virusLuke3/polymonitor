@@ -1,0 +1,109 @@
+import { selectableWorldEventLayers } from '../config/layerRegistry';
+import { isWorldEventRegion, worldEventRegionPreset } from '../config/regions';
+import type { GeoEventSeverity } from '../domain/types';
+import {
+  clampLatitude,
+  clampLongitude,
+  clampWorldEventZoom,
+  defaultWorldEventMapState,
+  WORLD_EVENT_SEVERITIES,
+  WORLD_EVENT_TIME_RANGES,
+  type WorldEventMapState,
+  type WorldEventTimeRange,
+} from './mapState';
+
+function parsedList(value: string | null) {
+  return value == null ? null : value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function finite(value: string | null) {
+  if (value == null || value.trim() === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+export function parseWorldEventMapState(
+  search: string,
+  fallback: WorldEventMapState = defaultWorldEventMapState(),
+): WorldEventMapState {
+  const params = new URLSearchParams(search);
+  let state: WorldEventMapState = {
+    ...fallback,
+    center: { ...fallback.center },
+    activeLayerIds: [...fallback.activeLayerIds],
+    severities: [...fallback.severities],
+  };
+  const region = params.get('region');
+  if (isWorldEventRegion(region)) {
+    const preset = worldEventRegionPreset(region);
+    state = { ...state, region, center: { ...preset.center }, zoom: preset.zoom };
+  }
+  const center = parsedList(params.get('center'));
+  if (center?.length === 2) {
+    const lon = finite(center[0] || null);
+    const lat = finite(center[1] || null);
+    if (lon != null && lat != null && lon >= -180 && lon <= 180 && lat >= -85 && lat <= 85) {
+      state.center = { lon: clampLongitude(lon), lat: clampLatitude(lat) };
+    }
+  }
+  const zoom = finite(params.get('zoom'));
+  if (zoom != null) state.zoom = clampWorldEventZoom(zoom);
+
+  const selectable = new Set(selectableWorldEventLayers().map((layer) => layer.id));
+  const rawLayers = params.get('layers');
+  const layers = parsedList(rawLayers);
+  const validLayers = layers ? layers.filter((layerId) => selectable.has(layerId)) : null;
+  if (validLayers && (validLayers.length > 0 || rawLayers === '')) {
+    state.activeLayerIds = [...new Set(validLayers)];
+  }
+
+  const timeRange = params.get('time');
+  if (WORLD_EVENT_TIME_RANGES.includes(timeRange as WorldEventTimeRange)) {
+    state.timeRange = timeRange as WorldEventTimeRange;
+  }
+  const rawSeverities = params.get('severity');
+  const severities = parsedList(rawSeverities);
+  const validSeverities = severities?.filter(
+    (severity): severity is GeoEventSeverity => WORLD_EVENT_SEVERITIES.includes(severity as GeoEventSeverity),
+  );
+  if (validSeverities && (validSeverities.length > 0 || rawSeverities === '')) {
+    state.severities = [...new Set(validSeverities)];
+  }
+  const selectedEventId = params.get('event');
+  if (selectedEventId) state.selectedEventId = selectedEventId;
+  return state;
+}
+
+export function serializeWorldEventMapUrl(state: WorldEventMapState, baseUrl: string) {
+  const url = new URL(baseUrl);
+  url.searchParams.set('center', `${state.center.lon.toFixed(4)},${state.center.lat.toFixed(4)}`);
+  url.searchParams.set('zoom', state.zoom.toFixed(2));
+  url.searchParams.set('region', state.region);
+  url.searchParams.set('layers', state.activeLayerIds.join(','));
+  url.searchParams.set('time', state.timeRange);
+  url.searchParams.set('severity', state.severities.join(','));
+  if (state.selectedEventId) url.searchParams.set('event', state.selectedEventId);
+  else url.searchParams.delete('event');
+  return url.toString();
+}
+
+export function readStoredWorldEventMapState(
+  raw: string | null,
+  fallback: WorldEventMapState = defaultWorldEventMapState(),
+): WorldEventMapState {
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as Partial<WorldEventMapState>;
+    const params = new URLSearchParams();
+    if (isWorldEventRegion(parsed.region)) params.set('region', parsed.region);
+    if (parsed.center) params.set('center', `${parsed.center.lon},${parsed.center.lat}`);
+    if (parsed.zoom != null) params.set('zoom', String(parsed.zoom));
+    if (Array.isArray(parsed.activeLayerIds)) params.set('layers', parsed.activeLayerIds.join(','));
+    if (parsed.timeRange) params.set('time', parsed.timeRange);
+    if (Array.isArray(parsed.severities)) params.set('severity', parsed.severities.join(','));
+    if (parsed.selectedEventId) params.set('event', parsed.selectedEventId);
+    return parseWorldEventMapState(params.toString(), fallback);
+  } catch {
+    return fallback;
+  }
+}

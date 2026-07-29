@@ -10001,6 +10001,65 @@ body {
   color: rgba(186, 199, 213, 0.6);
 }
 
+.wm-world-event-map-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(5, 8, 12, 0.86);
+  color: rgba(186, 199, 213, 0.78);
+  font: 800 9px/1 var(--mono);
+  text-transform: uppercase;
+}
+
+.wm-world-event-map-toolbar label,
+.wm-world-event-severity-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wm-world-event-map-toolbar select,
+.wm-world-event-severity-filters button {
+  min-height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: rgba(222, 232, 242, 0.7);
+  background: rgba(255, 255, 255, 0.035);
+  font: 800 9px/1 var(--mono);
+  text-transform: uppercase;
+}
+
+.wm-world-event-map-toolbar select {
+  padding: 0 20px 0 6px;
+}
+
+.wm-world-event-severity-filters button {
+  padding: 0 7px;
+  cursor: pointer;
+}
+
+.wm-world-event-severity-filters button.active {
+  color: #07150a;
+  background: #8ea6b8;
+}
+
+.wm-world-event-severity-filters button.is-watch.active {
+  background: #ffe066;
+}
+
+.wm-world-event-severity-filters button.is-warning.active {
+  background: #ff9f43;
+}
+
+.wm-world-event-severity-filters button.is-critical.active {
+  color: #fff;
+  background: #e84f4f;
+}
+
 .wm-map-view-toggle {
   display: inline-flex;
   align-items: center;

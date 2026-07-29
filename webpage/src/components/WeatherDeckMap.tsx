@@ -42,6 +42,8 @@ const EMPTY_WEATHER_POINTS: WeatherMapPoint[] = [];
 
 type WeatherDeckMapProps = {
   events: GeoEvent[];
+  camera?: { center: { lon: number; lat: number }; zoom: number };
+  onCameraChange?: (camera: { center: { lon: number; lat: number }; zoom: number }) => void;
   showAirRoutes?: boolean;
   selectedCityId?: string | null;
   onSelectCity?: (cityId: string) => void;
@@ -2338,6 +2340,8 @@ function ConflictInspector({ point, onClose }: { point: ConflictMapPoint; onClos
 
 export function WeatherDeckMap({
   events,
+  camera = { center: { lon: 20, lat: 24 }, zoom: 1.25 },
+  onCameraChange,
   showAirRoutes = false,
   selectedCityId = null,
   onSelectCity,
@@ -2348,6 +2352,8 @@ export function WeatherDeckMap({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mapHostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const initialCameraRef = useRef(camera);
+  const onCameraChangeRef = useRef(onCameraChange);
   const deckOverlayRef = useRef<MapboxOverlay | null>(null);
   const onSelectRef = useRef(onSelectCity);
   const countryRiskByIsoRef = useRef<Map<string, CountryRisk>>(new Map());
@@ -2647,6 +2653,25 @@ export function WeatherDeckMap({
   }, [onSelectCity]);
 
   useEffect(() => {
+    onCameraChangeRef.current = onCameraChange;
+  }, [onCameraChange]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const center = map.getCenter();
+    if (Math.abs(center.lng - camera.center.lon) < 0.0001
+      && Math.abs(center.lat - camera.center.lat) < 0.0001
+      && Math.abs(map.getZoom() - camera.zoom) < 0.001) return;
+    map.easeTo({
+      center: [camera.center.lon, camera.center.lat],
+      zoom: camera.zoom,
+      duration: 320,
+      essential: true,
+    });
+  }, [camera.center.lat, camera.center.lon, camera.zoom]);
+
+  useEffect(() => {
     selectedCityIdRef.current = selectedCityId;
     scheduleDeckUpdate();
   }, [selectedCityId]);
@@ -2751,11 +2776,12 @@ export function WeatherDeckMap({
     setMapDegraded(false);
     fallbackAppliedRef.current = false;
     let styleSettled = false;
+    const initialCamera = initialCameraRef.current;
     const map = new maplibregl.Map({
       container: host,
       style: getWeatherMapStyle('dark'),
-      center: [20, 24],
-      zoom: 1.25,
+      center: [initialCamera.center.lon, initialCamera.center.lat],
+      zoom: initialCamera.zoom,
       renderWorldCopies: false,
       attributionControl: false,
       interactive,
@@ -2783,6 +2809,11 @@ export function WeatherDeckMap({
         mapInteractingRef.current = false;
         setMapInteracting(false);
         setMapZoom(map.getZoom());
+        const center = map.getCenter();
+        onCameraChangeRef.current?.({
+          center: { lon: center.lng, lat: center.lat },
+          zoom: map.getZoom(),
+        });
         scheduleDeckUpdate(120);
       }, 110);
     };
