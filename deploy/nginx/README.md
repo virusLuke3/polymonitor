@@ -3,9 +3,10 @@
 This directory contains public Nginx templates for serving the built frontend
 as static files and proxying `/wm-api` to the local Tailscale-backed API.
 
-## Included template
+## Included templates
 
 - `polydata-static.conf.example`
+- `polydata-lob-limits.conf.example`
 
 ## Server contract
 
@@ -31,6 +32,7 @@ http://<tailscale-ip>:18500
 
 ```bash
 sudo mkdir -p /var/www/polydata
+sudo cp deploy/nginx/polydata-lob-limits.conf.example /etc/nginx/conf.d/polydata-lob-limits.conf
 sudo cp deploy/nginx/polydata-static.conf.example /etc/nginx/sites-available/polydata
 sudo nano /etc/nginx/sites-available/polydata
 sudo ln -sf /etc/nginx/sites-available/polydata /etc/nginx/sites-enabled/polydata
@@ -44,3 +46,6 @@ sudo systemctl reload nginx
   directory.
 - The API continues to live on the local machine; this template does not
   change the `/wm-api` topology.
+- The LOB connection zone must be installed in the Nginx `http` context before
+  enabling the site. It limits only concurrent public LOB reads per client; it
+  does not change LOB data, matching, storage, or runtime code.

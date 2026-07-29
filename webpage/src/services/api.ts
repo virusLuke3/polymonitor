@@ -264,7 +264,17 @@ export function fetchMarketGroupChart(eventId: string, range: '1h' | '6h' | '1d'
 }
 
 export function fetchSystemHealth() {
-  return apiGet<SystemHealth>('/system/health');
+  return apiGet<{
+    status?: string;
+    database?: boolean | string;
+    redis?: boolean;
+  }>('/health').then((payload): SystemHealth => ({
+    apiStatus: payload.status || 'unknown',
+    database: typeof payload.database === 'string'
+      ? payload.database
+      : (payload.database ? 'PostgreSQL' : 'unavailable'),
+    redis: Boolean(payload.redis),
+  }));
 }
 
 export function fetchRecentTrades(limit = 24) {

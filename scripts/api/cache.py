@@ -21,7 +21,13 @@ def get_redis_client(ctx: dict):
         if existing is not None:
             return existing
         try:
-            client = ctx["redis_module"].from_url(ctx["REDIS_URL"], decode_responses=True)
+            client = ctx["redis_module"].from_url(
+                ctx["REDIS_URL"],
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                health_check_interval=30,
+            )
             client.ping()
             ctx["set_redis_client_state"](client)
             return client

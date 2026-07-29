@@ -2,10 +2,9 @@
 Description=Collect Polymonitor GCP runtime health every minute
 
 [Timer]
-OnBootSec=90s
-OnUnitActiveSec=60s
-AccuracySec=5s
-RandomizedDelaySec=5s
+OnCalendar=*-*-* *:*:30
+AccuracySec=1s
+RandomizedDelaySec=2s
 Persistent=true
 Unit=polydata-operations-runtime-health.service
 

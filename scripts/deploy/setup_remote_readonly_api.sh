@@ -37,10 +37,10 @@ REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379/0}"
 
 : "${REMOTE_USER:?Set REMOTE_USER to the SSH user for the remote API host}"
 : "${REMOTE_HOST:?Set REMOTE_HOST to the remote API host}"
-GUNICORN_WORKERS="${GUNICORN_WORKERS:-3}"
-GUNICORN_THREADS="${GUNICORN_THREADS:-4}"
-GUNICORN_MAX_REQUESTS="${GUNICORN_MAX_REQUESTS:-300}"
-GUNICORN_MAX_REQUESTS_JITTER="${GUNICORN_MAX_REQUESTS_JITTER:-60}"
+GUNICORN_WORKERS="${GUNICORN_WORKERS:-4}"
+GUNICORN_THREADS="${GUNICORN_THREADS:-8}"
+GUNICORN_MAX_REQUESTS="${GUNICORN_MAX_REQUESTS:-0}"
+GUNICORN_MAX_REQUESTS_JITTER="${GUNICORN_MAX_REQUESTS_JITTER:-0}"
 
 if [[ -z "${LOCAL_DB_SSH_USER}" || -z "${LOCAL_DB_SSH_HOST}" ]]; then
   echo "LOCAL_DB_SSH_USER and LOCAL_DB_SSH_HOST are required." >&2
@@ -71,7 +71,8 @@ LOCAL_ENV_FILE="$(mktemp)"
 LOCAL_TUNNEL_SERVICE="$(mktemp)"
 LOCAL_API_SERVICE="$(mktemp)"
 LOCAL_NGINX_CONF="$(mktemp)"
-trap 'rm -f "${LOCAL_ENV_FILE}" "${LOCAL_TUNNEL_SERVICE}" "${LOCAL_API_SERVICE}" "${LOCAL_NGINX_CONF}"' EXIT
+LOCAL_NGINX_LIMITS_CONF="$(mktemp)"
+trap 'rm -f "${LOCAL_ENV_FILE}" "${LOCAL_TUNNEL_SERVICE}" "${LOCAL_API_SERVICE}" "${LOCAL_NGINX_CONF}" "${LOCAL_NGINX_LIMITS_CONF}"' EXIT
 
 cat > "${LOCAL_ENV_FILE}" <<EOF
 POLYMARKET_DB_BACKEND=postgres
@@ -93,11 +94,13 @@ POLYDATA_PYTHON_BIN=${PYTHON_BIN}
 POLYDATA_API_READONLY=1
 POLYDATA_API_HOST=127.0.0.1
 POLYDATA_API_PORT=${API_PORT}
-POLYDATA_SNAPSHOT_PREWARM=1
+POLYDATA_SNAPSHOT_PREWARM=0
 POLYDATA_GUNICORN_WORKERS=${GUNICORN_WORKERS}
 POLYDATA_GUNICORN_THREADS=${GUNICORN_THREADS}
 POLYDATA_GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS}
 POLYDATA_GUNICORN_MAX_REQUESTS_JITTER=${GUNICORN_MAX_REQUESTS_JITTER}
+POLYDATA_API_POSTGRES_POOL_SIZE=4
+POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS=10
 POLYDATA_REDIS_URL=${REDIS_URL}
 POLYDATA_REDIS_PREFIX=polydata:
 POLYDATA_OPERATIONS_API_BASE=http://127.0.0.1:${API_PORT}
@@ -224,6 +227,20 @@ server {
         return 403;
     }
 
+    location ^~ /wm-api/runtime/lob/ {
+        limit_conn polydata_lob_conn 4;
+        limit_conn_status 429;
+        proxy_pass http://127.0.0.1:${API_PORT}/runtime/lob/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
     location /wm-api/ {
         proxy_pass http://127.0.0.1:${API_PORT}/;
         proxy_http_version 1.1;
@@ -238,10 +255,15 @@ server {
 }
 EOF
 
+cat > "${LOCAL_NGINX_LIMITS_CONF}" <<'EOF'
+limit_conn_zone $binary_remote_addr zone=polydata_lob_conn:10m;
+EOF
+
 scp "${SSH_OPTS[@]}" "${LOCAL_ENV_FILE}" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata.env"
 scp "${SSH_OPTS[@]}" "${LOCAL_TUNNEL_SERVICE}" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata-db-tunnel.service"
 scp "${SSH_OPTS[@]}" "${LOCAL_API_SERVICE}" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata-api.service"
 scp "${SSH_OPTS[@]}" "${LOCAL_NGINX_CONF}" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata-nginx.conf"
+scp "${SSH_OPTS[@]}" "${LOCAL_NGINX_LIMITS_CONF}" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata-nginx-lob-limits.conf"
 
 echo "[3/7] Installing packages, services, and env on the remote VM ..."
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" bash <<'EOF'
@@ -327,6 +349,7 @@ npm install
 npm run build
 sudo rsync -av --delete "${REMOTE_REPO_ROOT}/webpage/dist/" "${REMOTE_WEB_ROOT}/"
 
+sudo install -m 644 /tmp/polydata-nginx-lob-limits.conf /etc/nginx/conf.d/polydata-lob-limits.conf
 sudo install -m 644 /tmp/polydata-nginx.conf /etc/nginx/sites-available/polydata
 sudo ln -sf /etc/nginx/sites-available/polydata /etc/nginx/sites-enabled/polydata
 sudo nginx -t

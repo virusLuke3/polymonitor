@@ -1240,7 +1240,11 @@ function WorldMonitorApp() {
     ]);
 
     const fallbackMarkets = bootstrapPayload?.activeMarketsPreview || [];
-    if (settled[0].status === 'fulfilled') setHealth(settled[0].value);
+    const systemHealthResult = settled[0];
+    if (systemHealthResult.status === 'fulfilled') {
+      const latestHealth = systemHealthResult.value;
+      setHealth((current) => ({ ...current, ...latestHealth }));
+    }
     else if (bootstrapPayload?.systemHealth) setHealth(bootstrapPayload.systemHealth);
 
     if (settled[1].status === 'fulfilled') setGlobalTrades(settled[1].value);
