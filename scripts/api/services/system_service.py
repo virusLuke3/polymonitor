@@ -557,7 +557,17 @@ def _build_system_health_payload_uncached(
             "updatedAt": row.get("updated_at"),
         }
     payload["syncState"] = sync_state
-    payload["marketSync"] = sync_state.get("market_sync_live") or sync_state.get("market_sync")
+    market_sync = sync_state.get("market_sync_live") or sync_state.get("market_sync")
+    if market_sync is None and dependencies.table_exists("market_tokens"):
+        market_token_state = dependencies.query_one(
+            "SELECT MAX(updated_at) AS updated_at FROM market_tokens"
+        )
+        if market_token_state.get("updated_at") is not None:
+            market_sync = {
+                "status": "derived-from-market-tokens",
+                "updatedAt": market_token_state.get("updated_at"),
+            }
+    payload["marketSync"] = market_sync
     payload["tradeSync"] = sync_state.get("trade_sync_live") or sync_state.get("trade_sync")
     payload["oracleSync"] = sync_state.get("oracle_sync_live") or sync_state.get("oracle_sync")
     payload["priceSync"] = {

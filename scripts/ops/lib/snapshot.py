@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,10 +21,14 @@ def utc_now_iso() -> str:
 def parse_timestamp(value: Any) -> datetime | None:
     if not value:
         return None
+    raw = str(value).strip()
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except (TypeError, ValueError):
-        return None
+        try:
+            parsed = parsedate_to_datetime(raw)
+        except (TypeError, ValueError):
+            return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)

@@ -137,7 +137,6 @@ def get_snapshot_payload(ctx: dict, namespace: str, cache_key: str, builder, *, 
 
     sqlite_payload = ctx["SNAPSHOT_STORE"].get(namespace, cache_key)
     if sqlite_payload is not None:
-        ctx["SNAPSHOT_STORE"].set(namespace, cache_key, sqlite_payload, ttl_seconds)
         set_cached_payload(ctx, namespace, cache_key, sqlite_payload, ttl_seconds)
         return sqlite_payload
 

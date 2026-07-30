@@ -269,6 +269,13 @@ def _seed_evidence(
         "observedAt": observed_at,
         "ageSeconds": age_seconds(observed_at),
         "evidence": "seed-metadata",
+        "serviceNames": sorted(
+            {
+                str(item.get("serviceName"))
+                for item in candidates
+                if item.get("serviceName")
+            }
+        ),
         "sourceCount": len(candidates),
         "recordCount": int(latest.get("recordCount") or 0),
     }
@@ -279,7 +286,13 @@ def _database_evidence(group: dict[str, Any], system: dict[str, Any]) -> dict[st
     max_age = int(group.get("expectedFreshnessSeconds") or 300)
     if probe == "lob_runtime":
         item = system.get("lobRuntime") if isinstance(system.get("lobRuntime"), dict) else {}
-        observed_at = item.get("updatedAt") or item.get("observedAt")
+        observed_at = (
+            item.get("updatedAt")
+            or item.get("observedAt")
+            or item.get("statusUpdatedAt")
+            or item.get("lastMessageAt")
+            or item.get("statusFileWrittenAt")
+        )
         source = normalize(item.get("status"))
     else:
         camel = {
@@ -313,26 +326,6 @@ def build_panel_snapshot(
     observed_services = service_states or {}
     panels = []
     for group in contract["groups"]:
-        group_services = [
-            {
-                "name": str(name),
-                **observed_services.get(
-                    str(name),
-                    {
-                        "status": Status.UNKNOWN.value,
-                        "activeState": "unknown",
-                        "subState": "unknown",
-                        "result": "unknown",
-                    },
-                ),
-            }
-            for name in group.get("serviceNames", [])
-        ]
-        service_status = (
-            aggregate(item["status"] for item in group_services)
-            if group_services
-            else Status.DISABLED
-        )
         for panel_id in group["panelIds"]:
             strategy = str(group["healthStrategy"])
             if strategy in {"seed", "external-api"}:
@@ -347,6 +340,35 @@ def build_panel_snapshot(
                     "ageSeconds": None,
                     "evidence": "browser-smoke-required",
                 }
+            configured_service_names = [
+                str(name) for name in group.get("serviceNames", [])
+            ]
+            evidence_service_names = evidence.get("serviceNames")
+            relevant_service_names = (
+                [str(name) for name in evidence_service_names]
+                if isinstance(evidence_service_names, list) and evidence_service_names
+                else configured_service_names
+            )
+            panel_services = [
+                {
+                    "name": name,
+                    **observed_services.get(
+                        name,
+                        {
+                            "status": Status.UNKNOWN.value,
+                            "activeState": "unknown",
+                            "subState": "unknown",
+                            "result": "unknown",
+                        },
+                    ),
+                }
+                for name in relevant_service_names
+            ]
+            service_status = (
+                aggregate(item["status"] for item in panel_services)
+                if panel_services
+                else Status.DISABLED
+            )
             panels.append(
                 {
                     "panelId": panel_id,
@@ -358,14 +380,15 @@ def build_panel_snapshot(
                     "ageSeconds": evidence["ageSeconds"],
                     "evidence": evidence["evidence"],
                     "dataSources": group["dataSources"],
-                    "serviceNames": group.get("serviceNames", []),
+                    "serviceNames": configured_service_names,
+                    "observedServiceNames": relevant_service_names,
                     "expectedFreshnessSeconds": group.get("expectedFreshnessSeconds"),
                     "degradationPolicy": group["degradationPolicy"],
                     "serviceStatus": service_status.value,
-                    "services": group_services,
+                    "services": panel_services,
                 }
             )
-            if group_services:
+            if panel_services:
                 panels[-1]["status"] = aggregate(
                     [panels[-1]["status"], service_status]
                 ).value

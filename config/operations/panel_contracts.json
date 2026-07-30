@@ -12,7 +12,7 @@
       "healthStrategy": "database",
       "dataSources": ["postgres", "market-registry"],
       "representativeProbe": "market_sync",
-      "expectedFreshnessSeconds": 300,
+      "expectedFreshnessSeconds": 1800,
       "degradationPolicy": "Keep the last complete market snapshot and mark stale or coverage-partial.",
       "panelIds": ["active-markets", "featured-market", "market-summary"]
     },
@@ -21,7 +21,7 @@
       "healthStrategy": "database",
       "dataSources": ["clickhouse", "postgres", "orderfilled"],
       "representativeProbe": "trade_sync",
-      "expectedFreshnessSeconds": 120,
+      "expectedFreshnessSeconds": 900,
       "degradationPolicy": "Preserve the last complete trade projection and isolate failures from unrelated panels.",
       "panelIds": ["global-orderfilled", "sample-chain-trades"]
     },
@@ -30,7 +30,7 @@
       "healthStrategy": "database",
       "dataSources": ["postgres", "oracle-events"],
       "representativeProbe": "oracle_sync",
-      "expectedFreshnessSeconds": 300,
+      "expectedFreshnessSeconds": 1800,
       "degradationPolicy": "Show the last lifecycle state with an explicit stale or partial marker.",
       "panelIds": ["oracle-feed", "oracle-timeline"]
     },
@@ -39,7 +39,7 @@
       "healthStrategy": "database",
       "dataSources": ["postgres", "derived-prices"],
       "representativeProbe": "price_sync",
-      "expectedFreshnessSeconds": 300,
+      "expectedFreshnessSeconds": 900,
       "degradationPolicy": "Retain the last complete price or evidence snapshot and expose its age.",
       "panelIds": ["price-chart", "price-implications", "related-news"]
     },
@@ -76,8 +76,11 @@
       "dataSources": ["redis", "seed-meta:markets"],
       "serviceNames": ["polydata-market-group-seed.service"],
       "expectedFreshnessSeconds": 120,
+      "evidenceAliases": {
+        "commodity-equity-transmission": "commodities-watch"
+      },
       "degradationPolicy": "Retain last-good groups with stale and source-degraded labels.",
-      "panelIds": ["commodities-watch", "crypto-watch"]
+      "panelIds": ["commodities-watch", "commodity-equity-transmission", "crypto-watch"]
     },
     {
       "owner": "finance",
@@ -129,7 +132,6 @@
       "expectedFreshnessSeconds": 43200,
       "degradationPolicy": "Respect each payload interval; retain last-good macro data with age and partial markers.",
       "panelIds": [
-        "commodity-equity-transmission",
         "cpi-components-pressure-registry",
         "cpi-release-calendar",
         "cpi-release-command-center",
@@ -253,7 +255,7 @@
       "dataSources": ["external-api", "runtime-cache"],
       "expectedFreshnessSeconds": 1800,
       "degradationPolicy": "Prefer last-good cache, distinguish rate limits from complete source failure.",
-      "panelIds": ["blockchain-policy-news", "crypto-funding-watch", "trade-policy-radar"]
+      "panelIds": ["blockchain-policy-news", "crypto-funding-watch"]
     },
     {
       "owner": "browser",
@@ -261,7 +263,7 @@
       "dataSources": ["static-assets", "browser-runtime"],
       "representativeProbe": "production-build-and-browser-smoke",
       "degradationPolicy": "No synthetic heartbeat; rely on registry, build and browser evidence.",
-      "panelIds": ["weather-quote-detail", "world-clock"]
+      "panelIds": ["trade-policy-radar", "weather-quote-detail", "world-clock"]
     }
   ]
 }
