@@ -12,6 +12,8 @@ export const SEVERITY_COLORS: Record<GeoEventSeverity, [number, number, number, 
   critical: [255, 76, 70, 235],
 };
 
+export const MAP_MONO_FONT_FAMILY = '"JetBrains Mono", "SFMono-Regular", Consolas, monospace';
+
 const HAZARD_COLORS: Record<HazardKind, [number, number, number, number]> = {
   'severe-storm': [167, 139, 250, 210],
   tornado: [192, 132, 252, 220],

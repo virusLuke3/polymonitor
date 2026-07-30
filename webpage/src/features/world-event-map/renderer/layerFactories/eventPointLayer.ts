@@ -7,7 +7,13 @@ import {
   worldEventLayerById,
   worldEventLayerIdForEvent,
 } from '../../config/layerRegistry';
-import { eventColor, eventLabel, pointRadiusMeters, SEVERITY_COLORS } from './shared';
+import {
+  eventColor,
+  eventLabel,
+  MAP_MONO_FONT_FAMILY,
+  pointRadiusMeters,
+  SEVERITY_COLORS,
+} from './shared';
 
 export type EventCluster = {
   kind: 'event-cluster';
@@ -149,12 +155,16 @@ export function createEventPointLayers({
   selectedEventId,
   showLabels,
   viewport,
+  animationTime = 0,
+  animate = true,
 }: {
   events: GeoEvent[];
   zoom: number;
   selectedEventId: string | null;
   showLabels: boolean;
   viewport?: [number, number, number, number];
+  animationTime?: number;
+  animate?: boolean;
 }): LayersList {
   const pointEvents = events.filter((event) => (
     event.properties.mapEntity !== 'air-hub'
@@ -163,6 +173,33 @@ export function createEventPointLayers({
   ));
   const { singles, clusters } = clusterEventPoints(pointEvents, zoom, selectedEventId, viewport);
   const layers: Layer[] = [];
+
+  const pulsingEvents = animate
+    ? singles
+      .filter((event) => (
+        event.id === selectedEventId || event.severity === 'critical' || event.severity === 'warning'
+      ))
+      .slice(0, 120)
+    : [];
+  if (pulsingEvents.length) {
+    layers.push(new ScatterplotLayer<GeoEvent>({
+      id: 'world-event-pulses',
+      data: pulsingEvents,
+      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
+      getRadius: (event) => {
+        const phase = (animationTime * 0.58 + hashEventPhase(event.id)) % 1;
+        return pointRadiusMeters(event) * (1.35 + phase * 1.45);
+      },
+      getFillColor: (event) => {
+        const phase = (animationTime * 0.58 + hashEventPhase(event.id)) % 1;
+        return eventColor(event, Math.round(72 * (1 - phase)));
+      },
+      radiusMinPixels: 6,
+      radiusMaxPixels: 30,
+      pickable: false,
+      stroked: false,
+    }));
+  }
 
   if (clusters.length) {
     layers.push(new ScatterplotLayer<EventCluster>({
@@ -192,7 +229,7 @@ export function createEventPointLayers({
       getColor: [245, 241, 224, 235],
       getTextAnchor: 'middle',
       getAlignmentBaseline: 'center',
-      fontFamily: 'monospace',
+      fontFamily: MAP_MONO_FONT_FAMILY,
       fontWeight: 800,
       pickable: false,
     }));
@@ -237,10 +274,18 @@ export function createEventPointLayers({
       getColor: [226, 231, 229, 220],
       getTextAnchor: 'start',
       getAlignmentBaseline: 'bottom',
-      fontFamily: 'monospace',
+      fontFamily: MAP_MONO_FONT_FAMILY,
       fontWeight: 700,
       pickable: false,
     }));
   }
   return layers;
+}
+
+function hashEventPhase(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (Math.imul(hash, 31) + value.charCodeAt(index)) | 0;
+  }
+  return ((hash >>> 0) % 1_000) / 1_000;
 }

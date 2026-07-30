@@ -3,6 +3,7 @@ import type { Layer } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import { defaultWorldEventMapState } from '../../state/mapState';
 import { createWorldEventLayers } from '.';
+import { selectAviationRenderData } from './aviationLayers';
 import { clusterEventPoints } from './eventPointLayer';
 
 const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['severity'] = 'watch'): GeoEvent => ({
@@ -40,6 +41,29 @@ describe('world event layer factories', () => {
       pointEvent('c', 10.3, 10.2),
     ], state);
     expect((layers as Layer[]).some((layer) => layer.id === 'world-event-points')).toBe(true);
+  });
+
+  it('animates warning events with their own color and honors reduced motion', () => {
+    const warning = pointEvent('warning', 10, 10, 'warning');
+    const animated = createWorldEventLayers(
+      [warning],
+      defaultWorldEventMapState(),
+      true,
+      undefined,
+      1.5,
+      true,
+    ) as Layer[];
+    const reducedMotion = createWorldEventLayers(
+      [warning],
+      defaultWorldEventMapState(),
+      true,
+      undefined,
+      1.5,
+      false,
+    ) as Layer[];
+
+    expect(animated.some((layer) => layer.id === 'world-event-pulses')).toBe(true);
+    expect(reducedMotion.some((layer) => layer.id === 'world-event-pulses')).toBe(false);
   });
 
   it('creates polygon and line layers without accessing the DOM', () => {
@@ -86,6 +110,24 @@ describe('world event layer factories', () => {
         'aviation-hubs',
         'aviation-hub-labels',
       ]);
+  });
+
+  it('shares the bounded aviation selection with the WebGL and SVG renderers', () => {
+    const routes = Array.from({ length: 220 }, (_, index): GeoEvent => ({
+      ...pointEvent(`route:${index}`, 0, 0, 'info'),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[0, 0], [index / 10, 4]] },
+      properties: {
+        mapEntity: 'air-route',
+        routeId: `route-${index}`,
+        layer: index < 12 ? 'trunk' : 'international',
+        trafficScore: 220 - index,
+      },
+    }));
+    const selected = selectAviationRenderData(routes, defaultWorldEventMapState());
+
+    expect(selected.routes).toHaveLength(160);
+    expect(new Set(selected.routes.map((route) => route.properties.routeId)).size).toBe(160);
   });
 
   it('clusters a 2,000 event fixture within the viewport and retains selection', () => {

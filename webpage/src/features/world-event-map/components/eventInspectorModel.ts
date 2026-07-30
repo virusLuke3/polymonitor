@@ -102,6 +102,53 @@ export function eventContextFields(event: GeoEvent): InspectorField[] {
       field('Violence type', event.properties.violenceType),
     ]);
   }
+  if (event.category === 'infrastructure') {
+    const mapEntity = String(event.properties.mapEntity || '');
+    if (mapEntity === 'air-route' || mapEntity === 'air-flight') {
+      return compact([
+        field('Reference type', mapEntity === 'air-route' ? 'Air route topology' : 'Seeded aircraft flow'),
+        field('Origin', event.properties.fromCode),
+        field('Destination', event.properties.toCode),
+        field('Corridor', event.properties.corridor),
+        field('Route class', event.properties.layer),
+        field('Traffic score', event.properties.trafficScore),
+        field('Risk score', event.properties.riskScore),
+        field('Risk evidence', Array.isArray(event.properties.riskSources)
+          ? event.properties.riskSources.join(', ')
+          : null),
+        field('Operator / source', event.properties.airline),
+        field('Status', event.properties.status),
+      ]);
+    }
+    if (mapEntity === 'air-hub') {
+      return compact([
+        field('Reference type', 'Air hub'),
+        field('Airport', event.properties.code),
+        field('City', event.properties.city),
+        field('Country', event.properties.country),
+        field('Connected routes', event.properties.routeCount),
+        field('Risk score', event.properties.riskScore),
+        field('Status', event.properties.status),
+      ]);
+    }
+    if (mapEntity === 'live-aircraft') {
+      return compact([
+        field('Reference type', 'Live surveillance aircraft'),
+        field('Callsign', event.properties.callsign),
+        field('ICAO24', event.properties.icao24),
+        field('Origin country', event.properties.originCountry),
+        field('Altitude', event.properties.baroAltitude, ' m'),
+        field('Velocity', event.properties.velocity, ' m/s'),
+        field('Heading', event.properties.heading, '°'),
+        field('Vertical rate', event.properties.verticalRate, ' m/s'),
+        field(
+          'On ground',
+          event.properties.onGround == null ? null : event.properties.onGround ? 'Yes' : 'No',
+        ),
+        field('Risk score', event.properties.riskScore),
+      ]);
+    }
+  }
   return [];
 }
 

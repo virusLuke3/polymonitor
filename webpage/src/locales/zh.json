@@ -350,7 +350,7 @@
   "atlas.focusedMarket": "已聚焦市场：{title}",
   "atlas.viewEnabled": "已启用{view}",
   "atlas.weatherLoadFailed": "无法加载天气地图。",
-  "atlas.weatherHint": "扫描经过验证的世界事件。使用鼠标滚轮缩放，拖动地图平移。",
+  "atlas.weatherHint": "扫描经过验证的世界事件。选择彩色事件可打开灾害报告；使用鼠标滚轮缩放，拖动地图平移。",
   "atlas.worldClock": "世界时钟浮层",
   "atlas.marketOpen": "开市",
   "atlas.marketClosed": "休市",

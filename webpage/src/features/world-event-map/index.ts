@@ -14,6 +14,7 @@ export * from './components/MapToolbar';
 export * from './components/EventInspector';
 export * from './components/WorldEventMap';
 export * from './components/AviationLens';
+export * from './components/LayerPanel';
 export * from './state/mapState';
 export * from './state/mapReducer';
 export * from './state/urlState';

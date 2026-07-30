@@ -15,6 +15,7 @@ export function createWorldEventLayers(
   showLabels = true,
   viewport?: [number, number, number, number],
   animationTime = 0,
+  animate = true,
 ): LayersList {
   return [
     ...createAviationLayers(events, state, animationTime),
@@ -25,6 +26,8 @@ export function createWorldEventLayers(
       selectedEventId: state.selectedEventId,
       showLabels,
       viewport,
+      animationTime,
+      animate,
     }),
   ];
 }

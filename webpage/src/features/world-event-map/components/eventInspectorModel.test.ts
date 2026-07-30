@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { HazardEvent } from '../domain/types';
+import type { GeoEvent, HazardEvent } from '../domain/types';
 import {
+  eventContextFields,
   eventTimeFields,
   geometryLabel,
   hazardLabel,
@@ -92,5 +93,34 @@ describe('event inspector model', () => {
       label: 'Record type',
       value: 'Thermal anomaly observation',
     });
+  });
+
+  it('turns aircraft evidence into a readable report without inventing missing state', () => {
+    const event: GeoEvent = {
+      id: 'aircraft:fixture',
+      category: 'infrastructure',
+      title: 'Fixture aircraft',
+      severity: 'watch',
+      geometry: { type: 'Point', coordinates: [120, 30] },
+      locationPrecision: 'exact',
+      sources: [{ provider: 'OpenSky', nativeId: 'fixture' }],
+      limitations: [],
+      relatedMarketIds: [],
+      properties: {
+        mapEntity: 'live-aircraft',
+        callsign: 'TEST123',
+        icao24: 'abc123',
+        originCountry: 'Fixture',
+        baroAltitude: 10_000,
+      },
+    };
+
+    expect(eventContextFields(event)).toEqual([
+      { label: 'Reference type', value: 'Live surveillance aircraft' },
+      { label: 'Callsign', value: 'TEST123' },
+      { label: 'ICAO24', value: 'abc123' },
+      { label: 'Origin country', value: 'Fixture' },
+      { label: 'Altitude', value: '10000 m' },
+    ]);
   });
 });

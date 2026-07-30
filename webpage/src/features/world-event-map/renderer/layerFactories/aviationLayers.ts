@@ -6,16 +6,24 @@ import type {
   AviationRiskSource,
   WorldEventMapState,
 } from '../../state/mapState';
+import { MAP_MONO_FONT_FAMILY } from './shared';
 
 type AviationEntity = 'air-route' | 'air-hub' | 'air-flight' | 'live-aircraft';
 
-type AviationMotionPoint = {
+export type AviationMotionPoint = {
   id: string;
   event: GeoEvent;
   position: [number, number];
   color: [number, number, number, number];
   angle: number;
   size: number;
+};
+
+export type AviationRenderData = {
+  routes: GeoEvent[];
+  hubs: GeoEvent[];
+  flights: GeoEvent[];
+  liveAircraft: GeoEvent[];
 };
 
 export type AviationLayerStats = {
@@ -27,8 +35,6 @@ export type AviationLayerStats = {
   watchRoutes: number;
   riskSources: Record<AviationRiskSource, number>;
 };
-
-const MAP_MONO_FONT = 'JetBrains Mono, SFMono-Regular, Consolas, monospace';
 
 function entity(event: GeoEvent): AviationEntity | null {
   if (event.category !== 'infrastructure') return null;
@@ -121,7 +127,7 @@ function selectedRouteSegments(
     .flat();
 }
 
-function routeTone(event: GeoEvent, alpha: number): [number, number, number, number] {
+export function aviationRouteTone(event: GeoEvent, alpha: number): [number, number, number, number] {
   const risks = riskSources(event);
   if (risks.includes('conflict')) return [255, 96, 76, alpha];
   if (risks.includes('weather')) return [45, 212, 191, alpha];
@@ -196,13 +202,13 @@ function routeMotionPoints(routes: GeoEvent[], animationTime: number) {
     const event = segments[0]!;
     const speed = Math.max(0.012, Math.min(0.08, numberProperty(event, 'speed', 0.028)));
     const progress = (hashUnit(routeId) + animationTime * speed) % 1;
-    const point = motionPointForSegments(routeId, segments, progress, routeTone(event, 230), 11);
+    const point = motionPointForSegments(routeId, segments, progress, aviationRouteTone(event, 230), 11);
     if (point) points.push(point);
   }
   return points;
 }
 
-function seededFlightPoints(flights: GeoEvent[], animationTime: number) {
+export function aviationSeededFlightPoints(flights: GeoEvent[], animationTime: number) {
   const points: AviationMotionPoint[] = [];
   for (const [flightId, segments] of groupSegments(flights, 'flightId')) {
     const event = segments[0]!;
@@ -258,11 +264,10 @@ export function aviationLayerStatsForState(
   return aviationLayerStats(events, routes);
 }
 
-export function createAviationLayers(
+export function selectAviationRenderData(
   events: GeoEvent[],
-  state: WorldEventMapState,
-  animationTime = 0,
-): LayersList {
+  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>,
+): AviationRenderData {
   const routes = selectedRouteSegments(
     events.filter((event) => entity(event) === 'air-route'),
     state,
@@ -277,8 +282,22 @@ export function createAviationLayers(
   const liveAircraft = events.filter(
     (event) => entity(event) === 'live-aircraft' && matchesLens(event, state.aviationLens, state.aviationRiskSource),
   );
+  return { routes, hubs, flights, liveAircraft };
+}
+
+export function createAviationLayers(
+  events: GeoEvent[],
+  state: WorldEventMapState,
+  animationTime = 0,
+): LayersList {
+  const {
+    routes,
+    hubs,
+    flights,
+    liveAircraft,
+  } = selectAviationRenderData(events, state);
   const routeRunners = routeMotionPoints(routes, animationTime);
-  const flightPoints = seededFlightPoints(flights, animationTime);
+  const flightPoints = aviationSeededFlightPoints(flights, animationTime);
   const layers: Layer[] = [];
 
   if (routes.length) {
@@ -286,7 +305,7 @@ export function createAviationLayers(
       id: 'aviation-route-underlay',
       data: routes,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
-      getColor: (event) => routeTone(event, event.id === state.selectedEventId ? 118 : 34),
+      getColor: (event) => aviationRouteTone(event, event.id === state.selectedEventId ? 118 : 34),
       getWidth: (event) => routeWidth(event, state.selectedEventId) + 1.1,
       widthMinPixels: 1,
       widthMaxPixels: 5,
@@ -298,7 +317,7 @@ export function createAviationLayers(
       id: 'aviation-route-core',
       data: routes,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
-      getColor: (event) => routeTone(event, event.id === state.selectedEventId ? 235 : 118),
+      getColor: (event) => aviationRouteTone(event, event.id === state.selectedEventId ? 235 : 118),
       getWidth: (event) => routeWidth(event, state.selectedEventId),
       widthMinPixels: 0.65,
       widthMaxPixels: 3.5,
@@ -338,7 +357,7 @@ export function createAviationLayers(
       getColor: (point) => point.color,
       getTextAnchor: 'middle',
       getAlignmentBaseline: 'center',
-      fontFamily: MAP_MONO_FONT,
+      fontFamily: MAP_MONO_FONT_FAMILY,
       fontWeight: 900,
       outlineWidth: 2,
       outlineColor: [0, 0, 0, 220],
@@ -357,7 +376,7 @@ export function createAviationLayers(
       getColor: (event) => isWatch(event) ? [255, 214, 84, 245] : [72, 244, 255, 232],
       getTextAnchor: 'middle',
       getAlignmentBaseline: 'center',
-      fontFamily: MAP_MONO_FONT,
+      fontFamily: MAP_MONO_FONT_FAMILY,
       fontWeight: 900,
       outlineWidth: 2,
       outlineColor: [0, 0, 0, 220],
@@ -392,7 +411,7 @@ export function createAviationLayers(
       getColor: [174, 233, 241, 195],
       getTextAnchor: 'start',
       getAlignmentBaseline: 'center',
-      fontFamily: MAP_MONO_FONT,
+      fontFamily: MAP_MONO_FONT_FAMILY,
       fontWeight: 900,
       outlineWidth: 3,
       outlineColor: [0, 0, 0, 220],

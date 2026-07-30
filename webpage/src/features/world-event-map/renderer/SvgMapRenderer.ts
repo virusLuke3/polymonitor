@@ -14,8 +14,13 @@ import {
   clampWorldEventZoom,
   type WorldEventMapState,
 } from '../state/mapState';
-import { eventColor, pointRadiusMeters } from './layerFactories/shared';
+import { eventColor, isHazardEvent, pointRadiusMeters } from './layerFactories/shared';
 import { clusterEventPoints } from './layerFactories/eventPointLayer';
+import {
+  aviationRouteTone,
+  aviationSeededFlightPoints,
+  selectAviationRenderData,
+} from './layerFactories/aviationLayers';
 import type { MapRenderer, MapRendererCallbacks } from './MapRenderer';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -33,6 +38,12 @@ function cssColor([red, green, blue, alpha]: [number, number, number, number]) {
 function eventGeoJson(event: GeoEvent): Geometry | null {
   if (!event.geometry || event.geometry.type === 'Point') return null;
   return normalizePolygonWinding(event.geometry as Geometry);
+}
+
+function aviationEntity(event: GeoEvent) {
+  return event.category === 'infrastructure'
+    ? String(event.properties.mapEntity || '')
+    : '';
 }
 
 function ringSignedArea(ring: Position[]) {
@@ -239,14 +250,31 @@ export class SvgMapRenderer implements MapRenderer {
     }
 
     this.eventLayer.replaceChildren();
+    const state = this.state;
     const selectedId = this.state?.selectedEventId;
-    const pointEvents = this.events.filter((event) => event.geometry?.type === 'Point');
+    const aviation = state
+      ? selectAviationRenderData(this.events, state)
+      : { routes: [], hubs: [], flights: [], liveAircraft: [] };
+    const visibleAviationIds = new Set([
+      ...aviation.routes,
+      ...aviation.hubs,
+      ...aviation.liveAircraft,
+    ].map((event) => event.id));
+    const renderEvents = this.events.filter((event) => {
+      const entity = aviationEntity(event);
+      if (!entity) return true;
+      if (entity === 'air-flight') return false;
+      return visibleAviationIds.has(event.id);
+    });
+    const pointEvents = renderEvents.filter((event) => (
+      event.geometry?.type === 'Point' && !aviationEntity(event)
+    ));
     const { singles, clusters } = clusterEventPoints(
       pointEvents,
       this.state?.zoom ?? 1.25,
       selectedId || null,
     );
-    for (const event of this.events) {
+    for (const event of renderEvents) {
       if (!event.geometry || event.geometry.type === 'Point') continue;
       const geometry = eventGeoJson(event);
       if (!geometry) continue;
@@ -256,6 +284,17 @@ export class SvgMapRenderer implements MapRenderer {
       shape.setAttribute('d', data);
       shape.classList.add('wm-world-event-svg-shape');
       this.decorateEventElement(shape, event, event.id === selectedId);
+      if (event.geometry.type === 'LineString') {
+        shape.setAttribute('fill', 'none');
+        if (aviationEntity(event) === 'air-route') {
+          shape.classList.add('wm-world-event-svg-air-route');
+          shape.setAttribute('stroke', cssColor(aviationRouteTone(
+            event,
+            event.id === selectedId ? 238 : 126,
+          )));
+          shape.setAttribute('stroke-width', event.id === selectedId ? '2.2' : '0.85');
+        }
+      }
       this.eventLayer.append(shape);
     }
     for (const cluster of clusters) {
@@ -308,6 +347,44 @@ export class SvgMapRenderer implements MapRenderer {
       this.decorateEventElement(point, event, event.id === selectedId);
       this.eventLayer.append(point);
     }
+    for (const event of [...aviation.hubs, ...aviation.liveAircraft]) {
+      if (event.geometry?.type !== 'Point') continue;
+      const position = projection(event.geometry.coordinates);
+      if (!position) continue;
+      const [x, y] = position;
+      if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
+      if (aviationEntity(event) === 'live-aircraft') {
+        const aircraft = svgElement('text');
+        aircraft.setAttribute('x', String(x));
+        aircraft.setAttribute('y', String(y));
+        aircraft.textContent = '✈';
+        aircraft.classList.add('wm-world-event-svg-aircraft');
+        this.decorateEventElement(aircraft, event, event.id === selectedId);
+        this.eventLayer.append(aircraft);
+        continue;
+      }
+      const hub = svgElement('circle');
+      hub.setAttribute('cx', String(x));
+      hub.setAttribute('cy', String(y));
+      hub.setAttribute('r', event.id === selectedId ? '5.5' : '3.5');
+      hub.classList.add('wm-world-event-svg-air-hub');
+      this.decorateEventElement(hub, event, event.id === selectedId);
+      this.eventLayer.append(hub);
+    }
+    for (const flight of aviationSeededFlightPoints(aviation.flights, 0)) {
+      const position = projection(flight.position);
+      if (!position) continue;
+      const [x, y] = position;
+      if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
+      const aircraft = svgElement('text');
+      aircraft.setAttribute('x', String(x));
+      aircraft.setAttribute('y', String(y));
+      aircraft.setAttribute('transform', `rotate(${flight.angle} ${x} ${y})`);
+      aircraft.textContent = '✈';
+      aircraft.classList.add('wm-world-event-svg-aircraft');
+      this.decorateEventElement(aircraft, flight.event, flight.event.id === selectedId);
+      this.eventLayer.append(aircraft);
+    }
   }
 
   private decorateEventElement(element: SVGElement, event: GeoEvent, selected: boolean) {
@@ -319,6 +396,9 @@ export class SvgMapRenderer implements MapRenderer {
     element.setAttribute('tabindex', '0');
     element.setAttribute('aria-label', `${event.title}. ${event.severity} severity.`);
     element.dataset.eventId = event.id;
+    element.classList.add(`severity-${event.severity}`);
+    if (selected) element.classList.add('is-selected');
+    if (isHazardEvent(event)) element.classList.add(`hazard-${event.hazardKind}`);
     const title = svgElement('title');
     title.textContent = `${event.title} · ${event.locationLabel || event.severity}`;
     element.append(title);

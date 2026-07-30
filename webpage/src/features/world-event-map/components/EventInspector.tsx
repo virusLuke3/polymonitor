@@ -88,6 +88,7 @@ export function EventInspector({
   }, [onClose]);
 
   const commonFields: InspectorField[] = [
+    { label: 'Report ID', value: event.id },
     { label: 'Severity', value: event.severity.toUpperCase() },
     ...(hazard ? [{ label: 'Lifecycle', value: hazard.lifecycle.toUpperCase() }] : []),
     { label: 'Location', value: event.locationLabel || 'Location label unavailable' },
@@ -123,11 +124,21 @@ export function EventInspector({
       </header>
 
       <section className="wm-event-inspector-section" aria-labelledby="wm-event-evidence-heading">
-        <h3 id="wm-event-evidence-heading">Event evidence</h3>
+        <h3 id="wm-event-evidence-heading">{hazard ? 'Disaster report' : 'Event evidence'}</h3>
         <FieldList fields={commonFields} />
         <FieldList fields={eventTimeFields(event)} />
         <FieldList fields={eventContextFields(event)} />
       </section>
+
+      {event.category === 'infrastructure' && event.properties.riskReason ? (
+        <section className="wm-event-inspector-section" aria-labelledby="wm-aviation-evidence-heading">
+          <h3 id="wm-aviation-evidence-heading">Aviation exposure note</h3>
+          <div className="wm-event-inspector-callout">
+            <strong>Why this corridor is highlighted</strong>
+            <p>{String(event.properties.riskReason)}</p>
+          </div>
+        </section>
+      ) : null}
 
       {hazard ? (
         <section className="wm-event-inspector-section" aria-labelledby="wm-hazard-metrics-heading">

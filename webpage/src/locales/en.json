@@ -350,7 +350,7 @@
   "atlas.focusedMarket": "Focused market: {title}",
   "atlas.viewEnabled": "{view} enabled",
   "atlas.weatherLoadFailed": "Failed to load weather map.",
-  "atlas.weatherHint": "Scan verified world events. Use the mouse wheel to zoom and drag to pan.",
+  "atlas.weatherHint": "Scan verified world events. Select a colored event for its disaster report; use the mouse wheel to zoom and drag to pan.",
   "atlas.worldClock": "World clock overlay",
   "atlas.marketOpen": "OPEN",
   "atlas.marketClosed": "CLSD",

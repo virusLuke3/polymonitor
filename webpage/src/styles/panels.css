@@ -11146,6 +11146,27 @@ a.wm-orderfilled-row {
 .wm-world-event-svg-point {
   cursor: pointer;
   vector-effect: non-scaling-stroke;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.wm-world-event-svg-point.severity-warning,
+.wm-world-event-svg-point.severity-critical,
+.wm-world-event-svg-point.is-selected {
+  animation: wm-world-event-svg-pulse 2.1s ease-in-out infinite;
+}
+
+@keyframes wm-world-event-svg-pulse {
+  0%,
+  100% {
+    filter: brightness(0.96) drop-shadow(0 0 1px currentColor);
+    transform: scale(0.92);
+  }
+
+  50% {
+    filter: brightness(1.35) drop-shadow(0 0 5px currentColor);
+    transform: scale(1.18);
+  }
 }
 
 .wm-world-event-svg-cluster {
@@ -11954,6 +11975,23 @@ a.wm-orderfilled-row {
   padding: 14px;
 }
 
+.wm-world-event-svg-air-route {
+  vector-effect: non-scaling-stroke;
+}
+
+.wm-world-event-svg-air-hub {
+  vector-effect: non-scaling-stroke;
+}
+
+.wm-world-event-svg-aircraft {
+  dominant-baseline: central;
+  paint-order: stroke fill;
+  stroke: rgba(0, 8, 12, 0.88);
+  stroke-width: 2px;
+  text-anchor: middle;
+  font: 900 12px/1 var(--font-mono);
+}
+
 .wm-weather-deck-legend {
   position: absolute;
   left: 50%;
@@ -11962,7 +12000,7 @@ a.wm-orderfilled-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: calc(100% - 96px);
+  max-width: calc(100% - 430px);
   padding: 5px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.78);
@@ -11973,6 +12011,12 @@ a.wm-orderfilled-row {
   letter-spacing: 0.5px;
   text-transform: uppercase;
   transform: translateX(-50%);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.wm-weather-deck-legend::-webkit-scrollbar {
+  display: none;
 }
 
 .wm-weather-deck-legend span {
@@ -12726,6 +12770,21 @@ a.wm-orderfilled-row {
     max-height: min(72%, 560px);
     border-left-width: 1px;
     border-top: 4px solid #73d8ff;
+  }
+
+  .wm-weather-deck-legend {
+    right: 82px;
+    left: 10px;
+    max-width: none;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wm-world-event-svg-point.severity-warning,
+  .wm-world-event-svg-point.severity-critical,
+  .wm-world-event-svg-point.is-selected {
+    animation: none;
   }
 }
 

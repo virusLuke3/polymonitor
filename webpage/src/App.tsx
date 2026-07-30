@@ -44,6 +44,7 @@ import {
   filterWorldEventMapEventsForLayers,
   MapStatus,
   MapToolbar,
+  LayerPanel,
   selectableWorldEventLayers,
   sourceStatusFromAdapter,
   useCountryGeometry,
@@ -775,7 +776,6 @@ function WorldMonitorApp() {
     initialData: readGeoShockRuntimeSeed(),
   });
   const [marketQuery] = useState('');
-  const [layerQuery, setLayerQuery] = useState('');
   const [commandQuery, setCommandQuery] = useState('');
   const [commandTab, setCommandTab] = useState<CommandPaletteTab>('markets');
   const [commandActiveMarketId, setCommandActiveMarketId] = useState<number | null>(null);
@@ -1631,11 +1631,6 @@ function WorldMonitorApp() {
     { label: 'ORACLE', value: currentGlobalOracle.length || 0 },
     { label: 'INTEL', value: currentLatestContent.length || 0 },
   ];
-  const visibleLayers = useMemo(() => {
-    const query = layerQuery.trim().toLowerCase();
-    if (!query) return layers;
-    return layers.filter((layer) => `${localizedLayerLabel(layer, t)} ${layer.label} ${layer.hint || ''} ${layer.id}`.toLowerCase().includes(query));
-  }, [layerQuery, layers, t]);
   const enabledLayerIds = useMemo(() => layers.filter((layer) => layer.enabled).map((layer) => layer.id), [layers]);
   const activeLayerCount = enabledLayerIds.length;
   const geoShockPayload = runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined;
@@ -2069,46 +2064,27 @@ function WorldMonitorApp() {
 
           <div className="wm-map-stage">
             <div className={`wm-globe-area ${viewMode !== '3d' ? 'wm-globe-area-flat' : ''}`}>
-              <aside className={`wm-layer-sidebar ${showPanelLibrary ? '' : 'collapsed'}`}>
-                <div className="wm-toggle-header">
-                  <span>{t('atlas.layers')}</span>
-                  <button type="button" className="wm-toggle-collapse" onClick={() => setShowPanelLibrary(false)}>▼</button>
-                </div>
-                <input
-                  className="wm-layer-search"
-                  value={layerQuery}
-                  onInput={(event) => setLayerQuery((event.currentTarget as HTMLInputElement).value)}
-                  placeholder={t('atlas.searchLayers')}
-                />
-
-                <div className="wm-layer-list">
-                  {visibleLayers.length ? visibleLayers.map((layer) => {
-                    const layerLabel = localizedLayerLabel(layer, t);
-                    const actionLabel = t(layer.enabled ? 'atlas.hideLayer' : 'atlas.showLayer', { layer: layerLabel });
-                    return (
-                      <label
-                        key={layer.id}
-                        className={`wm-layer-row ${layer.enabled ? 'enabled' : ''}`}
-                        title={actionLabel}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={layer.enabled}
-                          onChange={() => toggleLayer(layer.id)}
-                          aria-label={actionLabel}
-                        />
-                        <span className="wm-layer-icon">{layer.icon}</span>
-                        <span>{layerLabel}</span>
-                        {layer.hint ? <em className="wm-layer-hint">{layer.hint}</em> : null}
-                      </label>
-                    );
-                  }) : (
-                    <div className="wm-layer-empty">{t('atlas.noLayers')}</div>
-                  )}
-                </div>
-
-                <div className="wm-sidebar-footer">{t('atlas.layersActive', { active: formatNumber(activeLayerCount), total: formatNumber(layers.length) })}</div>
-              </aside>
+              <LayerPanel
+                items={layers.map((layer) => ({
+                  ...layer,
+                  label: localizedLayerLabel(layer, t),
+                }))}
+                events={worldEventMapEvents}
+                collapsed={!showPanelLibrary}
+                title={t('atlas.layers')}
+                searchPlaceholder={t('atlas.searchLayers')}
+                emptyLabel={t('atlas.noLayers')}
+                activeSummary={t('atlas.layersActive', {
+                  active: formatNumber(activeLayerCount),
+                  total: formatNumber(layers.length),
+                })}
+                getActionLabel={(layer) => t(
+                  layer.enabled ? 'atlas.hideLayer' : 'atlas.showLayer',
+                  { layer: layer.label },
+                )}
+                onToggle={toggleLayer}
+                onCollapse={() => setShowPanelLibrary(false)}
+              />
 
               <div className="wm-globe-hero">
                 {viewMode === '3d' ? (

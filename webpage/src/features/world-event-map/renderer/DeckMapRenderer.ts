@@ -215,7 +215,14 @@ export class DeckMapRenderer implements MapRenderer {
         : [-180, -85, 180, 85]
       : undefined;
     this.overlay.setProps({
-      layers: createWorldEventLayers(this.events, this.state, true, viewport, this.animationTime),
+      layers: createWorldEventLayers(
+        this.events,
+        this.state,
+        true,
+        viewport,
+        this.animationTime,
+        !this.reducedMotion,
+      ),
     });
     this.map?.triggerRepaint();
   }
@@ -316,15 +323,17 @@ export class DeckMapRenderer implements MapRenderer {
     }
   }
 
-  private hasAnimatedAviation() {
+  private hasAnimatedEvents() {
     return this.events.some((event) => (
-      event.category === 'infrastructure'
-      && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight')
+      (event.category === 'infrastructure'
+        && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight'))
+      || ((event.category === 'natural-hazard' || event.category === 'weather')
+        && (event.severity === 'warning' || event.severity === 'critical'))
     ));
   }
 
   private syncAnimationLoop() {
-    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) {
+    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedEvents()) {
       this.cancelAnimationLoop();
       return;
     }
@@ -335,7 +344,7 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleAnimationFrame = (timestamp: number) => {
     this.animationFrame = null;
-    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) return;
+    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedEvents()) return;
     if (timestamp - this.lastAnimationRenderAt >= 40) {
       this.animationTime = Math.max(0, (timestamp - this.animationStartedAt) / 1_000);
       this.lastAnimationRenderAt = timestamp;

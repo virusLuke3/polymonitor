@@ -1,0 +1,175 @@
+import { Fragment } from 'preact';
+import { useMemo, useState } from 'preact/hooks';
+import {
+  worldEventLayerById,
+  worldEventLayerIdForEvent,
+  type MapLayerDefinition,
+} from '../config/layerRegistry';
+import type { GeoEvent } from '../domain/types';
+
+export type LayerPanelItem = {
+  id: string;
+  label: string;
+  icon: string;
+  hint?: string;
+  enabled: boolean;
+};
+
+function LayerBrief({
+  layer,
+  eventCount,
+  onClose,
+}: {
+  layer: MapLayerDefinition;
+  eventCount: number;
+  onClose: () => void;
+}) {
+  return (
+    <aside className="wm-layer-brief" aria-labelledby="wm-layer-brief-title">
+      <button type="button" className="wm-layer-brief-close" onClick={onClose} aria-label="Close layer brief">×</button>
+      <header>
+        <span>Layer intelligence brief</span>
+        <h2 id="wm-layer-brief-title">{layer.icon} {layer.label}</h2>
+        <p>{layer.explanation.purpose}</p>
+      </header>
+      <dl>
+        <div>
+          <dt>Mapped now</dt>
+          <dd>{eventCount} events</dd>
+        </div>
+        <div>
+          <dt>Freshness</dt>
+          <dd>{layer.explanation.freshness}</dd>
+        </div>
+        <div>
+          <dt>Evidence standard</dt>
+          <dd>{layer.explanation.confidence}</dd>
+        </div>
+      </dl>
+      <section>
+        <h3>Sources</h3>
+        <div className="wm-layer-brief-sources">
+          {layer.explanation.sources.map((source) => <span key={source}>{source}</span>)}
+        </div>
+      </section>
+      <section>
+        <h3>Coverage & limitations</h3>
+        <ul>
+          {layer.explanation.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+        </ul>
+      </section>
+      <p className="wm-layer-brief-note">
+        Select a colored event on the map to open its full event report, native sources and related markets.
+      </p>
+    </aside>
+  );
+}
+
+export function LayerPanel({
+  items,
+  events,
+  collapsed,
+  title,
+  searchPlaceholder,
+  emptyLabel,
+  activeSummary,
+  getActionLabel,
+  onToggle,
+  onCollapse,
+}: {
+  items: LayerPanelItem[];
+  events: GeoEvent[];
+  collapsed: boolean;
+  title: string;
+  searchPlaceholder: string;
+  emptyLabel: string;
+  activeSummary: string;
+  getActionLabel: (item: LayerPanelItem) => string;
+  onToggle: (layerId: string) => void;
+  onCollapse: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [briefLayerId, setBriefLayerId] = useState<string | null>(null);
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return normalized
+      ? items.filter((item) => `${item.label} ${item.hint || ''} ${item.id}`.toLowerCase().includes(normalized))
+      : items;
+  }, [items, query]);
+  const counts = useMemo(() => {
+    const next = new Map<string, number>();
+    for (const event of events) {
+      const layerId = worldEventLayerIdForEvent(event);
+      if (layerId) next.set(layerId, (next.get(layerId) || 0) + 1);
+    }
+    return next;
+  }, [events]);
+  const briefLayer = briefLayerId ? worldEventLayerById(briefLayerId) : undefined;
+
+  return (
+    <Fragment>
+      <aside className={`wm-layer-sidebar ${collapsed ? 'collapsed' : ''}`}>
+        <div className="wm-toggle-header">
+          <span>{title}</span>
+          <button
+            type="button"
+            className="wm-toggle-collapse"
+            onClick={() => {
+              setBriefLayerId(null);
+              onCollapse();
+            }}
+          >
+            ▼
+          </button>
+        </div>
+        <input
+          className="wm-layer-search"
+          value={query}
+          onInput={(event) => setQuery((event.currentTarget as HTMLInputElement).value)}
+          placeholder={searchPlaceholder}
+        />
+        <div className="wm-layer-list">
+          {filtered.length ? filtered.map((item) => {
+            const actionLabel = getActionLabel(item);
+            const briefOpen = briefLayerId === item.id;
+            return (
+              <div
+                key={item.id}
+                className={`wm-layer-row ${item.enabled ? 'enabled' : ''} ${briefOpen ? 'brief-open' : ''}`}
+              >
+                <label className="wm-layer-toggle" title={actionLabel}>
+                  <input
+                    type="checkbox"
+                    checked={item.enabled}
+                    onChange={() => onToggle(item.id)}
+                    aria-label={actionLabel}
+                  />
+                  <span className="wm-layer-icon">{item.icon}</span>
+                  <span className="wm-layer-label">{item.label}</span>
+                  {item.hint ? <em className="wm-layer-hint">{item.hint}</em> : null}
+                </label>
+                <button
+                  type="button"
+                  className="wm-layer-info"
+                  aria-label={`Open ${item.label} source and coverage brief`}
+                  aria-pressed={briefOpen}
+                  onClick={() => setBriefLayerId(briefOpen ? null : item.id)}
+                >
+                  i
+                </button>
+              </div>
+            );
+          }) : <div className="wm-layer-empty">{emptyLabel}</div>}
+        </div>
+        <div className="wm-sidebar-footer">{activeSummary}</div>
+      </aside>
+      {briefLayer && !collapsed ? (
+        <LayerBrief
+          layer={briefLayer}
+          eventCount={counts.get(briefLayer.id) || 0}
+          onClose={() => setBriefLayerId(null)}
+        />
+      ) : null}
+    </Fragment>
+  );
+}
