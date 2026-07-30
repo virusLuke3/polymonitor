@@ -20,9 +20,11 @@ from typing import Any
 MANIFEST_VERSION = 1
 GCP_SOURCE_PREFIXES = (
     "agent/",
+    "config/operations/",
     "quant/",
     "telegram/",
     "scripts/api/",
+    "scripts/ops/",
     "scripts/runtime/",
 )
 GCP_SOURCE_FILES = {
@@ -37,12 +39,18 @@ GCP_SOURCE_FILES = {
 }
 EXTERNAL_RELEASE_PREFIXES = (
     ".github/",
+    "deploy/nginx/",
     "docs/",
     "scripts/qa/",
     "scripts/deploy/",
+    "tests/",
     "webpage/",
 )
 EXTERNAL_RELEASE_FILES = {
+    "AGENTS.md",
+    "deploy/systemd/polydata-db-reverse-tunnel-healthcheck.service",
+    "deploy/systemd/polydata-external-availability.service",
+    "deploy/systemd/polydata-external-availability.timer",
     "deploy/systemd/polydata.env.example",
     "scripts/requirements-dev.lock.txt",
     "scripts/requirements.txt",
@@ -87,14 +95,26 @@ def _safe_relative_path(raw: str) -> str:
 
 
 def _target_gcp_units(repo: Path, target: str) -> set[str]:
-    content, _mode = _git_entry(repo, target, "deploy/systemd/polydata-gcp.target")
+    target_unit = "polydata-gcp.target"
+    content, _mode = _git_entry(repo, target, f"deploy/systemd/{target_unit}")
     if content is None:
         raise RuntimeError("target commit does not contain polydata-gcp.target")
-    units = {"polydata-gcp.target", "polydata.target"}
-    for raw_line in content.decode("utf-8").splitlines():
-        line = raw_line.strip()
-        if line.startswith(("Wants=", "Requires=")):
-            units.update(line.split("=", 1)[1].split())
+    units = {target_unit, "polydata.target"}
+    pending = [target_unit]
+    while pending:
+        unit = pending.pop()
+        unit_content, _mode = _git_entry(repo, target, f"deploy/systemd/{unit}")
+        if unit_content is None:
+            continue
+        for raw_line in unit_content.decode("utf-8").splitlines():
+            line = raw_line.strip()
+            if not line.startswith(("Wants=", "Requires=", "Unit=")):
+                continue
+            for dependency in line.split("=", 1)[1].split():
+                if not dependency.startswith("polydata-") or dependency in units:
+                    continue
+                units.add(dependency)
+                pending.append(dependency)
     return units
 
 
