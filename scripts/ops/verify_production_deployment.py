@@ -142,7 +142,14 @@ def _remote_snapshot(target: str, app_dir: str) -> dict[str, object]:
     script = f"""
 set -eu
 cd {app_dir!r}
-sha="$(git rev-parse HEAD)"
+release_state="$HOME/.local/state/polydata-deploy/current.json"
+if test -f "$release_state"; then
+  sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_sha"])' "$release_state")"
+  sha_source="release-state"
+else
+  sha="$(git rev-parse HEAD)"
+  sha_source="git-head"
+fi
 index_hash="$(sha256sum /var/www/polydata/index.html | awk '{{print $1}}')"
 units=""
 for unit in {' '.join(EXPECTED_REMOTE_UNITS)}; do
@@ -154,21 +161,21 @@ for unit in {' '.join(EXPECTED_REMOTE_SYSTEM_UNITS)}; do
   state="$(systemctl is-active "$unit" 2>/dev/null || true)"
   system_units="${{system_units}}${{unit}}=${{state}};"
 done
-printf '%s\\n%s\\n%s\\n%s\\n' "$sha" "$index_hash" "$units" "$system_units"
+printf '%s\\n%s\\n%s\\n%s\\n%s\\n' "$sha" "$sha_source" "$index_hash" "$units" "$system_units"
 """
     result = _ssh(target, script)
     if result.returncode != 0:
         return {"status": Status.UNHEALTHY.value, "errorClass": "RemoteProbeFailed"}
     lines = result.stdout.splitlines()
-    if len(lines) < 4:
+    if len(lines) < 5:
         return {"status": Status.UNHEALTHY.value, "errorClass": "InvalidRemoteProbe"}
     units = {}
-    for item in lines[2].split(";"):
+    for item in lines[3].split(";"):
         if "=" in item:
             unit, state = item.split("=", 1)
             units[unit] = state
     system_units = {}
-    for item in lines[3].split(";"):
+    for item in lines[4].split(";"):
         if "=" in item:
             unit, state = item.split("=", 1)
             system_units[unit] = state
@@ -178,7 +185,8 @@ printf '%s\\n%s\\n%s\\n%s\\n' "$sha" "$index_hash" "$units" "$system_units"
     return {
         "status": status.value,
         "sha": lines[0].strip(),
-        "indexSha256": lines[1].strip(),
+        "shaSource": lines[1].strip(),
+        "indexSha256": lines[2].strip(),
         "units": units,
         "systemUnits": system_units,
     }
