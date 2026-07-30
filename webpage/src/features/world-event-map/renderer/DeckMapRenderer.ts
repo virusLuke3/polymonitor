@@ -37,6 +37,10 @@ export class DeckMapRenderer implements MapRenderer {
   private destroyed = false;
   private applyingCamera = false;
   private reducedMotion = false;
+  private animationFrame: number | null = null;
+  private animationStartedAt = 0;
+  private lastAnimationRenderAt = 0;
+  private animationTime = 0;
 
   async mount(container: HTMLElement, callbacks: MapRendererCallbacks) {
     if (this.map) return;
@@ -101,6 +105,7 @@ export class DeckMapRenderer implements MapRenderer {
       this.clearFallbackTimer();
       this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
       this.render();
+      this.syncAnimationLoop();
     });
     map.on('style.load', this.handleStyleLoad);
     map.on('moveend', this.handleMoveEnd);
@@ -136,11 +141,13 @@ export class DeckMapRenderer implements MapRenderer {
       }
     }
     this.render();
+    this.syncAnimationLoop();
   }
 
   setEvents(events: GeoEvent[]) {
     this.events = events;
     this.render();
+    this.syncAnimationLoop();
   }
 
   resize() {
@@ -150,10 +157,13 @@ export class DeckMapRenderer implements MapRenderer {
 
   setReducedMotion(reduced: boolean) {
     this.reducedMotion = reduced;
+    this.syncAnimationLoop();
+    this.render();
   }
 
   pause() {
     this.paused = true;
+    this.cancelAnimationLoop();
     this.overlay?.setProps({ layers: [] });
   }
 
@@ -161,12 +171,14 @@ export class DeckMapRenderer implements MapRenderer {
     if (!this.paused) return;
     this.paused = false;
     this.resize();
+    this.syncAnimationLoop();
   }
 
   destroy() {
     this.destroyed = true;
     this.clearFallbackTimer();
     this.clearContextRecoveryTimer();
+    this.cancelAnimationLoop();
     const map = this.map;
     if (map) {
       map.off('style.load', this.handleStyleLoad);
@@ -203,7 +215,7 @@ export class DeckMapRenderer implements MapRenderer {
         : [-180, -85, 180, 85]
       : undefined;
     this.overlay.setProps({
-      layers: createWorldEventLayers(this.events, this.state, true, viewport),
+      layers: createWorldEventLayers(this.events, this.state, true, viewport, this.animationTime),
     });
     this.map?.triggerRepaint();
   }
@@ -243,6 +255,7 @@ export class DeckMapRenderer implements MapRenderer {
   private handleContextLost = (event: Event) => {
     event.preventDefault();
     this.paused = true;
+    this.cancelAnimationLoop();
     this.overlay?.setProps({ layers: [] });
     this.emitBasemapState('renderer-fallback-ready');
     this.callbacks?.onError(new Error('WebGL context lost. Waiting for one bounded recovery attempt.'));
@@ -263,6 +276,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.paused = false;
     this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
     this.render();
+    this.syncAnimationLoop();
   };
 
   private applyLocalFallback(error: Error) {
@@ -299,6 +313,41 @@ export class DeckMapRenderer implements MapRenderer {
     if (this.contextRecoveryTimer != null) {
       window.clearTimeout(this.contextRecoveryTimer);
       this.contextRecoveryTimer = null;
+    }
+  }
+
+  private hasAnimatedAviation() {
+    return this.events.some((event) => (
+      event.category === 'infrastructure'
+      && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight')
+    ));
+  }
+
+  private syncAnimationLoop() {
+    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) {
+      this.cancelAnimationLoop();
+      return;
+    }
+    if (this.animationFrame != null) return;
+    this.animationStartedAt = performance.now() - this.animationTime * 1_000;
+    this.animationFrame = window.requestAnimationFrame(this.handleAnimationFrame);
+  }
+
+  private handleAnimationFrame = (timestamp: number) => {
+    this.animationFrame = null;
+    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) return;
+    if (timestamp - this.lastAnimationRenderAt >= 40) {
+      this.animationTime = Math.max(0, (timestamp - this.animationStartedAt) / 1_000);
+      this.lastAnimationRenderAt = timestamp;
+      this.render();
+    }
+    this.animationFrame = window.requestAnimationFrame(this.handleAnimationFrame);
+  };
+
+  private cancelAnimationLoop() {
+    if (this.animationFrame != null) {
+      window.cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
     }
   }
 }

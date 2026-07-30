@@ -247,9 +247,14 @@ describe('World Event Map adapters', () => {
     });
     expect(result.rejected).toHaveLength(0);
     expect(result.events.map((item) => item.properties.mapEntity)).toEqual(['air-route', 'air-hub']);
-    expect(result.events[0]?.geometry).toEqual({
-      type: 'LineString',
-      coordinates: [[103.99, 1.36], [-0.45, 51.47]],
+    expect(result.events[0]?.geometry).toMatchObject({ type: 'LineString' });
+    expect(result.events[0]?.geometry?.type === 'LineString'
+      ? result.events[0].geometry.coordinates.length
+      : 0).toBeGreaterThan(20);
+    expect(result.events[0]?.properties).toMatchObject({
+      routeId: 'SIN-LHR',
+      segmentIndex: 0,
+      layer: 'trunk',
     });
   });
 });

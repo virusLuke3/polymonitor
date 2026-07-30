@@ -52,6 +52,8 @@ import {
   WorldEventMap,
   worldEventLayerById,
   type GeoEvent,
+  type AviationLensMode,
+  type AviationRiskSource,
   type WorldEventMapState,
   type WorldEventRegion,
 } from '@/features/world-event-map';
@@ -375,6 +377,9 @@ function WorldEventInlineMap({
   onEventSelect,
   onEventHover,
   onOpenMarket,
+  onAviationLensChange,
+  onAviationRiskSourceChange,
+  onAviationClose,
 }: {
   events: GeoEvent[];
   state: WorldEventMapState;
@@ -382,6 +387,9 @@ function WorldEventInlineMap({
   onEventSelect: (eventId: string | null) => void;
   onEventHover: (eventId: string | null) => void;
   onOpenMarket: (marketId: number) => void;
+  onAviationLensChange: (lens: AviationLensMode) => void;
+  onAviationRiskSourceChange: (source: AviationRiskSource) => void;
+  onAviationClose: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -394,6 +402,9 @@ function WorldEventInlineMap({
         onEventSelect={onEventSelect}
         onEventHover={onEventHover}
         onOpenMarket={onOpenMarket}
+        onAviationLensChange={onAviationLensChange}
+        onAviationRiskSourceChange={onAviationRiskSourceChange}
+        onAviationClose={onAviationClose}
         height={620}
       />
     </div>
@@ -1673,10 +1684,13 @@ function WorldMonitorApp() {
   );
   const showAirRoutes = enabledLayerIds.includes('air-routes');
   const transportPayload = runtimeData['global-transport-shipping'] as RuntimeGlobalTransportShippingPayload | undefined;
-  const airReferenceEvents = useMemo(
-    () => showAirRoutes ? adaptTransportReference(transportPayload).events : [],
+  const airReferenceAdapterResult = useMemo(
+    () => showAirRoutes
+      ? adaptTransportReference(transportPayload)
+      : { events: [], rejected: [] },
     [showAirRoutes, transportPayload],
   );
+  const airReferenceEvents = airReferenceAdapterResult.events;
   const worldEventMapEvents = useMemo(
     () => [
       ...hazardMapEvents,
@@ -1734,6 +1748,17 @@ function WorldMonitorApp() {
       if (countryGeometry.error) status.message = countryGeometry.error;
       statuses.push(status);
     }
+    if (showAirRoutes) {
+      const runtimeStatus = getPanelRuntimeStatus('global-transport-shipping');
+      statuses.push(sourceStatusFromAdapter({
+        key: 'global-transport-shipping',
+        label: 'AVIATION',
+        payloadStatus: transportPayload?.status || runtimeStatus.phase,
+        generatedAt: transportPayload?.aviation?.generatedAt || transportPayload?.generatedAt,
+        result: airReferenceAdapterResult,
+        loaded: Boolean(transportPayload),
+      }));
+    }
     return statuses;
   }, [
     breakingEventPayload,
@@ -1748,6 +1773,9 @@ function WorldMonitorApp() {
     intelAdapterResult,
     intelLayerEnabled,
     naturalHazards.sources,
+    showAirRoutes,
+    transportPayload,
+    airReferenceAdapterResult,
     ucdpLayerEnabled,
   ]);
   const mapVisibleEventCount = viewMode === '3d' ? globeStatus.markerVisible : worldEventMapEvents.length;
@@ -2104,6 +2132,9 @@ function WorldMonitorApp() {
                     onEventSelect={worldEventMap.selectEvent}
                     onEventHover={worldEventMap.hoverEvent}
                     onOpenMarket={focusRelatedMarket}
+                    onAviationLensChange={worldEventMap.setAviationLens}
+                    onAviationRiskSourceChange={worldEventMap.setAviationRiskSource}
+                    onAviationClose={() => worldEventMap.toggleLayer('air-routes')}
                   />
                 )}
 

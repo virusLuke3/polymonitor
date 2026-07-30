@@ -18,9 +18,11 @@ describe('World Event Map state', () => {
       activeLayerIds: ['air-routes'],
       timeRange: '7d',
       severities: ['critical'],
+      aviationLens: 'trunk',
+      aviationRiskSource: 'weather',
     }));
     const fromUrl = parseWorldEventMapState(
-      '?region=eu&center=11.5,48.2&zoom=4.25&layers=ucdp&time=24h&severity=warning,critical&event=UCDP%3A1',
+      '?region=eu&center=11.5,48.2&zoom=4.25&layers=ucdp&time=24h&severity=warning,critical&event=UCDP%3A1&air=watch&airRisk=conflict',
       stored,
     );
     expect(fromUrl).toMatchObject({
@@ -31,6 +33,8 @@ describe('World Event Map state', () => {
       timeRange: '24h',
       severities: ['warning', 'critical'],
       selectedEventId: 'UCDP:1',
+      aviationLens: 'watch',
+      aviationRiskSource: 'conflict',
     });
     const serialized = serializeWorldEventMapUrl(fromUrl, 'https://example.test/?view=2d');
     expect(parseWorldEventMapState(new URL(serialized).search)).toMatchObject(fromUrl);
@@ -58,6 +62,8 @@ describe('World Event Map state', () => {
     expect(asia).toMatchObject({ region: 'asia', center: { lon: 101, lat: 29 }, zoom: 2.35 });
     const withRoutes = worldEventMapReducer(asia, { type: 'toggle-layer', layerId: 'air-routes' });
     expect(withRoutes.activeLayerIds).toContain('air-routes');
+    const trunk = worldEventMapReducer(withRoutes, { type: 'set-aviation-lens', lens: 'trunk' });
+    expect(trunk.aviationLens).toBe('trunk');
     expect(worldEventMapReducer(withRoutes, { type: 'reset' })).toEqual(defaultWorldEventMapState());
   });
 

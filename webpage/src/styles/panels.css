@@ -11183,6 +11183,180 @@ a.wm-orderfilled-row {
   stroke-width: 3;
 }
 
+.wm-aviation-lens {
+  position: absolute;
+  top: 12px;
+  right: 76px;
+  z-index: 10;
+  display: grid;
+  gap: 8px;
+  width: min(330px, calc(100% - 360px));
+  min-width: 260px;
+  padding: 10px;
+  border: 1px solid rgba(94, 238, 255, 0.24);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(7, 30, 42, 0.94), rgba(4, 12, 17, 0.91)),
+    rgba(0, 0, 0, 0.82);
+  color: #dff8ff;
+  font-family: var(--font-mono);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px);
+}
+
+.wm-aviation-lens header,
+.wm-aviation-lens-stats,
+.wm-aviation-lens-tabs,
+.wm-aviation-risk-tabs {
+  display: flex;
+  align-items: center;
+}
+
+.wm-aviation-lens header {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wm-aviation-lens header span {
+  display: block;
+  color: #6f93a4;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wm-aviation-lens header strong {
+  display: block;
+  margin-top: 3px;
+  color: #ecfbff;
+  font-size: 11px;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.wm-aviation-lens header > button {
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #91aab5;
+  font: 900 15px/1 var(--font-mono);
+  cursor: pointer;
+}
+
+.wm-aviation-lens-stats {
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.wm-aviation-lens-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #92aab5;
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.wm-aviation-lens-stats b {
+  color: #7df1ff;
+  font-size: 10px;
+}
+
+.wm-aviation-lens-stats em {
+  font-style: normal;
+}
+
+.wm-aviation-lens-stats i {
+  width: 7px;
+  height: 7px;
+  border: 1px solid #5eeeff;
+  border-radius: 999px;
+}
+
+.wm-aviation-lens-stats i.routes {
+  width: 10px;
+  height: 2px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #5eeeff, #ffd654);
+}
+
+.wm-aviation-lens-stats i.flights {
+  border: 0;
+  border-radius: 0;
+  background: #ffd654;
+  clip-path: polygon(0 55%, 100% 0, 65% 52%, 100% 100%);
+}
+
+.wm-aviation-lens-tabs,
+.wm-aviation-risk-tabs {
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.wm-aviation-lens-tabs button,
+.wm-aviation-risk-tabs button {
+  min-height: 25px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #829aa5;
+  font: 900 8px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.wm-aviation-lens-tabs button.active {
+  border-color: rgba(94, 238, 255, 0.42);
+  background: rgba(94, 238, 255, 0.13);
+  color: #e7fcff;
+}
+
+.wm-aviation-risk-tabs {
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.wm-aviation-risk-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wm-aviation-risk-tabs button.active {
+  border-color: rgba(255, 96, 76, 0.42);
+  background: rgba(255, 96, 76, 0.11);
+  color: #ffe4dc;
+}
+
+.wm-aviation-risk-tabs b {
+  color: #ffd654;
+}
+
+.wm-aviation-lens > p {
+  margin: 0;
+  color: #71858e;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+@media (max-width: 900px) {
+  .wm-aviation-lens {
+    top: auto;
+    right: 10px;
+    bottom: 64px;
+    left: 10px;
+    width: auto;
+    min-width: 0;
+  }
+}
+
 .wm-air-map-controls {
   position: absolute;
   top: 12px;

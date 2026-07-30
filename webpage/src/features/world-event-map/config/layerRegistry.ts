@@ -259,7 +259,12 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     clusterRadius: 0,
     timeFilter: false,
     severities: ['info', 'watch', 'warning', 'critical'],
-    legend: [],
+    legend: [
+      { label: 'Trunk corridor', color: '#5eeeff' },
+      { label: 'Weather exposure', color: '#2dd4bf' },
+      { label: 'Conflict exposure', color: '#ff604c' },
+      { label: 'Aircraft', color: '#ffd654' },
+    ],
     explanation: {
       purpose: 'Optional low-priority aviation topology reference.',
       sources: ['OpenFlights', 'OpenSky/ADSB where available'],
@@ -271,7 +276,21 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
 ] as const;
 
 export function selectableWorldEventLayers() {
-  return WORLD_EVENT_LAYER_REGISTRY.filter((layer) => layer.selectable);
+  const order = new Map([
+    'weather-alerts',
+    'earthquakes-volcanoes',
+    'wildfires',
+    'extreme-temperature',
+    'climate-anomalies',
+    'air-routes',
+    'intel-hotspots',
+    'ucdp',
+    'sanctions-country-risk',
+  ].map((id, index) => [id, index]));
+  return WORLD_EVENT_LAYER_REGISTRY
+    .filter((layer) => layer.selectable)
+    .slice()
+    .sort((left, right) => (order.get(left.id) ?? 99) - (order.get(right.id) ?? 99));
 }
 
 export function worldEventLayerById(id: string) {

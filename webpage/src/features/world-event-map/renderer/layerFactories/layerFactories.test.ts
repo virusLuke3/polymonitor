@@ -57,6 +57,37 @@ describe('world event layer factories', () => {
       .toEqual(['world-event-areas', 'world-event-paths']);
   });
 
+  it('renders aviation reference arcs, route runners, aircraft and hubs as a dedicated lens', () => {
+    const state = {
+      ...defaultWorldEventMapState(),
+      activeLayerIds: [...defaultWorldEventMapState().activeLayerIds, 'air-routes'],
+    };
+    const route: GeoEvent = {
+      ...pointEvent('route:0', 0, 0),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[0, 0], [4, 3], [8, 4]] },
+      properties: {
+        mapEntity: 'air-route',
+        routeId: 'route',
+        layer: 'trunk',
+        trafficScore: 90,
+      },
+    };
+    const hub: GeoEvent = {
+      ...pointEvent('hub', 0, 0),
+      category: 'infrastructure',
+      properties: { mapEntity: 'air-hub', code: 'HUB', routeCount: 100 },
+    };
+    expect((createWorldEventLayers([route, hub], state, true, undefined, 5) as Layer[]).map((layer) => layer.id))
+      .toEqual([
+        'aviation-route-underlay',
+        'aviation-route-core',
+        'aviation-route-runners',
+        'aviation-hubs',
+        'aviation-hub-labels',
+      ]);
+  });
+
   it('clusters a 2,000 event fixture within the viewport and retains selection', () => {
     const events = Array.from({ length: 2_000 }, (_, index) => pointEvent(
       `fixture-${index}`,

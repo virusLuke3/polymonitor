@@ -7,7 +7,11 @@ export function createEventGeometryLayers(
   events: GeoEvent[],
   selectedEventId: string | null,
 ): LayersList {
-  const lines = events.filter((event) => event.geometry?.type === 'LineString');
+  const lines = events.filter((event) => (
+    event.properties.mapEntity !== 'air-route'
+    && event.properties.mapEntity !== 'air-flight'
+    && event.geometry?.type === 'LineString'
+  ));
   const areas = events.filter((event) => (
     event.geometry?.type === 'Polygon' || event.geometry?.type === 'MultiPolygon'
   ));
@@ -41,10 +45,8 @@ export function createEventGeometryLayers(
       id: 'world-event-paths',
       data: lines,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
-      getColor: (event) => event.category === 'infrastructure'
-        ? [68, 176, 255, event.id === selectedEventId ? 205 : 70]
-        : eventColor(event, event.id === selectedEventId ? 240 : 165),
-      getWidth: (event) => event.id === selectedEventId ? 2.4 : event.category === 'infrastructure' ? 0.75 : 1.5,
+      getColor: (event) => eventColor(event, event.id === selectedEventId ? 240 : 165),
+      getWidth: (event) => event.id === selectedEventId ? 2.4 : 1.5,
       widthMinPixels: 0.6,
       widthMaxPixels: 5,
       jointRounded: true,

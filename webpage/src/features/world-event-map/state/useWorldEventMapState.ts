@@ -5,6 +5,8 @@ import {
   defaultWorldEventMapState,
   WORLD_EVENT_MAP_STORAGE_KEY,
   type WorldEventTimeRange,
+  type AviationLensMode,
+  type AviationRiskSource,
 } from './mapState';
 import { worldEventMapReducer } from './mapReducer';
 import {
@@ -37,6 +39,8 @@ export function useWorldEventMapState() {
     setSeverities: (severities: GeoEventSeverity[]) => dispatch({ type: 'set-severities', severities }),
     selectEvent: (eventId: string | null) => dispatch({ type: 'select-event', eventId }),
     hoverEvent: (eventId: string | null) => dispatch({ type: 'hover-event', eventId }),
+    setAviationLens: (lens: AviationLensMode) => dispatch({ type: 'set-aviation-lens', lens }),
+    setAviationRiskSource: (source: AviationRiskSource) => dispatch({ type: 'set-aviation-risk-source', source }),
     reset: () => dispatch({ type: 'reset' }),
     shareUrl: (baseUrl: string) => serializeWorldEventMapUrl(state, baseUrl),
   }), [state]);

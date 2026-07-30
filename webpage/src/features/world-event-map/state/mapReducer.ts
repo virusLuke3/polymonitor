@@ -8,6 +8,8 @@ import {
   defaultWorldEventMapState,
   type WorldEventMapState,
   type WorldEventTimeRange,
+  type AviationLensMode,
+  type AviationRiskSource,
 } from './mapState';
 
 export type WorldEventMapAction =
@@ -21,6 +23,8 @@ export type WorldEventMapAction =
   | { type: 'select-event'; eventId: string | null }
   | { type: 'hover-event'; eventId: string | null }
   | { type: 'set-basemap-theme'; theme: string }
+  | { type: 'set-aviation-lens'; lens: AviationLensMode }
+  | { type: 'set-aviation-risk-source'; source: AviationRiskSource }
   | { type: 'replace'; state: WorldEventMapState }
   | { type: 'reset' };
 
@@ -63,6 +67,8 @@ export function worldEventMapReducer(
   if (action.type === 'select-event') return { ...state, selectedEventId: action.eventId };
   if (action.type === 'hover-event') return { ...state, hoveredEventId: action.eventId };
   if (action.type === 'set-basemap-theme') return { ...state, basemapTheme: action.theme || 'dark' };
+  if (action.type === 'set-aviation-lens') return { ...state, aviationLens: action.lens };
+  if (action.type === 'set-aviation-risk-source') return { ...state, aviationRiskSource: action.source };
   if (action.type === 'replace') return action.state;
   if (action.type === 'reset') return defaultWorldEventMapState();
   return state;

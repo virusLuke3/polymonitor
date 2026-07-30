@@ -156,7 +156,11 @@ export function createEventPointLayers({
   showLabels: boolean;
   viewport?: [number, number, number, number];
 }): LayersList {
-  const pointEvents = events.filter((event) => event.geometry?.type === 'Point');
+  const pointEvents = events.filter((event) => (
+    event.properties.mapEntity !== 'air-hub'
+    && event.properties.mapEntity !== 'live-aircraft'
+    && event.geometry?.type === 'Point'
+  ));
   const { singles, clusters } = clusterEventPoints(pointEvents, zoom, selectedEventId, viewport);
   const layers: Layer[] = [];
 

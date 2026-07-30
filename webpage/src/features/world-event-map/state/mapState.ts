@@ -3,6 +3,8 @@ import { worldEventRegionPreset, type WorldEventRegion } from '../config/regions
 import type { GeoEventSeverity } from '../domain/types';
 
 export type WorldEventTimeRange = '1h' | '6h' | '24h' | '48h' | '7d' | 'all';
+export type AviationLensMode = 'all' | 'trunk' | 'watch';
+export type AviationRiskSource = 'all' | 'weather' | 'conflict' | 'corridor';
 
 export interface WorldEventMapState {
   center: { lon: number; lat: number };
@@ -14,11 +16,15 @@ export interface WorldEventMapState {
   selectedEventId: string | null;
   hoveredEventId: string | null;
   basemapTheme: string;
+  aviationLens: AviationLensMode;
+  aviationRiskSource: AviationRiskSource;
 }
 
 export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v3';
 export const WORLD_EVENT_TIME_RANGES: readonly WorldEventTimeRange[] = ['1h', '6h', '24h', '48h', '7d', 'all'];
 export const WORLD_EVENT_SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
+export const AVIATION_LENS_MODES: readonly AviationLensMode[] = ['all', 'trunk', 'watch'];
+export const AVIATION_RISK_SOURCES: readonly AviationRiskSource[] = ['all', 'weather', 'conflict', 'corridor'];
 
 export function defaultWorldEventMapState(): WorldEventMapState {
   const global = worldEventRegionPreset('global');
@@ -32,6 +38,8 @@ export function defaultWorldEventMapState(): WorldEventMapState {
     selectedEventId: null,
     hoveredEventId: null,
     basemapTheme: 'dark',
+    aviationLens: 'all',
+    aviationRiskSource: 'all',
   };
 }
 

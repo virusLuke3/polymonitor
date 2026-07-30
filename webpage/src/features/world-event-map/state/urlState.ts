@@ -8,6 +8,10 @@ import {
   defaultWorldEventMapState,
   WORLD_EVENT_SEVERITIES,
   WORLD_EVENT_TIME_RANGES,
+  AVIATION_LENS_MODES,
+  AVIATION_RISK_SOURCES,
+  type AviationLensMode,
+  type AviationRiskSource,
   type WorldEventMapState,
   type WorldEventTimeRange,
 } from './mapState';
@@ -71,6 +75,14 @@ export function parseWorldEventMapState(
   }
   const selectedEventId = params.get('event');
   if (selectedEventId) state.selectedEventId = selectedEventId;
+  const aviationLens = params.get('air');
+  if (AVIATION_LENS_MODES.includes(aviationLens as AviationLensMode)) {
+    state.aviationLens = aviationLens as AviationLensMode;
+  }
+  const aviationRiskSource = params.get('airRisk');
+  if (AVIATION_RISK_SOURCES.includes(aviationRiskSource as AviationRiskSource)) {
+    state.aviationRiskSource = aviationRiskSource as AviationRiskSource;
+  }
   return state;
 }
 
@@ -84,6 +96,8 @@ export function serializeWorldEventMapUrl(state: WorldEventMapState, baseUrl: st
   url.searchParams.set('severity', state.severities.join(','));
   if (state.selectedEventId) url.searchParams.set('event', state.selectedEventId);
   else url.searchParams.delete('event');
+  url.searchParams.set('air', state.aviationLens);
+  url.searchParams.set('airRisk', state.aviationRiskSource);
   return url.toString();
 }
 
@@ -102,6 +116,8 @@ export function readStoredWorldEventMapState(
     if (parsed.timeRange) params.set('time', parsed.timeRange);
     if (Array.isArray(parsed.severities)) params.set('severity', parsed.severities.join(','));
     if (parsed.selectedEventId) params.set('event', parsed.selectedEventId);
+    if (parsed.aviationLens) params.set('air', parsed.aviationLens);
+    if (parsed.aviationRiskSource) params.set('airRisk', parsed.aviationRiskSource);
     return parseWorldEventMapState(params.toString(), fallback);
   } catch {
     return fallback;

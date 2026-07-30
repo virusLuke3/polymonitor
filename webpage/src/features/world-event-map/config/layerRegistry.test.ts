@@ -16,10 +16,10 @@ describe('World Event Map layer registry', () => {
       'wildfires',
       'extreme-temperature',
       'climate-anomalies',
+      'air-routes',
       'intel-hotspots',
       'ucdp',
       'sanctions-country-risk',
-      'air-routes',
     ]);
     expect(selectableWorldEventLayers().filter((layer) => layer.defaultEnabled).map((layer) => layer.id)).toEqual([
       'weather-alerts',

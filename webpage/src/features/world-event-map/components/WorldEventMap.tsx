@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { GeoEvent } from '../domain/types';
-import type { WorldEventMapState } from '../state/mapState';
+import type {
+  AviationLensMode,
+  AviationRiskSource,
+  WorldEventMapState,
+} from '../state/mapState';
 import { DeckMapRenderer } from '../renderer/DeckMapRenderer';
 import { SvgMapRenderer } from '../renderer/SvgMapRenderer';
 import type { BasemapState, MapRenderer, MapRendererCallbacks } from '../renderer/MapRenderer';
@@ -8,6 +12,7 @@ import { inspectWebGL2Support } from '../renderer/webglSupport';
 import { worldEventLayerById } from '../config/layerRegistry';
 import { EventInspector } from './EventInspector';
 import { EventList } from './EventList';
+import { AviationLens } from './AviationLens';
 
 export type WorldEventMapProps = {
   events: GeoEvent[];
@@ -16,6 +21,9 @@ export type WorldEventMapProps = {
   onEventSelect: (eventId: string | null) => void;
   onEventHover: (eventId: string | null) => void;
   onOpenMarket?: (marketId: number) => void;
+  onAviationLensChange?: (lens: AviationLensMode) => void;
+  onAviationRiskSourceChange?: (source: AviationRiskSource) => void;
+  onAviationClose?: () => void;
   height?: number;
 };
 
@@ -26,6 +34,9 @@ export function WorldEventMap({
   onEventSelect,
   onEventHover,
   onOpenMarket,
+  onAviationLensChange,
+  onAviationRiskSourceChange,
+  onAviationClose,
   height = 620,
 }: WorldEventMapProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -175,6 +186,18 @@ export function WorldEventMap({
         selectedEventId={state.selectedEventId}
         onSelect={onEventSelect}
       />
+      {state.activeLayerIds.includes('air-routes')
+        && onAviationLensChange
+        && onAviationRiskSourceChange
+        && onAviationClose ? (
+          <AviationLens
+            events={events}
+            state={state}
+            onLensChange={onAviationLensChange}
+            onRiskSourceChange={onAviationRiskSourceChange}
+            onClose={onAviationClose}
+          />
+        ) : null}
       <div className="wm-weather-deck-legend" aria-label="Active hazard legend">
         {legendItems.map((item) => (
           <span key={`${item.label}:${item.color}`}>
