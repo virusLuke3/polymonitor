@@ -163,7 +163,6 @@ def _accepted_hashes(repo: Path, base: str, target: str, path: str) -> list[str 
             _git(
                 repo,
                 "rev-list",
-                "--ancestry-path",
                 "--reverse",
                 f"{base}..{target}",
                 "--",
