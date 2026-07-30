@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""Validate Panel health contracts and build a per-Panel health snapshot."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+from urllib.request import ProxyHandler, Request, build_opener
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.ops.lib.incidents import update_incident_history
+from scripts.ops.lib.redaction import redact_text
+from scripts.ops.lib.snapshot import age_seconds, atomic_write_json, operations_state_dir, read_json, utc_now_iso
+from scripts.ops.lib.status import Status, aggregate, normalize
+
+
+DEFAULT_CONTRACT = REPO_ROOT / "config" / "operations" / "panel_contracts.json"
+PANEL_INDEX = REPO_ROOT / "webpage" / "src" / "panels" / "modules" / "index.ts"
+IMPORT_RE = re.compile(
+    r"import\s+\{\s*panel\s+as\s+([A-Za-z0-9_]+)\s*\}\s+from\s+['\"]\./([^'\"]+)['\"]"
+)
+PANEL_MODULES_RE = re.compile(
+    r"const\s+(?:ALL_)?PANEL_MODULES[^=]*=\s*\[(.*?)\]\s*;",
+    re.DOTALL,
+)
+PANEL_ID_RE = re.compile(
+    r"export\s+const\s+panel(?:\s*:[^=]+)?\s*=.*?\bid\s*:\s*['\"]([^'\"]+)['\"]",
+    re.DOTALL,
+)
+
+
+def _module_file(relative: str) -> Path:
+    base = PANEL_INDEX.parent / relative
+    candidates = (base.with_suffix(".tsx"), base.with_suffix(".ts"), base / "index.tsx", base / "index.ts")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise ValueError(f"cannot resolve Panel module {relative}")
+
+
+def discover_registered_panel_ids() -> list[str]:
+    index_text = PANEL_INDEX.read_text(encoding="utf-8")
+    imports = dict(IMPORT_RE.findall(index_text))
+    all_match = PANEL_MODULES_RE.search(index_text)
+    if not all_match:
+        raise ValueError("PANEL_MODULES registry not found")
+    aliases = [
+        token.strip()
+        for token in all_match.group(1).split(",")
+        if re.fullmatch(r"[A-Za-z0-9_]+", token.strip())
+    ]
+    panel_ids = []
+    for alias in aliases:
+        relative = imports.get(alias)
+        if not relative:
+            raise ValueError(f"registry alias {alias} has no Panel import")
+        source = _module_file(relative).read_text(encoding="utf-8")
+        panel_match = PANEL_ID_RE.search(source)
+        if not panel_match:
+            raise ValueError(f"module {relative} does not expose a static Panel id")
+        panel_ids.append(panel_match.group(1))
+    return panel_ids
+
+
+def validate_contract(contract: dict[str, Any]) -> dict[str, Any]:
+    groups = contract.get("groups")
+    if not isinstance(groups, list):
+        raise ValueError("panel contract groups must be a list")
+    excluded_ids = {str(value) for value in contract.get("excludedPanelIds", [])}
+    excluded_prefixes = tuple(str(value) for value in contract.get("excludedPanelPrefixes", []))
+    registered = discover_registered_panel_ids()
+    active = {
+        panel_id
+        for panel_id in registered
+        if panel_id not in excluded_ids and not panel_id.startswith(excluded_prefixes)
+    }
+    declared: dict[str, int] = {}
+    errors: list[str] = []
+    required_fields = {
+        "owner",
+        "healthStrategy",
+        "dataSources",
+        "degradationPolicy",
+        "panelIds",
+    }
+    allowed_strategies = {"seed", "database", "external-api", "browser"}
+    for index, group in enumerate(groups):
+        missing_fields = sorted(required_fields - set(group))
+        if missing_fields:
+            errors.append(f"group[{index}] missing {','.join(missing_fields)}")
+        if group.get("healthStrategy") not in allowed_strategies:
+            errors.append(f"group[{index}] has unsupported healthStrategy")
+        if group.get("healthStrategy") != "browser" and not group.get("expectedFreshnessSeconds"):
+            errors.append(f"group[{index}] needs expectedFreshnessSeconds")
+        if group.get("healthStrategy") == "database" and not group.get("representativeProbe"):
+            errors.append(f"group[{index}] database contract needs representativeProbe")
+        for panel_id in group.get("panelIds", []):
+            panel_id = str(panel_id)
+            declared[panel_id] = declared.get(panel_id, 0) + 1
+    duplicates = sorted(panel_id for panel_id, count in declared.items() if count > 1)
+    missing = sorted(active - set(declared))
+    unknown = sorted(set(declared) - active)
+    if duplicates:
+        errors.append(f"duplicate Panel contracts: {','.join(duplicates)}")
+    if missing:
+        errors.append(f"missing Panel contracts: {','.join(missing)}")
+    if unknown:
+        errors.append(f"contracts for non-active Panels: {','.join(unknown)}")
+    return {
+        "status": Status.HEALTHY.value if not errors else Status.UNHEALTHY.value,
+        "registeredCount": len(registered),
+        "activeCount": len(active),
+        "contractCount": len(declared),
+        "excludedCount": len(set(registered) - active),
+        "errors": errors,
+    }
+
+
+def _request_json(path: str) -> dict[str, Any]:
+    base = os.environ.get(
+        "POLYDATA_OPERATIONS_API_BASE",
+        f"http://127.0.0.1:{os.environ.get('POLYDATA_API_PORT', '18500')}",
+    ).rstrip("/")
+    headers = {"Accept": "application/json"}
+    api_key = os.environ.get("POLYDATA_OPERATIONS_API_KEY")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = Request(f"{base}/{path.lstrip('/')}", headers=headers)
+    response = build_opener(ProxyHandler({})).open(request, timeout=15)
+    try:
+        if int(getattr(response, "status", 200)) != 200:
+            raise RuntimeError("non-200 API response")
+        payload = json.loads(response.read(2 * 1024 * 1024 + 1).decode("utf-8"))
+    finally:
+        response.close()
+    if not isinstance(payload, dict):
+        raise ValueError("API response must be an object")
+    return payload
+
+
+def _freshness_status(updated_at: Any, max_age: int) -> Status:
+    age = age_seconds(updated_at)
+    if age is None:
+        return Status.UNKNOWN
+    if age <= max_age:
+        return Status.HEALTHY
+    if age <= max_age * 3:
+        return Status.WARNING
+    return Status.DEGRADED
+
+
+def _service_states(contract: dict[str, Any]) -> dict[str, dict[str, str]]:
+    names = sorted(
+        {
+            str(name)
+            for group in contract.get("groups", [])
+            if isinstance(group, dict)
+            for name in group.get("serviceNames", [])
+            if str(name).startswith("polydata-") and str(name).endswith(".service")
+        }
+    )
+    states: dict[str, dict[str, str]] = {}
+    for name in names:
+        try:
+            result = subprocess.run(
+                [
+                    "systemctl",
+                    "--user",
+                    "show",
+                    name,
+                    "--property=LoadState",
+                    "--property=ActiveState",
+                    "--property=SubState",
+                    "--property=Result",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+            values = {}
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if "=" in line:
+                        key, value = line.split("=", 1)
+                        values[key] = value
+            load_state = values.get("LoadState") or "unknown"
+            active_state = values.get("ActiveState") or "unknown"
+            if load_state == "not-found":
+                status = Status.UNKNOWN
+            elif active_state == "active":
+                status = Status.HEALTHY
+            elif active_state in {"activating", "reloading"}:
+                status = Status.WARNING
+            elif active_state == "inactive":
+                status = Status.DEGRADED
+            elif active_state == "failed":
+                status = Status.UNHEALTHY
+            else:
+                status = Status.UNKNOWN
+            states[name] = {
+                "status": status.value,
+                "activeState": active_state,
+                "subState": values.get("SubState") or "unknown",
+                "result": values.get("Result") or "unknown",
+            }
+        except (OSError, subprocess.SubprocessError):
+            states[name] = {
+                "status": Status.UNKNOWN.value,
+                "activeState": "unknown",
+                "subState": "unknown",
+                "result": "unknown",
+            }
+    return states
+
+
+def _seed_evidence(
+    panel_id: str,
+    group: dict[str, Any],
+    seed_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    services = set(str(value) for value in group.get("serviceNames", []))
+    aliases = group.get("evidenceAliases") if isinstance(group.get("evidenceAliases"), dict) else {}
+    evidence_key = str(aliases.get(panel_id) or panel_id)
+    candidates = [
+        item
+        for item in seed_items
+        if isinstance(item, dict)
+        and str(item.get("panelId")) == evidence_key
+    ]
+    if not candidates and len(group.get("panelIds", [])) == 1:
+        candidates = [
+            item
+            for item in seed_items
+            if isinstance(item, dict) and str(item.get("serviceName")) in services
+        ]
+    if not candidates:
+        return {
+            "status": Status.UNKNOWN.value,
+            "freshness": Status.UNKNOWN.value,
+            "observedAt": None,
+            "ageSeconds": None,
+            "evidence": "seed-metadata-unavailable",
+        }
+    statuses = []
+    latest: dict[str, Any] | None = None
+    for item in candidates:
+        item_status = normalize(item.get("status"))
+        freshness = normalize(item.get("freshness"))
+        statuses.append(aggregate([item_status, freshness]))
+        if latest is None or str(item.get("lastSuccessAt") or "") > str(latest.get("lastSuccessAt") or ""):
+            latest = item
+    assert latest is not None
+    observed_at = latest.get("lastSuccessAt")
+    return {
+        "status": aggregate(statuses).value,
+        "freshness": normalize(latest.get("freshness")).value,
+        "observedAt": observed_at,
+        "ageSeconds": age_seconds(observed_at),
+        "evidence": "seed-metadata",
+        "sourceCount": len(candidates),
+        "recordCount": int(latest.get("recordCount") or 0),
+    }
+
+
+def _database_evidence(group: dict[str, Any], system: dict[str, Any]) -> dict[str, Any]:
+    probe = str(group.get("representativeProbe") or "")
+    max_age = int(group.get("expectedFreshnessSeconds") or 300)
+    if probe == "lob_runtime":
+        item = system.get("lobRuntime") if isinstance(system.get("lobRuntime"), dict) else {}
+        observed_at = item.get("updatedAt") or item.get("observedAt")
+        source = normalize(item.get("status"))
+    else:
+        camel = {
+            "market_sync": "marketSync",
+            "trade_sync": "tradeSync",
+            "oracle_sync": "oracleSync",
+            "price_sync": "priceSync",
+        }.get(probe, probe)
+        item = system.get(camel) if isinstance(system.get(camel), dict) else {}
+        observed_at = item.get("updatedAt")
+        source = normalize(item.get("status"), default=Status.HEALTHY if item else Status.UNKNOWN)
+    freshness = _freshness_status(observed_at, max_age)
+    return {
+        "status": aggregate([source, freshness]).value,
+        "freshness": freshness.value,
+        "observedAt": observed_at,
+        "ageSeconds": age_seconds(observed_at),
+        "evidence": f"database:{probe}",
+    }
+
+
+def build_panel_snapshot(
+    contract: dict[str, Any],
+    validation: dict[str, Any],
+    *,
+    system: dict[str, Any],
+    seed: dict[str, Any],
+    service_states: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    seed_items = seed.get("items") if isinstance(seed.get("items"), list) else []
+    observed_services = service_states or {}
+    panels = []
+    for group in contract["groups"]:
+        group_services = [
+            {
+                "name": str(name),
+                **observed_services.get(
+                    str(name),
+                    {
+                        "status": Status.UNKNOWN.value,
+                        "activeState": "unknown",
+                        "subState": "unknown",
+                        "result": "unknown",
+                    },
+                ),
+            }
+            for name in group.get("serviceNames", [])
+        ]
+        service_status = (
+            aggregate(item["status"] for item in group_services)
+            if group_services
+            else Status.DISABLED
+        )
+        for panel_id in group["panelIds"]:
+            strategy = str(group["healthStrategy"])
+            if strategy in {"seed", "external-api"}:
+                evidence = _seed_evidence(str(panel_id), group, seed_items)
+            elif strategy == "database":
+                evidence = _database_evidence(group, system)
+            else:
+                evidence = {
+                    "status": Status.UNKNOWN.value,
+                    "freshness": Status.UNKNOWN.value,
+                    "observedAt": None,
+                    "ageSeconds": None,
+                    "evidence": "browser-smoke-required",
+                }
+            panels.append(
+                {
+                    "panelId": panel_id,
+                    "owner": group["owner"],
+                    "healthStrategy": strategy,
+                    "status": evidence["status"],
+                    "freshness": evidence["freshness"],
+                    "observedAt": evidence["observedAt"],
+                    "ageSeconds": evidence["ageSeconds"],
+                    "evidence": evidence["evidence"],
+                    "dataSources": group["dataSources"],
+                    "serviceNames": group.get("serviceNames", []),
+                    "expectedFreshnessSeconds": group.get("expectedFreshnessSeconds"),
+                    "degradationPolicy": group["degradationPolicy"],
+                    "serviceStatus": service_status.value,
+                    "services": group_services,
+                }
+            )
+            if group_services:
+                panels[-1]["status"] = aggregate(
+                    [panels[-1]["status"], service_status]
+                ).value
+    watermarks = {
+        name: system.get(name)
+        for name in ("marketSync", "tradeSync", "oracleSync", "priceSync")
+        if isinstance(system.get(name), dict)
+    }
+    active_gaps = [
+        {
+            "panelId": panel["panelId"],
+            "status": panel["status"],
+            "freshness": panel["freshness"],
+            "evidence": panel["evidence"],
+        }
+        for panel in panels
+        if panel["status"] not in {Status.HEALTHY.value, Status.DISABLED.value}
+    ]
+    overall = aggregate([validation["status"], *[panel["status"] for panel in panels]])
+    return {
+        "schemaVersion": "polymonitor.panel-health.v1",
+        "generatedAt": utc_now_iso(),
+        "status": overall.value,
+        "contract": validation,
+        "watermarks": watermarks,
+        "activeGaps": active_gaps,
+        "summary": {
+            "panelCount": len(panels),
+            "healthyCount": sum(panel["status"] == Status.HEALTHY.value for panel in panels),
+            "attentionCount": sum(
+                panel["status"] in {Status.WARNING.value, Status.DEGRADED.value, Status.UNHEALTHY.value}
+                for panel in panels
+            ),
+            "unknownCount": sum(panel["status"] == Status.UNKNOWN.value for panel in panels),
+        },
+        "panels": panels,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--check-contracts", action="store_true")
+    parser.add_argument("--print", action="store_true", dest="print_payload")
+    args = parser.parse_args()
+    try:
+        contract = read_json(args.contract)
+        validation = validate_contract(contract)
+        if args.check_contracts:
+            json.dump(validation, sys.stdout, ensure_ascii=True, indent=2)
+            sys.stdout.write("\n")
+            return 0 if validation["status"] == Status.HEALTHY.value else 1
+        system = _request_json("/system/health")
+        seed = _request_json("/system/seed-health")
+        payload = build_panel_snapshot(
+            contract,
+            validation,
+            system=system,
+            seed=seed,
+            service_states=_service_states(contract),
+        )
+        output = args.output or operations_state_dir() / "panel-health.json"
+        atomic_write_json(output, payload)
+        update_incident_history(
+            operations_state_dir() / "incidents.json",
+            [
+                {
+                    "component": f"panel:{panel['panelId']}",
+                    "status": panel["status"],
+                    "summary": panel["evidence"],
+                }
+                for panel in payload["panels"]
+            ],
+        )
+        if args.print_payload:
+            json.dump(payload, sys.stdout, ensure_ascii=True, indent=2)
+            sys.stdout.write("\n")
+        return 0 if validation["status"] == Status.HEALTHY.value else 1
+    except Exception as exc:
+        print(f"[panel-health] audit failed: {redact_text(type(exc).__name__)}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

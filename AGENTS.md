@@ -2,7 +2,7 @@
 
 For any task that changes the 2D map, its controls, its data adapters, its
 runtime APIs, its fallback renderer, or its deployment behavior, read
-`docs/world-event-map-implementation-guide.md` in full before editing.
+`document/地图/WorldEventMap实施指导.md` in full before editing.
 
 Treat that document as the product, architecture, robustness, testing, and
 release contract for World Event Map work. Do not expand

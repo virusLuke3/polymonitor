@@ -1,0 +1,4 @@
+# Install in /etc/nginx/conf.d so this directive is loaded in the http context.
+# The site template uses the zone to stop one client from occupying every API
+# request slot with slow LOB reads.
+limit_conn_zone $binary_remote_addr zone=polydata_lob_conn:10m;
