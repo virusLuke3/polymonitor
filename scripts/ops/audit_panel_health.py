@@ -9,8 +9,9 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 from urllib.request import ProxyHandler, Request, build_opener
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -159,16 +160,25 @@ def _freshness_status(updated_at: Any, max_age: int) -> Status:
     return Status.DEGRADED
 
 
-def _service_states(contract: dict[str, Any]) -> dict[str, dict[str, str]]:
-    names = sorted(
-        {
+def _service_states(
+    contract: dict[str, Any],
+    *,
+    extra_names: Iterable[str] = (),
+) -> dict[str, dict[str, str]]:
+    names = sorted({
+        *{
             str(name)
             for group in contract.get("groups", [])
             if isinstance(group, dict)
             for name in group.get("serviceNames", [])
             if str(name).startswith("polydata-") and str(name).endswith(".service")
-        }
-    )
+        },
+        *{
+            str(name)
+            for name in extra_names
+            if str(name).startswith("polydata-") and str(name).endswith(".service")
+        },
+    })
     states: dict[str, dict[str, str]] = {}
     for name in names:
         try:
@@ -279,6 +289,21 @@ def _seed_evidence(
         "sourceCount": len(candidates),
         "recordCount": int(latest.get("recordCount") or 0),
     }
+
+
+def _request_system_health(
+    *,
+    max_attempts: int = 6,
+    retry_delay_seconds: float = 1.0,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for attempt in range(max(1, max_attempts)):
+        payload = _request_json("/system/health")
+        if payload.get("apiStatus") != "warming":
+            return payload
+        if attempt + 1 < max_attempts:
+            time.sleep(max(0.0, retry_delay_seconds))
+    return payload
 
 
 def _database_evidence(group: dict[str, Any], system: dict[str, Any]) -> dict[str, Any]:
@@ -442,14 +467,22 @@ def main() -> int:
             json.dump(validation, sys.stdout, ensure_ascii=True, indent=2)
             sys.stdout.write("\n")
             return 0 if validation["status"] == Status.HEALTHY.value else 1
-        system = _request_json("/system/health")
+        system = _request_system_health()
         seed = _request_json("/system/seed-health")
+        seed_items = seed.get("items") if isinstance(seed.get("items"), list) else []
         payload = build_panel_snapshot(
             contract,
             validation,
             system=system,
             seed=seed,
-            service_states=_service_states(contract),
+            service_states=_service_states(
+                contract,
+                extra_names=(
+                    str(item.get("serviceName"))
+                    for item in seed_items
+                    if isinstance(item, dict) and item.get("serviceName")
+                ),
+            ),
         )
         output = args.output or operations_state_dir() / "panel-health.json"
         atomic_write_json(output, payload)
