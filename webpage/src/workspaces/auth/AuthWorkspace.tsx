@@ -16,7 +16,6 @@ import {
   type AuthSession,
   type ProductApiKey,
 } from '@/services/auth';
-import { OperationsWorkspace } from '@/workspaces/operations/OperationsWorkspace';
 
 export function errorMessage(error: unknown) {
   if (error instanceof AuthApiError) {
@@ -125,21 +124,6 @@ export function LoginWorkspace() {
   return <AuthFrame><SignInPanel next={query.get('next') || '/account'} /></AuthFrame>;
 }
 
-export function OperationsAccessWorkspace() {
-  const [session, setSession] = useState<AuthSession | null>(null);
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    fetchAuthSession()
-      .then(setSession)
-      .finally(() => setReady(true));
-  }, []);
-  if (!ready) return <LoadingAccess />;
-  if (!session?.authenticated || session.user?.role !== 'admin') {
-    return <AuthFrame><SignInPanel next="/operations" /></AuthFrame>;
-  }
-  return <OperationsWorkspace />;
-}
-
 export function AccountWorkspace() {
   const { t, formatDateTime } = useI18n();
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -232,7 +216,6 @@ export function AccountWorkspace() {
           <div className="auth-account-actions">
             <a href="/watchlist">{t('auth.openWatchlist')}</a>
             <a href="/briefings">{t('auth.openBriefings')}</a>
-            {session.user?.role === 'admin' ? <a href="/operations">{t('auth.openOperations')}</a> : null}
             <button type="button" onClick={signOut} disabled={busy}>{t('auth.signOut')}</button>
           </div>
         </section>

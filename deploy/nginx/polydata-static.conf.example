@@ -24,6 +24,17 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # The browser Operations Workspace is intentionally not part of the
+    # product surface. Runtime collectors and protected API endpoints remain
+    # available to operators without publishing a frontend route.
+    location = /operations {
+        return 404;
+    }
+
+    location ^~ /operations/ {
+        return 404;
+    }
+
     # Agent endpoints call paid LLM APIs. Keep them out of the public web
     # surface; use the loopback API or an authenticated private tunnel instead.
     location ^~ /wm-api/agent/ {

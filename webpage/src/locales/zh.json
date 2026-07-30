@@ -762,7 +762,6 @@
   "auth.signedInAs": "当前登录",
   "auth.openWatchlist": "打开关注列表",
   "auth.openBriefings": "打开简报",
-  "auth.openOperations": "打开运维工作台",
   "auth.signOut": "退出登录",
   "auth.bootstrapWarning": "正常使用前必须更换此初始凭据。",
   "auth.sessionSecurity": "会话安全",

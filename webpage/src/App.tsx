@@ -114,7 +114,6 @@ const MarketWorkspace = lazy(() => import('@/workspaces/market/MarketWorkspace')
 const DataQualityWorkspace = lazy(() => import('@/workspaces/data-quality/DataQualityWorkspace').then((module) => ({ default: module.DataQualityWorkspace })));
 const LoginWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.LoginWorkspace })));
 const AccountWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.AccountWorkspace })));
-const OperationsAccessWorkspace = lazy(() => import('@/workspaces/auth/AuthWorkspace').then((module) => ({ default: module.OperationsAccessWorkspace })));
 const WatchlistWorkspace = lazy(() => import('@/workspaces/watchlist/WatchlistWorkspace').then((module) => ({ default: module.WatchlistWorkspace })));
 const BriefingManagerWorkspace = lazy(() => import('@/workspaces/briefing/BriefingWorkspace').then((module) => ({ default: module.BriefingManagerWorkspace })));
 const PublicBriefingWorkspace = lazy(() => import('@/workspaces/briefing/BriefingWorkspace').then((module) => ({ default: module.PublicBriefingWorkspace })));
@@ -2538,13 +2537,6 @@ export function App() {
     return (
       <Suspense fallback={<PanelLoading label="Loading Market workspace" detail="Resolving market identity, probability and evidence sources" />}>
         <MarketWorkspace />
-      </Suspense>
-    );
-  }
-  if (pathname === '/operations' || pathname.startsWith('/operations/')) {
-    return (
-      <Suspense fallback={<PanelLoading label="Loading Operations workspace" detail="Reading production health and freshness metadata" />}>
-        <OperationsAccessWorkspace />
       </Suspense>
     );
   }

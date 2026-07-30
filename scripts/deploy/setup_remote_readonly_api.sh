@@ -223,6 +223,14 @@ server {
         try_files \$uri \$uri/ /index.html;
     }
 
+    location = /operations {
+        return 404;
+    }
+
+    location ^~ /operations/ {
+        return 404;
+    }
+
     location ^~ /wm-api/agent/ {
         return 403;
     }

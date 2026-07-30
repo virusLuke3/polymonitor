@@ -4,7 +4,6 @@
 @import url('./main.css') layer(base);
 @import url('./panels.css') layer(base);
 @import url('./panel-workspace.css') layer(base);
-@import url('./operations-workspace.css') layer(components);
 @import url('./market-workspace.css') layer(components);
 @import url('./data-quality-workspace.css') layer(components);
 @import url('./auth-workspace.css') layer(components);

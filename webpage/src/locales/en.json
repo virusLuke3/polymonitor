@@ -762,7 +762,6 @@
   "auth.signedInAs": "Signed in as",
   "auth.openWatchlist": "Open Watchlist",
   "auth.openBriefings": "Open Briefings",
-  "auth.openOperations": "Open Operations",
   "auth.signOut": "Sign out",
   "auth.bootstrapWarning": "This bootstrap credential must be replaced before normal use.",
   "auth.sessionSecurity": "Session security",
