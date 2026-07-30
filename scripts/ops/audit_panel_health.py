@@ -303,7 +303,7 @@ def _request_system_health(
             return payload
         if attempt + 1 < max_attempts:
             time.sleep(max(0.0, retry_delay_seconds))
-    return payload
+    raise RuntimeError("system health remained warming")
 
 
 def _database_evidence(group: dict[str, Any], system: dict[str, Any]) -> dict[str, Any]:
