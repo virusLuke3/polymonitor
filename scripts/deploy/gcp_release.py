@@ -48,6 +48,7 @@ EXTERNAL_RELEASE_PREFIXES = (
 )
 EXTERNAL_RELEASE_FILES = {
     "AGENTS.md",
+    "deploy/gcp/accepted-remote-overrides.json",
     "deploy/systemd/polydata-db-reverse-tunnel-healthcheck.service",
     "deploy/systemd/polydata-external-availability.service",
     "deploy/systemd/polydata-external-availability.timer",
