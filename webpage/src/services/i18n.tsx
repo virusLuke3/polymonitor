@@ -1,5 +1,5 @@
 import { createContext, type ComponentChildren } from 'preact';
-import { useContext, useMemo, useState } from 'preact/hooks';
+import { useContext, useEffect, useMemo, useState } from 'preact/hooks';
 import en from '@/locales/en.json';
 import zh from '@/locales/zh.json';
 import { specialistEn, specialistZh } from '@/locales/specialist';
@@ -46,6 +46,10 @@ const I18nContext = createContext<I18nValue | null>(null);
 
 export function LocaleProvider({ children }: { children: ComponentChildren }) {
   const [locale, setLocaleState] = useState<Locale>(detectLocale);
+  useEffect(() => {
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+    if (locale === 'zh') void import('@fontsource-variable/noto-sans-sc/wght.css');
+  }, [locale]);
   const value = useMemo<I18nValue>(() => {
     const intlLocale = locale === 'zh' ? 'zh-CN' : 'en-US';
     const setLocale = (next: Locale) => {
@@ -57,7 +61,6 @@ export function LocaleProvider({ children }: { children: ComponentChildren }) {
       document.documentElement.lang = next === 'zh' ? 'zh-CN' : 'en';
       setLocaleState(next);
     };
-    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
     return {
       locale,
       setLocale,

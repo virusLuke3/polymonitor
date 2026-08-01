@@ -9337,10 +9337,10 @@ body {
   border-bottom: 1px solid rgba(62, 255, 121, 0.18);
   background:
     linear-gradient(90deg, rgba(15, 55, 29, 0.98) 0%, rgba(10, 29, 19, 0.98) 58%, rgba(7, 20, 14, 0.98) 100%);
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(0, 980px) minmax(170px, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: 16px;
+  column-gap: 16px;
   padding: 0 28px;
   font-family: var(--font-mono);
   font-size: 14px;
@@ -9361,6 +9361,8 @@ body {
 
 .wm-pro-badge {
   position: relative;
+  z-index: 1;
+  justify-self: start;
   padding: 6px 12px;
   border-radius: 6px;
   background: linear-gradient(180deg, #1fff6b 0%, #0fb84c 100%);
@@ -9371,17 +9373,21 @@ body {
 
 .wm-promo-copy {
   position: relative;
+  z-index: 1;
+  min-width: 0;
   color: #b9d6b9;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 .wm-promo-cta {
   position: relative;
-  margin-left: auto;
+  z-index: 1;
+  justify-self: end;
   border: 1px solid rgba(57, 255, 115, 0.55);
   border-radius: 8px;
   background: linear-gradient(180deg, #38ff75 0%, #1fe45c 100%);
@@ -9392,6 +9398,12 @@ body {
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 0 0 1px rgba(57, 255, 115, 0.12), 0 14px 30px rgba(0, 0, 0, 0.22);
+}
+
+html[lang='zh-CN'] .wm-promo-copy,
+html[lang='zh-CN'] .wm-promo-cta {
+  font-family: 'Noto Sans SC Variable', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', var(--font-body);
+  letter-spacing: 0.02em;
 }
 
 @keyframes wm-promo-scan {
@@ -15478,18 +15490,34 @@ body {
 @media (max-width: 720px) {
   .wm-promo {
     height: auto;
-    flex-wrap: wrap;
-    justify-content: flex-start;
+    min-height: 88px;
+    grid-template:
+      'badge spacer cta' auto
+      'copy copy copy' auto /
+      auto minmax(0, 1fr) auto;
+    column-gap: 12px;
+    row-gap: 9px;
     padding: 10px 12px;
   }
 
+  .wm-pro-badge {
+    grid-area: badge;
+  }
+
   .wm-promo-copy {
-    flex-basis: 100%;
-    order: 3;
+    grid-area: copy;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
   }
 
   .wm-promo-cta {
-    margin-left: auto;
+    grid-area: cta;
+    min-height: 40px;
+    padding: 9px 14px;
+    font-size: 12px;
   }
 
   .wm-brand {

@@ -31,8 +31,8 @@
   --ds-space-8: 32px;
   --ds-space-10: 40px;
   --ds-font-display: 'Rajdhani', 'Arial Narrow', sans-serif;
-  --ds-font-body: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
-  --ds-font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  --ds-font-body: 'Space Grotesk Variable', 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  --ds-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
   --ds-duration-fast: 140ms;
   --ds-duration-standard: 240ms;
   --ds-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
