@@ -51,6 +51,14 @@ function aviationEntity(event: GeoEvent) {
     : '';
 }
 
+function aircraftMarker(x: number, y: number, angle: number) {
+  const aircraft = svgElement('path');
+  aircraft.setAttribute('d', 'M 11 0 L 2.5 3.1 L -1.7 10 L -3.8 9.3 L -2.4 2.9 L -10 0 L -2.4 -2.9 L -3.8 -9.3 L -1.7 -10 L 2.5 -3.1 Z');
+  aircraft.setAttribute('transform', `translate(${x} ${y}) rotate(${angle})`);
+  aircraft.classList.add('wm-world-event-svg-aircraft');
+  return aircraft;
+}
+
 function ringSignedArea(ring: Position[]) {
   let area = 0;
   for (let index = 0; index < ring.length - 1; index += 1) {
@@ -390,11 +398,7 @@ export class SvgMapRenderer implements MapRenderer {
       const [x, y] = position;
       if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
       if (aviationEntity(event) === 'live-aircraft') {
-        const aircraft = svgElement('text');
-        aircraft.setAttribute('x', String(x));
-        aircraft.setAttribute('y', String(y));
-        aircraft.textContent = '✈';
-        aircraft.classList.add('wm-world-event-svg-aircraft');
+        const aircraft = aircraftMarker(x, y, Number(event.properties.heading || 0) - 90);
         this.decorateEventElement(aircraft, event, event.id === selectedId);
         this.eventLayer.append(aircraft);
         continue;
@@ -412,12 +416,7 @@ export class SvgMapRenderer implements MapRenderer {
       if (!position) continue;
       const [x, y] = position;
       if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
-      const aircraft = svgElement('text');
-      aircraft.setAttribute('x', String(x));
-      aircraft.setAttribute('y', String(y));
-      aircraft.setAttribute('transform', `rotate(${flight.angle} ${x} ${y})`);
-      aircraft.textContent = '✈';
-      aircraft.classList.add('wm-world-event-svg-aircraft');
+      const aircraft = aircraftMarker(x, y, flight.angle);
       this.decorateEventElement(aircraft, flight.event, flight.event.id === selectedId);
       this.eventLayer.append(aircraft);
     }

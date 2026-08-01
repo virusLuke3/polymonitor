@@ -1,4 +1,4 @@
-import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import { IconLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import type { Layer, LayersList } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import type {
@@ -7,6 +7,11 @@ import type {
   WorldEventMapState,
 } from '../../state/mapState';
 import { MAP_MONO_FONT_FAMILY } from './shared';
+
+const AIRCRAFT_ICON_ATLAS = '/map-icons/aircraft-east.svg';
+const AIRCRAFT_ICON_MAPPING = {
+  aircraft: { x: 0, y: 0, width: 32, height: 32, anchorX: 16, anchorY: 16, mask: true },
+};
 
 type AviationEntity = 'air-route' | 'air-hub' | 'air-flight' | 'live-aircraft';
 
@@ -347,39 +352,33 @@ export function createAviationLayers(
   }
 
   if (flightPoints.length) {
-    layers.push(new TextLayer<AviationMotionPoint>({
+    layers.push(new IconLayer<AviationMotionPoint>({
       id: 'aviation-seeded-aircraft',
       data: flightPoints,
+      iconAtlas: AIRCRAFT_ICON_ATLAS,
+      iconMapping: AIRCRAFT_ICON_MAPPING,
+      getIcon: () => 'aircraft',
       getPosition: (point) => point.position,
-      getText: () => '✈',
       getSize: (point) => point.size,
       getAngle: (point) => point.angle,
       getColor: (point) => point.color,
-      getTextAnchor: 'middle',
-      getAlignmentBaseline: 'center',
-      fontFamily: MAP_MONO_FONT_FAMILY,
-      fontWeight: 900,
-      outlineWidth: 2,
-      outlineColor: [0, 0, 0, 220],
+      sizeUnits: 'pixels',
       pickable: false,
     }));
   }
 
   if (liveAircraft.length) {
-    layers.push(new TextLayer<GeoEvent>({
+    layers.push(new IconLayer<GeoEvent>({
       id: 'aviation-live-aircraft',
       data: liveAircraft,
+      iconAtlas: AIRCRAFT_ICON_ATLAS,
+      iconMapping: AIRCRAFT_ICON_MAPPING,
+      getIcon: () => 'aircraft',
       getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
-      getText: () => '✈',
       getSize: (event) => isWatch(event) ? 15 : 12,
-      getAngle: (event) => numberProperty(event, 'heading'),
+      getAngle: (event) => numberProperty(event, 'heading') - 90,
       getColor: (event) => isWatch(event) ? [255, 214, 84, 245] : [72, 244, 255, 232],
-      getTextAnchor: 'middle',
-      getAlignmentBaseline: 'center',
-      fontFamily: MAP_MONO_FONT_FAMILY,
-      fontWeight: 900,
-      outlineWidth: 2,
-      outlineColor: [0, 0, 0, 220],
+      sizeUnits: 'pixels',
       pickable: true,
       autoHighlight: true,
     }));

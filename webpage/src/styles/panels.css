@@ -12001,12 +12001,10 @@ a.wm-orderfilled-row {
 }
 
 .wm-world-event-svg-aircraft {
-  dominant-baseline: central;
   paint-order: stroke fill;
   stroke: rgba(0, 8, 12, 0.88);
-  stroke-width: 2px;
-  text-anchor: middle;
-  font: 900 12px/1 var(--font-mono);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
 }
 
 .wm-weather-deck-legend {

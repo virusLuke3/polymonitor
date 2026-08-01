@@ -78,7 +78,7 @@ describe('world event layer factories', () => {
       geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] },
     };
     expect((createWorldEventLayers([area, line], defaultWorldEventMapState()) as Layer[]).map((layer) => layer.id))
-      .toEqual(['world-event-areas', 'world-event-paths']);
+      .toEqual(['world-event-context-areas', 'world-event-paths']);
   });
 
   it('renders aviation reference arcs, route runners, aircraft and hubs as a dedicated lens', () => {
