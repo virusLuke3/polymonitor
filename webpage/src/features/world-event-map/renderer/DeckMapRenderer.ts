@@ -10,6 +10,11 @@ import type { GeoEvent } from '../domain/types';
 import type { WorldEventMapState } from '../state/mapState';
 import type { BasemapState, MapRenderer, MapRendererCallbacks } from './MapRenderer';
 import { createWorldEventLayers, type EventCluster } from './layerFactories';
+import {
+  advanceAnimationTime,
+  boundedAnimationDelta,
+  MAP_ANIMATION_FRAME_INTERVAL_MS,
+} from './animationClock';
 
 type PickedObject = GeoEvent | EventCluster | { properties?: { event?: GeoEvent } };
 
@@ -42,8 +47,8 @@ export class DeckMapRenderer implements MapRenderer {
   private applyingCamera = false;
   private reducedMotion = false;
   private animationFrame: number | null = null;
-  private animationStartedAt = 0;
-  private lastAnimationRenderAt = 0;
+  private lastAnimationTimestamp: number | null = null;
+  private pendingAnimationDeltaMs = 0;
   private animationTime = 0;
 
   async mount(container: HTMLElement, callbacks: MapRendererCallbacks) {
@@ -330,8 +335,10 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   private hasAnimatedEvents() {
+    const airRoutesActive = this.state?.activeLayerIds.includes('air-routes') === true;
     return this.events.some((event) => (
-      (event.category === 'infrastructure'
+      (airRoutesActive
+        && event.category === 'infrastructure'
         && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight'))
       || ((event.category === 'natural-hazard' || event.category === 'weather')
         && (event.severity === 'warning' || event.severity === 'critical'))
@@ -344,16 +351,17 @@ export class DeckMapRenderer implements MapRenderer {
       return;
     }
     if (this.animationFrame != null) return;
-    this.animationStartedAt = performance.now() - this.animationTime * 1_000;
     this.animationFrame = window.requestAnimationFrame(this.handleAnimationFrame);
   }
 
   private handleAnimationFrame = (timestamp: number) => {
     this.animationFrame = null;
     if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedEvents()) return;
-    if (timestamp - this.lastAnimationRenderAt >= 40) {
-      this.animationTime = Math.max(0, (timestamp - this.animationStartedAt) / 1_000);
-      this.lastAnimationRenderAt = timestamp;
+    this.pendingAnimationDeltaMs += boundedAnimationDelta(this.lastAnimationTimestamp, timestamp);
+    this.lastAnimationTimestamp = timestamp;
+    if (this.pendingAnimationDeltaMs >= MAP_ANIMATION_FRAME_INTERVAL_MS) {
+      this.animationTime = advanceAnimationTime(this.animationTime, this.pendingAnimationDeltaMs);
+      this.pendingAnimationDeltaMs = 0;
       this.render();
     }
     this.animationFrame = window.requestAnimationFrame(this.handleAnimationFrame);
@@ -364,5 +372,7 @@ export class DeckMapRenderer implements MapRenderer {
       window.cancelAnimationFrame(this.animationFrame);
       this.animationFrame = null;
     }
+    this.lastAnimationTimestamp = null;
+    this.pendingAnimationDeltaMs = 0;
   }
 }

@@ -3,7 +3,7 @@ import type { Layer } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import { defaultWorldEventMapState } from '../../state/mapState';
 import { createWorldEventLayers } from '.';
-import { selectAviationRenderData } from './aviationLayers';
+import { aviationRouteMotionPoints, selectAviationRenderData } from './aviationLayers';
 import { clusterEventPoints } from './eventPointLayer';
 
 const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['severity'] = 'watch'): GeoEvent => ({
@@ -110,6 +110,24 @@ describe('world event layer factories', () => {
         'aviation-hubs',
         'aviation-hub-labels',
       ]);
+    const atStart = aviationRouteMotionPoints([route], 0)[0]?.position;
+    const afterMotion = aviationRouteMotionPoints([route], 8)[0]?.position;
+    expect(afterMotion).not.toEqual(atStart);
+  });
+
+  it('uses an icon layer instead of a font glyph for animated aircraft', () => {
+    const state = {
+      ...defaultWorldEventMapState(),
+      activeLayerIds: [...defaultWorldEventMapState().activeLayerIds, 'air-routes'],
+    };
+    const flight: GeoEvent = {
+      ...pointEvent('flight:0', 0, 0),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[0, 0], [4, 3]] },
+      properties: { mapEntity: 'air-flight', flightId: 'flight', phase: 0.1, speed: 0.06 },
+    };
+    const layers = createWorldEventLayers([flight], state, true, undefined, 5) as Layer[];
+    expect(layers.find((layer) => layer.id === 'aviation-seeded-aircraft')?.constructor.name).toBe('IconLayer');
   });
 
   it('shares the bounded aviation selection with the WebGL and SVG renderers', () => {

@@ -201,7 +201,7 @@ function motionPointForSegments(
   };
 }
 
-function routeMotionPoints(routes: GeoEvent[], animationTime: number) {
+export function aviationRouteMotionPoints(routes: GeoEvent[], animationTime: number) {
   const points: AviationMotionPoint[] = [];
   for (const [routeId, segments] of groupSegments(routes, 'routeId')) {
     const event = segments[0]!;
@@ -301,7 +301,7 @@ export function createAviationLayers(
     flights,
     liveAircraft,
   } = selectAviationRenderData(events, state);
-  const routeRunners = routeMotionPoints(routes, animationTime);
+  const routeRunners = aviationRouteMotionPoints(routes, animationTime);
   const flightPoints = aviationSeededFlightPoints(flights, animationTime);
   const layers: Layer[] = [];
 

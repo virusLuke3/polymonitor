@@ -17,6 +17,7 @@ import {
 import { eventColor, isHazardEvent, pointRadiusMeters } from './layerFactories/shared';
 import { clusterEventPoints } from './layerFactories/eventPointLayer';
 import {
+  aviationRouteMotionPoints,
   aviationRouteTone,
   aviationSeededFlightPoints,
   selectAviationRenderData,
@@ -26,6 +27,11 @@ import {
   visibleCountryBasemapLabels,
   type CountryBasemapLabel,
 } from './countryBasemapLabels';
+import {
+  advanceAnimationTime,
+  boundedAnimationDelta,
+  MAP_ANIMATION_FRAME_INTERVAL_MS,
+} from './animationClock';
 import type { MapRenderer, MapRendererCallbacks } from './MapRenderer';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -112,6 +118,11 @@ export class SvgMapRenderer implements MapRenderer {
   private basemapController: AbortController | null = null;
   private basemapTimer: number | null = null;
   private paused = false;
+  private reducedMotion = false;
+  private animationFrame: number | null = null;
+  private lastAnimationTimestamp: number | null = null;
+  private pendingAnimationDeltaMs = 0;
+  private animationTime = 0;
   private destroyed = false;
   private drag:
     | { pointerId: number; x: number; y: number; center: WorldEventMapState['center'] }
@@ -126,6 +137,7 @@ export class SvgMapRenderer implements MapRenderer {
 
     const svg = svgElement('svg');
     svg.classList.add('wm-world-event-svg-map');
+    svg.classList.toggle('reduced-motion', this.reducedMotion);
     svg.setAttribute('aria-hidden', 'true');
     svg.setAttribute('focusable', 'false');
     const countries = svgElement('g');
@@ -149,39 +161,48 @@ export class SvgMapRenderer implements MapRenderer {
     container.addEventListener('pointercancel', this.handlePointerUp);
 
     this.render();
+    this.syncAnimationLoop();
     await this.loadLocalBasemap();
   }
 
   setState(state: WorldEventMapState) {
     this.state = state;
     this.render();
+    this.syncAnimationLoop();
   }
 
   setEvents(events: GeoEvent[]) {
     this.events = events;
     this.render();
+    this.syncAnimationLoop();
   }
 
   resize() {
     this.render();
   }
 
-  setReducedMotion(_reduced: boolean) {
-    // The SVG renderer has no continuous animation.
+  setReducedMotion(reduced: boolean) {
+    this.reducedMotion = reduced;
+    this.svg?.classList.toggle('reduced-motion', reduced);
+    this.syncAnimationLoop();
+    this.render();
   }
 
   pause() {
     this.paused = true;
+    this.cancelAnimationLoop();
   }
 
   resume() {
     if (!this.paused) return;
     this.paused = false;
     this.render();
+    this.syncAnimationLoop();
   }
 
   destroy() {
     this.destroyed = true;
+    this.cancelAnimationLoop();
     this.clearBasemapTimer();
     this.basemapController?.abort();
     this.basemapController = null;
@@ -411,7 +432,20 @@ export class SvgMapRenderer implements MapRenderer {
       this.decorateEventElement(hub, event, event.id === selectedId);
       this.eventLayer.append(hub);
     }
-    for (const flight of aviationSeededFlightPoints(aviation.flights, 0)) {
+    for (const runner of aviationRouteMotionPoints(aviation.routes, this.animationTime)) {
+      const position = projection(runner.position);
+      if (!position) continue;
+      const [x, y] = position;
+      if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
+      const mote = svgElement('circle');
+      mote.classList.add('wm-world-event-svg-route-runner');
+      mote.setAttribute('cx', String(x));
+      mote.setAttribute('cy', String(y));
+      mote.setAttribute('r', '2.4');
+      mote.setAttribute('fill', cssColor(runner.color));
+      this.eventLayer.append(mote);
+    }
+    for (const flight of aviationSeededFlightPoints(aviation.flights, this.animationTime)) {
       const position = projection(flight.position);
       if (!position) continue;
       const [x, y] = position;
@@ -512,5 +546,43 @@ export class SvgMapRenderer implements MapRenderer {
     if (this.basemapTimer == null) return;
     window.clearTimeout(this.basemapTimer);
     this.basemapTimer = null;
+  }
+
+  private hasAnimatedAviation() {
+    return this.state?.activeLayerIds.includes('air-routes') === true
+      && this.events.some((event) => (
+        aviationEntity(event) === 'air-route' || aviationEntity(event) === 'air-flight'
+      ));
+  }
+
+  private syncAnimationLoop() {
+    if (!this.svg || this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) {
+      this.cancelAnimationLoop();
+      return;
+    }
+    if (this.animationFrame != null) return;
+    this.animationFrame = window.requestAnimationFrame(this.handleAnimationFrame);
+  }
+
+  private handleAnimationFrame = (timestamp: number) => {
+    this.animationFrame = null;
+    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) return;
+    this.pendingAnimationDeltaMs += boundedAnimationDelta(this.lastAnimationTimestamp, timestamp);
+    this.lastAnimationTimestamp = timestamp;
+    if (this.pendingAnimationDeltaMs >= MAP_ANIMATION_FRAME_INTERVAL_MS) {
+      this.animationTime = advanceAnimationTime(this.animationTime, this.pendingAnimationDeltaMs);
+      this.pendingAnimationDeltaMs = 0;
+      this.render();
+    }
+    this.animationFrame = window.requestAnimationFrame(this.handleAnimationFrame);
+  };
+
+  private cancelAnimationLoop() {
+    if (this.animationFrame != null) {
+      window.cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+    this.lastAnimationTimestamp = null;
+    this.pendingAnimationDeltaMs = 0;
   }
 }

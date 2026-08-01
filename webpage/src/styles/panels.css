@@ -11173,6 +11173,12 @@ a.wm-orderfilled-row {
   animation: wm-world-event-svg-pulse 2.1s ease-in-out infinite;
 }
 
+.wm-world-event-svg-map.reduced-motion .wm-world-event-svg-point.severity-warning,
+.wm-world-event-svg-map.reduced-motion .wm-world-event-svg-point.severity-critical,
+.wm-world-event-svg-map.reduced-motion .wm-world-event-svg-point.is-selected {
+  animation: none;
+}
+
 @keyframes wm-world-event-svg-pulse {
   0%,
   100% {
@@ -11993,6 +11999,13 @@ a.wm-orderfilled-row {
 }
 
 .wm-world-event-svg-air-route {
+  vector-effect: non-scaling-stroke;
+}
+
+.wm-world-event-svg-route-runner {
+  pointer-events: none;
+  stroke: rgba(3, 10, 15, 0.88);
+  stroke-width: 1px;
   vector-effect: non-scaling-stroke;
 }
 
