@@ -10,6 +10,9 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
+# The dedicated Telegram publisher consumes the cached snapshot. Keep collection
+# latency independent from Telegram rate limits and publisher state locking.
+Environment=POLYDATA_TELEGRAM_PUBLISH_ON_PANEL_CACHE=false
 ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/runtime/weather_news_watcher.py --watch --interval "${POLYDATA_WEATHER_NEWS_WATCH_INTERVAL_SECONDS:-300}"'
 Restart=always
 RestartSec=30
