@@ -2,6 +2,7 @@
 Description=polyData weather news seed watcher
 After=network-online.target redis-server.service
 Wants=network-online.target
+# Bound process-level recovery when storage or a startup dependency is unavailable.
 StartLimitIntervalSec=1800
 StartLimitBurst=5
 

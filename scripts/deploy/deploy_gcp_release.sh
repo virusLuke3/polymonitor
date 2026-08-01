@@ -171,7 +171,7 @@ sync_systemd_units() {
   fi
   while IFS= read -r path; do
     unit="${path##*/}"
-    ssh "${SSH_OPTIONS[@]}" "${REMOTE}" \
+    ssh "${SSH_OPTIONS[@]}" -n "${REMOTE}" \
       "mkdir -p ~/.config/systemd/user; sed 's|/__POLYDATA_REPO_ROOT__|${DEPLOY_PATH}|g' '${DEPLOY_PATH}/${path}' > ~/.config/systemd/user/'${unit}'"
   done <<< "${SYSTEMD_PATHS}"
   ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "systemctl --user daemon-reload"
