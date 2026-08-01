@@ -12,7 +12,6 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -20,6 +19,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import ProxyHandler, build_opener
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.ops.lib.incidents import update_incident_history
+from scripts.ops.lib.redaction import redact_text
+from scripts.ops.lib.snapshot import operations_state_dir
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
@@ -29,10 +36,10 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
         return max(minimum, default)
 
 
-API_UNIT = os.environ.get("POLYDATA_SERVING_HEALTH_API_UNIT", "polydata-api.service")
-PUBLISHER_UNIT = os.environ.get(
-    "POLYDATA_SERVING_HEALTH_PUBLISHER_UNIT", "polydata-telegram-publisher.service"
-)
+EXPECTED_API_UNIT = "polydata-api.service"
+EXPECTED_PUBLISHER_UNIT = "polydata-telegram-publisher.service"
+API_UNIT = os.environ.get("POLYDATA_SERVING_HEALTH_API_UNIT", EXPECTED_API_UNIT)
+PUBLISHER_UNIT = os.environ.get("POLYDATA_SERVING_HEALTH_PUBLISHER_UNIT", EXPECTED_PUBLISHER_UNIT)
 API_BASE = os.environ.get(
     "POLYDATA_SERVING_HEALTH_API_BASE",
     f"http://127.0.0.1:{os.environ.get('POLYDATA_API_PORT', '18500')}",
@@ -46,12 +53,6 @@ API_WARMUP_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_API_WARMUP_SECONDS", 180)
 PUBLISHER_WARMUP_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_PUBLISHER_WARMUP_SECONDS", 120)
 PUBLISHER_STALE_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_PUBLISHER_STALE_SECONDS", 300)
 SYSTEMCTL_TIMEOUT_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_SYSTEMCTL_TIMEOUT_SECONDS", 60)
-DISK_CHECK_PATH = Path(os.environ.get("POLYDATA_SERVING_HEALTH_DISK_PATH", "/"))
-DISK_CRITICAL_FREE_PCT = _env_int("POLYDATA_SERVING_HEALTH_DISK_CRITICAL_FREE_PCT", 5)
-DISK_MIN_FREE_BYTES = _env_int(
-    "POLYDATA_SERVING_HEALTH_DISK_MIN_FREE_BYTES",
-    512 * 1024 * 1024,
-)
 
 STATE_DIR = Path(
     os.environ.get(
@@ -70,7 +71,7 @@ PUBLISHER_HEARTBEAT_PATH = Path(
 
 
 def _log(message: str) -> None:
-    print(f"[serving-health] {message}", file=sys.stderr, flush=True)
+    print(f"[serving-health] {redact_text(message, limit=500)}", file=sys.stderr, flush=True)
 
 
 def _default_unit_state() -> dict[str, Any]:
@@ -82,7 +83,6 @@ def _default_unit_state() -> dict[str, Any]:
         "last_success_at": 0,
         "last_failure": "",
         "start_limit_blocked": False,
-        "dependency_blocked": "",
     }
 
 
@@ -168,17 +168,30 @@ def _probe_json(path: str, *, params: dict[str, Any] | None = None) -> dict[str,
     return payload
 
 
-def _api_healthy() -> tuple[bool, str]:
+def _api_healthy() -> tuple[bool, bool, str]:
     if not _unit_active(API_UNIT):
-        return False, f"{API_UNIT} is not active"
+        return False, False, f"{API_UNIT} is not active"
     try:
         health = _probe_json("/health")
-        if str(health.get("status") or "").lower() != "ok":
-            return False, f"/health returned status={health.get('status')!r}"
+        status = str(health.get("status") or "").lower()
+        if status not in {"ok", "degraded"}:
+            return False, False, f"/health returned status={status!r}"
+        if status == "degraded":
+            return True, False, "API responsive; dependency health is degraded"
         _probe_json("/content/latest", params={"limit": 1})
     except Exception as exc:
-        return False, f"API probe failed: {exc}"
-    return True, "liveness and latest-content probes passed"
+        return False, False, f"API probe failed: {exc}"
+    return True, True, "liveness and latest-content probes passed"
+
+
+def _record_recovery_incident(component: str, status: str, summary: str) -> None:
+    try:
+        update_incident_history(
+            operations_state_dir() / "incidents.json",
+            [{"component": f"recovery:{component}", "status": status, "summary": summary}],
+        )
+    except Exception as exc:
+        _log(f"could not record recovery incident: {type(exc).__name__}")
 
 
 def _publisher_healthy(now: int) -> tuple[bool, str]:
@@ -193,42 +206,10 @@ def _publisher_healthy(now: int) -> tuple[bool, str]:
     return True, f"publisher heartbeat age={age}s"
 
 
-def _disk_ready() -> tuple[bool, str]:
-    try:
-        usage = shutil.disk_usage(DISK_CHECK_PATH)
-    except OSError as exc:
-        return False, f"disk probe failed for {DISK_CHECK_PATH}: {exc}"
-    free_pct = (usage.free / usage.total * 100.0) if usage.total else 0.0
-    detail = (
-        f"disk free={usage.free} bytes ({free_pct:.2f}%) path={DISK_CHECK_PATH}"
-    )
-    if usage.free < DISK_MIN_FREE_BYTES or free_pct < DISK_CRITICAL_FREE_PCT:
-        return False, detail
-    return True, detail
-
-
-def _mark_dependency_blocked(
-    unit_state: dict[str, Any], *, dependency: str, reason: str
-) -> None:
-    unit_state["consecutive_failures"] = 0
-    unit_state["last_failure"] = reason
-    unit_state["dependency_blocked"] = dependency
-
-
-def _clear_dependency_block(unit_state: dict[str, Any], *, dependency: str) -> bool:
-    if str(unit_state.get("dependency_blocked") or "") != dependency:
-        return False
-    unit_state["dependency_blocked"] = ""
-    unit_state["backoff_until"] = 0
-    unit_state["consecutive_failures"] = 0
-    return True
-
-
 def _mark_healthy(unit_state: dict[str, Any], now: int) -> None:
     unit_state["consecutive_failures"] = 0
     unit_state["last_success_at"] = now
     unit_state["last_failure"] = ""
-    unit_state["dependency_blocked"] = ""
     unit_state["restart_attempts"] = [
         int(value)
         for value in unit_state.get("restart_attempts", [])
@@ -244,13 +225,16 @@ def _recover(
     now: int,
     state: dict[str, Any],
     warmup_seconds: int,
+    unit_uptime_seconds: int | None = None,
 ) -> None:
     current = _unit_state(state, key)
-    unit_uptime = _unit_uptime_seconds(unit)
-    if unit_uptime is not None and unit_uptime < warmup_seconds:
+    if unit_uptime_seconds is not None and unit_uptime_seconds < warmup_seconds:
         current["consecutive_failures"] = 0
         current["last_failure"] = reason
-        _log(f"{key} unhealthy during unit warmup ({unit_uptime}s/{warmup_seconds}s): {reason}")
+        _log(
+            f"{key} unhealthy during unit warmup "
+            f"({unit_uptime_seconds}s/{warmup_seconds}s): {reason}"
+        )
         return
 
     last_recovery_at = int(current.get("last_recovery_at") or 0)
@@ -296,6 +280,7 @@ def _recover(
         f"restarting {unit} after {failures} consecutive failures "
         f"(attempt {len(attempts) + 1}/{MAX_RESTARTS_PER_WINDOW}): {reason}"
     )
+    _record_recovery_incident(key, "warning", f"bounded restart attempt for {unit}")
     result = _systemctl("restart", unit)
     current["restart_attempts"] = [*attempts, now]
     current["last_recovery_at"] = now
@@ -307,6 +292,7 @@ def _recover(
             f"restart of {unit} failed; backing off for {BACKOFF_SECONDS}s: "
             f"{result.stdout.strip() or 'unknown systemctl error'}"
         )
+        _record_recovery_incident(key, "unhealthy", f"bounded restart failed for {unit}")
     else:
         current["backoff_until"] = 0
 
@@ -315,22 +301,18 @@ def run_once(*, now: int | None = None) -> int:
     timestamp = int(time.time() if now is None else now)
     state = _load_state()
 
-    api_ok, api_detail = _api_healthy()
+    api_result = _api_healthy()
+    if len(api_result) == 2:
+        api_ok, api_detail = api_result
+        dependencies_ready = api_ok
+    else:
+        api_ok, dependencies_ready, api_detail = api_result
     api_state = _unit_state(state, "api")
-    disk_ok, disk_detail = _disk_ready()
     if api_ok:
         _mark_healthy(api_state, timestamp)
+        _record_recovery_incident("api", "healthy", "API recovery path healthy")
         _log(f"api healthy: {api_detail}")
-    elif not disk_ok:
-        _mark_dependency_blocked(
-            api_state,
-            dependency="disk",
-            reason=f"API recovery blocked: {disk_detail}",
-        )
-        _log(f"api recovery deferred because disk is critical: {disk_detail}")
     else:
-        if _clear_dependency_block(api_state, dependency="disk"):
-            _log(f"disk recovered; API recovery budget is available: {disk_detail}")
         _recover(
             key="api",
             unit=API_UNIT,
@@ -338,16 +320,18 @@ def run_once(*, now: int | None = None) -> int:
             now=timestamp,
             state=state,
             warmup_seconds=API_WARMUP_SECONDS,
+            unit_uptime_seconds=_unit_uptime_seconds(API_UNIT),
         )
 
     # The publisher depends on the API. Restarting it while the API is down only
     # wastes resources, so publisher recovery is attempted only after API probes
     # pass.
-    if api_ok:
+    if api_ok and dependencies_ready:
         publisher_ok, publisher_detail = _publisher_healthy(timestamp)
         publisher_state = _unit_state(state, "publisher")
         if publisher_ok:
             _mark_healthy(publisher_state, timestamp)
+            _record_recovery_incident("publisher", "healthy", "publisher recovery path healthy")
             _log(f"publisher healthy: {publisher_detail}")
         else:
             _recover(
@@ -357,15 +341,19 @@ def run_once(*, now: int | None = None) -> int:
                 now=timestamp,
                 state=state,
                 warmup_seconds=PUBLISHER_WARMUP_SECONDS,
+                unit_uptime_seconds=_unit_uptime_seconds(PUBLISHER_UNIT),
             )
     else:
-        _log("publisher recovery deferred until API is healthy")
+        _log("publisher recovery deferred until API and its dependencies are healthy")
 
     _save_state(state)
     return 0
 
 
 def main() -> int:
+    if API_UNIT != EXPECTED_API_UNIT or PUBLISHER_UNIT != EXPECTED_PUBLISHER_UNIT:
+        _log("refusing to manage a non-allowlisted systemd unit")
+        return 2
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     with LOCK_PATH.open("a+", encoding="utf-8") as lock_file:
         try:
