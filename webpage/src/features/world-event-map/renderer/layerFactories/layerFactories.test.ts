@@ -28,6 +28,7 @@ describe('world event layer factories', () => {
       pointEvent('c', 10.3, 10.2, 'critical'),
     ], state);
     expect((layers as Layer[]).map((layer) => layer.id)).toEqual([
+      'world-event-cluster-halos',
       'world-event-clusters',
       'world-event-cluster-counts',
     ]);
@@ -43,27 +44,17 @@ describe('world event layer factories', () => {
     expect((layers as Layer[]).some((layer) => layer.id === 'world-event-points')).toBe(true);
   });
 
-  it('animates warning events with their own color and honors reduced motion', () => {
+  it('keeps warning events as persistent priority rings rather than forcing a global RAF loop', () => {
     const warning = pointEvent('warning', 10, 10, 'warning');
-    const animated = createWorldEventLayers(
+    const layers = createWorldEventLayers(
       [warning],
       defaultWorldEventMapState(),
       true,
       undefined,
       1.5,
-      true,
     ) as Layer[];
-    const reducedMotion = createWorldEventLayers(
-      [warning],
-      defaultWorldEventMapState(),
-      true,
-      undefined,
-      1.5,
-      false,
-    ) as Layer[];
-
-    expect(animated.some((layer) => layer.id === 'world-event-pulses')).toBe(true);
-    expect(reducedMotion.some((layer) => layer.id === 'world-event-pulses')).toBe(false);
+    expect(layers.some((layer) => layer.id === 'world-event-priority-rings')).toBe(true);
+    expect(layers.some((layer) => layer.id === 'world-event-pulses')).toBe(false);
   });
 
   it('creates polygon and line layers without accessing the DOM', () => {
@@ -113,6 +104,25 @@ describe('world event layer factories', () => {
     const atStart = aviationRouteMotionPoints([route], 0)[0]?.position;
     const afterMotion = aviationRouteMotionPoints([route], 8)[0]?.position;
     expect(afterMotion).not.toEqual(atStart);
+  });
+
+  it('keeps geometry below aviation and points in the final compositing order', () => {
+    const state = defaultWorldEventMapState();
+    const area: GeoEvent = {
+      ...pointEvent('risk-area', 0, 0),
+      category: 'country-risk',
+      geometry: { type: 'Polygon', coordinates: [[[0, 0], [2, 0], [2, 2], [0, 0]]] },
+      properties: { mapEntity: 'country-risk-area', evidenceCount: 18 },
+    };
+    const route: GeoEvent = {
+      ...pointEvent('route:above-area', 0, 0),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[0, 0], [3, 3]] },
+      properties: { mapEntity: 'air-route', routeId: 'above-area', layer: 'trunk' },
+    };
+    const enabled = { ...state, activeLayerIds: [...state.activeLayerIds, 'air-routes'] };
+    const ids = (createWorldEventLayers([area, route], enabled) as Layer[]).map((layer) => layer.id);
+    expect(ids.indexOf('world-event-country-risk')).toBeLessThan(ids.indexOf('aviation-route-core'));
   });
 
   it('uses an icon layer instead of a font glyph for animated aircraft', () => {

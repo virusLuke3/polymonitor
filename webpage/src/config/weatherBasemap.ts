@@ -17,27 +17,77 @@ export function getWeatherMapStyle(theme: WeatherMapTheme = 'dark') {
 }
 
 type LabelCapableMap = {
-  getStyle: () => { layers?: Array<{ id: string; type?: string }> };
+  getStyle: () => { layers?: Array<{ id: string; type?: string; 'source-layer'?: string }> };
   getLayoutProperty: (layerId: string, name: 'text-field') => unknown;
-  setPaintProperty: (layerId: string, name: 'text-halo-color' | 'text-halo-width', value: unknown) => void;
+  setLayoutProperty: (layerId: string, name: 'text-field', value: unknown) => void;
+  setPaintProperty: (
+    layerId: string,
+    name: 'text-color' | 'text-halo-color' | 'text-halo-width' | 'text-opacity',
+    value: unknown,
+  ) => void;
 };
 
 function hasNameField(field: unknown) {
   return JSON.stringify(field || '').toLowerCase().includes('name');
 }
 
+const ENGLISH_NAME_EXPRESSION = [
+  'coalesce',
+  ['get', 'name_en'],
+  ['get', 'name:en'],
+  ['get', 'name:latin'],
+  ['get', 'name'],
+];
+
+type LabelKind = 'country-major' | 'country-minor' | 'city-major' | 'city' | 'locality' | 'context';
+
+function labelKind(layer: { id: string; 'source-layer'?: string }): LabelKind {
+  const identity = `${layer.id} ${layer['source-layer'] || ''}`.toLowerCase();
+  if (identity.includes('place_country_major')) return 'country-major';
+  if (identity.includes('place_country')) return 'country-minor';
+  if (identity.includes('place_city_large')) return 'city-major';
+  if (identity.includes('place_city') || identity.includes('place_state')) return 'city';
+  if (/place_(town|village|suburb|other)/.test(identity)) return 'locality';
+  return 'context';
+}
+
+function labelOpacity(kind: LabelKind): unknown {
+  // OpenFreeMap supplies the glyphs, rank and collision handling.  These
+  // thresholds only remove low-value detail from the global intelligence view.
+  if (kind === 'country-major') return ['interpolate', ['linear'], ['zoom'], 0, 0.72, 1.5, 0.9];
+  if (kind === 'country-minor') return ['interpolate', ['linear'], ['zoom'], 0, 0.18, 1.3, 0.66, 2.1, 0.88];
+  if (kind === 'city-major') return ['interpolate', ['linear'], ['zoom'], 0, 0, 1.35, 0.72, 2.15, 0.9];
+  if (kind === 'city') return ['interpolate', ['linear'], ['zoom'], 0, 0, 2.1, 0, 2.8, 0.78];
+  if (kind === 'locality') return ['interpolate', ['linear'], ['zoom'], 0, 0, 3.4, 0, 4.25, 0.72];
+  return ['interpolate', ['linear'], ['zoom'], 0, 0, 3.1, 0, 4, 0.56];
+}
+
+function labelColor(kind: LabelKind) {
+  if (kind === 'country-major') return '#c4d0d5';
+  if (kind === 'country-minor') return '#aab8bd';
+  if (kind === 'city-major') return '#d2dade';
+  return '#aab5ba';
+}
+
 /**
- * Keep vector labels readable over the dark event layers without replacing the
- * provider's font, rank, language, or zoom rules. This follows WorldMonitor's
- * style-load label treatment while leaving the vector basemap authoritative.
+ * WorldMonitor localizes each provider-owned place layer after a style load.
+ * OpenFreeMap exposes `name_en` (not just OSM's `name:en`), and its default
+ * expression deliberately emits a second non-Latin line.  Retaining that
+ * expression made the global map crowded and inconsistent.  Keep the provider
+ * font, rank and collision behavior, but use its English field and suppress
+ * low-value locality labels at global zoom.
  */
 export function reinforceWorldEventBasemapLabels(map: LabelCapableMap) {
   for (const layer of map.getStyle().layers || []) {
     if (layer.type !== 'symbol') continue;
     try {
       if (!hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) continue;
+      const kind = labelKind(layer);
+      map.setLayoutProperty(layer.id, 'text-field', ENGLISH_NAME_EXPRESSION);
+      map.setPaintProperty(layer.id, 'text-color', labelColor(kind));
       map.setPaintProperty(layer.id, 'text-halo-color', '#070a0c');
-      map.setPaintProperty(layer.id, 'text-halo-width', 1.15);
+      map.setPaintProperty(layer.id, 'text-halo-width', kind.startsWith('country') ? 1.35 : 1.15);
+      map.setPaintProperty(layer.id, 'text-opacity', labelOpacity(kind));
     } catch {
       // Styles can swap while MapLibre is tearing down a layer. The provider
       // defaults remain usable if a single label layer cannot be adjusted.

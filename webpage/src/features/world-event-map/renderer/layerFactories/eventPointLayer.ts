@@ -155,16 +155,12 @@ export function createEventPointLayers({
   selectedEventId,
   showLabels,
   viewport,
-  animationTime = 0,
-  animate = true,
 }: {
   events: GeoEvent[];
   zoom: number;
   selectedEventId: string | null;
   showLabels: boolean;
   viewport?: [number, number, number, number];
-  animationTime?: number;
-  animate?: boolean;
 }): LayersList {
   const pointEvents = events.filter((event) => (
     event.properties.mapEntity !== 'air-hub'
@@ -174,48 +170,57 @@ export function createEventPointLayers({
   const { singles, clusters } = clusterEventPoints(pointEvents, zoom, selectedEventId, viewport);
   const layers: Layer[] = [];
 
-  const pulsingEvents = animate
-    ? singles
-      .filter((event) => (
-        event.id === selectedEventId || event.severity === 'critical' || event.severity === 'warning'
-      ))
-      .slice(0, 120)
-    : [];
-  if (pulsingEvents.length) {
+  const priorityEvents = singles
+    .filter((event) => (
+      event.id === selectedEventId || event.severity === 'critical' || event.severity === 'warning'
+    ))
+    .slice(0, 120);
+  if (priorityEvents.length) {
     layers.push(new ScatterplotLayer<GeoEvent>({
-      id: 'world-event-pulses',
-      data: pulsingEvents,
+      id: 'world-event-priority-rings',
+      data: priorityEvents,
       getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
-      getRadius: (event) => {
-        const phase = (animationTime * 0.58 + hashEventPhase(event.id)) % 1;
-        return pointRadiusMeters(event) * (1.35 + phase * 1.45);
-      },
-      getFillColor: (event) => {
-        const phase = (animationTime * 0.58 + hashEventPhase(event.id)) % 1;
-        return eventColor(event, Math.round(72 * (1 - phase)));
-      },
-      radiusMinPixels: 6,
-      radiusMaxPixels: 30,
+      getRadius: (event) => pointRadiusMeters(event) * (event.id === selectedEventId ? 2.8 : 2.15),
+      getFillColor: (event) => eventColor(event, event.id === selectedEventId ? 76 : 34),
+      getLineColor: (event) => eventColor(event, event.id === selectedEventId ? 255 : 225),
+      getLineWidth: (event) => event.id === selectedEventId ? 2.4 : 1.45,
+      radiusMinPixels: 8,
+      radiusMaxPixels: 34,
+      lineWidthMinPixels: 1.25,
       pickable: false,
-      stroked: false,
+      stroked: true,
     }));
   }
 
   if (clusters.length) {
     layers.push(new ScatterplotLayer<EventCluster>({
+      id: 'world-event-cluster-halos',
+      data: clusters,
+      getPosition: (cluster) => cluster.coordinates,
+      getRadius: (cluster) => Math.max(52_000, Math.log2(cluster.count + 1) * 48_000),
+      getFillColor: (cluster) => [cluster.color[0], cluster.color[1], cluster.color[2], 32],
+      getLineColor: (cluster) => {
+        const [red, green, blue] = SEVERITY_COLORS[cluster.severity];
+        return [red, green, blue, 235];
+      },
+      getLineWidth: 2,
+      radiusMinPixels: 10,
+      radiusMaxPixels: 32,
+      lineWidthMinPixels: 1.4,
+      pickable: false,
+      stroked: true,
+    }));
+    layers.push(new ScatterplotLayer<EventCluster>({
       id: 'world-event-clusters',
       data: clusters,
       getPosition: (cluster) => cluster.coordinates,
       getRadius: (cluster) => Math.max(36_000, Math.log2(cluster.count + 1) * 34_000),
-      getFillColor: (cluster) => [cluster.color[0], cluster.color[1], cluster.color[2], 115],
-      getLineColor: (cluster) => {
-        const [red, green, blue] = SEVERITY_COLORS[cluster.severity];
-        return [red, green, blue, 220];
-      },
-      getLineWidth: 1.5,
-      radiusMinPixels: 7,
-      radiusMaxPixels: 25,
-      lineWidthMinPixels: 1,
+      getFillColor: (cluster) => [cluster.color[0], cluster.color[1], cluster.color[2], 225],
+      getLineColor: [255, 250, 222, 235],
+      getLineWidth: 1.35,
+      radiusMinPixels: 8,
+      radiusMaxPixels: 27,
+      lineWidthMinPixels: 1.15,
       pickable: true,
       autoHighlight: true,
       stroked: true,
@@ -225,12 +230,14 @@ export function createEventPointLayers({
       data: clusters,
       getPosition: (cluster) => cluster.coordinates,
       getText: (cluster) => String(cluster.count),
-      getSize: 10,
-      getColor: [245, 241, 224, 235],
+      getSize: 11,
+      getColor: [255, 252, 236, 255],
       getTextAnchor: 'middle',
       getAlignmentBaseline: 'center',
       fontFamily: MAP_MONO_FONT_FAMILY,
       fontWeight: 800,
+      outlineWidth: 2,
+      outlineColor: [6, 10, 14, 255],
       pickable: false,
     }));
   }
@@ -241,12 +248,12 @@ export function createEventPointLayers({
       data: singles,
       getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
       getRadius: pointRadiusMeters,
-      getFillColor: (event) => eventColor(event, event.id === selectedEventId ? 245 : 185),
-      getLineColor: (event) => event.id === selectedEventId ? [255, 250, 222, 255] : eventColor(event, 225),
+      getFillColor: (event) => eventColor(event, event.id === selectedEventId ? 255 : 242),
+      getLineColor: (event) => event.id === selectedEventId ? [255, 250, 222, 255] : eventColor(event, 255),
       getLineWidth: (event) => event.id === selectedEventId ? 2.4 : 1,
-      radiusMinPixels: 3.5,
-      radiusMaxPixels: 15,
-      lineWidthMinPixels: 1,
+      radiusMinPixels: 4.5,
+      radiusMaxPixels: 18,
+      lineWidthMinPixels: 1.15,
       pickable: true,
       autoHighlight: true,
       stroked: true,
@@ -280,12 +287,4 @@ export function createEventPointLayers({
     }));
   }
   return layers;
-}
-
-function hashEventPhase(value: string) {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (Math.imul(hash, 31) + value.charCodeAt(index)) | 0;
-  }
-  return ((hash >>> 0) % 1_000) / 1_000;
 }

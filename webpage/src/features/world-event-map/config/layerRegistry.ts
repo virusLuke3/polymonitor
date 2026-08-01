@@ -251,7 +251,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     hint: 'REFERENCE',
     categories: ['infrastructure'],
     sourceKeys: ['global-transport-shipping'],
-    defaultEnabled: false,
+    defaultEnabled: true,
     selectable: true,
     minZoom: 1,
     labelMinZoom: 4,

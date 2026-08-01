@@ -9,11 +9,15 @@ import {
 import type { GeoEvent } from '../domain/types';
 import type { WorldEventMapState } from '../state/mapState';
 import type { BasemapState, MapRenderer, MapRendererCallbacks } from './MapRenderer';
-import { createWorldEventLayers, type EventCluster } from './layerFactories';
+import {
+  createAviationLayers,
+  createWorldEventStaticLayerSections,
+  type EventCluster,
+  type WorldEventStaticLayerSections,
+} from './layerFactories';
 import {
   advanceAnimationTime,
   boundedAnimationDelta,
-  MAP_ANIMATION_FRAME_INTERVAL_MS,
 } from './animationClock';
 
 type PickedObject = GeoEvent | EventCluster | { properties?: { event?: GeoEvent } };
@@ -48,8 +52,9 @@ export class DeckMapRenderer implements MapRenderer {
   private reducedMotion = false;
   private animationFrame: number | null = null;
   private lastAnimationTimestamp: number | null = null;
-  private pendingAnimationDeltaMs = 0;
   private animationTime = 0;
+  private animationFrameCount = 0;
+  private staticLayerSections: WorldEventStaticLayerSections | null = null;
 
   async mount(container: HTMLElement, callbacks: MapRendererCallbacks) {
     if (this.map) return;
@@ -150,25 +155,36 @@ export class DeckMapRenderer implements MapRenderer {
         });
       }
     }
-    this.render();
+    const staticLayersChanged = !previous
+      || previous.zoom !== state.zoom
+      || previous.selectedEventId !== state.selectedEventId
+      || previous.timeRange !== state.timeRange
+      || previous.severities.join(',') !== state.severities.join(',')
+      || previous.activeLayerIds.join(',') !== state.activeLayerIds.join(',');
+    if (staticLayersChanged) this.staticLayerSections = null;
+    // Hover and aviation-lens changes must not force Supercluster and all
+    // static geometry to be rebuilt.  They are high-frequency UI updates.
+    this.render(!staticLayersChanged);
     this.syncAnimationLoop();
   }
 
   setEvents(events: GeoEvent[]) {
     this.events = events;
+    this.staticLayerSections = null;
     this.render();
     this.syncAnimationLoop();
   }
 
   resize() {
     this.map?.resize();
+    this.staticLayerSections = null;
     this.render();
   }
 
   setReducedMotion(reduced: boolean) {
     this.reducedMotion = reduced;
     this.syncAnimationLoop();
-    this.render();
+    this.render(true);
   }
 
   pause() {
@@ -207,11 +223,12 @@ export class DeckMapRenderer implements MapRenderer {
     }
     this.map = null;
     this.overlay = null;
+    this.staticLayerSections = null;
     this.overlayMounted = false;
     this.callbacks = null;
   }
 
-  private render() {
+  private render(reuseStaticLayers = false) {
     if (this.paused || !this.overlay || !this.state) return;
     const bounds = this.map?.getBounds();
     const viewport: [number, number, number, number] | undefined = bounds
@@ -224,15 +241,16 @@ export class DeckMapRenderer implements MapRenderer {
           ]
         : [-180, -85, 180, 85]
       : undefined;
+    const staticSections = reuseStaticLayers && this.staticLayerSections
+      ? this.staticLayerSections
+      : createWorldEventStaticLayerSections(this.events, this.state, true, viewport);
+    this.staticLayerSections = staticSections;
     this.overlay.setProps({
-      layers: createWorldEventLayers(
-        this.events,
-        this.state,
-        true,
-        viewport,
-        this.animationTime,
-        !this.reducedMotion,
-      ),
+      layers: [
+        ...staticSections.geometry,
+        ...createAviationLayers(this.events, this.state, this.animationTime),
+        ...staticSections.points,
+      ],
     });
     this.map?.triggerRepaint();
   }
@@ -240,6 +258,7 @@ export class DeckMapRenderer implements MapRenderer {
   private handleMoveEnd = () => {
     const map = this.map;
     if (!map || !this.callbacks) return;
+    this.staticLayerSections = null;
     const center = map.getCenter();
     const camera = { center: { lon: center.lng, lat: center.lat }, zoom: map.getZoom() };
     if (this.applyingCamera) {
@@ -334,19 +353,16 @@ export class DeckMapRenderer implements MapRenderer {
     }
   }
 
-  private hasAnimatedEvents() {
+  private hasAnimatedAviation() {
     const airRoutesActive = this.state?.activeLayerIds.includes('air-routes') === true;
-    return this.events.some((event) => (
-      (airRoutesActive
-        && event.category === 'infrastructure'
-        && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight'))
-      || ((event.category === 'natural-hazard' || event.category === 'weather')
-        && (event.severity === 'warning' || event.severity === 'critical'))
+    return airRoutesActive && this.events.some((event) => (
+      event.category === 'infrastructure'
+      && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight')
     ));
   }
 
   private syncAnimationLoop() {
-    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedEvents()) {
+    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) {
       this.cancelAnimationLoop();
       return;
     }
@@ -356,13 +372,16 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleAnimationFrame = (timestamp: number) => {
     this.animationFrame = null;
-    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedEvents()) return;
-    this.pendingAnimationDeltaMs += boundedAnimationDelta(this.lastAnimationTimestamp, timestamp);
+    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) return;
+    const delta = boundedAnimationDelta(this.lastAnimationTimestamp, timestamp);
     this.lastAnimationTimestamp = timestamp;
-    if (this.pendingAnimationDeltaMs >= MAP_ANIMATION_FRAME_INTERVAL_MS) {
-      this.animationTime = advanceAnimationTime(this.animationTime, this.pendingAnimationDeltaMs);
-      this.pendingAnimationDeltaMs = 0;
-      this.render();
+    if (delta > 0) {
+      this.animationTime = advanceAnimationTime(this.animationTime, delta);
+      this.animationFrameCount += 1;
+      // Match WorldMonitor's animation contract: only the moving route layer
+      // refreshes, every other eligible frame, and never while a discrete
+      // interaction is queued.  Static hazards remain cached above.
+      if (this.shouldRenderAnimationFrame()) this.render(true);
     }
     this.animationFrame = window.requestAnimationFrame(this.handleAnimationFrame);
   };
@@ -373,6 +392,14 @@ export class DeckMapRenderer implements MapRenderer {
       this.animationFrame = null;
     }
     this.lastAnimationTimestamp = null;
-    this.pendingAnimationDeltaMs = 0;
+    this.animationFrameCount = 0;
+  }
+
+  private shouldRenderAnimationFrame() {
+    if (this.animationFrameCount % 2 !== 0) return false;
+    const scheduling = (globalThis as unknown as {
+      navigator?: { scheduling?: { isInputPending?: () => boolean } };
+    }).navigator?.scheduling;
+    return scheduling?.isInputPending?.() !== true;
   }
 }

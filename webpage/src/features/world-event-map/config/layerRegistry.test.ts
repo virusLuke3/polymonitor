@@ -27,6 +27,7 @@ describe('World Event Map layer registry', () => {
       'wildfires',
       'extreme-temperature',
       'climate-anomalies',
+      'air-routes',
     ]);
   });
 

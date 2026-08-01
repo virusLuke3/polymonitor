@@ -60,7 +60,9 @@ describe('World Event Map state', () => {
     const initial = defaultWorldEventMapState();
     const asia = worldEventMapReducer(initial, { type: 'set-region', region: 'asia' });
     expect(asia).toMatchObject({ region: 'asia', center: { lon: 101, lat: 29 }, zoom: 2.35 });
-    const withRoutes = worldEventMapReducer(asia, { type: 'toggle-layer', layerId: 'air-routes' });
+    const withoutRoutes = worldEventMapReducer(asia, { type: 'toggle-layer', layerId: 'air-routes' });
+    expect(withoutRoutes.activeLayerIds).not.toContain('air-routes');
+    const withRoutes = worldEventMapReducer(withoutRoutes, { type: 'toggle-layer', layerId: 'air-routes' });
     expect(withRoutes.activeLayerIds).toContain('air-routes');
     const trunk = worldEventMapReducer(withRoutes, { type: 'set-aviation-lens', lens: 'trunk' });
     expect(trunk.aviationLens).toBe('trunk');
