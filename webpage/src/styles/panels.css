@@ -11136,6 +11136,23 @@ a.wm-orderfilled-row {
   vector-effect: non-scaling-stroke;
 }
 
+.wm-world-event-svg-country-labels {
+  pointer-events: none;
+}
+
+.wm-world-event-svg-country-label {
+  fill: #b7cbd1;
+  stroke: #070a0c;
+  stroke-width: 3px;
+  paint-order: stroke fill;
+  font-family: var(--font-body);
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  opacity: 0.88;
+}
+
 .wm-world-event-svg-shape {
   fill-opacity: 0.26;
   stroke-opacity: 0.9;

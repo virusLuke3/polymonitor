@@ -217,7 +217,7 @@ export function WorldEventMap({
       </div>
       <div className="wm-world-event-attribution">
         {rendererKind === 'webgl' && basemapState === 'primary-ready'
-          ? '© CARTO · © OpenStreetMap contributors'
+          ? '© OpenFreeMap · © OpenStreetMap contributors'
           : 'LOCAL COUNTRY GEOMETRY · EVENT SOURCES IN INSPECTOR'}
       </div>
       {rendererError && basemapState === 'failed' ? (

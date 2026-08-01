@@ -21,6 +21,11 @@ import {
   aviationSeededFlightPoints,
   selectAviationRenderData,
 } from './layerFactories/aviationLayers';
+import {
+  countryBasemapLabels,
+  visibleCountryBasemapLabels,
+  type CountryBasemapLabel,
+} from './countryBasemapLabels';
 import type { MapRenderer, MapRendererCallbacks } from './MapRenderer';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -89,11 +94,13 @@ export class SvgMapRenderer implements MapRenderer {
   private host: HTMLElement | null = null;
   private svg: SVGSVGElement | null = null;
   private countryLayer: SVGGElement | null = null;
+  private countryLabelLayer: SVGGElement | null = null;
   private eventLayer: SVGGElement | null = null;
   private callbacks: MapRendererCallbacks | null = null;
   private state: WorldEventMapState | null = null;
   private events: GeoEvent[] = [];
   private countries: FeatureCollection | null = null;
+  private countryLabels: CountryBasemapLabel[] = [];
   private basemapController: AbortController | null = null;
   private basemapTimer: number | null = null;
   private paused = false;
@@ -115,12 +122,15 @@ export class SvgMapRenderer implements MapRenderer {
     svg.setAttribute('focusable', 'false');
     const countries = svgElement('g');
     countries.classList.add('wm-world-event-svg-countries');
+    const countryLabels = svgElement('g');
+    countryLabels.classList.add('wm-world-event-svg-country-labels');
     const events = svgElement('g');
     events.classList.add('wm-world-event-svg-events');
-    svg.append(countries, events);
+    svg.append(countries, countryLabels, events);
     container.append(svg);
     this.svg = svg;
     this.countryLayer = countries;
+    this.countryLabelLayer = countryLabels;
     this.eventLayer = events;
 
     container.addEventListener('wheel', this.handleWheel, { passive: false });
@@ -180,7 +190,9 @@ export class SvgMapRenderer implements MapRenderer {
     this.host = null;
     this.svg = null;
     this.countryLayer = null;
+    this.countryLabelLayer = null;
     this.eventLayer = null;
+    this.countryLabels = [];
     this.callbacks = null;
     this.drag = null;
   }
@@ -206,6 +218,7 @@ export class SvgMapRenderer implements MapRenderer {
         ...payload,
         features: payload.features.map(normalizedFeature),
       };
+      this.countryLabels = countryBasemapLabels(this.countries);
       this.render();
       this.callbacks?.onBasemapStateChange('renderer-fallback-ready');
     } catch (error) {
@@ -233,7 +246,7 @@ export class SvgMapRenderer implements MapRenderer {
   }
 
   private render() {
-    if (this.paused || !this.svg || !this.countryLayer || !this.eventLayer || !this.host) return;
+    if (this.paused || !this.svg || !this.countryLayer || !this.countryLabelLayer || !this.eventLayer || !this.host) return;
     const width = Math.max(1, this.host.clientWidth || 1_200);
     const height = Math.max(1, this.host.clientHeight || 620);
     this.svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -247,6 +260,29 @@ export class SvgMapRenderer implements MapRenderer {
       const country = svgElement('path');
       country.setAttribute('d', data);
       this.countryLayer.append(country);
+    }
+
+    this.countryLabelLayer.replaceChildren();
+    const occupiedCountryLabels: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+    const labelSize = (this.state?.zoom || 1.5) < 2.4 ? 11 : 12;
+    for (const label of visibleCountryBasemapLabels(this.countryLabels, this.state?.zoom || 1.5)) {
+      const position = projection(label.coordinates);
+      if (!position) continue;
+      const [x, y] = position;
+      const halfWidth = Math.max(24, label.name.length * labelSize * 0.29);
+      const box = { left: x - halfWidth, top: y - labelSize, right: x + halfWidth, bottom: y + labelSize };
+      if (x < -halfWidth || x > width + halfWidth || y < -labelSize || y > height + labelSize) continue;
+      if (occupiedCountryLabels.some((other) => (
+        box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top
+      ))) continue;
+      const text = svgElement('text');
+      text.classList.add('wm-world-event-svg-country-label');
+      text.setAttribute('x', String(x));
+      text.setAttribute('y', String(y));
+      text.setAttribute('font-size', String(labelSize));
+      text.textContent = label.name;
+      this.countryLabelLayer.append(text);
+      occupiedCountryLabels.push(box);
     }
 
     this.eventLayer.replaceChildren();

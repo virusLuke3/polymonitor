@@ -15,7 +15,8 @@ export type WorldEventRegionPreset = {
 };
 
 export const WORLD_EVENT_REGION_PRESETS: readonly WorldEventRegionPreset[] = [
-  { id: 'global', center: { lon: 8, lat: 18 }, zoom: 1.25 },
+  // Matches the primary vector style's country-label disclosure threshold.
+  { id: 'global', center: { lon: 8, lat: 18 }, zoom: 1.5 },
   { id: 'america', center: { lon: -90, lat: 25 }, zoom: 2.15 },
   { id: 'mena', center: { lon: 41, lat: 27 }, zoom: 3 },
   { id: 'eu', center: { lon: 13, lat: 51 }, zoom: 3 },

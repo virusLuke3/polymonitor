@@ -1,7 +1,11 @@
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import type { PickingInfo } from '@deck.gl/core';
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
-import { getWeatherMapFallbackStyle, getWeatherMapStyle } from '@/config/weatherBasemap';
+import {
+  getWeatherMapFallbackStyle,
+  getWeatherMapStyle,
+  reinforceWorldEventBasemapLabels,
+} from '@/config/weatherBasemap';
 import type { GeoEvent } from '../domain/types';
 import type { WorldEventMapState } from '../state/mapState';
 import type { BasemapState, MapRenderer, MapRendererCallbacks } from './MapRenderer';
@@ -103,6 +107,7 @@ export class DeckMapRenderer implements MapRenderer {
         this.overlayMounted = true;
       }
       this.clearFallbackTimer();
+      reinforceWorldEventBasemapLabels(map);
       this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
       this.render();
       this.syncAnimationLoop();
@@ -246,6 +251,7 @@ export class DeckMapRenderer implements MapRenderer {
   private handleStyleLoad = () => {
     if (!this.map || this.destroyed) return;
     this.clearFallbackTimer();
+    reinforceWorldEventBasemapLabels(this.map);
     this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
     this.render();
   };

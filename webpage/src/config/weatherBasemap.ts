@@ -7,10 +7,42 @@ export const OPENFREEMAP_LIGHT_STYLE = 'https://tiles.openfreemap.org/styles/pos
 export const CARTO_DARK_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
 export function getWeatherMapStyle(theme: WeatherMapTheme = 'dark') {
-  if (theme === 'dark') return CARTO_DARK_STYLE;
-  if (theme === 'dark-matter') return CARTO_DARK_STYLE;
+  // OpenFreeMap's vector style includes ranked country and city label layers.
+  // The local GeoJSON fallback deliberately does not pretend to be a full vector
+  // basemap, so the primary path must remain a label-capable style.
+  if (theme === 'dark') return OPENFREEMAP_DARK_STYLE;
+  if (theme === 'dark-matter') return OPENFREEMAP_DARK_STYLE;
   if (theme === 'positron') return OPENFREEMAP_LIGHT_STYLE;
-  return CARTO_DARK_STYLE;
+  return OPENFREEMAP_DARK_STYLE;
+}
+
+type LabelCapableMap = {
+  getStyle: () => { layers?: Array<{ id: string; type?: string }> };
+  getLayoutProperty: (layerId: string, name: 'text-field') => unknown;
+  setPaintProperty: (layerId: string, name: 'text-halo-color' | 'text-halo-width', value: unknown) => void;
+};
+
+function hasNameField(field: unknown) {
+  return JSON.stringify(field || '').toLowerCase().includes('name');
+}
+
+/**
+ * Keep vector labels readable over the dark event layers without replacing the
+ * provider's font, rank, language, or zoom rules. This follows WorldMonitor's
+ * style-load label treatment while leaving the vector basemap authoritative.
+ */
+export function reinforceWorldEventBasemapLabels(map: LabelCapableMap) {
+  for (const layer of map.getStyle().layers || []) {
+    if (layer.type !== 'symbol') continue;
+    try {
+      if (!hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) continue;
+      map.setPaintProperty(layer.id, 'text-halo-color', '#070a0c');
+      map.setPaintProperty(layer.id, 'text-halo-width', 1.15);
+    } catch {
+      // Styles can swap while MapLibre is tearing down a layer. The provider
+      // defaults remain usable if a single label layer cannot be adjusted.
+    }
+  }
 }
 
 export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
