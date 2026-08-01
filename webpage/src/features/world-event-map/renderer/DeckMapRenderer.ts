@@ -4,6 +4,7 @@ import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import {
   getWeatherMapFallbackStyle,
   getWeatherMapStyle,
+  refreshWorldEventBasemapLabelDensity,
   reinforceWorldEventBasemapLabels,
 } from '@/config/weatherBasemap';
 import type { GeoEvent } from '../domain/types';
@@ -287,6 +288,7 @@ export class DeckMapRenderer implements MapRenderer {
   private handleMoveEnd = () => {
     const map = this.map;
     if (!map || !this.callbacks) return;
+    refreshWorldEventBasemapLabelDensity(map);
     this.staticLayerSections = null;
     this.aviationLayerSections = null;
     const center = map.getCenter();
