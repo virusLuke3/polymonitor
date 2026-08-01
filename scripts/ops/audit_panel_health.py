@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -147,6 +148,26 @@ def _request_json(path: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("API response must be an object")
     return payload
+
+
+def _request_json_with_retries(
+    path: str,
+    *,
+    max_attempts: int = 3,
+    retry_delay_seconds: float = 1.0,
+) -> dict[str, Any]:
+    retryable_http_statuses = {500, 502, 503, 504}
+    for attempt in range(max(1, max_attempts)):
+        try:
+            return _request_json(path)
+        except HTTPError as exc:
+            if exc.code not in retryable_http_statuses or attempt + 1 >= max_attempts:
+                raise
+        except (URLError, TimeoutError, OSError):
+            if attempt + 1 >= max_attempts:
+                raise
+        time.sleep(max(0.0, retry_delay_seconds))
+    raise RuntimeError(f"request retry loop exhausted for {path}")
 
 
 def _freshness_status(updated_at: Any, max_age: int) -> Status:
@@ -298,7 +319,7 @@ def _request_system_health(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     for attempt in range(max(1, max_attempts)):
-        payload = _request_json("/system/health")
+        payload = _request_json_with_retries("/system/health")
         if payload.get("apiStatus") != "warming":
             return payload
         if attempt + 1 < max_attempts:
@@ -468,7 +489,7 @@ def main() -> int:
             sys.stdout.write("\n")
             return 0 if validation["status"] == Status.HEALTHY.value else 1
         system = _request_system_health()
-        seed = _request_json("/system/seed-health")
+        seed = _request_json_with_retries("/system/seed-health")
         seed_items = seed.get("items") if isinstance(seed.get("items"), list) else []
         payload = build_panel_snapshot(
             contract,

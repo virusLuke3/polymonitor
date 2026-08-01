@@ -221,6 +221,13 @@ def _fetch_gdelt_articles(
 ) -> List[Dict[str, Any]]:
     if dependencies.http_json_get is None:
         raise RuntimeError("http_json_get helper missing")
+    timeout = max(
+        2,
+        min(
+            int(os.environ.get("POLYDATA_BREAKING_EVENT_GDELT_TIMEOUT_SECONDS", "20") or 20),
+            60,
+        ),
+    )
     payload = dependencies.http_json_get(
         _gdelt_url(dependencies),
         params={
@@ -230,11 +237,24 @@ def _fetch_gdelt_articles(
             "maxrecords": max(1, min(max_records, 50)),
             "sort": "hybridrel",
         },
-        timeout=12,
+        timeout=timeout,
         headers={"Accept": "application/json", "User-Agent": "polydata-breaking-event-radar/1.0"},
     )
     articles = payload.get("articles") if isinstance(payload, dict) else []
     return [row for row in articles if isinstance(row, dict)]
+
+
+def _source_failure(exc: Exception) -> tuple[str, str]:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if status_code == 429:
+        return "rate-limited", "rate-limited"
+    if isinstance(status_code, int):
+        return "error", f"http-{status_code}"
+    error_name = exc.__class__.__name__
+    if "timeout" in error_name.lower():
+        return "timeout", "timeout"
+    return "error", error_name
 
 
 def _fetch_pageviews(
@@ -427,8 +447,14 @@ def _build_breaking_event_radar_payload(
             sources["gdelt"]["count"] += len(articles)
             sources["gdelt"]["status"] = "ok" if articles else sources["gdelt"]["status"]
         except Exception as exc:
-            sources["gdelt"]["status"] = "error"
-            errors.append(f"gdelt:{seed.get('id')}:{exc.__class__.__name__}")
+            failure_status, failure_label = _source_failure(exc)
+            sources["gdelt"]["status"] = (
+                "partial" if sources["gdelt"]["count"] else failure_status
+            )
+            sources["gdelt"]["errorCount"] = int(
+                sources["gdelt"].get("errorCount") or 0
+            ) + 1
+            errors.append(f"gdelt:{seed.get('id')}:{failure_label}")
         if wikimedia_enabled and max_wiki_titles > 0:
             for title in (seed.get("wikiTitles") or [])[:max_wiki_titles]:
                 try:

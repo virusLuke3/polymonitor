@@ -12,6 +12,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -45,6 +46,12 @@ API_WARMUP_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_API_WARMUP_SECONDS", 180)
 PUBLISHER_WARMUP_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_PUBLISHER_WARMUP_SECONDS", 120)
 PUBLISHER_STALE_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_PUBLISHER_STALE_SECONDS", 300)
 SYSTEMCTL_TIMEOUT_SECONDS = _env_int("POLYDATA_SERVING_HEALTH_SYSTEMCTL_TIMEOUT_SECONDS", 60)
+DISK_CHECK_PATH = Path(os.environ.get("POLYDATA_SERVING_HEALTH_DISK_PATH", "/"))
+DISK_CRITICAL_FREE_PCT = _env_int("POLYDATA_SERVING_HEALTH_DISK_CRITICAL_FREE_PCT", 5)
+DISK_MIN_FREE_BYTES = _env_int(
+    "POLYDATA_SERVING_HEALTH_DISK_MIN_FREE_BYTES",
+    512 * 1024 * 1024,
+)
 
 STATE_DIR = Path(
     os.environ.get(
@@ -75,6 +82,7 @@ def _default_unit_state() -> dict[str, Any]:
         "last_success_at": 0,
         "last_failure": "",
         "start_limit_blocked": False,
+        "dependency_blocked": "",
     }
 
 
@@ -185,10 +193,42 @@ def _publisher_healthy(now: int) -> tuple[bool, str]:
     return True, f"publisher heartbeat age={age}s"
 
 
+def _disk_ready() -> tuple[bool, str]:
+    try:
+        usage = shutil.disk_usage(DISK_CHECK_PATH)
+    except OSError as exc:
+        return False, f"disk probe failed for {DISK_CHECK_PATH}: {exc}"
+    free_pct = (usage.free / usage.total * 100.0) if usage.total else 0.0
+    detail = (
+        f"disk free={usage.free} bytes ({free_pct:.2f}%) path={DISK_CHECK_PATH}"
+    )
+    if usage.free < DISK_MIN_FREE_BYTES or free_pct < DISK_CRITICAL_FREE_PCT:
+        return False, detail
+    return True, detail
+
+
+def _mark_dependency_blocked(
+    unit_state: dict[str, Any], *, dependency: str, reason: str
+) -> None:
+    unit_state["consecutive_failures"] = 0
+    unit_state["last_failure"] = reason
+    unit_state["dependency_blocked"] = dependency
+
+
+def _clear_dependency_block(unit_state: dict[str, Any], *, dependency: str) -> bool:
+    if str(unit_state.get("dependency_blocked") or "") != dependency:
+        return False
+    unit_state["dependency_blocked"] = ""
+    unit_state["backoff_until"] = 0
+    unit_state["consecutive_failures"] = 0
+    return True
+
+
 def _mark_healthy(unit_state: dict[str, Any], now: int) -> None:
     unit_state["consecutive_failures"] = 0
     unit_state["last_success_at"] = now
     unit_state["last_failure"] = ""
+    unit_state["dependency_blocked"] = ""
     unit_state["restart_attempts"] = [
         int(value)
         for value in unit_state.get("restart_attempts", [])
@@ -277,10 +317,20 @@ def run_once(*, now: int | None = None) -> int:
 
     api_ok, api_detail = _api_healthy()
     api_state = _unit_state(state, "api")
+    disk_ok, disk_detail = _disk_ready()
     if api_ok:
         _mark_healthy(api_state, timestamp)
         _log(f"api healthy: {api_detail}")
+    elif not disk_ok:
+        _mark_dependency_blocked(
+            api_state,
+            dependency="disk",
+            reason=f"API recovery blocked: {disk_detail}",
+        )
+        _log(f"api recovery deferred because disk is critical: {disk_detail}")
     else:
+        if _clear_dependency_block(api_state, dependency="disk"):
+            _log(f"disk recovered; API recovery budget is available: {disk_detail}")
         _recover(
             key="api",
             unit=API_UNIT,

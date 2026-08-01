@@ -156,6 +156,17 @@ class BreakingEventRadarWatcher:
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    def store_seed_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_seed_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(
+                f"[breaking-event-radar] WARN seed meta write failed: {exc.__class__.__name__}",
+                file=sys.stderr,
+            )
+            return False
+
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         try:
@@ -194,6 +205,19 @@ class BreakingEventRadarWatcher:
         return {"status": status, "payload": payload}
 
 
+def _result_summary(result: Dict[str, Any]) -> Dict[str, Any]:
+    payload = result.get("payload") if isinstance(result.get("payload"), dict) else {}
+    sources = payload.get("sources") if isinstance(payload.get("sources"), dict) else {}
+    return {
+        "status": result.get("status"),
+        "payloadStatus": payload.get("status"),
+        "cacheMode": payload.get("cacheMode"),
+        "items": len(payload.get("items") or []),
+        "sources": sources,
+        "errors": payload.get("errors") or [],
+    }
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Seed Breaking Event Radar snapshots into Redis and SQLite")
     parser.add_argument("--watch", action="store_true", help="Run continuously instead of once")
@@ -216,15 +240,15 @@ def main() -> int:
     watcher.redis_client.ping()
     print(f"[breaking-event-radar] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)
         return 0
     while True:
         try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
-            watcher.store_seed_meta(status="error", record_count=0, source_states={"breakingEventRadar": "error"}, error_summary=str(exc), preserve_last_success=True)
+            watcher.store_seed_meta_fail_soft(status="error", record_count=0, source_states={"breakingEventRadar": "error"}, error_summary=str(exc), preserve_last_success=True)
             print(f"[breaking-event-radar] ERROR watch loop failed: {exc}", file=sys.stderr)
         time.sleep(watcher.interval_seconds)
 

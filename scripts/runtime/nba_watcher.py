@@ -154,6 +154,14 @@ class NbaWatcher:
         )
         return self.seed_meta_store.store(self.seed_meta_namespace(), self.seed_meta_cache_key(), payload)
 
+    def store_seed_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_seed_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(f"[nba] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
+            return False
+
     def redis_key(self, namespace: str, cache_key: str) -> str:
         return _redis_key(self.redis_prefix, namespace, cache_key)
 
@@ -327,7 +335,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
-            watcher.store_seed_meta(
+            watcher.store_seed_meta_fail_soft(
                 status="error",
                 record_count=0,
                 source_states={"nba": "error"},

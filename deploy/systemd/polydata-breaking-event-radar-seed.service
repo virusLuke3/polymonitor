@@ -2,6 +2,8 @@
 Description=polyData Breaking Event Radar seed watcher
 After=network-online.target redis-server.service
 Wants=network-online.target
+StartLimitIntervalSec=1800
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -9,7 +11,7 @@ WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
 ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/runtime/breaking_event_radar_watcher.py --watch --interval "${POLYDATA_BREAKING_EVENT_RADAR_WATCH_INTERVAL_SECONDS:-300}" --limit "${POLYDATA_BREAKING_EVENT_RADAR_LIMIT:-12}"'
 Restart=always
-RestartSec=10
+RestartSec=30
 StandardOutput=journal
 StandardError=journal
 

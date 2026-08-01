@@ -158,6 +158,17 @@ class MarketTvWireWatcher:
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    def store_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(
+                f"[market-tv-wire] WARN seed meta write failed: {exc.__class__.__name__}",
+                file=sys.stderr,
+            )
+            return False
+
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
         youtube_rss_refresh_due = self._youtube_rss_refresh_due()
@@ -244,7 +255,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
-            watcher.store_meta(status="error", record_count=0, source_states={"marketTvWire": {"status": "error"}}, error_summary=str(exc), preserve=True)
+            watcher.store_meta_fail_soft(status="error", record_count=0, source_states={"marketTvWire": {"status": "error"}}, error_summary=str(exc), preserve=True)
             print(f"[market-tv-wire] ERROR {exc}", file=sys.stderr)
         time.sleep(max(60, args.interval))
 
