@@ -5,6 +5,7 @@ import html
 import json
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -261,16 +262,31 @@ def build_weather_news_payload(
     cities = [*load_weather_cities(), *WEATHER_TOPIC_QUERIES]
     articles: List[Dict[str, Any]] = []
     source_states: Dict[str, str] = {}
-    for city in cities:
+
+    def fetch_city(city: Dict[str, Any]) -> tuple[Dict[str, Any], List[Dict[str, Any]], Exception | None]:
         try:
-            city_articles = fetch_google_news_rss(dependencies, city)
-            articles.extend(city_articles)
-            source_states[str(city["city_id"])] = "ok" if city_articles else "empty"
+            return city, fetch_google_news_rss(dependencies, city), None
         except Exception as exc:
+            return city, [], exc
+
+    worker_count = max(
+        1,
+        min(
+            8,
+            int(getattr(dependencies.settings, "weather_news_fetch_workers", 4) or 4),
+        ),
+    )
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="weather-news") as executor:
+        results = executor.map(fetch_city, cities)
+        for city, city_articles, error in results:
+            if error is None:
+                articles.extend(city_articles)
+                source_states[str(city["city_id"])] = "ok" if city_articles else "empty"
+                continue
             source_states[str(city["city_id"])] = "error"
             logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
-                logger.exception("weather news rss fetch failed city=%s error=%s", city.get("city"), exc)
+                logger.exception("weather news rss fetch failed city=%s error=%s", city.get("city"), error)
     ranked = _dedupe_rank(articles)
     status = "ok" if ranked else ("degraded" if any(value == "error" for value in source_states.values()) else "empty")
     if ranked and any(value == "error" for value in source_states.values()):

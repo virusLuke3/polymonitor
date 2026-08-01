@@ -269,6 +269,7 @@ class ApiSettings:
     global_weather_market_days: int
     weather_news_ttl_seconds: int
     weather_news_limit: int
+    weather_news_fetch_workers: int
     f1_panel_path: str
     f1_bwenews_rss_url: str
     f1_bwenews_source_url: str
@@ -577,6 +578,7 @@ def load_api_settings() -> ApiSettings:
         global_weather_market_days=_get_int("POLYDATA_GLOBAL_WEATHER_MARKET_DAYS", 4),
         weather_news_ttl_seconds=_get_int("POLYDATA_WEATHER_NEWS_TTL_SECONDS", 300),
         weather_news_limit=_get_int("POLYDATA_WEATHER_NEWS_LIMIT", 40),
+        weather_news_fetch_workers=_get_int("POLYDATA_WEATHER_NEWS_FETCH_WORKERS", 4),
         f1_panel_path=_get_str(
             "POLYDATA_F1_PANEL_PATH",
             str((PROJECT_ROOT / "data" / "runtime" / "f1" / "panel.json").resolve()),

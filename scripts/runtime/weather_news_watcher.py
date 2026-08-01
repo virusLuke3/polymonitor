@@ -56,8 +56,6 @@ class WeatherNewsWatcher:
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
-        self.requests.trust_env = False
 
     def namespace(self) -> str:
         return weather_news_service.WEATHER_NEWS_SNAPSHOT_NAMESPACE
@@ -72,9 +70,11 @@ class WeatherNewsWatcher:
         return max(300, int(getattr(self.settings, "weather_news_ttl_seconds", 900) or 900))
 
     def _http_text_get(self, url: str, *, timeout: int = 12, headers: Dict[str, str] | None = None) -> str:
-        response = self.requests.get(url, timeout=timeout, headers=headers)
-        response.raise_for_status()
-        return response.text
+        with requests.Session() as session:
+            session.trust_env = False
+            response = session.get(url, timeout=timeout, headers=headers)
+            response.raise_for_status()
+            return response.text
 
     def context(self) -> Dict[str, Any]:
         return {
