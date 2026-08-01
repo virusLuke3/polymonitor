@@ -190,6 +190,20 @@ class SportsOddsWatcher:
         return {"status": status, "payload": payload}
 
 
+def _result_summary(result: Dict[str, Any]) -> Dict[str, Any]:
+    payload = result.get("payload") if isinstance(result.get("payload"), dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    return {
+        "status": result.get("status"),
+        "payloadStatus": payload.get("status"),
+        "cacheMode": payload.get("cacheMode"),
+        "items": len(payload.get("items") or []),
+        "eventCount": summary.get("eventCount"),
+        "bookmakerCount": summary.get("bookmakerCount"),
+        "pmLinked": summary.get("pmLinked"),
+    }
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Seed sports odds panel snapshots into Redis and SQLite")
     parser.add_argument("--watch", action="store_true", help="Run continuously instead of once")
@@ -212,11 +226,11 @@ def main() -> int:
     watcher.redis_client.ping()
     print(f"[sports-odds] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)
         return 0
     while True:
         try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
