@@ -10,7 +10,12 @@ export { isHazardEvent } from './shared';
 export {
   aviationLayerStats,
   aviationLayerStatsForState,
+  createAviationDynamicLayers,
   createAviationLayers,
+  createAviationStaticLayerSections,
+  type AviationRenderData,
+  type AviationStaticLayerSections,
+  type AviationViewport,
 } from './aviationLayers';
 
 export type WorldEventStaticLayerSections = {

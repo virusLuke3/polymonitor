@@ -50,8 +50,12 @@ export function AviationLens({
       </header>
       <div className="wm-aviation-lens-stats" aria-label="Aviation reference counts">
         <span><i className="routes" /><b>{stats.visibleRoutes}</b><em>/{stats.routes} routes</em></span>
-        <span><i className="hubs" /><b>{stats.hubs}</b><em>hubs</em></span>
-        <span><i className="flights" /><b>{stats.flights + stats.liveAircraft}</b><em>aircraft</em></span>
+        <span><i className="hubs" /><b>{stats.visibleHubs}</b><em>/{stats.hubs} hubs</em></span>
+        <span>
+          <i className="flights" />
+          <b>{stats.visibleFlights + stats.visibleLiveAircraft}</b>
+          <em>/{stats.flights + stats.liveAircraft} aircraft</em>
+        </span>
       </div>
       <div className="wm-aviation-lens-tabs" role="group" aria-label="Aviation route mode">
         {AVIATION_LENS_MODES.map((lens) => (

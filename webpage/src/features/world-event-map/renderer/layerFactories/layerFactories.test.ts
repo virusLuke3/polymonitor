@@ -3,7 +3,13 @@ import type { Layer } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import { defaultWorldEventMapState } from '../../state/mapState';
 import { createWorldEventLayers } from '.';
-import { aviationRouteMotionPoints, selectAviationRenderData } from './aviationLayers';
+import {
+  aviationRouteMotionPoints,
+  aviationLayerStatsForState,
+  createAviationDynamicLayers,
+  createAviationStaticLayerSections,
+  selectAviationRenderData,
+} from './aviationLayers';
 import { clusterEventPoints } from './eventPointLayer';
 
 const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['severity'] = 'watch'): GeoEvent => ({
@@ -154,8 +160,88 @@ describe('world event layer factories', () => {
     }));
     const selected = selectAviationRenderData(routes, defaultWorldEventMapState());
 
-    expect(selected.routes).toHaveLength(160);
-    expect(new Set(selected.routes.map((route) => route.properties.routeId)).size).toBe(160);
+    expect(selected.routes).toHaveLength(120);
+    expect(new Set(selected.routes.map((route) => route.properties.routeId)).size).toBe(120);
+  });
+
+  it('precomputes a bounded world-view aviation generation outside the animation frame', () => {
+    const routes = Array.from({ length: 180 }, (_, index): GeoEvent => ({
+      ...pointEvent(`route:${index}`, 0, 0, 'info'),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[-70 + index / 10, 0], [-68 + index / 10, 5]] },
+      properties: { mapEntity: 'air-route', routeId: `route-${index}`, layer: 'international', trafficScore: 180 - index },
+    }));
+    const flights = Array.from({ length: 80 }, (_, index): GeoEvent => ({
+      ...pointEvent(`flight:${index}`, 0, 0, 'info'),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[-30 + index / 10, -3], [-28 + index / 10, 4]] },
+      properties: { mapEntity: 'air-flight', flightId: `flight-${index}`, layer: 'international', phase: index / 100 },
+    }));
+    const live = Array.from({ length: 40 }, (_, index): GeoEvent => ({
+      ...pointEvent(`live:${index}`, -20 + index, 8, 'info'),
+      category: 'infrastructure',
+      properties: { mapEntity: 'live-aircraft', heading: 90 },
+    }));
+    const selected = selectAviationRenderData([...routes, ...flights, ...live], defaultWorldEventMapState());
+
+    expect(selected.routes).toHaveLength(120);
+    expect(selected.routeMotionGroups).toHaveLength(48);
+    expect(selected.flights).toHaveLength(30);
+    expect(selected.flightMotionGroups).toHaveLength(30);
+    expect(selected.liveAircraft).toHaveLength(24);
+    expect(aviationLayerStatsForState([...routes, ...flights, ...live], defaultWorldEventMapState()))
+      .toMatchObject({
+        visibleRoutes: 120,
+        visibleFlights: 30,
+        visibleLiveAircraft: 24,
+      });
+
+    const staticSections = createAviationStaticLayerSections(
+      [...routes, ...flights, ...live],
+      defaultWorldEventMapState(),
+    );
+    const dynamicLayers = createAviationDynamicLayers(staticSections.data, 1) as Layer[];
+    expect((staticSections.routeLayers as Layer[]).map((layer) => layer.id)).toEqual([
+      'aviation-route-underlay',
+      'aviation-route-core',
+    ]);
+    expect(dynamicLayers.map((layer) => layer.id)).toEqual([
+      'aviation-route-runners',
+      'aviation-seeded-aircraft',
+    ]);
+  });
+
+  it('culls aviation paths and aircraft to a padded local viewport without hiding world-view data', () => {
+    const nearRoute: GeoEvent = {
+      ...pointEvent('near-route', 0, 0, 'info'),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[0, 0], [10, 5]] },
+      properties: { mapEntity: 'air-route', routeId: 'near', layer: 'international' },
+    };
+    const distantRoute: GeoEvent = {
+      ...pointEvent('distant-route', 0, 0, 'info'),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[120, 0], [130, 5]] },
+      properties: { mapEntity: 'air-route', routeId: 'distant', layer: 'international' },
+    };
+    const nearAircraft: GeoEvent = {
+      ...pointEvent('near-aircraft', 2, 2, 'info'),
+      category: 'infrastructure',
+      properties: { mapEntity: 'live-aircraft' },
+    };
+    const distantAircraft: GeoEvent = {
+      ...pointEvent('distant-aircraft', 130, 2, 'info'),
+      category: 'infrastructure',
+      properties: { mapEntity: 'live-aircraft' },
+    };
+    const selected = selectAviationRenderData(
+      [nearRoute, distantRoute, nearAircraft, distantAircraft],
+      { ...defaultWorldEventMapState(), zoom: 3 },
+      [-20, -20, 20, 20],
+    );
+
+    expect(selected.routes.map((event) => event.properties.routeId)).toEqual(['near']);
+    expect(selected.liveAircraft.map((event) => event.id)).toEqual(['near-aircraft']);
   });
 
   it('clusters a 2,000 event fixture within the viewport and retains selection', () => {

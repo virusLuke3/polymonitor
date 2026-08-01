@@ -15,6 +15,9 @@ const AIRCRAFT_ICON_MAPPING = {
 
 type AviationEntity = 'air-route' | 'air-hub' | 'air-flight' | 'live-aircraft';
 
+/** [west, south, east, north], in WGS84 degrees. */
+export type AviationViewport = [number, number, number, number];
+
 export type AviationMotionPoint = {
   id: string;
   event: GeoEvent;
@@ -24,21 +27,53 @@ export type AviationMotionPoint = {
   size: number;
 };
 
+/** A stable path grouping prepared outside the animation frame. */
+export type AviationMotionGroup = {
+  id: string;
+  event: GeoEvent;
+  segments: GeoEvent[];
+};
+
+/**
+ * The selected, zoom-budgeted aviation data. The renderer owns this object for
+ * the whole static render generation; animation must only read it, never
+ * filter/group/sort the full event payload again.
+ */
 export type AviationRenderData = {
   routes: GeoEvent[];
   hubs: GeoEvent[];
   flights: GeoEvent[];
   liveAircraft: GeoEvent[];
+  routeMotionGroups: AviationMotionGroup[];
+  flightMotionGroups: AviationMotionGroup[];
+};
+
+export type AviationStaticLayerSections = {
+  routeLayers: LayersList;
+  markerLayers: LayersList;
+  data: AviationRenderData;
 };
 
 export type AviationLayerStats = {
   routes: number;
   visibleRoutes: number;
   hubs: number;
+  visibleHubs: number;
   flights: number;
+  visibleFlights: number;
   liveAircraft: number;
+  visibleLiveAircraft: number;
   watchRoutes: number;
   riskSources: Record<AviationRiskSource, number>;
+};
+
+type AviationBudget = {
+  routes: number;
+  routeRunners: number;
+  seededAircraft: number;
+  liveAircraft: number;
+  hubs: number;
+  hubLabels: number;
 };
 
 function entity(event: GeoEvent): AviationEntity | null {
@@ -71,7 +106,7 @@ function groupId(event: GeoEvent, key: 'routeId' | 'flightId') {
   return stringProperty(event, key) || event.id;
 }
 
-function groupSegments(events: GeoEvent[], key: 'routeId' | 'flightId') {
+function groupSegments(events: readonly GeoEvent[], key: 'routeId' | 'flightId'): AviationMotionGroup[] {
   const groups = new Map<string, GeoEvent[]>();
   for (const event of events) {
     const id = groupId(event, key);
@@ -79,12 +114,12 @@ function groupSegments(events: GeoEvent[], key: 'routeId' | 'flightId') {
     values.push(event);
     groups.set(id, values);
   }
-  for (const values of groups.values()) {
-    values.sort((left, right) => (
+  return [...groups.entries()].map(([id, segments]) => {
+    segments.sort((left, right) => (
       numberProperty(left, 'segmentIndex') - numberProperty(right, 'segmentIndex')
     ));
-  }
-  return groups;
+    return { id, event: segments[0]!, segments };
+  });
 }
 
 function isWatch(event: GeoEvent) {
@@ -113,23 +148,107 @@ function routePriority(event: GeoEvent) {
     + numberProperty(event, 'riskScore') * 1.5;
 }
 
-function routeBudget(zoom: number, lens: AviationLensMode) {
-  if (lens === 'watch') return zoom < 2 ? 90 : 180;
-  if (lens === 'trunk') return zoom < 2 ? 120 : 240;
-  if (zoom < 1.6) return 160;
-  if (zoom < 2.8) return 300;
-  return 520;
+function aircraftPriority(event: GeoEvent) {
+  return (isWatch(event) ? 1_000 : 0)
+    + routePriority(event)
+    + numberProperty(event, 'velocity') / 10;
 }
 
-function selectedRouteSegments(
+/**
+ * World-view traffic needs context, not a full flight board. Detail expands
+ * predictably with zoom; route topology remains visible at every level while
+ * individual aircraft only become dense once the user has zoomed in.
+ */
+function aviationBudget(zoom: number, lens: AviationLensMode): AviationBudget {
+  const lensScale = lens === 'watch' ? 0.8 : lens === 'trunk' ? 0.72 : 1;
+  const scale = (value: number, minimum: number) => Math.max(minimum, Math.round(value * lensScale));
+  if (zoom < 1.6) {
+    return {
+      routes: scale(120, 64), routeRunners: scale(48, 28), seededAircraft: scale(30, 18),
+      liveAircraft: scale(24, 12), hubs: 12, hubLabels: 8,
+    };
+  }
+  if (zoom < 2.8) {
+    return {
+      routes: scale(180, 96), routeRunners: scale(96, 48), seededAircraft: scale(64, 32),
+      liveAircraft: scale(48, 24), hubs: 24, hubLabels: 12,
+    };
+  }
+  if (zoom < 4) {
+    return {
+      routes: scale(360, 160), routeRunners: scale(180, 84), seededAircraft: scale(120, 56),
+      liveAircraft: scale(100, 48), hubs: 30, hubLabels: 18,
+    };
+  }
+  return {
+    routes: scale(520, 220), routeRunners: scale(260, 120), seededAircraft: scale(220, 96),
+    liveAircraft: scale(160, 72), hubs: 48, hubLabels: 28,
+  };
+}
+
+function paddedViewport(viewport?: AviationViewport): AviationViewport | null {
+  if (!viewport) return null;
+  const [west, south, east, north] = viewport;
+  if (![west, south, east, north].every(Number.isFinite) || east <= west || east - west >= 300) return null;
+  // A buffer avoids flicker when a route/aircraft sits on the camera edge.
+  const horizontalPad = (east - west) * 0.12;
+  const verticalPad = (north - south) * 0.12;
+  return [west - horizontalPad, south - verticalPad, east + horizontalPad, north + verticalPad];
+}
+
+function pointIsVisible(event: GeoEvent, viewport: AviationViewport | null) {
+  if (!viewport || event.geometry?.type !== 'Point') return true;
+  const [lon, lat] = event.geometry.coordinates;
+  return lon >= viewport[0] && lon <= viewport[2] && lat >= viewport[1] && lat <= viewport[3];
+}
+
+function pathIntersectsViewport(event: GeoEvent, viewport: AviationViewport | null) {
+  if (!viewport || event.geometry?.type !== 'LineString') return true;
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const [lon, lat] of event.geometry.coordinates) {
+    west = Math.min(west, lon);
+    east = Math.max(east, lon);
+    south = Math.min(south, lat);
+    north = Math.max(north, lat);
+  }
+  return west <= viewport[2] && east >= viewport[0] && south <= viewport[3] && north >= viewport[1];
+}
+
+function groupIntersectsViewport(group: AviationMotionGroup, viewport: AviationViewport | null) {
+  return group.segments.some((segment) => pathIntersectsViewport(segment, viewport));
+}
+
+function flattenGroups(groups: readonly AviationMotionGroup[]) {
+  return groups.flatMap((group) => group.segments);
+}
+
+function visibleRouteGroups(
   routes: GeoEvent[],
   state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>,
+  viewport: AviationViewport | null,
+  budget: AviationBudget,
 ) {
-  return [...groupSegments(routes, 'routeId').values()]
-    .filter((segments) => matchesLens(segments[0]!, state.aviationLens, state.aviationRiskSource))
-    .sort((left, right) => routePriority(right[0]!) - routePriority(left[0]!))
-    .slice(0, routeBudget(state.zoom, state.aviationLens))
-    .flat();
+  return groupSegments(routes, 'routeId')
+    .filter((group) => matchesLens(group.event, state.aviationLens, state.aviationRiskSource))
+    .filter((group) => groupIntersectsViewport(group, viewport))
+    .sort((left, right) => routePriority(right.event) - routePriority(left.event))
+    .slice(0, budget.routes);
+}
+
+function visibleFlightGroups(
+  flights: GeoEvent[],
+  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>,
+  viewport: AviationViewport | null,
+  budget: AviationBudget,
+) {
+  return groupSegments(flights, 'flightId')
+    .filter((group) => matchesLens(group.event, state.aviationLens, state.aviationRiskSource))
+    .filter((group) => groupIntersectsViewport(group, viewport))
+    .sort((left, right) => aircraftPriority(right.event) - aircraftPriority(left.event))
+    .slice(0, budget.seededAircraft);
 }
 
 export function aviationRouteTone(event: GeoEvent, alpha: number): [number, number, number, number] {
@@ -179,20 +298,18 @@ function angleAlongPath(path: [number, number][], progress: number) {
   return (Math.atan2(next[1] - current[1], next[0] - current[0]) * 180) / Math.PI;
 }
 
-function motionPointForSegments(
-  id: string,
-  segments: GeoEvent[],
+function motionPointForGroup(
+  group: AviationMotionGroup,
   progress: number,
   color: [number, number, number, number],
   size: number,
 ): AviationMotionPoint | null {
-  if (!segments.length) return null;
-  const segmentProgress = Math.max(0, Math.min(0.999999, progress)) * segments.length;
-  const segment = segments[Math.min(segments.length - 1, Math.floor(segmentProgress))]!;
+  const segmentProgress = Math.max(0, Math.min(0.999999, progress)) * group.segments.length;
+  const segment = group.segments[Math.min(group.segments.length - 1, Math.floor(segmentProgress))]!;
   if (segment.geometry?.type !== 'LineString') return null;
   const localProgress = segmentProgress - Math.floor(segmentProgress);
   return {
-    id,
+    id: group.id,
     event: segment,
     position: pointAlongPath(segment.geometry.coordinates, localProgress),
     color,
@@ -201,41 +318,49 @@ function motionPointForSegments(
   };
 }
 
-export function aviationRouteMotionPoints(routes: GeoEvent[], animationTime: number) {
+function routeMotionPointsForGroups(groups: readonly AviationMotionGroup[], animationTime: number) {
   const points: AviationMotionPoint[] = [];
-  for (const [routeId, segments] of groupSegments(routes, 'routeId')) {
-    const event = segments[0]!;
-    const speed = Math.max(0.012, Math.min(0.08, numberProperty(event, 'speed', 0.028)));
-    const progress = (hashUnit(routeId) + animationTime * speed) % 1;
-    const point = motionPointForSegments(routeId, segments, progress, aviationRouteTone(event, 230), 11);
+  for (const group of groups) {
+    const speed = Math.max(0.012, Math.min(0.08, numberProperty(group.event, 'speed', 0.028)));
+    const progress = (hashUnit(group.id) + animationTime * speed) % 1;
+    const point = motionPointForGroup(group, progress, aviationRouteTone(group.event, 230), 11);
     if (point) points.push(point);
   }
   return points;
 }
 
-export function aviationSeededFlightPoints(flights: GeoEvent[], animationTime: number) {
+function seededFlightPointsForGroups(groups: readonly AviationMotionGroup[], animationTime: number) {
   const points: AviationMotionPoint[] = [];
-  for (const [flightId, segments] of groupSegments(flights, 'flightId')) {
-    const event = segments[0]!;
-    const phase = numberProperty(event, 'phase', hashUnit(flightId));
-    const speed = Math.max(0.012, Math.min(0.16, numberProperty(event, 'speed', 0.06)));
+  for (const group of groups) {
+    const phase = numberProperty(group.event, 'phase', hashUnit(group.id));
+    const speed = Math.max(0.012, Math.min(0.16, numberProperty(group.event, 'speed', 0.06)));
     const progress = (phase + animationTime * speed) % 1;
-    const color = isWatch(event)
+    const color = isWatch(group.event)
       ? [255, 214, 84, 245] as [number, number, number, number]
       : [92, 241, 255, 235] as [number, number, number, number];
-    const point = motionPointForSegments(flightId, segments, progress, color, 14);
+    const point = motionPointForGroup(group, progress, color, 14);
     if (point) points.push(point);
   }
   return points;
+}
+
+/** Compatibility helper for the SVG fallback and pure unit tests. */
+export function aviationRouteMotionPoints(routes: GeoEvent[], animationTime: number) {
+  return routeMotionPointsForGroups(groupSegments(routes, 'routeId'), animationTime);
+}
+
+/** Compatibility helper for the SVG fallback and pure unit tests. */
+export function aviationSeededFlightPoints(flights: GeoEvent[], animationTime: number) {
+  return seededFlightPointsForGroups(groupSegments(flights, 'flightId'), animationTime);
 }
 
 export function aviationLayerStats(events: GeoEvent[], visibleRoutes = events): AviationLayerStats {
   const routes = events.filter((event) => entity(event) === 'air-route');
-  const routeRepresentatives = [...groupSegments(routes, 'routeId').values()].map((segments) => segments[0]!);
+  const routeRepresentatives = groupSegments(routes, 'routeId').map((group) => group.event);
   const visibleRouteCount = groupSegments(
     visibleRoutes.filter((event) => entity(event) === 'air-route'),
     'routeId',
-  ).size;
+  ).length;
   const risks: Record<AviationRiskSource, number> = {
     all: routeRepresentatives.filter(isWatch).length,
     weather: 0,
@@ -251,8 +376,11 @@ export function aviationLayerStats(events: GeoEvent[], visibleRoutes = events): 
     routes: routeRepresentatives.length,
     visibleRoutes: visibleRouteCount,
     hubs: events.filter((event) => entity(event) === 'air-hub').length,
-    flights: groupSegments(events.filter((event) => entity(event) === 'air-flight'), 'flightId').size,
+    visibleHubs: events.filter((event) => entity(event) === 'air-hub').length,
+    flights: groupSegments(events.filter((event) => entity(event) === 'air-flight'), 'flightId').length,
+    visibleFlights: groupSegments(events.filter((event) => entity(event) === 'air-flight'), 'flightId').length,
     liveAircraft: events.filter((event) => entity(event) === 'live-aircraft').length,
+    visibleLiveAircraft: events.filter((event) => entity(event) === 'live-aircraft').length,
     watchRoutes: routeRepresentatives.filter(isWatch).length,
     riskSources: risks,
   };
@@ -262,53 +390,61 @@ export function aviationLayerStatsForState(
   events: GeoEvent[],
   state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>,
 ) {
-  const routes = selectedRouteSegments(
-    events.filter((event) => entity(event) === 'air-route'),
-    state,
-  );
-  return aviationLayerStats(events, routes);
+  const visible = selectAviationRenderData(events, state);
+  const stats = aviationLayerStats(events, visible.routes);
+  return {
+    ...stats,
+    visibleHubs: visible.hubs.length,
+    visibleFlights: visible.flightMotionGroups.length,
+    visibleLiveAircraft: visible.liveAircraft.length,
+  };
 }
 
+/**
+ * Select and precompute one static aviation generation. This is deliberately
+ * called on data/lens/zoom/viewport changes only, never from an animation tick.
+ */
 export function selectAviationRenderData(
   events: GeoEvent[],
   state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>,
+  viewport?: AviationViewport,
 ): AviationRenderData {
-  const routes = selectedRouteSegments(
-    events.filter((event) => entity(event) === 'air-route'),
-    state,
+  const budget = aviationBudget(state.zoom, state.aviationLens);
+  const visibleViewport = paddedViewport(viewport);
+  const routeGroups = visibleRouteGroups(
+    events.filter((event) => entity(event) === 'air-route'), state, visibleViewport, budget,
+  );
+  const flightGroups = visibleFlightGroups(
+    events.filter((event) => entity(event) === 'air-flight'), state, visibleViewport, budget,
   );
   const hubs = events
-    .filter((event) => entity(event) === 'air-hub' && matchesLens(event, state.aviationLens, state.aviationRiskSource))
+    .filter((event) => entity(event) === 'air-hub')
+    .filter((event) => matchesLens(event, state.aviationLens, state.aviationRiskSource))
+    .filter((event) => pointIsVisible(event, visibleViewport))
     .sort((left, right) => numberProperty(right, 'routeCount') - numberProperty(left, 'routeCount'))
-    .slice(0, state.zoom < 2.2 ? 12 : 30);
-  const flights = events.filter(
-    (event) => entity(event) === 'air-flight' && matchesLens(event, state.aviationLens, state.aviationRiskSource),
-  );
-  const liveAircraft = events.filter(
-    (event) => entity(event) === 'live-aircraft' && matchesLens(event, state.aviationLens, state.aviationRiskSource),
-  );
-  return { routes, hubs, flights, liveAircraft };
+    .slice(0, budget.hubs);
+  const liveAircraft = events
+    .filter((event) => entity(event) === 'live-aircraft')
+    .filter((event) => matchesLens(event, state.aviationLens, state.aviationRiskSource))
+    .filter((event) => pointIsVisible(event, visibleViewport))
+    .sort((left, right) => aircraftPriority(right) - aircraftPriority(left))
+    .slice(0, budget.liveAircraft);
+  return {
+    routes: flattenGroups(routeGroups),
+    hubs,
+    flights: flattenGroups(flightGroups),
+    liveAircraft,
+    routeMotionGroups: routeGroups.slice(0, budget.routeRunners),
+    flightMotionGroups: flightGroups,
+  };
 }
 
-export function createAviationLayers(
-  events: GeoEvent[],
-  state: WorldEventMapState,
-  animationTime = 0,
-): LayersList {
-  const {
-    routes,
-    hubs,
-    flights,
-    liveAircraft,
-  } = selectAviationRenderData(events, state);
-  const routeRunners = aviationRouteMotionPoints(routes, animationTime);
-  const flightPoints = aviationSeededFlightPoints(flights, animationTime);
-  const layers: Layer[] = [];
-
-  if (routes.length) {
-    layers.push(new PathLayer<GeoEvent>({
+function createAviationRouteLayers(data: AviationRenderData, state: Pick<WorldEventMapState, 'selectedEventId'>): LayersList {
+  if (!data.routes.length) return [];
+  return [
+    new PathLayer<GeoEvent>({
       id: 'aviation-route-underlay',
-      data: routes,
+      data: data.routes,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
       getColor: (event) => aviationRouteTone(event, event.id === state.selectedEventId ? 118 : 34),
       getWidth: (event) => routeWidth(event, state.selectedEventId) + 1.1,
@@ -317,10 +453,10 @@ export function createAviationLayers(
       jointRounded: true,
       capRounded: true,
       pickable: false,
-    }));
-    layers.push(new PathLayer<GeoEvent>({
+    }),
+    new PathLayer<GeoEvent>({
       id: 'aviation-route-core',
-      data: routes,
+      data: data.routes,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
       getColor: (event) => aviationRouteTone(event, event.id === state.selectedEventId ? 235 : 118),
       getWidth: (event) => routeWidth(event, state.selectedEventId),
@@ -331,9 +467,93 @@ export function createAviationLayers(
       pickable: true,
       autoHighlight: true,
       highlightColor: [255, 250, 198, 150],
+    }),
+  ];
+}
+
+function createAviationMarkerLayers(
+  data: AviationRenderData,
+  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens'>,
+): LayersList {
+  const budget = aviationBudget(state.zoom, state.aviationLens);
+  const layers: Layer[] = [];
+  if (data.liveAircraft.length) {
+    layers.push(new IconLayer<GeoEvent>({
+      id: 'aviation-live-aircraft',
+      data: data.liveAircraft,
+      iconAtlas: AIRCRAFT_ICON_ATLAS,
+      iconMapping: AIRCRAFT_ICON_MAPPING,
+      getIcon: () => 'aircraft',
+      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
+      getSize: (event) => isWatch(event) ? 15 : 12,
+      getAngle: (event) => numberProperty(event, 'heading') - 90,
+      getColor: (event) => isWatch(event) ? [255, 214, 84, 245] : [72, 244, 255, 232],
+      sizeUnits: 'pixels',
+      pickable: true,
+      autoHighlight: true,
     }));
   }
+  if (data.hubs.length) {
+    layers.push(new ScatterplotLayer<GeoEvent>({
+      id: 'aviation-hubs',
+      data: data.hubs,
+      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
+      getRadius: (event) => Math.max(26_000, Math.min(76_000, 18_000 + numberProperty(event, 'routeCount') * 34)),
+      getFillColor: (event) => isWatch(event) ? [255, 177, 76, 135] : [24, 211, 238, 112],
+      getLineColor: (event) => isWatch(event) ? [255, 220, 130, 230] : [87, 235, 255, 225],
+      getLineWidth: 1.5,
+      radiusMinPixels: 4,
+      radiusMaxPixels: 14,
+      lineWidthMinPixels: 1,
+      stroked: true,
+      pickable: true,
+      autoHighlight: true,
+    }));
+    layers.push(new TextLayer<GeoEvent>({
+      id: 'aviation-hub-labels',
+      data: data.hubs.slice(0, budget.hubLabels),
+      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
+      getText: (event) => stringProperty(event, 'code'),
+      getPixelOffset: [9, 10],
+      getSize: 9,
+      getColor: [174, 233, 241, 195],
+      getTextAnchor: 'start',
+      getAlignmentBaseline: 'center',
+      fontFamily: MAP_MONO_FONT_FAMILY,
+      fontWeight: 900,
+      outlineWidth: 3,
+      outlineColor: [0, 0, 0, 220],
+      pickable: false,
+    }));
+  }
+  return layers;
+}
 
+/** Builds immutable route/marker layers plus their precomputed animation data. */
+export function createAviationStaticLayerSections(
+  events: GeoEvent[],
+  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource' | 'selectedEventId'>,
+  viewport?: AviationViewport,
+): AviationStaticLayerSections {
+  const data = selectAviationRenderData(events, state, viewport);
+  return {
+    routeLayers: createAviationRouteLayers(data, state),
+    markerLayers: createAviationMarkerLayers(data, state),
+    data,
+  };
+}
+
+/**
+ * The only layers recreated during aviation animation. Their source groups are
+ * stable, and their count is bounded by the current zoom-level budget.
+ */
+export function createAviationDynamicLayers(
+  data: AviationRenderData,
+  animationTime = 0,
+): LayersList {
+  const routeRunners = routeMotionPointsForGroups(data.routeMotionGroups, animationTime);
+  const flightPoints = seededFlightPointsForGroups(data.flightMotionGroups, animationTime);
+  const layers: Layer[] = [];
   if (routeRunners.length) {
     layers.push(new ScatterplotLayer<AviationMotionPoint>({
       id: 'aviation-route-runners',
@@ -350,7 +570,6 @@ export function createAviationLayers(
       pickable: false,
     }));
   }
-
   if (flightPoints.length) {
     layers.push(new IconLayer<AviationMotionPoint>({
       id: 'aviation-seeded-aircraft',
@@ -366,57 +585,20 @@ export function createAviationLayers(
       pickable: false,
     }));
   }
-
-  if (liveAircraft.length) {
-    layers.push(new IconLayer<GeoEvent>({
-      id: 'aviation-live-aircraft',
-      data: liveAircraft,
-      iconAtlas: AIRCRAFT_ICON_ATLAS,
-      iconMapping: AIRCRAFT_ICON_MAPPING,
-      getIcon: () => 'aircraft',
-      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
-      getSize: (event) => isWatch(event) ? 15 : 12,
-      getAngle: (event) => numberProperty(event, 'heading') - 90,
-      getColor: (event) => isWatch(event) ? [255, 214, 84, 245] : [72, 244, 255, 232],
-      sizeUnits: 'pixels',
-      pickable: true,
-      autoHighlight: true,
-    }));
-  }
-
-  if (hubs.length) {
-    layers.push(new ScatterplotLayer<GeoEvent>({
-      id: 'aviation-hubs',
-      data: hubs,
-      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
-      getRadius: (event) => Math.max(26_000, Math.min(76_000, 18_000 + numberProperty(event, 'routeCount') * 34)),
-      getFillColor: (event) => isWatch(event) ? [255, 177, 76, 135] : [24, 211, 238, 112],
-      getLineColor: (event) => isWatch(event) ? [255, 220, 130, 230] : [87, 235, 255, 225],
-      getLineWidth: 1.5,
-      radiusMinPixels: 4,
-      radiusMaxPixels: 14,
-      lineWidthMinPixels: 1,
-      stroked: true,
-      pickable: true,
-      autoHighlight: true,
-    }));
-    layers.push(new TextLayer<GeoEvent>({
-      id: 'aviation-hub-labels',
-      data: hubs.slice(0, state.zoom < 2.2 ? 8 : 18),
-      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
-      getText: (event) => stringProperty(event, 'code'),
-      getPixelOffset: [9, 10],
-      getSize: 9,
-      getColor: [174, 233, 241, 195],
-      getTextAnchor: 'start',
-      getAlignmentBaseline: 'center',
-      fontFamily: MAP_MONO_FONT_FAMILY,
-      fontWeight: 900,
-      outlineWidth: 3,
-      outlineColor: [0, 0, 0, 220],
-      pickable: false,
-    }));
-  }
-
   return layers;
+}
+
+/** Compatibility composition for the SVG renderer and factory callers. */
+export function createAviationLayers(
+  events: GeoEvent[],
+  state: WorldEventMapState,
+  animationTime = 0,
+  viewport?: AviationViewport,
+): LayersList {
+  const sections = createAviationStaticLayerSections(events, state, viewport);
+  return [
+    ...sections.routeLayers,
+    ...createAviationDynamicLayers(sections.data, animationTime),
+    ...sections.markerLayers,
+  ];
 }
