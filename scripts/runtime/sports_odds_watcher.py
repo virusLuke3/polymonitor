@@ -84,6 +84,7 @@ class SportsOddsWatcher:
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
         self.requests.trust_env = False
+        self.last_http_quota: Dict[str, int] = {}
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_SPORTS_ODDS_SEED_TTL_SECONDS", "0") or 0)
@@ -103,12 +104,42 @@ class SportsOddsWatcher:
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
         response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
         response.raise_for_status()
+        quota = {}
+        for header, key in (
+            ("x-requests-used", "used"),
+            ("x-requests-remaining", "remaining"),
+            ("x-requests-last", "last"),
+        ):
+            try:
+                quota[key] = int(response.headers.get(header))
+            except (TypeError, ValueError):
+                continue
+        self.last_http_quota = quota
         if not response.content:
             return None
         return response.json()
 
+    def get_http_quota(self) -> Dict[str, int]:
+        return dict(self.last_http_quota)
+
+    def next_interval_seconds(self) -> int:
+        remaining = self.last_http_quota.get("remaining")
+        if remaining is None:
+            return self.interval_seconds
+        if remaining <= 25:
+            return max(self.interval_seconds, 86_400)
+        if remaining <= 100:
+            return max(self.interval_seconds, 21_600)
+        return self.interval_seconds
+
     def service_context(self) -> Dict[str, Any]:
-        context = {"SETTINGS": self.settings, "app": _AppAdapter(), "http_json_get": self.http_json_get, "utc_now_iso": utc_now_iso}
+        context = {
+            "SETTINGS": self.settings,
+            "app": _AppAdapter(),
+            "http_json_get": self.http_json_get,
+            "get_http_quota": self.get_http_quota,
+            "utc_now_iso": utc_now_iso,
+        }
         if bool(getattr(self.settings, "sports_odds_pm_search_enabled", False)):
             context["search_markets"] = build_market_search(self.settings)
         return context
@@ -130,7 +161,16 @@ class SportsOddsWatcher:
         self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
         self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
 
-    def store_seed_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False) -> None:
+    def store_seed_meta(
+        self,
+        *,
+        status: str,
+        record_count: int,
+        source_states: Dict[str, Any],
+        error_summary: str | None,
+        preserve_last_success: bool = False,
+        metadata: Dict[str, Any] | None = None,
+    ) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
@@ -150,7 +190,7 @@ class SportsOddsWatcher:
             error_summary=error_summary,
             cache_mode="seeded",
             payload_status=status,
-            metadata={"result": "stored", "limit": self.limit},
+            metadata={"result": "stored", "limit": self.limit, **(metadata or {})},
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
@@ -178,7 +218,15 @@ class SportsOddsWatcher:
             )
             return {"status": "preserved", "payload": previous}
 
-        payload = {**payload, "cacheMode": "seeded"}
+        payload = {
+            **payload,
+            "cacheMode": "seeded",
+            "refreshPolicy": {
+                "configuredIntervalSeconds": self.interval_seconds,
+                "nextIntervalSeconds": self.next_interval_seconds(),
+                "quotaBackoff": self.next_interval_seconds() > self.interval_seconds,
+            },
+        }
         self.store_payload(payload)
         status = str(payload.get("status") or ("ok" if record_count else "degraded"))
         self.store_seed_meta(
@@ -186,22 +234,12 @@ class SportsOddsWatcher:
             record_count=record_count,
             source_states=payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
             error_summary=None if record_count else "Sports odds payload contained no events",
+            metadata={
+                "quota": payload.get("quota") if isinstance(payload.get("quota"), dict) else {},
+                "refreshPolicy": payload["refreshPolicy"],
+            },
         )
         return {"status": status, "payload": payload}
-
-
-def _result_summary(result: Dict[str, Any]) -> Dict[str, Any]:
-    payload = result.get("payload") if isinstance(result.get("payload"), dict) else {}
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-    return {
-        "status": result.get("status"),
-        "payloadStatus": payload.get("status"),
-        "cacheMode": payload.get("cacheMode"),
-        "items": len(payload.get("items") or []),
-        "eventCount": summary.get("eventCount"),
-        "bookmakerCount": summary.get("bookmakerCount"),
-        "pmLinked": summary.get("pmLinked"),
-    }
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -226,16 +264,16 @@ def main() -> int:
     watcher.redis_client.ping()
     print(f"[sports-odds] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
-        print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         return 0
     while True:
         try:
-            print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)
+            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
             print(f"[sports-odds] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(watcher.interval_seconds)
+        time.sleep(watcher.next_interval_seconds())
 
 
 if __name__ == "__main__":
