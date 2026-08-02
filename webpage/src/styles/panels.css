@@ -15361,13 +15361,18 @@ a.wm-orderfilled-row {
 }
 
 .wm-focused-market-list .wm-poly-market-title {
-  min-height: 32px !important;
+  display: block !important;
+  min-height: 0 !important;
   color: var(--wm-terminal-primary) !important;
   font-family: var(--font-body) !important;
   font-size: 13px !important;
   font-weight: 680 !important;
   line-height: 1.22 !important;
-  -webkit-line-clamp: 2 !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  -webkit-box-orient: initial !important;
+  -webkit-line-clamp: unset !important;
 }
 
 .wm-focused-market-list .wm-poly-market-bottom {
