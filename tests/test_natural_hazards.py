@@ -241,6 +241,48 @@ def test_nws_provider_rejects_untrusted_zone_urls() -> None:
     assert event["properties"]["affectedZones"] == []
 
 
+def test_nws_provider_keeps_best_previous_official_zone_geometry() -> None:
+    alert_payload = {
+        "updated": "2026-08-02T10:00:00Z",
+        "features": [{
+            "geometry": None,
+            "properties": {
+                "id": "urn:test:heat-retained",
+                "event": "Excessive Heat Warning",
+                "sent": "2026-08-02T10:00:00Z",
+                "effective": "2026-08-02T10:00:00Z",
+                "expires": "2026-08-03T00:00:00Z",
+                "severity": "Severe",
+                "affectedZones": [
+                    "https://api.weather.gov/zones/forecast/ZZZ901",
+                    "https://api.weather.gov/zones/forecast/ZZZ902",
+                ],
+                "references": [],
+            },
+        }],
+    }
+    previous_geometry = {
+        "type": "Polygon",
+        "coordinates": [[[-100, 35], [-99, 35], [-99, 36], [-100, 35]]],
+    }
+    previous_events = [{
+        "id": "extreme-heat:nws:urn:test:heat-retained",
+        "geometry": previous_geometry,
+        "properties": {"resolvedZoneCount": 2},
+    }]
+
+    def fake_get(url: str, **_kwargs):
+        if "/zones/" in url:
+            raise TimeoutError("bounded refresh")
+        return alert_payload
+
+    event = nws.fetch(fake_get, previous_events=previous_events)["events"][0]
+    assert event["geometry"] == previous_geometry
+    assert event["properties"]["resolvedZoneCount"] == 2
+    assert event["properties"]["unresolvedZoneCount"] == 0
+    assert event["properties"]["geometryReusedFromSnapshot"] is True
+
+
 def test_gdacs_provider_adds_only_actionable_global_disasters() -> None:
     payload = {
         "features": [

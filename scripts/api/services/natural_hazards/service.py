@@ -135,6 +135,11 @@ def get_natural_hazards_snapshot(
 ) -> Dict[str, Any]:
     dependencies = NaturalHazardDependencies.from_context(context)
     bounded_limit = max(1, min(DEFAULT_EVENT_LIMIT, int(limit)))
+    previous_nws = stale_source_result(
+        dependencies.snapshot_store,
+        "nws",
+        "nws-previous-snapshot",
+    )
     source_specs = {
         "usgs": (
             60,
@@ -166,6 +171,7 @@ def get_natural_hazards_snapshot(
                 dependencies.http_json_get,
                 url=dependencies.nws_url,
                 limit=min(700, bounded_limit),
+                previous_events=(previous_nws or {}).get("events", []),
             ),
         ),
     }

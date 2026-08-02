@@ -185,7 +185,13 @@ def _merge_zone_geometries(geometries: list[Dict[str, Any]]) -> Dict[str, Any] |
     return {"type": "MultiPolygon", "coordinates": polygons}
 
 
-def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> ProviderResult:
+def fetch(
+    http_json_get,
+    *,
+    url: str = DEFAULT_URL,
+    limit: int = 600,
+    previous_events: list[Dict[str, Any]] | None = None,
+) -> ProviderResult:
     payload = http_json_get(
         url,
         params={"status": "actual", "message_type": "alert,update"},
@@ -212,6 +218,11 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> Provide
         if (trusted := _trusted_zone_url(zone)) is not None
     ]
     resolved_zones = _resolve_zone_geometries(http_json_get, zone_urls)
+    previous_by_id = {
+        str(event.get("id")): event
+        for event in (previous_events or [])
+        if isinstance(event, dict) and event.get("id")
+    }
     events: list[Dict[str, Any]] = []
     for feature in bounded_features:
         if not isinstance(feature, dict):
@@ -238,6 +249,15 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> Provide
         resolved_zone_count = sum(1 for zone in affected_zones if zone in resolved_zones)
         if geometry is None and resolved_zone_count:
             geometry = _merge_zone_geometries([resolved_zones[zone] for zone in affected_zones if zone in resolved_zones])
+        previous = previous_by_id.get(f"{hazard_kind}:nws:{native_id}") or {}
+        previous_properties = previous.get("properties") if isinstance(previous.get("properties"), dict) else {}
+        previous_zone_count = int(previous_properties.get("resolvedZoneCount") or 0)
+        previous_geometry = _geometry(previous.get("geometry"))
+        geometry_reused = False
+        if feature.get("geometry") is None and previous_geometry is not None and previous_zone_count > resolved_zone_count:
+            geometry = previous_geometry
+            resolved_zone_count = previous_zone_count
+            geometry_reused = True
         severity, evidence = nws_severity(properties)
         area = compact_text(properties.get("areaDesc"), 220)
         limitations = [
@@ -247,7 +267,11 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> Provide
         if geometry is None:
             limitations.append("This alert has no resolved official zone geometry; no point location was fabricated.")
         elif resolved_zone_count:
-            limitations.append("Geometry was resolved from official NWS affected-zone boundaries and generalized for map rendering.")
+            limitations.append(
+                "Geometry was resolved from official NWS affected-zone boundaries and generalized for map rendering."
+                if not geometry_reused
+                else "The best previously resolved official NWS affected-zone geometry was retained during this bounded refresh."
+            )
             if resolved_zone_count < len(affected_zones):
                 limitations.append("Some referenced NWS zones were unavailable within the bounded refresh deadline.")
         references = properties.get("references") if isinstance(properties.get("references"), list) else []
@@ -283,6 +307,7 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> Provide
                     "geometrySource": "nws-affected-zones" if resolved_zone_count else "nws-alert-polygon" if geometry else None,
                     "resolvedZoneCount": resolved_zone_count,
                     "unresolvedZoneCount": max(0, len(affected_zones) - resolved_zone_count),
+                    "geometryReusedFromSnapshot": geometry_reused,
                     "response": properties.get("response"),
                 },
                 "hazardKind": hazard_kind,
