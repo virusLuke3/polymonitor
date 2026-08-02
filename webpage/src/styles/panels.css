@@ -19729,3 +19729,60 @@ button.wm-evidence-row {
     animation: none;
   }
 }
+
+/*
+ * Market catalog header
+ *
+ * This panel is intentionally narrower than the other focused-market panels.
+ * Keep identity and freshness together, reserve a stable cell for the count,
+ * and give the ranking control its own row instead of shrinking all four
+ * controls into one unreadable line.
+ */
+.wm-focused-market-list .wm-market-panel .wm-panel-header {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-template-areas:
+    "market-identity market-count"
+    "market-sort market-sort" !important;
+  align-content: center !important;
+  align-items: center !important;
+  gap: 5px 8px !important;
+  min-height: 66px !important;
+  padding: 6px 10px !important;
+}
+
+.wm-focused-market-list .wm-market-panel .wm-panel-title-wrap {
+  grid-area: market-identity;
+  gap: 8px !important;
+  overflow: hidden;
+}
+
+.wm-focused-market-list .wm-market-panel .wm-panel-title {
+  flex: 0 0 auto;
+}
+
+.wm-focused-market-list .wm-market-panel .wm-panel-badge {
+  min-width: max-content;
+  flex: 0 0 auto;
+  white-space: nowrap !important;
+}
+
+.wm-focused-market-list .wm-market-panel .wm-panel-header-right {
+  display: contents !important;
+}
+
+.wm-focused-market-list .wm-market-panel .wm-market-panel-controls {
+  grid-area: market-sort;
+  display: block !important;
+  width: 100%;
+}
+
+.wm-focused-market-list .wm-market-panel .wm-market-sort {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.wm-focused-market-list .wm-market-panel .wm-panel-count {
+  grid-area: market-count;
+  justify-self: end;
+}
