@@ -2129,6 +2129,153 @@
   }
 }
 
+/* Active market catalog: make freshness, ranking and complete questions explicit. */
+.wm-focused-market-list .wm-market-catalog-health {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  margin-bottom: 6px;
+  padding: 6px 7px 6px 9px;
+  border: 1px solid var(--wm-terminal-border, rgba(148, 163, 184, 0.16));
+  border-radius: 4px;
+  background: rgba(8, 13, 20, 0.7);
+}
+
+.wm-focused-market-list .wm-market-catalog-health > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.wm-focused-market-list .wm-market-catalog-health strong,
+.wm-focused-market-list .wm-market-catalog-health span,
+.wm-focused-market-list .wm-market-refresh,
+.wm-focused-market-list .wm-market-sort-explainer {
+  font-family: var(--font-mono);
+}
+
+.wm-focused-market-list .wm-market-catalog-health strong {
+  color: #86efac;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+}
+
+.wm-focused-market-list .wm-market-catalog-health > div > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wm-terminal-muted, #6b7280);
+  font-size: 9px;
+  text-overflow: ellipsis;
+}
+
+.wm-focused-market-list .wm-market-catalog-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
+}
+
+.wm-focused-market-list .wm-market-catalog-health.is-delayed strong,
+.wm-focused-market-list .wm-market-catalog-health.is-stale strong,
+.wm-market-catalog-delayed .wm-panel-badge,
+.wm-market-catalog-stale .wm-panel-badge {
+  color: #fbbf24 !important;
+}
+
+.wm-focused-market-list .wm-market-catalog-health.is-delayed .wm-market-catalog-dot,
+.wm-focused-market-list .wm-market-catalog-health.is-stale .wm-market-catalog-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12);
+}
+
+.wm-focused-market-list .wm-market-catalog-health.is-error strong,
+.wm-market-catalog-error .wm-panel-badge {
+  color: #fb7185 !important;
+}
+
+.wm-focused-market-list .wm-market-catalog-health.is-error .wm-market-catalog-dot {
+  background: #f43f5e;
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.12);
+}
+
+.wm-market-catalog-delayed .wm-panel-badge,
+.wm-market-catalog-stale .wm-panel-badge {
+  border-color: rgba(245, 158, 11, 0.28) !important;
+  background: rgba(245, 158, 11, 0.08) !important;
+}
+
+.wm-market-catalog-error .wm-panel-badge {
+  border-color: rgba(244, 63, 94, 0.28) !important;
+  background: rgba(244, 63, 94, 0.08) !important;
+}
+
+.wm-focused-market-list .wm-market-refresh {
+  min-width: 58px;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #cbd5e1;
+  font-size: 9px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.wm-focused-market-list .wm-market-refresh:hover,
+.wm-focused-market-list .wm-market-refresh:focus-visible {
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #86efac;
+  outline: none;
+}
+
+.wm-focused-market-list .wm-market-refresh:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.wm-focused-market-list .wm-market-sort-explainer {
+  display: grid;
+  gap: 2px;
+  margin: 0 1px 8px;
+  color: #8f9baa;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.wm-focused-market-list .wm-market-sort-explainer span {
+  color: #aeb8c4;
+}
+
+.wm-focused-market-list .wm-market-sort-explainer em {
+  color: #66717d;
+  font-style: normal;
+}
+
+.wm-focused-market-list .wm-poly-market-card {
+  min-height: 0 !important;
+  height: auto !important;
+}
+
+.wm-focused-market-list .wm-poly-market-title {
+  display: block !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  -webkit-box-orient: initial !important;
+  -webkit-line-clamp: unset !important;
+}
+
 .wm-panel-body::-webkit-scrollbar {
   width: 5px;
   height: 5px;

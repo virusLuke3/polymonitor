@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem, PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
@@ -6,9 +6,22 @@ import { AiMarketWidePanel } from './shared/ai-market-wide';
 import { shortHash } from './shared/formatters';
 import { emptyState, priceLine } from './shared/renderers';
 import { globalMarkets } from './shared/selectors';
-import { useI18n } from '@/services/i18n';
+import { useI18n, type MessageKey } from '@/services/i18n';
 
 type MarketI18n = Pick<ReturnType<typeof useI18n>, 't' | 'formatDateTime' | 'formatNumber' | 'formatPercent' | 'formatRelativeTime'>;
+
+const MARKET_CATALOG_AUTO_REFRESH_MS = 20_000;
+const MARKET_CATALOG_SYNC_DELAYED_MS = 60_000;
+const MARKET_ACTIVITY_DELAYED_MS = 12 * 60 * 60 * 1000;
+const MARKET_ACTIVITY_STALE_MS = 24 * 60 * 60 * 1000;
+const MARKET_SORT_HELP_KEYS: Record<MarketGroupSort, MessageKey> = {
+  active: 'atlasMarket.sortHelp.active',
+  volume: 'atlasMarket.sortHelp.volume',
+  close: 'atlasMarket.sortHelp.close',
+  move: 'atlasMarket.sortHelp.move',
+  trades: 'atlasMarket.sortHelp.trades',
+  new: 'atlasMarket.sortHelp.new',
+};
 
 function localizedPercent(value: string | number | null | undefined, i18n: MarketI18n) {
   const numeric = Number(value);
@@ -57,6 +70,23 @@ function parseTimestamp(value: string | null | undefined) {
   if (!value) return 0;
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function newestTimestamp(values: Array<string | null | undefined>) {
+  return values.reduce((latest, value) => Math.max(latest, parseTimestamp(value)), 0);
+}
+
+function marketCatalogGeneratedAt(groups: MarketGroupItem[]) {
+  return newestTimestamp(groups.map((group) => group.generatedAt));
+}
+
+function marketCatalogActivityAt(groups: MarketGroupItem[]) {
+  return newestTimestamp(groups.flatMap((group) => [
+    group.lastActivityAt,
+    group.createdAt,
+    ...(group.outcomes || []).map((outcome) => outcome.lastTradeAt),
+    ...(group.topOutcomes || []).map((outcome) => outcome.lastTradeAt),
+  ]));
 }
 
 function isDefaultSuppressedMarket(market: MarketListItem) {
@@ -258,6 +288,11 @@ function groupDefaultOutcome(group: MarketGroupItem) {
     })[0] || null;
 }
 
+function groupDisplayTitle(group: MarketGroupItem) {
+  const focusedOutcome = groupDefaultOutcome(group);
+  return focusedOutcome?.title || focusedOutcome?.label || group.title;
+}
+
 function groupHasFocusableDefault(group: MarketGroupItem, requireActivity = true) {
   const selected = groupDefaultOutcome(group);
   if (!selected || !groupOutcomeIsFocusable(selected, false)) return false;
@@ -447,6 +482,7 @@ function activeMarketGroupsList(
     <div className="wm-poly-market-list">
       {groups.map((group) => {
         const defaultOutcome = groupDefaultOutcome(group);
+        const displayTitle = groupDisplayTitle(group);
         const defaultMarketId = defaultOutcome?.marketId ? Number(defaultOutcome.marketId) : defaultGroupMarketId(group);
         const groupEventId = group.eventId != null ? String(group.eventId) : null;
         const selected = (groupEventId != null && selectedMarketGroupId === groupEventId) || (defaultMarketId != null && selectedMarketId === defaultMarketId);
@@ -459,7 +495,7 @@ function activeMarketGroupsList(
               focusMarketGroup(group, defaultOutcome?.outcomeKey || group.defaultOutcomeKey || null, defaultMarketId);
             }}
             aria-pressed={selected}
-            title={group.title}
+            title={displayTitle === group.title ? group.title : `${displayTitle}\n${group.title}`}
             style={{ '--wm-market-accent': groupAccent(group), borderLeftColor: groupAccent(group) } as Record<string, string>}
           >
             <div className="wm-poly-market-card-main">
@@ -471,7 +507,7 @@ function activeMarketGroupsList(
                 <span>·</span>
                 <span>{groupOutcomeLabel(group, i18n)}</span>
               </div>
-              <strong className="wm-poly-market-title">{group.title}</strong>
+              <strong className="wm-poly-market-title">{displayTitle}</strong>
               <div className="wm-poly-market-bottom">
                 <span className="wm-poly-market-prob">{localizedPercent(groupBestLivePrice(group), i18n)}</span>
                 <span className="wm-poly-market-volume">{i18n.t('atlasMarket.volume', { value: localizedCurrency(groupDisplayVolume(group), i18n) })}</span>
@@ -532,6 +568,9 @@ function ActiveMarketsPanel({
   selectedMarketGroupId,
   setSelectedMarketId,
   focusMarketGroup,
+  marketCatalogRefreshing,
+  marketCatalogError,
+  refreshMarketCatalog,
 }: {
   markets: MarketListItem[];
   marketGroups: MarketGroupItem[];
@@ -541,10 +580,19 @@ function ActiveMarketsPanel({
   selectedMarketGroupId: string | null;
   setSelectedMarketId: (marketId: number | null) => void;
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
+  marketCatalogRefreshing: boolean;
+  marketCatalogError: string | null;
+  refreshMarketCatalog: () => Promise<void>;
 }) {
   const i18n = useI18n();
   const { t } = i18n;
   const [search, setSearch] = useState('');
+  const [clockNow, setClockNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const visibleGroups = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -604,14 +652,47 @@ function ActiveMarketsPanel({
 
   const hasGroups = marketGroups.length > 0 && visibleGroups.some(groupHasMarketCoverage);
   const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;
+  const catalogGeneratedAt = marketCatalogGeneratedAt(marketGroups);
+  const catalogActivityAt = marketCatalogActivityAt(marketGroups);
+  const catalogSyncAge = catalogGeneratedAt ? Math.max(0, clockNow - catalogGeneratedAt) : Number.POSITIVE_INFINITY;
+  const catalogActivityAge = catalogActivityAt ? Math.max(0, clockNow - catalogActivityAt) : Number.POSITIVE_INFINITY;
+  const catalogTone = marketCatalogError
+    ? 'error'
+    : !catalogGeneratedAt
+      ? 'waiting'
+      : catalogSyncAge > MARKET_CATALOG_SYNC_DELAYED_MS
+        ? 'delayed'
+        : catalogActivityAge > MARKET_ACTIVITY_STALE_MS
+          ? 'stale'
+          : catalogActivityAge > MARKET_ACTIVITY_DELAYED_MS
+            ? 'delayed'
+            : 'fresh';
+  const catalogStatusLabel = marketCatalogRefreshing
+    ? t('atlasMarket.catalog.refreshing')
+    : catalogTone === 'fresh'
+      ? t('atlasMarket.catalog.fresh')
+      : catalogTone === 'stale'
+        ? t('atlasMarket.catalog.stale')
+        : catalogTone === 'error'
+          ? t('atlasMarket.catalog.error')
+          : catalogTone === 'waiting'
+            ? t('atlasMarket.catalog.waiting')
+            : t('atlasMarket.catalog.delayed');
+  const generatedAtLabel = catalogGeneratedAt
+    ? i18n.formatRelativeTime(new Date(catalogGeneratedAt).toISOString())
+    : '--';
+  const activityAtLabel = catalogActivityAt
+    ? i18n.formatRelativeTime(new Date(catalogActivityAt).toISOString())
+    : '--';
+  const sortHelp = t(MARKET_SORT_HELP_KEYS[marketGroupSort]);
 
   return (
     <Panel
       title={t('atlasMarket.markets')}
-      badge={marketGroupSort === 'new' ? t('atlasMarket.badge.newest') : marketGroupSort === 'volume' ? t('atlasMarket.badge.volume') : marketGroupSort === 'close' ? t('atlasMarket.badge.close') : marketGroupSort === 'move' ? t('atlasMarket.badge.move') : marketGroupSort === 'trades' ? t('atlasMarket.badge.transactions') : t('atlasMarket.badge.live')}
-      status="live"
+      badge={catalogStatusLabel}
+      status={catalogTone === 'fresh' ? 'live' : 'muted'}
       count={panelCount}
-      className="wm-market-panel"
+      className={`wm-market-panel wm-market-catalog-${catalogTone}`}
       controls={
         <div className="wm-market-panel-controls">
           <select
@@ -642,6 +723,26 @@ function ActiveMarketsPanel({
           placeholder={t('atlasMarket.searchPlaceholder')}
         />
       </label>
+      <div className={`wm-market-catalog-health is-${catalogTone}`} role="status" aria-live="polite">
+        <div>
+          <span className="wm-market-catalog-dot" aria-hidden="true" />
+          <strong>{catalogStatusLabel}</strong>
+          <span>{t('atlasMarket.catalog.activity', { time: activityAtLabel })}</span>
+        </div>
+        <button
+          type="button"
+          className="wm-market-refresh"
+          onClick={() => void refreshMarketCatalog()}
+          disabled={marketCatalogRefreshing}
+          title={marketCatalogError || t('atlasMarket.catalog.refreshTitle')}
+        >
+          {marketCatalogRefreshing ? t('atlasMarket.catalog.refreshingShort') : t('atlasMarket.catalog.refresh')}
+        </button>
+      </div>
+      <div className="wm-market-sort-explainer">
+        <span>{sortHelp}</span>
+        <em>{t('atlasMarket.catalog.sync', { time: generatedAtLabel })} · {t('atlasMarket.catalog.auto', { seconds: MARKET_CATALOG_AUTO_REFRESH_MS / 1000 })}</em>
+      </div>
       {hasGroups
         ? activeMarketGroupsList(visibleGroups, selectedMarketId, selectedMarketGroupId, focusMarketGroup, i18n)
         : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId, i18n)}
@@ -828,6 +929,9 @@ export const marketPanelRenderers: PanelRenderMap = {
         selectedMarketGroupId={ctx.selectedMarketGroupId}
         setSelectedMarketId={ctx.setSelectedMarketId}
         focusMarketGroup={ctx.focusMarketGroup}
+        marketCatalogRefreshing={ctx.marketCatalogRefreshing}
+        marketCatalogError={ctx.marketCatalogError}
+        refreshMarketCatalog={ctx.refreshMarketCatalog}
       />
     ),
   },

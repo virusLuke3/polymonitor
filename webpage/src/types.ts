@@ -2932,6 +2932,9 @@ export type PanelRenderContext = {
   marketGroups: MarketGroupItem[];
   marketGroupSort: MarketGroupSort;
   setMarketGroupSort: (sort: MarketGroupSort) => void;
+  marketCatalogRefreshing: boolean;
+  marketCatalogError: string | null;
+  refreshMarketCatalog: () => Promise<void>;
   selectedMarketId: number | null;
   setSelectedMarketId: (marketId: number | null) => void;
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
