@@ -212,6 +212,33 @@ def test_nws_provider_resolves_official_affected_zone_geometry() -> None:
     assert event["properties"]["unresolvedZoneCount"] == 0
 
 
+def test_nws_zone_queue_prioritizes_one_official_zone_per_alert() -> None:
+    features = [
+        {
+            "geometry": None,
+            "properties": {"affectedZones": [
+                "https://api.weather.gov/zones/forecast/AAA001",
+                "https://api.weather.gov/zones/forecast/AAA002",
+                "https://api.weather.gov/zones/forecast/AAA003",
+            ]},
+        },
+        {
+            "geometry": None,
+            "properties": {"affectedZones": [
+                "https://api.weather.gov/zones/forecast/BBB001",
+                "https://api.weather.gov/zones/forecast/BBB002",
+            ]},
+        },
+    ]
+    assert nws._prioritized_zone_urls(features) == [
+        "https://api.weather.gov/zones/forecast/AAA001",
+        "https://api.weather.gov/zones/forecast/BBB001",
+        "https://api.weather.gov/zones/forecast/AAA002",
+        "https://api.weather.gov/zones/forecast/BBB002",
+        "https://api.weather.gov/zones/forecast/AAA003",
+    ]
+
+
 def test_nws_provider_rejects_untrusted_zone_urls() -> None:
     calls: list[str] = []
     payload = {

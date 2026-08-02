@@ -185,6 +185,25 @@ def _merge_zone_geometries(geometries: list[Dict[str, Any]]) -> Dict[str, Any] |
     return {"type": "MultiPolygon", "coordinates": polygons}
 
 
+def _prioritized_zone_urls(features: list[Any]) -> list[str]:
+    """Round-robin zones so every alert gets a renderable area before detail fills in."""
+    zones_by_alert: list[list[str]] = []
+    for feature in features:
+        if not isinstance(feature, dict) or _geometry(feature.get("geometry")) is not None:
+            continue
+        properties = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+        raw_zones = properties.get("affectedZones") if isinstance(properties.get("affectedZones"), list) else []
+        trusted = [zone for value in raw_zones if (zone := _trusted_zone_url(value)) is not None]
+        if trusted:
+            zones_by_alert.append(trusted)
+    prioritized: list[str] = []
+    for zone_index in range(max((len(zones) for zones in zones_by_alert), default=0)):
+        for zones in zones_by_alert:
+            if zone_index < len(zones):
+                prioritized.append(zones[zone_index])
+    return prioritized
+
+
 def fetch(
     http_json_get,
     *,
@@ -205,18 +224,7 @@ def fetch(
     if not isinstance(features, list):
         raise ValueError("nws-schema-features")
     bounded_features = features[: max(1, limit)]
-    zone_urls = [
-        trusted
-        for feature in bounded_features
-        if isinstance(feature, dict) and _geometry(feature.get("geometry")) is None
-        for zone in (
-            (feature.get("properties") or {}).get("affectedZones")
-            if isinstance(feature.get("properties"), dict)
-            and isinstance((feature.get("properties") or {}).get("affectedZones"), list)
-            else []
-        )
-        if (trusted := _trusted_zone_url(zone)) is not None
-    ]
+    zone_urls = _prioritized_zone_urls(bounded_features)
     resolved_zones = _resolve_zone_geometries(http_json_get, zone_urls)
     previous_by_id = {
         str(event.get("id")): event
