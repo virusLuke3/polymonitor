@@ -90,9 +90,6 @@ export function AppShell({
               ))}
             </select>
           </label>
-          <div className="wm-market-status" role="status" aria-label={t('shell.marketLive')}>
-            POLYMARKET <span>LIVE</span>
-          </div>
         </div>
         <nav className="wm-site-nav" aria-label={t('shell.resources')}>
           {PRIMARY_NAV_LINKS.map((link) => (
@@ -121,7 +118,7 @@ export function AppShell({
                   {t(link.key)}
                 </a>
               ))}
-              <div className="wm-more-mobile-actions" role="none">
+              <div className="wm-more-actions" role="none">
                 <a href="/account" role="menuitem">{t('nav.access')}</a>
                 <button
                   type="button"
@@ -143,12 +140,27 @@ export function AppShell({
                 >
                   {t('shell.panels')}
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => {
+                    onOpenSettings();
+                    event.currentTarget.closest('details')?.removeAttribute('open');
+                  }}
+                >
+                  {t('shell.settingsShort')}
+                </button>
               </div>
             </div>
           </details>
         </nav>
         <div className="wm-toolbar-right">
-          <a className="wm-access-link" href="/account">{t('nav.access')}</a>
+          <PwaControl />
+          <span className="wm-fill-status" role="status" title={t('shell.recentFillsTitle', { count: orderFilledCount })}>
+            <strong>{orderFilledCount}</strong>
+            <span>{t('shell.recentFills')}</span>
+          </span>
+          <button className="wm-tool-button" type="button" onClick={onOpenCommandPalette}>{t('shell.search')}</button>
           <label className="wm-language-switch">
             <span className="sr-only">{t('settings.language')}</span>
             <select value={locale} onChange={(event) => setLocale(event.currentTarget.value === 'zh' ? 'zh' : 'en')}>
@@ -156,15 +168,6 @@ export function AppShell({
               <option value="zh">中文</option>
             </select>
           </label>
-          <PwaControl />
-          <span className="wm-fill-status" role="status" title={t('shell.recentFillsTitle', { count: orderFilledCount })}>
-            <strong>{orderFilledCount}</strong>
-            <span>{t('shell.recentFills')}</span>
-          </span>
-          <button className="wm-tool-button" type="button" onClick={onOpenCommandPalette}>{t('shell.search')}</button>
-          <button className="wm-tool-button wm-tool-button-secondary" type="button" onClick={onCopyLink}>{t('shell.copyLink')}</button>
-          <button className="wm-tool-button wm-tool-button-secondary" type="button" onClick={onTogglePanelLibrary}>{t('shell.panels')}</button>
-          <button className="wm-tool-button" type="button" onClick={onOpenSettings}>{t('shell.settingsShort')}</button>
         </div>
       </header>
       {children}

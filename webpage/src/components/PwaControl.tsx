@@ -19,7 +19,7 @@ export function PwaControl() {
           onClick={() => state.updateReady ? activatePwaUpdate() : void installPwa()}
         >
           <i aria-hidden="true" />
-          {state.updateReady ? t('pwa.reload')
+          {state.updateReady ? t('pwa.reloadShort')
             : !state.online ? t('pwa.offline')
             : state.installing ? t('pwa.installing')
             : state.installed ? t('pwa.installed')
