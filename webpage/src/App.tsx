@@ -820,6 +820,7 @@ function WorldMonitorApp() {
   const [showPanelLibrary, setShowPanelLibrary] = useState<boolean>(() => Boolean(readJsonStorage(LIBRARY_STORAGE_KEY, true)));
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [manualCopyLink, setManualCopyLink] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [workspaceSyncStatus, setWorkspaceSyncStatus] = useState<WorkspaceSyncStatus>('checking');
   const [workspaceSyncUpdatedAt, setWorkspaceSyncUpdatedAt] = useState<string | null>(null);
@@ -836,6 +837,7 @@ function WorldMonitorApp() {
   const workspaceSyncApplyingRef = useRef(false);
   const workspaceSyncSnapshotRef = useRef('');
   const workspaceLocalChangeHydratedRef = useRef(false);
+  const manualCopyInputRef = useRef<HTMLInputElement | null>(null);
 
   const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
     const eventId = group.eventId != null ? String(group.eventId) : null;
@@ -1519,6 +1521,7 @@ function WorldMonitorApp() {
       if (event.key === 'Escape') {
         setShowCommandPalette(false);
         setShowSettings(false);
+        setManualCopyLink(null);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -1943,20 +1946,40 @@ function WorldMonitorApp() {
     setNotice(t('atlas.workspaceReset'));
   };
 
-  const cycleRegion = () => {
-    const currentIndex = REGION_OPTIONS.findIndex((item) => item.value === region);
-    const next = REGION_OPTIONS[(currentIndex + 1) % REGION_OPTIONS.length];
-    if (next) setRegion(next.value);
-  };
-
   const copyLink = async () => {
+    const writeClipboard = async (value: string) => {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+      } catch {
+        // Fall through to the selection-based copy path for restricted browsers.
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('Clipboard copy was rejected');
+    };
+    const shareUrl = new URL(worldEventMap.shareUrl(window.location.href));
+    shareUrl.searchParams.set('view', viewMode);
+    const value = shareUrl.toString();
     try {
-      const shareUrl = new URL(worldEventMap.shareUrl(window.location.href));
-      shareUrl.searchParams.set('view', viewMode);
-      await navigator.clipboard.writeText(shareUrl.toString());
+      await writeClipboard(value);
       setNotice(t('atlas.linkCopied'));
     } catch {
-      setNotice(t('atlas.copyFailed'));
+      setManualCopyLink(value);
+      window.setTimeout(() => {
+        manualCopyInputRef.current?.focus();
+        manualCopyInputRef.current?.select();
+      }, 0);
     }
   };
 
@@ -2014,9 +2037,15 @@ function WorldMonitorApp() {
 
   return (
     <AppShell
-      regionLabel={t(REGION_MESSAGE_KEYS[region])}
+      regionValue={region}
+      regionOptions={REGION_OPTIONS.map((option) => ({
+        value: option.value,
+        label: t(REGION_MESSAGE_KEYS[option.value]),
+      }))}
       orderFilledCount={liveMetrics[1]?.value || 0}
-      onCycleRegion={cycleRegion}
+      onRegionChange={(nextRegion) => {
+        if (REGION_OPTIONS.some((option) => option.value === nextRegion)) setRegion(nextRegion as RegionKey);
+      }}
       onResetWorkspace={resetWorkspace}
       onOpenCommandPalette={() => setShowCommandPalette(true)}
       onTogglePanelLibrary={() => setShowPanelLibrary((current) => !current)}
@@ -2480,6 +2509,35 @@ function WorldMonitorApp() {
               <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(sanitizePanelIds(PANEL_LIBRARY.map((panel) => panel.id)))}>{t('settings.enableAll')}</button>
               <button type="button" className="wm-settings-btn" onClick={() => setActivePanelIds(defaultWorkspacePanelIds(bootstrap))}>{t('settings.restore')}</button>
               <button type="button" className="wm-settings-btn primary" onClick={() => { resetWorkspace(); setShowSettings(false); }}>{t('settings.reset')}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {manualCopyLink ? (
+        <div className="wm-modal-backdrop" onClick={() => setManualCopyLink(null)}>
+          <div
+            className="wm-modal wm-copy-link-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wm-copy-link-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="wm-modal-title" id="wm-copy-link-title">{t('atlas.copyManualTitle')}</div>
+            <p>{t('atlas.copyManualDetail')}</p>
+            <input
+              ref={manualCopyInputRef}
+              type="text"
+              readOnly
+              value={manualCopyLink}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+            <div className="wm-settings-actions">
+              <button type="button" className="wm-settings-btn" onClick={() => {
+                manualCopyInputRef.current?.focus();
+                manualCopyInputRef.current?.select();
+              }}>{t('atlas.selectLink')}</button>
+              <button type="button" className="wm-settings-btn primary" onClick={() => setManualCopyLink(null)}>{t('atlas.closeCopy')}</button>
             </div>
           </div>
         </div>
