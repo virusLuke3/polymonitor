@@ -214,7 +214,7 @@ export function worldEventTooltipModel(
   if (cluster) {
     return {
       kicker: `${cluster.severity} Cluster`,
-      title: `${cluster.count.toLocaleString('en-US')} mapped events`,
+      title: `${cluster.count.toLocaleString('en-US')} ${cluster.label || 'mapped events'}`,
       details: ['Click to expand this area'],
     };
   }

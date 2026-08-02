@@ -13,7 +13,7 @@ from api.context import (
 
 from .contracts import SCHEMA_VERSION, SourceFetchResult
 from .dedupe import latest_revision
-from .providers import eonet, firms, nws, usgs
+from .providers import eonet, firms, gdacs, nws, usgs
 from .snapshots import cached_source_result, fetch_with_snapshot, stale_source_result
 from .source_health import unavailable_source
 
@@ -33,6 +33,7 @@ class NaturalHazardDependencies:
     logger: Any
     usgs_url: str
     eonet_url: str
+    gdacs_url: str
     nws_url: str
     firms_map_key: str
     firms_base_url: str
@@ -57,6 +58,10 @@ class NaturalHazardDependencies:
             eonet_url=str(
                 getattr(settings, "natural_hazards_eonet_url", None)
                 or eonet.DEFAULT_URL
+            ),
+            gdacs_url=str(
+                getattr(settings, "natural_hazards_gdacs_url", None)
+                or gdacs.DEFAULT_URL
             ),
             nws_url=str(
                 getattr(settings, "natural_hazards_nws_url", None)
@@ -145,6 +150,14 @@ def get_natural_hazards_snapshot(
                 dependencies.http_json_get,
                 url=dependencies.eonet_url,
                 limit=min(350, bounded_limit),
+            ),
+        ),
+        "gdacs": (
+            300,
+            lambda: gdacs.fetch(
+                dependencies.http_json_get,
+                url=dependencies.gdacs_url,
+                limit=min(160, bounded_limit),
             ),
         ),
         "nws": (

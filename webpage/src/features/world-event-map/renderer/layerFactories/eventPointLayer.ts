@@ -13,6 +13,7 @@ import {
   MAP_MONO_FONT_FAMILY,
   pointRadiusMeters,
   SEVERITY_COLORS,
+  isHazardEvent,
 } from './shared';
 
 export type EventCluster = {
@@ -25,6 +26,7 @@ export type EventCluster = {
   bounds: [number, number, number, number];
   expansionZoom: number;
   color: [number, number, number, number];
+  label?: string;
 };
 
 type ClusterPointProperties = {
@@ -59,6 +61,35 @@ function pointFeature(event: GeoEvent): Feature<Point, ClusterPointProperties> {
   };
 }
 
+function eventSemanticKey(event: GeoEvent) {
+  if (isHazardEvent(event)) return event.hazardKind;
+  if (event.category === 'conflict' || event.category === 'unrest') {
+    return `conflict-${String(event.properties.violenceType || 'unknown')}`;
+  }
+  return event.category;
+}
+
+function semanticLabel(event: GeoEvent) {
+  if (isHazardEvent(event)) return event.hazardKind.replace(/-/g, ' ');
+  if (event.category === 'conflict' || event.category === 'unrest') {
+    const violenceType = String(event.properties.violenceType || '');
+    if (violenceType === '1') return 'state-based conflict';
+    if (violenceType === '2') return 'non-state conflict';
+    if (violenceType === '3') return 'one-sided violence';
+  }
+  return event.category.replace(/-/g, ' ');
+}
+
+function rendersAsIndependentPoint(event: GeoEvent) {
+  return isHazardEvent(event) && [
+    'earthquake',
+    'volcano',
+    'tropical-cyclone',
+    'tornado',
+    'tsunami',
+  ].includes(event.hazardKind);
+}
+
 function clusterBounds(events: GeoEvent[]): [number, number, number, number] {
   let west = 180;
   let east = -180;
@@ -82,6 +113,7 @@ export function clusterEventPoints(
   viewport: [number, number, number, number] = [-180, -85, 180, 85],
 ) {
   const selected = events.filter((event) => event.id === selectedEventId);
+  const singles = [...selected];
   const grouped = new Map<string, GeoEvent[]>();
   for (const event of events) {
     if (event.id === selectedEventId || event.geometry?.type !== 'Point') continue;
@@ -89,14 +121,19 @@ export function clusterEventPoints(
     if (!layerId) continue;
     const layer = worldEventLayerById(layerId);
     if (!layer || zoom < layer.minZoom) continue;
-    const bucket = grouped.get(layerId) || [];
+    if (rendersAsIndependentPoint(event)) {
+      singles.push(event);
+      continue;
+    }
+    const bucketId = `${layerId}:${eventSemanticKey(event)}`;
+    const bucket = grouped.get(bucketId) || [];
     bucket.push(event);
-    grouped.set(layerId, bucket);
+    grouped.set(bucketId, bucket);
   }
 
-  const singles = [...selected];
   const clusters: EventCluster[] = [];
-  for (const [layerId, layerEvents] of grouped) {
+  for (const [bucketId, layerEvents] of grouped) {
+    const layerId = bucketId.split(':', 1)[0]!;
     const layer = worldEventLayerById(layerId);
     if (!layer?.cluster || layer.clusterRadius <= 0) {
       singles.push(...layerEvents);
@@ -135,7 +172,7 @@ export function clusterEventPoints(
       );
       clusters.push({
         kind: 'event-cluster',
-        id: `cluster:${layerId}:${clusterId}`,
+        id: `cluster:${bucketId}:${clusterId}`,
         coordinates: feature.geometry.coordinates as [number, number],
         eventIds: leaves.map((event) => event.id),
         count: Number(feature.properties.point_count),
@@ -143,6 +180,7 @@ export function clusterEventPoints(
         bounds: clusterBounds(leaves),
         expansionZoom: index.getClusterExpansionZoom(clusterId),
         color: eventColor(representative),
+        label: semanticLabel(representative),
       });
     }
   }

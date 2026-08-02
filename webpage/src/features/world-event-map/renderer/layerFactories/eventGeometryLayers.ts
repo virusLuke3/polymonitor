@@ -1,9 +1,14 @@
-import { GeoJsonLayer, PathLayer } from '@deck.gl/layers';
+import { GeoJsonLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers';
 import type { LayersList } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import { isHazardEvent } from './shared';
 import { createCountryRiskLayers, isCountryRiskArea } from './countryRiskLayers';
 import { eventColor } from './shared';
+
+type CycloneCenter = {
+  event: GeoEvent;
+  coordinates: [number, number];
+};
 
 export function createEventGeometryLayers(
   events: GeoEvent[],
@@ -14,6 +19,13 @@ export function createEventGeometryLayers(
     && event.properties.mapEntity !== 'air-flight'
     && event.geometry?.type === 'LineString'
   ));
+  const cycloneCenters: CycloneCenter[] = lines.flatMap((event) => {
+    if (!isHazardEvent(event) || event.hazardKind !== 'tropical-cyclone' || event.geometry?.type !== 'LineString') {
+      return [];
+    }
+    const coordinates = event.geometry.coordinates[event.geometry.coordinates.length - 1];
+    return coordinates ? [{ event, coordinates }] : [];
+  });
   const hazardAreas = events.filter((event) => (
     isHazardEvent(event)
     && (event.geometry?.type === 'Polygon' || event.geometry?.type === 'MultiPolygon')
@@ -89,6 +101,24 @@ export function createEventGeometryLayers(
       pickable: true,
       autoHighlight: true,
       highlightColor: [255, 250, 198, 128],
+    }));
+  }
+  if (cycloneCenters.length) {
+    layers.push(new ScatterplotLayer<CycloneCenter>({
+      id: 'world-event-cyclone-centers',
+      data: cycloneCenters,
+      getPosition: (center) => center.coordinates,
+      getRadius: (center) => center.event.id === selectedEventId ? 34_000 : 24_000,
+      getFillColor: (center) => eventColor(center.event, 245),
+      getLineColor: [235, 250, 255, 255],
+      getLineWidth: (center) => center.event.id === selectedEventId ? 2.8 : 1.5,
+      radiusMinPixels: 7,
+      radiusMaxPixels: 22,
+      lineWidthMinPixels: 1.2,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 255, 255, 112],
+      stroked: true,
     }));
   }
   return layers;

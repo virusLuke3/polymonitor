@@ -18,6 +18,15 @@ SOURCE_COVERAGE: dict[str, Dict[str, Any]] = {
         complete=False,
         gaps=["Discovery coverage is not equivalent to local official warnings."],
     ),
+    "gdacs": coverage(
+        scope="global",
+        label="International disaster alerts reported by GDACS",
+        complete=False,
+        gaps=[
+            "Low-severity green alerts are excluded from the operational map.",
+            "International discovery coverage does not replace local official warnings.",
+        ],
+    ),
     "nws": coverage(
         scope="provider-area",
         label="United States and NWS responsibility areas",

@@ -101,6 +101,7 @@ describe('map source status', () => {
     expect(failed.map((source) => source.key)).toEqual([
       'usgs',
       'eonet',
+      'gdacs',
       'nws',
       'firms',
       'climate-anomaly',

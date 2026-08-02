@@ -13,7 +13,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services.natural_hazards import service, snapshots
-from api.services.natural_hazards.providers import eonet, firms, nws, usgs
+from api.services.natural_hazards.providers import eonet, firms, gdacs, nws, usgs
 
 
 class FakeSnapshotStore:
@@ -167,6 +167,124 @@ def test_nws_provider_keeps_polygon_and_does_not_fabricate_missing_geometry() ->
     assert events[1]["geometry"] is None
     assert events[1]["locationPrecision"] == "region"
     assert any("no point location was fabricated" in item for item in events[1]["limitations"])
+
+
+def test_nws_provider_resolves_official_affected_zone_geometry() -> None:
+    alert_payload = {
+        "updated": "2026-08-02T10:00:00Z",
+        "features": [{
+            "id": "https://api.weather.gov/alerts/urn:test:heat-zone",
+            "geometry": None,
+            "properties": {
+                "id": "urn:test:heat-zone",
+                "event": "Excessive Heat Warning",
+                "headline": "Excessive Heat Warning",
+                "areaDesc": "Test Forecast Zone",
+                "sent": "2026-08-02T10:00:00Z",
+                "effective": "2026-08-02T10:00:00Z",
+                "expires": "2026-08-03T00:00:00Z",
+                "status": "Actual",
+                "messageType": "Alert",
+                "severity": "Severe",
+                "certainty": "Likely",
+                "urgency": "Expected",
+                "affectedZones": ["https://api.weather.gov/zones/forecast/ZZZ001"],
+                "references": [],
+            },
+        }],
+    }
+    zone_payload = {
+        "type": "Feature",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[-100, 35], [-99, 35], [-99, 36], [-100, 35]]],
+        },
+    }
+
+    def fake_get(url: str, **_kwargs):
+        return zone_payload if "/zones/" in url else alert_payload
+
+    event = nws.fetch(fake_get)["events"][0]
+    assert event["geometry"]["type"] == "Polygon"
+    assert event["locationPrecision"] == "region"
+    assert event["properties"]["geometrySource"] == "nws-affected-zones"
+    assert event["properties"]["resolvedZoneCount"] == 1
+    assert event["properties"]["unresolvedZoneCount"] == 0
+
+
+def test_nws_provider_rejects_untrusted_zone_urls() -> None:
+    calls: list[str] = []
+    payload = {
+        "updated": "2026-08-02T10:00:00Z",
+        "features": [{
+            "geometry": None,
+            "properties": {
+                "id": "urn:test:flood-untrusted",
+                "event": "Flood Warning",
+                "sent": "2026-08-02T10:00:00Z",
+                "effective": "2026-08-02T10:00:00Z",
+                "expires": "2026-08-03T00:00:00Z",
+                "severity": "Severe",
+                "affectedZones": ["https://example.test/internal"],
+                "references": [],
+            },
+        }],
+    }
+
+    def fake_get(url: str, **_kwargs):
+        calls.append(url)
+        return payload
+
+    event = nws.fetch(fake_get)["events"][0]
+    assert calls == [nws.DEFAULT_URL]
+    assert event["geometry"] is None
+    assert event["properties"]["affectedZones"] == []
+
+
+def test_gdacs_provider_adds_only_actionable_global_disasters() -> None:
+    payload = {
+        "features": [
+            {
+                "geometry": {"type": "Point", "coordinates": [120.5, 18.2]},
+                "properties": {
+                    "eventtype": "TC",
+                    "eventid": 1001,
+                    "episodeid": 2,
+                    "alertlevel": "Red",
+                    "name": "Typhoon Test",
+                    "description": "Tropical cyclone alert",
+                    "fromdate": "2026-08-01T00:00:00Z",
+                    "todate": "2026-08-02T00:00:00Z",
+                    "country": "Philippines",
+                    "url": {"report": "https://www.gdacs.org/report.aspx?eventid=1001"},
+                    "severitydata": {"severitytext": "Maximum wind 120 kt"},
+                },
+            },
+            {
+                "geometry": {"type": "Point", "coordinates": [30, 5]},
+                "properties": {
+                    "eventtype": "DR",
+                    "eventid": 1002,
+                    "alertlevel": "Orange",
+                    "name": "Drought Test",
+                    "fromdate": "2026-07-20T00:00:00Z",
+                },
+            },
+            {
+                "geometry": {"type": "Point", "coordinates": [0, 0]},
+                "properties": {"eventtype": "FL", "eventid": 1003, "alertlevel": "Green"},
+            },
+            {
+                "geometry": {"type": "Point", "coordinates": [1, 1]},
+                "properties": {"eventtype": "EQ", "eventid": 1004, "alertlevel": "Red"},
+            },
+        ]
+    }
+    events = gdacs.fetch(lambda *_args, **_kwargs: payload)["events"]
+    assert [event["hazardKind"] for event in events] == ["tropical-cyclone", "other-weather-anomaly"]
+    assert events[0]["severity"] == "critical"
+    assert events[1]["severity"] == "warning"
+    assert all(event["sources"][0]["provider"] == "GDACS" for event in events)
 
 
 def test_firms_provider_aggregates_pixels_without_upgrading_them_to_wildfires() -> None:

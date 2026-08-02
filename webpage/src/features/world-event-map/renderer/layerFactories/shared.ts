@@ -32,9 +32,23 @@ const HAZARD_COLORS: Record<HazardKind, [number, number, number, number]> = {
 };
 
 export function eventColor(event: GeoEvent, alpha?: number): [number, number, number, number] {
-  const color = isHazardEvent(event)
-    ? [...HAZARD_COLORS[event.hazardKind]] as [number, number, number, number]
-    : [...SEVERITY_COLORS[event.severity]] as [number, number, number, number];
+  let color: [number, number, number, number];
+  if (isHazardEvent(event)) {
+    color = [...HAZARD_COLORS[event.hazardKind]];
+  } else if (event.category === 'conflict' || event.category === 'unrest') {
+    const violenceType = String(event.properties.violenceType || '');
+    color = violenceType === '1'
+      ? [255, 103, 91, 225]
+      : violenceType === '2'
+        ? [240, 180, 60, 225]
+        : violenceType === '3'
+          ? [158, 232, 95, 225]
+          : [...SEVERITY_COLORS[event.severity]];
+  } else if (event.category === 'intel') {
+    color = [238, 199, 71, 225];
+  } else {
+    color = [...SEVERITY_COLORS[event.severity]];
+  }
   if (alpha != null) color[3] = alpha;
   return color;
 }

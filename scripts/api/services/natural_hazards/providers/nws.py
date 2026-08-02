@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, wait
+from threading import Lock
+from time import monotonic
 from typing import Any, Dict
+from urllib.parse import urlparse
 
 from ..contracts import ProviderResult
 from ..normalize import compact_text, iso_timestamp
@@ -10,6 +14,14 @@ from ..severity import nws_severity
 PROVIDER_KEY = "nws"
 DEFAULT_URL = "https://api.weather.gov/alerts/active"
 SOURCE_URL = "https://www.weather.gov/documentation/services-web-alerts"
+ZONE_CACHE_TTL_SECONDS = 6 * 60 * 60
+ZONE_FETCH_DEADLINE_SECONDS = 7
+MAX_ZONE_FETCHES_PER_REFRESH = 640
+ZONE_FETCH_WORKERS = 24
+MAX_RING_POINTS = 240
+
+_ZONE_CACHE: dict[str, tuple[float, Dict[str, Any] | None]] = {}
+_ZONE_CACHE_LOCK = Lock()
 
 
 def _hazard_kind(event_name: str) -> str | None:
@@ -43,6 +55,136 @@ def _geometry(raw: Any) -> Dict[str, Any] | None:
     return {"type": geometry_type, "coordinates": coordinates}
 
 
+def _trusted_zone_url(value: Any) -> str | None:
+    url = str(value or "").strip()
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != "api.weather.gov":
+        return None
+    if not parsed.path.startswith("/zones/"):
+        return None
+    return url
+
+
+def _generalize_ring(raw: Any) -> list[list[float]] | None:
+    if not isinstance(raw, list) or len(raw) < 4:
+        return None
+    points: list[list[float]] = []
+    for coordinate in raw:
+        if not isinstance(coordinate, (list, tuple)) or len(coordinate) < 2:
+            return None
+        try:
+            lon = float(coordinate[0])
+            lat = float(coordinate[1])
+        except (TypeError, ValueError):
+            return None
+        if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+            return None
+        points.append([lon, lat])
+    if points[0] != points[-1]:
+        points.append(points[0])
+    if len(points) <= MAX_RING_POINTS:
+        return points
+    stride = max(1, (len(points) - 2) // (MAX_RING_POINTS - 2) + 1)
+    generalized = points[:-1:stride]
+    if generalized[-1] != points[-2]:
+        generalized.append(points[-2])
+    generalized.append(generalized[0])
+    return generalized if len(generalized) >= 4 else None
+
+
+def _generalized_geometry(raw: Any) -> Dict[str, Any] | None:
+    geometry = _geometry(raw)
+    if geometry is None:
+        return None
+    polygons = (
+        [geometry["coordinates"]]
+        if geometry["type"] == "Polygon"
+        else geometry["coordinates"]
+    )
+    normalized: list[list[list[list[float]]]] = []
+    for polygon in polygons:
+        if not isinstance(polygon, list):
+            continue
+        rings = [_generalize_ring(ring) for ring in polygon]
+        valid_rings = [ring for ring in rings if ring is not None]
+        if valid_rings:
+            normalized.append(valid_rings)
+    if not normalized:
+        return None
+    if len(normalized) == 1:
+        return {"type": "Polygon", "coordinates": normalized[0]}
+    return {"type": "MultiPolygon", "coordinates": normalized}
+
+
+def _zone_geometry(http_json_get, url: str) -> Dict[str, Any] | None:
+    now = monotonic()
+    with _ZONE_CACHE_LOCK:
+        cached = _ZONE_CACHE.get(url)
+        if cached and now - cached[0] <= ZONE_CACHE_TTL_SECONDS:
+            return cached[1]
+    payload = http_json_get(
+        url,
+        timeout=5,
+        headers={
+            "Accept": "application/geo+json",
+            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+        },
+    )
+    geometry = _generalized_geometry(payload.get("geometry") if isinstance(payload, dict) else None)
+    with _ZONE_CACHE_LOCK:
+        _ZONE_CACHE[url] = (monotonic(), geometry)
+    return geometry
+
+
+def _resolve_zone_geometries(http_json_get, zone_urls: list[str]) -> dict[str, Dict[str, Any]]:
+    unique_urls = list(dict.fromkeys(zone_urls))
+    resolved: dict[str, Dict[str, Any]] = {}
+    missing: list[str] = []
+    now = monotonic()
+    with _ZONE_CACHE_LOCK:
+        for url in unique_urls:
+            cached = _ZONE_CACHE.get(url)
+            if cached and now - cached[0] <= ZONE_CACHE_TTL_SECONDS:
+                if cached[1] is not None:
+                    resolved[url] = cached[1]
+            else:
+                if len(missing) < MAX_ZONE_FETCHES_PER_REFRESH:
+                    missing.append(url)
+    if not missing:
+        return resolved
+    executor = ThreadPoolExecutor(max_workers=min(ZONE_FETCH_WORKERS, len(missing)), thread_name_prefix="nws-zone")
+    futures = {executor.submit(_zone_geometry, http_json_get, url): url for url in missing}
+    done, pending = wait(futures, timeout=ZONE_FETCH_DEADLINE_SECONDS)
+    for future in done:
+        url = futures[future]
+        try:
+            geometry = future.result()
+        except Exception:
+            geometry = None
+        if geometry is not None:
+            resolved[url] = geometry
+    for future in pending:
+        future.cancel()
+    executor.shutdown(wait=False, cancel_futures=True)
+    return resolved
+
+
+def _merge_zone_geometries(geometries: list[Dict[str, Any]]) -> Dict[str, Any] | None:
+    polygons: list[list[list[list[float]]]] = []
+    for geometry in geometries:
+        if geometry.get("type") == "Polygon":
+            polygons.append(geometry["coordinates"])
+        elif geometry.get("type") == "MultiPolygon":
+            polygons.extend(geometry["coordinates"])
+    if not polygons:
+        return None
+    if len(polygons) == 1:
+        return {"type": "Polygon", "coordinates": polygons[0]}
+    return {"type": "MultiPolygon", "coordinates": polygons}
+
+
 def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> ProviderResult:
     payload = http_json_get(
         url,
@@ -56,8 +198,22 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> Provide
     features = payload.get("features") if isinstance(payload, dict) else None
     if not isinstance(features, list):
         raise ValueError("nws-schema-features")
+    bounded_features = features[: max(1, limit)]
+    zone_urls = [
+        trusted
+        for feature in bounded_features
+        if isinstance(feature, dict) and _geometry(feature.get("geometry")) is None
+        for zone in (
+            (feature.get("properties") or {}).get("affectedZones")
+            if isinstance(feature.get("properties"), dict)
+            and isinstance((feature.get("properties") or {}).get("affectedZones"), list)
+            else []
+        )
+        if (trusted := _trusted_zone_url(zone)) is not None
+    ]
+    resolved_zones = _resolve_zone_geometries(http_json_get, zone_urls)
     events: list[Dict[str, Any]] = []
-    for feature in features[: max(1, limit)]:
+    for feature in bounded_features:
         if not isinstance(feature, dict):
             continue
         properties = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
@@ -73,7 +229,15 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> Provide
         updated_at = iso_timestamp(properties.get("sent"))
         expires_at = iso_timestamp(properties.get("expires"))
         ended_at = iso_timestamp(properties.get("ends"))
-        geometry = _geometry(feature.get("geometry"))
+        geometry = _generalized_geometry(feature.get("geometry"))
+        affected_zones = [
+            trusted
+            for zone in (properties.get("affectedZones") or [])
+            if (trusted := _trusted_zone_url(zone)) is not None
+        ] if isinstance(properties.get("affectedZones"), list) else []
+        resolved_zone_count = sum(1 for zone in affected_zones if zone in resolved_zones)
+        if geometry is None and resolved_zone_count:
+            geometry = _merge_zone_geometries([resolved_zones[zone] for zone in affected_zones if zone in resolved_zones])
         severity, evidence = nws_severity(properties)
         area = compact_text(properties.get("areaDesc"), 220)
         limitations = [
@@ -81,7 +245,11 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> Provide
             "Alert polygons and text may be revised, replaced or cancelled by subsequent CAP messages.",
         ]
         if geometry is None:
-            limitations.append("This alert has no polygon geometry; no point location was fabricated.")
+            limitations.append("This alert has no resolved official zone geometry; no point location was fabricated.")
+        elif resolved_zone_count:
+            limitations.append("Geometry was resolved from official NWS affected-zone boundaries and generalized for map rendering.")
+            if resolved_zone_count < len(affected_zones):
+                limitations.append("Some referenced NWS zones were unavailable within the bounded refresh deadline.")
         references = properties.get("references") if isinstance(properties.get("references"), list) else []
         events.append(
             {
@@ -94,7 +262,7 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> Provide
                 "updatedAt": updated_at,
                 "expiresAt": expires_at,
                 "geometry": geometry,
-                "locationPrecision": "region" if geometry is None else "exact",
+                "locationPrecision": "region" if resolved_zone_count or geometry is None else "exact",
                 "locationLabel": area,
                 "sources": [
                     {
@@ -111,7 +279,10 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 600) -> Provide
                 "properties": {
                     "mapEntity": "hazard-event",
                     "senderName": properties.get("senderName"),
-                    "affectedZones": properties.get("affectedZones") or [],
+                    "affectedZones": affected_zones,
+                    "geometrySource": "nws-affected-zones" if resolved_zone_count else "nws-alert-polygon" if geometry else None,
+                    "resolvedZoneCount": resolved_zone_count,
+                    "unresolvedZoneCount": max(0, len(affected_zones) - resolved_zone_count),
                     "response": properties.get("response"),
                 },
                 "hazardKind": hazard_kind,

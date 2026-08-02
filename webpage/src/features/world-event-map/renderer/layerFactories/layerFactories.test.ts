@@ -25,6 +25,20 @@ const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['se
   properties: {},
 });
 
+const hazardPoint = (id: string, hazardKind: 'earthquake' | 'volcano', lon: number, lat: number): GeoEvent => ({
+  ...pointEvent(id, lon, lat),
+  category: 'natural-hazard',
+  properties: { mapEntity: 'hazard-event' },
+  hazardKind,
+  lifecycle: 'active',
+  coverage: { scope: 'global', label: 'fixture', isComplete: false, gaps: [] },
+  severityEvidence: { provider: 'fixture', mappingVersion: 'fixture', reason: 'fixture' },
+  revision: { nativeEventId: id },
+  metrics: hazardKind === 'earthquake'
+    ? { kind: 'earthquake', magnitude: 4.5 }
+    : { kind: 'volcano-or-other', statusLabel: 'active' },
+} as GeoEvent);
+
 const aviationState = () => {
   const state = defaultWorldEventMapState();
   return {
@@ -57,6 +71,34 @@ describe('world event layer factories', () => {
       pointEvent('c', 10.3, 10.2),
     ], state);
     expect((layers as Layer[]).some((layer) => layer.id === 'world-event-points')).toBe(true);
+  });
+
+  it('keeps earthquakes and volcanoes individually visible at world zoom like WorldMonitor', () => {
+    const events = [
+      hazardPoint('eq:a', 'earthquake', 10, 10),
+      hazardPoint('eq:b', 'earthquake', 10.1, 10.1),
+      hazardPoint('eq:c', 'earthquake', 10.2, 10.2),
+      hazardPoint('vo:a', 'volcano', 11, 11),
+    ];
+    const clustered = clusterEventPoints(events, 1.25, null);
+    expect(clustered.clusters).toHaveLength(0);
+    expect(clustered.singles.map((event) => event.id)).toEqual(['eq:a', 'eq:b', 'eq:c', 'vo:a']);
+  });
+
+  it('does not combine different conflict types into one generic cluster', () => {
+    const events = [
+      { ...pointEvent('state:1', 10, 10), properties: { violenceType: '1' } },
+      { ...pointEvent('state:2', 10.1, 10.1), properties: { violenceType: '1' } },
+      { ...pointEvent('state:3', 10.2, 10.2), properties: { violenceType: '1' } },
+      { ...pointEvent('nonstate:1', 10, 10), properties: { violenceType: '2' } },
+      { ...pointEvent('nonstate:2', 10.1, 10.1), properties: { violenceType: '2' } },
+      { ...pointEvent('nonstate:3', 10.2, 10.2), properties: { violenceType: '2' } },
+    ];
+    const clustered = clusterEventPoints(events, 1.25, null);
+    expect(clustered.clusters.map((cluster) => cluster.label).sort()).toEqual([
+      'non-state conflict',
+      'state-based conflict',
+    ]);
   });
 
   it('keeps warning events as persistent priority rings rather than forcing a global RAF loop', () => {

@@ -258,6 +258,7 @@ class ApiSettings:
     geo_shock_ttl_seconds: int
     natural_hazards_usgs_url: str
     natural_hazards_eonet_url: str
+    natural_hazards_gdacs_url: str
     natural_hazards_nws_url: str
     natural_hazards_firms_base_url: str
     natural_hazards_firms_source: str
@@ -554,6 +555,10 @@ def load_api_settings() -> ApiSettings:
         natural_hazards_eonet_url=_get_str(
             "POLYDATA_NATURAL_HAZARDS_EONET_URL",
             "https://eonet.gsfc.nasa.gov/api/v3/events",
+        ),
+        natural_hazards_gdacs_url=_get_str(
+            "POLYDATA_NATURAL_HAZARDS_GDACS_URL",
+            "https://www.gdacs.org/xml/gdacs.geojson",
         ),
         natural_hazards_nws_url=_get_str(
             "POLYDATA_NATURAL_HAZARDS_NWS_URL",
