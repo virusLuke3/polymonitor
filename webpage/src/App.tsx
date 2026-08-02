@@ -122,7 +122,6 @@ const BriefingManagerWorkspace = lazy(() => import('@/workspaces/briefing/Briefi
 const PublicBriefingWorkspace = lazy(() => import('@/workspaces/briefing/BriefingWorkspace').then((module) => ({ default: module.PublicBriefingWorkspace })));
 const DeveloperWorkspace = lazy(() => import('@/workspaces/developers/DeveloperWorkspace').then((module) => ({ default: module.DeveloperWorkspace })));
 const FAST_MARKETS_PAGE_SIZE = 80;
-const MARKET_GROUPS_PAGE_SIZE = 200;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = selectableWorldEventLayers().map((layer) => ({
   id: layer.id,
@@ -869,7 +868,7 @@ function WorldMonitorApp() {
       fetchRecentTrades(24),
       fetchRecentOracle(16),
       fetchLatestContent(12),
-      fetchMarketGroups('', MARKET_GROUPS_PAGE_SIZE, 'active'),
+      fetchMarketGroups('', FAST_MARKETS_PAGE_SIZE, 'active'),
       fetchAllActiveMarkets('', FAST_MARKETS_PAGE_SIZE),
       refreshTier('fast', { panelIds: options.activePanelIds, reason: bootstrapPayload ? 'bootstrap' : 'refresh' }),
     ]);
@@ -921,15 +920,16 @@ function WorldMonitorApp() {
     setMarketCatalogError(null);
     try {
       const [groupsResult, marketsResult] = await Promise.allSettled([
-        fetchMarketGroups('', MARKET_GROUPS_PAGE_SIZE, 'active'),
+        fetchMarketGroups('', FAST_MARKETS_PAGE_SIZE, 'active'),
         fetchAllActiveMarkets('', FAST_MARKETS_PAGE_SIZE),
       ]);
-      if (groupsResult.status === 'fulfilled') setMarketGroups(groupsResult.value.items || []);
+      if (groupsResult.status === 'fulfilled') {
+        setMarketGroups(groupsResult.value.items || []);
+        setMarketCatalogError(null);
+      }
       if (marketsResult.status === 'fulfilled') setMarkets(marketsResult.value.items || []);
-      const failures = [groupsResult, marketsResult].filter((result) => result.status === 'rejected');
-      if (failures.length) {
-        const first = failures[0] as PromiseRejectedResult;
-        throw first.reason instanceof Error ? first.reason : new Error('Market catalog refresh failed.');
+      if (groupsResult.status === 'rejected') {
+        throw groupsResult.reason instanceof Error ? groupsResult.reason : new Error('Market catalog refresh failed.');
       }
     } catch (refreshError) {
       setMarketCatalogError(refreshError instanceof Error ? refreshError.message : 'Market catalog refresh failed.');
@@ -1314,7 +1314,7 @@ function WorldMonitorApp() {
   useEffect(() => {
     if (!marketQuery.trim()) {
       let cancelled = false;
-      void fetchMarketGroups('', MARKET_GROUPS_PAGE_SIZE, 'active')
+      void fetchMarketGroups('', FAST_MARKETS_PAGE_SIZE, 'active')
         .then((payload) => {
           if (!cancelled) {
             setMarketGroups(payload.items || []);
@@ -1333,7 +1333,7 @@ function WorldMonitorApp() {
     const timer = window.setTimeout(async () => {
       try {
         const [groupsResult, marketsResult] = await Promise.allSettled([
-          fetchMarketGroups(marketQuery.trim(), MARKET_GROUPS_PAGE_SIZE, 'active'),
+          fetchMarketGroups(marketQuery.trim(), FAST_MARKETS_PAGE_SIZE, 'active'),
           fetchAllActiveMarkets(marketQuery.trim(), SEARCH_MARKETS_PAGE_SIZE),
         ]);
         if (!cancelled && groupsResult.status === 'fulfilled') setMarketGroups(groupsResult.value.items || []);
