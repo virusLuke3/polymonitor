@@ -16,7 +16,7 @@
   --wm-shadow: rgba(0, 0, 0, 0.38);
   --font-body: var(--ds-font-body);
   --font-mono: var(--ds-font-mono);
-  --font-platform-mono: 'SF Mono', 'Monaco', 'Cascadia Code', 'Fira Code', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+  --font-platform-mono: 'Polymonitor DejaVu Mono', 'DejaVu Sans Mono', monospace;
 }
 
 html[lang='zh-CN'] {
@@ -9319,6 +9319,7 @@ body {
   background: #070707;
   color: var(--wm-text);
   font-family: var(--font-body);
+  font-synthesis: none;
   text-rendering: auto;
 }
 

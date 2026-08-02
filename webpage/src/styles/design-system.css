@@ -30,7 +30,7 @@
   --ds-space-6: 24px;
   --ds-space-8: 32px;
   --ds-space-10: 40px;
-  --ds-font-platform-mono: 'SF Mono', 'Monaco', 'Cascadia Code', 'Fira Code', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+  --ds-font-platform-mono: 'Polymonitor DejaVu Mono', 'DejaVu Sans Mono', monospace;
   --ds-font-display: var(--ds-font-platform-mono);
   --ds-font-body: var(--ds-font-platform-mono);
   --ds-font-mono: var(--ds-font-platform-mono);
