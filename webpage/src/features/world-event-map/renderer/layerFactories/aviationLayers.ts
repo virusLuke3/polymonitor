@@ -491,6 +491,7 @@ function createAviationMarkerLayers(
       sizeUnits: 'pixels',
       pickable: true,
       autoHighlight: true,
+      highlightColor: [255, 250, 198, 132],
     }));
   }
   if (data.hubs.length) {
@@ -508,6 +509,7 @@ function createAviationMarkerLayers(
       stroked: true,
       pickable: true,
       autoHighlight: true,
+      highlightColor: [255, 250, 198, 132],
     }));
     layers.push(new TextLayer<GeoEvent>({
       id: 'aviation-hub-labels',

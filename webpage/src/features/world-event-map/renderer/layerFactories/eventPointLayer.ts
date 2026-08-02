@@ -223,6 +223,7 @@ export function createEventPointLayers({
       lineWidthMinPixels: 1.15,
       pickable: true,
       autoHighlight: true,
+      highlightColor: [255, 250, 198, 118],
       stroked: true,
     }));
     layers.push(new TextLayer<EventCluster>({
@@ -256,6 +257,7 @@ export function createEventPointLayers({
       lineWidthMinPixels: 1.15,
       pickable: true,
       autoHighlight: true,
+      highlightColor: [255, 255, 255, 104],
       stroked: true,
     }));
   }

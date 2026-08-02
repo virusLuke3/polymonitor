@@ -7,7 +7,12 @@ import type {
 } from '../state/mapState';
 import { DeckMapRenderer } from '../renderer/DeckMapRenderer';
 import { SvgMapRenderer } from '../renderer/SvgMapRenderer';
-import type { BasemapState, MapRenderer, MapRendererCallbacks } from '../renderer/MapRenderer';
+import type {
+  BasemapState,
+  MapHoverPosition,
+  MapRenderer,
+  MapRendererCallbacks,
+} from '../renderer/MapRenderer';
 import { inspectWebGL2Support } from '../renderer/webglSupport';
 import { worldEventLayerById } from '../config/layerRegistry';
 import { EventInspector } from './EventInspector';
@@ -48,6 +53,7 @@ export function WorldEventMap({
   const [basemapState, setBasemapState] = useState<BasemapState>('idle');
   const [rendererKind, setRendererKind] = useState<'webgl' | 'svg'>('webgl');
   const [rendererError, setRendererError] = useState<string | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<MapHoverPosition | null>(null);
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === state.selectedEventId) || null,
     [events, state.selectedEventId],
@@ -83,7 +89,10 @@ export function WorldEventMap({
     const callbacks: MapRendererCallbacks = {
       onCameraChange: (camera) => callbackRef.current.onCameraChange(camera),
       onEventSelect: (eventId) => callbackRef.current.onEventSelect(eventId),
-      onEventHover: (eventId) => callbackRef.current.onEventHover(eventId),
+      onEventHover: (eventId, position) => {
+        callbackRef.current.onEventHover(eventId);
+        setHoverPosition(eventId ? position || null : null);
+      },
       onBasemapStateChange: (nextState) => {
         if (!disposed) setBasemapState(nextState);
       },
@@ -167,8 +176,12 @@ export function WorldEventMap({
         tabIndex={0}
         aria-label="World event map. Use pointer or keyboard controls to explore active real-world events."
       />
-      {hoveredEvent && !selectedEvent ? (
-        <div className="wm-deck-tooltip" role="status">
+      {rendererKind === 'svg' && hoveredEvent && !selectedEvent && hoverPosition ? (
+        <div
+          className="wm-weather-deck-tooltip wm-world-event-svg-tooltip"
+          role="status"
+          style={{ left: `${hoverPosition.x}px`, top: `${hoverPosition.y}px` }}
+        >
           <strong>{hoveredEvent.title}</strong>
           <span>{hoveredEvent.locationLabel || hoveredEvent.severity.toUpperCase()}</span>
         </div>

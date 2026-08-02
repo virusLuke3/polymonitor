@@ -12098,6 +12098,71 @@ a.wm-orderfilled-row {
   color: #73d8ff;
 }
 
+.wm-world-event-svg-tooltip {
+  position: absolute;
+  z-index: 20;
+  display: grid;
+  gap: 3px;
+  max-width: min(300px, calc(100% - 24px));
+  border-radius: 4px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.46);
+  pointer-events: none;
+  transform: translateY(-100%);
+}
+
+.wm-world-event-svg-tooltip span {
+  color: #a9b4b6;
+  font-size: 9px;
+}
+
+.wm-weather-deck-map .deck-tooltip {
+  z-index: 18;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  pointer-events: none;
+}
+
+.wm-world-event-tooltip {
+  display: grid;
+  gap: 4px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 9px 11px;
+  border: 1px solid rgba(94, 238, 255, 0.3);
+  border-radius: 5px;
+  background: rgba(3, 9, 12, 0.96);
+  color: #e8f1f2;
+  font-family: var(--font-mono);
+  line-height: 1.35;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.5);
+}
+
+.wm-world-event-tooltip-kicker {
+  color: #5eeeff;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.75px;
+  text-transform: uppercase;
+}
+
+.wm-world-event-tooltip strong {
+  color: #f4f7f7;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.wm-world-event-tooltip small {
+  color: #9aa7aa;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.2px;
+}
+
+.maplibregl-canvas.wm-map-hover-target {
+  cursor: pointer !important;
+}
+
 .wm-map-deck-tooltip.air {
   border-color: rgba(56, 189, 248, 0.38);
   background:

@@ -9,10 +9,12 @@ export type BasemapState =
   | 'renderer-fallback-ready'
   | 'failed';
 
+export type MapHoverPosition = { x: number; y: number };
+
 export interface MapRendererCallbacks {
   onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
   onEventSelect: (eventId: string | null) => void;
-  onEventHover: (eventId: string | null) => void;
+  onEventHover: (eventId: string | null, position?: MapHoverPosition | null) => void;
   onBasemapStateChange: (state: BasemapState) => void;
   onRendererFallbackRequested: (error: Error) => void;
   onError: (error: Error) => void;

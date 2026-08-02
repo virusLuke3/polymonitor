@@ -47,6 +47,7 @@ export function createEventGeometryLayers(
       lineWidthMinPixels: 1,
       pickable: true,
       autoHighlight: true,
+      highlightColor: [255, 255, 255, 82],
     }));
   }
 
@@ -70,6 +71,7 @@ export function createEventGeometryLayers(
       lineWidthMinPixels: 1,
       pickable: true,
       autoHighlight: true,
+      highlightColor: [255, 255, 255, 72],
     }));
   }
 
@@ -86,6 +88,7 @@ export function createEventGeometryLayers(
       capRounded: true,
       pickable: true,
       autoHighlight: true,
+      highlightColor: [255, 250, 198, 128],
     }));
   }
   return layers;

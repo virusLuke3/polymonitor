@@ -372,6 +372,8 @@ export class SvgMapRenderer implements MapRenderer {
       group.setAttribute('role', 'button');
       group.setAttribute('tabindex', '0');
       group.setAttribute('aria-label', `${cluster.count} mapped events. Zoom in to expand.`);
+      const title = svgElement('title');
+      title.textContent = `${cluster.count} mapped events · ${cluster.severity.toUpperCase()} · click to expand`;
       const point = svgElement('circle');
       point.setAttribute('cx', String(x));
       point.setAttribute('cy', String(y));
@@ -391,7 +393,7 @@ export class SvgMapRenderer implements MapRenderer {
         keyboardEvent.preventDefault();
         expand();
       });
-      group.append(point, label);
+      group.append(title, point, label);
       this.eventLayer.append(group);
     }
     for (const event of singles) {
@@ -471,7 +473,13 @@ export class SvgMapRenderer implements MapRenderer {
     const title = svgElement('title');
     title.textContent = `${event.title} · ${event.locationLabel || event.severity}`;
     element.append(title);
-    element.addEventListener('pointerenter', () => this.callbacks?.onEventHover(event.id));
+    element.addEventListener('pointerenter', (pointerEvent) => {
+      const bounds = this.svg?.getBoundingClientRect();
+      this.callbacks?.onEventHover(event.id, bounds ? {
+        x: Math.max(12, Math.min(bounds.width - 12, pointerEvent.clientX - bounds.left + 14)),
+        y: Math.max(12, Math.min(bounds.height - 12, pointerEvent.clientY - bounds.top + 14)),
+      } : null);
+    });
     element.addEventListener('pointerleave', () => this.callbacks?.onEventHover(null));
     element.addEventListener('click', (pointerEvent) => {
       pointerEvent.stopPropagation();

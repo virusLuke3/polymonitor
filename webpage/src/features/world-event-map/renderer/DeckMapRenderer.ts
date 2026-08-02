@@ -1,6 +1,10 @@
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import type { PickingInfo } from '@deck.gl/core';
-import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
+import maplibregl, {
+  type FilterSpecification,
+  type Map as MapLibreMap,
+  type MapMouseEvent,
+} from 'maplibre-gl';
 import {
   getWeatherMapFallbackStyle,
   getWeatherMapStyle,
@@ -14,7 +18,6 @@ import {
   createAviationDynamicLayers,
   createAviationStaticLayerSections,
   createWorldEventStaticLayerSections,
-  type EventCluster,
   type AviationStaticLayerSections,
   type WorldEventStaticLayerSections,
 } from './layerFactories';
@@ -23,21 +26,23 @@ import {
   boundedAnimationDelta,
   MAP_ANIMATION_FRAME_INTERVAL_MS,
 } from './animationClock';
+import {
+  pickedWorldEvent,
+  pickedWorldEventCluster,
+  worldEventTooltipHtml,
+  type WorldEventPickedObject,
+} from './hoverTooltip';
+import {
+  createCountryHoverQueryController,
+  type CountryHoverQueryController,
+} from './countryHoverController';
 
-type PickedObject = GeoEvent | EventCluster | { properties?: { event?: GeoEvent } };
-
-function pickedEvent(object?: PickedObject | null): GeoEvent | null {
-  if (!object) return null;
-  if ('properties' in object && object.properties?.event) return object.properties.event as GeoEvent;
-  if ('kind' in object && object.kind === 'event-cluster') return null;
-  return object as GeoEvent;
-}
-
-function pickedCluster(object?: PickedObject | null): EventCluster | null {
-  return object && 'kind' in object && object.kind === 'event-cluster'
-    ? object
-    : null;
-}
+const COUNTRY_INTERACTION_SOURCE = 'world-event-country-interaction-source';
+const FALLBACK_COUNTRY_SOURCE = 'wm-weather-country-boundaries';
+const COUNTRY_INTERACTIVE_LAYER = 'world-event-country-interactive';
+const COUNTRY_HOVER_FILL_LAYER = 'world-event-country-hover-fill';
+const COUNTRY_HOVER_BORDER_LAYER = 'world-event-country-hover-border';
+const EMPTY_COUNTRY_FILTER = ['==', ['get', 'ISO3166-1-Alpha-2'], ''] as FilterSpecification;
 
 export class DeckMapRenderer implements MapRenderer {
   private map: MapLibreMap | null = null;
@@ -60,6 +65,10 @@ export class DeckMapRenderer implements MapRenderer {
   private pendingAnimationDeltaMs = 0;
   private animationTime = 0;
   private staticLayerSections: WorldEventStaticLayerSections | null = null;
+  private deckHoverActive = false;
+  private hoveredDeckEventId: string | null = null;
+  private hoveredCountryIso2: string | null = null;
+  private countryHoverQueryController: CountryHoverQueryController<MapMouseEvent['point']> | null = null;
   /**
    * Aviation has a different invalidation cadence from hazards: route geometry,
    * hubs and live positions are static between data/camera changes, while only
@@ -89,19 +98,35 @@ export class DeckMapRenderer implements MapRenderer {
       canvasContextAttributes: { powerPreference: 'high-performance' },
     });
     this.map = map;
+    this.countryHoverQueryController = createCountryHoverQueryController(
+      (callback) => window.requestAnimationFrame(callback),
+      (handle) => window.cancelAnimationFrame(handle),
+      (point) => this.runCountryHoverQuery(point),
+    );
 
     const overlay = new MapboxOverlay({
       interleaved: true,
       layers: [],
       pickingRadius: 8,
       useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
-      onHover: (info: PickingInfo<PickedObject>) => {
-        const event = pickedEvent(info.object);
-        map.getCanvas().style.cursor = info.object ? 'pointer' : '';
-        callbacks.onEventHover(event?.id ?? null);
+      getCursor: ({ isDragging, isHovering }) => {
+        if (isDragging) return 'grabbing';
+        return isHovering || Boolean(this.hoveredCountryIso2) ? 'pointer' : 'grab';
       },
-      onClick: (info: PickingInfo<PickedObject>) => {
-        const cluster = pickedCluster(info.object);
+      getTooltip: (info: PickingInfo<WorldEventPickedObject>) => {
+        const html = worldEventTooltipHtml(info.object);
+        return html ? { html } : null;
+      },
+      onHover: (info: PickingInfo<WorldEventPickedObject>) => {
+        const eventId = pickedWorldEvent(info.object)?.id ?? null;
+        this.deckHoverActive = Boolean(info.object);
+        this.updateMapCursor();
+        if (eventId === this.hoveredDeckEventId) return;
+        this.hoveredDeckEventId = eventId;
+        callbacks.onEventHover(eventId);
+      },
+      onClick: (info: PickingInfo<WorldEventPickedObject>) => {
+        const cluster = pickedWorldEventCluster(info.object);
         if (cluster) {
           const [west, south, east, north] = cluster.bounds;
           if (west === east && south === north) {
@@ -118,7 +143,7 @@ export class DeckMapRenderer implements MapRenderer {
           }
           return;
         }
-        callbacks.onEventSelect(pickedEvent(info.object)?.id ?? null);
+        callbacks.onEventSelect(pickedWorldEvent(info.object)?.id ?? null);
       },
     });
     this.overlay = overlay;
@@ -131,12 +156,16 @@ export class DeckMapRenderer implements MapRenderer {
       }
       this.clearFallbackTimer();
       reinforceWorldEventBasemapLabels(map);
+      this.ensureCountryHoverLayers();
       this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
       this.render();
       this.syncAnimationLoop();
     });
     map.on('style.load', this.handleStyleLoad);
     map.on('moveend', this.handleMoveEnd);
+    map.on('movestart', this.handleMoveStart);
+    map.on('mousemove', this.handleCountryHoverMove);
+    map.on('mouseout', this.handleCountryHoverLeave);
     map.on('error', this.handleMapError);
     map.getCanvas().addEventListener('webglcontextlost', this.handleContextLost);
     map.getCanvas().addEventListener('webglcontextrestored', this.handleContextRestored);
@@ -211,6 +240,7 @@ export class DeckMapRenderer implements MapRenderer {
 
   pause() {
     this.paused = true;
+    this.clearAllHover();
     this.cancelAnimationLoop();
     this.overlay?.setProps({ layers: [] });
   }
@@ -231,6 +261,9 @@ export class DeckMapRenderer implements MapRenderer {
     if (map) {
       map.off('style.load', this.handleStyleLoad);
       map.off('moveend', this.handleMoveEnd);
+      map.off('movestart', this.handleMoveStart);
+      map.off('mousemove', this.handleCountryHoverMove);
+      map.off('mouseout', this.handleCountryHoverLeave);
       map.off('error', this.handleMapError);
       map.getCanvas().removeEventListener('webglcontextlost', this.handleContextLost);
       map.getCanvas().removeEventListener('webglcontextrestored', this.handleContextRestored);
@@ -248,6 +281,11 @@ export class DeckMapRenderer implements MapRenderer {
     this.staticLayerSections = null;
     this.aviationLayerSections = null;
     this.overlayMounted = false;
+    this.countryHoverQueryController?.cancel();
+    this.countryHoverQueryController = null;
+    this.deckHoverActive = false;
+    this.hoveredDeckEventId = null;
+    this.hoveredCountryIso2 = null;
     this.callbacks = null;
   }
 
@@ -307,13 +345,128 @@ export class DeckMapRenderer implements MapRenderer {
     this.callbacks.onCameraChange(camera);
   };
 
+  private handleMoveStart = () => {
+    this.countryHoverQueryController?.cancel();
+    this.clearCountryHover();
+  };
+
+  private handleCountryHoverMove = (event: MapMouseEvent) => {
+    if (this.destroyed || this.paused) return;
+    this.countryHoverQueryController?.queue(event.point);
+  };
+
+  private handleCountryHoverLeave = () => {
+    this.countryHoverQueryController?.cancel();
+    this.clearAllHover();
+  };
+
   private handleStyleLoad = () => {
     if (!this.map || this.destroyed) return;
     this.clearFallbackTimer();
     reinforceWorldEventBasemapLabels(this.map);
+    this.ensureCountryHoverLayers();
     this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
     this.render();
   };
+
+  private ensureCountryHoverLayers() {
+    const map = this.map;
+    if (!map || this.destroyed) return;
+    try {
+      const sourceId = map.getSource(FALLBACK_COUNTRY_SOURCE)
+        ? FALLBACK_COUNTRY_SOURCE
+        : COUNTRY_INTERACTION_SOURCE;
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, {
+          type: 'geojson',
+          data: '/map-data/world-countries.geojson',
+        });
+      }
+      const beforeId = map.getStyle().layers?.find((layer) => layer.type === 'symbol')?.id;
+      if (!map.getLayer(COUNTRY_INTERACTIVE_LAYER)) {
+        map.addLayer({
+          id: COUNTRY_INTERACTIVE_LAYER,
+          type: 'fill',
+          source: sourceId,
+          paint: { 'fill-color': '#ffffff', 'fill-opacity': 0 },
+        }, beforeId);
+      }
+      if (!map.getLayer(COUNTRY_HOVER_FILL_LAYER)) {
+        map.addLayer({
+          id: COUNTRY_HOVER_FILL_LAYER,
+          type: 'fill',
+          source: sourceId,
+          paint: { 'fill-color': '#ffffff', 'fill-opacity': 0.055 },
+          filter: EMPTY_COUNTRY_FILTER,
+        }, beforeId);
+      }
+      if (!map.getLayer(COUNTRY_HOVER_BORDER_LAYER)) {
+        map.addLayer({
+          id: COUNTRY_HOVER_BORDER_LAYER,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': '#d8f7ff',
+            'line-width': 1.35,
+            'line-opacity': 0.56,
+          },
+          filter: EMPTY_COUNTRY_FILTER,
+        }, beforeId);
+      }
+    } catch {
+      // Style replacement can race the async local country source load.
+    }
+  }
+
+  private runCountryHoverQuery(point: MapMouseEvent['point']) {
+    const map = this.map;
+    if (!map?.getLayer(COUNTRY_INTERACTIVE_LAYER)) return;
+    try {
+      const feature = map.queryRenderedFeatures(point, { layers: [COUNTRY_INTERACTIVE_LAYER] })[0];
+      const iso2 = String(feature?.properties?.['ISO3166-1-Alpha-2'] || '');
+      if (iso2 === this.hoveredCountryIso2) return;
+      this.hoveredCountryIso2 = iso2 || null;
+      const filter = iso2
+        ? ['==', ['get', 'ISO3166-1-Alpha-2'], iso2] as FilterSpecification
+        : EMPTY_COUNTRY_FILTER;
+      map.setFilter(COUNTRY_HOVER_FILL_LAYER, filter);
+      map.setFilter(COUNTRY_HOVER_BORDER_LAYER, filter);
+      this.updateMapCursor();
+    } catch {
+      // The style may be changing between pointer sampling and feature query.
+    }
+  }
+
+  private clearCountryHover() {
+    this.hoveredCountryIso2 = null;
+    const map = this.map;
+    if (map?.getLayer(COUNTRY_HOVER_FILL_LAYER)) {
+      try {
+        map.setFilter(COUNTRY_HOVER_FILL_LAYER, EMPTY_COUNTRY_FILTER);
+        map.setFilter(COUNTRY_HOVER_BORDER_LAYER, EMPTY_COUNTRY_FILTER);
+      } catch {
+        // The style may already be tearing down.
+      }
+    }
+    this.updateMapCursor();
+  }
+
+  private clearAllHover() {
+    this.deckHoverActive = false;
+    this.clearCountryHover();
+    if (this.hoveredDeckEventId != null) {
+      this.hoveredDeckEventId = null;
+      this.callbacks?.onEventHover(null);
+    }
+  }
+
+  private updateMapCursor() {
+    const canvas = this.map?.getCanvas();
+    canvas?.classList.toggle(
+      'wm-map-hover-target',
+      this.deckHoverActive || Boolean(this.hoveredCountryIso2),
+    );
+  }
 
   private handleMapError = (event: { error?: Error; message?: string }) => {
     const message = event.error?.message || event.message || 'Unknown MapLibre error';
