@@ -2,16 +2,9 @@
   position: relative;
   height: 100%;
   min-height: 200px;
-  background: linear-gradient(180deg, #181818 0%, #111315 100%);
-  border: 1px solid #4c5f73;
-  box-shadow:
-    0 18px 36px rgba(0, 0, 0, 0.5),
-    12px 0 30px rgba(25, 55, 94, 0.26),
-    0 0 0 1px rgba(127, 173, 219, 0.32),
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    inset 1px 0 0 rgba(170, 210, 255, 0.12),
-    inset -1px 0 0 rgba(71, 112, 158, 0.34),
-    inset 0 -22px 34px rgba(30, 64, 110, 0.16);
+  background: var(--ds-color-surface-2);
+  border: 1px solid var(--ds-color-border);
+  box-shadow: none;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -414,25 +407,17 @@
 }
 
 .wm-panel::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border: 1px solid rgba(207, 229, 255, 0.11);
-  box-shadow:
-    inset 1px 0 0 rgba(168, 207, 250, 0.16),
-    inset -1px 0 0 rgba(57, 96, 143, 0.38),
-    inset 0 -1px 0 rgba(66, 113, 166, 0.42);
-  pointer-events: none;
+  content: none;
 }
 
 .wm-panel-header {
-  min-height: 38px;
+  min-height: 32px;
   padding: 6px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #2b3036;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.018) 100%);
+  border-bottom: 1px solid var(--ds-color-border);
+  background: rgba(255, 255, 255, 0.025);
   cursor: grab;
   user-select: none;
 }
@@ -444,7 +429,7 @@
 .wm-panel-title-wrap {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -459,25 +444,26 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
 .wm-panel-title {
   margin: 0;
-  font-size: 10.5px;
-  font-weight: 800;
-  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
   text-transform: uppercase;
   line-height: 1.18;
 }
 
 .wm-panel-badge {
   padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid #2d2d2d;
-  font-size: 10px;
-  letter-spacing: 1px;
+  border-radius: 3px;
+  border: 1px solid var(--ds-color-border);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
   text-transform: uppercase;
 }
 
@@ -494,11 +480,11 @@
 }
 
 .wm-panel-count {
-  min-width: 28px;
+  min-width: 24px;
   text-align: center;
-  padding: 3px 6px;
-  border-radius: 4px;
-  background: #252525;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--ds-color-border);
   color: var(--wm-text-dim);
   font-family: var(--font-mono);
   font-size: 10px;
@@ -4847,50 +4833,42 @@
 }
 
 .wm-panel:not(.wm-market-panel) {
-  border-color: #405a76;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 22%),
-    #151515;
-  box-shadow:
-    0 16px 36px rgba(0, 0, 0, 0.48),
-    10px 0 26px rgba(35, 78, 130, 0.22),
-    0 0 0 1px rgba(130, 180, 235, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    inset 1px 0 0 rgba(168, 207, 250, 0.11),
-    inset -1px 0 0 rgba(57, 96, 143, 0.28),
-    inset 0 -80px 120px rgba(0, 0, 0, 0.18);
+  border-color: var(--ds-color-border);
+  background: var(--ds-color-surface-2);
+  box-shadow: none;
 }
 
 .wm-panel:not(.wm-market-panel) .wm-panel-header {
-  min-height: 40px;
-  padding: 7px 10px;
-  border-bottom-color: #272727;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-bottom-color: var(--ds-color-border);
   background: rgba(255, 255, 255, 0.025);
 }
 
 .wm-panel:not(.wm-market-panel) .wm-panel-title {
   font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 2px;
+  font-weight: 600;
+  letter-spacing: 1px;
   color: #f3f5f5;
 }
 
 .wm-panel:not(.wm-market-panel) .wm-panel-badge {
-  border-color: #203126;
-  background: #121b15;
+  border-color: rgba(57, 255, 115, 0.24);
+  border-radius: 3px;
+  background: rgba(57, 255, 115, 0.06);
   color: var(--wm-green);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .wm-panel:not(.wm-market-panel) .wm-panel-count {
-  min-width: 34px;
-  padding: 3px 7px;
-  border-radius: 6px;
-  background: #242424;
+  min-width: 24px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--ds-color-border);
   color: #929894;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 400;
 }
 
 .wm-panel:not(.wm-market-panel) .wm-panel-body {
@@ -16039,11 +16017,11 @@ a.wm-orderfilled-row {
 
 /* Focused market row v3: five independent panels, PolyWorld-style containment. */
 .wm-focused-market-row {
-  --wm-terminal-bg: #080b10;
-  --wm-terminal-panel: #0d1117;
-  --wm-terminal-elevated: #111722;
-  --wm-terminal-border: #202938;
-  --wm-terminal-divider: rgba(255, 255, 255, 0.06);
+  --wm-terminal-bg: var(--ds-color-canvas);
+  --wm-terminal-panel: var(--ds-color-surface-1);
+  --wm-terminal-elevated: var(--ds-color-surface-2);
+  --wm-terminal-border: var(--ds-color-border);
+  --wm-terminal-divider: var(--ds-color-border-soft);
   --wm-terminal-primary: #e5e7eb;
   --wm-terminal-secondary: #9ca3af;
   --wm-terminal-muted: #6b7280;
@@ -16060,8 +16038,8 @@ a.wm-orderfilled-row {
     clamp(286px, 16vw, 360px) !important;
   grid-template-rows: minmax(0, var(--wm-focused-row-height)) !important;
   grid-template-areas: "markets detail book trades oracle" !important;
-  gap: 6px !important;
-  padding: 6px !important;
+  gap: 4px !important;
+  padding: 4px !important;
   background: var(--wm-terminal-bg) !important;
   overflow-x: auto !important;
   overflow-y: hidden !important;
@@ -16130,9 +16108,9 @@ a.wm-orderfilled-row {
   height: 100% !important;
   min-height: 0 !important;
   border: 1px solid var(--wm-terminal-border) !important;
-  border-radius: 4px !important;
+  border-radius: 0 !important;
   background: var(--wm-terminal-panel) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
+  box-shadow: none !important;
   overflow: hidden !important;
   transform: none !important;
 }
@@ -16140,17 +16118,17 @@ a.wm-orderfilled-row {
 .wm-focused-market-row .wm-focus-detail-panel {
   border-top: 1px solid var(--wm-terminal-border) !important;
   border-left: 1px solid var(--wm-terminal-border) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
+  box-shadow: none !important;
 }
 
 .wm-focused-market-row .wm-panel .wm-panel-header,
 .wm-focused-market-row .wm-panel:not(.wm-market-panel) .wm-panel-header,
 .wm-focused-market-row .wm-market-panel .wm-panel-header {
-  min-height: 34px !important;
+  min-height: 32px !important;
   padding: 0 10px !important;
   border: 0 !important;
   border-bottom: 1px solid var(--wm-terminal-divider) !important;
-  background: #111722 !important;
+  background: var(--wm-terminal-elevated) !important;
 }
 
 .wm-focused-market-row .wm-panel .wm-panel-title,
@@ -16158,26 +16136,26 @@ a.wm-orderfilled-row {
 .wm-focused-market-row .wm-market-panel .wm-panel-title {
   color: var(--wm-terminal-primary) !important;
   font-family: var(--font-body) !important;
-  font-size: 13px !important;
-  font-weight: 760 !important;
-  letter-spacing: 0 !important;
-  text-transform: none !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 1px !important;
+  text-transform: uppercase !important;
 }
 
 .wm-focused-market-row .wm-panel .wm-panel-badge,
 .wm-focused-market-row .wm-panel:not(.wm-market-panel) .wm-panel-badge,
 .wm-focused-market-row .wm-market-panel .wm-panel-badge {
-  min-height: 19px !important;
-  padding: 0 7px !important;
+  min-height: 18px !important;
+  padding: 0 6px !important;
   border: 1px solid rgba(34, 197, 94, 0.22) !important;
-  border-radius: 999px !important;
+  border-radius: 3px !important;
   background: rgba(34, 197, 94, 0.08) !important;
   color: #86efac !important;
   font-family: var(--font-body) !important;
-  font-size: 10.5px !important;
-  font-weight: 680 !important;
-  letter-spacing: 0 !important;
-  text-transform: none !important;
+  font-size: 9px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.4px !important;
+  text-transform: uppercase !important;
   box-shadow: none !important;
 }
 
@@ -16185,13 +16163,13 @@ a.wm-orderfilled-row {
 .wm-focused-market-row .wm-panel:not(.wm-market-panel) .wm-panel-count,
 .wm-focused-market-row .wm-market-panel .wm-panel-count {
   min-width: 26px !important;
-  min-height: 19px !important;
-  border-radius: 5px !important;
-  background: rgba(255, 255, 255, 0.04) !important;
+  min-height: 18px !important;
+  border-radius: 2px !important;
+  background: var(--ds-color-border) !important;
   color: var(--wm-terminal-muted) !important;
   font-family: var(--font-mono) !important;
   font-size: 10px !important;
-  font-weight: 680 !important;
+  font-weight: 400 !important;
 }
 
 .wm-focused-market-row .wm-panel .wm-panel-body,
@@ -16212,18 +16190,18 @@ a.wm-orderfilled-row {
 }
 
 .wm-focused-market-list .wm-market-search {
-  height: 34px !important;
+  height: 32px !important;
   margin-bottom: 8px !important;
   border: 1px solid var(--wm-terminal-border) !important;
-  border-radius: 6px !important;
-  background: #0a0f15 !important;
+  border-radius: 3px !important;
+  background: var(--ds-color-canvas) !important;
   box-shadow: none !important;
 }
 
 .wm-focused-market-list .wm-market-sort {
   height: 28px !important;
-  border-radius: 5px !important;
-  background: #0a0f15 !important;
+  border-radius: 3px !important;
+  background: var(--ds-color-canvas) !important;
 }
 
 .wm-focused-market-list .wm-poly-market-card {

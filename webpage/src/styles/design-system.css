@@ -1,14 +1,14 @@
 :root {
   color-scheme: dark;
-  --ds-color-canvas: #070a08;
-  --ds-color-surface-1: #0d110f;
-  --ds-color-surface-2: #121815;
-  --ds-color-surface-3: #17201b;
-  --ds-color-border: #26302a;
-  --ds-color-border-soft: #19211d;
-  --ds-color-text: #edf4ef;
-  --ds-color-text-secondary: #a7b2aa;
-  --ds-color-text-muted: #758078;
+  --ds-color-canvas: #080908;
+  --ds-color-surface-1: #101110;
+  --ds-color-surface-2: #141514;
+  --ds-color-surface-3: #1a1b1a;
+  --ds-color-border: #2a2c2a;
+  --ds-color-border-soft: #202220;
+  --ds-color-text: #ecefec;
+  --ds-color-text-secondary: #a7aca8;
+  --ds-color-text-muted: #777d78;
   --ds-color-accent: #39ff73;
   --ds-color-accent-soft: rgba(57, 255, 115, 0.12);
   --ds-color-positive: #39ff73;
@@ -16,12 +16,12 @@
   --ds-color-critical: #ff5c5c;
   --ds-color-info: #64a4ff;
   --ds-color-neutral: #89948c;
-  --ds-shadow-panel: 0 18px 54px rgba(0, 0, 0, 0.3);
-  --ds-shadow-elevated: 0 28px 80px rgba(0, 0, 0, 0.52);
+  --ds-shadow-panel: none;
+  --ds-shadow-elevated: 0 18px 48px rgba(0, 0, 0, 0.48);
   --ds-radius-xs: 3px;
-  --ds-radius-sm: 6px;
-  --ds-radius-md: 10px;
-  --ds-radius-lg: 16px;
+  --ds-radius-sm: 4px;
+  --ds-radius-md: 6px;
+  --ds-radius-lg: 10px;
   --ds-space-1: 4px;
   --ds-space-2: 8px;
   --ds-space-3: 12px;
@@ -30,12 +30,18 @@
   --ds-space-6: 24px;
   --ds-space-8: 32px;
   --ds-space-10: 40px;
-  --ds-font-display: 'Rajdhani', 'Arial Narrow', sans-serif;
-  --ds-font-body: 'Space Grotesk Variable', 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
-  --ds-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  --ds-font-platform-mono: 'SF Mono', 'Monaco', 'Cascadia Code', 'Fira Code', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+  --ds-font-display: var(--ds-font-platform-mono);
+  --ds-font-body: var(--ds-font-platform-mono);
+  --ds-font-mono: var(--ds-font-platform-mono);
   --ds-duration-fast: 140ms;
   --ds-duration-standard: 240ms;
   --ds-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[lang='zh-CN'] {
+  --ds-font-display: 'Noto Sans SC Variable', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --ds-font-body: 'Noto Sans SC Variable', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .ds-status-badge {
@@ -43,17 +49,17 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 24px;
+  min-height: 20px;
   border: 1px solid color-mix(in srgb, var(--ds-status-color) 36%, transparent);
-  border-radius: 999px;
+  border-radius: var(--ds-radius-xs);
   background: color-mix(in srgb, var(--ds-status-color) 9%, var(--ds-color-surface-1));
   color: color-mix(in srgb, var(--ds-status-color) 82%, white);
   font-family: var(--ds-font-mono);
   font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.075em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   line-height: 1;
-  padding: 0 9px;
+  padding: 0 7px;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -117,7 +123,7 @@
     linear-gradient(135deg, color-mix(in srgb, var(--ds-metric-tone) 7%, transparent), transparent 55%),
     var(--ds-color-surface-1);
   box-shadow: var(--ds-shadow-panel);
-  padding: var(--ds-space-4);
+  padding: var(--ds-space-3);
 }
 
 .ds-metric-card::before {
@@ -153,8 +159,8 @@
   color: var(--ds-color-text-muted);
   font-family: var(--ds-font-mono);
   font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -206,8 +212,7 @@
 }
 
 .wm-panel-slot[data-runtime-phase]:not([data-runtime-phase='idle']) {
-  outline: 1px solid color-mix(in srgb, var(--wm-runtime-phase-color) 34%, transparent);
-  outline-offset: -1px;
+  outline: none;
 }
 
 @media (max-width: 720px) {

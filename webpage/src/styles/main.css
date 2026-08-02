@@ -9338,10 +9338,7 @@ body {
   font-family: var(--font-body);
   font-size: 12px;
   line-height: 1.5;
-  background:
-    linear-gradient(180deg, rgba(26, 82, 43, 0.14) 0%, transparent 14%),
-    radial-gradient(circle at 78% -10%, rgba(57, 255, 115, 0.08), transparent 28%),
-    linear-gradient(180deg, #111312 0%, #090a0a 38%, #050606 100%);
+  background: var(--ds-color-canvas);
 }
 
 html[lang='zh-CN'] .wm-shell {
@@ -9352,15 +9349,14 @@ html[lang='zh-CN'] .wm-shell {
 
 .wm-promo {
   position: relative;
-  height: 52px;
-  border-bottom: 1px solid rgba(62, 255, 121, 0.18);
-  background:
-    linear-gradient(90deg, rgba(15, 55, 29, 0.98) 0%, rgba(10, 29, 19, 0.98) 58%, rgba(7, 20, 14, 0.98) 100%);
+  height: 36px;
+  border-bottom: 1px solid rgba(74, 222, 128, 0.15);
+  background: linear-gradient(90deg, rgba(74, 222, 128, 0.055), rgba(74, 222, 128, 0.11), rgba(74, 222, 128, 0.055));
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(0, 980px) minmax(170px, 1fr);
+  grid-template-columns: minmax(96px, 1fr) minmax(0, 980px) minmax(96px, 1fr);
   align-items: center;
   column-gap: 16px;
-  padding: 0 28px;
+  padding: 0 16px;
   font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: normal;
@@ -9368,14 +9364,7 @@ html[lang='zh-CN'] .wm-shell {
 }
 
 .wm-promo::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(90deg, transparent 0%, rgba(115, 255, 159, 0.16) 48%, transparent 62%);
-  transform: translateX(-120%);
-  animation: wm-promo-scan 5.5s ease-in-out infinite;
-  pointer-events: none;
+  content: none;
 }
 
 .wm-pro-badge {
@@ -9384,11 +9373,12 @@ html[lang='zh-CN'] .wm-shell {
   justify-self: start;
   padding: 2px 8px;
   border-radius: 3px;
-  background: linear-gradient(180deg, #1fff6b 0%, #0fb84c 100%);
-  color: #051308;
+  border: 1px solid rgba(74, 222, 128, 0.24);
+  background: rgba(74, 222, 128, 0.08);
+  color: var(--wm-green);
   font-size: 10px;
   font-weight: 700;
-  box-shadow: 0 0 24px rgba(57, 255, 115, 0.2);
+  box-shadow: none;
 }
 
 .wm-promo-copy {
@@ -9429,17 +9419,16 @@ html[lang='zh-CN'] .wm-promo-copy {
 }
 
 .wm-toolbar {
-  min-height: 52px;
+  min-height: 48px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(180deg, rgba(24, 24, 24, 0.96) 0%, rgba(15, 16, 16, 0.98) 100%);
+  background: var(--ds-color-surface-1);
   display: grid;
   grid-template-columns: max-content minmax(300px, 1fr) max-content;
   align-items: center;
   gap: 12px;
-  padding: 6px 14px;
+  padding: 4px 14px;
   font-family: var(--font-body);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.18);
+  box-shadow: none;
 }
 
 .wm-toolbar-left,
@@ -9740,14 +9729,14 @@ html[lang='zh-CN'] .wm-promo-copy {
 }
 
 .wm-workspace-mark {
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
   display: inline-grid;
   place-items: center;
   border-color: rgba(57, 255, 115, 0.2);
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(34, 255, 102, 0.16), rgba(17, 80, 42, 0.42));
+  border-radius: 4px;
+  background: rgba(57, 255, 115, 0.08);
   color: var(--wm-green);
 }
 
@@ -9923,50 +9912,48 @@ html[lang='zh-CN'] .wm-promo-copy {
   height: 60vh;
   min-height: 540px;
   max-height: 90vh;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--ds-color-border);
   border-left: 0;
   border-right: 0;
-  background:
-    linear-gradient(180deg, rgba(24, 24, 24, 0.96), rgba(10, 10, 10, 0.98));
+  background: var(--ds-color-canvas);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   position: relative;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  box-shadow: none;
 }
 
 .wm-map-header {
   display: grid;
-  grid-template-columns: minmax(230px, max-content) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(210px, max-content) minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 14px 16px 12px;
-  min-height: 76px;
+  gap: 14px;
+  padding: 6px 14px;
+  min-height: 52px;
   font-family: var(--font-mono);
-  background:
-    linear-gradient(90deg, rgba(18, 18, 18, 0.98) 0%, rgba(15, 17, 17, 0.98) 52%, rgba(18, 18, 18, 0.98) 100%);
+  background: var(--ds-color-surface-1);
 }
 
 .wm-map-heading {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  min-width: 220px;
+  gap: 2px;
+  min-width: 210px;
 }
 
 .wm-map-kicker {
   color: #75ff95;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 1.8px;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
   text-transform: uppercase;
   opacity: 0.84;
 }
 
 .wm-map-title {
-  font-size: 23px;
-  font-weight: 800;
+  font-size: 17px;
+  font-weight: 700;
   line-height: 1;
   letter-spacing: 0.6px;
 }
@@ -9975,16 +9962,14 @@ html[lang='zh-CN'] .wm-promo-copy {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 7px;
   min-width: 0;
   max-width: 100%;
-  padding: 7px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012)),
-    rgba(5, 7, 12, 0.74);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -10000,20 +9985,20 @@ html[lang='zh-CN'] .wm-promo-copy {
 
 .wm-status-chip {
   flex: 0 0 auto;
-  padding: 5px 9px;
-  border-radius: 6px;
+  padding: 3px 6px;
+  border-radius: 3px;
   color: #07150a;
   background: #39ff73;
-  font-size: 10px;
-  font-weight: 900;
+  font-size: 9px;
+  font-weight: 600;
   letter-spacing: 0;
   white-space: nowrap;
 }
 
 .wm-map-clock {
   color: #f5f8ff;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0;
   white-space: nowrap;
 }
@@ -10024,7 +10009,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   gap: 5px;
   min-width: 0;
   color: rgba(186, 199, 213, 0.76);
-  font: 800 10px/1 var(--font-mono);
+  font: 600 9px/1 var(--font-mono);
   text-transform: uppercase;
   white-space: nowrap;
   flex: 0 0 auto;
@@ -10034,7 +10019,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   min-width: 0;
   overflow: hidden;
   color: #fff1cf;
-  font-weight: 900;
+  font-weight: 700;
   text-overflow: ellipsis;
 }
 
@@ -10050,11 +10035,11 @@ html[lang='zh-CN'] .wm-promo-copy {
 
 .wm-map-source-status {
   gap: 4px;
-  padding: 4px 6px;
+  padding: 3px 5px;
   border: 1px solid rgba(83, 218, 255, 0.22);
-  border-radius: 5px;
+  border-radius: 3px;
   color: #b6c9d7;
-  font: 800 9px/1 var(--font-mono);
+  font: 600 8px/1 var(--font-mono);
   white-space: nowrap;
 }
 
@@ -10104,7 +10089,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(5, 8, 12, 0.86);
   color: rgba(186, 199, 213, 0.78);
-  font: 800 9px/1 var(--font-mono);
+  font: 600 9px/1 var(--font-mono);
   text-transform: uppercase;
 }
 
@@ -10122,7 +10107,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   border-radius: 4px;
   color: rgba(222, 232, 242, 0.7);
   background: rgba(255, 255, 255, 0.035);
-  font: 800 9px/1 var(--font-mono);
+  font: 600 9px/1 var(--font-mono);
   text-transform: uppercase;
 }
 
@@ -10156,20 +10141,20 @@ html[lang='zh-CN'] .wm-promo-copy {
 .wm-map-view-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px;
+  gap: 0;
+  padding: 2px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 6px;
   background: rgba(8, 8, 8, 0.64);
 }
 
 .wm-map-view-toggle button {
   min-width: 0;
-  padding: 8px 10px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
   color: rgba(216, 226, 235, 0.74);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -15645,19 +15630,31 @@ html[lang='zh-CN'] .wm-promo-copy {
   }
 
   .wm-map-header {
+    grid-template-areas:
+      'heading view'
+      'status status';
     grid-template-columns: minmax(0, 1fr) auto;
-    padding: 12px;
+    gap: 8px;
+    padding: 10px 12px;
   }
 
   .wm-map-heading {
+    grid-area: heading;
     min-width: 0;
   }
 
   .wm-map-status-strip {
-    grid-column: 1 / -1;
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 8px;
+    grid-area: status;
+    align-items: center;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .wm-map-view-toggle {
+    grid-area: view;
+    align-self: start;
+    justify-self: end;
   }
 
   .wm-world-event-map-toolbar {
