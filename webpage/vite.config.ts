@@ -52,7 +52,14 @@ export default defineConfig(({ mode }) => {
   const apiBase = env.VITE_POLYDATA_API_BASE_URL || '';
   const target = env.VITE_POLYDATA_PROXY_TARGET
     || (apiBase.startsWith('http') ? apiBase : `http://${apiHost}:${apiPort}`);
+  const mapTilesTarget = env.POLYDATA_MAP_TILES_TARGET || 'https://maps.worldmonitor.app';
   const buildId = String(env.GITHUB_SHA || env.POLYDATA_BUILD_SHA || repositorySha()).slice(0, 40);
+
+  const mapTilesProxy = {
+    target: mapTilesTarget,
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/map-tiles/, ''),
+  };
 
   return {
     plugins: [preact(), pwaServiceWorker(buildId)],
@@ -72,6 +79,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/wm-api/, ''),
         },
+        '/map-tiles': mapTilesProxy,
+      },
+    },
+    preview: {
+      proxy: {
+        '/map-tiles': mapTilesProxy,
       },
     },
   };

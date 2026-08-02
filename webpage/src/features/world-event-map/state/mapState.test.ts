@@ -10,6 +10,21 @@ import {
 import type { GeoEvent, HazardEvent } from '../domain/types';
 
 describe('World Event Map state', () => {
+  it('defaults to hazard and risk intelligence while keeping aviation opt-in', () => {
+    const defaults = defaultWorldEventMapState();
+    expect(defaults.activeLayerIds).toEqual([
+      'weather-alerts',
+      'earthquakes-volcanoes',
+      'wildfires',
+      'extreme-temperature',
+      'climate-anomalies',
+      'ucdp',
+      'sanctions-country-risk',
+    ]);
+    expect(defaults.activeLayerIds).not.toContain('air-routes');
+    expect(defaults.aviationLens).toBe('trunk');
+  });
+
   it('applies URL state after stored state and round-trips canonical fields', () => {
     const stored = readStoredWorldEventMapState(JSON.stringify({
       region: 'asia',
@@ -60,9 +75,7 @@ describe('World Event Map state', () => {
     const initial = defaultWorldEventMapState();
     const asia = worldEventMapReducer(initial, { type: 'set-region', region: 'asia' });
     expect(asia).toMatchObject({ region: 'asia', center: { lon: 101, lat: 29 }, zoom: 2.35 });
-    const withoutRoutes = worldEventMapReducer(asia, { type: 'toggle-layer', layerId: 'air-routes' });
-    expect(withoutRoutes.activeLayerIds).not.toContain('air-routes');
-    const withRoutes = worldEventMapReducer(withoutRoutes, { type: 'toggle-layer', layerId: 'air-routes' });
+    const withRoutes = worldEventMapReducer(asia, { type: 'toggle-layer', layerId: 'air-routes' });
     expect(withRoutes.activeLayerIds).toContain('air-routes');
     const trunk = worldEventMapReducer(withRoutes, { type: 'set-aviation-lens', lens: 'trunk' });
     expect(trunk.aviationLens).toBe('trunk');

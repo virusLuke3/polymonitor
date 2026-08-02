@@ -25,6 +25,15 @@ const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['se
   properties: {},
 });
 
+const aviationState = () => {
+  const state = defaultWorldEventMapState();
+  return {
+    ...state,
+    activeLayerIds: [...state.activeLayerIds, 'air-routes'],
+    aviationLens: 'all' as const,
+  };
+};
+
 describe('world event layer factories', () => {
   it('uses stable layer ids and clusters dense global points', () => {
     const state = defaultWorldEventMapState();
@@ -79,10 +88,7 @@ describe('world event layer factories', () => {
   });
 
   it('renders aviation reference arcs, route runners, aircraft and hubs as a dedicated lens', () => {
-    const state = {
-      ...defaultWorldEventMapState(),
-      activeLayerIds: [...defaultWorldEventMapState().activeLayerIds, 'air-routes'],
-    };
+    const state = aviationState();
     const route: GeoEvent = {
       ...pointEvent('route:0', 0, 0),
       category: 'infrastructure',
@@ -126,16 +132,13 @@ describe('world event layer factories', () => {
       geometry: { type: 'LineString', coordinates: [[0, 0], [3, 3]] },
       properties: { mapEntity: 'air-route', routeId: 'above-area', layer: 'trunk' },
     };
-    const enabled = { ...state, activeLayerIds: [...state.activeLayerIds, 'air-routes'] };
+    const enabled = { ...aviationState(), activeLayerIds: [...state.activeLayerIds, 'air-routes'] };
     const ids = (createWorldEventLayers([area, route], enabled) as Layer[]).map((layer) => layer.id);
     expect(ids.indexOf('world-event-country-risk')).toBeLessThan(ids.indexOf('aviation-route-core'));
   });
 
   it('uses an icon layer instead of a font glyph for animated aircraft', () => {
-    const state = {
-      ...defaultWorldEventMapState(),
-      activeLayerIds: [...defaultWorldEventMapState().activeLayerIds, 'air-routes'],
-    };
+    const state = aviationState();
     const flight: GeoEvent = {
       ...pointEvent('flight:0', 0, 0),
       category: 'infrastructure',
@@ -158,7 +161,7 @@ describe('world event layer factories', () => {
         trafficScore: 220 - index,
       },
     }));
-    const selected = selectAviationRenderData(routes, defaultWorldEventMapState());
+    const selected = selectAviationRenderData(routes, aviationState());
 
     expect(selected.routes).toHaveLength(120);
     expect(new Set(selected.routes.map((route) => route.properties.routeId)).size).toBe(120);
@@ -182,14 +185,14 @@ describe('world event layer factories', () => {
       category: 'infrastructure',
       properties: { mapEntity: 'live-aircraft', heading: 90 },
     }));
-    const selected = selectAviationRenderData([...routes, ...flights, ...live], defaultWorldEventMapState());
+    const selected = selectAviationRenderData([...routes, ...flights, ...live], aviationState());
 
     expect(selected.routes).toHaveLength(120);
     expect(selected.routeMotionGroups).toHaveLength(48);
     expect(selected.flights).toHaveLength(30);
     expect(selected.flightMotionGroups).toHaveLength(30);
     expect(selected.liveAircraft).toHaveLength(24);
-    expect(aviationLayerStatsForState([...routes, ...flights, ...live], defaultWorldEventMapState()))
+    expect(aviationLayerStatsForState([...routes, ...flights, ...live], aviationState()))
       .toMatchObject({
         visibleRoutes: 120,
         visibleFlights: 30,
@@ -198,7 +201,7 @@ describe('world event layer factories', () => {
 
     const staticSections = createAviationStaticLayerSections(
       [...routes, ...flights, ...live],
-      defaultWorldEventMapState(),
+      aviationState(),
     );
     const dynamicLayers = createAviationDynamicLayers(staticSections.data, 1) as Layer[];
     expect((staticSections.routeLayers as Layer[]).map((layer) => layer.id)).toEqual([
@@ -236,7 +239,7 @@ describe('world event layer factories', () => {
     };
     const selected = selectAviationRenderData(
       [nearRoute, distantRoute, nearAircraft, distantAircraft],
-      { ...defaultWorldEventMapState(), zoom: 3 },
+      { ...aviationState(), zoom: 3 },
       [-20, -20, 20, 20],
     );
 

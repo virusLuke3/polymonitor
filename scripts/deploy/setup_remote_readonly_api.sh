@@ -235,6 +235,20 @@ server {
         return 403;
     }
 
+    location = /map-tiles/planet.pmtiles {
+        proxy_pass https://maps.worldmonitor.app/planet.pmtiles;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header Host maps.worldmonitor.app;
+        proxy_set_header Range \$http_range;
+        proxy_set_header If-Range \$http_if_range;
+        proxy_force_ranges on;
+        proxy_buffering off;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
     location /wm-api/ {
         proxy_pass http://127.0.0.1:${API_PORT}/;
         proxy_http_version 1.1;

@@ -41,6 +41,23 @@ server {
         return 403;
     }
 
+    # Same-origin Range proxy for the ranked Protomaps/PMTiles basemap. The
+    # upstream CDN only grants CORS to WorldMonitor itself, so browsers must
+    # not request it directly from the Polymonitor origin.
+    location = /map-tiles/planet.pmtiles {
+        proxy_pass https://maps.worldmonitor.app/planet.pmtiles;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header Host maps.worldmonitor.app;
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_force_ranges on;
+        proxy_buffering off;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
     # The connection zone is declared by
     # /etc/nginx/conf.d/polydata-lob-limits.conf. Bound slow LOB reads per
     # client so they cannot consume every main API request slot.

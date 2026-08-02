@@ -20,10 +20,10 @@ export interface WorldEventMapState {
   aviationRiskSource: AviationRiskSource;
 }
 
-// v4 restores aviation for existing visitors.  v3 persisted the temporary
-// no-routes default, which made the primary 2D map look as if its transport
-// layer had disappeared even after the renderer was repaired.
-export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v4';
+// v5 restores the WorldMonitor information hierarchy for existing visitors:
+// real-world hazards and country risk are primary; aviation remains an
+// explicitly enabled reference layer instead of covering the global view.
+export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v5';
 export const WORLD_EVENT_TIME_RANGES: readonly WorldEventTimeRange[] = ['1h', '6h', '24h', '48h', '7d', 'all'];
 export const WORLD_EVENT_SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 export const AVIATION_LENS_MODES: readonly AviationLensMode[] = ['all', 'trunk', 'watch'];
@@ -41,7 +41,7 @@ export function defaultWorldEventMapState(): WorldEventMapState {
     selectedEventId: null,
     hoveredEventId: null,
     basemapTheme: 'dark',
-    aviationLens: 'all',
+    aviationLens: 'trunk',
     aviationRiskSource: 'all',
   };
 }

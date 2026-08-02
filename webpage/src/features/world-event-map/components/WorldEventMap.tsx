@@ -13,6 +13,7 @@ import { worldEventLayerById } from '../config/layerRegistry';
 import { EventInspector } from './EventInspector';
 import { EventList } from './EventList';
 import { AviationLens } from './AviationLens';
+import { getWeatherBasemapAttribution } from '@/config/weatherBasemap';
 
 export type WorldEventMapProps = {
   events: GeoEvent[];
@@ -217,7 +218,7 @@ export function WorldEventMap({
       </div>
       <div className="wm-world-event-attribution">
         {rendererKind === 'webgl' && basemapState === 'primary-ready'
-          ? '© OpenFreeMap · © OpenStreetMap contributors'
+          ? getWeatherBasemapAttribution()
           : 'LOCAL COUNTRY GEOMETRY · EVENT SOURCES IN INSPECTOR'}
       </div>
       {rendererError && basemapState === 'failed' ? (

@@ -46,6 +46,7 @@ export class DeckMapRenderer implements MapRenderer {
   private state: WorldEventMapState | null = null;
   private events: GeoEvent[] = [];
   private fallbackApplied = false;
+  private primaryBasemapErrorCount = 0;
   private fallbackTimer: number | null = null;
   private contextRecoveryTimer: number | null = null;
   private contextRecoveryAttempts = 0;
@@ -72,9 +73,11 @@ export class DeckMapRenderer implements MapRenderer {
     this.callbacks = callbacks;
     this.emitBasemapState('initializing');
     const state = this.state;
+    const primaryStyle = await getWeatherMapStyle('dark');
+    if (this.destroyed) return;
     const map = new maplibregl.Map({
       container,
-      style: getWeatherMapStyle('dark'),
+      style: primaryStyle,
       center: state ? [state.center.lon, state.center.lat] : [20, 24],
       zoom: state?.zoom ?? 1.25,
       renderWorldCopies: false,
@@ -140,8 +143,8 @@ export class DeckMapRenderer implements MapRenderer {
 
     this.fallbackTimer = window.setTimeout(() => {
       if (!this.map || this.fallbackApplied || this.destroyed) return;
-      this.applyLocalFallback(new Error('Primary basemap did not become ready within 2.5 seconds.'));
-    }, 2_500);
+      this.applyLocalFallback(new Error('Primary basemap did not become ready within 10 seconds.'));
+    }, 10_000);
   }
 
   setState(state: WorldEventMapState) {
@@ -315,7 +318,8 @@ export class DeckMapRenderer implements MapRenderer {
   private handleMapError = (event: { error?: Error; message?: string }) => {
     const message = event.error?.message || event.message || 'Unknown MapLibre error';
     if (!this.fallbackApplied && /fetch|ajax|cors|network|403|forbidden|tile|style/i.test(message)) {
-      this.applyLocalFallback(new Error(message));
+      this.primaryBasemapErrorCount += 1;
+      if (this.primaryBasemapErrorCount >= 2) this.applyLocalFallback(new Error(message));
       return;
     }
     this.callbacks?.onError(new Error(message));
