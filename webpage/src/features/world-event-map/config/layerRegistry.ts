@@ -251,7 +251,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     hint: 'REFERENCE',
     categories: ['infrastructure'],
     sourceKeys: ['global-transport-shipping'],
-    defaultEnabled: false,
+    defaultEnabled: true,
     selectable: true,
     minZoom: 1,
     labelMinZoom: 4,
@@ -266,7 +266,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
       { label: 'Aircraft', color: '#ffd654' },
     ],
     explanation: {
-      purpose: 'Optional low-priority aviation topology reference.',
+      purpose: 'Low-priority aviation topology reference with a bounded default trunk view.',
       sources: ['OpenFlights', 'OpenSky/ADSB where available'],
       freshness: 'Static topology plus source-specific live snapshots.',
       confidence: 'Provider-native coordinates and identifiers.',

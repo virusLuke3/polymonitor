@@ -20,10 +20,10 @@ export interface WorldEventMapState {
   aviationRiskSource: AviationRiskSource;
 }
 
-// v6 restores WorldMonitor's seven-day discovery window for existing visitors:
-// real-world hazards and country risk are primary; aviation remains an
-// explicitly enabled reference layer instead of covering the global view.
-export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v6';
+// v7 restores the bounded trunk aviation reference for existing visitors.
+// Full topology and live-aircraft detail remain Aviation Lens choices, while
+// the default retains low-contrast route runners and illustrative aircraft.
+export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v7';
 export const WORLD_EVENT_TIME_RANGES: readonly WorldEventTimeRange[] = ['1h', '6h', '24h', '48h', '7d', 'all'];
 export const WORLD_EVENT_SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 export const AVIATION_LENS_MODES: readonly AviationLensMode[] = ['all', 'trunk', 'watch'];

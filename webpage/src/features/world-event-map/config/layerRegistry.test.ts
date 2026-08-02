@@ -27,6 +27,7 @@ describe('World Event Map layer registry', () => {
       'wildfires',
       'extreme-temperature',
       'climate-anomalies',
+      'air-routes',
       'ucdp',
       'sanctions-country-risk',
     ]);
@@ -37,7 +38,7 @@ describe('World Event Map layer registry', () => {
     expect(worldEventLayerById('sanctions-country-risk')?.selectable).toBe(true);
     expect(worldEventLayerById('intel-hotspots')?.defaultEnabled).toBe(false);
     expect(worldEventLayerById('sanctions-country-risk')?.defaultEnabled).toBe(true);
-    expect(worldEventLayerById('air-routes')?.defaultEnabled).toBe(false);
+    expect(worldEventLayerById('air-routes')?.defaultEnabled).toBe(true);
   });
 
   it('declares source, legend and limitations for every layer', () => {
