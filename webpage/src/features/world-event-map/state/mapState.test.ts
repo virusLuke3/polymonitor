@@ -23,6 +23,7 @@ describe('World Event Map state', () => {
     ]);
     expect(defaults.activeLayerIds).not.toContain('air-routes');
     expect(defaults.aviationLens).toBe('trunk');
+    expect(defaults.timeRange).toBe('7d');
   });
 
   it('applies URL state after stored state and round-trips canonical fields', () => {

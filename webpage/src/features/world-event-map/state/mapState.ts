@@ -20,10 +20,10 @@ export interface WorldEventMapState {
   aviationRiskSource: AviationRiskSource;
 }
 
-// v5 restores the WorldMonitor information hierarchy for existing visitors:
+// v6 restores WorldMonitor's seven-day discovery window for existing visitors:
 // real-world hazards and country risk are primary; aviation remains an
 // explicitly enabled reference layer instead of covering the global view.
-export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v5';
+export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v6';
 export const WORLD_EVENT_TIME_RANGES: readonly WorldEventTimeRange[] = ['1h', '6h', '24h', '48h', '7d', 'all'];
 export const WORLD_EVENT_SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 export const AVIATION_LENS_MODES: readonly AviationLensMode[] = ['all', 'trunk', 'watch'];
@@ -36,7 +36,7 @@ export function defaultWorldEventMapState(): WorldEventMapState {
     zoom: global.zoom,
     region: 'global',
     activeLayerIds: selectableWorldEventLayers().filter((layer) => layer.defaultEnabled).map((layer) => layer.id),
-    timeRange: '24h',
+    timeRange: '7d',
     severities: [...WORLD_EVENT_SEVERITIES],
     selectedEventId: null,
     hoveredEventId: null,
