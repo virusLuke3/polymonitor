@@ -134,9 +134,24 @@ function matchesRiskSource(event: GeoEvent, source: AviationRiskSource) {
 }
 
 function matchesLens(event: GeoEvent, lens: AviationLensMode, source: AviationRiskSource) {
-  if (lens === 'trunk') return stringProperty(event, 'layer') === 'trunk';
   if (lens === 'watch') return isWatch(event) && matchesRiskSource(event, source);
   return true;
+}
+
+function lensPriority(event: GeoEvent, lens: AviationLensMode) {
+  return lens === 'trunk' && stringProperty(event, 'layer') === 'trunk' ? 1 : 0;
+}
+
+function trunkEndpointCodes(events: readonly GeoEvent[]) {
+  const codes = new Set<string>();
+  for (const event of events) {
+    if (entity(event) !== 'air-route' || stringProperty(event, 'layer') !== 'trunk') continue;
+    for (const key of ['fromCode', 'toCode']) {
+      const code = stringProperty(event, key);
+      if (code) codes.add(code);
+    }
+  }
+  return codes;
 }
 
 function routePriority(event: GeoEvent) {
@@ -234,7 +249,10 @@ function visibleRouteGroups(
   return groupSegments(routes, 'routeId')
     .filter((group) => matchesLens(group.event, state.aviationLens, state.aviationRiskSource))
     .filter((group) => groupIntersectsViewport(group, viewport))
-    .sort((left, right) => routePriority(right.event) - routePriority(left.event))
+    .sort((left, right) => (
+      lensPriority(right.event, state.aviationLens) - lensPriority(left.event, state.aviationLens)
+      || routePriority(right.event) - routePriority(left.event)
+    ))
     .slice(0, budget.routes);
 }
 
@@ -247,7 +265,10 @@ function visibleFlightGroups(
   return groupSegments(flights, 'flightId')
     .filter((group) => matchesLens(group.event, state.aviationLens, state.aviationRiskSource))
     .filter((group) => groupIntersectsViewport(group, viewport))
-    .sort((left, right) => aircraftPriority(right.event) - aircraftPriority(left.event))
+    .sort((left, right) => (
+      lensPriority(right.event, state.aviationLens) - lensPriority(left.event, state.aviationLens)
+      || aircraftPriority(right.event) - aircraftPriority(left.event)
+    ))
     .slice(0, budget.seededAircraft);
 }
 
@@ -417,11 +438,18 @@ export function selectAviationRenderData(
   const flightGroups = visibleFlightGroups(
     events.filter((event) => entity(event) === 'air-flight'), state, visibleViewport, budget,
   );
+  const trunkEndpoints = trunkEndpointCodes(events);
   const hubs = events
     .filter((event) => entity(event) === 'air-hub')
     .filter((event) => matchesLens(event, state.aviationLens, state.aviationRiskSource))
     .filter((event) => pointIsVisible(event, visibleViewport))
-    .sort((left, right) => numberProperty(right, 'routeCount') - numberProperty(left, 'routeCount'))
+    .sort((left, right) => (
+      (state.aviationLens === 'trunk'
+        ? Number(trunkEndpoints.has(stringProperty(right, 'code')))
+          - Number(trunkEndpoints.has(stringProperty(left, 'code')))
+        : 0)
+      || numberProperty(right, 'routeCount') - numberProperty(left, 'routeCount')
+    ))
     .slice(0, budget.hubs);
   const liveAircraft = events
     .filter((event) => entity(event) === 'live-aircraft')

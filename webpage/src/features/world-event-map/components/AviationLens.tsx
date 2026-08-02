@@ -86,7 +86,11 @@ export function AviationLens({
           ))}
         </div>
       ) : null}
-      <p>Animated topology is contextual. A route line does not prove that a flight is operating.</p>
+      <p>
+        {state.aviationLens === 'trunk'
+          ? 'Trunk prioritizes classified corridors, then fills the bounded view with the highest-traffic routes. Route lines do not prove that flights are operating.'
+          : 'Animated topology is contextual. A route line does not prove that a flight is operating.'}
+      </p>
     </aside>
   );
 }

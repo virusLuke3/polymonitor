@@ -260,6 +260,65 @@ describe('world event layer factories', () => {
     ]);
   });
 
+  it('fills the trunk world budget without dropping untagged hubs or live aircraft', () => {
+    const routes = Array.from({ length: 360 }, (_, index): GeoEvent => ({
+      ...pointEvent(`route:${index}`, 0, 0, 'info'),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[-80 + index, 0], [-79 + index, 5]] },
+      properties: {
+        mapEntity: 'air-route',
+        routeId: `route-${index}`,
+        fromCode: `H${String(index).padStart(2, '0')}`,
+        toCode: `H${String(index + 1).padStart(2, '0')}`,
+        layer: index < 18 ? 'trunk' : 'international',
+        trafficScore: 360 - index,
+      },
+    }));
+    const flights = Array.from({ length: 140 }, (_, index): GeoEvent => ({
+      ...pointEvent(`flight:${index}`, 0, 0, 'info'),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[-40 + index, -3], [-39 + index, 4]] },
+      properties: {
+        mapEntity: 'air-flight',
+        flightId: `flight-${index}`,
+        layer: index < 18 ? 'trunk' : 'international',
+        trafficScore: 140 - index,
+      },
+    }));
+    const hubs = Array.from({ length: 24 }, (_, index): GeoEvent => ({
+      ...pointEvent(`hub:${index}`, index, 8, 'info'),
+      category: 'infrastructure',
+      properties: {
+        mapEntity: 'air-hub',
+        code: `H${String(index).padStart(2, '0')}`,
+        routeCount: index,
+      },
+    }));
+    const live = Array.from({ length: 61 }, (_, index): GeoEvent => ({
+      ...pointEvent(`live:${index}`, index, 12, 'info'),
+      category: 'infrastructure',
+      properties: { mapEntity: 'live-aircraft', velocity: 300 - index },
+    }));
+    const selected = selectAviationRenderData(
+      [...routes, ...flights, ...hubs, ...live],
+      { ...aviationState(), aviationLens: 'trunk' },
+    );
+
+    expect(new Set(selected.routes.map((route) => route.properties.routeId)).size).toBe(86);
+    expect(selected.routes.filter((route) => route.properties.layer === 'trunk')).toHaveLength(18);
+    expect(selected.hubs).toHaveLength(12);
+    expect(selected.hubs.every((hub) => Number(String(hub.properties.code).slice(1)) <= 18)).toBe(true);
+    expect(selected.flightMotionGroups).toHaveLength(22);
+    expect(selected.flightMotionGroups.filter((group) => group.event.properties.layer === 'trunk')).toHaveLength(18);
+    expect(selected.liveAircraft).toHaveLength(17);
+
+    const watch = selectAviationRenderData(
+      [...routes, ...flights, ...hubs, ...live],
+      { ...aviationState(), aviationLens: 'watch', aviationRiskSource: 'weather' },
+    );
+    expect(watch).toMatchObject({ routes: [], hubs: [], flights: [], liveAircraft: [] });
+  });
+
   it('culls aviation paths and aircraft to a padded local viewport without hiding world-view data', () => {
     const nearRoute: GeoEvent = {
       ...pointEvent('near-route', 0, 0, 'info'),

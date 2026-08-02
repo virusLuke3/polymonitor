@@ -371,7 +371,7 @@ interface RelatedHazardMarket {
 - 战略水道异常
 - 影响能源、战争和供应链市场的运输事件
 
-当前 OpenFlights 全量航线属于静态拓扑，不能作为默认主视觉。默认态只允许显示经过预算裁剪、低对比度的 trunk 走廊、移动 route runner 和明确标记为 illustrative 的模拟飞机；完整拓扑继续由 Aviation Lens 显式开启。
+当前 OpenFlights 全量航线属于静态拓扑，不能作为默认主视觉。默认态只允许显示经过预算裁剪、低对比度的 trunk-first 骨干集合、移动 route runner 和明确标记为 illustrative 的模拟飞机；骨干集合必须优先保留显式 trunk 路线，再用高流量路线填满未使用的渲染预算。机场和实时飞机没有 route layer 字段时不得被共用过滤器清零，也不得伪造 trunk 归属；完整拓扑继续由 Aviation Lens 显式开启。
 
 Live aircraft 和完整机场/航线详情只能在用户进入 Aviation Lens 后显示。全局默认的 trunk 动画必须受 zoom 数量预算、25 fps 帧率预算、页面可见性、viewport 和 reduced-motion 生命周期约束，且不得压过灾害和风险事件。
 
