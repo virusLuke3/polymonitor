@@ -1,5 +1,6 @@
 import type { GeoEvent } from '../domain/types';
 import type { WorldEventMapState } from '../state/mapState';
+import type { WorldEventTooltipModel } from './hoverTooltip';
 
 export type BasemapState =
   | 'idle'
@@ -15,6 +16,10 @@ export interface MapRendererCallbacks {
   onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
   onEventSelect: (eventId: string | null) => void;
   onEventHover: (eventId: string | null, position?: MapHoverPosition | null) => void;
+  onHoverTooltip: (
+    tooltip: WorldEventTooltipModel | null,
+    position?: MapHoverPosition | null,
+  ) => void;
   onBasemapStateChange: (state: BasemapState) => void;
   onRendererFallbackRequested: (error: Error) => void;
   onError: (error: Error) => void;

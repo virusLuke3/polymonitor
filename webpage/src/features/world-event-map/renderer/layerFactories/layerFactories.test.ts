@@ -146,7 +146,11 @@ describe('world event layer factories', () => {
       properties: { mapEntity: 'air-flight', flightId: 'flight', phase: 0.1, speed: 0.06 },
     };
     const layers = createWorldEventLayers([flight], state, true, undefined, 5) as Layer[];
-    expect(layers.find((layer) => layer.id === 'aviation-seeded-aircraft')?.constructor.name).toBe('IconLayer');
+    const aircraftLayer = layers.find((layer) => layer.id === 'aviation-seeded-aircraft');
+    expect(aircraftLayer?.constructor.name).toBe('IconLayer');
+    expect(aircraftLayer?.props.pickable).toBe(true);
+    const picked = (aircraftLayer?.props.data as Array<{ event?: GeoEvent }>)[0];
+    expect(picked?.event?.id).toBe('flight:0');
   });
 
   it('shares the bounded aviation selection with the WebGL and SVG renderers', () => {

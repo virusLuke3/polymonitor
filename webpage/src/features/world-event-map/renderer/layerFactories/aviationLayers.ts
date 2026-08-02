@@ -584,7 +584,9 @@ export function createAviationDynamicLayers(
       getAngle: (point) => point.angle,
       getColor: (point) => point.color,
       sizeUnits: 'pixels',
-      pickable: false,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: [255, 250, 198, 150],
     }));
   }
   return layers;

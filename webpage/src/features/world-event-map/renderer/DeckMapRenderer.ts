@@ -114,7 +114,7 @@ export class DeckMapRenderer implements MapRenderer {
         return isHovering || Boolean(this.hoveredCountryIso2) ? 'pointer' : 'grab';
       },
       getTooltip: (info: PickingInfo<WorldEventPickedObject>) => {
-        const html = worldEventTooltipHtml(info.object);
+        const html = worldEventTooltipHtml(info.object, info.layer?.id || '');
         return html ? { html } : null;
       },
       onHover: (info: PickingInfo<WorldEventPickedObject>) => {
@@ -257,6 +257,8 @@ export class DeckMapRenderer implements MapRenderer {
     this.clearFallbackTimer();
     this.clearContextRecoveryTimer();
     this.cancelAnimationLoop();
+    this.countryHoverQueryController?.cancel();
+    this.clearAllHover();
     const map = this.map;
     if (map) {
       map.off('style.load', this.handleStyleLoad);
@@ -281,7 +283,6 @@ export class DeckMapRenderer implements MapRenderer {
     this.staticLayerSections = null;
     this.aviationLayerSections = null;
     this.overlayMounted = false;
-    this.countryHoverQueryController?.cancel();
     this.countryHoverQueryController = null;
     this.deckHoverActive = false;
     this.hoveredDeckEventId = null;
@@ -347,7 +348,7 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleMoveStart = () => {
     this.countryHoverQueryController?.cancel();
-    this.clearCountryHover();
+    this.clearAllHover();
   };
 
   private handleCountryHoverMove = (event: MapMouseEvent) => {
@@ -452,12 +453,11 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   private clearAllHover() {
+    const hadDeckEventHover = this.hoveredDeckEventId != null;
     this.deckHoverActive = false;
     this.clearCountryHover();
-    if (this.hoveredDeckEventId != null) {
-      this.hoveredDeckEventId = null;
-      this.callbacks?.onEventHover(null);
-    }
+    this.hoveredDeckEventId = null;
+    if (hadDeckEventHover) this.callbacks?.onEventHover(null);
   }
 
   private updateMapCursor() {

@@ -13,6 +13,7 @@ import type {
   MapRenderer,
   MapRendererCallbacks,
 } from '../renderer/MapRenderer';
+import type { WorldEventTooltipModel } from '../renderer/hoverTooltip';
 import { inspectWebGL2Support } from '../renderer/webglSupport';
 import { worldEventLayerById } from '../config/layerRegistry';
 import { EventInspector } from './EventInspector';
@@ -54,13 +55,10 @@ export function WorldEventMap({
   const [rendererKind, setRendererKind] = useState<'webgl' | 'svg'>('webgl');
   const [rendererError, setRendererError] = useState<string | null>(null);
   const [hoverPosition, setHoverPosition] = useState<MapHoverPosition | null>(null);
+  const [hoverTooltip, setHoverTooltip] = useState<WorldEventTooltipModel | null>(null);
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === state.selectedEventId) || null,
     [events, state.selectedEventId],
-  );
-  const hoveredEvent = useMemo(
-    () => events.find((event) => event.id === state.hoveredEventId) || null,
-    [events, state.hoveredEventId],
   );
   const legendItems = useMemo(
     () => state.activeLayerIds.flatMap((layerId) => worldEventLayerById(layerId)?.legend || []),
@@ -92,6 +90,10 @@ export function WorldEventMap({
       onEventHover: (eventId, position) => {
         callbackRef.current.onEventHover(eventId);
         setHoverPosition(eventId ? position || null : null);
+      },
+      onHoverTooltip: (tooltip, position) => {
+        setHoverTooltip(tooltip);
+        setHoverPosition(tooltip ? position || null : null);
       },
       onBasemapStateChange: (nextState) => {
         if (!disposed) setBasemapState(nextState);
@@ -176,14 +178,15 @@ export function WorldEventMap({
         tabIndex={0}
         aria-label="World event map. Use pointer or keyboard controls to explore active real-world events."
       />
-      {rendererKind === 'svg' && hoveredEvent && !selectedEvent && hoverPosition ? (
+      {rendererKind === 'svg' && hoverTooltip && !selectedEvent && hoverPosition ? (
         <div
-          className="wm-weather-deck-tooltip wm-world-event-svg-tooltip"
+          className="wm-weather-deck-tooltip wm-world-event-svg-tooltip wm-world-event-tooltip"
           role="status"
           style={{ left: `${hoverPosition.x}px`, top: `${hoverPosition.y}px` }}
         >
-          <strong>{hoveredEvent.title}</strong>
-          <span>{hoveredEvent.locationLabel || hoveredEvent.severity.toUpperCase()}</span>
+          <span className="wm-world-event-tooltip-kicker">{hoverTooltip.kicker}</span>
+          <strong>{hoverTooltip.title}</strong>
+          {hoverTooltip.details.map((detail) => <small key={detail}>{detail}</small>)}
         </div>
       ) : null}
       {selectedEvent ? (

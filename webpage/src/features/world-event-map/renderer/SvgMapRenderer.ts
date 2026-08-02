@@ -32,7 +32,11 @@ import {
   boundedAnimationDelta,
   MAP_ANIMATION_FRAME_INTERVAL_MS,
 } from './animationClock';
-import type { MapRenderer, MapRendererCallbacks } from './MapRenderer';
+import type { MapHoverPosition, MapRenderer, MapRendererCallbacks } from './MapRenderer';
+import {
+  worldEventTooltipModel,
+  type WorldEventPickedObject,
+} from './hoverTooltip';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const LOCAL_BASEMAP_URL = '/map-data/world-countries.geojson';
@@ -120,6 +124,12 @@ export class SvgMapRenderer implements MapRenderer {
   private paused = false;
   private reducedMotion = false;
   private animationFrame: number | null = null;
+  private hoverFrame: number | null = null;
+  private pendingHover: {
+    eventId: string | null;
+    tooltip: ReturnType<typeof worldEventTooltipModel>;
+    position: MapHoverPosition | null;
+  } | null = null;
   private lastAnimationTimestamp: number | null = null;
   private pendingAnimationDeltaMs = 0;
   private animationTime = 0;
@@ -190,6 +200,7 @@ export class SvgMapRenderer implements MapRenderer {
 
   pause() {
     this.paused = true;
+    this.clearHover();
     this.cancelAnimationLoop();
   }
 
@@ -202,6 +213,7 @@ export class SvgMapRenderer implements MapRenderer {
 
   destroy() {
     this.destroyed = true;
+    this.clearHover();
     this.cancelAnimationLoop();
     this.clearBasemapTimer();
     this.basemapController?.abort();
@@ -387,6 +399,13 @@ export class SvgMapRenderer implements MapRenderer {
         center: { lon: cluster.coordinates[0], lat: cluster.coordinates[1] },
         zoom: clampWorldEventZoom(cluster.expansionZoom),
       });
+      const showClusterTooltip = (pointerEvent: PointerEvent) => {
+        this.queueHoverTooltip(cluster, pointerEvent, 'world-event-clusters');
+      };
+      group.addEventListener('pointerenter', showClusterTooltip);
+      group.addEventListener('pointermove', showClusterTooltip);
+      group.addEventListener('pointerleave', this.clearHover);
+      group.addEventListener('pointerdown', (pointerEvent) => pointerEvent.stopPropagation());
       group.addEventListener('click', expand);
       group.addEventListener('keydown', (keyboardEvent) => {
         if (keyboardEvent.key !== 'Enter' && keyboardEvent.key !== ' ') return;
@@ -473,14 +492,13 @@ export class SvgMapRenderer implements MapRenderer {
     const title = svgElement('title');
     title.textContent = `${event.title} · ${event.locationLabel || event.severity}`;
     element.append(title);
-    element.addEventListener('pointerenter', (pointerEvent) => {
-      const bounds = this.svg?.getBoundingClientRect();
-      this.callbacks?.onEventHover(event.id, bounds ? {
-        x: Math.max(12, Math.min(bounds.width - 12, pointerEvent.clientX - bounds.left + 14)),
-        y: Math.max(12, Math.min(bounds.height - 12, pointerEvent.clientY - bounds.top + 14)),
-      } : null);
-    });
-    element.addEventListener('pointerleave', () => this.callbacks?.onEventHover(null));
+    const showEventTooltip = (pointerEvent: PointerEvent) => {
+      this.queueHoverTooltip(event, pointerEvent, '', event.id);
+    };
+    element.addEventListener('pointerenter', showEventTooltip);
+    element.addEventListener('pointermove', showEventTooltip);
+    element.addEventListener('pointerleave', this.clearHover);
+    element.addEventListener('pointerdown', (pointerEvent) => pointerEvent.stopPropagation());
     element.addEventListener('click', (pointerEvent) => {
       pointerEvent.stopPropagation();
       this.callbacks?.onEventSelect(event.id);
@@ -523,6 +541,7 @@ export class SvgMapRenderer implements MapRenderer {
 
   private handlePointerDown = (event: PointerEvent) => {
     if (!this.state || event.button !== 0) return;
+    this.clearHover();
     this.drag = {
       pointerId: event.pointerId,
       x: event.clientX,
@@ -555,6 +574,44 @@ export class SvgMapRenderer implements MapRenderer {
     window.clearTimeout(this.basemapTimer);
     this.basemapTimer = null;
   }
+
+  private pointerPosition(pointerEvent: PointerEvent) {
+    const bounds = this.svg?.getBoundingClientRect();
+    return bounds ? {
+      x: Math.max(12, Math.min(bounds.width - 12, pointerEvent.clientX - bounds.left + 14)),
+      y: Math.max(12, Math.min(bounds.height - 12, pointerEvent.clientY - bounds.top + 14)),
+    } : null;
+  }
+
+  private queueHoverTooltip(
+    object: WorldEventPickedObject,
+    pointerEvent: PointerEvent,
+    layerId = '',
+    eventId: string | null = null,
+  ) {
+    this.pendingHover = {
+      eventId,
+      tooltip: worldEventTooltipModel(object, layerId),
+      position: this.pointerPosition(pointerEvent),
+    };
+    if (this.hoverFrame != null) return;
+    this.hoverFrame = window.requestAnimationFrame(() => {
+      this.hoverFrame = null;
+      const pending = this.pendingHover;
+      this.pendingHover = null;
+      if (!pending) return;
+      this.callbacks?.onEventHover(pending.eventId, pending.position);
+      this.callbacks?.onHoverTooltip(pending.tooltip, pending.position);
+    });
+  }
+
+  private clearHover = () => {
+    if (this.hoverFrame != null) window.cancelAnimationFrame(this.hoverFrame);
+    this.hoverFrame = null;
+    this.pendingHover = null;
+    this.callbacks?.onEventHover(null);
+    this.callbacks?.onHoverTooltip(null);
+  };
 
   private hasAnimatedAviation() {
     return this.state?.activeLayerIds.includes('air-routes') === true
