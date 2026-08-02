@@ -305,6 +305,8 @@
   "quality.stage.settle": "Settle",
   "shell.proBadge": "PRO",
   "shell.promo": "PolyMonitor Pro is coming — sharper Polymarket signals, less noise, and evidence-linked market briefs.",
+  "shell.promoHeadline": "PolyMonitor Pro is coming",
+  "shell.promoTagline": "sharper Polymarket signals, less noise, and evidence-linked market briefs.",
   "shell.world": "World",
   "shell.worldTitle": "World workspace",
   "shell.command": "Command palette",

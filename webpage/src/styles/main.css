@@ -9319,10 +9319,15 @@ body {
   background: #070707;
   color: var(--wm-text);
   font-family: var(--font-body);
-  text-rendering: geometricPrecision;
+  text-rendering: auto;
 }
 
 .wm-shell {
+  --font-body: var(--font-platform-mono);
+  --font-mono: var(--font-platform-mono);
+  --ds-font-display: var(--font-platform-mono);
+  --ds-font-body: var(--font-platform-mono);
+  --ds-font-mono: var(--font-platform-mono);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -9330,10 +9335,19 @@ body {
   overflow-y: auto;
   scrollbar-color: rgba(129, 142, 135, 0.46) rgba(5, 7, 6, 0.94);
   scrollbar-width: thin;
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 1.5;
   background:
     linear-gradient(180deg, rgba(26, 82, 43, 0.14) 0%, transparent 14%),
     radial-gradient(circle at 78% -10%, rgba(57, 255, 115, 0.08), transparent 28%),
     linear-gradient(180deg, #111312 0%, #090a0a 38%, #050606 100%);
+}
+
+html[lang='zh-CN'] .wm-shell {
+  --font-body: 'Noto Sans SC Variable', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', var(--font-platform-mono);
+  --ds-font-display: var(--font-body);
+  --ds-font-body: var(--font-body);
 }
 
 .wm-promo {
@@ -9348,8 +9362,8 @@ body {
   column-gap: 16px;
   padding: 0 28px;
   font-family: var(--font-mono);
-  font-size: 14px;
-  letter-spacing: 0.2px;
+  font-size: 12px;
+  letter-spacing: normal;
   overflow: hidden;
 }
 
@@ -9368,10 +9382,11 @@ body {
   position: relative;
   z-index: 1;
   justify-self: start;
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 3px;
   background: linear-gradient(180deg, #1fff6b 0%, #0fb84c 100%);
   color: #051308;
+  font-size: 10px;
   font-weight: 700;
   box-shadow: 0 0 24px rgba(57, 255, 115, 0.2);
 }
@@ -9381,12 +9396,17 @@ body {
   z-index: 1;
   min-width: 0;
   color: #b9d6b9;
-  font-weight: 600;
-  letter-spacing: 0.015em;
+  font-weight: 400;
+  letter-spacing: normal;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.wm-promo-copy strong {
+  color: var(--wm-text);
+  font-weight: 700;
 }
 
 html[lang='zh-CN'] .wm-promo-copy {
@@ -9418,7 +9438,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   align-items: center;
   gap: 12px;
   padding: 6px 14px;
-  font-family: var(--font-platform-mono);
+  font-family: var(--font-body);
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.18);
 }
 
@@ -9739,10 +9759,10 @@ html[lang='zh-CN'] .wm-promo-copy {
 
 .wm-brand {
   color: var(--wm-text);
-  font-family: var(--font-platform-mono);
+  font-family: var(--font-body);
   font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.055em;
+  letter-spacing: 2px;
   white-space: nowrap;
   text-decoration: none;
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
@@ -9754,17 +9774,17 @@ html[lang='zh-CN'] .wm-promo-copy {
 
 .wm-brand span {
   color: #8d9891;
-  margin-left: 8px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.5px;
 }
 
 .wm-live-dot {
   color: var(--wm-green);
   position: relative;
   padding-left: 12px;
-  font: 600 10px var(--font-platform-mono);
+  font: 400 10px var(--font-body);
   white-space: nowrap;
 }
 
@@ -9789,7 +9809,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   background: rgba(18, 18, 18, 0.88);
   color: rgba(236, 242, 238, 0.9);
   padding: 0 24px 0 9px;
-  font: 600 11px var(--font-platform-mono);
+  font: 400 11px var(--font-body);
   cursor: pointer;
 }
 
@@ -9821,6 +9841,8 @@ html[lang='zh-CN'] .wm-promo-copy {
   border-radius: 4px;
   background: transparent;
   color: rgba(236, 242, 238, 0.88);
+  font-weight: 400;
+  letter-spacing: normal;
   padding: 0 9px;
   cursor: pointer;
 }

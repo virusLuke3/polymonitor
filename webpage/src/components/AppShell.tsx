@@ -60,7 +60,10 @@ export function AppShell({
     <div className="wm-shell">
       <div className="wm-promo">
         <span className="wm-pro-badge">{t('shell.proBadge')}</span>
-        <span className="wm-promo-copy">{t('shell.promo')}</span>
+        <span className="wm-promo-copy">
+          <strong>{t('shell.promoHeadline')}</strong>
+          <span> — {t('shell.promoTagline')}</span>
+        </span>
       </div>
 
       <header className="wm-toolbar">
