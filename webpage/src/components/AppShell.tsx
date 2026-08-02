@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import { PwaControl } from '@/components/PwaControl';
+import { ResetWorkspaceIcon } from '@/components/icons/ShellIcons';
 import { useI18n, type MessageKey } from '@/services/i18n';
 
 const APP_VERSION = 'v0.2.1';
@@ -71,7 +72,7 @@ export function AppShell({
             aria-label={t('shell.home')}
             title={t('shell.home')}
           >
-            <span aria-hidden="true">◎</span>
+            <ResetWorkspaceIcon />
           </button>
           <a className="wm-brand" href="/" aria-label="PolyData Monitor">
             POLYDATA MONITOR <span>{APP_VERSION}</span>
@@ -120,6 +121,29 @@ export function AppShell({
                   {t(link.key)}
                 </a>
               ))}
+              <div className="wm-more-mobile-actions" role="none">
+                <a href="/account" role="menuitem">{t('nav.access')}</a>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => {
+                    onCopyLink();
+                    event.currentTarget.closest('details')?.removeAttribute('open');
+                  }}
+                >
+                  {t('shell.copyLink')}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => {
+                    onTogglePanelLibrary();
+                    event.currentTarget.closest('details')?.removeAttribute('open');
+                  }}
+                >
+                  {t('shell.panels')}
+                </button>
+              </div>
             </div>
           </details>
         </nav>
