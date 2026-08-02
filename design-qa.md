@@ -4,10 +4,10 @@ Final result: passed
 
 ## Scope
 
-- Reference: `/home/jiahuaiyu/.codex/attachments/5a57b542-f173-4614-a965-53ee46589bcb/codex-clipboard-cdbb69c7-7940-4315-8156-a34e2abec8b9.png`
-- Accepted implementation: `/home/jiahuaiyu/.codex/visualizations/2026/08/02/polymonitor-worldmonitor-basemap/seven-day-production-a301b54-pass2.png`
-- Aviation-on verification: `/home/jiahuaiyu/.codex/visualizations/2026/08/02/polymonitor-worldmonitor-basemap/seven-day-aviation-enabled-a301b54-gpu-pass2.png`
-- Combined comparison: `/home/jiahuaiyu/.codex/visualizations/2026/08/02/polymonitor-worldmonitor-basemap/reference-vs-production-a301b54.png`
+- Reference: user-provided WorldMonitor screenshot (local QA artifact; not tracked).
+- Accepted implementation: production capture for release `a301b54` (local QA artifact; not tracked).
+- Aviation-on verification: production capture with aviation enabled for release `a301b54` (local QA artifact; not tracked).
+- Combined comparison: reference-versus-production comparison for release `a301b54` (local QA artifact; not tracked).
 - Viewport: 2048 x 625 implementation capture; global region; zoom 1.50; 7-day event window.
 - State: dark PMTiles basemap; hazard and country-risk layers enabled; aviation disabled for the clean default and enabled in a separate verification capture.
 
