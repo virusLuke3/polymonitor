@@ -158,8 +158,24 @@ def _git_entry(repo: Path, ref: str, path: str) -> tuple[bytes | None, str | Non
 
 
 def _changed_paths(repo: Path, base: str, target: str) -> list[str]:
-    output = _git(repo, "diff", "--name-only", "--no-renames", f"{base}..{target}")
-    return sorted({_safe_relative_path(line) for line in str(output).splitlines() if line.strip()})
+    output = _git(
+        repo,
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "-z",
+        f"{base}..{target}",
+        text=False,
+    )
+    if not isinstance(output, bytes):
+        raise RuntimeError("git diff path output was not bytes")
+    return sorted(
+        {
+            _safe_relative_path(raw_path.decode("utf-8", errors="surrogateescape"))
+            for raw_path in output.split(b"\0")
+            if raw_path
+        }
+    )
 
 
 def _accepted_hashes(repo: Path, base: str, target: str, path: str) -> list[str | None]:
