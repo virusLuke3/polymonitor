@@ -132,6 +132,14 @@ function safeLiveProbability(value: string | number | null | undefined, isLive: 
   return isLive ? value : null;
 }
 
+function firstPositiveCount(...values: Array<string | number | null | undefined>) {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return value;
+  }
+  return null;
+}
+
 function accumulateNotional(levels: L2Level[]) {
   const working = levels.slice(0, BOOK_LEVEL_LIMIT).map((level) => ({
     price: Number(level.price) || 0,
@@ -1098,7 +1106,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const displayedYesPrice = chartLatestPoint?.yesPrice ?? price?.latestYesPrice ?? price?.latestPrice ?? selectedOutcome?.yesPrice ?? focusedMarket?.latestYesPrice ?? focusedMarket?.latestPrice;
   const displayedChange = selectedOutcome?.change24h ?? price?.change24h;
   const displayedVolume = selectedOutcome?.volume24h ?? price?.volume24h ?? marketStats?.volume24h;
-  const displayedTrades = selectedOutcome?.tradeCount24h ?? price?.tradeCount24h ?? marketStats?.tradeCount24h;
+  const displayedTrades = firstPositiveCount(
+    selectedOutcome?.tradeCount24h,
+    price?.tradeCount24h,
+    marketStats?.tradeCount24h,
+  );
   const displayedNoPrice = chartLatestPoint?.noPrice ?? price?.latestNoPrice ?? selectedOutcome?.noPrice;
   const chartStatus = String(
     chart?.historyStatus
@@ -1393,7 +1405,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   <span>{eventCategory}</span>
                   <i>{outcomeCount ? `${outcomeCount} outcomes` : 'event'}</i>
                   <i>{isBlockCloseView ? 'Vol' : '24h Vol'} {formatCurrencyCompact(displayedVolume)}</i>
-                  <i>{formatCompact(displayedTrades)} tx</i>
+                  {displayedTrades != null
+                    ? <i>{formatCompact(displayedTrades)} trades</i>
+                    : Number(displayedVolume) > 0
+                      ? <i>24h activity</i>
+                      : null}
                 </div>
               </div>
               <div className="wm-focus-price-hero">
@@ -1520,7 +1536,10 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
 
             <div className="wm-focus-inline-stats">
               <span><em>Vol</em> {formatCurrencyCompact(displayedVolume)}</span>
-              <span><em>{isBlockCloseView ? 'Trades' : '24h'}</em> {formatCompact(displayedTrades)} trades</span>
+              <span>
+                <em>{isBlockCloseView ? 'Trades' : '24h trades'}</em>
+                {' '}{displayedTrades != null ? `${formatCompact(displayedTrades)} trades` : '--'}
+              </span>
               <span><em>Yes</em> {formatPercent(liveDisplayedYesPrice)}</span>
               <span><em>No</em> {formatPercent(liveDisplayedNoPrice)}</span>
               <span><em>Sync</em> {blockCloseSyncLabel}</span>
