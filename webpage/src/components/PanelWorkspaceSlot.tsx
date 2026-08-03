@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { PanelLoading } from '@/components/Panel';
 import { RuntimeStatusBadge } from '@/components/design-system/StatusPrimitives';
 import type { PanelRuntimeStatus } from '@/panels/types';
@@ -12,6 +12,7 @@ const PANEL_MIN_ROW_SPAN = 1;
 const PANEL_MAX_ROW_SPAN = 4;
 const PANEL_MIN_COL_SPAN = 1;
 const PANEL_MAX_COL_SPAN = 3;
+const PANEL_CONTENT_ROOT_MARGIN = '240px 0px';
 
 export type PanelLayoutPrefs = Record<string, { rowSpan?: number; colSpan?: number }>;
 export type PanelSizeHint = 'default' | 'wide' | 'tall' | undefined;
@@ -120,6 +121,7 @@ export function PanelWorkspaceSlot({
 }: PanelWorkspaceSlotProps) {
   const { t } = useI18n();
   const slotRef = useRef<HTMLDivElement | null>(null);
+  const [contentReady, setContentReady] = useState(!layoutManaged);
   const layout = getPanelLayout(layoutPrefs, panelId, size);
   const dragRef = useRef<DragState>({
     active: false,
@@ -357,11 +359,28 @@ export function PanelWorkspaceSlot({
     };
   }, []);
 
+  useEffect(() => {
+    if (contentReady || !layoutManaged) return;
+    const slot = slotRef.current;
+    if (!slot || typeof IntersectionObserver === 'undefined') {
+      setContentReady(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      setContentReady(true);
+    }, { rootMargin: PANEL_CONTENT_ROOT_MARGIN });
+    observer.observe(slot);
+    return () => observer.disconnect();
+  }, [contentReady, layoutManaged]);
+
   return (
     <div
       className={`wm-panel-slot ${layoutManaged ? 'is-layout-managed' : ''} ${className}`.trim()}
       data-workspace-panel-id={panelId}
       data-runtime-phase={runtimeStatus?.phase || 'idle'}
+      data-content-ready={contentReady ? 'true' : 'false'}
       ref={slotRef}
       onMouseDown={startDrag}
       style={{
@@ -369,9 +388,11 @@ export function PanelWorkspaceSlot({
         '--wm-panel-col-span': String(layout.colSpan),
       } as Record<string, string>}
     >
-      <PanelRuntimeBoundary loading={loading} status={runtimeStatus} onRetry={onRetry}>
-        {children}
-      </PanelRuntimeBoundary>
+      {contentReady ? (
+        <PanelRuntimeBoundary loading={loading} status={runtimeStatus} onRetry={onRetry}>
+          {children}
+        </PanelRuntimeBoundary>
+      ) : <div className="wm-panel-slot-deferred" aria-hidden="true" />}
       {resizeEnabled ? (
         <>
           <button
