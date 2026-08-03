@@ -19808,3 +19808,40 @@ button.wm-evidence-row {
   grid-area: market-count;
   justify-self: end;
 }
+
+/*
+ * Market card activity metrics
+ *
+ * Probability is the primary datum. Volume and trade count form one activity
+ * group that may wrap as a unit on narrow catalog panels; individual values
+ * never overflow into a neighboring grid cell.
+ */
+.wm-focused-market-list .wm-poly-market-bottom {
+  display: grid !important;
+  grid-template-columns: minmax(44px, max-content) minmax(0, 1fr) !important;
+  gap: 0 18px !important;
+  align-items: baseline !important;
+  white-space: normal !important;
+}
+
+.wm-focused-market-list .wm-poly-market-prob {
+  align-self: baseline;
+  white-space: nowrap;
+}
+
+.wm-focused-market-list .wm-poly-market-activity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  min-width: 0;
+  gap: 3px 14px;
+}
+
+.wm-focused-market-list .wm-poly-market-volume,
+.wm-focused-market-list .wm-poly-market-trades {
+  margin-left: 0 !important;
+  justify-self: auto !important;
+  flex: 0 0 auto;
+  max-width: 100%;
+  white-space: nowrap;
+}

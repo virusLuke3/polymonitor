@@ -521,11 +521,13 @@ function activeMarketGroupsList(
               <strong className="wm-poly-market-title">{displayTitle}</strong>
               <div className="wm-poly-market-bottom">
                 <span className="wm-poly-market-prob">{localizedPercent(groupBestLivePrice(group), i18n)}</span>
-                <span className="wm-poly-market-volume">{i18n.t(
-                  displaysOutcome ? 'atlasMarket.marketVolume24h' : 'atlasMarket.eventVolume24h',
-                  { value: localizedCurrency(displayVolume, i18n) },
-                )}</span>
-                {activityLabel ? <span className="wm-poly-market-trades">{activityLabel}</span> : null}
+                <span className="wm-poly-market-activity">
+                  <span className="wm-poly-market-volume">{i18n.t(
+                    displaysOutcome ? 'atlasMarket.marketVolume24h' : 'atlasMarket.eventVolume24h',
+                    { value: localizedCurrency(displayVolume, i18n) },
+                  )}</span>
+                  {activityLabel ? <span className="wm-poly-market-trades">{activityLabel}</span> : null}
+                </span>
               </div>
             </div>
             <span className="wm-poly-market-star" aria-hidden="true">☆</span>
@@ -564,8 +566,10 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
               <strong className="wm-poly-market-title">{market.title}</strong>
               <div className="wm-poly-market-bottom">
                 <span className="wm-poly-market-prob">{localizedPercent(market.latestPrice, i18n)}</span>
-                <span className="wm-poly-market-volume">{i18n.t('atlasMarket.volume', { value: localizedCurrency(market.volume24h, i18n) })}</span>
-                {activityLabel ? <span className="wm-poly-market-trades">{activityLabel}</span> : null}
+                <span className="wm-poly-market-activity">
+                  <span className="wm-poly-market-volume">{i18n.t('atlasMarket.volume', { value: localizedCurrency(market.volume24h, i18n) })}</span>
+                  {activityLabel ? <span className="wm-poly-market-trades">{activityLabel}</span> : null}
+                </span>
               </div>
             </div>
             <span className="wm-poly-market-star" aria-hidden="true">☆</span>
