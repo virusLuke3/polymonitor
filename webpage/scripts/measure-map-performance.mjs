@@ -20,12 +20,20 @@ const budgets = {
   deckCommitP95Ms: Number(option('--max-deck-commit-p95', '20')),
   longTaskMaxMs: Number(option('--max-long-task', '150')),
 };
+const isLoopbackTarget = ['127.0.0.1', 'localhost', '::1'].includes(target.hostname);
+const proxyServer = option('--proxy', isLoopbackTarget
+  ? ''
+  : process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || '');
 const port = 19000 + (process.pid % 1000);
 const profile = mkdtempSync(resolve(tmpdir(), 'polymonitor-map-perf-'));
 const chrome = spawn('/usr/bin/google-chrome', [
   '--headless=new',
   '--disable-gpu-sandbox',
   '--no-sandbox',
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--disable-sync',
+  ...(proxyServer ? [`--proxy-server=${proxyServer}`] : []),
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${profile}`,
   '--window-size=1440,900',
@@ -119,7 +127,17 @@ try {
   if (!page?.webSocketDebuggerUrl) throw new Error('Chrome page target was unavailable.');
   client = new CdpClient(page.webSocketDebuggerUrl);
   await client.ready();
-  await Promise.all([client.send('Page.enable'), client.send('Runtime.enable'), client.send('Performance.enable')]);
+  await Promise.all([
+    client.send('Page.enable'),
+    client.send('Runtime.enable'),
+    client.send('Performance.enable'),
+    client.send('Network.enable'),
+  ]);
+  await client.send('Network.setBypassServiceWorker', { bypass: true });
+  const loadFailures = [];
+  client.on('Network.loadingFailed', ({ errorText, type, canceled }) => {
+    if (!canceled && loadFailures.length < 12) loadFailures.push(`${type || 'Other'}: ${errorText}`);
+  });
   const traceEvents = [];
   client.on('Tracing.dataCollected', ({ value }) => traceEvents.push(...value));
   await client.send('Tracing.start', {
@@ -128,7 +146,23 @@ try {
     transferMode: 'ReportEvents',
   });
   await client.send('Page.navigate', { url: target.href });
-  await waitForRenderer(client);
+  const rendererReady = await waitForRenderer(client, 30000);
+  if (!rendererReady) {
+    const diagnostics = await client.send('Runtime.evaluate', {
+      expression: `({
+        href: location.href,
+        title: document.title,
+        readyState: document.readyState,
+        bodyText: document.body?.innerText?.slice(0, 500) || '',
+        scripts: Array.from(document.scripts).map((script) => script.src).filter(Boolean).slice(-8),
+      })`,
+      returnByValue: true,
+    });
+    throw new Error(`2D map renderer did not become ready: ${JSON.stringify({
+      page: diagnostics.result?.value,
+      loadFailures,
+    })}`);
+  }
   await sleep(settleMs);
   const boundsResult = await client.send('Runtime.evaluate', {
     expression: `(() => {
