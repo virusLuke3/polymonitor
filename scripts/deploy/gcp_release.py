@@ -40,6 +40,7 @@ GCP_SOURCE_FILES = {
 EXTERNAL_RELEASE_PREFIXES = (
     ".github/",
     "deploy/nginx/",
+    "document/",
     "docs/",
     "scripts/qa/",
     "scripts/deploy/",
