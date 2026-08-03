@@ -10,7 +10,7 @@ import {
   createAviationStaticLayerSections,
   selectAviationRenderData,
 } from './aviationLayers';
-import { clusterEventPoints } from './eventPointLayer';
+import { clusterEventPoints, EventClusterIndex } from './eventPointLayer';
 
 const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['severity'] = 'watch'): GeoEvent => ({
   id,
@@ -99,6 +99,29 @@ describe('world event layer factories', () => {
       'non-state conflict',
       'state-based conflict',
     ]);
+  });
+
+  it('reuses persistent Supercluster indexes across viewport and selection changes', () => {
+    const events = Array.from({ length: 240 }, (_, index) => pointEvent(
+      `persistent:${index}`,
+      10 + (index % 20) * 0.01,
+      10 + Math.floor(index / 20) * 0.01,
+      index === 239 ? 'critical' : 'watch',
+    ));
+    const index = new EventClusterIndex();
+    index.update(events);
+    const first = index.query(1.25, null, [9, 9, 12, 12]);
+    const selected = index.query(2.1, 'persistent:239', [9.5, 9.5, 11.5, 11.5]);
+    index.update(events);
+
+    expect(index.buildCount).toBe(1);
+    expect(first.clusters[0]?.eventIds.length).toBeLessThanOrEqual(200);
+    expect(first.clusters[0]?.count).toBe(240);
+    expect(selected.singles.some((event) => event.id === 'persistent:239')).toBe(true);
+    expect(index.buildCount).toBe(1);
+
+    index.update([...events]);
+    expect(index.buildCount).toBe(2);
   });
 
   it('keeps warning events as persistent priority rings rather than forcing a global RAF loop', () => {

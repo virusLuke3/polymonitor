@@ -11162,6 +11162,24 @@ a.wm-orderfilled-row {
   min-height: 0;
 }
 
+.wm-world-event-map-shell {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  color: rgba(255, 178, 36, 0.9);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  background:
+    linear-gradient(rgba(94, 238, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(94, 238, 255, 0.045) 1px, transparent 1px),
+    #030405;
+  background-size: 36px 36px;
+}
+
 .wm-weather-deck-map {
   position: relative;
   height: 320px;
@@ -12233,6 +12251,10 @@ a.wm-orderfilled-row {
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.46);
   pointer-events: none;
   transform: translateY(-100%);
+}
+
+.wm-world-event-renderer-tooltip[hidden] {
+  display: none;
 }
 
 .wm-world-event-svg-tooltip span {

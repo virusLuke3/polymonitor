@@ -15,7 +15,7 @@ import {
   type WorldEventMapState,
 } from '../state/mapState';
 import { eventColor, isHazardEvent, pointRadiusMeters } from './layerFactories/shared';
-import { clusterEventPoints } from './layerFactories/eventPointLayer';
+import { EventClusterIndex } from './layerFactories/eventPointLayer';
 import {
   aviationRouteMotionPoints,
   aviationRouteTone,
@@ -37,6 +37,7 @@ import {
   worldEventTooltipModel,
   type WorldEventPickedObject,
 } from './hoverTooltip';
+import { RendererTooltip } from './rendererTooltip';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const LOCAL_BASEMAP_URL = '/map-data/world-countries.geojson';
@@ -114,7 +115,9 @@ export class SvgMapRenderer implements MapRenderer {
   private countryLayer: SVGGElement | null = null;
   private countryLabelLayer: SVGGElement | null = null;
   private eventLayer: SVGGElement | null = null;
+  private aviationMotionLayer: SVGGElement | null = null;
   private callbacks: MapRendererCallbacks | null = null;
+  private tooltip: RendererTooltip | null = null;
   private state: WorldEventMapState | null = null;
   private events: GeoEvent[] = [];
   private countries: FeatureCollection | null = null;
@@ -124,9 +127,9 @@ export class SvgMapRenderer implements MapRenderer {
   private paused = false;
   private reducedMotion = false;
   private animationFrame: number | null = null;
+  private renderFrame: number | null = null;
   private hoverFrame: number | null = null;
   private pendingHover: {
-    eventId: string | null;
     tooltip: ReturnType<typeof worldEventTooltipModel>;
     position: MapHoverPosition | null;
   } | null = null;
@@ -134,6 +137,7 @@ export class SvgMapRenderer implements MapRenderer {
   private pendingAnimationDeltaMs = 0;
   private animationTime = 0;
   private destroyed = false;
+  private readonly clusterIndex = new EventClusterIndex();
   private drag:
     | { pointerId: number; x: number; y: number; center: WorldEventMapState['center'] }
     | null = null;
@@ -141,6 +145,7 @@ export class SvgMapRenderer implements MapRenderer {
   async mount(container: HTMLElement, callbacks: MapRendererCallbacks) {
     if (this.svg) return;
     this.host = container;
+    this.tooltip = new RendererTooltip(container);
     this.callbacks = callbacks;
     this.destroyed = false;
     callbacks.onBasemapStateChange('initializing');
@@ -156,12 +161,15 @@ export class SvgMapRenderer implements MapRenderer {
     countryLabels.classList.add('wm-world-event-svg-country-labels');
     const events = svgElement('g');
     events.classList.add('wm-world-event-svg-events');
-    svg.append(countries, countryLabels, events);
+    const aviationMotion = svgElement('g');
+    aviationMotion.classList.add('wm-world-event-svg-aviation-motion');
+    svg.append(countries, countryLabels, events, aviationMotion);
     container.append(svg);
     this.svg = svg;
     this.countryLayer = countries;
     this.countryLabelLayer = countryLabels;
     this.eventLayer = events;
+    this.aviationMotionLayer = aviationMotion;
 
     container.addEventListener('wheel', this.handleWheel, { passive: false });
     container.addEventListener('keydown', this.handleKeyDown);
@@ -170,32 +178,34 @@ export class SvgMapRenderer implements MapRenderer {
     container.addEventListener('pointerup', this.handlePointerUp);
     container.addEventListener('pointercancel', this.handlePointerUp);
 
-    this.render();
+    this.scheduleRender();
     this.syncAnimationLoop();
     await this.loadLocalBasemap();
   }
 
   setState(state: WorldEventMapState) {
     this.state = state;
-    this.render();
+    this.scheduleRender();
     this.syncAnimationLoop();
   }
 
   setEvents(events: GeoEvent[]) {
+    if (events === this.events) return;
     this.events = events;
-    this.render();
+    this.clusterIndex.update(events);
+    this.scheduleRender();
     this.syncAnimationLoop();
   }
 
   resize() {
-    this.render();
+    this.scheduleRender();
   }
 
   setReducedMotion(reduced: boolean) {
     this.reducedMotion = reduced;
     this.svg?.classList.toggle('reduced-motion', reduced);
     this.syncAnimationLoop();
-    this.render();
+    this.scheduleRender();
   }
 
   pause() {
@@ -207,7 +217,7 @@ export class SvgMapRenderer implements MapRenderer {
   resume() {
     if (!this.paused) return;
     this.paused = false;
-    this.render();
+    this.scheduleRender();
     this.syncAnimationLoop();
   }
 
@@ -215,9 +225,12 @@ export class SvgMapRenderer implements MapRenderer {
     this.destroyed = true;
     this.clearHover();
     this.cancelAnimationLoop();
+    this.cancelScheduledRender();
     this.clearBasemapTimer();
     this.basemapController?.abort();
     this.basemapController = null;
+    this.tooltip?.destroy();
+    this.tooltip = null;
     const host = this.host;
     if (host) {
       host.removeEventListener('wheel', this.handleWheel);
@@ -233,6 +246,7 @@ export class SvgMapRenderer implements MapRenderer {
     this.countryLayer = null;
     this.countryLabelLayer = null;
     this.eventLayer = null;
+    this.aviationMotionLayer = null;
     this.countryLabels = [];
     this.callbacks = null;
     this.drag = null;
@@ -260,7 +274,7 @@ export class SvgMapRenderer implements MapRenderer {
         features: payload.features.map(normalizedFeature),
       };
       this.countryLabels = countryBasemapLabels(this.countries);
-      this.render();
+      this.scheduleRender();
       this.callbacks?.onBasemapStateChange('renderer-fallback-ready');
     } catch (error) {
       if (this.destroyed) return;
@@ -331,7 +345,7 @@ export class SvgMapRenderer implements MapRenderer {
     const selectedId = this.state?.selectedEventId;
     const aviation = state
       ? selectAviationRenderData(this.events, state)
-      : { routes: [], hubs: [], flights: [], liveAircraft: [] };
+      : { routes: [], hubs: [], flights: [], liveAircraft: [], routeMotionGroups: [], flightMotionGroups: [] };
     const visibleAviationIds = new Set([
       ...aviation.routes,
       ...aviation.hubs,
@@ -343,11 +357,7 @@ export class SvgMapRenderer implements MapRenderer {
       if (entity === 'air-flight') return false;
       return visibleAviationIds.has(event.id);
     });
-    const pointEvents = renderEvents.filter((event) => (
-      event.geometry?.type === 'Point' && !aviationEntity(event)
-    ));
-    const { singles, clusters } = clusterEventPoints(
-      pointEvents,
+    const { singles, clusters } = this.clusterIndex.query(
       this.state?.zoom ?? 1.25,
       selectedId || null,
     );
@@ -453,6 +463,20 @@ export class SvgMapRenderer implements MapRenderer {
       this.decorateEventElement(hub, event, event.id === selectedId);
       this.eventLayer.append(hub);
     }
+    this.renderAviationMotion(projection, width, height, aviation, selectedId || null);
+  }
+
+  private renderAviationMotion(
+    projection: GeoProjection,
+    width: number,
+    height: number,
+    aviation = this.state ? selectAviationRenderData(this.events, this.state) : null,
+    selectedId = this.state?.selectedEventId || null,
+  ) {
+    const layer = this.aviationMotionLayer;
+    if (!layer) return;
+    layer.replaceChildren();
+    if (!aviation) return;
     for (const runner of aviationRouteMotionPoints(aviation.routes, this.animationTime)) {
       const position = projection(runner.position);
       if (!position) continue;
@@ -464,7 +488,7 @@ export class SvgMapRenderer implements MapRenderer {
       mote.setAttribute('cy', String(y));
       mote.setAttribute('r', '2.4');
       mote.setAttribute('fill', cssColor(runner.color));
-      this.eventLayer.append(mote);
+      layer.append(mote);
     }
     for (const flight of aviationSeededFlightPoints(aviation.flights, this.animationTime)) {
       const position = projection(flight.position);
@@ -473,8 +497,21 @@ export class SvgMapRenderer implements MapRenderer {
       if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
       const aircraft = aircraftMarker(x, y, flight.angle);
       this.decorateEventElement(aircraft, flight.event, flight.event.id === selectedId);
-      this.eventLayer.append(aircraft);
+      layer.append(aircraft);
     }
+  }
+
+  private scheduleRender() {
+    if (this.paused || this.destroyed || this.renderFrame != null) return;
+    this.renderFrame = window.requestAnimationFrame(() => {
+      this.renderFrame = null;
+      this.render();
+    });
+  }
+
+  private cancelScheduledRender() {
+    if (this.renderFrame != null) window.cancelAnimationFrame(this.renderFrame);
+    this.renderFrame = null;
   }
 
   private decorateEventElement(element: SVGElement, event: GeoEvent, selected: boolean) {
@@ -587,10 +624,9 @@ export class SvgMapRenderer implements MapRenderer {
     object: WorldEventPickedObject,
     pointerEvent: PointerEvent,
     layerId = '',
-    eventId: string | null = null,
+    _eventId: string | null = null,
   ) {
     this.pendingHover = {
-      eventId,
       tooltip: worldEventTooltipModel(object, layerId),
       position: this.pointerPosition(pointerEvent),
     };
@@ -600,8 +636,7 @@ export class SvgMapRenderer implements MapRenderer {
       const pending = this.pendingHover;
       this.pendingHover = null;
       if (!pending) return;
-      this.callbacks?.onEventHover(pending.eventId, pending.position);
-      this.callbacks?.onHoverTooltip(pending.tooltip, pending.position);
+      this.tooltip?.show(pending.tooltip, pending.position);
     });
   }
 
@@ -609,8 +644,7 @@ export class SvgMapRenderer implements MapRenderer {
     if (this.hoverFrame != null) window.cancelAnimationFrame(this.hoverFrame);
     this.hoverFrame = null;
     this.pendingHover = null;
-    this.callbacks?.onEventHover(null);
-    this.callbacks?.onHoverTooltip(null);
+    this.tooltip?.clear();
   };
 
   private hasAnimatedAviation() {
@@ -637,7 +671,11 @@ export class SvgMapRenderer implements MapRenderer {
     if (this.pendingAnimationDeltaMs >= MAP_ANIMATION_FRAME_INTERVAL_MS) {
       this.animationTime = advanceAnimationTime(this.animationTime, this.pendingAnimationDeltaMs);
       this.pendingAnimationDeltaMs = 0;
-      this.render();
+      if (this.host) {
+        const width = Math.max(1, this.host.clientWidth || 1_200);
+        const height = Math.max(1, this.host.clientHeight || 620);
+        this.renderAviationMotion(this.projection(width, height), width, height);
+      }
     }
     this.animationFrame = window.requestAnimationFrame(this.handleAnimationFrame);
   };
