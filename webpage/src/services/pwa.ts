@@ -75,6 +75,7 @@ function watchRegistration(registration: ServiceWorkerRegistration) {
 export function registerPwa() {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
+  if (new URLSearchParams(window.location.search).get('mapPerf') === '1') return;
   window.addEventListener('online', () => emit({ online: true }));
   window.addEventListener('offline', () => emit({ online: false }));
   window.addEventListener('beforeinstallprompt', (event) => {
