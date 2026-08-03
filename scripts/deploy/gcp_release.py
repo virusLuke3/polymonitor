@@ -49,10 +49,15 @@ EXTERNAL_RELEASE_PREFIXES = (
 EXTERNAL_RELEASE_FILES = {
     "AGENTS.md",
     "deploy/gcp/accepted-remote-overrides.json",
+    "deploy/systemd/README.md",
+    "deploy/systemd/polydata-active-market-serving-refresh.service",
+    "deploy/systemd/polydata-active-market-serving-refresh.timer",
     "deploy/systemd/polydata-db-reverse-tunnel-healthcheck.service",
     "deploy/systemd/polydata-external-availability.service",
     "deploy/systemd/polydata-external-availability.timer",
+    "deploy/systemd/polydata-local-collector.target",
     "deploy/systemd/polydata.env.example",
+    "scripts/market/refresh_active_market_serving.py",
     "scripts/requirements-dev.lock.txt",
     "scripts/requirements.txt",
 }

@@ -52,6 +52,7 @@ disables local collector units on GCP.
 `polydata-local-collector.target` starts:
 
 - `polydata-market-sync.service`
+- `polydata-active-market-serving-refresh.timer` / bounded five-minute refresh of current Gamma prices and rolling 24-hour volume for already-registered markets
 - `polydata-trade-sync.service` / OrderFilled ClickHouse live sync
 - `polydata-block-timestamps-live.service` / ClickHouse block timestamp live sync
 - `polydata-oracle-sync.service`
@@ -137,6 +138,8 @@ Local collector manual flow:
 mkdir -p ~/.config/systemd/user
 cp deploy/systemd/polydata-local-collector.target ~/.config/systemd/user/
 cp deploy/systemd/polydata-market-sync.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-active-market-serving-refresh.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-active-market-serving-refresh.timer ~/.config/systemd/user/
 cp deploy/systemd/polydata-trade-sync.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-block-timestamps-live.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-oracle-sync.service ~/.config/systemd/user/
@@ -151,6 +154,7 @@ cp deploy/systemd/polydata-quant-price-build-runner.service ~/.config/systemd/us
 cp deploy/systemd/polydata-quant-frontend-price-build-runner@.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now polydata-local-collector.target
+systemctl --user enable --now polydata-active-market-serving-refresh.timer
 systemctl --user enable --now polydata-quant-frontend-price-build-runner@0.service polydata-quant-frontend-price-build-runner@1.service
 systemctl --user enable --now polydata-db-reverse-tunnel-healthcheck.timer
 ```
@@ -174,7 +178,7 @@ loginctl enable-linger "$USER"
 On GCP, these units should be inactive:
 
 ```bash
-systemctl --user is-active polydata-market-sync.service polydata-trade-sync.service polydata-block-timestamps-live.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-event-market-serving.service polydata-db-reverse-tunnel.service polydata-local-collector.target
+systemctl --user is-active polydata-market-sync.service polydata-active-market-serving-refresh.timer polydata-trade-sync.service polydata-block-timestamps-live.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-event-market-serving.service polydata-db-reverse-tunnel.service polydata-local-collector.target
 ```
 
 On the local collector host, `polydata-api.service` and `polydata-gcp.target`

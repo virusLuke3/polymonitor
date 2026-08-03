@@ -23,6 +23,7 @@ TERMINAL_PROBABILITY_HIGH = 0.97
 ACTIVE_DEFAULT_MIN_VOLUME_24H = 25.0
 ACTIVE_DEFAULT_MIN_TRADES_24H = 1.0
 ACTIVE_GROUP_LOOKAHEAD_MULTIPLIER = 5
+ACTIVE_GROUP_STALE_SECONDS = 24 * 60 * 60
 
 CHART_RANGE_INTERVALS: Dict[str, str] = {
     "1h": "5m",
@@ -575,7 +576,7 @@ def _normalize_group(
         local = by_condition.get(condition_id) or by_gamma.get(gamma_market_id) or by_slug.get(slug) or by_yes_token.get(yes_token_id) or {}
         gamma_yes, gamma_no = _market_prices(market)
         local_yes = _float_value(local.get("latest_yes_price"))
-        yes_price = local_yes if local_yes is not None else gamma_yes
+        yes_price = gamma_yes if gamma_yes is not None else local_yes
         no_price = _float_value(local.get("latest_no_price"))
         if no_price is None:
             no_price = gamma_no
@@ -584,9 +585,15 @@ def _normalize_group(
             price_24h_ago = _float_value(local.get("price_24h_ago"))
             if price_24h_ago is not None:
                 change_24h = yes_price - price_24h_ago
-        volume_24h = _float_value(local.get("volume_24h"))
+        gamma_volume_24h = _float_value(market.get("volume24hr") or market.get("volume_24hr") or market.get("volume24h"))
+        volume_24h = gamma_volume_24h
         if volume_24h is None:
-            volume_24h = _float_value(market.get("volume24hr") or market.get("volume_24hr") or market.get("volume24h"))
+            volume_24h = _float_value(local.get("volume_24h"))
+        gamma_activity_at = market.get("updatedAt") or market.get("updated_at") or event.get("updatedAt") or event.get("updated_at")
+        local_activity_at = local.get("last_trade_at")
+        last_trade_at = local_activity_at
+        if gamma_volume_24h is not None and gamma_volume_24h > 0 and _parse_timestamp(gamma_activity_at) > _parse_timestamp(local_activity_at):
+            last_trade_at = gamma_activity_at
         label = _label_for_market(event_title, market)
         outcomes.append(
             {
@@ -601,7 +608,7 @@ def _normalize_group(
                 "change24h": change_24h,
                 "volume24h": volume_24h,
                 "tradeCount24h": local.get("trade_count_24h"),
-                "lastTradeAt": local.get("last_trade_at"),
+                "lastTradeAt": last_trade_at,
                 "conditionId": condition_id or None,
                 "slug": slug or market.get("slug") or local.get("slug"),
                 "yesTokenId": yes_token_id or None,
@@ -839,7 +846,7 @@ def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int
     ready_signal = _group_has_ready_signal(group)
     live_price_signal = _group_has_live_price_signal(group)
     multi_penalty = 0 if int(group.get("outcomeCount") or 0) > 2 else 1
-    recent_threshold = now_ts - (14 * 86400)
+    recent_threshold = now_ts - ACTIVE_GROUP_STALE_SECONDS
     fresh_threshold = now_ts - (12 * 3600)
     if volume > 0 and last_activity_ts >= recent_threshold:
         bucket = 0
@@ -1305,16 +1312,23 @@ def _serving_market_groups_payload(
     ]
     params: List[Any] = []
     if sort == "active":
+        now_iso = dependencies.utc_now_iso()
         where.append("is_trading_closed = FALSE")
         where.append("completion_status NOT IN ('SETTLED', 'CANCELLED', 'CLOSED_UNRESOLVED')")
         where.append("(end_date IS NULL OR end_date >= ?)")
-        params.append(dependencies.utc_now_iso())
+        params.append(now_iso)
+        fresh_cutoff = datetime.fromtimestamp(
+            _parse_timestamp(now_iso) - ACTIVE_GROUP_STALE_SECONDS,
+            tz=timezone.utc,
+        ).isoformat()
+        where.append("last_activity_at >= ?")
+        params.append(fresh_cutoff)
     if query:
         like = f"%{query}%"
         where.append("(title ILIKE ? OR COALESCE(event_slug, '') ILIKE ? OR COALESCE(category, '') ILIKE ? OR tags::text ILIKE ?)")
         params.extend([like, like, like, like])
     where_sql = " AND ".join(where)
-    active_order_sql = ""
+    active_order_sql = "volume_24h DESC, trade_count_24h DESC, last_activity_at DESC NULLS LAST, active_rank DESC"
     order_sql = {
         "active": active_order_sql,
         "new": "created_at DESC NULLS LAST, last_activity_at DESC NULLS LAST, volume_24h DESC",
@@ -1364,6 +1378,8 @@ def _serving_market_groups_payload(
         items = _limit_group_category_dominance(items, page_size)
         total = max(total, offset + min(len(items), page_size) + (1 if len(rows) > page_size else 0))
     items = items[:page_size]
+    if sort == "active" and not query and not items:
+        return None
     return {
         "items": items,
         "pagination": {
@@ -1465,7 +1481,7 @@ def _get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 30}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 31}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(

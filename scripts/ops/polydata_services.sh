@@ -20,6 +20,8 @@ LOCAL_COLLECTOR_TARGET="polydata-local-collector.target"
 LEGACY_CORE_TARGET="polydata-core.target"
 LOCAL_COLLECTOR_SERVICES=(
   "polydata-market-sync.service"
+  "polydata-active-market-serving-refresh.service"
+  "polydata-active-market-serving-refresh.timer"
   "polydata-trade-sync.service"
   "polydata-block-timestamps-live.service"
   "polydata-oracle-sync.service"

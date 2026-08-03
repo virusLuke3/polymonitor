@@ -1,0 +1,12 @@
+[Unit]
+Description=polyData active market serving refresh
+After=network-online.target polydata-market-sync.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/polydata.env
+ExecStart=/bin/bash -lc 'proxy="${POLYDATA_ACTIVE_MARKET_REFRESH_PROXY_URL:-${POLYDATA_MARKET_EVIDENCE_PROXY_URL:-}}"; if [ -n "$proxy" ]; then export HTTP_PROXY="$proxy" HTTPS_PROXY="$proxy" http_proxy="$proxy" https_proxy="$proxy"; fi; exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/market/refresh_active_market_serving.py --backend postgres --pages "${POLYDATA_ACTIVE_MARKET_REFRESH_PAGES:-6}" --target-events "${POLYDATA_ACTIVE_MARKET_REFRESH_TARGET_EVENTS:-600}" --timeout "${POLYDATA_ACTIVE_MARKET_REFRESH_TIMEOUT_SECONDS:-15}"'
+StandardOutput=journal
+StandardError=journal
