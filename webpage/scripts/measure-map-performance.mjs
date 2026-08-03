@@ -275,6 +275,8 @@ try {
   }
 } finally {
   client?.close();
+  const chromeExited = new Promise((resolveExit) => chrome.once('exit', resolveExit));
   chrome.kill('SIGTERM');
-  rmSync(profile, { recursive: true, force: true });
+  await Promise.race([chromeExited, sleep(2000)]);
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

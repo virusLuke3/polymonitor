@@ -65,7 +65,7 @@ describe('renderer hover lifecycle', () => {
     expect(renderer.callbacks).toBeNull();
   });
 
-  it('reduces aviation frame rate after an expensive dynamic commit and recovers gradually', () => {
+  it('reduces aviation frame rate after a delayed RAF and recovers gradually', () => {
     const renderer = new DeckMapRenderer() as unknown as {
       animationIntervalMs: number;
       animationRecoveryFrames: number;
@@ -73,14 +73,14 @@ describe('renderer hover lifecycle', () => {
       destroy: () => void;
     };
 
-    renderer.updateAdaptiveAnimationBudget(17);
+    renderer.updateAdaptiveAnimationBudget(25);
     expect(renderer.animationIntervalMs).toBe(80);
 
-    for (let frame = 0; frame < 29; frame += 1) renderer.updateAdaptiveAnimationBudget(4);
+    for (let frame = 0; frame < 599; frame += 1) renderer.updateAdaptiveAnimationBudget(16);
     expect(renderer.animationIntervalMs).toBe(80);
-    expect(renderer.animationRecoveryFrames).toBe(29);
+    expect(renderer.animationRecoveryFrames).toBe(599);
 
-    renderer.updateAdaptiveAnimationBudget(4);
+    renderer.updateAdaptiveAnimationBudget(16);
     expect(renderer.animationIntervalMs).toBe(40);
     expect(renderer.animationRecoveryFrames).toBe(0);
     renderer.destroy();

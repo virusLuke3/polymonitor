@@ -413,12 +413,10 @@ export class DeckMapRenderer implements MapRenderer {
       ...(aviationSections?.markerLayers || []),
       ...(this.pointLayers || []),
     ];
-    const commitStartedAt = performance.now();
     this.performanceMonitor.measure(onlyDynamic ? 'dynamic-commit' : 'deck-commit', () => {
       this.overlay?.setProps({ layers });
     });
     this.map?.triggerRepaint();
-    if (onlyDynamic) this.updateAdaptiveAnimationBudget(performance.now() - commitStartedAt);
   }
 
   private handleMoveEnd = () => {
@@ -641,14 +639,14 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   private updateAdaptiveAnimationBudget(frameCostMs: number) {
-    if (frameCostMs > 16) {
+    if (frameCostMs > 24) {
       this.animationIntervalMs = 80;
       this.animationRecoveryFrames = 0;
       return;
     }
     if (this.animationIntervalMs <= MAP_ANIMATION_FRAME_INTERVAL_MS) return;
     this.animationRecoveryFrames += 1;
-    if (this.animationRecoveryFrames >= 30) {
+    if (this.animationRecoveryFrames >= 600) {
       this.animationIntervalMs = MAP_ANIMATION_FRAME_INTERVAL_MS;
       this.animationRecoveryFrames = 0;
     }
@@ -674,6 +672,10 @@ export class DeckMapRenderer implements MapRenderer {
   private handleAnimationFrame = (timestamp: number) => {
     this.animationFrame = null;
     if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) return;
+    const actualFrameDelay = this.lastAnimationTimestamp == null
+      ? 0
+      : Math.max(0, timestamp - this.lastAnimationTimestamp);
+    if (actualFrameDelay > 0) this.updateAdaptiveAnimationBudget(actualFrameDelay);
     const delta = boundedAnimationDelta(this.lastAnimationTimestamp, timestamp);
     this.lastAnimationTimestamp = timestamp;
     this.pendingAnimationDeltaMs += delta;
