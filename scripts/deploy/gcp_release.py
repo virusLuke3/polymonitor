@@ -37,6 +37,9 @@ GCP_SOURCE_FILES = {
     "scripts/ops/gcp_serving_healthcheck.py",
     "scripts/requirements.lock.txt",
 }
+GCP_EXCLUDED_SOURCE_FILES = {
+    "scripts/ops/polydata_services.sh",
+}
 EXTERNAL_RELEASE_PREFIXES = (
     ".github/",
     "deploy/nginx/",
@@ -59,6 +62,7 @@ EXTERNAL_RELEASE_FILES = {
     "deploy/systemd/polydata-local-collector.target",
     "deploy/systemd/polydata.env.example",
     "scripts/market/refresh_active_market_serving.py",
+    "scripts/ops/polydata_services.sh",
     "scripts/requirements-dev.lock.txt",
     "scripts/requirements.txt",
 }
@@ -128,6 +132,8 @@ def _target_gcp_units(repo: Path, target: str) -> set[str]:
 def _deployable(path: str, *, gcp_units: set[str]) -> bool:
     if path.startswith("deploy/systemd/"):
         return PurePosixPath(path).name in gcp_units
+    if path in GCP_EXCLUDED_SOURCE_FILES:
+        return False
     if path.startswith("quant/backtest/vendor/"):
         return False
     if path.startswith(("scripts/runtime/worldcup_", "scripts/runtime/world_cup_")):
