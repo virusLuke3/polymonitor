@@ -261,7 +261,7 @@ export function fetchMarketGroups(query = '', pageSize = 80, sort: MarketGroupSo
     sort,
   });
   if (query.trim()) params.set('q', query.trim());
-  return apiGetWithTimeout<MarketGroupsPayload>(`/market-groups?${params.toString()}`, 3500);
+  return apiGetWithTimeout<MarketGroupsPayload>(`/market-groups?${params.toString()}`, 9000);
 }
 
 export function fetchMarketGroupDetail(eventId: string, timeoutMs = 3500) {

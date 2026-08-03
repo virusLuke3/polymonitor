@@ -1264,10 +1264,21 @@ def _latest_block_close_by_market_id(
 def _apply_latest_block_close_prices(
     context: Mapping[str, Any] | MarketGroupDependencies,
     items: List[Dict[str, Any]],
+    *,
+    default_only: bool = False,
 ) -> None:
+    if default_only:
+        market_ids = [
+            int(market_id)
+            for item in items
+            for market_id in [_float_value(item.get("defaultMarketId"))]
+            if market_id is not None
+        ]
+    else:
+        market_ids = [market_id for item in items for market_id in _group_market_ids(item)]
     latest_by_market_id = _latest_block_close_by_market_id(
         context,
-        [market_id for item in items for market_id in _group_market_ids(item)],
+        market_ids,
     )
     if not latest_by_market_id:
         return
@@ -1440,7 +1451,7 @@ def _serving_market_groups_payload(
         items.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
         items = _limit_group_category_dominance(items, page_size)
         items = items[: max(page_size * 2, page_size)]
-    _apply_latest_block_close_prices(dependencies, items)
+    _apply_latest_block_close_prices(dependencies, items, default_only=True)
     if sort == "active":
         items = [item for item in items if _retarget_group_default_outcome(item)]
         if not query:
@@ -1556,7 +1567,7 @@ def _get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 33}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 34}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(
