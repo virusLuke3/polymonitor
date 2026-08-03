@@ -64,6 +64,8 @@ export type MarketGroupOutcome = {
   change24h?: string | number | null;
   volume24h?: string | number | null;
   tradeCount24h?: number | string | null;
+  volumeScope?: 'market' | 'event' | null;
+  volumeSource?: string | null;
   lastTradeAt?: string | null;
   conditionId?: string | null;
   slug?: string | null;
@@ -84,6 +86,8 @@ export type MarketGroupItem = {
   endDate?: string | null;
   volume24h?: string | number | null;
   tradeCount24h?: number | string | null;
+  volumeScope?: 'market' | 'event' | null;
+  volumeSource?: string | null;
   outcomeCount?: number | null;
   defaultOutcomeKey?: string | null;
   defaultMarketId?: number | null;

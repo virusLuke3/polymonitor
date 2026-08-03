@@ -12,6 +12,7 @@ from api.context import (
     resolve_service_callable,
     resolve_service_value,
 )
+from api.services import clickhouse_orderfilled_service
 
 MARKET_GROUPS_LIST_NAMESPACE = "snapshot:market-groups:list"
 MARKET_GROUPS_DETAIL_NAMESPACE = "snapshot:market-groups:detail"
@@ -83,6 +84,7 @@ def _service_callable(
 
 @dataclass(frozen=True)
 class MarketGroupDependencies:
+    source: Mapping[str, Any]
     application: Any
     settings: Any
     query_all: Callable[..., Any]
@@ -101,6 +103,7 @@ class MarketGroupDependencies:
         context: Mapping[str, Any],
     ) -> MarketGroupDependencies:
         return cls(
+            source=context,
             application=resolve_service_value(context, "app"),
             settings=resolve_service_value(context, "SETTINGS"),
             query_all=_service_callable(context, "query_all"),
@@ -162,6 +165,17 @@ def _float_value(value: Any) -> Optional[float]:
     if numeric != numeric:
         return None
     return numeric
+
+
+def _first_present(*values: Any) -> Any:
+    return next((value for value in values if value is not None and value != ""), None)
+
+
+def _positive_count_or_none(value: Any) -> Optional[int]:
+    numeric = _float_value(value)
+    if numeric is None or numeric <= 0:
+        return None
+    return int(numeric)
 
 
 def _is_terminal_probability(value: Any) -> bool:
@@ -585,7 +599,9 @@ def _normalize_group(
             price_24h_ago = _float_value(local.get("price_24h_ago"))
             if price_24h_ago is not None:
                 change_24h = yes_price - price_24h_ago
-        gamma_volume_24h = _float_value(market.get("volume24hr") or market.get("volume_24hr") or market.get("volume24h"))
+        gamma_volume_24h = _float_value(
+            _first_present(market.get("volume24hr"), market.get("volume_24hr"), market.get("volume24h"))
+        )
         volume_24h = gamma_volume_24h
         if volume_24h is None:
             volume_24h = _float_value(local.get("volume_24h"))
@@ -607,7 +623,9 @@ def _normalize_group(
                 "noPrice": no_price,
                 "change24h": change_24h,
                 "volume24h": volume_24h,
-                "tradeCount24h": local.get("trade_count_24h"),
+                "tradeCount24h": _positive_count_or_none(local.get("trade_count_24h")),
+                "volumeScope": "market",
+                "volumeSource": "gamma-market" if gamma_volume_24h is not None else "postgres-serving",
                 "lastTradeAt": last_trade_at,
                 "conditionId": condition_id or None,
                 "slug": slug or market.get("slug") or local.get("slug"),
@@ -661,7 +679,10 @@ def _normalize_group(
         default_outcome = top_outcomes[0]
     if default_outcome is None and outcomes:
         default_outcome = outcomes[0]
-    event_volume_24h = _float_value(event.get("volume24hr") or event.get("volume_24hr") or event.get("volume24h"))
+    gamma_event_volume_24h = _float_value(
+        _first_present(event.get("volume24hr"), event.get("volume_24hr"), event.get("volume24h"))
+    )
+    event_volume_24h = gamma_event_volume_24h
     if event_volume_24h is None:
         outcome_volumes = [_float_value(outcome.get("volume24h")) for outcome in outcomes]
         summed_volume = sum(value for value in outcome_volumes if value is not None)
@@ -683,6 +704,8 @@ def _normalize_group(
         "endDate": event.get("endDate") or event.get("end_date"),
         "volume24h": event_volume_24h,
         "tradeCount24h": event_trade_count_24h,
+        "volumeScope": "event",
+        "volumeSource": "gamma-event" if gamma_event_volume_24h is not None else "derived-markets",
         "outcomeCount": len(outcomes),
         "lastActivityAt": last_activity_at,
         "defaultOutcomeKey": default_outcome.get("outcomeKey") if default_outcome else None,
@@ -697,6 +720,8 @@ def _normalize_group(
                 "change24h": outcome.get("change24h"),
                 "volume24h": outcome.get("volume24h"),
                 "tradeCount24h": outcome.get("tradeCount24h"),
+                "volumeScope": outcome.get("volumeScope") or "market",
+                "volumeSource": outcome.get("volumeSource"),
                 "marketId": outcome.get("marketId"),
                 "localMarketId": outcome.get("localMarketId"),
                 "gammaMarketId": outcome.get("gammaMarketId"),
@@ -942,7 +967,7 @@ def _interleave_group_categories(groups: List[Dict[str, Any]], page_size: int) -
 
 
 def _limit_group_category_dominance(groups: List[Dict[str, Any]], page_size: int) -> List[Dict[str, Any]]:
-    """Preserve impact rank while keeping the first screen diverse across categories."""
+    """Preserve activity rank while keeping the first screen diverse across categories."""
     if not groups:
         return groups
     page_size = max(1, int(page_size))
@@ -987,7 +1012,7 @@ def _serving_select_sql(where_sql: str, order_sql: str) -> str:
           serving_key, group_id, event_id, event_slug, event_title, title, category, tags,
           created_at, end_date, volume_24h, trade_count_24h, last_activity_at, outcome_count,
           default_market_id, default_condition_id, default_gamma_market_id, default_outcome_key,
-          top_outcomes, outcomes, completion_status, is_trading_closed, active_rank, updated_at
+          top_outcomes, outcomes, completion_status, is_trading_closed, active_rank, source, updated_at
         FROM event_market_serving
         WHERE {where_sql}
         {order_clause}
@@ -1087,7 +1112,9 @@ def _serving_group_from_row(
         "createdAt": row.get("created_at"),
         "endDate": row.get("end_date"),
         "volume24h": _float_value(row.get("volume_24h")) or 0.0,
-        "tradeCount24h": int(_float_value(row.get("trade_count_24h")) or 0),
+        "tradeCount24h": _positive_count_or_none(row.get("trade_count_24h")),
+        "volumeScope": "event",
+        "volumeSource": row.get("source") or "postgres-serving",
         "outcomeCount": int(row.get("outcome_count") or len(outcomes)),
         "lastActivityAt": row.get("last_activity_at"),
         "defaultOutcomeKey": row.get("default_outcome_key"),
@@ -1120,6 +1147,39 @@ def _group_market_ids(group: Dict[str, Any]) -> List[int]:
         if market_id is not None:
             ids.append(market_id)
     return list(dict.fromkeys(ids))
+
+
+def _apply_orderfilled_trade_counts(
+    dependencies: MarketGroupDependencies,
+    items: List[Dict[str, Any]],
+) -> None:
+    market_ids = [market_id for item in items for market_id in _group_market_ids(item)]
+    try:
+        stats = clickhouse_orderfilled_service.get_market_stats(
+            dependencies.source,  # type: ignore[arg-type]
+            market_ids,
+            hours=24,
+        )
+    except Exception:
+        logger = getattr(dependencies.application, "logger", None)
+        if logger:
+            logger.exception("market group OrderFilled trade-count lookup failed")
+        return
+    if not stats:
+        return
+    for group in items:
+        group_counts: Dict[int, int] = {}
+        for collection_name in ("outcomes", "topOutcomes"):
+            for outcome in group.get(collection_name) or []:
+                if not isinstance(outcome, dict):
+                    continue
+                market_id = _outcome_market_id(outcome)
+                stat = stats.get(market_id) if market_id is not None else None
+                trade_count = _positive_count_or_none((stat or {}).get("trade_count_24h"))
+                outcome["tradeCount24h"] = trade_count
+                if market_id is not None and trade_count is not None:
+                    group_counts[market_id] = trade_count
+        group["tradeCount24h"] = sum(group_counts.values()) or None
 
 
 def _latest_block_close_by_market_id(
@@ -1378,6 +1438,7 @@ def _serving_market_groups_payload(
         items = _limit_group_category_dominance(items, page_size)
         total = max(total, offset + min(len(items), page_size) + (1 if len(rows) > page_size else 0))
     items = items[:page_size]
+    _apply_orderfilled_trade_counts(dependencies, items)
     if sort == "active" and not query and not items:
         return None
     return {
@@ -1410,7 +1471,7 @@ def _serving_market_group_detail(
           serving_key, group_id, event_id, event_slug, event_title, title, category, tags,
           created_at, end_date, volume_24h, trade_count_24h, last_activity_at, outcome_count,
           default_market_id, default_condition_id, default_gamma_market_id, default_outcome_key,
-          top_outcomes, outcomes, completion_status, is_trading_closed, active_rank, updated_at
+          top_outcomes, outcomes, completion_status, is_trading_closed, active_rank, source, updated_at
         FROM event_market_serving
         WHERE serving_key IN ({placeholders})
            OR group_id IN ({placeholders})
@@ -1424,6 +1485,7 @@ def _serving_market_group_detail(
     if not rows:
         return None
     group = _serving_group_from_row(dependencies, rows[0])
+    _apply_orderfilled_trade_counts(dependencies, [group])
     group["status"] = "ok"
     return group
 
@@ -1481,7 +1543,7 @@ def _get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 31}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 33}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(
@@ -1627,7 +1689,7 @@ def _get_market_group_detail_payload(
     identifier = str(event_id or "").strip()
     if not identifier:
         return None
-    cache_key = json.dumps({"eventId": identifier, "v": 6}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "v": 8}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         serving_payload = _serving_market_group_detail(dependencies, identifier)

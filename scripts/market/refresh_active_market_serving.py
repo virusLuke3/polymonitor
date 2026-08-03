@@ -75,6 +75,10 @@ def _decimal(value: Any) -> Optional[Decimal]:
     return numeric
 
 
+def _first_present(*values: Any) -> Any:
+    return next((value for value in values if value is not None and value != ""), None)
+
+
 def _probability(value: Any) -> Optional[Decimal]:
     numeric = _decimal(value)
     if numeric is None or numeric < 0 or numeric > 1:
@@ -170,8 +174,8 @@ def _merge_events(*groups: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _market_snapshot(event: Dict[str, Any], market: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if not _market_is_open(market):
-        return None
+    is_open = _market_is_open(market)
+    is_closed = market.get("closed") is True
     prices = _as_list(market.get("outcomePrices") or market.get("outcome_prices"))
     yes_price = _probability(prices[0]) if prices else None
     no_price = _probability(prices[1]) if len(prices) > 1 else None
@@ -193,6 +197,9 @@ def _market_snapshot(event: Dict[str, Any], market: Dict[str, Any]) -> Optional[
     )
     if not source_updated_at:
         return None
+    volume_24h = _decimal(
+        _first_present(market.get("volume24hr"), market.get("volume_24hr"), market.get("volume24h"))
+    )
     return {
         "condition_id": _normalize_condition(market.get("conditionId") or market.get("condition_id")),
         "gamma_market_id": str(market.get("id") or market.get("gamma_market_id") or "").strip(),
@@ -204,8 +211,10 @@ def _market_snapshot(event: Dict[str, Any], market: Dict[str, Any]) -> Optional[
         "yes_price": yes_price,
         "no_price": no_price,
         "price_24h_ago": price_24h_ago,
-        "volume_24h": max(Decimal("0"), _decimal(market.get("volume24hr") or market.get("volume_24hr") or market.get("volume24h")) or Decimal("0")),
+        "volume_24h": max(Decimal("0"), volume_24h or Decimal("0")) if not is_closed else Decimal("0"),
         "source_updated_at": str(source_updated_at),
+        "is_open": is_open,
+        "is_closed": is_closed,
     }
 
 
@@ -274,10 +283,11 @@ def _matched_snapshots(conn: Any, snapshots: Sequence[Dict[str, Any]]) -> Dict[i
 
 def _write_snapshots(conn: Any, matched: Dict[int, Dict[str, Any]]) -> Dict[str, int]:
     if not matched:
-        return {"matched": 0, "marketMetadata": 0, "latestPrices": 0, "marketServing": 0}
+        return {"matched": 0, "marketMetadata": 0, "latestPrices": 0, "marketServing": 0, "marketStatus": 0}
     metadata_rows: List[Tuple[Any, ...]] = []
     price_rows: List[Tuple[Any, ...]] = []
     serving_rows: List[Tuple[Any, ...]] = []
+    status_rows: List[Tuple[Any, ...]] = []
     for market_id, item in matched.items():
         metadata_rows.append(
             (
@@ -289,25 +299,33 @@ def _write_snapshots(conn: Any, matched: Dict[int, Dict[str, Any]]) -> Dict[str,
                 market_id,
             )
         )
-        price_rows.append(
-            (
-                market_id,
-                item["source_updated_at"],
-                item["yes_price"],
-                item["source_updated_at"],
-                item["yes_price"],
-                item["source_updated_at"],
-                item["no_price"],
+        if not item["is_closed"]:
+            price_rows.append(
+                (
+                    market_id,
+                    item["source_updated_at"],
+                    item["yes_price"],
+                    item["source_updated_at"],
+                    item["yes_price"],
+                    item["source_updated_at"],
+                    item["no_price"],
+                )
             )
-        )
         serving_rows.append(
             (
                 market_id,
-                item["yes_price"],
-                item["source_updated_at"],
-                item["price_24h_ago"],
+                item["yes_price"] if not item["is_closed"] else None,
+                item["source_updated_at"] if not item["is_closed"] else None,
+                item["price_24h_ago"] if not item["is_closed"] else None,
                 item["volume_24h"],
                 item["source_updated_at"] if item["volume_24h"] > 0 else None,
+            )
+        )
+        status_rows.append(
+            (
+                market_id,
+                item["is_closed"],
+                item["source_updated_at"] if item["is_closed"] else None,
             )
         )
 
@@ -324,8 +342,9 @@ def _write_snapshots(conn: Any, matched: Dict[int, Dict[str, Any]]) -> Dict[str,
         metadata_rows,
     )
 
-    conn.executemany(
-        """
+    if price_rows:
+        conn.executemany(
+            """
         INSERT INTO core.market_latest_prices (
           market_id, latest_trade_at, latest_price,
           latest_yes_trade_at, latest_yes_price,
@@ -357,9 +376,9 @@ def _write_snapshots(conn: Any, matched: Dict[int, Dict[str, Any]]) -> Dict[str,
              AND EXCLUDED.latest_no_trade_at >= COALESCE(core.market_latest_prices.latest_no_trade_at, '-infinity'::timestamptz)
             THEN EXCLUDED.latest_no_price ELSE core.market_latest_prices.latest_no_price END,
           updated_at = now()
-        """,
-        price_rows,
-    )
+            """,
+            price_rows,
+        )
     conn.executemany(
         """
         INSERT INTO core.market_list_serving (
@@ -376,13 +395,76 @@ def _write_snapshots(conn: Any, matched: Dict[int, Dict[str, Any]]) -> Dict[str,
         """,
         serving_rows,
     )
+    conn.executemany(
+        """
+        INSERT INTO core.market_status_snapshot (
+          market_id, gamma_closed, gamma_closed_time, is_trading_closed
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT (market_id) DO UPDATE SET
+          gamma_closed = EXCLUDED.gamma_closed,
+          gamma_closed_time = EXCLUDED.gamma_closed_time,
+          is_trading_closed = CASE
+            WHEN EXCLUDED.gamma_closed THEN TRUE
+            WHEN core.market_status_snapshot.is_final = FALSE
+             AND core.market_status_snapshot.is_resolved = FALSE
+             AND core.market_status_snapshot.completion_status = 'OPEN'
+            THEN FALSE
+            ELSE core.market_status_snapshot.is_trading_closed
+          END,
+          updated_at = now()
+        """,
+        [(market_id, gamma_closed, closed_at, gamma_closed) for market_id, gamma_closed, closed_at in status_rows],
+    )
     conn.commit()
     return {
         "matched": len(matched),
         "marketMetadata": len(metadata_rows),
         "latestPrices": len(price_rows),
         "marketServing": len(serving_rows),
+        "marketStatus": len(status_rows),
     }
+
+
+def _event_metric_rows(events: Sequence[Dict[str, Any]]) -> List[Tuple[Any, ...]]:
+    fetched_at = _utc_now_iso()
+    rows: List[Tuple[Any, ...]] = []
+    for event in events:
+        event_id = str(event.get("id") or "").strip()
+        volume_24h = _decimal(
+            _first_present(event.get("volume24hr"), event.get("volume_24hr"), event.get("volume24h"))
+        )
+        if not event_id or volume_24h is None:
+            continue
+        source_updated_at = event.get("updatedAt") or event.get("updated_at") or fetched_at
+        rows.append((max(Decimal("0"), volume_24h), str(source_updated_at), fetched_at, event_id))
+    return rows
+
+
+def _write_event_metrics(conn: Any, events: Sequence[Dict[str, Any]]) -> int:
+    rows = _event_metric_rows(events)
+    if not rows:
+        return 0
+    for sql in (
+        "ALTER TABLE core.event_market_serving ADD COLUMN IF NOT EXISTS gamma_volume_24h NUMERIC(38, 18)",
+        "ALTER TABLE core.event_market_serving ADD COLUMN IF NOT EXISTS gamma_volume_updated_at TIMESTAMPTZ",
+        "ALTER TABLE core.event_market_serving ADD COLUMN IF NOT EXISTS gamma_volume_fetched_at TIMESTAMPTZ",
+    ):
+        conn.execute(sql)
+    conn.executemany(
+        """
+        UPDATE core.event_market_serving
+        SET gamma_volume_24h = ?,
+            gamma_volume_updated_at = ?,
+            gamma_volume_fetched_at = ?,
+            volume_24h = ?,
+            source = 'gamma-event',
+            updated_at = now()
+        WHERE event_id = ?
+        """,
+        [(volume, updated_at, fetched_at, volume, event_id) for volume, updated_at, fetched_at, event_id in rows],
+    )
+    conn.commit()
+    return len(rows)
 
 
 def refresh_active_market_serving(
@@ -414,11 +496,18 @@ def refresh_active_market_serving(
     conn = get_connection()
     try:
         matched = _matched_snapshots(conn, snapshots)
-        write_stats = (
-            {"matched": len(matched), "marketMetadata": 0, "latestPrices": 0, "marketServing": 0}
-            if dry_run
-            else _write_snapshots(conn, matched)
-        )
+        if dry_run:
+            write_stats = {
+                "matched": len(matched),
+                "marketMetadata": 0,
+                "latestPrices": 0,
+                "marketServing": 0,
+                "marketStatus": 0,
+                "eventMetrics": len(_event_metric_rows(events)),
+            }
+        else:
+            write_stats = _write_snapshots(conn, matched)
+            write_stats["eventMetrics"] = _write_event_metrics(conn, events)
     finally:
         conn.close()
     return {
@@ -427,7 +516,9 @@ def refresh_active_market_serving(
         "events": len(events),
         "volumeEvents": len(fetched["volume24hr"]),
         "newEvents": len(fetched["startDate"]),
-        "openMarketSnapshots": len(snapshots),
+        "marketSnapshots": len(snapshots),
+        "openMarketSnapshots": sum(1 for item in snapshots if item.get("is_open")),
+        "closedMarketSnapshots": sum(1 for item in snapshots if item.get("is_closed")),
         "errors": errors,
         **write_stats,
     }

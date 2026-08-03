@@ -62,6 +62,8 @@ EXTERNAL_RELEASE_FILES = {
     "deploy/systemd/polydata-local-collector.target",
     "deploy/systemd/polydata.env.example",
     "scripts/market/refresh_active_market_serving.py",
+    "scripts/db/db.py",
+    "scripts/db/sync_event_market_serving.py",
     "scripts/ops/polydata_services.sh",
     "scripts/requirements-dev.lock.txt",
     "scripts/requirements.txt",

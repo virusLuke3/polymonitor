@@ -232,6 +232,9 @@ def ensure_schema(conn) -> None:
             created_at TIMESTAMPTZ,
             end_date TIMESTAMPTZ,
             volume_24h NUMERIC(38, 18) NOT NULL DEFAULT 0,
+            gamma_volume_24h NUMERIC(38, 18),
+            gamma_volume_updated_at TIMESTAMPTZ,
+            gamma_volume_fetched_at TIMESTAMPTZ,
             trade_count_24h BIGINT NOT NULL DEFAULT 0,
             last_activity_at TIMESTAMPTZ,
             outcome_count INTEGER NOT NULL DEFAULT 0,
@@ -250,6 +253,17 @@ def ensure_schema(conn) -> None:
         """
     )
     conn.commit()
+    for column, column_type in (
+        ("gamma_volume_24h", "NUMERIC(38, 18)"),
+        ("gamma_volume_updated_at", "TIMESTAMPTZ"),
+        ("gamma_volume_fetched_at", "TIMESTAMPTZ"),
+    ):
+        if not _column_exists(conn, "core", "event_market_serving", column):
+            _best_effort_ddl(
+                conn,
+                f"ALTER TABLE core.event_market_serving ADD COLUMN {column} {column_type}",
+                label=f"event_market_serving.{column}",
+            )
     for sql in (
         "CREATE INDEX IF NOT EXISTS idx_markets_event_id ON core.markets (event_id)",
         "CREATE INDEX IF NOT EXISTS idx_markets_event_slug ON core.markets (event_slug)",
@@ -422,7 +436,8 @@ def _load_candidate_markets(conn, *, max_markets: int) -> List[Dict[str, Any]]:
           COALESCE(mls.last_trade_at, mls.latest_trade_at, mlp.latest_trade_at, m.created_at) AS last_activity_at,
           COALESCE(mss.completion_status, 'OPEN') AS completion_status,
           COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
-          COALESCE(mss.is_final, FALSE) AS is_final
+          COALESCE(mss.is_final, FALSE) AS is_final,
+          COALESCE(mss.gamma_closed, FALSE) AS gamma_closed
         FROM core.markets m
         LEFT JOIN core.market_list_serving mls ON mls.market_id = m.id
         LEFT JOIN core.market_latest_prices mlp ON mlp.market_id = m.id
@@ -487,6 +502,8 @@ def _build_groups(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for row in rows:
         if _is_noisy(row):
             continue
+        if bool(row.get("gamma_closed")) or bool(row.get("is_trading_closed")) or bool(row.get("is_final")):
+            continue
         event_id = str(row.get("event_id") or "").strip()
         event_slug = str(row.get("event_slug") or "").strip()
         serving_key = event_id or (f"slug:{event_slug}" if event_slug else f"market:{row.get('id')}")
@@ -525,9 +542,10 @@ def _build_groups(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if _timestamp(row.get("last_activity_at")) > _timestamp(group.get("last_activity_at")):
             group["last_activity_at"] = row.get("last_activity_at")
         volume = _to_float(row.get("volume_24h")) or 0.0
-        trades = _to_int(row.get("trade_count_24h"))
+        raw_trades = _to_float(row.get("trade_count_24h"))
+        trades = int(raw_trades) if raw_trades is not None and raw_trades > 0 else None
         group["volume_24h"] += volume
-        group["trade_count_24h"] += trades
+        group["trade_count_24h"] += trades or 0
         yes_price = _to_float(row.get("yes_price"))
         no_price = _to_float(row.get("no_price"))
         if no_price is None and yes_price is not None:
@@ -550,6 +568,8 @@ def _build_groups(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "change24h": change_24h,
             "volume24h": volume,
             "tradeCount24h": trades,
+            "volumeScope": "market",
+            "volumeSource": "gamma-market",
             "lastTradeAt": row.get("last_activity_at"),
             "conditionId": row.get("condition_id"),
             "slug": row.get("slug"),
@@ -674,7 +694,12 @@ def refresh_serving(conn, *, max_markets: int, prune: bool) -> int:
           tags = EXCLUDED.tags,
           created_at = EXCLUDED.created_at,
           end_date = EXCLUDED.end_date,
-          volume_24h = EXCLUDED.volume_24h,
+          volume_24h = CASE
+            WHEN core.event_market_serving.gamma_volume_24h IS NOT NULL
+             AND core.event_market_serving.gamma_volume_fetched_at >= now() - interval '30 minutes'
+            THEN core.event_market_serving.gamma_volume_24h
+            ELSE EXCLUDED.volume_24h
+          END,
           trade_count_24h = EXCLUDED.trade_count_24h,
           last_activity_at = EXCLUDED.last_activity_at,
           outcome_count = EXCLUDED.outcome_count,
@@ -687,7 +712,12 @@ def refresh_serving(conn, *, max_markets: int, prune: bool) -> int:
           completion_status = EXCLUDED.completion_status,
           is_trading_closed = EXCLUDED.is_trading_closed,
           active_rank = EXCLUDED.active_rank,
-          source = 'postgres',
+          source = CASE
+            WHEN core.event_market_serving.gamma_volume_24h IS NOT NULL
+             AND core.event_market_serving.gamma_volume_fetched_at >= now() - interval '30 minutes'
+            THEN 'gamma-event'
+            ELSE 'postgres'
+          END,
           updated_at = now()
         """,
         upsert_rows,
@@ -703,7 +733,7 @@ def refresh_serving(conn, *, max_markets: int, prune: bool) -> int:
         conn.execute(
             """
             DELETE FROM core.event_market_serving s
-            WHERE s.source = 'postgres'
+            WHERE s.source IN ('postgres', 'gamma-event')
               AND NOT EXISTS (
                 SELECT 1 FROM tmp_event_market_serving_keys k WHERE k.serving_key = s.serving_key
               )

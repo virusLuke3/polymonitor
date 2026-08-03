@@ -1032,6 +1032,9 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
             created_at TIMESTAMPTZ,
             end_date TIMESTAMPTZ,
             volume_24h NUMERIC(38, 18) NOT NULL DEFAULT 0,
+            gamma_volume_24h NUMERIC(38, 18),
+            gamma_volume_updated_at TIMESTAMPTZ,
+            gamma_volume_fetched_at TIMESTAMPTZ,
             trade_count_24h BIGINT NOT NULL DEFAULT 0,
             last_activity_at TIMESTAMPTZ,
             outcome_count INTEGER NOT NULL DEFAULT 0,
@@ -1049,6 +1052,12 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         )
         """
     )
+    for col, col_type in (
+        ("gamma_volume_24h", "NUMERIC(38, 18)"),
+        ("gamma_volume_updated_at", "TIMESTAMPTZ"),
+        ("gamma_volume_fetched_at", "TIMESTAMPTZ"),
+    ):
+        ensure_column_exists(conn, "core.event_market_serving", col, col_type)
     for table, index_name, cols in (
         ("core.markets", "idx_markets_gamma_market_id", ["gamma_market_id"]),
         ("core.markets", "idx_markets_event_id", ["event_id"]),

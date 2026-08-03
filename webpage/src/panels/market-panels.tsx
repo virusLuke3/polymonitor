@@ -29,6 +29,7 @@ function localizedPercent(value: string | number | null | undefined, i18n: Marke
 }
 
 function localizedCompact(value: string | number | null | undefined, i18n: MarketI18n) {
+  if (value === null || value === undefined || value === '') return '--';
   const numeric = Number(value);
   return Number.isFinite(numeric)
     ? i18n.formatNumber(numeric, { notation: 'compact', maximumFractionDigits: 1 })
@@ -36,6 +37,7 @@ function localizedCompact(value: string | number | null | undefined, i18n: Marke
 }
 
 function localizedCurrency(value: string | number | null | undefined, i18n: MarketI18n) {
+  if (value === null || value === undefined || value === '') return '--';
   const numeric = Number(value);
   return Number.isFinite(numeric)
     ? i18n.formatNumber(numeric, { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 })
@@ -236,6 +238,7 @@ function firstFiniteValue(...values: Array<string | number | null | undefined>) 
 
 function sumFiniteValues(values: Array<string | number | null | undefined>) {
   const finite = values
+    .filter((value) => value !== null && value !== undefined && value !== '')
     .map((value) => Number(value))
     .filter((value) => Number.isFinite(value));
   if (!finite.length) return null;
@@ -288,11 +291,6 @@ function groupDefaultOutcome(group: MarketGroupItem) {
     })[0] || null;
 }
 
-function groupDisplayTitle(group: MarketGroupItem) {
-  const focusedOutcome = groupDefaultOutcome(group);
-  return focusedOutcome?.title || focusedOutcome?.label || group.title;
-}
-
 function groupHasFocusableDefault(group: MarketGroupItem, requireActivity = true) {
   const selected = groupDefaultOutcome(group);
   if (!selected || !groupOutcomeIsFocusable(selected, false)) return false;
@@ -339,11 +337,15 @@ function groupHasMarketCoverage(group: MarketGroupItem) {
   return false;
 }
 
-function groupActivityLabel(group: MarketGroupItem, i18n: MarketI18n) {
-  const tradeCount = Number(groupDisplayTradeCount(group) || 0);
+function marketActivityLabel(
+  tradeCountValue: string | number | null | undefined,
+  volumeValue: string | number | null | undefined,
+  i18n: MarketI18n,
+) {
+  const tradeCount = Number(tradeCountValue);
   if (tradeCount > 0) return i18n.t('atlasMarket.transactions', { count: localizedCompact(tradeCount, i18n) });
-  if (Number(groupDisplayVolume(group) || 0) > 0) return i18n.t('atlasMarket.impact');
-  return groupOutcomeLabel(group, i18n);
+  if (Number(volumeValue) > 0) return i18n.t('atlasMarket.activity24h');
+  return null;
 }
 
 function groupActivityTimestamp(group: MarketGroupItem) {
@@ -371,9 +373,9 @@ function groupActiveRank(group: MarketGroupItem) {
     activityAgeHours <= 72 ? 240 :
     createdAgeHours <= 168 ? 180 :
     0;
-  const impact = Math.log10(Math.max(volume, 0) + 1) * 38 + Math.log10(Math.max(trades, 0) + 1) * 62;
+  const activityWeight = Math.log10(Math.max(volume, 0) + 1) * 38 + Math.log10(Math.max(trades, 0) + 1) * 62;
   const multiOutcomeBonus = Number(group.outcomeCount || group.outcomes?.length || 0) > 2 ? 18 : 0;
-  return freshness + impact + multiOutcomeBonus + tradableSignal * 24 - staleMidPenalty;
+  return freshness + activityWeight + multiOutcomeBonus + tradableSignal * 24 - staleMidPenalty;
 }
 
 function groupBestLivePrice(group: MarketGroupItem) {
@@ -482,7 +484,16 @@ function activeMarketGroupsList(
     <div className="wm-poly-market-list">
       {groups.map((group) => {
         const defaultOutcome = groupDefaultOutcome(group);
-        const displayTitle = groupDisplayTitle(group);
+        const outcomeTitle = defaultOutcome?.title || defaultOutcome?.label || null;
+        const displaysOutcome = Boolean(defaultOutcome && outcomeTitle);
+        const displayTitle = outcomeTitle || group.title;
+        const displayVolume = displaysOutcome
+          ? firstFiniteValue(defaultOutcome?.volume24h)
+          : groupDisplayVolume(group);
+        const displayTradeCount = displaysOutcome
+          ? firstFiniteValue(defaultOutcome?.tradeCount24h)
+          : groupDisplayTradeCount(group);
+        const activityLabel = marketActivityLabel(displayTradeCount, displayVolume, i18n);
         const defaultMarketId = defaultOutcome?.marketId ? Number(defaultOutcome.marketId) : defaultGroupMarketId(group);
         const groupEventId = group.eventId != null ? String(group.eventId) : null;
         const selected = (groupEventId != null && selectedMarketGroupId === groupEventId) || (defaultMarketId != null && selectedMarketId === defaultMarketId);
@@ -510,8 +521,11 @@ function activeMarketGroupsList(
               <strong className="wm-poly-market-title">{displayTitle}</strong>
               <div className="wm-poly-market-bottom">
                 <span className="wm-poly-market-prob">{localizedPercent(groupBestLivePrice(group), i18n)}</span>
-                <span className="wm-poly-market-volume">{i18n.t('atlasMarket.volume', { value: localizedCurrency(groupDisplayVolume(group), i18n) })}</span>
-                <span className="wm-poly-market-trades">{groupActivityLabel(group, i18n)}</span>
+                <span className="wm-poly-market-volume">{i18n.t(
+                  displaysOutcome ? 'atlasMarket.marketVolume24h' : 'atlasMarket.eventVolume24h',
+                  { value: localizedCurrency(displayVolume, i18n) },
+                )}</span>
+                {activityLabel ? <span className="wm-poly-market-trades">{activityLabel}</span> : null}
               </div>
             </div>
             <span className="wm-poly-market-star" aria-hidden="true">☆</span>
@@ -526,35 +540,38 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
   if (!markets.length) return emptyState(i18n.t('atlasMarket.noMarkets'), localizedEmptyCopy(i18n));
   return (
     <div className="wm-poly-market-list">
-      {markets.map((market) => (
-        <button
-          key={market.id}
-          type="button"
-          className={`wm-poly-market-card ${topicClassName(marketTopic(market))} ${selectedMarketId === market.id ? 'active' : ''}`}
-          onClick={() => setSelectedMarketId(market.id)}
-          aria-pressed={selectedMarketId === market.id}
-          title={`${market.title}${market.slug ? ` · ${market.slug}` : ''}`}
-          style={{ '--wm-market-accent': marketAccent(market) } as Record<string, string>}
-        >
-          <div className="wm-poly-market-card-main">
-            <div className="wm-poly-market-meta">
-              <span className="wm-poly-market-dot" />
-              <span>{marketTopic(market)}</span>
-              <span>·</span>
-              <span>{marketTiming(market, i18n)}</span>
-              <span>·</span>
-              <span>{marketOutcomeLabel(market, i18n)}</span>
+      {markets.map((market) => {
+        const activityLabel = marketActivityLabel(market.tradeCount24h, market.volume24h, i18n);
+        return (
+          <button
+            key={market.id}
+            type="button"
+            className={`wm-poly-market-card ${topicClassName(marketTopic(market))} ${selectedMarketId === market.id ? 'active' : ''}`}
+            onClick={() => setSelectedMarketId(market.id)}
+            aria-pressed={selectedMarketId === market.id}
+            title={`${market.title}${market.slug ? ` · ${market.slug}` : ''}`}
+            style={{ '--wm-market-accent': marketAccent(market) } as Record<string, string>}
+          >
+            <div className="wm-poly-market-card-main">
+              <div className="wm-poly-market-meta">
+                <span className="wm-poly-market-dot" />
+                <span>{marketTopic(market)}</span>
+                <span>·</span>
+                <span>{marketTiming(market, i18n)}</span>
+                <span>·</span>
+                <span>{marketOutcomeLabel(market, i18n)}</span>
+              </div>
+              <strong className="wm-poly-market-title">{market.title}</strong>
+              <div className="wm-poly-market-bottom">
+                <span className="wm-poly-market-prob">{localizedPercent(market.latestPrice, i18n)}</span>
+                <span className="wm-poly-market-volume">{i18n.t('atlasMarket.volume', { value: localizedCurrency(market.volume24h, i18n) })}</span>
+                {activityLabel ? <span className="wm-poly-market-trades">{activityLabel}</span> : null}
+              </div>
             </div>
-            <strong className="wm-poly-market-title">{market.title}</strong>
-            <div className="wm-poly-market-bottom">
-              <span className="wm-poly-market-prob">{localizedPercent(market.latestPrice, i18n)}</span>
-              <span className="wm-poly-market-volume">{i18n.t('atlasMarket.volume', { value: localizedCurrency(market.volume24h, i18n) })}</span>
-              <span className="wm-poly-market-trades">{i18n.t('atlasMarket.transactions', { count: localizedCompact(market.tradeCount24h, i18n) })}</span>
-            </div>
-          </div>
-          <span className="wm-poly-market-star" aria-hidden="true">☆</span>
-        </button>
-      ))}
+            <span className="wm-poly-market-star" aria-hidden="true">☆</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -903,7 +920,7 @@ function PriceSurfacePanel({ ctx }: { ctx: PanelRenderContext }) {
           </article>
           <article>
             <span>{t('atlasMarket.trades24h')}</span>
-            <strong>{i18n.formatNumber(Number(ctx.bundle?.price?.tradeCount24h || 0))}</strong>
+            <strong>{localizedCompact(ctx.bundle?.price?.tradeCount24h, i18n)}</strong>
           </article>
         </div>
         {priceLine(ctx.bundle?.chart?.points || [], {

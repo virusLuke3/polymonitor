@@ -2834,10 +2834,7 @@ def _market_trade_count_24h(row: Dict[str, Any]) -> Optional[int]:
     trade_count = _int_value(row.get("trade_count_24h"), 0)
     if trade_count > 0:
         return trade_count
-    volume = _decimal_from_any(row.get("volume_24h")) or Decimal("0")
-    if volume > 0 or row.get("last_trade_at") not in (None, "") or row.get("latest_trade_at") not in (None, ""):
-        return None
-    return 0
+    return None
 
 
 def _market_volume_24h(
