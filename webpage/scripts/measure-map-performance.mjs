@@ -12,6 +12,7 @@ const target = new URL(args.find((value) => !value.startsWith('--')) || 'http://
 target.searchParams.set('view', '2d');
 target.searchParams.set('mapPerf', '1');
 const settleMs = Number(option('--settle', '6000'));
+const warmupMs = Number(option('--warmup', '1000'));
 const output = resolve(option('--out', 'artifacts/map-performance/chrome-trace.json'));
 const strict = args.includes('--strict');
 const requireDynamic = args.includes('--require-dynamic');
@@ -24,6 +25,7 @@ const isLoopbackTarget = ['127.0.0.1', 'localhost', '::1'].includes(target.hostn
 const proxyServer = option('--proxy', isLoopbackTarget
   ? ''
   : process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || '');
+const useAngle = option('--use-angle', '');
 const port = 19000 + (process.pid % 1000);
 const profile = mkdtempSync(resolve(tmpdir(), 'polymonitor-map-perf-'));
 const chrome = spawn('/usr/bin/google-chrome', [
@@ -34,6 +36,8 @@ const chrome = spawn('/usr/bin/google-chrome', [
   '--disable-background-networking',
   '--disable-sync',
   ...(proxyServer ? [`--proxy-server=${proxyServer}`] : []),
+  ...(useAngle ? [`--use-angle=${useAngle}`, '--ignore-gpu-blocklist'] : []),
+  ...(useAngle === 'vulkan' ? ['--enable-features=Vulkan'] : []),
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${profile}`,
   '--window-size=1440,900',
@@ -120,6 +124,25 @@ async function waitForRenderer(client, timeoutMs = 15000) {
   return false;
 }
 
+async function waitForPerformanceSamples(client, dynamicRequired, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await client.send('Runtime.evaluate', {
+      expression: `(() => {
+        const snapshot = window.__POLYMONITOR_MAP_PERF__?.snapshot();
+        if (!snapshot) return false;
+        return snapshot.phases['js-build'].count > 0
+          && snapshot.phases['deck-commit'].count > 0
+          && (${dynamicRequired ? 'true' : 'false'} ? snapshot.phases['dynamic-commit'].count > 0 : true);
+      })()`,
+      returnByValue: true,
+    });
+    if (result.result?.value) return true;
+    await sleep(100);
+  }
+  return false;
+}
+
 let client;
 try {
   await waitForEndpoint('/json/version');
@@ -132,11 +155,21 @@ try {
     client.send('Runtime.enable'),
     client.send('Performance.enable'),
     client.send('Network.enable'),
+    client.send('Log.enable'),
   ]);
   await client.send('Network.setBypassServiceWorker', { bypass: true });
   const loadFailures = [];
+  const runtimeErrors = [];
   client.on('Network.loadingFailed', ({ errorText, type, canceled }) => {
     if (!canceled && loadFailures.length < 12) loadFailures.push(`${type || 'Other'}: ${errorText}`);
+  });
+  client.on('Runtime.exceptionThrown', ({ exceptionDetails }) => {
+    if (runtimeErrors.length < 12) {
+      runtimeErrors.push(exceptionDetails?.exception?.description || exceptionDetails?.text || 'Runtime exception');
+    }
+  });
+  client.on('Log.entryAdded', ({ entry }) => {
+    if (entry?.level === 'error' && runtimeErrors.length < 12) runtimeErrors.push(entry.text);
   });
   const traceEvents = [];
   client.on('Tracing.dataCollected', ({ value }) => traceEvents.push(...value));
@@ -161,8 +194,15 @@ try {
     throw new Error(`2D map renderer did not become ready: ${JSON.stringify({
       page: diagnostics.result?.value,
       loadFailures,
+      runtimeErrors,
     })}`);
   }
+  const samplesReady = await waitForPerformanceSamples(client, requireDynamic);
+  if (!samplesReady) throw new Error('Map performance phases did not become ready before measurement.');
+  await sleep(warmupMs);
+  await client.send('Runtime.evaluate', {
+    expression: 'window.__POLYMONITOR_MAP_PERF__?.resetLongTasks()',
+  });
   await sleep(settleMs);
   const boundsResult = await client.send('Runtime.evaluate', {
     expression: `(() => {
@@ -200,7 +240,16 @@ try {
       expression: 'document.querySelector("[data-map-renderer-ready]")?.dataset.mapRendererReady || null',
       returnByValue: true,
     }).then((result) => result.result?.value),
+    gpu: await client.send('Runtime.evaluate', {
+      expression: `(() => {
+        const gl = document.createElement('canvas').getContext('webgl2');
+        const extension = gl?.getExtension('WEBGL_debug_renderer_info');
+        return extension ? gl.getParameter(extension.UNMASKED_RENDERER_WEBGL) : null;
+      })()`,
+      returnByValue: true,
+    }).then((result) => result.result?.value),
     map: snapshot,
+    warmupMs,
     budgets,
     chromeMetrics: Object.fromEntries((metrics.metrics || []).map((metric) => [metric.name, metric.value])),
   };

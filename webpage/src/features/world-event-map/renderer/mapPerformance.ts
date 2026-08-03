@@ -10,7 +10,11 @@ export type MapPerformanceSnapshot = {
 
 declare global {
   interface Window {
-    __POLYMONITOR_MAP_PERF__?: { snapshot: () => MapPerformanceSnapshot; reset: () => void };
+    __POLYMONITOR_MAP_PERF__?: {
+      snapshot: () => MapPerformanceSnapshot;
+      reset: () => void;
+      resetLongTasks: () => void;
+    };
   }
 }
 
@@ -43,6 +47,7 @@ export class MapPerformanceMonitor {
     this.exposedApi = {
       snapshot: () => this.snapshot(),
       reset: () => this.reset(),
+      resetLongTasks: () => this.resetLongTasks(),
     };
     window.__POLYMONITOR_MAP_PERF__ = this.exposedApi;
   }
@@ -88,6 +93,10 @@ export class MapPerformanceMonitor {
 
   reset() {
     this.samples = [];
+    this.longTasks = [];
+  }
+
+  resetLongTasks() {
     this.longTasks = [];
   }
 
