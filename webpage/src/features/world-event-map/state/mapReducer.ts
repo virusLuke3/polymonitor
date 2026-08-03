@@ -21,6 +21,7 @@ export type WorldEventMapAction =
   | { type: 'set-time-range'; timeRange: WorldEventTimeRange }
   | { type: 'set-severities'; severities: GeoEventSeverity[] }
   | { type: 'select-event'; eventId: string | null }
+  | { type: 'hover-event'; eventId: string | null }
   | { type: 'set-basemap-theme'; theme: string }
   | { type: 'set-aviation-lens'; lens: AviationLensMode }
   | { type: 'set-aviation-risk-source'; source: AviationRiskSource }
@@ -64,6 +65,7 @@ export function worldEventMapReducer(
     return { ...state, severities: [...new Set(action.severities)] };
   }
   if (action.type === 'select-event') return { ...state, selectedEventId: action.eventId };
+  if (action.type === 'hover-event') return { ...state, hoveredEventId: action.eventId };
   if (action.type === 'set-basemap-theme') return { ...state, basemapTheme: action.theme || 'dark' };
   if (action.type === 'set-aviation-lens') return { ...state, aviationLens: action.lens };
   if (action.type === 'set-aviation-risk-source') return { ...state, aviationRiskSource: action.source };

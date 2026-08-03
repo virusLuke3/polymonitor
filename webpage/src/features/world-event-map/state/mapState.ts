@@ -14,6 +14,7 @@ export interface WorldEventMapState {
   timeRange: WorldEventTimeRange;
   severities: GeoEventSeverity[];
   selectedEventId: string | null;
+  hoveredEventId: string | null;
   basemapTheme: string;
   aviationLens: AviationLensMode;
   aviationRiskSource: AviationRiskSource;
@@ -38,6 +39,7 @@ export function defaultWorldEventMapState(): WorldEventMapState {
     timeRange: '7d',
     severities: [...WORLD_EVENT_SEVERITIES],
     selectedEventId: null,
+    hoveredEventId: null,
     basemapTheme: 'dark',
     aviationLens: 'trunk',
     aviationRiskSource: 'all',

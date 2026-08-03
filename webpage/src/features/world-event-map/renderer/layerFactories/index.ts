@@ -2,10 +2,10 @@ import type { LayersList } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import type { WorldEventMapState } from '../../state/mapState';
 import { createEventGeometryLayers } from './eventGeometryLayers';
-import { createEventPointLayers, type EventClusterIndex } from './eventPointLayer';
+import { createEventPointLayers } from './eventPointLayer';
 import { createAviationLayers } from './aviationLayers';
 
-export { EventClusterIndex, type EventCluster } from './eventPointLayer';
+export { type EventCluster } from './eventPointLayer';
 export { isHazardEvent } from './shared';
 export {
   aviationLayerStats,
@@ -33,7 +33,6 @@ export function createWorldEventStaticLayerSections(
   state: WorldEventMapState,
   showLabels = true,
   viewport?: [number, number, number, number],
-  clusterIndex?: EventClusterIndex,
 ): WorldEventStaticLayerSections {
   return {
     geometry: createEventGeometryLayers(events, state.selectedEventId),
@@ -43,29 +42,8 @@ export function createWorldEventStaticLayerSections(
       selectedEventId: state.selectedEventId,
       showLabels,
       viewport,
-      clusterIndex,
     }),
   };
-}
-
-export function createWorldEventGeometryLayers(events: GeoEvent[], selectedEventId: string | null) {
-  return createEventGeometryLayers(events, selectedEventId);
-}
-
-export function createWorldEventPointLayers(
-  events: GeoEvent[],
-  state: WorldEventMapState,
-  viewport: [number, number, number, number] | undefined,
-  clusterIndex: EventClusterIndex,
-) {
-  return createEventPointLayers({
-    events,
-    zoom: state.zoom,
-    selectedEventId: state.selectedEventId,
-    showLabels: true,
-    viewport,
-    clusterIndex,
-  });
 }
 
 export function createWorldEventLayers(

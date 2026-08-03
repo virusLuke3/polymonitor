@@ -1,19 +1,11 @@
 import maplibregl, { type StyleSpecification } from 'maplibre-gl';
-import {
-  OPENFREEMAP_DARK_STYLE,
-  OPENFREEMAP_LIGHT_STYLE,
-  WORLD_EVENT_PMTILES_URL,
-  type WeatherMapTheme,
-} from './weatherBasemapMeta';
 
-export {
-  CARTO_DARK_STYLE,
-  OPENFREEMAP_DARK_STYLE,
-  OPENFREEMAP_LIGHT_STYLE,
-  WORLD_EVENT_PMTILES_URL,
-  getWeatherBasemapAttribution,
-  type WeatherMapTheme,
-} from './weatherBasemapMeta';
+export type WeatherMapTheme = 'dark' | 'dark-matter' | 'positron';
+
+export const OPENFREEMAP_DARK_STYLE = 'https://tiles.openfreemap.org/styles/dark';
+export const OPENFREEMAP_LIGHT_STYLE = 'https://tiles.openfreemap.org/styles/positron';
+export const CARTO_DARK_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+export const WORLD_EVENT_PMTILES_URL = (import.meta.env.VITE_PMTILES_URL || '').trim();
 
 let pmtilesRegistered = false;
 let pmtilesRegistration: Promise<void> | null = null;
@@ -101,6 +93,11 @@ export async function getWeatherMapStyle(theme: WeatherMapTheme = 'dark'): Promi
   return theme === 'positron' ? OPENFREEMAP_LIGHT_STYLE : OPENFREEMAP_DARK_STYLE;
 }
 
+export function getWeatherBasemapAttribution() {
+  return WORLD_EVENT_PMTILES_URL
+    ? '© Protomaps · © OpenStreetMap contributors'
+    : '© OpenFreeMap · © OpenStreetMap contributors';
+}
 
 type LabelCapableMap = {
   getZoom: () => number;

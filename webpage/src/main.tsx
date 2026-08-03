@@ -3,6 +3,7 @@ import { App } from './App';
 import { LocaleProvider } from '@/services/i18n';
 import { registerPwa } from '@/services/pwa';
 import './styles/fonts.css';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import './styles/base-layer.css';
 import './styles/panel-layout-stability.css';
 

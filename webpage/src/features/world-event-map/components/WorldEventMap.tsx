@@ -5,23 +5,28 @@ import type {
   AviationRiskSource,
   WorldEventMapState,
 } from '../state/mapState';
+import { DeckMapRenderer } from '../renderer/DeckMapRenderer';
+import { SvgMapRenderer } from '../renderer/SvgMapRenderer';
 import type {
   BasemapState,
+  MapHoverPosition,
   MapRenderer,
   MapRendererCallbacks,
 } from '../renderer/MapRenderer';
+import type { WorldEventTooltipModel } from '../renderer/hoverTooltip';
 import { inspectWebGL2Support } from '../renderer/webglSupport';
 import { worldEventLayerById } from '../config/layerRegistry';
 import { EventInspector } from './EventInspector';
 import { EventList } from './EventList';
 import { AviationLens } from './AviationLens';
-import { getWeatherBasemapAttribution } from '@/config/weatherBasemapMeta';
+import { getWeatherBasemapAttribution } from '@/config/weatherBasemap';
 
 export type WorldEventMapProps = {
   events: GeoEvent[];
   state: WorldEventMapState;
   onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
   onEventSelect: (eventId: string | null) => void;
+  onEventHover: (eventId: string | null) => void;
   onOpenMarket?: (marketId: number) => void;
   onAviationLensChange?: (lens: AviationLensMode) => void;
   onAviationRiskSourceChange?: (source: AviationRiskSource) => void;
@@ -34,6 +39,7 @@ export function WorldEventMap({
   state,
   onCameraChange,
   onEventSelect,
+  onEventHover,
   onOpenMarket,
   onAviationLensChange,
   onAviationRiskSourceChange,
@@ -44,10 +50,12 @@ export function WorldEventMap({
   const rendererRef = useRef<MapRenderer | null>(null);
   const stateRef = useRef(state);
   const eventsRef = useRef(events);
-  const callbackRef = useRef({ onCameraChange, onEventSelect });
+  const callbackRef = useRef({ onCameraChange, onEventSelect, onEventHover });
   const [basemapState, setBasemapState] = useState<BasemapState>('idle');
   const [rendererKind, setRendererKind] = useState<'webgl' | 'svg'>('webgl');
   const [rendererError, setRendererError] = useState<string | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<MapHoverPosition | null>(null);
+  const [hoverTooltip, setHoverTooltip] = useState<WorldEventTooltipModel | null>(null);
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === state.selectedEventId) || null,
     [events, state.selectedEventId],
@@ -57,7 +65,7 @@ export function WorldEventMap({
     [state.activeLayerIds],
   );
 
-  callbackRef.current = { onCameraChange, onEventSelect };
+  callbackRef.current = { onCameraChange, onEventSelect, onEventHover };
   stateRef.current = state;
   eventsRef.current = events;
 
@@ -79,6 +87,14 @@ export function WorldEventMap({
     const callbacks: MapRendererCallbacks = {
       onCameraChange: (camera) => callbackRef.current.onCameraChange(camera),
       onEventSelect: (eventId) => callbackRef.current.onEventSelect(eventId),
+      onEventHover: (eventId, position) => {
+        callbackRef.current.onEventHover(eventId);
+        setHoverPosition(eventId ? position || null : null);
+      },
+      onHoverTooltip: (tooltip, position) => {
+        setHoverTooltip(tooltip);
+        setHoverPosition(tooltip ? position || null : null);
+      },
       onBasemapStateChange: (nextState) => {
         if (!disposed) setBasemapState(nextState);
       },
@@ -94,12 +110,8 @@ export function WorldEventMap({
       if (disposed) return;
       rendererRef.current?.destroy();
       const renderer: MapRenderer = kind === 'webgl'
-        ? new (await import('../renderer/DeckMapRenderer')).DeckMapRenderer()
-        : new (await import('../renderer/SvgMapRenderer')).SvgMapRenderer();
-      if (disposed) {
-        renderer.destroy();
-        return;
-      }
+        ? new DeckMapRenderer()
+        : new SvgMapRenderer();
       rendererRef.current = renderer;
       setRendererKind(kind);
       if (reason) setRendererError(reason.message);
@@ -108,7 +120,6 @@ export function WorldEventMap({
       renderer.setEvents(eventsRef.current);
       try {
         await renderer.mount(host, callbacks);
-        host.dataset.mapRendererReady = kind;
         updatePauseState();
       } catch (error) {
         if (disposed || rendererRef.current !== renderer) return;
@@ -122,9 +133,7 @@ export function WorldEventMap({
       }
     };
 
-    const support = inspectWebGL2Support({
-      allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1',
-    });
+    const support = inspectWebGL2Support();
     if (support.supported) void installRenderer('webgl');
     else void installRenderer('svg', new Error(support.reason || 'WebGL2 is unavailable.'));
 
@@ -147,7 +156,6 @@ export function WorldEventMap({
       motionQuery.removeEventListener('change', handleMotionPreference);
       observer.disconnect();
       intersectionObserver.disconnect();
-      delete host.dataset.mapRendererReady;
       rendererRef.current?.destroy();
       rendererRef.current = null;
     };
@@ -170,6 +178,17 @@ export function WorldEventMap({
         tabIndex={0}
         aria-label="World event map. Use pointer or keyboard controls to explore active real-world events."
       />
+      {rendererKind === 'svg' && hoverTooltip && !selectedEvent && hoverPosition ? (
+        <div
+          className="wm-weather-deck-tooltip wm-world-event-svg-tooltip wm-world-event-tooltip"
+          role="status"
+          style={{ left: `${hoverPosition.x}px`, top: `${hoverPosition.y}px` }}
+        >
+          <span className="wm-world-event-tooltip-kicker">{hoverTooltip.kicker}</span>
+          <strong>{hoverTooltip.title}</strong>
+          {hoverTooltip.details.map((detail) => <small key={detail}>{detail}</small>)}
+        </div>
+      ) : null}
       {selectedEvent ? (
         <EventInspector
           key={selectedEvent.id}

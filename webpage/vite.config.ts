@@ -4,8 +4,6 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 import preact from '@preact/preset-vite';
 import { resolve } from 'path';
 
-const LAZY_MAP_ASSET_RE = /(?:WorldEventMap|DeckMapRenderer|SvgMapRenderer|maplibre|deck-stack|map-tiles|map-geo)-[A-Za-z0-9_-]+\.(?:js|css)$/;
-
 function repositorySha() {
   try {
     return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -21,9 +19,6 @@ function pwaServiceWorker(buildId: string): Plugin {
     generateBundle(_options, bundle) {
       const generatedAssets = Object.keys(bundle)
         .filter((name) => /\.(?:css|js)$/.test(name))
-        // The map renderer is demand-loaded. Precaching it during SW install
-        // would compete with first paint and defeat the lazy chunk boundary.
-        .filter((name) => !LAZY_MAP_ASSET_RE.test(name))
         .map((name) => `/${name}`);
       const precache = [
         '/',
@@ -90,30 +85,6 @@ export default defineConfig(({ mode }) => {
     preview: {
       proxy: {
         '/map-tiles': mapTilesProxy,
-      },
-    },
-    build: {
-      modulePreload: {
-        resolveDependencies: (_filename, dependencies, context) => (
-          context.hostType === 'html'
-            ? dependencies.filter((dependency) => !LAZY_MAP_ASSET_RE.test(dependency))
-            : dependencies
-        ),
-      },
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            if (id.includes('/maplibre-gl/')) return 'maplibre';
-            if (id.includes('/@deck.gl/')
-              || id.includes('/deck.gl/')
-              || id.includes('/@luma.gl/')
-              || id.includes('/@loaders.gl/')
-              || id.includes('/@math.gl/')) return 'deck-stack';
-            if (id.includes('/pmtiles/') || id.includes('/@protomaps/basemaps/')) return 'map-tiles';
-            if (id.includes('/supercluster/') || id.includes('/d3-geo/')) return 'map-geo';
-            return undefined;
-          },
-        },
       },
     },
   };

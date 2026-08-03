@@ -26,23 +26,7 @@ export function useWorldEventMapState() {
   const [state, dispatch] = useReducer(worldEventMapReducer, undefined, initialState);
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    let cancelled = false;
-    const persist = () => {
-      if (!cancelled) window.localStorage.setItem(WORLD_EVENT_MAP_STORAGE_KEY, JSON.stringify(state));
-    };
-    const scheduler = window as Window & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-      cancelIdleCallback?: (handle: number) => void;
-    };
-    const hasIdleCallback = typeof scheduler.requestIdleCallback === 'function';
-    const handle = hasIdleCallback
-      ? scheduler.requestIdleCallback(persist, { timeout: 1_000 })
-      : window.setTimeout(persist, 0);
-    return () => {
-      cancelled = true;
-      if (hasIdleCallback && typeof scheduler.cancelIdleCallback === 'function') scheduler.cancelIdleCallback(handle);
-      else window.clearTimeout(handle);
-    };
+    window.localStorage.setItem(WORLD_EVENT_MAP_STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
   return useMemo(() => ({
@@ -54,6 +38,7 @@ export function useWorldEventMapState() {
     setTimeRange: (timeRange: WorldEventTimeRange) => dispatch({ type: 'set-time-range', timeRange }),
     setSeverities: (severities: GeoEventSeverity[]) => dispatch({ type: 'set-severities', severities }),
     selectEvent: (eventId: string | null) => dispatch({ type: 'select-event', eventId }),
+    hoverEvent: (eventId: string | null) => dispatch({ type: 'hover-event', eventId }),
     setAviationLens: (lens: AviationLensMode) => dispatch({ type: 'set-aviation-lens', lens }),
     setAviationRiskSource: (source: AviationRiskSource) => dispatch({ type: 'set-aviation-risk-source', source }),
     reset: () => dispatch({ type: 'reset' }),

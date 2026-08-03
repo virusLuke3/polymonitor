@@ -10,7 +10,7 @@ export function isSoftwareWebGLRenderer(renderer: string | null | undefined) {
   return SOFTWARE_RENDERER_PATTERN.test(renderer || '');
 }
 
-export function inspectWebGL2Support(options: { allowSoftware?: boolean } = {}): WebGLSupport {
+export function inspectWebGL2Support(): WebGLSupport {
   if (typeof document === 'undefined') {
     return { supported: false, renderer: null, reason: 'WebGL2 requires a browser document.' };
   }
@@ -18,7 +18,7 @@ export function inspectWebGL2Support(options: { allowSoftware?: boolean } = {}):
   let gl: WebGL2RenderingContext | null = null;
   try {
     gl = canvas.getContext('webgl2', {
-      failIfMajorPerformanceCaveat: !options.allowSoftware,
+      failIfMajorPerformanceCaveat: true,
       powerPreference: 'high-performance',
     });
     if (!gl) {
@@ -32,7 +32,7 @@ export function inspectWebGL2Support(options: { allowSoftware?: boolean } = {}):
     const renderer = debugInfo
       ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '')
       : String(gl.getParameter(gl.RENDERER) || '');
-    if (isSoftwareWebGLRenderer(renderer) && !options.allowSoftware) {
+    if (isSoftwareWebGLRenderer(renderer)) {
       return {
         supported: false,
         renderer,
