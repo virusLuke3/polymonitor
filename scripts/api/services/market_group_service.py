@@ -1152,8 +1152,18 @@ def _group_market_ids(group: Dict[str, Any]) -> List[int]:
 def _apply_orderfilled_trade_counts(
     dependencies: MarketGroupDependencies,
     items: List[Dict[str, Any]],
+    *,
+    default_only: bool = False,
 ) -> None:
-    market_ids = [market_id for item in items for market_id in _group_market_ids(item)]
+    if default_only:
+        market_ids = [
+            int(market_id)
+            for item in items
+            for market_id in [_float_value(item.get("defaultMarketId"))]
+            if market_id is not None
+        ]
+    else:
+        market_ids = [market_id for item in items for market_id in _group_market_ids(item)]
     try:
         stats = clickhouse_orderfilled_service.get_market_stats(
             dependencies.source,  # type: ignore[arg-type]
@@ -1174,12 +1184,15 @@ def _apply_orderfilled_trade_counts(
                 if not isinstance(outcome, dict):
                     continue
                 market_id = _outcome_market_id(outcome)
+                if default_only and market_id not in stats:
+                    continue
                 stat = stats.get(market_id) if market_id is not None else None
                 trade_count = _positive_count_or_none((stat or {}).get("trade_count_24h"))
                 outcome["tradeCount24h"] = trade_count
                 if market_id is not None and trade_count is not None:
                     group_counts[market_id] = trade_count
-        group["tradeCount24h"] = sum(group_counts.values()) or None
+        if not default_only:
+            group["tradeCount24h"] = sum(group_counts.values()) or None
 
 
 def _latest_block_close_by_market_id(
@@ -1438,7 +1451,7 @@ def _serving_market_groups_payload(
         items = _limit_group_category_dominance(items, page_size)
         total = max(total, offset + min(len(items), page_size) + (1 if len(rows) > page_size else 0))
     items = items[:page_size]
-    _apply_orderfilled_trade_counts(dependencies, items)
+    _apply_orderfilled_trade_counts(dependencies, items, default_only=True)
     if sort == "active" and not query and not items:
         return None
     return {
