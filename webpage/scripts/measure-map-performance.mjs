@@ -198,7 +198,21 @@ try {
     })}`);
   }
   const samplesReady = await waitForPerformanceSamples(client, requireDynamic);
-  if (!samplesReady) throw new Error('Map performance phases did not become ready before measurement.');
+  if (!samplesReady) {
+    const diagnostics = await client.send('Runtime.evaluate', {
+      expression: `({
+        renderer: document.querySelector('[data-map-renderer-ready]')?.getAttribute('data-map-renderer-ready') || null,
+        performance: window.__POLYMONITOR_MAP_PERF__?.snapshot() || null,
+        bodyText: document.body?.innerText?.slice(0, 500) || '',
+      })`,
+      returnByValue: true,
+    });
+    throw new Error(`Map performance phases did not become ready before measurement: ${JSON.stringify({
+      page: diagnostics.result?.value,
+      loadFailures,
+      runtimeErrors,
+    })}`);
+  }
   await sleep(warmupMs);
   await client.send('Runtime.evaluate', {
     expression: 'window.__POLYMONITOR_MAP_PERF__?.resetLongTasks()',

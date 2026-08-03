@@ -201,7 +201,10 @@ export class DeckMapRenderer implements MapRenderer {
       interleaved: false,
       layers: [],
       pickingRadius: 8,
-      useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
+      // The motion canvas contains only small aircraft and route runners. A
+      // bounded pixel ratio keeps its full-canvas clear/draw below the frame
+      // budget without reducing the labelled basemap or static event detail.
+      useDevicePixels: Math.min(1.25, Math.max(0.75, window.devicePixelRatio * 0.75)),
       getCursor,
       getTooltip,
       onHover: (info: PickingInfo<WorldEventPickedObject>) => {
