@@ -50,7 +50,6 @@ import {
   useCountryGeometry,
   useNaturalHazards,
   useWorldEventMapState,
-  WorldEventMap,
   worldEventLayerById,
   type GeoEvent,
   type AviationLensMode,
@@ -121,6 +120,7 @@ const WatchlistWorkspace = lazy(() => import('@/workspaces/watchlist/WatchlistWo
 const BriefingManagerWorkspace = lazy(() => import('@/workspaces/briefing/BriefingWorkspace').then((module) => ({ default: module.BriefingManagerWorkspace })));
 const PublicBriefingWorkspace = lazy(() => import('@/workspaces/briefing/BriefingWorkspace').then((module) => ({ default: module.PublicBriefingWorkspace })));
 const DeveloperWorkspace = lazy(() => import('@/workspaces/developers/DeveloperWorkspace').then((module) => ({ default: module.DeveloperWorkspace })));
+const WorldEventMap = lazy(() => import('@/features/world-event-map/components/WorldEventMap').then((module) => ({ default: module.WorldEventMap })));
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = selectableWorldEventLayers().map((layer) => ({
@@ -376,7 +376,6 @@ function WorldEventInlineMap({
   state,
   onCameraChange,
   onEventSelect,
-  onEventHover,
   onOpenMarket,
   onAviationLensChange,
   onAviationRiskSourceChange,
@@ -386,7 +385,6 @@ function WorldEventInlineMap({
   state: WorldEventMapState;
   onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
   onEventSelect: (eventId: string | null) => void;
-  onEventHover: (eventId: string | null) => void;
   onOpenMarket: (marketId: number) => void;
   onAviationLensChange: (lens: AviationLensMode) => void;
   onAviationRiskSourceChange: (source: AviationRiskSource) => void;
@@ -396,18 +394,19 @@ function WorldEventInlineMap({
   return (
     <div className="wm-inline-weather-map">
       <div className="wm-inline-weather-map-hint">{t('atlas.weatherHint')}</div>
-      <WorldEventMap
-        events={events}
-        state={state}
-        onCameraChange={onCameraChange}
-        onEventSelect={onEventSelect}
-        onEventHover={onEventHover}
-        onOpenMarket={onOpenMarket}
-        onAviationLensChange={onAviationLensChange}
-        onAviationRiskSourceChange={onAviationRiskSourceChange}
-        onAviationClose={onAviationClose}
-        height={620}
-      />
+      <Suspense fallback={<div className="wm-world-event-map-shell" role="status">Loading world event renderer…</div>}>
+        <WorldEventMap
+          events={events}
+          state={state}
+          onCameraChange={onCameraChange}
+          onEventSelect={onEventSelect}
+          onOpenMarket={onOpenMarket}
+          onAviationLensChange={onAviationLensChange}
+          onAviationRiskSourceChange={onAviationRiskSourceChange}
+          onAviationClose={onAviationClose}
+          height={620}
+        />
+      </Suspense>
     </div>
   );
 }
@@ -1687,30 +1686,39 @@ function WorldMonitorApp() {
     () => adaptGeoShockCountryRiskPayload(geoShockPayload, countryGeometry.index),
     [countryGeometry.index, geoShockPayload],
   );
+  const worldEventFilterState = useMemo(() => ({
+    activeLayerIds: worldEventMap.state.activeLayerIds,
+    timeRange: worldEventMap.state.timeRange,
+    severities: worldEventMap.state.severities,
+  }), [
+    worldEventMap.state.activeLayerIds,
+    worldEventMap.state.severities,
+    worldEventMap.state.timeRange,
+  ]);
   const hazardMapEvents = useMemo(
-    () => filterWorldEventMapEventsForLayers(naturalHazards.events, worldEventMap.state),
-    [naturalHazards.events, worldEventMap.state],
+    () => filterWorldEventMapEventsForLayers(naturalHazards.events, worldEventFilterState),
+    [naturalHazards.events, worldEventFilterState],
   );
   const ucdpMapEvents = useMemo(
     () => ucdpLayerEnabled
       ? filterWorldEventMapEvents(
         geoShockAdapterResult.events.filter((event) => event.geometry?.type === 'Point'),
-        worldEventMap.state,
+        worldEventFilterState,
       )
       : [],
-    [geoShockAdapterResult, ucdpLayerEnabled, worldEventMap.state],
+    [geoShockAdapterResult, ucdpLayerEnabled, worldEventFilterState],
   );
   const intelMapEvents = useMemo(
     () => intelLayerEnabled
-      ? filterWorldEventMapEvents(intelAdapterResult.events, worldEventMap.state)
+      ? filterWorldEventMapEvents(intelAdapterResult.events, worldEventFilterState)
       : [],
-    [intelAdapterResult.events, intelLayerEnabled, worldEventMap.state],
+    [intelAdapterResult.events, intelLayerEnabled, worldEventFilterState],
   );
   const countryRiskMapEvents = useMemo(
     () => countryRiskLayerEnabled
-      ? filterWorldEventMapEvents(countryRiskAdapterResult.events, worldEventMap.state)
+      ? filterWorldEventMapEvents(countryRiskAdapterResult.events, worldEventFilterState)
       : [],
-    [countryRiskAdapterResult.events, countryRiskLayerEnabled, worldEventMap.state],
+    [countryRiskAdapterResult.events, countryRiskLayerEnabled, worldEventFilterState],
   );
   const showAirRoutes = enabledLayerIds.includes('air-routes');
   const transportPayload = runtimeData['global-transport-shipping'] as RuntimeGlobalTransportShippingPayload | undefined;
@@ -2170,7 +2178,6 @@ function WorldMonitorApp() {
                     state={worldEventMap.state}
                     onCameraChange={(nextCamera) => worldEventMap.setCamera(nextCamera.center, nextCamera.zoom)}
                     onEventSelect={worldEventMap.selectEvent}
-                    onEventHover={worldEventMap.hoverEvent}
                     onOpenMarket={focusRelatedMarket}
                     onAviationLensChange={worldEventMap.setAviationLens}
                     onAviationRiskSourceChange={worldEventMap.setAviationRiskSource}

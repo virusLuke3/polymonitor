@@ -32,11 +32,26 @@ export type EventCluster = {
 type ClusterPointProperties = {
   eventId: string;
   severityRank: number;
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+  representativeEventId: string;
 };
 
-type ClusterAggregateProperties = {
-  severityRank: number;
+type ClusterAggregateProperties = ClusterPointProperties;
+
+type ClusterBucket = {
+  id: string;
+  layerId: string;
+  index: Supercluster<ClusterPointProperties, ClusterAggregateProperties>;
+  eventById: Map<string, GeoEvent>;
 };
+
+type UnclusteredBucket = { layerId: string; events: GeoEvent[] };
+
+const MAX_CLUSTER_LEAVES = 200;
+const WORLD_VIEWPORT: [number, number, number, number] = [-180, -85, 180, 85];
 
 const SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 const SEVERITY_RANK: Record<GeoEventSeverity, number> = {
@@ -51,12 +66,18 @@ function severityFromRank(rank: number): GeoEventSeverity {
 }
 
 function pointFeature(event: GeoEvent): Feature<Point, ClusterPointProperties> {
+  const [lon, lat] = event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0];
   return {
     type: 'Feature',
     geometry: event.geometry as Point,
     properties: {
       eventId: event.id,
       severityRank: SEVERITY_RANK[event.severity],
+      west: lon,
+      south: lat,
+      east: lon,
+      north: lat,
+      representativeEventId: event.id,
     },
   };
 }
@@ -90,101 +111,152 @@ function rendersAsIndependentPoint(event: GeoEvent) {
   ].includes(event.hazardKind);
 }
 
-function clusterBounds(events: GeoEvent[]): [number, number, number, number] {
-  let west = 180;
-  let east = -180;
-  let south = 90;
-  let north = -90;
-  for (const event of events) {
-    if (event.geometry?.type !== 'Point') continue;
-    const [lon, lat] = event.geometry.coordinates;
-    west = Math.min(west, lon);
-    east = Math.max(east, lon);
-    south = Math.min(south, lat);
-    north = Math.max(north, lat);
+function inViewport(event: GeoEvent, viewport: [number, number, number, number]) {
+  if (event.geometry?.type !== 'Point') return false;
+  const [lon, lat] = event.geometry.coordinates;
+  return lon >= viewport[0] && lon <= viewport[2] && lat >= viewport[1] && lat <= viewport[3];
+}
+
+/** Persistent source index. Viewport/zoom queries never rebuild Supercluster. */
+export class EventClusterIndex {
+  private source: GeoEvent[] | null = null;
+  private eventById = new Map<string, GeoEvent>();
+  private independent: GeoEvent[] = [];
+  private unclustered: UnclusteredBucket[] = [];
+  private buckets: ClusterBucket[] = [];
+  private queryKey = '';
+  private queryResult: { singles: GeoEvent[]; clusters: EventCluster[] } | null = null;
+  buildCount = 0;
+
+  update(events: GeoEvent[]) {
+    if (events === this.source) return;
+    this.source = events;
+    this.eventById = new Map();
+    this.independent = [];
+    this.unclustered = [];
+    this.buckets = [];
+    this.queryKey = '';
+    this.queryResult = null;
+    const grouped = new Map<string, GeoEvent[]>();
+    for (const event of events) {
+      if (event.geometry?.type !== 'Point') continue;
+      if (event.properties.mapEntity === 'air-hub' || event.properties.mapEntity === 'live-aircraft') continue;
+      const layerId = worldEventLayerIdForEvent(event);
+      if (!layerId) continue;
+      this.eventById.set(event.id, event);
+      if (rendersAsIndependentPoint(event)) {
+        this.independent.push(event);
+        continue;
+      }
+      const bucketId = `${layerId}:${eventSemanticKey(event)}`;
+      const bucket = grouped.get(bucketId) || [];
+      bucket.push(event);
+      grouped.set(bucketId, bucket);
+    }
+
+    for (const [id, bucketEvents] of grouped) {
+      const layerId = id.split(':', 1)[0]!;
+      const layer = worldEventLayerById(layerId);
+      if (!layer?.cluster || layer.clusterRadius <= 0) {
+        this.unclustered.push({ layerId, events: bucketEvents });
+        continue;
+      }
+      const index = new Supercluster<ClusterPointProperties, ClusterAggregateProperties>({
+        radius: layer.clusterRadius,
+        minPoints: 3,
+        maxZoom: 7,
+        map: (properties) => ({ ...properties }),
+        reduce: (accumulated, properties) => {
+          if (properties.severityRank > accumulated.severityRank) {
+            accumulated.severityRank = properties.severityRank;
+            accumulated.representativeEventId = properties.representativeEventId;
+          }
+          accumulated.west = Math.min(accumulated.west, properties.west);
+          accumulated.south = Math.min(accumulated.south, properties.south);
+          accumulated.east = Math.max(accumulated.east, properties.east);
+          accumulated.north = Math.max(accumulated.north, properties.north);
+        },
+      });
+      const eventById = new Map(bucketEvents.map((event) => [event.id, event]));
+      index.load(bucketEvents.map(pointFeature));
+      this.buckets.push({ id, layerId, index, eventById });
+    }
+    this.buildCount += 1;
   }
-  return [west, south, east, north];
+
+  query(
+    zoom: number,
+    selectedEventId: string | null,
+    viewport: [number, number, number, number] = WORLD_VIEWPORT,
+  ) {
+    const normalizedZoom = Math.max(0, Math.floor(zoom));
+    const key = `${normalizedZoom}|${selectedEventId || ''}|${viewport.map((value) => value.toFixed(3)).join(':')}`;
+    if (key === this.queryKey && this.queryResult) return this.queryResult;
+    const selected = selectedEventId ? this.eventById.get(selectedEventId) : undefined;
+    const singles: GeoEvent[] = selected ? [selected] : [];
+    const addVisible = (event: GeoEvent, revealLowPriority = true) => {
+      if (event.id === selectedEventId || !inViewport(event, viewport)) return;
+      if (revealLowPriority || zoom >= 3 || event.severity === 'warning' || event.severity === 'critical') {
+        singles.push(event);
+      }
+    };
+    for (const event of this.independent) {
+      const layerId = worldEventLayerIdForEvent(event);
+      const layer = layerId ? worldEventLayerById(layerId) : undefined;
+      if (layer && zoom >= layer.minZoom) addVisible(event);
+    }
+    for (const bucket of this.unclustered) {
+      const layer = worldEventLayerById(bucket.layerId);
+      if (!layer || zoom < layer.minZoom) continue;
+      for (const event of bucket.events) addVisible(event);
+    }
+
+    const clusters: EventCluster[] = [];
+    for (const bucket of this.buckets) {
+      const layer = worldEventLayerById(bucket.layerId);
+      if (!layer || zoom < layer.minZoom) continue;
+      for (const feature of bucket.index.getClusters(viewport, normalizedZoom)) {
+        if (!('cluster' in feature.properties)) {
+          const event = bucket.eventById.get(feature.properties.eventId);
+          if (event) addVisible(event, false);
+          continue;
+        }
+        const clusterId = Number(feature.properties.cluster_id);
+        const properties = feature.properties as typeof feature.properties & ClusterAggregateProperties;
+        const representative = bucket.eventById.get(properties.representativeEventId)
+          || bucket.eventById.values().next().value as GeoEvent | undefined;
+        if (!representative) continue;
+        const leaves = bucket.index.getLeaves(clusterId, MAX_CLUSTER_LEAVES);
+        const severity = severityFromRank(Number(properties.severityRank || 0));
+        clusters.push({
+          kind: 'event-cluster',
+          id: `cluster:${bucket.id}:${clusterId}`,
+          coordinates: feature.geometry.coordinates as [number, number],
+          eventIds: leaves.map((leaf) => leaf.properties.eventId),
+          count: Number(feature.properties.point_count),
+          severity,
+          bounds: [properties.west, properties.south, properties.east, properties.north],
+          expansionZoom: bucket.index.getClusterExpansionZoom(clusterId),
+          color: eventColor(representative),
+          label: semanticLabel(representative),
+        });
+      }
+    }
+    this.queryKey = key;
+    this.queryResult = { singles, clusters };
+    return this.queryResult;
+  }
 }
 
 export function clusterEventPoints(
   events: GeoEvent[],
   zoom: number,
   selectedEventId: string | null,
-  viewport: [number, number, number, number] = [-180, -85, 180, 85],
+  viewport: [number, number, number, number] = WORLD_VIEWPORT,
 ) {
-  const selected = events.filter((event) => event.id === selectedEventId);
-  const singles = [...selected];
-  const grouped = new Map<string, GeoEvent[]>();
-  for (const event of events) {
-    if (event.id === selectedEventId || event.geometry?.type !== 'Point') continue;
-    const layerId = worldEventLayerIdForEvent(event);
-    if (!layerId) continue;
-    const layer = worldEventLayerById(layerId);
-    if (!layer || zoom < layer.minZoom) continue;
-    if (rendersAsIndependentPoint(event)) {
-      singles.push(event);
-      continue;
-    }
-    const bucketId = `${layerId}:${eventSemanticKey(event)}`;
-    const bucket = grouped.get(bucketId) || [];
-    bucket.push(event);
-    grouped.set(bucketId, bucket);
-  }
-
-  const clusters: EventCluster[] = [];
-  for (const [bucketId, layerEvents] of grouped) {
-    const layerId = bucketId.split(':', 1)[0]!;
-    const layer = worldEventLayerById(layerId);
-    if (!layer?.cluster || layer.clusterRadius <= 0) {
-      singles.push(...layerEvents);
-      continue;
-    }
-    const eventById = new Map(layerEvents.map((event) => [event.id, event]));
-    const index = new Supercluster<ClusterPointProperties, ClusterAggregateProperties>({
-      radius: layer.clusterRadius,
-      minPoints: 3,
-      maxZoom: 7,
-      map: (properties) => ({ severityRank: properties.severityRank }),
-      reduce: (accumulated, properties) => {
-        accumulated.severityRank = Math.max(accumulated.severityRank, properties.severityRank);
-      },
-    });
-    index.load(layerEvents.map(pointFeature));
-    for (const feature of index.getClusters(viewport, Math.max(0, Math.floor(zoom)))) {
-      if (!('cluster' in feature.properties)) {
-        const event = eventById.get(feature.properties.eventId);
-        if (event && (zoom >= 3 || event.severity === 'warning' || event.severity === 'critical')) {
-          singles.push(event);
-        }
-        continue;
-      }
-      const clusterId = Number(feature.properties.cluster_id);
-      const leaves = index
-        .getLeaves(clusterId, Infinity)
-        .flatMap((leaf) => {
-          const event = eventById.get(leaf.properties.eventId);
-          return event ? [event] : [];
-        });
-      const severity = severityFromRank(Number(feature.properties.severityRank || 0));
-      const representative = leaves.reduce(
-        (best, event) => SEVERITY_RANK[event.severity] > SEVERITY_RANK[best.severity] ? event : best,
-        leaves[0]!,
-      );
-      clusters.push({
-        kind: 'event-cluster',
-        id: `cluster:${bucketId}:${clusterId}`,
-        coordinates: feature.geometry.coordinates as [number, number],
-        eventIds: leaves.map((event) => event.id),
-        count: Number(feature.properties.point_count),
-        severity,
-        bounds: clusterBounds(leaves),
-        expansionZoom: index.getClusterExpansionZoom(clusterId),
-        color: eventColor(representative),
-        label: semanticLabel(representative),
-      });
-    }
-  }
-  return { singles, clusters };
+  const index = new EventClusterIndex();
+  index.update(events);
+  return index.query(zoom, selectedEventId, viewport);
 }
 
 export function createEventPointLayers({
@@ -193,19 +265,18 @@ export function createEventPointLayers({
   selectedEventId,
   showLabels,
   viewport,
+  clusterIndex,
 }: {
   events: GeoEvent[];
   zoom: number;
   selectedEventId: string | null;
   showLabels: boolean;
   viewport?: [number, number, number, number];
+  clusterIndex?: EventClusterIndex;
 }): LayersList {
-  const pointEvents = events.filter((event) => (
-    event.properties.mapEntity !== 'air-hub'
-    && event.properties.mapEntity !== 'live-aircraft'
-    && event.geometry?.type === 'Point'
-  ));
-  const { singles, clusters } = clusterEventPoints(pointEvents, zoom, selectedEventId, viewport);
+  const index = clusterIndex || new EventClusterIndex();
+  index.update(events);
+  const { singles, clusters } = index.query(zoom, selectedEventId, viewport);
   const layers: Layer[] = [];
 
   const priorityEvents = singles
