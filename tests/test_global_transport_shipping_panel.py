@@ -64,6 +64,7 @@ def test_build_global_transport_shipping_payload_from_structured_sources(tmp_pat
     monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
     monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
     monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("AISSTREAM_API_KEY", raising=False)
     monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_ID", raising=False)
     monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("OPENSKY_CLIENT_ID", raising=False)
@@ -113,6 +114,7 @@ def test_build_global_transport_shipping_payload_accepts_dict_market_search(tmp_
     monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
     monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
     monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("AISSTREAM_API_KEY", raising=False)
     monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_ID", raising=False)
     monkeypatch.delenv("POLYDATA_OPENSKY_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("OPENSKY_CLIENT_ID", raising=False)
@@ -182,6 +184,7 @@ def test_transitland_catalog_defaults_to_index_sampling(monkeypatch):
 
 def test_aisstream_status_uses_plain_env_alias_and_fresh_cache(monkeypatch):
     monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("AISSTREAM_API_KEY", raising=False)
     monkeypatch.setenv("AISSTREAM_API_KEY", "test-key")
     monkeypatch.setenv("POLYDATA_AISSTREAM_MIN_SAMPLE_INTERVAL_SECONDS", "21600")
 
@@ -260,6 +263,7 @@ def test_opensky_auth_failure_degrades_without_breaking_payload(tmp_path, monkey
     monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
     monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
     monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("AISSTREAM_API_KEY", raising=False)
     monkeypatch.setenv("OPENSKY_CLIENT_ID", "client-id")
     monkeypatch.setenv("OPENSKY_CLIENT_SECRET", "client-secret")
     monkeypatch.setenv("POLYDATA_ADSB_FALLBACK_ENABLED", "0")
@@ -302,6 +306,7 @@ def test_adsb_fallback_supplies_live_aircraft_when_opensky_degraded(tmp_path, mo
     monkeypatch.setenv("POLYDATA_TRANSITLAND_ATLAS_URL", "https://example.test/transitland.dmfr.json")
     monkeypatch.delenv("POLYDATA_TRANSITLAND_ATLAS_URLS", raising=False)
     monkeypatch.delenv("POLYDATA_AISSTREAM_API_KEY", raising=False)
+    monkeypatch.delenv("AISSTREAM_API_KEY", raising=False)
     monkeypatch.setenv("OPENSKY_CLIENT_ID", "client-id")
     monkeypatch.setenv("OPENSKY_CLIENT_SECRET", "client-secret")
     monkeypatch.setenv("POLYDATA_ADSB_HUB_LIMIT", "1")

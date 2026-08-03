@@ -90,6 +90,13 @@ SCRIPTS_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_dotenv_files() -> None:
+    if str(os.environ.get("POLYDATA_DISABLE_DOTENV") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return
     try:
         from dotenv import load_dotenv
     except ImportError:
