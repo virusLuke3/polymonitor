@@ -26,6 +26,7 @@ export class MapPerformanceMonitor {
   private samples: Sample[] = [];
   private longTasks: number[] = [];
   private observer: PerformanceObserver | null = null;
+  private exposedApi: Window['__POLYMONITOR_MAP_PERF__'] = undefined;
   readonly enabled: boolean;
 
   constructor() {
@@ -39,10 +40,11 @@ export class MapPerformanceMonitor {
       });
       this.observer.observe({ type: 'longtask', buffered: true });
     }
-    window.__POLYMONITOR_MAP_PERF__ = {
+    this.exposedApi = {
       snapshot: () => this.snapshot(),
       reset: () => this.reset(),
     };
+    window.__POLYMONITOR_MAP_PERF__ = this.exposedApi;
   }
 
   measure<T>(phase: MapPerformancePhase, run: () => T): T {
@@ -92,8 +94,9 @@ export class MapPerformanceMonitor {
   destroy() {
     this.observer?.disconnect();
     this.observer = null;
-    if (typeof window !== 'undefined' && window.__POLYMONITOR_MAP_PERF__?.snapshot) {
+    if (typeof window !== 'undefined' && window.__POLYMONITOR_MAP_PERF__ === this.exposedApi) {
       delete window.__POLYMONITOR_MAP_PERF__;
     }
+    this.exposedApi = undefined;
   }
 }
