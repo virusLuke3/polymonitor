@@ -52,6 +52,7 @@ const EMPTY_COUNTRY_FILTER = ['==', ['get', 'ISO3166-1-Alpha-2'], ''] as FilterS
 export class DeckMapRenderer implements MapRenderer {
   private map: MapLibreMap | null = null;
   private overlay: MapboxOverlay | null = null;
+  private aviationOverlay: MapboxOverlay | null = null;
   private callbacks: MapRendererCallbacks | null = null;
   private state: WorldEventMapState | null = null;
   private events: GeoEvent[] = [];
@@ -61,6 +62,7 @@ export class DeckMapRenderer implements MapRenderer {
   private contextRecoveryTimer: number | null = null;
   private contextRecoveryAttempts = 0;
   private overlayMounted = false;
+  private aviationOverlayMounted = false;
   private paused = false;
   private destroyed = false;
   private applyingCamera = false;
@@ -83,6 +85,8 @@ export class DeckMapRenderer implements MapRenderer {
   private readonly performanceMonitor = new MapPerformanceMonitor();
   private deckHoverActive = false;
   private hoveredDeckEventId: string | null = null;
+  private staticDeckHoverActive = false;
+  private aviationDeckHoverActive = false;
   private hoveredCountryIso2: string | null = null;
   private countryHoverQueryController: CountryHoverQueryController<MapMouseEvent['point']> | null = null;
   private interacting = false;
@@ -149,27 +153,15 @@ export class DeckMapRenderer implements MapRenderer {
       (point) => this.runCountryHoverQuery(point),
     );
 
-    const overlay = new MapboxOverlay({
-      interleaved: true,
-      layers: [],
-      pickingRadius: 8,
-      useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
-      getCursor: ({ isDragging, isHovering }) => {
-        if (isDragging) return 'grabbing';
-        return isHovering || Boolean(this.hoveredCountryIso2) ? 'pointer' : 'grab';
-      },
-      getTooltip: (info: PickingInfo<WorldEventPickedObject>) => {
-        const html = worldEventTooltipHtml(info.object, info.layer?.id || '');
-        return html ? { html } : null;
-      },
-      onHover: (info: PickingInfo<WorldEventPickedObject>) => {
-        const eventId = pickedWorldEvent(info.object)?.id ?? null;
-        this.deckHoverActive = Boolean(info.object);
-        this.updateMapCursor();
-        if (eventId === this.hoveredDeckEventId) return;
-        this.hoveredDeckEventId = eventId;
-      },
-      onClick: (info: PickingInfo<WorldEventPickedObject>) => {
+    const getTooltip = (info: PickingInfo<WorldEventPickedObject>) => {
+      const html = worldEventTooltipHtml(info.object, info.layer?.id || '');
+      return html ? { html } : null;
+    };
+    const getCursor = ({ isDragging, isHovering }: { isDragging: boolean; isHovering: boolean }) => {
+      if (isDragging) return 'grabbing';
+      return isHovering || Boolean(this.hoveredCountryIso2) ? 'pointer' : 'grab';
+    };
+    const onClick = (info: PickingInfo<WorldEventPickedObject>) => {
         const cluster = pickedWorldEventCluster(info.object);
         if (cluster) {
           const [west, south, east, north] = cluster.bounds;
@@ -188,15 +180,51 @@ export class DeckMapRenderer implements MapRenderer {
           return;
         }
         callbacks.onEventSelect(pickedWorldEvent(info.object)?.id ?? null);
+    };
+    const overlay = new MapboxOverlay({
+      interleaved: true,
+      layers: [],
+      pickingRadius: 8,
+      useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
+      getCursor,
+      getTooltip,
+      onHover: (info: PickingInfo<WorldEventPickedObject>) => {
+        this.staticDeckHoverActive = Boolean(info.object);
+        this.deckHoverActive = this.staticDeckHoverActive || this.aviationDeckHoverActive;
+        this.hoveredDeckEventId = pickedWorldEvent(info.object)?.id
+          ?? (this.aviationDeckHoverActive ? this.hoveredDeckEventId : null);
+        this.updateMapCursor();
       },
+      onClick,
+    });
+    const aviationOverlay = new MapboxOverlay({
+      interleaved: false,
+      layers: [],
+      pickingRadius: 8,
+      useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
+      getCursor,
+      getTooltip,
+      onHover: (info: PickingInfo<WorldEventPickedObject>) => {
+        this.aviationDeckHoverActive = Boolean(info.object);
+        this.deckHoverActive = this.staticDeckHoverActive || this.aviationDeckHoverActive;
+        this.hoveredDeckEventId = pickedWorldEvent(info.object)?.id
+          ?? (this.staticDeckHoverActive ? this.hoveredDeckEventId : null);
+        this.updateMapCursor();
+      },
+      onClick,
     });
     this.overlay = overlay;
+    this.aviationOverlay = aviationOverlay;
 
     map.once('load', () => {
       if (this.destroyed) return;
       if (!this.overlayMounted) {
         map.addControl(overlay as unknown as maplibregl.IControl);
         this.overlayMounted = true;
+      }
+      if (!this.aviationOverlayMounted) {
+        map.addControl(aviationOverlay as unknown as maplibregl.IControl);
+        this.aviationOverlayMounted = true;
       }
       this.clearFallbackTimer();
       reinforceWorldEventBasemapLabels(map);
@@ -299,6 +327,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.heavyGeometryCommit.cancel();
     this.geometryNeedsCommit = true;
     this.overlay?.setProps({ layers: [] });
+    this.aviationOverlay?.setProps({ layers: [] });
   }
 
   resume() {
@@ -336,15 +365,26 @@ export class DeckMapRenderer implements MapRenderer {
           // MapLibre may already be tearing the style down.
         }
       }
+      if (this.aviationOverlay) {
+        try {
+          map.removeControl(this.aviationOverlay as unknown as maplibregl.IControl);
+        } catch {
+          // MapLibre may already be tearing the style down.
+        }
+      }
       map.remove();
     }
     this.map = null;
     this.overlay = null;
+    this.aviationOverlay = null;
     this.pointLayers = null;
     this.geometryLayers = [];
     this.aviationLayerSections = null;
     this.overlayMounted = false;
+    this.aviationOverlayMounted = false;
     this.countryHoverQueryController = null;
+    this.staticDeckHoverActive = false;
+    this.aviationDeckHoverActive = false;
     this.deckHoverActive = false;
     this.hoveredDeckEventId = null;
     this.hoveredCountryIso2 = null;
@@ -352,7 +392,7 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   private requestRender(invalidation: Partial<MapRenderInvalidation> = {}) {
-    if (this.paused || !this.overlay || !this.state) return;
+    if (this.paused || !this.overlay || !this.aviationOverlay || !this.state) return;
     this.renderScheduler.request(invalidation);
   }
 
@@ -406,17 +446,17 @@ export class DeckMapRenderer implements MapRenderer {
         () => createAviationDynamicLayers(aviationSections.data, this.animationTime),
       )
       : [];
-    const layers = [
+    const staticLayers = [
       ...this.geometryLayers,
       ...(aviationSections?.routeLayers || []),
-      ...dynamicLayers,
       ...(aviationSections?.markerLayers || []),
       ...(this.pointLayers || []),
     ];
     this.performanceMonitor.measure(onlyDynamic ? 'dynamic-commit' : 'deck-commit', () => {
-      this.overlay?.setProps({ layers });
+      if (!onlyDynamic) this.overlay?.setProps({ layers: staticLayers });
+      this.aviationOverlay?.setProps({ layers: dynamicLayers });
     });
-    this.map?.triggerRepaint();
+    if (!onlyDynamic) this.map?.triggerRepaint();
   }
 
   private handleMoveEnd = () => {
@@ -548,6 +588,8 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   private clearAllHover() {
+    this.staticDeckHoverActive = false;
+    this.aviationDeckHoverActive = false;
     this.deckHoverActive = false;
     this.clearCountryHover();
     this.hoveredDeckEventId = null;
@@ -579,6 +621,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.heavyGeometryCommit.cancel();
     this.geometryNeedsCommit = true;
     this.overlay?.setProps({ layers: [] });
+    this.aviationOverlay?.setProps({ layers: [] });
     this.emitBasemapState('renderer-fallback-ready');
     this.callbacks?.onError(new Error('WebGL context lost. Waiting for one bounded recovery attempt.'));
     this.clearContextRecoveryTimer();
