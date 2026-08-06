@@ -1296,18 +1296,21 @@ def prewarm_snapshot_payloads(ctx: Mapping[str, Any]) -> None:
     )
 
 
+def _prewarm_active_market_focus_tiles(
+    dependencies: BootstrapPrewarmDependencies,
+) -> None:
+    payload = dependencies.get_active_markets_snapshot(page_size=80)
+    items = payload.get("items") if isinstance(payload, dict) else []
+    limit = max(1, min(int(os.environ.get("POLYDATA_PREWARM_MARKET_FOCUS_LIMIT", "16")), 40))
+    for market in (items or [])[:limit]:
+        market_id = market.get("id") if isinstance(market, dict) else None
+        if market_id is not None:
+            dependencies.get_market_focus_tile_payload(int(market_id))
+
+
 def _prewarm_snapshot_payloads(
     dependencies: BootstrapPrewarmDependencies,
 ) -> None:
-    def _prewarm_active_market_focus_tiles() -> None:
-        payload = dependencies.get_active_markets_snapshot(page_size=80)
-        items = payload.get("items") if isinstance(payload, dict) else []
-        limit = max(1, min(int(os.environ.get("POLYDATA_PREWARM_MARKET_FOCUS_LIMIT", "16")), 40))
-        for market in (items or [])[:limit]:
-            market_id = market.get("id") if isinstance(market, dict) else None
-            if market_id is not None:
-                dependencies.get_market_focus_tile_payload(int(market_id))
-
     def _prewarm_active_market_group_charts() -> None:
         enabled = str(
             os.environ.get("POLYDATA_PREWARM_MARKET_GROUP_CHARTS") or ""
@@ -1362,7 +1365,7 @@ def _prewarm_snapshot_payloads(
         (
             "markets:focus-tiles",
             30,
-            _prewarm_active_market_focus_tiles,
+            lambda: _prewarm_active_market_focus_tiles(dependencies),
         ),
         (
             "oracle:12",
@@ -1547,6 +1550,10 @@ def _prewarm_critical_payloads(
                 page_size=80,
                 sort="active",
             ),
+        ),
+        (
+            "markets:focus-tiles",
+            lambda: _prewarm_active_market_focus_tiles(dependencies),
         ),
         (
             "finance:market-atlas",
