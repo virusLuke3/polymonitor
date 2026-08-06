@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { emptyState, orderfilledList } from '@/panels/shared/renderers';
 import { formatCompact, formatCurrencyCompact, formatPercent, formatRelative, formatSignedPercent, signedClass } from '@/panels/shared/formatters';
-import { fetchMarketLobByToken, fetchQuantMarketPriceSeries } from '@/services/api';
+import { fetchMarketLobByToken } from '@/services/api';
 import type {
   ChartPayload,
   L2Level,
@@ -15,7 +15,6 @@ import type {
   MarketListItem,
   PanelRenderContext,
   PriceSummary,
-  QuantMarketSeriesPayload,
   TradeRow,
 } from '@/types';
 
@@ -40,9 +39,7 @@ const FOCUS_CHART = {
   left: 10,
 };
 const BOOK_LEVEL_LIMIT = 4;
-const BLOCK_CLOSE_POINT_LIMIT = 3000;
 const LOB_REFRESH_INTERVAL_MS = 8_000;
-const BLOCK_CLOSE_REFRESH_INTERVAL_MS = 20_000;
 const LIVE_LOB_MAX_AGE_MS = 60_000;
 
 const POLYMARKET_SERIES_COLORS = ['#7cb6ff', '#4377ff', '#f5b800', '#ff7a1a', '#7f56d9', '#12b76a', '#f04438', '#06aed4'];
@@ -54,11 +51,6 @@ type TokenLobState = {
   updatedAt: number | null;
   pulseId: number;
   direction: RefreshDirection;
-};
-type BlockCloseState = {
-  key: string;
-  payload: QuantMarketSeriesPayload | null;
-  loading: boolean;
 };
 
 function marketTimeSubtitle(endDate?: string | null, createdAt?: string | null) {
@@ -717,62 +709,6 @@ function eventChartLegend(
   );
 }
 
-function blockCloseSeriesToChart(
-  payload: QuantMarketSeriesPayload | null,
-  selectedMarketId: number | null,
-  selectedOutcome: MarketGroupOutcome | null,
-  range?: string | null,
-): ChartPayload | null {
-  const outcomes = payload?.outcomes || [];
-  if (!outcomes.length) return null;
-  const selectedYesToken = String(selectedOutcome?.yesTokenId || '').trim();
-  const selectedSlug = String(selectedOutcome?.slug || '').trim();
-  const selected = outcomes.find((outcome) => (
-    (selectedMarketId != null && Number(outcome.marketId) === Number(selectedMarketId))
-      || (selectedYesToken && String(outcome.buyYesTokenId || outcome.tokenId || '') === selectedYesToken)
-      || (selectedSlug && String(outcome.marketSlug || '') === selectedSlug)
-  )) || outcomes[0];
-  if (!selected) return null;
-  const yesPoints = (selected.points || [])
-    .map((point) => {
-      const blockNumber = Number(point.blockNumber ?? point.x);
-      const yesPrice = Number(point.price);
-      return {
-        blockNumber,
-        yesPrice,
-        volume: point.volume ?? null,
-        tradeCount: point.tradeCount ?? null,
-      };
-    })
-    .filter((point) => Number.isFinite(point.blockNumber) && Number.isFinite(point.yesPrice));
-  if (yesPoints.length < 2) return null;
-  const noByBlock = new Map<number, number>();
-  (selected.complementPoints || []).forEach((point) => {
-    const blockNumber = Number(point.blockNumber ?? point.x);
-    const noPrice = Number(point.price);
-    if (Number.isFinite(blockNumber) && Number.isFinite(noPrice)) noByBlock.set(blockNumber, noPrice);
-  });
-  return {
-    marketId: Number(selected.marketId || selectedMarketId || 0),
-    localMarketId: Number(selected.marketId || selectedMarketId || 0),
-    range: String(range || '1d'),
-    interval: 'block',
-    kind: 'probability',
-    historyStatus: yesPoints.length >= 12 ? 'ok' : 'short',
-    priceSource: 'orderfilled_block_close',
-    servingSource: 'quant.market_token_block_close',
-    points: yesPoints.map((point) => ({
-      timestamp: String(point.blockNumber),
-      blockNumber: point.blockNumber,
-      x: point.blockNumber,
-      yesPrice: point.yesPrice,
-      noPrice: noByBlock.get(point.blockNumber) ?? Math.max(0, Math.min(1, 1 - point.yesPrice)),
-      volume: point.volume,
-      tradeCount: point.tradeCount,
-    })),
-  };
-}
-
 type DetailChartOptions = {
   title?: string | null;
   category?: string | null;
@@ -1050,7 +986,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const selectedTokenKey = selectedTokenId ? `${selectedTokenId}:${selectedNoTokenId}` : '';
   const [refreshClock, setRefreshClock] = useState(0);
   const tokenLobRequestRef = useRef(0);
-  const blockCloseRequestRef = useRef(0);
   const [tokenLobState, setTokenLobState] = useState<TokenLobState>({
     key: '',
     lob: null,
@@ -1058,11 +993,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     updatedAt: null,
     pulseId: 0,
     direction: 'flat',
-  });
-  const [blockCloseState, setBlockCloseState] = useState<BlockCloseState>({
-    key: '',
-    payload: null,
-    loading: false,
   });
   void refreshClock;
   const tokenLob = tokenLobState.key === selectedTokenKey ? tokenLobState.lob : null;
@@ -1072,15 +1002,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const lob = executionAvailable ? (tokenLob || (bundleMatchesSelected ? ctx.bundle?.lob : null)) : null;
   const trades = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.trades || []) : [];
   const marketStats = marketLookup(ctx.markets, ctx.selectedMarketId);
-  const selectedMarketSlug = String(selectedOutcome?.slug || focusedMarket?.slug || marketStats?.slug || ctx.bundle?.identity?.slug || '').trim();
-  const blockCloseKey = selectedMarketSlug
-    ? `${selectedMarketSlug}:${ctx.selectedMarketId || ''}:${selectedTokenId || activeOutcomeKey || ''}`
-    : '';
-  const blockCloseLoading = blockCloseState.key === blockCloseKey && blockCloseState.loading;
-  const blockCloseChart = blockCloseState.key === blockCloseKey
-    ? blockCloseSeriesToChart(blockCloseState.payload, ctx.selectedMarketId, selectedOutcome, 'blocks')
-    : null;
-  const chart = blockCloseChart || (bundleMatchesSelected ? (ctx.bundle?.chart || null) : null);
+  const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
   const [bookSide, setBookSide] = useState<BookSide>('yes');
   const activeBook = bookSide === 'no' ? lob?.no : lob?.yes;
   const activePrice = bookSide === 'no'
@@ -1178,7 +1100,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const focusedMarketSourceIsHistorical = Boolean(
     chartSource.includes('orderfilled')
       || chartSource.includes('trade-history')
-      || chartSource.includes('serving-history'),
+      || chartSource.includes('serving-history')
+      || chartSource.includes('clob'),
   );
   const canRenderFocusedHistory = hasFocusedMarketCurve || (hasFocusedMarketHistory && focusedMarketSourceIsHistorical);
   const preferEventChart = Boolean(
@@ -1197,14 +1120,14 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       : chartSourceLabel(chartSource, chartStatus);
   const hasServingTradeActivity = Number(displayedTrades || 0) > 0 || Number(displayedVolume || 0) > 0;
   const focusedHistoryEmptyText = isBlockCloseView
-    ? (blockCloseLoading ? 'Loading OrderFilled block-close history...' : 'No local OrderFilled block-close history is available for this market yet.')
+    ? 'No local OrderFilled block-close history is available for this market yet.'
     : chartStatus === 'snapshot'
       ? 'Only a latest-price snapshot is available for this market.'
       : hasServingTradeActivity
         ? 'Price history is still loading for this market.'
         : 'No local price history is available for this market.';
   const focusedHistoryFallback = isBlockCloseView
-    ? blockClosePlaceholder(focusedHistoryEmptyText, blockCloseLoading)
+    ? blockClosePlaceholder(focusedHistoryEmptyText)
     : emptyState(focusedHistoryEmptyText);
   const hasLiveExecutionQuote = lobYesPrice != null || servingYesPrice != null;
   const suppressTerminalSnapshot = Boolean(
@@ -1337,74 +1260,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [bookSide, detail?.title, hasBundledBookLevels, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
-
-  useEffect(() => {
-    if (!selectedMarketSlug || !executionAvailable || !blockCloseKey) {
-      setBlockCloseState((current) => (
-        current.loading || current.payload
-          ? { key: '', payload: null, loading: false }
-          : current
-      ));
-      return;
-    }
-    let cancelled = false;
-    let timer: number | undefined;
-    const controller = new AbortController();
-    const key = blockCloseKey;
-
-    const loadBlockClose = () => {
-      const requestSeq = ++blockCloseRequestRef.current;
-      setBlockCloseState((current) => ({
-        key,
-        payload: current.key === key ? current.payload : null,
-        loading: true,
-      }));
-      fetchQuantMarketPriceSeries({
-        marketSlug: selectedMarketSlug,
-        tokenId: selectedTokenId || undefined,
-        priceSource: 'orderfilled_block_close',
-        scope: 'market',
-        tokenSide: 'YES',
-        limit: selectedTokenId ? 1600 : BLOCK_CLOSE_POINT_LIMIT,
-        maxPoints: 360,
-        pointFormat: 'lite',
-        maxOutcomes: selectedTokenId ? 1 : 4,
-        live: true,
-        timeoutMs: 5000,
-      }, controller.signal)
-        .then((payload) => {
-          if (cancelled || requestSeq !== blockCloseRequestRef.current) return;
-          setBlockCloseState({ key, payload, loading: false });
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setBlockCloseState((current) => ({
-              key,
-              payload: current.key === key ? current.payload : null,
-              loading: false,
-            }));
-          }
-        })
-        .finally(() => {
-          if (!cancelled) {
-            timer = window.setTimeout(() => {
-              if (document.visibilityState === 'hidden') {
-                timer = window.setTimeout(loadBlockClose, BLOCK_CLOSE_REFRESH_INTERVAL_MS);
-                return;
-              }
-              loadBlockClose();
-            }, BLOCK_CLOSE_REFRESH_INTERVAL_MS);
-          }
-        });
-    };
-
-    timer = window.setTimeout(loadBlockClose, 3_500);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [blockCloseKey, ctx.selectedMarketId, executionAvailable, selectedMarketSlug, selectedOutcome, selectedTokenId]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {

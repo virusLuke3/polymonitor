@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'preact/compat';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { AppShell } from '@/components/AppShell';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
 import { PanelLoading } from '@/components/Panel';
@@ -187,6 +187,7 @@ function isMapViewMode(value: unknown): value is MapViewMode {
 
 const MAP_BOTTOM_PANEL_IDS: string[] = [];
 const FOCUSED_STRIP_PANEL_IDS = new Set(['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled', 'oracle-feed']);
+const MARKET_FOCUS_BROWSER_CACHE_MS = 15_000;
 function reorderPanelIds(panelIds: string[], draggedPanelId: string, targetPanelId: string, insertAfter: boolean) {
   if (draggedPanelId === targetPanelId) return panelIds;
   const next = panelIds.filter((panelId) => panelId !== draggedPanelId);
@@ -841,12 +842,53 @@ function WorldMonitorApp() {
   const marketGroupSortRef = useRef<MarketGroupSort>(marketGroupSort);
   const bundleRequestSeqRef = useRef(0);
   const bundleCacheRef = useRef<Map<number, WorkspaceBundle>>(new Map());
+  const bundleFocusUpdatedAtRef = useRef<Map<number, number>>(new Map());
+  const focusTileInflightRef = useRef<Map<number, Promise<WorkspaceBundle>>>(new Map());
   const workspaceSyncRevisionRef = useRef(0);
   const workspaceSyncReadyRef = useRef(false);
   const workspaceSyncApplyingRef = useRef(false);
   const workspaceSyncSnapshotRef = useRef('');
   const workspaceLocalChangeHydratedRef = useRef(false);
   const manualCopyInputRef = useRef<HTMLInputElement | null>(null);
+
+  const loadMarketFocusTile = useCallback((marketId: number, force = false): Promise<WorkspaceBundle> => {
+    const normalizedMarketId = Number(marketId);
+    const cachedBundle = bundleCacheRef.current.get(normalizedMarketId);
+    const cachedAt = bundleFocusUpdatedAtRef.current.get(normalizedMarketId) || 0;
+    if (!force && cachedBundle && Date.now() - cachedAt <= MARKET_FOCUS_BROWSER_CACHE_MS) {
+      return Promise.resolve(cachedBundle);
+    }
+    const inFlight = focusTileInflightRef.current.get(normalizedMarketId);
+    if (inFlight) return inFlight;
+
+    const request = fetchMarketFocusTile(normalizedMarketId, 2500)
+      .then((loadedBundle) => {
+        if (!bundleMatchesMarket(loadedBundle, normalizedMarketId)) return loadedBundle;
+        const current = bundleCacheRef.current.get(normalizedMarketId) || emptyWorkspaceBundle();
+        const merged = mergeWorkspaceBundle(current, loadedBundle);
+        bundleCacheRef.current.set(normalizedMarketId, merged);
+        bundleFocusUpdatedAtRef.current.set(normalizedMarketId, Date.now());
+        return merged;
+      })
+      .finally(() => {
+        if (focusTileInflightRef.current.get(normalizedMarketId) === request) {
+          focusTileInflightRef.current.delete(normalizedMarketId);
+        }
+      });
+    focusTileInflightRef.current.set(normalizedMarketId, request);
+    return request;
+  }, []);
+
+  const prefetchMarketFocus = useCallback((marketIds: number[]) => {
+    const uniqueMarketIds = [...new Set(
+      marketIds
+        .map((marketId) => Number(marketId))
+        .filter((marketId) => Number.isFinite(marketId) && marketId > 0),
+    )].slice(0, 3);
+    uniqueMarketIds.forEach((marketId) => {
+      void loadMarketFocusTile(marketId).catch(() => undefined);
+    });
+  }, [loadMarketFocusTile]);
 
   const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
     const eventId = group.eventId != null ? String(group.eventId) : null;
@@ -857,10 +899,14 @@ function WorldMonitorApp() {
     selectedMarketIdRef.current = nextMarketId;
     if (nextMarketId != null) {
       const optimisticBundle = optimisticBundleFromGroup(group, nextMarketId, nextOutcomeKey);
-      bundleCacheRef.current.set(nextMarketId, optimisticBundle);
-      setBundle(optimisticBundle);
+      const cachedFocusBundle = bundleCacheRef.current.get(nextMarketId);
+      const hydratedBundle = cachedFocusBundle
+        ? mergeWorkspaceBundle(cachedFocusBundle, optimisticBundle)
+        : optimisticBundle;
+      bundleCacheRef.current.set(nextMarketId, hydratedBundle);
+      setBundle(hydratedBundle);
       setBundleLoading(false);
-      setSelectedMarketGroupDetail(optimisticBundle.group || null);
+      setSelectedMarketGroupDetail(hydratedBundle.group || null);
     }
     setSelectedMarketGroupId(eventId);
     setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
@@ -1366,11 +1412,26 @@ function WorldMonitorApp() {
     };
   }, [marketGroupSort, marketQuery]);
 
+  const selectedFocusDetailReady = Boolean(
+    selectedMarketId
+      && bundleMatchesMarket(bundle, selectedMarketId)
+      && bundle?.focusStatus === 'ready'
+      && bundle.group
+      && (bundle.group.outcomes || []).length,
+  );
+  const selectedFocusChartReady = Boolean(
+    selectedMarketId
+      && bundleMatchesMarket(bundle, selectedMarketId)
+      && (bundle?.chart?.points || []).length > 2
+      && !['missing', 'snapshot', 'warming'].includes(String(bundle?.chart?.historyStatus || '').toLowerCase()),
+  );
+
   useEffect(() => {
     if (!selectedMarketGroupId) {
       setSelectedMarketGroupDetail(null);
       return;
     }
+    if (selectedFocusDetailReady) return;
     let cancelled = false;
     const controller = new AbortController();
     const eventId = selectedMarketGroupId;
@@ -1397,7 +1458,7 @@ function WorldMonitorApp() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [selectedMarketGroupId]);
+  }, [selectedFocusDetailReady, selectedMarketGroupId]);
 
   useEffect(() => {
     if (!selectedMarketGroupId) {
@@ -1410,6 +1471,7 @@ function WorldMonitorApp() {
     const eventId = selectedMarketGroupId;
     const chartRange = selectedMarketGroupChartRange;
     setSelectedMarketGroupChart(null);
+    if (chartRange === '1d' && selectedFocusChartReady) return;
 
     timer = window.setTimeout(() => {
       fetchMarketGroupChart(eventId, chartRange, 3500, controller.signal)
@@ -1426,7 +1488,7 @@ function WorldMonitorApp() {
       controller.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [selectedMarketGroupChartRange, selectedMarketGroupId]);
+  }, [selectedFocusChartReady, selectedMarketGroupChartRange, selectedMarketGroupId]);
 
   useEffect(() => {
     if (!selectedMarketId) return;
@@ -1509,7 +1571,7 @@ function WorldMonitorApp() {
       });
     }
 
-    const loadFocusTile = () => fetchMarketFocusTile(currentMarketId, 2500, controller.signal)
+    const loadFocusTile = (force = false) => loadMarketFocusTile(currentMarketId, force)
       .then((loadedBundle) => applyLoadedBundle(loadedBundle))
       .catch((loadError) => {
         if (!cancelled && bundleRequestSeqRef.current === requestSeq && !listMarket && !listGroup && !cachedBundle) {
@@ -1531,7 +1593,7 @@ function WorldMonitorApp() {
     }, 6500);
     const timer = window.setInterval(() => {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq || document.visibilityState === 'hidden') return;
-      void loadFocusTile();
+      void loadFocusTile(true);
     }, 20000);
 
     const loadingTimer = window.setTimeout(() => {
@@ -1547,7 +1609,7 @@ function WorldMonitorApp() {
       window.clearTimeout(workspaceTimer);
       window.clearTimeout(loadingTimer);
     };
-  }, [selectedMarketId]);
+  }, [loadMarketFocusTile, selectedMarketId]);
 
   useEffect(() => {
     if (!selectedMarketId || Number(bundle?.market?.id) === Number(selectedMarketId)) return;
@@ -1869,6 +1931,7 @@ function WorldMonitorApp() {
     refreshMarketCatalog,
     selectedMarketId,
     setSelectedMarketId,
+    prefetchMarketFocus,
     focusMarketGroup,
     selectedMarketGroupId,
     selectedMarketGroup,

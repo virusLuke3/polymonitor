@@ -171,7 +171,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=80)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
-    parser.add_argument("--lob-limit", type=int, default=20)
+    parser.add_argument("--lob-limit", type=int, default=80)
     parser.add_argument("--state-path", type=Path, default=Path("/tmp/polydata/market-focus-prewarm-state.json"))
     parser.add_argument("--catalog-refresh-seconds", type=int, default=300)
     args = parser.parse_args()
@@ -181,7 +181,7 @@ def main() -> int:
             limit=max(1, min(int(args.limit), 80)),
             workers=max(1, min(int(args.workers), 12)),
             timeout_seconds=max(0.5, min(float(args.timeout_seconds), 15.0)),
-            lob_limit=max(0, min(int(args.lob_limit), 40)),
+            lob_limit=max(0, min(int(args.lob_limit), 80)),
             state_path=args.state_path,
             catalog_refresh_seconds=max(60, min(int(args.catalog_refresh_seconds), 1800)),
         )

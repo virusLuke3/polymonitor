@@ -2945,6 +2945,7 @@ export type PanelRenderContext = {
   refreshMarketCatalog: () => Promise<void>;
   selectedMarketId: number | null;
   setSelectedMarketId: (marketId: number | null) => void;
+  prefetchMarketFocus: (marketIds: number[]) => void;
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
   selectedMarketGroupId: string | null;
   selectedMarketGroup: MarketGroupItem | null;
