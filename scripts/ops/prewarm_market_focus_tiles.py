@@ -88,8 +88,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Prewarm selection-critical market focus tiles through the local API.")
     parser.add_argument("--base-url", default="http://127.0.0.1:18500")
     parser.add_argument("--limit", type=int, default=80)
-    parser.add_argument("--workers", type=int, default=6)
-    parser.add_argument("--timeout-seconds", type=float, default=3.0)
+    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--timeout-seconds", type=float, default=10.0)
     args = parser.parse_args()
     try:
         payload = prewarm(
