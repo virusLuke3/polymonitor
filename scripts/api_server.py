@@ -391,11 +391,12 @@ def build_route_context(service_context: ServiceContext) -> RouteContext:
         "get_related_content_payload": lambda market_id, limit=8: content_service.get_related_content_payload(build_service_context(), market_id, limit=limit),
         "get_redis_client": get_redis_client,
         "get_runtime_lob_payload": lambda market_id: market_workspace_cache_service.get_market_orderbook_payload(build_service_context(), market_id),
-        "get_runtime_lob_by_token_payload": lambda token_id, no_token_id="", market_title="": lob_service.get_runtime_lob_by_token_payload(
+        "get_runtime_lob_by_token_payload": lambda token_id, no_token_id="", market_title="", market_id=None: lob_service.get_runtime_lob_by_token_payload(
             build_service_context(),
             token_id,
             no_token_id=no_token_id,
             market_title=market_title,
+            market_id=market_id,
         ),
         "get_lob_snapshots_by_token_payload": lambda token_id, side="", limit=48: lob_service.get_lob_snapshots_by_token_payload(
             build_service_context(),
@@ -618,11 +619,12 @@ def _create_service_context() -> ServiceContext:
         "get_redis_client": get_redis_client,
         "get_related_content_by_market_id": lambda market_id, limit=8: query_service.get_related_content_by_market_id(build_service_context(), market_id, limit=limit),
         "get_runtime_lob_payload": lambda market_id: lob_service.get_runtime_lob_payload(build_service_context(), market_id),
-        "get_runtime_lob_by_token_payload": lambda token_id, no_token_id="", market_title="": lob_service.get_runtime_lob_by_token_payload(
+        "get_runtime_lob_by_token_payload": lambda token_id, no_token_id="", market_title="", market_id=None: lob_service.get_runtime_lob_by_token_payload(
             build_service_context(),
             token_id,
             no_token_id=no_token_id,
             market_title=market_title,
+            market_id=market_id,
         ),
         "get_lob_snapshots_by_token_payload": lambda token_id, side="", limit=48: lob_service.get_lob_snapshots_by_token_payload(
             build_service_context(),
