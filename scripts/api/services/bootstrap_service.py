@@ -1525,6 +1525,10 @@ def _prewarm_critical_payloads(
 ) -> None:
     tasks = [
         (
+            "markets:focus-tiles",
+            lambda: _prewarm_active_market_focus_tiles(dependencies),
+        ),
+        (
             "commodities",
             lambda: dependencies.get_market_group_snapshot(
                 dependencies.commodity_symbols,
@@ -1550,10 +1554,6 @@ def _prewarm_critical_payloads(
                 page_size=80,
                 sort="active",
             ),
-        ),
-        (
-            "markets:focus-tiles",
-            lambda: _prewarm_active_market_focus_tiles(dependencies),
         ),
         (
             "finance:market-atlas",
