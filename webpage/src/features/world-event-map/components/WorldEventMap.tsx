@@ -12,10 +12,12 @@ import type {
 } from '../renderer/MapRenderer';
 import { inspectWebGL2Support } from '../renderer/webglSupport';
 import { worldEventLayerById } from '../config/layerRegistry';
+import { MAP_SEVERITY_STYLES } from '../config/mapSymbols';
 import { EventInspector } from './EventInspector';
 import { EventList } from './EventList';
 import { AviationLens } from './AviationLens';
 import { getWeatherBasemapAttribution } from '@/config/weatherBasemapMeta';
+import { MapSymbolIcon } from './MapSymbolIcon';
 
 export type WorldEventMapProps = {
   events: GeoEvent[];
@@ -53,7 +55,17 @@ export function WorldEventMap({
     [events, state.selectedEventId],
   );
   const legendItems = useMemo(
-    () => state.activeLayerIds.flatMap((layerId) => worldEventLayerById(layerId)?.legend || []),
+    () => {
+      const seen = new Set<string>();
+      return state.activeLayerIds
+        .flatMap((layerId) => worldEventLayerById(layerId)?.legend || [])
+        .filter((item) => {
+          const key = `${item.symbol}:${item.label}:${item.color}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+    },
     [state.activeLayerIds],
   );
 
@@ -198,11 +210,18 @@ export function WorldEventMap({
         ) : null}
       <div className="wm-weather-deck-legend" aria-label="Active hazard legend">
         {legendItems.map((item) => (
-          <span key={`${item.label}:${item.color}`}>
-            <i style={{ background: item.color }} />
+          <span key={`${item.symbol}:${item.label}:${item.color}`}>
+            <MapSymbolIcon symbol={item.symbol} color={item.color} size={13} />
             {item.label.toUpperCase()}
           </span>
         ))}
+        <span className="wm-map-legend-severity" aria-label="Severity colors">
+          {state.severities.map((severity) => (
+            <b key={severity} style={{ color: MAP_SEVERITY_STYLES[severity].color }}>
+              <i />{severity.toUpperCase()}
+            </b>
+          ))}
+        </span>
       </div>
       <div className="wm-weather-deck-status">
         {rendererKind === 'svg'

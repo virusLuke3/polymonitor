@@ -49,6 +49,7 @@ import {
   useWorldEventMapState,
   worldEventLayerById,
   type GeoEvent,
+  type MapSymbolKey,
   type AviationLensMode,
   type AviationRiskSource,
   type WorldEventMapState,
@@ -89,7 +90,7 @@ import type { PanelRuntimeData } from '@/panels/types';
 type LayerToggle = {
   id: string;
   label: string;
-  icon: string;
+  icon: MapSymbolKey;
   enabled: boolean;
   hint?: string;
 };

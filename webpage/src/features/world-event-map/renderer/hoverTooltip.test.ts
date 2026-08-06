@@ -120,6 +120,7 @@ describe('world event hover tooltip', () => {
       bounds: [10, 30, 14, 38],
       expansionZoom: 4,
       color: [255, 76, 70, 235],
+      symbol: 'earthquake',
     };
     expect(pickedWorldEvent(cluster)).toBeNull();
     expect(pickedWorldEventCluster(cluster)).toBe(cluster);

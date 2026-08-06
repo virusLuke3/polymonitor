@@ -10334,6 +10334,12 @@ html[lang='zh-CN'] .wm-promo-copy {
   font-size: 13px;
 }
 
+.wm-layer-icon svg {
+  display: block;
+  margin: 0 auto;
+  color: #d9e5e7;
+}
+
 .wm-layer-row span:last-of-type {
   font-size: 11px;
   font-weight: 700;
@@ -10449,10 +10455,18 @@ html[lang='zh-CN'] .wm-promo-copy {
 }
 
 .wm-layer-brief h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin: 0;
   color: #f5f8f6;
   font-size: 17px;
   line-height: 1.2;
+}
+
+.wm-layer-brief h2 svg {
+  flex: 0 0 auto;
+  color: #72dfff;
 }
 
 .wm-layer-brief p {

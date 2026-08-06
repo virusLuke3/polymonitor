@@ -7,6 +7,7 @@ import {
   worldEventLayerById,
 } from './layerRegistry';
 import type { HazardEvent } from '../domain/types';
+import { MAP_SYMBOL_DEFINITIONS } from './mapSymbols';
 
 describe('World Event Map layer registry', () => {
   it('is the single source of selectable product layers', () => {
@@ -46,6 +47,9 @@ describe('World Event Map layer registry', () => {
       expect(layer.sourceKeys.length).toBeGreaterThan(0);
       expect(layer.explanation.sources.length).toBeGreaterThan(0);
       expect(layer.explanation.limitations.length).toBeGreaterThan(0);
+      expect(MAP_SYMBOL_DEFINITIONS[layer.icon]).toBeDefined();
+      expect(layer.legend.length).toBeGreaterThan(0);
+      for (const item of layer.legend) expect(MAP_SYMBOL_DEFINITIONS[item.symbol]).toBeDefined();
     }
   });
 

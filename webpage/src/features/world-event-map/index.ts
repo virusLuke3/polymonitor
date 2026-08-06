@@ -2,6 +2,7 @@ export * from './domain/types';
 export * from './domain/validation';
 export * from './domain/countryGeometry';
 export * from './config/layerRegistry';
+export * from './config/mapSymbols';
 export * from './config/regions';
 export * from './data/sourceStatus';
 export * from './data/naturalHazards';

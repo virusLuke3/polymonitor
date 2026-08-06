@@ -12,7 +12,11 @@ import {
   createAviationStaticLayerSections,
   selectAviationRenderData,
 } from './aviationLayers';
-import { clusterEventPoints, EventClusterIndex } from './eventPointLayer';
+import {
+  clusterEventPoints,
+  eventVisibleAtZoom,
+  EventClusterIndex,
+} from './eventPointLayer';
 import {
   createEventInteractionLayers,
   createEventPulseLayers,
@@ -66,8 +70,8 @@ describe('world event layer factories', () => {
   it('uses stable layer ids and clusters dense global points', () => {
     const state = defaultWorldEventMapState();
     const layers = createWorldEventLayers([
-      pointEvent('a', 10, 10),
-      pointEvent('b', 10.2, 10.1),
+      pointEvent('a', 10, 10, 'warning'),
+      pointEvent('b', 10.2, 10.1, 'warning'),
       pointEvent('c', 10.3, 10.2, 'critical'),
     ], state);
     expect((layers as Layer[]).map((layer) => layer.id)).toEqual([
@@ -89,41 +93,65 @@ describe('world event layer factories', () => {
 
   it('clusters dense earthquakes at world zoom and preserves hazard semantics', () => {
     const events = [
-      hazardPoint('eq:a', 'earthquake', 10, 10),
-      hazardPoint('eq:b', 'earthquake', 10.1, 10.1),
-      hazardPoint('eq:c', 'earthquake', 10.2, 10.2),
+      hazardPoint('eq:a', 'earthquake', 10, 10, 'critical'),
+      hazardPoint('eq:b', 'earthquake', 10.1, 10.1, 'critical'),
+      hazardPoint('eq:c', 'earthquake', 10.2, 10.2, 'critical'),
       hazardPoint('vo:a', 'volcano', 11, 11),
     ];
     const clustered = clusterEventPoints(events, 1.25, null);
     expect(clustered.clusters).toHaveLength(1);
     expect(clustered.clusters[0]?.count).toBe(3);
     expect(clustered.clusters[0]?.label).toBe('earthquake');
+    expect(clustered.clusters[0]?.symbol).toBe('earthquake');
     expect(clustered.clusters[0]?.badge).toBe('EQ');
     expect(clustered.singles).toHaveLength(0);
   });
 
-  it('uses category symbols and lower opacity for globally visible hazard singles', () => {
+  it('progressively discloses lower-priority events without hiding the selected event', () => {
+    const info = hazardPoint('info', 'volcano', 10, 10, 'info');
+    const moderateQuake = hazardPoint('moderate-quake', 'earthquake', 11, 11, 'warning');
+    expect(eventVisibleAtZoom(info, 1.25, null)).toBe(false);
+    expect(eventVisibleAtZoom(info, 4, null)).toBe(true);
+    expect(eventVisibleAtZoom(moderateQuake, 1.25, null)).toBe(false);
+    expect(eventVisibleAtZoom(moderateQuake, 3, null)).toBe(true);
+    expect(eventVisibleAtZoom(info, 1.25, info.id)).toBe(true);
+  });
+
+  it('uses metric-sized circles only when a continuous metric exists', () => {
+    const quake = hazardPoint('quake', 'earthquake', 10, 10, 'warning');
+    const volcano = hazardPoint('volcano', 'volcano', 11, 11, 'warning');
+    const state = { ...defaultWorldEventMapState(), zoom: 3 };
+    const quakeLayers = createWorldEventLayers([quake], state) as Layer[];
+    const volcanoLayers = createWorldEventLayers([volcano], state) as Layer[];
+    expect(quakeLayers.some((layer) => layer.id === 'world-event-point-intensity')).toBe(true);
+    expect(volcanoLayers.some((layer) => layer.id === 'world-event-point-intensity')).toBe(false);
+    expect(volcanoLayers.some((layer) => layer.id === 'world-event-points')).toBe(true);
+  });
+
+  it('uses SVG mask icons and severity frames for globally visible hazard singles', () => {
     const warning = hazardPoint('volcano:warning', 'volcano', 10, 10, 'warning');
     const state = { ...defaultWorldEventMapState(), zoom: 1.25 };
     const layers = createWorldEventLayers([warning], state) as Layer[];
     const point = layers.find((layer) => layer.id === 'world-event-points');
-    const symbols = layers.find((layer) => layer.id === 'world-event-point-symbols');
+    const frame = layers.find((layer) => layer.id === 'world-event-point-frames');
     const pointProps = point?.props as unknown as Record<string, unknown>;
-    const fill = (pointProps.getFillColor as (event: GeoEvent) => number[])(warning);
+    const color = (pointProps.getColor as (event: GeoEvent) => number[])(warning);
 
-    expect(symbols).toBeDefined();
-    expect(fill[3]).toBeLessThan(200);
-    expect(pointProps.radiusMaxPixels).toBe(12);
+    expect(point?.constructor.name).toBe('IconLayer');
+    expect(frame).toBeDefined();
+    expect(pointProps.getIcon).toBeDefined();
+    expect(color[3]).toBeLessThan(220);
+    expect(pointProps.sizeMaxPixels).toBe(20);
   });
 
   it('does not combine different conflict types into one generic cluster', () => {
     const events = [
-      { ...pointEvent('state:1', 10, 10), properties: { violenceType: '1' } },
-      { ...pointEvent('state:2', 10.1, 10.1), properties: { violenceType: '1' } },
-      { ...pointEvent('state:3', 10.2, 10.2), properties: { violenceType: '1' } },
-      { ...pointEvent('nonstate:1', 10, 10), properties: { violenceType: '2' } },
-      { ...pointEvent('nonstate:2', 10.1, 10.1), properties: { violenceType: '2' } },
-      { ...pointEvent('nonstate:3', 10.2, 10.2), properties: { violenceType: '2' } },
+      { ...pointEvent('state:1', 10, 10, 'warning'), properties: { violenceType: '1' } },
+      { ...pointEvent('state:2', 10.1, 10.1, 'warning'), properties: { violenceType: '1' } },
+      { ...pointEvent('state:3', 10.2, 10.2, 'warning'), properties: { violenceType: '1' } },
+      { ...pointEvent('nonstate:1', 10, 10, 'warning'), properties: { violenceType: '2' } },
+      { ...pointEvent('nonstate:2', 10.1, 10.1, 'warning'), properties: { violenceType: '2' } },
+      { ...pointEvent('nonstate:3', 10.2, 10.2, 'warning'), properties: { violenceType: '2' } },
     ];
     const clustered = clusterEventPoints(events, 1.25, null);
     expect(clustered.clusters.map((cluster) => cluster.label).sort()).toEqual([
@@ -137,7 +165,7 @@ describe('world event layer factories', () => {
       `persistent:${index}`,
       10 + (index % 20) * 0.01,
       10 + Math.floor(index / 20) * 0.01,
-      index === 239 ? 'critical' : 'watch',
+      index === 239 ? 'critical' : 'warning',
     ));
     const index = new EventClusterIndex();
     index.update(events);
@@ -157,7 +185,9 @@ describe('world event layer factories', () => {
 
   it('keeps stable clickable hazard entities separate from hollow non-pickable pulse rings', () => {
     const warning = hazardPoint('warning', 'earthquake', 10, 10, 'warning');
-    const stableLayers = createWorldEventLayers([warning], defaultWorldEventMapState()) as Layer[];
+    const stableLayers = createWorldEventLayers([
+      warning,
+    ], { ...defaultWorldEventMapState(), zoom: 3 }) as Layer[];
     const pulseLayers = createEventPulseLayers({
       events: [warning],
       selectedEventId: null,

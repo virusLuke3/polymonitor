@@ -9,12 +9,25 @@ import type {
 } from 'geojson';
 import type { GeoEvent } from '../domain/types';
 import {
+  MAP_SEVERITY_STYLES,
+  MAP_SYMBOL_SIZE,
+  mapSymbolForEvent,
+  mapSymbolPaths,
+  type MapSymbolKey,
+} from '../config/mapSymbols';
+import {
   clampLatitude,
   clampLongitude,
   clampWorldEventZoom,
   type WorldEventMapState,
 } from '../state/mapState';
-import { eventColor, isHazardEvent, pointRadiusMeters } from './layerFactories/shared';
+import {
+  continuousMetricRadiusMeters,
+  eventColor,
+  isHazardEvent,
+  pointRadiusMeters,
+  SEVERITY_COLORS,
+} from './layerFactories/shared';
 import {
   eventRepresentativePoint,
   HAZARD_PULSE_INTERVAL_MS,
@@ -22,7 +35,7 @@ import {
   hasAnimatedHazardPulse,
   selectEventPulseCandidates,
 } from './layerFactories/eventEmphasisLayers';
-import { EventClusterIndex, hazardPointSymbol } from './layerFactories/eventPointLayer';
+import { EventClusterIndex } from './layerFactories/eventPointLayer';
 import {
   aviationRouteMotionPoints,
   aviationRouteTone,
@@ -72,11 +85,30 @@ function aviationEntity(event: GeoEvent) {
 }
 
 function aircraftMarker(x: number, y: number, angle: number) {
-  const aircraft = svgElement('path');
-  aircraft.setAttribute('d', 'M 11 0 L 2.5 3.1 L -1.7 10 L -3.8 9.3 L -2.4 2.9 L -10 0 L -2.4 -2.9 L -3.8 -9.3 L -1.7 -10 L 2.5 -3.1 Z');
-  aircraft.setAttribute('transform', `translate(${x} ${y}) rotate(${angle})`);
+  const aircraft = mapSymbolMarker(x, y, 'aircraft', 22, angle);
+  aircraft.removeAttribute('pointer-events');
+  aircraft.removeAttribute('aria-hidden');
   aircraft.classList.add('wm-world-event-svg-aircraft');
   return aircraft;
+}
+
+function mapSymbolMarker(x: number, y: number, symbol: MapSymbolKey, size: number, angle = 0) {
+  const marker = svgElement('g');
+  const scale = size / MAP_SYMBOL_SIZE;
+  marker.setAttribute(
+    'transform',
+    `translate(${x} ${y}) rotate(${angle}) translate(${-size / 2} ${-size / 2}) scale(${scale})`,
+  );
+  marker.setAttribute('aria-hidden', 'true');
+  marker.setAttribute('pointer-events', 'none');
+  marker.setAttribute('fill-rule', 'evenodd');
+  marker.setAttribute('stroke', 'none');
+  for (const pathData of mapSymbolPaths(symbol)) {
+    const path = svgElement('path');
+    path.setAttribute('d', pathData);
+    marker.append(path);
+  }
+  return marker;
 }
 
 function ringSignedArea(ring: Position[]) {
@@ -445,15 +477,35 @@ export class SvgMapRenderer implements MapRenderer {
       group.setAttribute('aria-label', `${cluster.count} ${cluster.label || 'mapped events'}. Zoom in to expand.`);
       const title = svgElement('title');
       title.textContent = `${cluster.count} ${cluster.label || 'mapped events'} · ${cluster.severity.toUpperCase()} · click to expand`;
-      const point = svgElement('circle');
-      point.setAttribute('cx', String(x));
-      point.setAttribute('cy', String(y));
-      point.setAttribute('r', String(Math.min(24, Math.max(10, 7 + Math.log2(cluster.count + 1) * 2.4))));
-      point.setAttribute('fill', cssColor(cluster.color));
+      const frame = svgElement('circle');
+      frame.classList.add('wm-world-event-svg-symbol-frame');
+      frame.setAttribute('cx', String(x));
+      frame.setAttribute('cy', String(y));
+      frame.setAttribute('r', '11');
+      frame.setAttribute('fill', 'rgba(3, 9, 13, 0.9)');
+      frame.setAttribute('stroke', cssColor(cluster.color));
+      frame.setAttribute('stroke-width', String(MAP_SEVERITY_STYLES[cluster.severity].lineWidth));
+      const symbol = mapSymbolMarker(
+        x,
+        y,
+        cluster.symbol,
+        Math.min(21, 14 + Math.log2(cluster.count + 1) * 1.25),
+      );
+      symbol.setAttribute('fill', cssColor(cluster.color));
+      const badgeWidth = Math.max(12, String(cluster.count).length * 5 + 6);
+      const badge = svgElement('rect');
+      badge.classList.add('wm-world-event-svg-cluster-badge');
+      badge.setAttribute('x', String(x + 4));
+      badge.setAttribute('y', String(y + 3));
+      badge.setAttribute('width', String(badgeWidth));
+      badge.setAttribute('height', '12');
+      badge.setAttribute('rx', '4');
+      badge.setAttribute('fill', 'rgba(4, 10, 14, 0.95)');
+      badge.setAttribute('stroke', cssColor(cluster.color));
       const label = svgElement('text');
-      label.setAttribute('x', String(x));
-      label.setAttribute('y', String(y));
-      label.textContent = `${cluster.badge || ''}${cluster.count}`;
+      label.setAttribute('x', String(x + 4 + badgeWidth / 2));
+      label.setAttribute('y', String(y + 9));
+      label.textContent = String(cluster.count);
       const expand = () => this.callbacks?.onCameraChange({
         center: { lon: cluster.coordinates[0], lat: cluster.coordinates[1] },
         zoom: clampWorldEventZoom(cluster.expansionZoom),
@@ -471,7 +523,7 @@ export class SvgMapRenderer implements MapRenderer {
         keyboardEvent.preventDefault();
         expand();
       });
-      group.append(title, point, label);
+      group.append(title, frame, symbol, badge, label);
       this.eventLayer.append(group);
     }
     for (const event of singles) {
@@ -480,27 +532,46 @@ export class SvgMapRenderer implements MapRenderer {
       if (!position) continue;
       const [x, y] = position;
       if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
-      const point = svgElement('circle');
-      const radius = Math.max(
-        4,
-        Math.min(14, Math.log2(Math.max(2, pointRadiusMeters(event) / 1_000)) * 1.8),
-      );
-      point.setAttribute('cx', String(x));
-      point.setAttribute('cy', String(y));
-      point.setAttribute('r', String(radius));
-      point.classList.add('wm-world-event-svg-point');
-      this.decorateEventElement(point, event, false);
-      this.eventLayer.append(point);
-      const symbolValue = hazardPointSymbol(event);
-      if (symbolValue) {
-        const symbol = svgElement('text');
-        symbol.setAttribute('x', String(x));
-        symbol.setAttribute('y', String(y));
-        symbol.setAttribute('aria-hidden', 'true');
-        symbol.classList.add('wm-world-event-svg-point-symbol');
-        symbol.textContent = symbolValue;
-        this.eventLayer.append(symbol);
+      const group = svgElement('g');
+      group.classList.add('wm-world-event-svg-point');
+      this.decorateEventElement(group, event, event.id === selectedId);
+      const severityColor = SEVERITY_COLORS[event.severity];
+      const metricRadius = continuousMetricRadiusMeters(event);
+      if (metricRadius != null) {
+        const intensity = svgElement('circle');
+        const radius = Math.max(7, Math.min(22, Math.log2(Math.max(2, metricRadius / 1_000)) * 1.8));
+        intensity.classList.add('wm-world-event-svg-intensity');
+        intensity.setAttribute('cx', String(x));
+        intensity.setAttribute('cy', String(y));
+        intensity.setAttribute('r', String(radius));
+        intensity.setAttribute('fill', cssColor([severityColor[0], severityColor[1], severityColor[2], 28]));
+        intensity.setAttribute('stroke', cssColor([severityColor[0], severityColor[1], severityColor[2], 90]));
+        group.append(intensity);
       }
+      const frame = svgElement('circle');
+      frame.classList.add('wm-world-event-svg-symbol-frame');
+      frame.setAttribute('cx', String(x));
+      frame.setAttribute('cy', String(y));
+      frame.setAttribute('r', event.id === selectedId ? '10' : '8.5');
+      frame.setAttribute('fill', 'rgba(3, 9, 13, 0.84)');
+      frame.setAttribute('stroke', cssColor(severityColor));
+      frame.setAttribute('stroke-width', String(
+        event.id === selectedId ? 2.4 : MAP_SEVERITY_STYLES[event.severity].lineWidth,
+      ));
+      const symbol = mapSymbolMarker(
+        x,
+        y,
+        mapSymbolForEvent(event),
+        event.id === selectedId ? 19 : (this.state?.zoom || 1.25) < 2.5 ? 13 : 15,
+      );
+      symbol.setAttribute('fill', cssColor([
+        severityColor[0],
+        severityColor[1],
+        severityColor[2],
+        event.id === selectedId ? 255 : 225,
+      ]));
+      group.append(frame, symbol);
+      this.eventLayer.append(group);
     }
     for (const event of aviation.hubs) {
       if (event.geometry?.type !== 'Point') continue;

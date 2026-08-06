@@ -6,11 +6,13 @@ import {
   type MapLayerDefinition,
 } from '../config/layerRegistry';
 import type { GeoEvent } from '../domain/types';
+import type { MapSymbolKey } from '../config/mapSymbols';
+import { MapSymbolIcon } from './MapSymbolIcon';
 
 export type LayerPanelItem = {
   id: string;
   label: string;
-  icon: string;
+  icon: MapSymbolKey;
   hint?: string;
   enabled: boolean;
 };
@@ -29,7 +31,10 @@ function LayerBrief({
       <button type="button" className="wm-layer-brief-close" onClick={onClose} aria-label="Close layer brief">×</button>
       <header>
         <span>Layer intelligence brief</span>
-        <h2 id="wm-layer-brief-title">{layer.icon} {layer.label}</h2>
+        <h2 id="wm-layer-brief-title">
+          <MapSymbolIcon symbol={layer.icon} size={18} />
+          {layer.label}
+        </h2>
         <p>{layer.explanation.purpose}</p>
       </header>
       <dl>
@@ -144,7 +149,7 @@ export function LayerPanel({
                     onChange={() => onToggle(item.id)}
                     aria-label={actionLabel}
                   />
-                  <span className="wm-layer-icon">{item.icon}</span>
+                  <span className="wm-layer-icon"><MapSymbolIcon symbol={item.icon} size={15} /></span>
                   <span className="wm-layer-label">{item.label}</span>
                   {item.hint ? <em className="wm-layer-hint">{item.hint}</em> : null}
                 </label>

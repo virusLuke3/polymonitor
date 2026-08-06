@@ -4,12 +4,13 @@ import type {
   HazardEvent,
   HazardKind,
 } from '../../domain/types';
+import { MAP_SEVERITY_STYLES } from '../../config/mapSymbols';
 
 export const SEVERITY_COLORS: Record<GeoEventSeverity, [number, number, number, number]> = {
-  info: [85, 196, 224, 185],
-  watch: [238, 199, 71, 205],
-  warning: [255, 145, 53, 220],
-  critical: [255, 76, 70, 235],
+  info: [...MAP_SEVERITY_STYLES.info.rgba],
+  watch: [...MAP_SEVERITY_STYLES.watch.rgba],
+  warning: [...MAP_SEVERITY_STYLES.warning.rgba],
+  critical: [...MAP_SEVERITY_STYLES.critical.rgba],
 };
 
 export const MAP_MONO_FONT_FAMILY = '"JetBrains Mono", "SFMono-Regular", Consolas, monospace';
@@ -58,15 +59,29 @@ export function isHazardEvent(event: GeoEvent): event is HazardEvent {
     && typeof (event as Partial<HazardEvent>).hazardKind === 'string';
 }
 
-export function pointRadiusMeters(event: GeoEvent) {
+export function continuousMetricRadiusMeters(event: GeoEvent): number | null {
   if (isHazardEvent(event) && event.metrics.kind === 'earthquake') {
     return Math.max(12_000, Math.pow(Math.max(0.5, event.metrics.magnitude), 2.25) * 4_200);
+  }
+  if (isHazardEvent(event)
+    && (event.hazardKind === 'wildfire' || event.hazardKind === 'fire-detection')
+    && event.metrics.kind === 'wildfire') {
+    const frp = Number(event.metrics.fireRadiativePowerMw || 0);
+    const detections = Number(event.metrics.detectionCount || 0);
+    if (frp > 0 || detections > 0) {
+      return Math.max(11_000, Math.sqrt(Math.max(frp, detections * 18, 1)) * 5_200);
+    }
   }
   const deaths = Number(event.properties.deathsBest || 0);
   if (Number.isFinite(deaths) && deaths > 0) {
     return Math.max(10_000, Math.sqrt(deaths + 1) * 6_200);
   }
-  return event.category === 'infrastructure' ? 13_000 : 18_000;
+  return null;
+}
+
+export function pointRadiusMeters(event: GeoEvent) {
+  return continuousMetricRadiusMeters(event)
+    ?? (event.category === 'infrastructure' ? 13_000 : 18_000);
 }
 
 export function eventLabel(event: GeoEvent) {
