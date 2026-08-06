@@ -11235,8 +11235,7 @@ a.wm-orderfilled-row {
 }
 
 .wm-weather-deck-map .maplibregl-map,
-.wm-weather-deck-map .maplibregl-canvas,
-.wm-weather-deck-map canvas {
+.wm-weather-deck-map .maplibregl-canvas {
   background: #030405 !important;
 }
 
@@ -11255,7 +11254,22 @@ a.wm-orderfilled-row {
 }
 
 .wm-weather-deck-map .maplibregl-control-container {
-  display: none;
+  /* The non-interleaved deck.gl motion overlay mounts here. Hiding the whole
+     MapLibre control tree leaves routes visible but removes aircraft, pulse
+     rings, interaction outlines and point labels. */
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.wm-weather-deck-map .maplibregl-control-container .maplibregl-ctrl-top-left {
+  width: 100%;
+  height: 100%;
+}
+
+.wm-weather-deck-map .maplibregl-control-container canvas {
+  background: transparent;
 }
 
 .wm-world-event-svg-map {
