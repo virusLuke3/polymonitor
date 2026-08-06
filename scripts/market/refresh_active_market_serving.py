@@ -451,12 +451,6 @@ def _write_event_metrics(conn: Any, events: Sequence[Dict[str, Any]]) -> int:
     rows = _event_metric_rows(events)
     if not rows:
         return 0
-    for sql in (
-        "ALTER TABLE core.event_market_serving ADD COLUMN IF NOT EXISTS gamma_volume_24h NUMERIC(38, 18)",
-        "ALTER TABLE core.event_market_serving ADD COLUMN IF NOT EXISTS gamma_volume_updated_at TIMESTAMPTZ",
-        "ALTER TABLE core.event_market_serving ADD COLUMN IF NOT EXISTS gamma_volume_fetched_at TIMESTAMPTZ",
-    ):
-        conn.execute(sql)
     conn.executemany(
         """
         UPDATE core.event_market_serving
