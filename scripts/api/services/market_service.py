@@ -3395,7 +3395,7 @@ def _get_markets_payload(
         params.extend([pattern, pattern, pattern, pattern])
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 7}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 8}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
         return get_active_markets_snapshot(
@@ -3747,7 +3747,7 @@ def _get_active_markets_snapshot(
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": should_include_change_24h,
             "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
-            "v": 24,
+            "v": 25,
         },
         sort_keys=True,
         ensure_ascii=True,
