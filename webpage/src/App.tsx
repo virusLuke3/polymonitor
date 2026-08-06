@@ -1545,6 +1545,23 @@ function WorldMonitorApp() {
   }, [selectedMarketId]);
 
   useEffect(() => {
+    if (!selectedMarketId || Number(bundle?.market?.id) === Number(selectedMarketId)) return;
+    const selectedGroup = findGroupForMarketId(marketGroups, selectedMarketId);
+    const selectedListMarket = markets.find((market) => Number(market.id) === Number(selectedMarketId)) || null;
+    const optimistic = selectedGroup
+      ? optimisticBundleFromGroup(selectedGroup, selectedMarketId, selectedMarketGroupOutcomeKey)
+      : selectedListMarket
+        ? optimisticBundleFromMarket(selectedListMarket)
+        : null;
+    if (!optimistic) return;
+    setBundle((previous) => {
+      const next = mergeWorkspaceBundle(previous, optimistic);
+      bundleCacheRef.current.set(selectedMarketId, next);
+      return next;
+    });
+  }, [bundle?.market?.id, marketGroups, markets, selectedMarketGroupOutcomeKey, selectedMarketId]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
