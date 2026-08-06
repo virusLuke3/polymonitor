@@ -35,7 +35,7 @@ const chrome = spawn('/usr/bin/google-chrome', [
   '--disable-extensions',
   '--disable-background-networking',
   '--disable-sync',
-  ...(proxyServer ? [`--proxy-server=${proxyServer}`] : []),
+  ...(proxyServer ? [`--proxy-server=${proxyServer}`] : ['--no-proxy-server']),
   ...(useAngle ? [`--use-angle=${useAngle}`, '--ignore-gpu-blocklist'] : []),
   ...(useAngle === 'vulkan' ? ['--enable-features=Vulkan'] : []),
   `--remote-debugging-port=${port}`,
