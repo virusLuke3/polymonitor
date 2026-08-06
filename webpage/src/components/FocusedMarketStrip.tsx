@@ -43,6 +43,7 @@ const BOOK_LEVEL_LIMIT = 4;
 const BLOCK_CLOSE_POINT_LIMIT = 3000;
 const LOB_REFRESH_INTERVAL_MS = 8_000;
 const BLOCK_CLOSE_REFRESH_INTERVAL_MS = 20_000;
+const LIVE_LOB_MAX_AGE_MS = 60_000;
 
 const POLYMARKET_SERIES_COLORS = ['#7cb6ff', '#4377ff', '#f5b800', '#ff7a1a', '#7f56d9', '#12b76a', '#f04438', '#06aed4'];
 type RefreshDirection = 'up' | 'down' | 'flat';
@@ -58,9 +59,6 @@ type BlockCloseState = {
   key: string;
   payload: QuantMarketSeriesPayload | null;
   loading: boolean;
-  updatedAt: number | null;
-  pulseId: number;
-  direction: RefreshDirection;
 };
 
 function marketTimeSubtitle(endDate?: string | null, createdAt?: string | null) {
@@ -76,6 +74,7 @@ function resolveMarketTitle(ctx: PanelRenderContext, trade: TradeRow) {
 }
 
 function formatBookPrice(value?: string | number | null) {
+  if (value == null || value === '') return '--';
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
   return `${Math.round(numeric * 100)}c`;
@@ -98,6 +97,11 @@ function formatRefreshAge(value?: number | null) {
   if (seconds < 2) return 'now';
   if (seconds < 60) return `${seconds}s ago`;
   return `${Math.floor(seconds / 60)}m ago`;
+}
+
+function timestampMillis(value?: string | null) {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function bookDepthTotal(levels?: L2Level[]) {
@@ -130,6 +134,15 @@ function isTerminalProbability(value?: string | number | null) {
 
 function safeLiveProbability(value: string | number | null | undefined, isLive: boolean) {
   return isLive ? value : null;
+}
+
+function firstProbability(...values: Array<string | number | null | undefined>) {
+  for (const value of values) {
+    if (value == null || value === '') continue;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0 && numeric <= 1) return numeric;
+  }
+  return null;
 }
 
 function firstPositiveCount(...values: Array<string | number | null | undefined>) {
@@ -758,17 +771,6 @@ function blockCloseSeriesToChart(
   };
 }
 
-function blockCloseLatestYes(
-  payload: QuantMarketSeriesPayload | null,
-  selectedMarketId: number | null,
-  selectedOutcome: MarketGroupOutcome | null,
-) {
-  const chart = blockCloseSeriesToChart(payload, selectedMarketId, selectedOutcome, 'blocks');
-  const point = chart?.points?.[chart.points.length - 1];
-  const value = Number(point?.yesPrice);
-  return Number.isFinite(value) ? value : null;
-}
-
 type DetailChartOptions = {
   title?: string | null;
   category?: string | null;
@@ -1044,8 +1046,18 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const bundleMatchesSelected = ctx.selectedMarketId != null && bundleMarketId != null && Number(bundleMarketId) === Number(ctx.selectedMarketId);
   const selectedOutcomeMatches = selectedOutcome?.marketId != null && Number(selectedOutcome.marketId) === ctx.selectedMarketId;
   const activeOutcomeKey = selectedOutcome?.outcomeKey || ctx.selectedMarketGroupOutcomeKey || null;
-  const selectedTokenId = String(selectedOutcome?.yesTokenId || '').trim();
-  const selectedNoTokenId = String(selectedOutcome?.noTokenId || '').trim();
+  const selectedTokenId = String(
+    selectedOutcome?.yesTokenId
+      || focusedMarket?.yesTokenId
+      || ctx.bundle?.market?.yesTokenId
+      || '',
+  ).trim();
+  const selectedNoTokenId = String(
+    selectedOutcome?.noTokenId
+      || focusedMarket?.noTokenId
+      || ctx.bundle?.market?.noTokenId
+      || '',
+  ).trim();
   const selectedTokenKey = selectedTokenId ? `${selectedTokenId}:${selectedNoTokenId}` : '';
   const [refreshClock, setRefreshClock] = useState(0);
   const tokenLobRequestRef = useRef(0);
@@ -1062,9 +1074,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     key: '',
     payload: null,
     loading: false,
-    updatedAt: null,
-    pulseId: 0,
-    direction: 'flat',
   });
   void refreshClock;
   const tokenLob = tokenLobState.key === selectedTokenKey ? tokenLobState.lob : null;
@@ -1084,7 +1093,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     ? blockCloseSeriesToChart(blockCloseState.payload, ctx.selectedMarketId, selectedOutcome, 'blocks')
     : null;
   const chart = blockCloseChart || (bundleMatchesSelected ? (ctx.bundle?.chart || null) : null);
-  const chartLatestPoint = (chart?.points || []).length ? chart?.points?.[chart.points.length - 1] : null;
   const [bookSide, setBookSide] = useState<BookSide>('yes');
   const activeBook = bookSide === 'no' ? lob?.no : lob?.yes;
   const activePrice = bookSide === 'no'
@@ -1103,7 +1111,28 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const shouldShowOutcomeRail = detail
     ? (detail.outcomes || []).length > 1
     : ((selectedGroup?.outcomes || []).length > 1 || Number(marketStats?.outcomeCount || 2) > 2);
-  const displayedYesPrice = chartLatestPoint?.yesPrice ?? price?.latestYesPrice ?? price?.latestPrice ?? selectedOutcome?.yesPrice ?? focusedMarket?.latestYesPrice ?? focusedMarket?.latestPrice;
+  const lobObservedAt = timestampMillis(lob?.fetchedAt) ?? (tokenLob ? tokenLobState.updatedAt : null);
+  const lobAgeMs = lobObservedAt == null ? null : Date.now() - lobObservedAt;
+  const lobIsFresh = Boolean(
+    lobAgeMs != null
+      && lobAgeMs >= -30_000
+      && lobAgeMs <= LIVE_LOB_MAX_AGE_MS,
+  );
+  const lobYesPrice = lobIsFresh ? bookMidValue(lob, 'yes') : null;
+  const lobNoPrice = lobIsFresh ? bookMidValue(lob, 'no') : null;
+  const servingYesPrice = firstProbability(price?.latestYesPrice, price?.latestPrice);
+  const catalogYesPrice = firstProbability(
+    selectedOutcome?.yesPrice,
+    focusedMarket?.latestYesPrice,
+    focusedMarket?.latestPrice,
+  );
+  const displayedYesPrice = firstProbability(lobYesPrice, servingYesPrice, catalogYesPrice);
+  const displayedNoPrice = firstProbability(
+    lobNoPrice,
+    price?.latestNoPrice,
+    selectedOutcome?.noPrice,
+    displayedYesPrice == null ? null : 1 - displayedYesPrice,
+  );
   const displayedChange = selectedOutcome?.change24h ?? price?.change24h;
   const displayedVolume = selectedOutcome?.volume24h ?? price?.volume24h ?? marketStats?.volume24h;
   const displayedTrades = firstPositiveCount(
@@ -1111,7 +1140,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     price?.tradeCount24h,
     marketStats?.tradeCount24h,
   );
-  const displayedNoPrice = chartLatestPoint?.noPrice ?? price?.latestNoPrice ?? selectedOutcome?.noPrice;
   const chartStatus = String(
     chart?.historyStatus
       || (chart?.range === 'snapshot' || chart?.interval === 'snapshot' ? 'snapshot' : ''),
@@ -1189,18 +1217,23 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const focusedHistoryFallback = isBlockCloseView
     ? blockClosePlaceholder(focusedHistoryEmptyText, blockCloseLoading)
     : emptyState(focusedHistoryEmptyText);
-  const liveQuoteAvailable = Boolean(
-    hasAnyBookLevels
-      || hasServingTradeActivity
-      || hasSelectedEventHistory
-      || hasFocusedMarketHistory,
-  );
+  const hasLiveExecutionQuote = lobYesPrice != null || servingYesPrice != null;
   const suppressTerminalSnapshot = Boolean(
     isTerminalProbability(displayedYesPrice)
-      && !liveQuoteAvailable
+      && !hasLiveExecutionQuote
+      && !hasServingTradeActivity
   );
   const liveDisplayedYesPrice = safeLiveProbability(displayedYesPrice, !suppressTerminalSnapshot);
   const liveDisplayedNoPrice = safeLiveProbability(displayedNoPrice, !suppressTerminalSnapshot);
+  const quoteDirection = lobYesPrice != null ? tokenLobState.direction : 'flat';
+  const quotePulseId = lobYesPrice != null ? tokenLobState.pulseId : 0;
+  const quoteSourceLabel = lobYesPrice != null
+    ? `CLOB midpoint · ${formatRefreshAge(lobObservedAt)}`
+    : servingYesPrice != null
+      ? 'Latest serving quote'
+      : catalogYesPrice != null
+        ? 'Catalog quote'
+        : 'No live quote';
   const activePriceForBook = hasActiveBookLevels ? activePrice : null;
   const noTradesYet = executionAvailable && trades.length === 0 && !hasServingTradeActivity;
   const eventCategory = detail?.category || selectedGroup?.category || focusedMarket?.category || marketStats?.category || 'market';
@@ -1213,9 +1246,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     outcomeCount,
     selectedLabel: selectedOutcome?.label || 'YES',
   };
-  const blockCloseSyncLabel = blockCloseLoading
-    ? 'syncing block close'
-    : `updated ${formatRefreshAge(blockCloseState.updatedAt)}`;
   const lobSyncLabel = tokenLobLoading
     ? 'SYNC'
     : hasAnyBookLevels
@@ -1250,7 +1280,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         pulseId: current.key === key ? current.pulseId : 0,
         direction: current.key === key ? current.direction : 'flat',
       }));
-      fetchMarketLobByToken(selectedTokenId, title, selectedNoTokenId, 1800)
+      fetchMarketLobByToken(selectedTokenId, title, selectedNoTokenId, 4500)
         .then((lobPayload) => {
           if (cancelled || requestSeq !== tokenLobRequestRef.current) return;
           setTokenLobState((current) => {
@@ -1295,7 +1325,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     if (!selectedMarketSlug || !executionAvailable || !blockCloseKey) {
       setBlockCloseState((current) => (
         current.loading || current.payload
-          ? { key: '', payload: null, loading: false, updatedAt: null, pulseId: 0, direction: 'flat' }
+          ? { key: '', payload: null, loading: false }
           : current
       ));
       return;
@@ -1310,9 +1340,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         key,
         payload: current.key === key ? current.payload : null,
         loading: true,
-        updatedAt: current.key === key ? current.updatedAt : null,
-        pulseId: current.key === key ? current.pulseId : 0,
-        direction: current.key === key ? current.direction : 'flat',
       }));
       fetchQuantMarketPriceSeries({
         marketSlug: selectedMarketSlug,
@@ -1329,18 +1356,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       })
         .then((payload) => {
           if (cancelled || requestSeq !== blockCloseRequestRef.current) return;
-          setBlockCloseState((current) => {
-            const previous = current.key === key ? blockCloseLatestYes(current.payload, ctx.selectedMarketId, selectedOutcome) : null;
-            const next = blockCloseLatestYes(payload, ctx.selectedMarketId, selectedOutcome);
-            return {
-              key,
-              payload,
-              loading: false,
-              updatedAt: Date.now(),
-              pulseId: (current.key === key ? current.pulseId : 0) + 1,
-              direction: directionFromValues(next, previous),
-            };
-          });
+          setBlockCloseState({ key, payload, loading: false });
         })
         .catch(() => {
           if (!cancelled) {
@@ -1348,9 +1364,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               key,
               payload: current.key === key ? current.payload : null,
               loading: false,
-              updatedAt: current.key === key ? current.updatedAt : null,
-              pulseId: current.key === key ? current.pulseId : 0,
-              direction: current.key === key ? current.direction : 'flat',
             }));
           }
         });
@@ -1397,7 +1410,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
           status="live"
           className="wm-focus-panel wm-focus-detail-panel"
         >
-          <div className={`wm-focus-detail ${blockCloseLoading ? 'is-refreshing' : ''} tick-${blockCloseState.direction}`}>
+          <div className={`wm-focus-detail tick-${quoteDirection}`}>
             <div className="wm-focus-event-head">
               <div className="wm-focus-detail-copy">
                 <strong className="wm-focus-title">{marketTitle}</strong>
@@ -1413,10 +1426,18 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 </div>
               </div>
               <div className="wm-focus-price-hero">
-                <strong key={`price-${blockCloseState.pulseId}`} className={`wm-live-price-tick ${blockCloseState.direction}`}>{formatPercent(liveDisplayedYesPrice)}</strong>
+                <strong
+                  key={`price-${quotePulseId}`}
+                  className={`wm-live-price-tick ${quoteDirection}`}
+                  aria-live="polite"
+                  aria-label={`YES probability ${formatPercent(liveDisplayedYesPrice)}`}
+                >
+                  {formatPercent(liveDisplayedYesPrice)}
+                </strong>
                 <span className={suppressTerminalSnapshot ? 'flat' : signedClass(displayedChange)}>
                   {suppressTerminalSnapshot ? 'No live quote' : formatSignedPercent(displayedChange)}
                 </span>
+                <small className="wm-focus-quote-source">{quoteSourceLabel}</small>
                 {ctx.selectedMarketId ? (
                   <a className="wm-focus-dossier-link" href={`/markets/${ctx.selectedMarketId}`}>
                     Open dossier ↗
@@ -1430,11 +1451,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <span><em>YES</em> <strong>{formatBookPrice(liveDisplayedYesPrice)}</strong></span>
                 <span><em>NO</em> <strong>{formatBookPrice(liveDisplayedNoPrice)}</strong></span>
                 <span><em>Spread</em> <strong>{formatBookPrice(spreadValue)}</strong></span>
-              </div>
-              <div className={`wm-focus-live-rail ${blockCloseLoading ? 'syncing' : 'ready'} ${blockCloseState.direction}`} aria-live="polite">
-                <i key={`block-sync-${blockCloseState.pulseId}`} />
-                <span>{blockCloseSyncLabel}</span>
-                <b>{Math.round(BLOCK_CLOSE_REFRESH_INTERVAL_MS / 1000)}s poll</b>
               </div>
               <div className="wm-focus-chart-topline">
                 {isBlockCloseView ? (
@@ -1542,7 +1558,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               </span>
               <span><em>Yes</em> {formatPercent(liveDisplayedYesPrice)}</span>
               <span><em>No</em> {formatPercent(liveDisplayedNoPrice)}</span>
-              <span><em>Sync</em> {blockCloseSyncLabel}</span>
+              <span><em>Quote</em> {quoteSourceLabel}</span>
             </div>
           </div>
         </Panel>

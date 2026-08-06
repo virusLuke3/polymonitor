@@ -16444,6 +16444,23 @@ a.wm-orderfilled-row {
   letter-spacing: 0 !important;
 }
 
+.wm-focus-quote-source {
+  display: block;
+  max-width: 100%;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--wm-terminal-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 560;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .wm-focus-kicker,
 .wm-focus-kicker span,
 .wm-focus-kicker i {
@@ -16476,6 +16493,17 @@ a.wm-orderfilled-row {
 .wm-focus-chart-topline {
   padding-inline: 10px !important;
   border-color: var(--wm-terminal-divider) !important;
+}
+
+.wm-focus-price-strip {
+  padding-block: 10px 9px !important;
+  border-bottom: 1px solid var(--wm-terminal-divider) !important;
+}
+
+.wm-focus-chart-topline {
+  min-height: 32px !important;
+  padding-block: 6px !important;
+  border-bottom: 1px solid var(--wm-terminal-divider) !important;
 }
 
 .wm-focus-chart-tabs button {

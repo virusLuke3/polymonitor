@@ -11501,69 +11501,6 @@ html[lang='zh-CN'] .wm-promo-copy {
   text-overflow: ellipsis;
 }
 
-.wm-focus-live-rail {
-  position: relative;
-  z-index: 2;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 7px;
-  margin: 7px 10px 0;
-  padding: 5px 8px;
-  border: 1px solid rgba(126, 220, 255, 0.1);
-  background: rgba(8, 12, 13, 0.76);
-  color: #8f989d;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 900;
-  text-transform: uppercase;
-  overflow: hidden;
-}
-
-.wm-focus-live-rail::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(57, 255, 115, 0), rgba(57, 255, 115, 0.62), rgba(57, 255, 115, 0));
-  transform: translateX(-100%);
-}
-
-.wm-focus-live-rail.syncing::after {
-  animation: wm-live-sync-scan 1300ms linear infinite;
-}
-
-.wm-focus-live-rail i {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: #57f294;
-  box-shadow: 0 0 12px rgba(57, 255, 115, 0.35);
-  animation: wm-live-dot-pop 520ms ease;
-}
-
-.wm-focus-live-rail.syncing i {
-  animation: wm-live-dot-breathe 1000ms ease-in-out infinite;
-}
-
-.wm-focus-live-rail.down i {
-  background: #ff6f7b;
-  box-shadow: 0 0 12px rgba(255, 111, 123, 0.36);
-}
-
-.wm-focus-live-rail span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wm-focus-live-rail b {
-  color: #dce8e6;
-  font-weight: 950;
-  letter-spacing: 0;
-}
-
 .wm-focus-chart-marketbar {
   position: relative;
   z-index: 2;
@@ -11615,19 +11552,6 @@ html[lang='zh-CN'] .wm-promo-copy {
 
 .wm-focus-chart-card::before {
   content: none;
-}
-
-.wm-focus-detail.is-refreshing .wm-focus-chart-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background:
-    linear-gradient(90deg, rgba(126, 220, 255, 0), rgba(126, 220, 255, 0.075), rgba(126, 220, 255, 0));
-  mix-blend-mode: screen;
-  transform: translateX(-100%);
-  animation: wm-live-sync-scan 1550ms linear infinite;
 }
 
 .wm-focus-chart-topline {
@@ -12701,16 +12625,6 @@ html[lang='zh-CN'] .wm-promo-copy {
   }
 }
 
-@keyframes wm-live-sync-scan {
-  from {
-    transform: translateX(-100%);
-  }
-
-  to {
-    transform: translateX(100%);
-  }
-}
-
 @keyframes wm-live-panel-scan {
   from {
     transform: translateY(-100%);
@@ -12718,35 +12632,6 @@ html[lang='zh-CN'] .wm-promo-copy {
 
   to {
     transform: translateY(100%);
-  }
-}
-
-@keyframes wm-live-dot-pop {
-  0% {
-    transform: scale(0.72);
-    opacity: 0.65;
-  }
-
-  55% {
-    transform: scale(1.28);
-    opacity: 1;
-  }
-
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-@keyframes wm-live-dot-breathe {
-  0%, 100% {
-    transform: scale(0.9);
-    opacity: 0.7;
-  }
-
-  50% {
-    transform: scale(1.22);
-    opacity: 1;
   }
 }
 
@@ -12779,9 +12664,6 @@ html[lang='zh-CN'] .wm-promo-copy {
   .wm-focus-book-mid,
   .wm-focus-book-mid::before,
   .wm-live-price-tick,
-  .wm-focus-live-rail i,
-  .wm-focus-live-rail::after,
-  .wm-focus-detail.is-refreshing .wm-focus-chart-card::after,
   .wm-focus-book.is-refreshing .wm-focus-book-ladder::after {
     animation: none;
   }
