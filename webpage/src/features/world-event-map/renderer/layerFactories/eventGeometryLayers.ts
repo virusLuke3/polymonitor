@@ -1,7 +1,12 @@
 import { GeoJsonLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers';
 import type { LayersList } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
-import { isHazardEvent } from './shared';
+import {
+  eventSeverityColor,
+  hazardAreaPresentation,
+  isHazardEvent,
+  type HazardAreaPresentation,
+} from './shared';
 import { createCountryRiskLayers, isCountryRiskArea } from './countryRiskLayers';
 import { eventColor } from './shared';
 
@@ -10,9 +15,16 @@ type CycloneCenter = {
   coordinates: [number, number];
 };
 
+type HazardAreaFeatureProperties = {
+  event: GeoEvent;
+  presentation: HazardAreaPresentation;
+};
+
 export function createEventGeometryLayers(
   events: GeoEvent[],
   selectedEventId: string | null,
+  zoom = Number.POSITIVE_INFINITY,
+  beforeId?: string,
 ): LayersList {
   const lines = events.filter((event) => (
     event.properties.mapEntity !== 'air-route'
@@ -26,10 +38,12 @@ export function createEventGeometryLayers(
     const coordinates = event.geometry.coordinates[event.geometry.coordinates.length - 1];
     return coordinates ? [{ event, coordinates }] : [];
   });
-  const hazardAreas = events.filter((event) => (
-    isHazardEvent(event)
-    && (event.geometry?.type === 'Polygon' || event.geometry?.type === 'MultiPolygon')
-  ));
+  const hazardAreas = events.flatMap((event) => {
+    if (!isHazardEvent(event)
+      || (event.geometry?.type !== 'Polygon' && event.geometry?.type !== 'MultiPolygon')) return [];
+    const presentation = hazardAreaPresentation(event, zoom, selectedEventId);
+    return presentation.mode === 'hidden' ? [] : [{ event, presentation }];
+  });
   const contextAreas = events.filter((event) => (
     !isHazardEvent(event)
     && !isCountryRiskArea(event)
@@ -46,18 +60,28 @@ export function createEventGeometryLayers(
         type: 'FeatureCollection',
         features: hazardAreas.map((event) => ({
           type: 'Feature',
-          id: event.id,
-          properties: { event },
-          geometry: event.geometry,
+          id: event.event.id,
+          properties: event,
+          geometry: event.event.geometry,
         })),
       } as any,
       filled: true,
       stroked: true,
-      getFillColor: (feature) => eventColor(feature.properties?.event as GeoEvent, 64),
-      getLineColor: (feature) => eventColor(feature.properties?.event as GeoEvent, 220),
-      getLineWidth: (feature) => feature.properties?.event?.id === selectedEventId ? 2.8 : 1.35,
-      lineWidthMinPixels: 1,
+      getFillColor: (feature) => {
+        const properties = feature.properties as HazardAreaFeatureProperties;
+        return eventSeverityColor(properties.event, properties.presentation.fillAlpha);
+      },
+      getLineColor: (feature) => {
+        const properties = feature.properties as HazardAreaFeatureProperties;
+        return eventSeverityColor(properties.event, properties.presentation.lineAlpha);
+      },
+      getLineWidth: (feature) => (
+        (feature.properties as HazardAreaFeatureProperties).presentation.lineWidth
+      ),
+      lineWidthMinPixels: 0.5,
       pickable: true,
+      autoHighlight: false,
+      beforeId,
     }));
   }
 
@@ -80,6 +104,8 @@ export function createEventGeometryLayers(
       getLineWidth: (feature) => feature.properties?.event?.id === selectedEventId ? 2.5 : 1,
       lineWidthMinPixels: 1,
       pickable: true,
+      autoHighlight: false,
+      beforeId,
     }));
   }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Layer } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import { defaultWorldEventMapState } from '../../state/mapState';
-import { createWorldEventLayers } from '.';
+import { createWorldEventGeometryLayers, createWorldEventLayers } from '.';
 import {
   aviationRouteMotionPoints,
   aviationSeededFlightPoints,
@@ -56,6 +56,25 @@ const hazardPoint = (
     ? { kind: 'earthquake', magnitude: 4.5 }
     : { kind: 'volcano-or-other', statusLabel: 'active' },
 } as GeoEvent);
+
+const hazardArea = (
+  id: string,
+  west: number,
+  south: number,
+  severity: GeoEvent['severity'] = 'warning',
+): GeoEvent => ({
+  ...hazardPoint(id, 'volcano', west, south, severity),
+  geometry: {
+    type: 'Polygon',
+    coordinates: [[
+      [west, south],
+      [west + 2, south],
+      [west + 2, south + 2],
+      [west, south + 2],
+      [west, south],
+    ]],
+  },
+});
 
 const aviationState = () => {
   const state = defaultWorldEventMapState();
@@ -115,6 +134,45 @@ describe('world event layer factories', () => {
     expect(eventVisibleAtZoom(moderateQuake, 1.25, null)).toBe(false);
     expect(eventVisibleAtZoom(moderateQuake, 3, null)).toBe(true);
     expect(eventVisibleAtZoom(info, 1.25, info.id)).toBe(true);
+  });
+
+  it('represents official hazard areas as semantic markers and clusters at world zoom', () => {
+    const events = [
+      hazardArea('area:a', 10, 10, 'warning'),
+      hazardArea('area:b', 10.2, 10.1, 'warning'),
+      hazardArea('area:c', 10.4, 10.2, 'critical'),
+    ];
+    const clustered = clusterEventPoints(events, 1.25, null);
+    expect(clustered.clusters).toHaveLength(1);
+    expect(clustered.clusters[0]?.count).toBe(3);
+    expect(clustered.clusters[0]?.symbol).toBe('volcano');
+    expect(clustered.clusters[0]?.bounds).toEqual([10, 10, 12.4, 12.2]);
+    expect(clustered.singles).toHaveLength(0);
+  });
+
+  it('hides hazard footprints globally, reveals restrained regional fill, and preserves selection', () => {
+    const area = hazardArea('area:progressive', 10, 10, 'warning');
+    const globalLayers = createWorldEventLayers(
+      [area],
+      { ...defaultWorldEventMapState(), zoom: 1.25 },
+    ) as Layer[];
+    expect(globalLayers.some((layer) => layer.id === 'world-event-hazard-areas')).toBe(false);
+    expect(globalLayers.some((layer) => layer.id === 'world-event-points')).toBe(true);
+
+    const regional = createWorldEventGeometryLayers([area], null, 3.2, 'country-labels') as Layer[];
+    const regionalLayer = regional.find((layer) => layer.id === 'world-event-hazard-areas');
+    const regionalProps = regionalLayer?.props as unknown as Record<string, any>;
+    const regionalFeature = regionalProps.data.features[0];
+    expect(regionalProps.getFillColor(regionalFeature)[3]).toBe(16);
+    expect(regionalProps.getLineColor(regionalFeature)[3]).toBe(0);
+    expect(regionalProps.beforeId).toBe('country-labels');
+
+    const selected = createWorldEventGeometryLayers([area], area.id, 1.25) as Layer[];
+    const selectedLayer = selected.find((layer) => layer.id === 'world-event-hazard-areas');
+    const selectedProps = selectedLayer?.props as unknown as Record<string, any>;
+    const selectedFeature = selectedProps.data.features[0];
+    expect(selectedProps.getFillColor(selectedFeature)[3]).toBe(46);
+    expect(selectedProps.getLineColor(selectedFeature)[3]).toBe(245);
   });
 
   it('uses metric-sized circles only when a continuous metric exists', () => {
@@ -489,7 +547,8 @@ describe('world event layer factories', () => {
       ...hazardPoint('hazard:polygon', 'volcano', 0, 0, 'critical'),
       geometry: { type: 'Polygon', coordinates: [[[10, 10], [14, 10], [14, 12], [10, 10]]] },
     } as GeoEvent;
-    expect(eventRepresentativePoint(polygon)).toEqual([12, 11]);
+    expect(eventRepresentativePoint(polygon)?.[0]).toBeCloseTo(12.67, 2);
+    expect(eventRepresentativePoint(polygon)?.[1]).toBeCloseTo(10.67, 2);
     const layers = createEventPulseLayers({
       events: [polygon],
       selectedEventId: null,

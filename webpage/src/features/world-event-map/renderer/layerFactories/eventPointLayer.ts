@@ -17,6 +17,8 @@ import {
 import {
   continuousMetricRadiusMeters,
   eventLabel,
+  eventGeometryBounds,
+  eventRepresentativePoint,
   MAP_MONO_FONT_FAMILY,
   SEVERITY_COLORS,
   isHazardEvent,
@@ -115,20 +117,21 @@ export function eventVisibleAtZoom(event: GeoEvent, zoom: number, selectedEventI
   return event.id === selectedEventId || eventDisclosureTier(event) <= disclosureTierForZoom(zoom);
 }
 
-function pointFeature(event: GeoEvent): Feature<Point, ClusterPointProperties> {
-  const [lon, lat] = event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0];
+function pointFeature(event: GeoEvent, coordinates: [number, number]): Feature<Point, ClusterPointProperties> {
+  const [lon, lat] = coordinates;
+  const bounds = eventGeometryBounds(event) || [lon, lat, lon, lat];
   const visibilityTier = eventDisclosureTier(event);
   const severityRank = SEVERITY_RANK[event.severity];
   return {
     type: 'Feature',
-    geometry: event.geometry as Point,
+    geometry: { type: 'Point', coordinates },
     properties: {
       eventId: event.id,
       severityRank,
-      west: lon,
-      south: lat,
-      east: lon,
-      north: lat,
+      west: bounds[0],
+      south: bounds[1],
+      east: bounds[2],
+      north: bounds[3],
       representativeEventId: event.id,
       visibilityTier,
       majorCount: visibilityTier === 0 ? 1 : 0,
@@ -191,9 +194,16 @@ function semanticBadge(event: GeoEvent) {
 }
 
 function inViewport(event: GeoEvent, viewport: [number, number, number, number]) {
-  if (event.geometry?.type !== 'Point') return false;
-  const [lon, lat] = event.geometry.coordinates;
+  const position = eventRepresentativePoint(event);
+  if (!position) return false;
+  const [lon, lat] = position;
   return lon >= viewport[0] && lon <= viewport[2] && lat >= viewport[1] && lat <= viewport[3];
+}
+
+function isClusterableMarker(event: GeoEvent) {
+  if (event.geometry?.type === 'Point') return true;
+  return isHazardEvent(event)
+    && (event.geometry?.type === 'Polygon' || event.geometry?.type === 'MultiPolygon');
 }
 
 /** Persistent source index. Viewport/zoom queries never rebuild Supercluster. */
@@ -216,8 +226,9 @@ export class EventClusterIndex {
     this.queryResult = null;
     const grouped = new Map<string, GeoEvent[]>();
     for (const event of events) {
-      if (event.geometry?.type !== 'Point') continue;
+      if (!isClusterableMarker(event)) continue;
       if (event.properties.mapEntity === 'air-hub' || event.properties.mapEntity === 'live-aircraft') continue;
+      if (!eventRepresentativePoint(event)) continue;
       const layerId = worldEventLayerIdForEvent(event);
       if (!layerId) continue;
       this.eventById.set(event.id, event);
@@ -262,7 +273,7 @@ export class EventClusterIndex {
         },
       });
       const eventById = new Map(bucketEvents.map((event) => [event.id, event]));
-      index.load(bucketEvents.map(pointFeature));
+      index.load(bucketEvents.map((event) => pointFeature(event, eventRepresentativePoint(event)!)));
       this.buckets.push({ id, layerId, index, eventById });
     }
     this.buildCount += 1;
@@ -460,7 +471,7 @@ export function createEventPointLayers({
       layers.push(new ScatterplotLayer<GeoEvent>({
         id: 'world-event-point-intensity',
         data: intensityEvents,
-        getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
+        getPosition: (event) => eventRepresentativePoint(event)!,
         getRadius: (event) => continuousMetricRadiusMeters(event) || 0,
         getFillColor: (event) => {
           const [red, green, blue] = SEVERITY_COLORS[event.severity];
@@ -482,7 +493,7 @@ export function createEventPointLayers({
     layers.push(new ScatterplotLayer<GeoEvent>({
       id: 'world-event-point-frames',
       data: singles,
-      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
+      getPosition: (event) => eventRepresentativePoint(event)!,
       getRadius: 18_000,
       getFillColor: [3, 9, 13, 210],
       getLineColor: (event) => {
@@ -504,7 +515,7 @@ export function createEventPointLayers({
       iconAtlas: MAP_SYMBOL_ATLAS,
       iconMapping: MAP_SYMBOL_ICON_MAPPING,
       getIcon: mapSymbolForEvent,
-      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
+      getPosition: (event) => eventRepresentativePoint(event)!,
       getSize: (event) => event.id === selectedEventId ? 19 : zoom < 2.5 ? 13 : zoom < 4 ? 14.5 : 16,
       getColor: (event) => {
         const [red, green, blue] = SEVERITY_COLORS[event.severity];
@@ -533,7 +544,7 @@ export function createEventPointLayers({
     layers.push(new TextLayer<GeoEvent>({
       id: 'world-event-labels',
       data: labeled,
-      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
+      getPosition: (event) => eventRepresentativePoint(event)!,
       getText: eventLabel,
       getPixelOffset: [7, -8],
       getSize: (event) => event.id === selectedEventId ? 11 : 9,

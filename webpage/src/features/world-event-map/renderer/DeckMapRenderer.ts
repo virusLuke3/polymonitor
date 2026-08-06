@@ -88,6 +88,8 @@ export class DeckMapRenderer implements MapRenderer {
   private readonly heavyGeometryCommit: DeferredLatestCommit<{
     events: GeoEvent[];
     selectedEventId: string | null;
+    zoom: number;
+    beforeId?: string;
     generation: number;
   }>;
   private readonly performanceMonitor = new MapPerformanceMonitor();
@@ -127,11 +129,11 @@ export class DeckMapRenderer implements MapRenderer {
     );
     this.heavyGeometryCommit = new DeferredLatestCommit(
       scheduleAfterMainThreadYield,
-      ({ events, selectedEventId, generation }) => {
+      ({ events, selectedEventId, zoom, beforeId, generation }) => {
         if (this.destroyed || this.paused || generation !== this.geometryGeneration) return;
         this.geometryLayers = this.performanceMonitor.measure(
           'js-build',
-          () => createWorldEventGeometryLayers(events, selectedEventId),
+          () => createWorldEventGeometryLayers(events, selectedEventId, zoom, beforeId),
         );
         this.geometryNeedsCommit = false;
         this.requestRender();
@@ -291,6 +293,7 @@ export class DeckMapRenderer implements MapRenderer {
     if (staticLayersChanged) this.pointLayers = null;
     if (aviationLayersChanged) this.aviationLayerSections = null;
     const geometryChanged = !previous
+      || previous.zoom !== state.zoom
       || previous.selectedEventId !== state.selectedEventId
       || previous.timeRange !== state.timeRange
       || previous.severities.join(',') !== state.severities.join(',')
@@ -462,6 +465,8 @@ export class DeckMapRenderer implements MapRenderer {
       this.heavyGeometryCommit.stage({
         events: this.events,
         selectedEventId: this.state.selectedEventId,
+        zoom: this.state.zoom,
+        beforeId: this.map?.getStyle().layers?.find((layer) => layer.type === 'symbol')?.id,
         generation: this.geometryGeneration,
       });
     }
@@ -617,6 +622,7 @@ export class DeckMapRenderer implements MapRenderer {
     reinforceWorldEventBasemapLabels(this.map);
     this.ensureCountryHoverLayers();
     if (this.fallbackApplied) this.markLocalFallbackReadyIfLoaded();
+    this.invalidateGeometry();
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
   };
 

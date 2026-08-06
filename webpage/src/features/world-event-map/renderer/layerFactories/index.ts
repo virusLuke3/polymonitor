@@ -47,7 +47,7 @@ export function createWorldEventStaticLayerSections(
   clusterIndex?: EventClusterIndex,
 ): WorldEventStaticLayerSections {
   return {
-    geometry: createEventGeometryLayers(events, state.selectedEventId),
+    geometry: createEventGeometryLayers(events, state.selectedEventId, state.zoom),
     points: createEventPointLayers({
       events,
       zoom: state.zoom,
@@ -59,8 +59,13 @@ export function createWorldEventStaticLayerSections(
   };
 }
 
-export function createWorldEventGeometryLayers(events: GeoEvent[], selectedEventId: string | null) {
-  return createEventGeometryLayers(events, selectedEventId);
+export function createWorldEventGeometryLayers(
+  events: GeoEvent[],
+  selectedEventId: string | null,
+  zoom: number,
+  beforeId?: string,
+) {
+  return createEventGeometryLayers(events, selectedEventId, zoom, beforeId);
 }
 
 export function createWorldEventPointLayers(

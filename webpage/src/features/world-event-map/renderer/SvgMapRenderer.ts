@@ -24,12 +24,14 @@ import {
 import {
   continuousMetricRadiusMeters,
   eventColor,
+  eventRepresentativePoint,
+  eventSeverityColor,
+  hazardAreaPresentation,
   isHazardEvent,
   pointRadiusMeters,
   SEVERITY_COLORS,
 } from './layerFactories/shared';
 import {
-  eventRepresentativePoint,
   HAZARD_PULSE_INTERVAL_MS,
   hazardPulseTargets,
   hasAnimatedHazardPulse,
@@ -154,6 +156,7 @@ export class SvgMapRenderer implements MapRenderer {
   private host: HTMLElement | null = null;
   private svg: SVGSVGElement | null = null;
   private countryLayer: SVGGElement | null = null;
+  private areaLayer: SVGGElement | null = null;
   private countryLabelLayer: SVGGElement | null = null;
   private eventLayer: SVGGElement | null = null;
   private aviationMotionLayer: SVGGElement | null = null;
@@ -205,6 +208,8 @@ export class SvgMapRenderer implements MapRenderer {
     svg.setAttribute('focusable', 'false');
     const countries = svgElement('g');
     countries.classList.add('wm-world-event-svg-countries');
+    const areas = svgElement('g');
+    areas.classList.add('wm-world-event-svg-areas');
     const countryLabels = svgElement('g');
     countryLabels.classList.add('wm-world-event-svg-country-labels');
     const events = svgElement('g');
@@ -213,10 +218,11 @@ export class SvgMapRenderer implements MapRenderer {
     aviationMotion.classList.add('wm-world-event-svg-aviation-motion');
     const emphasis = svgElement('g');
     emphasis.classList.add('wm-world-event-svg-emphasis');
-    svg.append(countries, countryLabels, events, aviationMotion, emphasis);
+    svg.append(countries, areas, countryLabels, events, aviationMotion, emphasis);
     container.append(svg);
     this.svg = svg;
     this.countryLayer = countries;
+    this.areaLayer = areas;
     this.countryLabelLayer = countryLabels;
     this.eventLayer = events;
     this.aviationMotionLayer = aviationMotion;
@@ -318,6 +324,7 @@ export class SvgMapRenderer implements MapRenderer {
     this.host = null;
     this.svg = null;
     this.countryLayer = null;
+    this.areaLayer = null;
     this.countryLabelLayer = null;
     this.eventLayer = null;
     this.aviationMotionLayer = null;
@@ -376,7 +383,8 @@ export class SvgMapRenderer implements MapRenderer {
   }
 
   private render() {
-    if (this.paused || !this.svg || !this.countryLayer || !this.countryLabelLayer || !this.eventLayer || !this.host) return;
+    if (this.paused || !this.svg || !this.countryLayer || !this.areaLayer
+      || !this.countryLabelLayer || !this.eventLayer || !this.host) return;
     const width = Math.max(1, this.host.clientWidth || 1_200);
     const height = Math.max(1, this.host.clientHeight || 620);
     this.svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -415,6 +423,7 @@ export class SvgMapRenderer implements MapRenderer {
       occupiedCountryLabels.push(box);
     }
 
+    this.areaLayer.replaceChildren();
     this.eventLayer.replaceChildren();
     const state = this.state;
     const selectedId = this.state?.selectedEventId;
@@ -442,6 +451,11 @@ export class SvgMapRenderer implements MapRenderer {
     );
     for (const event of renderEvents) {
       if (!event.geometry || event.geometry.type === 'Point') continue;
+      const isArea = event.geometry.type === 'Polygon' || event.geometry.type === 'MultiPolygon';
+      const areaPresentation = isArea && isHazardEvent(event)
+        ? hazardAreaPresentation(event, this.state?.zoom ?? 1.25, selectedId || null)
+        : null;
+      if (areaPresentation?.mode === 'hidden') continue;
       const geometry = eventGeoJson(event);
       if (!geometry) continue;
       const data = path(geometry);
@@ -450,6 +464,17 @@ export class SvgMapRenderer implements MapRenderer {
       shape.setAttribute('d', data);
       shape.classList.add('wm-world-event-svg-shape');
       this.decorateEventElement(shape, event, event.id === selectedId);
+      if (areaPresentation) {
+        shape.classList.add('wm-world-event-svg-hazard-area', `is-${areaPresentation.mode}`);
+        shape.setAttribute('fill', cssColor(eventSeverityColor(event, areaPresentation.fillAlpha)));
+        shape.setAttribute(
+          'stroke',
+          areaPresentation.lineAlpha > 0
+            ? cssColor(eventSeverityColor(event, areaPresentation.lineAlpha))
+            : 'none',
+        );
+        shape.setAttribute('stroke-width', String(areaPresentation.lineWidth));
+      }
       if (event.geometry.type === 'LineString') {
         shape.setAttribute('fill', 'none');
         if (aviationEntity(event) === 'air-route') {
@@ -463,7 +488,7 @@ export class SvgMapRenderer implements MapRenderer {
           shape.setAttribute('stroke-width', sameSelectedRoute ? '2.2' : '0.85');
         }
       }
-      this.eventLayer.append(shape);
+      (isArea ? this.areaLayer : this.eventLayer).append(shape);
     }
     for (const cluster of clusters) {
       const position = projection(cluster.coordinates);
@@ -527,8 +552,9 @@ export class SvgMapRenderer implements MapRenderer {
       this.eventLayer.append(group);
     }
     for (const event of singles) {
-      if (event.geometry?.type !== 'Point') continue;
-      const position = projection(event.geometry.coordinates);
+      const representativePoint = eventRepresentativePoint(event);
+      if (!representativePoint) continue;
+      const position = projection(representativePoint);
       if (!position) continue;
       const [x, y] = position;
       if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;

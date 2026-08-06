@@ -1,8 +1,15 @@
 import { PathLayer, ScatterplotLayer } from '@deck.gl/layers';
 import type { Layer, LayersList } from '@deck.gl/core';
 import type { GeoEvent, GeoPoint, HazardEvent } from '../../domain/types';
-import { eventColor, isHazardEvent, pointRadiusMeters } from './shared';
+import {
+  eventColor,
+  eventRepresentativePoint,
+  isHazardEvent,
+  pointRadiusMeters,
+} from './shared';
 import type { EventCluster } from './eventPointLayer';
+
+export { eventRepresentativePoint } from './shared';
 
 export const HAZARD_PULSE_INTERVAL_MS = 500;
 export const RECENT_EVENT_PULSE_MS = 30_000;
@@ -20,40 +27,6 @@ type HazardPulseTarget = EventEmphasisTarget & {
 type RecentPulseTarget = EventEmphasisTarget & {
   fade: number;
 };
-
-function polygonOuterRings(event: GeoEvent): number[][][] {
-  if (event.geometry?.type === 'Polygon') return event.geometry.coordinates.slice(0, 1);
-  if (event.geometry?.type === 'MultiPolygon') {
-    return event.geometry.coordinates.flatMap((polygon) => polygon.slice(0, 1));
-  }
-  return [];
-}
-
-/** Uses only supplied geometry; no inferred or fabricated geographic location. */
-export function eventRepresentativePoint(event: GeoEvent): GeoPoint | null {
-  const geometry = event.geometry;
-  if (!geometry) return null;
-  if (geometry.type === 'Point') return geometry.coordinates;
-  if (geometry.type === 'LineString') return geometry.coordinates[geometry.coordinates.length - 1] || null;
-  const coordinates = polygonOuterRings(event).flat();
-  if (!coordinates.length) return null;
-  let west = Infinity;
-  let south = Infinity;
-  let east = -Infinity;
-  let north = -Infinity;
-  for (const coordinate of coordinates) {
-    const lon = Number(coordinate[0]);
-    const lat = Number(coordinate[1]);
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-    west = Math.min(west, lon);
-    south = Math.min(south, lat);
-    east = Math.max(east, lon);
-    north = Math.max(north, lat);
-  }
-  return [west, south, east, north].every(Number.isFinite)
-    ? [(west + east) / 2, (south + north) / 2]
-    : null;
-}
 
 function targetForEvent(event: GeoEvent): EventEmphasisTarget | null {
   const position = eventRepresentativePoint(event);

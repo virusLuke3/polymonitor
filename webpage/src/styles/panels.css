@@ -11317,6 +11317,15 @@ a.wm-orderfilled-row {
   cursor: pointer;
 }
 
+.wm-world-event-svg-hazard-area {
+  fill-opacity: 1;
+  stroke-opacity: 1;
+}
+
+.wm-world-event-svg-hazard-area.is-regional {
+  cursor: pointer;
+}
+
 .wm-world-event-svg-point {
   cursor: pointer;
   vector-effect: non-scaling-stroke;
