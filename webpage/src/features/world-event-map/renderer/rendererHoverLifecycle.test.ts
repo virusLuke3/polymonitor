@@ -16,6 +16,50 @@ function callbacks(): MapRendererCallbacks {
 }
 
 describe('renderer hover lifecycle', () => {
+  it('does not declare the local fallback ready before country geometry loads', () => {
+    const onBasemapStateChange = vi.fn();
+    const renderer = new DeckMapRenderer() as unknown as {
+      callbacks: MapRendererCallbacks;
+      fallbackApplied: boolean;
+      map: { getSource: () => object; isSourceLoaded: () => boolean };
+      markLocalFallbackReadyIfLoaded: () => boolean;
+      destroy: () => void;
+    };
+    renderer.callbacks = { ...callbacks(), onBasemapStateChange };
+    renderer.fallbackApplied = true;
+    renderer.map = {
+      getSource: () => ({}),
+      isSourceLoaded: () => false,
+    };
+
+    expect(renderer.markLocalFallbackReadyIfLoaded()).toBe(false);
+    expect(onBasemapStateChange).not.toHaveBeenCalledWith('local-fallback-ready');
+    renderer.map = null as never;
+    renderer.destroy();
+  });
+
+  it('declares the local fallback ready after country geometry loads', () => {
+    const onBasemapStateChange = vi.fn();
+    const renderer = new DeckMapRenderer() as unknown as {
+      callbacks: MapRendererCallbacks;
+      fallbackApplied: boolean;
+      map: { getSource: () => object; isSourceLoaded: () => boolean };
+      markLocalFallbackReadyIfLoaded: () => boolean;
+      destroy: () => void;
+    };
+    renderer.callbacks = { ...callbacks(), onBasemapStateChange };
+    renderer.fallbackApplied = true;
+    renderer.map = {
+      getSource: () => ({}),
+      isSourceLoaded: () => true,
+    };
+
+    expect(renderer.markLocalFallbackReadyIfLoaded()).toBe(true);
+    expect(onBasemapStateChange).toHaveBeenCalledWith('local-fallback-ready');
+    renderer.map = null as never;
+    renderer.destroy();
+  });
+
   it('clears Deck hover locally when a map drag starts', () => {
     const renderer = new DeckMapRenderer() as unknown as {
       callbacks: MapRendererCallbacks;

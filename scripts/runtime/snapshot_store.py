@@ -13,26 +13,41 @@ from typing import Any, Optional
 
 
 class SnapshotStore:
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, *, busy_timeout_ms: int = 750) -> None:
         self.db_path = str(Path(db_path).expanduser())
-        self._lock = threading.Lock()
+        self._schema_lock = threading.Lock()
+        self._write_lock = threading.Lock()
+        self._busy_timeout_ms = max(1, int(busy_timeout_ms))
         self._initialized = False
 
     def _connect(self) -> sqlite3.Connection:
         path = Path(self.db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(
+            self.db_path,
+            timeout=self._busy_timeout_ms / 1000,
+        )
         conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA busy_timeout={self._busy_timeout_ms}")
         return conn
+
+    @staticmethod
+    def _is_busy_error(error: sqlite3.OperationalError) -> bool:
+        message = str(error).lower()
+        return "database is locked" in message or "database is busy" in message
 
     def _ensure_schema(self) -> None:
         if self._initialized:
             return
-        with self._lock:
+        with self._schema_lock:
             if self._initialized:
                 return
             conn = self._connect()
             try:
+                # WAL lets API readers continue while seed workers replace cached
+                # snapshots. The setting is persistent for the database file.
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS panel_snapshots (
@@ -97,19 +112,29 @@ class SnapshotStore:
                 conn.close()
 
     def get(self, namespace: str, cache_key: str) -> Optional[Any]:
-        self._ensure_schema()
+        try:
+            self._ensure_schema()
+        except sqlite3.OperationalError as exc:
+            if self._is_busy_error(exc):
+                return None
+            raise
         now = int(time.time())
         conn = self._connect()
         try:
-            row = conn.execute(
-                """
-                SELECT payload_json, expires_at
-                FROM panel_snapshots
-                WHERE namespace = ? AND cache_key = ?
-                LIMIT 1
-                """,
-                (namespace, cache_key),
-            ).fetchone()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT payload_json, expires_at
+                    FROM panel_snapshots
+                    WHERE namespace = ? AND cache_key = ?
+                    LIMIT 1
+                    """,
+                    (namespace, cache_key),
+                ).fetchone()
+            except sqlite3.OperationalError as exc:
+                if self._is_busy_error(exc):
+                    return None
+                raise
             if row is None:
                 return None
             if int(row["expires_at"] or 0) <= now:
@@ -119,18 +144,28 @@ class SnapshotStore:
             conn.close()
 
     def get_stale(self, namespace: str, cache_key: str) -> Optional[Any]:
-        self._ensure_schema()
+        try:
+            self._ensure_schema()
+        except sqlite3.OperationalError as exc:
+            if self._is_busy_error(exc):
+                return None
+            raise
         conn = self._connect()
         try:
-            row = conn.execute(
-                """
-                SELECT payload_json
-                FROM panel_snapshots
-                WHERE namespace = ? AND cache_key = ?
-                LIMIT 1
-                """,
-                (namespace, cache_key),
-            ).fetchone()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT payload_json
+                    FROM panel_snapshots
+                    WHERE namespace = ? AND cache_key = ?
+                    LIMIT 1
+                    """,
+                    (namespace, cache_key),
+                ).fetchone()
+            except sqlite3.OperationalError as exc:
+                if self._is_busy_error(exc):
+                    return None
+                raise
             if row is None:
                 return None
             return json.loads(str(row["payload_json"]))
@@ -138,7 +173,12 @@ class SnapshotStore:
             conn.close()
 
     def get_latest_stale(self, namespace: str, *, exclude_cache_key: Optional[str] = None) -> Optional[Any]:
-        self._ensure_schema()
+        try:
+            self._ensure_schema()
+        except sqlite3.OperationalError as exc:
+            if self._is_busy_error(exc):
+                return None
+            raise
         conn = self._connect()
         try:
             params: tuple[Any, ...]
@@ -147,42 +187,68 @@ class SnapshotStore:
             if exclude_cache_key:
                 where_clause += " AND cache_key != ?"
                 params = (namespace, exclude_cache_key)
-            row = conn.execute(
-                f"""
-                SELECT payload_json
-                FROM panel_snapshots
-                WHERE {where_clause}
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                params,
-            ).fetchone()
+            try:
+                row = conn.execute(
+                    f"""
+                    SELECT payload_json
+                    FROM panel_snapshots
+                    WHERE {where_clause}
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    params,
+                ).fetchone()
+            except sqlite3.OperationalError as exc:
+                if self._is_busy_error(exc):
+                    return None
+                raise
             if row is None:
                 return None
             return json.loads(str(row["payload_json"]))
         finally:
             conn.close()
 
-    def set(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
-        self._ensure_schema()
+    def set(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> bool:
+        """Store a disposable panel snapshot without blocking an API response.
+
+        Snapshot persistence is a cache side effect, not the source of truth. If
+        another process holds SQLite's writer lock beyond the small busy window,
+        callers keep serving their already-built payload and the next seed cycle
+        retries the write.
+        """
+        try:
+            self._ensure_schema()
+        except sqlite3.OperationalError as exc:
+            if self._is_busy_error(exc):
+                return False
+            raise
         now = int(time.time())
         expires_at = now + max(1, int(ttl_seconds))
-        conn = self._connect()
-        try:
-            conn.execute(
-                """
-                INSERT INTO panel_snapshots(namespace, cache_key, payload_json, updated_at, expires_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(namespace, cache_key) DO UPDATE SET
-                    payload_json = excluded.payload_json,
-                    updated_at = excluded.updated_at,
-                    expires_at = excluded.expires_at
-                """,
-                (namespace, cache_key, json.dumps(payload, ensure_ascii=True, default=str), now, expires_at),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        payload_json = json.dumps(payload, ensure_ascii=True, default=str)
+        with self._write_lock:
+            conn = self._connect()
+            try:
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO panel_snapshots(namespace, cache_key, payload_json, updated_at, expires_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(namespace, cache_key) DO UPDATE SET
+                            payload_json = excluded.payload_json,
+                            updated_at = excluded.updated_at,
+                            expires_at = excluded.expires_at
+                        """,
+                        (namespace, cache_key, payload_json, now, expires_at),
+                    )
+                    conn.commit()
+                    return True
+                except sqlite3.OperationalError as exc:
+                    if self._is_busy_error(exc):
+                        conn.rollback()
+                        return False
+                    raise
+            finally:
+                conn.close()
 
     def record_agent_node_events(self, events: list[dict[str, Any]]) -> None:
         if not events:

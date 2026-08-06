@@ -545,7 +545,11 @@ def _create_service_context() -> ServiceContext:
         "get_food_retail_basket_snapshot": lambda limit=8: food_retail_basket_service.get_food_retail_basket_snapshot(build_service_context(), limit=limit),
         "get_f1_panel_snapshot": lambda limit=10: f1_runtime_service.get_f1_panel_snapshot(build_service_context(), limit=limit),
         "get_geo_sanctions_shock_snapshot": lambda limit=geo_sanctions_shock_service.DEFAULT_ITEM_LIMIT: geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit),
-        "get_natural_hazards_snapshot": lambda limit=natural_hazards.DEFAULT_EVENT_LIMIT: natural_hazards.get_natural_hazards_snapshot(build_service_context(), limit=limit),
+        "get_natural_hazards_snapshot": lambda limit=natural_hazards.DEFAULT_EVENT_LIMIT: natural_hazards.get_natural_hazards_snapshot(
+            build_service_context(),
+            limit=limit,
+            allow_provider_fetch=False,
+        ),
         "get_natural_hazard_related_markets": lambda event_id, limit=natural_hazards.DEFAULT_RELATED_MARKET_LIMIT: get_natural_hazard_related_markets(event_id=event_id, limit=limit),
         "get_global_transport_shipping_snapshot": lambda limit=14: global_transport_shipping_service.get_global_transport_shipping_snapshot(build_service_context(), limit=limit),
         "get_global_weather_map_snapshot": lambda limit=34: global_weather_map_service.get_global_weather_map_snapshot(build_service_context(), limit=limit),
@@ -1062,7 +1066,11 @@ def get_geo_sanctions_shock_snapshot(limit: int = geo_sanctions_shock_service.DE
 
 
 def get_natural_hazards_snapshot(limit: int = natural_hazards.DEFAULT_EVENT_LIMIT) -> Dict[str, Any]:
-    return natural_hazards.get_natural_hazards_snapshot(build_service_context(), limit=limit)
+    return natural_hazards.get_natural_hazards_snapshot(
+        build_service_context(),
+        limit=limit,
+        allow_provider_fetch=False,
+    )
 
 
 def get_polymarket_macro_map_snapshot(limit: int = 12) -> Dict[str, Any]:

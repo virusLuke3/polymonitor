@@ -236,15 +236,19 @@ server {
     }
 
     location = /map-tiles/planet.pmtiles {
-        proxy_pass https://maps.worldmonitor.app/planet.pmtiles;
+        resolver 1.1.1.1 8.8.8.8 ipv6=off valid=300s;
+        set \$worldmonitor_map_host maps.worldmonitor.app;
+        proxy_pass https://\$worldmonitor_map_host/planet.pmtiles;
         proxy_http_version 1.1;
         proxy_ssl_server_name on;
-        proxy_set_header Host maps.worldmonitor.app;
+        proxy_ssl_name \$worldmonitor_map_host;
+        proxy_set_header Host \$worldmonitor_map_host;
         proxy_set_header Range \$http_range;
         proxy_set_header If-Range \$http_if_range;
         proxy_force_ranges on;
         proxy_buffering off;
-        proxy_connect_timeout 10s;
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_connect_timeout 5s;
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
     }

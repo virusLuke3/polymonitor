@@ -266,12 +266,17 @@ class BootstrapPhase1TestCase(unittest.TestCase):
 
     def test_get_bootstrap_payload_cached_returns_fresh_cache(self):
         cached_payload = {"generatedAt": "fresh-cache"}
-        ctx = self.make_service_context(cached_json=cached_payload)
+        snapshot_store = FakeSnapshotStore()
+        ctx = self.make_service_context(
+            cached_json=cached_payload,
+            snapshot_store=snapshot_store,
+        )
 
         payload = bootstrap_service.get_bootstrap_payload_cached(ctx)
 
         self.assertEqual(payload, cached_payload)
         self.assertEqual(ctx["_bootstrap_cache"]["value"], cached_payload)
+        self.assertEqual(snapshot_store.set_calls, [])
 
     def test_get_bootstrap_payload_cached_returns_stale_and_schedules_one_refresh(self):
         stale_payload = {"generatedAt": "stale-cache"}

@@ -4,6 +4,7 @@ import maplibregl, {
   type FilterSpecification,
   type Map as MapLibreMap,
   type MapMouseEvent,
+  type MapSourceDataEvent,
 } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
@@ -65,6 +66,7 @@ export class DeckMapRenderer implements MapRenderer {
   private fallbackApplied = false;
   private primaryBasemapErrorCount = 0;
   private fallbackTimer: number | null = null;
+  private fallbackSourceTimer: number | null = null;
   private contextRecoveryTimer: number | null = null;
   private contextRecoveryAttempts = 0;
   private overlayMounted = false;
@@ -221,23 +223,21 @@ export class DeckMapRenderer implements MapRenderer {
 
     map.once('load', () => {
       if (this.destroyed) return;
-      if (!this.overlayMounted) {
-        map.addControl(overlay as unknown as maplibregl.IControl);
-        this.overlayMounted = true;
-      }
-      if (!this.aviationOverlayMounted) {
-        map.addControl(aviationOverlay as unknown as maplibregl.IControl);
-        this.aviationOverlayMounted = true;
-      }
-      this.clearFallbackTimer();
+      this.mountOverlaysIfNeeded();
       reinforceWorldEventBasemapLabels(map);
       this.ensureCountryHoverLayers();
-      this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
+      if (this.fallbackApplied) {
+        if (!this.markLocalFallbackReadyIfLoaded()) this.scheduleFallbackSourceTimeout();
+      } else {
+        this.clearFallbackTimer();
+        this.emitBasemapState('primary-ready');
+      }
       this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
       this.syncAnimationLoop();
       this.syncHazardPulseLoop();
     });
     map.on('style.load', this.handleStyleLoad);
+    map.on('sourcedata', this.handleSourceData);
     map.on('moveend', this.handleMoveEnd);
     map.on('movestart', this.handleMoveStart);
     map.on('mousemove', this.handleCountryHoverMove);
@@ -376,6 +376,7 @@ export class DeckMapRenderer implements MapRenderer {
   destroy() {
     this.destroyed = true;
     this.clearFallbackTimer();
+    this.clearFallbackSourceTimer();
     this.clearContextRecoveryTimer();
     this.cancelAnimationLoop();
     this.cancelHazardPulseLoop();
@@ -387,6 +388,7 @@ export class DeckMapRenderer implements MapRenderer {
     const map = this.map;
     if (map) {
       map.off('style.load', this.handleStyleLoad);
+      map.off('sourcedata', this.handleSourceData);
       map.off('moveend', this.handleMoveEnd);
       map.off('movestart', this.handleMoveStart);
       map.off('mousemove', this.handleCountryHoverMove);
@@ -611,12 +613,47 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleStyleLoad = () => {
     if (!this.map || this.destroyed) return;
-    this.clearFallbackTimer();
     reinforceWorldEventBasemapLabels(this.map);
     this.ensureCountryHoverLayers();
-    this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
+    if (this.fallbackApplied) this.markLocalFallbackReadyIfLoaded();
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
   };
+
+  private handleSourceData = (event: MapSourceDataEvent) => {
+    if (!this.fallbackApplied || event.sourceId !== FALLBACK_COUNTRY_SOURCE) return;
+    if (!this.markLocalFallbackReadyIfLoaded()) return;
+    this.mountOverlaysIfNeeded();
+    this.ensureCountryHoverLayers();
+    this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
+  };
+
+  private mountOverlaysIfNeeded() {
+    const map = this.map;
+    if (!map || this.destroyed) return;
+    if (this.overlay && !this.overlayMounted) {
+      map.addControl(this.overlay as unknown as maplibregl.IControl);
+      this.overlayMounted = true;
+    }
+    if (this.aviationOverlay && !this.aviationOverlayMounted) {
+      map.addControl(this.aviationOverlay as unknown as maplibregl.IControl);
+      this.aviationOverlayMounted = true;
+    }
+  }
+
+  private markLocalFallbackReadyIfLoaded() {
+    const map = this.map;
+    if (!map || !this.fallbackApplied || this.destroyed) return false;
+    try {
+      if (!map.getSource(FALLBACK_COUNTRY_SOURCE)
+        || !map.isSourceLoaded(FALLBACK_COUNTRY_SOURCE)) return false;
+    } catch {
+      return false;
+    }
+    this.clearFallbackTimer();
+    this.clearFallbackSourceTimer();
+    this.emitBasemapState('local-fallback-ready');
+    return true;
+  }
 
   private ensureCountryHoverLayers() {
     const map = this.map;
@@ -727,6 +764,10 @@ export class DeckMapRenderer implements MapRenderer {
       if (this.primaryBasemapErrorCount >= 2) this.applyLocalFallback(new Error(message));
       return;
     }
+    if (this.fallbackApplied && /fetch|ajax|cors|network|404|tile|source/i.test(message)) {
+      this.requestRendererFallback(new Error(`Local basemap failed: ${message}`));
+      return;
+    }
     this.callbacks?.onError(new Error(message));
   };
 
@@ -767,9 +808,11 @@ export class DeckMapRenderer implements MapRenderer {
     if (!this.map || this.fallbackApplied || this.destroyed) return;
     this.fallbackApplied = true;
     this.clearFallbackTimer();
+    this.emitBasemapState('initializing');
     this.callbacks?.onError(error);
     try {
       this.map.setStyle(getWeatherMapFallbackStyle('dark'), { diff: false });
+      this.scheduleFallbackSourceTimeout();
     } catch (caught) {
       this.requestRendererFallback(caught instanceof Error ? caught : new Error(String(caught)));
     }
@@ -777,6 +820,7 @@ export class DeckMapRenderer implements MapRenderer {
 
   private requestRendererFallback(error: Error) {
     if (this.destroyed) return;
+    this.clearFallbackSourceTimer();
     this.clearContextRecoveryTimer();
     this.emitBasemapState('renderer-fallback-ready');
     this.callbacks?.onRendererFallbackRequested(error);
@@ -790,6 +834,24 @@ export class DeckMapRenderer implements MapRenderer {
     if (this.fallbackTimer != null) {
       window.clearTimeout(this.fallbackTimer);
       this.fallbackTimer = null;
+    }
+  }
+
+  private scheduleFallbackSourceTimeout() {
+    if (this.fallbackSourceTimer != null || this.destroyed) return;
+    this.fallbackSourceTimer = window.setTimeout(() => {
+      this.fallbackSourceTimer = null;
+      if (this.markLocalFallbackReadyIfLoaded()) return;
+      this.requestRendererFallback(new Error(
+        'Local country geometry did not become renderable within 6 seconds.',
+      ));
+    }, 6_000);
+  }
+
+  private clearFallbackSourceTimer() {
+    if (this.fallbackSourceTimer != null) {
+      window.clearTimeout(this.fallbackSourceTimer);
+      this.fallbackSourceTimer = null;
     }
   }
 

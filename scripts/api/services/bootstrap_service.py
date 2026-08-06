@@ -1217,12 +1217,9 @@ def get_bootstrap_payload_cached(ctx: Mapping[str, Any]) -> Dict[str, Any]:
     redis_payload = dependencies.get_cached_json("bootstrap", BOOTSTRAP_CACHE_KEY)
     if redis_payload is not None:
         dependencies.application.logger.info("bootstrap-cache redis-hit")
-        dependencies.snapshot_store.set(
-            BOOTSTRAP_SNAPSHOT_NAMESPACE,
-            BOOTSTRAP_CACHE_KEY,
-            redis_payload,
-            dependencies.cache_ttl_seconds,
-        )
+        # Redis is already the fast, seeded source for this request. Mirroring
+        # every hit back into SQLite turned a read-only endpoint into a writer
+        # and allowed cache contention to consume the browser timeout budget.
         with dependencies.cache_lock:
             dependencies.cache["value"] = redis_payload
             dependencies.cache["expires_at"] = (
