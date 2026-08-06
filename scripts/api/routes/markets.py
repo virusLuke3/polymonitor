@@ -22,6 +22,7 @@ class MarketRouteDependencies:
     get_market_detail_payload: Callable[[int], dict[str, Any]]
     get_market_chart_payload: Callable[..., Any]
     get_market_workspace_payload: Callable[[int], dict[str, Any]]
+    get_market_focus_tile_payload: Callable[[int], dict[str, Any]]
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> MarketRouteDependencies:
@@ -57,6 +58,10 @@ class MarketRouteDependencies:
             get_market_workspace_payload=cast(
                 Callable[[int], dict[str, Any]],
                 resolve_route_callable(context, "get_market_workspace_payload"),
+            ),
+            get_market_focus_tile_payload=cast(
+                Callable[[int], dict[str, Any]],
+                resolve_route_callable(context, "get_market_focus_tile_payload"),
             ),
         )
 
@@ -139,6 +144,12 @@ def create_markets_blueprint(context: Mapping[str, Any]) -> Blueprint:
     @bp.route("/markets/<int:market_id>/workspace", methods=["GET"])
     def api_market_workspace_by_id(market_id: int):
         payload = dependencies.get_market_workspace_payload(market_id)
+        status_code = int(payload.pop("_status", 200))
+        return jsonify(payload), status_code
+
+    @bp.route("/markets/<int:market_id>/focus-tile", methods=["GET"])
+    def api_market_focus_tile_by_id(market_id: int):
+        payload = dependencies.get_market_focus_tile_payload(market_id)
         status_code = int(payload.pop("_status", 200))
         return jsonify(payload), status_code
 

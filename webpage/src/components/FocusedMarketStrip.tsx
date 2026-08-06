@@ -188,7 +188,7 @@ function orderBookRows(levels: L2Level[], tone: 'bid' | 'ask', pulseId = 0) {
     .sort((left, right) => {
       const leftPrice = Number(left.price) || 0;
       const rightPrice = Number(right.price) || 0;
-      return tone === 'ask' ? rightPrice - leftPrice : rightPrice - leftPrice;
+      return tone === 'ask' ? leftPrice - rightPrice : rightPrice - leftPrice;
     });
   const rows = accumulateNotional(sorted);
   const max = Math.max(...rows.map((row) => row.cumulative), 1);
@@ -1093,6 +1093,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const bidDepthTotal = bookDepthTotal(bidLevels);
   const bidImbalance = bookImbalancePercent(bidDepthTotal, askDepthTotal);
   const hasAnyBookLevels = hasBookLevels(lob);
+  const hasBundledBookLevels = bundleMatchesSelected && hasBookLevels(ctx.bundle?.lob);
   const hasActiveBookLevels = hasSideBookLevels(activeBook);
   const eventOutcomes = detail ? eventOutcomeCards(detail) : [];
   const legacyOutcomes = detail ? [] : (outcomeCards(price) as LegacyOutcomeCard[]);
@@ -1241,10 +1242,12 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   };
   const lobSyncLabel = tokenLobLoading
     ? 'SYNC'
-    : hasAnyBookLevels
+    : hasAnyBookLevels && lobIsFresh
       ? 'LIVE'
+      : hasAnyBookLevels
+        ? 'STALE'
       : 'WAIT';
-  const lobAgeLabel = tokenLobState.updatedAt ? formatRefreshAge(tokenLobState.updatedAt) : 'waiting';
+  const lobAgeLabel = lobObservedAt ? formatRefreshAge(lobObservedAt) : 'waiting';
   const wrapPanel = (panelId: string, className: string, panel: ComponentChildren) => (
     renderPanelSlot ? renderPanelSlot(panelId, className, panel) : panel
   );
@@ -1259,7 +1262,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       return;
     }
     let cancelled = false;
-    let interval: number | undefined;
+    let timer: number | undefined;
+    const controller = new AbortController();
     const key = selectedTokenKey;
     const title = selectedOutcome?.label || detail?.title || '';
 
@@ -1273,7 +1277,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         pulseId: current.key === key ? current.pulseId : 0,
         direction: current.key === key ? current.direction : 'flat',
       }));
-      fetchMarketLobByToken(selectedTokenId, title, selectedNoTokenId, 4500)
+      fetchMarketLobByToken(selectedTokenId, title, selectedNoTokenId, 6500, controller.signal)
         .then((lobPayload) => {
           if (cancelled || requestSeq !== tokenLobRequestRef.current) return;
           setTokenLobState((current) => {
@@ -1283,7 +1287,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               key,
               lob: lobPayload,
               loading: false,
-              updatedAt: Date.now(),
+              updatedAt: timestampMillis(lobPayload.fetchedAt) ?? Date.now(),
               pulseId: (current.key === key ? current.pulseId : 0) + 1,
               direction: directionFromValues(nextMid, previousMid),
             };
@@ -1300,19 +1304,27 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               direction: current.key === key ? current.direction : 'flat',
             }));
           }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            timer = window.setTimeout(() => {
+              if (document.visibilityState === 'hidden') {
+                timer = window.setTimeout(loadBook, LOB_REFRESH_INTERVAL_MS);
+                return;
+              }
+              loadBook();
+            }, LOB_REFRESH_INTERVAL_MS);
+          }
         });
     };
 
-    loadBook();
-    interval = window.setInterval(() => {
-      if (document.visibilityState === 'hidden') return;
-      loadBook();
-    }, LOB_REFRESH_INTERVAL_MS);
+    timer = window.setTimeout(loadBook, hasBundledBookLevels ? 4_000 : 0);
     return () => {
       cancelled = true;
-      if (interval !== undefined) window.clearInterval(interval);
+      controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [bookSide, detail?.title, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
+  }, [bookSide, detail?.title, hasBundledBookLevels, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
 
   useEffect(() => {
     if (!selectedMarketSlug || !executionAvailable || !blockCloseKey) {
@@ -1324,7 +1336,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       return;
     }
     let cancelled = false;
-    let interval: number | undefined;
+    let timer: number | undefined;
+    const controller = new AbortController();
     const key = blockCloseKey;
 
     const loadBlockClose = () => {
@@ -1345,8 +1358,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         pointFormat: 'lite',
         maxOutcomes: selectedTokenId ? 1 : 4,
         live: true,
-        timeoutMs: 3200,
-      })
+        timeoutMs: 5000,
+      }, controller.signal)
         .then((payload) => {
           if (cancelled || requestSeq !== blockCloseRequestRef.current) return;
           setBlockCloseState({ key, payload, loading: false });
@@ -1359,17 +1372,25 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               loading: false,
             }));
           }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            timer = window.setTimeout(() => {
+              if (document.visibilityState === 'hidden') {
+                timer = window.setTimeout(loadBlockClose, BLOCK_CLOSE_REFRESH_INTERVAL_MS);
+                return;
+              }
+              loadBlockClose();
+            }, BLOCK_CLOSE_REFRESH_INTERVAL_MS);
+          }
         });
     };
 
-    loadBlockClose();
-    interval = window.setInterval(() => {
-      if (document.visibilityState === 'hidden') return;
-      loadBlockClose();
-    }, BLOCK_CLOSE_REFRESH_INTERVAL_MS);
+    timer = window.setTimeout(loadBlockClose, 1_200);
     return () => {
       cancelled = true;
-      if (interval !== undefined) window.clearInterval(interval);
+      controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [blockCloseKey, ctx.selectedMarketId, executionAvailable, selectedMarketSlug, selectedOutcome, selectedTokenId]);
 

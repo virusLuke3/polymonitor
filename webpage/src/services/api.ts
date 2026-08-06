@@ -264,14 +264,20 @@ export function fetchMarketGroups(query = '', pageSize = 80, sort: MarketGroupSo
   return apiGetWithTimeout<MarketGroupsPayload>(`/market-groups?${params.toString()}`, 9000);
 }
 
-export function fetchMarketGroupDetail(eventId: string, timeoutMs = 3500) {
-  return apiGetWithTimeout<MarketGroupDetail>(`/market-groups/${encodeURIComponent(eventId)}/detail`, timeoutMs);
+export function fetchMarketGroupDetail(eventId: string, timeoutMs = 3500, signal?: AbortSignal) {
+  return apiGetWithTimeout<MarketGroupDetail>(`/market-groups/${encodeURIComponent(eventId)}/detail`, timeoutMs, signal);
 }
 
-export function fetchMarketGroupChart(eventId: string, range: '1h' | '6h' | '1d' | '1w' | '1m' | 'all' = '1d', timeoutMs = 4000) {
+export function fetchMarketGroupChart(
+  eventId: string,
+  range: '1h' | '6h' | '1d' | '1w' | '1m' | 'all' = '1d',
+  timeoutMs = 4000,
+  signal?: AbortSignal,
+) {
   return apiGetWithTimeout<MarketGroupChartPayload>(
     `/market-groups/${encodeURIComponent(eventId)}/chart?range=${encodeURIComponent(range)}`,
     timeoutMs,
+    signal,
   );
 }
 
@@ -358,7 +364,10 @@ export function fetchQuantBlockClosePrices(query: QuantPriceQuery = {}) {
   );
 }
 
-export function fetchQuantMarketPriceSeries(query: QuantPriceQuery & { priceSource?: string; scope?: string; maxOutcomes?: number } = {}) {
+export function fetchQuantMarketPriceSeries(
+  query: QuantPriceQuery & { priceSource?: string; scope?: string; maxOutcomes?: number } = {},
+  signal?: AbortSignal,
+) {
   const params = new URLSearchParams();
   if (query.marketSlug?.trim()) params.set('market_slug', query.marketSlug.trim());
   if (query.tokenSide?.trim()) params.set('token_side', query.tokenSide.trim());
@@ -377,7 +386,11 @@ export function fetchQuantMarketPriceSeries(query: QuantPriceQuery & { priceSour
     params.set('live', '1');
     params.set('_ts', String(Date.now()));
   }
-  return apiGetWithTimeout<QuantMarketSeriesPayload>(`/quant/market-price-series?${params.toString()}`, query.timeoutMs || 20000);
+  return apiGetWithTimeout<QuantMarketSeriesPayload>(
+    `/quant/market-price-series?${params.toString()}`,
+    query.timeoutMs || 20000,
+    signal,
+  );
 }
 
 export function fetchQuantEventPriceSeries(query: QuantPriceQuery & { eventSlug?: string; priceSource?: string; maxOutcomes?: number } = {}) {
@@ -902,9 +915,12 @@ type MarketDetailBundlePayload = {
   oracle?: OraclePayload | null;
   oracleEvents?: OraclePayload['timeline'];
   content?: ContentPayload | null;
+  lob?: LobPayload | null;
   servingSource?: string | null;
   servingUpdatedAt?: string | null;
   generatedAt?: string | null;
+  focusStatus?: 'ready' | 'warming' | string | null;
+  cacheLayers?: Record<string, unknown> | null;
 };
 
 function normalizeMarketBundlePayload(payload: MarketDetailBundlePayload, marketId: number): WorkspaceBundle {
@@ -941,20 +957,27 @@ function normalizeMarketBundlePayload(payload: MarketDetailBundlePayload, market
         : null
     ),
     content: payload.content || null,
-    lob: null,
+    lob: payload.lob || null,
     servingSource: payload.servingSource || null,
     servingUpdatedAt: payload.servingUpdatedAt || null,
     generatedAt: payload.generatedAt || null,
+    focusStatus: payload.focusStatus || null,
+    cacheLayers: payload.cacheLayers || null,
   };
 }
 
-export async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500): Promise<WorkspaceBundle> {
-  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/detail`, timeoutMs);
+export async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500, signal?: AbortSignal): Promise<WorkspaceBundle> {
+  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/detail`, timeoutMs, signal);
   return normalizeMarketBundlePayload(payload, marketId);
 }
 
-export async function fetchMarketWorkspaceBundle(marketId: number, timeoutMs = 6500): Promise<WorkspaceBundle> {
-  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/workspace`, timeoutMs);
+export async function fetchMarketWorkspaceBundle(marketId: number, timeoutMs = 6500, signal?: AbortSignal): Promise<WorkspaceBundle> {
+  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/workspace`, timeoutMs, signal);
+  return normalizeMarketBundlePayload(payload, marketId);
+}
+
+export async function fetchMarketFocusTile(marketId: number, timeoutMs = 2200, signal?: AbortSignal): Promise<WorkspaceBundle> {
+  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/focus-tile`, timeoutMs, signal);
   return normalizeMarketBundlePayload(payload, marketId);
 }
 
@@ -987,9 +1010,10 @@ export function fetchMarketChart(
   range: MarketChartRange = '1d',
   interval = intervalForMarketChartRange(range),
   timeoutMs = 6500,
+  signal?: AbortSignal,
 ) {
   const params = new URLSearchParams({ range, interval });
-  return apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?${params.toString()}`, timeoutMs);
+  return apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?${params.toString()}`, timeoutMs, signal);
 }
 
 export function fetchMarketTrades(marketId: number, limit = 24, timeoutMs = 4000) {
@@ -1008,13 +1032,13 @@ export function fetchMarketLob(marketId: number, timeoutMs = 4000) {
   return apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, timeoutMs);
 }
 
-export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '', timeoutMs = 4000) {
+export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '', timeoutMs = 4000, signal?: AbortSignal) {
   const params = new URLSearchParams();
   if (title.trim()) params.set('title', title.trim());
   if (noTokenId.trim()) params.set('noTokenId', noTokenId.trim());
   params.set('_ts', String(Date.now()));
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  return apiGetWithTimeout<LobPayload>(`/runtime/lob/token/${encodeURIComponent(tokenId)}${suffix}`, timeoutMs);
+  return apiGetWithTimeout<LobPayload>(`/runtime/lob/token/${encodeURIComponent(tokenId)}${suffix}`, timeoutMs, signal);
 }
 
 export function fetchMarketLobSnapshotsByToken(tokenId: string, side = '', limit = 48, timeoutMs = 4500) {
@@ -1045,6 +1069,8 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
     servingSource: primary.servingSource || secondary.servingSource,
     servingUpdatedAt: primary.servingUpdatedAt || secondary.servingUpdatedAt,
     generatedAt: primary.generatedAt || secondary.generatedAt,
+    focusStatus: primary.focusStatus || secondary.focusStatus,
+    cacheLayers: primary.cacheLayers || secondary.cacheLayers,
   };
 }
 
@@ -1068,6 +1094,8 @@ function emptyWorkspaceBundle(): WorkspaceBundle {
     servingSource: null,
     servingUpdatedAt: null,
     generatedAt: null,
+    focusStatus: null,
+    cacheLayers: null,
   };
 }
 
@@ -1082,11 +1110,14 @@ export function fetchMarketWideAiSnapshot(lens: MarketWideAiInsightLens, timeout
   );
 }
 
-export async function fetchWorkspaceBundle(marketId: number, options: { includeContent?: boolean; includeLob?: boolean } = {}): Promise<WorkspaceBundle> {
+export async function fetchWorkspaceBundle(
+  marketId: number,
+  options: { includeContent?: boolean; includeLob?: boolean; signal?: AbortSignal } = {},
+): Promise<WorkspaceBundle> {
   const includeContent = Boolean(options.includeContent);
   const includeLob = Boolean(options.includeLob);
   const inflightKey = `${marketId}:${includeContent ? 'content' : 'base'}:${includeLob ? 'lob' : 'no-lob'}`;
-  const inflight = workspaceBundleInflight.get(inflightKey);
+  const inflight = options.signal ? null : workspaceBundleInflight.get(inflightKey);
   if (inflight) return inflight;
 
   const request = (async () => {
@@ -1094,8 +1125,8 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
       ? fetchMarketContent(marketId, 20, 3800)
       : Promise.resolve(null);
     const lobPromise = includeLob ? fetchMarketLob(marketId, 1800) : Promise.resolve(null);
-    const detailPromise = fetchMarketWorkspaceBundle(marketId, 18000)
-      .catch(() => fetchMarketDetailBundle(marketId, 12000));
+    const detailPromise = fetchMarketWorkspaceBundle(marketId, 22000, options.signal)
+      .catch(() => fetchMarketDetailBundle(marketId, 12000, options.signal));
     const [detailResult, contentResult, lobResult] = await Promise.allSettled([detailPromise, contentPromise, lobPromise]);
     const detailBundle = detailResult.status === 'fulfilled' ? detailResult.value : emptyWorkspaceBundle();
     const secondary: WorkspaceBundle = {
@@ -1115,11 +1146,15 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
       servingSource: null,
       servingUpdatedAt: null,
       generatedAt: null,
+      focusStatus: null,
+      cacheLayers: null,
     };
     return preferLoadedBundle(detailBundle, secondary);
   })();
 
-  workspaceBundleInflight.set(inflightKey, request);
-  void request.finally(() => workspaceBundleInflight.delete(inflightKey));
+  if (!options.signal) {
+    workspaceBundleInflight.set(inflightKey, request);
+    void request.finally(() => workspaceBundleInflight.delete(inflightKey));
+  }
   return request;
 }

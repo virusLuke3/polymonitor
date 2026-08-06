@@ -100,6 +100,7 @@ class LocalOrderBookRuntimeManager:
         self.registry = OrderBookRegistry()
         self._lock = threading.Lock()
         self._cache: dict[str, dict[str, Any]] = {}
+        self._fetch_locks: dict[str, threading.Lock] = {}
         self._session = session or requests.Session()
         if hasattr(self._session, "trust_env"):
             self._session.trust_env = str(os.environ.get("POLYDATA_CLOB_TRUST_ENV_PROXY") or "").strip().lower() in {
@@ -207,19 +208,38 @@ class LocalOrderBookRuntimeManager:
                     self._cache[token_id] = {"cached_at": now, "payload": dict(payload)}
                     return payload
 
-        state_payload = self._fetch_apply_snapshot(
-            TokenBookIdentity(
-                token_id=token_id,
-                market_id=int(market_id or 0),
-                condition_id=str(condition_id or ""),
-                outcome=str(outcome or ""),
-                outcome_index=int(outcome_index or 0),
-                market_slug=market_slug,
-            )
-        )
         with self._lock:
-            self._cache[token_id] = {"cached_at": now, "payload": dict(state_payload)}
-        return state_payload
+            fetch_lock = self._fetch_locks.setdefault(token_id, threading.Lock())
+
+        with fetch_lock:
+            now = time.time()
+            with self._lock:
+                cached = self._cache.get(token_id)
+                if not force_refresh and cached and now - float(cached.get("cached_at") or 0) < self.cache_ttl_seconds:
+                    return dict(cached["payload"])
+                if not force_refresh:
+                    book = self.registry.get(token_id)
+                    if book is not None and book.ready:
+                        payload = book.snapshot_payload(depth_levels=self.depth_limit)
+                        payload["source"] = "local-orderbook"
+                        payload["snapshot_source"] = "registry"
+                        payload["runtime_model"] = "LocalOrderBook"
+                        self._cache[token_id] = {"cached_at": now, "payload": dict(payload)}
+                        return payload
+
+            state_payload = self._fetch_apply_snapshot(
+                TokenBookIdentity(
+                    token_id=token_id,
+                    market_id=int(market_id or 0),
+                    condition_id=str(condition_id or ""),
+                    outcome=str(outcome or ""),
+                    outcome_index=int(outcome_index or 0),
+                    market_slug=market_slug,
+                )
+            )
+            with self._lock:
+                self._cache[token_id] = {"cached_at": time.time(), "payload": dict(state_payload)}
+            return state_payload
 
     def get_cached_market_snapshot(
         self,
@@ -714,7 +734,7 @@ def _persist_book_side_snapshot(
             )
 
 
-def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> bool:
+def _persist_orderbook_snapshots_sync(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> bool:
     try:
         fetched_at = str(payload.get("fetchedAt") or _iso_utc_now())
         source = str(payload.get("source") or "local-orderbook")
@@ -757,8 +777,21 @@ def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_i
         return False
 
 
+def _persist_orderbook_snapshots(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> bool:
+    """Compatibility hook; API reads stay side-effect free unless explicitly enabled."""
+    enabled = str(os.environ.get("POLYDATA_LOB_API_PERSIST_SNAPSHOTS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not enabled:
+        return False
+    return _persist_orderbook_snapshots_sync(ctx, payload, yes_token_id, no_token_id)
+
+
 def persist_runtime_lob_payload(ctx: dict, payload: Dict[str, Any], yes_token_id: str, no_token_id: str) -> bool:
-    return _persist_orderbook_snapshots(ctx, payload, yes_token_id, no_token_id)
+    return _persist_orderbook_snapshots_sync(ctx, payload, yes_token_id, no_token_id)
 
 
 def write_lob_dead_letter(

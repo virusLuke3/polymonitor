@@ -16,15 +16,12 @@ import {
   fetchAllActiveMarkets,
   fetchBootstrap,
   fetchLatestContent,
-  fetchMarketContent,
   fetchMarketChart,
+  fetchMarketFocusTile,
   fetchMarketGroupChart,
   fetchMarketGroupDetail,
   fetchMarketGroups,
-  fetchMarketLob,
-  fetchMarketPrice,
   fetchMarketSearch,
-  fetchMarketTrades,
   fetchRecentOracle,
   fetchRecentTrades,
   fetchRuntimeGeoSanctionsShock,
@@ -541,6 +538,8 @@ function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
       createdAt: market.createdAt,
       category: market.category,
       tags: market.tags,
+      yesTokenId: market.yesTokenId,
+      noTokenId: market.noTokenId,
     },
     identity: {
       localMarketId: market.id,
@@ -549,6 +548,8 @@ function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
       slug: market.slug,
       conditionId: market.conditionId,
       questionId: market.questionId,
+      yesTokenId: market.yesTokenId,
+      noTokenId: market.noTokenId,
     },
     diagnostics: null,
     health: null,
@@ -609,6 +610,8 @@ function optimisticBundleFromGroup(group: MarketGroupItem, marketId: number | nu
       createdAt: group.createdAt || null,
       category: group.category || undefined,
       tags: group.tags || [],
+      yesTokenId: selectedOutcome?.yesTokenId ?? null,
+      noTokenId: selectedOutcome?.noTokenId ?? null,
     } : null,
     identity: {
       localMarketId: selectedMarketId || null,
@@ -618,6 +621,8 @@ function optimisticBundleFromGroup(group: MarketGroupItem, marketId: number | nu
       conditionId: selectedOutcome?.conditionId ?? null,
       eventId: group.eventId == null ? null : String(group.eventId),
       selectedOutcomeKey: selectedOutcome?.outcomeKey ?? outcomeKey ?? group.defaultOutcomeKey ?? null,
+      yesTokenId: selectedOutcome?.yesTokenId ?? null,
+      noTokenId: selectedOutcome?.noTokenId ?? null,
     },
     diagnostics: null,
     health: null,
@@ -742,6 +747,8 @@ function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: WorkspaceBund
     servingSource: patch.servingSource || current.servingSource,
     servingUpdatedAt: patch.servingUpdatedAt || current.servingUpdatedAt,
     generatedAt: patch.generatedAt || current.generatedAt,
+    focusStatus: patch.focusStatus || current.focusStatus,
+    cacheLayers: patch.cacheLayers || current.cacheLayers,
   };
 }
 
@@ -1356,9 +1363,10 @@ function WorldMonitorApp() {
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     const eventId = selectedMarketGroupId;
 
-    fetchMarketGroupDetail(eventId, 3000)
+    fetchMarketGroupDetail(eventId, 3000, controller.signal)
       .then((detailPayload) => {
         if (cancelled) return;
         setSelectedMarketGroupDetail(detailPayload);
@@ -1375,6 +1383,7 @@ function WorldMonitorApp() {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [selectedMarketGroupId]);
 
@@ -1384,30 +1393,38 @@ function WorldMonitorApp() {
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
+    let timer: number | undefined;
     const eventId = selectedMarketGroupId;
     const chartRange = selectedMarketGroupChartRange;
     setSelectedMarketGroupChart(null);
 
-    fetchMarketGroupChart(eventId, chartRange, 3500)
-      .then((chartPayload) => {
-        if (!cancelled) setSelectedMarketGroupChart(chartPayload);
-      })
-      .catch(() => {
-        if (!cancelled) setSelectedMarketGroupChart(null);
-      });
+    timer = window.setTimeout(() => {
+      fetchMarketGroupChart(eventId, chartRange, 3500, controller.signal)
+        .then((chartPayload) => {
+          if (!cancelled) setSelectedMarketGroupChart(chartPayload);
+        })
+        .catch(() => {
+          if (!cancelled) setSelectedMarketGroupChart(null);
+        });
+    }, 350);
 
     return () => {
       cancelled = true;
+      controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [selectedMarketGroupChartRange, selectedMarketGroupId]);
 
   useEffect(() => {
     if (!selectedMarketId) return;
+    if (selectedMarketGroupChartRange === '1d') return;
     let cancelled = false;
+    const controller = new AbortController();
     const currentMarketId = selectedMarketId;
     const chartRange = selectedMarketGroupChartRange;
 
-    fetchMarketChart(currentMarketId, chartRange, undefined, 12000)
+    fetchMarketChart(currentMarketId, chartRange, undefined, 12000, controller.signal)
       .then((chartPayload) => {
         if (cancelled) return;
         setBundle((previous) => {
@@ -1421,6 +1438,7 @@ function WorldMonitorApp() {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [selectedMarketGroupChartRange, selectedMarketId]);
 
@@ -1429,6 +1447,7 @@ function WorldMonitorApp() {
     const currentMarketId = selectedMarketId;
     const requestSeq = ++bundleRequestSeqRef.current;
     let cancelled = false;
+    const controller = new AbortController();
     const cachedBundle = bundleCacheRef.current.get(currentMarketId);
     const listMarket = markets.find((market) => market.id === currentMarketId)
       || bootstrapRef.current?.activeMarketsPreview?.find((market) => market.id === currentMarketId)
@@ -1478,36 +1497,7 @@ function WorldMonitorApp() {
       });
     }
 
-    function refreshLobSnapshot() {
-      fetchMarketLob(currentMarketId, 1800)
-        .then((lob) => applyLoadedBundle({ ...emptyWorkspaceBundle(), lob }))
-        .catch(() => undefined);
-    }
-
-    function refreshPriceSnapshot() {
-      fetchMarketPrice(currentMarketId, 1800)
-        .then((price) => applyLoadedBundle({ ...emptyWorkspaceBundle(), price }))
-        .catch(() => undefined);
-    }
-
-    function refreshTradeSnapshot() {
-      fetchMarketTrades(currentMarketId, 48, 5000)
-        .then((trades) => applyLoadedBundle({ ...emptyWorkspaceBundle(), trades }))
-        .catch(() => undefined);
-    }
-
-    function refreshContentSnapshot() {
-      fetchMarketContent(currentMarketId, 20, 5000)
-        .then((content) => applyLoadedBundle({ ...emptyWorkspaceBundle(), content }))
-        .catch(() => undefined);
-    }
-
-    refreshPriceSnapshot();
-    refreshTradeSnapshot();
-    refreshLobSnapshot();
-    refreshContentSnapshot();
-
-    fetchWorkspaceBundle(currentMarketId)
+    const loadFocusTile = () => fetchMarketFocusTile(currentMarketId, 2500, controller.signal)
       .then((loadedBundle) => applyLoadedBundle(loadedBundle))
       .catch((loadError) => {
         if (!cancelled && bundleRequestSeqRef.current === requestSeq && !listMarket && !listGroup && !cachedBundle) {
@@ -1519,16 +1509,22 @@ function WorldMonitorApp() {
           setBundleLoading(false);
         }
       });
-    const timer = window.setInterval(() => {
+
+    void loadFocusTile();
+    const focusRetryTimer = window.setTimeout(() => {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
-      fetchWorkspaceBundle(currentMarketId)
+      void loadFocusTile();
+    }, 1800);
+    const workspaceTimer = window.setTimeout(() => {
+      if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
+      fetchWorkspaceBundle(currentMarketId, { signal: controller.signal })
         .then((loadedBundle) => applyLoadedBundle(loadedBundle))
         .catch(() => undefined);
-      refreshPriceSnapshot();
-      refreshTradeSnapshot();
-      refreshLobSnapshot();
-      refreshContentSnapshot();
-    }, 45000);
+    }, 6500);
+    const timer = window.setInterval(() => {
+      if (cancelled || bundleRequestSeqRef.current !== requestSeq || document.visibilityState === 'hidden') return;
+      void loadFocusTile();
+    }, 20000);
 
     const loadingTimer = window.setTimeout(() => {
       if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
@@ -1538,7 +1534,10 @@ function WorldMonitorApp() {
 
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearInterval(timer);
+      window.clearTimeout(focusRetryTimer);
+      window.clearTimeout(workspaceTimer);
       window.clearTimeout(loadingTimer);
     };
   }, [selectedMarketId]);

@@ -161,6 +161,8 @@ export type MarketListItem = {
   tradeCount24h?: number | null;
   change24h?: string | number | null;
   lastTradeAt?: string | null;
+  yesTokenId?: string | null;
+  noTokenId?: string | null;
 };
 
 export type TradeRow = {
@@ -1056,6 +1058,8 @@ export type WorkspaceBundle = {
   servingSource?: string | null;
   servingUpdatedAt?: string | null;
   generatedAt?: string | null;
+  focusStatus?: 'ready' | 'warming' | string | null;
+  cacheLayers?: Record<string, unknown> | null;
 };
 
 export type MarketAiInsightFocus = {

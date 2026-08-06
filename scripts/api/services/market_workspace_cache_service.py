@@ -22,6 +22,10 @@ FLOW_TTL_SECONDS = int(os.environ.get("POLYDATA_MARKET_WORKSPACE_FLOW_TTL_SECOND
 
 _REFRESH_LOCK = threading.Lock()
 _REFRESHING: set[str] = set()
+_REFRESH_EXECUTOR = ThreadPoolExecutor(
+    max_workers=max(2, min(int(os.environ.get("POLYDATA_MARKET_FOCUS_REFRESH_WORKERS", "6")), 12)),
+    thread_name_prefix="market-focus-refresh",
+)
 
 
 @dataclass(frozen=True)
@@ -245,8 +249,7 @@ def _refresh_async(
             with _REFRESH_LOCK:
                 _REFRESHING.discard(refresh_key)
 
-    thread = threading.Thread(target=refresh, name=f"market-workspace-cache:{layer}", daemon=True)
-    thread.start()
+    _REFRESH_EXECUTOR.submit(refresh)
 
 
 def _cached_layer(
@@ -320,6 +323,13 @@ def _cached_layer(
             )
         return {"payload": _with_cache_meta(stale_payload, layer, "stale-hit", cache_key), "mode": "stale-hit"}
 
+    refresh_key = f"{namespace}:{cache_key}"
+    with _REFRESH_LOCK:
+        refresh_in_flight = refresh_key in _REFRESHING
+    if refresh_in_flight:
+        payload = _fallback_payload(layer, cache_key)
+        return {"payload": _with_cache_meta(payload, layer, "warming", cache_key), "mode": "warming"}
+
     try:
         payload = builder()
     except Exception:
@@ -336,6 +346,68 @@ def _cached_layer(
     ttl = ttl_seconds if not _is_empty_replacement(layer, payload) else min(ttl_seconds, 10)
     _write_cache(dependencies, namespace, cache_key, wrapped, ttl)
     return {"payload": _copy_payload(wrapped), "mode": mode}
+
+
+def _cached_layer_read_only(
+    context: MarketWorkspaceCacheContext,
+    *,
+    layer: str,
+    cache_key: str,
+    ttl_seconds: int,
+    builder: Callable[[], Any],
+) -> Dict[str, Any]:
+    """Return the best cached layer without making the request wait for a live build."""
+    dependencies = _dependencies(context)
+    namespace = _namespace(layer)
+
+    runtime_payload = api_cache.get_cached_runtime_payload(
+        dependencies.source,
+        namespace,
+        cache_key,
+    )
+    if runtime_payload is not None:
+        return {"payload": _with_cache_meta(runtime_payload, layer, "memory-hit", cache_key), "mode": "memory-hit"}
+
+    redis_payload = _read_redis(dependencies, namespace, cache_key)
+    if redis_payload is not None:
+        api_cache.set_cached_runtime_payload(
+            dependencies.source,
+            namespace,
+            cache_key,
+            redis_payload,
+            min(ttl_seconds, 30),
+        )
+        return {"payload": _with_cache_meta(redis_payload, layer, "redis-hit", cache_key), "mode": "redis-hit"}
+
+    sqlite_payload = dependencies.snapshot_store.get(namespace, cache_key)
+    if sqlite_payload is not None:
+        _write_cache(dependencies, namespace, cache_key, sqlite_payload, ttl_seconds)
+        return {"payload": _with_cache_meta(sqlite_payload, layer, "sqlite-hit", cache_key), "mode": "sqlite-hit"}
+
+    stale_payload = dependencies.snapshot_store.get_stale(namespace, cache_key)
+    if stale_payload is not None:
+        _refresh_async(
+            dependencies,
+            layer=layer,
+            namespace=namespace,
+            cache_key=cache_key,
+            builder=builder,
+            ttl_seconds=ttl_seconds,
+            stale_payload=stale_payload,
+        )
+        return {"payload": _with_cache_meta(stale_payload, layer, "stale-hit", cache_key), "mode": "stale-hit"}
+
+    fallback = _fallback_payload(layer, cache_key)
+    _refresh_async(
+        dependencies,
+        layer=layer,
+        namespace=namespace,
+        cache_key=cache_key,
+        builder=builder,
+        ttl_seconds=ttl_seconds,
+        stale_payload=fallback,
+    )
+    return {"payload": _with_cache_meta(fallback, layer, "warming", cache_key), "mode": "warming"}
 
 
 def _fallback_payload(layer: str, cache_key: str) -> Any:
@@ -571,5 +643,82 @@ def get_market_workspace_payload(
         "layers": payload["cacheLayers"],
         "generatedAt": _utc_now_iso(),
     }
+    payload["generatedAt"] = _utc_now_iso()
+    return payload
+
+
+def get_market_focus_tile_payload(
+    context: MarketWorkspaceCacheContext,
+    market_id: int,
+) -> Dict[str, Any]:
+    """Serve the selection-critical detail, chart and LOB without cold-path blocking."""
+    dependencies = _dependencies(context)
+    detail_key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 3})
+    chart_key = _cache_key(
+        {
+            "marketId": int(market_id),
+            "layer": "chart",
+            "range": "1d",
+            "interval": "5m",
+            "v": 5,
+        }
+    )
+    orderbook_key = _cache_key({"marketId": int(market_id), "layer": "orderbook", "v": 1})
+
+    detail_result = _cached_layer_read_only(
+        dependencies,
+        layer="detail",
+        cache_key=detail_key,
+        ttl_seconds=DETAIL_TTL_SECONDS,
+        builder=lambda: _build_detail(dependencies, market_id),
+    )
+    chart_result = _cached_layer_read_only(
+        dependencies,
+        layer="chart",
+        cache_key=chart_key,
+        ttl_seconds=CHART_TTL_SECONDS,
+        builder=lambda: market_service.get_market_chart_payload(
+            dependencies.source,
+            market_id,
+            range_name="1d",
+            interval="5m",
+        ),
+    )
+    orderbook_result = _cached_layer_read_only(
+        dependencies,
+        layer="orderbook",
+        cache_key=orderbook_key,
+        ttl_seconds=ORDERBOOK_TTL_SECONDS,
+        builder=lambda: lob_service.get_runtime_lob_payload(
+            dependencies.source,
+            market_id,
+        ),
+    )
+
+    detail = detail_result["payload"] if isinstance(detail_result["payload"], dict) else {}
+    chart = chart_result["payload"] if isinstance(chart_result["payload"], dict) else _fallback_payload("chart", chart_key)
+    orderbook = orderbook_result["payload"] if isinstance(orderbook_result["payload"], dict) else _fallback_payload("orderbook", orderbook_key)
+    chart.setdefault("marketId", market_id)
+    chart.setdefault("localMarketId", market_id)
+    chart.setdefault("range", "1d")
+    chart.setdefault("interval", "5m")
+    orderbook.setdefault("marketId", market_id)
+    orderbook.setdefault("localMarketId", market_id)
+
+    payload = dict(detail)
+    payload.setdefault("marketId", market_id)
+    payload.setdefault("localMarketId", market_id)
+    payload["chart"] = chart
+    payload["lob"] = orderbook
+    payload["cacheLayers"] = {
+        "detail": detail_result["mode"],
+        "chart": chart_result["mode"],
+        "orderbook": orderbook_result["mode"],
+    }
+    payload["focusStatus"] = (
+        "ready"
+        if detail_result["mode"] != "warming" and chart_result["mode"] != "warming" and orderbook_result["mode"] != "warming"
+        else "warming"
+    )
     payload["generatedAt"] = _utc_now_iso()
     return payload

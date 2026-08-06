@@ -343,6 +343,7 @@ def build_route_context(service_context: ServiceContext) -> RouteContext:
         "get_market_detail_payload": lambda market_id: market_workspace_cache_service.get_market_detail_payload(build_service_context(), market_id),
         "get_market_data_quality_payload": lambda: market_quality_service.get_market_data_quality_payload(build_service_context()),
         "get_market_workspace_payload": lambda market_id: market_workspace_cache_service.get_market_workspace_payload(build_service_context(), market_id),
+        "get_market_focus_tile_payload": lambda market_id: market_workspace_cache_service.get_market_focus_tile_payload(build_service_context(), market_id),
         "get_market_group_snapshot": get_market_group_snapshot,
         "get_market_groups_payload": lambda query="", page=1, page_size=80, sort="active": market_group_service.get_market_groups_payload(
             build_service_context(),
