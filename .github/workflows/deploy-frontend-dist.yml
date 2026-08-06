@@ -82,7 +82,7 @@ jobs:
           set -euo pipefail
           REMOTE_DEPLOY_PATH="${DEPLOY_PATH:-/var/www/polydata}"
           ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "
-            set -euo pipefail
+            set -eu
             mkdir -p '$REMOTE_DEPLOY_PATH'
             rsync -az --delete '$RELEASE_DIR/' '$REMOTE_DEPLOY_PATH/'
             find '$REMOTE_DEPLOY_PATH' -type d -exec chmod 0755 {} +
@@ -96,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "
-            set -euo pipefail
+            set -eu
             test -f '${DEPLOY_PATH:-/var/www/polydata}/index.html'
             curl -fsS --max-time 15 http://127.0.0.1/ >/dev/null
             curl -fsS --max-time 15 http://127.0.0.1/wm-api/health >/dev/null
