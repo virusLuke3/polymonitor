@@ -22,7 +22,7 @@ from api.services import clickhouse_orderfilled_service
 from api.services import market_group_service
 from market.market_identity import MarketIdentity, oracle_event_lookup_clause, oracle_event_lookup_terms
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v13"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v14"
 DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_AGE_HOURS", "336"))
 DEFAULT_ACTIVE_MARKET_ACTIVITY_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_ACTIVITY_HOURS", "72"))
 DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT = int(os.environ.get("POLYDATA_ACTIVE_MARKET_LOB_PREFETCH_LIMIT", "0"))
@@ -3716,6 +3716,20 @@ def _active_markets_payload_has_price_history_schema(payload: Any) -> bool:
     )
 
 
+def _active_markets_payload_has_token_schema(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        return False
+    return all(
+        isinstance(item, dict)
+        and "yesTokenId" in item
+        and "noTokenId" in item
+        for item in items[:20]
+    )
+
+
 def get_active_markets_snapshot(
     ctx: Mapping[str, Any],
     page_size: int = 40,
@@ -3759,7 +3773,11 @@ def _get_active_markets_snapshot(
     exact_payload_was_empty = False
     if exact_payload is not None:
         exact_items = exact_payload.get("items") if isinstance(exact_payload, dict) else None
-        if isinstance(exact_items, list) and exact_items:
+        if (
+            isinstance(exact_items, list)
+            and exact_items
+            and _active_markets_payload_has_token_schema(exact_payload)
+        ):
             dependencies.set_cached_json(
                 ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
                 cache_key,
@@ -3769,7 +3787,7 @@ def _get_active_markets_snapshot(
             return exact_payload
         exact_payload_was_empty = True
         dependencies.application.logger.warning(
-            "markets-active exact snapshot ignored because it is empty page_size=%s include_runtime_prices=%s",
+            "markets-active exact snapshot ignored because it is empty or incompatible page_size=%s include_runtime_prices=%s",
             page_size,
             include_runtime_prices,
         )
@@ -3783,8 +3801,12 @@ def _get_active_markets_snapshot(
             latest_payload,
             page_size,
         )
-        if fallback_payload is not None and (
-            not should_include_change_24h or _active_markets_payload_has_price_history_schema(fallback_payload)
+        if (
+            fallback_payload is not None
+            and _active_markets_payload_has_token_schema(fallback_payload)
+            and (
+                not should_include_change_24h or _active_markets_payload_has_price_history_schema(fallback_payload)
+            )
         ):
             dependencies.application.logger.info(
                 "markets-active latest-snapshot-fallback page_size=%s include_runtime_prices=%s",
