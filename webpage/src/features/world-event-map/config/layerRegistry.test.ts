@@ -59,6 +59,12 @@ describe('World Event Map layer registry', () => {
     }
   });
 
+  it('keeps every selectable layer label English-only for the map control', () => {
+    for (const layer of selectableWorldEventLayers()) {
+      expect(layer.label).toMatch(/^[\x20-\x7e]+$/);
+    }
+  });
+
   it('maps hazards by hazard kind instead of the broad natural-hazard category', () => {
     const event = {
       id: 'earthquake:usgs:test',

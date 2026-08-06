@@ -17,6 +17,14 @@ export type LayerPanelItem = {
   enabled: boolean;
 };
 
+export const LAYER_PANEL_COPY = {
+  title: 'LAYERS',
+  searchPlaceholder: 'Search layers…',
+  emptyLabel: 'No matching layers',
+  openLabel: 'Open layers panel',
+  collapseLabel: 'Collapse layers panel',
+} as const;
+
 function LayerBrief({
   layer,
   eventCount,
@@ -74,11 +82,6 @@ export function LayerPanel({
   items,
   events,
   collapsed,
-  title,
-  searchPlaceholder,
-  emptyLabel,
-  activeSummary,
-  getActionLabel,
   onToggle,
   onCollapse,
   onExpand,
@@ -86,11 +89,6 @@ export function LayerPanel({
   items: LayerPanelItem[];
   events: GeoEvent[];
   collapsed: boolean;
-  title: string;
-  searchPlaceholder: string;
-  emptyLabel: string;
-  activeSummary: string;
-  getActionLabel: (item: LayerPanelItem) => string;
   onToggle: (layerId: string) => void;
   onCollapse: () => void;
   onExpand: () => void;
@@ -113,6 +111,7 @@ export function LayerPanel({
   }, [events]);
   const briefLayer = briefLayerId ? worldEventLayerById(briefLayerId) : undefined;
   const activeCount = useMemo(() => items.filter((item) => item.enabled).length, [items]);
+  const activeSummary = `${activeCount}/${items.length} LAYERS ACTIVE`;
 
   const toggleCollapsed = () => {
     if (collapsed) {
@@ -128,10 +127,10 @@ export function LayerPanel({
       <aside
         id="wm-layer-sidebar"
         className={`wm-layer-sidebar ${collapsed ? 'is-collapsed' : ''}`}
-        aria-label={title}
+        aria-label={LAYER_PANEL_COPY.title}
       >
         <div className="wm-toggle-header">
-          <span className="wm-layer-heading">{title}</span>
+          <span className="wm-layer-heading">{LAYER_PANEL_COPY.title}</span>
           <span
             className="wm-layer-status-orb"
             role="status"
@@ -143,7 +142,7 @@ export function LayerPanel({
           <button
             type="button"
             className="wm-toggle-collapse"
-            aria-label={collapsed ? 'Open layers panel' : 'Collapse layers panel'}
+            aria-label={collapsed ? LAYER_PANEL_COPY.openLabel : LAYER_PANEL_COPY.collapseLabel}
             aria-controls="wm-layer-panel-body"
             aria-expanded={!collapsed}
             onClick={toggleCollapsed}
@@ -156,8 +155,8 @@ export function LayerPanel({
             className="wm-layer-search"
             value={query}
             onInput={(event) => setQuery((event.currentTarget as HTMLInputElement).value)}
-            placeholder={searchPlaceholder}
-            aria-label={searchPlaceholder}
+            placeholder={LAYER_PANEL_COPY.searchPlaceholder}
+            aria-label={LAYER_PANEL_COPY.searchPlaceholder}
             autoComplete="off"
             spellcheck={false}
           />
@@ -167,7 +166,7 @@ export function LayerPanel({
             onTouchMove={(event) => event.stopPropagation()}
           >
             {filtered.length ? filtered.map((item) => {
-              const actionLabel = getActionLabel(item);
+              const actionLabel = `${item.enabled ? 'Hide' : 'Show'} ${item.label}`;
               const briefOpen = briefLayerId === item.id;
               return (
                 <div
@@ -196,7 +195,7 @@ export function LayerPanel({
                   </button>
                 </div>
               );
-            }) : <div className="wm-layer-empty">{emptyLabel}</div>}
+            }) : <div className="wm-layer-empty">{LAYER_PANEL_COPY.emptyLabel}</div>}
           </div>
           <div className="wm-sidebar-footer">{activeSummary}</div>
         </div>

@@ -1751,7 +1751,6 @@ function WorldMonitorApp() {
     { label: 'INTEL', value: currentLatestContent.length || 0 },
   ];
   const enabledLayerIds = useMemo(() => layers.filter((layer) => layer.enabled).map((layer) => layer.id), [layers]);
-  const activeLayerCount = enabledLayerIds.length;
   const geoShockPayload = runtimeData['geo-sanctions-shock'] as RuntimeGeoSanctionsShockPayload | undefined;
   const ucdpLayerEnabled = enabledLayerIds.includes('ucdp');
   const intelLayerEnabled = enabledLayerIds.includes('intel-hotspots');
@@ -2223,23 +2222,9 @@ function WorldMonitorApp() {
           <div className="wm-map-stage">
             <div className={`wm-globe-area ${viewMode !== '3d' ? 'wm-globe-area-flat' : ''}`}>
               <LayerPanel
-                items={layers.map((layer) => ({
-                  ...layer,
-                  label: localizedLayerLabel(layer, t),
-                }))}
+                items={layers}
                 events={worldEventMapEvents}
                 collapsed={!showPanelLibrary}
-                title={t('atlas.layers')}
-                searchPlaceholder={t('atlas.searchLayers')}
-                emptyLabel={t('atlas.noLayers')}
-                activeSummary={t('atlas.layersActive', {
-                  active: formatNumber(activeLayerCount),
-                  total: formatNumber(layers.length),
-                })}
-                getActionLabel={(layer) => t(
-                  layer.enabled ? 'atlas.hideLayer' : 'atlas.showLayer',
-                  { layer: layer.label },
-                )}
                 onToggle={toggleLayer}
                 onCollapse={() => setShowPanelLibrary(false)}
                 onExpand={() => setShowPanelLibrary(true)}
