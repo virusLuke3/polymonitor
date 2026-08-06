@@ -855,6 +855,13 @@ function WorldMonitorApp() {
     const nextOutcomeKey = selectedOutcome?.outcomeKey || outcomeKeyForGroupMarket(group, nextMarketId, outcomeKey);
     selectedMarketGroupIdRef.current = eventId;
     selectedMarketIdRef.current = nextMarketId;
+    if (nextMarketId != null) {
+      const optimisticBundle = optimisticBundleFromGroup(group, nextMarketId, nextOutcomeKey);
+      bundleCacheRef.current.set(nextMarketId, optimisticBundle);
+      setBundle(optimisticBundle);
+      setBundleLoading(false);
+      setSelectedMarketGroupDetail(optimisticBundle.group || null);
+    }
     setSelectedMarketGroupId(eventId);
     setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
     setSelectedMarketId(nextMarketId);
@@ -1368,24 +1375,27 @@ function WorldMonitorApp() {
     const controller = new AbortController();
     const eventId = selectedMarketGroupId;
 
-    fetchMarketGroupDetail(eventId, 3000, controller.signal)
-      .then((detailPayload) => {
-        if (cancelled || selectedMarketGroupIdRef.current !== eventId) return;
-        setSelectedMarketGroupDetail(detailPayload);
-        const liveDetailOutcome = pickDefaultGroupOutcome(detailPayload, selectedMarketGroupOutcomeKey, selectedMarketIdRef.current);
-        if (liveDetailOutcome?.marketId != null && Number(liveDetailOutcome.marketId) !== selectedMarketIdRef.current) {
-          selectedMarketIdRef.current = Number(liveDetailOutcome.marketId);
-          setSelectedMarketId(Number(liveDetailOutcome.marketId));
-        }
-        setSelectedMarketGroupOutcomeKey(liveDetailOutcome?.outcomeKey || detailPayload.defaultOutcomeKey || null);
-      })
-      .catch(() => {
-        if (!cancelled && selectedMarketGroupIdRef.current === eventId) setSelectedMarketGroupDetail(null);
-      });
+    const timer = window.setTimeout(() => {
+      fetchMarketGroupDetail(eventId, 3000, controller.signal)
+        .then((detailPayload) => {
+          if (cancelled || selectedMarketGroupIdRef.current !== eventId) return;
+          setSelectedMarketGroupDetail(detailPayload);
+          const liveDetailOutcome = pickDefaultGroupOutcome(detailPayload, selectedMarketGroupOutcomeKey, selectedMarketIdRef.current);
+          if (liveDetailOutcome?.marketId != null && Number(liveDetailOutcome.marketId) !== selectedMarketIdRef.current) {
+            selectedMarketIdRef.current = Number(liveDetailOutcome.marketId);
+            setSelectedMarketId(Number(liveDetailOutcome.marketId));
+          }
+          setSelectedMarketGroupOutcomeKey(liveDetailOutcome?.outcomeKey || detailPayload.defaultOutcomeKey || null);
+        })
+        .catch(() => {
+          // Keep the optimistic/focus-tile detail visible on a transient detail miss.
+        });
+    }, 2500);
 
     return () => {
       cancelled = true;
       controller.abort();
+      window.clearTimeout(timer);
     };
   }, [selectedMarketGroupId]);
 
@@ -1409,7 +1419,7 @@ function WorldMonitorApp() {
         .catch(() => {
           if (!cancelled) setSelectedMarketGroupChart(null);
         });
-    }, 350);
+    }, chartRange === '1d' ? 2500 : 150);
 
     return () => {
       cancelled = true;
@@ -1449,6 +1459,7 @@ function WorldMonitorApp() {
     const currentMarketId = selectedMarketId;
     const requestSeq = ++bundleRequestSeqRef.current;
     let cancelled = false;
+    let focusReady = false;
     const controller = new AbortController();
     const cachedBundle = bundleCacheRef.current.get(currentMarketId);
     const listMarket = markets.find((market) => market.id === currentMarketId)
@@ -1471,6 +1482,9 @@ function WorldMonitorApp() {
     function applyLoadedBundle(loadedBundle: WorkspaceBundle) {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
       if (!bundleMatchesMarket(loadedBundle, currentMarketId)) return;
+      if (loadedBundle.focusStatus && loadedBundle.focusStatus !== 'warming') {
+        focusReady = true;
+      }
       const loadedGroup = loadedBundle.group || null;
       const loadedEventId = loadedGroup?.eventId ?? loadedBundle.identity?.eventId ?? null;
       if (loadedGroup && loadedEventId != null) {
@@ -1514,7 +1528,7 @@ function WorldMonitorApp() {
 
     void loadFocusTile();
     const focusRetryTimer = window.setTimeout(() => {
-      if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
+      if (cancelled || focusReady || bundleRequestSeqRef.current !== requestSeq) return;
       void loadFocusTile();
     }, 1800);
     const workspaceTimer = window.setTimeout(() => {

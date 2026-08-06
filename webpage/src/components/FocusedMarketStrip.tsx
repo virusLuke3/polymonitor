@@ -1266,6 +1266,18 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     const controller = new AbortController();
     const key = selectedTokenKey;
     const title = selectedOutcome?.label || detail?.title || '';
+    const bundledLob = bundleMatchesSelected && hasBookLevels(ctx.bundle?.lob) ? ctx.bundle?.lob || null : null;
+
+    if (bundledLob) {
+      setTokenLobState((current) => ({
+        key,
+        lob: bundledLob,
+        loading: false,
+        updatedAt: timestampMillis(bundledLob.fetchedAt) ?? Date.now(),
+        pulseId: current.key === key ? current.pulseId : current.pulseId + 1,
+        direction: current.key === key ? current.direction : 'flat',
+      }));
+    }
 
     const loadBook = () => {
       const requestSeq = ++tokenLobRequestRef.current;
@@ -1277,7 +1289,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         pulseId: current.key === key ? current.pulseId : 0,
         direction: current.key === key ? current.direction : 'flat',
       }));
-      fetchMarketLobByToken(selectedTokenId, title, selectedNoTokenId, 6500, controller.signal)
+      fetchMarketLobByToken(selectedTokenId, title, selectedNoTokenId, 6500, controller.signal, ctx.selectedMarketId)
         .then((lobPayload) => {
           if (cancelled || requestSeq !== tokenLobRequestRef.current) return;
           setTokenLobState((current) => {
@@ -1318,7 +1330,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         });
     };
 
-    timer = window.setTimeout(loadBook, hasBundledBookLevels ? 4_000 : 0);
+    timer = window.setTimeout(loadBook, hasBundledBookLevels ? 4_000 : 350);
     return () => {
       cancelled = true;
       controller.abort();
@@ -1386,7 +1398,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         });
     };
 
-    timer = window.setTimeout(loadBlockClose, 1_200);
+    timer = window.setTimeout(loadBlockClose, 3_500);
     return () => {
       cancelled = true;
       controller.abort();

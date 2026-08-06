@@ -29,6 +29,7 @@ Wants=polydata-lob-maintenance.service
 Wants=polydata-macro-cpi-panels-seed.service
 Wants=polydata-macro-cpi-registry-seed.service
 Wants=polydata-market-group-seed.service
+Wants=polydata-market-focus-prewarm.timer
 Wants=polydata-market-tv-wire-seed.service
 Wants=polydata-nba-seed.service
 Wants=polydata-new-market-signal.service

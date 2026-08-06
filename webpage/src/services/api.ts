@@ -1032,10 +1032,18 @@ export function fetchMarketLob(marketId: number, timeoutMs = 4000) {
   return apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, timeoutMs);
 }
 
-export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '', timeoutMs = 4000, signal?: AbortSignal) {
+export function fetchMarketLobByToken(
+  tokenId: string,
+  title = '',
+  noTokenId = '',
+  timeoutMs = 4000,
+  signal?: AbortSignal,
+  marketId?: number | null,
+) {
   const params = new URLSearchParams();
   if (title.trim()) params.set('title', title.trim());
   if (noTokenId.trim()) params.set('noTokenId', noTokenId.trim());
+  if (marketId != null && Number.isFinite(Number(marketId))) params.set('marketId', String(marketId));
   params.set('_ts', String(Date.now()));
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return apiGetWithTimeout<LobPayload>(`/runtime/lob/token/${encodeURIComponent(tokenId)}${suffix}`, timeoutMs, signal);

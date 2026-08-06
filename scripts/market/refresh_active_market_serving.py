@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.parse
 import urllib.request
@@ -121,6 +122,7 @@ def _fetch_events(
     pages: int,
     target_events: int,
     timeout_seconds: int,
+    proxy_url: str = "",
 ) -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
     seen: set[str] = set()
@@ -140,7 +142,12 @@ def _fetch_events(
             f"{base_url.rstrip('/')}/events?{query}",
             headers={"Accept": "application/json", "User-Agent": "polydata-active-market-refresh/1.0"},
         )
-        with urllib.request.urlopen(request, timeout=max(3, int(timeout_seconds))) as response:
+        proxy_url = str(proxy_url or "").strip()
+        proxy_handler = urllib.request.ProxyHandler(
+            {"http": proxy_url, "https": proxy_url} if proxy_url else {}
+        )
+        opener = urllib.request.build_opener(proxy_handler)
+        with opener.open(request, timeout=max(3, int(timeout_seconds))) as response:
             payload = json.loads(response.read().decode("utf-8"))
         page_events = payload if isinstance(payload, list) else ((payload or {}).get("events") or (payload or {}).get("data") or [])
         if not isinstance(page_events, list) or not page_events:
@@ -474,6 +481,7 @@ def refresh_active_market_serving(
     target_events: int,
     timeout_seconds: int,
     dry_run: bool,
+    fallback_proxy_url: str = "",
 ) -> Dict[str, Any]:
     fetched: Dict[str, List[Dict[str, Any]]] = {}
     errors: Dict[str, str] = {}
@@ -487,8 +495,31 @@ def refresh_active_market_serving(
                 timeout_seconds=timeout_seconds,
             )
         except Exception as exc:
-            errors[order] = f"{exc.__class__.__name__}: {exc}"
+            errors[f"{order}:direct"] = f"{exc.__class__.__name__}: {exc}"
+            fallback_proxy_urls = [
+                value.strip()
+                for value in str(fallback_proxy_url or "").split("|")
+                if value.strip()
+            ]
+            if not fallback_proxy_urls:
+                fetched[order] = []
+                continue
             fetched[order] = []
+            for proxy_index, proxy_url in enumerate(fallback_proxy_urls, start=1):
+                try:
+                    fetched[order] = _fetch_events(
+                        base_url,
+                        order=order,
+                        pages=pages,
+                        target_events=target_events,
+                        timeout_seconds=timeout_seconds,
+                        proxy_url=proxy_url,
+                    )
+                    break
+                except Exception as proxy_exc:
+                    errors[f"{order}:fallback-proxy-{proxy_index}"] = (
+                        f"{proxy_exc.__class__.__name__}: {proxy_exc}"
+                    )
     events = _merge_events(fetched["volume24hr"], fetched["startDate"])
     if not events:
         raise RuntimeError(f"Gamma active event refresh returned no events: {errors}")
@@ -543,6 +574,12 @@ def main() -> None:
         target_events=max(1, int(args.target_events)),
         timeout_seconds=max(3, int(args.timeout)),
         dry_run=bool(args.dry_run),
+        fallback_proxy_url="|".join(dict.fromkeys(filter(None, (
+            os.environ.get("POLYDATA_ACTIVE_MARKET_REFRESH_FALLBACK_PROXY_URL"),
+            os.environ.get("POLYDATA_MARKET_EVIDENCE_PROXY_URL"),
+            os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"),
+            os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"),
+        )))),
     )
     print(json.dumps(stats, ensure_ascii=False, sort_keys=True))
 

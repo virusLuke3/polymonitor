@@ -27,6 +27,7 @@ def create_lob_blueprint(helpers: dict) -> Blueprint:
             token_id,
             no_token_id=request.args.get("noTokenId") or "",
             market_title=request.args.get("title") or "",
+            market_id=request.args.get("marketId", type=int),
         )
         status_code = int(payload.pop("_status", 200))
         return jsonify(payload), status_code

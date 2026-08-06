@@ -316,6 +316,8 @@ GCP_UNITS=(
   polydata-macro-cpi-panels-seed.service
   polydata-macro-cpi-registry-seed.service
   polydata-market-group-seed.service
+  polydata-market-focus-prewarm.service
+  polydata-market-focus-prewarm.timer
   polydata-nba-seed.service
   polydata-new-market-signal.service
   polydata-polybeats-feed-seed.service

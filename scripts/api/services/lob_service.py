@@ -6,9 +6,12 @@ import contextlib
 import os
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict
+
+from api import cache as api_cache
 
 try:
     import requests
@@ -33,11 +36,17 @@ _SNAPSHOT_SCHEMA_READY = False
 _SNAPSHOT_SCHEMA_LOCK = threading.Lock()
 BOOK_LEVEL_LIMIT = 12
 DEFAULT_LOB_CACHE_TTL_SECONDS = 3
+DEFAULT_LOB_REDIS_CACHE_TTL_SECONDS = 120
+DEFAULT_LOB_WARM_REQUEST_TTL_SECONDS = 600
+DEFAULT_LOB_WARM_REQUEST_LIMIT = 32
 DEFAULT_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS = 300
 LOB_COVERAGE_RAW_ROW_LIMIT = 1200
 WORLDCUP_LOB_PRE_KICKOFF_MINUTES = 60
 WORLDCUP_LOB_FALLBACK_MATCH_MINUTES = 150
 DEFAULT_WORLDCUP_LOB_MARKET_LIMIT = 12
+LOB_REDIS_CACHE_NAMESPACE = "lob:token"
+LOB_WARM_REQUEST_INDEX = "lob:warm-requests:index"
+LOB_WARM_REQUEST_DATA = "lob:warm-requests:data"
 WORLDCUP_TEAM_SLUG_CODES = {
     "argentina": "arg",
     "australia": "aus",
@@ -116,7 +125,6 @@ class LocalOrderBookRuntimeManager:
                     "User-Agent": "polyData-local-orderbook/1.0",
                 }
             )
-
     def get_market_snapshot(
         self,
         *,
@@ -355,6 +363,231 @@ class LocalOrderBookRuntimeManager:
         if response.status_code == 404:
             payload["book_status"] = "no-book"
         return payload
+
+
+def _redis_client(ctx: dict) -> Any | None:
+    try:
+        return api_cache.get_redis_client(ctx)
+    except Exception:
+        return None
+
+
+def _redis_runtime_key(ctx: dict, suffix: str) -> str:
+    return f"{str(ctx.get('REDIS_PREFIX') or '')}{suffix}"
+
+
+def _lob_redis_ttl_seconds() -> int:
+    return _int_clamped(
+        os.environ.get("POLYDATA_LOB_REDIS_CACHE_TTL_SECONDS"),
+        default=DEFAULT_LOB_REDIS_CACHE_TTL_SECONDS,
+        minimum=15,
+        maximum=900,
+    )
+
+
+def cache_runtime_lob_payload(
+    ctx: dict,
+    payload: Dict[str, Any],
+    yes_token_id: str,
+    no_token_id: str = "",
+) -> bool:
+    if not isinstance(payload, dict) or not yes_token_id:
+        return False
+    cached = dict(payload)
+    cached.setdefault("cachedAt", _iso_utc_now())
+    wrote = False
+    for token_id in (str(yes_token_id or "").strip(), str(no_token_id or "").strip()):
+        if not token_id:
+            continue
+        try:
+            api_cache.set_cached_payload(
+                ctx,
+                LOB_REDIS_CACHE_NAMESPACE,
+                token_id,
+                cached,
+                _lob_redis_ttl_seconds(),
+            )
+            wrote = True
+        except Exception:
+            continue
+    return wrote
+
+
+def _get_cached_runtime_lob_payload(ctx: dict, token_id: str) -> Dict[str, Any] | None:
+    try:
+        payload = api_cache.get_cached_payload(
+            ctx,
+            LOB_REDIS_CACHE_NAMESPACE,
+            str(token_id or "").strip(),
+        )
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or not _lob_payload_has_levels(payload):
+        return None
+    cached = dict(payload)
+    cached["cacheMode"] = "redis-hot"
+    return cached
+
+
+def enqueue_lob_warm_request(
+    ctx: dict,
+    *,
+    yes_token_id: str,
+    no_token_id: str = "",
+    market_id: int | None = None,
+    market_title: str = "",
+) -> bool:
+    yes_token_id = str(yes_token_id or "").strip()
+    if not yes_token_id:
+        return False
+    client = _redis_client(ctx)
+    if client is None:
+        return False
+    now = int(time.time())
+    ttl_seconds = _int_clamped(
+        os.environ.get("POLYDATA_LOB_WARM_REQUEST_TTL_SECONDS"),
+        default=DEFAULT_LOB_WARM_REQUEST_TTL_SECONDS,
+        minimum=60,
+        maximum=3600,
+    )
+    payload = {
+        "yesTokenId": yes_token_id,
+        "noTokenId": str(no_token_id or "").strip() or None,
+        "marketId": int(market_id) if market_id not in (None, "") else None,
+        "marketTitle": str(market_title or "")[:240] or None,
+        "requestedAt": now,
+        "expiresAt": now + ttl_seconds,
+    }
+    index_key = _redis_runtime_key(ctx, LOB_WARM_REQUEST_INDEX)
+    data_key = _redis_runtime_key(ctx, LOB_WARM_REQUEST_DATA)
+    try:
+        pipe = client.pipeline(transaction=False)
+        pipe.hset(data_key, yes_token_id, json.dumps(payload, ensure_ascii=True))
+        pipe.zadd(index_key, {yes_token_id: now})
+        pipe.zremrangebyscore(index_key, "-inf", now - ttl_seconds)
+        pipe.expire(index_key, ttl_seconds * 2)
+        pipe.expire(data_key, ttl_seconds * 2)
+        pipe.execute()
+        return True
+    except Exception:
+        return False
+
+
+def _recent_lob_warm_requests(ctx: dict) -> list[Dict[str, Any]]:
+    client = _redis_client(ctx)
+    if client is None:
+        return []
+    now = int(time.time())
+    ttl_seconds = _int_clamped(
+        os.environ.get("POLYDATA_LOB_WARM_REQUEST_TTL_SECONDS"),
+        default=DEFAULT_LOB_WARM_REQUEST_TTL_SECONDS,
+        minimum=60,
+        maximum=3600,
+    )
+    limit = _int_clamped(
+        os.environ.get("POLYDATA_LOB_WARM_REQUEST_LIMIT"),
+        default=DEFAULT_LOB_WARM_REQUEST_LIMIT,
+        minimum=1,
+        maximum=100,
+    )
+    index_key = _redis_runtime_key(ctx, LOB_WARM_REQUEST_INDEX)
+    data_key = _redis_runtime_key(ctx, LOB_WARM_REQUEST_DATA)
+    try:
+        token_ids = client.zrevrangebyscore(
+            index_key,
+            "+inf",
+            now - ttl_seconds,
+            start=0,
+            num=limit,
+        )
+        raw_values = client.hmget(data_key, token_ids) if token_ids else []
+    except Exception:
+        return []
+    requests: list[Dict[str, Any]] = []
+    for raw in raw_values:
+        try:
+            payload = json.loads(raw) if raw else None
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict) or int(payload.get("expiresAt") or 0) < now:
+            continue
+        requests.append(payload)
+    return requests
+
+
+def _dynamic_lob_warm_targets(ctx: dict) -> list[Dict[str, Any]]:
+    requests = _recent_lob_warm_requests(ctx)
+    market_ids = sorted({
+        int(item["marketId"])
+        for item in requests
+        if item.get("marketId") not in (None, "")
+    })
+    token_ids = sorted({
+        str(item.get("yesTokenId") or "").strip()
+        for item in requests
+        if str(item.get("yesTokenId") or "").strip()
+    })
+    if not market_ids and not token_ids:
+        return []
+    clauses: list[str] = []
+    params: list[Any] = []
+    if market_ids:
+        clauses.append(f"m.id IN ({', '.join('?' for _ in market_ids)})")
+        params.extend(market_ids)
+    if token_ids:
+        placeholders = ", ".join("?" for _ in token_ids)
+        clauses.append(f"(m.yes_token_id IN ({placeholders}) OR m.no_token_id IN ({placeholders}))")
+        params.extend(token_ids)
+        params.extend(token_ids)
+    try:
+        rows = ctx["query_all"](
+            f"""
+            SELECT
+                m.id AS market_id,
+                m.slug AS market_slug,
+                COALESCE(m.title, m.slug) AS market_title,
+                m.category,
+                m.tags,
+                m.condition_id,
+                m.yes_token_id,
+                m.no_token_id,
+                COALESCE(mls.volume_24h, 0) AS volume_24h,
+                COALESCE(mls.trade_count_24h, 0) AS trade_count_24h
+            FROM core.markets m
+            LEFT JOIN core.market_list_serving mls ON mls.market_id = m.id
+            LEFT JOIN core.market_status_snapshot mss ON mss.market_id = m.id
+            WHERE ({' OR '.join(clauses)})
+              AND COALESCE(m.yes_token_id, '') <> ''
+              AND COALESCE(m.no_token_id, '') <> ''
+              AND NOT COALESCE(mss.is_trading_closed, FALSE)
+              AND NOT COALESCE(mss.is_resolved, FALSE)
+            """,
+            tuple(params),
+        )
+    except Exception:
+        return []
+    return [
+        {
+            "marketId": row.get("market_id"),
+            "marketSlug": row.get("market_slug"),
+            "marketTitle": row.get("market_title"),
+            "category": row.get("category"),
+            "tags": row.get("tags") or [],
+            "conditionId": row.get("condition_id"),
+            "yesTokenId": row.get("yes_token_id"),
+            "noTokenId": row.get("no_token_id"),
+            "volume24h": row.get("volume_24h") or 0,
+            "tradeCount24h": row.get("trade_count_24h") or 0,
+            "topic": "dynamic",
+            "tier": "hot",
+            "priorityScore": "1000000",
+            "sampleIntervalSeconds": 15,
+            "retentionDays": 14,
+            "reason": "dynamic:recent-selection",
+        }
+        for row in rows
+        if row.get("market_id") is not None
+    ]
 
 
 def _empty_book_side() -> Dict[str, Any]:
@@ -988,14 +1221,44 @@ def get_lob_coverage_targets_payload(ctx: dict, *, limit: int = 250, topics: str
             topic_limits={"worldcup": worldcup_market_limit},
             context=worldcup_context,
         )
-        payload_targets = [target.as_payload() for target in targets]
-        summary = summarize_coverage_targets(targets)
+        policy_targets = [target.as_payload() for target in targets]
+        dynamic_targets = _dynamic_lob_warm_targets(ctx)
+        seen_market_ids: set[int] = set()
+        payload_targets: list[Dict[str, Any]] = []
+        for item in [*dynamic_targets, *policy_targets]:
+            market_id = _int_or_none(item.get("marketId") or item.get("market_id"))
+            if market_id is None or market_id in seen_market_ids:
+                continue
+            seen_market_ids.add(market_id)
+            payload_targets.append(item)
+            if len(payload_targets) >= limit:
+                break
+        summary: Dict[str, Any] = {
+            "topics": {topic: 0 for topic in [*PRIORITY_TOPICS, "dynamic"]},
+            "tiers": {"hot": 0, "warm": 0, "cold": 0},
+            "marketCount": len(payload_targets),
+            "tokenCount": len(payload_targets) * 2,
+        }
+        for item in payload_targets:
+            topic = str(item.get("topic") or "unknown")
+            tier = str(item.get("tier") or "cold")
+            summary["topics"][topic] = int(summary["topics"].get(topic, 0)) + 1
+            summary["tiers"][tier] = int(summary["tiers"].get(tier, 0)) + 1
         return {
             "source": "local-orderbook-coverage-policy",
             "priorityTopics": topic_list or list(PRIORITY_TOPICS),
             "selectionContext": {
                 "worldcup": worldcup_context_payload,
                 "crypto": {"assets": ["BTC", "ETH"], "patterns": ["above", "hit"], "excluded": ["up-or-down", "5m", "15m"]},
+                "dynamic": {
+                    "recentSelectionCount": len(dynamic_targets),
+                    "retentionSeconds": _int_clamped(
+                        os.environ.get("POLYDATA_LOB_WARM_REQUEST_TTL_SECONDS"),
+                        default=DEFAULT_LOB_WARM_REQUEST_TTL_SECONDS,
+                        minimum=60,
+                        maximum=3600,
+                    ),
+                },
             },
             "selectionLimits": {
                 "worldcupMarketLimit": worldcup_market_limit,
@@ -1209,17 +1472,62 @@ def get_runtime_lob_by_token_payload(
     *,
     no_token_id: str = "",
     market_title: str = "",
+    market_id: int | None = None,
 ) -> Dict[str, Any]:
     yes_token_id = str(token_id or "").strip()
     no_token_id = str(no_token_id or "").strip()
     if not yes_token_id:
         return {"error": "Missing token id", "marketId": 0, "localMarketId": None, "_status": 400}
+    enqueue_lob_warm_request(
+        ctx,
+        yes_token_id=yes_token_id,
+        no_token_id=no_token_id,
+        market_id=market_id,
+        market_title=market_title,
+    )
+    cached_payload = _get_cached_runtime_lob_payload(ctx, yes_token_id)
+    if cached_payload is not None:
+        return cached_payload
+
+    client = _redis_client(ctx)
+    lock_key = _redis_runtime_key(ctx, f"{LOB_REDIS_CACHE_NAMESPACE}:bootstrap-lock:{yes_token_id}")
+    lock_owner = uuid.uuid4().hex
+    owns_lock = False
+    if client is not None:
+        try:
+            owns_lock = bool(client.set(lock_key, lock_owner, nx=True, ex=8))
+        except Exception:
+            owns_lock = False
+        if not owns_lock:
+            deadline = time.monotonic() + 1.2
+            while time.monotonic() < deadline:
+                time.sleep(0.04)
+                cached_payload = _get_cached_runtime_lob_payload(ctx, yes_token_id)
+                if cached_payload is not None:
+                    return cached_payload
+            return {
+                "marketId": int(market_id or 0),
+                "localMarketId": int(market_id) if market_id is not None else None,
+                "marketTitle": str(market_title or ""),
+                "fetchedAt": _iso_utc_now(),
+                "source": "local-orderbook",
+                "snapshotSource": "singleflight-wait",
+                "runtimeModel": "LocalOrderBook",
+                "bookStatus": "warming",
+                "detail": "Another worker is preparing this token; retry the focus tile shortly.",
+                "yes": _empty_book_side(),
+                "no": _empty_book_side(),
+            }
     try:
         payload = ctx["LOB_RUNTIME_MANAGER"].get_token_pair_snapshot(
             yes_token_id=yes_token_id,
             no_token_id=no_token_id,
             market_title=str(market_title or ""),
         )
+        if market_id is not None:
+            payload.setdefault("marketId", int(market_id))
+            payload.setdefault("localMarketId", int(market_id))
+        cache_runtime_lob_payload(ctx, payload, yes_token_id, no_token_id)
         _persist_orderbook_snapshots(ctx, payload, yes_token_id, no_token_id)
         return payload
     except Exception as exc:
@@ -1231,6 +1539,17 @@ def get_runtime_lob_by_token_payload(
             "detail": str(exc),
             "_status": 502,
         }
+    finally:
+        if client is not None and owns_lock:
+            try:
+                client.eval(
+                    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+                    1,
+                    lock_key,
+                    lock_owner,
+                )
+            except Exception:
+                pass
 
 
 def get_runtime_lob_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
@@ -1241,6 +1560,18 @@ def get_runtime_lob_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
     no_token_id = str(market.get("no_token_id") or "").strip()
     if not yes_token_id or not no_token_id:
         return {"error": "Market is missing token ids", "marketId": market_id, "localMarketId": market_id, "_status": 409}
+    enqueue_lob_warm_request(
+        ctx,
+        yes_token_id=yes_token_id,
+        no_token_id=no_token_id,
+        market_id=market_id,
+        market_title=str(market.get("title") or ""),
+    )
+    cached_payload = _get_cached_runtime_lob_payload(ctx, yes_token_id)
+    if cached_payload is not None:
+        cached_payload.setdefault("marketId", market_id)
+        cached_payload.setdefault("localMarketId", market_id)
+        return cached_payload
     try:
         runtime_payload = ctx["LOB_RUNTIME_MANAGER"].get_market_snapshot(
             market_id=market_id,
@@ -1256,6 +1587,7 @@ def get_runtime_lob_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
             runtime_payload.setdefault("snapshotSource", "rest-book")
             runtime_payload.setdefault("runtimeModel", "LocalOrderBook")
             runtime_payload.setdefault("bookStatus", "ok" if _lob_payload_has_levels(runtime_payload) else "no-book")
+        cache_runtime_lob_payload(ctx, runtime_payload, yes_token_id, no_token_id)
         _persist_orderbook_snapshots(ctx, runtime_payload, yes_token_id, no_token_id)
         return runtime_payload
     except Exception as exc:

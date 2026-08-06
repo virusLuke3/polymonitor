@@ -475,7 +475,7 @@ class LocalOrderBookWebsocketWatcher:
         count = 0
         for target in targets if targets is not None else self.targets_by_market.values():
             try:
-                self.manager.get_market_snapshot(
+                payload = self.manager.get_market_snapshot(
                     market_id=target.market_id,
                     yes_token_id=target.yes_token_id,
                     no_token_id=target.no_token_id,
@@ -484,6 +484,7 @@ class LocalOrderBookWebsocketWatcher:
                     market_slug=target.market_slug or None,
                     force_refresh=force_refresh,
                 )
+                self.publish_target_cache(target, payload=payload, reason="bootstrap")
                 count += 1
                 self.persist_target_if_due(target, force=True, reason="bootstrap")
             except Exception as exc:
@@ -701,9 +702,37 @@ class LocalOrderBookWebsocketWatcher:
         for market_id in changed_markets:
             target = self.targets_by_market.get(market_id)
             if target is not None:
+                self.publish_target_cache(target, reason=str(event.get("event_type") or "websocket"))
                 self.persist_target_if_due(target, reason=str(event.get("event_type") or "websocket"))
         self.flush_clickhouse_sink()
         return len(changed_markets)
+
+    def publish_target_cache(
+        self,
+        target: CoverageTarget,
+        *,
+        payload: dict[str, Any] | None = None,
+        reason: str = "",
+    ) -> bool:
+        latest = payload or self.manager.get_cached_market_snapshot(
+            market_id=target.market_id,
+            yes_token_id=target.yes_token_id,
+            no_token_id=target.no_token_id,
+            market_title=target.market_title,
+        )
+        latest["coverage"] = {
+            "topic": target.topic,
+            "tier": target.tier,
+            "sampleIntervalSeconds": target.sample_interval_seconds,
+            "reason": reason,
+        }
+        latest["source"] = "local-orderbook"
+        return lob_service.cache_runtime_lob_payload(
+            self.ctx,
+            latest,
+            target.yes_token_id,
+            target.no_token_id,
+        )
 
     def persist_target_if_due(self, target: CoverageTarget, *, force: bool = False, reason: str = "") -> bool:
         if not self.persist or self.snapshot_persistor is None:

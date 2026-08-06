@@ -2861,6 +2861,8 @@ def _market_list_item(
         "title": row.get("title"),
         "conditionId": row.get("condition_id"),
         "questionId": row.get("question_id"),
+        "yesTokenId": row.get("yes_token_id"),
+        "noTokenId": row.get("no_token_id"),
         "endDate": row.get("end_date"),
         "createdAt": row.get("created_at"),
         "latestPrice": row.get("latest_price"),
