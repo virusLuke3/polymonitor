@@ -1190,6 +1190,7 @@ function WorldMonitorApp() {
     const nextEventId = matchedGroup.eventId != null ? String(matchedGroup.eventId) : null;
     const matchedOutcome = (matchedGroup.outcomes || []).find((outcome) => Number(outcome.marketId) === selectedMarketId) || null;
     if (nextEventId && nextEventId !== selectedMarketGroupId) {
+      selectedMarketGroupIdRef.current = nextEventId;
       setSelectedMarketGroupId(nextEventId);
       setSelectedMarketGroupDetail(null);
       setSelectedMarketGroupChart(null);
@@ -1369,7 +1370,7 @@ function WorldMonitorApp() {
 
     fetchMarketGroupDetail(eventId, 3000, controller.signal)
       .then((detailPayload) => {
-        if (cancelled) return;
+        if (cancelled || selectedMarketGroupIdRef.current !== eventId) return;
         setSelectedMarketGroupDetail(detailPayload);
         const liveDetailOutcome = pickDefaultGroupOutcome(detailPayload, selectedMarketGroupOutcomeKey, selectedMarketIdRef.current);
         if (liveDetailOutcome?.marketId != null && Number(liveDetailOutcome.marketId) !== selectedMarketIdRef.current) {
@@ -1379,7 +1380,7 @@ function WorldMonitorApp() {
         setSelectedMarketGroupOutcomeKey(liveDetailOutcome?.outcomeKey || detailPayload.defaultOutcomeKey || null);
       })
       .catch(() => {
-        if (!cancelled) setSelectedMarketGroupDetail(null);
+        if (!cancelled && selectedMarketGroupIdRef.current === eventId) setSelectedMarketGroupDetail(null);
       });
 
     return () => {
