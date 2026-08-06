@@ -469,6 +469,34 @@ class LocalOrderBookWebsocketWatcher:
         )
         return targets
 
+    def add_recent_selection_targets(self) -> list[CoverageTarget]:
+        """Admit recently selected markets without waiting for the full DB coverage query."""
+        targets = [
+            target
+            for target in (
+                CoverageTarget.from_payload(item)
+                for item in lob_service.get_dynamic_lob_warm_targets(self.ctx)
+            )
+            if target is not None and target.market_id not in self.targets_by_market
+        ]
+        added: list[CoverageTarget] = []
+        for target in targets:
+            self.targets_by_market[target.market_id] = target
+            yes_identity, no_identity = target.identities()
+            for identity in (yes_identity, no_identity):
+                self.identities_by_token[identity.token_id] = identity
+                self.target_by_token[identity.token_id] = target
+                if identity.token_id not in self.subscription_token_order:
+                    self.subscription_token_order.append(identity.token_id)
+            added.append(target)
+        if added:
+            self.logger.info("dynamic coverage admitted markets=%s", len(added))
+            _update_runtime_status(
+                targetCount=len(self.targets_by_market),
+                lastDynamicCoverageRefreshAt=_utc_now_iso(),
+            )
+        return added
+
     def bootstrap_targets(self, targets: Iterable[CoverageTarget] | None = None, *, force_refresh: bool = False) -> int:
         if not self.bootstrap:
             return 0
@@ -522,6 +550,7 @@ class LocalOrderBookWebsocketWatcher:
         self.bootstrap_targets(targets[: self.bootstrap_market_limit] if self.bootstrap_market_limit else [], force_refresh=True)
         deadline = time.monotonic() + run_seconds if run_seconds and run_seconds > 0 else None
         last_refresh_at = time.monotonic()
+        last_dynamic_refresh_at = 0.0
         last_drift_tick = time.monotonic()
         last_ping_at = 0.0
         ping_interval_seconds = _env_int("POLYDATA_LOB_WS_PING_INTERVAL_SECONDS", DEFAULT_PING_INTERVAL_SECONDS, minimum=0)
@@ -535,6 +564,19 @@ class LocalOrderBookWebsocketWatcher:
                 now = time.monotonic()
                 if deadline is not None and now >= deadline:
                     break
+                if now - last_dynamic_refresh_at >= 5:
+                    dynamic_targets = self.add_recent_selection_targets()
+                    if dynamic_targets:
+                        self.bootstrap_targets(dynamic_targets, force_refresh=True)
+                        dynamic_token_ids = [
+                            token_id
+                            for target in dynamic_targets
+                            for token_id in target.token_ids
+                            if token_id not in self.subscribed_tokens
+                        ]
+                        if dynamic_token_ids:
+                            await self.subscribe(websocket, dynamic_token_ids, replace=False)
+                    last_dynamic_refresh_at = now
                 if now - last_refresh_at >= self.coverage_refresh_seconds:
                     await self.reconcile_subscriptions(websocket)
                     last_refresh_at = now

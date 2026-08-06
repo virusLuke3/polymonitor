@@ -5,8 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+TimeoutStartSec=180
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/market/refresh_active_market_serving.py --backend postgres --pages "${POLYDATA_ACTIVE_MARKET_REFRESH_PAGES:-2}" --target-events "${POLYDATA_ACTIVE_MARKET_REFRESH_TARGET_EVENTS:-200}" --timeout "${POLYDATA_ACTIVE_MARKET_REFRESH_TIMEOUT_SECONDS:-15}"'
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/market/refresh_active_market_serving.py --backend postgres --pages "${POLYDATA_ACTIVE_MARKET_REFRESH_PAGES:-1}" --target-events "${POLYDATA_ACTIVE_MARKET_REFRESH_TARGET_EVENTS:-50}" --timeout "${POLYDATA_ACTIVE_MARKET_REFRESH_TIMEOUT_SECONDS:-15}"'
 StandardOutput=journal
 StandardError=journal

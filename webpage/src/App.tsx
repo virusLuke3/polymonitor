@@ -1459,7 +1459,6 @@ function WorldMonitorApp() {
     const currentMarketId = selectedMarketId;
     const requestSeq = ++bundleRequestSeqRef.current;
     let cancelled = false;
-    let focusReady = false;
     const controller = new AbortController();
     const cachedBundle = bundleCacheRef.current.get(currentMarketId);
     const listMarket = markets.find((market) => market.id === currentMarketId)
@@ -1482,9 +1481,6 @@ function WorldMonitorApp() {
     function applyLoadedBundle(loadedBundle: WorkspaceBundle) {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
       if (!bundleMatchesMarket(loadedBundle, currentMarketId)) return;
-      if (loadedBundle.focusStatus && loadedBundle.focusStatus !== 'warming') {
-        focusReady = true;
-      }
       const loadedGroup = loadedBundle.group || null;
       const loadedEventId = loadedGroup?.eventId ?? loadedBundle.identity?.eventId ?? null;
       if (loadedGroup && loadedEventId != null) {
@@ -1527,10 +1523,6 @@ function WorldMonitorApp() {
       });
 
     void loadFocusTile();
-    const focusRetryTimer = window.setTimeout(() => {
-      if (cancelled || focusReady || bundleRequestSeqRef.current !== requestSeq) return;
-      void loadFocusTile();
-    }, 1800);
     const workspaceTimer = window.setTimeout(() => {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
       fetchWorkspaceBundle(currentMarketId, { signal: controller.signal })
@@ -1552,7 +1544,6 @@ function WorldMonitorApp() {
       cancelled = true;
       controller.abort();
       window.clearInterval(timer);
-      window.clearTimeout(focusRetryTimer);
       window.clearTimeout(workspaceTimer);
       window.clearTimeout(loadingTimer);
     };

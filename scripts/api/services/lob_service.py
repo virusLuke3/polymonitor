@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import contextlib
+import concurrent.futures
 import os
 import threading
 import time
@@ -171,12 +172,35 @@ class LocalOrderBookRuntimeManager:
         market_title: str = "",
         force_refresh: bool = False,
     ) -> Dict[str, Any]:
-        yes_state = self.get_token_snapshot(token_id=yes_token_id, market_id=0, outcome="YES", outcome_index=0, force_refresh=force_refresh)
-        no_state = (
-            self.get_token_snapshot(token_id=no_token_id, market_id=0, outcome="NO", outcome_index=1, force_refresh=force_refresh)
-            if no_token_id
-            else _empty_state_payload("NO")
-        )
+        if no_token_id:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                yes_future = executor.submit(
+                    self.get_token_snapshot,
+                    token_id=yes_token_id,
+                    market_id=0,
+                    outcome="YES",
+                    outcome_index=0,
+                    force_refresh=force_refresh,
+                )
+                no_future = executor.submit(
+                    self.get_token_snapshot,
+                    token_id=no_token_id,
+                    market_id=0,
+                    outcome="NO",
+                    outcome_index=1,
+                    force_refresh=force_refresh,
+                )
+                yes_state = yes_future.result()
+                no_state = no_future.result()
+        else:
+            yes_state = self.get_token_snapshot(
+                token_id=yes_token_id,
+                market_id=0,
+                outcome="YES",
+                outcome_index=0,
+                force_refresh=force_refresh,
+            )
+            no_state = _empty_state_payload("NO")
         return _panel_payload_from_state(
             market_id=0,
             local_market_id=None,
@@ -515,8 +539,36 @@ def _recent_lob_warm_requests(ctx: dict) -> list[Dict[str, Any]]:
     return requests
 
 
-def _dynamic_lob_warm_targets(ctx: dict) -> list[Dict[str, Any]]:
+def get_dynamic_lob_warm_targets(ctx: dict) -> list[Dict[str, Any]]:
     requests = _recent_lob_warm_requests(ctx)
+    direct_targets: list[Dict[str, Any]] = []
+    unresolved_requests: list[Dict[str, Any]] = []
+    for item in requests:
+        market_id = _int_or_none(item.get("marketId"))
+        yes_token_id = str(item.get("yesTokenId") or "").strip()
+        no_token_id = str(item.get("noTokenId") or "").strip()
+        if market_id is None or not yes_token_id or not no_token_id:
+            unresolved_requests.append(item)
+            continue
+        direct_targets.append({
+            "marketId": market_id,
+            "marketSlug": "",
+            "marketTitle": str(item.get("marketTitle") or ""),
+            "category": "dynamic",
+            "tags": [],
+            "conditionId": "",
+            "yesTokenId": yes_token_id,
+            "noTokenId": no_token_id,
+            "volume24h": 0,
+            "tradeCount24h": 0,
+            "topic": "dynamic",
+            "tier": "hot",
+            "priorityScore": "1000000",
+            "sampleIntervalSeconds": 15,
+            "retentionDays": 14,
+            "reason": "dynamic:recent-selection",
+        })
+    requests = unresolved_requests
     market_ids = sorted({
         int(item["marketId"])
         for item in requests
@@ -528,7 +580,7 @@ def _dynamic_lob_warm_targets(ctx: dict) -> list[Dict[str, Any]]:
         if str(item.get("yesTokenId") or "").strip()
     })
     if not market_ids and not token_ids:
-        return []
+        return direct_targets
     clauses: list[str] = []
     params: list[Any] = []
     if market_ids:
@@ -565,8 +617,8 @@ def _dynamic_lob_warm_targets(ctx: dict) -> list[Dict[str, Any]]:
             tuple(params),
         )
     except Exception:
-        return []
-    return [
+        return direct_targets
+    resolved_targets = [
         {
             "marketId": row.get("market_id"),
             "marketSlug": row.get("market_slug"),
@@ -588,6 +640,7 @@ def _dynamic_lob_warm_targets(ctx: dict) -> list[Dict[str, Any]]:
         for row in rows
         if row.get("market_id") is not None
     ]
+    return [*direct_targets, *resolved_targets]
 
 
 def _empty_book_side() -> Dict[str, Any]:
@@ -1222,7 +1275,7 @@ def get_lob_coverage_targets_payload(ctx: dict, *, limit: int = 250, topics: str
             context=worldcup_context,
         )
         policy_targets = [target.as_payload() for target in targets]
-        dynamic_targets = _dynamic_lob_warm_targets(ctx)
+        dynamic_targets = get_dynamic_lob_warm_targets(ctx)
         seen_market_ids: set[int] = set()
         payload_targets: list[Dict[str, Any]] = []
         for item in [*dynamic_targets, *policy_targets]:

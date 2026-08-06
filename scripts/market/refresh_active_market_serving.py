@@ -526,6 +526,8 @@ def refresh_active_market_serving(
     snapshots = _event_snapshots(events)
     conn = get_connection()
     try:
+        conn.execute("SET lock_timeout TO '5s'")
+        conn.execute("SET statement_timeout TO '120s'")
         matched = _matched_snapshots(conn, snapshots)
         if dry_run:
             write_stats = {
