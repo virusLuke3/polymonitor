@@ -37,6 +37,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'weather-alerts',
     label: 'Storms, Cyclones & Floods',
+    messageKey: 'atlas.layer.weatherAlerts',
     icon: 'storm',
     hint: 'ALERTS',
     categories: ['weather', 'natural-hazard'],
@@ -66,6 +67,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'earthquakes-volcanoes',
     label: 'Earthquakes & Volcanoes',
+    messageKey: 'atlas.layer.earthquakesVolcanoes',
     icon: 'earthquake',
     hint: 'GEO',
     categories: ['natural-hazard'],
@@ -93,6 +95,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'wildfires',
     label: 'Wildfires',
+    messageKey: 'atlas.layer.wildfires',
     icon: 'wildfire',
     hint: 'FIRE',
     categories: ['natural-hazard'],
@@ -120,6 +123,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'extreme-temperature',
     label: 'Extreme Temperature Alerts',
+    messageKey: 'atlas.layer.extremeTemperature',
     icon: 'heat',
     hint: 'TEMP',
     categories: ['weather', 'natural-hazard'],
@@ -147,6 +151,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'climate-anomalies',
     label: 'Major Weather Anomalies',
+    messageKey: 'atlas.layer.climateAnomalies',
     icon: 'anomaly',
     hint: 'ANOMALY',
     categories: ['weather', 'natural-hazard'],
@@ -171,6 +176,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'intel-hotspots',
     label: 'Intel Hotspots',
+    messageKey: 'atlas.layer.intelHotspots',
     icon: 'intel',
     hint: 'INTEL',
     categories: ['intel'],
@@ -224,6 +230,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'sanctions-country-risk',
     label: 'Sanctions & Country Risk',
+    messageKey: 'atlas.layer.countryRisk',
     icon: 'country-risk',
     hint: 'RISK',
     categories: ['sanctions', 'country-risk'],

@@ -53,6 +53,12 @@ describe('World Event Map layer registry', () => {
     }
   });
 
+  it('gives every selectable layer a localized control label', () => {
+    for (const layer of selectableWorldEventLayers()) {
+      expect(layer.messageKey).toMatch(/^atlas\.layer\./);
+    }
+  });
+
   it('maps hazards by hazard kind instead of the broad natural-hazard category', () => {
     const event = {
       id: 'earthquake:usgs:test',

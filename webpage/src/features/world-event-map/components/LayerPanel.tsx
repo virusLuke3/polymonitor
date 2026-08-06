@@ -112,49 +112,60 @@ export function LayerPanel({
     return next;
   }, [events]);
   const briefLayer = briefLayerId ? worldEventLayerById(briefLayerId) : undefined;
+  const activeCount = useMemo(() => items.filter((item) => item.enabled).length, [items]);
+
+  const toggleCollapsed = () => {
+    if (collapsed) {
+      onExpand();
+      return;
+    }
+    setBriefLayerId(null);
+    onCollapse();
+  };
 
   return (
     <Fragment>
-      {collapsed ? (
-        <button
-          type="button"
-          className="wm-layer-restore"
-          onClick={onExpand}
-          aria-label="Open layers panel"
-          aria-expanded="false"
-        >
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="m10 3 7 3.8-7 3.8-7-3.8L10 3Z" />
-            <path d="m3 10.2 7 3.8 7-3.8M3 13.6l7 3.4 7-3.4" />
-          </svg>
-          <span>LAYERS</span>
-          <strong>{items.filter((item) => item.enabled).length}/{items.length}</strong>
-        </button>
-      ) : (
-        <aside id="wm-layer-sidebar" className="wm-layer-sidebar">
-          <div className="wm-toggle-header">
-            <span>{title}</span>
-            <button
-              type="button"
-              className="wm-toggle-collapse"
-              aria-label="Collapse layers panel"
-              aria-controls="wm-layer-sidebar"
-              aria-expanded="true"
-              onClick={() => {
-                setBriefLayerId(null);
-                onCollapse();
-              }}
-            >
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5" /></svg>
-            </button>
-          </div>
+      <aside
+        id="wm-layer-sidebar"
+        className={`wm-layer-sidebar ${collapsed ? 'is-collapsed' : ''}`}
+        aria-label={title}
+      >
+        <div className="wm-toggle-header">
+          <span className="wm-layer-heading">{title}</span>
+          <span
+            className="wm-layer-status-orb"
+            role="status"
+            aria-label={activeSummary}
+            title={activeSummary}
+          >
+            {activeCount}
+          </span>
+          <button
+            type="button"
+            className="wm-toggle-collapse"
+            aria-label={collapsed ? 'Open layers panel' : 'Collapse layers panel'}
+            aria-controls="wm-layer-panel-body"
+            aria-expanded={!collapsed}
+            onClick={toggleCollapsed}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5" /></svg>
+          </button>
+        </div>
+        <div id="wm-layer-panel-body" className="wm-layer-panel-body" hidden={collapsed}>
           <input
             className="wm-layer-search"
             value={query}
             onInput={(event) => setQuery((event.currentTarget as HTMLInputElement).value)}
             placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
+            autoComplete="off"
+            spellcheck={false}
           />
-          <div className="wm-layer-list">
+          <div
+            className="wm-layer-list"
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+          >
             {filtered.length ? filtered.map((item) => {
               const actionLabel = getActionLabel(item);
               const briefOpen = briefLayerId === item.id;
@@ -188,8 +199,8 @@ export function LayerPanel({
             }) : <div className="wm-layer-empty">{emptyLabel}</div>}
           </div>
           <div className="wm-sidebar-footer">{activeSummary}</div>
-        </aside>
-      )}
+        </div>
+      </aside>
       {briefLayer && !collapsed ? (
         <LayerBrief
           layer={briefLayer}
