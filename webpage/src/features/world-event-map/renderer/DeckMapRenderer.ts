@@ -513,6 +513,7 @@ export class DeckMapRenderer implements MapRenderer {
         selectedEventId: this.state.selectedEventId,
         firstSeenAt: this.eventFirstSeenAt,
         pulseTime: this.hazardPulseTime,
+        zoom: this.state.zoom,
       });
     const interactionLayers = createEventInteractionLayers(
       this.events,
@@ -895,6 +896,8 @@ export class DeckMapRenderer implements MapRenderer {
         this.pulseEvents,
         this.state?.selectedEventId || null,
         this.eventFirstSeenAt,
+        Date.now(),
+        this.state?.zoom ?? 0,
       );
     if (!shouldPulse) {
       this.cancelHazardPulseLoop();
@@ -911,6 +914,8 @@ export class DeckMapRenderer implements MapRenderer {
           this.pulseEvents,
           this.state?.selectedEventId || null,
           this.eventFirstSeenAt,
+          Date.now(),
+          this.state?.zoom ?? 0,
         )
       ) {
         this.cancelHazardPulseLoop();

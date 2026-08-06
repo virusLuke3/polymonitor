@@ -11310,6 +11310,14 @@ a.wm-orderfilled-row {
   transform-origin: center;
 }
 
+.wm-world-event-svg-point-symbol {
+  fill: rgba(7, 11, 14, 0.9);
+  font: 800 8px var(--font-mono);
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
 .wm-world-event-svg-point.severity-warning,
 .wm-world-event-svg-point.severity-critical,
 .wm-world-event-svg-point.is-selected {
@@ -11348,7 +11356,7 @@ a.wm-orderfilled-row {
 
 .wm-world-event-svg-cluster text {
   fill: #fffade;
-  font: 800 10px var(--font-mono);
+  font: 800 9px var(--font-mono);
   text-anchor: middle;
   dominant-baseline: central;
   pointer-events: none;

@@ -22,7 +22,7 @@ import {
   hasAnimatedHazardPulse,
   selectEventPulseCandidates,
 } from './layerFactories/eventEmphasisLayers';
-import { EventClusterIndex } from './layerFactories/eventPointLayer';
+import { EventClusterIndex, hazardPointSymbol } from './layerFactories/eventPointLayer';
 import {
   aviationRouteMotionPoints,
   aviationRouteTone,
@@ -442,9 +442,9 @@ export class SvgMapRenderer implements MapRenderer {
       group.classList.add('wm-world-event-svg-cluster');
       group.setAttribute('role', 'button');
       group.setAttribute('tabindex', '0');
-      group.setAttribute('aria-label', `${cluster.count} mapped events. Zoom in to expand.`);
+      group.setAttribute('aria-label', `${cluster.count} ${cluster.label || 'mapped events'}. Zoom in to expand.`);
       const title = svgElement('title');
-      title.textContent = `${cluster.count} mapped events · ${cluster.severity.toUpperCase()} · click to expand`;
+      title.textContent = `${cluster.count} ${cluster.label || 'mapped events'} · ${cluster.severity.toUpperCase()} · click to expand`;
       const point = svgElement('circle');
       point.setAttribute('cx', String(x));
       point.setAttribute('cy', String(y));
@@ -453,7 +453,7 @@ export class SvgMapRenderer implements MapRenderer {
       const label = svgElement('text');
       label.setAttribute('x', String(x));
       label.setAttribute('y', String(y));
-      label.textContent = String(cluster.count);
+      label.textContent = `${cluster.badge || ''}${cluster.count}`;
       const expand = () => this.callbacks?.onCameraChange({
         center: { lon: cluster.coordinates[0], lat: cluster.coordinates[1] },
         zoom: clampWorldEventZoom(cluster.expansionZoom),
@@ -491,6 +491,16 @@ export class SvgMapRenderer implements MapRenderer {
       point.classList.add('wm-world-event-svg-point');
       this.decorateEventElement(point, event, false);
       this.eventLayer.append(point);
+      const symbolValue = hazardPointSymbol(event);
+      if (symbolValue) {
+        const symbol = svgElement('text');
+        symbol.setAttribute('x', String(x));
+        symbol.setAttribute('y', String(y));
+        symbol.setAttribute('aria-hidden', 'true');
+        symbol.classList.add('wm-world-event-svg-point-symbol');
+        symbol.textContent = symbolValue;
+        this.eventLayer.append(symbol);
+      }
     }
     for (const event of aviation.hubs) {
       if (event.geometry?.type !== 'Point') continue;
@@ -620,6 +630,7 @@ export class SvgMapRenderer implements MapRenderer {
         this.state?.selectedEventId || null,
         this.eventFirstSeenAt,
         this.hazardPulseTime,
+        this.state?.zoom ?? 0,
       );
       for (const target of targets.status) {
         const wave = 0.5 + 0.5 * Math.sin(
@@ -847,6 +858,8 @@ export class SvgMapRenderer implements MapRenderer {
         this.pulseEvents,
         this.state?.selectedEventId || null,
         this.eventFirstSeenAt,
+        Date.now(),
+        this.state?.zoom ?? 0,
       );
     if (!shouldPulse) {
       this.cancelHazardPulseLoop();

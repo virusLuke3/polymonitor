@@ -87,7 +87,7 @@ describe('world event layer factories', () => {
     expect((layers as Layer[]).some((layer) => layer.id === 'world-event-points')).toBe(true);
   });
 
-  it('keeps earthquakes and volcanoes individually visible at world zoom like WorldMonitor', () => {
+  it('clusters dense earthquakes at world zoom and preserves hazard semantics', () => {
     const events = [
       hazardPoint('eq:a', 'earthquake', 10, 10),
       hazardPoint('eq:b', 'earthquake', 10.1, 10.1),
@@ -95,8 +95,25 @@ describe('world event layer factories', () => {
       hazardPoint('vo:a', 'volcano', 11, 11),
     ];
     const clustered = clusterEventPoints(events, 1.25, null);
-    expect(clustered.clusters).toHaveLength(0);
-    expect(clustered.singles.map((event) => event.id)).toEqual(['eq:a', 'eq:b', 'eq:c', 'vo:a']);
+    expect(clustered.clusters).toHaveLength(1);
+    expect(clustered.clusters[0]?.count).toBe(3);
+    expect(clustered.clusters[0]?.label).toBe('earthquake');
+    expect(clustered.clusters[0]?.badge).toBe('EQ');
+    expect(clustered.singles).toHaveLength(0);
+  });
+
+  it('uses category symbols and lower opacity for globally visible hazard singles', () => {
+    const warning = hazardPoint('volcano:warning', 'volcano', 10, 10, 'warning');
+    const state = { ...defaultWorldEventMapState(), zoom: 1.25 };
+    const layers = createWorldEventLayers([warning], state) as Layer[];
+    const point = layers.find((layer) => layer.id === 'world-event-points');
+    const symbols = layers.find((layer) => layer.id === 'world-event-point-symbols');
+    const pointProps = point?.props as unknown as Record<string, unknown>;
+    const fill = (pointProps.getFillColor as (event: GeoEvent) => number[])(warning);
+
+    expect(symbols).toBeDefined();
+    expect(fill[3]).toBeLessThan(200);
+    expect(pointProps.radiusMaxPixels).toBe(12);
   });
 
   it('does not combine different conflict types into one generic cluster', () => {
@@ -413,6 +430,14 @@ describe('world event layer factories', () => {
     expect(targets.status.find((target) => target.event.id === critical.id)?.strength).toBe('strong');
     expect(targets.recent).toHaveLength(1);
     expect(targets.recent[0]?.fade).toBeCloseTo(0.5);
+  });
+
+  it('suppresses warning motion at world zoom while retaining critical pulses', () => {
+    const warning = hazardPoint('hazard:warning:global', 'earthquake', 10, 10, 'warning');
+    const critical = hazardPoint('hazard:critical:global', 'volcano', 20, 20, 'critical');
+    const targets = hazardPulseTargets([warning, critical], null, new Map(), 100_000, 1.25);
+
+    expect(targets.status.map((target) => target.event.id)).toEqual([critical.id]);
   });
 
   it('never pulses low-priority FIRMS cells and only animates major aggregates', () => {

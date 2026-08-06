@@ -110,6 +110,7 @@ export function hazardPulseTargets(
   selectedEventId: string | null,
   firstSeenAt: ReadonlyMap<string, number>,
   now: number,
+  zoom = Number.POSITIVE_INFINITY,
 ) {
   const status: HazardPulseTarget[] = [];
   const recent: RecentPulseTarget[] = [];
@@ -127,13 +128,13 @@ export function hazardPulseTargets(
     if (!target) continue;
     if (selected || majorAviationInterruption || (eligibleHazard && event.severity === 'critical')) {
       status.push({ ...target, strength: 'strong' });
-    } else if (eligibleHazard && event.severity === 'warning') {
+    } else if (eligibleHazard && event.severity === 'warning' && zoom >= 3) {
       status.push({ ...target, strength: 'warning' });
     }
     const firstSeen = firstSeenAt.get(event.id);
     const age = firstSeen == null ? Number.POSITIVE_INFINITY : Math.max(0, now - firstSeen);
     if (eligibleHazard
-      && (event.severity === 'warning' || event.severity === 'critical')
+      && (event.severity === 'critical' || (event.severity === 'warning' && zoom >= 3))
       && age < RECENT_EVENT_PULSE_MS) {
       recent.push({ ...target, fade: Math.max(0, 1 - age / RECENT_EVENT_PULSE_MS) });
     }
@@ -144,7 +145,9 @@ export function hazardPulseTargets(
   );
   status.sort((left, right) => priority(right) - priority(left));
   recent.sort((left, right) => priority(right) - priority(left));
-  return { status: status.slice(0, 120), recent: recent.slice(0, 60) };
+  const statusBudget = zoom < 2.5 ? 18 : zoom < 4 ? 50 : 120;
+  const recentBudget = zoom < 2.5 ? 10 : zoom < 4 ? 25 : 60;
+  return { status: status.slice(0, statusBudget), recent: recent.slice(0, recentBudget) };
 }
 
 export function hasAnimatedHazardPulse(
@@ -152,8 +155,9 @@ export function hasAnimatedHazardPulse(
   selectedEventId: string | null,
   firstSeenAt: ReadonlyMap<string, number>,
   now = Date.now(),
+  zoom = Number.POSITIVE_INFINITY,
 ) {
-  const targets = hazardPulseTargets(events, selectedEventId, firstSeenAt, now);
+  const targets = hazardPulseTargets(events, selectedEventId, firstSeenAt, now, zoom);
   return targets.status.length > 0 || targets.recent.length > 0;
 }
 
@@ -162,13 +166,15 @@ export function createEventPulseLayers({
   selectedEventId,
   firstSeenAt,
   pulseTime,
+  zoom = Number.POSITIVE_INFINITY,
 }: {
   events: readonly GeoEvent[];
   selectedEventId: string | null;
   firstSeenAt: ReadonlyMap<string, number>;
   pulseTime: number;
+  zoom?: number;
 }): LayersList {
-  const { status, recent } = hazardPulseTargets(events, selectedEventId, firstSeenAt, pulseTime);
+  const { status, recent } = hazardPulseTargets(events, selectedEventId, firstSeenAt, pulseTime, zoom);
   const layers: Layer[] = [];
   if (status.length) {
     layers.push(new ScatterplotLayer<HazardPulseTarget>({
