@@ -16953,23 +16953,22 @@ a.wm-orderfilled-row {
 }
 
 .wm-focused-oracle-feed .wm-oracle-focused-status-list {
-  grid-template-columns: 1fr !important;
-  gap: 0 !important;
-  border: 1px solid var(--wm-terminal-border) !important;
-  border-radius: 4px !important;
-  overflow: hidden !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+  padding: 0 !important;
 }
 
 .wm-focused-oracle-feed .wm-oracle-focused-status-list div {
-  min-height: 34px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--wm-terminal-divider) !important;
-  border-radius: 0 !important;
-  background: transparent !important;
+  min-height: 48px !important;
+  padding: 7px 8px !important;
+  border: 1px solid var(--wm-terminal-border) !important;
+  border-radius: 4px !important;
+  background: #090d12 !important;
 }
 
-.wm-focused-oracle-feed .wm-oracle-lifecycle {
-  display: none !important;
+.wm-focused-oracle-feed .wm-oracle-focused-status-list div.wide {
+  grid-column: 1 / -1;
+  min-height: 36px !important;
 }
 
 .wm-focused-oracle-feed .wm-oracle-focused-card,
@@ -16979,6 +16978,163 @@ a.wm-orderfilled-row {
   border-radius: 4px !important;
   background: #0b1017 !important;
   box-shadow: none !important;
+}
+
+.wm-focused-oracle-feed .wm-oracle-shell.focused {
+  display: grid !important;
+  gap: 8px !important;
+  padding: 0 !important;
+}
+
+.wm-oracle-stage-card {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--wm-terminal-border);
+  border-left: 3px solid var(--wm-terminal-muted);
+  border-radius: 4px;
+  background: #090d12;
+}
+
+.wm-oracle-stage-card.positive {
+  border-left-color: var(--wm-terminal-positive);
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.08), transparent 58%), #090d12;
+}
+
+.wm-oracle-stage-card.warning {
+  border-left-color: var(--wm-terminal-warning);
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.08), transparent 58%), #090d12;
+}
+
+.wm-oracle-stage-heading,
+.wm-oracle-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: var(--wm-terminal-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.wm-oracle-stage-heading em,
+.wm-oracle-section-heading em {
+  color: var(--wm-terminal-positive);
+  font-style: normal;
+}
+
+.wm-oracle-stage-card > strong {
+  color: var(--wm-terminal-primary);
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 760;
+  letter-spacing: 0.25px;
+}
+
+.wm-oracle-stage-card > p {
+  margin: 0;
+  color: var(--wm-terminal-secondary);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.wm-focused-oracle-feed .wm-oracle-focused-status-list strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  white-space: normal !important;
+}
+
+.wm-focused-oracle-feed .wm-oracle-focused-status-list small {
+  color: var(--wm-terminal-muted);
+  font-family: var(--font-body);
+  font-size: 9px;
+  font-weight: 520;
+}
+
+.wm-focused-oracle-feed .wm-oracle-lifecycle {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding: 0 !important;
+  overflow: hidden;
+  border-radius: 4px !important;
+}
+
+.wm-focused-oracle-feed .wm-oracle-lifecycle-step {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 10px minmax(20px, auto) 12px;
+  gap: 3px;
+  align-content: center;
+  justify-items: center;
+  min-height: 64px;
+  padding: 6px 2px;
+  text-align: center;
+}
+
+.wm-focused-oracle-feed .wm-oracle-lifecycle-step + .wm-oracle-lifecycle-step {
+  border-top: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.wm-focused-oracle-feed .wm-oracle-lifecycle-step span {
+  justify-self: center;
+}
+
+.wm-focused-oracle-feed .wm-oracle-lifecycle-step strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 9px;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.wm-focused-oracle-feed .wm-oracle-lifecycle-step em {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-focused-oracle-feed .wm-oracle-focused-card {
+  gap: 7px !important;
+  padding: 9px !important;
+}
+
+.wm-focused-oracle-feed .wm-oracle-awaiting-badge.linked {
+  border-color: rgba(34, 197, 94, 0.32);
+  background: rgba(34, 197, 94, 0.08);
+  color: var(--wm-terminal-positive);
+}
+
+.wm-focused-oracle-feed .wm-oracle-focused-table strong {
+  text-align: right;
+}
+
+.wm-oracle-recent-events {
+  display: grid;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+@media (max-width: 480px) {
+  .wm-focused-oracle-feed .wm-oracle-focused-status-list {
+    grid-template-columns: 1fr !important;
+  }
+
+  .wm-focused-oracle-feed .wm-oracle-focused-status-list div.wide {
+    grid-column: auto;
+  }
 }
 
 .wm-focused-market-row .wm-focus-book-imbalance {

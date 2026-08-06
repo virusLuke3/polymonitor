@@ -47,34 +47,76 @@ function focusedOraclePayload(ctx: PanelRenderContext): OraclePayload | null {
   };
 }
 
+function oracleIdentity(ctx: PanelRenderContext, payload: OraclePayload) {
+  const identity = ctx.bundle?.identity;
+  const market = ctx.bundle?.market || ctx.selectedMarket;
+  return {
+    questionId: payload.questionId || identity?.questionId || market?.questionId || null,
+    conditionId: payload.conditionId || identity?.conditionId || market?.conditionId || null,
+    oracle: payload.oracle || identity?.oracle || market?.oracle || null,
+    gammaMarketId: payload.gammaMarketId || identity?.gammaMarketId || market?.gammaMarketId || null,
+  };
+}
+
+function oracleIsLinked(ctx: PanelRenderContext, payload: OraclePayload) {
+  const identity = oracleIdentity(ctx, payload);
+  return Boolean(identity.questionId || identity.conditionId || identity.oracle);
+}
+
 function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload, i18n: OracleI18n) {
   const { t } = i18n;
   const marketTitle = ctx.bundle?.market?.title || ctx.selectedMarket?.title || ctx.bundle?.group?.title || ctx.selectedMarketGroupDetail?.title || ctx.selectedMarketGroup?.title || t('atlasOracle.selectedMarket');
-  const status = payload.completionStatus || (payload.isFinal ? 'SETTLED' : payload.isTradingClosed ? 'CLOSED' : 'OPEN');
-  const outcome = payload.settlementOutcome && payload.settlementOutcome !== 'UNKNOWN' ? payload.settlementOutcome : t('atlasOracle.awaiting');
-  const bound = payload.questionId || payload.conditionId || payload.gammaMarketId ? t('atlasOracle.yes') : t('atlasOracle.no');
-  const updatedAt = ctx.selectedMarket?.endDate || ctx.bundle?.market?.endDate || null;
+  const identity = oracleIdentity(ctx, payload);
+  const linked = oracleIsLinked(ctx, payload);
+  const currentStatus = String(payload.currentStatus || payload.completionStatus || '').toLowerCase();
+  const tradingClosed = Boolean(payload.isTradingClosed || payload.isResolved || payload.isFinal || currentStatus.includes('closed') || currentStatus.includes('ended'));
+  const resolved = Boolean(payload.isResolved || payload.isFinal);
+  const outcome = payload.settlementOutcome && payload.settlementOutcome !== 'UNKNOWN' ? payload.settlementOutcome : t('atlasOracle.pendingOutcome');
+  const updatedAt = ctx.bundle?.servingUpdatedAt || ctx.bundle?.generatedAt || null;
   const createdAt = ctx.bundle?.market?.createdAt || ctx.selectedMarket?.createdAt || ctx.bundle?.group?.createdAt || ctx.selectedMarketGroupDetail?.createdAt || ctx.selectedMarketGroup?.createdAt || null;
   const closedAt = ctx.bundle?.market?.endDate || ctx.selectedMarket?.endDate || ctx.bundle?.group?.endDate || ctx.selectedMarketGroupDetail?.endDate || ctx.selectedMarketGroup?.endDate || null;
   const proposedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('propose'));
+  const disputedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('dispute'));
   const finalizedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('settle') || event.isFinal);
+  const stage = resolved
+    ? { label: t('atlasOracle.stageFinalized'), detail: t('atlasOracle.finalizedHint', { outcome }), tone: 'positive' }
+    : disputedEvent
+      ? { label: t('atlasOracle.stageDisputed'), detail: t('atlasOracle.disputedHint'), tone: 'warning' }
+      : proposedEvent
+        ? { label: t('atlasOracle.stageProposed'), detail: t('atlasOracle.proposedHint'), tone: 'warning' }
+        : tradingClosed
+          ? { label: t('atlasOracle.stageAwaiting'), detail: t('atlasOracle.awaitingHint'), tone: 'warning' }
+          : {
+              label: t('atlasOracle.stageTrading'),
+              detail: closedAt
+                ? t('atlasOracle.tradingHintWithClose', { time: i18n.formatRelativeTime(closedAt) })
+                : t('atlasOracle.tradingHint'),
+              tone: 'positive',
+            };
   const lifecycle = [
-    { label: t('atlasOracle.created'), time: createdAt, active: true, done: Boolean(createdAt) },
-    { label: t('atlasOracle.tradingOpen'), time: createdAt, active: !payload.isTradingClosed && !payload.isResolved, done: !payload.isTradingClosed && !payload.isResolved },
-    { label: t('atlasOracle.closed'), time: closedAt, active: payload.isTradingClosed && !payload.isResolved, done: payload.isTradingClosed || payload.isResolved },
-    { label: t('atlasOracle.awaiting'), time: closedAt, active: payload.isTradingClosed && !payload.isResolved, done: Boolean(proposedEvent || payload.isResolved) },
-    { label: t('atlasOracle.submitted'), time: proposedEvent?.eventTime || null, active: Boolean(proposedEvent && !payload.isFinal), done: Boolean(proposedEvent) },
-    { label: t('atlasOracle.finalized'), time: finalizedEvent?.eventTime || null, active: Boolean(payload.isFinal), done: Boolean(payload.isFinal) },
+    { label: t('atlasOracle.created'), time: createdAt, active: false, done: Boolean(createdAt) },
+    { label: t('atlasOracle.tradingOpen'), time: createdAt, active: !tradingClosed, done: Boolean(createdAt) },
+    { label: tradingClosed ? t('atlasOracle.closed') : t('atlasOracle.closes'), time: closedAt, active: tradingClosed && !proposedEvent && !resolved, done: tradingClosed },
+    { label: proposedEvent ? t('atlasOracle.submitted') : t('atlasOracle.proposed'), time: proposedEvent?.eventTime || null, active: Boolean(proposedEvent && !disputedEvent && !resolved), done: Boolean(proposedEvent) },
+    { label: t('atlasOracle.finalized'), time: finalizedEvent?.eventTime || null, active: resolved, done: resolved },
   ];
   return (
     <div className="wm-oracle-shell focused">
+      <section className={`wm-oracle-stage-card ${stage.tone}`} aria-label={t('atlasOracle.currentStage')}>
+        <div className="wm-oracle-stage-heading">
+          <span>{t('atlasOracle.currentStage')}</span>
+          <em>{linked ? t('atlasOracle.linked') : t('atlasOracle.unlinked')}</em>
+        </div>
+        <strong>{stage.label}</strong>
+        <p>{stage.detail}</p>
+      </section>
       <div className="wm-oracle-focused-status-list" aria-label={t('atlasOracle.statusTitle')}>
-        <div><span>{t('atlasOracle.status')}</span><strong>{status}</strong></div>
-        <div><span>{t('atlasOracle.resolution')}</span><strong>{payload.isResolved ? outcome : t('atlasOracle.unresolved')}</strong></div>
-        <div><span>{t('atlasOracle.bound')}</span><strong>{bound}</strong></div>
-        <div><span>{t('atlasOracle.events')}</span><strong>{i18n.formatNumber(payload.timeline?.length || 0)}</strong></div>
+        <div><span>{t('atlasOracle.resolution')}</span><strong>{resolved ? outcome : t('atlasOracle.pendingOutcome')}</strong></div>
+        <div><span>{t('atlasOracle.events')}</span><strong>{i18n.formatNumber(payload.timeline?.length || 0)} <small>{payload.timeline?.length ? t('atlasOracle.onchain') : t('atlasOracle.noneYet')}</small></strong></div>
+        <div className="wide"><span>{t('atlasOracle.dataUpdated')}</span><strong>{updatedAt ? i18n.formatRelativeTime(updatedAt) : t('atlasOracle.notAvailable')}</strong></div>
       </div>
-      <div className="wm-oracle-lifecycle" aria-label={t('atlasOracle.statusTitle')}>
+      <div className="wm-oracle-section-heading"><span>{t('atlasOracle.lifecycle')}</span></div>
+      <div className="wm-oracle-lifecycle" aria-label={t('atlasOracle.lifecycle')}>
         {lifecycle.map((step) => (
           <div className={`wm-oracle-lifecycle-step${step.done ? ' done' : ''}${step.active ? ' active' : ''}`} key={step.label}>
             <span aria-hidden="true" />
@@ -85,17 +127,17 @@ function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload, i1
       </div>
       <article className="wm-oracle-focused-card">
         <div className="wm-oracle-focused-heading">
-          <span className={`wm-oracle-stage-dot ${payload.isFinal ? 'positive' : payload.isTradingClosed ? 'warning' : 'neutral'}`} aria-hidden="true" />
-          <strong>{t('atlasOracle.market')}</strong>
-          <em className="wm-oracle-awaiting-badge">{payload.isResolved ? t('atlasOracle.resolved') : t('atlasOracle.awaitingLower')}</em>
+          <span className={`wm-oracle-stage-dot ${linked ? 'positive' : 'warning'}`} aria-hidden="true" />
+          <strong>{t('atlasOracle.resolutionConnection')}</strong>
+          <em className={`wm-oracle-awaiting-badge ${linked ? 'linked' : ''}`}>{linked ? t('atlasOracle.linked') : t('atlasOracle.unlinked')}</em>
         </div>
         <div className="wm-oracle-market-title">{marketTitle}</div>
         <div className="wm-oracle-focused-table" aria-label={t('atlasOracle.details')}>
-          <div><span>{t('atlasOracle.source')}</span><strong>{payload.settlementSource || 'market'}</strong></div>
-          <div><span>QID</span><strong>{shortHash(payload.questionId || payload.conditionId || '', 8, 5) || '--'}</strong></div>
-          <div><span>Oracle</span><strong>{shortHash(payload.oracle || '', 8, 5) || '--'}</strong></div>
-          <div><span>{t('atlasOracle.updated')}</span><strong>{i18n.formatRelativeTime(updatedAt)}</strong></div>
-          <div><span>{t('atlasOracle.market')}</span><strong>{payload.localMarketId || payload.marketId ? `#${payload.localMarketId || payload.marketId}` : '--'}</strong></div>
+          <div><span>QID</span><strong title={identity.questionId || undefined}>{shortHash(identity.questionId || '', 8, 5) || t('atlasOracle.notAvailable')}</strong></div>
+          <div><span>{t('atlasOracle.condition')}</span><strong title={identity.conditionId || undefined}>{shortHash(identity.conditionId || '', 8, 5) || t('atlasOracle.notAvailable')}</strong></div>
+          <div><span>Oracle</span><strong title={identity.oracle || undefined}>{shortHash(identity.oracle || '', 8, 5) || t('atlasOracle.notAvailable')}</strong></div>
+          <div><span>{t('atlasOracle.source')}</span><strong>{payload.settlementSource || t('atlasOracle.marketRegistry')}</strong></div>
+          <div><span>{t('atlasOracle.marketId')}</span><strong>{payload.localMarketId || payload.marketId ? `#${payload.localMarketId || payload.marketId}` : t('atlasOracle.notAvailable')}</strong></div>
         </div>
       </article>
     </div>
@@ -132,13 +174,23 @@ function OracleFeedPanel({ ctx }: { ctx: PanelRenderContext }) {
   return (
     <Panel
       title={focused ? t('atlasOracle.statusTitle') : t('atlasOracle.feedTitle')}
-      badge={focused ? t('atlasOracle.bound') : t('atlasOracle.live')}
+      badge={focused ? (oracleIsLinked(ctx, focused) ? t('atlasOracle.linked') : t('atlasOracle.unlinked')) : t('atlasOracle.live')}
       status="live"
       count={focused ? (focused.timeline?.length || 0) : globalOracle(ctx).length}
       className="wm-oracle-feed-panel"
     >
       {focused
-        ? (focused.timeline?.length ? oracleList(focused.timeline, 10, 'timeline', copy) : focusedOracleStatus(ctx, focused, i18n))
+        ? (
+            <>
+              {focusedOracleStatus(ctx, focused, i18n)}
+              {focused.timeline?.length ? (
+                <section className="wm-oracle-recent-events">
+                  <div className="wm-oracle-section-heading"><span>{t('atlasOracle.recentEvents')}</span><em>{i18n.formatNumber(focused.timeline.length)}</em></div>
+                  {oracleList(focused.timeline, 6, 'timeline', copy)}
+                </section>
+              ) : null}
+            </>
+          )
         : oracleList(events, 10, 'feed', copy)}
     </Panel>
   );

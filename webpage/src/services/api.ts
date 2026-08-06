@@ -936,9 +936,32 @@ function normalizeMarketBundlePayload(payload: MarketDetailBundlePayload, market
         }
       : null
   );
+  const oracleSource = payload.oracle || null;
+  const oracleSummary = oracleSource?.summary || null;
+  const identity = payload.identity || null;
+  const oracle = oracleSource || payload.oracleEvents || identity
+    ? {
+        ...(oracleSource || {}),
+        marketId: Number(oracleSource?.marketId ?? identity?.marketId ?? marketId),
+        localMarketId: Number(oracleSource?.localMarketId ?? identity?.localMarketId ?? marketId),
+        gammaMarketId: oracleSource?.gammaMarketId ?? identity?.gammaMarketId ?? payload.market?.gammaMarketId ?? null,
+        questionId: oracleSource?.questionId ?? identity?.questionId ?? payload.market?.questionId ?? null,
+        conditionId: oracleSource?.conditionId ?? identity?.conditionId ?? payload.market?.conditionId ?? null,
+        oracle: oracleSource?.oracle ?? identity?.oracle ?? payload.market?.oracle ?? null,
+        currentStatus: oracleSource?.currentStatus ?? payload.market?.status ?? null,
+        completionStatus: oracleSource?.completionStatus ?? oracleSummary?.completionStatus ?? null,
+        isTradingClosed: oracleSource?.isTradingClosed ?? oracleSummary?.isTradingClosed ?? false,
+        isResolved: oracleSource?.isResolved ?? oracleSummary?.isResolved ?? false,
+        isFinal: oracleSource?.isFinal ?? oracleSummary?.isFinal ?? false,
+        settlementOutcome: oracleSource?.settlementOutcome ?? oracleSummary?.settlementOutcome ?? null,
+        settlementSource: oracleSource?.settlementSource ?? oracleSummary?.settlementSource ?? null,
+        summary: oracleSummary,
+        timeline: oracleSource?.timeline || payload.oracleEvents || [],
+      }
+    : null;
   return {
     market: payload.market || null,
-    identity: payload.identity || null,
+    identity,
     diagnostics: payload.diagnostics || null,
     health: payload.health || null,
     evidence: payload.evidence || null,
@@ -947,15 +970,7 @@ function normalizeMarketBundlePayload(payload: MarketDetailBundlePayload, market
     price: payload.price || null,
     chart,
     trades: payload.trades || [],
-    oracle: payload.oracle || (
-      payload.oracleEvents
-        ? {
-            marketId,
-            localMarketId: marketId,
-            timeline: payload.oracleEvents,
-          }
-        : null
-    ),
+    oracle,
     content: payload.content || null,
     lob: payload.lob || null,
     servingSource: payload.servingSource || null,
