@@ -285,7 +285,11 @@ export class EventClusterIndex {
     viewport: [number, number, number, number] = WORLD_VIEWPORT,
   ) {
     const normalizedZoom = Math.max(0, Math.floor(zoom));
-    const key = `${normalizedZoom}|${selectedEventId || ''}|${viewport.map((value) => value.toFixed(3)).join(':')}`;
+    const disclosureTier = disclosureTierForZoom(zoom);
+    // Supercluster only needs integer zooms, but disclosure changes at 2.5 and
+    // 4.0. Include that tier so crossing 2.5 cannot reuse a world-view result
+    // until the next integer zoom.
+    const key = `${normalizedZoom}|${disclosureTier}|${selectedEventId || ''}|${viewport.map((value) => value.toFixed(3)).join(':')}`;
     if (key === this.queryKey && this.queryResult) return this.queryResult;
     const selected = selectedEventId ? this.eventById.get(selectedEventId) : undefined;
     const singles: GeoEvent[] = selected ? [selected] : [];
@@ -303,7 +307,6 @@ export class EventClusterIndex {
     for (const bucket of this.buckets) {
       const layer = worldEventLayerById(bucket.layerId);
       if (!layer || zoom < layer.minZoom) continue;
-      const disclosureTier = disclosureTierForZoom(zoom);
       for (const feature of bucket.index.getClusters(viewport, normalizedZoom)) {
         if (!('cluster' in feature.properties)) {
           const event = bucket.eventById.get(feature.properties.eventId);
@@ -312,17 +315,12 @@ export class EventClusterIndex {
         }
         const clusterId = Number(feature.properties.cluster_id);
         const properties = feature.properties as typeof feature.properties & ClusterAggregateProperties;
-        const visibleCount = disclosureTier === 0
-          ? Number(properties.majorCount || 0)
-          : disclosureTier === 1
-            ? Number(properties.contextCount || 0)
-            : Number(feature.properties.point_count);
-        if (visibleCount <= 0) continue;
-        const representativeId = disclosureTier === 0
-          ? properties.representativeMajorEventId
-          : disclosureTier === 1
-            ? properties.representativeContextEventId
-            : properties.representativeEventId;
+        // Progressive disclosure controls standalone points, labels and heavy
+        // footprints. A cluster is the bounded world-view representation of
+        // every active event it contains; removing watch/info leaves from the
+        // aggregate made a healthy 500-event feed look empty.
+        const visibleCount = Number(feature.properties.point_count);
+        const representativeId = properties.representativeEventId;
         const representative = bucket.eventById.get(representativeId)
           || bucket.eventById.get(properties.representativeEventId)
           || bucket.eventById.values().next().value as GeoEvent | undefined;
@@ -330,17 +328,12 @@ export class EventClusterIndex {
         const leaves = bucket.index.getLeaves(clusterId, MAX_CLUSTER_LEAVES);
         const visibleLeaves = leaves
           .map((leaf) => bucket.eventById.get(leaf.properties.eventId))
-          .filter((event): event is GeoEvent => event != null)
-          .filter((event) => eventDisclosureTier(event) <= disclosureTier);
+          .filter((event): event is GeoEvent => event != null);
         if (visibleCount === 1) {
           addVisible(representative);
           continue;
         }
-        const severityRank = disclosureTier === 0
-          ? properties.majorSeverityRank
-          : disclosureTier === 1
-            ? properties.contextSeverityRank
-            : properties.severityRank;
+        const severityRank = properties.severityRank;
         const severity = severityFromRank(Number(severityRank || 0));
         const [red, green, blue] = SEVERITY_COLORS[severity];
         clusters.push({

@@ -19,10 +19,12 @@ export interface WorldEventMapState {
   aviationRiskSource: AviationRiskSource;
 }
 
-// v7 restores the bounded trunk aviation reference for existing visitors.
+// v8 resets the map surface after the world-view disclosure regression. It
+// restores the bounded trunk aviation reference and the corrected semantic
+// cluster defaults without inheriting a stale v7 layer selection.
 // Full topology and live-aircraft detail remain Aviation Lens choices, while
 // the default retains low-contrast route runners and illustrative aircraft.
-export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v7';
+export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v8';
 export const WORLD_EVENT_TIME_RANGES: readonly WorldEventTimeRange[] = ['1h', '6h', '24h', '48h', '7d', 'all'];
 export const WORLD_EVENT_SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 export const AVIATION_LENS_MODES: readonly AviationLensMode[] = ['all', 'trunk', 'watch'];

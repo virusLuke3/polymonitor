@@ -136,6 +136,39 @@ describe('world event layer factories', () => {
     expect(eventVisibleAtZoom(info, 1.25, info.id)).toBe(true);
   });
 
+  it('keeps lower-priority events represented by semantic clusters at world zoom', () => {
+    const events = [
+      hazardPoint('eq:info-a', 'earthquake', 10, 10, 'info'),
+      hazardPoint('eq:info-b', 'earthquake', 10.1, 10.1, 'info'),
+      hazardPoint('eq:watch', 'earthquake', 10.2, 10.2, 'watch'),
+    ];
+    const clustered = clusterEventPoints(events, 1.25, null);
+
+    expect(clustered.singles).toHaveLength(0);
+    expect(clustered.clusters).toHaveLength(1);
+    expect(clustered.clusters[0]).toMatchObject({
+      count: 3,
+      severity: 'watch',
+      symbol: 'earthquake',
+    });
+    expect(clustered.clusters[0]?.eventIds).toHaveLength(3);
+  });
+
+  it('invalidates the query cache when zoom crosses a disclosure boundary', () => {
+    const events = [
+      hazardPoint('volcano:watch-a', 'volcano', 10, 10, 'watch'),
+      hazardPoint('volcano:watch-b', 'volcano', 30, 20, 'watch'),
+    ];
+    const index = new EventClusterIndex();
+    index.update(events);
+
+    expect(index.query(2.49, null).singles).toHaveLength(0);
+    expect(index.query(2.5, null).singles.map((event) => event.id)).toEqual([
+      'volcano:watch-a',
+      'volcano:watch-b',
+    ]);
+  });
+
   it('represents official hazard areas as semantic markers and clusters at world zoom', () => {
     const events = [
       hazardArea('area:a', 10, 10, 'warning'),
