@@ -2179,6 +2179,7 @@ function WorldMonitorApp() {
                 )}
                 onToggle={toggleLayer}
                 onCollapse={() => setShowPanelLibrary(false)}
+                onExpand={() => setShowPanelLibrary(true)}
               />
 
               <div className="wm-globe-hero">

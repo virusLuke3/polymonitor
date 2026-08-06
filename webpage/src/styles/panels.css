@@ -12024,77 +12024,268 @@ a.wm-orderfilled-row {
   font-family: var(--font-mono);
 }
 
+.wm-world-event-list.is-open {
+  top: 8px;
+  right: 92px;
+}
+
 .wm-world-event-list-toggle {
-  display: block;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 7px;
   margin-left: auto;
-  padding: 5px 8px;
-  border: 1px solid rgba(115, 216, 255, 0.28);
-  border-radius: 4px;
-  background: rgba(4, 10, 14, 0.9);
-  color: #73d8ff;
-  font: 800 8px/1.2 var(--font-mono);
-  letter-spacing: 0.6px;
+  padding: 0 13px;
+  border: 1px solid rgba(115, 216, 255, 0.46);
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(8, 22, 28, 0.96), rgba(3, 10, 14, 0.96));
+  color: #9ce5ff;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38), inset 0 1px rgba(255, 255, 255, 0.06);
+  font: 800 10px/1.2 var(--font-mono);
+  letter-spacing: 0.72px;
   cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+  touch-action: manipulation;
+}
+
+.wm-world-event-list-toggle:hover,
+.wm-world-event-list-toggle:focus-visible,
+.wm-world-event-list.is-open .wm-world-event-list-toggle {
+  outline: 2px solid transparent;
+  border-color: rgba(115, 216, 255, 0.82);
+  background: linear-gradient(180deg, rgba(13, 35, 45, 0.98), rgba(4, 16, 22, 0.98));
+  color: #d7f5ff;
+}
+
+.wm-world-event-list-toggle strong {
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .wm-world-event-list > section {
-  width: min(360px, calc(100vw - 32px));
-  max-height: min(390px, 48vh);
-  margin-bottom: 6px;
+  display: flex;
+  width: min(500px, calc(100vw - 32px));
+  max-height: min(650px, 72vh);
+  min-height: min(520px, 68vh);
+  flex-direction: column;
+  margin-bottom: 8px;
   overflow: hidden;
-  border: 1px solid rgba(115, 216, 255, 0.24);
-  border-radius: 8px;
-  background: rgba(5, 10, 13, 0.96);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.58);
+  border: 1px solid rgba(115, 216, 255, 0.34);
+  border-radius: 10px;
+  background: rgba(5, 10, 13, 0.985);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.68), inset 0 1px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(14px);
+}
+
+.wm-world-event-list.is-open > section {
+  height: calc(100% - 52px);
+  min-height: 0;
+  max-height: none;
 }
 
 .wm-world-event-list > section > header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 10px 11px 8px;
+  gap: 12px;
+  padding: 14px 14px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-world-event-list > section > header > div > span {
+  display: block;
+  margin-bottom: 4px;
+  color: #5bbbdc;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
 }
 
 .wm-world-event-list h2 {
   margin: 0;
-  color: #e9f3f4;
-  font-size: 10px;
-  letter-spacing: 0.3px;
+  color: #f3f8f8;
+  font-size: 14px;
+  letter-spacing: 0.45px;
   text-transform: uppercase;
 }
 
-.wm-world-event-list header span,
-.wm-world-event-list > section > p {
-  color: #849094;
-  font-size: 8px;
+.wm-world-event-list-close {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #b7c3c7;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
 }
 
-.wm-world-event-list ol {
-  max-height: min(345px, 42vh);
-  margin: 0;
-  padding: 0;
-  overflow: auto;
-  list-style: none;
+.wm-world-event-list-close svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.7;
+}
+
+.wm-world-event-list-close:hover,
+.wm-world-event-list-close:focus-visible {
+  outline: 2px solid rgba(115, 216, 255, 0.42);
+  outline-offset: 2px;
+  border-color: rgba(115, 216, 255, 0.5);
+  background: rgba(115, 216, 255, 0.08);
+  color: #d8f5ff;
+}
+
+.wm-world-event-list-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.wm-world-event-list-filters label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wm-world-event-list-filters label.is-search {
+  grid-column: 1 / -1;
+}
+
+.wm-world-event-list-filters label > span {
+  color: #8fa0a5;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.55px;
+  text-transform: uppercase;
+}
+
+.wm-world-event-list-filters input,
+.wm-world-event-list-filters select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  background: #0a1114;
+  color: #e6eeee;
+  font: 700 10px/1.2 var(--font-mono);
+  outline: none;
+}
+
+.wm-world-event-list-filters input {
+  padding: 0 11px;
+}
+
+.wm-world-event-list-filters select {
+  padding: 0 7px;
+  cursor: pointer;
+}
+
+.wm-world-event-list-filters input:focus,
+.wm-world-event-list-filters select:focus {
+  border-color: rgba(115, 216, 255, 0.76);
+  box-shadow: 0 0 0 2px rgba(115, 216, 255, 0.12);
+}
+
+.wm-world-event-list-filters input::placeholder {
+  color: #647277;
+}
+
+.wm-world-event-list-summary {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  color: #86959a;
+  font-size: 9px;
+}
+
+.wm-world-event-list-summary strong {
+  color: #d8f4ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-world-event-list-summary button,
+.wm-world-event-list-empty button {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(115, 216, 255, 0.28);
+  border-radius: 4px;
+  background: rgba(115, 216, 255, 0.06);
+  color: #9ce5ff;
+  font: 800 8px/1 var(--font-mono);
+  letter-spacing: 0.4px;
+  cursor: pointer;
+}
+
+.wm-world-event-list-summary button:hover,
+.wm-world-event-list-summary button:focus-visible,
+.wm-world-event-list-empty button:hover,
+.wm-world-event-list-empty button:focus-visible {
+  outline: 2px solid rgba(115, 216, 255, 0.36);
+  outline-offset: 1px;
+  background: rgba(115, 216, 255, 0.12);
+}
+
+.wm-world-event-list-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(115, 216, 255, 0.38) rgba(255, 255, 255, 0.03);
   scrollbar-width: thin;
 }
 
-.wm-world-event-list li + li {
-  border-top: 1px solid rgba(255, 255, 255, 0.055);
+.wm-world-event-list-scroll:focus-visible {
+  outline: 2px solid rgba(115, 216, 255, 0.48);
+  outline-offset: -2px;
+}
+
+.wm-world-event-list ol {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wm-world-event-list li {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 68px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  contain: layout paint style;
 }
 
 .wm-world-event-list li button {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
-  gap: 3px 8px;
+  grid-template-columns: 66px minmax(0, 1fr) auto;
+  grid-template-rows: 19px 17px 16px;
+  gap: 0 9px;
   width: 100%;
-  padding: 8px 10px;
+  height: 100%;
+  padding: 7px 12px;
   border: 0;
   background: transparent;
   color: #dfe8e8;
   text-align: left;
   cursor: pointer;
+  transition: background 140ms ease;
 }
 
 .wm-world-event-list li button:hover,
@@ -12104,13 +12295,18 @@ a.wm-orderfilled-row {
   background: rgba(115, 216, 255, 0.1);
 }
 
-.wm-world-event-list li span {
-  grid-row: span 2;
+.wm-world-event-list li button:focus-visible {
+  box-shadow: inset 3px 0 #73d8ff;
+}
+
+.wm-world-event-list li .wm-event-list-severity {
+  grid-row: 1 / span 3;
   align-self: start;
-  padding: 2px 4px;
+  margin-top: 2px;
+  padding: 3px 4px;
   border: 1px solid currentColor;
   border-radius: 3px;
-  font-size: 7px;
+  font-size: 8px;
   text-align: center;
   text-transform: uppercase;
 }
@@ -12121,23 +12317,55 @@ a.wm-orderfilled-row {
 .wm-world-event-list .severity-info { color: #73d8ff; }
 
 .wm-world-event-list li strong {
+  grid-column: 2 / -1;
   overflow: hidden;
-  font-size: 9px;
+  align-self: center;
+  color: #ecf3f3;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .wm-world-event-list li small {
   overflow: hidden;
-  color: #879195;
+  align-self: center;
+  color: #91a0a4;
   font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-transform: uppercase;
 }
 
-.wm-world-event-list > section > p {
-  margin: 0;
-  padding: 14px;
+.wm-world-event-list li time {
+  grid-column: 3;
+  grid-row: 3;
+  align-self: center;
+  color: #68777c;
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wm-world-event-list-empty {
+  display: grid;
+  min-height: 180px;
+  flex: 1;
+  place-content: center;
+  justify-items: center;
+  padding: 24px;
+  color: #8e9a9e;
+  text-align: center;
+}
+
+.wm-world-event-list-empty strong {
+  color: #e3ebeb;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.wm-world-event-list-empty p {
+  margin: 7px 0 14px;
+  font-size: 9px;
 }
 
 .wm-world-event-svg-air-route {
@@ -13010,17 +13238,46 @@ a.wm-orderfilled-row {
 
 @media (max-width: 860px) {
   .wm-world-event-list {
-    right: 74px;
-    bottom: 124px;
+    right: 10px;
+    bottom: 78px;
+    left: 10px;
+  }
+
+  .wm-world-event-list-toggle {
+    align-self: flex-end;
+  }
+
+  .wm-world-event-list.is-open {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    bottom: 74px;
+    left: 10px;
+    z-index: 240;
   }
 
   .wm-world-event-list > section {
-    width: min(320px, calc(100vw - 100px));
-    max-height: min(260px, 34vh);
+    width: 100%;
+    min-height: min(540px, 70dvh);
+    max-height: min(620px, 76dvh);
   }
 
-  .wm-world-event-list ol {
-    max-height: min(215px, 28vh);
+  .wm-world-event-list-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wm-world-event-list-filters input,
+  .wm-world-event-list-filters select {
+    height: 44px;
+    font-size: 12px;
+  }
+
+  .wm-world-event-list li button {
+    grid-template-columns: 66px minmax(0, 1fr);
+  }
+
+  .wm-world-event-list li time {
+    display: none;
   }
 
   .wm-map-risk-inspector {

@@ -81,6 +81,7 @@ export function LayerPanel({
   getActionLabel,
   onToggle,
   onCollapse,
+  onExpand,
 }: {
   items: LayerPanelItem[];
   events: GeoEvent[];
@@ -92,6 +93,7 @@ export function LayerPanel({
   getActionLabel: (item: LayerPanelItem) => string;
   onToggle: (layerId: string) => void;
   onCollapse: () => void;
+  onExpand: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [briefLayerId, setBriefLayerId] = useState<string | null>(null);
@@ -113,61 +115,81 @@ export function LayerPanel({
 
   return (
     <Fragment>
-      <aside className={`wm-layer-sidebar ${collapsed ? 'collapsed' : ''}`}>
-        <div className="wm-toggle-header">
-          <span>{title}</span>
-          <button
-            type="button"
-            className="wm-toggle-collapse"
-            onClick={() => {
-              setBriefLayerId(null);
-              onCollapse();
-            }}
-          >
-            ▼
-          </button>
-        </div>
-        <input
-          className="wm-layer-search"
-          value={query}
-          onInput={(event) => setQuery((event.currentTarget as HTMLInputElement).value)}
-          placeholder={searchPlaceholder}
-        />
-        <div className="wm-layer-list">
-          {filtered.length ? filtered.map((item) => {
-            const actionLabel = getActionLabel(item);
-            const briefOpen = briefLayerId === item.id;
-            return (
-              <div
-                key={item.id}
-                className={`wm-layer-row ${item.enabled ? 'enabled' : ''} ${briefOpen ? 'brief-open' : ''}`}
-              >
-                <label className="wm-layer-toggle" title={actionLabel}>
-                  <input
-                    type="checkbox"
-                    checked={item.enabled}
-                    onChange={() => onToggle(item.id)}
-                    aria-label={actionLabel}
-                  />
-                  <span className="wm-layer-icon"><MapSymbolIcon symbol={item.icon} size={15} /></span>
-                  <span className="wm-layer-label">{item.label}</span>
-                  {item.hint ? <em className="wm-layer-hint">{item.hint}</em> : null}
-                </label>
-                <button
-                  type="button"
-                  className="wm-layer-info"
-                  aria-label={`Open ${item.label} source and coverage brief`}
-                  aria-pressed={briefOpen}
-                  onClick={() => setBriefLayerId(briefOpen ? null : item.id)}
+      {collapsed ? (
+        <button
+          type="button"
+          className="wm-layer-restore"
+          onClick={onExpand}
+          aria-label="Open layers panel"
+          aria-expanded="false"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m10 3 7 3.8-7 3.8-7-3.8L10 3Z" />
+            <path d="m3 10.2 7 3.8 7-3.8M3 13.6l7 3.4 7-3.4" />
+          </svg>
+          <span>LAYERS</span>
+          <strong>{items.filter((item) => item.enabled).length}/{items.length}</strong>
+        </button>
+      ) : (
+        <aside id="wm-layer-sidebar" className="wm-layer-sidebar">
+          <div className="wm-toggle-header">
+            <span>{title}</span>
+            <button
+              type="button"
+              className="wm-toggle-collapse"
+              aria-label="Collapse layers panel"
+              aria-controls="wm-layer-sidebar"
+              aria-expanded="true"
+              onClick={() => {
+                setBriefLayerId(null);
+                onCollapse();
+              }}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 8 5 5 5-5" /></svg>
+            </button>
+          </div>
+          <input
+            className="wm-layer-search"
+            value={query}
+            onInput={(event) => setQuery((event.currentTarget as HTMLInputElement).value)}
+            placeholder={searchPlaceholder}
+          />
+          <div className="wm-layer-list">
+            {filtered.length ? filtered.map((item) => {
+              const actionLabel = getActionLabel(item);
+              const briefOpen = briefLayerId === item.id;
+              return (
+                <div
+                  key={item.id}
+                  className={`wm-layer-row ${item.enabled ? 'enabled' : ''} ${briefOpen ? 'brief-open' : ''}`}
                 >
-                  i
-                </button>
-              </div>
-            );
-          }) : <div className="wm-layer-empty">{emptyLabel}</div>}
-        </div>
-        <div className="wm-sidebar-footer">{activeSummary}</div>
-      </aside>
+                  <label className="wm-layer-toggle" title={actionLabel}>
+                    <input
+                      type="checkbox"
+                      checked={item.enabled}
+                      onChange={() => onToggle(item.id)}
+                      aria-label={actionLabel}
+                    />
+                    <span className="wm-layer-icon"><MapSymbolIcon symbol={item.icon} size={15} /></span>
+                    <span className="wm-layer-label">{item.label}</span>
+                    {item.hint ? <em className="wm-layer-hint">{item.hint}</em> : null}
+                  </label>
+                  <button
+                    type="button"
+                    className="wm-layer-info"
+                    aria-label={`Open ${item.label} source and coverage brief`}
+                    aria-pressed={briefOpen}
+                    onClick={() => setBriefLayerId(briefOpen ? null : item.id)}
+                  >
+                    i
+                  </button>
+                </div>
+              );
+            }) : <div className="wm-layer-empty">{emptyLabel}</div>}
+          </div>
+          <div className="wm-sidebar-footer">{activeSummary}</div>
+        </aside>
+      )}
       {briefLayer && !collapsed ? (
         <LayerBrief
           layer={briefLayer}

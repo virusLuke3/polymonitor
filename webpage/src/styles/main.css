@@ -10207,18 +10207,86 @@ html[lang='zh-CN'] .wm-promo-copy {
 }
 
 .wm-toggle-collapse {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  margin: -8px -8px -8px 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: none;
-  border: none;
   color: var(--wm-text-dim);
   cursor: pointer;
-  font-size: 10px;
   padding: 0;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
 }
 
-.wm-layer-sidebar.collapsed {
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(8px);
+.wm-toggle-collapse svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.wm-toggle-collapse:hover,
+.wm-toggle-collapse:focus-visible {
+  outline: 2px solid rgba(115, 216, 255, 0.35);
+  outline-offset: 1px;
+  border-color: rgba(115, 216, 255, 0.28);
+  background: rgba(115, 216, 255, 0.07);
+  color: #bcecff;
+}
+
+.wm-layer-restore {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 21;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid rgba(115, 216, 255, 0.44);
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(8, 22, 28, 0.96), rgba(3, 10, 14, 0.96));
+  color: #a9e9ff;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.06);
+  font: 800 10px/1 var(--font-mono);
+  letter-spacing: 0.72px;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+  touch-action: manipulation;
+}
+
+.wm-layer-restore svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.45;
+}
+
+.wm-layer-restore strong {
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-layer-restore:hover,
+.wm-layer-restore:focus-visible {
+  outline: 2px solid rgba(115, 216, 255, 0.42);
+  outline-offset: 2px;
+  border-color: rgba(115, 216, 255, 0.8);
+  background: linear-gradient(180deg, rgba(13, 35, 45, 0.98), rgba(4, 16, 22, 0.98));
+  color: #e0f7ff;
 }
 
 .wm-layer-title {
@@ -15598,6 +15666,10 @@ html[lang='zh-CN'] .wm-promo-copy {
 
   .wm-layer-sidebar {
     width: min(292px, calc(100% - 28px));
+  }
+
+  .wm-layer-restore {
+    bottom: 78px;
   }
 
   .wm-layer-brief {
