@@ -16428,12 +16428,20 @@ a.wm-orderfilled-row {
 }
 
 .wm-focus-title {
+  display: block !important;
   color: var(--wm-terminal-primary) !important;
   font-family: var(--font-body) !important;
   font-size: clamp(15px, 1.05vw, 20px) !important;
   font-weight: 780 !important;
   line-height: 1.18 !important;
   letter-spacing: 0 !important;
+  overflow: visible !important;
+  overflow-wrap: anywhere !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  word-break: normal !important;
+  -webkit-box-orient: initial !important;
+  -webkit-line-clamp: unset !important;
 }
 
 .wm-focus-price-hero strong {
@@ -16485,8 +16493,17 @@ a.wm-orderfilled-row {
 
 .wm-focused-market-row .wm-focus-detail-grid,
 .wm-focused-market-row .wm-focus-chart-wrap {
+  height: 100% !important;
   min-height: 0 !important;
   overflow: hidden !important;
+}
+
+.wm-focused-market-row .wm-focus-detail-grid {
+  padding: 7px 9px 9px !important;
+}
+
+.wm-focused-market-row .wm-focus-chart-shell {
+  height: 100% !important;
 }
 
 .wm-focus-price-strip,
@@ -16512,10 +16529,10 @@ a.wm-orderfilled-row {
   border-radius: 5px !important;
 }
 
-.wm-focus-chart-svg,
-.wm-focus-detail-grid.compact .wm-focus-chart-svg {
-  height: clamp(250px, 31vh, 330px) !important;
-  min-height: 240px !important;
+.wm-focused-market-row .wm-focus-chart-svg,
+.wm-focused-market-row .wm-focus-detail-grid.compact .wm-focus-chart-svg {
+  height: 100% !important;
+  min-height: 0 !important;
   background: #070a0f !important;
 }
 
@@ -16759,23 +16776,21 @@ a.wm-orderfilled-row {
 
 .wm-focused-market-row .wm-block-close-chart .wm-focus-chart-svg {
   display: block !important;
-  height: clamp(232px, 28vh, 292px) !important;
-  min-height: 232px !important;
+  height: 100% !important;
+  min-height: 0 !important;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.036) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.036) 1px, transparent 1px),
-    #0f0f0f !important;
-  background-size: 78px 42px !important;
+    linear-gradient(180deg, rgba(56, 189, 248, 0.025), transparent 58%),
+    #070a0f !important;
 }
 
 .wm-focused-market-row .wm-block-close-chart .wm-focus-chart-grid {
-  stroke: rgba(255, 255, 255, 0.088) !important;
+  stroke: rgba(148, 163, 184, 0.13) !important;
   stroke-dasharray: none !important;
   stroke-width: 1 !important;
 }
 
 .wm-focused-market-row .wm-block-close-chart .wm-focus-chart-grid.v {
-  stroke: rgba(148, 163, 184, 0.105) !important;
+  stroke: rgba(148, 163, 184, 0.07) !important;
 }
 
 .wm-focused-market-row .wm-block-close-chart .wm-focus-chart-axis-text {
@@ -16786,26 +16801,29 @@ a.wm-orderfilled-row {
 }
 
 .wm-focused-market-row .wm-block-close-chart .wm-focus-chart-line.yes {
-  stroke: #00c8ff !important;
-  stroke-width: 2.2 !important;
-  filter: drop-shadow(0 0 7px rgba(0, 200, 255, 0.22)) !important;
+  stroke: #38bdf8 !important;
+  stroke-width: 2.35 !important;
+  filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.2)) !important;
 }
 
-.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-line.no {
-  stroke: #d83b65 !important;
-  stroke-width: 2 !important;
-  opacity: 0.88 !important;
+.wm-focused-market-row .wm-polymarket-prob-chart .wm-focus-chart-area.block-close,
+.wm-focused-market-row .wm-polymarket-prob-chart .wm-focus-chart-area.probability-history {
+  fill: url("#wm-block-close-area") !important;
+  opacity: 1 !important;
 }
 
-.wm-focused-market-row .wm-block-close-chart .wm-focus-chart-line.ma {
-  fill: none !important;
-  stroke: #f59e0b !important;
-  stroke-width: 1.35 !important;
-  opacity: 0.92 !important;
+.wm-focused-market-row .wm-polymarket-prob-chart .wm-focus-chart-area.probability-history {
+  fill: url("#wm-prob-history-area") !important;
+}
+
+.wm-focused-market-row .wm-polymarket-prob-chart .wm-focus-chart-current-guide {
+  stroke: rgba(56, 189, 248, 0.34) !important;
+  stroke-width: 1 !important;
+  stroke-dasharray: 4 5 !important;
 }
 
 .wm-focused-market-row .wm-block-close-chart .wm-focus-chart-timeline-line {
-  stroke: rgba(148, 163, 184, 0.2) !important;
+  stroke: rgba(148, 163, 184, 0.16) !important;
 }
 
 .wm-focused-market-row .wm-block-close-chart .wm-focus-chart-timeline-handle {
@@ -16813,82 +16831,11 @@ a.wm-orderfilled-row {
   stroke: rgba(148, 163, 184, 0.22) !important;
 }
 
-.wm-focus-qtv-chart-info {
-  position: absolute !important;
-  z-index: 4 !important;
-  top: 9px !important;
-  right: 62px !important;
-  left: 14px !important;
-  display: block !important;
-  max-height: 24px !important;
-  overflow: hidden !important;
-  pointer-events: none !important;
-}
-
-.wm-focus-block-chart-hud {
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  min-width: 0 !important;
-  max-width: 100% !important;
-  overflow: hidden !important;
-  color: #8f9bad !important;
+.wm-focused-market-row .wm-polymarket-prob-chart .wm-focus-chart-latest-value {
+  fill: #7dd3fc !important;
   font-family: var(--font-mono) !important;
   font-size: 10px !important;
-  font-weight: 820 !important;
-  letter-spacing: 0 !important;
-  white-space: nowrap !important;
-}
-
-.wm-focus-block-chart-hud span {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 4px !important;
-  flex: 0 1 auto !important;
-  min-width: 0 !important;
-  height: 22px !important;
-  max-width: 118px !important;
-  overflow: hidden !important;
-  border: 1px solid rgba(38, 50, 68, 0.74) !important;
-  border-radius: 4px !important;
-  background: rgba(7, 12, 18, 0.78) !important;
-  color: #8f9bad !important;
-  padding: 0 7px !important;
-  text-overflow: ellipsis !important;
-}
-
-.wm-focus-block-chart-hud b {
-  color: #e5eef8 !important;
-  font-weight: 900 !important;
-}
-
-.wm-focus-block-chart-hud i {
-  width: 8px !important;
-  height: 8px !important;
-  flex: 0 0 auto !important;
-  border-radius: 999px !important;
-  background: currentColor !important;
-}
-
-.wm-focus-block-chart-hud span.yes {
-  border-color: rgba(56, 189, 248, 0.34) !important;
-  color: #38bdf8 !important;
-}
-
-.wm-focus-block-chart-hud span.no {
-  border-color: rgba(244, 63, 94, 0.34) !important;
-  color: #fb7185 !important;
-}
-
-.wm-focus-block-chart-hud span.ma {
-  border-color: rgba(245, 158, 11, 0.34) !important;
-  color: #fbbf24 !important;
-}
-
-.wm-focus-block-chart-hud span.yes b,
-.wm-focus-block-chart-hud span.no b,
-.wm-focus-block-chart-hud span.ma b {
-  color: #f8fafc !important;
+  font-weight: 850 !important;
 }
 
 .wm-focus-block-placeholder {
