@@ -8,8 +8,19 @@ import { createAviationLayers } from './aviationLayers';
 export { EventClusterIndex, type EventCluster } from './eventPointLayer';
 export { isHazardEvent } from './shared';
 export {
+  createEventInteractionLayers,
+  createEventPulseLayers,
+  eventRepresentativePoint,
+  HAZARD_PULSE_INTERVAL_MS,
+  hasAnimatedHazardPulse,
+  hazardPulseTargets,
+  selectEventPulseCandidates,
+  RECENT_EVENT_PULSE_MS,
+} from './eventEmphasisLayers';
+export {
   aviationLayerStats,
   aviationLayerStatsForState,
+  aviationLiveAircraftMarkers,
   createAviationDynamicLayers,
   createAviationLayers,
   createAviationStaticLayerSections,

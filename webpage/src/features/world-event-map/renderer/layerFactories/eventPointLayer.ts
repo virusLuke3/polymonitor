@@ -279,28 +279,6 @@ export function createEventPointLayers({
   const { singles, clusters } = index.query(zoom, selectedEventId, viewport);
   const layers: Layer[] = [];
 
-  const priorityEvents = singles
-    .filter((event) => (
-      event.id === selectedEventId || event.severity === 'critical' || event.severity === 'warning'
-    ))
-    .slice(0, 120);
-  if (priorityEvents.length) {
-    layers.push(new ScatterplotLayer<GeoEvent>({
-      id: 'world-event-priority-rings',
-      data: priorityEvents,
-      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
-      getRadius: (event) => pointRadiusMeters(event) * (event.id === selectedEventId ? 2.8 : 2.15),
-      getFillColor: (event) => eventColor(event, event.id === selectedEventId ? 76 : 34),
-      getLineColor: (event) => eventColor(event, event.id === selectedEventId ? 255 : 225),
-      getLineWidth: (event) => event.id === selectedEventId ? 2.4 : 1.45,
-      radiusMinPixels: 8,
-      radiusMaxPixels: 34,
-      lineWidthMinPixels: 1.25,
-      pickable: false,
-      stroked: true,
-    }));
-  }
-
   if (clusters.length) {
     layers.push(new ScatterplotLayer<EventCluster>({
       id: 'world-event-cluster-halos',
@@ -331,8 +309,6 @@ export function createEventPointLayers({
       radiusMaxPixels: 27,
       lineWidthMinPixels: 1.15,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 250, 198, 118],
       stroked: true,
     }));
     layers.push(new TextLayer<EventCluster>({
@@ -365,8 +341,6 @@ export function createEventPointLayers({
       radiusMaxPixels: 18,
       lineWidthMinPixels: 1.15,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 255, 255, 104],
       stroked: true,
     }));
   }

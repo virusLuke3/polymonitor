@@ -22,6 +22,8 @@ describe('MapRenderScheduler', () => {
       aviation: true,
       geometry: false,
       dynamic: true,
+      pulse: false,
+      interaction: false,
     });
   });
 

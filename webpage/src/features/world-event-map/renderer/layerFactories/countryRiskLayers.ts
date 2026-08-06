@@ -50,7 +50,5 @@ export function createCountryRiskLayers(events: GeoEvent[], selectedEventId: str
     getLineWidth: (feature) => feature.properties?.event?.id === selectedEventId ? 2.8 : 1.35,
     lineWidthMinPixels: 1,
     pickable: true,
-    autoHighlight: true,
-    highlightColor: [255, 236, 184, 96],
   })];
 }

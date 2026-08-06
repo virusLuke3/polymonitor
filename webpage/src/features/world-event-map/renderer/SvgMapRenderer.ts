@@ -15,11 +15,20 @@ import {
   type WorldEventMapState,
 } from '../state/mapState';
 import { eventColor, isHazardEvent, pointRadiusMeters } from './layerFactories/shared';
+import {
+  eventRepresentativePoint,
+  HAZARD_PULSE_INTERVAL_MS,
+  hazardPulseTargets,
+  hasAnimatedHazardPulse,
+  selectEventPulseCandidates,
+} from './layerFactories/eventEmphasisLayers';
 import { EventClusterIndex } from './layerFactories/eventPointLayer';
 import {
   aviationRouteMotionPoints,
   aviationRouteTone,
   aviationSeededFlightPoints,
+  aviationAltitudeColor,
+  aviationLiveAircraftMarkers,
   selectAviationRenderData,
 } from './layerFactories/aviationLayers';
 import {
@@ -116,6 +125,7 @@ export class SvgMapRenderer implements MapRenderer {
   private countryLabelLayer: SVGGElement | null = null;
   private eventLayer: SVGGElement | null = null;
   private aviationMotionLayer: SVGGElement | null = null;
+  private emphasisLayer: SVGGElement | null = null;
   private callbacks: MapRendererCallbacks | null = null;
   private tooltip: RendererTooltip | null = null;
   private state: WorldEventMapState | null = null;
@@ -136,6 +146,12 @@ export class SvgMapRenderer implements MapRenderer {
   private lastAnimationTimestamp: number | null = null;
   private pendingAnimationDeltaMs = 0;
   private animationTime = 0;
+  private hazardPulseTimer: number | null = null;
+  private hazardPulseTime = Date.now();
+  private readonly eventFirstSeenAt = new Map<string, number>();
+  private receivedInitialEventSnapshot = false;
+  private pulseEvents: GeoEvent[] = [];
+  private hoveredEventId: string | null = null;
   private destroyed = false;
   private readonly clusterIndex = new EventClusterIndex();
   private drag:
@@ -163,13 +179,16 @@ export class SvgMapRenderer implements MapRenderer {
     events.classList.add('wm-world-event-svg-events');
     const aviationMotion = svgElement('g');
     aviationMotion.classList.add('wm-world-event-svg-aviation-motion');
-    svg.append(countries, countryLabels, events, aviationMotion);
+    const emphasis = svgElement('g');
+    emphasis.classList.add('wm-world-event-svg-emphasis');
+    svg.append(countries, countryLabels, events, aviationMotion, emphasis);
     container.append(svg);
     this.svg = svg;
     this.countryLayer = countries;
     this.countryLabelLayer = countryLabels;
     this.eventLayer = events;
     this.aviationMotionLayer = aviationMotion;
+    this.emphasisLayer = emphasis;
 
     container.addEventListener('wheel', this.handleWheel, { passive: false });
     container.addEventListener('keydown', this.handleKeyDown);
@@ -180,21 +199,40 @@ export class SvgMapRenderer implements MapRenderer {
 
     this.scheduleRender();
     this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
     await this.loadLocalBasemap();
   }
 
   setState(state: WorldEventMapState) {
+    const selectionChanged = this.state?.selectedEventId !== state.selectedEventId;
     this.state = state;
+    if (selectionChanged) this.pulseEvents = selectEventPulseCandidates(this.events, state.selectedEventId);
     this.scheduleRender();
     this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
   }
 
   setEvents(events: GeoEvent[]) {
     if (events === this.events) return;
+    const previousIds = new Set(this.events.map((event) => event.id));
+    const now = Date.now();
+    if (this.receivedInitialEventSnapshot) {
+      for (const event of events) {
+        if (!previousIds.has(event.id)) this.eventFirstSeenAt.set(event.id, now);
+      }
+    } else if (events.length > 0) {
+      this.receivedInitialEventSnapshot = true;
+    }
+    const nextIds = new Set(events.map((event) => event.id));
+    for (const eventId of this.eventFirstSeenAt.keys()) {
+      if (!nextIds.has(eventId)) this.eventFirstSeenAt.delete(eventId);
+    }
     this.events = events;
+    this.pulseEvents = selectEventPulseCandidates(events, this.state?.selectedEventId || null);
     this.clusterIndex.update(events);
     this.scheduleRender();
     this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
   }
 
   resize() {
@@ -205,6 +243,7 @@ export class SvgMapRenderer implements MapRenderer {
     this.reducedMotion = reduced;
     this.svg?.classList.toggle('reduced-motion', reduced);
     this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
     this.scheduleRender();
   }
 
@@ -212,6 +251,7 @@ export class SvgMapRenderer implements MapRenderer {
     this.paused = true;
     this.clearHover();
     this.cancelAnimationLoop();
+    this.cancelHazardPulseLoop();
   }
 
   resume() {
@@ -219,12 +259,14 @@ export class SvgMapRenderer implements MapRenderer {
     this.paused = false;
     this.scheduleRender();
     this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
   }
 
   destroy() {
     this.destroyed = true;
     this.clearHover();
     this.cancelAnimationLoop();
+    this.cancelHazardPulseLoop();
     this.cancelScheduledRender();
     this.clearBasemapTimer();
     this.basemapController?.abort();
@@ -247,6 +289,7 @@ export class SvgMapRenderer implements MapRenderer {
     this.countryLabelLayer = null;
     this.eventLayer = null;
     this.aviationMotionLayer = null;
+    this.emphasisLayer = null;
     this.countryLabels = [];
     this.callbacks = null;
     this.drag = null;
@@ -346,6 +389,10 @@ export class SvgMapRenderer implements MapRenderer {
     const aviation = state
       ? selectAviationRenderData(this.events, state)
       : { routes: [], hubs: [], flights: [], liveAircraft: [], routeMotionGroups: [], flightMotionGroups: [] };
+    const selectedRoute = selectedId
+      ? aviation.routes.find((event) => event.id === selectedId)
+      : null;
+    const selectedRouteId = selectedRoute ? String(selectedRoute.properties.routeId || selectedRoute.id) : null;
     const visibleAviationIds = new Set([
       ...aviation.routes,
       ...aviation.hubs,
@@ -375,11 +422,13 @@ export class SvgMapRenderer implements MapRenderer {
         shape.setAttribute('fill', 'none');
         if (aviationEntity(event) === 'air-route') {
           shape.classList.add('wm-world-event-svg-air-route');
+          const sameSelectedRoute = selectedRouteId != null
+            && String(event.properties.routeId || event.id) === selectedRouteId;
           shape.setAttribute('stroke', cssColor(aviationRouteTone(
             event,
-            event.id === selectedId ? 238 : 126,
+            selectedRouteId ? sameSelectedRoute ? 235 : 36 : 112,
           )));
-          shape.setAttribute('stroke-width', event.id === selectedId ? '2.2' : '0.85');
+          shape.setAttribute('stroke-width', sameSelectedRoute ? '2.2' : '0.85');
         }
       }
       this.eventLayer.append(shape);
@@ -438,23 +487,17 @@ export class SvgMapRenderer implements MapRenderer {
       );
       point.setAttribute('cx', String(x));
       point.setAttribute('cy', String(y));
-      point.setAttribute('r', String(event.id === selectedId ? radius + 2 : radius));
+      point.setAttribute('r', String(radius));
       point.classList.add('wm-world-event-svg-point');
-      this.decorateEventElement(point, event, event.id === selectedId);
+      this.decorateEventElement(point, event, false);
       this.eventLayer.append(point);
     }
-    for (const event of [...aviation.hubs, ...aviation.liveAircraft]) {
+    for (const event of aviation.hubs) {
       if (event.geometry?.type !== 'Point') continue;
       const position = projection(event.geometry.coordinates);
       if (!position) continue;
       const [x, y] = position;
       if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
-      if (aviationEntity(event) === 'live-aircraft') {
-        const aircraft = aircraftMarker(x, y, Number(event.properties.heading || 0) - 90);
-        this.decorateEventElement(aircraft, event, event.id === selectedId);
-        this.eventLayer.append(aircraft);
-        continue;
-      }
       const hub = svgElement('circle');
       hub.setAttribute('cx', String(x));
       hub.setAttribute('cy', String(y));
@@ -463,7 +506,38 @@ export class SvgMapRenderer implements MapRenderer {
       this.decorateEventElement(hub, event, event.id === selectedId);
       this.eventLayer.append(hub);
     }
+    for (const marker of aviationLiveAircraftMarkers(
+      aviation.liveAircraft,
+      this.state?.zoom || 1.25,
+      selectedId || null,
+    )) {
+      const position = projection(marker.position);
+      if (!position) continue;
+      const [x, y] = position;
+      if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
+      const event = marker.event;
+      const aircraft = aircraftMarker(x, y, Number(event.properties.heading || 0) - 90);
+      this.decorateEventElement(aircraft, event, event.id === selectedId);
+      const altitude = Number(event.properties.baroAltitude || 0);
+      const [red, green, blue] = aviationAltitudeColor(altitude);
+      const alpha = event.id === selectedId ? 245 : event.severity === 'info' ? 174 : 220;
+      aircraft.setAttribute('fill', cssColor([red, green, blue, alpha]));
+      this.eventLayer.append(aircraft);
+      if (marker.count > 1) {
+        const count = svgElement('text');
+        count.setAttribute('x', String(x + 8));
+        count.setAttribute('y', String(y - 8));
+        count.setAttribute('font-size', '8');
+        count.setAttribute('fill', '#e1f7fa');
+        count.setAttribute('stroke', '#00080c');
+        count.setAttribute('stroke-width', '2');
+        count.setAttribute('paint-order', 'stroke fill');
+        count.textContent = String(marker.count);
+        this.eventLayer.append(count);
+      }
+    }
     this.renderAviationMotion(projection, width, height, aviation, selectedId || null);
+    this.renderEmphasis(projection, width, height);
   }
 
   private renderAviationMotion(
@@ -477,7 +551,7 @@ export class SvgMapRenderer implements MapRenderer {
     if (!layer) return;
     layer.replaceChildren();
     if (!aviation) return;
-    for (const runner of aviationRouteMotionPoints(aviation.routes, this.animationTime)) {
+    for (const runner of aviationRouteMotionPoints(aviation.routes, this.animationTime, selectedId)) {
       const position = projection(runner.position);
       if (!position) continue;
       const [x, y] = position;
@@ -490,14 +564,100 @@ export class SvgMapRenderer implements MapRenderer {
       mote.setAttribute('fill', cssColor(runner.color));
       layer.append(mote);
     }
-    for (const flight of aviationSeededFlightPoints(aviation.flights, this.animationTime)) {
+    for (const flight of aviationSeededFlightPoints(
+      aviation.flights,
+      this.animationTime,
+      this.state?.zoom || 1.25,
+      selectedId,
+    )) {
       const position = projection(flight.position);
       if (!position) continue;
       const [x, y] = position;
       if (x < -40 || x > width + 40 || y < -40 || y > height + 40) continue;
       const aircraft = aircraftMarker(x, y, flight.angle);
       this.decorateEventElement(aircraft, flight.event, flight.event.id === selectedId);
+      aircraft.setAttribute('fill', cssColor(flight.color));
       layer.append(aircraft);
+    }
+  }
+
+  private renderEmphasis(
+    projection: GeoProjection,
+    width: number,
+    height: number,
+  ) {
+    const layer = this.emphasisLayer;
+    if (!layer) return;
+    layer.replaceChildren();
+    const appendRing = (
+      position: [number, number],
+      radius: number,
+      color: [number, number, number, number],
+      lineWidth: number,
+    ) => {
+      const projected = projection(position);
+      if (!projected) return;
+      const [x, y] = projected;
+      if (x < -48 || x > width + 48 || y < -48 || y > height + 48) return;
+      const circle = svgElement('circle');
+      circle.setAttribute('cx', String(x));
+      circle.setAttribute('cy', String(y));
+      circle.setAttribute('r', String(radius));
+      circle.setAttribute('fill', 'none');
+      circle.setAttribute('stroke', cssColor(color));
+      circle.setAttribute('stroke-width', String(lineWidth));
+      circle.setAttribute('pointer-events', 'none');
+      circle.setAttribute('vector-effect', 'non-scaling-stroke');
+      layer.append(circle);
+    };
+    const pixelRadius = (event: GeoEvent) => event.geometry?.type === 'Point'
+      ? Math.max(5, Math.min(18, Math.log2(Math.max(2, pointRadiusMeters(event) / 1_000)) * 1.8))
+      : 9;
+
+    if (!this.reducedMotion) {
+      const targets = hazardPulseTargets(
+        this.pulseEvents,
+        this.state?.selectedEventId || null,
+        this.eventFirstSeenAt,
+        this.hazardPulseTime,
+      );
+      for (const target of targets.status) {
+        const wave = 0.5 + 0.5 * Math.sin(
+          this.hazardPulseTime / (target.strength === 'warning' ? 900 : 400),
+        );
+        const multiplier = target.strength === 'warning' ? 1.35 + wave * 0.25 : 1.45 + wave * 0.75;
+        appendRing(
+          target.position,
+          pixelRadius(target.event) * multiplier,
+          eventColor(target.event, target.strength === 'warning' ? 58 : 126),
+          target.strength === 'warning' ? 1 : 1.5,
+        );
+      }
+      for (const target of targets.recent) {
+        const wave = 0.5 + 0.5 * Math.sin(this.hazardPulseTime / 318);
+        appendRing(
+          target.position,
+          pixelRadius(target.event) * (1.6 + wave * 1.05),
+          eventColor(target.event, Math.round(150 * target.fade)),
+          1.5,
+        );
+      }
+    }
+
+    const hovered = this.hoveredEventId
+      ? this.events.find((event) => event.id === this.hoveredEventId)
+      : null;
+    const hoveredPosition = hovered ? eventRepresentativePoint(hovered) : null;
+    if (hovered && hoveredPosition && hovered.id !== this.state?.selectedEventId) {
+      appendRing(hoveredPosition, pixelRadius(hovered) * 1.38, eventColor(hovered, 190), 1.2);
+    }
+    const selected = this.state?.selectedEventId
+      ? this.events.find((event) => event.id === this.state?.selectedEventId)
+      : null;
+    const selectedPosition = selected ? eventRepresentativePoint(selected) : null;
+    if (selected && selectedPosition && selected.geometry?.type !== 'LineString') {
+      appendRing(selectedPosition, pixelRadius(selected) * 2.05, eventColor(selected, 235), 1.7);
+      appendRing(selectedPosition, pixelRadius(selected) * 1.48, [220, 244, 248, 210], 1.25);
     }
   }
 
@@ -519,6 +679,9 @@ export class SvgMapRenderer implements MapRenderer {
     element.setAttribute('fill', color);
     element.setAttribute('stroke', selected ? '#fffade' : color);
     element.setAttribute('stroke-width', selected ? '2.5' : '1.2');
+    // Legacy CSS animated the clickable entity itself. Emphasis now lives in a
+    // separate hollow-ring layer so hit targets never move under the pointer.
+    element.setAttribute('style', 'animation:none');
     element.setAttribute('role', 'button');
     element.setAttribute('tabindex', '0');
     element.setAttribute('aria-label', `${event.title}. ${event.severity} severity.`);
@@ -579,6 +742,8 @@ export class SvgMapRenderer implements MapRenderer {
   private handlePointerDown = (event: PointerEvent) => {
     if (!this.state || event.button !== 0) return;
     this.clearHover();
+    this.cancelAnimationLoop();
+    this.cancelHazardPulseLoop();
     this.drag = {
       pointerId: event.pointerId,
       x: event.clientX,
@@ -604,6 +769,8 @@ export class SvgMapRenderer implements MapRenderer {
     if (!this.drag || event.pointerId !== this.drag.pointerId) return;
     this.host?.releasePointerCapture(event.pointerId);
     this.drag = null;
+    this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
   };
 
   private clearBasemapTimer() {
@@ -624,8 +791,16 @@ export class SvgMapRenderer implements MapRenderer {
     object: WorldEventPickedObject,
     pointerEvent: PointerEvent,
     layerId = '',
-    _eventId: string | null = null,
+    eventId: string | null = null,
   ) {
+    if (eventId !== this.hoveredEventId) {
+      this.hoveredEventId = eventId;
+      if (this.host) {
+        const width = Math.max(1, this.host.clientWidth || 1_200);
+        const height = Math.max(1, this.host.clientHeight || 620);
+        this.renderEmphasis(this.projection(width, height), width, height);
+      }
+    }
     this.pendingHover = {
       tooltip: worldEventTooltipModel(object, layerId),
       position: this.pointerPosition(pointerEvent),
@@ -645,6 +820,14 @@ export class SvgMapRenderer implements MapRenderer {
     this.hoverFrame = null;
     this.pendingHover = null;
     this.tooltip?.clear();
+    if (this.hoveredEventId != null) {
+      this.hoveredEventId = null;
+      if (this.host) {
+        const width = Math.max(1, this.host.clientWidth || 1_200);
+        const height = Math.max(1, this.host.clientHeight || 620);
+        this.renderEmphasis(this.projection(width, height), width, height);
+      }
+    }
   };
 
   private hasAnimatedAviation() {
@@ -654,8 +837,44 @@ export class SvgMapRenderer implements MapRenderer {
       ));
   }
 
+  private syncHazardPulseLoop() {
+    const shouldPulse = Boolean(this.svg)
+      && !this.destroyed
+      && !this.paused
+      && !this.drag
+      && !this.reducedMotion
+      && hasAnimatedHazardPulse(
+        this.pulseEvents,
+        this.state?.selectedEventId || null,
+        this.eventFirstSeenAt,
+      );
+    if (!shouldPulse) {
+      this.cancelHazardPulseLoop();
+      return;
+    }
+    if (this.hazardPulseTimer != null) return;
+    this.hazardPulseTimer = window.setInterval(() => {
+      if (this.destroyed || this.paused || this.drag || this.reducedMotion) {
+        this.cancelHazardPulseLoop();
+        return;
+      }
+      this.hazardPulseTime = Date.now();
+      if (!this.host) return;
+      const width = Math.max(1, this.host.clientWidth || 1_200);
+      const height = Math.max(1, this.host.clientHeight || 620);
+      this.renderEmphasis(this.projection(width, height), width, height);
+    }, HAZARD_PULSE_INTERVAL_MS);
+  }
+
+  private cancelHazardPulseLoop() {
+    if (this.hazardPulseTimer != null) {
+      window.clearInterval(this.hazardPulseTimer);
+      this.hazardPulseTimer = null;
+    }
+  }
+
   private syncAnimationLoop() {
-    if (!this.svg || this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) {
+    if (!this.svg || this.destroyed || this.paused || this.drag || this.reducedMotion || !this.hasAnimatedAviation()) {
       this.cancelAnimationLoop();
       return;
     }
@@ -665,7 +884,7 @@ export class SvgMapRenderer implements MapRenderer {
 
   private handleAnimationFrame = (timestamp: number) => {
     this.animationFrame = null;
-    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) return;
+    if (this.destroyed || this.paused || this.drag || this.reducedMotion || !this.hasAnimatedAviation()) return;
     this.pendingAnimationDeltaMs += boundedAnimationDelta(this.lastAnimationTimestamp, timestamp);
     this.lastAnimationTimestamp = timestamp;
     if (this.pendingAnimationDeltaMs >= MAP_ANIMATION_FRAME_INTERVAL_MS) {

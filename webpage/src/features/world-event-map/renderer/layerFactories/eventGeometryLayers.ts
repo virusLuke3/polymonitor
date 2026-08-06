@@ -58,8 +58,6 @@ export function createEventGeometryLayers(
       getLineWidth: (feature) => feature.properties?.event?.id === selectedEventId ? 2.8 : 1.35,
       lineWidthMinPixels: 1,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 255, 255, 82],
     }));
   }
 
@@ -82,8 +80,6 @@ export function createEventGeometryLayers(
       getLineWidth: (feature) => feature.properties?.event?.id === selectedEventId ? 2.5 : 1,
       lineWidthMinPixels: 1,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 255, 255, 72],
     }));
   }
 
@@ -99,8 +95,6 @@ export function createEventGeometryLayers(
       jointRounded: true,
       capRounded: true,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 250, 198, 128],
     }));
   }
   if (cycloneCenters.length) {
@@ -116,8 +110,6 @@ export function createEventGeometryLayers(
       radiusMaxPixels: 22,
       lineWidthMinPixels: 1.2,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 255, 255, 112],
       stroked: true,
     }));
   }

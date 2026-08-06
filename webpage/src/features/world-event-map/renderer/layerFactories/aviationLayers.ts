@@ -25,6 +25,14 @@ export type AviationMotionPoint = {
   color: [number, number, number, number];
   angle: number;
   size: number;
+  count: number;
+};
+
+export type AviationAircraftMarker = {
+  id: string;
+  event: GeoEvent;
+  position: [number, number];
+  count: number;
 };
 
 /** A stable path grouping prepared outside the animation frame. */
@@ -50,6 +58,9 @@ export type AviationRenderData = {
 
 export type AviationStaticLayerSections = {
   routeLayers: LayersList;
+  hubLayers: LayersList;
+  aircraftLayers: LayersList;
+  labelLayers: LayersList;
   markerLayers: LayersList;
   data: AviationRenderData;
 };
@@ -169,6 +180,37 @@ function aircraftPriority(event: GeoEvent) {
     + numberProperty(event, 'velocity') / 10;
 }
 
+const ALTITUDE_COLOR_STOPS = [
+  { alt: 0, color: [0, 217, 255] },
+  { alt: 5_000, color: [50, 250, 160] },
+  { alt: 10_000, color: [200, 230, 60] },
+  { alt: 20_000, color: [255, 165, 30] },
+  { alt: 30_000, color: [255, 100, 35] },
+  { alt: 40_000, color: [235, 50, 55] },
+  { alt: 45_000, color: [210, 40, 70] },
+] as const;
+
+/** WorldMonitor altitude ramp: cyan at sea level through red at cruise altitude. */
+export function aviationAltitudeColor(altitudeMeters: number): [number, number, number] {
+  const altitudeFeet = Number.isFinite(altitudeMeters) ? altitudeMeters * 3.28084 : 0;
+  const first = ALTITUDE_COLOR_STOPS[0];
+  const last = ALTITUDE_COLOR_STOPS[ALTITUDE_COLOR_STOPS.length - 1]!;
+  if (altitudeFeet <= first.alt) return [first.color[0], first.color[1], first.color[2]];
+  if (altitudeFeet >= last.alt) return [last.color[0], last.color[1], last.color[2]];
+  for (let index = 1; index < ALTITUDE_COLOR_STOPS.length; index += 1) {
+    const high = ALTITUDE_COLOR_STOPS[index]!;
+    const low = ALTITUDE_COLOR_STOPS[index - 1]!;
+    if (altitudeFeet > high.alt) continue;
+    const ratio = (altitudeFeet - low.alt) / (high.alt - low.alt);
+    return [
+      Math.round(low.color[0] + (high.color[0] - low.color[0]) * ratio),
+      Math.round(low.color[1] + (high.color[1] - low.color[1]) * ratio),
+      Math.round(low.color[2] + (high.color[2] - low.color[2]) * ratio),
+    ];
+  }
+  return [last.color[0], last.color[1], last.color[2]];
+}
+
 /**
  * World-view traffic needs context, not a full flight board. Detail expands
  * predictably with zoom; route topology remains visible at every level while
@@ -242,15 +284,20 @@ function flattenGroups(groups: readonly AviationMotionGroup[]) {
 
 function visibleRouteGroups(
   routes: GeoEvent[],
-  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>,
+  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>
+    & Partial<Pick<WorldEventMapState, 'selectedEventId'>>,
   viewport: AviationViewport | null,
   budget: AviationBudget,
 ) {
   return groupSegments(routes, 'routeId')
-    .filter((group) => matchesLens(group.event, state.aviationLens, state.aviationRiskSource))
-    .filter((group) => groupIntersectsViewport(group, viewport))
+    .filter((group) => group.segments.some((segment) => segment.id === state.selectedEventId)
+      || matchesLens(group.event, state.aviationLens, state.aviationRiskSource))
+    .filter((group) => group.segments.some((segment) => segment.id === state.selectedEventId)
+      || groupIntersectsViewport(group, viewport))
     .sort((left, right) => (
-      lensPriority(right.event, state.aviationLens) - lensPriority(left.event, state.aviationLens)
+      Number(right.segments.some((segment) => segment.id === state.selectedEventId))
+        - Number(left.segments.some((segment) => segment.id === state.selectedEventId))
+      || lensPriority(right.event, state.aviationLens) - lensPriority(left.event, state.aviationLens)
       || routePriority(right.event) - routePriority(left.event)
     ))
     .slice(0, budget.routes);
@@ -258,15 +305,20 @@ function visibleRouteGroups(
 
 function visibleFlightGroups(
   flights: GeoEvent[],
-  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>,
+  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>
+    & Partial<Pick<WorldEventMapState, 'selectedEventId'>>,
   viewport: AviationViewport | null,
   budget: AviationBudget,
 ) {
   return groupSegments(flights, 'flightId')
-    .filter((group) => matchesLens(group.event, state.aviationLens, state.aviationRiskSource))
-    .filter((group) => groupIntersectsViewport(group, viewport))
+    .filter((group) => group.segments.some((segment) => segment.id === state.selectedEventId)
+      || matchesLens(group.event, state.aviationLens, state.aviationRiskSource))
+    .filter((group) => group.segments.some((segment) => segment.id === state.selectedEventId)
+      || groupIntersectsViewport(group, viewport))
     .sort((left, right) => (
-      lensPriority(right.event, state.aviationLens) - lensPriority(left.event, state.aviationLens)
+      Number(right.segments.some((segment) => segment.id === state.selectedEventId))
+        - Number(left.segments.some((segment) => segment.id === state.selectedEventId))
+      || lensPriority(right.event, state.aviationLens) - lensPriority(left.event, state.aviationLens)
       || aircraftPriority(right.event) - aircraftPriority(left.event)
     ))
     .slice(0, budget.seededAircraft);
@@ -282,8 +334,8 @@ export function aviationRouteTone(event: GeoEvent, alpha: number): [number, numb
   return [98, 126, 156, alpha];
 }
 
-function routeWidth(event: GeoEvent, selectedEventId: string | null) {
-  if (event.id === selectedEventId) return 2.4;
+function routeWidth(event: GeoEvent, selectedGroupId: string | null) {
+  if (selectedGroupId && groupId(event, 'routeId') === selectedGroupId) return 2.4;
   const layer = stringProperty(event, 'layer');
   const base = layer === 'trunk' ? 1.25 : layer === 'international' ? 0.9 : 0.55;
   return Math.max(0.5, Math.min(2.2, base + numberProperty(event, 'trafficScore') / 130));
@@ -296,6 +348,48 @@ function hashUnit(value: string) {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0) / 0xffffffff;
+}
+
+function mercatorPixel([lon, lat]: [number, number], zoom: number): [number, number] {
+  const worldSize = 512 * Math.pow(2, Math.max(0, zoom));
+  const boundedLat = Math.max(-85.051129, Math.min(85.051129, lat));
+  const sine = Math.sin((boundedLat * Math.PI) / 180);
+  return [
+    ((lon + 180) / 360) * worldSize,
+    (0.5 - Math.log((1 + sine) / (1 - sine)) / (4 * Math.PI)) * worldSize,
+  ];
+}
+
+function aircraftScreenGrid<T extends { event: GeoEvent; position: [number, number] }>(
+  items: readonly T[],
+  zoom: number,
+  selectedEventId: string | null,
+  cellPixels = 20,
+): Array<T & { count: number }> {
+  const cells = new Map<string, T & { count: number }>();
+  for (const item of items) {
+    const [x, y] = mercatorPixel(item.position, zoom);
+    const key = `${Math.floor(x / cellPixels)}:${Math.floor(y / cellPixels)}`;
+    const existing = cells.get(key);
+    const itemPriority = aircraftPriority(item.event) + Number(item.event.id === selectedEventId) * 100_000;
+    const existingPriority = existing
+      ? aircraftPriority(existing.event) + Number(existing.event.id === selectedEventId) * 100_000
+      : Number.NEGATIVE_INFINITY;
+    if (!existing || itemPriority > existingPriority) {
+      cells.set(key, { ...item, count: (existing?.count || 0) + 1 });
+    } else {
+      existing.count += 1;
+    }
+  }
+  return [...cells.values()];
+}
+
+function endpointFade(progress: number, fadeFraction = 0.1) {
+  const edge = Math.max(0.08, Math.min(0.12, fadeFraction));
+  const entering = Math.max(0, Math.min(1, progress / edge));
+  const leaving = Math.max(0, Math.min(1, (1 - progress) / edge));
+  const smooth = (value: number) => value * value * (3 - 2 * value);
+  return Math.min(smooth(entering), smooth(leaving));
 }
 
 function pointAlongPath(path: [number, number][], progress: number) {
@@ -331,48 +425,78 @@ function motionPointForGroup(
   const localProgress = segmentProgress - Math.floor(segmentProgress);
   return {
     id: group.id,
-    event: segment,
+    // A moving marker keeps the stable group representative for hover/click;
+    // changing the picked event id at every segment would lose selection mid-flight.
+    event: group.event,
     position: pointAlongPath(segment.geometry.coordinates, localProgress),
     color,
     angle: angleAlongPath(segment.geometry.coordinates, localProgress),
     size,
+    count: 1,
   };
 }
 
-function routeMotionPointsForGroups(groups: readonly AviationMotionGroup[], animationTime: number) {
+function routeMotionPointsForGroups(
+  groups: readonly AviationMotionGroup[],
+  animationTime: number,
+  selectedEventId: string | null = null,
+  selectedGroupOverride: string | null = null,
+) {
   const points: AviationMotionPoint[] = [];
+  const selectedGroupId = selectedGroupOverride || (selectedEventId
+    ? groups.find((group) => group.segments.some((segment) => segment.id === selectedEventId))?.id || null
+    : null);
   for (const group of groups) {
     const speed = Math.max(0.012, Math.min(0.08, numberProperty(group.event, 'speed', 0.028)));
     const progress = (hashUnit(group.id) + animationTime * speed) % 1;
-    const point = motionPointForGroup(group, progress, aviationRouteTone(group.event, 230), 11);
+    const alpha = selectedGroupId ? group.id === selectedGroupId ? 225 : 36 : 172;
+    const point = motionPointForGroup(group, progress, aviationRouteTone(group.event, alpha), 4);
     if (point) points.push(point);
   }
   return points;
 }
 
-function seededFlightPointsForGroups(groups: readonly AviationMotionGroup[], animationTime: number) {
+function seededFlightPointsForGroups(
+  groups: readonly AviationMotionGroup[],
+  animationTime: number,
+  zoom = 1.25,
+  selectedEventId: string | null = null,
+) {
   const points: AviationMotionPoint[] = [];
   for (const group of groups) {
     const phase = numberProperty(group.event, 'phase', hashUnit(group.id));
     const speed = Math.max(0.012, Math.min(0.16, numberProperty(group.event, 'speed', 0.06)));
     const progress = (phase + animationTime * speed) % 1;
-    const color = isWatch(group.event)
-      ? [255, 214, 84, 245] as [number, number, number, number]
-      : [92, 241, 255, 235] as [number, number, number, number];
+    const selected = group.segments.some((segment) => segment.id === selectedEventId);
+    const alpha = Math.round(
+      (selected ? 245 : isWatch(group.event) ? 220 : 170) * endpointFade(progress, 0.1),
+    );
+    const color = isWatch(group.event) || selected
+      ? [255, 214, 84, alpha] as [number, number, number, number]
+      : [92, 241, 255, alpha] as [number, number, number, number];
     const point = motionPointForGroup(group, progress, color, 14);
     if (point) points.push(point);
   }
-  return points;
+  return aircraftScreenGrid(points, zoom, selectedEventId);
 }
 
 /** Compatibility helper for the SVG fallback and pure unit tests. */
-export function aviationRouteMotionPoints(routes: GeoEvent[], animationTime: number) {
-  return routeMotionPointsForGroups(groupSegments(routes, 'routeId'), animationTime);
+export function aviationRouteMotionPoints(
+  routes: GeoEvent[],
+  animationTime: number,
+  selectedEventId: string | null = null,
+) {
+  return routeMotionPointsForGroups(groupSegments(routes, 'routeId'), animationTime, selectedEventId);
 }
 
 /** Compatibility helper for the SVG fallback and pure unit tests. */
-export function aviationSeededFlightPoints(flights: GeoEvent[], animationTime: number) {
-  return seededFlightPointsForGroups(groupSegments(flights, 'flightId'), animationTime);
+export function aviationSeededFlightPoints(
+  flights: GeoEvent[],
+  animationTime: number,
+  zoom = 1.25,
+  selectedEventId: string | null = null,
+) {
+  return seededFlightPointsForGroups(groupSegments(flights, 'flightId'), animationTime, zoom, selectedEventId);
 }
 
 export function aviationLayerStats(events: GeoEvent[], visibleRoutes = events): AviationLayerStats {
@@ -427,7 +551,8 @@ export function aviationLayerStatsForState(
  */
 export function selectAviationRenderData(
   events: GeoEvent[],
-  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>,
+  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'aviationRiskSource'>
+    & Partial<Pick<WorldEventMapState, 'selectedEventId'>>,
   viewport?: AviationViewport,
 ): AviationRenderData {
   const budget = aviationBudget(state.zoom, state.aviationLens);
@@ -441,10 +566,12 @@ export function selectAviationRenderData(
   const trunkEndpoints = trunkEndpointCodes(events);
   const hubs = events
     .filter((event) => entity(event) === 'air-hub')
-    .filter((event) => matchesLens(event, state.aviationLens, state.aviationRiskSource))
-    .filter((event) => pointIsVisible(event, visibleViewport))
+    .filter((event) => event.id === state.selectedEventId
+      || matchesLens(event, state.aviationLens, state.aviationRiskSource))
+    .filter((event) => event.id === state.selectedEventId || pointIsVisible(event, visibleViewport))
     .sort((left, right) => (
-      (state.aviationLens === 'trunk'
+      Number(right.id === state.selectedEventId) - Number(left.id === state.selectedEventId)
+      || (state.aviationLens === 'trunk'
         ? Number(trunkEndpoints.has(stringProperty(right, 'code')))
           - Number(trunkEndpoints.has(stringProperty(left, 'code')))
         : 0)
@@ -453,9 +580,13 @@ export function selectAviationRenderData(
     .slice(0, budget.hubs);
   const liveAircraft = events
     .filter((event) => entity(event) === 'live-aircraft')
-    .filter((event) => matchesLens(event, state.aviationLens, state.aviationRiskSource))
-    .filter((event) => pointIsVisible(event, visibleViewport))
-    .sort((left, right) => aircraftPriority(right) - aircraftPriority(left))
+    .filter((event) => event.id === state.selectedEventId
+      || matchesLens(event, state.aviationLens, state.aviationRiskSource))
+    .filter((event) => event.id === state.selectedEventId || pointIsVisible(event, visibleViewport))
+    .sort((left, right) => (
+      Number(right.id === state.selectedEventId) - Number(left.id === state.selectedEventId)
+      || aircraftPriority(right) - aircraftPriority(left)
+    ))
     .slice(0, budget.liveAircraft);
   return {
     routes: flattenGroups(routeGroups),
@@ -467,15 +598,36 @@ export function selectAviationRenderData(
   };
 }
 
+function selectedRouteId(data: AviationRenderData, selectedEventId: string | null) {
+  const selected = selectedEventId
+    ? data.routes.find((event) => event.id === selectedEventId)
+    : null;
+  return selected ? groupId(selected, 'routeId') : null;
+}
+
+function routeAlpha(
+  event: GeoEvent,
+  selectedId: string | null,
+  selectedGroupId: string | null,
+  normalAlpha: number,
+  selectedAlpha: number,
+) {
+  if (!selectedGroupId) return normalAlpha;
+  return event.id === selectedId || groupId(event, 'routeId') === selectedGroupId ? selectedAlpha : 36;
+}
+
 function createAviationRouteLayers(data: AviationRenderData, state: Pick<WorldEventMapState, 'selectedEventId'>): LayersList {
   if (!data.routes.length) return [];
+  const selectedGroupId = selectedRouteId(data, state.selectedEventId);
   return [
     new PathLayer<GeoEvent>({
       id: 'aviation-route-underlay',
       data: data.routes,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
-      getColor: (event) => aviationRouteTone(event, event.id === state.selectedEventId ? 118 : 34),
-      getWidth: (event) => routeWidth(event, state.selectedEventId) + 1.1,
+      getColor: (event) => aviationRouteTone(event, routeAlpha(
+        event, state.selectedEventId, selectedGroupId, 34, 96,
+      )),
+      getWidth: (event) => routeWidth(event, selectedGroupId) + 1.1,
       widthMinPixels: 1,
       widthMaxPixels: 5,
       jointRounded: true,
@@ -486,44 +638,100 @@ function createAviationRouteLayers(data: AviationRenderData, state: Pick<WorldEv
       id: 'aviation-route-core',
       data: data.routes,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
-      getColor: (event) => aviationRouteTone(event, event.id === state.selectedEventId ? 235 : 118),
-      getWidth: (event) => routeWidth(event, state.selectedEventId),
+      getColor: (event) => aviationRouteTone(event, routeAlpha(
+        event, state.selectedEventId, selectedGroupId, 112, 235,
+      )),
+      getWidth: (event) => routeWidth(event, selectedGroupId),
       widthMinPixels: 0.65,
       widthMaxPixels: 3.5,
       jointRounded: true,
       capRounded: true,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 250, 198, 150],
     }),
   ];
 }
 
-function createAviationMarkerLayers(
+function liveAircraftMarker(event: GeoEvent): AviationAircraftMarker | null {
+  return event.geometry?.type === 'Point'
+    ? { id: event.id, event, position: event.geometry.coordinates, count: 1 }
+    : null;
+}
+
+export function aviationLiveAircraftMarkers(
+  events: readonly GeoEvent[],
+  zoom: number,
+  selectedEventId: string | null = null,
+) {
+  return aircraftScreenGrid(
+    events.flatMap((event) => liveAircraftMarker(event) || []),
+    zoom,
+    selectedEventId,
+  );
+}
+
+function liveAircraftColor(
+  marker: AviationAircraftMarker,
+  selectedEventId: string | null,
+): [number, number, number, number] {
+  const event = marker.event;
+  const selected = event.id === selectedEventId;
+  const alpha = selected ? 245 : isWatch(event) ? 220 : 174;
+  if (Boolean(event.properties.onGround)) return [120, 120, 120, Math.min(alpha, 170)];
+  const [red, green, blue] = aviationAltitudeColor(numberProperty(event, 'baroAltitude'));
+  return [red, green, blue, alpha];
+}
+
+function createAviationMarkerLayerSections(
   data: AviationRenderData,
-  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens'>,
-): LayersList {
+  state: Pick<WorldEventMapState, 'zoom' | 'aviationLens' | 'selectedEventId'>,
+) {
   const budget = aviationBudget(state.zoom, state.aviationLens);
-  const layers: Layer[] = [];
+  const hubLayers: Layer[] = [];
+  const aircraftLayers: Layer[] = [];
+  const labelLayers: Layer[] = [];
   if (data.liveAircraft.length) {
-    layers.push(new IconLayer<GeoEvent>({
+    const liveMarkers = aviationLiveAircraftMarkers(
+      data.liveAircraft,
+      state.zoom,
+      state.selectedEventId,
+    );
+    aircraftLayers.push(new IconLayer<AviationAircraftMarker>({
       id: 'aviation-live-aircraft',
-      data: data.liveAircraft,
+      data: liveMarkers,
       iconAtlas: AIRCRAFT_ICON_ATLAS,
       iconMapping: AIRCRAFT_ICON_MAPPING,
       getIcon: () => 'aircraft',
-      getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
-      getSize: (event) => isWatch(event) ? 15 : 12,
-      getAngle: (event) => numberProperty(event, 'heading') - 90,
-      getColor: (event) => isWatch(event) ? [255, 214, 84, 245] : [72, 244, 255, 232],
+      getPosition: (marker) => marker.position,
+      getSize: (marker) => marker.event.id === state.selectedEventId ? 17 : isWatch(marker.event) ? 15 : 12,
+      getAngle: (marker) => -numberProperty(marker.event, 'heading'),
+      getColor: (marker) => liveAircraftColor(marker, state.selectedEventId),
       sizeUnits: 'pixels',
+      sizeMinPixels: 8,
+      sizeMaxPixels: 28,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 250, 198, 132],
     }));
+    const overlaps = liveMarkers.filter((marker) => marker.count > 1);
+    if (overlaps.length) {
+      labelLayers.push(new TextLayer<AviationAircraftMarker>({
+        id: 'aviation-live-aircraft-counts',
+        data: overlaps,
+        getPosition: (marker) => marker.position,
+        getText: (marker) => String(marker.count),
+        getPixelOffset: [8, -8],
+        getSize: 8,
+        getColor: [225, 247, 250, 230],
+        getTextAnchor: 'middle',
+        getAlignmentBaseline: 'center',
+        fontFamily: MAP_MONO_FONT_FAMILY,
+        fontWeight: 800,
+        outlineWidth: 2,
+        outlineColor: [0, 8, 12, 230],
+        pickable: false,
+      }));
+    }
   }
   if (data.hubs.length) {
-    layers.push(new ScatterplotLayer<GeoEvent>({
+    hubLayers.push(new ScatterplotLayer<GeoEvent>({
       id: 'aviation-hubs',
       data: data.hubs,
       getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
@@ -536,10 +744,8 @@ function createAviationMarkerLayers(
       lineWidthMinPixels: 1,
       stroked: true,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 250, 198, 132],
     }));
-    layers.push(new TextLayer<GeoEvent>({
+    labelLayers.push(new TextLayer<GeoEvent>({
       id: 'aviation-hub-labels',
       data: data.hubs.slice(0, budget.hubLabels),
       getPosition: (event) => event.geometry?.type === 'Point' ? event.geometry.coordinates : [0, 0],
@@ -556,7 +762,7 @@ function createAviationMarkerLayers(
       pickable: false,
     }));
   }
-  return layers;
+  return { hubLayers, aircraftLayers, labelLayers };
 }
 
 /** Builds immutable route/marker layers plus their precomputed animation data. */
@@ -566,9 +772,15 @@ export function createAviationStaticLayerSections(
   viewport?: AviationViewport,
 ): AviationStaticLayerSections {
   const data = selectAviationRenderData(events, state, viewport);
+  const markerSections = createAviationMarkerLayerSections(data, state);
   return {
     routeLayers: createAviationRouteLayers(data, state),
-    markerLayers: createAviationMarkerLayers(data, state),
+    ...markerSections,
+    markerLayers: [
+      ...markerSections.hubLayers,
+      ...markerSections.aircraftLayers,
+      ...markerSections.labelLayers,
+    ],
     data,
   };
 }
@@ -580,9 +792,22 @@ export function createAviationStaticLayerSections(
 export function createAviationDynamicLayers(
   data: AviationRenderData,
   animationTime = 0,
+  zoom = 1.25,
+  selectedEventId: string | null = null,
+  hoveredEventId: string | null = null,
 ): LayersList {
-  const routeRunners = routeMotionPointsForGroups(data.routeMotionGroups, animationTime);
-  const flightPoints = seededFlightPointsForGroups(data.flightMotionGroups, animationTime);
+  const routeRunners = routeMotionPointsForGroups(
+    data.routeMotionGroups,
+    animationTime,
+    selectedEventId,
+    selectedRouteId(data, selectedEventId),
+  );
+  const flightPoints = seededFlightPointsForGroups(
+    data.flightMotionGroups,
+    animationTime,
+    zoom,
+    selectedEventId,
+  );
   const layers: Layer[] = [];
   if (routeRunners.length) {
     layers.push(new ScatterplotLayer<AviationMotionPoint>({
@@ -593,8 +818,8 @@ export function createAviationDynamicLayers(
       getFillColor: (point) => point.color,
       getLineColor: [4, 12, 18, 230],
       getLineWidth: 1,
-      radiusMinPixels: 1.8,
-      radiusMaxPixels: 4.5,
+      radiusMinPixels: 2,
+      radiusMaxPixels: 4,
       lineWidthMinPixels: 1,
       stroked: true,
       pickable: false,
@@ -609,13 +834,84 @@ export function createAviationDynamicLayers(
       getIcon: () => 'aircraft',
       getPosition: (point) => point.position,
       getSize: (point) => point.size,
-      getAngle: (point) => point.angle,
+      getAngle: (point) => point.angle - 90,
       getColor: (point) => point.color,
       sizeUnits: 'pixels',
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 250, 198, 150],
     }));
+    const hovered = hoveredEventId && hoveredEventId !== selectedEventId
+      ? flightPoints.filter((point) => point.event.id === hoveredEventId)
+      : [];
+    if (hovered.length) {
+      layers.push(new ScatterplotLayer<AviationMotionPoint>({
+        id: 'aviation-seeded-hover-ring',
+        data: hovered,
+        getPosition: (point) => point.position,
+        getRadius: 21_000,
+        getLineColor: (point) => [point.color[0], point.color[1], point.color[2], 185],
+        getLineWidth: 1.2,
+        radiusMinPixels: 8,
+        radiusMaxPixels: 17,
+        lineWidthMinPixels: 1,
+        filled: false,
+        stroked: true,
+        pickable: false,
+      }));
+    }
+    const selected = selectedEventId
+      ? flightPoints.filter((point) => point.event.id === selectedEventId)
+      : [];
+    if (selected.length) {
+      layers.push(
+        new ScatterplotLayer<AviationMotionPoint>({
+          id: 'aviation-seeded-selected-ring-outer',
+          data: selected,
+          getPosition: (point) => point.position,
+          getRadius: 28_000,
+          getLineColor: (point) => [point.color[0], point.color[1], point.color[2], 235],
+          getLineWidth: 1.6,
+          radiusMinPixels: 11,
+          radiusMaxPixels: 23,
+          lineWidthMinPixels: 1.3,
+          filled: false,
+          stroked: true,
+          pickable: false,
+        }),
+        new ScatterplotLayer<AviationMotionPoint>({
+          id: 'aviation-seeded-selected-ring-inner',
+          data: selected,
+          getPosition: (point) => point.position,
+          getRadius: 21_000,
+          getLineColor: [220, 244, 248, 210],
+          getLineWidth: 1.2,
+          radiusMinPixels: 8,
+          radiusMaxPixels: 18,
+          lineWidthMinPixels: 1,
+          filled: false,
+          stroked: true,
+          pickable: false,
+        }),
+      );
+    }
+    const overlaps = flightPoints.filter((point) => point.count > 1);
+    if (overlaps.length) {
+      layers.push(new TextLayer<AviationMotionPoint>({
+        id: 'aviation-seeded-aircraft-counts',
+        data: overlaps,
+        getPosition: (point) => point.position,
+        getText: (point) => String(point.count),
+        getPixelOffset: [8, -8],
+        getSize: 8,
+        getColor: [225, 247, 250, 230],
+        getTextAnchor: 'middle',
+        getAlignmentBaseline: 'center',
+        fontFamily: MAP_MONO_FONT_FAMILY,
+        fontWeight: 800,
+        outlineWidth: 2,
+        outlineColor: [0, 8, 12, 230],
+        pickable: false,
+      }));
+    }
   }
   return layers;
 }
@@ -628,9 +924,20 @@ export function createAviationLayers(
   viewport?: AviationViewport,
 ): LayersList {
   const sections = createAviationStaticLayerSections(events, state, viewport);
+  const dynamic = createAviationDynamicLayers(
+    sections.data,
+    animationTime,
+    state.zoom,
+    state.selectedEventId,
+  ).filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer));
   return [
     ...sections.routeLayers,
-    ...createAviationDynamicLayers(sections.data, animationTime),
-    ...sections.markerLayers,
+    ...dynamic.filter((layer) => layer.id === 'aviation-route-runners'),
+    ...sections.hubLayers,
+    ...dynamic.filter((layer) => layer.id === 'aviation-seeded-aircraft'),
+    ...sections.aircraftLayers,
+    ...dynamic.filter((layer) => layer.id.includes('-hover-') || layer.id.includes('-selected-')),
+    ...sections.labelLayers,
+    ...dynamic.filter((layer) => layer.id.endsWith('-counts')),
   ];
 }

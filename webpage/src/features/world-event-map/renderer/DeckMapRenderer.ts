@@ -1,5 +1,5 @@
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import type { LayersList, PickingInfo } from '@deck.gl/core';
+import type { Layer, LayersList, PickingInfo } from '@deck.gl/core';
 import maplibregl, {
   type FilterSpecification,
   type Map as MapLibreMap,
@@ -18,10 +18,16 @@ import type { BasemapState, MapRenderer, MapRendererCallbacks } from './MapRende
 import {
   createAviationDynamicLayers,
   createAviationStaticLayerSections,
+  createEventInteractionLayers,
+  createEventPulseLayers,
   createWorldEventGeometryLayers,
   createWorldEventPointLayers,
   EventClusterIndex,
+  HAZARD_PULSE_INTERVAL_MS,
+  hasAnimatedHazardPulse,
+  selectEventPulseCandidates,
   type AviationStaticLayerSections,
+  type EventCluster,
 } from './layerFactories';
 import {
   advanceAnimationTime,
@@ -85,6 +91,7 @@ export class DeckMapRenderer implements MapRenderer {
   private readonly performanceMonitor = new MapPerformanceMonitor();
   private deckHoverActive = false;
   private hoveredDeckEventId: string | null = null;
+  private hoveredDeckCluster: EventCluster | null = null;
   private staticDeckHoverActive = false;
   private aviationDeckHoverActive = false;
   private hoveredCountryIso2: string | null = null;
@@ -92,6 +99,11 @@ export class DeckMapRenderer implements MapRenderer {
   private interacting = false;
   private animationIntervalMs = MAP_ANIMATION_FRAME_INTERVAL_MS;
   private animationRecoveryFrames = 0;
+  private hazardPulseTimer: number | null = null;
+  private hazardPulseTime = Date.now();
+  private readonly eventFirstSeenAt = new Map<string, number>();
+  private receivedInitialEventSnapshot = false;
+  private pulseEvents: GeoEvent[] = [];
   /**
    * Aviation has a different invalidation cadence from hazards: route geometry,
    * hubs and live positions are static between data/camera changes, while only
@@ -188,13 +200,7 @@ export class DeckMapRenderer implements MapRenderer {
       useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
       getCursor,
       getTooltip,
-      onHover: (info: PickingInfo<WorldEventPickedObject>) => {
-        this.staticDeckHoverActive = Boolean(info.object);
-        this.deckHoverActive = this.staticDeckHoverActive || this.aviationDeckHoverActive;
-        this.hoveredDeckEventId = pickedWorldEvent(info.object)?.id
-          ?? (this.aviationDeckHoverActive ? this.hoveredDeckEventId : null);
-        this.updateMapCursor();
-      },
+      onHover: (info: PickingInfo<WorldEventPickedObject>) => this.handleDeckHover('static', info),
       onClick,
     });
     const aviationOverlay = new MapboxOverlay({
@@ -207,13 +213,7 @@ export class DeckMapRenderer implements MapRenderer {
       useDevicePixels: Math.min(1.25, Math.max(0.75, window.devicePixelRatio * 0.75)),
       getCursor,
       getTooltip,
-      onHover: (info: PickingInfo<WorldEventPickedObject>) => {
-        this.aviationDeckHoverActive = Boolean(info.object);
-        this.deckHoverActive = this.staticDeckHoverActive || this.aviationDeckHoverActive;
-        this.hoveredDeckEventId = pickedWorldEvent(info.object)?.id
-          ?? (this.staticDeckHoverActive ? this.hoveredDeckEventId : null);
-        this.updateMapCursor();
-      },
+      onHover: (info: PickingInfo<WorldEventPickedObject>) => this.handleDeckHover('aviation', info),
       onClick,
     });
     this.overlay = overlay;
@@ -235,6 +235,7 @@ export class DeckMapRenderer implements MapRenderer {
       this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
       this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
       this.syncAnimationLoop();
+      this.syncHazardPulseLoop();
     });
     map.on('style.load', this.handleStyleLoad);
     map.on('moveend', this.handleMoveEnd);
@@ -254,6 +255,9 @@ export class DeckMapRenderer implements MapRenderer {
   setState(state: WorldEventMapState) {
     const previous = this.state;
     this.state = state;
+    if (!previous || previous.selectedEventId !== state.selectedEventId) {
+      this.pulseEvents = selectEventPulseCandidates(this.events, state.selectedEventId);
+    }
     const map = this.map;
     if (map && (!previous
       || Math.abs(previous.center.lon - state.center.lon) > 0.0001
@@ -297,19 +301,44 @@ export class DeckMapRenderer implements MapRenderer {
       aviation: aviationLayersChanged,
       geometry: geometryChanged,
       dynamic: aviationLayersChanged,
+      pulse: previous?.selectedEventId !== state.selectedEventId,
+      interaction: previous?.selectedEventId !== state.selectedEventId,
     });
     this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
   }
 
   setEvents(events: GeoEvent[]) {
     if (events === this.events) return;
+    const previousIds = new Set(this.events.map((event) => event.id));
+    const now = Date.now();
+    if (this.receivedInitialEventSnapshot) {
+      for (const event of events) {
+        if (!previousIds.has(event.id)) this.eventFirstSeenAt.set(event.id, now);
+      }
+    } else if (events.length > 0) {
+      this.receivedInitialEventSnapshot = true;
+    }
+    const nextIds = new Set(events.map((event) => event.id));
+    for (const eventId of this.eventFirstSeenAt.keys()) {
+      if (!nextIds.has(eventId)) this.eventFirstSeenAt.delete(eventId);
+    }
     this.events = events;
+    this.pulseEvents = selectEventPulseCandidates(events, this.state?.selectedEventId || null);
     this.clusterIndex.update(events);
     this.pointLayers = null;
     this.aviationLayerSections = null;
     this.invalidateGeometry();
-    this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
+    this.requestRender({
+      points: true,
+      aviation: true,
+      geometry: true,
+      dynamic: true,
+      pulse: true,
+      interaction: true,
+    });
     this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
   }
 
   resize() {
@@ -319,13 +348,15 @@ export class DeckMapRenderer implements MapRenderer {
   setReducedMotion(reduced: boolean) {
     this.reducedMotion = reduced;
     this.syncAnimationLoop();
-    this.requestRender({ dynamic: true });
+    this.syncHazardPulseLoop();
+    this.requestRender({ dynamic: true, pulse: true });
   }
 
   pause() {
     this.paused = true;
     this.clearAllHover();
     this.cancelAnimationLoop();
+    this.cancelHazardPulseLoop();
     this.renderScheduler.cancel();
     this.heavyGeometryCommit.cancel();
     this.geometryNeedsCommit = true;
@@ -339,6 +370,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.resize();
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
     this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
   }
 
   destroy() {
@@ -346,6 +378,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.clearFallbackTimer();
     this.clearContextRecoveryTimer();
     this.cancelAnimationLoop();
+    this.cancelHazardPulseLoop();
     this.renderScheduler.cancel();
     this.heavyGeometryCommit.cancel();
     this.performanceMonitor.destroy();
@@ -395,7 +428,7 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   private requestRender(invalidation: Partial<MapRenderInvalidation> = {}) {
-    if (this.paused || !this.overlay || !this.aviationOverlay || !this.state) return;
+    if (this.destroyed || this.paused || !this.overlay || !this.aviationOverlay || !this.state) return;
     this.renderScheduler.request(invalidation);
   }
 
@@ -439,21 +472,68 @@ export class DeckMapRenderer implements MapRenderer {
       );
     }
     const aviationSections = this.aviationLayerSections;
-    const onlyDynamic = invalidation.dynamic
+    const onlyDynamic = (invalidation.dynamic || invalidation.pulse || invalidation.interaction)
       && !invalidation.points
       && !invalidation.aviation
       && !invalidation.geometry;
-    const dynamicLayers = aviationSections
+    const aviationDynamicLayers = aviationSections
       ? this.performanceMonitor.measure(
         onlyDynamic ? 'dynamic-build' : 'js-build',
-        () => createAviationDynamicLayers(aviationSections.data, this.animationTime),
+        () => createAviationDynamicLayers(
+          aviationSections.data,
+          this.animationTime,
+          this.state!.zoom,
+          this.state!.selectedEventId,
+          this.hoveredDeckEventId,
+        ),
       )
       : [];
+    const pointLayerList = (this.pointLayers || []).filter(
+      (layer): layer is Layer => Boolean(layer) && !Array.isArray(layer),
+    );
+    const aviationDynamicLayerList = aviationDynamicLayers.filter(
+      (layer): layer is Layer => Boolean(layer) && !Array.isArray(layer),
+    );
+    const pointLabels = pointLayerList.filter((layer) => (
+      layer?.id === 'world-event-labels' || layer?.id === 'world-event-cluster-counts'
+    ));
+    const pointBaseLayers = pointLayerList.filter((layer) => !pointLabels.includes(layer));
+    const routeRunnerLayers = aviationDynamicLayerList.filter((layer) => layer.id === 'aviation-route-runners');
+    const seededAircraftLayers = aviationDynamicLayerList.filter((layer) => layer.id === 'aviation-seeded-aircraft');
+    const seededInteractionLayers = aviationDynamicLayerList.filter((layer) => (
+      layer.id.startsWith('aviation-seeded-hover-') || layer.id.startsWith('aviation-seeded-selected-')
+    ));
+    const aviationCountLabels = aviationDynamicLayerList.filter((layer) => layer.id.endsWith('-counts'));
+    const pulseLayers = this.reducedMotion
+      ? []
+      : createEventPulseLayers({
+        events: this.pulseEvents,
+        selectedEventId: this.state.selectedEventId,
+        firstSeenAt: this.eventFirstSeenAt,
+        pulseTime: this.hazardPulseTime,
+      });
+    const interactionLayers = createEventInteractionLayers(
+      this.events,
+      this.state.selectedEventId,
+      this.hoveredDeckEventId,
+      this.hoveredDeckCluster,
+    );
     const staticLayers = [
       ...this.geometryLayers,
       ...(aviationSections?.routeLayers || []),
-      ...(aviationSections?.markerLayers || []),
-      ...(this.pointLayers || []),
+      ...pointBaseLayers,
+    ];
+    const dynamicLayers = [
+      ...routeRunnerLayers,
+      ...(aviationSections?.hubLayers || []),
+      ...seededAircraftLayers,
+      ...(aviationSections?.aircraftLayers || []),
+      ...pulseLayers,
+      ...interactionLayers,
+      ...seededInteractionLayers,
+      ...(aviationSections?.labelLayers || []),
+      ...aviationCountLabels,
+      ...pointLabels,
     ];
     this.performanceMonitor.measure(onlyDynamic ? 'dynamic-commit' : 'deck-commit', () => {
       if (!onlyDynamic) this.overlay?.setProps({ layers: staticLayers });
@@ -470,6 +550,8 @@ export class DeckMapRenderer implements MapRenderer {
     this.pointLayers = null;
     this.aviationLayerSections = null;
     this.requestRender({ points: true, aviation: true, dynamic: true });
+    this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
     const center = map.getCenter();
     const camera = { center: { lon: center.lng, lat: center.lat }, zoom: map.getZoom() };
     if (this.applyingCamera) {
@@ -485,9 +567,37 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleMoveStart = () => {
     this.interacting = true;
+    this.cancelAnimationLoop();
+    this.cancelHazardPulseLoop();
     this.countryHoverQueryController?.cancel();
     this.clearAllHover();
   };
+
+  private handleDeckHover(
+    source: 'static' | 'aviation',
+    info: PickingInfo<WorldEventPickedObject>,
+  ) {
+    const previousHoveredEventId = this.hoveredDeckEventId;
+    const previousHoveredClusterId = this.hoveredDeckCluster?.id || null;
+    if (source === 'static') this.staticDeckHoverActive = Boolean(info.object);
+    else this.aviationDeckHoverActive = Boolean(info.object);
+    this.deckHoverActive = this.staticDeckHoverActive || this.aviationDeckHoverActive;
+    const pickedId = pickedWorldEvent(info.object)?.id || null;
+    const pickedCluster = pickedWorldEventCluster(info.object);
+    if (pickedCluster) this.hoveredDeckCluster = pickedCluster;
+    else if (source === 'static' ? !this.aviationDeckHoverActive : !this.staticDeckHoverActive) {
+      this.hoveredDeckCluster = null;
+    }
+    if (pickedId) this.hoveredDeckEventId = pickedId;
+    else if (source === 'static' ? !this.aviationDeckHoverActive : !this.staticDeckHoverActive) {
+      this.hoveredDeckEventId = null;
+    }
+    if (previousHoveredEventId !== this.hoveredDeckEventId
+      || previousHoveredClusterId !== (this.hoveredDeckCluster?.id || null)) {
+      this.requestRender({ interaction: true });
+    }
+    this.updateMapCursor();
+  }
 
   private handleCountryHoverMove = (event: MapMouseEvent) => {
     if (this.destroyed || this.paused) return;
@@ -591,11 +701,15 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   private clearAllHover() {
+    const hadEventHover = this.hoveredDeckEventId != null;
+    const hadClusterHover = this.hoveredDeckCluster != null;
     this.staticDeckHoverActive = false;
     this.aviationDeckHoverActive = false;
     this.deckHoverActive = false;
     this.clearCountryHover();
     this.hoveredDeckEventId = null;
+    this.hoveredDeckCluster = null;
+    if (hadEventHover || hadClusterHover) this.requestRender({ interaction: true });
   }
 
   private updateMapCursor() {
@@ -620,6 +734,7 @@ export class DeckMapRenderer implements MapRenderer {
     event.preventDefault();
     this.paused = true;
     this.cancelAnimationLoop();
+    this.cancelHazardPulseLoop();
     this.renderScheduler.cancel();
     this.heavyGeometryCommit.cancel();
     this.geometryNeedsCommit = true;
@@ -645,6 +760,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
     this.syncAnimationLoop();
+    this.syncHazardPulseLoop();
   };
 
   private applyLocalFallback(error: Error) {
@@ -704,6 +820,50 @@ export class DeckMapRenderer implements MapRenderer {
       event.category === 'infrastructure'
       && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight')
     ));
+  }
+
+  private syncHazardPulseLoop() {
+    const shouldPulse = !this.destroyed
+      && !this.paused
+      && !this.interacting
+      && !this.reducedMotion
+      && Boolean(this.overlay)
+      && Boolean(this.aviationOverlay)
+      && hasAnimatedHazardPulse(
+        this.pulseEvents,
+        this.state?.selectedEventId || null,
+        this.eventFirstSeenAt,
+      );
+    if (!shouldPulse) {
+      this.cancelHazardPulseLoop();
+      return;
+    }
+    if (this.hazardPulseTimer != null) return;
+    this.hazardPulseTimer = window.setInterval(() => {
+      if (
+        this.destroyed
+        || this.paused
+        || this.interacting
+        || this.reducedMotion
+        || !hasAnimatedHazardPulse(
+          this.pulseEvents,
+          this.state?.selectedEventId || null,
+          this.eventFirstSeenAt,
+        )
+      ) {
+        this.cancelHazardPulseLoop();
+        return;
+      }
+      this.hazardPulseTime = Date.now();
+      if (this.shouldRenderAnimationFrame()) this.requestRender({ pulse: true });
+    }, HAZARD_PULSE_INTERVAL_MS);
+  }
+
+  private cancelHazardPulseLoop() {
+    if (this.hazardPulseTimer != null) {
+      window.clearInterval(this.hazardPulseTimer);
+      this.hazardPulseTimer = null;
+    }
   }
 
   private syncAnimationLoop() {

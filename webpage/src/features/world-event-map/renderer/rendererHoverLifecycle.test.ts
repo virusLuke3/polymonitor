@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { DeckMapRenderer } from './DeckMapRenderer';
 import { SvgMapRenderer } from './SvgMapRenderer';
 import type { MapRendererCallbacks } from './MapRenderer';
+import { defaultWorldEventMapState } from '../state/mapState';
+import type { GeoEvent } from '../domain/types';
 
 function callbacks(): MapRendererCallbacks {
   return {
@@ -84,5 +86,58 @@ describe('renderer hover lifecycle', () => {
     expect(renderer.animationIntervalMs).toBe(40);
     expect(renderer.animationRecoveryFrames).toBe(0);
     renderer.destroy();
+  });
+
+  it('runs hazard pulses on a separate 500ms clock and stops it during interaction', () => {
+    const setInterval = vi.fn(() => 41);
+    const clearInterval = vi.fn();
+    vi.stubGlobal('window', { location: { search: '' }, setInterval, clearInterval });
+    const critical = {
+      id: 'earthquake:critical',
+      category: 'natural-hazard',
+      title: 'Critical earthquake',
+      severity: 'critical',
+      geometry: { type: 'Point', coordinates: [10, 10] },
+      locationPrecision: 'exact',
+      sources: [{ provider: 'fixture' }],
+      limitations: [],
+      relatedMarketIds: [],
+      properties: {},
+      hazardKind: 'earthquake',
+      lifecycle: 'active',
+      coverage: { scope: 'global', label: 'fixture', isComplete: false, gaps: [] },
+      severityEvidence: { provider: 'fixture', mappingVersion: 'fixture', reason: 'fixture' },
+      revision: { nativeEventId: 'critical' },
+      metrics: { kind: 'earthquake', magnitude: 6.2 },
+    } as GeoEvent;
+    const renderer = new DeckMapRenderer() as unknown as {
+      overlay: object;
+      aviationOverlay: object;
+      state: ReturnType<typeof defaultWorldEventMapState>;
+      events: GeoEvent[];
+      pulseEvents: GeoEvent[];
+      eventFirstSeenAt: Map<string, number>;
+      hazardPulseTimer: number | null;
+      interacting: boolean;
+      syncHazardPulseLoop: () => void;
+      destroy: () => void;
+    };
+    renderer.overlay = {};
+    renderer.aviationOverlay = {};
+    renderer.state = defaultWorldEventMapState();
+    renderer.events = [critical];
+    renderer.pulseEvents = [critical];
+    renderer.eventFirstSeenAt = new Map();
+
+    renderer.syncHazardPulseLoop();
+    expect(setInterval).toHaveBeenCalledWith(expect.any(Function), 500);
+    expect(renderer.hazardPulseTimer).toBe(41);
+
+    renderer.interacting = true;
+    renderer.syncHazardPulseLoop();
+    expect(clearInterval).toHaveBeenCalledWith(41);
+    expect(renderer.hazardPulseTimer).toBeNull();
+    renderer.destroy();
+    vi.unstubAllGlobals();
   });
 });

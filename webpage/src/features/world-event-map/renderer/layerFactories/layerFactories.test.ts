@@ -5,12 +5,20 @@ import { defaultWorldEventMapState } from '../../state/mapState';
 import { createWorldEventLayers } from '.';
 import {
   aviationRouteMotionPoints,
+  aviationSeededFlightPoints,
+  aviationAltitudeColor,
   aviationLayerStatsForState,
   createAviationDynamicLayers,
   createAviationStaticLayerSections,
   selectAviationRenderData,
 } from './aviationLayers';
 import { clusterEventPoints, EventClusterIndex } from './eventPointLayer';
+import {
+  createEventInteractionLayers,
+  createEventPulseLayers,
+  eventRepresentativePoint,
+  hazardPulseTargets,
+} from './eventEmphasisLayers';
 
 const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['severity'] = 'watch'): GeoEvent => ({
   id,
@@ -25,8 +33,14 @@ const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['se
   properties: {},
 });
 
-const hazardPoint = (id: string, hazardKind: 'earthquake' | 'volcano', lon: number, lat: number): GeoEvent => ({
-  ...pointEvent(id, lon, lat),
+const hazardPoint = (
+  id: string,
+  hazardKind: 'earthquake' | 'volcano',
+  lon: number,
+  lat: number,
+  severity: GeoEvent['severity'] = 'watch',
+): GeoEvent => ({
+  ...pointEvent(id, lon, lat, severity),
   category: 'natural-hazard',
   properties: { mapEntity: 'hazard-event' },
   hazardKind,
@@ -124,17 +138,25 @@ describe('world event layer factories', () => {
     expect(index.buildCount).toBe(2);
   });
 
-  it('keeps warning events as persistent priority rings rather than forcing a global RAF loop', () => {
-    const warning = pointEvent('warning', 10, 10, 'warning');
-    const layers = createWorldEventLayers(
-      [warning],
-      defaultWorldEventMapState(),
-      true,
-      undefined,
-      1.5,
-    ) as Layer[];
-    expect(layers.some((layer) => layer.id === 'world-event-priority-rings')).toBe(true);
-    expect(layers.some((layer) => layer.id === 'world-event-pulses')).toBe(false);
+  it('keeps stable clickable hazard entities separate from hollow non-pickable pulse rings', () => {
+    const warning = hazardPoint('warning', 'earthquake', 10, 10, 'warning');
+    const stableLayers = createWorldEventLayers([warning], defaultWorldEventMapState()) as Layer[];
+    const pulseLayers = createEventPulseLayers({
+      events: [warning],
+      selectedEventId: null,
+      firstSeenAt: new Map(),
+      pulseTime: 1_000,
+    }) as Layer[];
+    const point = stableLayers.find((layer) => layer.id === 'world-event-points');
+    const pulse = pulseLayers.find((layer) => layer.id === 'world-event-status-pulses');
+
+    const pointProps = point?.props as unknown as Record<string, unknown>;
+    const pulseProps = pulse?.props as unknown as Record<string, unknown>;
+    expect(pointProps.pickable).toBe(true);
+    expect(pointProps.autoHighlight).toBe(false);
+    expect(pulseProps.pickable).toBe(false);
+    expect(pulseProps.filled).toBe(false);
+    expect(pulseProps.stroked).toBe(true);
   });
 
   it('creates polygon and line layers without accessing the DOM', () => {
@@ -280,6 +302,7 @@ describe('world event layer factories', () => {
     expect(dynamicLayers.map((layer) => layer.id)).toEqual([
       'aviation-route-runners',
       'aviation-seeded-aircraft',
+      'aviation-seeded-aircraft-counts',
     ]);
   });
 
@@ -373,6 +396,111 @@ describe('world event layer factories', () => {
 
     expect(selected.routes.map((event) => event.properties.routeId)).toEqual(['near']);
     expect(selected.liveAircraft.map((event) => event.id)).toEqual(['near-aircraft']);
+  });
+
+  it('uses slow warning rings, strong critical rings and a 30 second recent-event fade', () => {
+    const warning = hazardPoint('hazard:warning', 'earthquake', 10, 10, 'warning');
+    const critical = hazardPoint('hazard:critical', 'volcano', 20, 20, 'critical');
+    const now = 100_000;
+    const targets = hazardPulseTargets(
+      [warning, critical],
+      null,
+      new Map([[critical.id, now - 15_000]]),
+      now,
+    );
+
+    expect(targets.status.find((target) => target.event.id === warning.id)?.strength).toBe('warning');
+    expect(targets.status.find((target) => target.event.id === critical.id)?.strength).toBe('strong');
+    expect(targets.recent).toHaveLength(1);
+    expect(targets.recent[0]?.fade).toBeCloseTo(0.5);
+  });
+
+  it('never pulses low-priority FIRMS cells and only animates major aggregates', () => {
+    const firms = (id: string, severity: GeoEvent['severity'], detectionCount: number): GeoEvent => ({
+      ...hazardPoint(id, 'volcano', 10, 10, severity),
+      hazardKind: 'fire-detection',
+      metrics: { kind: 'wildfire', detectionCount, fireRadiativePowerMw: detectionCount * 10 },
+    } as GeoEvent);
+    const low = firms('firms:low', 'info', 1);
+    const watch = firms('firms:watch', 'watch', 20);
+    const major = firms('firms:major', 'warning', 100);
+    const targets = hazardPulseTargets([low, watch, major], null, new Map(), 10_000);
+
+    expect(targets.status.map((target) => target.event.id)).toEqual(['firms:major']);
+  });
+
+  it('animates a polygon centre marker without flashing the polygon fill', () => {
+    const polygon = {
+      ...hazardPoint('hazard:polygon', 'volcano', 0, 0, 'critical'),
+      geometry: { type: 'Polygon', coordinates: [[[10, 10], [14, 10], [14, 12], [10, 10]]] },
+    } as GeoEvent;
+    expect(eventRepresentativePoint(polygon)).toEqual([12, 11]);
+    const layers = createEventPulseLayers({
+      events: [polygon],
+      selectedEventId: null,
+      firstSeenAt: new Map(),
+      pulseTime: 5_000,
+    }) as Layer[];
+    expect(layers[0]?.constructor.name).toBe('ScatterplotLayer');
+    expect((layers[0]?.props as unknown as Record<string, unknown>).filled).toBe(false);
+  });
+
+  it('uses a restrained hover outline and double hollow rings only for selection', () => {
+    const event = hazardPoint('hazard:selected', 'earthquake', 10, 10, 'watch');
+    const hover = createEventInteractionLayers([event], null, event.id) as Layer[];
+    const selected = createEventInteractionLayers([event], event.id, null) as Layer[];
+    expect(hover.map((layer) => layer.id)).toEqual(['world-event-hover-ring']);
+    expect(selected.map((layer) => layer.id)).toEqual([
+      'world-event-selected-ring-outer',
+      'world-event-selected-ring-inner',
+    ]);
+    expect(selected.every((layer) => {
+      const props = layer.props as unknown as Record<string, unknown>;
+      return props.filled === false && props.pickable === false;
+    })).toBe(true);
+  });
+
+  it('fades seeded aircraft at route endpoints and merges screen-grid overlaps by priority', () => {
+    const flight = (id: string, phase: number, severity: GeoEvent['severity']): GeoEvent => ({
+      ...pointEvent(id, 0, 0, severity),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[0, 0], [20, 0]] },
+      properties: { mapEntity: 'air-flight', flightId: id, phase, speed: 0.012 },
+    });
+    const nearHub = aviationSeededFlightPoints([flight('near', 0.01, 'info')], 0, 4)[0]!;
+    const midRoute = aviationSeededFlightPoints([flight('middle', 0.5, 'info')], 0, 4)[0]!;
+    const overlap = aviationSeededFlightPoints([
+      flight('lower-priority', 0.5, 'info'),
+      flight('watch-priority', 0.5, 'warning'),
+    ], 0, 2);
+
+    expect(nearHub.color[3]).toBeLessThan(midRoute.color[3]);
+    expect(midRoute.color[3]).toBe(170);
+    expect(overlap).toHaveLength(1);
+    expect(overlap[0]?.event.id).toBe('watch-priority');
+    expect(overlap[0]?.count).toBe(2);
+  });
+
+  it('dims non-selected routes to alpha 36 and keeps live aircraft at bounded opacity', () => {
+    const route = (id: string): GeoEvent => ({
+      ...pointEvent(id, 0, 0, 'info'),
+      category: 'infrastructure',
+      geometry: { type: 'LineString', coordinates: [[0, 0], [10, 5]] },
+      properties: { mapEntity: 'air-route', routeId: id, layer: 'trunk' },
+    });
+    const first = route('route:first');
+    const second = route('route:second');
+    const state = { ...aviationState(), selectedEventId: first.id };
+    const sections = createAviationStaticLayerSections([first, second], state);
+    const core = (sections.routeLayers as Layer[]).find((layer) => layer.id === 'aviation-route-core')!;
+    const coreProps = core.props as unknown as Record<string, unknown>;
+    const getColor = coreProps.getColor as (event: GeoEvent) => [number, number, number, number];
+
+    expect(getColor(first)[3]).toBe(235);
+    expect(getColor(second)[3]).toBe(36);
+    expect(coreProps.autoHighlight).toBe(false);
+    expect(aviationAltitudeColor(0)).toEqual([0, 217, 255]);
+    expect(aviationAltitudeColor(12_192)).toEqual([235, 50, 55]);
   });
 
   it('clusters a 2,000 event fixture within the viewport and retains selection', () => {
