@@ -64,19 +64,31 @@ describe('renderer hover lifecycle', () => {
     const onError = vi.fn();
     const renderer = new DeckMapRenderer() as unknown as {
       callbacks: MapRendererCallbacks;
-      primaryBasemapReady: boolean;
-      primaryBasemapErrorCount: number;
       fallbackApplied: boolean;
       handleMapError: (event: { error?: Error; message?: string }) => void;
       destroy: () => void;
     };
     renderer.callbacks = { ...callbacks(), onError };
-    renderer.primaryBasemapReady = true;
-
     renderer.handleMapError({ message: 'Tile network request failed' });
     renderer.handleMapError({ message: 'Glyph fetch network request failed' });
 
-    expect(renderer.primaryBasemapErrorCount).toBe(0);
+    expect(renderer.fallbackApplied).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(2);
+    renderer.destroy();
+  });
+
+  it('lets retryable PMTiles resources recover before the readiness timeout', () => {
+    const onError = vi.fn();
+    const renderer = new DeckMapRenderer() as unknown as {
+      callbacks: MapRendererCallbacks;
+      fallbackApplied: boolean;
+      handleMapError: (event: { error?: Error; message?: string }) => void;
+      destroy: () => void;
+    };
+    renderer.callbacks = { ...callbacks(), onError };
+    renderer.handleMapError({ message: 'Tile network request failed' });
+    renderer.handleMapError({ message: 'Glyph fetch network request failed' });
+
     expect(renderer.fallbackApplied).toBe(false);
     expect(onError).toHaveBeenCalledTimes(2);
     renderer.destroy();

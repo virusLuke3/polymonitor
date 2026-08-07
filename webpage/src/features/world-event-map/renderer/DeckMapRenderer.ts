@@ -102,8 +102,6 @@ export class DeckMapRenderer implements MapRenderer {
   private state: WorldEventMapState | null = null;
   private events: GeoEvent[] = [];
   private fallbackApplied = false;
-  private primaryBasemapReady = false;
-  private primaryBasemapErrorCount = 0;
   private fallbackTimer: number | null = null;
   private fallbackSourceTimer: number | null = null;
   private fallbackCountryLabels: CountryBasemapLabel[] = [];
@@ -288,7 +286,6 @@ export class DeckMapRenderer implements MapRenderer {
       if (this.fallbackApplied) {
         if (!this.markLocalFallbackReadyIfLoaded()) this.scheduleFallbackSourceTimeout();
       } else {
-        this.primaryBasemapReady = true;
         this.clearFallbackTimer();
         this.emitBasemapState('primary-ready');
       }
@@ -1226,17 +1223,13 @@ export class DeckMapRenderer implements MapRenderer {
   private handleMapError = (event: { error?: Error; message?: string }) => {
     const message = event.error?.message || event.message || 'Unknown MapLibre error';
     if (!this.fallbackApplied && /fetch|ajax|cors|network|403|forbidden|tile|style/i.test(message)) {
-      // Once the labelled vector basemap has reached `load`, isolated tile or
-      // glyph failures are recoverable and MapLibre will retry them. Replacing
-      // the entire style after two late errors blanks a healthy map during a
-      // pan and leaves the UI stuck on INITIALIZING. Fallback is reserved for
-      // the initial style failing to become usable at all.
-      if (!this.primaryBasemapReady) {
-        this.primaryBasemapErrorCount += 1;
-        if (this.primaryBasemapErrorCount >= 2) this.applyLocalFallback(new Error(message));
-      } else {
-        this.callbacks?.onError(new Error(message));
-      }
+      // MapLibre emits transient tile/glyph errors before the first `load`
+      // event as well as after it. Counting two resource errors as a fatal
+      // style failure made a healthy same-origin PMTiles basemap downgrade
+      // immediately on a cold Cloudflare range request. Keep retryable errors
+      // visible to diagnostics and let the bounded readiness timer make the
+      // only initial fallback decision.
+      this.callbacks?.onError(new Error(message));
       return;
     }
     if (this.fallbackApplied && /fetch|ajax|cors|network|404|tile|source/i.test(message)) {
