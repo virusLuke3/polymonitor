@@ -39,10 +39,32 @@ export async function registerWorldEventPMTilesProtocol() {
  * Country/city disclosure, collision, font weight, boundaries and halos all
  * remain owned by the provider style instead of being re-created after load.
  */
+export function resolveWorldEventPMTilesUrl(
+  url: string,
+  origin = typeof window !== 'undefined' ? window.location.origin : '',
+) {
+  if (/^https?:\/\//i.test(url) || !origin) return url;
+  return new URL(url, origin).href;
+}
+
 export async function buildWorldEventPMTilesStyle(url: string): Promise<StyleSpecification> {
   const { layers, namedFlavor } = await import('@protomaps/basemaps');
+  const archiveUrl = resolveWorldEventPMTilesUrl(url);
   const rankedLayers = layers('basemap', namedFlavor('black'), { lang: 'en' }) as StyleSpecification['layers'];
-  const tunedLayers = rankedLayers.flatMap((layer) => {
+  const eventBasemapLayerIds = new Set([
+    'background',
+    'earth',
+    'water',
+    'boundaries_country',
+    'boundaries',
+    'water_label_ocean',
+    'water_label_lakes',
+    'earth_label_islands',
+    'places_region',
+    'places_locality',
+    'places_country',
+  ]);
+  const tunedLayers = rankedLayers.filter((layer) => eventBasemapLayerIds.has(layer.id)).flatMap((layer) => {
     if (layer.id === 'places_country') {
       const regional = { ...layer, minzoom: 2.6 };
       const global = {
@@ -54,6 +76,14 @@ export async function buildWorldEventPMTilesStyle(url: string): Promise<StyleSpe
           ...layer.layout,
           'text-size': ['interpolate', ['linear'], ['zoom'], 0, 14, 2, 18, 2.6, 19],
           'text-padding': 8,
+        },
+        paint: {
+          ...layer.paint,
+          'text-color': '#aeb7ba',
+          'text-halo-color': '#070a0c',
+          'text-halo-width': 1.25,
+          'text-halo-blur': 0.15,
+          'text-opacity': 0.95,
         },
       };
       return [global, regional] as typeof rankedLayers;
@@ -77,9 +107,18 @@ export async function buildWorldEventPMTilesStyle(url: string): Promise<StyleSpe
           'text-size': ['interpolate', ['linear'], ['zoom'], 0, 13, 2, 17, 2.6, 18],
           'text-padding': 10,
         },
+        paint: {
+          ...layer.paint,
+          'text-color': '#aeb7ba',
+          'text-halo-color': '#070a0c',
+          'text-halo-width': 1.25,
+          'text-halo-blur': 0.15,
+          'text-opacity': 0.94,
+        },
       };
       return [global, regional, detail] as typeof rankedLayers;
     }
+    if (layer.id === 'water_label_lakes' || layer.id === 'earth_label_islands') return [{ ...layer, minzoom: 4 }];
     if (layer.id === 'places_region') return [{ ...layer, minzoom: 5 }];
     if (layer.id === 'places_subplace') return [{ ...layer, minzoom: 7 }];
     if (layer.id === 'boundaries') return [{ ...layer, minzoom: 5 }];
@@ -92,7 +131,7 @@ export async function buildWorldEventPMTilesStyle(url: string): Promise<StyleSpe
     sources: {
       basemap: {
         type: 'vector',
-        url: `pmtiles://${url}`,
+        url: `pmtiles://${archiveUrl}`,
         attribution: '<a href="https://protomaps.com">Protomaps</a> | <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
       },
     },
@@ -198,10 +237,10 @@ function labelVisible(kind: LabelKind, density: LabelDensity) {
 }
 
 function labelSize(kind: LabelKind): unknown | null {
-  if (kind === 'country-major') return ['interpolate', ['linear'], ['zoom'], 0, 10, 3, 12, 5, 14];
-  if (kind === 'country-minor') return ['interpolate', ['linear'], ['zoom'], 1.85, 9, 4, 11, 6, 12];
-  if (kind === 'city-major') return ['interpolate', ['linear'], ['zoom'], 0, 10, 3, 12, 6, 14];
-  if (kind === 'city') return ['interpolate', ['linear'], ['zoom'], 3.1, 9, 5, 11, 7, 13];
+  if (kind === 'country-major') return ['interpolate', ['linear'], ['zoom'], 0, 13, 3, 15, 5, 17];
+  if (kind === 'country-minor') return ['interpolate', ['linear'], ['zoom'], 1.85, 11, 4, 13, 6, 15];
+  if (kind === 'city-major') return ['interpolate', ['linear'], ['zoom'], 0, 14, 3, 16, 6, 18];
+  if (kind === 'city') return ['interpolate', ['linear'], ['zoom'], 3.1, 11, 5, 13, 7, 15];
   return null;
 }
 
@@ -234,11 +273,15 @@ export function reinforceWorldEventBasemapLabels(map: LabelCapableMap) {
       map.setLayoutProperty(layer.id, 'text-field', ENGLISH_NAME_EXPRESSION);
       const size = labelSize(kind);
       if (size) map.setLayoutProperty(layer.id, 'text-size', size);
-      map.setPaintProperty(layer.id, 'text-color', '#8f979a');
-      map.setPaintProperty(layer.id, 'text-halo-color', '#141414');
-      map.setPaintProperty(layer.id, 'text-halo-width', 1);
-      map.setPaintProperty(layer.id, 'text-halo-blur', 0);
-      map.setPaintProperty(layer.id, 'text-opacity', kind === 'context' ? 0.68 : 0.82);
+      map.setPaintProperty(layer.id, 'text-color', '#aeb7ba');
+      map.setPaintProperty(layer.id, 'text-halo-color', '#070a0c');
+      map.setPaintProperty(layer.id, 'text-halo-width', 1.25);
+      map.setPaintProperty(layer.id, 'text-halo-blur', 0.15);
+      map.setPaintProperty(
+        layer.id,
+        'text-opacity',
+        kind === 'context' ? 0.72 : kind === 'country-major' || kind === 'city-major' ? 0.95 : 0.9,
+      );
     } catch {
       // A remote style may replace a layer during load. Its defaults remain usable.
     }
@@ -270,6 +313,7 @@ export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
 
   return {
     version: 8,
+    glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
     sources: {
       'wm-weather-country-boundaries': {
         type: 'geojson',
@@ -296,6 +340,28 @@ export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
           'line-color': border,
           'line-opacity': light ? 0.72 : 0.82,
           'line-width': ['interpolate', ['linear'], ['zoom'], 0, 0.45, 4, 0.9, 7, 1.4],
+        },
+      },
+      {
+        id: 'wm-local-country-labels',
+        type: 'symbol',
+        source: 'wm-weather-country-boundaries',
+        layout: {
+          'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']],
+          'text-font': ['Noto Sans Medium'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 0, 13, 3, 15, 5, 17],
+          'text-padding': 8,
+          'text-max-width': 8,
+          'text-letter-spacing': 0.035,
+          'text-allow-overlap': false,
+          'text-ignore-placement': false,
+        },
+        paint: {
+          'text-color': light ? '#4a5459' : '#aeb7ba',
+          'text-halo-color': light ? '#eef3f4' : '#070a0c',
+          'text-halo-width': 1.25,
+          'text-halo-blur': 0.15,
+          'text-opacity': 0.94,
         },
       },
     ],

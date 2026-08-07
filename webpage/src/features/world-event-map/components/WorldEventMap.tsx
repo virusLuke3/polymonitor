@@ -15,7 +15,12 @@ import {
   worldEventLayerById,
   worldEventLayerIdForEvent,
 } from '../config/layerRegistry';
-import { MAP_SEVERITY_STYLES } from '../config/mapSymbols';
+import {
+  MAP_SEVERITY_STYLES,
+  mapSymbolForEvent,
+  mapSymbolPalette,
+  type MapSymbolKey,
+} from '../config/mapSymbols';
 import { EventInspector } from './EventInspector';
 import { EventList } from './EventList';
 import { AviationLens } from './AviationLens';
@@ -59,19 +64,38 @@ export function WorldEventMap({
   );
   const legendItems = useMemo(
     () => {
-      const populatedLayerIds = new Set(events
-        .map(worldEventLayerIdForEvent)
-        .filter((layerId): layerId is string => layerId != null));
+      const activeLayerIds = new Set(state.activeLayerIds);
+      const populatedLayerIds = new Set<string>();
+      const visibleSymbols = new Set<MapSymbolKey>();
+      for (const event of events) {
+        const layerId = worldEventLayerIdForEvent(event);
+        const layer = layerId ? worldEventLayerById(layerId) : null;
+        if (!layerId || !layer || !activeLayerIds.has(layerId) || state.zoom < layer.minZoom) continue;
+        populatedLayerIds.add(layerId);
+        visibleSymbols.add(mapSymbolForEvent(event));
+        if (event.category === 'infrastructure' && Array.isArray(event.properties.riskSources)) {
+          const sources = event.properties.riskSources.map(String);
+          if (sources.includes('weather')) visibleSymbols.add('weather-exposure');
+          if (sources.includes('conflict')) visibleSymbols.add('conflict-exposure');
+        }
+      }
+      const seen = new Set<string>();
       return state.activeLayerIds
         .map(worldEventLayerById)
         .filter((layer): layer is NonNullable<typeof layer> => (
           layer != null && populatedLayerIds.has(layer.id) && state.zoom >= layer.minZoom
         ))
-        .slice(0, 8)
-        .map((layer) => ({
-          label: layer.legendLabel,
-          symbol: layer.icon,
-          color: '#bdcacc',
+        .flatMap((layer) => layer.legend)
+        .filter((item) => visibleSymbols.has(item.symbol))
+        .filter((item) => {
+          const key = `${item.symbol}:${item.label}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map((item) => ({
+          ...item,
+          color: mapSymbolPalette(item.symbol).primary,
         }));
     },
     [events, state.activeLayerIds, state.zoom],
@@ -223,7 +247,7 @@ export function WorldEventMap({
         <span className="wm-map-legend-group" aria-label="Visible event types">
           {legendItems.map((item) => (
             <span key={`${item.symbol}:${item.label}`}>
-            <MapSymbolIcon symbol={item.symbol} color={item.color} size={13} />
+            <MapSymbolIcon symbol={item.symbol} color={item.color} size={15} />
             {item.label.toUpperCase()}
             </span>
           ))}

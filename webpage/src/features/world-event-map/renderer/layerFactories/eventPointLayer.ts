@@ -10,6 +10,7 @@ import {
 import {
   MAP_SYMBOL_ATLAS,
   MAP_SYMBOL_ICON_MAPPING,
+  MAP_SEVERITY_STYLES,
   mapSymbolForEvent,
   type MapSymbolKey,
 } from '../../config/mapSymbols';
@@ -333,17 +334,33 @@ export class EventClusterIndex {
 function pointAlpha(event: GeoEvent, zoom: number, selectedEventId: string | null) {
   if (event.id === selectedEventId) return 255;
   const base = event.severity === 'critical'
-    ? 235
+    ? 245
     : event.severity === 'warning'
-      ? 210
+      ? 225
       : event.severity === 'watch'
-        ? 145
-        : 105;
-  const zoomScale = zoom < 2.5 ? 0.62 : zoom < 4 ? 0.8 : 1;
+        ? 180
+        : 145;
+  const zoomScale = zoom < 2.5 ? 0.72 : zoom < 4 ? 0.86 : 1;
   const scaled = Math.round(base * zoomScale);
   if (event.severity === 'critical') return Math.max(205, scaled);
   if (event.severity === 'warning') return Math.max(150, scaled);
-  return scaled;
+  return Math.max(event.severity === 'watch' ? 118 : 96, scaled);
+}
+
+function pointIconSize(event: GeoEvent, zoom: number, selectedEventId: string | null) {
+  if (event.id === selectedEventId) return 22;
+  if (zoom < 2.5) return 14;
+  if (zoom < 4) return 16;
+  return 18;
+}
+
+function clusterIconSize(cluster: EventCluster) {
+  return Math.min(24, 15 + Math.log2(cluster.count + 1) * 1.25);
+}
+
+function severityRingColor(severity: GeoEventSeverity, alpha?: number): [number, number, number, number] {
+  const [red, green, blue, baseAlpha] = MAP_SEVERITY_STYLES[severity].rgba;
+  return [red, green, blue, alpha ?? baseAlpha];
 }
 
 export function clusterEventPoints(
@@ -380,6 +397,37 @@ export function createEventPointLayers({
   ].filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer));
 
   if (clusters.length) {
+    layers.push(new ScatterplotLayer<EventCluster>({
+      id: 'world-event-cluster-severity-rings',
+      data: clusters,
+      getPosition: (cluster) => cluster.coordinates,
+      getRadius: (cluster) => clusterIconSize(cluster) / 2 + 1,
+      getFillColor: [0, 0, 0, 0],
+      getLineColor: (cluster) => severityRingColor(cluster.severity),
+      getLineWidth: (cluster) => MAP_SEVERITY_STYLES[cluster.severity].lineWidth,
+      radiusUnits: 'pixels',
+      lineWidthUnits: 'pixels',
+      filled: false,
+      stroked: true,
+      pickable: false,
+    }));
+    const criticalClusters = clusters.filter((cluster) => cluster.severity === 'critical');
+    if (criticalClusters.length) {
+      layers.push(new ScatterplotLayer<EventCluster>({
+        id: 'world-event-cluster-critical-rings',
+        data: criticalClusters,
+        getPosition: (cluster) => cluster.coordinates,
+        getRadius: (cluster) => clusterIconSize(cluster) / 2 + 3.5,
+        getFillColor: [0, 0, 0, 0],
+        getLineColor: () => severityRingColor('critical', 145),
+        getLineWidth: 1,
+        radiusUnits: 'pixels',
+        lineWidthUnits: 'pixels',
+        filled: false,
+        stroked: true,
+        pickable: false,
+      }));
+    }
     layers.push(new IconLayer<EventCluster>({
       id: 'world-event-clusters',
       data: clusters,
@@ -387,11 +435,11 @@ export function createEventPointLayers({
       iconMapping: MAP_SYMBOL_ICON_MAPPING,
       getIcon: (cluster) => cluster.symbol,
       getPosition: (cluster) => cluster.coordinates,
-      getSize: (cluster) => Math.min(20, 12.5 + Math.log2(cluster.count + 1) * 1.15),
-      getColor: (cluster) => cluster.color,
+      getSize: clusterIconSize,
+      getColor: (cluster) => [255, 255, 255, cluster.color[3]],
       sizeUnits: 'pixels',
-      sizeMinPixels: 12.5,
-      sizeMaxPixels: 20,
+      sizeMinPixels: 15,
+      sizeMaxPixels: 24,
       alphaCutoff: 0.05,
       pickable: true,
       autoHighlight: false,
@@ -447,6 +495,37 @@ export function createEventPointLayers({
         stroked: true,
       }));
     }
+    layers.push(new ScatterplotLayer<GeoEvent>({
+      id: 'world-event-point-severity-rings',
+      data: singles,
+      getPosition: (event) => eventRepresentativePoint(event)!,
+      getRadius: (event) => pointIconSize(event, zoom, selectedEventId) / 2 + 0.75,
+      getFillColor: [0, 0, 0, 0],
+      getLineColor: (event) => severityRingColor(event.severity),
+      getLineWidth: (event) => MAP_SEVERITY_STYLES[event.severity].lineWidth,
+      radiusUnits: 'pixels',
+      lineWidthUnits: 'pixels',
+      filled: false,
+      stroked: true,
+      pickable: false,
+    }));
+    const criticalSingles = singles.filter((event) => event.severity === 'critical');
+    if (criticalSingles.length) {
+      layers.push(new ScatterplotLayer<GeoEvent>({
+        id: 'world-event-point-critical-rings',
+        data: criticalSingles,
+        getPosition: (event) => eventRepresentativePoint(event)!,
+        getRadius: (event) => pointIconSize(event, zoom, selectedEventId) / 2 + 3.2,
+        getFillColor: [0, 0, 0, 0],
+        getLineColor: () => severityRingColor('critical', 145),
+        getLineWidth: 1,
+        radiusUnits: 'pixels',
+        lineWidthUnits: 'pixels',
+        filled: false,
+        stroked: true,
+        pickable: false,
+      }));
+    }
     layers.push(new IconLayer<GeoEvent>({
       id: 'world-event-points',
       data: singles,
@@ -454,14 +533,11 @@ export function createEventPointLayers({
       iconMapping: MAP_SYMBOL_ICON_MAPPING,
       getIcon: mapSymbolForEvent,
       getPosition: (event) => eventRepresentativePoint(event)!,
-      getSize: (event) => event.id === selectedEventId ? 18 : zoom < 2.5 ? 11 : zoom < 4 ? 13 : 15,
-      getColor: (event) => {
-        const [red, green, blue] = SEVERITY_COLORS[event.severity];
-        return [red, green, blue, pointAlpha(event, zoom, selectedEventId)];
-      },
+      getSize: (event) => pointIconSize(event, zoom, selectedEventId),
+      getColor: (event) => [255, 255, 255, pointAlpha(event, zoom, selectedEventId)],
       sizeUnits: 'pixels',
-      sizeMinPixels: 11,
-      sizeMaxPixels: 18,
+      sizeMinPixels: 14,
+      sizeMaxPixels: 22,
       alphaCutoff: 0.05,
       pickable: true,
       autoHighlight: false,

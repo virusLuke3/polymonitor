@@ -92,6 +92,8 @@ describe('world event layer factories', () => {
       pointEvent(`dense:${index}`, 10 + index * 0.03, 10 + index * 0.02, index === 5 ? 'critical' : 'warning')
     )), state);
     expect((layers as Layer[]).map((layer) => layer.id)).toEqual([
+      'world-event-cluster-severity-rings',
+      'world-event-cluster-critical-rings',
       'world-event-clusters',
       'world-event-cluster-counts',
     ]);
@@ -235,7 +237,7 @@ describe('world event layer factories', () => {
     expect(volcanoLayers.some((layer) => layer.id === 'world-event-points')).toBe(true);
   });
 
-  it('uses one semantic SVG mask icon for globally visible singles', () => {
+  it('uses a colored semantic icon with a separate non-pickable severity ring', () => {
     const warning = hazardPoint('volcano:warning', 'volcano', 10, 10, 'warning');
     const state = { ...defaultWorldEventMapState(), zoom: 1.25 };
     const layers = createWorldEventLayers([warning], state) as Layer[];
@@ -245,9 +247,12 @@ describe('world event layer factories', () => {
 
     expect(point?.constructor.name).toBe('IconLayer');
     expect(layers.some((layer) => layer.id === 'world-event-point-underlays')).toBe(false);
+    const ring = layers.find((layer) => layer.id === 'world-event-point-severity-rings');
     expect(pointProps.getIcon).toBeDefined();
+    expect(color.slice(0, 3)).toEqual([255, 255, 255]);
     expect(color[3]).toBeLessThan(220);
-    expect(pointProps.sizeMaxPixels).toBe(18);
+    expect(pointProps.sizeMaxPixels).toBe(22);
+    expect((ring?.props as unknown as Record<string, unknown>).pickable).toBe(false);
   });
 
   it('retains low-priority spatial texture without making observations pickable', () => {

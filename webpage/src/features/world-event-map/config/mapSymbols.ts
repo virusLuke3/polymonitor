@@ -103,6 +103,43 @@ export const MAP_SYMBOL_DEFINITIONS = {
 
 export type MapSymbolKey = keyof typeof MAP_SYMBOL_DEFINITIONS;
 
+export type MapSymbolPalette = {
+  primary: string;
+  secondary: string;
+  surface: string;
+  rgba: [number, number, number, number];
+};
+
+/**
+ * Category colour belongs to the symbol; severity belongs to the outer ring.
+ * Keeping the two channels separate prevents every map object from collapsing
+ * into the same orange/red dot while retaining a colour-blind-safe shape cue.
+ */
+export const MAP_SYMBOL_PALETTES: Record<MapSymbolKey, MapSymbolPalette> = {
+  signal: { primary: '#74e7d4', secondary: '#d9fff8', surface: '#071519', rgba: [116, 231, 212, 255] },
+  storm: { primary: '#72c7ff', secondary: '#e3f5ff', surface: '#07131c', rgba: [114, 199, 255, 255] },
+  tornado: { primary: '#b89cff', secondary: '#f0eaff', surface: '#100c1b', rgba: [184, 156, 255, 255] },
+  cyclone: { primary: '#46d9f5', secondary: '#d8faff', surface: '#06171b', rgba: [70, 217, 245, 255] },
+  flood: { primary: '#36d9c2', secondary: '#d8fff9', surface: '#061815', rgba: [54, 217, 194, 255] },
+  tsunami: { primary: '#4aa8ff', secondary: '#dceeff', surface: '#071321', rgba: [74, 168, 255, 255] },
+  earthquake: { primary: '#ff9d3f', secondary: '#ffe7c4', surface: '#1b1006', rgba: [255, 157, 63, 255] },
+  volcano: { primary: '#ff5f62', secondary: '#ffe1dd', surface: '#1c080a', rgba: [255, 95, 98, 255] },
+  wildfire: { primary: '#ff713d', secondary: '#ffe2cf', surface: '#1c0c05', rgba: [255, 113, 61, 255] },
+  'fire-detection': { primary: '#ffb548', secondary: '#fff0c9', surface: '#191205', rgba: [255, 181, 72, 255] },
+  heat: { primary: '#ff6b55', secondary: '#ffe2dc', surface: '#1c0907', rgba: [255, 107, 85, 255] },
+  cold: { primary: '#6caeff', secondary: '#e1efff', surface: '#081322', rgba: [108, 174, 255, 255] },
+  anomaly: { primary: '#dc72f2', secondary: '#f9e1ff', surface: '#180a1d', rgba: [220, 114, 242, 255] },
+  intel: { primary: '#a98bff', secondary: '#63efff', surface: '#100c1b', rgba: [169, 139, 255, 255] },
+  'conflict-state': { primary: '#ff6262', secondary: '#ffe2e2', surface: '#1c0808', rgba: [255, 98, 98, 255] },
+  'conflict-nonstate': { primary: '#f5b84b', secondary: '#fff0c5', surface: '#191205', rgba: [245, 184, 75, 255] },
+  'conflict-one-sided': { primary: '#9ee66b', secondary: '#eaffdd', surface: '#0d1708', rgba: [158, 230, 107, 255] },
+  'country-risk': { primary: '#f1cf4d', secondary: '#fff4be', surface: '#181405', rgba: [241, 207, 77, 255] },
+  'air-route': { primary: '#58dcef', secondary: '#ddfbff', surface: '#06161a', rgba: [88, 220, 239, 255] },
+  'weather-exposure': { primary: '#3ed5bd', secondary: '#dcfff9', surface: '#061713', rgba: [62, 213, 189, 255] },
+  'conflict-exposure': { primary: '#ff6a58', secondary: '#ffe4df', surface: '#1b0907', rgba: [255, 106, 88, 255] },
+  aircraft: { primary: '#ffd45a', secondary: '#fff5c8', surface: '#191405', rgba: [255, 212, 90, 255] },
+};
+
 export const MAP_SEVERITY_STYLES: Record<GeoEventSeverity, {
   color: string;
   rgba: [number, number, number, number];
@@ -154,25 +191,33 @@ export function mapSymbolForEvent(event: GeoEvent): MapSymbolKey {
 
 const atlasKeys = Object.keys(MAP_SYMBOL_DEFINITIONS) as MapSymbolKey[];
 
-export const MAP_SYMBOL_ICON_MAPPING = Object.fromEntries(atlasKeys.map((key, index) => [key, {
-  x: index * MAP_SYMBOL_SIZE,
-  y: 0,
-  width: MAP_SYMBOL_SIZE,
-  height: MAP_SYMBOL_SIZE,
-  anchorX: MAP_SYMBOL_SIZE / 2,
-  anchorY: MAP_SYMBOL_SIZE / 2,
-  mask: true,
-}])) as Record<MapSymbolKey, {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  anchorX: number;
-  anchorY: number;
-  mask: true;
-}>;
+function iconMapping(mask: boolean) {
+  return Object.fromEntries(atlasKeys.map((key, index) => [key, {
+    x: index * MAP_SYMBOL_SIZE,
+    y: 0,
+    width: MAP_SYMBOL_SIZE,
+    height: MAP_SYMBOL_SIZE,
+    anchorX: MAP_SYMBOL_SIZE / 2,
+    anchorY: MAP_SYMBOL_SIZE / 2,
+    mask,
+  }])) as Record<MapSymbolKey, {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    anchorX: number;
+    anchorY: number;
+    mask: boolean;
+  }>;
+}
 
-function svgAtlas() {
+/** Baked RGBA atlas for static event symbols. */
+export const MAP_SYMBOL_ICON_MAPPING = iconMapping(false);
+
+/** White mask atlas retained for altitude/route-tinted moving aircraft. */
+export const MAP_SYMBOL_MASK_ICON_MAPPING = iconMapping(true);
+
+function maskSvgAtlas() {
   const width = atlasKeys.length * MAP_SYMBOL_SIZE;
   const content = atlasKeys.map((key, index) => (
     MAP_SYMBOL_DEFINITIONS[key].paths.map((path) => (
@@ -182,7 +227,25 @@ function svgAtlas() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${MAP_SYMBOL_SIZE}" viewBox="0 0 ${width} ${MAP_SYMBOL_SIZE}">${content}</svg>`;
 }
 
-export const MAP_SYMBOL_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgAtlas())}`;
+function colorSvgAtlas() {
+  const width = atlasKeys.length * MAP_SYMBOL_SIZE;
+  const content = atlasKeys.map((key, index) => {
+    const palette = MAP_SYMBOL_PALETTES[key];
+    const offset = index * MAP_SYMBOL_SIZE;
+    const paths = MAP_SYMBOL_DEFINITIONS[key].paths.map((path) => (
+      `<path transform="translate(${offset} 0)" d="${path}" fill="${palette.primary}" stroke="${palette.secondary}" stroke-width="0.65" paint-order="stroke" fill-rule="evenodd"/>`
+    )).join('');
+    return `<circle cx="${offset + 24}" cy="24" r="21" fill="${palette.surface}" fill-opacity="0.9" stroke="${palette.primary}" stroke-opacity="0.44" stroke-width="1"/>${paths}`;
+  }).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${MAP_SYMBOL_SIZE}" viewBox="0 0 ${width} ${MAP_SYMBOL_SIZE}">${content}</svg>`;
+}
+
+export const MAP_SYMBOL_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(colorSvgAtlas())}`;
+export const MAP_SYMBOL_MASK_ATLAS = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(maskSvgAtlas())}`;
+
+export function mapSymbolPalette(symbol: MapSymbolKey) {
+  return MAP_SYMBOL_PALETTES[symbol];
+}
 
 export function mapSymbolPaths(symbol: MapSymbolKey) {
   return MAP_SYMBOL_DEFINITIONS[symbol].paths;

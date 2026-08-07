@@ -26,7 +26,7 @@ export type MapLayerDefinition = {
   clusterMinPoints: number;
   timeFilter: boolean;
   severities: GeoEventSeverity[];
-  legend: Array<{ label: string; color: string; symbol: MapSymbolKey }>;
+  legend: Array<{ label: string; symbol: MapSymbolKey }>;
   explanation: {
     purpose: string;
     sources: string[];
@@ -57,10 +57,11 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
-      { label: 'Storm / tornado', color: '#d9e5e7', symbol: 'storm' },
-      { label: 'Cyclone', color: '#d9e5e7', symbol: 'cyclone' },
-      { label: 'Flood', color: '#d9e5e7', symbol: 'flood' },
-      { label: 'Tsunami', color: '#d9e5e7', symbol: 'tsunami' },
+      { label: 'Severe storm', symbol: 'storm' },
+      { label: 'Tornado', symbol: 'tornado' },
+      { label: 'Cyclone', symbol: 'cyclone' },
+      { label: 'Flood', symbol: 'flood' },
+      { label: 'Tsunami', symbol: 'tsunami' },
     ],
     explanation: {
       purpose: 'Active severe storms, tornadoes, tropical cyclones, floods and tsunamis.',
@@ -90,8 +91,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
-      { label: 'Earthquake', color: '#d9e5e7', symbol: 'earthquake' },
-      { label: 'Volcano', color: '#d9e5e7', symbol: 'volcano' },
+      { label: 'Earthquake', symbol: 'earthquake' },
+      { label: 'Volcano', symbol: 'volcano' },
     ],
     explanation: {
       purpose: 'Recent earthquakes and reported volcanic events.',
@@ -121,8 +122,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
-      { label: 'Wildfire event', color: '#d9e5e7', symbol: 'wildfire' },
-      { label: 'Satellite detection', color: '#d9e5e7', symbol: 'fire-detection' },
+      { label: 'Wildfire event', symbol: 'wildfire' },
+      { label: 'Satellite detection', symbol: 'fire-detection' },
     ],
     explanation: {
       purpose: 'Active wildfire events, with aggregated satellite detections when configured.',
@@ -152,8 +153,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
-      { label: 'Extreme heat', color: '#d9e5e7', symbol: 'heat' },
-      { label: 'Extreme cold', color: '#d9e5e7', symbol: 'cold' },
+      { label: 'Extreme heat', symbol: 'heat' },
+      { label: 'Extreme cold', symbol: 'cold' },
     ],
     explanation: {
       purpose: 'Active extreme heat and extreme cold alerts.',
@@ -182,7 +183,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
-    legend: [{ label: 'Major anomaly', color: '#d9e5e7', symbol: 'anomaly' }],
+    legend: [{ label: 'Major anomaly', symbol: 'anomaly' }],
     explanation: {
       purpose: 'Major observed weather anomalies and quantitative climate departures.',
       sources: ['NASA EONET', 'GDACS major drought alerts', 'Versioned anomaly baseline pipeline'],
@@ -210,7 +211,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     clusterMinPoints: 5,
     timeFilter: true,
     severities: ['watch', 'warning', 'critical'],
-    legend: [{ label: 'Evidence-qualified intelligence', color: '#d9e5e7', symbol: 'intel' }],
+    legend: [{ label: 'Evidence-qualified intelligence', symbol: 'intel' }],
     explanation: {
       purpose: 'Verified, time-bounded real-world intelligence with reliable spatial evidence.',
       sources: ['Breaking Event Radar', 'GDELT', 'Wikimedia'],
@@ -239,9 +240,9 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
-      { label: 'State-based', color: '#d9e5e7', symbol: 'conflict-state' },
-      { label: 'Non-state', color: '#d9e5e7', symbol: 'conflict-nonstate' },
-      { label: 'One-sided', color: '#d9e5e7', symbol: 'conflict-one-sided' },
+      { label: 'State-based', symbol: 'conflict-state' },
+      { label: 'Non-state', symbol: 'conflict-nonstate' },
+      { label: 'One-sided', symbol: 'conflict-one-sided' },
     ],
     explanation: {
       purpose: 'Verified conflict events and fatality estimates.',
@@ -271,8 +272,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     timeFilter: true,
     severities: ['watch', 'warning', 'critical'],
     legend: [
-      { label: 'Country risk evidence', color: '#eec747', symbol: 'country-risk' },
-      { label: 'Elevated country evidence', color: '#ff9135', symbol: 'country-risk' },
+      { label: 'Country risk evidence', symbol: 'country-risk' },
     ],
     explanation: {
       purpose: 'Country-level sanctions and verified risk changes.',
@@ -302,10 +302,10 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     timeFilter: false,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
-      { label: 'Trunk corridor', color: '#5eeeff', symbol: 'air-route' },
-      { label: 'Weather exposure', color: '#2dd4bf', symbol: 'weather-exposure' },
-      { label: 'Conflict exposure', color: '#ff604c', symbol: 'conflict-exposure' },
-      { label: 'Aircraft', color: '#ffd654', symbol: 'aircraft' },
+      { label: 'Trunk corridor', symbol: 'air-route' },
+      { label: 'Weather exposure', symbol: 'weather-exposure' },
+      { label: 'Conflict exposure', symbol: 'conflict-exposure' },
+      { label: 'Aircraft', symbol: 'aircraft' },
     ],
     explanation: {
       purpose: 'Low-priority aviation topology reference with a bounded default trunk view.',

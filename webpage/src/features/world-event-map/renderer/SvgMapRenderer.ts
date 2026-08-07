@@ -9,8 +9,10 @@ import type {
 } from 'geojson';
 import type { GeoEvent } from '../domain/types';
 import {
+  MAP_SEVERITY_STYLES,
   MAP_SYMBOL_SIZE,
   mapSymbolForEvent,
+  mapSymbolPalette,
   mapSymbolPaths,
   type MapSymbolKey,
 } from '../config/mapSymbols';
@@ -104,13 +106,47 @@ function mapSymbolMarker(x: number, y: number, symbol: MapSymbolKey, size: numbe
   marker.setAttribute('aria-hidden', 'true');
   marker.setAttribute('pointer-events', 'none');
   marker.setAttribute('fill-rule', 'evenodd');
-  marker.setAttribute('stroke', 'none');
+  const palette = mapSymbolPalette(symbol);
+  marker.setAttribute('fill', palette.primary);
+  marker.setAttribute('stroke', palette.secondary);
+  marker.setAttribute('stroke-width', '0.65');
+  marker.setAttribute('paint-order', 'stroke');
   for (const pathData of mapSymbolPaths(symbol)) {
     const path = svgElement('path');
     path.setAttribute('d', pathData);
     marker.append(path);
   }
   return marker;
+}
+
+function mapSymbolBackdrop(x: number, y: number, symbol: MapSymbolKey, size: number) {
+  const palette = mapSymbolPalette(symbol);
+  const backdrop = svgElement('circle');
+  backdrop.setAttribute('cx', String(x));
+  backdrop.setAttribute('cy', String(y));
+  backdrop.setAttribute('r', String(size * 0.4375));
+  backdrop.setAttribute('fill', palette.surface);
+  backdrop.setAttribute('fill-opacity', '0.92');
+  backdrop.setAttribute('stroke', palette.primary);
+  backdrop.setAttribute('stroke-opacity', '0.44');
+  backdrop.setAttribute('stroke-width', '1');
+  backdrop.setAttribute('pointer-events', 'none');
+  return backdrop;
+}
+
+function severityRing(x: number, y: number, radius: number, severity: GeoEvent['severity'], outer = false) {
+  const style = MAP_SEVERITY_STYLES[severity];
+  const ring = svgElement('circle');
+  ring.setAttribute('cx', String(x));
+  ring.setAttribute('cy', String(y));
+  ring.setAttribute('r', String(radius));
+  ring.setAttribute('fill', 'none');
+  ring.setAttribute('stroke', style.color);
+  ring.setAttribute('stroke-opacity', outer ? '0.57' : '0.94');
+  ring.setAttribute('stroke-width', String(outer ? 1 : style.lineWidth));
+  ring.setAttribute('pointer-events', 'none');
+  ring.setAttribute('vector-effect', 'non-scaling-stroke');
+  return ring;
 }
 
 function ringSignedArea(ring: Position[]) {
@@ -526,17 +562,19 @@ export class SvgMapRenderer implements MapRenderer {
       group.setAttribute('aria-label', `${cluster.count} ${cluster.label || 'mapped events'}. Zoom in to expand.`);
       const title = svgElement('title');
       title.textContent = `${cluster.count} ${cluster.label || 'mapped events'} · ${cluster.severity.toUpperCase()} · click to expand`;
-      const symbolSize = Math.min(20, 12.5 + Math.log2(cluster.count + 1) * 1.15);
-      const underlay = mapSymbolMarker(x, y, cluster.symbol, symbolSize + 3);
+      const symbolSize = Math.min(24, 15 + Math.log2(cluster.count + 1) * 1.25);
+      const underlay = mapSymbolBackdrop(x, y, cluster.symbol, symbolSize);
       underlay.classList.add('wm-world-event-svg-symbol-underlay');
-      underlay.setAttribute('fill', 'rgba(2, 7, 10, 0.86)');
+      const ring = severityRing(x, y, symbolSize / 2 + 1, cluster.severity);
+      const outerRing = cluster.severity === 'critical'
+        ? severityRing(x, y, symbolSize / 2 + 3.5, cluster.severity, true)
+        : null;
       const symbol = mapSymbolMarker(
         x,
         y,
         cluster.symbol,
         symbolSize,
       );
-      symbol.setAttribute('fill', cssColor(cluster.color));
       const badgeWidth = Math.max(12, String(cluster.count).length * 5 + 6);
       const badge = svgElement('rect');
       badge.classList.add('wm-world-event-svg-cluster-badge');
@@ -568,7 +606,7 @@ export class SvgMapRenderer implements MapRenderer {
         keyboardEvent.preventDefault();
         expand();
       });
-      group.append(title, underlay, symbol, badge, label);
+      group.append(title, ...(outerRing ? [outerRing] : []), ring, underlay, symbol, badge, label);
       this.eventLayer.append(group);
     }
     for (const event of singles) {
@@ -595,26 +633,24 @@ export class SvgMapRenderer implements MapRenderer {
         group.append(intensity);
       }
       const symbolSize = event.id === selectedId
-        ? 18
+        ? 22
         : (this.state?.zoom || 1.25) < 2.5
-          ? 11
-          : (this.state?.zoom || 1.25) < 4 ? 13 : 15;
-      const underlay = mapSymbolMarker(x, y, mapSymbolForEvent(event), symbolSize + 2);
+          ? 14
+          : (this.state?.zoom || 1.25) < 4 ? 16 : 18;
+      const eventSymbol = mapSymbolForEvent(event);
+      const underlay = mapSymbolBackdrop(x, y, eventSymbol, symbolSize);
       underlay.classList.add('wm-world-event-svg-symbol-underlay');
-      underlay.setAttribute('fill', 'rgba(2, 7, 10, 0.86)');
+      const ring = severityRing(x, y, symbolSize / 2 + 0.75, event.severity);
+      const outerRing = event.severity === 'critical'
+        ? severityRing(x, y, symbolSize / 2 + 3.2, event.severity, true)
+        : null;
       const symbol = mapSymbolMarker(
         x,
         y,
-        mapSymbolForEvent(event),
+        eventSymbol,
         symbolSize,
       );
-      symbol.setAttribute('fill', cssColor([
-        severityColor[0],
-        severityColor[1],
-        severityColor[2],
-        event.id === selectedId ? 255 : 225,
-      ]));
-      group.append(underlay, symbol);
+      group.append(...(outerRing ? [outerRing] : []), ring, underlay, symbol);
       this.eventLayer.append(group);
     }
     for (const event of aviation.hubs) {

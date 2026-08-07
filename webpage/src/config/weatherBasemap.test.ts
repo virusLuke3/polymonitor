@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   OPENFREEMAP_DARK_STYLE,
   buildWorldEventPMTilesStyle,
+  getWeatherMapFallbackStyle,
   getWeatherMapStyle,
   refreshWorldEventBasemapLabelDensity,
   reinforceWorldEventBasemapLabels,
+  resolveWorldEventPMTilesUrl,
 } from './weatherBasemap';
 
 function createLabelMap(zoom: number) {
@@ -31,6 +33,31 @@ function createLabelMap(zoom: number) {
 }
 
 describe('World Event Map vector basemap', () => {
+  it('resolves a same-origin PMTiles route before handing it to the protocol', () => {
+    expect(resolveWorldEventPMTilesUrl('/map-tiles/planet.pmtiles', 'https://polymonitor.club'))
+      .toBe('https://polymonitor.club/map-tiles/planet.pmtiles');
+    expect(resolveWorldEventPMTilesUrl('https://maps.example.test/planet.pmtiles', 'https://polymonitor.club'))
+      .toBe('https://maps.example.test/planet.pmtiles');
+  });
+
+  it('keeps readable country labels in the local GeoJSON fallback', () => {
+    const style = getWeatherMapFallbackStyle('dark');
+    const labels = style.layers.find((layer) => layer.id === 'wm-local-country-labels');
+    expect(style.glyphs).toContain('protomaps.github.io');
+    expect(labels).toMatchObject({
+      type: 'symbol',
+      source: 'wm-weather-country-boundaries',
+      layout: {
+        'text-size': ['interpolate', ['linear'], ['zoom'], 0, 13, 3, 15, 5, 17],
+      },
+      paint: {
+        'text-color': '#aeb7ba',
+        'text-halo-width': 1.25,
+        'text-opacity': 0.94,
+      },
+    });
+  });
+
   it('uses the zero-config OpenFreeMap style outside the production PMTiles build', async () => {
     expect(await getWeatherMapStyle('dark')).toBe(OPENFREEMAP_DARK_STYLE);
   });
@@ -73,6 +100,7 @@ describe('World Event Map vector basemap', () => {
     expect(JSON.stringify(localityLabels?.layout)).toContain('population_rank');
     expect(countryBoundaries).toMatchObject({ type: 'line', 'source-layer': 'boundaries', filter: ['<=', 'kind_detail', 2] });
     expect(detailBoundaries).toMatchObject({ type: 'line', 'source-layer': 'boundaries', minzoom: 5 });
+    expect(style.layers?.some((layer) => layer.id.startsWith('roads_') || layer.id === 'buildings')).toBe(false);
   });
 
   it('localizes Protomaps labels without overwriting its visual hierarchy', () => {
@@ -99,8 +127,10 @@ describe('World Event Map vector basemap', () => {
     reinforceWorldEventBasemapLabels(map);
     expect(updates).toEqual(expect.arrayContaining([
       ['place_country_major', 'text-field', ['coalesce', ['get', 'name_en'], ['get', 'name:en'], ['get', 'name:latin'], ['get', 'name']]],
-      ['place_country_major', 'text-size', ['interpolate', ['linear'], ['zoom'], 0, 12, 3, 14, 5, 16]],
-      ['place_country_major', 'text-halo-width', 1],
+      ['place_country_major', 'text-size', ['interpolate', ['linear'], ['zoom'], 0, 13, 3, 15, 5, 17]],
+      ['place_country_major', 'text-color', '#aeb7ba'],
+      ['place_country_major', 'text-halo-width', 1.25],
+      ['place_country_major', 'text-opacity', 0.95],
       ['place_country_major', 'visibility', 'visible'],
       ['place_city_large', 'visibility', 'visible'],
       ['place_country_minor', 'visibility', 'none'],

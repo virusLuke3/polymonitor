@@ -6,7 +6,7 @@ import type {
   AviationRiskSource,
   WorldEventMapState,
 } from '../../state/mapState';
-import { MAP_SYMBOL_ATLAS, MAP_SYMBOL_ICON_MAPPING } from '../../config/mapSymbols';
+import { MAP_SYMBOL_MASK_ATLAS, MAP_SYMBOL_MASK_ICON_MAPPING } from '../../config/mapSymbols';
 import { MAP_MONO_FONT_FAMILY } from './shared';
 
 type AviationEntity = 'air-route' | 'air-hub' | 'air-flight' | 'live-aircraft';
@@ -699,8 +699,8 @@ function createAviationMarkerLayerSections(
     aircraftLayers.push(new IconLayer<AviationAircraftMarker>({
       id: 'aviation-live-aircraft',
       data: liveMarkers,
-      iconAtlas: MAP_SYMBOL_ATLAS,
-      iconMapping: MAP_SYMBOL_ICON_MAPPING,
+      iconAtlas: MAP_SYMBOL_MASK_ATLAS,
+      iconMapping: MAP_SYMBOL_MASK_ICON_MAPPING,
       getIcon: () => 'aircraft',
       getPosition: (marker) => marker.position,
       getSize: (marker) => marker.event.id === state.selectedEventId ? 17 : isWatch(marker.event) ? 15 : 12,
@@ -832,8 +832,8 @@ export function createAviationDynamicLayers(
     layers.push(new IconLayer<AviationMotionPoint>({
       id: 'aviation-seeded-aircraft',
       data: flightPoints,
-      iconAtlas: MAP_SYMBOL_ATLAS,
-      iconMapping: MAP_SYMBOL_ICON_MAPPING,
+      iconAtlas: MAP_SYMBOL_MASK_ATLAS,
+      iconMapping: MAP_SYMBOL_MASK_ICON_MAPPING,
       getIcon: () => 'aircraft',
       getPosition: (point) => point.position,
       getSize: (point) => point.size,

@@ -10432,6 +10432,15 @@ html[lang='zh-CN'] .wm-promo-copy {
   transition: color var(--ds-duration-fast) ease, filter var(--ds-duration-fast) ease, transform var(--ds-duration-fast) var(--ds-ease-out);
 }
 
+.wm-layer-emoji {
+  overflow: visible;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 15px;
+  line-height: 1;
+  color: initial;
+  filter: saturate(0.96) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.76));
+}
+
 .wm-layer-row:hover .wm-layer-symbol,
 .wm-layer-row:focus-within .wm-layer-symbol {
   color: #7feaff;
@@ -10439,9 +10448,20 @@ html[lang='zh-CN'] .wm-promo-copy {
   transform: translateY(-0.5px) scale(1.06);
 }
 
+.wm-layer-row:hover .wm-layer-emoji,
+.wm-layer-row:focus-within .wm-layer-emoji {
+  color: initial;
+  filter: saturate(1.08) drop-shadow(0 0 5px rgba(68, 208, 231, 0.2));
+}
+
 .wm-layer-row:not(.enabled) .wm-layer-symbol {
   color: #657378;
   filter: none;
+}
+
+.wm-layer-row:not(.enabled) .wm-layer-emoji {
+  color: initial;
+  filter: saturate(0.45) brightness(0.72);
 }
 
 .wm-layer-hint {

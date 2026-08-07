@@ -4,6 +4,9 @@ import {
   MAP_SYMBOL_ATLAS,
   MAP_SYMBOL_DEFINITIONS,
   MAP_SYMBOL_ICON_MAPPING,
+  MAP_SYMBOL_MASK_ATLAS,
+  MAP_SYMBOL_MASK_ICON_MAPPING,
+  MAP_SYMBOL_PALETTES,
   MAP_SYMBOL_SIZE,
   mapSymbolForEvent,
 } from './mapSymbols';
@@ -32,16 +35,21 @@ function hazard(hazardKind: HazardEvent['hazardKind']): HazardEvent {
 }
 
 describe('Polymonitor map symbol atlas', () => {
-  it('packs every semantic symbol into one mask atlas with stable non-overlapping cells', () => {
+  it('packs every semantic symbol into a colored atlas plus an aviation mask atlas', () => {
     const keys = Object.keys(MAP_SYMBOL_DEFINITIONS);
     expect(MAP_SYMBOL_ATLAS.startsWith('data:image/svg+xml;charset=utf-8,')).toBe(true);
+    expect(MAP_SYMBOL_MASK_ATLAS.startsWith('data:image/svg+xml;charset=utf-8,')).toBe(true);
     expect(Object.keys(MAP_SYMBOL_ICON_MAPPING)).toEqual(keys);
+    expect(Object.keys(MAP_SYMBOL_MASK_ICON_MAPPING)).toEqual(keys);
+    expect(Object.keys(MAP_SYMBOL_PALETTES)).toEqual(keys);
     expect(new Set(keys.map((key) => MAP_SYMBOL_ICON_MAPPING[key as keyof typeof MAP_SYMBOL_ICON_MAPPING].x)).size)
       .toBe(keys.length);
     for (const [key, mapping] of Object.entries(MAP_SYMBOL_ICON_MAPPING)) {
       expect(mapping.width).toBe(MAP_SYMBOL_SIZE);
       expect(mapping.height).toBe(MAP_SYMBOL_SIZE);
-      expect(mapping.mask).toBe(true);
+      expect(mapping.mask).toBe(false);
+      expect(MAP_SYMBOL_MASK_ICON_MAPPING[key as keyof typeof MAP_SYMBOL_MASK_ICON_MAPPING].mask).toBe(true);
+      expect(MAP_SYMBOL_PALETTES[key as keyof typeof MAP_SYMBOL_PALETTES].primary).toMatch(/^#[0-9a-f]{6}$/i);
       expect(MAP_SYMBOL_DEFINITIONS[key as keyof typeof MAP_SYMBOL_DEFINITIONS].paths.length).toBeGreaterThan(0);
     }
   });
