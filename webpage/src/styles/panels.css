@@ -5693,10 +5693,10 @@
 }
 
 .wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-panel-title {
-  color: #e8e8e8;
+  color: var(--ds-color-text);
   font-family: var(--font-body);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: 1px;
   line-height: 1.2;
 }
@@ -5708,8 +5708,8 @@
   background: rgba(57, 255, 115, 0.035);
   box-shadow: none;
   font-family: var(--font-body);
-  font-size: 9px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.4px;
 }
 
@@ -5739,9 +5739,9 @@
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  color: #888;
+  color: var(--ds-color-text-secondary);
   font-family: var(--font-body);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 400;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -5757,18 +5757,18 @@
 
 .wm-market-summary-kicker em {
   flex: 0 0 auto;
-  color: #888;
+  color: var(--ds-color-text-secondary);
   font-style: normal;
 }
 
 .wm-market-summary-hero strong {
   display: -webkit-box;
   overflow: hidden;
-  color: #e8e8e8;
+  color: var(--ds-color-text);
   font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.4;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
@@ -5810,9 +5810,9 @@
 .wm-market-summary-prices span,
 .wm-market-summary-grid span,
 .wm-market-summary-oracle span {
-  color: #888;
+  color: var(--ds-color-text-secondary);
   font-family: var(--font-body);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 400;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -5821,7 +5821,7 @@
 .wm-market-summary-prices strong {
   color: #e8e8e8;
   font-family: var(--font-mono);
-  font-size: 22px;
+  font-size: 24px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   line-height: 1;
@@ -5853,11 +5853,11 @@
 
 .wm-market-summary-grid strong {
   min-width: 0;
-  color: #e8e8e8;
+  color: var(--ds-color-text);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.3;
   overflow-wrap: anywhere;
 }
@@ -5897,10 +5897,10 @@
 
 .wm-market-summary-oracle strong {
   min-width: 0;
-  color: #ccc;
+  color: var(--ds-color-text);
   font-family: var(--font-body);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
