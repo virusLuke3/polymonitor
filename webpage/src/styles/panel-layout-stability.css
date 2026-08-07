@@ -439,4 +439,9 @@
     grid-template-columns: 1fr;
     grid-auto-rows: auto;
   }
+
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot.is-layout-managed[data-workspace-panel-id='market-summary'] {
+    grid-column: 1 / span 2 !important;
+    width: auto;
+  }
 }

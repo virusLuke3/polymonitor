@@ -912,6 +912,7 @@ function MarketSummaryPanel({ ctx }: { ctx: PanelRenderContext }) {
   const endDate = selectedGroup?.endDate || selected?.endDate || listMarket?.endDate || null;
   const oracleHint = marketSummaryOracleHint(ctx, endDate, i18n);
   const statusClass = statusTone(status);
+  const marketTitle = selectedGroup?.title || selected?.title || t('atlasMarket.noSelection');
   return (
     <Panel title={t('atlasMarket.summary')} badge={status} status="live" className="wm-market-panel wm-market-summary-panel">
       <div className="wm-market-summary">
@@ -920,7 +921,7 @@ function MarketSummaryPanel({ ctx }: { ctx: PanelRenderContext }) {
             <span>{selectedGroup?.category || selected?.category || listMarket?.category || t('atlasOracle.market')}</span>
             <em>{endDate ? i18n.formatRelativeTime(endDate) : t('atlasMarket.rolling')}</em>
           </div>
-          <strong>{selectedGroup?.title || selected?.title || t('atlasMarket.noSelection')}</strong>
+          <strong title={marketTitle}>{marketTitle}</strong>
         </section>
 
         <div className="wm-market-summary-prices" aria-label={t('atlasMarket.currentPrices')}>
@@ -955,7 +956,7 @@ function MarketSummaryPanel({ ctx }: { ctx: PanelRenderContext }) {
 
         <div className="wm-market-summary-oracle">
           <span>{t('atlasMarket.oracleResolution')}</span>
-          <strong>{oracleHint}</strong>
+          <strong title={oracleHint}>{oracleHint}</strong>
         </div>
       </div>
     </Panel>

@@ -5653,19 +5653,20 @@
   white-space: nowrap;
 }
 
-/* Market Summary is the reference implementation for the quiet, flat panel
-   hierarchy. Keep its visual contract here rather than layering workspace
-   overrides over the component's original styles. */
+/* Market Summary is intentionally isolated as the first quiet, flat panel.
+   Keep this experiment local until its visual contract is accepted. */
 .wm-panel-slot[data-workspace-panel-id='market-summary'] {
   --wm-panel-resize-handle-opacity: 0;
-  --wm-panel-resize-handle-active-opacity: 0.68;
+  --wm-panel-resize-handle-active-opacity: 0.32;
   --wm-panel-resize-inset: 1px;
-  --wm-panel-resize-row-background: linear-gradient(to top, rgba(68, 136, 255, 0.14), transparent);
-  --wm-panel-resize-col-background: linear-gradient(to left, rgba(68, 136, 255, 0.14), transparent);
-  --wm-panel-resize-marker-color: #6f7472;
+  --wm-panel-resize-row-background: linear-gradient(to top, rgba(120, 132, 126, 0.1), transparent);
+  --wm-panel-resize-col-background: linear-gradient(to left, rgba(120, 132, 126, 0.1), transparent);
+  --wm-panel-resize-marker-color: #747a76;
   --wm-panel-resize-row-marker: '⋯';
   --wm-panel-resize-col-marker: '⋮';
-  overflow: hidden;
+  isolation: isolate;
+  z-index: 2;
+  overflow: clip;
   box-shadow: none;
 }
 
@@ -5682,6 +5683,8 @@
   border: 1px solid #2a2a2a;
   background: #141414;
   box-shadow: none;
+  contain: paint;
+  min-height: 0;
 }
 
 .wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel > .wm-panel-header {
@@ -5693,10 +5696,10 @@
 }
 
 .wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-panel-title {
-  color: var(--ds-color-text);
+  color: #f0f2f0;
   font-family: var(--font-body);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 1px;
   line-height: 1.2;
 }
@@ -5708,46 +5711,56 @@
   background: rgba(57, 255, 115, 0.035);
   box-shadow: none;
   font-family: var(--font-body);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.35px;
 }
 
-.wm-market-summary-panel .wm-panel-body {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-panel .wm-panel-body {
   padding: 0;
   background: #141414;
+  overflow: hidden;
+  scrollbar-width: none;
 }
 
-.wm-market-summary {
-  display: block;
-  min-height: 100%;
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-panel .wm-panel-body::-webkit-scrollbar {
+  display: none;
+}
+
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary {
+  display: grid;
+  grid-template-rows: minmax(62px, auto) 56px minmax(76px, 1fr) minmax(38px, auto);
+  height: 100%;
+  min-height: 0;
   background: #141414;
 }
 
-.wm-market-summary-hero {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-hero {
   display: grid;
-  gap: 8px;
-  padding: 11px 12px 12px;
+  align-content: center;
+  gap: 4px;
+  min-height: 0;
+  padding: 8px 10px 9px;
   border: 0;
-  border-bottom: 1px solid #2a2a2a;
-  background: rgba(255, 255, 255, 0.012);
+  border-bottom: 1px solid #272927;
+  background: transparent;
 }
 
-.wm-market-summary-kicker {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-kicker {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  color: var(--ds-color-text-secondary);
+  color: #979d99;
   font-family: var(--font-body);
   font-size: 10px;
   font-weight: 400;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.35px;
   text-transform: uppercase;
 }
 
-.wm-market-summary-kicker span {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-kicker span {
   min-width: 0;
   overflow: hidden;
   color: var(--wm-green);
@@ -5755,71 +5768,77 @@
   white-space: nowrap;
 }
 
-.wm-market-summary-kicker em {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-kicker em {
   flex: 0 0 auto;
-  color: var(--ds-color-text-secondary);
+  color: #9ca29e;
   font-style: normal;
 }
 
-.wm-market-summary-hero strong {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-hero strong {
   display: -webkit-box;
   overflow: hidden;
-  color: var(--ds-color-text);
+  color: #f2f4f2;
   font-family: var(--font-body);
   font-size: 13px;
-  font-weight: 700;
-  line-height: 1.45;
-  -webkit-line-clamp: 3;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
-.wm-market-summary-prices,
-.wm-market-summary-grid {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices,
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0;
-  border-bottom: 1px solid #2a2a2a;
+  min-height: 0;
 }
 
-.wm-market-summary-prices article,
-.wm-market-summary-grid article,
-.wm-market-summary-oracle {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices {
+  border-bottom: 1px solid #272927;
+  background: rgba(255, 255, 255, 0.008);
+}
+
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices article,
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-grid article,
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-oracle {
   min-width: 0;
   border: 0;
   background: transparent;
   box-shadow: none;
 }
 
-.wm-market-summary-prices article {
-  min-height: 64px;
-  padding: 9px 12px;
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices article {
+  min-height: 0;
+  padding: 7px 10px 8px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 7px;
+  gap: 4px;
 }
 
-.wm-market-summary-prices article.yes {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices article.yes {
   border-left: 2px solid var(--wm-green);
 }
 
-.wm-market-summary-prices article.no {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices article.no {
   border-left: 2px solid #ff6b7a;
 }
 
-.wm-market-summary-prices span,
-.wm-market-summary-grid span,
-.wm-market-summary-oracle span {
-  color: var(--ds-color-text-secondary);
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices span,
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-grid span,
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-oracle span {
+  color: #989e9a;
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 400;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.25px;
   text-transform: uppercase;
 }
 
-.wm-market-summary-prices strong {
-  color: #e8e8e8;
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices strong {
+  color: #edf0ed;
   font-family: var(--font-mono);
   font-size: 24px;
   font-variant-numeric: tabular-nums;
@@ -5827,33 +5846,29 @@
   line-height: 1;
 }
 
-.wm-market-summary-prices article.yes strong {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices article.yes strong {
   color: var(--wm-green);
 }
 
-.wm-market-summary-prices article.no strong {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices article.no strong {
   color: #ff8c97;
 }
 
-.wm-market-summary-grid article {
-  min-height: 52px;
-  padding: 8px 12px;
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-grid article {
+  min-height: 0;
+  padding: 6px 10px;
   display: grid;
   align-content: space-between;
-  gap: 6px;
+  gap: 3px;
 }
 
-.wm-market-summary-grid article:nth-child(even) {
-  border-left: 1px solid #2a2a2a;
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-grid article:nth-child(-n + 2) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
 }
 
-.wm-market-summary-grid article:nth-child(-n + 2) {
-  border-bottom: 1px solid #2a2a2a;
-}
-
-.wm-market-summary-grid strong {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-grid strong {
   min-width: 0;
-  color: var(--ds-color-text);
+  color: #e9ece9;
   font-family: var(--font-body);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -5862,7 +5877,7 @@
   overflow-wrap: anywhere;
 }
 
-.wm-market-status-value {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-status-value {
   display: inline-flex;
   align-items: center;
   width: fit-content;
@@ -5875,34 +5890,56 @@
   text-transform: uppercase;
 }
 
-.wm-market-status-value.active {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-status-value.active {
   color: var(--wm-green);
 }
 
-.wm-market-status-value.settled {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-status-value.settled {
   color: var(--wm-cyan);
 }
 
-.wm-market-status-value.pending {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-status-value.pending {
   color: #ffca62;
 }
 
-.wm-market-summary-oracle {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-oracle {
   display: grid;
-  grid-template-columns: minmax(108px, 0.72fr) minmax(0, 1.28fr);
-  align-items: start;
-  gap: 12px;
-  padding: 10px 12px 12px;
+  grid-template-columns: minmax(92px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 7px 10px 8px;
+  border-top: 1px solid #272927;
+  background: rgba(255, 255, 255, 0.014);
 }
 
-.wm-market-summary-oracle strong {
+.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-oracle strong {
   min-width: 0;
-  color: var(--ds-color-text);
+  overflow: hidden;
+  color: #dfe3df;
   font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) and (min-width: 761px) {
+  .wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary {
+    grid-template-rows: 60px 54px minmax(76px, 1fr) 35px;
+  }
+
+  .wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-hero {
+    padding-top: 6px;
+    padding-bottom: 7px;
+  }
+
+  .wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-oracle {
+    padding-top: 5px;
+    padding-bottom: 6px;
+  }
 }
 
 .wm-ai-market-panel .wm-panel-body {
