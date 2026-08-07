@@ -10393,21 +10393,32 @@ html[lang='zh-CN'] .wm-promo-copy {
   line-height: 1;
 }
 
-.wm-layer-icon {
-  width: 16px;
-  min-width: 16px;
-  height: 16px;
+.wm-layer-emoji {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   text-align: center;
-  color: var(--wm-text);
+  font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+  font-size: 15px;
+  font-style: normal;
+  font-variant-emoji: emoji;
+  line-height: 1;
+  filter: saturate(0.92);
+  transform: translateY(0);
+  transition: filter var(--ds-duration-fast) ease, transform var(--ds-duration-fast) var(--ds-ease-out);
 }
 
-.wm-layer-icon svg {
-  display: block;
-  margin: 0 auto;
-  color: #d7dfdc;
+.wm-layer-row:hover .wm-layer-emoji,
+.wm-layer-row:focus-within .wm-layer-emoji {
+  filter: saturate(1.08);
+  transform: translateY(-0.5px) scale(1.06);
+}
+
+.wm-layer-row:not(.enabled) .wm-layer-emoji {
+  filter: grayscale(0.28) saturate(0.58);
 }
 
 .wm-layer-hint {
@@ -13509,6 +13520,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   .wm-toggle-collapse svg,
   .wm-layer-search,
   .wm-layer-row,
+  .wm-layer-emoji,
   .wm-layer-info {
     transition: none;
   }

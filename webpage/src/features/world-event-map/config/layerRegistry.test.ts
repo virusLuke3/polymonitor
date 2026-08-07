@@ -59,6 +59,12 @@ describe('World Event Map layer registry', () => {
     }
   });
 
+  it('gives every selectable layer a distinct native emoji for the control surface', () => {
+    const layers = selectableWorldEventLayers();
+    expect(layers.every((layer) => /\p{Extended_Pictographic}/u.test(layer.panelEmoji))).toBe(true);
+    expect(new Set(layers.map((layer) => layer.panelEmoji)).size).toBe(layers.length);
+  });
+
   it('keeps every selectable layer label English-only for the map control', () => {
     for (const layer of selectableWorldEventLayers()) {
       expect(layer.label).toMatch(/^[\x20-\x7e]+$/);

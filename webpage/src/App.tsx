@@ -90,6 +90,7 @@ import type { PanelRuntimeData } from '@/panels/types';
 type LayerToggle = {
   id: string;
   label: string;
+  panelEmoji: string;
   icon: MapSymbolKey;
   enabled: boolean;
   hint?: string;
@@ -124,6 +125,7 @@ const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INITIAL_LAYERS: LayerToggle[] = selectableWorldEventLayers().map((layer) => ({
   id: layer.id,
   label: layer.label,
+  panelEmoji: layer.panelEmoji,
   icon: layer.icon,
   enabled: layer.defaultEnabled,
   hint: layer.hint,

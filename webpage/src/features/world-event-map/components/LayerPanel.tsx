@@ -12,6 +12,7 @@ import { MapSymbolIcon } from './MapSymbolIcon';
 export type LayerPanelItem = {
   id: string;
   label: string;
+  panelEmoji: string;
   icon: MapSymbolKey;
   hint?: string;
   enabled: boolean;
@@ -180,7 +181,7 @@ export function LayerPanel({
                       onChange={() => onToggle(item.id)}
                       aria-label={actionLabel}
                     />
-                    <span className="wm-layer-icon"><MapSymbolIcon symbol={item.icon} size={15} /></span>
+                    <span className="wm-layer-emoji" aria-hidden="true">{item.panelEmoji}</span>
                     <span className="wm-layer-label">{item.label}</span>
                     {item.hint ? <em className="wm-layer-hint">{item.hint}</em> : null}
                   </label>

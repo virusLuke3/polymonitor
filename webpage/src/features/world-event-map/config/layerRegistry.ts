@@ -11,6 +11,7 @@ export type MapLayerDefinition = {
   id: string;
   label: string;
   messageKey?: string;
+  panelEmoji: string;
   icon: MapSymbolKey;
   hint?: string;
   categories: GeoEventCategory[];
@@ -38,6 +39,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'weather-alerts',
     label: 'Storms, Cyclones & Floods',
     messageKey: 'atlas.layer.weatherAlerts',
+    panelEmoji: '⛈️',
     icon: 'storm',
     hint: 'ALERTS',
     categories: ['weather', 'natural-hazard'],
@@ -68,6 +70,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'earthquakes-volcanoes',
     label: 'Earthquakes & Volcanoes',
     messageKey: 'atlas.layer.earthquakesVolcanoes',
+    panelEmoji: '🌋',
     icon: 'earthquake',
     hint: 'GEO',
     categories: ['natural-hazard'],
@@ -96,6 +99,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'wildfires',
     label: 'Wildfires',
     messageKey: 'atlas.layer.wildfires',
+    panelEmoji: '🔥',
     icon: 'wildfire',
     hint: 'FIRE',
     categories: ['natural-hazard'],
@@ -124,6 +128,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'extreme-temperature',
     label: 'Extreme Temperature Alerts',
     messageKey: 'atlas.layer.extremeTemperature',
+    panelEmoji: '🌡️',
     icon: 'heat',
     hint: 'TEMP',
     categories: ['weather', 'natural-hazard'],
@@ -152,6 +157,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'climate-anomalies',
     label: 'Major Weather Anomalies',
     messageKey: 'atlas.layer.climateAnomalies',
+    panelEmoji: '🌀',
     icon: 'anomaly',
     hint: 'ANOMALY',
     categories: ['weather', 'natural-hazard'],
@@ -177,6 +183,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'intel-hotspots',
     label: 'Intel Hotspots',
     messageKey: 'atlas.layer.intelHotspots',
+    panelEmoji: '🎯',
     icon: 'intel',
     hint: 'INTEL',
     categories: ['intel'],
@@ -202,6 +209,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'ucdp',
     label: 'Conflict & Unrest',
     messageKey: 'atlas.layer.ucdp',
+    panelEmoji: '⚔️',
     icon: 'conflict-state',
     hint: 'CONFLICT',
     categories: ['conflict', 'unrest'],
@@ -231,6 +239,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'sanctions-country-risk',
     label: 'Sanctions & Country Risk',
     messageKey: 'atlas.layer.countryRisk',
+    panelEmoji: '🛡️',
     icon: 'country-risk',
     hint: 'RISK',
     categories: ['sanctions', 'country-risk'],
@@ -259,6 +268,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'air-routes',
     label: 'Air Routes',
     messageKey: 'atlas.layer.airRoutes',
+    panelEmoji: '✈️',
     icon: 'air-route',
     hint: 'REFERENCE',
     categories: ['infrastructure'],
