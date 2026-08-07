@@ -311,48 +311,54 @@
   z-index: 8;
   border: 0;
   padding: 0;
-  opacity: 0;
+  opacity: var(--wm-panel-resize-handle-opacity, 0);
   background: transparent;
   transition: opacity 140ms ease, background 140ms ease;
 }
 
 .wm-panel-resize-handle {
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: var(--wm-panel-resize-inset, 0);
+  right: var(--wm-panel-resize-inset, 0);
+  bottom: var(--wm-panel-resize-inset, 0);
   height: 18px;
   cursor: ns-resize;
-  background: linear-gradient(to top, rgba(120, 183, 255, 0.18), transparent);
+  background: var(
+    --wm-panel-resize-row-background,
+    linear-gradient(to top, rgba(120, 183, 255, 0.18), transparent)
+  );
 }
 
 .wm-panel-col-resize-handle {
-  top: 0;
-  right: 0;
-  bottom: 0;
+  top: var(--wm-panel-resize-inset, 0);
+  right: var(--wm-panel-resize-inset, 0);
+  bottom: var(--wm-panel-resize-inset, 0);
   width: 18px;
   cursor: ew-resize;
-  background: linear-gradient(to left, rgba(120, 183, 255, 0.18), transparent);
+  background: var(
+    --wm-panel-resize-col-background,
+    linear-gradient(to left, rgba(120, 183, 255, 0.18), transparent)
+  );
 }
 
 .wm-panel-resize-handle::after {
-  content: '...';
+  content: var(--wm-panel-resize-row-marker, '...');
   position: absolute;
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
-  color: #9cb7d8;
+  color: var(--wm-panel-resize-marker-color, #9cb7d8);
   font-family: var(--font-mono);
   font-size: 13px;
   letter-spacing: 2px;
 }
 
 .wm-panel-col-resize-handle::after {
-  content: '...';
+  content: var(--wm-panel-resize-col-marker, '...');
   position: absolute;
   top: 50%;
   right: -1px;
   transform: translateY(-50%) rotate(90deg);
-  color: #9cb7d8;
+  color: var(--wm-panel-resize-marker-color, #9cb7d8);
   font-family: var(--font-mono);
   font-size: 13px;
   letter-spacing: 2px;
@@ -362,7 +368,7 @@
 .wm-panel-slot:hover .wm-panel-col-resize-handle,
 .wm-panel-slot.resizing .wm-panel-resize-handle,
 .wm-panel-slot.col-resizing .wm-panel-col-resize-handle {
-  opacity: 1;
+  opacity: var(--wm-panel-resize-handle-active-opacity, 1);
 }
 
 .wm-panel-slot.resizing,
@@ -499,156 +505,4 @@ body.panel-resize-active iframe {
     opacity: 0.96;
     transform: translate3d(0, 0, 0) scale(1.028);
   }
-}
-
-/* Market Summary is the first scoped trial of WorldMonitor's quieter panel
-   framing. The slot remains responsible for layout and resize interaction;
-   only this panel drops the permanent metallic-blue presentation layer. */
-.wm-panel-slot[data-workspace-panel-id='market-summary'] {
-  box-shadow: none;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary']::before {
-  content: none;
-  border: 0;
-  box-shadow: none;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel,
-.wm-panel-slot[data-workspace-panel-id='market-summary']:hover > .wm-panel,
-.wm-panel-slot[data-workspace-panel-id='market-summary'].panel-drop-target > .wm-panel,
-.wm-panel-slot[data-workspace-panel-id='market-summary'].dragging-source > .wm-panel {
-  border: 1px solid #2a2a2a;
-  box-shadow: none;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel > .wm-panel-header {
-  border-bottom: 1px solid #2a2a2a;
-  background: rgba(255, 255, 255, 0.03);
-  box-shadow: none;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-panel-title {
-  font-family: var(--font-body);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  line-height: 1.2;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-panel-badge {
-  font-family: var(--font-body);
-  font-weight: 600;
-  letter-spacing: 0.4px;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-hero {
-  border: 0;
-  border-bottom: 1px solid #2a2a2a;
-  background: rgba(255, 255, 255, 0.018);
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-kicker {
-  font-family: var(--font-body);
-  font-size: 9px;
-  font-weight: 400;
-  letter-spacing: 0.5px;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-hero > strong {
-  font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices article,
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-grid article,
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-oracle {
-  border: 0;
-  border-bottom: 1px solid #2a2a2a;
-  background: rgba(255, 255, 255, 0.012);
-  box-shadow: none;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices article.yes {
-  border-left: 2px solid var(--wm-green);
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices article.no {
-  border-left: 2px solid #ff6b7a;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices span,
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-grid span,
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-oracle span {
-  font-family: var(--font-body);
-  font-size: 9px;
-  font-weight: 400;
-  letter-spacing: 0.5px;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-prices strong {
-  font-family: var(--font-mono);
-  font-weight: 700;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-grid strong,
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-oracle strong,
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-status-value {
-  font-family: var(--font-body);
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-oracle {
-  border-left: 0;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel-resize-handle,
-.wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel-col-resize-handle {
-  opacity: 0.58;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel-resize-handle {
-  background: linear-gradient(to top, rgba(68, 136, 255, 0.15), transparent);
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel-col-resize-handle {
-  background: linear-gradient(to left, rgba(68, 136, 255, 0.15), transparent);
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel-resize-handle::after {
-  content: '⋯';
-  bottom: 2px;
-  color: var(--wm-text-dim);
-  font-size: 16px;
-  letter-spacing: 2px;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel-col-resize-handle::after {
-  content: '⋮';
-  top: 50%;
-  right: 3px;
-  color: var(--wm-text-dim);
-  font-size: 16px;
-  letter-spacing: 2px;
-  transform: translateY(-50%);
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary']:hover > .wm-panel-resize-handle,
-.wm-panel-slot[data-workspace-panel-id='market-summary']:hover > .wm-panel-col-resize-handle,
-.wm-panel-slot[data-workspace-panel-id='market-summary'].resizing > .wm-panel-resize-handle,
-.wm-panel-slot[data-workspace-panel-id='market-summary'].col-resizing > .wm-panel-col-resize-handle {
-  opacity: 1;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary']:hover > .wm-panel-resize-handle,
-.wm-panel-slot[data-workspace-panel-id='market-summary'].resizing > .wm-panel-resize-handle {
-  background: linear-gradient(to top, rgba(68, 136, 255, 0.28), transparent);
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary']:hover > .wm-panel-col-resize-handle,
-.wm-panel-slot[data-workspace-panel-id='market-summary'].col-resizing > .wm-panel-col-resize-handle {
-  background: linear-gradient(to left, rgba(68, 136, 255, 0.28), transparent);
 }
