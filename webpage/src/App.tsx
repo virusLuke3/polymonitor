@@ -829,7 +829,11 @@ function WorldMonitorApp() {
     dpr: 1,
   });
   const geoShockHydratingRef = useRef(false);
-  const [showPanelLibrary, setShowPanelLibrary] = useState<boolean>(() => Boolean(readJsonStorage(LIBRARY_STORAGE_KEY, true)));
+  const [showPanelLibrary, setShowPanelLibrary] = useState<boolean>(() => {
+    const stored = readJsonStorage<boolean | null>(LIBRARY_STORAGE_KEY, null);
+    if (stored !== null) return stored;
+    return typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches;
+  });
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [manualCopyLink, setManualCopyLink] = useState<string | null>(null);

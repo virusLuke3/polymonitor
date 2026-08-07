@@ -25,6 +25,7 @@ export {
   createAviationLayers,
   createAviationStaticLayerSections,
   type AviationRenderData,
+  type AviationMotionPoint,
   type AviationStaticLayerSections,
   type AviationViewport,
 } from './aviationLayers';
@@ -47,7 +48,7 @@ export function createWorldEventStaticLayerSections(
   clusterIndex?: EventClusterIndex,
 ): WorldEventStaticLayerSections {
   return {
-    geometry: createEventGeometryLayers(events, state.selectedEventId, state.zoom),
+    geometry: createEventGeometryLayers(events, state.selectedEventId, state.zoom, undefined, viewport),
     points: createEventPointLayers({
       events,
       zoom: state.zoom,
@@ -64,8 +65,9 @@ export function createWorldEventGeometryLayers(
   selectedEventId: string | null,
   zoom: number,
   beforeId?: string,
+  viewport?: [number, number, number, number],
 ) {
-  return createEventGeometryLayers(events, selectedEventId, zoom, beforeId);
+  return createEventGeometryLayers(events, selectedEventId, zoom, beforeId, viewport);
 }
 
 export function createWorldEventPointLayers(

@@ -18,8 +18,15 @@ const countryRisk: GeoEvent = {
 describe('country risk map layer', () => {
   it('renders verified country evidence as a distinct polygon layer', () => {
     expect(isCountryRiskArea(countryRisk)).toBe(true);
-    const layers = createCountryRiskLayers([countryRisk], null) as unknown as Array<{ id: string }>;
+    const layers = createCountryRiskLayers([countryRisk], null) as unknown as Array<{
+      id: string;
+      props: Record<string, any>;
+    }>;
     expect(layers[0]?.id).toBe('world-event-country-risk');
+    const feature = layers[0]?.props.data.features[0];
+    expect(layers[0]?.props.getFillColor(feature)[3]).toBe(28);
+    expect(layers[0]?.props.getLineColor(feature)[3]).toBe(132);
+    expect(layers[0]?.props.autoHighlight).toBe(false);
   });
 
   it('uses a warm risk scale instead of a natural-hazard color', () => {

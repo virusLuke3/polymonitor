@@ -44,6 +44,7 @@ describe('World Event Map vector basemap', () => {
     const countryLabels = style.layers?.find((layer) => layer.id === 'places_country');
     const globalCountryLabels = style.layers?.find((layer) => layer.id === 'places_country_global');
     const localityLabels = style.layers?.find((layer) => layer.id === 'places_locality');
+    const regionalLocalityLabels = style.layers?.find((layer) => layer.id === 'places_locality_regional');
     const globalLocalityLabels = style.layers?.find((layer) => layer.id === 'places_locality_global');
     const countryBoundaries = style.layers?.find((layer) => layer.id === 'boundaries_country');
     const detailBoundaries = style.layers?.find((layer) => layer.id === 'boundaries');
@@ -61,9 +62,17 @@ describe('World Event Map vector basemap', () => {
       filter: ['all', ['==', 'kind', 'locality'], ['>=', 'population_rank', 11]],
     });
     expect(JSON.stringify(countryLabels?.layout)).toContain('population_rank');
+    expect(localityLabels).toMatchObject({ type: 'symbol', 'source-layer': 'places', minzoom: 4.5 });
+    expect(regionalLocalityLabels).toMatchObject({
+      type: 'symbol',
+      'source-layer': 'places',
+      minzoom: 2.6,
+      maxzoom: 4.5,
+      filter: ['all', ['==', 'kind', 'locality'], ['>=', 'population_rank', 11]],
+    });
     expect(JSON.stringify(localityLabels?.layout)).toContain('population_rank');
     expect(countryBoundaries).toMatchObject({ type: 'line', 'source-layer': 'boundaries', filter: ['<=', 'kind_detail', 2] });
-    expect(detailBoundaries).toMatchObject({ type: 'line', 'source-layer': 'boundaries', minzoom: 3 });
+    expect(detailBoundaries).toMatchObject({ type: 'line', 'source-layer': 'boundaries', minzoom: 5 });
   });
 
   it('localizes Protomaps labels without overwriting its visual hierarchy', () => {

@@ -181,7 +181,12 @@ export function LayerPanel({
                       onChange={() => onToggle(item.id)}
                       aria-label={actionLabel}
                     />
-                    <span className="wm-layer-emoji" aria-hidden="true">{item.panelEmoji}</span>
+                    <MapSymbolIcon
+                      className="wm-layer-symbol"
+                      symbol={item.icon}
+                      color="#9fb2b8"
+                      size={17}
+                    />
                     <span className="wm-layer-label">{item.label}</span>
                     {item.hint ? <em className="wm-layer-hint">{item.hint}</em> : null}
                   </label>

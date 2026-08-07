@@ -60,14 +60,53 @@ describe('renderer hover lifecycle', () => {
     renderer.destroy();
   });
 
-  it('clears Deck hover locally when a map drag starts', () => {
+  it('keeps a loaded primary basemap when an individual tile fails later', () => {
+    const onError = vi.fn();
     const renderer = new DeckMapRenderer() as unknown as {
       callbacks: MapRendererCallbacks;
+      primaryBasemapReady: boolean;
+      primaryBasemapErrorCount: number;
+      fallbackApplied: boolean;
+      handleMapError: (event: { error?: Error; message?: string }) => void;
+      destroy: () => void;
+    };
+    renderer.callbacks = { ...callbacks(), onError };
+    renderer.primaryBasemapReady = true;
+
+    renderer.handleMapError({ message: 'Tile network request failed' });
+    renderer.handleMapError({ message: 'Glyph fetch network request failed' });
+
+    expect(renderer.primaryBasemapErrorCount).toBe(0);
+    expect(renderer.fallbackApplied).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(2);
+    renderer.destroy();
+  });
+
+  it('clears Deck hover locally when a map drag starts', () => {
+    const off = vi.fn();
+    const sync = vi.fn();
+    const canvas = { style: { visibility: '' } } as HTMLCanvasElement;
+    const renderer = new DeckMapRenderer() as unknown as {
+      callbacks: MapRendererCallbacks;
+      map: {
+        off: (event: string, callback: () => void) => void;
+        getLayer: () => undefined;
+        getCanvas: () => { classList: { toggle: () => void } };
+      };
+      aviationOverlay: { getCanvas: () => HTMLCanvasElement };
+      aviationOverlayViewSync: () => void;
       hoveredDeckEventId: string | null;
       deckHoverActive: boolean;
       handleMoveStart: () => void;
     };
     renderer.callbacks = callbacks();
+    renderer.map = {
+      off,
+      getLayer: () => undefined,
+      getCanvas: () => ({ classList: { toggle: vi.fn() } }),
+    };
+    renderer.aviationOverlay = { getCanvas: () => canvas };
+    renderer.aviationOverlayViewSync = sync;
     renderer.hoveredDeckEventId = 'event:1';
     renderer.deckHoverActive = true;
 
@@ -75,6 +114,12 @@ describe('renderer hover lifecycle', () => {
 
     expect(renderer.hoveredDeckEventId).toBeNull();
     expect(renderer.deckHoverActive).toBe(false);
+    // The stock render listener is removed at mount; camera synchronization is
+    // one-shot after moveend, so drag start must not register another frame
+    // listener or trigger a redraw.
+    expect(off).not.toHaveBeenCalled();
+    expect(sync).not.toHaveBeenCalled();
+    expect(canvas.style.visibility).toBe('hidden');
   });
 
   it('does not require App hover state during Deck destruction', () => {
@@ -89,6 +134,114 @@ describe('renderer hover lifecycle', () => {
     renderer.destroy();
 
     expect(renderer.callbacks).toBeNull();
+  });
+
+  it('keeps animated aircraft hover and click without a second GPU picking pass', () => {
+    const onEventSelect = vi.fn();
+    const show = vi.fn();
+    const flight = {
+      id: 'flight:cpu-pick',
+      category: 'infrastructure',
+      title: 'PX 204',
+      severity: 'watch',
+      geometry: { type: 'LineString', coordinates: [[0, 0], [2, 2]] },
+      locationPrecision: 'exact',
+      sources: [{ provider: 'fixture' }],
+      limitations: [],
+      relatedMarketIds: [],
+      properties: { mapEntity: 'air-flight', flightId: 'PX204' },
+    } as GeoEvent;
+    const renderer = new DeckMapRenderer() as unknown as {
+      callbacks: MapRendererCallbacks;
+      map: {
+        project: () => { x: number; y: number };
+        getCanvas: () => { classList: { toggle: () => void } };
+      };
+      seededAircraftPickPoints: Array<{
+        id: string;
+        event: GeoEvent;
+        position: [number, number];
+        color: [number, number, number, number];
+        angle: number;
+        size: number;
+        count: number;
+      }>;
+      manualAviationTooltip: { show: typeof show; clear: () => void; destroy: () => void };
+      hoveredDeckEventId: string | null;
+      handleManualAviationHover: (event: { point: { x: number; y: number } }) => void;
+      handleManualAviationClick: () => void;
+      destroy: () => void;
+    };
+    renderer.callbacks = { ...callbacks(), onEventSelect };
+    renderer.map = {
+      project: () => ({ x: 20, y: 20 }),
+      getCanvas: () => ({ classList: { toggle: vi.fn() } }),
+    };
+    renderer.seededAircraftPickPoints = [{
+      id: 'PX204',
+      event: flight,
+      position: [1, 1],
+      color: [92, 241, 255, 170],
+      angle: 45,
+      size: 14,
+      count: 1,
+    }];
+    renderer.manualAviationTooltip = { show, clear: vi.fn(), destroy: vi.fn() };
+
+    renderer.handleManualAviationHover({ point: { x: 24, y: 23 } });
+    expect(renderer.hoveredDeckEventId).toBe(flight.id);
+    expect(show).toHaveBeenCalled();
+    renderer.handleManualAviationClick();
+    expect(onEventSelect).toHaveBeenCalledWith(flight.id);
+
+    renderer.map = null as never;
+    renderer.destroy();
+  });
+
+  it('does not rebuild disaster and geometry layers for an aviation-only refresh', () => {
+    const hazard = {
+      id: 'hazard:stable',
+      category: 'natural-hazard',
+      severity: 'warning',
+      geometry: { type: 'Point', coordinates: [10, 10] },
+      properties: {},
+    } as GeoEvent;
+    const flight = (id: string) => ({
+      id,
+      category: 'infrastructure',
+      title: id,
+      severity: 'info',
+      geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] },
+      locationPrecision: 'exact',
+      sources: [{ provider: 'fixture' }],
+      limitations: [],
+      relatedMarketIds: [],
+      properties: { mapEntity: 'air-flight' },
+    }) as GeoEvent;
+    const previousPointLayers = [{}];
+    const previousGeometryLayers = [{}];
+    const renderer = new DeckMapRenderer() as unknown as {
+      events: GeoEvent[];
+      pointLayers: object[];
+      geometryLayers: object[];
+      geometryNeedsCommit: boolean;
+      aviationLayerSections: object | null;
+      setEvents: (events: GeoEvent[]) => void;
+      destroy: () => void;
+    };
+    renderer.events = [hazard, flight('flight:old')];
+    renderer.pointLayers = previousPointLayers;
+    renderer.geometryLayers = previousGeometryLayers;
+    renderer.geometryNeedsCommit = false;
+    renderer.aviationLayerSections = {};
+
+    renderer.setEvents([hazard, flight('flight:new')]);
+
+    expect(renderer.pointLayers).toBe(previousPointLayers);
+    expect(renderer.geometryLayers).toBe(previousGeometryLayers);
+    expect(renderer.geometryNeedsCommit).toBe(false);
+    expect(renderer.aviationLayerSections).toBeNull();
+    renderer.destroy();
   });
 
   it('clears and destroys the renderer-owned SVG tooltip', () => {

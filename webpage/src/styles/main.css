@@ -10257,6 +10257,32 @@ html[lang='zh-CN'] .wm-promo-copy {
   transform: rotate(-90deg);
 }
 
+.wm-layer-sidebar.is-collapsed {
+  width: 132px;
+  max-height: 38px;
+  border-color: rgba(0, 217, 255, 0.28);
+  background: rgba(4, 10, 12, 0.96);
+}
+
+.wm-layer-sidebar.is-collapsed .wm-toggle-header {
+  grid-template-columns: minmax(0, 1fr) 24px 28px;
+  min-height: 36px;
+  padding-left: 9px;
+  border-bottom: 0;
+  color: #9ce5ff;
+}
+
+.wm-layer-sidebar.is-collapsed .wm-layer-status-orb {
+  width: 20px;
+  height: 20px;
+  border-color: rgba(0, 217, 255, 0.28);
+  color: #d7f5ff;
+}
+
+.wm-layer-sidebar.is-collapsed .wm-toggle-collapse {
+  width: 28px;
+}
+
 .wm-toggle-collapse:hover,
 .wm-toggle-collapse:focus-visible {
   outline: 2px solid rgba(0, 217, 255, 0.34);
@@ -10393,32 +10419,29 @@ html[lang='zh-CN'] .wm-promo-copy {
   line-height: 1;
 }
 
-.wm-layer-emoji {
+.wm-layer-symbol {
   width: 18px;
   min-width: 18px;
   height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  text-align: center;
-  font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
-  font-size: 15px;
-  font-style: normal;
-  font-variant-emoji: emoji;
-  line-height: 1;
-  filter: saturate(0.92);
+  color: #9fb2b8;
+  filter: drop-shadow(0 0 5px rgba(68, 208, 231, 0.08));
   transform: translateY(0);
-  transition: filter var(--ds-duration-fast) ease, transform var(--ds-duration-fast) var(--ds-ease-out);
+  transition: color var(--ds-duration-fast) ease, filter var(--ds-duration-fast) ease, transform var(--ds-duration-fast) var(--ds-ease-out);
 }
 
-.wm-layer-row:hover .wm-layer-emoji,
-.wm-layer-row:focus-within .wm-layer-emoji {
-  filter: saturate(1.08);
+.wm-layer-row:hover .wm-layer-symbol,
+.wm-layer-row:focus-within .wm-layer-symbol {
+  color: #7feaff;
+  filter: drop-shadow(0 0 6px rgba(68, 208, 231, 0.2));
   transform: translateY(-0.5px) scale(1.06);
 }
 
-.wm-layer-row:not(.enabled) .wm-layer-emoji {
-  filter: grayscale(0.28) saturate(0.58);
+.wm-layer-row:not(.enabled) .wm-layer-symbol {
+  color: #657378;
+  filter: none;
 }
 
 .wm-layer-hint {
@@ -13520,7 +13543,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   .wm-toggle-collapse svg,
   .wm-layer-search,
   .wm-layer-row,
-  .wm-layer-emoji,
+  .wm-layer-symbol,
   .wm-layer-info {
     transition: none;
   }
@@ -15693,6 +15716,11 @@ html[lang='zh-CN'] .wm-promo-copy {
     width: min(260px, calc(100% - 84px));
     bottom: 104px;
     max-height: min(62vh, calc(100% - 114px));
+  }
+
+  .wm-layer-sidebar.is-collapsed {
+    width: 132px;
+    bottom: 78px;
   }
 
   .wm-layer-brief {

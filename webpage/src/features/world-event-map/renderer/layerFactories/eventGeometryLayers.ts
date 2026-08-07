@@ -3,6 +3,7 @@ import type { LayersList } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import {
   eventSeverityColor,
+  eventGeometryBounds,
   hazardAreaPresentation,
   isHazardEvent,
   type HazardAreaPresentation,
@@ -25,8 +26,21 @@ export function createEventGeometryLayers(
   selectedEventId: string | null,
   zoom = Number.POSITIVE_INFINITY,
   beforeId?: string,
+  viewport?: [number, number, number, number],
 ): LayersList {
-  const lines = events.filter((event) => (
+  const visibleEvents = viewport
+    ? events.filter((event) => {
+      if (event.id === selectedEventId) return true;
+      const bounds = eventGeometryBounds(event);
+      return !bounds || (
+        bounds[0] <= viewport[2]
+        && bounds[2] >= viewport[0]
+        && bounds[1] <= viewport[3]
+        && bounds[3] >= viewport[1]
+      );
+    })
+    : events;
+  const lines = visibleEvents.filter((event) => (
     event.properties.mapEntity !== 'air-route'
     && event.properties.mapEntity !== 'air-flight'
     && event.geometry?.type === 'LineString'
@@ -38,20 +52,20 @@ export function createEventGeometryLayers(
     const coordinates = event.geometry.coordinates[event.geometry.coordinates.length - 1];
     return coordinates ? [{ event, coordinates }] : [];
   });
-  const hazardAreas = events.flatMap((event) => {
+  const hazardAreas = visibleEvents.flatMap((event) => {
     if (!isHazardEvent(event)
       || (event.geometry?.type !== 'Polygon' && event.geometry?.type !== 'MultiPolygon')) return [];
     const presentation = hazardAreaPresentation(event, zoom, selectedEventId);
     return presentation.mode === 'hidden' ? [] : [{ event, presentation }];
   });
-  const contextAreas = events.filter((event) => (
+  const contextAreas = visibleEvents.filter((event) => (
     !isHazardEvent(event)
     && !isCountryRiskArea(event)
     && (event.geometry?.type === 'Polygon' || event.geometry?.type === 'MultiPolygon')
   ));
   const layers: LayersList = [];
 
-  layers.push(...createCountryRiskLayers(events, selectedEventId));
+  layers.push(...createCountryRiskLayers(visibleEvents, selectedEventId));
 
   if (hazardAreas.length) {
     layers.push(new GeoJsonLayer({

@@ -11,7 +11,10 @@ import type {
   MapRendererCallbacks,
 } from '../renderer/MapRenderer';
 import { inspectWebGL2Support } from '../renderer/webglSupport';
-import { worldEventLayerById } from '../config/layerRegistry';
+import {
+  worldEventLayerById,
+  worldEventLayerIdForEvent,
+} from '../config/layerRegistry';
 import { MAP_SEVERITY_STYLES } from '../config/mapSymbols';
 import { EventInspector } from './EventInspector';
 import { EventList } from './EventList';
@@ -56,17 +59,22 @@ export function WorldEventMap({
   );
   const legendItems = useMemo(
     () => {
-      const seen = new Set<string>();
+      const populatedLayerIds = new Set(events
+        .map(worldEventLayerIdForEvent)
+        .filter((layerId): layerId is string => layerId != null));
       return state.activeLayerIds
-        .flatMap((layerId) => worldEventLayerById(layerId)?.legend || [])
-        .filter((item) => {
-          const key = `${item.symbol}:${item.label}:${item.color}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        .map(worldEventLayerById)
+        .filter((layer): layer is NonNullable<typeof layer> => (
+          layer != null && populatedLayerIds.has(layer.id) && state.zoom >= layer.minZoom
+        ))
+        .slice(0, 8)
+        .map((layer) => ({
+          label: layer.legendLabel,
+          symbol: layer.icon,
+          color: '#bdcacc',
+        }));
     },
-    [state.activeLayerIds],
+    [events, state.activeLayerIds, state.zoom],
   );
 
   callbackRef.current = { onCameraChange, onEventSelect };
@@ -208,13 +216,18 @@ export function WorldEventMap({
             onClose={onAviationClose}
           />
         ) : null}
-      <div className="wm-weather-deck-legend" aria-label="Active hazard legend">
-        {legendItems.map((item) => (
-          <span key={`${item.symbol}:${item.label}:${item.color}`}>
+      <div
+        className="wm-weather-deck-legend"
+        aria-label="Visible event types. Symbol shape identifies event type; color identifies severity."
+      >
+        <span className="wm-map-legend-group" aria-label="Visible event types">
+          {legendItems.map((item) => (
+            <span key={`${item.symbol}:${item.label}`}>
             <MapSymbolIcon symbol={item.symbol} color={item.color} size={13} />
             {item.label.toUpperCase()}
-          </span>
-        ))}
+            </span>
+          ))}
+        </span>
         <span className="wm-map-legend-severity" aria-label="Severity colors">
           {state.severities.map((severity) => (
             <b key={severity} style={{ color: MAP_SEVERITY_STYLES[severity].color }}>

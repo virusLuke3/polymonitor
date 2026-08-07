@@ -42,13 +42,17 @@ export function createCountryRiskLayers(events: GeoEvent[], selectedEventId: str
     } as any,
     filled: true,
     stroked: true,
-    getFillColor: (feature) => countryRiskColor(feature.properties?.event as GeoEvent, 76),
+    getFillColor: (feature) => countryRiskColor(
+      feature.properties?.event as GeoEvent,
+      feature.properties?.event?.id === selectedEventId ? 72 : 28,
+    ),
     getLineColor: (feature) => countryRiskColor(
       feature.properties?.event as GeoEvent,
-      feature.properties?.event?.id === selectedEventId ? 255 : 214,
+      feature.properties?.event?.id === selectedEventId ? 255 : 132,
     ),
-    getLineWidth: (feature) => feature.properties?.event?.id === selectedEventId ? 2.8 : 1.35,
-    lineWidthMinPixels: 1,
+    getLineWidth: (feature) => feature.properties?.event?.id === selectedEventId ? 2.6 : 0.85,
+    lineWidthMinPixels: 0.65,
     pickable: true,
+    autoHighlight: false,
   })];
 }

@@ -49,6 +49,8 @@ describe('World Event Map layer registry', () => {
       expect(layer.explanation.limitations.length).toBeGreaterThan(0);
       expect(MAP_SYMBOL_DEFINITIONS[layer.icon]).toBeDefined();
       expect(layer.legend.length).toBeGreaterThan(0);
+      if (layer.cluster) expect(layer.clusterMinPoints).toBeGreaterThanOrEqual(5);
+      else expect(layer.clusterMinPoints).toBe(0);
       for (const item of layer.legend) expect(MAP_SYMBOL_DEFINITIONS[item.symbol]).toBeDefined();
     }
   });

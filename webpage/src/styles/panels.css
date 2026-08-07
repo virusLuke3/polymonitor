@@ -11331,7 +11331,8 @@ a.wm-orderfilled-row {
   vector-effect: non-scaling-stroke;
 }
 
-.wm-world-event-svg-symbol-frame,
+.wm-world-event-svg-symbol-underlay,
+.wm-world-event-svg-observation,
 .wm-world-event-svg-intensity,
 .wm-world-event-svg-cluster-badge {
   vector-effect: non-scaling-stroke;
@@ -11340,10 +11341,6 @@ a.wm-orderfilled-row {
 
 .wm-world-event-svg-cluster {
   cursor: pointer;
-}
-
-.wm-world-event-svg-cluster .wm-world-event-svg-symbol-frame {
-  vector-effect: non-scaling-stroke;
 }
 
 .wm-world-event-svg-cluster text {
@@ -11358,10 +11355,11 @@ a.wm-orderfilled-row {
   outline: none;
 }
 
-.wm-world-event-svg-cluster:focus .wm-world-event-svg-symbol-frame,
-.wm-world-event-svg-point:focus .wm-world-event-svg-symbol-frame {
-  stroke: #fff;
-  stroke-width: 3;
+.wm-world-event-svg-cluster:focus .wm-world-event-svg-symbol-underlay,
+.wm-world-event-svg-point:focus .wm-world-event-svg-symbol-underlay {
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1.5;
+  paint-order: stroke fill;
 }
 
 .wm-world-event-svg-shape:focus,
@@ -12274,7 +12272,7 @@ a.wm-orderfilled-row {
 
 .wm-world-event-list li button {
   display: grid;
-  grid-template-columns: 66px minmax(0, 1fr) auto;
+  grid-template-columns: 22px 58px minmax(0, 1fr) auto;
   grid-template-rows: 19px 17px 16px;
   gap: 0 9px;
   width: 100%;
@@ -12300,6 +12298,7 @@ a.wm-orderfilled-row {
 }
 
 .wm-world-event-list li .wm-event-list-severity {
+  grid-column: 2;
   grid-row: 1 / span 3;
   align-self: start;
   margin-top: 2px;
@@ -12311,13 +12310,22 @@ a.wm-orderfilled-row {
   text-transform: uppercase;
 }
 
+.wm-world-event-list li .wm-event-list-symbol {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  align-self: start;
+  justify-self: center;
+  margin-top: 1px;
+  line-height: 0;
+}
+
 .wm-world-event-list .severity-critical { color: #ff7474; }
 .wm-world-event-list .severity-warning { color: #ffac50; }
 .wm-world-event-list .severity-watch { color: #efd56a; }
 .wm-world-event-list .severity-info { color: #73d8ff; }
 
 .wm-world-event-list li strong {
-  grid-column: 2 / -1;
+  grid-column: 3 / -1;
   overflow: hidden;
   align-self: center;
   color: #ecf3f3;
@@ -12336,8 +12344,18 @@ a.wm-orderfilled-row {
   text-transform: uppercase;
 }
 
-.wm-world-event-list li time {
+.wm-world-event-list li .wm-event-list-kind {
   grid-column: 3;
+  grid-row: 2;
+}
+
+.wm-world-event-list li .wm-event-list-place {
+  grid-column: 3;
+  grid-row: 3;
+}
+
+.wm-world-event-list li time {
+  grid-column: 4;
   grid-row: 3;
   align-self: center;
   color: #68777c;
@@ -12397,24 +12415,26 @@ a.wm-orderfilled-row {
   z-index: 5;
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: calc(100% - 430px);
-  padding: 5px 10px;
+  gap: 12px;
+  max-width: calc(100% - 460px);
+  padding: 6px 11px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.78);
-  color: #a8aca8;
+  border-radius: 5px;
+  background: rgba(3, 8, 11, 0.88);
+  color: #b9c3c3;
   font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.5px;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.42px;
   text-transform: uppercase;
   transform: translateX(-50%);
-  overflow-x: auto;
-  scrollbar-width: none;
+  box-shadow: 0 9px 28px rgba(0, 0, 0, 0.34);
 }
 
-.wm-weather-deck-legend::-webkit-scrollbar {
-  display: none;
+.wm-map-legend-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px !important;
 }
 
 .wm-weather-deck-legend span {
@@ -12429,10 +12449,15 @@ a.wm-orderfilled-row {
   filter: drop-shadow(0 0 3px rgba(217, 229, 231, 0.22));
 }
 
+.wm-map-legend-group > span > svg {
+  opacity: 0.92;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.9));
+}
+
 .wm-map-legend-severity {
-  gap: 7px !important;
+  gap: 6px !important;
   margin-left: 2px;
-  padding-left: 9px;
+  padding-left: 10px;
   border-left: 1px solid rgba(255, 255, 255, 0.14);
 }
 
@@ -12441,14 +12466,14 @@ a.wm-orderfilled-row {
   align-items: center;
   gap: 3px;
   color: inherit;
-  font-size: 8px;
+  font-size: 7.5px;
   font-weight: 900;
 }
 
 .wm-map-legend-severity b i {
-  width: 9px;
-  height: 9px;
-  border: 1.5px solid currentColor;
+  width: 7px;
+  height: 7px;
+  border: 1px solid currentColor;
   border-radius: 50%;
   background: rgba(3, 9, 13, 0.92);
   box-shadow: none;
@@ -12966,6 +12991,17 @@ a.wm-orderfilled-row {
   line-height: 1.25;
 }
 
+.wm-event-inspector-titleline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.wm-event-inspector-titleline > svg {
+  flex: 0 0 auto;
+  margin-top: -2px;
+}
+
 .wm-event-inspector-header h2:focus {
   outline: none;
 }
@@ -13245,6 +13281,11 @@ a.wm-orderfilled-row {
 
   .wm-world-event-list-toggle {
     align-self: flex-end;
+    margin-right: 58px;
+  }
+
+  .wm-world-event-list.is-open .wm-world-event-list-toggle {
+    margin-right: 0;
   }
 
   .wm-world-event-list.is-open {
@@ -13273,7 +13314,37 @@ a.wm-orderfilled-row {
   }
 
   .wm-world-event-list li button {
-    grid-template-columns: 66px minmax(0, 1fr);
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    grid-template-rows: 19px 17px 16px;
+    column-gap: 9px;
+  }
+
+  .wm-world-event-list li .wm-event-list-symbol {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+  }
+
+  .wm-world-event-list li strong {
+    grid-column: 2 / -1;
+    grid-row: 1;
+  }
+
+  .wm-world-event-list li .wm-event-list-kind {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .wm-world-event-list li .wm-event-list-place {
+    grid-column: 2 / -1;
+    grid-row: 3;
+  }
+
+  .wm-world-event-list li .wm-event-list-severity {
+    grid-column: 3;
+    grid-row: 2;
+    width: auto;
+    margin: 0;
+    padding: 2px 4px;
   }
 
   .wm-world-event-list li time {

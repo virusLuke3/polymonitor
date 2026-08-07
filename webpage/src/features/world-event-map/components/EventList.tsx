@@ -6,6 +6,8 @@ import type {
   GeoEventSeverity,
   GeoPoint,
 } from '../domain/types';
+import { mapSymbolForEvent } from '../config/mapSymbols';
+import { MapSymbolIcon } from './MapSymbolIcon';
 
 export type EventListTimeFilter = 'all' | '1h' | '6h' | '24h' | '48h' | '7d';
 export type EventListRegion =
@@ -459,10 +461,20 @@ export function EventList({
                         closeDrawer(false);
                       }}
                     >
+                      <span className="wm-event-list-symbol">
+                        <MapSymbolIcon
+                          symbol={mapSymbolForEvent(event)}
+                          severity={event.severity}
+                          framed={false}
+                          size={18}
+                        />
+                      </span>
                       <span className={`wm-event-list-severity severity-${event.severity}`}>{event.severity}</span>
                       <strong>{event.title}</strong>
-                      <small>{EVENT_TYPE_LABELS[eventListType(event)] || eventListType(event).replace(/-/g, ' ')}</small>
-                      <small>{event.locationLabel || 'Mapped geometry'}</small>
+                      <small className="wm-event-list-kind">
+                        {EVENT_TYPE_LABELS[eventListType(event)] || eventListType(event).replace(/-/g, ' ')}
+                      </small>
+                      <small className="wm-event-list-place">{event.locationLabel || 'Mapped geometry'}</small>
                       <time dateTime={event.updatedAt || event.occurredAt}>{eventTimeLabel(event)}</time>
                     </button>
                   </li>

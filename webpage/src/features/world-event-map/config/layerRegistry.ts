@@ -10,6 +10,7 @@ import type { MapSymbolKey } from './mapSymbols';
 export type MapLayerDefinition = {
   id: string;
   label: string;
+  legendLabel: string;
   messageKey?: string;
   panelEmoji: string;
   icon: MapSymbolKey;
@@ -22,6 +23,7 @@ export type MapLayerDefinition = {
   labelMinZoom: number;
   cluster: boolean;
   clusterRadius: number;
+  clusterMinPoints: number;
   timeFilter: boolean;
   severities: GeoEventSeverity[];
   legend: Array<{ label: string; color: string; symbol: MapSymbolKey }>;
@@ -38,6 +40,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'weather-alerts',
     label: 'Storms, Cyclones & Floods',
+    legendLabel: 'Storms / floods',
     messageKey: 'atlas.layer.weatherAlerts',
     panelEmoji: '⛈️',
     icon: 'storm',
@@ -49,7 +52,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 58,
+    clusterRadius: 34,
+    clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
@@ -69,6 +73,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'earthquakes-volcanoes',
     label: 'Earthquakes & Volcanoes',
+    legendLabel: 'Quakes / volcanoes',
     messageKey: 'atlas.layer.earthquakesVolcanoes',
     panelEmoji: '🌋',
     icon: 'earthquake',
@@ -80,7 +85,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 52,
+    clusterRadius: 32,
+    clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
@@ -98,6 +104,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'wildfires',
     label: 'Wildfires',
+    legendLabel: 'Wildfires',
     messageKey: 'atlas.layer.wildfires',
     panelEmoji: '🔥',
     icon: 'wildfire',
@@ -109,7 +116,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 62,
+    clusterRadius: 36,
+    clusterMinPoints: 6,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
@@ -127,6 +135,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'extreme-temperature',
     label: 'Extreme Temperature Alerts',
+    legendLabel: 'Extreme temp',
     messageKey: 'atlas.layer.extremeTemperature',
     panelEmoji: '🌡️',
     icon: 'heat',
@@ -138,7 +147,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 58,
+    clusterRadius: 34,
+    clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
@@ -156,6 +166,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'climate-anomalies',
     label: 'Major Weather Anomalies',
+    legendLabel: 'Anomalies',
     messageKey: 'atlas.layer.climateAnomalies',
     panelEmoji: '🌀',
     icon: 'anomaly',
@@ -167,7 +178,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 54,
+    clusterRadius: 34,
+    clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [{ label: 'Major anomaly', color: '#d9e5e7', symbol: 'anomaly' }],
@@ -182,6 +194,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'intel-hotspots',
     label: 'Intel Hotspots',
+    legendLabel: 'Intel',
     messageKey: 'atlas.layer.intelHotspots',
     panelEmoji: '🎯',
     icon: 'intel',
@@ -193,7 +206,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 55,
+    clusterRadius: 34,
+    clusterMinPoints: 5,
     timeFilter: true,
     severities: ['watch', 'warning', 'critical'],
     legend: [{ label: 'Evidence-qualified intelligence', color: '#d9e5e7', symbol: 'intel' }],
@@ -208,6 +222,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'ucdp',
     label: 'Conflict & Unrest',
+    legendLabel: 'Conflict',
     messageKey: 'atlas.layer.ucdp',
     panelEmoji: '⚔️',
     icon: 'conflict-state',
@@ -219,7 +234,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 52,
+    clusterRadius: 32,
+    clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [
@@ -238,6 +254,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'sanctions-country-risk',
     label: 'Sanctions & Country Risk',
+    legendLabel: 'Country risk',
     messageKey: 'atlas.layer.countryRisk',
     panelEmoji: '🛡️',
     icon: 'country-risk',
@@ -250,6 +267,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     labelMinZoom: 2,
     cluster: false,
     clusterRadius: 0,
+    clusterMinPoints: 0,
     timeFilter: true,
     severities: ['watch', 'warning', 'critical'],
     legend: [
@@ -267,6 +285,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
     id: 'air-routes',
     label: 'Air Routes',
+    legendLabel: 'Aviation',
     messageKey: 'atlas.layer.airRoutes',
     panelEmoji: '✈️',
     icon: 'air-route',
@@ -279,6 +298,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     labelMinZoom: 4,
     cluster: false,
     clusterRadius: 0,
+    clusterMinPoints: 0,
     timeFilter: false,
     severities: ['info', 'watch', 'warning', 'critical'],
     legend: [

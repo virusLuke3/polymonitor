@@ -13,6 +13,7 @@ export function MapSymbolIcon({
   size = 14,
   label,
   className,
+  framed,
 }: {
   symbol: MapSymbolKey;
   color?: string;
@@ -20,9 +21,11 @@ export function MapSymbolIcon({
   size?: number;
   label?: string;
   className?: string;
+  framed?: boolean;
 }) {
   const definition = MAP_SYMBOL_DEFINITIONS[symbol];
   const severityStyle = severity ? MAP_SEVERITY_STYLES[severity] : null;
+  const showFrame = framed ?? Boolean(severityStyle);
   return (
     <svg
       className={className}
@@ -34,7 +37,7 @@ export function MapSymbolIcon({
       aria-hidden={label ? undefined : 'true'}
       focusable="false"
     >
-      {severityStyle ? (
+      {severityStyle && showFrame ? (
         <circle
           cx="24"
           cy="24"

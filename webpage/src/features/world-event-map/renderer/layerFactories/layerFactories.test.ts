@@ -86,15 +86,12 @@ const aviationState = () => {
 };
 
 describe('world event layer factories', () => {
-  it('uses stable layer ids and clusters dense global points', () => {
+  it('uses stable layer ids and clusters only genuinely dense global points', () => {
     const state = defaultWorldEventMapState();
-    const layers = createWorldEventLayers([
-      pointEvent('a', 10, 10, 'warning'),
-      pointEvent('b', 10.2, 10.1, 'warning'),
-      pointEvent('c', 10.3, 10.2, 'critical'),
-    ], state);
+    const layers = createWorldEventLayers(Array.from({ length: 6 }, (_, index) => (
+      pointEvent(`dense:${index}`, 10 + index * 0.03, 10 + index * 0.02, index === 5 ? 'critical' : 'warning')
+    )), state);
     expect((layers as Layer[]).map((layer) => layer.id)).toEqual([
-      'world-event-cluster-halos',
       'world-event-clusters',
       'world-event-cluster-counts',
     ]);
@@ -112,14 +109,14 @@ describe('world event layer factories', () => {
 
   it('clusters dense earthquakes at world zoom and preserves hazard semantics', () => {
     const events = [
-      hazardPoint('eq:a', 'earthquake', 10, 10, 'critical'),
-      hazardPoint('eq:b', 'earthquake', 10.1, 10.1, 'critical'),
-      hazardPoint('eq:c', 'earthquake', 10.2, 10.2, 'critical'),
+      ...Array.from({ length: 5 }, (_, index) => (
+        hazardPoint(`eq:${index}`, 'earthquake', 10 + index * 0.04, 10 + index * 0.04, 'critical')
+      )),
       hazardPoint('vo:a', 'volcano', 11, 11),
     ];
     const clustered = clusterEventPoints(events, 1.25, null);
     expect(clustered.clusters).toHaveLength(1);
-    expect(clustered.clusters[0]?.count).toBe(3);
+    expect(clustered.clusters[0]?.count).toBe(5);
     expect(clustered.clusters[0]?.label).toBe('earthquake');
     expect(clustered.clusters[0]?.symbol).toBe('earthquake');
     expect(clustered.clusters[0]?.badge).toBe('EQ');
@@ -138,20 +135,21 @@ describe('world event layer factories', () => {
 
   it('keeps lower-priority events represented by semantic clusters at world zoom', () => {
     const events = [
-      hazardPoint('eq:info-a', 'earthquake', 10, 10, 'info'),
-      hazardPoint('eq:info-b', 'earthquake', 10.1, 10.1, 'info'),
-      hazardPoint('eq:watch', 'earthquake', 10.2, 10.2, 'watch'),
+      ...Array.from({ length: 5 }, (_, index) => (
+        hazardPoint(`eq:info-${index}`, 'earthquake', 10 + index * 0.03, 10 + index * 0.03, 'info')
+      )),
+      hazardPoint('eq:watch', 'earthquake', 10.15, 10.15, 'watch'),
     ];
     const clustered = clusterEventPoints(events, 1.25, null);
 
     expect(clustered.singles).toHaveLength(0);
     expect(clustered.clusters).toHaveLength(1);
     expect(clustered.clusters[0]).toMatchObject({
-      count: 3,
+      count: 6,
       severity: 'watch',
       symbol: 'earthquake',
     });
-    expect(clustered.clusters[0]?.eventIds).toHaveLength(3);
+    expect(clustered.clusters[0]?.eventIds).toHaveLength(6);
   });
 
   it('invalidates the query cache when zoom crosses a disclosure boundary', () => {
@@ -170,16 +168,14 @@ describe('world event layer factories', () => {
   });
 
   it('represents official hazard areas as semantic markers and clusters at world zoom', () => {
-    const events = [
-      hazardArea('area:a', 10, 10, 'warning'),
-      hazardArea('area:b', 10.2, 10.1, 'warning'),
-      hazardArea('area:c', 10.4, 10.2, 'critical'),
-    ];
+    const events = Array.from({ length: 5 }, (_, index) => (
+      hazardArea(`area:${index}`, 10 + index * 0.08, 10 + index * 0.04, index === 4 ? 'critical' : 'warning')
+    ));
     const clustered = clusterEventPoints(events, 1.25, null);
     expect(clustered.clusters).toHaveLength(1);
-    expect(clustered.clusters[0]?.count).toBe(3);
+    expect(clustered.clusters[0]?.count).toBe(5);
     expect(clustered.clusters[0]?.symbol).toBe('volcano');
-    expect(clustered.clusters[0]?.bounds).toEqual([10, 10, 12.4, 12.2]);
+    expect(clustered.clusters[0]?.bounds).toEqual([10, 10, 12.32, 12.16]);
     expect(clustered.singles).toHaveLength(0);
   });
 
@@ -208,6 +204,26 @@ describe('world event layer factories', () => {
     expect(selectedProps.getLineColor(selectedFeature)[3]).toBe(245);
   });
 
+  it('does not tessellate offscreen hazard polygons but always keeps the selection', () => {
+    const nearby = hazardArea('area:nearby', 10, 10, 'warning');
+    const remote = hazardArea('area:remote', -120, 35, 'warning');
+    const viewport: [number, number, number, number] = [0, 0, 40, 40];
+
+    const visible = createWorldEventGeometryLayers(
+      [nearby, remote], null, 3.2, undefined, viewport,
+    ) as Layer[];
+    const visibleFeatures = (visible.find((layer) => layer.id === 'world-event-hazard-areas')
+      ?.props as unknown as Record<string, any>).data.features;
+    expect(visibleFeatures.map((feature: any) => feature.id)).toEqual([nearby.id]);
+
+    const withSelection = createWorldEventGeometryLayers(
+      [nearby, remote], remote.id, 3.2, undefined, viewport,
+    ) as Layer[];
+    const selectedFeatures = (withSelection.find((layer) => layer.id === 'world-event-hazard-areas')
+      ?.props as unknown as Record<string, any>).data.features;
+    expect(selectedFeatures.map((feature: any) => feature.id)).toEqual([nearby.id, remote.id]);
+  });
+
   it('uses metric-sized circles only when a continuous metric exists', () => {
     const quake = hazardPoint('quake', 'earthquake', 10, 10, 'warning');
     const volcano = hazardPoint('volcano', 'volcano', 11, 11, 'warning');
@@ -219,30 +235,46 @@ describe('world event layer factories', () => {
     expect(volcanoLayers.some((layer) => layer.id === 'world-event-points')).toBe(true);
   });
 
-  it('uses SVG mask icons and severity frames for globally visible hazard singles', () => {
+  it('uses one semantic SVG mask icon for globally visible singles', () => {
     const warning = hazardPoint('volcano:warning', 'volcano', 10, 10, 'warning');
     const state = { ...defaultWorldEventMapState(), zoom: 1.25 };
     const layers = createWorldEventLayers([warning], state) as Layer[];
     const point = layers.find((layer) => layer.id === 'world-event-points');
-    const frame = layers.find((layer) => layer.id === 'world-event-point-frames');
     const pointProps = point?.props as unknown as Record<string, unknown>;
     const color = (pointProps.getColor as (event: GeoEvent) => number[])(warning);
 
     expect(point?.constructor.name).toBe('IconLayer');
-    expect(frame).toBeDefined();
+    expect(layers.some((layer) => layer.id === 'world-event-point-underlays')).toBe(false);
     expect(pointProps.getIcon).toBeDefined();
     expect(color[3]).toBeLessThan(220);
-    expect(pointProps.sizeMaxPixels).toBe(20);
+    expect(pointProps.sizeMaxPixels).toBe(18);
+  });
+
+  it('retains low-priority spatial texture without making observations pickable', () => {
+    const events = [
+      pointEvent('context:a', -40, 10, 'info'),
+      pointEvent('context:b', 60, -15, 'watch'),
+    ];
+    const layers = createWorldEventLayers(events, defaultWorldEventMapState()) as Layer[];
+    const texture = layers.find((layer) => layer.id === 'world-event-observation-texture');
+    const props = texture?.props as unknown as Record<string, unknown>;
+
+    expect(texture?.constructor.name).toBe('ScatterplotLayer');
+    expect(props.pickable).toBe(false);
+    expect(props.stroked).toBe(false);
+    expect((props.data as GeoEvent[]).map((event) => event.id)).toEqual(['context:b', 'context:a']);
   });
 
   it('does not combine different conflict types into one generic cluster', () => {
     const events = [
-      { ...pointEvent('state:1', 10, 10, 'warning'), properties: { violenceType: '1' } },
-      { ...pointEvent('state:2', 10.1, 10.1, 'warning'), properties: { violenceType: '1' } },
-      { ...pointEvent('state:3', 10.2, 10.2, 'warning'), properties: { violenceType: '1' } },
-      { ...pointEvent('nonstate:1', 10, 10, 'warning'), properties: { violenceType: '2' } },
-      { ...pointEvent('nonstate:2', 10.1, 10.1, 'warning'), properties: { violenceType: '2' } },
-      { ...pointEvent('nonstate:3', 10.2, 10.2, 'warning'), properties: { violenceType: '2' } },
+      ...Array.from({ length: 5 }, (_, index) => ({
+        ...pointEvent(`state:${index}`, 10 + index * 0.03, 10 + index * 0.03, 'warning'),
+        properties: { violenceType: '1' },
+      })),
+      ...Array.from({ length: 5 }, (_, index) => ({
+        ...pointEvent(`nonstate:${index}`, 10 + index * 0.03, 10 + index * 0.03, 'warning'),
+        properties: { violenceType: '2' },
+      })),
     ];
     const clustered = clusterEventPoints(events, 1.25, null);
     expect(clustered.clusters.map((cluster) => cluster.label).sort()).toEqual([
@@ -332,7 +364,6 @@ describe('world event layer factories', () => {
     };
     expect((createWorldEventLayers([route, hub], state, true, undefined, 5) as Layer[]).map((layer) => layer.id))
       .toEqual([
-        'aviation-route-underlay',
         'aviation-route-core',
         'aviation-route-runners',
         'aviation-hubs',
@@ -373,7 +404,7 @@ describe('world event layer factories', () => {
     const layers = createWorldEventLayers([flight], state, true, undefined, 5) as Layer[];
     const aircraftLayer = layers.find((layer) => layer.id === 'aviation-seeded-aircraft');
     expect(aircraftLayer?.constructor.name).toBe('IconLayer');
-    expect(aircraftLayer?.props.pickable).toBe(true);
+    expect(aircraftLayer?.props.pickable).toBe(false);
     const picked = (aircraftLayer?.props.data as Array<{ event?: GeoEvent }>)[0];
     expect(picked?.event?.id).toBe('flight:0');
   });
@@ -392,8 +423,8 @@ describe('world event layer factories', () => {
     }));
     const selected = selectAviationRenderData(routes, aviationState());
 
-    expect(selected.routes).toHaveLength(120);
-    expect(new Set(selected.routes.map((route) => route.properties.routeId)).size).toBe(120);
+    expect(selected.routes).toHaveLength(32);
+    expect(new Set(selected.routes.map((route) => route.properties.routeId)).size).toBe(32);
   });
 
   it('precomputes a bounded world-view aviation generation outside the animation frame', () => {
@@ -416,16 +447,16 @@ describe('world event layer factories', () => {
     }));
     const selected = selectAviationRenderData([...routes, ...flights, ...live], aviationState());
 
-    expect(selected.routes).toHaveLength(120);
-    expect(selected.routeMotionGroups).toHaveLength(48);
-    expect(selected.flights).toHaveLength(30);
-    expect(selected.flightMotionGroups).toHaveLength(30);
-    expect(selected.liveAircraft).toHaveLength(24);
+    expect(selected.routes).toHaveLength(32);
+    expect(selected.routeMotionGroups).toHaveLength(24);
+    expect(selected.flights).toHaveLength(24);
+    expect(selected.flightMotionGroups).toHaveLength(24);
+    expect(selected.liveAircraft).toHaveLength(18);
     expect(aviationLayerStatsForState([...routes, ...flights, ...live], aviationState()))
       .toMatchObject({
-        visibleRoutes: 120,
-        visibleFlights: 30,
-        visibleLiveAircraft: 24,
+        visibleRoutes: 32,
+        visibleFlights: 24,
+        visibleLiveAircraft: 18,
       });
 
     const staticSections = createAviationStaticLayerSections(
@@ -434,7 +465,6 @@ describe('world event layer factories', () => {
     );
     const dynamicLayers = createAviationDynamicLayers(staticSections.data, 1) as Layer[];
     expect((staticSections.routeLayers as Layer[]).map((layer) => layer.id)).toEqual([
-      'aviation-route-underlay',
       'aviation-route-core',
     ]);
     expect(dynamicLayers.map((layer) => layer.id)).toEqual([
@@ -488,13 +518,13 @@ describe('world event layer factories', () => {
       { ...aviationState(), aviationLens: 'trunk' },
     );
 
-    expect(new Set(selected.routes.map((route) => route.properties.routeId)).size).toBe(86);
+    expect(new Set(selected.routes.map((route) => route.properties.routeId)).size).toBe(24);
     expect(selected.routes.filter((route) => route.properties.layer === 'trunk')).toHaveLength(18);
-    expect(selected.hubs).toHaveLength(12);
+    expect(selected.hubs).toHaveLength(10);
     expect(selected.hubs.every((hub) => Number(String(hub.properties.code).slice(1)) <= 18)).toBe(true);
-    expect(selected.flightMotionGroups).toHaveLength(22);
+    expect(selected.flightMotionGroups).toHaveLength(18);
     expect(selected.flightMotionGroups.filter((group) => group.event.properties.layer === 'trunk')).toHaveLength(18);
-    expect(selected.liveAircraft).toHaveLength(17);
+    expect(selected.liveAircraft).toHaveLength(13);
 
     const watch = selectAviationRenderData(
       [...routes, ...flights, ...hubs, ...live],

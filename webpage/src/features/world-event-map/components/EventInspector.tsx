@@ -11,6 +11,8 @@ import {
   type InspectorField,
 } from './eventInspectorModel';
 import { useRelatedWeatherMarkets } from '../data/useRelatedWeatherMarkets';
+import { mapSymbolForEvent } from '../config/mapSymbols';
+import { MapSymbolIcon } from './MapSymbolIcon';
 
 export type EventInspectorProps = {
   event: GeoEvent;
@@ -119,7 +121,15 @@ export function EventInspector({
           <span>{event.severity}</span>
           {hazard ? <span>{hazard.lifecycle}</span> : null}
         </div>
-        <h2 id="wm-event-inspector-title" ref={titleRef} tabIndex={-1}>{event.title}</h2>
+        <div className="wm-event-inspector-titleline">
+          <MapSymbolIcon
+            symbol={mapSymbolForEvent(event)}
+            severity={event.severity}
+            size={36}
+            label={`${event.severity} ${hazard ? hazardLabel(hazard) : event.category}`}
+          />
+          <h2 id="wm-event-inspector-title" ref={titleRef} tabIndex={-1}>{event.title}</h2>
+        </div>
         {event.summary ? <p>{event.summary}</p> : null}
       </header>
 

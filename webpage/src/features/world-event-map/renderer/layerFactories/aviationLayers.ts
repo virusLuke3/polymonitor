@@ -217,25 +217,25 @@ function aviationBudget(zoom: number, lens: AviationLensMode): AviationBudget {
   const scale = (value: number, minimum: number) => Math.max(minimum, Math.round(value * lensScale));
   if (zoom < 1.6) {
     return {
-      routes: scale(120, 64), routeRunners: scale(48, 28), seededAircraft: scale(30, 18),
-      liveAircraft: scale(24, 12), hubs: 12, hubLabels: 8,
+      routes: scale(32, 24), routeRunners: scale(24, 18), seededAircraft: scale(24, 18),
+      liveAircraft: scale(18, 12), hubs: 10, hubLabels: 6,
     };
   }
   if (zoom < 2.8) {
     return {
-      routes: scale(180, 96), routeRunners: scale(96, 48), seededAircraft: scale(64, 32),
-      liveAircraft: scale(48, 24), hubs: 24, hubLabels: 12,
+      routes: scale(48, 32), routeRunners: scale(28, 20), seededAircraft: scale(36, 24),
+      liveAircraft: scale(28, 18), hubs: 14, hubLabels: 8,
     };
   }
   if (zoom < 4) {
     return {
-      routes: scale(360, 160), routeRunners: scale(180, 84), seededAircraft: scale(120, 56),
-      liveAircraft: scale(100, 48), hubs: 30, hubLabels: 18,
+      routes: scale(72, 48), routeRunners: scale(36, 24), seededAircraft: scale(48, 32),
+      liveAircraft: scale(36, 24), hubs: 18, hubLabels: 10,
     };
   }
   return {
-    routes: scale(520, 220), routeRunners: scale(260, 120), seededAircraft: scale(220, 96),
-    liveAircraft: scale(160, 72), hubs: 48, hubLabels: 28,
+    routes: scale(140, 96), routeRunners: scale(72, 48), seededAircraft: scale(96, 64),
+    liveAircraft: scale(64, 42), hubs: 28, hubLabels: 16,
   };
 }
 
@@ -612,11 +612,13 @@ function routeAlpha(
   return event.id === selectedId || groupId(event, 'routeId') === selectedGroupId ? selectedAlpha : 36;
 }
 
-function createAviationRouteLayers(data: AviationRenderData, state: Pick<WorldEventMapState, 'selectedEventId'>): LayersList {
+function createAviationRouteLayers(
+  data: AviationRenderData,
+  state: Pick<WorldEventMapState, 'selectedEventId' | 'zoom'>,
+): LayersList {
   if (!data.routes.length) return [];
   const selectedGroupId = selectedRouteId(data, state.selectedEventId);
-  return [
-    new PathLayer<GeoEvent>({
+  const underlay = new PathLayer<GeoEvent>({
       id: 'aviation-route-underlay',
       data: data.routes,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
@@ -629,8 +631,8 @@ function createAviationRouteLayers(data: AviationRenderData, state: Pick<WorldEv
       jointRounded: true,
       capRounded: true,
       pickable: false,
-    }),
-    new PathLayer<GeoEvent>({
+    });
+  const core = new PathLayer<GeoEvent>({
       id: 'aviation-route-core',
       data: data.routes,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
@@ -643,8 +645,11 @@ function createAviationRouteLayers(data: AviationRenderData, state: Pick<WorldEv
       jointRounded: true,
       capRounded: true,
       pickable: true,
-    }),
-  ];
+    });
+  // At world scale the thin semantic core is enough; a second full-route
+  // underlay doubles tessellation and turns the overview into glowing bands.
+  // Restore it once detail is useful or a route is explicitly selected.
+  return state.zoom < 4 && !selectedGroupId ? [core] : [underlay, core];
 }
 
 function liveAircraftMarker(event: GeoEvent): AviationAircraftMarker | null {
@@ -720,6 +725,7 @@ function createAviationMarkerLayerSections(
         getAlignmentBaseline: 'center',
         fontFamily: MAP_MONO_FONT_FAMILY,
         fontWeight: 800,
+        characterSet: 'auto',
         outlineWidth: 2,
         outlineColor: [0, 8, 12, 230],
         pickable: false,
@@ -753,6 +759,7 @@ function createAviationMarkerLayerSections(
       getAlignmentBaseline: 'center',
       fontFamily: MAP_MONO_FONT_FAMILY,
       fontWeight: 900,
+      characterSet: 'auto',
       outlineWidth: 3,
       outlineColor: [0, 0, 0, 220],
       pickable: false,
@@ -833,7 +840,11 @@ export function createAviationDynamicLayers(
       getAngle: (point) => point.angle - 90,
       getColor: (point) => point.color,
       sizeUnits: 'pixels',
-      pickable: true,
+      // The motion canvas is intentionally excluded from deck.gl GPU picking.
+      // DeckMapRenderer performs a bounded CPU proximity hit-test over these
+      // points so moving aircraft retain hover/click without a second full
+      // framebuffer readback on every pointer move.
+      pickable: false,
     }));
     const hovered = hoveredEventId && hoveredEventId !== selectedEventId
       ? flightPoints.filter((point) => point.event.id === hoveredEventId)
@@ -903,6 +914,7 @@ export function createAviationDynamicLayers(
         getAlignmentBaseline: 'center',
         fontFamily: MAP_MONO_FONT_FAMILY,
         fontWeight: 800,
+        characterSet: 'auto',
         outlineWidth: 2,
         outlineColor: [0, 8, 12, 230],
         pickable: false,

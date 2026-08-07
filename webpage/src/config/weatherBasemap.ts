@@ -59,7 +59,14 @@ export async function buildWorldEventPMTilesStyle(url: string): Promise<StyleSpe
       return [global, regional] as typeof rankedLayers;
     }
     if (layer.id === 'places_locality') {
-      const regional = { ...layer, minzoom: 2.6 };
+      const detail = { ...layer, minzoom: 4.5 };
+      const regional = {
+        ...layer,
+        id: 'places_locality_regional',
+        minzoom: 2.6,
+        maxzoom: 4.5,
+        filter: ['all', ['==', 'kind', 'locality'], ['>=', 'population_rank', 11]],
+      };
       const global = {
         ...layer,
         id: 'places_locality_global',
@@ -71,11 +78,11 @@ export async function buildWorldEventPMTilesStyle(url: string): Promise<StyleSpe
           'text-padding': 10,
         },
       };
-      return [global, regional] as typeof rankedLayers;
+      return [global, regional, detail] as typeof rankedLayers;
     }
-    if (layer.id === 'places_region') return [{ ...layer, minzoom: 3 }];
-    if (layer.id === 'places_subplace') return [{ ...layer, minzoom: 5 }];
-    if (layer.id === 'boundaries') return [{ ...layer, minzoom: 3 }];
+    if (layer.id === 'places_region') return [{ ...layer, minzoom: 5 }];
+    if (layer.id === 'places_subplace') return [{ ...layer, minzoom: 7 }];
+    if (layer.id === 'boundaries') return [{ ...layer, minzoom: 5 }];
     return [layer];
   }) as StyleSpecification['layers'];
   return {

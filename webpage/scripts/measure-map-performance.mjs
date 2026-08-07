@@ -14,8 +14,15 @@ target.searchParams.set('mapPerf', '1');
 const settleMs = Number(option('--settle', '6000'));
 const warmupMs = Number(option('--warmup', '1000'));
 const output = resolve(option('--out', 'artifacts/map-performance/chrome-trace.json'));
+const screenshotOption = option('--screenshot', '');
+const screenshotOutput = screenshotOption ? resolve(screenshotOption) : '';
 const strict = args.includes('--strict');
 const requireDynamic = args.includes('--require-dynamic');
+const requireEvents = args.includes('--require-events');
+const requireHazards = args.includes('--require-hazards');
+const openEvents = args.includes('--open-events');
+const viewportWidth = Math.max(320, Number(option('--width', '1440')));
+const viewportHeight = Math.max(480, Number(option('--height', '900')));
 const budgets = {
   jsBuildP95Ms: Number(option('--max-js-build-p95', '20')),
   deckCommitP95Ms: Number(option('--max-deck-commit-p95', '20')),
@@ -40,7 +47,7 @@ const chrome = spawn('/usr/bin/google-chrome', [
   ...(useAngle === 'vulkan' ? ['--enable-features=Vulkan'] : []),
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${profile}`,
-  '--window-size=1440,900',
+  `--window-size=${viewportWidth},${viewportHeight}`,
   'about:blank',
 ], { stdio: 'ignore' });
 
@@ -143,6 +150,27 @@ async function waitForPerformanceSamples(client, dynamicRequired, timeoutMs = 30
   return false;
 }
 
+async function waitForMappedEvents(client, hazardsRequired, timeoutMs = 60000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastState = { count: 0, hazardsReady: false, legend: '' };
+  while (Date.now() < deadline) {
+    const result = await client.send('Runtime.evaluate', {
+      expression: `(() => {
+        const value = document.querySelector('.wm-world-event-list-toggle strong')?.textContent || '0';
+        const count = Number(value.replace(/[^0-9]/g, '')) || 0;
+        const legend = document.querySelector('.wm-weather-deck-legend')?.textContent || '';
+        const hazardsReady = /STORMS|QUAKES|VOLCANOES|WILDFIRES|EXTREME|ANOMAL/i.test(legend);
+        return { count, hazardsReady, legend, ready: count > 0 && (${hazardsRequired ? 'true' : 'false'} ? hazardsReady : true) };
+      })()`,
+      returnByValue: true,
+    });
+    if (result.result?.value) lastState = result.result.value;
+    if (lastState.ready) return lastState;
+    await sleep(150);
+  }
+  return lastState;
+}
+
 let client;
 try {
   await waitForEndpoint('/json/version');
@@ -157,6 +185,12 @@ try {
     client.send('Network.enable'),
     client.send('Log.enable'),
   ]);
+  await client.send('Emulation.setDeviceMetricsOverride', {
+    width: viewportWidth,
+    height: viewportHeight,
+    deviceScaleFactor: 1,
+    mobile: viewportWidth <= 860,
+  });
   await client.send('Network.setBypassServiceWorker', { bypass: true });
   const loadFailures = [];
   const runtimeErrors = [];
@@ -213,6 +247,31 @@ try {
       runtimeErrors,
     })}`);
   }
+  const mappedEventState = await waitForMappedEvents(client, requireHazards);
+  const mappedEventCount = mappedEventState.count;
+  if ((requireEvents && mappedEventCount === 0) || (requireHazards && !mappedEventState.hazardsReady)) {
+    const diagnostics = await client.send('Runtime.evaluate', {
+      expression: `({
+        sourceStates: Array.from(document.querySelectorAll('[data-source-state]')).map((node) => ({
+          source: node.getAttribute('data-source-state'),
+          text: node.textContent,
+        })),
+        bodyText: document.body?.innerText?.slice(0, 900) || '',
+      })`,
+      returnByValue: true,
+    });
+    throw new Error(`No mapped events became available before measurement: ${JSON.stringify({
+      page: diagnostics.result?.value,
+      loadFailures,
+      runtimeErrors,
+    })}`);
+  }
+  if (openEvents) {
+    await client.send('Runtime.evaluate', {
+      expression: `document.querySelector('.wm-world-event-list-toggle')?.click()`,
+    });
+    await sleep(500);
+  }
   await sleep(warmupMs);
   await client.send('Runtime.evaluate', {
     expression: 'window.__POLYMONITOR_MAP_PERF__?.resetLongTasks()',
@@ -231,9 +290,30 @@ try {
     const y = bounds.y + bounds.height * 0.52;
     await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
     await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
-    await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + 90, y: y + 20, button: 'left' });
+    // Exercise the same frame pacing as a physical drag. Sending press, a
+    // 90px jump and release back-to-back creates a synthetic burst that Chrome
+    // never has an opportunity to coalesce or hand to movestart.
+    await sleep(34);
+    for (let step = 1; step <= 6; step += 1) {
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: x + 15 * step,
+        y: y + (20 / 6) * step,
+        button: 'left',
+      });
+      await sleep(17);
+    }
     await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x + 90, y: y + 20, button: 'left', clickCount: 1 });
     await sleep(1200);
+  }
+  if (screenshotOutput) {
+    const screenshot = await client.send('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: false,
+      fromSurface: true,
+    });
+    mkdirSync(dirname(screenshotOutput), { recursive: true });
+    writeFileSync(screenshotOutput, Buffer.from(screenshot.data, 'base64'));
   }
   const snapshotResult = await client.send('Runtime.evaluate', {
     expression: 'window.__POLYMONITOR_MAP_PERF__?.snapshot() || null',
@@ -250,6 +330,10 @@ try {
     url: target.href,
     trace: output,
     traceEvents: traceEvents.length,
+    screenshot: screenshotOutput || null,
+    mappedEventCount,
+    mappedHazardsReady: mappedEventState.hazardsReady,
+    viewport: { width: viewportWidth, height: viewportHeight },
     renderer: await client.send('Runtime.evaluate', {
       expression: 'document.querySelector("[data-map-renderer-ready]")?.dataset.mapRendererReady || null',
       returnByValue: true,
