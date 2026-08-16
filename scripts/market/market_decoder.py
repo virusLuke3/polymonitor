@@ -700,7 +700,7 @@ def main():
     parser.add_argument(
         "--rpc-url",
         default=POLYGON_RPC_URL,
-        help="Polygon RPC URL（默认从 POLYMARKET_RPC_URL / NODE_URL 读取）"
+        help="Polygon RPC URL（默认仅从 POLYMARKET_RPC_URL 读取）"
     )
     parser.add_argument(
         "--collateral-token",

@@ -114,6 +114,10 @@ RPC_RECOVERY_SLEEP_MAX_SECONDS = 300
 DB_WRITE_MAX_RETRIES = 6
 DB_WRITE_RETRY_BASE_SECONDS = 1
 LOG_PROCESS_CHUNK_SIZE = max(1, int(os.environ.get("POLYDATA_ORDERFILLED_LOG_PROCESS_CHUNK_SIZE", "5000")))
+RPC_TOPIC_FILTER_BATCH_SIZE = max(
+    1,
+    int(os.environ.get("POLYDATA_ORDERFILLED_RPC_TOPIC_BATCH_SIZE", "64")),
+)
 ACTIVITY_FALLBACK_WORKERS = max(1, int(os.environ.get("POLYDATA_ORDERFILLED_ACTIVITY_WORKERS", "1")))
 WATCH_ERROR_BACKOFF_BASE_SECONDS = 30
 WATCH_ERROR_BACKOFF_MAX_SECONDS = 300
@@ -385,6 +389,65 @@ def _orderfilled_log_key(log: Dict) -> Tuple[str, int]:
     return tx_hash_text.lower().removeprefix("0x"), int(log.get("logIndex") or 0)
 
 
+def _fetch_wallet_topic_batch(
+    w3: Web3,
+    base_filter: Dict[str, Any],
+    event_topics: Sequence[bytes],
+    wallet_topics: Sequence[bytes],
+    topic_position: int,
+) -> List[Dict]:
+    """Query a wallet-topic batch and adapt to stricter self-hosted Bor limits."""
+    topics: List[Any] = [list(event_topics), None]
+    if topic_position == 3:
+        topics.append(None)
+    topics.append(list(wallet_topics))
+    try:
+        return [dict(log) for log in w3.eth.get_logs({**base_filter, "topics": topics})]
+    except Exception as error:
+        if "exceed max topics" not in str(error).lower() or len(wallet_topics) <= 1:
+            raise
+        midpoint = len(wallet_topics) // 2
+        return [
+            *_fetch_wallet_topic_batch(
+                w3,
+                base_filter,
+                event_topics,
+                wallet_topics[:midpoint],
+                topic_position,
+            ),
+            *_fetch_wallet_topic_batch(
+                w3,
+                base_filter,
+                event_topics,
+                wallet_topics[midpoint:],
+                topic_position,
+            ),
+        ]
+
+
+def _fetch_wallet_filtered_logs(
+    w3: Web3,
+    base_filter: Dict[str, Any],
+    event_topics: Sequence[bytes],
+    wallet_topics: Sequence[bytes],
+) -> List[Dict]:
+    unique_logs: Dict[Tuple[str, int], Dict] = {}
+    for _, topic_batch in iter_chunks(list(wallet_topics), RPC_TOPIC_FILTER_BATCH_SIZE):
+        for topic_position in (2, 3):
+            for log in _fetch_wallet_topic_batch(
+                w3,
+                base_filter,
+                event_topics,
+                topic_batch,
+                topic_position,
+            ):
+                unique_logs[_orderfilled_log_key(log)] = log
+    return sorted(
+        unique_logs.values(),
+        key=lambda log: (int(log.get("blockNumber") or 0), int(log.get("logIndex") or 0)),
+    )
+
+
 def fetch_logs_with_retry(
     rpc_url: str,
     from_block: int,
@@ -413,13 +476,7 @@ def fetch_logs_with_retry(
                 }
                 wallet_topics = address_filter_topics(address_filters or [])
                 if wallet_topics:
-                    maker_logs = w3.eth.get_logs({**base_filter, "topics": [topics, None, wallet_topics]})
-                    taker_logs = w3.eth.get_logs({**base_filter, "topics": [topics, None, None, wallet_topics]})
-                    unique_logs = {
-                        _orderfilled_log_key(dict(log)): dict(log)
-                        for log in [*maker_logs, *taker_logs]
-                    }
-                    return list(unique_logs.values())
+                    return _fetch_wallet_filtered_logs(w3, base_filter, topics, wallet_topics)
                 logs = w3.eth.get_logs({**base_filter, "topics": [topics]})
                 return [dict(log) for log in logs]
             except Exception as e:
@@ -441,8 +498,8 @@ def fetch_logs_with_retry(
                 f"getLogs failed repeatedly for blocks {from_block}-{to_block}; split into {from_block}-{mid} and {mid + 1}-{to_block}",
                 file=sys.stderr,
             )
-            left = fetch_logs_with_retry(rpc_url, from_block, mid)
-            right = fetch_logs_with_retry(rpc_url, mid + 1, to_block)
+            left = fetch_logs_with_retry(rpc_url, from_block, mid, address_filters)
+            right = fetch_logs_with_retry(rpc_url, mid + 1, to_block, address_filters)
             return left + right
 
         if last_err is not None and _is_transient_rpc_error(last_err):
@@ -1892,7 +1949,7 @@ def main():
     parser = argparse.ArgumentParser(description="Polymarket Trades Indexer")
     parser.add_argument("--from-block", type=int, help="起始区块")
     parser.add_argument("--to-block", type=int, help="结束区块")
-    parser.add_argument("--rpc", default=None, help="RPC URL（默认从 NODE_URL/POLYMARKET_RPC_URL 或 config 读取）")
+    parser.add_argument("--rpc", default=None, help="Polygon RPC URL（默认仅从 POLYMARKET_RPC_URL 读取）")
     add_db_cli_args(parser)
     parser.add_argument("--continue-sync", action="store_true", help="从上次进度继续")
     parser.add_argument("--watch", action="store_true", help="守护进程模式：循环执行 trade 同步")
