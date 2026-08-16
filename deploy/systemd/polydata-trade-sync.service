@@ -1,7 +1,8 @@
 [Unit]
 Description=polyData OrderFilled ClickHouse live sync
-After=network-online.target
+After=network-online.target polydata-polygon-rpc-tunnel.service
 Wants=network-online.target
+Requires=polydata-polygon-rpc-tunnel.service
 StartLimitIntervalSec=3600
 StartLimitBurst=3
 

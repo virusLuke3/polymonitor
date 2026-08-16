@@ -1,7 +1,8 @@
 [Unit]
 Description=polyData ClickHouse block timestamp live sync
-After=network-online.target polydata-trade-sync.service
+After=network-online.target polydata-polygon-rpc-tunnel.service polydata-trade-sync.service
 Wants=network-online.target
+Requires=polydata-polygon-rpc-tunnel.service
 StartLimitIntervalSec=3600
 StartLimitBurst=3
 

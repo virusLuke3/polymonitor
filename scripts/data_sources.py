@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Dict, List
+from urllib.parse import urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -39,13 +40,34 @@ def env_str(name: str, default: str = "") -> str:
     return text or default
 
 
+def require_self_hosted_polygon_rpc_url(value: str) -> str:
+    """Accept only the loopback endpoint backed by the Polygon SSH tunnel."""
+
+    text = str(value or "").strip().strip('"').strip("'")
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    }:
+        raise RuntimeError(
+            "POLYMARKET_RPC_URL must use the local SSH tunnel to the self-hosted Polygon node"
+        )
+    return text
+
+
 _load_dotenv_files()
 
 # Polygon reads are intentionally pinned to the explicitly configured
 # Polymonitor endpoint.  NODE_URL used to point at a hosted Chainstack
 # fallback; silently falling back to it makes local collectors switch
 # providers when the self-hosted SSH tunnel is unavailable.
-POLYGON_RPC_URL = env_str("POLYMARKET_RPC_URL")
+_POLYGON_RPC_URL = env_str("POLYMARKET_RPC_URL")
+POLYGON_RPC_URL = (
+    require_self_hosted_polygon_rpc_url(_POLYGON_RPC_URL)
+    if _POLYGON_RPC_URL
+    else ""
+)
 POLYMARKET_GAMMA_API_BASE = env_str("POLYDATA_GAMMA_API_BASE")
 POLYMARKET_MACRO_MAP_SOURCE_URL = env_str("POLYDATA_MACRO_MARKET_MAP_SOURCE_URL")
 POLYMARKET_DATA_API_BASE = env_str("POLYDATA_POLYMARKET_DATA_API_BASE")

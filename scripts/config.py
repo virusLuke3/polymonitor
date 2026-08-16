@@ -9,7 +9,7 @@ RPC URL 优先从环境变量读取，支持 .env 或系统变量
 import os
 from pathlib import Path
 
-from data_sources import POLYGON_RPC_URL
+from data_sources import POLYGON_RPC_URL, require_self_hosted_polygon_rpc_url
 
 # 尝试加载 Polymonitor 自己的 .env。不要再从相邻的 chainStackNode
 # 项目继承托管 RPC 凭据；自建 Polygon 节点不可用时应明确失败。
@@ -44,10 +44,9 @@ def get_rpc_url() -> str:
     """
     url = os.environ.get(RPC_ENV_KEY)
     if url:
-        # 处理 .env 中可能带引号的值
-        return url.strip().strip('"').strip("'")
+        return require_self_hosted_polygon_rpc_url(url)
     if DEFAULT_RPC_URL:
-        return DEFAULT_RPC_URL
+        return require_self_hosted_polygon_rpc_url(DEFAULT_RPC_URL)
     raise RuntimeError(
         "POLYMARKET_RPC_URL is required; configure the self-hosted Polygon RPC tunnel"
     )
