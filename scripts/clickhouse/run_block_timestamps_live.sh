@@ -20,5 +20,4 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u al
     --no-proxy \
     --clickhouse-container "${POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER:-polydata_clickhouse_orderfilled}" \
     --clickhouse-database "${POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE:-poly_orderfilled}" \
-    --clickhouse-user "${POLYDATA_ORDERFILLED_CLICKHOUSE_USER:-poly_user}" \
-    --clickhouse-password "$CLICKHOUSE_PASSWORD"
+    --clickhouse-user "${POLYDATA_ORDERFILLED_CLICKHOUSE_USER:-poly_user}"

@@ -1,0 +1,12 @@
+[Unit]
+Description=polyData self-hosted Polygon RPC healthcheck
+After=network-online.target polydata-polygon-rpc-tunnel.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/polydata/polydata.env
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+ExecStart=/__POLYDATA_REPO_ROOT__/scripts/ops/polygon_rpc_tunnel_healthcheck.sh
+TimeoutStartSec=30
+UMask=0077

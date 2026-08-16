@@ -41,7 +41,11 @@ def env_str(name: str, default: str = "") -> str:
 
 _load_dotenv_files()
 
-POLYGON_RPC_URL = env_str("POLYMARKET_RPC_URL") or env_str("NODE_URL")
+# Polygon reads are intentionally pinned to the explicitly configured
+# Polymonitor endpoint.  NODE_URL used to point at a hosted Chainstack
+# fallback; silently falling back to it makes local collectors switch
+# providers when the self-hosted SSH tunnel is unavailable.
+POLYGON_RPC_URL = env_str("POLYMARKET_RPC_URL")
 POLYMARKET_GAMMA_API_BASE = env_str("POLYDATA_GAMMA_API_BASE")
 POLYMARKET_MACRO_MAP_SOURCE_URL = env_str("POLYDATA_MACRO_MARKET_MAP_SOURCE_URL")
 POLYMARKET_DATA_API_BASE = env_str("POLYDATA_POLYMARKET_DATA_API_BASE")

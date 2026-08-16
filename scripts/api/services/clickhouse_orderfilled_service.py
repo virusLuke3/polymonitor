@@ -176,14 +176,10 @@ def _orderfilled_projection_sql() -> str:
         multiIf(f.side_code = 1, 'BUY', f.side_code = 2, 'SELL', 'UNKNOWN') AS side,
         multiIf(f.outcome_code = 1, 'YES', f.outcome_code = 2, 'NO', 'UNKNOWN') AS outcome,
         lower(f.token_id) AS token_id,
-        formatDateTime(
-            if(
-                isNull(bt.block_time),
-                addSeconds(anchor_time, (toInt64(f.block_number) - toInt64(anchor_block)) * 2),
-                bt.block_time
-            ),
-            '%Y-%m-%dT%H:%i:%SZ',
-            'UTC'
+        if(
+            ifNull(bt.block_time <= toDateTime('2000-01-01 00:00:00', 'UTC'), 1),
+            CAST(NULL, 'Nullable(String)'),
+            formatDateTime(bt.block_time, '%Y-%m-%dT%H:%i:%SZ', 'UTC')
         ) AS timestamp,
         f.block_number AS block_number,
         lower(f.order_hash) AS order_hash,
@@ -385,36 +381,6 @@ def _non_placeholder_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return filtered
 
 
-def _timestamp_needs_repair(value: Any) -> bool:
-    text = str(value or "").strip()
-    return not text or text.startswith("1970-01-01")
-
-
-def _repair_block_timestamps(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    if not rows:
-        return rows
-    timestamps = [str(row.get("timestamp") or "") for row in rows]
-    if len({value for value in timestamps if value}) > 1 and not all(_timestamp_needs_repair(value) for value in timestamps):
-        return rows
-    blocks: List[int] = []
-    for row in rows:
-        try:
-            blocks.append(int(row.get("block_number") or 0))
-        except (TypeError, ValueError):
-            blocks.append(0)
-    max_block = max(blocks or [0])
-    if max_block <= 0:
-        return rows
-    now = datetime.now(timezone.utc)
-    repaired: List[Dict[str, Any]] = []
-    for row, block in zip(rows, blocks):
-        seconds_ago = max(0, (max_block - block) * 2)
-        repaired_row = dict(row)
-        repaired_row["timestamp"] = (now - timedelta(seconds=seconds_ago)).isoformat().replace("+00:00", "Z")
-        repaired.append(repaired_row)
-    return repaired
-
-
 def get_market_trades(ctx: dict, market_id: int, *, limit: int = 100, offset: int = 0) -> Optional[List[Dict[str, Any]]]:
     limit = min(max(int(limit), 1), 500)
     offset = max(int(offset), 0)
@@ -428,12 +394,7 @@ def get_market_trades(ctx: dict, market_id: int, *, limit: int = 100, offset: in
                 WHERE market_id = {int(market_id)}
                 ORDER BY block_number DESC, log_index DESC
                 LIMIT {int(offset)}, {int(limit)}
-            ),
-            (SELECT ifNull(max(block_number), 0) FROM selected) AS market_max_block,
-            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(market_max_block > max_ts_block + 7200, market_max_block, max_ts_block) AS anchor_block,
-            if(market_max_block > max_ts_block + 7200, now('UTC'), max_ts_time) AS anchor_time
+            )
         SELECT {_orderfilled_projection_sql()}
         FROM selected f
         LEFT JOIN (
@@ -452,7 +413,6 @@ def get_market_trades(ctx: dict, market_id: int, *, limit: int = 100, offset: in
     )
     if rows is None:
         return None
-    rows = _repair_block_timestamps(rows)
     return [ctx["normalize_trade"](row) for row in rows]
 
 
@@ -462,11 +422,7 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
         ctx,
         f"""
         WITH
-            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
-            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time
+            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block
         SELECT {_orderfilled_projection_sql()}
         FROM {_table_sql()} f
         LEFT JOIN block_timestamps bt ON bt.block_number = f.block_number
@@ -480,7 +436,6 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
     )
     if rows is None:
         return None
-    rows = _repair_block_timestamps(rows)
     normalized = [ctx["normalize_trade"](row) for row in rows]
     market_ids = sorted({int(row["marketId"]) for row in normalized if row.get("marketId") is not None})
     title_map: Dict[int, str] = {}
@@ -521,10 +476,6 @@ def get_volume_whale_rows(ctx: dict, *, limit: int = 14, window_minutes: Optiona
         WITH
             (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             {window_blocks} AS window_blocks,
-            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time,
             (SELECT quantileTDigest(0.99)(toFloat64(price) * toFloat64(size)) FROM {_table_sql()} WHERE market_id != 0 AND block_number >= max_fact_block - window_blocks) AS p99_notional,
             (SELECT quantileTDigest(0.995)(toFloat64(price) * toFloat64(size)) FROM {_table_sql()} WHERE market_id != 0 AND block_number >= max_fact_block - window_blocks) AS p995_notional,
             (SELECT quantileTDigest(0.999)(toFloat64(price) * toFloat64(size)) FROM {_table_sql()} WHERE market_id != 0 AND block_number >= max_fact_block - window_blocks) AS p999_notional
@@ -579,7 +530,6 @@ def get_volume_whale_rows(ctx: dict, *, limit: int = 14, window_minutes: Optiona
     )
     if rows is None:
         return None
-    rows = _repair_block_timestamps(rows)
     rows = _attach_post_signal_metrics(ctx, rows)
     rows = _attach_market_titles(ctx, rows)
     return _non_placeholder_rows(rows)[:limit]
@@ -618,10 +568,6 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
             (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
             {window_blocks} AS window_blocks,
             {baseline_blocks} AS baseline_blocks,
-            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time,
             (
                 SELECT quantileTDigest(0.95)(flow_notional)
                 FROM
@@ -701,10 +647,10 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
             max(f.block_number) AS latest_block,
             argMax(f.log_index, tuple(f.block_number, f.log_index)) AS latest_log_index,
             lower(argMax(f.tx_hash, tuple(f.block_number, f.log_index))) AS tx_hash,
-            formatDateTime(
-                addSeconds(anchor_time, (toInt64(max(f.block_number)) - toInt64(anchor_block)) * 2),
-                '%Y-%m-%dT%H:%i:%SZ',
-                'UTC'
+            if(
+                ifNull(argMax(bt.block_time, tuple(f.block_number, f.log_index)) <= toDateTime('2000-01-01 00:00:00', 'UTC'), 1),
+                CAST(NULL, 'Nullable(String)'),
+                formatDateTime(argMax(bt.block_time, tuple(f.block_number, f.log_index)), '%Y-%m-%dT%H:%i:%SZ', 'UTC')
             ) AS timestamp,
             multiIf(
                 toFloat64(flow_notional) >= 10000 OR max(toFloat64(f.price) * toFloat64(f.size)) >= 10000 OR toFloat64(market_share) >= 0.25, 'critical',
@@ -731,6 +677,13 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
             'net-directional-flow' AS signal_type,
             'clickhouse-volume-alpha' AS source_mode
         FROM {_table_sql()} f
+        LEFT JOIN
+        (
+            SELECT block_number, argMax(block_time, ingested_at) AS block_time
+            FROM block_timestamps
+            WHERE block_number >= max_fact_block - baseline_blocks
+            GROUP BY block_number
+        ) bt ON bt.block_number = f.block_number
         LEFT JOIN
         (
             SELECT market_id, sum(toFloat64(price) * toFloat64(size)) AS market_baseline_notional
@@ -771,7 +724,6 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
     )
     if rows is None:
         return None
-    rows = _repair_block_timestamps(rows)
     rows = _attach_post_signal_metrics(ctx, rows)
     rows.sort(
         key=lambda row: (
@@ -794,37 +746,40 @@ def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional
         ctx,
         f"""
         WITH
-            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
-            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time
+            selected AS (
+                SELECT outcome_code, price, block_number, log_index
+                FROM {_table_sql()}
+                WHERE market_id = {int(market_id)}
+                ORDER BY block_number DESC, log_index DESC
+                LIMIT {int(limit)}
+            )
         SELECT
-            formatDateTime(
-                if(
-                    isNull(bt.block_time),
-                    addSeconds(anchor_time, (toInt64(f.block_number) - toInt64(anchor_block)) * 2),
-                    bt.block_time
-                ),
-                '%Y-%m-%dT%H:%i:%SZ',
-                'UTC'
+            if(
+                ifNull(bt.block_time <= toDateTime('2000-01-01 00:00:00', 'UTC'), 1),
+                CAST(NULL, 'Nullable(String)'),
+                formatDateTime(bt.block_time, '%Y-%m-%dT%H:%i:%SZ', 'UTC')
             ) AS timestamp,
             multiIf(f.outcome_code = 1, 'YES', f.outcome_code = 2, 'NO', 'UNKNOWN') AS outcome,
             toString(f.price) AS price,
             f.block_number AS block_number,
             f.log_index AS log_index
-        FROM {_table_sql()} f
-        LEFT JOIN block_timestamps bt ON bt.block_number = f.block_number
-        WHERE f.market_id = {int(market_id)}
+        FROM selected f
+        LEFT JOIN (
+            SELECT
+                block_number,
+                argMax(block_time, ingested_at) AS block_time
+            FROM block_timestamps
+            WHERE block_number IN (SELECT block_number FROM selected)
+            GROUP BY block_number
+        ) bt ON bt.block_number = f.block_number
         ORDER BY f.block_number DESC, f.log_index DESC
-        LIMIT {int(limit)}
         FORMAT JSONEachRow
+        SETTINGS join_use_nulls = 1
         """,
         timeout_seconds=5.0,
     )
     if rows is None:
         return None
-    rows = _repair_block_timestamps(rows)
     rows.reverse()
     compacted: Dict[str, Dict[str, Any]] = {}
     points: List[Dict[str, Any]] = []
@@ -901,22 +856,25 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
         ctx,
         f"""
         WITH
-            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block,
-            (SELECT ifNull(max(block_number), 0) FROM block_timestamps) AS max_ts_block,
-            (SELECT ifNull(max(block_time), toDateTime(0, 'UTC')) FROM block_timestamps) AS max_ts_time,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_block, max_fact_block) AS anchor_block,
-            if(max_ts_block > 0 AND max_ts_time > toDateTime('2000-01-01 00:00:00', 'UTC') AND max_fact_block - max_ts_block <= 7200, max_ts_time, now('UTC')) AS anchor_time
+            (SELECT ifNull(max(block_number), 0) FROM {_table_sql()}) AS max_fact_block
         SELECT
             f.market_id AS market_id,
             count() AS trade_count_24h,
             toString(sum(f.size * f.price)) AS volume_24h,
             argMax(toString(if(f.outcome_code = 2, 1 - f.price, f.price)), tuple(f.block_number, f.log_index)) AS latest_price,
-            formatDateTime(
-                max(addSeconds(anchor_time, (toInt64(f.block_number) - toInt64(anchor_block)) * 2)),
-                '%Y-%m-%dT%H:%i:%SZ',
-                'UTC'
+            if(
+                ifNull(argMax(bt.block_time, tuple(f.block_number, f.log_index)) <= toDateTime('2000-01-01 00:00:00', 'UTC'), 1),
+                CAST(NULL, 'Nullable(String)'),
+                formatDateTime(argMax(bt.block_time, tuple(f.block_number, f.log_index)), '%Y-%m-%dT%H:%i:%SZ', 'UTC')
             ) AS latest_trade_at
         FROM {_table_sql()} f
+        LEFT JOIN
+        (
+            SELECT block_number, argMax(block_time, ingested_at) AS block_time
+            FROM block_timestamps
+            WHERE block_number >= max_fact_block - {hours * 1800}
+            GROUP BY block_number
+        ) bt ON bt.block_number = f.block_number
         WHERE f.market_id != 0
           AND f.block_number >= max_fact_block - {hours * 1800}
         GROUP BY f.market_id

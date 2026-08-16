@@ -157,13 +157,20 @@ function accumulateNotional(levels: L2Level[]) {
   });
 }
 
-function bookMidValue(lob?: LobPayload | null, side: BookSide = 'yes') {
+function nullableBookNumber(value?: string | number | null) {
+  if (value == null || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+export function bookMidValue(lob?: LobPayload | null, side: BookSide = 'yes') {
   const book = side === 'no' ? lob?.no : lob?.yes;
-  const bid = Number(book?.bestBid);
-  const ask = Number(book?.bestAsk);
-  if (Number.isFinite(bid) && Number.isFinite(ask)) return (bid + ask) / 2;
-  if (Number.isFinite(bid)) return bid;
-  if (Number.isFinite(ask)) return ask;
+  if (!hasSideBookLevels(book)) return null;
+  const bid = nullableBookNumber(book?.bestBid);
+  const ask = nullableBookNumber(book?.bestAsk);
+  if (bid != null && ask != null) return (bid + ask) / 2;
+  if (bid != null) return bid;
+  if (ask != null) return ask;
   return null;
 }
 
@@ -230,13 +237,32 @@ function compactDateLabel(value: number) {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function compactTimeLabel(value: number, index: number, total: number) {
+export function compactTimeLabel(value: number, index: number, total: number, latestTickIsNow = true) {
   if (!Number.isFinite(value)) return '';
-  if (index === total - 1) return 'Now';
+  if (latestTickIsNow && index === total - 1) return 'Now';
   return new Date(value).toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
+  });
+}
+
+export function marketLifecycleIsClosed(...signals: Array<string | boolean | null | undefined>) {
+  return signals.some((signal) => {
+    if (signal === true) return true;
+    if (typeof signal !== 'string') return false;
+    const normalized = signal.trim().toLowerCase().replace(/[_-]+/g, ' ');
+    return /\b(closed|settled|resolved|final|cancelled|expired)\b/.test(normalized)
+      || normalized.includes('awaiting oracle');
+  });
+}
+
+function marketLifecycleIsFinal(...signals: Array<string | boolean | null | undefined>) {
+  return signals.some((signal) => {
+    if (signal === true) return true;
+    if (typeof signal !== 'string') return false;
+    const normalized = signal.trim().toLowerCase().replace(/[_-]+/g, ' ');
+    return /\b(settled|resolved|final|cancelled)\b/.test(normalized);
   });
 }
 
@@ -564,7 +590,12 @@ type EventOutcomeCard = MarketGroupOutcome & {
   change: number;
 };
 
-function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedOutcomeKey: string | null, activeRange?: string | null) {
+function renderEventDetailChart(
+  chart: MarketGroupChartPayload | null,
+  selectedOutcomeKey: string | null,
+  activeRange?: string | null,
+  latestTickIsNow = true,
+) {
   const series = (chart?.series || []).filter((entry) => (entry.points || []).length > 1);
   if (!series.length) return emptyState('Fresh market: waiting for event price history to print.');
   const { width, height, left, right, top, bottom } = FOCUS_CHART;
@@ -628,7 +659,7 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
           return (
             <g key={`${tick.ts}-${tick.label}`}>
               <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
-              <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactTimeLabel(tick.ts, timeTicks.indexOf(tick), timeTicks.length)}</text>
+              <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactTimeLabel(tick.ts, timeTicks.indexOf(tick), timeTicks.length, latestTickIsNow)}</text>
             </g>
           );
         })}
@@ -714,6 +745,7 @@ type DetailChartOptions = {
   category?: string | null;
   outcomeCount?: number | string | null;
   selectedLabel?: string | null;
+  latestTickIsNow?: boolean;
 };
 
 function renderDetailChart(chart: ChartPayload | null, activeRange?: string | null, _options: DetailChartOptions = {}) {
@@ -865,7 +897,7 @@ function renderDetailChart(chart: ChartPayload | null, activeRange?: string | nu
             return (
               <g key={`${tick.ts}-${tick.label}`}>
                 <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
-                <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactTimeLabel(tick.ts, timeTicks.indexOf(tick), timeTicks.length)}</text>
+                <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactTimeLabel(tick.ts, timeTicks.indexOf(tick), timeTicks.length, _options.latestTickIsNow !== false)}</text>
               </g>
             );
           })}
@@ -969,6 +1001,24 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   );
   const bundleMarketId = ctx.bundle?.market?.id ?? ctx.bundle?.identity?.localMarketId ?? ctx.bundle?.identity?.marketId ?? ctx.bundle?.price?.marketId ?? ctx.bundle?.chart?.marketId ?? ctx.bundle?.lob?.marketId ?? null;
   const bundleMatchesSelected = ctx.selectedMarketId != null && bundleMarketId != null && Number(bundleMarketId) === Number(ctx.selectedMarketId);
+  const marketStats = marketLookup(ctx.markets, ctx.selectedMarketId);
+  const marketIsClosed = marketLifecycleIsClosed(
+    bundleMatchesSelected ? ctx.bundle?.oracle?.isTradingClosed : false,
+    bundleMatchesSelected ? ctx.bundle?.oracle?.currentStatus : null,
+    bundleMatchesSelected ? ctx.bundle?.oracle?.completionStatus : null,
+    focusedMarket?.status,
+    detail?.status,
+    marketStats?.status,
+  );
+  const marketIsFinal = marketLifecycleIsFinal(
+    bundleMatchesSelected ? ctx.bundle?.oracle?.isFinal : false,
+    bundleMatchesSelected ? ctx.bundle?.oracle?.isResolved : false,
+    bundleMatchesSelected ? ctx.bundle?.oracle?.completionStatus : null,
+    focusedMarket?.status,
+    detail?.status,
+    marketStats?.status,
+  );
+  const marketIsAwaitingOracle = marketIsClosed && !marketIsFinal;
   const selectedOutcomeMatches = selectedOutcome?.marketId != null && Number(selectedOutcome.marketId) === ctx.selectedMarketId;
   const activeOutcomeKey = selectedOutcome?.outcomeKey || ctx.selectedMarketGroupOutcomeKey || null;
   const selectedTokenId = String(
@@ -995,13 +1045,12 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     direction: 'flat',
   });
   void refreshClock;
-  const tokenLob = tokenLobState.key === selectedTokenKey ? tokenLobState.lob : null;
-  const tokenLobLoading = tokenLobState.key === selectedTokenKey && tokenLobState.loading;
+  const tokenLob = !marketIsClosed && tokenLobState.key === selectedTokenKey ? tokenLobState.lob : null;
+  const tokenLobLoading = !marketIsClosed && tokenLobState.key === selectedTokenKey && tokenLobState.loading;
   const executionAvailable = bundleMatchesSelected || selectedOutcomeMatches || Boolean(selectedTokenId) || Boolean(ctx.selectedMarketId && !detail);
   const price = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.price ?? null) : null;
-  const lob = executionAvailable ? (tokenLob || (bundleMatchesSelected ? ctx.bundle?.lob : null)) : null;
+  const lob = executionAvailable && !marketIsClosed ? (tokenLob || (bundleMatchesSelected ? ctx.bundle?.lob : null)) : null;
   const trades = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.trades || []) : [];
-  const marketStats = marketLookup(ctx.markets, ctx.selectedMarketId);
   const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
   const [bookSide, setBookSide] = useState<BookSide>('yes');
   const activeBook = bookSide === 'no' ? lob?.no : lob?.yes;
@@ -1129,23 +1178,32 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const focusedHistoryFallback = isBlockCloseView
     ? blockClosePlaceholder(focusedHistoryEmptyText)
     : emptyState(focusedHistoryEmptyText);
-  const hasLiveExecutionQuote = lobYesPrice != null || servingYesPrice != null;
+  const hasLiveExecutionQuote = !marketIsClosed && (lobYesPrice != null || servingYesPrice != null);
   const suppressTerminalSnapshot = Boolean(
-    isTerminalProbability(displayedYesPrice)
-      && !hasLiveExecutionQuote
-      && !hasServingTradeActivity
+    (marketIsAwaitingOracle && isTerminalProbability(displayedYesPrice))
+      || (
+        isTerminalProbability(displayedYesPrice)
+        && !hasLiveExecutionQuote
+        && !hasServingTradeActivity
+      )
   );
   const liveDisplayedYesPrice = safeLiveProbability(displayedYesPrice, !suppressTerminalSnapshot);
   const liveDisplayedNoPrice = safeLiveProbability(displayedNoPrice, !suppressTerminalSnapshot);
   const quoteDirection = lobYesPrice != null ? tokenLobState.direction : 'flat';
   const quotePulseId = lobYesPrice != null ? tokenLobState.pulseId : 0;
-  const quoteSourceLabel = lobYesPrice != null
-    ? `CLOB midpoint · ${formatRefreshAge(lobObservedAt)}`
-    : servingYesPrice != null
-      ? 'Latest serving quote'
-      : catalogYesPrice != null
-        ? 'Catalog quote'
-        : 'No live quote';
+  const quoteSourceLabel = marketIsClosed
+    ? suppressTerminalSnapshot
+      ? 'Closed · awaiting settlement evidence'
+      : displayedYesPrice != null
+        ? 'Closed · last recorded quote'
+        : 'Closed · no live quote'
+    : lobYesPrice != null
+      ? `CLOB midpoint · ${formatRefreshAge(lobObservedAt)}`
+      : servingYesPrice != null
+        ? 'Latest serving quote'
+        : catalogYesPrice != null
+          ? 'Catalog quote'
+          : 'No live quote';
   const activePriceForBook = hasActiveBookLevels ? activePrice : null;
   const noTradesYet = executionAvailable && trades.length === 0 && !hasServingTradeActivity;
   const eventCategory = detail?.category || selectedGroup?.category || focusedMarket?.category || marketStats?.category || 'market';
@@ -1162,6 +1220,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     category: eventCategory,
     outcomeCount,
     selectedLabel: selectedOutcome?.label || 'YES',
+    latestTickIsNow: !marketIsClosed,
   };
   const lobSyncLabel = tokenLobLoading
     ? 'SYNC'
@@ -1176,7 +1235,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   );
 
   useEffect(() => {
-    if (!selectedTokenId) {
+    if (marketIsClosed || !selectedTokenId) {
       setTokenLobState((current) => (
         current.loading || current.lob
           ? { key: '', lob: null, loading: false, updatedAt: null, pulseId: 0, direction: 'flat' }
@@ -1259,7 +1318,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       controller.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [bookSide, detail?.title, hasBundledBookLevels, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
+  }, [bookSide, detail?.title, hasBundledBookLevels, marketIsClosed, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1287,8 +1346,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       {wrapPanel('price-chart', 'wm-focus-panel-slot wm-focus-detail-slot', (
         <Panel
           title="Market Detail"
-          badge="Selected"
-          status="live"
+          badge={marketIsAwaitingOracle ? 'Awaiting Oracle' : marketIsClosed ? 'Closed' : 'Selected'}
+          status={marketIsClosed ? 'muted' : 'live'}
           className="wm-focus-panel wm-focus-detail-panel"
         >
           <div className={`wm-focus-detail tick-${quoteDirection}`}>
@@ -1368,11 +1427,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   {detail
                     ? (
                         preferEventChart
-                            ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
+                            ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange, !marketIsClosed)
                             : canRenderFocusedHistory
                               ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions)
                             : hasEventHistory && !isBlockCloseView
-                              ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
+                              ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange, !marketIsClosed)
                               : focusedHistoryFallback
                       )
                     : (canRenderFocusedHistory ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions) : focusedHistoryFallback)}
@@ -1448,12 +1507,14 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       {wrapPanel('lob-depth', 'wm-focus-panel-slot wm-focus-book-slot', (
         <Panel
           title="Order Book"
-          badge={hasAnyBookLevels ? (tokenLobLoading ? 'Refreshing' : 'Live') : tokenLobLoading ? 'Loading' : 'Stale'}
-          status="live"
+          badge={marketIsClosed ? 'Closed' : hasAnyBookLevels ? (tokenLobLoading ? 'Refreshing' : 'Live') : tokenLobLoading ? 'Loading' : 'Stale'}
+          status={marketIsClosed ? 'muted' : 'live'}
           className="wm-focus-panel wm-focus-book-panel"
           controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{orderbookOutcomeLabel(ctx, bookSide, selectedOutcome)}</span> : undefined}
         >
-          {!executionAvailable && detail ? (
+          {marketIsClosed ? (
+            emptyState('Trading is closed. Live CLOB levels are cleared; historical price and OrderFilled evidence remain available.')
+          ) : !executionAvailable && detail ? (
             emptyState('Select an outcome with CLOB token data to inspect the order book.')
           ) : tokenLobLoading && !lob ? (
             emptyState('Loading live CLOB order book.')
@@ -1534,8 +1595,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       {wrapPanel('global-orderfilled', 'wm-focus-panel-slot wm-focus-trades-slot', (
         <Panel
           title="OrderFilled Flow"
-          badge={trades.length ? 'Live' : 'Focused'}
-          status="live"
+          badge={marketIsClosed ? 'Historical' : trades.length ? 'Live' : 'Focused'}
+          status={marketIsClosed ? 'muted' : 'live'}
           count={trades.length}
           className="wm-focus-panel wm-focus-trades-panel wm-orderfilled-panel"
         >

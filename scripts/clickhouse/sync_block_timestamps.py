@@ -46,9 +46,9 @@ def get_rpc_url(args: argparse.Namespace) -> str:
     if args.rpc_url:
         return args.rpc_url
     load_dotenv(PROJECT_ROOT / ".env")
-    rpc_url = os.environ.get("POLYMARKET_RPC_URL") or os.environ.get("NODE_URL")
+    rpc_url = os.environ.get("POLYMARKET_RPC_URL")
     if not rpc_url:
-        raise SystemExit("RPC URL missing. Pass --rpc-url or set POLYMARKET_RPC_URL/NODE_URL.")
+        raise SystemExit("RPC URL missing. Pass --rpc-url or set POLYMARKET_RPC_URL.")
     return rpc_url
 
 
@@ -300,9 +300,12 @@ def continue_sync_once(args: argparse.Namespace, ch: ClickHouse, rpc_url: str, r
         and not args.allow_large_range
         and args.from_block is None
     ):
-        from_block = max(0, to_block - args.max_catchup_blocks + 1)
+        # Advance from the existing watermark instead of jumping to the tail.
+        # Tail-capping made max(block_number) look current while permanently
+        # leaving a large hole in block_timestamps.
+        to_block = from_block + args.max_catchup_blocks - 1
         planned_blocks = max(0, to_block - from_block + 1)
-        start_reason = f"tail_capped_{args.max_catchup_blocks}"
+        start_reason = f"sequential_catchup_{args.max_catchup_blocks}"
 
     status = {
         "latest_confirmed": latest_confirmed,
@@ -310,6 +313,7 @@ def continue_sync_once(args: argparse.Namespace, ch: ClickHouse, rpc_url: str, r
         "from_block": from_block,
         "to_block": to_block,
         "planned_blocks": planned_blocks,
+        "remaining_blocks": max(0, latest_confirmed - to_block),
         "start_reason": start_reason,
     }
     print(f"[block-timestamps] continue-sync {json.dumps(status, ensure_ascii=False)}", file=sys.stderr, flush=True)
@@ -377,11 +381,12 @@ def main() -> None:
 
     if args.command == "continue-sync":
         while True:
-            continue_sync_once(args, ch, rpc_url, rpc)
+            status = continue_sync_once(args, ch, rpc_url, rpc)
             if not args.watch:
                 return
-            print(f"[block-timestamps] sleeping {args.interval_seconds}s", file=sys.stderr, flush=True)
-            time.sleep(args.interval_seconds)
+            sleep_seconds = 1 if int(status.get("remaining_blocks") or 0) > 0 else args.interval_seconds
+            print(f"[block-timestamps] sleeping {sleep_seconds}s", file=sys.stderr, flush=True)
+            time.sleep(sleep_seconds)
 
     if args.command == "backfill-range":
         if args.from_block is None or args.to_block is None:

@@ -52,6 +52,8 @@ disables local collector units on GCP.
 `polydata-local-collector.target` starts:
 
 - `polydata-market-sync.service`
+- `polydata-polygon-rpc-tunnel.service` / SSH local-forward to the self-hosted Bor RPC; no hosted-provider fallback
+- `polydata-polygon-rpc-healthcheck.timer` / verifies chain ID 137, Bor identity and bounded sync lag
 - `polydata-active-market-serving-refresh.timer` / bounded five-minute refresh of current Gamma prices and rolling 24-hour volume for already-registered markets
 - `polydata-trade-sync.service` / OrderFilled ClickHouse live sync
 - `polydata-block-timestamps-live.service` / ClickHouse block timestamp live sync
@@ -137,6 +139,9 @@ Local collector manual flow:
 ```bash
 mkdir -p ~/.config/systemd/user
 cp deploy/systemd/polydata-local-collector.target ~/.config/systemd/user/
+cp deploy/systemd/polydata-polygon-rpc-tunnel.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-polygon-rpc-healthcheck.service ~/.config/systemd/user/
+cp deploy/systemd/polydata-polygon-rpc-healthcheck.timer ~/.config/systemd/user/
 cp deploy/systemd/polydata-market-sync.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-active-market-serving-refresh.service ~/.config/systemd/user/
 cp deploy/systemd/polydata-active-market-serving-refresh.timer ~/.config/systemd/user/
@@ -154,6 +159,7 @@ cp deploy/systemd/polydata-quant-price-build-runner.service ~/.config/systemd/us
 cp deploy/systemd/polydata-quant-frontend-price-build-runner@.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now polydata-local-collector.target
+systemctl --user enable --now polydata-polygon-rpc-healthcheck.timer
 systemctl --user enable --now polydata-active-market-serving-refresh.timer
 systemctl --user enable --now polydata-quant-frontend-price-build-runner@0.service polydata-quant-frontend-price-build-runner@1.service
 systemctl --user enable --now polydata-db-reverse-tunnel-healthcheck.timer

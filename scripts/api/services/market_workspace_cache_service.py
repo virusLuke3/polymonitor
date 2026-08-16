@@ -425,6 +425,78 @@ def _fallback_payload(layer: str, cache_key: str) -> Any:
     return {"status": "warming", "cacheKey": cache_key}
 
 
+def _truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() not in {"", "0", "false", "none", "null"}
+
+
+def _market_is_closed(
+    context: MarketWorkspaceCacheContext,
+    market_id: int,
+) -> bool:
+    dependencies = _dependencies(context)
+    resolver = dependencies.source.get("get_market_by_id")
+    if not callable(resolver):
+        return False
+    try:
+        market = resolver(int(market_id))
+    except Exception:
+        dependencies.application.logger.exception(
+            "market-workspace-cache market-status lookup failed market_id=%s",
+            market_id,
+        )
+        return False
+    if not isinstance(market, Mapping):
+        return False
+    if any(
+        _truthy_flag(market.get(key))
+        for key in ("is_trading_closed", "gamma_closed", "is_final")
+    ):
+        return True
+    statuses = " ".join(
+        str(market.get(key) or "").strip().lower().replace("_", "-")
+        for key in ("status", "completion_status")
+    )
+    return any(
+        token in statuses
+        for token in ("closed", "settled", "resolved", "final", "cancelled", "expired", "awaiting-oracle", "awaiting oracle")
+    )
+
+
+def _closed_orderbook_result(
+    context: MarketWorkspaceCacheContext,
+    *,
+    market_id: int,
+    cache_key: str,
+) -> Dict[str, Any]:
+    dependencies = _dependencies(context)
+    namespace = _namespace("orderbook")
+    payload = _fallback_payload("orderbook", cache_key)
+    payload.update(
+        {
+            "marketId": int(market_id),
+            "localMarketId": int(market_id),
+            "bookStatus": "closed",
+            "source": "market-lifecycle",
+            "fallbackReason": "Trading is closed; live CLOB levels are not applicable.",
+        }
+    )
+    wrapped = _with_cache_meta(payload, "orderbook", "closed", cache_key)
+    _write_cache(
+        dependencies,
+        namespace,
+        cache_key,
+        wrapped,
+        ORDERBOOK_TTL_SECONDS,
+    )
+    return {"payload": _copy_payload(wrapped), "mode": "closed"}
+
+
 def _build_detail(
     context: MarketWorkspaceCacheContext,
     market_id: int,
@@ -574,15 +646,23 @@ def get_market_orderbook_payload(
 ) -> Dict[str, Any]:
     dependencies = _dependencies(context)
     key = _cache_key({"marketId": int(market_id), "layer": "orderbook", "v": 1})
-    result = _cached_layer(
-        dependencies,
-        layer="orderbook",
-        cache_key=key,
-        ttl_seconds=ORDERBOOK_TTL_SECONDS,
-        builder=lambda: lob_service.get_runtime_lob_payload(
-            dependencies.source,
-            market_id,
-        ),
+    result = (
+        _closed_orderbook_result(
+            dependencies,
+            market_id=market_id,
+            cache_key=key,
+        )
+        if _market_is_closed(dependencies, market_id)
+        else _cached_layer(
+            dependencies,
+            layer="orderbook",
+            cache_key=key,
+            ttl_seconds=ORDERBOOK_TTL_SECONDS,
+            builder=lambda: lob_service.get_runtime_lob_payload(
+                dependencies.source,
+                market_id,
+            ),
+        )
     )
     payload = result["payload"]
     if isinstance(payload, dict):
@@ -684,15 +764,23 @@ def get_market_focus_tile_payload(
             interval="5m",
         ),
     )
-    orderbook_result = _cached_layer_read_only(
-        dependencies,
-        layer="orderbook",
-        cache_key=orderbook_key,
-        ttl_seconds=ORDERBOOK_TTL_SECONDS,
-        builder=lambda: lob_service.get_runtime_lob_payload(
-            dependencies.source,
-            market_id,
-        ),
+    orderbook_result = (
+        _closed_orderbook_result(
+            dependencies,
+            market_id=market_id,
+            cache_key=orderbook_key,
+        )
+        if _market_is_closed(dependencies, market_id)
+        else _cached_layer_read_only(
+            dependencies,
+            layer="orderbook",
+            cache_key=orderbook_key,
+            ttl_seconds=ORDERBOOK_TTL_SECONDS,
+            builder=lambda: lob_service.get_runtime_lob_payload(
+                dependencies.source,
+                market_id,
+            ),
+        )
     )
 
     detail = detail_result["payload"] if isinstance(detail_result["payload"], dict) else {}

@@ -1,0 +1,17 @@
+[Unit]
+Description=polyData SSH tunnel to self-hosted Polygon Bor RPC
+After=network-online.target
+Wants=network-online.target
+Before=polydata-block-timestamps-live.service polydata-trade-sync.service polydata-trade-head-sync.service polydata-oracle-sync.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/polydata/polydata.env
+ExecCondition=/bin/bash -lc 'test -n "$${POLYDATA_POLYGON_RPC_SSH_TARGET:-}" && test -n "$${POLYDATA_POLYGON_RPC_SSH_IDENTITY_FILE:-}"'
+ExecStart=/bin/bash -lc 'exec ssh -N -L "127.0.0.1:$${POLYDATA_POLYGON_RPC_LOCAL_PORT:-28545}:127.0.0.1:$${POLYDATA_POLYGON_RPC_REMOTE_PORT:-18545}" -i "$${POLYDATA_POLYGON_RPC_SSH_IDENTITY_FILE}" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -o TCPKeepAlive=yes -o IPQoS=none -o KexAlgorithms=curve25519-sha256 "$${POLYDATA_POLYGON_RPC_SSH_TARGET}"'
+Restart=always
+RestartSec=8
+
+[Install]
+WantedBy=polydata-local-collector.target

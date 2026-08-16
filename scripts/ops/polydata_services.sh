@@ -19,6 +19,9 @@ ORDERFILLED_CLICKHOUSE_DOCKER_LOG_MAX_FILE="${ORDERFILLED_CLICKHOUSE_DOCKER_LOG_
 LOCAL_COLLECTOR_TARGET="polydata-local-collector.target"
 LEGACY_CORE_TARGET="polydata-core.target"
 LOCAL_COLLECTOR_SERVICES=(
+  "polydata-polygon-rpc-tunnel.service"
+  "polydata-polygon-rpc-healthcheck.service"
+  "polydata-polygon-rpc-healthcheck.timer"
   "polydata-market-sync.service"
   "polydata-active-market-serving-refresh.service"
   "polydata-active-market-serving-refresh.timer"
@@ -35,6 +38,7 @@ LOCAL_COLLECTOR_SERVICES=(
   "polydata-quant-frontend-price-build-runner@.service"
 )
 DATA_SERVICES=(
+  "polydata-polygon-rpc-tunnel.service"
   "polydata-market-sync.service"
   "polydata-trade-sync.service"
   "polydata-block-timestamps-live.service"
@@ -385,6 +389,7 @@ env_file_value() {
 doctor() {
   ensure_installed
   python3 "${ROOT_DIR}/scripts/deploy/check_env_split.py" --role local --env "${POLYDATA_ENV_FILE}"
+  POLYDATA_ENV_FILE="${POLYDATA_ENV_FILE}" "${ROOT_DIR}/scripts/ops/polygon_rpc_tunnel_healthcheck.sh"
   local python_bin
   python_bin="$(env_file_value POLYDATA_PYTHON_BIN)"
   python_bin="${python_bin:-$(python_bin_default)}"

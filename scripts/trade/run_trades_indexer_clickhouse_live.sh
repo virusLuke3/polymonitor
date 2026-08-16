@@ -31,7 +31,6 @@ COMMON_ARGS=(
   --clickhouse-container "${POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER:-polydata_clickhouse_orderfilled}"
   --clickhouse-database "${POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE:-poly_orderfilled}"
   --clickhouse-user "${POLYDATA_ORDERFILLED_CLICKHOUSE_USER:-poly_user}"
-  --clickhouse-password "$CLICKHOUSE_PASSWORD"
   --clickhouse-orderfilled-insert-table "${POLYDATA_ORDERFILLED_CLICKHOUSE_INSERT_TABLE:-orderfilled_fact_buffer}"
 )
 

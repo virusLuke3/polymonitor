@@ -1,0 +1,11 @@
+[Unit]
+Description=Run polyData self-hosted Polygon RPC healthcheck
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=polydata-polygon-rpc-healthcheck.service
+
+[Install]
+WantedBy=timers.target
