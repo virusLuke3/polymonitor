@@ -30,6 +30,8 @@ GCP_SOURCE_PREFIXES = (
 GCP_SOURCE_FILES = {
     ".python-version",
     "pyproject.toml",
+    "scripts/config.py",
+    "scripts/data_sources.py",
     "scripts/agent/seed_market_wide_insights.py",
     "scripts/api_server.py",
     "scripts/market/market_discovery.py",
@@ -51,6 +53,7 @@ EXTERNAL_RELEASE_PREFIXES = (
     "webpage/",
 )
 EXTERNAL_RELEASE_FILES = {
+    ".env.example",
     "AGENTS.md",
     "deploy/gcp/accepted-remote-overrides.json",
     "deploy/systemd/README.md",
@@ -60,11 +63,17 @@ EXTERNAL_RELEASE_FILES = {
     "deploy/systemd/polydata-external-availability.service",
     "deploy/systemd/polydata-external-availability.timer",
     "deploy/systemd/polydata-local-collector.target",
+    "deploy/systemd/polydata-polygon-rpc-healthcheck.service",
+    "deploy/systemd/polydata-polygon-rpc-healthcheck.timer",
+    "deploy/systemd/polydata-polygon-rpc-tunnel.service",
     "deploy/systemd/polydata.env.example",
+    "scripts/clickhouse/run_block_timestamps_live.sh",
+    "scripts/clickhouse/sync_block_timestamps.py",
     "scripts/market/refresh_active_market_serving.py",
     "scripts/db/db.py",
     "scripts/db/sync_event_market_serving.py",
     "scripts/ops/polydata_services.sh",
+    "scripts/trade/run_trades_indexer_clickhouse_live.sh",
     "scripts/requirements-dev.lock.txt",
     "scripts/requirements.txt",
 }
