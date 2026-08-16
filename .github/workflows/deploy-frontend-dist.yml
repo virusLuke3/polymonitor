@@ -43,6 +43,8 @@ jobs:
 
       - name: Build frontend dist
         working-directory: webpage
+        env:
+          VITE_PMTILES_URL: /map-tiles/planet.pmtiles
         run: npm run build
 
       - name: Verify dist output
@@ -100,4 +102,8 @@ jobs:
             test -f '${DEPLOY_PATH:-/var/www/polydata}/index.html'
             curl -fsS --max-time 15 http://127.0.0.1/ >/dev/null
             curl -fsS --max-time 15 http://127.0.0.1/wm-api/health >/dev/null
+            curl -fsS --max-time 30 --range 0-16383 -D /tmp/polymonitor-pmtiles-headers \
+              http://127.0.0.1/map-tiles/planet.pmtiles -o /dev/null
+            tr -d '\r' < /tmp/polymonitor-pmtiles-headers | grep -q '^HTTP/.* 206'
+            rm -f /tmp/polymonitor-pmtiles-headers
           "

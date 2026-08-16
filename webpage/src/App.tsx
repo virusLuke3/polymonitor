@@ -795,7 +795,7 @@ function WorldMonitorApp() {
   const [commandMarketSearchLoading, setCommandMarketSearchLoading] = useState(false);
   const [commandMarketSearchError, setCommandMarketSearchError] = useState('');
   const worldEventMap = useWorldEventMapState();
-  const naturalHazards = useNaturalHazards();
+  const naturalHazards = useNaturalHazards(worldEventMap.state.zoom);
   const layers = useMemo<LayerToggle[]>(
     () => INITIAL_LAYERS.map((layer) => ({
       ...layer,

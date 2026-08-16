@@ -1,3 +1,16 @@
+proxy_cache_path /var/cache/nginx/polymonitor-pmtiles
+    levels=1:2
+    keys_zone=polymonitor_pmtiles:20m
+    max_size=10g
+    inactive=30d
+    use_temp_path=off;
+proxy_cache_path /var/cache/nginx/polymonitor-hazard-map
+    levels=1:2
+    keys_zone=polymonitor_hazard_map:10m
+    max_size=512m
+    inactive=1d
+    use_temp_path=off;
+
 server {
     listen 80;
     server_name __POLYDATA_SERVER_NAME__ _;
@@ -55,11 +68,58 @@ server {
         proxy_set_header Range $http_range;
         proxy_set_header If-Range $http_if_range;
         proxy_force_ranges on;
-        proxy_buffering off;
+        proxy_cache polymonitor_pmtiles;
+        proxy_cache_key "$request_method|$uri|$http_range";
+        proxy_cache_valid 200 206 30d;
+        proxy_cache_valid any 1m;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_buffering on;
+        proxy_buffers 16 64k;
+        proxy_busy_buffers_size 128k;
         proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_connect_timeout 5s;
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
+        add_header Accept-Ranges bytes always;
+        add_header Cache-Control "public, max-age=86400, stale-while-revalidate=604800" always;
+        add_header X-PMTiles-Cache $upstream_cache_status always;
+    }
+
+    location = /wm-api/runtime/world/natural-hazards/map {
+        proxy_pass __POLYDATA_API_UPSTREAM__/runtime/world/natural-hazards/map;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache polymonitor_hazard_map;
+        proxy_cache_key "$request_method|$request_uri";
+        proxy_cache_valid 200 30s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 60s;
+        add_header X-Hazard-Cache $upstream_cache_status always;
+    }
+
+    location ^~ /wm-api/runtime/world/natural-hazards/events/ {
+        proxy_pass __POLYDATA_API_UPSTREAM__/runtime/world/natural-hazards/events/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache polymonitor_hazard_map;
+        proxy_cache_key "$request_method|$request_uri";
+        proxy_cache_valid 200 60s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 60s;
+        add_header X-Hazard-Cache $upstream_cache_status always;
     }
 
     # The connection zone is declared by

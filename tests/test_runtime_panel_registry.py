@@ -13,6 +13,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_default_panel_ids
+from api.services.bootstrap_service import BootstrapPrewarmDependencies
 
 
 def test_runtime_panel_modules_have_unique_ids_and_routes():
@@ -91,6 +92,7 @@ def test_runtime_panel_blueprint_registers_all_routes():
     assert map_response.headers["ETag"]
     assert map_response.headers["X-Map-Source"] == "usgs"
     assert map_response.headers["Server-Timing"].startswith("hazard-map;dur=")
+    assert map_response.get_json()["meta"]["zoom"] == 2.0
     conditional = client.get(
         "/runtime/world/natural-hazards/map?source=usgs&zoom=2",
         headers={"If-None-Match": map_response.headers["ETag"]},
@@ -118,3 +120,11 @@ def test_default_workspace_panel_ids_include_runtime_and_static_panels():
     assert "fed-reaction-growth-risk-board" in panel_ids
     assert "f1-trackside" in panel_ids
     assert len(panel_ids) == len(set(panel_ids))
+
+
+def test_api_server_context_satisfies_bootstrap_prewarm_contract():
+    import api_server
+
+    dependencies = BootstrapPrewarmDependencies.from_context(api_server.build_service_context())
+
+    assert callable(dependencies.get_market_focus_tile_payload)

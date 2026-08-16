@@ -174,6 +174,13 @@ export interface HazardMapResponse {
     events: number;
     byHazardKind: Partial<Record<HazardKind, number>>;
   };
+  meta?: {
+    source?: string;
+    geometryMode?: 'simplified' | 'full';
+    geometryZoom?: number;
+    detailEndpoint?: string;
+    fullSchemaVersion?: string;
+  };
 }
 
 export interface HazardDetailResponse {

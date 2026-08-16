@@ -23,6 +23,10 @@ DEFAULT_EVENT_LIMIT = 1200
 # Individual provider workers may finish later, but stale snapshots are returned
 # immediately once this bounded deadline expires.
 PROVIDER_DEADLINE_SECONDS = 12
+# The compact browser feed uses a 10 second request timeout. Return retained
+# source data (or an isolated source error) before the client aborts; the
+# provider worker may still finish and populate the shared snapshot.
+SOURCE_PROVIDER_DEADLINE_SECONDS = 6.5
 
 
 @dataclass(frozen=True)
@@ -213,13 +217,11 @@ def get_natural_hazard_source_result(
             "status": "error",
             "events": [],
         }
-    ttl_seconds, fetcher = spec
-    return fetch_with_snapshot(
-        key=key,
-        snapshot_store=dependencies.snapshot_store,
-        fetcher=fetcher,
-        ttl_seconds=ttl_seconds,
-    )
+    return _fetch_provider_results(
+        dependencies=dependencies,
+        source_specs={key: spec},
+        deadline_seconds=SOURCE_PROVIDER_DEADLINE_SECONDS,
+    )[key]
 
 
 def get_natural_hazards_snapshot(

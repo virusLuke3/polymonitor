@@ -109,7 +109,9 @@ export function WorldEventMap({
     const host = hostRef.current;
     if (!host || rendererRef.current) return;
     let disposed = false;
-    let inViewport = true;
+    let inViewport = typeof IntersectionObserver === 'undefined';
+    let installFrame: number | null = null;
+    let rendererInstallStarted = false;
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     const updatePauseState = () => {
@@ -166,31 +168,50 @@ export function WorldEventMap({
       }
     };
 
-    const support = inspectWebGL2Support({
-      allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1',
-    });
-    if (support.supported) void installRenderer('webgl');
-    else void installRenderer('svg', new Error(support.reason || 'WebGL2 is unavailable.'));
+    const scheduleRendererInstall = () => {
+      if (disposed || rendererInstallStarted || installFrame != null || document.hidden || !inViewport) return;
+      // Let the lightweight map shell and surrounding controls paint first.
+      // The renderer chunk and WebGL context are only installed for a visible
+      // map, avoiding work for off-screen/hidden workspaces.
+      installFrame = window.requestAnimationFrame(() => {
+        installFrame = null;
+        if (disposed || rendererInstallStarted || document.hidden || !inViewport) return;
+        rendererInstallStarted = true;
+        const support = inspectWebGL2Support({
+          allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1',
+        });
+        if (support.supported) void installRenderer('webgl');
+        else void installRenderer('svg', new Error(support.reason || 'WebGL2 is unavailable.'));
+      });
+    };
 
     const observer = new ResizeObserver(() => rendererRef.current?.resize());
     observer.observe(host);
-    const intersectionObserver = new IntersectionObserver((entries) => {
-      inViewport = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0);
+    const intersectionObserver = typeof IntersectionObserver === 'undefined'
+      ? null
+      : new IntersectionObserver((entries) => {
+        inViewport = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0);
+        updatePauseState();
+        if (inViewport) scheduleRendererInstall();
+      }, { threshold: [0, 0.01] });
+    intersectionObserver?.observe(host);
+    const handleVisibility = () => {
       updatePauseState();
-    }, { threshold: [0, 0.01] });
-    intersectionObserver.observe(host);
-    const handleVisibility = () => updatePauseState();
+      if (!document.hidden) scheduleRendererInstall();
+    };
     const handleMotionPreference = () => {
       rendererRef.current?.setReducedMotion(motionQuery.matches);
     };
     document.addEventListener('visibilitychange', handleVisibility);
     motionQuery.addEventListener('change', handleMotionPreference);
+    scheduleRendererInstall();
     return () => {
       disposed = true;
+      if (installFrame != null) window.cancelAnimationFrame(installFrame);
       document.removeEventListener('visibilitychange', handleVisibility);
       motionQuery.removeEventListener('change', handleMotionPreference);
       observer.disconnect();
-      intersectionObserver.disconnect();
+      intersectionObserver?.disconnect();
       delete host.dataset.mapRendererReady;
       rendererRef.current?.destroy();
       rendererRef.current = null;

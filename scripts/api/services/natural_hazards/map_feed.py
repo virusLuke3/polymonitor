@@ -91,6 +91,14 @@ def _simplify_ring(coordinates: Any, *, max_points: int, precision: int) -> list
     return line if len(line) >= 4 else []
 
 
+def _ring_area_score(ring: list[list[float]]) -> float:
+    if not ring:
+        return 0.0
+    longitudes = [point[0] for point in ring]
+    latitudes = [point[1] for point in ring]
+    return max(0.0, max(longitudes) - min(longitudes)) * max(0.0, max(latitudes) - min(latitudes))
+
+
 def simplify_geometry(geometry: Any, *, zoom: float = 2.0) -> dict[str, Any] | None:
     """Return a bounded map geometry without mutating the evidence record.
 
@@ -104,11 +112,14 @@ def simplify_geometry(geometry: Any, *, zoom: float = 2.0) -> dict[str, Any] | N
     kind = str(geometry.get("type") or "")
     coordinates = geometry.get("coordinates")
     if zoom < 3:
-        precision, line_budget, ring_budget, hole_budget = 2, 96, 96, 0
+        precision, line_budget, ring_budget, hole_budget = 2, 64, 64, 0
+        polygon_budget, total_point_budget = 8, 256
     elif zoom < 5:
-        precision, line_budget, ring_budget, hole_budget = 3, 256, 256, 1
+        precision, line_budget, ring_budget, hole_budget = 3, 128, 128, 0
+        polygon_budget, total_point_budget = 24, 1_024
     else:
-        precision, line_budget, ring_budget, hole_budget = 4, 640, 640, 3
+        precision, line_budget, ring_budget, hole_budget = 4, 192, 192, 1
+        polygon_budget, total_point_budget = 32, 2_048
 
     if kind == "Point":
         point = _point(coordinates, precision)
@@ -124,7 +135,7 @@ def simplify_geometry(geometry: Any, *, zoom: float = 2.0) -> dict[str, Any] | N
         ]
         return {"type": kind, "coordinates": rings} if rings else None
     if kind == "MultiPolygon" and isinstance(coordinates, list):
-        polygons: list[list[list[list[float]]]] = []
+        candidates: list[tuple[float, list[list[list[float]]]]] = []
         for polygon in coordinates:
             if not isinstance(polygon, list):
                 continue
@@ -134,7 +145,18 @@ def simplify_geometry(geometry: Any, *, zoom: float = 2.0) -> dict[str, Any] | N
                 if (ring := _simplify_ring(item, max_points=ring_budget, precision=precision))
             ]
             if rings:
-                polygons.append(rings)
+                candidates.append((_ring_area_score(rings[0]), rings))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        polygons: list[list[list[list[float]]]] = []
+        point_count = 0
+        for _, rings in candidates[:polygon_budget]:
+            ring_points = sum(len(ring) for ring in rings)
+            if polygons and point_count + ring_points > total_point_budget:
+                continue
+            polygons.append(rings)
+            point_count += ring_points
+            if point_count >= total_point_budget:
+                break
         return {"type": kind, "coordinates": polygons} if polygons else None
     return None
 
@@ -168,12 +190,22 @@ def compact_hazard_event(event: Mapping[str, Any], *, zoom: float = 2.0) -> dict
     if summary:
         compact["summary"] = summary
     compact["geometry"] = simplify_geometry(event.get("geometry"), zoom=zoom)
-    compact["coverage"] = deepcopy(event.get("coverage") or {
+    coverage = event.get("coverage") if isinstance(event.get("coverage"), Mapping) else {
         "scope": "provider-area",
         "label": "Provider coverage was not declared.",
         "isComplete": False,
         "gaps": ["Coverage metadata unavailable."],
-    })
+    }
+    compact["coverage"] = {
+        "scope": str(coverage.get("scope") or "provider-area"),
+        "label": _text(coverage.get("label"), 180) or "Provider coverage was not declared.",
+        "isComplete": bool(coverage.get("isComplete")),
+        "gaps": [
+            text
+            for value in list(coverage.get("gaps") or [])[:2]
+            if (text := _text(value, 160))
+        ],
+    }
 
     evidence = event.get("severityEvidence") if isinstance(event.get("severityEvidence"), Mapping) else {}
     compact["severityEvidence"] = {
@@ -218,6 +250,8 @@ def compact_hazard_event(event: Mapping[str, Any], *, zoom: float = 2.0) -> dict
         for key in _RENDER_PROPERTY_KEYS
         if (value := properties.get(key)) is not None
     }
+    compact["properties"]["geometryMode"] = "simplified"
+    compact["properties"]["geometryZoom"] = zoom
     compact["properties"]["detailAvailable"] = True
     compact["limitations"] = [
         text
@@ -295,6 +329,7 @@ def get_natural_hazard_map_snapshot(
         "meta": {
             "source": key,
             "geometryMode": "simplified",
+            "geometryZoom": zoom,
             "detailEndpoint": "/runtime/world/natural-hazards/events/{eventId}",
             "fullSchemaVersion": SCHEMA_VERSION,
         },

@@ -445,6 +445,7 @@ def test_provider_deadline_returns_partial_error_without_waiting_for_slow_source
 
 def test_default_provider_deadline_fits_inside_browser_request_budget() -> None:
     assert service.PROVIDER_DEADLINE_SECONDS < 25
+    assert service.SOURCE_PROVIDER_DEADLINE_SECONDS < 10
 
 
 def test_provider_deadline_retains_last_successful_snapshot() -> None:
@@ -625,13 +626,29 @@ def test_map_feed_is_source_scoped_compact_and_keeps_detail_out_of_first_paint()
     )
     compact = payload["events"][0]
     assert payload["schemaVersion"] == "natural-hazards-map.v1"
+    assert payload["meta"]["geometryZoom"] == 2
     assert [source["key"] for source in payload["sources"]] == ["nws"]
-    assert len(compact["geometry"]["coordinates"][0]) <= 97
+    assert len(compact["geometry"]["coordinates"][0]) <= 65
     assert compact["geometry"]["coordinates"][0][0] == compact["geometry"]["coordinates"][0][-1]
-    assert compact["properties"] == {"geometrySource": "nws-alert", "detailAvailable": True}
+    assert compact["properties"] == {
+        "geometrySource": "nws-alert",
+        "detailAvailable": True,
+        "geometryMode": "simplified",
+        "geometryZoom": 2,
+    }
     assert compact["relatedMarketIds"] == []
     assert compact["sources"][0].get("url") is None
     assert len(json.dumps(compact)) < len(json.dumps(full_event)) * 0.2
+
+    detailed_payload = map_feed.get_natural_hazard_map_snapshot(
+        _map_feed_context(store),
+        source="nws",
+        zoom=6,
+    )
+    assert detailed_payload["meta"]["geometryZoom"] == 6
+    assert len(detailed_payload["events"][0]["geometry"]["coordinates"][0]) > len(
+        compact["geometry"]["coordinates"][0]
+    )
 
     detail = map_feed.get_natural_hazard_event_detail(
         _map_feed_context(store),
@@ -653,6 +670,36 @@ def test_map_feed_rejects_unknown_source() -> None:
         assert str(exc) == "unsupported-natural-hazard-source"
     else:  # pragma: no cover - explicit contract failure branch
         raise AssertionError("unknown provider must be rejected")
+
+
+def test_map_feed_bounds_large_multipolygon_by_zoom() -> None:
+    polygons = []
+    for polygon_index in range(240):
+        x = float(polygon_index % 24)
+        y = float(polygon_index // 24)
+        ring = [
+            [x, y],
+            [x + 0.4, y],
+            [x + 0.4, y + 0.4],
+            [x, y + 0.4],
+            [x, y],
+        ]
+        polygons.append([ring])
+
+    global_geometry = map_feed.simplify_geometry(
+        {"type": "MultiPolygon", "coordinates": polygons},
+        zoom=2,
+    )
+    detail_geometry = map_feed.simplify_geometry(
+        {"type": "MultiPolygon", "coordinates": polygons},
+        zoom=6,
+    )
+
+    assert global_geometry is not None
+    assert detail_geometry is not None
+    assert len(global_geometry["coordinates"]) <= 8
+    assert sum(len(ring) for polygon in global_geometry["coordinates"] for ring in polygon) <= 256
+    assert len(detail_geometry["coordinates"]) > len(global_geometry["coordinates"])
 
 
 def test_map_feed_fetches_only_the_requested_provider_on_cache_miss() -> None:

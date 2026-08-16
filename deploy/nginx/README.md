@@ -15,6 +15,7 @@ The production frontend server is expected to:
 - serve static files from `/var/www/polydata`
 - use SPA fallback via `try_files ... /index.html`
 - proxy `/wm-api/` to the local-machine API over Tailscale
+- serve byte-range PMTiles and compact hazard feeds through bounded Nginx caches
 - not build frontend code on the server
 
 The checked-in template uses placeholders instead of private values:
@@ -32,6 +33,8 @@ http://<tailscale-ip>:18500
 
 ```bash
 sudo mkdir -p /var/www/polydata
+sudo install -d -o www-data -g www-data -m 750 /var/cache/nginx/polymonitor-pmtiles
+sudo install -d -o www-data -g www-data -m 750 /var/cache/nginx/polymonitor-hazard-map
 sudo cp deploy/nginx/polydata-lob-limits.conf.example /etc/nginx/conf.d/polydata-lob-limits.conf
 sudo cp deploy/nginx/polydata-static.conf.example /etc/nginx/sites-available/polydata
 sudo nano /etc/nginx/sites-available/polydata
@@ -39,6 +42,10 @@ sudo ln -sf /etc/nginx/sites-available/polydata /etc/nginx/sites-enabled/polydat
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+The frontend release must be built with
+`VITE_PMTILES_URL=/map-tiles/planet.pmtiles`; otherwise it intentionally uses
+the OpenFreeMap fallback and the Range cache is not exercised.
 
 ## Notes
 

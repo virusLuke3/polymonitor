@@ -12,15 +12,27 @@ export const HAZARD_MAP_SOURCE_KEYS = [
 export type HazardMapSourceKey = typeof HAZARD_MAP_SOURCE_KEYS[number];
 
 type HazardCacheEntry = {
+  cacheKey: string;
   source: HazardMapSourceKey;
+  geometryZoom: number;
   storedAt: number;
   payload: HazardMapResponse;
 };
 
 const DATABASE_NAME = 'polymonitor-world-event-map';
 const STORE_NAME = 'hazard-source-snapshots';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const LOCAL_STORAGE_PREFIX = 'polymonitor:hazard-map:last-good:';
+
+export function hazardMapGeometryZoom(zoom: number) {
+  if (zoom < 3) return 2;
+  if (zoom < 5) return 4;
+  return 6;
+}
+
+function cacheKey(source: HazardMapSourceKey, geometryZoom: number) {
+  return `${source}:${geometryZoom}`;
+}
 
 function openDatabase(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
@@ -32,10 +44,13 @@ function openDatabase(): Promise<IDBDatabase | null> {
       resolve(null);
       return;
     }
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const database = request.result;
+      if (database.objectStoreNames.contains(STORE_NAME) && event.oldVersion < 2) {
+        database.deleteObjectStore(STORE_NAME);
+      }
       if (!database.objectStoreNames.contains(STORE_NAME)) {
-        database.createObjectStore(STORE_NAME, { keyPath: 'source' });
+        database.createObjectStore(STORE_NAME, { keyPath: 'cacheKey' });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -44,15 +59,17 @@ function openDatabase(): Promise<IDBDatabase | null> {
   });
 }
 
-function localStorageKey(source: HazardMapSourceKey) {
-  return `${LOCAL_STORAGE_PREFIX}${source}`;
+function localStorageKey(source: HazardMapSourceKey, geometryZoom: number) {
+  return `${LOCAL_STORAGE_PREFIX}${cacheKey(source, geometryZoom)}`;
 }
 
-function readLocalFallback(source: HazardMapSourceKey): HazardCacheEntry | null {
+function readLocalFallback(source: HazardMapSourceKey, geometryZoom: number): HazardCacheEntry | null {
   if (typeof localStorage === 'undefined') return null;
   try {
-    const value = JSON.parse(localStorage.getItem(localStorageKey(source)) || 'null') as HazardCacheEntry | null;
-    return value?.source === source && value.payload ? value : null;
+    const value = JSON.parse(
+      localStorage.getItem(localStorageKey(source, geometryZoom)) || 'null',
+    ) as HazardCacheEntry | null;
+    return value?.source === source && value.geometryZoom === geometryZoom && value.payload ? value : null;
   } catch {
     return null;
   }
@@ -61,27 +78,56 @@ function readLocalFallback(source: HazardMapSourceKey): HazardCacheEntry | null 
 function writeLocalFallback(entry: HazardCacheEntry) {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(localStorageKey(entry.source), JSON.stringify(entry));
+    localStorage.setItem(localStorageKey(entry.source, entry.geometryZoom), JSON.stringify(entry));
   } catch {
     // Storage can be disabled or full. Network data remains usable in memory.
   }
 }
 
-export async function readHazardMapSnapshot(source: HazardMapSourceKey): Promise<HazardCacheEntry | null> {
+export async function readHazardMapSnapshot(
+  source: HazardMapSourceKey,
+  geometryZoom: number,
+): Promise<HazardCacheEntry | null> {
   const database = await openDatabase();
-  if (!database) return readLocalFallback(source);
+  if (!database) {
+    return readLocalFallback(source, geometryZoom)
+      || (geometryZoom === 2 ? null : readLocalFallback(source, 2));
+  }
   return new Promise((resolve) => {
     const transaction = database.transaction(STORE_NAME, 'readonly');
-    const request = transaction.objectStore(STORE_NAME).get(source);
-    request.onsuccess = () => resolve((request.result as HazardCacheEntry | undefined) || null);
-    request.onerror = () => resolve(readLocalFallback(source));
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.get(cacheKey(source, geometryZoom));
+    request.onsuccess = () => {
+      const exact = request.result as HazardCacheEntry | undefined;
+      if (exact || geometryZoom === 2) {
+        resolve(exact || null);
+        return;
+      }
+      const globalRequest = store.get(cacheKey(source, 2));
+      globalRequest.onsuccess = () => resolve((globalRequest.result as HazardCacheEntry | undefined) || null);
+      globalRequest.onerror = () => resolve(readLocalFallback(source, geometryZoom) || readLocalFallback(source, 2));
+    };
+    request.onerror = () => resolve(
+      readLocalFallback(source, geometryZoom)
+      || (geometryZoom === 2 ? null : readLocalFallback(source, 2)),
+    );
     transaction.oncomplete = () => database.close();
     transaction.onabort = () => database.close();
   });
 }
 
-export async function writeHazardMapSnapshot(source: HazardMapSourceKey, payload: HazardMapResponse) {
-  const entry: HazardCacheEntry = { source, storedAt: Date.now(), payload };
+export async function writeHazardMapSnapshot(
+  source: HazardMapSourceKey,
+  geometryZoom: number,
+  payload: HazardMapResponse,
+) {
+  const entry: HazardCacheEntry = {
+    cacheKey: cacheKey(source, geometryZoom),
+    source,
+    geometryZoom,
+    storedAt: Date.now(),
+    payload,
+  };
   const database = await openDatabase();
   if (!database) {
     writeLocalFallback(entry);

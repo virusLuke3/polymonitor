@@ -757,8 +757,8 @@ export function fetchRuntimeGeoSanctionsShock(limit = 2000) {
   return apiGet<RuntimeGeoSanctionsShockPayload>(`/runtime/world/geo-sanctions-shock?limit=${limit}`);
 }
 
-export function fetchNaturalHazardMapSource(source: string, signal?: AbortSignal) {
-  const params = new URLSearchParams({ source, limit: '1200', zoom: '2' });
+export function fetchNaturalHazardMapSource(source: string, zoom: number, signal?: AbortSignal) {
+  const params = new URLSearchParams({ source, limit: '1200', zoom: String(zoom) });
   return apiGetWithTimeout<HazardMapResponse>(
     `/runtime/world/natural-hazards/map?${params.toString()}`,
     10_000,

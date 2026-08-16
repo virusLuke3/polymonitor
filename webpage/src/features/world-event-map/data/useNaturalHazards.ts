@@ -10,6 +10,7 @@ import { sourceStatusesFromHazardResponse } from './sourceStatus';
 import { parseNaturalHazardsResponse, type ParsedNaturalHazards } from './naturalHazards';
 import {
   HAZARD_MAP_SOURCE_KEYS,
+  hazardMapGeometryZoom,
   readHazardMapSnapshot,
   writeHazardMapSnapshot,
   type HazardMapSourceKey,
@@ -17,6 +18,15 @@ import {
 import { recordMapDataPhase } from './mapDataPerformance';
 
 const RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 60_000] as const;
+const INITIAL_SOURCE_PRIORITY: readonly HazardMapSourceKey[] = [
+  'usgs',
+  'eonet',
+  'nws',
+  'gdacs',
+  'firms',
+  'climate-anomaly',
+];
+const INITIAL_SOURCE_CONCURRENCY = 3;
 const REFRESH_INTERVAL_MS: Record<HazardMapSourceKey, number> = {
   usgs: 60_000,
   eonet: 300_000,
@@ -45,6 +55,7 @@ export type NaturalHazardsState = {
 function sourceSignature(parsed: ParsedNaturalHazards) {
   const source = parsed.response.sources[0];
   return JSON.stringify([
+    parsed.response.meta?.geometryZoom,
     source?.key,
     source?.status,
     source?.dataUpdatedAt,
@@ -131,7 +142,15 @@ function sourceStatus(
   };
 }
 
-export function useNaturalHazards(): NaturalHazardsState {
+function yieldMainThread() {
+  const scheduler = globalThis as typeof globalThis & { scheduler?: { yield?: () => Promise<void> } };
+  return typeof scheduler.scheduler?.yield === 'function'
+    ? scheduler.scheduler.yield()
+    : new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+}
+
+export function useNaturalHazards(zoom = 2): NaturalHazardsState {
+  const geometryZoom = hazardMapGeometryZoom(zoom);
   const [state, setState] = useState<NaturalHazardsState>({
     events: [],
     response: null,
@@ -231,7 +250,7 @@ export function useNaturalHazards(): NaturalHazardsState {
       attempts.add(source);
       const networkStartedAt = performance.now();
       try {
-        const payload = await fetchNaturalHazardMapSource(source, controller.signal);
+        const payload = await fetchNaturalHazardMapSource(source, geometryZoom, controller.signal);
         recordMapDataPhase('network', source, networkStartedAt, payload.events?.length || 0);
         const parseStartedAt = performance.now();
         const parsed = parseNaturalHazardsResponse(payload);
@@ -239,7 +258,7 @@ export function useNaturalHazards(): NaturalHazardsState {
         if (disposed || controller.signal.aborted || generation !== requestGenerationRef.current) return;
         commit(source, parsed, 'network');
         failureCounts.set(source, 0);
-        void writeHazardMapSnapshot(source, parsed.response);
+        void writeHazardMapSnapshot(source, geometryZoom, parsed.response);
         schedule(source, false);
       } catch (error) {
         if (disposed || controller.signal.aborted || generation !== requestGenerationRef.current) return;
@@ -256,7 +275,7 @@ export function useNaturalHazards(): NaturalHazardsState {
 
     for (const source of HAZARD_MAP_SOURCE_KEYS) {
       const cacheStartedAt = performance.now();
-      void readHazardMapSnapshot(source).then((cached) => {
+      void readHazardMapSnapshot(source, geometryZoom).then((cached) => {
         recordMapDataPhase('cache-read', source, cacheStartedAt, cached?.payload.events?.length || 0);
         if (!cached || disposed || generation !== requestGenerationRef.current) return;
         try {
@@ -265,7 +284,23 @@ export function useNaturalHazards(): NaturalHazardsState {
           // Invalid or old schema cache is ignored and replaced by the network response.
         }
       });
-      void loadSource(source);
+    }
+
+    // Keep the first-paint network fan-out bounded. Fast canonical sources
+    // immediately free a slot for the next provider, so a slow GDACS request
+    // cannot head-of-line block USGS/EONET/NWS or the persisted cache path.
+    let initialSourceIndex = 0;
+    const hydrateWorker = async () => {
+      while (!disposed && generation === requestGenerationRef.current) {
+        const source = INITIAL_SOURCE_PRIORITY[initialSourceIndex];
+        initialSourceIndex += 1;
+        if (!source) return;
+        await loadSource(source);
+        await yieldMainThread();
+      }
+    };
+    for (let worker = 0; worker < INITIAL_SOURCE_CONCURRENCY; worker += 1) {
+      void hydrateWorker();
     }
 
     return () => {
@@ -275,7 +310,7 @@ export function useNaturalHazards(): NaturalHazardsState {
       for (const controller of controllers.values()) controller.abort();
       for (const timer of timers.values()) window.clearTimeout(timer);
     };
-  }, []);
+  }, [geometryZoom]);
 
   return state;
 }

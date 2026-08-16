@@ -423,7 +423,7 @@ sudo install -d -o www-data -g www-data -m 750 /var/cache/nginx/polymonitor-pmti
 sudo install -d -o www-data -g www-data -m 750 /var/cache/nginx/polymonitor-hazard-map
 cd "${REMOTE_REPO_ROOT}/webpage"
 npm install
-npm run build
+VITE_PMTILES_URL=/map-tiles/planet.pmtiles npm run build
 sudo rsync -av --delete "${REMOTE_REPO_ROOT}/webpage/dist/" "${REMOTE_WEB_ROOT}/"
 
 sudo install -m 644 /tmp/polydata-nginx.conf /etc/nginx/sites-available/polydata
@@ -504,7 +504,14 @@ PY"
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "curl -fsS http://127.0.0.1:${API_PORT}/health && echo && curl -fsS http://127.0.0.1:${API_PORT}/system/health >/dev/null && echo api-ok"
 
 echo "[5/7] Verifying Nginx proxy ..."
-ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "curl -fsS http://127.0.0.1/wm-api/health && echo"
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "set -eu
+curl -fsS http://127.0.0.1/wm-api/health
+echo
+headers=\$(mktemp)
+trap 'rm -f \"\$headers\"' EXIT
+curl -fsS --max-time 30 --range 0-16383 -D \"\$headers\" http://127.0.0.1/map-tiles/planet.pmtiles -o /dev/null
+tr -d '\r' < \"\$headers\" | grep -q '^HTTP/.* 206'
+echo pmtiles-range-ok"
 
 echo "[6/7] Remote service status ..."
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "systemctl --user --no-pager --full status polydata-gcp.target polydata-db-tunnel.service polydata-api.service polydata-lob-websocket.service | sed -n '1,220p'"
