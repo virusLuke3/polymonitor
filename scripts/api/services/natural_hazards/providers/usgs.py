@@ -15,7 +15,7 @@ SOURCE_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php"
 def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 500) -> ProviderResult:
     payload = http_json_get(
         url,
-        timeout=16,
+        timeout=8,
         headers={
             "Accept": "application/geo+json, application/json",
             "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",

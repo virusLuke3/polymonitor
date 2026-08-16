@@ -1,5 +1,6 @@
 import type {
   GeoEventAdapterIssue,
+  HazardDetailResponse,
   HazardEvent,
   HazardMapResponse,
   HazardMapSource,
@@ -31,7 +32,7 @@ export type ParsedNaturalHazards = {
 
 export function parseNaturalHazardsResponse(value: unknown): ParsedNaturalHazards {
   if (!isRecord(value)) throw new Error('Natural hazards response must be an object');
-  if (value.schemaVersion !== 'natural-hazards.v1') {
+  if (value.schemaVersion !== 'natural-hazards.v1' && value.schemaVersion !== 'natural-hazards-map.v1') {
     throw new Error(`Unsupported natural hazards schema: ${String(value.schemaVersion || 'missing')}`);
   }
   if (!Array.isArray(value.events)) throw new Error('Natural hazards response is missing events');
@@ -51,7 +52,7 @@ export function parseNaturalHazardsResponse(value: unknown): ParsedNaturalHazard
   }
   const counts = isRecord(value.counts) ? value.counts : {};
   const response: HazardMapResponse = {
-    schemaVersion: 'natural-hazards.v1',
+    schemaVersion: value.schemaVersion,
     generatedAt: typeof value.generatedAt === 'string' ? value.generatedAt : new Date(0).toISOString(),
     events,
     sources: value.sources as HazardMapSource[],
@@ -70,4 +71,20 @@ export function parseNaturalHazardsResponse(value: unknown): ParsedNaturalHazard
     },
   };
   return { response, events, rejected };
+}
+
+export function parseNaturalHazardDetail(value: unknown): HazardDetailResponse {
+  if (!isRecord(value) || value.schemaVersion !== 'natural-hazard-detail.v1') {
+    throw new Error('Unsupported natural hazard detail response');
+  }
+  const validated = validateGeoEvents([value.event]);
+  const event = validated.events.find(isHazardGeoEvent);
+  if (!event || validated.rejected.length) {
+    throw new Error('Natural hazard detail contains an invalid event');
+  }
+  return {
+    schemaVersion: 'natural-hazard-detail.v1',
+    generatedAt: typeof value.generatedAt === 'string' ? value.generatedAt : new Date(0).toISOString(),
+    event,
+  };
 }

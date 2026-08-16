@@ -85,6 +85,7 @@ import type {
 } from '@/types';
 import type { WorldCupDashboardPayload, WorldCupIntelPayload } from '@/workspaces/worldcup/types';
 import type {
+  HazardDetailResponse,
   HazardMapResponse,
   HazardMarketLinksResponse,
 } from '@/features/world-event-map/domain/types';
@@ -756,8 +757,26 @@ export function fetchRuntimeGeoSanctionsShock(limit = 2000) {
   return apiGet<RuntimeGeoSanctionsShockPayload>(`/runtime/world/geo-sanctions-shock?limit=${limit}`);
 }
 
+export function fetchNaturalHazardMapSource(source: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ source, limit: '1200', zoom: '2' });
+  return apiGetWithTimeout<HazardMapResponse>(
+    `/runtime/world/natural-hazards/map?${params.toString()}`,
+    10_000,
+    signal,
+  );
+}
+
+/** Kept for diagnostics and backward compatibility; the map no longer uses this heavy aggregate. */
 export function fetchNaturalHazards(signal?: AbortSignal) {
-  return apiGetWithTimeout<HazardMapResponse>('/runtime/world/natural-hazards?limit=1200', 25000, signal);
+  return apiGetWithTimeout<HazardMapResponse>('/runtime/world/natural-hazards?limit=1200', 25_000, signal);
+}
+
+export function fetchNaturalHazardDetail(eventId: string, signal?: AbortSignal) {
+  return apiGetWithTimeout<HazardDetailResponse>(
+    `/runtime/world/natural-hazards/events/${encodeURIComponent(eventId)}`,
+    10_000,
+    signal,
+  );
 }
 
 export function fetchNaturalHazardRelatedMarkets(eventId: string, signal?: AbortSignal) {

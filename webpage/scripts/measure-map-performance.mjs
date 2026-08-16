@@ -17,6 +17,7 @@ const output = resolve(option('--out', 'artifacts/map-performance/chrome-trace.j
 const screenshotOption = option('--screenshot', '');
 const screenshotOutput = screenshotOption ? resolve(screenshotOption) : '';
 const strict = args.includes('--strict');
+const verbose = args.includes('--verbose');
 const requireDynamic = args.includes('--require-dynamic');
 const requireEvents = args.includes('--require-events');
 const requireHazards = args.includes('--require-hazards');
@@ -28,11 +29,40 @@ const budgets = {
   deckCommitP95Ms: Number(option('--max-deck-commit-p95', '20')),
   longTaskMaxMs: Number(option('--max-long-task', '150')),
 };
+
+function summarizeDataSamples(samples = []) {
+  const byPhase = {};
+  for (const sample of samples) {
+    const bucket = byPhase[sample.phase] || { count: 0, maxMs: 0, durations: [], eventCount: 0 };
+    bucket.count += 1;
+    bucket.maxMs = Math.max(bucket.maxMs, Number(sample.durationMs) || 0);
+    bucket.durations.push(Number(sample.durationMs) || 0);
+    bucket.eventCount = Math.max(bucket.eventCount, Number(sample.eventCount) || 0);
+    byPhase[sample.phase] = bucket;
+  }
+  for (const bucket of Object.values(byPhase)) {
+    bucket.durations.sort((left, right) => left - right);
+    const index = Math.max(0, Math.ceil(bucket.durations.length * 0.95) - 1);
+    bucket.p95Ms = bucket.durations[index] || 0;
+    delete bucket.durations;
+  }
+  const firstPublishAtMs = samples
+    .filter((sample) => sample.phase === 'publish')
+    .reduce((earliest, sample) => Math.min(earliest, Number(sample.at) || Infinity), Infinity);
+  return {
+    samples,
+    phases: byPhase,
+    firstPublishAtMs: Number.isFinite(firstPublishAtMs) ? firstPublishAtMs : null,
+  };
+}
 const isLoopbackTarget = ['127.0.0.1', 'localhost', '::1'].includes(target.hostname);
 const proxyServer = option('--proxy', isLoopbackTarget
   ? ''
   : process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || '');
 const useAngle = option('--use-angle', '');
+const progress = (message) => {
+  if (verbose) process.stderr.write(`[map-perf] ${message}\n`);
+};
 const port = 19000 + (process.pid % 1000);
 const profile = mkdtempSync(resolve(tmpdir(), 'polymonitor-map-perf-'));
 const chrome = spawn('/usr/bin/google-chrome', [
@@ -69,18 +99,15 @@ class CdpClient {
     this.nextId = 1;
     this.pending = new Map();
     this.listeners = new Map();
-  }
-  async ready() {
-    if (this.socket.readyState === WebSocket.OPEN) return;
-    await new Promise((resolveReady, reject) => {
-      this.socket.addEventListener('open', resolveReady, { once: true });
-      this.socket.addEventListener('error', reject, { once: true });
-    });
+    // Install the dispatcher before awaiting `open`. On a loopback DevTools
+    // socket the connection can already be OPEN when ready() runs; the old
+    // early return then left every CDP command waiting forever.
     this.socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data));
       if (message.id) {
         const pending = this.pending.get(message.id);
         this.pending.delete(message.id);
+        clearTimeout(pending?.timeout);
         if (message.error) pending?.reject(new Error(message.error.message));
         else pending?.resolve(message.result);
         return;
@@ -88,10 +115,21 @@ class CdpClient {
       for (const listener of this.listeners.get(message.method) || []) listener(message.params);
     });
   }
-  send(method, params = {}) {
+  async ready() {
+    if (this.socket.readyState === WebSocket.OPEN) return;
+    await new Promise((resolveReady, reject) => {
+      this.socket.addEventListener('open', resolveReady, { once: true });
+      this.socket.addEventListener('error', reject, { once: true });
+    });
+  }
+  send(method, params = {}, timeoutMs = 15000) {
     const id = this.nextId++;
     return new Promise((resolveSend, reject) => {
-      this.pending.set(id, { resolve: resolveSend, reject });
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`CDP ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve: resolveSend, reject, timeout });
       this.socket.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -173,11 +211,14 @@ async function waitForMappedEvents(client, hazardsRequired, timeoutMs = 60000) {
 
 let client;
 try {
+  progress('waiting for Chrome DevTools');
   await waitForEndpoint('/json/version');
+  progress('creating page target');
   const page = await waitForEndpoint('/json/new?about%3Ablank');
   if (!page?.webSocketDebuggerUrl) throw new Error('Chrome page target was unavailable.');
   client = new CdpClient(page.webSocketDebuggerUrl);
   await client.ready();
+  progress('connected to page target');
   await Promise.all([
     client.send('Page.enable'),
     client.send('Runtime.enable'),
@@ -212,7 +253,17 @@ try {
     options: 'sampling-frequency=10000',
     transferMode: 'ReportEvents',
   });
-  await client.send('Page.navigate', { url: target.href });
+  progress(`navigating to ${target.href}`);
+  try {
+    await client.send('Page.navigate', { url: target.href });
+  } catch (error) {
+    // Some headless GPU stacks commit the navigation but do not acknowledge
+    // Page.navigate until the first renderer frame. Continue with the bounded
+    // readiness probe; a genuinely failed navigation is reported with DOM and
+    // network diagnostics below.
+    if (!(error instanceof Error) || !error.message.startsWith('CDP Page.navigate timed out')) throw error;
+    progress('Page.navigate acknowledgement timed out; probing the committed target');
+  }
   const rendererReady = await waitForRenderer(client, 30000);
   if (!rendererReady) {
     const diagnostics = await client.send('Runtime.evaluate', {
@@ -231,6 +282,7 @@ try {
       runtimeErrors,
     })}`);
   }
+  progress('renderer ready');
   const samplesReady = await waitForPerformanceSamples(client, requireDynamic);
   if (!samplesReady) {
     const diagnostics = await client.send('Runtime.evaluate', {
@@ -247,6 +299,7 @@ try {
       runtimeErrors,
     })}`);
   }
+  progress('renderer performance samples ready');
   const mappedEventState = await waitForMappedEvents(client, requireHazards);
   const mappedEventCount = mappedEventState.count;
   if ((requireEvents && mappedEventCount === 0) || (requireHazards && !mappedEventState.hazardsReady)) {
@@ -266,6 +319,7 @@ try {
       runtimeErrors,
     })}`);
   }
+  progress(`mapped events ready count=${mappedEventCount}`);
   if (openEvents) {
     await client.send('Runtime.evaluate', {
       expression: `document.querySelector('.wm-world-event-list-toggle')?.click()`,
@@ -319,13 +373,19 @@ try {
     expression: 'window.__POLYMONITOR_MAP_PERF__?.snapshot() || null',
     returnByValue: true,
   });
+  const dataSnapshotResult = await client.send('Runtime.evaluate', {
+    expression: 'window.__POLYMONITOR_MAP_DATA_PERF__?.snapshot() || []',
+    returnByValue: true,
+  });
   const metrics = await client.send('Performance.getMetrics');
   const completed = client.once('Tracing.tracingComplete');
   await client.send('Tracing.end');
   await completed;
+  progress('trace collected');
   mkdirSync(dirname(output), { recursive: true });
   writeFileSync(output, JSON.stringify({ traceEvents }));
   const snapshot = snapshotResult.result?.value;
+  const dataSnapshot = dataSnapshotResult.result?.value || [];
   const summary = {
     url: target.href,
     trace: output,
@@ -347,6 +407,7 @@ try {
       returnByValue: true,
     }).then((result) => result.result?.value),
     map: snapshot,
+    mapData: summarizeDataSamples(dataSnapshot),
     warmupMs,
     budgets,
     chromeMetrics: Object.fromEntries((metrics.metrics || []).map((metric) => [metric.name, metric.value])),
@@ -368,6 +429,11 @@ try {
     }
     if (requireDynamic && snapshot.phases['dynamic-commit'].count === 0) {
       failures.push('dynamic-commit produced no samples; run against a backend with aviation events');
+    }
+    if (requireHazards && !dataSnapshot.some((sample) => (
+      sample.phase === 'publish' && sample.eventCount > 0
+    ))) {
+      failures.push('hazard source data produced no measured publish sample');
     }
     if (failures.length) throw new Error(`Map performance gate failed: ${failures.join('; ')}`);
   }

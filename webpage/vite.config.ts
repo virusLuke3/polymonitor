@@ -89,6 +89,11 @@ export default defineConfig(({ mode }) => {
     },
     preview: {
       proxy: {
+        '/wm-api': {
+          target,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/wm-api/, ''),
+        },
         '/map-tiles': mapTilesProxy,
       },
     },

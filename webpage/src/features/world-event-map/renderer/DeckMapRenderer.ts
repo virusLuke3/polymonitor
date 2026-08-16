@@ -136,6 +136,8 @@ export class DeckMapRenderer implements MapRenderer {
     viewport?: [number, number, number, number];
     generation: number;
   }>;
+  private readonly staticLayerCommit: DeferredLatestCommit<LayersList>;
+  private readonly aviationLayerCommit: DeferredLatestCommit<LayersList>;
   private readonly performanceMonitor = new MapPerformanceMonitor();
   private deckHoverActive = false;
   private hoveredDeckEventId: string | null = null;
@@ -150,12 +152,6 @@ export class DeckMapRenderer implements MapRenderer {
   private animationRecoveryFrames = 0;
   private cancelPickingWarmup: (() => void) | null = null;
   private pickingWarmupStage: 0 | 1 | 2 = 0;
-  private aviationCommitFrame: number | null = null;
-  private aviationCommitFrame2: number | null = null;
-  private aviationCommitDelayTimer: number | null = null;
-  private pendingAviationLayers: LayersList | null = null;
-  private staticLabelCommitTimers: number[] = [];
-  private staticLabelCommitGeneration = 0;
   private hazardPulseTimer: number | null = null;
   private hazardPulseTime = Date.now();
   private readonly eventFirstSeenAt = new Map<string, number>();
@@ -194,6 +190,29 @@ export class DeckMapRenderer implements MapRenderer {
         );
         this.geometryNeedsCommit = false;
         this.requestRender();
+      },
+    );
+    this.staticLayerCommit = new DeferredLatestCommit(
+      scheduleAfterMainThreadYield,
+      (layers) => {
+        if (this.destroyed || this.paused || this.interacting || !this.overlay) return;
+        this.performanceMonitor.measure('deck-commit', () => {
+          this.overlay?.setProps({ layers });
+        });
+        this.map?.triggerRepaint();
+      },
+    );
+    this.aviationLayerCommit = new DeferredLatestCommit(
+      scheduleAfterMainThreadYield,
+      (layers) => {
+        if (this.destroyed || this.paused || this.interacting || !layers.length) return;
+        const overlay = this.ensureAviationOverlay();
+        if (!overlay) return;
+        this.resumeAviationOverlayViewSync();
+        this.performanceMonitor.measure('dynamic-commit', () => {
+          overlay.setProps({ layers });
+        });
+        this.resumeAviationDeckLoop();
       },
     );
   }
@@ -267,16 +286,7 @@ export class DeckMapRenderer implements MapRenderer {
       onHover: (info: PickingInfo<WorldEventPickedObject>) => this.handleDeckHover('static', info),
       onClick,
     });
-    const aviationOverlay = new MapboxOverlay({
-      interleaved: false,
-      layers: [],
-      // The motion canvas contains only small aircraft and route runners. A
-      // bounded pixel ratio keeps its full-canvas clear/draw below the frame
-      // budget without reducing the labelled basemap or static event detail.
-      useDevicePixels: Math.min(1, Math.max(0.6, window.devicePixelRatio * 0.6)),
-    });
     this.overlay = overlay;
-    this.aviationOverlay = aviationOverlay;
 
     map.once('load', () => {
       if (this.destroyed) return;
@@ -534,8 +544,7 @@ export class DeckMapRenderer implements MapRenderer {
     // pending frame, so the supposedly paused aviation canvas still paid a
     // full GPU draw on the first drag frame. All invalidated caches remain on
     // the renderer and are committed once pointerup/moveend resumes it.
-    if (this.destroyed || this.paused || this.interacting
-      || !this.overlay || !this.aviationOverlay || !this.state) return;
+    if (this.destroyed || this.paused || this.interacting || !this.overlay || !this.state) return;
     this.renderScheduler.request(invalidation);
   }
 
@@ -656,38 +665,49 @@ export class DeckMapRenderer implements MapRenderer {
       ...pointLabels,
       ...(aviationSections?.labelLayers || []),
     ].filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer));
-    const dynamicLayers = [
+    const aviationMotionLayers = [
       ...routeRunnerLayers,
       ...seededAircraftLayers,
-      ...pulseLayers,
-      ...interactionLayers,
       ...seededInteractionLayers,
       ...aviationCountLabels,
     ];
+    const staticCompleteLayers = [
+      ...staticBaseLayers,
+      ...pulseLayers,
+      ...interactionLayers,
+      ...staticLabelLayers,
+    ];
     if (!onlyDynamic) {
-      // Keep the independent motion Deck asleep while the static Deck uploads
-      // geometry and icon buffers. It resumes from the staged aviation commit
-      // below, so two animation loops never contend for the same first frame.
+      // Commit the lightweight base immediately, then submit the latest labels
+      // and interaction layers after yielding. Unlike the previous fixed
+      // 160ms-per-label reveal, this has no artificial minimum wait and stale
+      // generations are cancelled automatically.
       this.suspendAviationDeckLoop();
       this.performanceMonitor.measure('deck-commit', () => {
         this.overlay?.setProps({ layers: staticBaseLayers });
       });
-      if (staticLabelLayers.length) this.stageStaticLabelCommit(staticBaseLayers, staticLabelLayers);
-      else this.cancelStagedStaticLabelCommit();
-      // Two Deck instances scheduling their GPU work in the same browser frame
-      // produce one combined 250-380ms long task on a cold/contended GPU. Let
-      // the interleaved static deck paint first, then submit the motion canvas
-      // on the following frame. Later animation updates replace the pending
-      // payload instead of bypassing this boundary.
-      this.stageAviationOverlayCommit(dynamicLayers);
-    } else if (this.aviationCommitFrame != null
-      || this.aviationCommitFrame2 != null
-      || this.aviationCommitDelayTimer != null) {
-      this.pendingAviationLayers = dynamicLayers;
-    } else {
-      this.performanceMonitor.measure('dynamic-commit', () => {
-        this.aviationOverlay?.setProps({ layers: dynamicLayers });
+      this.staticLayerCommit.stage(staticCompleteLayers);
+    } else if (invalidation.pulse || invalidation.interaction) {
+      // Hazard pulses and hover state belong to the static renderer. Aircraft
+      // ticks therefore no longer repaint the labelled map canvas.
+      this.staticLayerCommit.cancel();
+      this.performanceMonitor.measure('deck-commit', () => {
+        this.overlay?.setProps({ layers: staticCompleteLayers });
       });
+    }
+    if (aviationActive && aviationMotionLayers.length) {
+      this.ensureAviationOverlay();
+      if (onlyDynamic && !invalidation.pulse && !invalidation.interaction && this.aviationOverlay) {
+        this.performanceMonitor.measure('dynamic-commit', () => {
+          this.aviationOverlay?.setProps({ layers: aviationMotionLayers });
+        });
+      } else {
+        // WorldMonitor-style latest commit: yield once, discard superseded
+        // payloads, and never sleep for a fixed 900ms.
+        this.aviationLayerCommit.stage(aviationMotionLayers);
+      }
+    } else {
+      this.removeAviationOverlay();
     }
     if (!onlyDynamic) {
       this.map?.triggerRepaint();
@@ -702,7 +722,7 @@ export class DeckMapRenderer implements MapRenderer {
    */
   private schedulePickingWarmup() {
     if (this.pickingWarmupStage === 2 || this.cancelPickingWarmup || this.interacting
-      || this.paused || this.destroyed || !this.overlay || !this.aviationOverlay) return;
+      || this.paused || this.destroyed || !this.overlay) return;
     this.cancelPickingWarmup = scheduleAfterMainThreadYield(() => {
       this.cancelPickingWarmup = null;
       if (this.interacting || this.paused || this.destroyed) return;
@@ -922,24 +942,57 @@ export class DeckMapRenderer implements MapRenderer {
       map.addControl(this.overlay as unknown as maplibregl.IControl);
       this.overlayMounted = true;
     }
-    if (this.aviationOverlay && !this.aviationOverlayMounted) {
+  }
+
+  private ensureAviationOverlay() {
+    const map = this.map;
+    if (!map || this.destroyed || this.paused || this.interacting) return null;
+    if (!this.aviationOverlay) {
+      this.aviationOverlay = new MapboxOverlay({
+        interleaved: false,
+        layers: [],
+        // Only moving aircraft and 2-4px route runners use this canvas. The
+        // labelled basemap and all static objects keep their full DPR.
+        useDevicePixels: Math.min(1, Math.max(0.6, window.devicePixelRatio * 0.6)),
+      });
+      this.aviationDeckSuspended = false;
+    }
+    if (!this.aviationOverlayMounted) {
       map.addControl(this.aviationOverlay as unknown as maplibregl.IControl);
       this.aviationOverlayMounted = true;
       const nativeViewSync = (this.aviationOverlay as unknown as {
         _updateViewState?: () => void;
       })._updateViewState || null;
       if (nativeViewSync) {
-        // The stock overlaid MapboxOverlay listens to every MapLibre render and
-        // calls Deck.redraw() synchronously. Our motion canvas is hidden during
-        // camera movement, so following every intermediate camera frame only
-        // duplicates the animation commit. Keep the original method as a
-        // one-shot sync used after moveend instead.
         map.off('render', nativeViewSync);
         this.aviationOverlayViewSync = () => {
           if (!this.interacting && !this.paused && !this.destroyed) nativeViewSync();
         };
       }
     }
+    return this.aviationOverlay;
+  }
+
+  private removeAviationOverlay() {
+    this.aviationLayerCommit.cancel();
+    this.cancelAnimationLoop();
+    this.seededAircraftPickPoints = [];
+    this.clearManualAviationHover();
+    const overlay = this.aviationOverlay;
+    const map = this.map;
+    if (overlay) overlay.setProps({ layers: [] });
+    if (map && overlay && this.aviationOverlayMounted) {
+      try {
+        map.removeControl(overlay as unknown as maplibregl.IControl);
+      } catch {
+        // MapLibre may already be replacing its style or tearing down.
+      }
+    }
+    this.aviationOverlay = null;
+    this.aviationOverlayMounted = false;
+    this.aviationOverlayViewSync = null;
+    this.aviationOverlayViewSyncPaused = false;
+    this.aviationDeckSuspended = false;
   }
 
   private pauseAviationOverlayViewSync() {
@@ -949,80 +1002,12 @@ export class DeckMapRenderer implements MapRenderer {
     if (canvas) canvas.style.visibility = 'hidden';
   }
 
-  private stageAviationOverlayCommit(layers: LayersList) {
-    this.pendingAviationLayers = layers;
-    this.cancelStagedAviationFrames();
-    this.aviationCommitFrame = window.requestAnimationFrame(() => {
-      this.aviationCommitFrame = null;
-      // A second immediate RAF is not a reliable frame boundary: Deck may
-      // defer the static draw, then Chrome coalesces both Deck canvases into a
-      // single 250ms+ task. Give the labelled/static canvas a bounded paint
-      // window, then enqueue motion on its own RAF. This is only used after a
-      // static generation; ordinary aviation ticks remain low-latency.
-      this.aviationCommitDelayTimer = window.setTimeout(() => {
-        this.aviationCommitDelayTimer = null;
-        this.aviationCommitFrame2 = window.requestAnimationFrame(() => {
-          this.aviationCommitFrame2 = null;
-          const pending = this.pendingAviationLayers;
-          this.pendingAviationLayers = null;
-          if (!pending || this.destroyed || this.paused || this.interacting) return;
-          // Reattach view-state synchronization only after the static Deck has
-          // painted; otherwise MapLibre's moveend repaint wakes both Deck
-          // animation loops in the same frame and defeats the staged commit.
-          this.resumeAviationOverlayViewSync();
-          this.performanceMonitor.measure('deck-commit', () => {
-            this.aviationOverlay?.setProps({ layers: pending });
-          });
-          this.resumeAviationDeckLoop();
-        });
-      }, 900);
-    });
-  }
-
-  private stageStaticLabelCommit(baseLayers: LayersList, labelLayers: Layer[]) {
-    this.cancelStagedStaticLabelCommit();
-    const generation = this.staticLabelCommitGeneration;
-    let cumulativeLayers = [...baseLayers];
-    labelLayers.forEach((layer, index) => {
-      cumulativeLayers = [...cumulativeLayers, layer];
-      const pending = cumulativeLayers;
-      const timer = window.setTimeout(() => {
-        this.staticLabelCommitTimers = this.staticLabelCommitTimers.filter((handle) => handle !== timer);
-        if (generation !== this.staticLabelCommitGeneration
-          || this.destroyed || this.paused || this.interacting) return;
-        this.performanceMonitor.measure('deck-commit', () => {
-          this.overlay?.setProps({ layers: pending });
-        });
-        this.map?.triggerRepaint();
-      }, 160 * (index + 1));
-      this.staticLabelCommitTimers.push(timer);
-    });
-  }
-
   private cancelStagedStaticLabelCommit() {
-    this.staticLabelCommitGeneration += 1;
-    for (const timer of this.staticLabelCommitTimers) window.clearTimeout(timer);
-    this.staticLabelCommitTimers = [];
-  }
-
-  private cancelStagedAviationFrames() {
-    if (this.aviationCommitFrame != null) {
-      window.cancelAnimationFrame(this.aviationCommitFrame);
-      this.aviationCommitFrame = null;
-    }
-    if (this.aviationCommitFrame2 != null) {
-      window.cancelAnimationFrame(this.aviationCommitFrame2);
-      this.aviationCommitFrame2 = null;
-    }
-    if (this.aviationCommitDelayTimer != null) {
-      window.clearTimeout(this.aviationCommitDelayTimer);
-      this.aviationCommitDelayTimer = null;
-    }
+    this.staticLayerCommit.cancel();
   }
 
   private cancelStagedAviationCommit() {
-    this.cancelStagedAviationFrames();
-    this.pendingAviationLayers = null;
+    this.aviationLayerCommit.cancel();
   }
 
   private resumeAviationOverlayViewSync() {
@@ -1248,6 +1233,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.cancelPickingWarmup?.();
     this.cancelPickingWarmup = null;
     this.cancelStagedAviationCommit();
+    this.cancelStagedStaticLabelCommit();
     this.pickingWarmupStage = 0;
     this.renderScheduler.cancel();
     this.heavyGeometryCommit.cancel();
@@ -1381,7 +1367,6 @@ export class DeckMapRenderer implements MapRenderer {
       && !this.interacting
       && !this.reducedMotion
       && Boolean(this.overlay)
-      && Boolean(this.aviationOverlay)
       && hasAnimatedHazardPulse(
         this.pulseEvents,
         this.state?.selectedEventId || null,

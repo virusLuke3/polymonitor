@@ -13,6 +13,7 @@ import {
 import { useRelatedWeatherMarkets } from '../data/useRelatedWeatherMarkets';
 import { mapSymbolForEvent } from '../config/mapSymbols';
 import { MapSymbolIcon } from './MapSymbolIcon';
+import { useNaturalHazardDetail } from '../data/useNaturalHazardDetail';
 
 export type EventInspectorProps = {
   event: GeoEvent;
@@ -57,13 +58,16 @@ function SourceCard({ source }: { source: GeoEventSource }) {
 }
 
 export function EventInspector({
-  event,
+  event: mapEvent,
   onClose,
   onOpenMarket,
   returnFocusTarget,
 }: EventInspectorProps) {
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const mapHazard = isHazardGeoEvent(mapEvent) ? mapEvent : null;
+  const detail = useNaturalHazardDetail(mapHazard);
+  const event = detail.event || mapEvent;
   const hazard = isHazardGeoEvent(event) ? event : null;
   const relatedMarkets = useRelatedWeatherMarkets(hazard?.id || null);
 
@@ -135,6 +139,12 @@ export function EventInspector({
 
       <section className="wm-event-inspector-section" aria-labelledby="wm-event-evidence-heading">
         <h3 id="wm-event-evidence-heading">{hazard ? 'Disaster report' : 'Event evidence'}</h3>
+        {detail.loading ? <p role="status">Loading the complete source report…</p> : null}
+        {detail.error ? (
+          <p className="wm-event-inspector-market-error" role="status">
+            Full report refresh failed; showing the compact map record: {detail.error}
+          </p>
+        ) : null}
         <FieldList fields={commonFields} />
         <FieldList fields={eventTimeFields(event)} />
         <FieldList fields={eventContextFields(event)} />

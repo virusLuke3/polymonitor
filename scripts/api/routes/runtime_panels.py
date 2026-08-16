@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
@@ -23,6 +24,8 @@ except Exception:  # pragma: no cover
 class RuntimePanelRouteDependencies:
     panel_context: RuntimePanelContext
     utc_now_iso: Callable[[], str]
+    natural_hazard_map_snapshot: Callable[..., dict[str, Any]] | None
+    natural_hazard_event_detail: Callable[..., dict[str, Any] | None] | None
     natural_hazard_related_markets: Callable[..., dict[str, Any] | None] | None
 
     @classmethod
@@ -30,6 +33,14 @@ class RuntimePanelRouteDependencies:
         return cls(
             panel_context=RuntimePanelContext.from_context(context),
             utc_now_iso=cast(Callable[[], str], resolve_route_callable(context, "utc_now_iso")),
+            natural_hazard_map_snapshot=cast(
+                Callable[..., dict[str, Any]] | None,
+                context.get("get_natural_hazard_map_snapshot"),
+            ),
+            natural_hazard_event_detail=cast(
+                Callable[..., dict[str, Any] | None] | None,
+                context.get("get_natural_hazard_event_detail"),
+            ),
             natural_hazard_related_markets=cast(
                 Callable[..., dict[str, Any] | None] | None,
                 context.get("get_natural_hazard_related_markets"),
@@ -230,6 +241,56 @@ def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
         response = jsonify(payload)
         response.headers["Cache-Control"] = "private, max-age=30"
         return response
+
+    def _public_conditional_json(payload: dict[str, Any], cache_control: str):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = cache_control
+        response.headers["Vary"] = "Accept-Encoding"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.add_etag()
+        response.make_conditional(request)
+        return response
+
+    @bp.route("/runtime/world/natural-hazards/map", methods=["GET"])
+    def api_natural_hazard_map_snapshot():
+        if dependencies.natural_hazard_map_snapshot is None:
+            return jsonify({"status": "error", "error": "hazard-map-feed-unavailable"}), 503
+        source = str(request.args.get("source") or "").strip().lower()
+        started_at = time.perf_counter()
+        try:
+            limit = max(1, min(1200, int(request.args.get("limit") or 1200)))
+            zoom = max(0.0, min(12.0, float(request.args.get("zoom") or 2.0)))
+            payload = dependencies.natural_hazard_map_snapshot(
+                source=source,
+                limit=limit,
+                zoom=zoom,
+            )
+        except ValueError as exc:
+            return jsonify({"status": "error", "error": str(exc)}), 400
+        response = _public_conditional_json(
+            payload,
+            "public, max-age=30, stale-while-revalidate=300, stale-if-error=86400",
+        )
+        response.headers["X-Map-Source"] = source
+        response.headers["X-Map-Event-Count"] = str((payload.get("counts") or {}).get("events") or 0)
+        response.headers["Server-Timing"] = f"hazard-map;dur={(time.perf_counter() - started_at) * 1000:.1f}"
+        return response
+
+    @bp.route("/runtime/world/natural-hazards/events/<path:event_id>", methods=["GET"])
+    def api_natural_hazard_event_detail(event_id: str):
+        if dependencies.natural_hazard_event_detail is None:
+            return jsonify({"status": "error", "error": "hazard-detail-unavailable"}), 503
+        payload = dependencies.natural_hazard_event_detail(event_id=event_id)
+        if payload is None:
+            return jsonify({
+                "status": "error",
+                "error": "hazard-event-not-found",
+                "eventId": event_id,
+            }), 404
+        return _public_conditional_json(
+            payload,
+            "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400",
+        )
 
     @bp.route("/v1/runtime/panels", methods=["GET"])
     def api_runtime_panels_batch_v1():

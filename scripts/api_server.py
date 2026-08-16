@@ -313,6 +313,8 @@ def build_route_context(service_context: ServiceContext) -> RouteContext:
         "get_f1_panel_snapshot": get_f1_panel_snapshot,
         "get_geo_sanctions_shock_snapshot": get_geo_sanctions_shock_snapshot,
         "get_natural_hazards_snapshot": get_natural_hazards_snapshot,
+        "get_natural_hazard_map_snapshot": get_natural_hazard_map_snapshot,
+        "get_natural_hazard_event_detail": get_natural_hazard_event_detail,
         "get_natural_hazard_related_markets": get_natural_hazard_related_markets,
         "get_global_transport_shipping_snapshot": lambda limit=14: global_transport_shipping_service.get_global_transport_shipping_snapshot(build_service_context(), limit=limit),
         "get_global_weather_map_snapshot": get_global_weather_map_snapshot,
@@ -551,6 +553,16 @@ def _create_service_context() -> ServiceContext:
             build_service_context(),
             limit=limit,
             allow_provider_fetch=False,
+        ),
+        "get_natural_hazard_map_snapshot": lambda source, limit=natural_hazards.DEFAULT_EVENT_LIMIT, zoom=2.0: natural_hazards.get_natural_hazard_map_snapshot(
+            build_service_context(),
+            source=source,
+            limit=limit,
+            zoom=zoom,
+        ),
+        "get_natural_hazard_event_detail": lambda event_id: natural_hazards.get_natural_hazard_event_detail(
+            build_service_context(),
+            event_id=event_id,
         ),
         "get_natural_hazard_related_markets": lambda event_id, limit=natural_hazards.DEFAULT_RELATED_MARKET_LIMIT: get_natural_hazard_related_markets(event_id=event_id, limit=limit),
         "get_global_transport_shipping_snapshot": lambda limit=14: global_transport_shipping_service.get_global_transport_shipping_snapshot(build_service_context(), limit=limit),
@@ -1073,6 +1085,26 @@ def get_natural_hazards_snapshot(limit: int = natural_hazards.DEFAULT_EVENT_LIMI
         build_service_context(),
         limit=limit,
         allow_provider_fetch=False,
+    )
+
+
+def get_natural_hazard_map_snapshot(
+    source: str,
+    limit: int = natural_hazards.DEFAULT_EVENT_LIMIT,
+    zoom: float = 2.0,
+) -> Dict[str, Any]:
+    return natural_hazards.get_natural_hazard_map_snapshot(
+        build_service_context(),
+        source=source,
+        limit=limit,
+        zoom=zoom,
+    )
+
+
+def get_natural_hazard_event_detail(event_id: str) -> Dict[str, Any] | None:
+    return natural_hazards.get_natural_hazard_event_detail(
+        build_service_context(),
+        event_id=event_id,
     )
 
 

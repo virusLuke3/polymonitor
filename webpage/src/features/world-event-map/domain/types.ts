@@ -164,7 +164,7 @@ export interface HazardMapSource {
 }
 
 export interface HazardMapResponse {
-  schemaVersion: 'natural-hazards.v1';
+  schemaVersion: 'natural-hazards.v1' | 'natural-hazards-map.v1';
   generatedAt: string;
   events: HazardEvent[];
   sources: HazardMapSource[];
@@ -174,6 +174,12 @@ export interface HazardMapResponse {
     events: number;
     byHazardKind: Partial<Record<HazardKind, number>>;
   };
+}
+
+export interface HazardDetailResponse {
+  schemaVersion: 'natural-hazard-detail.v1';
+  generatedAt: string;
+  event: HazardEvent;
 }
 
 export type HazardMarketEvidence = {

@@ -189,7 +189,7 @@ def fetch(
     url = f"{base_url.rstrip('/')}/{quote(clean_key, safe='')}/{quote(clean_source, safe='')}/world/1"
     text = http_text_get(
         url,
-        timeout=30,
+        timeout=8,
         headers={
             "Accept": "text/csv",
             "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",

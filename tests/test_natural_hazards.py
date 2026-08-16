@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ SCRIPTS_ROOT = REPO_ROOT / "scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
-from api.services.natural_hazards import service, snapshots
+from api.services.natural_hazards import map_feed, service, snapshots
 from api.services.natural_hazards.providers import eonet, firms, gdacs, nws, usgs
 
 
@@ -541,3 +542,150 @@ def test_cached_service_mode_never_calls_live_providers(monkeypatch) -> None:
     assert statuses["usgs"] == "degraded"
     assert statuses["eonet"] == "error"
     assert statuses["nws"] == "error"
+
+
+def _map_feed_context(store: FakeSnapshotStore):
+    return {
+        "http_json_get": lambda *_args, **_kwargs: {},
+        "SNAPSHOT_STORE": store,
+        "SETTINGS": SimpleNamespace(
+            natural_hazards_usgs_url="usgs",
+            natural_hazards_eonet_url="eonet",
+            natural_hazards_gdacs_url="gdacs",
+            natural_hazards_nws_url="nws",
+        ),
+        "app": SimpleNamespace(logger=FakeLogger()),
+    }
+
+
+def test_map_feed_is_source_scoped_compact_and_keeps_detail_out_of_first_paint() -> None:
+    store = FakeSnapshotStore()
+    coordinates = [[-125 + index * 0.01, 35 + (index % 7) * 0.01] for index in range(1400)]
+    coordinates.append(coordinates[0])
+    full_event = {
+        "id": "flood:nws:large-polygon",
+        "category": "weather",
+        "title": "Large flood warning",
+        "summary": "S" * 2000,
+        "severity": "warning",
+        "occurredAt": "2026-08-16T00:00:00Z",
+        "updatedAt": "2026-08-16T00:01:00Z",
+        "geometry": {"type": "Polygon", "coordinates": [coordinates]},
+        "locationPrecision": "region",
+        "locationLabel": "Test region",
+        "confidence": 0.9,
+        "sources": [{
+            "provider": "NWS",
+            "nativeId": "large-polygon",
+            "url": "https://example.test/full-source-link",
+            "freshness": "fresh",
+            "status": "ok",
+        }],
+        "limitations": ["L" * 1200],
+        "relatedMarketIds": [1, 2, 3],
+        "properties": {
+            "geometrySource": "nws-alert",
+            "instruction": "I" * 4000,
+            "affectedZones": [f"zone-{index}" for index in range(1000)],
+        },
+        "hazardKind": "flood",
+        "lifecycle": "active",
+        "coverage": {
+            "scope": "provider-area",
+            "label": "NWS responsibility areas",
+            "isComplete": False,
+            "gaps": ["Outside coverage"],
+        },
+        "severityEvidence": {
+            "provider": "NWS",
+            "rawLevel": "Severe",
+            "mappingVersion": "hazard-severity.v1",
+            "reason": "R" * 1000,
+        },
+        "revision": {"nativeEventId": "large-polygon", "revisionAt": "2026-08-16T00:01:00Z"},
+        "metrics": {
+            "kind": "weather-alert",
+            "urgency": "Immediate",
+            "certainty": "Likely",
+            "providerSeverity": "Severe",
+            "instruction": "I" * 4000,
+        },
+    }
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, "nws")] = {
+        "events": [full_event],
+        "fetchedAt": "2026-08-16T00:02:00Z",
+        "dataUpdatedAt": "2026-08-16T00:01:00Z",
+        "staleAfter": "2026-08-16T00:03:00Z",
+    }
+
+    payload = map_feed.get_natural_hazard_map_snapshot(
+        _map_feed_context(store),
+        source="nws",
+        zoom=2,
+    )
+    compact = payload["events"][0]
+    assert payload["schemaVersion"] == "natural-hazards-map.v1"
+    assert [source["key"] for source in payload["sources"]] == ["nws"]
+    assert len(compact["geometry"]["coordinates"][0]) <= 97
+    assert compact["geometry"]["coordinates"][0][0] == compact["geometry"]["coordinates"][0][-1]
+    assert compact["properties"] == {"geometrySource": "nws-alert", "detailAvailable": True}
+    assert compact["relatedMarketIds"] == []
+    assert compact["sources"][0].get("url") is None
+    assert len(json.dumps(compact)) < len(json.dumps(full_event)) * 0.2
+
+    detail = map_feed.get_natural_hazard_event_detail(
+        _map_feed_context(store),
+        event_id=full_event["id"],
+    )
+    assert detail is not None
+    assert detail["schemaVersion"] == "natural-hazard-detail.v1"
+    assert detail["event"]["metrics"]["instruction"] == "I" * 4000
+    assert detail["event"]["sources"][0]["url"] == "https://example.test/full-source-link"
+
+
+def test_map_feed_rejects_unknown_source() -> None:
+    try:
+        map_feed.get_natural_hazard_map_snapshot(
+            _map_feed_context(FakeSnapshotStore()),
+            source="invented",
+        )
+    except ValueError as exc:
+        assert str(exc) == "unsupported-natural-hazard-source"
+    else:  # pragma: no cover - explicit contract failure branch
+        raise AssertionError("unknown provider must be rejected")
+
+
+def test_map_feed_fetches_only_the_requested_provider_on_cache_miss() -> None:
+    calls: list[str] = []
+
+    def get_json(url: str, **_kwargs):
+        calls.append(url)
+        return {
+            "metadata": {"generated": 1_788_000_000_000},
+            "features": [{
+                "id": "source-scoped",
+                "properties": {
+                    "mag": 5.4,
+                    "place": "Scoped trench",
+                    "time": 1_788_000_000_000,
+                    "updated": 1_788_000_060_000,
+                    "url": "https://earthquake.usgs.gov/scoped",
+                    "detail": "https://earthquake.usgs.gov/scoped.geojson",
+                    "sig": 500,
+                    "status": "reviewed",
+                },
+                "geometry": {"type": "Point", "coordinates": [140.2, 35.1, 18.5]},
+            }],
+        }
+
+    store = FakeSnapshotStore()
+    context = _map_feed_context(store)
+    context["http_json_get"] = get_json
+
+    payload = map_feed.get_natural_hazard_map_snapshot(context, source="usgs")
+
+    assert payload["counts"]["events"] == 1
+    assert len(calls) == 1
+    assert calls == ["usgs"]
+    assert (snapshots.SNAPSHOT_NAMESPACE, "usgs") in store.values
+    assert (snapshots.SNAPSHOT_NAMESPACE, "eonet") not in store.values

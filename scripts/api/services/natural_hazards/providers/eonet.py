@@ -68,7 +68,7 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 300) -> Provide
     payload = http_json_get(
         url,
         params={"status": "open", "days": 120, "limit": max(1, limit), "category": CATEGORY_IDS},
-        timeout=18,
+        timeout=8,
         headers={
             "Accept": "application/json",
             "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",

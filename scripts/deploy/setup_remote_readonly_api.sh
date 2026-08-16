@@ -34,6 +34,9 @@ SERVER_NAME="${SERVER_NAME:-${REMOTE_HOST}}"
 PYTHON_BIN="${PYTHON_BIN:-${REMOTE_REPO_ROOT}/.venv/bin/python}"
 SNAPSHOT_SQLITE_PATH="${SNAPSHOT_SQLITE_PATH:-${REMOTE_REPO_ROOT}/data/panel_snapshots.sqlite3}"
 REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379/0}"
+PMTILES_UPSTREAM_HOST="${PMTILES_UPSTREAM_HOST:-maps.worldmonitor.app}"
+PMTILES_UPSTREAM_PATH="${PMTILES_UPSTREAM_PATH:-/planet.pmtiles}"
+PMTILES_CACHE_MAX_SIZE="${PMTILES_CACHE_MAX_SIZE:-10g}"
 
 : "${REMOTE_USER:?Set REMOTE_USER to the SSH user for the remote API host}"
 : "${REMOTE_HOST:?Set REMOTE_HOST to the remote API host}"
@@ -212,9 +215,28 @@ WantedBy=polydata-gcp.target
 EOF
 
 cat > "${LOCAL_NGINX_CONF}" <<EOF
+proxy_cache_path /var/cache/nginx/polymonitor-pmtiles
+    levels=1:2
+    keys_zone=polymonitor_pmtiles:20m
+    max_size=${PMTILES_CACHE_MAX_SIZE}
+    inactive=30d
+    use_temp_path=off;
+proxy_cache_path /var/cache/nginx/polymonitor-hazard-map
+    levels=1:2
+    keys_zone=polymonitor_hazard_map:10m
+    max_size=512m
+    inactive=1d
+    use_temp_path=off;
+
 server {
     listen 80;
     server_name ${SERVER_NAME} _;
+
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_vary on;
+    gzip_types application/json application/geo+json application/javascript text/css;
 
     root ${REMOTE_WEB_ROOT};
     index index.html;
@@ -237,20 +259,68 @@ server {
 
     location = /map-tiles/planet.pmtiles {
         resolver 1.1.1.1 8.8.8.8 ipv6=off valid=300s;
-        set \$worldmonitor_map_host maps.worldmonitor.app;
-        proxy_pass https://\$worldmonitor_map_host/planet.pmtiles;
+        set \$pmtiles_upstream_host ${PMTILES_UPSTREAM_HOST};
+        proxy_pass https://\$pmtiles_upstream_host${PMTILES_UPSTREAM_PATH};
         proxy_http_version 1.1;
         proxy_ssl_server_name on;
-        proxy_ssl_name \$worldmonitor_map_host;
-        proxy_set_header Host \$worldmonitor_map_host;
+        proxy_ssl_name \$pmtiles_upstream_host;
+        proxy_set_header Host \$pmtiles_upstream_host;
         proxy_set_header Range \$http_range;
         proxy_set_header If-Range \$http_if_range;
         proxy_force_ranges on;
-        proxy_buffering off;
+        proxy_cache polymonitor_pmtiles;
+        proxy_cache_key "\$request_method|\$uri|\$http_range";
+        proxy_cache_valid 200 206 30d;
+        proxy_cache_valid any 1m;
+        proxy_cache_lock on;
+        proxy_cache_lock_timeout 10s;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_buffering on;
+        proxy_buffers 16 64k;
+        proxy_busy_buffers_size 128k;
         proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_connect_timeout 5s;
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
+        add_header Accept-Ranges bytes always;
+        add_header Cache-Control "public, max-age=86400, stale-while-revalidate=604800" always;
+        add_header X-PMTiles-Cache \$upstream_cache_status always;
+    }
+
+    location = /wm-api/runtime/world/natural-hazards/map {
+        proxy_pass http://127.0.0.1:${API_PORT}/runtime/world/natural-hazards/map;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache polymonitor_hazard_map;
+        proxy_cache_key "\$request_method|\$request_uri";
+        proxy_cache_valid 200 30s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_background_update on;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 60s;
+        add_header X-Hazard-Cache \$upstream_cache_status always;
+    }
+
+    location ^~ /wm-api/runtime/world/natural-hazards/events/ {
+        proxy_pass http://127.0.0.1:${API_PORT}/runtime/world/natural-hazards/events/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache polymonitor_hazard_map;
+        proxy_cache_key "\$request_method|\$request_uri";
+        proxy_cache_valid 200 60s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 60s;
+        add_header X-Hazard-Cache \$upstream_cache_status always;
     }
 
     location /wm-api/ {
@@ -349,6 +419,8 @@ fi
 "${REMOTE_REPO_ROOT}/.venv/bin/pip" install -r "${REMOTE_REPO_ROOT}/scripts/requirements.lock.txt"
 
 sudo mkdir -p "${REMOTE_WEB_ROOT}"
+sudo install -d -o www-data -g www-data -m 750 /var/cache/nginx/polymonitor-pmtiles
+sudo install -d -o www-data -g www-data -m 750 /var/cache/nginx/polymonitor-hazard-map
 cd "${REMOTE_REPO_ROOT}/webpage"
 npm install
 npm run build

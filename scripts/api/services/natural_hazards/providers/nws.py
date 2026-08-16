@@ -214,7 +214,7 @@ def fetch(
     payload = http_json_get(
         url,
         params={"status": "actual", "message_type": "alert,update"},
-        timeout=20,
+        timeout=8,
         headers={
             "Accept": "application/geo+json",
             "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",

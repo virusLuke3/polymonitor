@@ -61,6 +61,21 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
         "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
         "get_weather_news_snapshot": lambda limit=24: {"limit": limit},
+        "get_natural_hazard_map_snapshot": lambda source, limit=1200, zoom=2: {
+            "schemaVersion": "natural-hazards-map.v1",
+            "generatedAt": "2026-08-16T00:00:00Z",
+            "events": [],
+            "sources": [],
+            "isPartial": False,
+            "errors": [],
+            "counts": {"events": 0, "byHazardKind": {}},
+            "meta": {"source": source, "limit": limit, "zoom": zoom},
+        },
+        "get_natural_hazard_event_detail": lambda event_id: {
+            "schemaVersion": "natural-hazard-detail.v1",
+            "generatedAt": "2026-08-16T00:00:00Z",
+            "event": {"id": event_id},
+        },
     }
 
     app.register_blueprint(create_runtime_panels_blueprint(helpers))
@@ -68,6 +83,23 @@ def test_runtime_panel_blueprint_registers_all_routes():
 
     for panel in RUNTIME_PANEL_MODULES:
         assert panel.route in registered_routes
+
+    client = app.test_client()
+    map_response = client.get("/runtime/world/natural-hazards/map?source=usgs&zoom=2")
+    assert map_response.status_code == 200
+    assert map_response.headers["Cache-Control"].startswith("public, max-age=30")
+    assert map_response.headers["ETag"]
+    assert map_response.headers["X-Map-Source"] == "usgs"
+    assert map_response.headers["Server-Timing"].startswith("hazard-map;dur=")
+    conditional = client.get(
+        "/runtime/world/natural-hazards/map?source=usgs&zoom=2",
+        headers={"If-None-Match": map_response.headers["ETag"]},
+    )
+    assert conditional.status_code == 304
+
+    detail_response = client.get("/runtime/world/natural-hazards/events/earthquake%3Ausgs%3Atest")
+    assert detail_response.status_code == 200
+    assert detail_response.get_json()["event"]["id"] == "earthquake:usgs:test"
 
 
 def test_default_workspace_panel_ids_include_runtime_and_static_panels():

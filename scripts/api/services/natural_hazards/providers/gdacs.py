@@ -62,7 +62,7 @@ def _metric(hazard_kind: str, properties: Dict[str, Any]) -> Dict[str, Any]:
 def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 160) -> ProviderResult:
     payload = http_json_get(
         url,
-        timeout=18,
+        timeout=8,
         headers={
             "Accept": "*/*",
             "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",

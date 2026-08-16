@@ -127,20 +127,16 @@ def _fetch_provider_results(
     return results
 
 
-def get_natural_hazards_snapshot(
-    context: Mapping[str, Any],
-    *,
-    limit: int = DEFAULT_EVENT_LIMIT,
-    allow_provider_fetch: bool = True,
-) -> Dict[str, Any]:
-    dependencies = NaturalHazardDependencies.from_context(context)
-    bounded_limit = max(1, min(DEFAULT_EVENT_LIMIT, int(limit)))
+def _source_specs(
+    dependencies: NaturalHazardDependencies,
+    bounded_limit: int,
+) -> dict[str, tuple[int, Callable[[], Dict[str, Any]]]]:
     previous_nws = stale_source_result(
         dependencies.snapshot_store,
         "nws",
         "nws-previous-snapshot",
     )
-    source_specs = {
+    specs: dict[str, tuple[int, Callable[[], Dict[str, Any]]]] = {
         "usgs": (
             60,
             lambda: usgs.fetch(
@@ -176,7 +172,7 @@ def get_natural_hazards_snapshot(
         ),
     }
     if dependencies.firms_map_key and dependencies.http_text_get is not None:
-        source_specs["firms"] = (
+        specs["firms"] = (
             900,
             lambda: firms.fetch(
                 dependencies.http_text_get,
@@ -186,6 +182,55 @@ def get_natural_hazards_snapshot(
                 limit=min(firms.MAX_AGGREGATES, bounded_limit),
             ),
         )
+    return specs
+
+
+def get_natural_hazard_source_result(
+    context: Mapping[str, Any],
+    *,
+    source: str,
+    limit: int = DEFAULT_EVENT_LIMIT,
+    allow_provider_fetch: bool = True,
+) -> SourceFetchResult:
+    """Load exactly one provider so slow sources never head-of-line block peers."""
+
+    key = str(source or "").strip().lower()
+    if key not in {"usgs", "eonet", "gdacs", "nws", "firms"}:
+        raise ValueError("unsupported-natural-hazard-source")
+    dependencies = NaturalHazardDependencies.from_context(context)
+    bounded_limit = max(1, min(DEFAULT_EVENT_LIMIT, int(limit)))
+    spec = _source_specs(dependencies, bounded_limit).get(key)
+    if spec is None:
+        error_code = "configuration-required" if key == "firms" else f"{key}-source-unavailable"
+        return {
+            **unavailable_source(key, error_code),
+            "status": "error",
+            "events": [],
+        }
+    if not allow_provider_fetch:
+        return cached_source_result(dependencies.snapshot_store, key) or {
+            **unavailable_source(key, f"{key}-snapshot-unavailable"),
+            "status": "error",
+            "events": [],
+        }
+    ttl_seconds, fetcher = spec
+    return fetch_with_snapshot(
+        key=key,
+        snapshot_store=dependencies.snapshot_store,
+        fetcher=fetcher,
+        ttl_seconds=ttl_seconds,
+    )
+
+
+def get_natural_hazards_snapshot(
+    context: Mapping[str, Any],
+    *,
+    limit: int = DEFAULT_EVENT_LIMIT,
+    allow_provider_fetch: bool = True,
+) -> Dict[str, Any]:
+    dependencies = NaturalHazardDependencies.from_context(context)
+    bounded_limit = max(1, min(DEFAULT_EVENT_LIMIT, int(limit)))
+    source_specs = _source_specs(dependencies, bounded_limit)
     if allow_provider_fetch:
         results = _fetch_provider_results(
             dependencies=dependencies,

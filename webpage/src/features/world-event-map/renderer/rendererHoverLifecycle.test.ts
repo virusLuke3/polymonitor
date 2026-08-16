@@ -321,7 +321,6 @@ describe('renderer hover lifecycle', () => {
     } as GeoEvent;
     const renderer = new DeckMapRenderer() as unknown as {
       overlay: object;
-      aviationOverlay: object;
       state: ReturnType<typeof defaultWorldEventMapState>;
       events: GeoEvent[];
       pulseEvents: GeoEvent[];
@@ -332,7 +331,6 @@ describe('renderer hover lifecycle', () => {
       destroy: () => void;
     };
     renderer.overlay = {};
-    renderer.aviationOverlay = {};
     renderer.state = defaultWorldEventMapState();
     renderer.events = [critical];
     renderer.pulseEvents = [critical];
@@ -348,5 +346,27 @@ describe('renderer hover lifecycle', () => {
     expect(renderer.hazardPulseTimer).toBeNull();
     renderer.destroy();
     vi.unstubAllGlobals();
+  });
+
+  it('renders the static map without allocating an aviation overlay', () => {
+    const request = vi.fn();
+    const renderer = new DeckMapRenderer() as unknown as {
+      overlay: object;
+      aviationOverlay: object | null;
+      state: ReturnType<typeof defaultWorldEventMapState>;
+      renderScheduler: { request: typeof request; cancel: () => void };
+      requestRender: (invalidation: { points: boolean }) => void;
+      destroy: () => void;
+    };
+    renderer.overlay = {};
+    renderer.aviationOverlay = null;
+    renderer.state = defaultWorldEventMapState();
+    renderer.renderScheduler = { request, cancel: vi.fn() };
+
+    renderer.requestRender({ points: true });
+
+    expect(request).toHaveBeenCalledWith({ points: true });
+    expect(renderer.aviationOverlay).toBeNull();
+    renderer.destroy();
   });
 });
