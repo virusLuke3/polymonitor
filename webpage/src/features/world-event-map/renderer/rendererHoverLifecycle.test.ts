@@ -369,4 +369,62 @@ describe('renderer hover lifecycle', () => {
     expect(renderer.aviationOverlay).toBeNull();
     renderer.destroy();
   });
+
+  it('commits static labels atomically so cached Deck layers are never finalized and reinserted', () => {
+    const setProps = vi.fn();
+    const events = Array.from({ length: 6 }, (_, index) => ({
+      id: `earthquake:cluster:${index}`,
+      category: 'natural-hazard',
+      title: `Earthquake ${index}`,
+      severity: 'critical',
+      geometry: { type: 'Point', coordinates: [10 + index * 0.02, 10 + index * 0.02] },
+      locationPrecision: 'exact',
+      sources: [{ provider: 'fixture', nativeId: String(index) }],
+      limitations: [],
+      relatedMarketIds: [],
+      properties: { mapEntity: 'hazard-event' },
+      hazardKind: 'earthquake',
+      lifecycle: 'active',
+      coverage: { scope: 'global', label: 'fixture', isComplete: false, gaps: [] },
+      severityEvidence: { provider: 'fixture', mappingVersion: 'fixture', reason: 'fixture' },
+      revision: { nativeEventId: String(index) },
+      metrics: { kind: 'earthquake', magnitude: 6.4 },
+    })) as GeoEvent[];
+    const renderer = new DeckMapRenderer() as unknown as {
+      overlay: { setProps: typeof setProps };
+      state: ReturnType<typeof defaultWorldEventMapState>;
+      events: GeoEvent[];
+      clusterIndex: { update: (items: GeoEvent[]) => void };
+      flushRender: (invalidation: {
+        points: boolean;
+        aviation: boolean;
+        geometry: boolean;
+        dynamic: boolean;
+        pulse: boolean;
+        interaction: boolean;
+      }) => void;
+      destroy: () => void;
+    };
+    renderer.overlay = { setProps };
+    renderer.state = {
+      ...defaultWorldEventMapState(),
+      activeLayerIds: ['earthquakes-volcanoes'],
+    };
+    renderer.events = events;
+    renderer.clusterIndex.update(events);
+
+    renderer.flushRender({
+      points: true,
+      aviation: false,
+      geometry: false,
+      dynamic: false,
+      pulse: false,
+      interaction: false,
+    });
+
+    expect(setProps).toHaveBeenCalledTimes(1);
+    const committed = setProps.mock.calls[0]?.[0]?.layers as Array<{ id: string }>;
+    expect(committed.map((layer) => layer.id)).toContain('world-event-cluster-counts');
+    renderer.destroy();
+  });
 });

@@ -136,7 +136,6 @@ export class DeckMapRenderer implements MapRenderer {
     viewport?: [number, number, number, number];
     generation: number;
   }>;
-  private readonly staticLayerCommit: DeferredLatestCommit<LayersList>;
   private readonly aviationLayerCommit: DeferredLatestCommit<LayersList>;
   private readonly performanceMonitor = new MapPerformanceMonitor();
   private deckHoverActive = false;
@@ -190,16 +189,6 @@ export class DeckMapRenderer implements MapRenderer {
         );
         this.geometryNeedsCommit = false;
         this.requestRender();
-      },
-    );
-    this.staticLayerCommit = new DeferredLatestCommit(
-      scheduleAfterMainThreadYield,
-      (layers) => {
-        if (this.destroyed || this.paused || this.interacting || !this.overlay) return;
-        this.performanceMonitor.measure('deck-commit', () => {
-          this.overlay?.setProps({ layers });
-        });
-        this.map?.triggerRepaint();
       },
     );
     this.aviationLayerCommit = new DeferredLatestCommit(
@@ -445,7 +434,6 @@ export class DeckMapRenderer implements MapRenderer {
     this.cancelPickingWarmup?.();
     this.cancelPickingWarmup = null;
     this.cancelStagedAviationCommit();
-    this.cancelStagedStaticLabelCommit();
     this.renderScheduler.cancel();
     this.heavyGeometryCommit.cancel();
     this.geometryNeedsCommit = true;
@@ -473,7 +461,6 @@ export class DeckMapRenderer implements MapRenderer {
     this.cancelPickingWarmup?.();
     this.cancelPickingWarmup = null;
     this.cancelStagedAviationCommit();
-    this.cancelStagedStaticLabelCommit();
     this.renderScheduler.cancel();
     this.heavyGeometryCommit.cancel();
     this.performanceMonitor.destroy();
@@ -678,19 +665,21 @@ export class DeckMapRenderer implements MapRenderer {
       ...staticLabelLayers,
     ];
     if (!onlyDynamic) {
-      // Commit the lightweight base immediately, then submit the latest labels
-      // and interaction layers after yielding. Unlike the previous fixed
-      // 160ms-per-label reveal, this has no artificial minimum wait and stale
-      // generations are cancelled automatically.
+      // Commit each static layer instance exactly once. The former two-step
+      // base/label path first removed the previous label layers (which makes
+      // deck.gl finalize them) and then reinserted the same cached instances
+      // after yielding. Layer._initialize correctly rejects that finalized
+      // instance reuse, leaving cluster counts and aviation labels missing.
+      // Heavy polygon work still uses the independent latest-only yielded
+      // geometry commit above; static labels are small enough for one atomic
+      // deck commit and must remain attached across updates.
       this.suspendAviationDeckLoop();
       this.performanceMonitor.measure('deck-commit', () => {
-        this.overlay?.setProps({ layers: staticBaseLayers });
+        this.overlay?.setProps({ layers: staticCompleteLayers });
       });
-      this.staticLayerCommit.stage(staticCompleteLayers);
     } else if (invalidation.pulse || invalidation.interaction) {
       // Hazard pulses and hover state belong to the static renderer. Aircraft
       // ticks therefore no longer repaint the labelled map canvas.
-      this.staticLayerCommit.cancel();
       this.performanceMonitor.measure('deck-commit', () => {
         this.overlay?.setProps({ layers: staticCompleteLayers });
       });
@@ -1002,10 +991,6 @@ export class DeckMapRenderer implements MapRenderer {
     if (canvas) canvas.style.visibility = 'hidden';
   }
 
-  private cancelStagedStaticLabelCommit() {
-    this.staticLayerCommit.cancel();
-  }
-
   private cancelStagedAviationCommit() {
     this.aviationLayerCommit.cancel();
   }
@@ -1231,7 +1216,6 @@ export class DeckMapRenderer implements MapRenderer {
     this.cancelPickingWarmup?.();
     this.cancelPickingWarmup = null;
     this.cancelStagedAviationCommit();
-    this.cancelStagedStaticLabelCommit();
     this.pickingWarmupStage = 0;
     this.renderScheduler.cancel();
     this.heavyGeometryCommit.cancel();
