@@ -2566,6 +2566,33 @@ def get_market_oracle_payload(
     )
 
 
+def _build_market_oracle_payload(
+    dependencies: MarketOraclePayloadDependencies,
+    market_id: int,
+    market: dict,
+) -> Dict[str, Any]:
+    return {
+        "marketId": market_id,
+        "localMarketId": market_id,
+        "gammaMarketId": market.get("gamma_market_id"),
+        "questionId": market.get("question_id"),
+        "conditionId": market.get("condition_id"),
+        "oracle": market.get("oracle"),
+        "currentStatus": market.get("status"),
+        "completionStatus": market.get("completion_status"),
+        "isTradingClosed": _truthy_flag(market.get("is_trading_closed")),
+        "isResolved": _truthy_flag(market.get("is_resolved")),
+        "isFinal": _truthy_flag(market.get("is_final")),
+        "settlementOutcome": market.get("settlement_outcome"),
+        "settlementSource": market.get("settlement_source"),
+        "timeline": _get_oracle_events_by_market_id(
+            dependencies.oracle,
+            market_id,
+            market=market,
+        ),
+    }
+
+
 def _get_market_oracle_payload(
     dependencies: MarketOraclePayloadDependencies,
     market_id: int,
@@ -2578,34 +2605,12 @@ def _get_market_oracle_payload(
     )
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    cache_key = json.dumps({"marketId": int(market_id), "v": 3}, sort_keys=True, ensure_ascii=True)
-
-    def build_payload() -> Dict[str, Any]:
-        return {
-            "marketId": market_id,
-            "localMarketId": market_id,
-            "gammaMarketId": market.get("gamma_market_id"),
-            "questionId": market.get("question_id"),
-            "conditionId": market.get("condition_id"),
-            "oracle": market.get("oracle"),
-            "currentStatus": market.get("status"),
-            "completionStatus": market.get("completion_status"),
-            "isTradingClosed": _truthy_flag(market.get("is_trading_closed")),
-            "isResolved": _truthy_flag(market.get("is_resolved")),
-            "isFinal": _truthy_flag(market.get("is_final")),
-            "settlementOutcome": market.get("settlement_outcome"),
-            "settlementSource": market.get("settlement_source"),
-            "timeline": _get_oracle_events_by_market_id(
-                dependencies.oracle,
-                market_id,
-                market=market,
-            ),
-        }
+    cache_key = json.dumps({"marketId": int(market_id), "v": 4}, sort_keys=True, ensure_ascii=True)
 
     return dependencies.get_snapshot_payload(
         "snapshot:market_oracle_payload",
         cache_key,
-        build_payload,
+        lambda: _build_market_oracle_payload(dependencies, market_id, market),
         ttl_seconds=60,
     )
 
@@ -3893,10 +3898,10 @@ def _get_market_detail_payload(
         # request/propose/dispute/settle events from the Oracle panel.
         market = _get_market_by_id(dependencies.lookup, market_id)
         if market:
-            oracle_payload = _get_market_oracle_payload(
+            oracle_payload = _build_market_oracle_payload(
                 dependencies.oracle,
                 market_id,
-                market=market,
+                market,
             )
             if not oracle_payload.get("error"):
                 timeline = oracle_payload.get("timeline") or []
