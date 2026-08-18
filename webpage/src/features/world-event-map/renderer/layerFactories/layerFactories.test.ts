@@ -98,8 +98,12 @@ describe('world event layer factories', () => {
       'world-event-cluster-counts',
     ]);
     const clusterCounts = (layers as Layer[]).find((layer) => layer.id === 'world-event-cluster-counts');
-    expect((clusterCounts?.props as unknown as { characterSet?: string }).characterSet)
-      .toBe('0123456789');
+    const clusterCountProps = clusterCounts?.props as unknown as {
+      characterSet?: string;
+      getIcon?: unknown;
+    };
+    expect(clusterCountProps.getIcon).toBeTypeOf('function');
+    expect(clusterCountProps.characterSet).toBeUndefined();
   });
 
   it('keeps the selected event outside a cluster', () => {

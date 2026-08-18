@@ -15,6 +15,11 @@ import {
   type MapSymbolKey,
 } from '../../config/mapSymbols';
 import {
+  MAP_CLUSTER_COUNT_ATLAS,
+  MAP_CLUSTER_COUNT_ICON_MAPPING,
+  mapClusterCountIcon,
+} from '../../config/mapClusterCountAtlas';
+import {
   continuousMetricRadiusMeters,
   eventLabel,
   eventGeometryBounds,
@@ -444,28 +449,20 @@ export function createEventPointLayers({
       pickable: true,
       autoHighlight: false,
     }));
-    layers.push(new TextLayer<EventCluster>({
+    layers.push(new IconLayer<EventCluster>({
       id: 'world-event-cluster-counts',
       data: clusters,
+      iconAtlas: MAP_CLUSTER_COUNT_ATLAS,
+      iconMapping: MAP_CLUSTER_COUNT_ICON_MAPPING,
+      getIcon: (cluster) => mapClusterCountIcon(cluster.count),
       getPosition: (cluster) => cluster.coordinates,
-      getText: (cluster) => String(cluster.count),
-      getSize: (cluster) => String(cluster.count).length > 3 ? 7 : 8,
-      getColor: [236, 244, 242, 255],
+      getSize: 27,
+      getColor: [255, 255, 255, 255],
       getPixelOffset: [9, 7],
-      getTextAnchor: 'middle',
-      getAlignmentBaseline: 'center',
-      fontFamily: MAP_MONO_FONT_FAMILY,
-      fontWeight: 800,
-      // Cluster badges only contain decimal counts. A fixed minimal atlas is
-      // deterministic across deck.gl layer lifecycles and avoids rebuilding an
-      // empty auto-derived atlas while data is progressively hydrated.
-      characterSet: '0123456789',
-      background: true,
-      getBackgroundColor: [4, 10, 14, 226],
-      getBorderColor: (cluster) => cluster.color,
-      getBorderWidth: 1,
-      backgroundPadding: [3, 2],
-      backgroundBorderRadius: 4,
+      sizeUnits: 'pixels',
+      sizeMinPixels: 22,
+      sizeMaxPixels: 30,
+      alphaCutoff: 0.02,
       pickable: false,
     }));
   }
