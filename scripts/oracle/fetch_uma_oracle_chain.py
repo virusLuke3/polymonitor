@@ -648,15 +648,23 @@ def resolve_auto_start_block(
 
 
 def _block_ts(w3: Web3, block_number: int, cache: Optional[Dict[int, str]] = None) -> str:
-    """Return no event_time without issuing per-block timestamp RPC calls.
+    """Return the UTC timestamp for an Oracle event's Polygon block.
 
-    Oracle rows keep block_number/log_index/tx_hash as the canonical chain
-    ordering. Hydrating block timestamps requires eth_getBlockByNumber per
-    unique block and is intentionally disabled for live/backfill sync traffic.
+    The cache limits ``eth_getBlockByNumber`` to one call per unique event
+    block.  This is safe for the self-hosted Bor RPC and, unlike the former
+    empty-string placeholder, produces a valid PostgreSQL ``timestamptz``.
     """
+    block_number = int(block_number)
+    if cache is not None and block_number in cache:
+        return cache[block_number]
+    block = _call_with_retries(
+        f"eth_getBlockByNumber({block_number})",
+        lambda: w3.eth.get_block(block_number),
+    )
+    timestamp = datetime.fromtimestamp(int(block["timestamp"]), timezone.utc).isoformat()
     if cache is not None:
-        cache.setdefault(block_number, "")
-    return ""
+        cache[block_number] = timestamp
+    return timestamp
 
 
 def fetch_logs_with_retry(
@@ -2033,14 +2041,20 @@ def run(
             _live("updown_ctf", progress_block=oracle_start_block)
             updown_last = get_last_oracle_synced_block(db_path, sync_state_key=updown_sync_state_key)
             updown_start_block = oracle_start_block
-            if updown_last is not None:
+            if continue_sync and updown_last is not None:
                 rewind = max(0, int(continue_sync_rewind_blocks))
-                updown_start_block = max(oracle_start_block, int(updown_last) + 1 - rewind)
-            if updown_start_block <= end_block:
+                updown_start_block = max(0, int(updown_last) + 1 - rewind)
+            updown_end_block = int(end_block)
+            if continue_sync and continue_sync_max_blocks and continue_sync_max_blocks > 0:
+                updown_end_block = min(
+                    updown_end_block,
+                    int(updown_start_block) + int(continue_sync_max_blocks) - 1,
+                )
+            if updown_start_block <= updown_end_block:
                 updown_stats = run_updown_oracle_backfill(
                     rpc_url=rpc_url,
                     from_block=updown_start_block,
-                    to_block=end_block,
+                    to_block=updown_end_block,
                     db_path=db_path,
                     batch_blocks=batch_oracle,
                     max_workers=max_workers,
@@ -2049,7 +2063,7 @@ def run(
                 )
                 _live(
                     "updown_ctf_complete",
-                    progress_block=end_block,
+                    progress_block=updown_end_block,
                     logs_scanned=updown_stats.get("logs_scanned"),
                     records_written=updown_stats.get("matched_events"),
                 )
@@ -2089,7 +2103,13 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="最大输出条数，默认不限")
     add_db_cli_args(parser)
     parser.add_argument("--watch", action="store_true", help="守护进程模式：循环执行 oracle 同步")
-    parser.add_argument("--interval", type=int, default=30, help="--watch 模式下每轮等待秒数")
+    parser.add_argument("--interval", type=int, default=30, help="--watch 模式追平后每轮等待秒数")
+    parser.add_argument(
+        "--catchup-interval",
+        type=int,
+        default=1,
+        help="--watch/--continue-sync 落后且本轮被区块上限截断时的等待秒数 (default: 1)",
+    )
     parser.add_argument("--confirmations", type=int, default=20, help="自动追最新区块时保留的确认块数")
     parser.add_argument("--continue-sync", action="store_true", help="从 sync_state.oracle_sync 记录的上次区块继续同步")
     parser.add_argument(
@@ -2139,7 +2159,7 @@ def main():
     configure_db_from_args(args)
     db_path = args.sqlite_path
 
-    def _run_once() -> None:
+    def _run_once() -> Tuple[Optional[int], int]:
         effective_end_block = args.end_block
         if effective_end_block is None:
             rpc_url = args.rpc or get_rpc_url()
@@ -2170,6 +2190,21 @@ def main():
             include_updown=args.include_updown,
             updown_sync_state_key=args.updown_sync_state_key,
         )
+        checkpoint = get_last_oracle_synced_block(
+            db_path,
+            sync_state_key=ORACLE_SYNC_STATE_KEY,
+        )
+        if args.include_updown:
+            updown_checkpoint = get_last_oracle_synced_block(
+                db_path,
+                sync_state_key=args.updown_sync_state_key,
+            )
+            if updown_checkpoint is not None:
+                checkpoint = min(
+                    int(checkpoint) if checkpoint is not None else int(updown_checkpoint),
+                    int(updown_checkpoint),
+                )
+        return checkpoint, int(effective_end_block)
 
     if args.watch:
         run_index = 0
@@ -2182,10 +2217,26 @@ def main():
                     file=sys.stderr,
                 )
                 try:
-                    _run_once()
+                    checkpoint, target_end_block = _run_once()
                     consecutive_failures = 0
-                    print(f"[oracle] Sleeping {args.interval}s", file=sys.stderr)
-                    time.sleep(args.interval)
+                    still_catching_up = (
+                        args.continue_sync
+                        and checkpoint is not None
+                        and int(checkpoint) < int(target_end_block)
+                    )
+                    sleep_seconds = max(
+                        0,
+                        int(args.catchup_interval if still_catching_up else args.interval),
+                    )
+                    if still_catching_up:
+                        print(
+                            f"[oracle] Catch-up checkpoint={checkpoint}, target={target_end_block}; "
+                            f"sleeping {sleep_seconds}s before the next bounded window",
+                            file=sys.stderr,
+                        )
+                    else:
+                        print(f"[oracle] Sleeping {sleep_seconds}s", file=sys.stderr)
+                    time.sleep(sleep_seconds)
                 except KeyboardInterrupt:
                     raise
                 except Exception as exc:

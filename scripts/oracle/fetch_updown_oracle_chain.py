@@ -27,6 +27,7 @@ from db import dict_from_row, get_connection
 from oracle.fetch_uma_oracle_chain import (
     _OracleDbWriter,
     _block_at_timestamp,
+    _block_ts,
     _build_web3,
     _call_with_retries,
     _db_target_available,
@@ -332,13 +333,15 @@ def run_updown_oracle_backfill(
         matched_entries.append((log, decoded, market, tx_hash))
 
     tx_context = {"tx_from": "", "tx_to": "", "actor": "", "log_addresses": []}
+    block_ts_cache: Dict[int, str] = {}
 
     for log, decoded, market, tx_hash in matched_entries:
+        block_number = int(log.get("blockNumber", 0) or 0)
         record = _build_record(
             market,
             decoded,
             log,
-            "",
+            _block_ts(w3, block_number, block_ts_cache),
             tx_context,
             _lower_or_empty(log.get("_source_address") or log.get("address") or ""),
         )
