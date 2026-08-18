@@ -382,9 +382,11 @@ describe('world event layer factories', () => {
     const hubLabelProps = hubLabel?.props as unknown as {
       characterSet?: string;
       fontSettings?: { sdf?: boolean };
+      outlineWidth?: number;
     } | undefined;
-    expect(hubLabelProps?.fontSettings?.sdf).toBe(true);
     expect(hubLabelProps?.characterSet).toBe('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-');
+    expect(hubLabelProps?.fontSettings?.sdf).not.toBe(true);
+    expect(hubLabelProps?.outlineWidth).toBe(0);
     const atStart = aviationRouteMotionPoints([route], 0)[0]?.position;
     const afterMotion = aviationRouteMotionPoints([route], 8)[0]?.position;
     expect(afterMotion).not.toEqual(atStart);

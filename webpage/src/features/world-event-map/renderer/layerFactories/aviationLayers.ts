@@ -9,11 +9,6 @@ import type {
 import { MAP_SYMBOL_MASK_ATLAS, MAP_SYMBOL_MASK_ICON_MAPPING } from '../../config/mapSymbols';
 import { MAP_MONO_FONT_FAMILY } from './shared';
 
-const AVIATION_LABEL_FONT_SETTINGS = {
-  sdf: true,
-  fontSize: 32,
-  buffer: 4,
-} as const;
 const AVIATION_COUNT_CHARACTER_SET = '0123456789';
 const AVIATION_HUB_CHARACTER_SET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-';
 
@@ -734,9 +729,6 @@ function createAviationMarkerLayerSections(
         fontFamily: MAP_MONO_FONT_FAMILY,
         fontWeight: 800,
         characterSet: AVIATION_COUNT_CHARACTER_SET,
-        fontSettings: AVIATION_LABEL_FONT_SETTINGS,
-        outlineWidth: 2,
-        outlineColor: [0, 8, 12, 230],
         pickable: false,
       }));
     }
@@ -769,9 +761,6 @@ function createAviationMarkerLayerSections(
       fontFamily: MAP_MONO_FONT_FAMILY,
       fontWeight: 900,
       characterSet: AVIATION_HUB_CHARACTER_SET,
-      fontSettings: AVIATION_LABEL_FONT_SETTINGS,
-      outlineWidth: 3,
-      outlineColor: [0, 0, 0, 220],
       pickable: false,
     }));
   }
@@ -925,9 +914,6 @@ export function createAviationDynamicLayers(
         fontFamily: MAP_MONO_FONT_FAMILY,
         fontWeight: 800,
         characterSet: AVIATION_COUNT_CHARACTER_SET,
-        fontSettings: AVIATION_LABEL_FONT_SETTINGS,
-        outlineWidth: 2,
-        outlineColor: [0, 8, 12, 230],
         pickable: false,
       }));
     }

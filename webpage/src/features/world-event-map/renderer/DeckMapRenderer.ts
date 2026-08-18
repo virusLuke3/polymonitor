@@ -1095,8 +1095,6 @@ export class DeckMapRenderer implements MapRenderer {
       getColor: [134, 146, 151, 205],
       getTextAnchor: 'middle',
       getAlignmentBaseline: 'center',
-      outlineWidth: 2,
-      outlineColor: [4, 8, 11, 235],
       parameters: { depthWriteEnabled: false },
     })];
   }
