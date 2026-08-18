@@ -11,6 +11,7 @@ import type {
   MapRendererCallbacks,
 } from '../renderer/MapRenderer';
 import { inspectWebGL2Support } from '../renderer/webglSupport';
+import { rectIntersectsViewport } from '../renderer/rendererVisibility';
 import {
   worldEventLayerById,
   worldEventLayerIdForEvent,
@@ -109,7 +110,12 @@ export function WorldEventMap({
     const host = hostRef.current;
     if (!host || rendererRef.current) return;
     let disposed = false;
-    let inViewport = typeof IntersectionObserver === 'undefined';
+    const hostIntersectsViewport = () => rectIntersectsViewport(
+      host.getBoundingClientRect(),
+      window.innerWidth,
+      window.innerHeight,
+    );
+    let inViewport = typeof IntersectionObserver === 'undefined' || hostIntersectsViewport();
     let installFrame: number | null = null;
     let rendererInstallStarted = false;
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -185,7 +191,13 @@ export function WorldEventMap({
       });
     };
 
-    const observer = new ResizeObserver(() => rendererRef.current?.resize());
+    const observer = new ResizeObserver(() => {
+      rendererRef.current?.resize();
+      if (!rendererInstallStarted && !inViewport) {
+        inViewport = hostIntersectsViewport();
+        if (inViewport) scheduleRendererInstall();
+      }
+    });
     observer.observe(host);
     const intersectionObserver = typeof IntersectionObserver === 'undefined'
       ? null
