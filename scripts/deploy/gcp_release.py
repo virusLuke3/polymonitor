@@ -45,6 +45,7 @@ GCP_EXCLUDED_SOURCE_FILES = {
 EXTERNAL_RELEASE_PREFIXES = (
     ".github/",
     "deploy/nginx/",
+    "deploy/systemd/",
     "document/",
     "docs/",
     "scripts/qa/",
