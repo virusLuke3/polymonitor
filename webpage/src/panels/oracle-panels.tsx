@@ -1,5 +1,5 @@
 import { Panel } from '@/components/Panel';
-import type { OraclePayload, PanelRenderContext } from '@/types';
+import type { OracleEvent, OraclePayload, PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
 import { AiMarketWidePanel } from './shared/ai-market-wide';
 import { oracleList } from './shared/renderers';
@@ -8,6 +8,21 @@ import { globalOracle } from './shared/selectors';
 import { useI18n } from '@/services/i18n';
 
 type OracleI18n = ReturnType<typeof useI18n>;
+
+type OracleFeedView = {
+  events: OracleEvent[];
+  source: 'focused' | 'global-fallback' | 'global';
+};
+
+export function oracleFeedView(focused: OraclePayload | null, globalEvents: OracleEvent[]): OracleFeedView {
+  if (focused?.timeline?.length) {
+    return { events: focused.timeline, source: 'focused' };
+  }
+  return {
+    events: globalEvents,
+    source: focused ? 'global-fallback' : 'global',
+  };
+}
 
 function focusedOraclePayload(ctx: PanelRenderContext): OraclePayload | null {
   if (ctx.selectedMarketId && ctx.bundle?.oracle) {
@@ -150,7 +165,7 @@ function OracleFeedPanel({ ctx }: { ctx: PanelRenderContext }) {
   const i18n = useI18n();
   const { t } = i18n;
   const focused = focusedOraclePayload(ctx);
-  const events = focused?.timeline?.length ? focused.timeline : globalOracle(ctx);
+  const view = oracleFeedView(focused, globalOracle(ctx));
   const copy = {
     noActivity: t('atlasOracle.noActivity'),
     finalCount: (count: number) => t('atlasOracle.finalCount', { count: i18n.formatNumber(count) }),
@@ -178,22 +193,25 @@ function OracleFeedPanel({ ctx }: { ctx: PanelRenderContext }) {
       title={focused ? t('atlasOracle.statusTitle') : t('atlasOracle.feedTitle')}
       badge={focused ? (oracleIsLinked(ctx, focused) ? t('atlasOracle.linked') : t('atlasOracle.unlinked')) : t('atlasOracle.live')}
       status="live"
-      count={focused ? (focused.timeline?.length || 0) : globalOracle(ctx).length}
+      count={view.events.length}
       className="wm-oracle-feed-panel"
     >
       {focused
         ? (
             <>
               {focusedOracleStatus(ctx, focused, i18n)}
-              {focused.timeline?.length ? (
+              {view.events.length ? (
                 <section className="wm-oracle-recent-events">
-                  <div className="wm-oracle-section-heading"><span>{t('atlasOracle.recentEvents')}</span><em>{i18n.formatNumber(focused.timeline.length)}</em></div>
-                  {oracleList(focused.timeline, 6, 'timeline', copy)}
+                  <div className="wm-oracle-section-heading">
+                    <span>{view.source === 'focused' ? t('atlasOracle.recentEvents') : t('atlasOracle.feedTitle')}</span>
+                    <em>{i18n.formatNumber(view.events.length)}</em>
+                  </div>
+                  {oracleList(view.events, 6, view.source === 'focused' ? 'timeline' : 'feed', copy)}
                 </section>
               ) : null}
             </>
           )
-        : oracleList(events, 10, 'feed', copy)}
+        : oracleList(view.events, 10, 'feed', copy)}
     </Panel>
   );
 }
