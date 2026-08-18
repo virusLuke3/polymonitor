@@ -72,9 +72,11 @@ function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload, i1
   const tradingClosed = Boolean(payload.isTradingClosed || payload.isResolved || payload.isFinal || currentStatus.includes('closed') || currentStatus.includes('ended'));
   const resolved = Boolean(payload.isResolved || payload.isFinal);
   const outcome = payload.settlementOutcome && payload.settlementOutcome !== 'UNKNOWN' ? payload.settlementOutcome : t('atlasOracle.pendingOutcome');
-  const updatedAt = ctx.bundle?.servingUpdatedAt || ctx.bundle?.generatedAt || null;
   const createdAt = ctx.bundle?.market?.createdAt || ctx.selectedMarket?.createdAt || ctx.bundle?.group?.createdAt || ctx.selectedMarketGroupDetail?.createdAt || ctx.selectedMarketGroup?.createdAt || null;
   const closedAt = ctx.bundle?.market?.endDate || ctx.selectedMarket?.endDate || ctx.bundle?.group?.endDate || ctx.selectedMarketGroupDetail?.endDate || ctx.selectedMarketGroup?.endDate || null;
+  const timeline = payload.timeline || [];
+  const latestEvent = timeline.length ? timeline[timeline.length - 1] : null;
+  const updatedAt = latestEvent?.eventTime || ctx.bundle?.generatedAt || ctx.bundle?.servingUpdatedAt || null;
   const proposedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('propose'));
   const disputedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('dispute'));
   const finalizedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('settle') || event.isFinal);

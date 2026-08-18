@@ -3887,6 +3887,28 @@ def _get_market_detail_payload(
         market_id,
     )
     if serving_payload is not None:
+        # The pre-generated serving row intentionally contains only a compact
+        # Oracle summary. Hydrate the selected market from the canonical
+        # oracle_events table so a stale serving row cannot hide newly indexed
+        # request/propose/dispute/settle events from the Oracle panel.
+        market = _get_market_by_id(dependencies.lookup, market_id)
+        if market:
+            oracle_payload = _get_market_oracle_payload(
+                dependencies.oracle,
+                market_id,
+                market=market,
+            )
+            if not oracle_payload.get("error"):
+                timeline = oracle_payload.get("timeline") or []
+                serving_payload = dict(serving_payload)
+                serving_payload["oracle"] = oracle_payload
+                serving_payload["oracleEvents"] = timeline
+                diagnostics = dict(serving_payload.get("diagnostics") or {})
+                diagnostics["oracleStatus"] = (
+                    oracle_payload.get("completionStatus") or "OPEN"
+                )
+                diagnostics["oracleEventCount"] = len(timeline) if isinstance(timeline, list) else 0
+                serving_payload["diagnostics"] = diagnostics
         return serving_payload
     market = _get_market_by_id(dependencies.lookup, market_id)
     if not market:
