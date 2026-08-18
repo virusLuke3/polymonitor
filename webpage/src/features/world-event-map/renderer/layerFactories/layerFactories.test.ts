@@ -97,6 +97,9 @@ describe('world event layer factories', () => {
       'world-event-clusters',
       'world-event-cluster-counts',
     ]);
+    const clusterCounts = (layers as Layer[]).find((layer) => layer.id === 'world-event-cluster-counts');
+    expect((clusterCounts?.props as unknown as { characterSet?: string }).characterSet)
+      .toBe('0123456789');
   });
 
   it('keeps the selected event outside a cluster', () => {
@@ -376,8 +379,12 @@ describe('world event layer factories', () => {
       ]);
     const hubLabel = (createWorldEventLayers([route, hub], state, true, undefined, 5) as Layer[])
       .find((layer) => layer.id === 'aviation-hub-labels');
-    const hubLabelProps = hubLabel?.props as unknown as { fontSettings?: { sdf?: boolean } } | undefined;
+    const hubLabelProps = hubLabel?.props as unknown as {
+      characterSet?: string;
+      fontSettings?: { sdf?: boolean };
+    } | undefined;
     expect(hubLabelProps?.fontSettings?.sdf).toBe(true);
+    expect(hubLabelProps?.characterSet).toBe('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-');
     const atStart = aviationRouteMotionPoints([route], 0)[0]?.position;
     const afterMotion = aviationRouteMotionPoints([route], 8)[0]?.position;
     expect(afterMotion).not.toEqual(atStart);

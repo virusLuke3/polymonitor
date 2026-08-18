@@ -456,10 +456,10 @@ export function createEventPointLayers({
       getAlignmentBaseline: 'center',
       fontFamily: MAP_MONO_FONT_FAMILY,
       fontWeight: 800,
-      // Default TextLayer allocates an atlas for the full ASCII range. Cluster
-      // badges only contain the digits currently on screen, so let deck.gl
-      // derive the minimal glyph set instead of blocking first paint.
-      characterSet: 'auto',
+      // Cluster badges only contain decimal counts. A fixed minimal atlas is
+      // deterministic across deck.gl layer lifecycles and avoids rebuilding an
+      // empty auto-derived atlas while data is progressively hydrated.
+      characterSet: '0123456789',
       background: true,
       getBackgroundColor: [4, 10, 14, 226],
       getBorderColor: (cluster) => cluster.color,
