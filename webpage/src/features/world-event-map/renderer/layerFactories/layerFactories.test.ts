@@ -374,6 +374,9 @@ describe('world event layer factories', () => {
         'aviation-hubs',
         'aviation-hub-labels',
       ]);
+    const hubLabel = (createWorldEventLayers([route, hub], state, true, undefined, 5) as Layer[])
+      .find((layer) => layer.id === 'aviation-hub-labels');
+    expect((hubLabel?.props.fontSettings as { sdf?: boolean } | undefined)?.sdf).toBe(true);
     const atStart = aviationRouteMotionPoints([route], 0)[0]?.position;
     const afterMotion = aviationRouteMotionPoints([route], 8)[0]?.position;
     expect(afterMotion).not.toEqual(atStart);
