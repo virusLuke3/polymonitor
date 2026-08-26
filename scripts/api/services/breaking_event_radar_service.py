@@ -428,7 +428,7 @@ def _build_breaking_event_radar_payload(
             float(
                 os.environ.get(
                     "POLYDATA_BREAKING_EVENT_GDELT_MIN_INTERVAL_SECONDS",
-                    "5",
+                    "10",
                 )
                 or 5
             ),
@@ -441,6 +441,7 @@ def _build_breaking_event_radar_payload(
     items: List[Dict[str, Any]] = []
     sources: Dict[str, Any] = {"gdelt": {"status": "empty", "count": 0}, "wikimedia": {"status": "empty", "count": 0}}
     errors: List[str] = []
+    gdelt_failure_statuses: List[str] = []
     last_gdelt_attempt_at: Optional[float] = None
     for seed in seeds:
         articles: List[Dict[str, Any]] = []
@@ -459,12 +460,9 @@ def _build_breaking_event_radar_payload(
                 max_records=max_records,
             )
             sources["gdelt"]["count"] += len(articles)
-            sources["gdelt"]["status"] = "ok" if articles else sources["gdelt"]["status"]
         except Exception as exc:
             failure_status, failure_label = _source_failure(exc)
-            sources["gdelt"]["status"] = (
-                "partial" if sources["gdelt"]["count"] else failure_status
-            )
+            gdelt_failure_statuses.append(failure_status)
             sources["gdelt"]["errorCount"] = int(
                 sources["gdelt"].get("errorCount") or 0
             ) + 1
@@ -492,6 +490,14 @@ def _build_breaking_event_radar_payload(
                     pageviews,
                 )
             )
+    if gdelt_failure_statuses:
+        sources["gdelt"]["status"] = (
+            "partial"
+            if sources["gdelt"]["count"]
+            else gdelt_failure_statuses[-1]
+        )
+    elif sources["gdelt"]["count"]:
+        sources["gdelt"]["status"] = "ok"
     items.sort(key=lambda row: (int(row.get("velocityScore") or 0), str(row.get("eventTime") or "")), reverse=True)
     limited = items[: max(1, min(int(limit or DEFAULT_LIMIT), 80))]
     status = "ok" if limited and not errors else "degraded" if limited else "empty" if not errors else "degraded"
