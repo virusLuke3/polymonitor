@@ -261,7 +261,7 @@ class SignalsWatcher:
     def service_context(self) -> Dict[str, Any]:
         import api_server
 
-        ctx = api_server.build_service_context()
+        ctx = dict(api_server.build_service_context())
         ctx["app"] = _AppAdapter()
         ctx["DB_CONNECTION_EXIT_DISABLED"] = True
         return ctx
