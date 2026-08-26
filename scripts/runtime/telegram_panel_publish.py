@@ -14,10 +14,7 @@ if str(_repo_root) not in sys.path:
 
 
 def _enabled() -> bool:
-    # The dedicated all-panel publisher owns outbound delivery in production.
-    # Cache writers must remain fast and deterministic unless a standalone
-    # deployment explicitly opts back into synchronous publishing.
-    raw = os.environ.get("POLYDATA_TELEGRAM_PUBLISH_ON_PANEL_CACHE", "false")
+    raw = os.environ.get("POLYDATA_TELEGRAM_PUBLISH_ON_PANEL_CACHE", "true")
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
