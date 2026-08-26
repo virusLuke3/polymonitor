@@ -9,7 +9,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 from urllib.parse import quote
 
 from api.context import (
@@ -180,6 +180,14 @@ def _load_topic_seeds() -> List[Dict[str, Any]]:
     return DEFAULT_TOPIC_SEEDS
 
 
+def breaking_event_topic_ids() -> List[str]:
+    return [
+        str(seed.get("id") or "").strip()
+        for seed in _load_topic_seeds()
+        if str(seed.get("id") or "").strip()
+    ]
+
+
 def _gdelt_url(dependencies: BreakingEventRadarDependencies) -> str:
     return str(
         os.environ.get("POLYDATA_BREAKING_EVENT_GDELT_DOC_API_URL")
@@ -314,6 +322,7 @@ def _build_event_item(
     source_url = str(latest_article.get("url") or latest_article.get("shareurl") or GDELT_DOC_API_URL)
     return {
         "id": _stable_id(seed.get("id"), _article_title(latest_article), source_url),
+        "topicId": str(seed.get("id") or ""),
         "topic": str(seed.get("topic") or "breaking"),
         "entity": str(seed.get("entity") or seed.get("id") or "Breaking Event"),
         "country": str(seed.get("country") or "Global"),
@@ -409,10 +418,12 @@ def build_breaking_event_radar_payload(
     ctx: Mapping[str, Any],
     *,
     limit: int = DEFAULT_LIMIT,
+    topic_ids: Iterable[str] | None = None,
 ) -> Dict[str, Any]:
     return _build_breaking_event_radar_payload(
         BreakingEventRadarDependencies.from_context(ctx),
         limit=limit,
+        topic_ids=topic_ids,
     )
 
 
@@ -420,6 +431,7 @@ def _build_breaking_event_radar_payload(
     dependencies: BreakingEventRadarDependencies,
     *,
     limit: int,
+    topic_ids: Iterable[str] | None = None,
 ) -> Dict[str, Any]:
     max_records = max(5, min(int(os.environ.get("POLYDATA_BREAKING_EVENT_GDELT_MAX_RECORDS", "20") or 20), 50))
     gdelt_min_interval_seconds = max(
@@ -438,6 +450,17 @@ def _build_breaking_event_radar_payload(
     wikimedia_enabled = str(os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "on"}
     max_wiki_titles = max(0, min(int(os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_TITLES_PER_TOPIC", "1") or 1), 4))
     seeds = _load_topic_seeds()
+    requested_topic_ids = {
+        str(topic_id or "").strip()
+        for topic_id in (topic_ids or [])
+        if str(topic_id or "").strip()
+    }
+    if requested_topic_ids:
+        seeds = [
+            seed
+            for seed in seeds
+            if str(seed.get("id") or "").strip() in requested_topic_ids
+        ]
     items: List[Dict[str, Any]] = []
     sources: Dict[str, Any] = {"gdelt": {"status": "empty", "count": 0}, "wikimedia": {"status": "empty", "count": 0}}
     errors: List[str] = []
@@ -513,6 +536,73 @@ def _build_breaking_event_radar_payload(
         "summary": _summary(limited),
         "items": limited,
         "errors": errors[:12],
+    }
+
+
+def _topic_id_for_item(item: Dict[str, Any]) -> str:
+    explicit = str(item.get("topicId") or "").strip()
+    if explicit:
+        return explicit
+    entity = str(item.get("entity") or "").strip().lower()
+    topic = str(item.get("topic") or "").strip()
+    for seed in _load_topic_seeds():
+        if entity and entity == str(seed.get("entity") or "").strip().lower():
+            return str(seed.get("id") or topic).strip()
+    return topic
+
+
+def merge_breaking_event_radar_payloads(
+    previous: Dict[str, Any],
+    current: Dict[str, Any],
+    *,
+    limit: int = DEFAULT_LIMIT,
+) -> Dict[str, Any]:
+    allowed_topic_ids = set(breaking_event_topic_ids())
+    previous_items = {
+        _topic_id_for_item(item): item
+        for item in (previous.get("items") or [])
+        if isinstance(item, dict)
+        and _topic_id_for_item(item) in allowed_topic_ids
+    }
+    current_items = {
+        _topic_id_for_item(item): item
+        for item in (current.get("items") or [])
+        if isinstance(item, dict)
+        and _topic_id_for_item(item) in allowed_topic_ids
+    }
+    merged_items = dict(previous_items)
+    for topic_id, item in current_items.items():
+        articles = (
+            (item.get("evidence") or {}).get("articles")
+            if isinstance(item.get("evidence"), dict)
+            else []
+        )
+        previous_item = previous_items.get(topic_id)
+        previous_articles = (
+            (previous_item.get("evidence") or {}).get("articles")
+            if isinstance(previous_item, dict)
+            and isinstance(previous_item.get("evidence"), dict)
+            else []
+        )
+        if articles or not previous_articles:
+            merged_items[topic_id] = item
+        else:
+            merged_items[topic_id] = {
+                **previous_item,
+                "evidenceFreshness": "preserved",
+            }
+    ranked = sorted(
+        merged_items.values(),
+        key=lambda row: (
+            int(row.get("velocityScore") or 0),
+            str(row.get("eventTime") or ""),
+        ),
+        reverse=True,
+    )[: max(1, min(int(limit or DEFAULT_LIMIT), 80))]
+    return {
+        **current,
+        "items": ranked,
+        "summary": _summary(ranked),
     }
 
 

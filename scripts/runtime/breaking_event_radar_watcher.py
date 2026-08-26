@@ -30,7 +30,7 @@ from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_is
 from runtime.snapshot_store import SnapshotStore
 
 
-DEFAULT_INTERVAL_SECONDS = 300
+DEFAULT_INTERVAL_SECONDS = 60
 DEFAULT_LIMIT = 12
 SEED_META_NAMESPACE = "seed-meta:evidence"
 SEED_META_CACHE_KEY = "breaking-event-radar"
@@ -169,8 +169,36 @@ class BreakingEventRadarWatcher:
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
+        topic_ids = breaking_event_radar_service.breaking_event_topic_ids()
+        previous_rotation = (
+            previous.get("rotation")
+            if isinstance(previous.get("rotation"), dict)
+            else {}
+        )
         try:
-            payload = breaking_event_radar_service.build_breaking_event_radar_payload(self.service_context(), limit=self.limit)
+            previous_index = int(previous_rotation.get("index", -1))
+        except (TypeError, ValueError):
+            previous_index = -1
+        rotation_index = (previous_index + 1) % max(1, len(topic_ids))
+        topic_id = topic_ids[rotation_index] if topic_ids else ""
+        try:
+            payload = breaking_event_radar_service.build_breaking_event_radar_payload(
+                self.service_context(),
+                limit=self.limit,
+                topic_ids=[topic_id] if topic_id else None,
+            )
+            payload = breaking_event_radar_service.merge_breaking_event_radar_payloads(
+                previous,
+                {
+                    **payload,
+                    "rotation": {
+                        "index": rotation_index,
+                        "topicId": topic_id,
+                        "totalTopics": len(topic_ids),
+                    },
+                },
+                limit=self.limit,
+            )
         except Exception as exc:
             if previous:
                 preserved = {**previous, "cacheMode": "preserved"}
