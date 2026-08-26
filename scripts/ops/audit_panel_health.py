@@ -320,10 +320,20 @@ def _request_system_health(
     payload: dict[str, Any] = {}
     for attempt in range(max(1, max_attempts)):
         payload = _request_json_with_retries("/system/health")
-        if payload.get("apiStatus") != "warming":
-            return payload
-        if attempt + 1 < max_attempts:
+        if payload.get("apiStatus") == "warming":
+            if attempt + 1 < max_attempts:
+                time.sleep(max(0.0, retry_delay_seconds))
+            continue
+
+        # /system/health intentionally serves stale data once while refreshing
+        # its shared cache. This audit runs less often than that cache's TTL, so
+        # a single request would always record the pre-refresh LOB heartbeat and
+        # falsely mark the 30-second contract degraded. Give the background
+        # refresh one bounded opportunity, then consume the shared result.
+        if attempt == 0 and max_attempts > 1:
             time.sleep(max(0.0, retry_delay_seconds))
+            continue
+        return payload
     raise RuntimeError("system health remained warming")
 
 

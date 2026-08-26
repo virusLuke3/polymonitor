@@ -27,6 +27,9 @@ DEFAULT_HOT_RETENTION_DAYS = 14
 DEFAULT_WARM_RETENTION_DAYS = 14
 DEFAULT_COLD_RETENTION_DAYS = 7
 DEFAULT_BATCH_SIZE = 5000
+DEFAULT_ROLLUP_WINDOW_MINUTES = 60
+DEFAULT_ROLLUP_MAX_WINDOWS = 336
+DEFAULT_DELETE_MAX_BATCHES = 20
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,9 @@ class MaintenancePolicy:
     warm_retention_days: int = DEFAULT_WARM_RETENTION_DAYS
     cold_retention_days: int = DEFAULT_COLD_RETENTION_DAYS
     batch_size: int = DEFAULT_BATCH_SIZE
+    rollup_window_minutes: int = DEFAULT_ROLLUP_WINDOW_MINUTES
+    rollup_max_windows: int = DEFAULT_ROLLUP_MAX_WINDOWS
+    delete_max_batches: int = DEFAULT_DELETE_MAX_BATCHES
 
 
 def cutoff_map(now: datetime, policy: MaintenancePolicy) -> dict[str, datetime]:
@@ -73,7 +79,9 @@ WITH base AS (
             PARTITION BY s.token_id, s.side, date_trunc('minute', s.fetched_at)
         ) AS last_fetched_at
     FROM quant.clob_orderbook_snapshots s
-    WHERE s.fetched_at < %s
+    WHERE s.side = %s
+      AND s.fetched_at >= %s
+      AND s.fetched_at < %s
 ),
 latest AS (
     SELECT * FROM base WHERE rn = 1
@@ -168,10 +176,83 @@ def dry_run_counts(conn: Any, *, rollup_cutoff: datetime, cutoffs: dict[str, dat
     return {"rollupGroups": rollup_groups, "deleteRows": delete_rows}
 
 
-def execute_rollup(conn: Any, *, rollup_cutoff: datetime) -> int:
+def _rollup_start(conn: Any, *, rollup_cutoff: datetime) -> datetime | None:
+    """Resume from the latest completed minute without rescanning all history."""
+
     with conn.cursor() as cur:
-        cur.execute(ROLLUP_SQL, (rollup_cutoff,))
-        return len(cur.fetchall())
+        cur.execute(
+            """
+            SELECT max(bucket_minute) AS watermark
+            FROM quant.clob_orderbook_rollups_1m
+            WHERE bucket_minute < %s
+            """,
+            (rollup_cutoff,),
+        )
+        watermark = (cur.fetchone() or {}).get("watermark")
+        if watermark is not None:
+            return watermark.astimezone(timezone.utc)
+        cur.execute(
+            """
+            SELECT min(fetched_at) AS oldest
+            FROM quant.clob_orderbook_snapshots
+            WHERE fetched_at < %s
+            """,
+            (rollup_cutoff,),
+        )
+        oldest = (cur.fetchone() or {}).get("oldest")
+    return oldest.astimezone(timezone.utc) if oldest is not None else None
+
+
+def _snapshot_sides(conn: Any) -> list[str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT side
+            FROM quant.clob_orderbook_snapshots
+            WHERE side IS NOT NULL AND side <> ''
+            ORDER BY side
+            """
+        )
+        return [str(row["side"]) for row in cur.fetchall() if row.get("side")]
+
+
+def execute_rollup(
+    conn: Any,
+    *,
+    rollup_cutoff: datetime,
+    window_minutes: int = DEFAULT_ROLLUP_WINDOW_MINUTES,
+    max_windows: int = DEFAULT_ROLLUP_MAX_WINDOWS,
+) -> int:
+    """Roll up bounded time windows using the existing ``(side, fetched_at)`` index.
+
+    The former query applied window functions to every historical snapshot on
+    every pass. Production has millions of rows, so PostgreSQL repeatedly
+    exceeded ``temp_file_limit`` before retention could run. Reprocessing the
+    latest completed minute keeps late samples correct while bounding each
+    sort to one side and one small time window.
+    """
+
+    start = _rollup_start(conn, rollup_cutoff=rollup_cutoff)
+    if start is None or start >= rollup_cutoff:
+        return 0
+    start = start.replace(second=0, microsecond=0)
+    window = timedelta(minutes=max(1, int(window_minutes)))
+    sides = _snapshot_sides(conn)
+    if not sides:
+        return 0
+
+    total = 0
+    windows = 0
+    while start < rollup_cutoff and windows < max(1, int(max_windows)):
+        end = min(rollup_cutoff, start + window)
+        with conn.cursor() as cur:
+            for side in sides:
+                cur.execute(ROLLUP_SQL, (side, start, end))
+                total += len(cur.fetchall())
+        conn.commit()
+        windows += 1
+        start = end
+    return total
 
 
 def execute_delete(conn: Any, *, cutoffs: dict[str, datetime], batch_size: int) -> int:
@@ -194,6 +275,23 @@ def execute_delete(conn: Any, *, cutoffs: dict[str, datetime], batch_size: int) 
         return len(cur.fetchall())
 
 
+def execute_delete_batches(
+    conn: Any,
+    *,
+    cutoffs: dict[str, datetime],
+    batch_size: int,
+    max_batches: int = DEFAULT_DELETE_MAX_BATCHES,
+) -> int:
+    total = 0
+    for _ in range(max(1, int(max_batches))):
+        deleted = execute_delete(conn, cutoffs=cutoffs, batch_size=batch_size)
+        conn.commit()
+        total += deleted
+        if deleted < max(1, int(batch_size)):
+            break
+    return total
+
+
 def rollup_watermark(conn: Any) -> str | None:
     with conn.cursor() as cur:
         cur.execute("SELECT max(bucket_minute) AS watermark FROM quant.clob_orderbook_rollups_1m")
@@ -208,8 +306,18 @@ def run_once(*, settings: PostgresSettings | None = None, policy: MaintenancePol
     with postgres_connection(settings or PostgresSettings(), readonly=dry_run) as conn:
         if not dry_run:
             create_schema(conn)
-            rolled_up = execute_rollup(conn, rollup_cutoff=cutoffs["rollup"])
-            deleted = execute_delete(conn, cutoffs=cutoffs, batch_size=policy.batch_size)
+            rolled_up = execute_rollup(
+                conn,
+                rollup_cutoff=cutoffs["rollup"],
+                window_minutes=policy.rollup_window_minutes,
+                max_windows=policy.rollup_max_windows,
+            )
+            deleted = execute_delete_batches(
+                conn,
+                cutoffs=cutoffs,
+                batch_size=policy.batch_size,
+                max_batches=policy.delete_max_batches,
+            )
             counts = {"rollupGroups": rolled_up, "deleteRows": deleted}
         else:
             counts = dry_run_counts(conn, rollup_cutoff=cutoffs["rollup"], cutoffs=cutoffs)
@@ -240,6 +348,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--warm-retention-days", type=int, default=env_int("POLYDATA_LOB_WARM_RETENTION_DAYS", DEFAULT_WARM_RETENTION_DAYS))
     parser.add_argument("--cold-retention-days", type=int, default=env_int("POLYDATA_LOB_COLD_RETENTION_DAYS", DEFAULT_COLD_RETENTION_DAYS))
     parser.add_argument("--batch-size", type=int, default=env_int("POLYDATA_LOB_MAINTENANCE_BATCH_SIZE", DEFAULT_BATCH_SIZE))
+    parser.add_argument("--rollup-window-minutes", type=int, default=env_int("POLYDATA_LOB_ROLLUP_WINDOW_MINUTES", DEFAULT_ROLLUP_WINDOW_MINUTES))
+    parser.add_argument("--rollup-max-windows", type=int, default=env_int("POLYDATA_LOB_ROLLUP_MAX_WINDOWS", DEFAULT_ROLLUP_MAX_WINDOWS))
+    parser.add_argument("--delete-max-batches", type=int, default=env_int("POLYDATA_LOB_DELETE_MAX_BATCHES", DEFAULT_DELETE_MAX_BATCHES))
     return parser
 
 
@@ -251,6 +362,9 @@ def main() -> int:
         warm_retention_days=args.warm_retention_days,
         cold_retention_days=args.cold_retention_days,
         batch_size=args.batch_size,
+        rollup_window_minutes=args.rollup_window_minutes,
+        rollup_max_windows=args.rollup_max_windows,
+        delete_max_batches=args.delete_max_batches,
     )
     watch = bool(args.watch or not args.once)
     while True:
