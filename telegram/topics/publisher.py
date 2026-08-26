@@ -33,7 +33,7 @@ PANEL_ENDPOINTS = {
     "weather-news": ("/runtime/weather/news", {"limit": 24}),
 }
 ALL_PANELS_MAX_WORKERS = 4
-ALL_PANELS_REQUEST_TIMEOUT_SECONDS = 5
+ALL_PANELS_REQUEST_TIMEOUT_SECONDS = 10
 
 
 TARGET_PANELS = {

@@ -87,8 +87,9 @@ Panel. Each entry has exactly one delivery mode:
 
 The normal publisher remains intentionally limited to the original 11 sources.
 It does not start polling every Panel after an upgrade. Operators may audit the
-complete server-side catalog explicitly with bounded runtime batch requests
-plus the two existing non-runtime feeds:
+complete server-side catalog explicitly with four bounded, isolated runtime
+requests at a time plus the two existing non-runtime feeds. A slow Panel is
+reported independently and cannot discard the other Panel snapshots:
 
 ```bash
 python -m telegram.topics.publisher --once --target all-panels --dry-run
