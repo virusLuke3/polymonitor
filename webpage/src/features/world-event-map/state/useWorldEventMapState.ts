@@ -7,6 +7,8 @@ import {
   type WorldEventTimeRange,
   type AviationLensMode,
   type AviationRiskSource,
+  type WorldEventBasemapProvider,
+  type WorldEventBasemapTheme,
 } from './mapState';
 import { worldEventMapReducer } from './mapReducer';
 import {
@@ -45,6 +47,15 @@ export function useWorldEventMapState() {
     };
   }, [state]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const nextUrl = serializeWorldEventMapUrl(state, window.location.href);
+      if (nextUrl !== window.location.href) window.history.replaceState(window.history.state, '', nextUrl);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [state]);
+
   return useMemo(() => ({
     state,
     setCamera: (center: { lon: number; lat: number }, zoom: number) => dispatch({ type: 'set-camera', center, zoom }),
@@ -54,6 +65,9 @@ export function useWorldEventMapState() {
     setTimeRange: (timeRange: WorldEventTimeRange) => dispatch({ type: 'set-time-range', timeRange }),
     setSeverities: (severities: GeoEventSeverity[]) => dispatch({ type: 'set-severities', severities }),
     selectEvent: (eventId: string | null) => dispatch({ type: 'select-event', eventId }),
+    setBasemapProvider: (provider: WorldEventBasemapProvider) => dispatch({ type: 'set-basemap-provider', provider }),
+    setBasemapTheme: (theme: WorldEventBasemapTheme) => dispatch({ type: 'set-basemap-theme', theme }),
+    setCountry: (countryCode: string | null) => dispatch({ type: 'set-country', countryCode }),
     setAviationLens: (lens: AviationLensMode) => dispatch({ type: 'set-aviation-lens', lens }),
     setAviationRiskSource: (source: AviationRiskSource) => dispatch({ type: 'set-aviation-risk-source', source }),
     reset: () => dispatch({ type: 'reset' }),

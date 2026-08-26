@@ -7,6 +7,7 @@ export * from './config/regions';
 export * from './data/sourceStatus';
 export * from './data/naturalHazards';
 export * from './data/useNaturalHazards';
+export * from './data/useAviationViewport';
 export * from './data/relatedMarkets';
 export * from './data/useRelatedWeatherMarkets';
 export * from './data/useCountryGeometry';

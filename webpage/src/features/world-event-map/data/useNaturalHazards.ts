@@ -7,7 +7,11 @@ import type {
 } from '../domain/types';
 import type { WorldEventSourceStatus } from './sourceStatus';
 import { sourceStatusesFromHazardResponse } from './sourceStatus';
-import { parseNaturalHazardsResponse, type ParsedNaturalHazards } from './naturalHazards';
+import {
+  mergeCanonicalHazardEvents,
+  parseNaturalHazardsResponse,
+  type ParsedNaturalHazards,
+} from './naturalHazards';
 import {
   HAZARD_MAP_SOURCE_KEYS,
   hazardMapGeometryZoom,
@@ -20,6 +24,8 @@ import { recordMapDataPhase } from './mapDataPerformance';
 const RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 60_000] as const;
 const INITIAL_SOURCE_PRIORITY: readonly HazardMapSourceKey[] = [
   'usgs',
+  'usgs-volcano-cap',
+  'nhc',
   'eonet',
   'nws',
   'gdacs',
@@ -29,11 +35,13 @@ const INITIAL_SOURCE_PRIORITY: readonly HazardMapSourceKey[] = [
 const INITIAL_SOURCE_CONCURRENCY = 3;
 const REFRESH_INTERVAL_MS: Record<HazardMapSourceKey, number> = {
   usgs: 60_000,
+  'usgs-volcano-cap': 300_000,
+  nhc: 120_000,
   eonet: 300_000,
   gdacs: 300_000,
   nws: 60_000,
   firms: 900_000,
-  'climate-anomaly': 300_000,
+  'climate-anomaly': 6 * 60 * 60_000,
 };
 
 type SourceRecord = {
@@ -79,20 +87,9 @@ function latestGeneratedAt(records: Map<HazardMapSourceKey, SourceRecord>) {
 }
 
 function mergeHazardEvents(records: Map<HazardMapSourceKey, SourceRecord>) {
-  const byId = new Map<string, HazardEvent>();
-  for (const source of HAZARD_MAP_SOURCE_KEYS) {
-    for (const event of records.get(source)?.parsed.events || []) {
-      const current = byId.get(event.id);
-      if (!current || String(event.updatedAt || event.occurredAt || '') >= String(
-        current.updatedAt || current.occurredAt || '',
-      )) {
-        byId.set(event.id, event);
-      }
-    }
-  }
-  return [...byId.values()].sort((left, right) => String(
-    right.updatedAt || right.occurredAt || '',
-  ).localeCompare(String(left.updatedAt || left.occurredAt || '')));
+  return mergeCanonicalHazardEvents(HAZARD_MAP_SOURCE_KEYS.flatMap(
+    (source) => records.get(source)?.parsed.events || [],
+  ));
 }
 
 function countsByKind(events: HazardEvent[]) {
@@ -107,10 +104,15 @@ function sourceStatus(
   attempted: boolean,
   requestError: string | undefined,
 ): WorldEventSourceStatus {
+  const label = source === 'climate-anomaly'
+    ? 'ANOMALY'
+    : source === 'usgs-volcano-cap'
+      ? 'USGS VOLCANO'
+      : source.toUpperCase();
   if (!record) {
     return {
       key: source,
-      label: source === 'climate-anomaly' ? 'ANOMALY' : source.toUpperCase(),
+      label,
       status: attempted ? 'error' : 'loading',
       eventCount: 0,
       rejectedCount: 0,
@@ -122,7 +124,7 @@ function sourceStatus(
     record.parsed.rejected.length,
   )[0] || {
     key: source,
-    label: source.toUpperCase(),
+    label,
     status: 'partial' as const,
     eventCount: record.parsed.events.length,
     rejectedCount: record.parsed.rejected.length,
@@ -149,8 +151,25 @@ function yieldMainThread() {
     : new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 }
 
-export function useNaturalHazards(zoom = 2): NaturalHazardsState {
+function viewportForCamera(center: [number, number], zoom: number): [number, number, number, number] | undefined {
+  if (zoom < 5) return undefined;
+  const longitudinalSpan = Math.max(1.5, 360 / (2 ** zoom) * 1.5);
+  const latitudinalSpan = Math.max(1, longitudinalSpan * 0.56);
+  const quantum = Math.max(0.25, longitudinalSpan * 0.2);
+  const snappedLon = Math.round(center[0] / quantum) * quantum;
+  const snappedLat = Math.round(center[1] / quantum) * quantum;
+  return [
+    Math.max(-180, snappedLon - longitudinalSpan / 2),
+    Math.max(-85, snappedLat - latitudinalSpan / 2),
+    Math.min(180, snappedLon + longitudinalSpan / 2),
+    Math.min(85, snappedLat + latitudinalSpan / 2),
+  ].map((value) => Number(value.toFixed(3))) as [number, number, number, number];
+}
+
+export function useNaturalHazards(zoom = 2, center: [number, number] = [0, 18]): NaturalHazardsState {
   const geometryZoom = hazardMapGeometryZoom(zoom);
+  const firmsViewport = viewportForCamera(center, zoom);
+  const firmsViewportKey = firmsViewport?.join(',') || '';
   const [state, setState] = useState<NaturalHazardsState>({
     events: [],
     response: null,
@@ -250,7 +269,12 @@ export function useNaturalHazards(zoom = 2): NaturalHazardsState {
       attempts.add(source);
       const networkStartedAt = performance.now();
       try {
-        const payload = await fetchNaturalHazardMapSource(source, geometryZoom, controller.signal);
+        const payload = await fetchNaturalHazardMapSource(
+          source,
+          geometryZoom,
+          source === 'firms' ? firmsViewport : undefined,
+          controller.signal,
+        );
         recordMapDataPhase('network', source, networkStartedAt, payload.events?.length || 0);
         const parseStartedAt = performance.now();
         const parsed = parseNaturalHazardsResponse(payload);
@@ -258,7 +282,12 @@ export function useNaturalHazards(zoom = 2): NaturalHazardsState {
         if (disposed || controller.signal.aborted || generation !== requestGenerationRef.current) return;
         commit(source, parsed, 'network');
         failureCounts.set(source, 0);
-        void writeHazardMapSnapshot(source, geometryZoom, parsed.response);
+        void writeHazardMapSnapshot(
+          source,
+          geometryZoom,
+          parsed.response,
+          source === 'firms' ? firmsViewportKey : '',
+        );
         schedule(source, false);
       } catch (error) {
         if (disposed || controller.signal.aborted || generation !== requestGenerationRef.current) return;
@@ -275,7 +304,11 @@ export function useNaturalHazards(zoom = 2): NaturalHazardsState {
 
     for (const source of HAZARD_MAP_SOURCE_KEYS) {
       const cacheStartedAt = performance.now();
-      void readHazardMapSnapshot(source, geometryZoom).then((cached) => {
+      void readHazardMapSnapshot(
+        source,
+        geometryZoom,
+        source === 'firms' ? firmsViewportKey : '',
+      ).then((cached) => {
         recordMapDataPhase('cache-read', source, cacheStartedAt, cached?.payload.events?.length || 0);
         if (!cached || disposed || generation !== requestGenerationRef.current) return;
         try {
@@ -310,7 +343,7 @@ export function useNaturalHazards(zoom = 2): NaturalHazardsState {
       for (const controller of controllers.values()) controller.abort();
       for (const timer of timers.values()) window.clearTimeout(timer);
     };
-  }, [geometryZoom]);
+  }, [geometryZoom, firmsViewportKey]);
 
   return state;
 }

@@ -126,6 +126,18 @@ function hazardMetricsMatch(event: HazardEvent) {
   return event.metrics.kind === 'volcano-or-other';
 }
 
+function climateMetricsAreReproducible(event: HazardEvent) {
+  if (event.metrics.kind !== 'climate-anomaly') return false;
+  return typeof event.metrics.value === 'number'
+    && Number.isFinite(event.metrics.value)
+    && Boolean(String(event.metrics.unit || '').trim())
+    && Boolean(String(event.metrics.baselinePeriod || '').trim())
+    && Boolean(String(event.metrics.calculationVersion || '').trim())
+    && Boolean(String(event.metrics.timeWindow || '').trim())
+    && Boolean(String(event.metrics.spatialResolution || '').trim())
+    && Boolean(String(event.metrics.provider || '').trim());
+}
+
 export function validateGeoEvent(value: unknown): { ok: true; event: GeoEvent } | { ok: false; errors: string[] } {
   const errors: string[] = [];
   if (!isRecord(value)) return { ok: false, errors: ['event must be an object'] };
@@ -167,6 +179,10 @@ export function validateGeoEvent(value: unknown): { ok: true; event: GeoEvent } 
     const hazard = value as unknown as HazardEvent;
     if (!VALID_HAZARD_KINDS.has(String(hazard.hazardKind || ''))) errors.push('hazardKind is invalid');
     if (!hazardMetricsMatch(hazard)) errors.push('hazard metrics are incompatible with hazardKind');
+    if ((hazard.hazardKind === 'temperature-anomaly' || hazard.hazardKind === 'precipitation-anomaly')
+      && !climateMetricsAreReproducible(hazard)) {
+      errors.push('climate anomaly requires value, unit, baseline, time window, resolution, version and provider');
+    }
     if (!hazard.coverage || !Array.isArray(hazard.coverage.gaps)) errors.push('hazard coverage is invalid');
     if (!hazard.revision?.nativeEventId) errors.push('hazard revision.nativeEventId is required');
     if (!hazard.severityEvidence?.mappingVersion) errors.push('hazard severity mappingVersion is required');

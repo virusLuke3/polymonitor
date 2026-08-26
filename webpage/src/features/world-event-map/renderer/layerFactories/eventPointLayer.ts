@@ -79,6 +79,8 @@ type ClusterBucket = {
 };
 
 type UnclusteredBucket = { layerId: string; events: GeoEvent[] };
+export type ScreenBox = [number, number, number, number];
+export type LabelProjection = (position: [number, number]) => { x: number; y: number } | null;
 
 const MAX_CLUSTER_LEAVES = 200;
 const WORLD_VIEWPORT: [number, number, number, number] = [-180, -85, 180, 85];
@@ -386,6 +388,8 @@ export function createEventPointLayers({
   showLabels,
   viewport,
   clusterIndex,
+  project,
+  occupiedScreenBoxes = [],
 }: {
   events: GeoEvent[];
   zoom: number;
@@ -393,6 +397,8 @@ export function createEventPointLayers({
   showLabels: boolean;
   viewport?: [number, number, number, number];
   clusterIndex?: EventClusterIndex;
+  project?: LabelProjection;
+  occupiedScreenBoxes?: ScreenBox[];
 }): LayersList {
   const index = clusterIndex || new EventClusterIndex();
   index.update(events);
@@ -552,8 +558,25 @@ export function createEventPointLayers({
             || (event.category === 'natural-hazard' && (zoom >= 4 || event.severity === 'warning')));
       })
     : [];
-  const labelCell: [number, number] = zoom < 4 ? [8, 4] : zoom < 5 ? [4, 2] : [2, 1];
-  const occupiedLabelCells = new Set<string>();
+  const boxes: ScreenBox[] = [...occupiedScreenBoxes];
+  if (project) {
+    for (const event of singles) {
+      const point = eventRepresentativePoint(event);
+      const screen = point ? project(point) : null;
+      if (!screen) continue;
+      const radius = pointIconSize(event, zoom, selectedEventId) / 2 + 2;
+      boxes.push([screen.x - radius, screen.y - radius, screen.x + radius, screen.y + radius]);
+    }
+    for (const cluster of clusters) {
+      const screen = project(cluster.coordinates);
+      if (!screen) continue;
+      const radius = clusterIconSize(cluster) / 2 + 5;
+      boxes.push([screen.x - radius, screen.y - radius, screen.x + radius, screen.y + radius]);
+    }
+  }
+  const overlaps = (candidate: ScreenBox) => boxes.some((box) => !(
+    candidate[2] < box[0] || candidate[0] > box[2] || candidate[3] < box[1] || candidate[1] > box[3]
+  ));
   const labeled = labelCandidates
     .sort((left, right) => (
       Number(right.id === selectedEventId) - Number(left.id === selectedEventId)
@@ -561,12 +584,17 @@ export function createEventPointLayers({
       || Date.parse(right.updatedAt || '') - Date.parse(left.updatedAt || '')
     ))
     .filter((event) => {
-      if (event.id === selectedEventId) return true;
       const point = eventRepresentativePoint(event);
       if (!point) return false;
-      const key = `${Math.floor((point[0] + 180) / labelCell[0])}:${Math.floor((point[1] + 90) / labelCell[1])}`;
-      if (occupiedLabelCells.has(key)) return false;
-      occupiedLabelCells.add(key);
+      if (!project) return event.id === selectedEventId;
+      const screen = project(point);
+      if (!screen) return false;
+      const label = eventLabel(event);
+      const fontSize = event.id === selectedEventId ? 11 : 9;
+      const width = Math.min(220, Math.max(28, label.length * fontSize * 0.62));
+      const candidate: ScreenBox = [screen.x + 5, screen.y - fontSize - 13, screen.x + 5 + width, screen.y - 2];
+      if (event.id !== selectedEventId && overlaps(candidate)) return false;
+      boxes.push(candidate);
       return true;
     })
     .slice(0, zoom < 4 ? 24 : zoom < 5 ? 60 : 120);

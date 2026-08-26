@@ -306,6 +306,23 @@ server {
         add_header X-Hazard-Cache \$upstream_cache_status always;
     }
 
+    location = /wm-api/runtime/transport/aviation-viewport {
+        proxy_pass http://127.0.0.1:${API_PORT}/runtime/transport/aviation-viewport;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache polymonitor_hazard_map;
+        proxy_cache_key "\$request_method|\$request_uri";
+        proxy_cache_valid 200 15s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 30s;
+        add_header X-Aviation-Cache \$upstream_cache_status always;
+    }
+
     location ^~ /wm-api/runtime/world/natural-hazards/events/ {
         proxy_pass http://127.0.0.1:${API_PORT}/runtime/world/natural-hazards/events/;
         proxy_http_version 1.1;

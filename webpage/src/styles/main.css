@@ -10102,7 +10102,8 @@ html[lang='zh-CN'] .wm-promo-copy {
 }
 
 .wm-world-event-map-toolbar select,
-.wm-world-event-severity-filters button {
+.wm-world-event-severity-filters button,
+.wm-world-event-country-filter {
   min-height: 22px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
@@ -10110,6 +10111,18 @@ html[lang='zh-CN'] .wm-promo-copy {
   background: rgba(255, 255, 255, 0.035);
   font: 600 9px/1 var(--font-mono);
   text-transform: uppercase;
+}
+
+.wm-world-event-basemap-control:first-of-type {
+  margin-left: auto;
+}
+
+.wm-world-event-country-filter {
+  min-height: 22px;
+  padding: 0 7px;
+  border-color: rgba(80, 220, 255, 0.32);
+  color: #9beaff;
+  cursor: pointer;
 }
 
 .wm-world-event-map-toolbar select {
@@ -10379,6 +10392,23 @@ html[lang='zh-CN'] .wm-promo-copy {
 
 .wm-layer-row:not(.enabled) {
   opacity: 0.52;
+}
+
+.wm-layer-row.is-unavailable {
+  opacity: 0.36;
+}
+
+.wm-layer-row.is-unavailable:hover {
+  opacity: 0.48;
+}
+
+.wm-layer-row.is-unavailable input,
+.wm-layer-row.is-unavailable label {
+  cursor: not-allowed;
+}
+
+.wm-layer-row.is-unavailable .wm-layer-hint {
+  color: #ff8a7e;
 }
 
 .wm-layer-row:hover {

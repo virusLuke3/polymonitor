@@ -74,6 +74,18 @@ class NaturalHazardsWatcher:
         response.raise_for_status()
         return response.text
 
+    def _http_bytes_get(
+        self,
+        url: str,
+        *,
+        params: Dict[str, Any] | None = None,
+        timeout: int = 12,
+        headers: Dict[str, str] | None = None,
+    ) -> bytes:
+        response = self.session.get(url, params=params, timeout=timeout, headers=headers)
+        response.raise_for_status()
+        return response.content
+
     def context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
@@ -81,6 +93,7 @@ class NaturalHazardsWatcher:
             "app": _App(),
             "http_json_get": self._http_json_get,
             "http_text_get": self._http_text_get,
+            "http_bytes_get": self._http_bytes_get,
         }
 
     def run_once(self) -> Dict[str, Any]:

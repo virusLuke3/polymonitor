@@ -35,4 +35,16 @@ describe('country geometry identity', () => {
   it('normalizes punctuation without conflating arbitrary entities', () => {
     expect(normalizeCountryIdentity('Côte d’Ivoire')).toBe('cote d ivoire');
   });
+
+  it('locates points and intersects event polygons without requiring fabricated country fields', () => {
+    const index = buildCountryGeometryIndex(collection);
+    expect(index.locate([-95, 34])?.iso2).toBe('US');
+    expect(index.locate([10, 10])).toBeNull();
+    expect(index.intersects('US', { type: 'Point', coordinates: [-95, 34] })).toBe(true);
+    expect(index.intersects('US', {
+      type: 'Polygon',
+      coordinates: [[[-96, 32], [-92, 32], [-92, 36], [-96, 32]]],
+    })).toBe(true);
+    expect(index.intersects('US', { type: 'Point', coordinates: [10, 10] })).toBe(false);
+  });
 });

@@ -12,6 +12,12 @@ SOURCE_COVERAGE: dict[str, Dict[str, Any]] = {
         complete=False,
         gaps=["Small-event completeness varies by region and network coverage."],
     ),
+    "usgs-volcano-cap": coverage(
+        scope="provider-area",
+        label="Elevated volcanoes monitored by USGS volcano observatories",
+        complete=False,
+        gaps=["No official coverage is implied outside United States volcano observatory responsibility areas."],
+    ),
     "eonet": coverage(
         scope="global",
         label="Global open natural-event discovery from NASA EONET",
@@ -33,6 +39,12 @@ SOURCE_COVERAGE: dict[str, Dict[str, Any]] = {
         complete=False,
         gaps=["No official CAP coverage is implied outside NWS responsibility areas."],
     ),
+    "nhc": coverage(
+        scope="provider-area",
+        label="Active Atlantic, eastern Pacific and central Pacific tropical cyclones published by NOAA NHC",
+        complete=False,
+        gaps=["Tropical cyclones outside NHC responsibility areas require other official meteorological agencies."],
+    ),
     "firms": coverage(
         scope="global",
         label="NASA FIRMS satellite fire detections",
@@ -45,9 +57,12 @@ SOURCE_COVERAGE: dict[str, Dict[str, Any]] = {
     ),
     "climate-anomaly": coverage(
         scope="global",
-        label="Versioned quantitative climate anomaly pipeline",
+        label="NOAA NCEI Climate at a Glance global 5 degree monthly temperature anomaly grid",
         complete=False,
-        gaps=["No quantitative baseline pipeline is configured; EONET temperature extremes and drought remain discovery events."],
+        gaps=[
+            "Monthly observations are not active weather warnings or incident impact forecasts.",
+            "Publication follows the observation month and individual grid cells may be unavailable.",
+        ],
     ),
 }
 

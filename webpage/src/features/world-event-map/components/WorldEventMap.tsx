@@ -9,6 +9,8 @@ import type {
   BasemapState,
   MapRenderer,
   MapRendererCallbacks,
+  MapCountryTarget,
+  MapHoverPosition,
 } from '../renderer/MapRenderer';
 import { inspectWebGL2Support } from '../renderer/webglSupport';
 import { rectIntersectsViewport } from '../renderer/rendererVisibility';
@@ -37,6 +39,7 @@ export type WorldEventMapProps = {
   onAviationLensChange?: (lens: AviationLensMode) => void;
   onAviationRiskSourceChange?: (source: AviationRiskSource) => void;
   onAviationClose?: () => void;
+  onCountryChange?: (countryCode: string | null) => void;
   height?: number;
 };
 
@@ -49,6 +52,7 @@ export function WorldEventMap({
   onAviationLensChange,
   onAviationRiskSourceChange,
   onAviationClose,
+  onCountryChange,
   height = 620,
 }: WorldEventMapProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -59,6 +63,12 @@ export function WorldEventMap({
   const [basemapState, setBasemapState] = useState<BasemapState>('idle');
   const [rendererKind, setRendererKind] = useState<'webgl' | 'svg'>('webgl');
   const [rendererError, setRendererError] = useState<string | null>(null);
+  const [rendererLayerError, setRendererLayerError] = useState<string | null>(null);
+  const [countryTarget, setCountryTarget] = useState<{
+    country: MapCountryTarget;
+    position?: MapHoverPosition;
+    context: boolean;
+  } | null>(null);
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === state.selectedEventId) || null,
     [events, state.selectedEventId],
@@ -101,6 +111,26 @@ export function WorldEventMap({
     },
     [events, state.activeLayerIds, state.zoom],
   );
+  const legendContext = useMemo(() => ({
+    observed: events.some((event) => {
+      if (event.properties.observed === true || String(event.properties.observationType || '')) return true;
+      const geometries = event.properties.geometries;
+      return Boolean(geometries && typeof geometries === 'object' && 'observedTrack' in geometries);
+    }),
+    forecast: events.some((event) => {
+      const geometries = event.properties.geometries;
+      return Boolean(geometries && typeof geometries === 'object' && (
+        'forecastTrack' in geometries || 'forecastCone' in geometries
+      ));
+    }),
+    stale: events.some((event) => event.sources.some((source) => (
+      String(source.freshness || '').toLowerCase().includes('stale') || source.status === 'degraded'
+    ))),
+    coverageGap: events.some((event) => {
+      const coverage = (event as GeoEvent & { coverage?: { isComplete?: boolean } }).coverage;
+      return coverage?.isComplete === false;
+    }),
+  }), [events]);
 
   callbackRef.current = { onCameraChange, onEventSelect };
   stateRef.current = state;
@@ -109,6 +139,10 @@ export function WorldEventMap({
   useEffect(() => {
     const host = hostRef.current;
     if (!host || rendererRef.current) return;
+    if (typeof performance !== 'undefined'
+      && performance.getEntriesByName('polymonitor:map:first-shell').length === 0) {
+      performance.mark('polymonitor:map:first-shell');
+    }
     let disposed = false;
     const hostIntersectsViewport = () => rectIntersectsViewport(
       host.getBoundingClientRect(),
@@ -117,7 +151,13 @@ export function WorldEventMap({
     );
     let inViewport = typeof IntersectionObserver === 'undefined' || hostIntersectsViewport();
     let installFrame: number | null = null;
+    let secondInstallFrame: number | null = null;
     let rendererInstallStarted = false;
+    let interactionReady = false;
+    let idleReady = false;
+    let forceReady = false;
+    let idleHandle: number | null = null;
+    let forceTimer: number | null = null;
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     const updatePauseState = () => {
@@ -131,6 +171,12 @@ export function WorldEventMap({
     const callbacks: MapRendererCallbacks = {
       onCameraChange: (camera) => callbackRef.current.onCameraChange(camera),
       onEventSelect: (eventId) => callbackRef.current.onEventSelect(eventId),
+      onCountrySelect: (country, position) => {
+        if (!disposed) setCountryTarget(country ? { country, position, context: false } : null);
+      },
+      onCountryContextMenu: (country, position) => {
+        if (!disposed) setCountryTarget({ country, position, context: true });
+      },
       onBasemapStateChange: (nextState) => {
         if (!disposed) setBasemapState(nextState);
       },
@@ -138,6 +184,9 @@ export function WorldEventMap({
         if (disposed) return;
         setRendererError(error.message);
         void installRenderer('svg', error);
+      },
+      onLayerDegraded: (layerId, error) => {
+        if (!disposed) setRendererLayerError(`${layerId}: ${error.message}`);
       },
       onError: (error) => setRendererError(error.message),
     };
@@ -154,6 +203,7 @@ export function WorldEventMap({
       }
       rendererRef.current = renderer;
       setRendererKind(kind);
+      setRendererLayerError(null);
       if (reason) setRendererError(reason.message);
       renderer.setReducedMotion(motionQuery.matches);
       renderer.setState(stateRef.current);
@@ -174,21 +224,50 @@ export function WorldEventMap({
       }
     };
 
+    // Deterministic browser harness for the same fallback path used by real
+    // WebGL failures. Browser/driver implementations differ in whether
+    // WEBGL_lose_context auto-restores, so relying on that extension alone
+    // makes the renderer-switch regression test nondeterministic. This hook is
+    // unavailable during normal use and does not bypass renderer cleanup.
+    const performanceHarnessEnabled = new URLSearchParams(window.location.search).get('mapPerf') === '1';
+    const handleHarnessRendererFailure = () => {
+      if (!performanceHarnessEnabled || disposed) return;
+      callbacks.onRendererFallbackRequested(
+        new Error('Simulated WebGL renderer failure from the deterministic map harness.'),
+      );
+    };
+    if (performanceHarnessEnabled) {
+      host.addEventListener('polymonitor:map-renderer-failure', handleHarnessRendererFailure);
+    }
+
     const scheduleRendererInstall = () => {
-      if (disposed || rendererInstallStarted || installFrame != null || document.hidden || !inViewport) return;
+      if (disposed || rendererInstallStarted || installFrame != null || document.hidden || !inViewport
+        || (!interactionReady && !idleReady && !forceReady)) return;
       // Let the lightweight map shell and surrounding controls paint first.
       // The renderer chunk and WebGL context are only installed for a visible
       // map, avoiding work for off-screen/hidden workspaces.
       installFrame = window.requestAnimationFrame(() => {
         installFrame = null;
-        if (disposed || rendererInstallStarted || document.hidden || !inViewport) return;
-        rendererInstallStarted = true;
-        const support = inspectWebGL2Support({
-          allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1',
+        secondInstallFrame = window.requestAnimationFrame(() => {
+          secondInstallFrame = null;
+          if (disposed || rendererInstallStarted || document.hidden || !inViewport) return;
+          rendererInstallStarted = true;
+          const compactDevice = window.matchMedia('(max-width: 720px)').matches
+            || Boolean((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData);
+          const support = inspectWebGL2Support({
+            allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1',
+          });
+          if (support.supported && !compactDevice) void installRenderer('webgl');
+          else void installRenderer('svg', new Error(compactDevice
+            ? 'Compact devices start with the lightweight SVG renderer.'
+            : support.reason || 'WebGL2 is unavailable.'));
         });
-        if (support.supported) void installRenderer('webgl');
-        else void installRenderer('svg', new Error(support.reason || 'WebGL2 is unavailable.'));
       });
+    };
+
+    const markInteractionReady = () => {
+      interactionReady = true;
+      scheduleRendererInstall();
     };
 
     const observer = new ResizeObserver(() => {
@@ -202,10 +281,10 @@ export function WorldEventMap({
     const intersectionObserver = typeof IntersectionObserver === 'undefined'
       ? null
       : new IntersectionObserver((entries) => {
-        inViewport = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0);
+        inViewport = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.15);
         updatePauseState();
         if (inViewport) scheduleRendererInstall();
-      }, { threshold: [0, 0.01] });
+      }, { threshold: [0, 0.15] });
     intersectionObserver?.observe(host);
     const handleVisibility = () => {
       updatePauseState();
@@ -216,12 +295,46 @@ export function WorldEventMap({
     };
     document.addEventListener('visibilitychange', handleVisibility);
     motionQuery.addEventListener('change', handleMotionPreference);
-    scheduleRendererInstall();
+    host.addEventListener('pointerdown', markInteractionReady, { once: true });
+    host.addEventListener('wheel', markInteractionReady, { once: true });
+    host.addEventListener('keydown', markInteractionReady, { once: true });
+    const scheduler = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (typeof scheduler.requestIdleCallback === 'function') {
+      idleHandle = scheduler.requestIdleCallback(() => {
+        idleHandle = null;
+        idleReady = true;
+        scheduleRendererInstall();
+      }, { timeout: 1_500 });
+    } else {
+      idleHandle = window.setTimeout(() => {
+        idleHandle = null;
+        idleReady = true;
+        scheduleRendererInstall();
+      }, 350);
+    }
+    forceTimer = window.setTimeout(() => {
+      forceTimer = null;
+      forceReady = true;
+      scheduleRendererInstall();
+    }, 2_500);
     return () => {
       disposed = true;
       if (installFrame != null) window.cancelAnimationFrame(installFrame);
+      if (secondInstallFrame != null) window.cancelAnimationFrame(secondInstallFrame);
+      if (idleHandle != null) {
+        if (typeof scheduler.cancelIdleCallback === 'function') scheduler.cancelIdleCallback(idleHandle);
+        else window.clearTimeout(idleHandle);
+      }
+      if (forceTimer != null) window.clearTimeout(forceTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       motionQuery.removeEventListener('change', handleMotionPreference);
+      host.removeEventListener('pointerdown', markInteractionReady);
+      host.removeEventListener('wheel', markInteractionReady);
+      host.removeEventListener('keydown', markInteractionReady);
+      host.removeEventListener('polymonitor:map-renderer-failure', handleHarnessRendererFailure);
       observer.disconnect();
       intersectionObserver?.disconnect();
       delete host.dataset.mapRendererReady;
@@ -261,6 +374,31 @@ export function WorldEventMap({
         selectedEventId={state.selectedEventId}
         onSelect={onEventSelect}
       />
+      {countryTarget ? (
+        <div
+          className={`wm-country-context-card ${countryTarget.context ? 'is-context' : ''}`}
+          style={countryTarget.position ? {
+            left: `${Math.max(12, countryTarget.position.x + 12)}px`,
+            top: `${Math.max(12, countryTarget.position.y + 12)}px`,
+          } : undefined}
+          role="dialog"
+          aria-label={`${countryTarget.country.name} map actions`}
+        >
+          <strong>{countryTarget.country.name}</strong>
+          <span>{countryTarget.country.iso2}</span>
+          <div>
+            <button type="button" onClick={() => {
+              rendererRef.current?.fitCountry(countryTarget.country);
+              setCountryTarget(null);
+            }}>Fit country</button>
+            <button type="button" onClick={() => {
+              onCountryChange?.(countryTarget.country.iso2);
+              setCountryTarget(null);
+            }}>Filter events</button>
+            <button type="button" aria-label="Close country actions" onClick={() => setCountryTarget(null)}>×</button>
+          </div>
+        </div>
+      ) : null}
       {state.activeLayerIds.includes('air-routes')
         && onAviationLensChange
         && onAviationRiskSourceChange
@@ -292,6 +430,12 @@ export function WorldEventMap({
             </b>
           ))}
         </span>
+        <span className="wm-map-legend-context" aria-label="Observation and coverage states">
+          {legendContext.observed ? <b><i className="is-observed" />OBSERVED</b> : null}
+          {legendContext.forecast ? <b><i className="is-forecast" />FORECAST</b> : null}
+          {legendContext.stale ? <b><i className="is-stale" />STALE</b> : null}
+          {legendContext.coverageGap ? <b><i className="is-coverage" />COVERAGE GAP</b> : null}
+        </span>
       </div>
       <div className="wm-weather-deck-status">
         {rendererKind === 'svg'
@@ -304,11 +448,14 @@ export function WorldEventMap({
       </div>
       <div className="wm-world-event-attribution">
         {rendererKind === 'webgl' && basemapState === 'primary-ready'
-          ? getWeatherBasemapAttribution()
+          ? getWeatherBasemapAttribution(state.basemapProvider)
           : 'LOCAL COUNTRY GEOMETRY · EVENT SOURCES IN INSPECTOR'}
       </div>
       {rendererError && basemapState === 'failed' ? (
         <div className="wm-banner error" role="alert">{rendererError}</div>
+      ) : null}
+      {rendererLayerError ? (
+        <div className="wm-banner notice" role="status">MAP DEGRADED · ISOLATED {rendererLayerError}</div>
       ) : null}
     </div>
   );

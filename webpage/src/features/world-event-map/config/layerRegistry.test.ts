@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   WORLD_EVENT_LAYER_REGISTRY,
   eventMatchesWorldEventLayers,
+  executableWorldEventLayers,
   selectableWorldEventLayers,
   worldEventLayerIdForEvent,
   worldEventLayerById,
@@ -40,6 +41,20 @@ describe('World Event Map layer registry', () => {
     expect(worldEventLayerById('intel-hotspots')?.defaultEnabled).toBe(false);
     expect(worldEventLayerById('sanctions-country-risk')?.defaultEnabled).toBe(true);
     expect(worldEventLayerById('air-routes')?.defaultEnabled).toBe(true);
+  });
+
+  it('gates execution by renderer and required runtime sources', () => {
+    const authoritativeSources = new Set(['usgs', 'climate-anomaly', 'global-transport-shipping']);
+    expect(executableWorldEventLayers({ renderer: 'webgl', availableSources: authoritativeSources })
+      .map((layer) => layer.id)).toEqual(expect.arrayContaining([
+        'earthquakes-volcanoes',
+        'climate-anomalies',
+        'air-routes',
+      ]));
+    expect(executableWorldEventLayers({ renderer: 'webgl', availableSources: authoritativeSources })
+      .map((layer) => layer.id)).not.toContain('intel-hotspots');
+    expect(executableWorldEventLayers({ renderer: 'svg', availableSources: new Set() })
+      .map((layer) => layer.id)).not.toContain('earthquakes-volcanoes');
   });
 
   it('declares source, legend and limitations for every layer', () => {

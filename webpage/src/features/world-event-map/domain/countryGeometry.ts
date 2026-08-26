@@ -17,6 +17,8 @@ export type CountryGeometry = {
 export type CountryGeometryIndex = {
   countries: CountryGeometry[];
   resolve: (identity?: string | null) => CountryGeometry | null;
+  locate: (position: [number, number]) => CountryGeometry | null;
+  intersects: (identity: string, geometry: GeoEventGeometry) => boolean;
 };
 
 const COUNTRY_ALIASES: Record<string, string> = {
@@ -89,6 +91,67 @@ function countryFeature(feature: Feature): CountryGeometry | null {
   };
 }
 
+type Position = [number, number];
+
+function pointInRing([x, y]: Position, ring: number[][]) {
+  let inside = false;
+  for (let current = 0, previous = ring.length - 1; current < ring.length; previous = current++) {
+    const currentPosition = ring[current];
+    const previousPosition = ring[previous];
+    if (!currentPosition || !previousPosition) continue;
+    const xi = currentPosition[0];
+    const yi = currentPosition[1];
+    const xj = previousPosition[0];
+    const yj = previousPosition[1];
+    if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
+    if (xi === undefined || yi === undefined || xj === undefined || yj === undefined) continue;
+    const crosses = (yi > y) !== (yj > y)
+      && x < ((xj - xi) * (y - yi)) / ((yj - yi) || Number.EPSILON) + xi;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function pointInPolygon(position: Position, coordinates: number[][][]) {
+  const exterior = coordinates[0];
+  if (!exterior || !pointInRing(position, exterior)) return false;
+  return coordinates.slice(1).every((hole) => !pointInRing(position, hole));
+}
+
+function pointInGeometry(position: Position, geometry: GeoEventGeometry) {
+  if (geometry.type === 'Polygon') return pointInPolygon(position, geometry.coordinates);
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.some((polygon) => pointInPolygon(position, polygon));
+  }
+  return false;
+}
+
+function sampledPositions(geometry: GeoEventGeometry, limit = 96): Position[] {
+  if (geometry.type === 'Point') return [geometry.coordinates];
+  const positions: Position[] = [];
+  const collect = (candidate: unknown) => {
+    if (!Array.isArray(candidate)) return;
+    if (candidate.length >= 2 && Number.isFinite(candidate[0]) && Number.isFinite(candidate[1])) {
+      positions.push([Number(candidate[0]), Number(candidate[1])]);
+      return;
+    }
+    candidate.forEach(collect);
+  };
+  collect(geometry.coordinates);
+  if (positions.length <= limit) return positions;
+  const stride = Math.max(1, Math.floor(positions.length / limit));
+  const sampled = positions.filter((_position, index) => index % stride === 0).slice(0, limit - 1);
+  const last = positions[positions.length - 1];
+  if (last) sampled.push(last);
+  return sampled;
+}
+
+function geometryIntersectsCountry(country: CountryGeometry, geometry: GeoEventGeometry) {
+  if (sampledPositions(geometry).some((position) => pointInGeometry(position, country.geometry))) return true;
+  if (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon') return false;
+  return sampledPositions(country.geometry).some((position) => pointInGeometry(position, geometry));
+}
+
 export function buildCountryGeometryIndex(collection: FeatureCollection): CountryGeometryIndex {
   const countries = collection.features
     .map(countryFeature)
@@ -109,6 +172,14 @@ export function buildCountryGeometryIndex(collection: FeatureCollection): Countr
       const raw = String(identity || '').trim();
       if (!raw || /^global$/i.test(raw)) return null;
       return lookup.get(raw.toLowerCase()) || lookup.get(normalizeCountryIdentity(raw)) || null;
+    },
+    locate(position) {
+      if (!position.every(Number.isFinite)) return null;
+      return countries.find((country) => pointInGeometry(position, country.geometry)) || null;
+    },
+    intersects(identity, geometry) {
+      const country = this.resolve(identity);
+      return country ? geometryIntersectsCountry(country, geometry) : false;
     },
   };
 }

@@ -235,6 +235,9 @@ try {
   await client.send('Network.setBypassServiceWorker', { bypass: true });
   const loadFailures = [];
   const runtimeErrors = [];
+  const responseByRequest = new Map();
+  const networkBodies = [];
+  const networkBodyTasks = [];
   client.on('Network.loadingFailed', ({ errorText, type, canceled }) => {
     if (!canceled && loadFailures.length < 12) loadFailures.push(`${type || 'Other'}: ${errorText}`);
   });
@@ -245,6 +248,42 @@ try {
   });
   client.on('Log.entryAdded', ({ entry }) => {
     if (entry?.level === 'error' && runtimeErrors.length < 12) runtimeErrors.push(entry.text);
+  });
+  client.on('Network.responseReceived', ({ requestId, response, type }) => {
+    const url = String(response?.url || '');
+    if (!url.includes('/natural-hazards/map') && !url.includes('.pmtiles')) return;
+    responseByRequest.set(requestId, {
+      requestId,
+      url,
+      type,
+      status: response.status,
+      headers: response.headers || {},
+      mimeType: response.mimeType,
+      encodedBytes: 0,
+      bodyBytes: null,
+      geometryBytes: null,
+    });
+  });
+  client.on('Network.loadingFinished', ({ requestId, encodedDataLength }) => {
+    const record = responseByRequest.get(requestId);
+    if (!record) return;
+    record.encodedBytes = Number(encodedDataLength) || 0;
+    networkBodies.push(record);
+    if (!record.url.includes('/natural-hazards/map')) return;
+    networkBodyTasks.push(client.send('Network.getResponseBody', { requestId }).then(({ body, base64Encoded }) => {
+      const decoded = base64Encoded ? Buffer.from(body, 'base64').toString('utf8') : String(body || '');
+      record.bodyBytes = Buffer.byteLength(decoded);
+      try {
+        const payload = JSON.parse(decoded);
+        const geometryPayload = (payload.events || []).map((event) => ({
+          geometry: event.geometry,
+          geometries: event.properties?.geometries,
+        }));
+        record.geometryBytes = Buffer.byteLength(JSON.stringify(geometryPayload));
+      } catch {
+        record.geometryBytes = null;
+      }
+    }).catch(() => undefined));
   });
   const traceEvents = [];
   client.on('Tracing.dataCollected', ({ value }) => traceEvents.push(...value));
@@ -377,6 +416,17 @@ try {
     expression: 'window.__POLYMONITOR_MAP_DATA_PERF__?.snapshot() || []',
     returnByValue: true,
   });
+  await Promise.allSettled(networkBodyTasks);
+  const lifecycleResult = await client.send('Runtime.evaluate', {
+    expression: `(() => ({
+      marks: Object.fromEntries(performance.getEntriesByType('mark')
+        .filter((entry) => entry.name.startsWith('polymonitor:map:first-'))
+        .map((entry) => [entry.name, entry.startTime])),
+      canvases: document.querySelectorAll('.wm-weather-deck-basemap canvas').length,
+      aviationCanvases: document.querySelectorAll('.wm-weather-deck-basemap .deck-canvas').length,
+    }))()`,
+    returnByValue: true,
+  });
   const metrics = await client.send('Performance.getMetrics');
   const completed = client.once('Tracing.tracingComplete');
   await client.send('Tracing.end');
@@ -386,6 +436,10 @@ try {
   writeFileSync(output, JSON.stringify({ traceEvents }));
   const snapshot = snapshotResult.result?.value;
   const dataSnapshot = dataSnapshotResult.result?.value || [];
+  const hazardResponses = networkBodies.filter((record) => record.url.includes('/natural-hazards/map'));
+  const pmtilesResponses = networkBodies.filter((record) => record.url.includes('.pmtiles'));
+  const lifecycle = lifecycleResult.result?.value || { marks: {}, canvases: 0, aviationCanvases: 0 };
+  const publishTimes = dataSnapshot.filter((sample) => sample.phase === 'publish').map((sample) => Number(sample.at) || 0);
   const summary = {
     url: target.href,
     trace: output,
@@ -408,6 +462,27 @@ try {
     }).then((result) => result.result?.value),
     map: snapshot,
     mapData: summarizeDataSamples(dataSnapshot),
+    lifecycle: {
+      firstMapShellMs: lifecycle.marks?.['polymonitor:map:first-shell'] ?? null,
+      firstBasemapMs: lifecycle.marks?.['polymonitor:map:first-basemap'] ?? null,
+      firstHazardMs: lifecycle.marks?.['polymonitor:map:first-hazard'] ?? null,
+      completeVisibleHazardsMs: publishTimes.length ? Math.max(...publishTimes) : null,
+    },
+    network: {
+      initialHazardPayloadBytes: hazardResponses.reduce((sum, response) => sum + (response.bodyBytes ?? response.encodedBytes ?? 0), 0),
+      initialHazardGeometryBytes: hazardResponses.reduce((sum, response) => sum + (response.geometryBytes || 0), 0),
+      hazardResponses: hazardResponses.map(({ url, status, encodedBytes, bodyBytes, geometryBytes }) => ({
+        url, status, encodedBytes, bodyBytes, geometryBytes,
+      })),
+      pmtilesRangeResponses: pmtilesResponses.map(({ url, status, encodedBytes, headers }) => ({
+        url, status, encodedBytes,
+        contentRange: headers['content-range'] || headers['Content-Range'] || null,
+      })),
+    },
+    canvas: {
+      total: lifecycle.canvases,
+      deck: lifecycle.aviationCanvases,
+    },
     warmupMs,
     budgets,
     chromeMetrics: Object.fromEntries((metrics.metrics || []).map((metric) => [metric.name, metric.value])),

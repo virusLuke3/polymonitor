@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, wait
+from datetime import datetime, timezone
 from threading import Lock
 from time import monotonic
 from typing import Any, Dict
@@ -12,7 +13,7 @@ from ..severity import nws_severity
 
 
 PROVIDER_KEY = "nws"
-DEFAULT_URL = "https://api.weather.gov/alerts/active"
+DEFAULT_URL = "https://api.weather.gov/alerts"
 SOURCE_URL = "https://www.weather.gov/documentation/services-web-alerts"
 ZONE_CACHE_TTL_SECONDS = 6 * 60 * 60
 ZONE_FETCH_DEADLINE_SECONDS = 7
@@ -210,10 +211,12 @@ def fetch(
     url: str = DEFAULT_URL,
     limit: int = 600,
     previous_events: list[Dict[str, Any]] | None = None,
+    now: datetime | None = None,
 ) -> ProviderResult:
+    observed_now = now or datetime.now(timezone.utc)
     payload = http_json_get(
         url,
-        params={"status": "actual", "message_type": "alert,update"},
+        params={"status": "actual", "message_type": "alert,update,cancel", "limit": min(500, max(1, limit))},
         timeout=8,
         headers={
             "Accept": "application/geo+json",
@@ -243,11 +246,30 @@ def fetch(
             continue
         message_type = str(properties.get("messageType") or "Alert")
         cancelled = message_type.lower() == "cancel"
+        references = properties.get("references") if isinstance(properties.get("references"), list) else []
+        referenced_ids = [
+            str(reference.get("identifier") or reference.get("@id") or "").strip()
+            for reference in references
+            if isinstance(reference, dict)
+            and str(reference.get("identifier") or reference.get("@id") or "").strip()
+        ]
+        # CAP Update/Cancel messages have a new identifier. The oldest explicit
+        # reference is the stable advisory identity; retaining it makes the
+        # latest-revision selector replace the alert instead of drawing a
+        # duplicate. No spatial or title-based guess is used here.
+        canonical_native_id = referenced_ids[-1] if referenced_ids else native_id
         effective_at = iso_timestamp(properties.get("effective"))
         onset_at = iso_timestamp(properties.get("onset"))
         updated_at = iso_timestamp(properties.get("sent"))
         expires_at = iso_timestamp(properties.get("expires"))
         ended_at = iso_timestamp(properties.get("ends"))
+        expired = False
+        if expires_at:
+            try:
+                expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                expired = expiry <= observed_now
+            except ValueError:
+                expired = False
         geometry = _generalized_geometry(feature.get("geometry"))
         affected_zones = [
             trusted
@@ -257,7 +279,11 @@ def fetch(
         resolved_zone_count = sum(1 for zone in affected_zones if zone in resolved_zones)
         if geometry is None and resolved_zone_count:
             geometry = _merge_zone_geometries([resolved_zones[zone] for zone in affected_zones if zone in resolved_zones])
-        previous = previous_by_id.get(f"{hazard_kind}:nws:{native_id}") or {}
+        previous = (
+            previous_by_id.get(f"{hazard_kind}:nws:{canonical_native_id}")
+            or previous_by_id.get(f"{hazard_kind}:nws:{native_id}")
+            or {}
+        )
         previous_properties = previous.get("properties") if isinstance(previous.get("properties"), dict) else {}
         previous_zone_count = int(previous_properties.get("resolvedZoneCount") or 0)
         previous_geometry = _geometry(previous.get("geometry"))
@@ -282,10 +308,9 @@ def fetch(
             )
             if resolved_zone_count < len(affected_zones):
                 limitations.append("Some referenced NWS zones were unavailable within the bounded refresh deadline.")
-        references = properties.get("references") if isinstance(properties.get("references"), list) else []
         events.append(
             {
-                "id": f"{hazard_kind}:nws:{native_id}",
+                "id": f"{hazard_kind}:nws:{canonical_native_id}",
                 "category": "weather",
                 "title": compact_text(properties.get("headline"), 240) or event_name,
                 "summary": compact_text(properties.get("description"), 700),
@@ -317,9 +342,13 @@ def fetch(
                     "unresolvedZoneCount": max(0, len(affected_zones) - resolved_zone_count),
                     "geometryReusedFromSnapshot": geometry_reused,
                     "response": properties.get("response"),
+                    "canonicalEventId": f"{hazard_kind}:nws:{canonical_native_id}",
+                    "mergeReason": "CAP identifier/references revision chain",
+                    "sourceProvenance": [{"provider": "NWS", "nativeEventId": native_id}],
+                    "expired": expired,
                 },
                 "hazardKind": hazard_kind,
-                "lifecycle": "ended" if cancelled else "active",
+                "lifecycle": "ended" if cancelled or expired else "active",
                 "effectiveAt": effective_at,
                 "onsetAt": onset_at,
                 "endedAt": ended_at,
@@ -335,9 +364,8 @@ def fetch(
                     "advisoryId": native_id,
                     "revisionAt": updated_at,
                     "replaces": [
-                        str(reference.get("identifier") or reference.get("@id") or "")
-                        for reference in references
-                        if isinstance(reference, dict)
+                        reference_id
+                        for reference_id in referenced_ids
                     ],
                     "cancelled": cancelled,
                 },

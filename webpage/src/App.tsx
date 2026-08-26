@@ -46,6 +46,7 @@ import {
   sourceStatusFromAdapter,
   useCountryGeometry,
   useNaturalHazards,
+  useAviationViewport,
   useWorldEventMapState,
   worldEventLayerById,
   type GeoEvent,
@@ -94,6 +95,12 @@ type LayerToggle = {
   icon: MapSymbolKey;
   enabled: boolean;
   hint?: string;
+  aliases: string[];
+  availability: 'ready' | 'degraded' | 'unavailable';
+  availabilityReason?: string;
+  isExecutable: boolean;
+  sourceKeys: string[];
+  requiredSources: string[];
 };
 
 type RegionKey = WorldEventRegion;
@@ -129,6 +136,12 @@ const INITIAL_LAYERS: LayerToggle[] = selectableWorldEventLayers().map((layer) =
   icon: layer.icon,
   enabled: layer.defaultEnabled,
   hint: layer.hint,
+  aliases: [...layer.aliases],
+  availability: layer.availability,
+  availabilityReason: layer.availabilityReason,
+  isExecutable: layer.isExecutable(),
+  sourceKeys: [...layer.sourceKeys],
+  requiredSources: [...layer.requiredSources],
 }));
 
 const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
@@ -381,6 +394,7 @@ function WorldEventInlineMap({
   onAviationLensChange,
   onAviationRiskSourceChange,
   onAviationClose,
+  onCountryChange,
 }: {
   events: GeoEvent[];
   state: WorldEventMapState;
@@ -390,6 +404,7 @@ function WorldEventInlineMap({
   onAviationLensChange: (lens: AviationLensMode) => void;
   onAviationRiskSourceChange: (source: AviationRiskSource) => void;
   onAviationClose: () => void;
+  onCountryChange: (countryCode: string | null) => void;
 }) {
   const { t } = useI18n();
   return (
@@ -405,6 +420,7 @@ function WorldEventInlineMap({
           onAviationLensChange={onAviationLensChange}
           onAviationRiskSourceChange={onAviationRiskSourceChange}
           onAviationClose={onAviationClose}
+          onCountryChange={onCountryChange}
           height={620}
         />
       </Suspense>
@@ -795,14 +811,57 @@ function WorldMonitorApp() {
   const [commandMarketSearchLoading, setCommandMarketSearchLoading] = useState(false);
   const [commandMarketSearchError, setCommandMarketSearchError] = useState('');
   const worldEventMap = useWorldEventMapState();
-  const naturalHazards = useNaturalHazards(worldEventMap.state.zoom);
-  const layers = useMemo<LayerToggle[]>(
-    () => INITIAL_LAYERS.map((layer) => ({
-      ...layer,
-      enabled: worldEventMap.state.activeLayerIds.includes(layer.id),
-    })),
-    [worldEventMap.state.activeLayerIds],
+  const naturalHazards = useNaturalHazards(
+    worldEventMap.state.zoom,
+    [worldEventMap.state.center.lon, worldEventMap.state.center.lat],
   );
+  const airRoutesRequested = worldEventMap.state.activeLayerIds.includes('air-routes');
+  const aviationViewport = useAviationViewport(
+    airRoutesRequested,
+    [worldEventMap.state.center.lon, worldEventMap.state.center.lat],
+    worldEventMap.state.zoom,
+  );
+  const layers = useMemo<LayerToggle[]>(() => {
+    const statuses = new Map(naturalHazards.sources.map((source) => [source.key, source]));
+    return INITIAL_LAYERS.map((layer) => {
+      const relevant = layer.sourceKeys.map((key) => statuses.get(key)).filter(Boolean);
+      const required = layer.requiredSources.map((key) => statuses.get(key)).filter(Boolean);
+      const requiredUnavailable = required.length > 0 && required.some((source) => (
+        source?.status === 'error' && source.eventCount === 0
+      ));
+      const aviationDegraded = layer.id === 'air-routes'
+        && Boolean(aviationViewport.error || aviationViewport.payload?.status === 'unavailable');
+      const degraded = aviationDegraded
+        || relevant.some((source) => source?.status === 'error' || source?.status === 'degraded');
+      const reasons = relevant
+        .filter((source) => source?.status === 'error' || source?.status === 'degraded')
+        .map((source) => `${source?.label || source?.key}: ${source?.message || source?.status}`);
+      if (requiredUnavailable) {
+        reasons.unshift('A required authoritative source is unavailable; this layer cannot make its declared claim.');
+      }
+      if (aviationDegraded) {
+        reasons.push(
+          aviationViewport.error
+            || aviationViewport.payload?.limitations?.join(' · ')
+            || aviationViewport.payload?.errorCode
+            || 'Live viewport aircraft are unavailable; reference routes remain usable.',
+        );
+      }
+      return {
+        ...layer,
+        enabled: worldEventMap.state.activeLayerIds.includes(layer.id),
+        availability: layer.availability === 'unavailable' || requiredUnavailable
+          ? 'unavailable'
+          : degraded ? 'degraded' : 'ready',
+        availabilityReason: reasons.join(' · ') || layer.availabilityReason,
+      };
+    });
+  }, [
+    aviationViewport.error,
+    aviationViewport.payload,
+    naturalHazards.sources,
+    worldEventMap.state.activeLayerIds,
+  ]);
   const region = worldEventMap.state.region;
   const mapZoom = worldEventMap.state.zoom;
   const setRegion = (nextRegion: RegionKey) => worldEventMap.setRegion(nextRegion);
@@ -1076,7 +1135,14 @@ function WorldMonitorApp() {
       Object.fromEntries(Object.entries(layout.panelLayout || {}).filter(([panelId]) => validPanels.has(panelId))),
     );
     const preferences = layout.preferences || {};
-    if (!readSearchParam('region') && REGION_OPTIONS.some((option) => option.value === preferences.region)) {
+    // A shared map camera is authoritative even when it does not include a
+    // named region. Applying the workspace's saved region after hydration
+    // otherwise moves the map away from the URL center/zoom and breaks
+    // reproducible links, cluster picking and screenshot baselines.
+    if (!readSearchParam('region')
+      && !readSearchParam('center')
+      && !readSearchParam('zoom')
+      && REGION_OPTIONS.some((option) => option.value === preferences.region)) {
       setRegion(preferences.region as RegionKey);
     }
     if (!readSearchParam('view') && isMapViewMode(preferences.viewMode || '')) {
@@ -1658,6 +1724,10 @@ function WorldMonitorApp() {
 
   const toggleLayer = (layerId: string) => {
     const target = layers.find((layer) => layer.id === layerId);
+    if (!target?.isExecutable || target.availability === 'unavailable') {
+      setNotice(target?.availabilityReason || 'This layer is not available in the current runtime.');
+      return;
+    }
     if (target) {
       const label = localizedLayerLabel(target, t);
       setNotice(t(target.enabled ? 'atlas.hideLayer' : 'atlas.showLayer', { layer: label }));
@@ -1761,7 +1831,9 @@ function WorldMonitorApp() {
   const ucdpLayerEnabled = enabledLayerIds.includes('ucdp');
   const intelLayerEnabled = enabledLayerIds.includes('intel-hotspots');
   const countryRiskLayerEnabled = enabledLayerIds.includes('sanctions-country-risk');
-  const countryGeometry = useCountryGeometry(intelLayerEnabled || countryRiskLayerEnabled);
+  const countryGeometry = useCountryGeometry(
+    intelLayerEnabled || countryRiskLayerEnabled || Boolean(worldEventMap.state.countryCode),
+  );
   const breakingEventPayload = runtimeData['breaking-event-radar'] as RuntimeBreakingEventRadarPayload | undefined;
   const ucdpRawMapEvents = useMemo(
     () => (ucdpLayerEnabled ? (geoShockPayload?.items || []).filter(hasGeoConflictCoordinates) : []),
@@ -1780,43 +1852,75 @@ function WorldMonitorApp() {
     activeLayerIds: worldEventMap.state.activeLayerIds,
     timeRange: worldEventMap.state.timeRange,
     severities: worldEventMap.state.severities,
+    countryCode: worldEventMap.state.countryCode,
   }), [
     worldEventMap.state.activeLayerIds,
     worldEventMap.state.severities,
     worldEventMap.state.timeRange,
+    worldEventMap.state.countryCode,
   ]);
   const hazardMapEvents = useMemo(
-    () => filterWorldEventMapEventsForLayers(naturalHazards.events, worldEventFilterState),
-    [naturalHazards.events, worldEventFilterState],
+    () => filterWorldEventMapEventsForLayers(
+      naturalHazards.events,
+      worldEventFilterState,
+      Date.now(),
+      countryGeometry.index,
+    ),
+    [countryGeometry.index, naturalHazards.events, worldEventFilterState],
   );
   const ucdpMapEvents = useMemo(
     () => ucdpLayerEnabled
       ? filterWorldEventMapEvents(
         geoShockAdapterResult.events.filter((event) => event.geometry?.type === 'Point'),
         worldEventFilterState,
+        Date.now(),
+        countryGeometry.index,
       )
       : [],
-    [geoShockAdapterResult, ucdpLayerEnabled, worldEventFilterState],
+    [countryGeometry.index, geoShockAdapterResult, ucdpLayerEnabled, worldEventFilterState],
   );
   const intelMapEvents = useMemo(
     () => intelLayerEnabled
-      ? filterWorldEventMapEvents(intelAdapterResult.events, worldEventFilterState)
+      ? filterWorldEventMapEvents(
+        intelAdapterResult.events,
+        worldEventFilterState,
+        Date.now(),
+        countryGeometry.index,
+      )
       : [],
-    [intelAdapterResult.events, intelLayerEnabled, worldEventFilterState],
+    [countryGeometry.index, intelAdapterResult.events, intelLayerEnabled, worldEventFilterState],
   );
   const countryRiskMapEvents = useMemo(
     () => countryRiskLayerEnabled
-      ? filterWorldEventMapEvents(countryRiskAdapterResult.events, worldEventFilterState)
+      ? filterWorldEventMapEvents(
+        countryRiskAdapterResult.events,
+        worldEventFilterState,
+        Date.now(),
+        countryGeometry.index,
+      )
       : [],
-    [countryRiskAdapterResult.events, countryRiskLayerEnabled, worldEventFilterState],
+    [countryGeometry.index, countryRiskAdapterResult.events, countryRiskLayerEnabled, worldEventFilterState],
   );
-  const showAirRoutes = enabledLayerIds.includes('air-routes');
+  const showAirRoutes = airRoutesRequested;
   const transportPayload = runtimeData['global-transport-shipping'] as RuntimeGlobalTransportShippingPayload | undefined;
+  const mapTransportPayload = useMemo<RuntimeGlobalTransportShippingPayload | undefined>(() => {
+    if (!showAirRoutes) return transportPayload;
+    if (!transportPayload && !aviationViewport.payload) return undefined;
+    return {
+      ...(transportPayload || { items: [] }),
+      status: transportPayload?.status || aviationViewport.payload?.status || 'loading',
+      aviation: {
+        ...transportPayload?.aviation,
+        generatedAt: aviationViewport.payload?.generatedAt || transportPayload?.aviation?.generatedAt,
+        liveFlights: aviationViewport.payload?.aircraft || [],
+      },
+    };
+  }, [aviationViewport.payload, showAirRoutes, transportPayload]);
   const airReferenceAdapterResult = useMemo(
     () => showAirRoutes
-      ? adaptTransportReference(transportPayload)
+      ? adaptTransportReference(mapTransportPayload)
       : { events: [], rejected: [] },
-    [showAirRoutes, transportPayload],
+    [showAirRoutes, mapTransportPayload],
   );
   const airReferenceEvents = airReferenceAdapterResult.events;
   const worldEventMapEvents = useMemo(
@@ -1878,14 +1982,25 @@ function WorldMonitorApp() {
     }
     if (showAirRoutes) {
       const runtimeStatus = getPanelRuntimeStatus('global-transport-shipping');
-      statuses.push(sourceStatusFromAdapter({
+      const status = sourceStatusFromAdapter({
         key: 'global-transport-shipping',
         label: 'AVIATION',
-        payloadStatus: transportPayload?.status || runtimeStatus.phase,
-        generatedAt: transportPayload?.aviation?.generatedAt || transportPayload?.generatedAt,
+        payloadStatus: aviationViewport.error
+          ? 'error'
+          : aviationViewport.payload?.status === 'unavailable'
+            ? 'degraded'
+            : transportPayload?.status || aviationViewport.payload?.status || runtimeStatus.phase,
+        generatedAt: aviationViewport.payload?.generatedAt
+          || transportPayload?.aviation?.generatedAt
+          || transportPayload?.generatedAt,
         result: airReferenceAdapterResult,
-        loaded: Boolean(transportPayload),
-      }));
+        loaded: Boolean(transportPayload || aviationViewport.payload || aviationViewport.error),
+      });
+      if (aviationViewport.error) status.message = aviationViewport.error;
+      else if (aviationViewport.payload?.limitations?.length) {
+        status.message = aviationViewport.payload.limitations.join(' · ');
+      }
+      statuses.push(status);
     }
     return statuses;
   }, [
@@ -1902,6 +2017,8 @@ function WorldMonitorApp() {
     intelLayerEnabled,
     naturalHazards.sources,
     showAirRoutes,
+    aviationViewport.error,
+    aviationViewport.payload,
     transportPayload,
     airReferenceAdapterResult,
     ucdpLayerEnabled,
@@ -2223,6 +2340,9 @@ function WorldMonitorApp() {
             state={worldEventMap.state}
             onTimeRangeChange={worldEventMap.setTimeRange}
             onSeveritiesChange={worldEventMap.setSeverities}
+            onBasemapProviderChange={worldEventMap.setBasemapProvider}
+            onBasemapThemeChange={worldEventMap.setBasemapTheme}
+            onClearCountry={() => worldEventMap.setCountry(null)}
           />
 
           <div className="wm-map-stage">
@@ -2260,6 +2380,7 @@ function WorldMonitorApp() {
                     onAviationLensChange={worldEventMap.setAviationLens}
                     onAviationRiskSourceChange={worldEventMap.setAviationRiskSource}
                     onAviationClose={() => worldEventMap.toggleLayer('air-routes')}
+                    onCountryChange={worldEventMap.setCountry}
                   />
                 )}
 

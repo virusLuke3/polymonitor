@@ -6,14 +6,16 @@ from math import ceil
 from typing import Any, Iterable, Mapping
 
 from .contracts import SCHEMA_VERSION
+from .dedupe import canonical_event_identity, latest_revision
 from .service import NaturalHazardDependencies, get_natural_hazard_source_result
 from .snapshots import cached_source_result
 from .source_health import SOURCE_COVERAGE
+from .providers import firms
 
 
 MAP_SCHEMA_VERSION = "natural-hazards-map.v1"
 DETAIL_SCHEMA_VERSION = "natural-hazard-detail.v1"
-MAP_SOURCE_KEYS = ("usgs", "eonet", "gdacs", "nws", "firms", "climate-anomaly")
+MAP_SOURCE_KEYS = ("usgs", "usgs-volcano-cap", "nhc", "eonet", "gdacs", "nws", "firms", "climate-anomaly")
 
 _RENDER_PROPERTY_KEYS = {
     "observationType",
@@ -23,6 +25,10 @@ _RENDER_PROPERTY_KEYS = {
     "forecast",
     "observed",
     "status",
+    "geometries",
+    "canonicalEventId",
+    "mergeReason",
+    "sourceProvenance",
 }
 
 _METRIC_KEYS_BY_KIND = {
@@ -30,7 +36,10 @@ _METRIC_KEYS_BY_KIND = {
     "tropical-cyclone": {"maximumWind", "pressureHpa", "categoryLabel", "advisoryNumber"},
     "weather-alert": {"urgency", "certainty", "providerSeverity"},
     "wildfire": {"detectionCount", "fireRadiativePowerMw", "sensor", "satellite", "confidenceLabel"},
-    "climate-anomaly": {"variable", "value", "anomaly", "unit", "baselinePeriod", "calculationVersion"},
+    "climate-anomaly": {
+        "variable", "value", "anomaly", "unit", "baselinePeriod", "calculationVersion",
+        "timeWindow", "spatialResolution", "provider",
+    },
     "volcano-or-other": {"statusLabel"},
 }
 
@@ -247,9 +256,40 @@ def compact_hazard_event(event: Mapping[str, Any], *, zoom: float = 2.0) -> dict
     properties = event.get("properties") if isinstance(event.get("properties"), Mapping) else {}
     compact["properties"] = {
         key: deepcopy(value)
-        for key in _RENDER_PROPERTY_KEYS
+        for key in _RENDER_PROPERTY_KEYS - {"geometries"}
         if (value := properties.get(key)) is not None
     }
+    canonical_id, merge_reason = canonical_event_identity(event)
+    if canonical_id and canonical_id != str(event.get("id") or ""):
+        compact["id"] = canonical_id
+        compact["properties"]["canonicalEventId"] = canonical_id
+        compact["properties"]["mergeReason"] = merge_reason
+        compact["properties"].setdefault("sourceProvenance", [
+            {
+                "provider": str(source.get("provider") or "unknown"),
+                "nativeEventId": str(
+                    revision.get("nativeEventId")
+                    or source.get("nativeId")
+                    or event.get("id")
+                    or ""
+                ),
+                "revisionAt": str(
+                    revision.get("revisionAt")
+                    or event.get("updatedAt")
+                    or ""
+                ),
+            }
+            for source in event.get("sources") or []
+            if isinstance(source, Mapping)
+        ])
+    named_geometries = properties.get("geometries") if isinstance(properties.get("geometries"), Mapping) else {}
+    simplified_named = {
+        str(name): simplified
+        for name, geometry in named_geometries.items()
+        if (simplified := simplify_geometry(geometry, zoom=zoom)) is not None
+    }
+    if simplified_named:
+        compact["properties"]["geometries"] = simplified_named
     compact["properties"]["geometryMode"] = "simplified"
     compact["properties"]["geometryZoom"] = zoom
     compact["properties"]["detailAvailable"] = True
@@ -287,13 +327,40 @@ def get_natural_hazard_map_snapshot(
     source: str,
     limit: int = 1200,
     zoom: float = 2.0,
+    bbox: tuple[float, float, float, float] | None = None,
 ) -> dict[str, Any]:
     key = str(source or "").strip().lower()
     if key not in MAP_SOURCE_KEYS:
         raise ValueError("unsupported-natural-hazard-source")
     bounded_limit = max(1, min(1200, int(limit)))
-    if key == "climate-anomaly":
-        result = _empty_source(key, "baseline-pipeline-not-configured")
+    if key == "firms" and zoom >= 5 and bbox is not None:
+        dependencies = NaturalHazardDependencies.from_context(context)
+        if not dependencies.firms_map_key or dependencies.http_text_get is None:
+            result = _empty_source(key, "configuration-required")
+        else:
+            try:
+                viewport_result = firms.fetch_viewport(
+                    dependencies.http_text_get,
+                    map_key=dependencies.firms_map_key,
+                    bbox=bbox,
+                    base_url=dependencies.firms_base_url,
+                    source=dependencies.firms_source,
+                    limit=bounded_limit,
+                )
+                updated = viewport_result.get("data_updated_at") or _generated_at()
+                result = {
+                    "key": key,
+                    "status": "ok",
+                    "coverage": SOURCE_COVERAGE[key],
+                    "events": viewport_result.get("events") or [],
+                    "fetchedAt": _generated_at(),
+                    "dataUpdatedAt": updated,
+                    "staleAfter": None,
+                    "lastSuccessAt": updated,
+                    "errorCode": None,
+                }
+            except Exception as exc:
+                result = _empty_source(key, f"firms-viewport-{exc.__class__.__name__}")
     else:
         result = get_natural_hazard_source_result(
             context,
@@ -304,6 +371,8 @@ def get_natural_hazard_map_snapshot(
         compact_hazard_event(event, zoom=zoom)
         for event in list(result.get("events") or [])[:bounded_limit]
         if isinstance(event, Mapping)
+        and not bool((event.get("revision") or {}).get("cancelled"))
+        and str(event.get("lifecycle") or "").lower() not in {"cancelled", "expired", "ended"}
     ]
     source_state = {name: deepcopy(value) for name, value in result.items() if name != "events"}
     errors = [] if source_state.get("status") == "ok" else [{
@@ -330,6 +399,7 @@ def get_natural_hazard_map_snapshot(
             "source": key,
             "geometryMode": "simplified",
             "geometryZoom": zoom,
+            "bbox": list(bbox) if bbox is not None else None,
             "detailEndpoint": "/runtime/world/natural-hazards/events/{eventId}",
             "fullSchemaVersion": SCHEMA_VERSION,
         },
@@ -345,23 +415,26 @@ def get_natural_hazard_event_detail(
     if not wanted:
         return None
     dependencies = NaturalHazardDependencies.from_context(context)
+    cached_events: list[dict[str, Any]] = []
     for key in MAP_SOURCE_KEYS:
-        if key == "climate-anomaly":
-            continue
         result = cached_source_result(dependencies.snapshot_store, key)
         if not result:
             continue
         for event in result.get("events") or []:
-            if isinstance(event, Mapping) and str(event.get("id") or "") == wanted:
-                revision = event.get("revision") if isinstance(event.get("revision"), Mapping) else {}
-                generated_at = str(
-                    event.get("updatedAt")
-                    or revision.get("revisionAt")
-                    or _generated_at()
-                )
-                return {
-                    "schemaVersion": DETAIL_SCHEMA_VERSION,
-                    "generatedAt": generated_at,
-                    "event": deepcopy(dict(event)),
-                }
+            if isinstance(event, Mapping):
+                cached_events.append(deepcopy(dict(event)))
+    for event in latest_revision(cached_events):
+        if str(event.get("id") or "") != wanted:
+            continue
+        revision = event.get("revision") if isinstance(event.get("revision"), Mapping) else {}
+        generated_at = str(
+            event.get("updatedAt")
+            or revision.get("revisionAt")
+            or _generated_at()
+        )
+        return {
+            "schemaVersion": DETAIL_SCHEMA_VERSION,
+            "generatedAt": generated_at,
+            "event": event,
+        }
     return None

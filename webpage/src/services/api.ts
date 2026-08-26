@@ -701,6 +701,19 @@ export function fetchRuntimeGlobalTransportShipping(limit = 14) {
   return apiGet<RuntimeGlobalTransportShippingPayload>(`/runtime/transport/global-shipping?limit=${limit}`);
 }
 
+export function fetchAviationViewport(
+  bbox: [number, number, number, number],
+  zoom: number,
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams({ bbox: bbox.join(','), zoom: String(zoom), limit: '180' });
+  return apiGetWithTimeout<import('@/types').AviationViewportPayload>(
+    `/runtime/transport/aviation-viewport?${params.toString()}`,
+    10_000,
+    signal,
+  );
+}
+
 export function fetchRuntimeBreakingEventRadar(limit = 12) {
   return apiGet<RuntimeBreakingEventRadarPayload>(`/runtime/evidence/breaking-event-radar?limit=${limit}`);
 }
@@ -757,8 +770,14 @@ export function fetchRuntimeGeoSanctionsShock(limit = 2000) {
   return apiGet<RuntimeGeoSanctionsShockPayload>(`/runtime/world/geo-sanctions-shock?limit=${limit}`);
 }
 
-export function fetchNaturalHazardMapSource(source: string, zoom: number, signal?: AbortSignal) {
+export function fetchNaturalHazardMapSource(
+  source: string,
+  zoom: number,
+  bbox?: [number, number, number, number],
+  signal?: AbortSignal,
+) {
   const params = new URLSearchParams({ source, limit: '1200', zoom: String(zoom) });
+  if (bbox) params.set('bbox', bbox.join(','));
   return apiGetWithTimeout<HazardMapResponse>(
     `/runtime/world/natural-hazards/map?${params.toString()}`,
     10_000,

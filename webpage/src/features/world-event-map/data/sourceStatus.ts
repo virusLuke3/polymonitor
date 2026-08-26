@@ -62,6 +62,8 @@ export function sourceStatusFromAdapter({
 
 const HAZARD_SOURCE_LABELS: Record<string, string> = {
   usgs: 'USGS',
+  'usgs-volcano-cap': 'USGS VOLCANO',
+  nhc: 'NHC',
   eonet: 'EONET',
   gdacs: 'GDACS',
   nws: 'NWS',
@@ -76,7 +78,7 @@ export function sourceStatusesFromHazardResponse(
 ): WorldEventSourceStatus[] {
   if (!response) {
     return loading
-      ? ['usgs', 'eonet', 'gdacs', 'nws', 'firms', 'climate-anomaly'].map((key) => ({
+      ? ['usgs', 'usgs-volcano-cap', 'nhc', 'eonet', 'gdacs', 'nws', 'firms', 'climate-anomaly'].map((key) => ({
           key,
           label: HAZARD_SOURCE_LABELS[key] || key.toUpperCase(),
           status: 'loading' as const,

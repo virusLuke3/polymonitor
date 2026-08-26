@@ -1,4 +1,4 @@
-import { selectableWorldEventLayers } from '../config/layerRegistry';
+import { executableWorldEventLayers } from '../config/layerRegistry';
 import { isWorldEventRegion, worldEventRegionPreset, type WorldEventRegion } from '../config/regions';
 import type { GeoEventSeverity } from '../domain/types';
 import {
@@ -10,6 +10,8 @@ import {
   type WorldEventTimeRange,
   type AviationLensMode,
   type AviationRiskSource,
+  type WorldEventBasemapProvider,
+  type WorldEventBasemapTheme,
 } from './mapState';
 
 export type WorldEventMapAction =
@@ -21,14 +23,16 @@ export type WorldEventMapAction =
   | { type: 'set-time-range'; timeRange: WorldEventTimeRange }
   | { type: 'set-severities'; severities: GeoEventSeverity[] }
   | { type: 'select-event'; eventId: string | null }
-  | { type: 'set-basemap-theme'; theme: string }
+  | { type: 'set-basemap-provider'; provider: WorldEventBasemapProvider }
+  | { type: 'set-basemap-theme'; theme: WorldEventBasemapTheme }
+  | { type: 'set-country'; countryCode: string | null }
   | { type: 'set-aviation-lens'; lens: AviationLensMode }
   | { type: 'set-aviation-risk-source'; source: AviationRiskSource }
   | { type: 'replace'; state: WorldEventMapState }
   | { type: 'reset' };
 
 function validLayerIds(layerIds: string[]) {
-  const selectable = new Set(selectableWorldEventLayers().map((layer) => layer.id));
+  const selectable = new Set(executableWorldEventLayers().map((layer) => layer.id));
   return [...new Set(layerIds.filter((layerId) => selectable.has(layerId)))];
 }
 
@@ -64,7 +68,12 @@ export function worldEventMapReducer(
     return { ...state, severities: [...new Set(action.severities)] };
   }
   if (action.type === 'select-event') return { ...state, selectedEventId: action.eventId };
-  if (action.type === 'set-basemap-theme') return { ...state, basemapTheme: action.theme || 'dark' };
+  if (action.type === 'set-basemap-provider') return { ...state, basemapProvider: action.provider };
+  if (action.type === 'set-basemap-theme') return { ...state, basemapTheme: action.theme };
+  if (action.type === 'set-country') {
+    const normalized = action.countryCode?.trim().toUpperCase() || null;
+    return { ...state, countryCode: normalized && /^[A-Z]{2}$/.test(normalized) ? normalized : null };
+  }
   if (action.type === 'set-aviation-lens') return { ...state, aviationLens: action.lens };
   if (action.type === 'set-aviation-risk-source') return { ...state, aviationRiskSource: action.source };
   if (action.type === 'replace') return action.state;

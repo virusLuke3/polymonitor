@@ -13,7 +13,7 @@ from api.context import (
 
 from .contracts import SCHEMA_VERSION, SourceFetchResult
 from .dedupe import latest_revision
-from .providers import eonet, firms, gdacs, nws, usgs
+from .providers import eonet, firms, gdacs, nhc, ncei, nws, usgs, usgs_volcano_cap
 from .snapshots import cached_source_result, fetch_with_snapshot, stale_source_result
 from .source_health import unavailable_source
 
@@ -33,6 +33,7 @@ SOURCE_PROVIDER_DEADLINE_SECONDS = 6.5
 class NaturalHazardDependencies:
     http_json_get: Callable[..., Any]
     http_text_get: Callable[..., str] | None
+    http_bytes_get: Callable[..., bytes] | None
     snapshot_store: Any
     logger: Any
     usgs_url: str
@@ -53,6 +54,7 @@ class NaturalHazardDependencies:
         return cls(
             http_json_get=getter,
             http_text_get=resolve_optional_service_callable(context, "http_text_get"),
+            http_bytes_get=resolve_optional_service_callable(context, "http_bytes_get"),
             snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
             logger=getattr(app, "logger", None),
             usgs_url=str(
@@ -174,6 +176,28 @@ def _source_specs(
                 previous_events=(previous_nws or {}).get("events", []),
             ),
         ),
+        "nhc": (
+            120,
+            lambda: nhc.fetch(
+                dependencies.http_json_get,
+                http_bytes_get=dependencies.http_bytes_get,
+                limit=min(40, bounded_limit),
+            ),
+        ),
+        "usgs-volcano-cap": (
+            300,
+            lambda: usgs_volcano_cap.fetch(
+                dependencies.http_json_get,
+                limit=min(80, bounded_limit),
+            ),
+        ),
+        "climate-anomaly": (
+            6 * 60 * 60,
+            lambda: ncei.fetch(
+                dependencies.http_json_get,
+                limit=min(ncei.MAX_EVENTS, bounded_limit),
+            ),
+        ),
     }
     if dependencies.firms_map_key and dependencies.http_text_get is not None:
         specs["firms"] = (
@@ -199,7 +223,7 @@ def get_natural_hazard_source_result(
     """Load exactly one provider so slow sources never head-of-line block peers."""
 
     key = str(source or "").strip().lower()
-    if key not in {"usgs", "eonet", "gdacs", "nws", "firms"}:
+    if key not in {"usgs", "usgs-volcano-cap", "eonet", "gdacs", "nws", "nhc", "firms", "climate-anomaly"}:
         raise ValueError("unsupported-natural-hazard-source")
     dependencies = NaturalHazardDependencies.from_context(context)
     bounded_limit = max(1, min(DEFAULT_EVENT_LIMIT, int(limit)))
@@ -265,7 +289,6 @@ def get_natural_hazards_snapshot(
     if "firms" not in results:
         error_code = "configuration-required" if not dependencies.firms_map_key else "http-text-get-unavailable"
         sources.append(unavailable_source("firms", error_code))
-    sources.append(unavailable_source("climate-anomaly", "baseline-pipeline-not-configured"))
     failed_sources = [source for source in sources if source["status"] != "ok"]
     return {
         "schemaVersion": SCHEMA_VERSION,

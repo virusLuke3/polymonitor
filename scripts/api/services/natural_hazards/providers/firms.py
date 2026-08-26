@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import math
+import hashlib
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Mapping
@@ -18,6 +19,7 @@ DEFAULT_SOURCE = "VIIRS_NOAA20_NRT"
 SOURCE_URL = "https://firms.modaps.eosdis.nasa.gov/api/area/"
 GRID_DEGREES = 0.5
 MAX_AGGREGATES = 250
+MAX_VIEWPORT_DETECTIONS = 1_200
 
 
 def _observed_at(row: Dict[str, str]) -> str | None:
@@ -200,5 +202,115 @@ def fetch(
     if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
         raise ValueError("firms-schema-columns")
     events = _cluster_rows(reader, clean_source, limit)
+    newest = max((event["updatedAt"] for event in events), default=None)
+    return {"events": events, "data_updated_at": newest}
+
+
+def _raw_detection_events(rows: Iterable[Mapping[str, str]], source: str, limit: int) -> list[Dict[str, Any]]:
+    events: list[Dict[str, Any]] = []
+    for row in rows:
+        lon = finite_number(row.get("longitude"))
+        lat = finite_number(row.get("latitude"))
+        observed_at = _observed_at(dict(row))
+        if lon is None or lat is None or observed_at is None or not (-180 <= lon <= 180 and -90 <= lat <= 90):
+            continue
+        frp = finite_number(row.get("frp")) or 0.0
+        confidence = str(row.get("confidence") or "").strip() or None
+        satellite = str(row.get("satellite") or "").strip() or None
+        instrument = str(row.get("instrument") or "").strip() or None
+        identity = "|".join((source, observed_at, f"{lat:.5f}", f"{lon:.5f}", satellite or "", instrument or ""))
+        native_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+        severity = "watch" if frp >= 100 else "info"
+        events.append({
+            "id": f"fire-detection:firms-raw:{native_id}",
+            "category": "natural-hazard",
+            "title": f"Satellite thermal detection · {frp:.1f} MW FRP",
+            "summary": "A source-native NASA FIRMS thermal detection in the requested viewport; it is not a confirmed wildfire perimeter.",
+            "severity": severity,
+            "occurredAt": observed_at,
+            "updatedAt": observed_at,
+            "geometry": {"type": "Point", "coordinates": [round(lon, 5), round(lat, 5)]},
+            "locationPrecision": "exact",
+            "locationLabel": f"{lat:.4f}, {lon:.4f}",
+            "sources": [{
+                "provider": "NASA FIRMS",
+                "url": SOURCE_URL,
+                "nativeId": native_id,
+                "observedAt": observed_at,
+                "freshness": "live",
+                "status": "ok",
+            }],
+            "limitations": [
+                "A satellite thermal anomaly is not a confirmed wildfire or fire perimeter.",
+                "Cloud, smoke, sensor coverage and overpass timing can create gaps.",
+                "Raw detections are requested only for the current high-zoom viewport and are display-capped.",
+            ],
+            "relatedMarketIds": [],
+            "properties": {
+                "mapEntity": "hazard-observation",
+                "observationType": "satellite-thermal-detection",
+                "sourceProduct": source,
+                "rawDetection": True,
+                "canonicalEventId": f"fire-detection:firms-raw:{native_id}",
+                "mergeReason": "source-native FIRMS observation identifier",
+                "sourceProvenance": [{"provider": "NASA FIRMS", "nativeEventId": native_id}],
+            },
+            "hazardKind": "fire-detection",
+            "lifecycle": "observed",
+            "coverage": {
+                "scope": "viewport",
+                "label": f"NASA FIRMS {source} detections in the requested map viewport",
+                "isComplete": False,
+                "gaps": ["Sensor coverage, clouds and acquisition timing affect detection completeness."],
+            },
+            "severityEvidence": {
+                "provider": "NASA FIRMS",
+                "rawLevel": f"frp={frp:.1f}MW,confidence={confidence or 'not-reported'}",
+                "mappingVersion": SEVERITY_MAPPING_VERSION,
+                "reason": "Raw detection priority uses reported FRP only; it does not assert incident severity.",
+            },
+            "revision": {"nativeEventId": native_id, "revisionAt": observed_at, "replaces": [], "cancelled": False},
+            "metrics": {
+                "kind": "wildfire",
+                "detectionCount": 1,
+                "fireRadiativePowerMw": round(frp, 2),
+                "sensor": instrument,
+                "satellite": satellite,
+                "confidenceLabel": confidence,
+            },
+        })
+        if len(events) >= max(1, min(MAX_VIEWPORT_DETECTIONS, limit)):
+            break
+    events.sort(key=lambda event: str(event.get("updatedAt") or ""), reverse=True)
+    return events
+
+
+def fetch_viewport(
+    http_text_get,
+    *,
+    map_key: str,
+    bbox: tuple[float, float, float, float],
+    base_url: str = DEFAULT_BASE_URL,
+    source: str = DEFAULT_SOURCE,
+    limit: int = MAX_VIEWPORT_DETECTIONS,
+) -> ProviderResult:
+    clean_key = str(map_key or "").strip()
+    if not clean_key:
+        raise ValueError("firms-map-key-required")
+    west, south, east, north = bbox
+    if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
+        raise ValueError("firms-invalid-viewport-bbox")
+    clean_source = str(source or DEFAULT_SOURCE).strip()
+    area = f"{west:.4f},{south:.4f},{east:.4f},{north:.4f}"
+    url = f"{base_url.rstrip('/')}/{quote(clean_key, safe='')}/{quote(clean_source, safe='')}/{area}/1"
+    text = http_text_get(url, timeout=8, headers={
+        "Accept": "text/csv",
+        "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+    })
+    reader = csv.DictReader(io.StringIO(str(text or "")))
+    required = {"latitude", "longitude", "acq_date", "acq_time"}
+    if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+        raise ValueError("firms-schema-columns")
+    events = _raw_detection_events(reader, clean_source, limit)
     newest = max((event["updatedAt"] for event in events), default=None)
     return {"events": events, "data_updated_at": newest}

@@ -25,6 +25,7 @@ import {
 import {
   continuousMetricRadiusMeters,
   eventColor,
+  eventLabel,
   eventRepresentativePoint,
   eventSeverityColor,
   hazardAreaPresentation,
@@ -58,7 +59,7 @@ import {
   boundedAnimationDelta,
   MAP_ANIMATION_FRAME_INTERVAL_MS,
 } from './animationClock';
-import type { MapHoverPosition, MapRenderer, MapRendererCallbacks } from './MapRenderer';
+import type { MapCountryTarget, MapHoverPosition, MapRenderer, MapRendererCallbacks } from './MapRenderer';
 import {
   worldEventTooltipModel,
   type WorldEventPickedObject,
@@ -80,6 +81,17 @@ function cssColor([red, green, blue, alpha]: [number, number, number, number]) {
 function eventGeoJson(event: GeoEvent): Geometry | null {
   if (!event.geometry || event.geometry.type === 'Point') return null;
   return normalizePolygonWinding(event.geometry as Geometry);
+}
+
+function eventNamedGeometry(event: GeoEvent, name: string): Geometry | null {
+  const geometries = event.properties.geometries;
+  if (!geometries || typeof geometries !== 'object' || Array.isArray(geometries)) return null;
+  const geometry = (geometries as Record<string, unknown>)[name];
+  if (!geometry || typeof geometry !== 'object' || Array.isArray(geometry)) return null;
+  const type = String((geometry as { type?: unknown }).type || '');
+  return ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'].includes(type)
+    ? geometry as Geometry
+    : null;
 }
 
 function aviationEntity(event: GeoEvent) {
@@ -186,6 +198,36 @@ function normalizedFeature(feature: Feature): Feature {
   return feature.geometry
     ? { ...feature, geometry: normalizePolygonWinding(feature.geometry) }
     : feature;
+}
+
+function featureCountryTarget(feature: Feature): MapCountryTarget | null {
+  const properties = feature.properties || {};
+  const iso2 = String(properties['ISO3166-1-Alpha-2'] || '').toUpperCase();
+  const name = String(properties['name:en'] || properties.name || iso2);
+  const positions: Position[] = [];
+  const visit = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+      positions.push(value as Position);
+      return;
+    }
+    value.forEach(visit);
+  };
+  if (feature.geometry?.type === 'GeometryCollection') {
+    feature.geometry.geometries.forEach((geometry) => {
+      if ('coordinates' in geometry) visit(geometry.coordinates);
+    });
+  } else if (feature.geometry && 'coordinates' in feature.geometry) {
+    visit(feature.geometry.coordinates);
+  }
+  if (!iso2 || !positions.length) return null;
+  const lons = positions.map((position) => Number(position[0])).filter(Number.isFinite);
+  const lats = positions.map((position) => Number(position[1])).filter(Number.isFinite);
+  return {
+    iso2,
+    name,
+    bounds: [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+  };
 }
 
 export class SvgMapRenderer implements MapRenderer {
@@ -321,6 +363,14 @@ export class SvgMapRenderer implements MapRenderer {
     this.scheduleRender();
   }
 
+  fitCountry(country: MapCountryTarget) {
+    const [[west, south], [east, north]] = country.bounds;
+    const span = Math.max(1, east - west, north - south);
+    const center = { lon: (west + east) / 2, lat: (south + north) / 2 };
+    const zoom = clampWorldEventZoom(Math.log2(360 / span) - 0.35);
+    this.callbacks?.onCameraChange({ center, zoom });
+  }
+
   pause() {
     this.paused = true;
     this.clearHover();
@@ -393,6 +443,10 @@ export class SvgMapRenderer implements MapRenderer {
       };
       this.countryLabels = countryBasemapLabels(this.countries);
       this.scheduleRender();
+      if (typeof performance !== 'undefined'
+        && performance.getEntriesByName('polymonitor:map:first-basemap').length === 0) {
+        performance.mark('polymonitor:map:first-basemap');
+      }
       this.callbacks?.onBasemapStateChange('renderer-fallback-ready');
     } catch (error) {
       if (this.destroyed) return;
@@ -433,6 +487,28 @@ export class SvgMapRenderer implements MapRenderer {
       if (!data) continue;
       const country = svgElement('path');
       country.setAttribute('d', data);
+      const target = featureCountryTarget(feature);
+      if (target) {
+        country.setAttribute('tabindex', '0');
+        country.setAttribute('role', 'button');
+        country.setAttribute('aria-label', `${target.name} map area`);
+        country.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const rect = this.host?.getBoundingClientRect();
+          const mouse = event as MouseEvent;
+          this.callbacks?.onCountrySelect(target, rect
+            ? { x: mouse.clientX - rect.left, y: mouse.clientY - rect.top }
+            : undefined);
+        });
+        country.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const rect = this.host?.getBoundingClientRect();
+          this.callbacks?.onCountryContextMenu(target, rect
+            ? { x: event.clientX - rect.left, y: event.clientY - rect.top }
+            : { x: 0, y: 0 });
+        });
+      }
       this.countryLayer.append(country);
     }
 
@@ -485,6 +561,37 @@ export class SvgMapRenderer implements MapRenderer {
       this.state?.zoom ?? 1.25,
       selectedId || null,
     );
+    const occupiedEventLabels = [...occupiedCountryLabels];
+    const eventLabelCandidates: Array<{ event: GeoEvent; x: number; y: number; size: number }> = [];
+    for (const event of renderEvents) {
+      if (!isHazardEvent(event) || event.hazardKind !== 'tropical-cyclone') continue;
+      for (const [name, mode] of [
+        ['forecastCone', 'cone'],
+        ['observedTrack', 'observed'],
+        ['forecastTrack', 'forecast'],
+      ] as const) {
+        const geometry = eventNamedGeometry(event, name);
+        if (!geometry) continue;
+        const data = path(geometry);
+        if (!data) continue;
+        const shape = svgElement('path');
+        shape.setAttribute('d', data);
+        shape.classList.add('wm-world-event-svg-cyclone-geometry', `is-${mode}`);
+        this.decorateEventElement(shape, event, event.id === selectedId);
+        if (mode === 'cone') {
+          shape.setAttribute('fill', cssColor(eventColor(event, 28)));
+          shape.setAttribute('stroke', cssColor(eventColor(event, 135)));
+          shape.setAttribute('stroke-width', '1');
+          this.areaLayer.append(shape);
+        } else {
+          shape.setAttribute('fill', 'none');
+          shape.setAttribute('stroke', mode === 'observed' ? cssColor(eventColor(event, 205)) : '#cde1e89b');
+          shape.setAttribute('stroke-width', mode === 'observed' ? '2.2' : '1.2');
+          if (mode === 'forecast') shape.setAttribute('stroke-dasharray', '4 4');
+          this.eventLayer.append(shape);
+        }
+      }
+    }
     for (const event of renderEvents) {
       if (!event.geometry || event.geometry.type === 'Point') continue;
       const isArea = event.geometry.type === 'Polygon' || event.geometry.type === 'MultiPolygon';
@@ -563,6 +670,12 @@ export class SvgMapRenderer implements MapRenderer {
       const title = svgElement('title');
       title.textContent = `${cluster.count} ${cluster.label || 'mapped events'} · ${cluster.severity.toUpperCase()} · click to expand`;
       const symbolSize = Math.min(24, 15 + Math.log2(cluster.count + 1) * 1.25);
+      occupiedEventLabels.push({
+        left: x - symbolSize / 2 - 3,
+        top: y - symbolSize / 2 - 3,
+        right: x + symbolSize / 2 + 18,
+        bottom: y + symbolSize / 2 + 14,
+      });
       const underlay = mapSymbolBackdrop(x, y, cluster.symbol, symbolSize);
       underlay.classList.add('wm-world-event-svg-symbol-underlay');
       const ring = severityRing(x, y, symbolSize / 2 + 1, cluster.severity);
@@ -638,6 +751,12 @@ export class SvgMapRenderer implements MapRenderer {
           ? 14
           : (this.state?.zoom || 1.25) < 4 ? 16 : 18;
       const eventSymbol = mapSymbolForEvent(event);
+      occupiedEventLabels.push({
+        left: x - symbolSize / 2 - 2,
+        top: y - symbolSize / 2 - 2,
+        right: x + symbolSize / 2 + 2,
+        bottom: y + symbolSize / 2 + 2,
+      });
       const underlay = mapSymbolBackdrop(x, y, eventSymbol, symbolSize);
       underlay.classList.add('wm-world-event-svg-symbol-underlay');
       const ring = severityRing(x, y, symbolSize / 2 + 0.75, event.severity);
@@ -652,6 +771,40 @@ export class SvgMapRenderer implements MapRenderer {
       );
       group.append(...(outerRing ? [outerRing] : []), ring, underlay, symbol);
       this.eventLayer.append(group);
+      const mapZoom = this.state?.zoom || 1.25;
+      if (mapZoom >= 3 && (
+        event.id === selectedId
+        || event.severity === 'critical'
+        || (mapZoom >= 4 && event.severity === 'warning')
+      )) eventLabelCandidates.push({ event, x, y, size: event.id === selectedId ? 11 : 9 });
+    }
+    const rank = { info: 0, watch: 1, warning: 2, critical: 3 } as const;
+    eventLabelCandidates.sort((left, right) => (
+      Number(right.event.id === selectedId) - Number(left.event.id === selectedId)
+      || rank[right.event.severity] - rank[left.event.severity]
+      || Date.parse(right.event.updatedAt || '') - Date.parse(left.event.updatedAt || '')
+    ));
+    for (const candidate of eventLabelCandidates.slice(0, (this.state?.zoom || 0) < 4 ? 24 : 100)) {
+      const textValue = eventLabel(candidate.event);
+      const widthEstimate = Math.min(220, Math.max(30, textValue.length * candidate.size * 0.62));
+      const box = {
+        left: candidate.x + 6,
+        top: candidate.y - candidate.size - 13,
+        right: candidate.x + 6 + widthEstimate,
+        bottom: candidate.y - 2,
+      };
+      const collides = occupiedEventLabels.some((other) => (
+        box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top
+      ));
+      if (candidate.event.id !== selectedId && collides) continue;
+      const label = svgElement('text');
+      label.classList.add('wm-world-event-svg-event-label');
+      label.setAttribute('x', String(box.left));
+      label.setAttribute('y', String(candidate.y - 8));
+      label.setAttribute('font-size', String(candidate.size));
+      label.textContent = textValue;
+      this.eventLayer.append(label);
+      occupiedEventLabels.push(box);
     }
     for (const event of aviation.hubs) {
       if (event.geometry?.type !== 'Point') continue;

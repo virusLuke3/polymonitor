@@ -12,6 +12,7 @@
     "check:locales": "node scripts/check-locales.mjs",
     "check:map-bundle": "node scripts/check-map-bundle.mjs",
     "test:map": "vitest run src/features/world-event-map",
+    "test:map:e2e": "playwright test e2e/world-event-map.spec.ts",
     "perf:map": "node scripts/measure-map-performance.mjs",
     "build": "npm run check:locales && tsc && vite build && npm run check:map-bundle",
     "preview": "vite preview"
@@ -35,6 +36,7 @@
     "world-atlas": "^2.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@preact/preset-vite": "^2.10.2",
     "@types/d3-geo": "^3.1.0",
     "@types/supercluster": "^7.1.3",

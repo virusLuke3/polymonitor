@@ -37,6 +37,7 @@ DEFAULT_ADSB_SAMPLE_INTERVAL_SECONDS = 1800
 AVIATION_ROUTE_LAYER_LIMIT = 360
 AVIATION_FLIGHT_LAYER_LIMIT = 140
 EVIDENCE_SCHEMA_VERSION = "air-evidence-v1"
+AVIATION_VIEWPORT_SCHEMA_VERSION = "aviation-viewport.v1"
 
 OPENFLIGHTS_AIRPORTS_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat"
 OPENFLIGHTS_ROUTES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat"
@@ -1341,6 +1342,98 @@ def _opensky_live_status(ctx: dict) -> Dict[str, Any]:
     }
     _store_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, OPENSKY_CACHE_KEY, live_payload, ttl_seconds=min_interval)
     return live_payload
+
+
+def get_aviation_viewport_snapshot(
+    ctx: GlobalTransportShippingContext,
+    *,
+    bbox: tuple[float, float, float, float],
+    zoom: float,
+    limit: int = 180,
+) -> Dict[str, Any]:
+    """Return live aircraft only for a bounded visible map viewport.
+
+    The client discards stale request generations. This server function keeps
+    provider credentials and sampling policy off the browser, caches a
+    quantized viewport briefly, and never falls back to fabricated flights.
+    """
+    west, south, east, north = bbox
+    if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
+        raise ValueError("invalid-aviation-bbox")
+    bounded_zoom = max(0.0, min(12.0, float(zoom)))
+    bounded_limit = max(1, min(360, int(limit)))
+    sampled_at = _utc_now_iso(ctx)
+    if bounded_zoom < 2:
+        return {
+            "schemaVersion": AVIATION_VIEWPORT_SCHEMA_VERSION,
+            "generatedAt": sampled_at,
+            "status": "threshold",
+            "bbox": list(bbox),
+            "zoom": bounded_zoom,
+            "aircraft": [],
+            "aircraftCount": 0,
+            "source": None,
+            "limitations": ["Live aircraft positions are requested only at zoom 2 or higher."],
+        }
+    quantum = max(0.25, 8 / (2 ** max(0, int(bounded_zoom) - 2)))
+    quantized = tuple(round(value / quantum) * quantum for value in bbox)
+    cache_key = "viewport-v1:" + ":".join(f"{value:.2f}" for value in quantized)
+    cached = _read_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, cache_key, max_age_seconds=30)
+    if cached is not None:
+        return cached
+    try:
+        token, token_state = _opensky_access_token(ctx)  # type: ignore[arg-type]
+    except Exception as exc:
+        token, token_state = None, {"status": f"auth-{exc.__class__.__name__}"}
+    if not token:
+        return {
+            "schemaVersion": AVIATION_VIEWPORT_SCHEMA_VERSION,
+            "generatedAt": sampled_at,
+            "status": "unavailable",
+            "bbox": list(bbox),
+            "zoom": bounded_zoom,
+            "aircraft": [],
+            "aircraftCount": 0,
+            "source": "OpenSky",
+            "sourceUrl": OPENSKY_DOC_URL,
+            "errorCode": token_state.get("status") or "opensky-credentials-unavailable",
+            "limitations": ["OpenSky live viewport data requires configured server-side credentials."],
+        }
+    region = {"id": cache_key, "label": "Current map viewport"}
+    payload = _http_json_get(
+        ctx,
+        OPENSKY_STATES_URL,
+        params={"lamin": south, "lomin": west, "lamax": north, "lomax": east},
+        timeout=14,
+        headers={"Authorization": f"Bearer {token}", "User-Agent": "polydata-global-transport/1.0"},
+    )
+    rows = payload.get("states") if isinstance(payload, dict) else []
+    normalized = [
+        item
+        for item in (_normalize_opensky_state(row, region=region, sampled_at=sampled_at) for row in rows or [])
+        if item is not None and west <= float(item["lon"]) <= east and south <= float(item["lat"]) <= north
+    ]
+    normalized.sort(key=lambda item: (
+        0 if item.get("status") == "watch" else 1,
+        -float(item.get("riskScore") or 0),
+        str(item.get("id") or ""),
+    ))
+    aircraft = normalized[:bounded_limit]
+    result = {
+        "schemaVersion": AVIATION_VIEWPORT_SCHEMA_VERSION,
+        "generatedAt": sampled_at,
+        "status": "ok",
+        "bbox": list(bbox),
+        "zoom": bounded_zoom,
+        "aircraft": aircraft,
+        "aircraftCount": len(aircraft),
+        "availableAircraftCount": len(normalized),
+        "source": "OpenSky",
+        "sourceUrl": OPENSKY_DOC_URL,
+        "limitations": ["Aircraft surveillance coverage, update delay and regional availability vary by provider."],
+    }
+    _store_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, cache_key, result, ttl_seconds=30)
+    return result
 
 
 def _market_links(

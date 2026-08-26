@@ -2,12 +2,15 @@ import maplibregl, { type StyleSpecification } from 'maplibre-gl';
 import {
   OPENFREEMAP_DARK_STYLE,
   OPENFREEMAP_LIGHT_STYLE,
+  CARTO_DARK_STYLE,
+  CARTO_LIGHT_STYLE,
   WORLD_EVENT_PMTILES_URL,
   type WeatherMapTheme,
 } from './weatherBasemapMeta';
 
 export {
   CARTO_DARK_STYLE,
+  CARTO_LIGHT_STYLE,
   OPENFREEMAP_DARK_STYLE,
   OPENFREEMAP_LIGHT_STYLE,
   WORLD_EVENT_PMTILES_URL,
@@ -139,11 +142,20 @@ export async function buildWorldEventPMTilesStyle(url: string): Promise<StyleSpe
   };
 }
 
-export async function getWeatherMapStyle(theme: WeatherMapTheme = 'dark'): Promise<StyleSpecification | string> {
-  if (theme !== 'positron' && WORLD_EVENT_PMTILES_URL) {
+export type WeatherBasemapProvider = 'auto' | 'pmtiles' | 'openfreemap' | 'carto';
+
+export async function getWeatherMapStyle(
+  theme: WeatherMapTheme = 'dark',
+  provider: WeatherBasemapProvider = 'auto',
+): Promise<StyleSpecification | string> {
+  const resolvedProvider = provider === 'auto'
+    ? (theme !== 'positron' && WORLD_EVENT_PMTILES_URL ? 'pmtiles' : 'openfreemap')
+    : provider;
+  if (resolvedProvider === 'pmtiles' && WORLD_EVENT_PMTILES_URL) {
     await registerWorldEventPMTilesProtocol();
     return buildWorldEventPMTilesStyle(WORLD_EVENT_PMTILES_URL);
   }
+  if (resolvedProvider === 'carto') return theme === 'positron' ? CARTO_LIGHT_STYLE : CARTO_DARK_STYLE;
   return theme === 'positron' ? OPENFREEMAP_LIGHT_STYLE : OPENFREEMAP_DARK_STYLE;
 }
 

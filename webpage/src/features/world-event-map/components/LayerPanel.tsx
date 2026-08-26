@@ -16,6 +16,10 @@ export type LayerPanelItem = {
   icon: MapSymbolKey;
   hint?: string;
   enabled: boolean;
+  aliases: string[];
+  availability: 'ready' | 'degraded' | 'unavailable';
+  availabilityReason?: string;
+  isExecutable: boolean;
 };
 
 export const LAYER_PANEL_COPY = {
@@ -28,10 +32,12 @@ export const LAYER_PANEL_COPY = {
 
 function LayerBrief({
   layer,
+  runtime,
   eventCount,
   onClose,
 }: {
   layer: MapLayerDefinition;
+  runtime?: LayerPanelItem;
   eventCount: number;
   onClose: () => void;
 }) {
@@ -58,6 +64,13 @@ function LayerBrief({
         <div>
           <dt>Evidence standard</dt>
           <dd>{layer.explanation.confidence}</dd>
+        </div>
+        <div>
+          <dt>Runtime capability</dt>
+          <dd>
+            {(runtime?.availability || layer.availability).toUpperCase()}
+            {runtime?.availabilityReason ? ` · ${runtime.availabilityReason}` : ''}
+          </dd>
         </div>
       </dl>
       <section>
@@ -99,7 +112,7 @@ export function LayerPanel({
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized
-      ? items.filter((item) => `${item.label} ${item.hint || ''} ${item.id}`.toLowerCase().includes(normalized))
+      ? items.filter((item) => `${item.label} ${item.hint || ''} ${item.id} ${item.aliases.join(' ')}`.toLowerCase().includes(normalized))
       : items;
   }, [items, query]);
   const counts = useMemo(() => {
@@ -111,8 +124,17 @@ export function LayerPanel({
     return next;
   }, [events]);
   const briefLayer = briefLayerId ? worldEventLayerById(briefLayerId) : undefined;
-  const activeCount = useMemo(() => items.filter((item) => item.enabled).length, [items]);
-  const activeSummary = `${activeCount}/${items.length} LAYERS ACTIVE`;
+  const executableCount = useMemo(
+    () => items.filter((item) => item.isExecutable && item.availability !== 'unavailable').length,
+    [items],
+  );
+  const activeCount = useMemo(
+    () => items.filter((item) => (
+      item.enabled && item.isExecutable && item.availability !== 'unavailable'
+    )).length,
+    [items],
+  );
+  const activeSummary = `${activeCount}/${executableCount} LAYERS ACTIVE`;
 
   const toggleCollapsed = () => {
     if (collapsed) {
@@ -167,17 +189,23 @@ export function LayerPanel({
             onTouchMove={(event) => event.stopPropagation()}
           >
             {filtered.length ? filtered.map((item) => {
-              const actionLabel = `${item.enabled ? 'Hide' : 'Show'} ${item.label}`;
               const briefOpen = briefLayerId === item.id;
+              const unavailable = !item.isExecutable || item.availability === 'unavailable';
+              const visiblyEnabled = item.enabled && !unavailable;
+              const actionLabel = unavailable
+                ? `${item.label} unavailable`
+                : `${visiblyEnabled ? 'Hide' : 'Show'} ${item.label}`;
               return (
                 <div
                   key={item.id}
-                  className={`wm-layer-row ${item.enabled ? 'enabled' : ''} ${briefOpen ? 'brief-open' : ''}`}
+                  className={`wm-layer-row ${visiblyEnabled ? 'enabled' : ''} ${briefOpen ? 'brief-open' : ''} ${unavailable ? 'is-unavailable' : ''}`}
+                  title={unavailable ? item.availabilityReason : undefined}
                 >
                   <label className="wm-layer-toggle" title={actionLabel}>
                     <input
                       type="checkbox"
-                      checked={item.enabled}
+                      checked={visiblyEnabled}
+                      disabled={unavailable}
                       onChange={() => onToggle(item.id)}
                       aria-label={actionLabel}
                     />
@@ -188,7 +216,11 @@ export function LayerPanel({
                       {item.panelEmoji}
                     </span>
                     <span className="wm-layer-label">{item.label}</span>
-                    {item.hint ? <em className="wm-layer-hint">{item.hint}</em> : null}
+                    {item.hint ? (
+                      <em className="wm-layer-hint">
+                        {unavailable ? 'OFFLINE' : item.availability === 'degraded' ? 'DEGRADED' : item.hint}
+                      </em>
+                    ) : null}
                   </label>
                   <button
                     type="button"
@@ -209,6 +241,7 @@ export function LayerPanel({
       {briefLayer && !collapsed ? (
         <LayerBrief
           layer={briefLayer}
+          runtime={items.find((item) => item.id === briefLayer.id)}
           eventCount={counts.get(briefLayer.id) || 0}
           onClose={() => setBriefLayerId(null)}
         />

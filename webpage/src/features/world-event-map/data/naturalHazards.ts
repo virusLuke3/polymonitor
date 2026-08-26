@@ -30,6 +30,66 @@ export type ParsedNaturalHazards = {
   rejected: GeoEventAdapterIssue[];
 };
 
+function hazardCanonicalId(event: HazardEvent) {
+  return String(event.properties.canonicalEventId || event.id);
+}
+
+function canonicalPrimaryRank(event: HazardEvent) {
+  const providers = event.sources.map((source) => source.provider.toLowerCase()).join(' ');
+  const authoritativeEarthquake = event.hazardKind === 'earthquake' && providers.includes('usgs') ? 2 : 1;
+  return [authoritativeEarthquake, String(event.updatedAt || event.occurredAt || '')] as const;
+}
+
+/** Fuse only events carrying the same explicit canonical identity. */
+export function mergeCanonicalHazardEvents(events: readonly HazardEvent[]) {
+  const groups = new Map<string, HazardEvent[]>();
+  for (const event of events) {
+    const canonicalId = hazardCanonicalId(event);
+    groups.set(canonicalId, [...(groups.get(canonicalId) || []), event]);
+  }
+  return [...groups.entries()].map(([canonicalId, group]) => {
+    const primary = group.slice().sort((left, right) => {
+      const leftRank = canonicalPrimaryRank(left);
+      const rightRank = canonicalPrimaryRank(right);
+      return rightRank[0] - leftRank[0] || rightRank[1].localeCompare(leftRank[1]);
+    })[0]!;
+    if (group.length === 1 && primary.id === canonicalId) return primary;
+    const seenSources = new Set<string>();
+    const sources = group.flatMap((event) => event.sources).filter((source) => {
+      const key = `${source.provider}:${source.nativeId || ''}`;
+      if (seenSources.has(key)) return false;
+      seenSources.add(key);
+      return true;
+    });
+    const sourceProvenance = group.flatMap((event) => {
+      const declared = event.properties.sourceProvenance;
+      if (Array.isArray(declared)) return declared;
+      return event.sources.map((source) => ({
+        provider: source.provider,
+        nativeEventId: event.revision.nativeEventId || source.nativeId || event.id,
+        revisionAt: event.revision.revisionAt || event.updatedAt || '',
+      }));
+    });
+    return {
+      ...primary,
+      id: canonicalId,
+      sources,
+      limitations: [...new Set(group.flatMap((event) => event.limitations))],
+      properties: {
+        ...primary.properties,
+        canonicalEventId: canonicalId,
+        mergeReason: String(
+          group.find((event) => event.properties.mergeReason)?.properties.mergeReason
+          || 'explicit canonical identity',
+        ),
+        sourceProvenance,
+      },
+    } satisfies HazardEvent;
+  }).sort((left, right) => String(
+    right.updatedAt || right.occurredAt || '',
+  ).localeCompare(String(left.updatedAt || left.occurredAt || '')));
+}
+
 export function parseNaturalHazardsResponse(value: unknown): ParsedNaturalHazards {
   if (!isRecord(value)) throw new Error('Natural hazards response must be an object');
   if (value.schemaVersion !== 'natural-hazards.v1' && value.schemaVersion !== 'natural-hazards-map.v1') {
@@ -69,6 +129,13 @@ export function parseNaturalHazardsResponse(value: unknown): ParsedNaturalHazard
         ? counts.byHazardKind as HazardMapResponse['counts']['byHazardKind']
         : {},
     },
+    meta: isRecord(value.meta) ? {
+      source: typeof value.meta.source === 'string' ? value.meta.source : undefined,
+      geometryMode: value.meta.geometryMode === 'full' ? 'full' : value.meta.geometryMode === 'simplified' ? 'simplified' : undefined,
+      geometryZoom: typeof value.meta.geometryZoom === 'number' ? value.meta.geometryZoom : undefined,
+      detailEndpoint: typeof value.meta.detailEndpoint === 'string' ? value.meta.detailEndpoint : undefined,
+      fullSchemaVersion: typeof value.meta.fullSchemaVersion === 'string' ? value.meta.fullSchemaVersion : undefined,
+    } : undefined,
   };
   return { response, events, rejected };
 }

@@ -17,6 +17,16 @@ export type MapLayerDefinition = {
   hint?: string;
   categories: GeoEventCategory[];
   sourceKeys: string[];
+  requiredSources: string[];
+  supportedRenderers: Array<'webgl' | 'svg'>;
+  availability: 'ready' | 'degraded' | 'unavailable';
+  availabilityReason?: string;
+  isExecutable: (context?: {
+    renderer?: 'webgl' | 'svg';
+    availableSources?: ReadonlySet<string>;
+  }) => boolean;
+  aliases: string[];
+  capabilities: Array<'points' | 'areas' | 'paths' | 'animation' | 'clustering' | 'details'>;
   defaultEnabled: boolean;
   selectable: boolean;
   minZoom: number;
@@ -46,7 +56,13 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     icon: 'storm',
     hint: 'ALERTS',
     categories: ['weather', 'natural-hazard'],
-    sourceKeys: ['nws', 'eonet', 'gdacs'],
+    sourceKeys: ['nws', 'nhc', 'eonet', 'gdacs'],
+    requiredSources: [],
+    supportedRenderers: ['webgl', 'svg'],
+    availability: 'ready',
+    isExecutable: () => true,
+    aliases: ['hurricane', 'typhoon', 'tornado', 'flood', 'tsunami', 'storm'],
+    capabilities: ['points', 'areas', 'paths', 'clustering', 'details'],
     defaultEnabled: true,
     selectable: true,
     minZoom: 0,
@@ -65,8 +81,8 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     ],
     explanation: {
       purpose: 'Active severe storms, tornadoes, tropical cyclones, floods and tsunamis.',
-      sources: ['NWS active CAP alerts', 'NASA EONET', 'GDACS international alerts'],
-      freshness: 'NWS refreshes every 60 seconds; EONET refreshes every five minutes.',
+      sources: ['NOAA NWS active alerts', 'NOAA NHC advisories and GIS products', 'NASA EONET', 'GDACS international alerts'],
+      freshness: 'NWS refreshes every 60 seconds; NHC every two minutes; EONET every five minutes.',
       confidence: 'Provider-native alert geometry, advisory identity and event tracks.',
       limitations: ['NWS coverage is United States focused.', 'EONET is a discovery feed, not an exhaustive global alert service.'],
     },
@@ -80,7 +96,13 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     icon: 'earthquake',
     hint: 'GEO',
     categories: ['natural-hazard'],
-    sourceKeys: ['usgs', 'eonet', 'gdacs'],
+    sourceKeys: ['usgs', 'usgs-volcano-cap', 'eonet', 'gdacs'],
+    requiredSources: ['usgs'],
+    supportedRenderers: ['webgl', 'svg'],
+    availability: 'ready',
+    isExecutable: () => true,
+    aliases: ['quake', 'eruption', 'seismic', 'volcano'],
+    capabilities: ['points', 'areas', 'clustering', 'details'],
     defaultEnabled: true,
     selectable: true,
     minZoom: 0,
@@ -96,10 +118,10 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     ],
     explanation: {
       purpose: 'Recent earthquakes and reported volcanic events.',
-      sources: ['USGS Earthquake Hazards Program', 'NASA EONET', 'GDACS international alerts'],
+      sources: ['USGS Earthquake Hazards Program', 'USGS Volcano Hazards Program HANS CAP', 'NASA EONET', 'GDACS international alerts'],
       freshness: 'USGS refreshes every 60 seconds; EONET refreshes every five minutes.',
       confidence: 'Magnitude, depth, PAGER and provider-native event identity are retained.',
-      limitations: ['Volcano coverage follows EONET discovery and is not a complete eruption registry.'],
+      limitations: ['USGS CAP status covers US observatory responsibility areas; EONET is discovery-only and neither is complete global volcano coverage.'],
     },
   },
   {
@@ -112,6 +134,12 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     hint: 'FIRE',
     categories: ['natural-hazard'],
     sourceKeys: ['eonet', 'gdacs', 'firms'],
+    requiredSources: [],
+    supportedRenderers: ['webgl', 'svg'],
+    availability: 'ready',
+    isExecutable: () => true,
+    aliases: ['fire', 'firms', 'hotspot', 'satellite detection'],
+    capabilities: ['points', 'areas', 'clustering', 'details'],
     defaultEnabled: true,
     selectable: true,
     minZoom: 0,
@@ -143,6 +171,12 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     hint: 'TEMP',
     categories: ['weather', 'natural-hazard'],
     sourceKeys: ['nws', 'eonet'],
+    requiredSources: [],
+    supportedRenderers: ['webgl', 'svg'],
+    availability: 'ready',
+    isExecutable: () => true,
+    aliases: ['heat', 'cold', 'temperature', 'freeze'],
+    capabilities: ['points', 'areas', 'clustering', 'details'],
     defaultEnabled: true,
     selectable: true,
     minZoom: 0,
@@ -173,7 +207,13 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     icon: 'anomaly',
     hint: 'ANOMALY',
     categories: ['weather', 'natural-hazard'],
-    sourceKeys: ['eonet', 'gdacs', 'climate-anomaly'],
+    sourceKeys: ['climate-anomaly'],
+    requiredSources: ['climate-anomaly'],
+    supportedRenderers: ['webgl', 'svg'],
+    availability: 'ready',
+    isExecutable: () => true,
+    aliases: ['anomaly', 'climatology', 'temperature departure', 'precipitation departure'],
+    capabilities: ['points', 'areas', 'details'],
     defaultEnabled: true,
     selectable: true,
     minZoom: 0,
@@ -186,10 +226,10 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     legend: [{ label: 'Major anomaly', symbol: 'anomaly' }],
     explanation: {
       purpose: 'Major observed weather anomalies and quantitative climate departures.',
-      sources: ['NASA EONET', 'GDACS major drought alerts', 'Versioned anomaly baseline pipeline'],
-      freshness: 'Source-specific runtime freshness.',
+      sources: ['NOAA NCEI Climate at a Glance global mapping'],
+      freshness: 'Monthly, using the newest published observation month.',
       confidence: 'Quantitative anomalies require a declared baseline period and calculation version.',
-      limitations: ['The quantitative baseline pipeline is not yet configured.', 'Discovery events are not presented as calculated anomalies.'],
+      limitations: ['The 5 degree monthly grid is an observation, not an active warning or local impact forecast.', 'The declared baseline is 1991-2020.'],
     },
   },
   {
@@ -202,6 +242,12 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     hint: 'INTEL',
     categories: ['intel'],
     sourceKeys: ['breaking-event-radar'],
+    requiredSources: ['breaking-event-radar'],
+    supportedRenderers: ['webgl', 'svg'],
+    availability: 'ready',
+    isExecutable: () => true,
+    aliases: ['intelligence', 'breaking event', 'news hotspot'],
+    capabilities: ['points', 'areas', 'clustering', 'details'],
     defaultEnabled: false,
     selectable: true,
     minZoom: 0,
@@ -230,6 +276,12 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     hint: 'CONFLICT',
     categories: ['conflict', 'unrest'],
     sourceKeys: ['geo-sanctions-shock'],
+    requiredSources: ['geo-sanctions-shock'],
+    supportedRenderers: ['webgl', 'svg'],
+    availability: 'ready',
+    isExecutable: () => true,
+    aliases: ['war', 'unrest', 'ucdp', 'armed conflict'],
+    capabilities: ['points', 'areas', 'clustering', 'details'],
     defaultEnabled: true,
     selectable: true,
     minZoom: 0,
@@ -262,6 +314,12 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     hint: 'RISK',
     categories: ['sanctions', 'country-risk'],
     sourceKeys: ['geo-sanctions-shock'],
+    requiredSources: ['geo-sanctions-shock'],
+    supportedRenderers: ['webgl', 'svg'],
+    availability: 'ready',
+    isExecutable: () => true,
+    aliases: ['sanctions', 'risk', 'country exposure'],
+    capabilities: ['areas', 'details'],
     defaultEnabled: true,
     selectable: true,
     minZoom: 0,
@@ -292,6 +350,12 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     hint: 'REFERENCE',
     categories: ['infrastructure'],
     sourceKeys: ['global-transport-shipping'],
+    requiredSources: ['global-transport-shipping'],
+    supportedRenderers: ['webgl', 'svg'],
+    availability: 'ready',
+    isExecutable: () => true,
+    aliases: ['aviation', 'aircraft', 'airport', 'flight', 'corridor'],
+    capabilities: ['points', 'paths', 'animation', 'details'],
     defaultEnabled: true,
     selectable: true,
     minZoom: 1,
@@ -333,6 +397,26 @@ export function selectableWorldEventLayers() {
     .filter((layer) => layer.selectable)
     .slice()
     .sort((left, right) => (order.get(left.id) ?? 99) - (order.get(right.id) ?? 99));
+}
+
+export type MapLayerExecutionContext = {
+  renderer?: 'webgl' | 'svg';
+  availableSources?: ReadonlySet<string>;
+};
+
+export function isWorldEventLayerExecutable(
+  layer: MapLayerDefinition,
+  context: MapLayerExecutionContext = {},
+) {
+  if (layer.availability === 'unavailable') return false;
+  if (context.renderer && !layer.supportedRenderers.includes(context.renderer)) return false;
+  if (context.availableSources
+    && layer.requiredSources.some((source) => !context.availableSources?.has(source))) return false;
+  return layer.isExecutable(context);
+}
+
+export function executableWorldEventLayers(context: MapLayerExecutionContext = {}) {
+  return selectableWorldEventLayers().filter((layer) => isWorldEventLayerExecutable(layer, context));
 }
 
 export function worldEventLayerById(id: string) {

@@ -27,6 +27,7 @@ class RuntimePanelRouteDependencies:
     natural_hazard_map_snapshot: Callable[..., dict[str, Any]] | None
     natural_hazard_event_detail: Callable[..., dict[str, Any] | None] | None
     natural_hazard_related_markets: Callable[..., dict[str, Any] | None] | None
+    aviation_viewport_snapshot: Callable[..., dict[str, Any]] | None
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelRouteDependencies:
@@ -44,6 +45,10 @@ class RuntimePanelRouteDependencies:
             natural_hazard_related_markets=cast(
                 Callable[..., dict[str, Any] | None] | None,
                 context.get("get_natural_hazard_related_markets"),
+            ),
+            aviation_viewport_snapshot=cast(
+                Callable[..., dict[str, Any]] | None,
+                context.get("get_aviation_viewport_snapshot"),
             ),
         )
 
@@ -260,11 +265,20 @@ def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
         try:
             limit = max(1, min(1200, int(request.args.get("limit") or 1200)))
             zoom = max(0.0, min(12.0, float(request.args.get("zoom") or 2.0)))
-            payload = dependencies.natural_hazard_map_snapshot(
-                source=source,
-                limit=limit,
-                zoom=zoom,
-            )
+            bbox = None
+            bbox_text = str(request.args.get("bbox") or "").strip()
+            if bbox_text:
+                values = tuple(float(value) for value in bbox_text.split(","))
+                if len(values) != 4:
+                    raise ValueError("invalid-bbox")
+                west, south, east, north = values
+                if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
+                    raise ValueError("invalid-bbox")
+                bbox = values
+            kwargs = {"source": source, "limit": limit, "zoom": zoom}
+            if bbox is not None:
+                kwargs["bbox"] = bbox
+            payload = dependencies.natural_hazard_map_snapshot(**kwargs)
         except ValueError as exc:
             return jsonify({"status": "error", "error": str(exc)}), 400
         response = _public_conditional_json(
@@ -275,6 +289,24 @@ def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
         response.headers["X-Map-Event-Count"] = str((payload.get("counts") or {}).get("events") or 0)
         response.headers["Server-Timing"] = f"hazard-map;dur={(time.perf_counter() - started_at) * 1000:.1f}"
         return response
+
+    @bp.route("/runtime/transport/aviation-viewport", methods=["GET"])
+    def api_aviation_viewport_snapshot():
+        if dependencies.aviation_viewport_snapshot is None:
+            return jsonify({"status": "error", "error": "aviation-viewport-unavailable"}), 503
+        try:
+            values = tuple(float(value) for value in str(request.args.get("bbox") or "").split(","))
+            if len(values) != 4:
+                raise ValueError("invalid-aviation-bbox")
+            west, south, east, north = values
+            if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
+                raise ValueError("invalid-aviation-bbox")
+            zoom = max(0.0, min(12.0, float(request.args.get("zoom") or 2.0)))
+            limit = max(1, min(360, int(request.args.get("limit") or 180)))
+            payload = dependencies.aviation_viewport_snapshot(bbox=values, zoom=zoom, limit=limit)
+        except ValueError as exc:
+            return jsonify({"status": "error", "error": str(exc)}), 400
+        return _public_conditional_json(payload, "public, max-age=15, stale-while-revalidate=30")
 
     @bp.route("/runtime/world/natural-hazards/events/<path:event_id>", methods=["GET"])
     def api_natural_hazard_event_detail(event_id: str):

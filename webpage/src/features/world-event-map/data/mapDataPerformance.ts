@@ -38,5 +38,9 @@ export function recordMapDataPhase(
   samples.push({ phase, source, durationMs, eventCount, at: performance.now() });
   if (samples.length > 180) samples.splice(0, samples.length - 180);
   performance.mark(`polymonitor:map-data:${phase}:${source}`);
+  if (phase === 'publish' && eventCount > 0
+    && performance.getEntriesByName('polymonitor:map:first-hazard').length === 0) {
+    performance.mark('polymonitor:map:first-hazard');
+  }
   expose();
 }

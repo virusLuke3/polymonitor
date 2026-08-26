@@ -2,7 +2,12 @@ import type { LayersList } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import type { WorldEventMapState } from '../../state/mapState';
 import { createEventGeometryLayers } from './eventGeometryLayers';
-import { createEventPointLayers, type EventClusterIndex } from './eventPointLayer';
+import {
+  createEventPointLayers,
+  type EventClusterIndex,
+  type LabelProjection,
+  type ScreenBox,
+} from './eventPointLayer';
 import { createAviationLayers } from './aviationLayers';
 
 export { EventClusterIndex, type EventCluster } from './eventPointLayer';
@@ -75,6 +80,8 @@ export function createWorldEventPointLayers(
   state: WorldEventMapState,
   viewport: [number, number, number, number] | undefined,
   clusterIndex: EventClusterIndex,
+  project?: LabelProjection,
+  occupiedScreenBoxes?: ScreenBox[],
 ) {
   return createEventPointLayers({
     events,
@@ -83,6 +90,8 @@ export function createWorldEventPointLayers(
     showLabels: true,
     viewport,
     clusterIndex,
+    project,
+    occupiedScreenBoxes,
   });
 }
 

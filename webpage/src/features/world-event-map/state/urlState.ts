@@ -1,4 +1,4 @@
-import { selectableWorldEventLayers } from '../config/layerRegistry';
+import { executableWorldEventLayers } from '../config/layerRegistry';
 import { isWorldEventRegion, worldEventRegionPreset } from '../config/regions';
 import type { GeoEventSeverity } from '../domain/types';
 import {
@@ -10,10 +10,14 @@ import {
   WORLD_EVENT_TIME_RANGES,
   AVIATION_LENS_MODES,
   AVIATION_RISK_SOURCES,
+  WORLD_EVENT_BASEMAP_PROVIDERS,
+  WORLD_EVENT_BASEMAP_THEMES,
   type AviationLensMode,
   type AviationRiskSource,
   type WorldEventMapState,
   type WorldEventTimeRange,
+  type WorldEventBasemapProvider,
+  type WorldEventBasemapTheme,
 } from './mapState';
 
 function parsedList(value: string | null) {
@@ -31,11 +35,18 @@ export function parseWorldEventMapState(
   fallback: WorldEventMapState = defaultWorldEventMapState(),
 ): WorldEventMapState {
   const params = new URLSearchParams(search);
+  // A serialized map snapshot is authoritative. Optional fields deliberately
+  // omitted from that snapshot (for example event/country) must clear stale
+  // local state instead of silently inheriting a previous investigation.
+  // Partial links still layer over the supplied fallback for backwards
+  // compatibility with old region-only and layer-only URLs.
+  const isCompleteSnapshot = ['center', 'zoom', 'layers', 'time'].every((key) => params.has(key));
+  const base = isCompleteSnapshot ? defaultWorldEventMapState() : fallback;
   let state: WorldEventMapState = {
-    ...fallback,
-    center: { ...fallback.center },
-    activeLayerIds: [...fallback.activeLayerIds],
-    severities: [...fallback.severities],
+    ...base,
+    center: { ...base.center },
+    activeLayerIds: [...base.activeLayerIds],
+    severities: [...base.severities],
   };
   const region = params.get('region');
   if (isWorldEventRegion(region)) {
@@ -53,7 +64,7 @@ export function parseWorldEventMapState(
   const zoom = finite(params.get('zoom'));
   if (zoom != null) state.zoom = clampWorldEventZoom(zoom);
 
-  const selectable = new Set(selectableWorldEventLayers().map((layer) => layer.id));
+  const selectable = new Set(executableWorldEventLayers().map((layer) => layer.id));
   const rawLayers = params.get('layers');
   const layers = parsedList(rawLayers);
   const validLayers = layers ? layers.filter((layerId) => selectable.has(layerId)) : null;
@@ -75,6 +86,16 @@ export function parseWorldEventMapState(
   }
   const selectedEventId = params.get('event');
   if (selectedEventId) state.selectedEventId = selectedEventId;
+  const provider = params.get('basemap');
+  if (WORLD_EVENT_BASEMAP_PROVIDERS.includes(provider as WorldEventBasemapProvider)) {
+    state.basemapProvider = provider as WorldEventBasemapProvider;
+  }
+  const theme = params.get('theme');
+  if (WORLD_EVENT_BASEMAP_THEMES.includes(theme as WorldEventBasemapTheme)) {
+    state.basemapTheme = theme as WorldEventBasemapTheme;
+  }
+  const country = params.get('country')?.trim().toUpperCase();
+  if (country && /^[A-Z]{2}$/.test(country)) state.countryCode = country;
   const aviationLens = params.get('air');
   if (AVIATION_LENS_MODES.includes(aviationLens as AviationLensMode)) {
     state.aviationLens = aviationLens as AviationLensMode;
@@ -96,6 +117,10 @@ export function serializeWorldEventMapUrl(state: WorldEventMapState, baseUrl: st
   url.searchParams.set('severity', state.severities.join(','));
   if (state.selectedEventId) url.searchParams.set('event', state.selectedEventId);
   else url.searchParams.delete('event');
+  url.searchParams.set('basemap', state.basemapProvider);
+  url.searchParams.set('theme', state.basemapTheme);
+  if (state.countryCode) url.searchParams.set('country', state.countryCode);
+  else url.searchParams.delete('country');
   url.searchParams.set('air', state.aviationLens);
   url.searchParams.set('airRisk', state.aviationRiskSource);
   return url.toString();
@@ -116,6 +141,9 @@ export function readStoredWorldEventMapState(
     if (parsed.timeRange) params.set('time', parsed.timeRange);
     if (Array.isArray(parsed.severities)) params.set('severity', parsed.severities.join(','));
     if (parsed.selectedEventId) params.set('event', parsed.selectedEventId);
+    if (parsed.basemapProvider) params.set('basemap', parsed.basemapProvider);
+    if (parsed.basemapTheme) params.set('theme', parsed.basemapTheme);
+    if (parsed.countryCode) params.set('country', parsed.countryCode);
     if (parsed.aviationLens) params.set('air', parsed.aviationLens);
     if (parsed.aviationRiskSource) params.set('airRisk', parsed.aviationRiskSource);
     return parseWorldEventMapState(params.toString(), fallback);

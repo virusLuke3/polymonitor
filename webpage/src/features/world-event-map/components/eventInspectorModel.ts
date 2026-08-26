@@ -169,6 +169,10 @@ export function hazardMetricFields(event: HazardEvent): InspectorField[] {
       field('Pressure', metrics.pressureHpa, ' hPa'),
       field('Category', metrics.categoryLabel),
       field('Advisory', metrics.advisoryNumber),
+      field('Movement direction', event.properties.movementDirectionDegrees, '°'),
+      field('Movement speed', event.properties.movementSpeedKnots, ' kt'),
+      field('Observed geometry', (event.properties.geometries as Record<string, unknown> | undefined)?.observedTrack ? 'Position + track' : 'Position'),
+      field('Forecast geometry', (event.properties.geometries as Record<string, unknown> | undefined)?.forecastCone ? 'Track + cone' : (event.properties.geometries as Record<string, unknown> | undefined)?.forecastTrack ? 'Track' : 'Unavailable'),
     ]);
   }
   if (metrics.kind === 'weather-alert') {
@@ -195,6 +199,9 @@ export function hazardMetricFields(event: HazardEvent): InspectorField[] {
       field('Anomaly', `${metrics.anomaly >= 0 ? '+' : ''}${metrics.anomaly}`, ` ${metrics.unit}`),
       field('Baseline', metrics.baselinePeriod),
       field('Calculation', metrics.calculationVersion),
+      field('Time window', metrics.timeWindow),
+      field('Spatial resolution', metrics.spatialResolution),
+      field('Provider', metrics.provider),
     ]);
   }
   return compact([field('Provider status', metrics.statusLabel)]);

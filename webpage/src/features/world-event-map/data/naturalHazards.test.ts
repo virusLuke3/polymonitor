@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseNaturalHazardsResponse } from './naturalHazards';
+import { mergeCanonicalHazardEvents, parseNaturalHazardsResponse } from './naturalHazards';
 
 const validEarthquake = {
   id: 'earthquake:usgs:test',
@@ -70,5 +70,37 @@ describe('natural hazard response boundary', () => {
       ...response([]),
       schemaVersion: 'natural-hazards.v2',
     })).toThrow(/Unsupported natural hazards schema/);
+  });
+
+  it('fuses cross-provider records only when they share an explicit canonical identity', () => {
+    const discovery = {
+      ...validEarthquake,
+      id: 'earthquake:eonet:discovery',
+      updatedAt: '2026-07-29T11:02:00Z',
+      sources: [{ provider: 'NASA EONET', nativeId: 'discovery' }],
+      properties: {
+        canonicalEventId: validEarthquake.id,
+        mergeReason: 'explicit USGS event-page identifier',
+      },
+      revision: { nativeEventId: 'discovery' },
+    };
+    const unrelated = {
+      ...validEarthquake,
+      id: 'earthquake:eonet:nearby-but-unproven',
+      sources: [{ provider: 'NASA EONET', nativeId: 'nearby-but-unproven' }],
+      properties: {},
+    };
+
+    const merged = mergeCanonicalHazardEvents([
+      validEarthquake,
+      discovery,
+      unrelated,
+    ] as never);
+
+    expect(merged).toHaveLength(2);
+    const canonical = merged.find((event) => event.id === validEarthquake.id);
+    expect(canonical?.sources.map((source) => source.provider)).toEqual(['USGS', 'NASA EONET']);
+    expect(canonical?.properties.mergeReason).toBe('explicit USGS event-page identifier');
+    expect(merged.some((event) => event.id === unrelated.id)).toBe(true);
   });
 });

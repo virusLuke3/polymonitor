@@ -2687,6 +2687,21 @@ export type RuntimeGlobalTransportShippingPayload = {
   items: RuntimeGlobalTransportShippingItem[];
 };
 
+export type AviationViewportPayload = {
+  schemaVersion: 'aviation-viewport.v1';
+  generatedAt: string;
+  status: string;
+  bbox: [number, number, number, number];
+  zoom: number;
+  aircraft: NonNullable<NonNullable<RuntimeGlobalTransportShippingPayload['aviation']>['liveFlights']>;
+  aircraftCount: number;
+  availableAircraftCount?: number;
+  source?: string | null;
+  sourceUrl?: string | null;
+  errorCode?: string | null;
+  limitations?: string[];
+};
+
 export type RuntimeNewMarketSignalItem = {
   marketId?: number | null;
   title?: string | null;

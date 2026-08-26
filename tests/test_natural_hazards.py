@@ -507,7 +507,7 @@ def test_service_returns_partial_data_when_one_provider_fails(monkeypatch) -> No
     assert statuses["eonet"] == "ok"
     assert statuses["nws"] == "error"
     assert statuses["firms"] == "degraded"
-    assert statuses["climate-anomaly"] == "degraded"
+    assert statuses["climate-anomaly"] == "error"
 
 
 def test_cached_service_mode_never_calls_live_providers(monkeypatch) -> None:
@@ -670,6 +670,54 @@ def test_map_feed_rejects_unknown_source() -> None:
         assert str(exc) == "unsupported-natural-hazard-source"
     else:  # pragma: no cover - explicit contract failure branch
         raise AssertionError("unknown provider must be rejected")
+
+
+def test_map_feed_canonical_identity_survives_source_split_and_detail_fuses_evidence() -> None:
+    store = FakeSnapshotStore()
+    discovery = {
+        "id": "earthquake:eonet:discovery",
+        "category": "natural-hazard",
+        "title": "Discovery earthquake",
+        "severity": "warning",
+        "updatedAt": "2026-08-16T00:02:00Z",
+        "properties": {},
+        "limitations": ["Discovery feed."],
+        "revision": {"nativeEventId": "discovery", "revisionAt": "2026-08-16T00:02:00Z"},
+        "sources": [{
+            "provider": "NASA EONET",
+            "nativeId": "discovery",
+            "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000fixture",
+        }],
+        "hazardKind": "earthquake",
+    }
+    authoritative = {
+        **discovery,
+        "id": "earthquake:usgs:us7000fixture",
+        "title": "USGS authoritative earthquake",
+        "updatedAt": "2026-08-16T00:01:00Z",
+        "limitations": ["USGS preliminary solution."],
+        "revision": {"nativeEventId": "us7000fixture", "revisionAt": "2026-08-16T00:01:00Z"},
+        "sources": [{"provider": "USGS", "nativeId": "us7000fixture"}],
+    }
+    for key, events in (("eonet", [discovery]), ("usgs", [authoritative])):
+        store.values[(snapshots.SNAPSHOT_NAMESPACE, key)] = {
+            "events": events,
+            "fetchedAt": "2026-08-16T00:03:00Z",
+            "dataUpdatedAt": "2026-08-16T00:02:00Z",
+            "staleAfter": "2026-08-16T00:04:00Z",
+        }
+
+    compact = map_feed.compact_hazard_event(discovery)
+    assert compact["id"] == "earthquake:usgs:us7000fixture"
+    assert compact["properties"]["canonicalEventId"] == compact["id"]
+    detail = map_feed.get_natural_hazard_event_detail(
+        _map_feed_context(store),
+        event_id="earthquake:usgs:us7000fixture",
+    )
+    assert detail is not None
+    assert detail["event"]["title"] == "USGS authoritative earthquake"
+    assert {source["provider"] for source in detail["event"]["sources"]} == {"USGS", "NASA EONET"}
+    assert "explicit USGS" in detail["event"]["properties"]["mergeReason"]
 
 
 def test_map_feed_bounds_large_multipolygon_by_zoom() -> None:

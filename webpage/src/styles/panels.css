@@ -11416,6 +11416,17 @@ a.wm-orderfilled-row {
   opacity: 0.88;
 }
 
+.wm-world-event-svg-event-label {
+  fill: #e2e9e7;
+  stroke: #05090b;
+  stroke-width: 3px;
+  paint-order: stroke fill;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
 .wm-world-event-svg-shape {
   fill-opacity: 0.26;
   stroke-opacity: 0.9;
@@ -12543,6 +12554,55 @@ a.wm-orderfilled-row {
   scrollbar-width: thin;
 }
 
+.wm-country-context-card {
+  position: absolute;
+  z-index: 14;
+  display: grid;
+  min-width: 220px;
+  max-width: min(320px, calc(100% - 24px));
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid rgba(82, 220, 255, 0.32);
+  border-radius: 5px;
+  background: rgba(3, 10, 14, 0.95);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.48);
+  color: #dcebef;
+  font-family: var(--font-mono);
+}
+
+.wm-country-context-card strong {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.wm-country-context-card > span {
+  color: #73d8ff;
+  font-size: 9px;
+}
+
+.wm-country-context-card > div {
+  display: flex;
+  gap: 5px;
+}
+
+.wm-country-context-card button {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #c9d7db;
+  font: 800 8px/1 var(--font-mono);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.wm-country-context-card button:hover,
+.wm-country-context-card button:focus-visible {
+  border-color: rgba(82, 220, 255, 0.45);
+  color: #9beaff;
+}
+
 .wm-weather-deck-legend::-webkit-scrollbar {
   height: 3px;
 }
@@ -12604,6 +12664,35 @@ a.wm-orderfilled-row {
   background: rgba(3, 9, 13, 0.92);
   box-shadow: none;
 }
+
+.wm-map-legend-context {
+  flex: 0 0 auto;
+  gap: 7px !important;
+  padding-left: 9px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.wm-map-legend-context b {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #9eb0b5;
+  font-size: 7.5px;
+  font-weight: 900;
+}
+
+.wm-map-legend-context i {
+  width: 9px;
+  height: 5px;
+  border-radius: 1px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.wm-map-legend-context .is-observed { border-bottom: 2px solid #65e6d1; }
+.wm-map-legend-context .is-forecast { border-bottom: 2px dashed #cde1e8; }
+.wm-map-legend-context .is-stale { border: 1px dotted #a2abb0; }
+.wm-map-legend-context .is-coverage { border: 1px solid #f2bd53; }
 
 .wm-weather-deck-legend i {
   width: 8px;

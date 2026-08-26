@@ -79,7 +79,7 @@ export type HazardLifecycle =
   | 'unknown';
 
 export interface HazardCoverage {
-  scope: 'global' | 'regional' | 'country' | 'provider-area';
+  scope: 'global' | 'regional' | 'country' | 'provider-area' | 'viewport';
   label: string;
   isComplete: boolean;
   gaps: string[];
@@ -145,6 +145,9 @@ export interface HazardEvent extends GeoEvent {
         unit: string;
         baselinePeriod: string;
         calculationVersion: string;
+        timeWindow: string;
+        spatialResolution: string;
+        provider: string;
       }
     | {
         kind: 'volcano-or-other';

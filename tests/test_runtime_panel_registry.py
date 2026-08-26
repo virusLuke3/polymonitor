@@ -35,6 +35,18 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "get_f1_panel_snapshot": lambda limit=10: {"limit": limit},
         "get_geo_sanctions_shock_snapshot": lambda limit=6: {"limit": limit},
         "get_global_transport_shipping_snapshot": lambda limit=14: {"limit": limit},
+        "get_aviation_viewport_snapshot": lambda bbox, zoom=2, limit=180: {
+            "schemaVersion": "aviation-viewport.v1",
+            "generatedAt": "2026-08-16T00:00:00Z",
+            "bbox": list(bbox),
+            "zoom": zoom,
+            "aircraft": [],
+            "aircraftCount": 0,
+            "availableAircraftCount": 0,
+            "source": "fixture",
+            "limitations": [],
+            "limit": limit,
+        },
         "get_global_weather_map_snapshot": lambda limit=34: {"limit": limit},
         "get_grid_esports_snapshot": lambda limit=10: {"limit": limit},
         "get_sports_odds_snapshot": lambda limit=8: {"limit": limit},
@@ -98,6 +110,22 @@ def test_runtime_panel_blueprint_registers_all_routes():
         headers={"If-None-Match": map_response.headers["ETag"]},
     )
     assert conditional.status_code == 304
+
+    aviation_response = client.get(
+        "/runtime/transport/aviation-viewport?bbox=-75,39,-72,42&zoom=5&limit=120",
+    )
+    assert aviation_response.status_code == 200
+    assert aviation_response.headers["Cache-Control"] == "public, max-age=15, stale-while-revalidate=30"
+    assert aviation_response.headers["ETag"]
+    assert aviation_response.get_json()["bbox"] == [-75.0, 39.0, -72.0, 42.0]
+    aviation_conditional = client.get(
+        "/runtime/transport/aviation-viewport?bbox=-75,39,-72,42&zoom=5&limit=120",
+        headers={"If-None-Match": aviation_response.headers["ETag"]},
+    )
+    assert aviation_conditional.status_code == 304
+    assert client.get(
+        "/runtime/transport/aviation-viewport?bbox=75,39,-72,42&zoom=5",
+    ).status_code == 400
 
     detail_response = client.get("/runtime/world/natural-hazards/events/earthquake%3Ausgs%3Atest")
     assert detail_response.status_code == 200

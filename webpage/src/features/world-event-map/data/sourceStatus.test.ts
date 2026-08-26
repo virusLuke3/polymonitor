@@ -100,6 +100,8 @@ describe('map source status', () => {
     const failed = sourceStatusesAfterHazardRefreshFailure(initial, 'API timeout', false);
     expect(failed.map((source) => source.key)).toEqual([
       'usgs',
+      'usgs-volcano-cap',
+      'nhc',
       'eonet',
       'gdacs',
       'nws',

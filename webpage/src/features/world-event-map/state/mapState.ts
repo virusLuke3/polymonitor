@@ -1,10 +1,12 @@
-import { selectableWorldEventLayers } from '../config/layerRegistry';
+import { executableWorldEventLayers } from '../config/layerRegistry';
 import { worldEventRegionPreset, type WorldEventRegion } from '../config/regions';
 import type { GeoEventSeverity } from '../domain/types';
 
 export type WorldEventTimeRange = '1h' | '6h' | '24h' | '48h' | '7d' | 'all';
 export type AviationLensMode = 'all' | 'trunk' | 'watch';
 export type AviationRiskSource = 'all' | 'weather' | 'conflict' | 'corridor';
+export type WorldEventBasemapProvider = 'auto' | 'pmtiles' | 'openfreemap' | 'carto';
+export type WorldEventBasemapTheme = 'dark' | 'positron';
 
 export interface WorldEventMapState {
   center: { lon: number; lat: number };
@@ -14,7 +16,9 @@ export interface WorldEventMapState {
   timeRange: WorldEventTimeRange;
   severities: GeoEventSeverity[];
   selectedEventId: string | null;
-  basemapTheme: string;
+  basemapProvider: WorldEventBasemapProvider;
+  basemapTheme: WorldEventBasemapTheme;
+  countryCode: string | null;
   aviationLens: AviationLensMode;
   aviationRiskSource: AviationRiskSource;
 }
@@ -29,6 +33,8 @@ export const WORLD_EVENT_TIME_RANGES: readonly WorldEventTimeRange[] = ['1h', '6
 export const WORLD_EVENT_SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 export const AVIATION_LENS_MODES: readonly AviationLensMode[] = ['all', 'trunk', 'watch'];
 export const AVIATION_RISK_SOURCES: readonly AviationRiskSource[] = ['all', 'weather', 'conflict', 'corridor'];
+export const WORLD_EVENT_BASEMAP_PROVIDERS: readonly WorldEventBasemapProvider[] = ['auto', 'pmtiles', 'openfreemap', 'carto'];
+export const WORLD_EVENT_BASEMAP_THEMES: readonly WorldEventBasemapTheme[] = ['dark', 'positron'];
 
 export function defaultWorldEventMapState(): WorldEventMapState {
   const global = worldEventRegionPreset('global');
@@ -36,11 +42,13 @@ export function defaultWorldEventMapState(): WorldEventMapState {
     center: { ...global.center },
     zoom: global.zoom,
     region: 'global',
-    activeLayerIds: selectableWorldEventLayers().filter((layer) => layer.defaultEnabled).map((layer) => layer.id),
+    activeLayerIds: executableWorldEventLayers().filter((layer) => layer.defaultEnabled).map((layer) => layer.id),
     timeRange: '7d',
     severities: [...WORLD_EVENT_SEVERITIES],
     selectedEventId: null,
+    basemapProvider: 'auto',
     basemapTheme: 'dark',
+    countryCode: null,
     aviationLens: 'trunk',
     aviationRiskSource: 'all',
   };

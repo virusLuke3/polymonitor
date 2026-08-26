@@ -21,6 +21,34 @@ type HazardAreaFeatureProperties = {
   presentation: HazardAreaPresentation;
 };
 
+type NamedCyclonePath = {
+  event: GeoEvent;
+  path: [number, number][];
+  mode: 'observed' | 'forecast';
+};
+
+type NamedCycloneCone = { event: GeoEvent; geometry: Record<string, unknown> };
+
+function namedGeometry(event: GeoEvent, name: string) {
+  const geometries = event.properties.geometries;
+  if (!geometries || typeof geometries !== 'object' || Array.isArray(geometries)) return null;
+  const geometry = (geometries as Record<string, unknown>)[name];
+  return geometry && typeof geometry === 'object' && !Array.isArray(geometry)
+    ? geometry as { type?: string; coordinates?: unknown }
+    : null;
+}
+
+function namedPaths(event: GeoEvent, name: string, mode: NamedCyclonePath['mode']): NamedCyclonePath[] {
+  const geometry = namedGeometry(event, name);
+  if (geometry?.type === 'LineString' && Array.isArray(geometry.coordinates)) {
+    return [{ event, path: geometry.coordinates as [number, number][], mode }];
+  }
+  if (geometry?.type === 'MultiLineString' && Array.isArray(geometry.coordinates)) {
+    return (geometry.coordinates as [number, number][][]).map((path) => ({ event, path, mode }));
+  }
+  return [];
+}
+
 export function createEventGeometryLayers(
   events: GeoEvent[],
   selectedEventId: string | null,
@@ -58,6 +86,18 @@ export function createEventGeometryLayers(
     const presentation = hazardAreaPresentation(event, zoom, selectedEventId);
     return presentation.mode === 'hidden' ? [] : [{ event, presentation }];
   });
+  const cyclonePaths = visibleEvents.flatMap((event) => (
+    isHazardEvent(event) && event.hazardKind === 'tropical-cyclone'
+      ? [...namedPaths(event, 'observedTrack', 'observed'), ...namedPaths(event, 'forecastTrack', 'forecast')]
+      : []
+  ));
+  const cycloneCones: NamedCycloneCone[] = visibleEvents.flatMap((event) => {
+    if (!isHazardEvent(event) || event.hazardKind !== 'tropical-cyclone') return [];
+    const geometry = namedGeometry(event, 'forecastCone');
+    return geometry?.type === 'Polygon' || geometry?.type === 'MultiPolygon'
+      ? [{ event, geometry }]
+      : [];
+  });
   const contextAreas = visibleEvents.filter((event) => (
     !isHazardEvent(event)
     && !isCountryRiskArea(event)
@@ -66,6 +106,46 @@ export function createEventGeometryLayers(
   const layers: LayersList = [];
 
   layers.push(...createCountryRiskLayers(visibleEvents, selectedEventId));
+
+  if (cycloneCones.length) {
+    layers.push(new GeoJsonLayer({
+      id: 'world-event-cyclone-forecast-cones',
+      data: {
+        type: 'FeatureCollection',
+        features: cycloneCones.map(({ event, geometry }) => ({
+          type: 'Feature', id: event.id, properties: { event }, geometry,
+        })),
+      } as any,
+      filled: true,
+      stroked: true,
+      getFillColor: (feature) => eventColor(feature.properties?.event as GeoEvent, 28),
+      getLineColor: (feature) => eventColor(feature.properties?.event as GeoEvent, 135),
+      getLineWidth: 1,
+      lineWidthMinPixels: 0.75,
+      pickable: true,
+      autoHighlight: false,
+      wrapLongitude: true,
+      beforeId,
+    }));
+  }
+
+  if (cyclonePaths.length) {
+    layers.push(new PathLayer<NamedCyclonePath>({
+      id: 'world-event-cyclone-tracks',
+      data: cyclonePaths,
+      getPath: (item) => item.path,
+      getColor: (item) => item.mode === 'observed'
+        ? eventColor(item.event, item.event.id === selectedEventId ? 245 : 205)
+        : [205, 225, 232, item.event.id === selectedEventId ? 225 : 155],
+      getWidth: (item) => item.mode === 'observed' ? 2.2 : 1.2,
+      widthMinPixels: 1,
+      widthMaxPixels: 4,
+      jointRounded: true,
+      capRounded: true,
+      pickable: true,
+      wrapLongitude: true,
+    }));
+  }
 
   if (hazardAreas.length) {
     layers.push(new GeoJsonLayer({

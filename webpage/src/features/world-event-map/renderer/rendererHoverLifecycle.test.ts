@@ -9,6 +9,8 @@ function callbacks(): MapRendererCallbacks {
   return {
     onCameraChange: vi.fn(),
     onEventSelect: vi.fn(),
+    onCountrySelect: vi.fn(),
+    onCountryContextMenu: vi.fn(),
     onBasemapStateChange: vi.fn(),
     onRendererFallbackRequested: vi.fn(),
     onError: vi.fn(),
@@ -74,6 +76,28 @@ describe('renderer hover lifecycle', () => {
 
     expect(renderer.fallbackApplied).toBe(false);
     expect(onError).toHaveBeenCalledTimes(2);
+    renderer.destroy();
+  });
+
+  it('quarantines only the failed deck layer and reports an explicit degraded state', () => {
+    const onLayerDegraded = vi.fn();
+    const onError = vi.fn();
+    const renderer = new DeckMapRenderer() as unknown as {
+      callbacks: MapRendererCallbacks;
+      quarantinedLayerIds: Set<string>;
+      handleDeckLayerError: (error: Error, layer?: { id: string }) => void;
+      destroy: () => void;
+    };
+    renderer.callbacks = { ...callbacks(), onLayerDegraded, onError };
+
+    const failure = new Error('fixture shader failure');
+    renderer.handleDeckLayerError(failure, { id: 'world-event-points' });
+    renderer.handleDeckLayerError(failure, { id: 'world-event-points' });
+
+    expect(renderer.quarantinedLayerIds).toEqual(new Set(['world-event-points']));
+    expect(onLayerDegraded).toHaveBeenCalledOnce();
+    expect(onLayerDegraded).toHaveBeenCalledWith('world-event-points', failure);
+    expect(onError).toHaveBeenCalledOnce();
     renderer.destroy();
   });
 

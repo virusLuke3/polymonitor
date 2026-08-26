@@ -1,7 +1,7 @@
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import type { Layer, LayersList, PickingInfo } from '@deck.gl/core';
 import { TextLayer } from '@deck.gl/layers';
-import type { FeatureCollection } from 'geojson';
+import type { FeatureCollection, Geometry, Position } from 'geojson';
 import maplibregl, {
   type FilterSpecification,
   type Map as MapLibreMap,
@@ -17,7 +17,7 @@ import {
 } from '@/config/weatherBasemap';
 import type { GeoEvent } from '../domain/types';
 import type { WorldEventMapState } from '../state/mapState';
-import type { BasemapState, MapRenderer, MapRendererCallbacks } from './MapRenderer';
+import type { BasemapState, MapCountryTarget, MapRenderer, MapRendererCallbacks } from './MapRenderer';
 import {
   createAviationDynamicLayers,
   createAviationStaticLayerSections,
@@ -65,6 +65,41 @@ const COUNTRY_INTERACTIVE_LAYER = 'world-event-country-interactive';
 const COUNTRY_HOVER_FILL_LAYER = 'world-event-country-hover-fill';
 const COUNTRY_HOVER_BORDER_LAYER = 'world-event-country-hover-border';
 const EMPTY_COUNTRY_FILTER = ['==', ['get', 'ISO3166-1-Alpha-2'], ''] as FilterSpecification;
+
+type MapPerformanceHarnessHost = HTMLElement & {
+  __polymonitorProjectGeoPoint?: (lon: number, lat: number) => { x: number; y: number };
+};
+
+function geometryPositions(geometry: Geometry | null | undefined): Position[] {
+  if (!geometry) return [];
+  if (geometry.type === 'GeometryCollection') return geometry.geometries.flatMap(geometryPositions);
+  const positions: Position[] = [];
+  const visit = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+      positions.push(value as Position);
+      return;
+    }
+    value.forEach(visit);
+  };
+  visit(geometry.coordinates);
+  return positions;
+}
+
+function countryTarget(feature: { properties?: Record<string, unknown> | null; geometry?: Geometry | null } | undefined) {
+  const iso2 = String(feature?.properties?.['ISO3166-1-Alpha-2'] || '').toUpperCase();
+  const name = String(feature?.properties?.['name:en'] || feature?.properties?.name || iso2);
+  const positions = geometryPositions(feature?.geometry);
+  if (!iso2 || !positions.length) return null;
+  const lons = positions.map((position) => Number(position[0])).filter(Number.isFinite);
+  const lats = positions.map((position) => Number(position[1])).filter(Number.isFinite);
+  if (!lons.length || !lats.length) return null;
+  return {
+    iso2,
+    name,
+    bounds: [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+  } satisfies MapCountryTarget;
+}
 
 function isAviationEvent(event: GeoEvent) {
   if (event.category !== 'infrastructure') return false;
@@ -166,6 +201,9 @@ export class DeckMapRenderer implements MapRenderer {
   private seededAircraftPickPoints: AviationMotionPoint[] = [];
   private manualAviationEvent: GeoEvent | null = null;
   private manualAviationTooltip: RendererTooltip | null = null;
+  private basemapStyleGeneration = 0;
+  private readonly quarantinedLayerIds = new Set<string>();
+  private performanceHarnessHost: MapPerformanceHarnessHost | null = null;
 
   constructor() {
     const requestFrame = (callback: FrameRequestCallback) => typeof requestAnimationFrame === 'function'
@@ -213,7 +251,10 @@ export class DeckMapRenderer implements MapRenderer {
     this.manualAviationTooltip = new RendererTooltip(container);
     this.emitBasemapState('initializing');
     const state = this.state;
-    const primaryStyle = await getWeatherMapStyle('dark');
+    const primaryStyle = await getWeatherMapStyle(
+      state?.basemapTheme ?? 'dark',
+      state?.basemapProvider ?? 'auto',
+    );
     if (this.destroyed) return;
     const map = new maplibregl.Map({
       container,
@@ -229,6 +270,13 @@ export class DeckMapRenderer implements MapRenderer {
       canvasContextAttributes: { powerPreference: 'high-performance' },
     });
     this.map = map;
+    if (new URLSearchParams(window.location.search).get('mapPerf') === '1') {
+      this.performanceHarnessHost = container as MapPerformanceHarnessHost;
+      this.performanceHarnessHost.__polymonitorProjectGeoPoint = (lon, lat) => {
+        const point = map.project([lon, lat]);
+        return { x: point.x, y: point.y };
+      };
+    }
     this.countryHoverQueryController = createCountryHoverQueryController(
       (callback) => window.requestAnimationFrame(callback),
       (handle) => window.cancelAnimationFrame(handle),
@@ -274,6 +322,7 @@ export class DeckMapRenderer implements MapRenderer {
       getTooltip,
       onHover: (info: PickingInfo<WorldEventPickedObject>) => this.handleDeckHover('static', info),
       onClick,
+      onError: (error: Error, layer?: Layer) => this.handleDeckLayerError(error, layer),
     });
     this.overlay = overlay;
 
@@ -298,6 +347,8 @@ export class DeckMapRenderer implements MapRenderer {
     map.on('movestart', this.handleMoveStart);
     map.on('mousemove', this.handleCountryHoverMove);
     map.on('click', this.handleManualAviationClick);
+    map.on('click', this.handleCountryClick);
+    map.on('contextmenu', this.handleCountryContextMenu);
     map.on('mouseout', this.handleCountryHoverLeave);
     map.on('error', this.handleMapError);
     map.getCanvas().addEventListener('webglcontextlost', this.handleContextLost);
@@ -314,6 +365,10 @@ export class DeckMapRenderer implements MapRenderer {
   setState(state: WorldEventMapState) {
     const previous = this.state;
     this.state = state;
+    if (previous && (previous.basemapProvider !== state.basemapProvider
+      || previous.basemapTheme !== state.basemapTheme)) {
+      void this.replaceBasemapStyle(state);
+    }
     if (!previous || previous.selectedEventId !== state.selectedEventId) {
       this.pulseEvents = selectEventPulseCandidates(this.events, state.selectedEventId);
     }
@@ -425,6 +480,14 @@ export class DeckMapRenderer implements MapRenderer {
     this.requestRender({ dynamic: true, pulse: true });
   }
 
+  fitCountry(country: MapCountryTarget) {
+    this.map?.fitBounds(country.bounds, {
+      padding: 64,
+      maxZoom: 5.5,
+      duration: this.reducedMotion ? 0 : 480,
+    });
+  }
+
   pause() {
     this.paused = true;
     this.clearAllHover();
@@ -452,6 +515,7 @@ export class DeckMapRenderer implements MapRenderer {
 
   destroy() {
     this.destroyed = true;
+    this.basemapStyleGeneration += 1;
     this.clearFallbackTimer();
     this.clearFallbackSourceTimer();
     this.clearContextRecoveryTimer();
@@ -468,6 +532,10 @@ export class DeckMapRenderer implements MapRenderer {
     this.manualAviationTooltip = null;
     this.countryHoverQueryController?.cancel();
     this.clearAllHover();
+    if (this.performanceHarnessHost) {
+      delete this.performanceHarnessHost.__polymonitorProjectGeoPoint;
+      this.performanceHarnessHost = null;
+    }
     const map = this.map;
     if (map) {
       map.off('style.load', this.handleStyleLoad);
@@ -476,6 +544,8 @@ export class DeckMapRenderer implements MapRenderer {
       map.off('movestart', this.handleMoveStart);
       map.off('mousemove', this.handleCountryHoverMove);
       map.off('click', this.handleManualAviationClick);
+      map.off('click', this.handleCountryClick);
+      map.off('contextmenu', this.handleCountryContextMenu);
       map.off('mouseout', this.handleCountryHoverLeave);
       map.off('error', this.handleMapError);
       map.getCanvas().removeEventListener('webglcontextlost', this.handleContextLost);
@@ -523,6 +593,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.hoveredDeckEventId = null;
     this.hoveredCountryIso2 = null;
     this.callbacks = null;
+    this.quarantinedLayerIds.clear();
   }
 
   private requestRender(invalidation: Partial<MapRenderInvalidation> = {}) {
@@ -554,9 +625,50 @@ export class DeckMapRenderer implements MapRenderer {
         : [-180, -85, 180, 85]
       : undefined;
     if ((invalidation.points || !this.pointLayers)) {
+      const map = this.map;
+      const project = map
+        ? (position: [number, number]) => {
+            const point = map.project(position);
+            return Number.isFinite(point.x) && Number.isFinite(point.y) ? { x: point.x, y: point.y } : null;
+          }
+        : undefined;
+      const occupiedScreenBoxes: [number, number, number, number][] = [];
+      if (map) {
+        try {
+          const symbolLayerIds = (map.getStyle()?.layers || [])
+            .filter((layer) => layer.type === 'symbol')
+            .map((layer) => layer.id);
+          const visibleLabels = symbolLayerIds.length
+            ? map.queryRenderedFeatures(undefined, { layers: symbolLayerIds })
+            : [];
+          for (const feature of visibleLabels.slice(0, 500)) {
+            if (feature.geometry?.type !== 'Point') continue;
+            const coordinates = feature.geometry.coordinates as [number, number];
+            const screen = project?.(coordinates);
+            if (!screen) continue;
+            const properties = feature.properties || {};
+            const text = String(properties.name_en || properties.name || properties.name_int || '');
+            if (!text) continue;
+            const width = Math.min(220, Math.max(30, text.length * 7));
+            occupiedScreenBoxes.push([
+              screen.x - width / 2, screen.y - 9, screen.x + width / 2, screen.y + 9,
+            ]);
+          }
+        } catch {
+          // A basemap may be mid-style-reload; event labels are recomputed on
+          // the next style/data render without blocking the map.
+        }
+      }
       this.pointLayers = this.performanceMonitor.measure(
         'js-build',
-        () => createWorldEventPointLayers(this.events, this.state!, viewport, this.clusterIndex),
+        () => createWorldEventPointLayers(
+          this.events,
+          this.state!,
+          viewport,
+          this.clusterIndex,
+          project,
+          occupiedScreenBoxes,
+        ),
       );
     }
     if (invalidation.geometry || this.geometryNeedsCommit) {
@@ -604,10 +716,10 @@ export class DeckMapRenderer implements MapRenderer {
     const aviationDynamicLayers = this.aviationDynamicLayers || [];
     const pointLayerList = (this.pointLayers || []).filter(
       (layer): layer is Layer => Boolean(layer) && !Array.isArray(layer),
-    );
+    ).filter((layer) => !this.quarantinedLayerIds.has(layer.id));
     const aviationDynamicLayerList = aviationDynamicLayers.filter(
       (layer): layer is Layer => Boolean(layer) && !Array.isArray(layer),
-    );
+    ).filter((layer) => !this.quarantinedLayerIds.has(layer.id));
     const pointLabels = pointLayerList.filter((layer) => (
       layer?.id === 'world-event-labels' || layer?.id === 'world-event-cluster-counts'
     ));
@@ -638,7 +750,9 @@ export class DeckMapRenderer implements MapRenderer {
       this.hoveredDeckCluster,
     );
     const staticBaseLayers = [
-      ...this.geometryLayers,
+      ...this.geometryLayers.filter(
+        (layer): layer is Layer => Boolean(layer) && !Array.isArray(layer),
+      ).filter((layer) => !this.quarantinedLayerIds.has(layer.id)),
       ...(aviationSections?.routeLayers || []),
       ...pointBaseLayers,
       // Keep genuinely static aviation objects and text out of the animation
@@ -651,7 +765,8 @@ export class DeckMapRenderer implements MapRenderer {
       ...this.createFallbackCountryLabelLayers(),
       ...pointLabels,
       ...(aviationSections?.labelLayers || []),
-    ].filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer));
+    ].filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer))
+      .filter((layer) => !this.quarantinedLayerIds.has(layer.id));
     const aviationMotionLayers = [
       ...routeRunnerLayers,
       ...seededAircraftLayers,
@@ -888,6 +1003,34 @@ export class DeckMapRenderer implements MapRenderer {
     if (this.manualAviationEvent) this.callbacks?.onEventSelect(this.manualAviationEvent.id);
   };
 
+  private countryAtPoint(point: MapMouseEvent['point']) {
+    const map = this.map;
+    if (!map?.getLayer(COUNTRY_INTERACTIVE_LAYER)) return null;
+    try {
+      const feature = map.queryRenderedFeatures(point, { layers: [COUNTRY_INTERACTIVE_LAYER] })[0];
+      return countryTarget(feature as unknown as { properties?: Record<string, unknown>; geometry?: Geometry });
+    } catch {
+      return null;
+    }
+  }
+
+  private handleCountryClick = (event: MapMouseEvent) => {
+    // MapLibre emits `click` only when its drag tolerance was not exceeded.
+    // `mousedown` deliberately marks the renderer as interacting before that
+    // click, so checking `this.interacting` here made every genuine country
+    // click impossible. Deck/manual aviation ownership is still respected.
+    if (this.deckHoverActive || this.manualAviationEvent) return;
+    const country = this.countryAtPoint(event.point);
+    this.callbacks?.onCountrySelect(country, country ? { x: event.point.x, y: event.point.y } : undefined);
+  };
+
+  private handleCountryContextMenu = (event: MapMouseEvent) => {
+    const country = this.countryAtPoint(event.point);
+    if (!country) return;
+    event.preventDefault();
+    this.callbacks?.onCountryContextMenu(country, { x: event.point.x, y: event.point.y });
+  };
+
   private clearManualAviationHover() {
     if (!this.manualAviationEvent) return;
     const previousId = this.manualAviationEvent.id;
@@ -909,6 +1052,10 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleStyleLoad = () => {
     if (!this.map || this.destroyed) return;
+    if (typeof performance !== 'undefined'
+      && performance.getEntriesByName('polymonitor:map:first-basemap').length === 0) {
+      performance.mark('polymonitor:map:first-basemap');
+    }
     reinforceWorldEventBasemapLabels(this.map);
     this.ensureCountryHoverLayers();
     if (this.fallbackApplied) this.markLocalFallbackReadyIfLoaded();
@@ -943,6 +1090,7 @@ export class DeckMapRenderer implements MapRenderer {
         // Only moving aircraft and 2-4px route runners use this canvas. The
         // labelled basemap and all static objects keep their full DPR.
         useDevicePixels: Math.min(1, Math.max(0.6, window.devicePixelRatio * 0.6)),
+        onError: (error: Error, layer?: Layer) => this.handleDeckLayerError(error, layer),
       });
       this.aviationDeckSuspended = false;
     }
@@ -1252,11 +1400,54 @@ export class DeckMapRenderer implements MapRenderer {
     this.emitBasemapState('initializing');
     this.callbacks?.onError(error);
     try {
-      this.map.setStyle(getWeatherMapFallbackStyle('dark'), { diff: false });
+      this.map.setStyle(getWeatherMapFallbackStyle(this.state?.basemapTheme ?? 'dark'), { diff: false });
       this.scheduleFallbackSourceTimeout();
     } catch (caught) {
       this.requestRendererFallback(caught instanceof Error ? caught : new Error(String(caught)));
     }
+  }
+
+  private async replaceBasemapStyle(state: WorldEventMapState) {
+    const map = this.map;
+    if (!map || this.destroyed) return;
+    const generation = ++this.basemapStyleGeneration;
+    this.fallbackApplied = false;
+    this.clearFallbackTimer();
+    this.clearFallbackSourceTimer();
+    this.emitBasemapState('initializing');
+    try {
+      const style = await getWeatherMapStyle(state.basemapTheme, state.basemapProvider);
+      if (this.destroyed || generation !== this.basemapStyleGeneration || map !== this.map) return;
+      map.setStyle(style, { diff: false });
+      this.fallbackTimer = window.setTimeout(() => {
+        if (!this.map || this.fallbackApplied || this.destroyed || generation !== this.basemapStyleGeneration) return;
+        this.applyLocalFallback(new Error('Selected basemap did not become ready within 10 seconds.'));
+      }, 10_000);
+    } catch (error) {
+      if (this.destroyed || generation !== this.basemapStyleGeneration) return;
+      this.applyLocalFallback(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private handleDeckLayerError(error: Error, layer?: Layer) {
+    const layerId = layer?.id;
+    if (!layerId) {
+      this.callbacks?.onError(error);
+      return;
+    }
+    if (this.quarantinedLayerIds.has(layerId)) return;
+    this.quarantinedLayerIds.add(layerId);
+    this.callbacks?.onLayerDegraded?.(layerId, error);
+    this.callbacks?.onError(new Error(`Map layer ${layerId} was isolated after a render error: ${error.message}`));
+    if (layerId.startsWith('aviation-')) {
+      this.aviationLayerSections = null;
+      this.aviationDynamicLayers = null;
+      this.requestRender({ aviation: true, dynamic: true });
+      return;
+    }
+    this.pointLayers = null;
+    this.invalidateGeometry();
+    this.requestRender({ points: true, geometry: true, interaction: true });
   }
 
   private requestRendererFallback(error: Error) {

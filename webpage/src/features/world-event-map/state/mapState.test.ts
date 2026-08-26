@@ -58,6 +58,31 @@ describe('World Event Map state', () => {
     expect(new URL(serialized).searchParams.get('view')).toBe('2d');
   });
 
+  it('treats a complete shared map snapshot as authoritative over stale local investigation state', () => {
+    const stale = {
+      ...defaultWorldEventMapState(),
+      selectedEventId: 'earthquake:stale',
+      countryCode: 'US',
+      basemapTheme: 'positron' as const,
+    };
+    const shared = parseWorldEventMapState(
+      '?center=-122.1,37.4&zoom=2.2&layers=earthquakes-volcanoes&time=all',
+      stale,
+    );
+    expect(shared).toMatchObject({
+      center: { lon: -122.1, lat: 37.4 },
+      zoom: 2.2,
+      activeLayerIds: ['earthquakes-volcanoes'],
+      timeRange: 'all',
+      selectedEventId: null,
+      countryCode: null,
+      basemapTheme: 'dark',
+    });
+    const partial = parseWorldEventMapState('?region=eu', stale);
+    expect(partial.selectedEventId).toBe('earthquake:stale');
+    expect(partial.countryCode).toBe('US');
+  });
+
   it('ignores unknown layers, regions and malformed coordinates', () => {
     const defaults = defaultWorldEventMapState();
     const parsed = parseWorldEventMapState(

@@ -317,6 +317,9 @@ def build_route_context(service_context: ServiceContext) -> RouteContext:
         "get_natural_hazard_event_detail": get_natural_hazard_event_detail,
         "get_natural_hazard_related_markets": get_natural_hazard_related_markets,
         "get_global_transport_shipping_snapshot": lambda limit=14: global_transport_shipping_service.get_global_transport_shipping_snapshot(build_service_context(), limit=limit),
+        "get_aviation_viewport_snapshot": lambda bbox, zoom, limit=180: global_transport_shipping_service.get_aviation_viewport_snapshot(
+            build_service_context(), bbox=bbox, zoom=zoom, limit=limit,
+        ),
         "get_global_weather_map_snapshot": get_global_weather_map_snapshot,
         "get_grid_esports_snapshot": lambda limit=10: grid_esports_service.get_grid_esports_snapshot(build_service_context(), limit=limit),
         "get_sports_odds_snapshot": lambda limit=8: sports_odds_service.get_sports_odds_snapshot(build_service_context(), limit=limit),
@@ -554,11 +557,12 @@ def _create_service_context() -> ServiceContext:
             limit=limit,
             allow_provider_fetch=False,
         ),
-        "get_natural_hazard_map_snapshot": lambda source, limit=natural_hazards.DEFAULT_EVENT_LIMIT, zoom=2.0: natural_hazards.get_natural_hazard_map_snapshot(
+        "get_natural_hazard_map_snapshot": lambda source, limit=natural_hazards.DEFAULT_EVENT_LIMIT, zoom=2.0, bbox=None: natural_hazards.get_natural_hazard_map_snapshot(
             build_service_context(),
             source=source,
             limit=limit,
             zoom=zoom,
+            bbox=bbox,
         ),
         "get_natural_hazard_event_detail": lambda event_id: natural_hazards.get_natural_hazard_event_detail(
             build_service_context(),
@@ -1096,12 +1100,14 @@ def get_natural_hazard_map_snapshot(
     source: str,
     limit: int = natural_hazards.DEFAULT_EVENT_LIMIT,
     zoom: float = 2.0,
+    bbox: tuple[float, float, float, float] | None = None,
 ) -> Dict[str, Any]:
     return natural_hazards.get_natural_hazard_map_snapshot(
         build_service_context(),
         source=source,
         limit=limit,
         zoom=zoom,
+        bbox=bbox,
     )
 
 
