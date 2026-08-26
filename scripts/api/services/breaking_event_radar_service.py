@@ -5,6 +5,7 @@ import json
 import os
 import re
 import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -52,14 +53,6 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "country": "Global",
         "query": '(war OR ceasefire OR invasion OR sanctions OR military) (risk OR crisis OR talks OR strike)',
         "wikiTitles": ["Geopolitics", "International_sanctions"],
-    },
-    {
-        "id": "world-cup",
-        "topic": "world-cup",
-        "entity": "World Cup 2026",
-        "country": "Global",
-        "query": '("World Cup 2026" OR "FIFA World Cup") (schedule OR team OR venue OR injury OR weather)',
-        "wikiTitles": ["2026_FIFA_World_Cup", "FIFA_World_Cup"],
     },
     {
         "id": "crypto-policy",
@@ -429,15 +422,36 @@ def _build_breaking_event_radar_payload(
     limit: int,
 ) -> Dict[str, Any]:
     max_records = max(5, min(int(os.environ.get("POLYDATA_BREAKING_EVENT_GDELT_MAX_RECORDS", "20") or 20), 50))
+    gdelt_min_interval_seconds = max(
+        0.0,
+        min(
+            float(
+                os.environ.get(
+                    "POLYDATA_BREAKING_EVENT_GDELT_MIN_INTERVAL_SECONDS",
+                    "5",
+                )
+                or 5
+            ),
+            30.0,
+        ),
+    )
     wikimedia_enabled = str(os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "on"}
     max_wiki_titles = max(0, min(int(os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_TITLES_PER_TOPIC", "1") or 1), 4))
     seeds = _load_topic_seeds()
     items: List[Dict[str, Any]] = []
     sources: Dict[str, Any] = {"gdelt": {"status": "empty", "count": 0}, "wikimedia": {"status": "empty", "count": 0}}
     errors: List[str] = []
+    last_gdelt_attempt_at: Optional[float] = None
     for seed in seeds:
         articles: List[Dict[str, Any]] = []
         pageviews: List[Dict[str, Any]] = []
+        if last_gdelt_attempt_at is not None and gdelt_min_interval_seconds > 0:
+            wait_seconds = gdelt_min_interval_seconds - (
+                time.monotonic() - last_gdelt_attempt_at
+            )
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+        last_gdelt_attempt_at = time.monotonic()
         try:
             articles = _fetch_gdelt_articles(
                 dependencies,

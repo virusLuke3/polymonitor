@@ -20,12 +20,30 @@ DEFAULT_GRID_ESPORTS_LIMIT = 10
 DEFAULT_GRID_PM_SEARCH_LIMIT = 12
 DEFAULT_GRID_SERIES_CANDIDATE_LIMIT = 50
 
-ALL_SERIES_QUERY = """
-query EsportsIntelSeries($gte: String!, $lte: String!, $first: Int!) {
-  allSeries(
+NEARBY_SERIES_QUERY = """
+query EsportsIntelSeries($recentGte: String!, $now: String!, $upcomingLte: String!, $first: Int!) {
+  recent: allSeries(
     first: $first
-    filter: { startTimeScheduled: { gte: $gte, lte: $lte } }
+    filter: { startTimeScheduled: { gte: $recentGte, lte: $now } }
     orderBy: StartTimeScheduled
+    orderDirection: DESC
+  ) {
+    totalCount
+    edges {
+      node {
+        id
+        startTimeScheduled
+        teams { baseInfo { id name logoUrl } }
+        tournament { id name }
+        title { id nameShortened }
+      }
+    }
+  }
+  upcoming: allSeries(
+    first: $first
+    filter: { startTimeScheduled: { gte: $now, lte: $upcomingLte } }
+    orderBy: StartTimeScheduled
+    orderDirection: ASC
   ) {
     totalCount
     edges {
@@ -185,9 +203,20 @@ def _status_from_state(state: Optional[Dict[str, Any]], start_time: Optional[str
 
 def _source_status(has_key: bool, central_status: str, state_statuses: Iterable[str]) -> Dict[str, str]:
     states = list(state_statuses)
+    queried_states = [status for status in states if status != "not-due"]
+    if not queried_states and states:
+        state_status = "not-required"
+    elif any(status == "ok" for status in queried_states) and any(
+        status != "ok" for status in queried_states
+    ):
+        state_status = "partial"
+    elif any(status == "ok" for status in queried_states):
+        state_status = "ok"
+    else:
+        state_status = "empty" if queried_states else "not-queried"
     return {
         "gridCentralData": central_status if has_key else "missing-key",
-        "gridSeriesState": "ok" if any(status == "ok" for status in states) else ("empty" if states else "not-queried"),
+        "gridSeriesState": state_status,
         "polymarket": "optional-local-match",
     }
 
@@ -258,8 +287,15 @@ def _raise_graphql_errors(payload: Dict[str, Any]) -> None:
         raise RuntimeError(message)
 
 
-def _extract_series_nodes(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], int]:
-    all_series = (payload.get("data") or {}).get("allSeries") if isinstance(payload.get("data"), dict) else None
+def _extract_series_nodes(
+    payload: Dict[str, Any],
+    connection_name: str = "allSeries",
+) -> Tuple[List[Dict[str, Any]], int]:
+    all_series = (
+        (payload.get("data") or {}).get(connection_name)
+        if isinstance(payload.get("data"), dict)
+        else None
+    )
     if not isinstance(all_series, dict):
         return [], 0
     total_count = _safe_int(all_series.get("totalCount")) or 0
@@ -499,7 +535,7 @@ def build_grid_esports_cache_key(settings: Any, *, limit: int = DEFAULT_GRID_ESP
             ]
         ).encode("utf-8")
     ).hexdigest()[:12]
-    return json.dumps({"limit": int(limit), "source": fingerprint, "version": 1}, sort_keys=True, ensure_ascii=True)
+    return json.dumps({"limit": int(limit), "source": fingerprint, "version": 2}, sort_keys=True, ensure_ascii=True)
 
 
 def normalize_grid_esports_payload(payload: Any, *, settings: Any, limit: int = DEFAULT_GRID_ESPORTS_LIMIT, generated_at: str | None = None) -> Dict[str, Any]:
@@ -614,23 +650,67 @@ def fetch_live_grid_esports_payload(
     payload = _post_graphql(
         dependencies,
         central_url,
-        ALL_SERIES_QUERY,
-        {"gte": gte, "lte": lte, "first": candidate_limit},
+        NEARBY_SERIES_QUERY,
+        {
+            "recentGte": gte,
+            "now": generated_at,
+            "upcomingLte": lte,
+            "first": candidate_limit,
+        },
         timeout=20,
     )
     _raise_graphql_errors(payload)
-    nodes, total_count = _extract_series_nodes(payload)
+    recent_nodes, recent_count = _extract_series_nodes(payload, "recent")
+    upcoming_nodes, upcoming_count = _extract_series_nodes(payload, "upcoming")
+    uses_nearby_windows = bool(recent_nodes or upcoming_nodes)
+    if not uses_nearby_windows:
+        # Compatibility for fixtures and older GraphQL proxies that expose a
+        # single allSeries connection.
+        nodes, total_count = _extract_series_nodes(payload)
+    else:
+        nodes_by_id: Dict[str, Dict[str, Any]] = {}
+        for node in [*recent_nodes, *upcoming_nodes]:
+            series_id = str(node.get("id") or "").strip()
+            if series_id:
+                nodes_by_id.setdefault(series_id, node)
+        nodes = list(nodes_by_id.values())
+        total_count = recent_count + upcoming_count
     selected = _select_relevant_series(nodes, limit=limit, reference_at=generated_at)
+    reference_at = _parse_iso(generated_at) or _utc_now()
     state_statuses: List[str] = []
     items: List[Dict[str, Any]] = []
     for node in selected:
         series_id = str(node.get("id") or "").strip()
-        state, state_status = _series_state(dependencies, series_id) if series_id else (None, "missing-id")
+        scheduled_at = _parse_iso(node.get("startTimeScheduled"))
+        state_due = (
+            not uses_nearby_windows
+            or scheduled_at is None
+            or scheduled_at <= reference_at + timedelta(minutes=15)
+        )
+        if not state_due:
+            state, state_status = None, "not-due"
+        else:
+            state, state_status = (
+                _series_state(dependencies, series_id)
+                if series_id
+                else (None, "missing-id")
+            )
+            if (
+                state_status == "empty"
+                and scheduled_at is not None
+                and scheduled_at > reference_at
+            ):
+                state_status = "not-due"
         state_statuses.append(state_status)
         items.append(_normalize_series(node, state, ctx=dependencies))
 
     live_count = sum(1 for item in items if item.get("state") == "live")
-    status = "ok" if items and all(status == "ok" for status in state_statuses) else "degraded" if items else "empty"
+    state_failures = [
+        state_status
+        for state_status in state_statuses
+        if state_status not in {"ok", "not-due"}
+    ]
+    status = "ok" if items and not state_failures else "degraded" if items else "empty"
     return normalize_grid_esports_payload(
         {
             "generatedAt": generated_at,
