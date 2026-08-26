@@ -247,7 +247,7 @@ def test_aviation_viewport_uses_bbox_and_never_fabricates(monkeypatch: pytest.Mo
     monkeypatch.setattr(transport, "_http_json_get", fake_get)
     context = transport.GlobalTransportShippingDependencies(
         application=None,
-        utc_now_iso=lambda: "2026-08-25T12:00:00Z",
+        utc_now_iso=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         http_text_get=None,
         http_json_get=None,
         http_form_post=None,
@@ -264,3 +264,86 @@ def test_aviation_viewport_uses_bbox_and_never_fabricates(monkeypatch: pytest.Mo
     assert captured == {"lamin": 39, "lomin": -75, "lamax": 42, "lomax": -72}
     assert result["aircraftCount"] == 1
     assert result["aircraft"][0]["callsign"] == "TEST1"
+
+
+def test_aviation_viewport_falls_back_to_real_adsb_and_caches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(transport, "_opensky_access_token", lambda _ctx: (None, {"status": "auth-error-cache"}))
+    cache = {}
+    calls = []
+
+    def fake_get(_ctx, url, **_kwargs):
+        calls.append(url)
+        assert "api.adsb.lol/v2/point/" in url
+        return {"ac": [
+            {
+                "hex": "a53207",
+                "flight": "AAL1567 ",
+                "lat": 40.7,
+                "lon": -73.9,
+                "alt_baro": 17900,
+                "gs": 405.7,
+                "track": 273.25,
+                "baro_rate": 320,
+                "emergency": "none",
+            },
+            {"hex": "outside", "flight": "DROP", "lat": 36.0, "lon": -80.0},
+        ]}
+
+    monkeypatch.setattr(transport, "_http_json_get", fake_get)
+    context = transport.GlobalTransportShippingDependencies(
+        application=None,
+        utc_now_iso=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        http_text_get=None,
+        http_json_get=None,
+        http_form_post=None,
+        get_cached_json=lambda namespace, key: cache.get((namespace, key)),
+        set_cached_json=lambda namespace, key, value, _ttl: cache.__setitem__((namespace, key), value),
+        snapshot_store=None,
+        search_markets=None,
+    )
+    first = transport.get_aviation_viewport_snapshot(
+        context,
+        bbox=(-75, 39, -72, 42),
+        zoom=5,
+    )
+    second = transport.get_aviation_viewport_snapshot(
+        context,
+        bbox=(-75, 39, -72, 42),
+        zoom=5,
+    )
+
+    assert first["status"] == "ok"
+    assert first["source"] == "ADSB.lol"
+    assert first["fallbackFrom"]["reason"] == "auth-error-cache"
+    assert first["coverage"] == {"mode": "covering-sector", "sectorCount": 1, "complete": True}
+    assert first["aircraftCount"] == 1
+    assert first["aircraft"][0]["callsign"] == "AAL1567"
+    assert first["aircraft"][0]["source"] == "ADSB.lol"
+    assert second["cacheMode"] == "cache"
+    assert len(calls) == 1
+
+
+def test_aviation_viewport_never_fabricates_when_live_providers_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(transport, "_opensky_access_token", lambda _ctx: (None, {"status": "auth-error"}))
+    monkeypatch.setattr(transport, "_http_json_get", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError()))
+    context = transport.GlobalTransportShippingDependencies(
+        application=None,
+        utc_now_iso=lambda: "2026-08-25T12:00:00Z",
+        http_text_get=None,
+        http_json_get=None,
+        http_form_post=None,
+        get_cached_json=None,
+        set_cached_json=None,
+        snapshot_store=None,
+        search_markets=None,
+    )
+    result = transport.get_aviation_viewport_snapshot(
+        context,
+        bbox=(-75, 39, -72, 42),
+        zoom=5,
+    )
+
+    assert result["status"] == "unavailable"
+    assert result["source"] == "ADSB.lol"
+    assert result["aircraft"] == []
+    assert result["aircraftCount"] == 0

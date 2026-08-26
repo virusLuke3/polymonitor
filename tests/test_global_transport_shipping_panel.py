@@ -256,6 +256,32 @@ def test_opensky_live_status_uses_oauth_and_state_cache(monkeypatch):
     assert calls == {"token": 1, "states": 1}
 
 
+def test_opensky_auth_transport_failure_is_short_cached(monkeypatch):
+    monkeypatch.setenv("OPENSKY_CLIENT_ID", "client-id")
+    monkeypatch.setenv("OPENSKY_CLIENT_SECRET", "client-secret")
+    cache = {}
+    calls = {"token": 0}
+
+    def fail_form_post(*_args, **_kwargs):
+        calls["token"] += 1
+        raise TimeoutError("blocked provider")
+
+    ctx = {
+        "utc_now_iso": lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "http_form_post": fail_form_post,
+        "get_cached_json": lambda namespace, key: cache.get((namespace, key)),
+        "set_cached_json": lambda namespace, key, payload, ttl: cache.__setitem__((namespace, key), payload),
+    }
+    first = global_transport_shipping_service._opensky_access_token(ctx)
+    second = global_transport_shipping_service._opensky_access_token(ctx)
+
+    assert first[0] is None
+    assert first[1]["status"] == "auth-error"
+    assert second[0] is None
+    assert second[1]["status"] == "auth-error-cache"
+    assert calls["token"] == 1
+
+
 def test_opensky_auth_failure_degrades_without_breaking_payload(tmp_path, monkeypatch):
     openflights_root = tmp_path / "openflights"
     _write_openflights_fixture(openflights_root)

@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import os
 import threading
 from collections import Counter, defaultdict
@@ -1050,22 +1051,45 @@ def _opensky_access_token(ctx: dict) -> tuple[Optional[str], Dict[str, Any]]:
     if not client_id or not client_secret:
         return None, {"status": "missing-key", "sourceUrl": OPENSKY_DOC_URL}
     cached = _read_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, OPENSKY_TOKEN_CACHE_KEY)
-    if cached and cached.get("accessToken"):
-        expires_at = _parse_iso(cached.get("expiresAt"))
-        if expires_at and (expires_at - datetime.now(timezone.utc)).total_seconds() > 90:
-            return str(cached["accessToken"]), {"status": "token-cache", "sourceUrl": OPENSKY_DOC_URL}
+    if cached:
+        if cached.get("accessToken"):
+            expires_at = _parse_iso(cached.get("expiresAt"))
+            if expires_at and (expires_at - datetime.now(timezone.utc)).total_seconds() > 90:
+                return str(cached["accessToken"]), {"status": "token-cache", "sourceUrl": OPENSKY_DOC_URL}
+        if cached.get("status") == "auth-error":
+            return None, {
+                "status": "auth-error-cache",
+                "sourceUrl": OPENSKY_DOC_URL,
+                "errorClass": cached.get("errorClass"),
+            }
     data = {
         "grant_type": "client_credentials",
         "client_id": client_id,
         "client_secret": client_secret,
     }
-    payload = _http_form_post(
-        ctx,
-        OPENSKY_AUTH_URL,
-        data=data,
-        timeout=15,
-        headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "polydata-global-transport/1.0"},
-    )
+    try:
+        payload = _http_form_post(
+            ctx,
+            OPENSKY_AUTH_URL,
+            data=data,
+            timeout=_env_int("POLYDATA_OPENSKY_AUTH_TIMEOUT_SECONDS", 5, minimum=2, maximum=15),
+            headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "polydata-global-transport/1.0"},
+        )
+    except Exception as exc:
+        failure = {
+            "status": "auth-error",
+            "generatedAt": _utc_now_iso(ctx),
+            "sourceUrl": OPENSKY_DOC_URL,
+            "errorClass": exc.__class__.__name__,
+        }
+        _store_cached_payload(
+            ctx,
+            OPENSKY_SNAPSHOT_NAMESPACE,
+            OPENSKY_TOKEN_CACHE_KEY,
+            failure,
+            ttl_seconds=_env_int("POLYDATA_OPENSKY_FAILURE_TTL_SECONDS", 300, minimum=30, maximum=1800),
+        )
+        return None, failure
     if not isinstance(payload, dict) or not payload.get("access_token"):
         return None, {"status": "auth-error", "sourceUrl": OPENSKY_DOC_URL}
     expires_in = int(payload.get("expires_in") or 1800)
@@ -1130,6 +1154,31 @@ def _adsb_base_url() -> str:
     return str(os.environ.get("POLYDATA_ADSB_BASE_URL") or ADSB_LOL_BASE_URL).rstrip("/")
 
 
+def _adsb_viewport_samples(
+    bbox: tuple[float, float, float, float],
+) -> List[Dict[str, float]]:
+    """Translate a viewport into at most four honest ADSB radius queries."""
+
+    west, south, east, north = bbox
+    mid_lat = (south + north) / 2
+    mid_lon = (west + east) / 2
+    height_nm = abs(north - south) * 60
+    width_nm = abs(east - west) * 60 * max(0.15, abs(math.cos(math.radians(mid_lat))))
+    diagonal_nm = math.hypot(width_nm, height_nm)
+    if diagonal_nm <= 460:
+        return [{
+            "lat": mid_lat,
+            "lon": mid_lon,
+            "radiusNm": float(max(20, min(250, math.ceil(diagonal_nm / 2) + 12))),
+        }]
+    radius_nm = float(max(80, min(250, math.ceil(diagonal_nm / 4) + 20)))
+    return [
+        {"lat": lat, "lon": lon, "radiusNm": radius_nm}
+        for lat in (south + (north - south) * 0.25, south + (north - south) * 0.75)
+        for lon in (west + (east - west) * 0.25, west + (east - west) * 0.75)
+    ]
+
+
 def _adsb_number(value: Any) -> Optional[float]:
     if isinstance(value, str) and value.strip().lower() == "ground":
         return 0.0
@@ -1186,6 +1235,100 @@ def _normalize_adsb_aircraft(row: Dict[str, Any], *, hub: Dict[str, Any], sample
         "sourceUrl": ADSB_LOL_DOC_URL,
         "updatedAt": sampled_at,
     }
+
+
+def _adsb_viewport_snapshot(
+    ctx: GlobalTransportShippingContext,
+    *,
+    bbox: tuple[float, float, float, float],
+    zoom: float,
+    limit: int,
+    cache_key: str,
+    sampled_at: str,
+    fallback_reason: str,
+) -> Dict[str, Any]:
+    if not _env_bool("POLYDATA_ADSB_FALLBACK_ENABLED", True):
+        return {
+            "schemaVersion": AVIATION_VIEWPORT_SCHEMA_VERSION,
+            "generatedAt": sampled_at,
+            "status": "unavailable",
+            "bbox": list(bbox),
+            "zoom": zoom,
+            "aircraft": [],
+            "aircraftCount": 0,
+            "source": None,
+            "errorCode": "aviation-providers-unavailable",
+            "limitations": ["No live aviation provider is currently available."],
+        }
+    cached = _read_cached_payload(ctx, ADSB_SNAPSHOT_NAMESPACE, cache_key, max_age_seconds=30)
+    if cached is not None:
+        return cached
+
+    west, south, east, north = bbox
+    aircraft: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+    sectors = _adsb_viewport_samples(bbox)
+    seen: set[str] = set()
+    for index, sector in enumerate(sectors):
+        hub = {"id": f"viewport-{index + 1}", "iata": None, "icao": None}
+        url = (
+            f"{_adsb_base_url()}/point/{sector['lat']:.5f}/"
+            f"{sector['lon']:.5f}/{int(sector['radiusNm'])}"
+        )
+        try:
+            payload = _http_json_get(
+                ctx,
+                url,
+                timeout=_env_int("POLYDATA_ADSB_VIEWPORT_TIMEOUT_SECONDS", 6, minimum=2, maximum=15),
+                headers={"User-Agent": "polydata-global-transport/1.0"},
+            )
+            rows = payload.get("ac") if isinstance(payload, dict) else []
+            for row in rows if isinstance(rows, list) else []:
+                item = _normalize_adsb_aircraft(row, hub=hub, sampled_at=sampled_at)
+                if item is None:
+                    continue
+                if not (west <= float(item["lon"]) <= east and south <= float(item["lat"]) <= north):
+                    continue
+                identity = str(item.get("icao24") or item.get("id"))
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                aircraft.append(item)
+        except Exception as exc:
+            errors.append({"sector": str(index + 1), "error": exc.__class__.__name__})
+
+    aircraft.sort(key=lambda item: (
+        0 if item.get("status") == "watch" else 1,
+        -float(item.get("riskScore") or 0),
+        str(item.get("id") or ""),
+    ))
+    picked = aircraft[:limit]
+    status = "ok" if picked and not errors else ("partial" if picked else ("unavailable" if errors else "empty"))
+    result = {
+        "schemaVersion": AVIATION_VIEWPORT_SCHEMA_VERSION,
+        "generatedAt": sampled_at,
+        "status": status,
+        "bbox": list(bbox),
+        "zoom": zoom,
+        "aircraft": picked,
+        "aircraftCount": len(picked),
+        "availableAircraftCount": len(aircraft),
+        "source": "ADSB.lol",
+        "sourceUrl": ADSB_LOL_DOC_URL,
+        "fallbackFrom": {"source": "OpenSky", "reason": fallback_reason},
+        "coverage": {
+            "mode": "covering-sector" if len(sectors) == 1 else "sampled-sectors",
+            "sectorCount": len(sectors),
+            "complete": len(sectors) == 1 and not errors,
+        },
+        "errors": errors,
+        "limitations": [
+            "Aircraft positions are real ADSB observations; surveillance coverage and update delay vary.",
+            *(["Large viewports are sampled with bounded sectors and are not complete global coverage."] if len(sectors) > 1 else []),
+        ],
+    }
+    _store_cached_payload(ctx, ADSB_SNAPSHOT_NAMESPACE, cache_key, result, ttl_seconds=30)
+    return result
 
 
 def _adsb_live_status(ctx: dict, hubs: List[Dict[str, Any]], *, enabled: bool = True) -> Dict[str, Any]:
@@ -1381,32 +1524,42 @@ def get_aviation_viewport_snapshot(
     cached = _read_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, cache_key, max_age_seconds=30)
     if cached is not None:
         return cached
+    cached = _read_cached_payload(ctx, ADSB_SNAPSHOT_NAMESPACE, cache_key, max_age_seconds=30)
+    if cached is not None:
+        return cached
     try:
         token, token_state = _opensky_access_token(ctx)  # type: ignore[arg-type]
     except Exception as exc:
         token, token_state = None, {"status": f"auth-{exc.__class__.__name__}"}
     if not token:
-        return {
-            "schemaVersion": AVIATION_VIEWPORT_SCHEMA_VERSION,
-            "generatedAt": sampled_at,
-            "status": "unavailable",
-            "bbox": list(bbox),
-            "zoom": bounded_zoom,
-            "aircraft": [],
-            "aircraftCount": 0,
-            "source": "OpenSky",
-            "sourceUrl": OPENSKY_DOC_URL,
-            "errorCode": token_state.get("status") or "opensky-credentials-unavailable",
-            "limitations": ["OpenSky live viewport data requires configured server-side credentials."],
-        }
+        return _adsb_viewport_snapshot(
+            ctx,
+            bbox=bbox,
+            zoom=bounded_zoom,
+            limit=bounded_limit,
+            cache_key=cache_key,
+            sampled_at=sampled_at,
+            fallback_reason=str(token_state.get("status") or "opensky-credentials-unavailable"),
+        )
     region = {"id": cache_key, "label": "Current map viewport"}
-    payload = _http_json_get(
-        ctx,
-        OPENSKY_STATES_URL,
-        params={"lamin": south, "lomin": west, "lamax": north, "lomax": east},
-        timeout=14,
-        headers={"Authorization": f"Bearer {token}", "User-Agent": "polydata-global-transport/1.0"},
-    )
+    try:
+        payload = _http_json_get(
+            ctx,
+            OPENSKY_STATES_URL,
+            params={"lamin": south, "lomin": west, "lamax": north, "lomax": east},
+            timeout=_env_int("POLYDATA_OPENSKY_VIEWPORT_TIMEOUT_SECONDS", 5, minimum=2, maximum=14),
+            headers={"Authorization": f"Bearer {token}", "User-Agent": "polydata-global-transport/1.0"},
+        )
+    except Exception as exc:
+        return _adsb_viewport_snapshot(
+            ctx,
+            bbox=bbox,
+            zoom=bounded_zoom,
+            limit=bounded_limit,
+            cache_key=cache_key,
+            sampled_at=sampled_at,
+            fallback_reason=f"states-{exc.__class__.__name__}",
+        )
     rows = payload.get("states") if isinstance(payload, dict) else []
     normalized = [
         item
