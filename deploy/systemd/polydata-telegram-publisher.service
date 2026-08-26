@@ -12,7 +12,7 @@ EnvironmentFile=%h/.config/polydata/polydata.env
 RuntimeDirectory=polydata-telegram
 RuntimeDirectoryPreserve=restart
 Environment=POLYDATA_TELEGRAM_HEARTBEAT_PATH=%t/polydata-telegram/publisher-heartbeat.json
-ExecStart=/bin/bash -lc 'exec env POLYDATA_TELEGRAM_MARKET_LINKING_ENABLED=false "${POLYDATA_PYTHON_BIN:-python3}" -m telegram.topics.publisher --watch --interval "${POLYDATA_TELEGRAM_WATCH_INTERVAL_SECONDS:-60}"'
+ExecStart=/bin/bash -lc 'exec env POLYDATA_TELEGRAM_MARKET_LINKING_ENABLED=false "${POLYDATA_PYTHON_BIN:-python3}" -m telegram.topics.publisher --watch --target all-panels --interval "${POLYDATA_TELEGRAM_WATCH_INTERVAL_SECONDS:-60}"'
 Restart=always
 RestartSec=15
 TimeoutStopSec=30
