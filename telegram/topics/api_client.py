@@ -61,6 +61,12 @@ class PolyDataApiClient:
             }
         )
 
+    def isolated(self, *, timeout_seconds: Optional[int] = None) -> "PolyDataApiClient":
+        return PolyDataApiClient(
+            base_url=self.base_url,
+            timeout_seconds=self.timeout_seconds if timeout_seconds is None else timeout_seconds,
+        )
+
     def get_json(
         self,
         path: str,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import sys
@@ -31,8 +32,8 @@ PANEL_ENDPOINTS = {
     "global-weather-map": ("/runtime/weather/global-map", {"limit": 34}),
     "weather-news": ("/runtime/weather/news", {"limit": 24}),
 }
-ALL_PANELS_BATCH_SIZE = 8
-ALL_PANELS_BATCH_TIMEOUT_SECONDS = 30
+ALL_PANELS_MAX_WORKERS = 4
+ALL_PANELS_REQUEST_TIMEOUT_SECONDS = 5
 
 
 TARGET_PANELS = {
@@ -95,40 +96,45 @@ def _write_heartbeat(*, phase: str, result: PublishResult | None = None, error: 
 
 def fetch_snapshots(api: PolyDataApiClient, *, target: str) -> Dict[str, Dict]:
     if target == "all-panels":
-        snapshots: Dict[str, Dict] = {}
-        runtime_batches = [
-            SERVER_RUNTIME_PANEL_IDS[index : index + ALL_PANELS_BATCH_SIZE]
-            for index in range(0, len(SERVER_RUNTIME_PANEL_IDS), ALL_PANELS_BATCH_SIZE)
-        ]
-        for batch_index, panel_ids in enumerate(runtime_batches, start=1):
+        runtime_snapshots: Dict[str, Dict] = {}
+
+        def fetch_runtime_panel(panel_id: str) -> tuple[str, Dict | None, int]:
+            panel_api = api.isolated(timeout_seconds=ALL_PANELS_REQUEST_TIMEOUT_SECONDS)
             try:
-                envelope = api.get_json(
+                envelope = panel_api.get_json(
                     "/v1/runtime/panels",
-                    params={"ids": ",".join(panel_ids), "limit": 12},
-                    timeout_seconds=max(api.timeout_seconds, ALL_PANELS_BATCH_TIMEOUT_SECONDS),
+                    params={"ids": panel_id, "limit": 12},
+                    timeout_seconds=ALL_PANELS_REQUEST_TIMEOUT_SECONDS,
                 )
                 data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
                 panels = data.get("panels") if isinstance(data.get("panels"), dict) else {}
-                snapshots.update(
-                    (panel_id, payload)
-                    for panel_id, payload in panels.items()
-                    if panel_id in panel_ids and isinstance(payload, dict)
-                )
                 errors = envelope.get("errors") if isinstance(envelope.get("errors"), list) else []
-                if errors:
-                    print(
-                        "[telegram-publisher] WARN all-panels batch partial "
-                        f"batch={batch_index}/{len(runtime_batches)} requested={len(panel_ids)} "
-                        f"returned={sum(panel_id in snapshots for panel_id in panel_ids)} errors={len(errors)}",
-                        file=sys.stderr,
-                    )
+                payload = panels.get(panel_id)
+                return panel_id, payload if isinstance(payload, dict) else None, len(errors)
             except Exception as exc:
                 print(
-                    "[telegram-publisher] WARN all-panels batch failed "
-                    f"batch={batch_index}/{len(runtime_batches)} requested={len(panel_ids)} "
-                    f"error_class={exc.__class__.__name__}",
+                    "[telegram-publisher] WARN all-panels panel failed "
+                    f"panel={panel_id} error_class={exc.__class__.__name__}",
                     file=sys.stderr,
                 )
+                return panel_id, None, 1
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=ALL_PANELS_MAX_WORKERS) as executor:
+            for panel_id, payload, error_count in executor.map(fetch_runtime_panel, SERVER_RUNTIME_PANEL_IDS):
+                if payload is not None:
+                    runtime_snapshots[panel_id] = payload
+                if error_count:
+                    print(
+                        "[telegram-publisher] WARN all-panels panel partial "
+                        f"panel={panel_id} returned={payload is not None} errors={error_count}",
+                        file=sys.stderr,
+                    )
+
+        snapshots: Dict[str, Dict] = {
+            panel_id: runtime_snapshots[panel_id]
+            for panel_id in SERVER_RUNTIME_PANEL_IDS
+            if panel_id in runtime_snapshots
+        }
         for panel_id in ("latest-content", "worldcup-intel"):
             path, params = PANEL_ENDPOINTS[panel_id]
             try:
