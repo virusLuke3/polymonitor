@@ -177,23 +177,58 @@ def ensure_schema(conn) -> None:
 
 def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int], active_only: bool) -> List[Dict[str, Any]]:
     params: List[Any] = []
-    filters: List[str] = []
     if market_ids:
         placeholders = ", ".join("?" for _ in market_ids)
-        filters.append(f"m.id IN ({placeholders})")
+        candidate_pool_sql = f"SELECT id AS market_id FROM core.markets WHERE id IN ({placeholders})"
+        event_pool_sql = ""
         params.extend(int(market_id) for market_id in market_ids)
-    elif active_only:
-        filters.append(
-            """
-            (
-              COALESCE(mss.is_final, FALSE) = FALSE
-              OR COALESCE(mls.volume_24h, 0) > 0
-              OR ec.market_id IS NOT NULL
-              OR m.created_at >= now() - interval '45 days'
-            )
-            """
+    else:
+        # core.markets is multi-million-row history.  Sorting full market rows
+        # (including description/tags JSON) can spill more than PostgreSQL's
+        # temp_file_limit before LIMIT is applied.  Build a bounded ID pool
+        # from the ranking indexes first, then load the wide payload only for
+        # those candidates.  The event defaults are added below so a group
+        # leader cannot be displaced by the activity-only pool.
+        candidate_pool_sql = """
+          SELECT market_id FROM (
+            SELECT market_id
+            FROM core.market_list_serving
+            ORDER BY
+              volume_24h DESC,
+              trade_count_24h DESC,
+              last_trade_at DESC NULLS LAST,
+              market_id DESC
+            LIMIT ?
+          ) activity_candidates
+          UNION
+          SELECT market_id FROM (
+            SELECT market_id
+            FROM core.market_latest_prices
+            ORDER BY latest_trade_at DESC NULLS LAST, market_id DESC
+            LIMIT ?
+          ) price_candidates
+          UNION
+          SELECT market_id FROM (
+            SELECT id AS market_id
+            FROM core.markets
+            ORDER BY created_at DESC NULLS LAST, id DESC
+            LIMIT ?
+          ) recent_candidates
+        """
+        event_pool_sql = "UNION SELECT market_id FROM event_candidates"
+        params.extend((int(max_markets), int(max_markets), int(max_markets)))
+    active_filter_sql = (
+        """
+        WHERE (
+          COALESCE(mss.is_final, FALSE) = FALSE
+          OR COALESCE(mls.volume_24h, 0) > 0
+          OR ec.market_id IS NOT NULL
+          OR m.created_at >= now() - interval '45 days'
         )
-    where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
+        """
+        if active_only and not market_ids
+        else ""
+    )
     params.append(int(max_markets))
     rows = conn.execute(
         f"""
@@ -207,6 +242,38 @@ def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int]
           FROM core.event_market_serving
           WHERE default_market_id IS NOT NULL
           GROUP BY default_market_id
+        ),
+        candidate_pool AS MATERIALIZED (
+          {candidate_pool_sql}
+          {event_pool_sql}
+        ),
+        ranked_candidates AS MATERIALIZED (
+          SELECT
+            m.id,
+            COALESCE(ec.group_active_rank, 0) AS group_active_rank,
+            GREATEST(COALESCE(mls.volume_24h, 0), COALESCE(ec.group_volume_24h, 0)) AS rank_volume_24h,
+            GREATEST(COALESCE(mls.trade_count_24h, 0), COALESCE(ec.group_trade_count_24h, 0)) AS rank_trade_count_24h,
+            COALESCE(
+              mls.last_trade_at,
+              mls.latest_trade_at,
+              mlp.latest_trade_at,
+              ec.group_last_activity_at,
+              m.created_at
+            ) AS rank_activity_at
+          FROM candidate_pool cp
+          JOIN core.markets m ON m.id = cp.market_id
+          LEFT JOIN core.market_status_snapshot mss ON mss.market_id = m.id
+          LEFT JOIN core.market_latest_prices mlp ON mlp.market_id = m.id
+          LEFT JOIN core.market_list_serving mls ON mls.market_id = m.id
+          LEFT JOIN event_candidates ec ON ec.market_id = m.id
+          {active_filter_sql}
+          ORDER BY
+            group_active_rank DESC,
+            rank_volume_24h DESC,
+            rank_trade_count_24h DESC,
+            rank_activity_at DESC NULLS LAST,
+            m.id DESC
+          LIMIT ?
         )
         SELECT
           m.id,
@@ -249,19 +316,18 @@ def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int]
           GREATEST(COALESCE(mls.trade_count_24h, 0), COALESCE(ec.group_trade_count_24h, 0)) AS trade_count_24h,
           COALESCE(mls.last_trade_at, mls.latest_trade_at, mlp.latest_trade_at, ec.group_last_activity_at, m.created_at) AS last_activity_at,
           COALESCE(ec.group_active_rank, 0) AS group_active_rank
-        FROM core.markets m
+        FROM ranked_candidates rc
+        JOIN core.markets m ON m.id = rc.id
         LEFT JOIN core.market_status_snapshot mss ON mss.market_id = m.id
         LEFT JOIN core.market_latest_prices mlp ON mlp.market_id = m.id
         LEFT JOIN core.market_list_serving mls ON mls.market_id = m.id
         LEFT JOIN event_candidates ec ON ec.market_id = m.id
-        {where_sql}
         ORDER BY
-          COALESCE(ec.group_active_rank, 0) DESC,
-          GREATEST(COALESCE(mls.volume_24h, 0), COALESCE(ec.group_volume_24h, 0)) DESC,
-          GREATEST(COALESCE(mls.trade_count_24h, 0), COALESCE(ec.group_trade_count_24h, 0)) DESC,
-          COALESCE(mls.last_trade_at, mls.latest_trade_at, mlp.latest_trade_at, ec.group_last_activity_at, m.created_at) DESC NULLS LAST,
-          m.id DESC
-        LIMIT ?
+          rc.group_active_rank DESC,
+          rc.rank_volume_24h DESC,
+          rc.rank_trade_count_24h DESC,
+          rc.rank_activity_at DESC NULLS LAST,
+          rc.id DESC
         """,
         params,
     ).fetchall()
@@ -424,10 +490,11 @@ def _chart_payload(row: Dict[str, Any], range_name: str, interval: str, trade_po
     points = trade_points
     latest = price.get("latestYesPrice") or price.get("latestPrice")
     if not points and latest not in (None, ""):
-        timestamp = price.get("updatedAt") or _now_iso()
+        end_timestamp = price.get("updatedAt") or _iso(row.get("created_at")) or _now_iso()
+        start_timestamp = _iso(row.get("created_at")) or end_timestamp
         points = [
-            {"timestamp": timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
-            {"timestamp": _now_iso(), "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+            {"timestamp": start_timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+            {"timestamp": end_timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
         ]
     status = _history_status(range_name, interval, points)
     return {
@@ -507,7 +574,7 @@ def refresh_market_workspace_serving(conn, *, max_markets: int, market_ids: Sequ
     if chart_rows:
         conn.executemany(
             """
-            INSERT INTO core.market_chart_serving (
+            INSERT INTO core.market_chart_serving AS current (
               market_id, range_name, interval_name, kind, history_status, point_count, points
             ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)
             ON CONFLICT (market_id, range_name, interval_name) DO UPDATE SET
@@ -517,13 +584,26 @@ def refresh_market_workspace_serving(conn, *, max_markets: int, market_ids: Sequ
               points = EXCLUDED.points,
               source = 'postgres',
               updated_at = now()
+            WHERE (
+              current.kind,
+              current.history_status,
+              current.point_count,
+              current.points,
+              current.source
+            ) IS DISTINCT FROM (
+              EXCLUDED.kind,
+              EXCLUDED.history_status,
+              EXCLUDED.point_count,
+              EXCLUDED.points,
+              'postgres'
+            )
             """,
             chart_rows,
         )
     if workspace_rows:
         conn.executemany(
             """
-            INSERT INTO core.market_workspace_serving (
+            INSERT INTO core.market_workspace_serving AS current (
               market_id, detail_payload, price_payload, oracle_summary, content_summary
             ) VALUES (?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb)
             ON CONFLICT (market_id) DO UPDATE SET
@@ -533,6 +613,19 @@ def refresh_market_workspace_serving(conn, *, max_markets: int, market_ids: Sequ
               content_summary = EXCLUDED.content_summary,
               source = 'postgres',
               updated_at = now()
+            WHERE (
+              current.detail_payload,
+              current.price_payload,
+              current.oracle_summary,
+              current.content_summary,
+              current.source
+            ) IS DISTINCT FROM (
+              EXCLUDED.detail_payload,
+              EXCLUDED.price_payload,
+              EXCLUDED.oracle_summary,
+              EXCLUDED.content_summary,
+              'postgres'
+            )
             """,
             workspace_rows,
         )
@@ -557,7 +650,7 @@ def main() -> None:
     parser.add_argument("--interval", type=int, default=60, help="Loop interval seconds when --watch is set")
     parser.add_argument("--watch", action="store_true", help="Refresh forever")
     parser.add_argument("--once", action="store_true", help="Refresh once and exit")
-    parser.add_argument("--max-markets", type=int, default=20000, help="Maximum candidate markets per refresh")
+    parser.add_argument("--max-markets", type=int, default=80, help="Maximum candidate markets per refresh")
     parser.add_argument("--market-id", action="append", default=[], help="Specific local market id; can be repeated or comma-separated")
     parser.add_argument("--all", action="store_true", help="Include historical markets instead of active/recent candidates")
     args = parser.parse_args()

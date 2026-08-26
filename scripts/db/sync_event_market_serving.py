@@ -410,6 +410,54 @@ def supplement_event_identity_from_gamma(conn, *, base_url: str, pages: int, tar
 def _load_candidate_markets(conn, *, max_markets: int) -> List[Dict[str, Any]]:
     cur = conn.execute(
         """
+        WITH candidate_pool AS MATERIALIZED (
+          SELECT market_id FROM (
+            SELECT market_id
+            FROM core.market_list_serving
+            ORDER BY
+              volume_24h DESC,
+              trade_count_24h DESC,
+              last_trade_at DESC NULLS LAST,
+              market_id DESC
+            LIMIT ?
+          ) activity_candidates
+          UNION
+          SELECT market_id FROM (
+            SELECT market_id
+            FROM core.market_latest_prices
+            ORDER BY latest_trade_at DESC NULLS LAST, market_id DESC
+            LIMIT ?
+          ) price_candidates
+          UNION
+          SELECT market_id FROM (
+            SELECT id AS market_id
+            FROM core.markets
+            ORDER BY created_at DESC NULLS LAST, id DESC
+            LIMIT ?
+          ) recent_candidates
+        ),
+        ranked_candidates AS MATERIALIZED (
+          SELECT
+            m.id,
+            COALESCE(mls.volume_24h, 0) AS rank_volume_24h,
+            COALESCE(mls.trade_count_24h, 0) AS rank_trade_count_24h,
+            COALESCE(mls.last_trade_at, mls.latest_trade_at, mlp.latest_trade_at, m.created_at) AS rank_activity_at
+          FROM candidate_pool cp
+          JOIN core.markets m ON m.id = cp.market_id
+          LEFT JOIN core.market_list_serving mls ON mls.market_id = m.id
+          LEFT JOIN core.market_latest_prices mlp ON mlp.market_id = m.id
+          LEFT JOIN core.market_status_snapshot mss ON mss.market_id = m.id
+          WHERE
+            COALESCE(mss.is_final, FALSE) = FALSE
+            OR COALESCE(mls.volume_24h, 0) > 0
+            OR m.created_at >= now() - interval '45 days'
+          ORDER BY
+            rank_volume_24h DESC,
+            rank_trade_count_24h DESC,
+            rank_activity_at DESC NULLS LAST,
+            m.id DESC
+          LIMIT ?
+        )
         SELECT
           m.id,
           m.gamma_market_id,
@@ -438,22 +486,18 @@ def _load_candidate_markets(conn, *, max_markets: int) -> List[Dict[str, Any]]:
           COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
           COALESCE(mss.is_final, FALSE) AS is_final,
           COALESCE(mss.gamma_closed, FALSE) AS gamma_closed
-        FROM core.markets m
+        FROM ranked_candidates rc
+        JOIN core.markets m ON m.id = rc.id
         LEFT JOIN core.market_list_serving mls ON mls.market_id = m.id
         LEFT JOIN core.market_latest_prices mlp ON mlp.market_id = m.id
         LEFT JOIN core.market_status_snapshot mss ON mss.market_id = m.id
-        WHERE
-          COALESCE(mss.is_final, FALSE) = FALSE
-          OR COALESCE(mls.volume_24h, 0) > 0
-          OR m.created_at >= now() - interval '45 days'
         ORDER BY
-          COALESCE(mls.volume_24h, 0) DESC,
-          COALESCE(mls.trade_count_24h, 0) DESC,
-          COALESCE(mls.last_trade_at, mls.latest_trade_at, mlp.latest_trade_at, m.created_at) DESC NULLS LAST,
-          m.id DESC
-        LIMIT ?
+          rc.rank_volume_24h DESC,
+          rc.rank_trade_count_24h DESC,
+          rc.rank_activity_at DESC NULLS LAST,
+          rc.id DESC
         """,
-        (int(max_markets),),
+        (int(max_markets), int(max_markets), int(max_markets), int(max_markets)),
     )
     return [_as_dict(row) for row in cur.fetchall()]
 
@@ -673,7 +717,7 @@ def refresh_serving(conn, *, max_markets: int, prune: bool) -> int:
         return 0
     conn.executemany(
         """
-        INSERT INTO core.event_market_serving (
+        INSERT INTO core.event_market_serving AS current (
           serving_key, group_id, event_id, event_slug, event_title, title, category, tags,
           created_at, end_date, volume_24h, trade_count_24h, last_activity_at, outcome_count,
           default_market_id, default_condition_id, default_gamma_market_id, default_outcome_key,
@@ -695,9 +739,9 @@ def refresh_serving(conn, *, max_markets: int, prune: bool) -> int:
           created_at = EXCLUDED.created_at,
           end_date = EXCLUDED.end_date,
           volume_24h = CASE
-            WHEN core.event_market_serving.gamma_volume_24h IS NOT NULL
-             AND core.event_market_serving.gamma_volume_fetched_at >= now() - interval '30 minutes'
-            THEN core.event_market_serving.gamma_volume_24h
+            WHEN current.gamma_volume_24h IS NOT NULL
+             AND current.gamma_volume_fetched_at >= now() - interval '30 minutes'
+            THEN current.gamma_volume_24h
             ELSE EXCLUDED.volume_24h
           END,
           trade_count_24h = EXCLUDED.trade_count_24h,
@@ -713,12 +757,71 @@ def refresh_serving(conn, *, max_markets: int, prune: bool) -> int:
           is_trading_closed = EXCLUDED.is_trading_closed,
           active_rank = EXCLUDED.active_rank,
           source = CASE
-            WHEN core.event_market_serving.gamma_volume_24h IS NOT NULL
-             AND core.event_market_serving.gamma_volume_fetched_at >= now() - interval '30 minutes'
+            WHEN current.gamma_volume_24h IS NOT NULL
+             AND current.gamma_volume_fetched_at >= now() - interval '30 minutes'
             THEN 'gamma-event'
             ELSE 'postgres'
           END,
           updated_at = now()
+        WHERE (
+          current.group_id,
+          current.event_id,
+          current.event_slug,
+          current.event_title,
+          current.title,
+          current.category,
+          current.tags,
+          current.created_at,
+          current.end_date,
+          current.volume_24h,
+          current.trade_count_24h,
+          current.last_activity_at,
+          current.outcome_count,
+          current.default_market_id,
+          current.default_condition_id,
+          current.default_gamma_market_id,
+          current.default_outcome_key,
+          current.top_outcomes,
+          current.outcomes,
+          current.completion_status,
+          current.is_trading_closed,
+          current.active_rank,
+          current.source
+        ) IS DISTINCT FROM (
+          EXCLUDED.group_id,
+          EXCLUDED.event_id,
+          EXCLUDED.event_slug,
+          EXCLUDED.event_title,
+          EXCLUDED.title,
+          EXCLUDED.category,
+          EXCLUDED.tags,
+          EXCLUDED.created_at,
+          EXCLUDED.end_date,
+          CASE
+            WHEN current.gamma_volume_24h IS NOT NULL
+             AND current.gamma_volume_fetched_at >= now() - interval '30 minutes'
+            THEN current.gamma_volume_24h
+            ELSE EXCLUDED.volume_24h
+          END,
+          EXCLUDED.trade_count_24h,
+          EXCLUDED.last_activity_at,
+          EXCLUDED.outcome_count,
+          EXCLUDED.default_market_id,
+          EXCLUDED.default_condition_id,
+          EXCLUDED.default_gamma_market_id,
+          EXCLUDED.default_outcome_key,
+          EXCLUDED.top_outcomes,
+          EXCLUDED.outcomes,
+          EXCLUDED.completion_status,
+          EXCLUDED.is_trading_closed,
+          EXCLUDED.active_rank,
+          CASE
+            WHEN current.gamma_volume_24h IS NOT NULL
+             AND current.gamma_volume_fetched_at >= now() - interval '30 minutes'
+            THEN 'gamma-event'
+            ELSE 'postgres'
+          END
+        )
         """,
         upsert_rows,
     )
