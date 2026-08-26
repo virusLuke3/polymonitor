@@ -225,11 +225,6 @@
         "polydata-sports-odds-seed.service"
       ],
       "expectedFreshnessSeconds": 900,
-      "evidenceAliases": {
-        "nba-scoreboard": "nba",
-        "nba-intel": "nba",
-        "espn-matchup-predictor": "nba"
-      },
       "degradationPolicy": "Use last-good event data and keep provider errors isolated.",
       "panelIds": [
         "espn-matchup-predictor",

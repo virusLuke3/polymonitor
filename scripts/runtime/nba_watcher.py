@@ -117,8 +117,8 @@ class NbaWatcher:
     def seed_meta_cache_key(self) -> str:
         return SEED_META_CACHE_KEY
 
-    def load_seed_meta(self) -> Dict[str, Any]:
-        payload = self.seed_meta_store.load(self.seed_meta_namespace(), self.seed_meta_cache_key())
+    def load_seed_meta(self, cache_key: str = SEED_META_CACHE_KEY) -> Dict[str, Any]:
+        payload = self.seed_meta_store.load(self.seed_meta_namespace(), cache_key)
         return payload if isinstance(payload, dict) else {}
 
     def store_seed_meta(
@@ -130,16 +130,19 @@ class NbaWatcher:
         error_summary: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         preserve_last_success: bool = False,
+        panel_id: str = "nba",
+        cache_key: str = SEED_META_CACHE_KEY,
+        payload_status: Optional[str] = None,
     ) -> Dict[str, Any]:
-        previous = self.load_seed_meta()
+        previous = self.load_seed_meta(cache_key)
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
         if not preserve_last_success and str(status or "").strip().lower() in {"ok", "degraded", "preserved"}:
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
-            panel_id="nba",
+            panel_id=panel_id,
             namespace=self.seed_meta_namespace(),
-            cache_key=self.seed_meta_cache_key(),
+            cache_key=cache_key,
             service_name=SEED_META_SERVICE_NAME,
             expected_interval_seconds=self.interval_seconds,
             status=status,
@@ -149,10 +152,10 @@ class NbaWatcher:
             source_states=source_states,
             error_summary=error_summary,
             cache_mode="seeded",
-            payload_status=status,
+            payload_status=payload_status or status,
             metadata=metadata,
         )
-        return self.seed_meta_store.store(self.seed_meta_namespace(), self.seed_meta_cache_key(), payload)
+        return self.seed_meta_store.store(self.seed_meta_namespace(), cache_key, payload)
 
     def store_seed_meta_fail_soft(self, **kwargs: Any) -> bool:
         try:
@@ -232,9 +235,10 @@ class NbaWatcher:
             return {"status": "error", "recordCount": 0, "error": str(exc)}
 
         record_count = _nba_record_count(payload)
-        if previous and record_count <= 0:
+        previous_record_count = _nba_record_count(previous)
+        if previous_record_count > 0 and record_count <= 0:
             self.store_payload(namespace, cache_key, previous)
-            return {"status": "preserved", "recordCount": _nba_record_count(previous), "error": f"{label} returned empty payload"}
+            return {"status": "preserved", "recordCount": previous_record_count, "error": f"{label} returned empty payload"}
 
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(namespace, cache_key, payload)
@@ -266,10 +270,35 @@ class NbaWatcher:
                 fetcher=lambda ctx: runtime_service.fetch_live_nba_matchup_predictor_payload(ctx, limit=self.predictor_limit),
             ),
         }
+        component_panels = {
+            "scoreboard": "nba-scoreboard",
+            "intel": "nba-intel",
+            "predictor": "espn-matchup-predictor",
+        }
+        for component_name, panel_id in component_panels.items():
+            component = components[component_name]
+            payload_status = str(component.get("status") or "unknown")
+            if payload_status in {"ok", "empty"}:
+                operational_status = "ok"
+            elif payload_status == "preserved":
+                operational_status = "degraded"
+            else:
+                operational_status = "error"
+            self.store_seed_meta(
+                status=operational_status,
+                record_count=int(component.get("recordCount") or 0),
+                source_states={component_name: payload_status},
+                error_summary=str(component.get("error") or "") or None,
+                metadata={"result": "stored", "component": component_name},
+                preserve_last_success=payload_status in {"preserved", "error"},
+                panel_id=panel_id,
+                cache_key=panel_id,
+                payload_status=payload_status,
+            )
         source_states = {key: value["status"] for key, value in components.items()}
         record_count = sum(int(value.get("recordCount") or 0) for value in components.values())
         errors = [f"{key}: {value['error']}" for key, value in components.items() if value.get("error")]
-        if all(value["status"] == "ok" for value in components.values()):
+        if all(value["status"] in {"ok", "empty"} for value in components.values()):
             status = "ok"
         elif any(value["status"] in {"ok", "preserved"} for value in components.values()):
             status = "degraded"
