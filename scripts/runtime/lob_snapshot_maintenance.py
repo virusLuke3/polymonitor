@@ -203,15 +203,31 @@ def _rollup_start(conn: Any, *, rollup_cutoff: datetime) -> datetime | None:
     return oldest.astimezone(timezone.utc) if oldest is not None else None
 
 
-def _snapshot_sides(conn: Any) -> list[str]:
+def _snapshot_sides(
+    conn: Any,
+    *,
+    start: datetime,
+    end: datetime,
+) -> list[str]:
+    """Return only outcome sides that have snapshots in the current window.
+
+    Sports and multi-outcome markets make ``side`` an open vocabulary rather
+    than a small YES/NO enum. Iterating every historical side for every hour
+    creates thousands of empty index probes and prevents maintenance from
+    advancing its watermark. Limit the probe set to the bounded window.
+    """
+
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT DISTINCT side
             FROM quant.clob_orderbook_snapshots
             WHERE side IS NOT NULL AND side <> ''
+              AND fetched_at >= %s
+              AND fetched_at < %s
             ORDER BY side
-            """
+            """,
+            (start, end),
         )
         return [str(row["side"]) for row in cur.fetchall() if row.get("side")]
 
@@ -237,14 +253,11 @@ def execute_rollup(
         return 0
     start = start.replace(second=0, microsecond=0)
     window = timedelta(minutes=max(1, int(window_minutes)))
-    sides = _snapshot_sides(conn)
-    if not sides:
-        return 0
-
     total = 0
     windows = 0
     while start < rollup_cutoff and windows < max(1, int(max_windows)):
         end = min(rollup_cutoff, start + window)
+        sides = _snapshot_sides(conn, start=start, end=end)
         with conn.cursor() as cur:
             for side in sides:
                 cur.execute(ROLLUP_SQL, (side, start, end))

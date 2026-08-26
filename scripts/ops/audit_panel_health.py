@@ -326,11 +326,23 @@ def _request_system_health(
             continue
 
         # /system/health intentionally serves stale data once while refreshing
-        # its shared cache. This audit runs less often than that cache's TTL, so
-        # a single request would always record the pre-refresh LOB heartbeat and
-        # falsely mark the 30-second contract degraded. Give the background
-        # refresh one bounded opportunity, then consume the shared result.
-        if attempt == 0 and max_attempts > 1:
+        # its shared cache. With multiple API workers, the refreshed payload can
+        # take more than one follow-up request to become visible through Redis.
+        # Keep polling only while the LOB heartbeat is older than its contract;
+        # a genuinely stale runtime still returns after this bounded loop.
+        lob_runtime = payload.get("lobRuntime") if isinstance(payload.get("lobRuntime"), dict) else {}
+        lob_observed_at = (
+            lob_runtime.get("updatedAt")
+            or lob_runtime.get("observedAt")
+            or lob_runtime.get("statusUpdatedAt")
+            or lob_runtime.get("lastMessageAt")
+            or lob_runtime.get("statusFileWrittenAt")
+        )
+        lob_age_seconds = age_seconds(lob_observed_at)
+        if (
+            attempt + 1 < max_attempts
+            and (attempt == 0 or lob_age_seconds is None or lob_age_seconds > 30)
+        ):
             time.sleep(max(0.0, retry_delay_seconds))
             continue
         return payload
