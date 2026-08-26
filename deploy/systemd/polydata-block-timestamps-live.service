@@ -10,6 +10,7 @@ StartLimitBurst=3
 Type=simple
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
+UnsetEnvironment=NODE_URL NODE_URL2 BLOCK_TIMESTAMPS_RPC_URLS
 ExecStart=/bin/bash -lc 'exec scripts/clickhouse/run_block_timestamps_live.sh'
 Restart=always
 RestartSec=600
