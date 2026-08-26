@@ -28,6 +28,9 @@ from scripts.ops.lib.status import Status, aggregate, normalize
 
 DEFAULT_CONTRACT = REPO_ROOT / "config" / "operations" / "panel_contracts.json"
 PANEL_INDEX = REPO_ROOT / "webpage" / "src" / "panels" / "modules" / "index.ts"
+DEFAULT_LOB_RUNTIME_STATUS_PATH = Path(
+    "/tmp/polydata/local-orderbook-websocket-status.json"
+)
 IMPORT_RE = re.compile(
     r"import\s+\{\s*panel\s+as\s+([A-Za-z0-9_]+)\s*\}\s+from\s+['\"]\./([^'\"]+)['\"]"
 )
@@ -320,6 +323,21 @@ def _request_system_health(
     payload: dict[str, Any] = {}
     for attempt in range(max(1, max_attempts)):
         payload = _request_json_with_retries("/system/health")
+        api_lob_runtime = (
+            payload.get("lobRuntime")
+            if isinstance(payload.get("lobRuntime"), dict)
+            else {}
+        )
+        local_lob_runtime = _read_local_lob_runtime_status()
+        api_lob_age = age_seconds(_lob_observed_at(api_lob_runtime))
+        local_lob_age = age_seconds(_lob_observed_at(local_lob_runtime))
+        if local_lob_age is not None and (
+            api_lob_age is None or local_lob_age < api_lob_age
+        ):
+            payload = {
+                **payload,
+                "lobRuntime": {**api_lob_runtime, **local_lob_runtime},
+            }
         if payload.get("apiStatus") == "warming":
             if attempt + 1 < max_attempts:
                 time.sleep(max(0.0, retry_delay_seconds))
@@ -331,13 +349,7 @@ def _request_system_health(
         # Keep polling only while the LOB heartbeat is older than its contract;
         # a genuinely stale runtime still returns after this bounded loop.
         lob_runtime = payload.get("lobRuntime") if isinstance(payload.get("lobRuntime"), dict) else {}
-        lob_observed_at = (
-            lob_runtime.get("updatedAt")
-            or lob_runtime.get("observedAt")
-            or lob_runtime.get("statusUpdatedAt")
-            or lob_runtime.get("lastMessageAt")
-            or lob_runtime.get("statusFileWrittenAt")
-        )
+        lob_observed_at = _lob_observed_at(lob_runtime)
         lob_age_seconds = age_seconds(lob_observed_at)
         if (
             attempt + 1 < max_attempts
@@ -349,18 +361,51 @@ def _request_system_health(
     raise RuntimeError("system health remained warming")
 
 
+def _lob_observed_at(item: dict[str, Any]) -> Any:
+    candidates = [
+        item.get("updatedAt"),
+        item.get("observedAt"),
+        item.get("statusUpdatedAt"),
+        item.get("lastMessageAt"),
+        item.get("statusFileWrittenAt"),
+    ]
+    ranked = [
+        (age, value)
+        for value in candidates
+        if (age := age_seconds(value)) is not None
+    ]
+    return min(ranked, key=lambda pair: pair[0])[1] if ranked else None
+
+
+def _read_local_lob_runtime_status() -> dict[str, Any]:
+    """Read the local watcher heartbeat when this audit runs on the GCP host.
+
+    The public system-health endpoint is intentionally cached across API
+    workers.  That cache is useful remotely, but it can be older than the
+    30-second LOB freshness contract even while the watcher is writing its
+    atomic status file every two seconds.  A missing or stale local file never
+    replaces newer API evidence.
+    """
+
+    raw_path = str(
+        os.environ.get("POLYDATA_LOB_RUNTIME_STATUS_PATH")
+        or DEFAULT_LOB_RUNTIME_STATUS_PATH
+    ).strip()
+    if not raw_path:
+        return {}
+    try:
+        payload = read_json(Path(raw_path).expanduser())
+    except (OSError, ValueError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _database_evidence(group: dict[str, Any], system: dict[str, Any]) -> dict[str, Any]:
     probe = str(group.get("representativeProbe") or "")
     max_age = int(group.get("expectedFreshnessSeconds") or 300)
     if probe == "lob_runtime":
         item = system.get("lobRuntime") if isinstance(system.get("lobRuntime"), dict) else {}
-        observed_at = (
-            item.get("updatedAt")
-            or item.get("observedAt")
-            or item.get("statusUpdatedAt")
-            or item.get("lastMessageAt")
-            or item.get("statusFileWrittenAt")
-        )
+        observed_at = _lob_observed_at(item)
         source = normalize(item.get("status"))
     else:
         camel = {
