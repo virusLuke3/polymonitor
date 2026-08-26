@@ -10,6 +10,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Dict
 
 from api import cache as api_cache
@@ -41,6 +42,9 @@ DEFAULT_LOB_REDIS_CACHE_TTL_SECONDS = 120
 DEFAULT_LOB_WARM_REQUEST_TTL_SECONDS = 600
 DEFAULT_LOB_WARM_REQUEST_LIMIT = 32
 DEFAULT_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS = 300
+DEFAULT_LOB_MAINTENANCE_STATUS_PATH = Path(
+    "/tmp/polydata/lob-maintenance-status.json"
+)
 LOB_COVERAGE_RAW_ROW_LIMIT = 1200
 WORLDCUP_LOB_PRE_KICKOFF_MINUTES = 60
 WORLDCUP_LOB_FALLBACK_MATCH_MINUTES = 150
@@ -1127,21 +1131,54 @@ def write_lob_dead_letter(
 
 
 def get_lob_storage_status() -> Dict[str, Any]:
+    maintenance: Dict[str, Any] = {}
+    status_path = Path(
+        os.environ.get(
+            "POLYDATA_LOB_MAINTENANCE_STATUS_PATH",
+            str(DEFAULT_LOB_MAINTENANCE_STATUS_PATH),
+        )
+    ).expanduser()
     try:
-        _ensure_snapshot_schema()
+        if status_path.stat().st_size <= 1024 * 1024:
+            decoded = json.loads(status_path.read_text(encoding="utf-8"))
+            if isinstance(decoded, dict):
+                maintenance = decoded
+    except (OSError, ValueError, TypeError):
+        maintenance = {}
+    try:
         with postgres_connection(PostgresSettings(), readonly=True) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT
-                        max(fetched_at) AS latest_raw_at,
-                        count(*) FILTER (WHERE fetched_at >= now() - interval '1 hour') AS raw_rows_1h
+                    SELECT set_config('statement_timeout', %s, true)
+                    """,
+                    (
+                        str(
+                            max(
+                                250,
+                                min(
+                                    int(
+                                        os.environ.get(
+                                            "POLYDATA_LOB_STORAGE_HEALTH_TIMEOUT_MS",
+                                            "2000",
+                                        )
+                                        or 2000
+                                    ),
+                                    10000,
+                                ),
+                            )
+                        ),
+                    ),
+                )
+                cur.execute(
+                    """
+                    SELECT fetched_at AS latest_raw_at
                     FROM quant.clob_orderbook_snapshots
+                    ORDER BY snapshot_id DESC
+                    LIMIT 1
                     """
                 )
                 snapshot_row = cur.fetchone() or {}
-                cur.execute("SELECT max(bucket_minute) AS rollup_watermark FROM quant.clob_orderbook_rollups_1m")
-                rollup_row = cur.fetchone() or {}
                 cur.execute(
                     """
                     SELECT count(*) AS dead_letters_1h
@@ -1151,12 +1188,15 @@ def get_lob_storage_status() -> Dict[str, Any]:
                 )
                 dead_row = cur.fetchone() or {}
         latest_raw_at = snapshot_row.get("latest_raw_at")
-        rollup_watermark = rollup_row.get("rollup_watermark")
+        rollup_watermark = maintenance.get("rollupWatermark")
         return {
+            "status": "ok" if maintenance.get("status") in {None, "ok"} else "partial",
             "latestRawAt": latest_raw_at.isoformat().replace("+00:00", "Z") if latest_raw_at else None,
-            "rawRows1h": int(snapshot_row.get("raw_rows_1h") or 0),
-            "rollupWatermark": rollup_watermark.isoformat().replace("+00:00", "Z") if rollup_watermark else None,
+            "rawRows1h": None,
+            "rollupWatermark": str(rollup_watermark) if rollup_watermark else None,
             "deadLetters1h": int(dead_row.get("dead_letters_1h") or 0),
+            "maintenanceUpdatedAt": maintenance.get("updatedAt"),
+            "maintenanceStatus": maintenance.get("status") or "unknown",
         }
     except Exception as exc:
         return {"status": "unavailable", "detail": str(exc)[:240]}

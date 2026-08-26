@@ -30,6 +30,7 @@ DEFAULT_BATCH_SIZE = 5000
 DEFAULT_ROLLUP_WINDOW_MINUTES = 60
 DEFAULT_ROLLUP_MAX_WINDOWS = 336
 DEFAULT_DELETE_MAX_BATCHES = 20
+DEFAULT_STATUS_PATH = Path("/tmp/polydata/lob-maintenance-status.json")
 
 
 @dataclass(frozen=True)
@@ -312,6 +313,17 @@ def rollup_watermark(conn: Any) -> str | None:
     return value.isoformat().replace("+00:00", "Z") if value else None
 
 
+def write_status(path: Path, payload: dict[str, Any]) -> None:
+    path = path.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
 def run_once(*, settings: PostgresSettings | None = None, policy: MaintenancePolicy | None = None, dry_run: bool = False) -> dict[str, Any]:
     policy = policy or MaintenancePolicy()
     now = datetime.now(timezone.utc)
@@ -364,6 +376,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rollup-window-minutes", type=int, default=env_int("POLYDATA_LOB_ROLLUP_WINDOW_MINUTES", DEFAULT_ROLLUP_WINDOW_MINUTES))
     parser.add_argument("--rollup-max-windows", type=int, default=env_int("POLYDATA_LOB_ROLLUP_MAX_WINDOWS", DEFAULT_ROLLUP_MAX_WINDOWS))
     parser.add_argument("--delete-max-batches", type=int, default=env_int("POLYDATA_LOB_DELETE_MAX_BATCHES", DEFAULT_DELETE_MAX_BATCHES))
+    parser.add_argument(
+        "--status-path",
+        type=Path,
+        default=Path(
+            os.environ.get(
+                "POLYDATA_LOB_MAINTENANCE_STATUS_PATH",
+                str(DEFAULT_STATUS_PATH),
+            )
+        ),
+    )
     return parser
 
 
@@ -381,7 +403,24 @@ def main() -> int:
     )
     watch = bool(args.watch or not args.once)
     while True:
-        summary = run_once(policy=policy, dry_run=args.dry_run)
+        try:
+            summary = run_once(policy=policy, dry_run=args.dry_run)
+        except Exception as exc:
+            write_status(
+                args.status_path,
+                {
+                    "status": "error",
+                    "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "errorClass": exc.__class__.__name__,
+                },
+            )
+            raise
+        summary = {
+            **summary,
+            "status": "ok",
+            "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        write_status(args.status_path, summary)
         print(json.dumps(summary, ensure_ascii=True, sort_keys=True), flush=True)
         if not watch:
             return 0
