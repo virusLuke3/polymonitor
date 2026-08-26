@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable
 
 from .client import TelegramClient
 from .config import TelegramSettings, load_settings
-from .formatters import format_panel_snapshot
+from .formatters import format_panel_snapshot_outcome
 from .models import MessageCandidate
 from .publisher import publish_candidates
 from .state import PublishState, state_lock
@@ -20,7 +20,7 @@ def publish_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> None:
     try:
         settings = load_settings()
     except Exception as exc:
-        _log(f"settings-load-failed panel={panel_id} error={exc}")
+        _log(f"settings-load-failed panel={panel_id} error_class={exc.__class__.__name__}")
         return
     if not _enabled(settings):
         return
@@ -30,13 +30,14 @@ def publish_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> None:
 
 
 def _format_and_publish(panel_id: str, payload: Dict[str, Any], settings: TelegramSettings) -> None:
-    try:
-        candidates = format_panel_snapshot(panel_id, payload)
-    except Exception as exc:
-        _log(f"format-failed panel={panel_id} error={exc}")
+    outcome = format_panel_snapshot_outcome(panel_id, payload)
+    if not outcome.candidates:
+        _log(
+            "panel=%s mode=%s candidates=0 reason=%s"
+            % (panel_id, outcome.mode, outcome.reason or "empty")
+        )
         return
-    if candidates:
-        _publish_candidates(tuple(candidates), settings, panel_id)
+    _publish_candidates(outcome.candidates, settings, panel_id)
 
 
 def _enabled(settings: TelegramSettings) -> bool:
@@ -65,7 +66,7 @@ def _publish_candidates(candidates: Iterable[MessageCandidate], settings: Telegr
                 % (panel_id, result.candidates, result.sent, result.failed_sends, result.skipped_seen, result.skipped_unconfigured)
             )
     except Exception as exc:
-        _log(f"publish-failed panel={panel_id} error={exc}")
+        _log(f"publish-failed panel={panel_id} error_class={exc.__class__.__name__}")
 
 
 def _log(message: str) -> None:

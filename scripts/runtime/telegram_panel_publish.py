@@ -24,19 +24,26 @@ def publish_cached_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> int
     try:
         from telegram.topics.client import TelegramClient
         from telegram.topics.config import load_settings
-        from telegram.topics.formatters import format_panel_snapshot
+        from telegram.topics.formatters import format_panel_snapshot_outcome
         from telegram.topics.publisher import publish_candidates
         from telegram.topics.state import PublishState, state_lock
     except Exception as exc:
-        print(f"[telegram-panel-publish] WARN imports unavailable panel={panel_id} error={exc}", file=sys.stderr)
+        print(
+            f"[telegram-panel-publish] WARN imports unavailable panel={panel_id} error_class={exc.__class__.__name__}",
+            file=sys.stderr,
+        )
         return 0
 
     try:
         settings = load_settings()
         if not settings.bot_token and not settings.dry_run:
             return 0
-        candidates = format_panel_snapshot(panel_id, payload)
-        if not candidates:
+        outcome = format_panel_snapshot_outcome(panel_id, payload)
+        if not outcome.candidates:
+            print(
+                f"[telegram-panel-publish] panel={panel_id} mode={outcome.mode} candidates=0 reason={outcome.reason or 'empty'}",
+                file=sys.stderr,
+            )
             return 0
         telegram = TelegramClient(
             bot_token=settings.bot_token,
@@ -46,7 +53,7 @@ def publish_cached_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> int
         with state_lock(settings.state_path):
             state = PublishState(settings.state_path)
             result = publish_candidates(
-                candidates,
+                list(outcome.candidates),
                 settings=settings,
                 state=state,
                 telegram=telegram,
@@ -59,5 +66,8 @@ def publish_cached_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> int
             )
         return int(result.sent or 0)
     except Exception as exc:
-        print(f"[telegram-panel-publish] WARN publish failed panel={panel_id} error={exc}", file=sys.stderr)
+        print(
+            f"[telegram-panel-publish] WARN publish failed panel={panel_id} error_class={exc.__class__.__name__}",
+            file=sys.stderr,
+        )
         return 0

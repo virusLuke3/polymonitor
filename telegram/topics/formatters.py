@@ -5,8 +5,10 @@ import re
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
 
+from .catalog import DeliveryMode, delivery_contract
+from .generic_formatter import format_generic_snapshot
 from .market_linker import MarketLink, resolve_market_link
-from .models import MessageCandidate
+from .models import FormatOutcome, MessageCandidate
 
 RELATED_NEWS_GROUP_LIMIT = 2
 WORLDCUP_WORKSPACE_URL = "https://www.polymonitor.club/?workspace=worldcup"
@@ -704,17 +706,10 @@ def _title_tags(title: str) -> List[str]:
     return [tag for tag in known if tag.lower() in lowered]
 
 
-def format_all_snapshots(snapshots: Dict[str, Dict[str, Any]]) -> List[MessageCandidate]:
-    messages: List[MessageCandidate] = []
-    for panel_id, payload in snapshots.items():
-        messages.extend(format_panel_snapshot(panel_id, payload))
-    return messages
-
-
-def format_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> List[MessageCandidate]:
+def _format_specialized(panel_id: str, payload: Dict[str, Any]) -> List[MessageCandidate]:
     if panel_id == "latest-content":
         return format_latest_content(payload)
-    if panel_id in {"related-news", "related-intel"}:
+    if panel_id == "related-news":
         return format_related_news(payload)
     if panel_id == "alpha-signal":
         return format_alpha_signal(payload)
@@ -730,10 +725,107 @@ def format_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> List[Messag
         return format_nba_intel(payload)
     if panel_id == "espn-matchup-predictor":
         return format_nba_predictor(payload)
-    if panel_id in {"worldcup-intel", "worldcup-dashboard"}:
+    if panel_id == "worldcup-intel":
         return format_worldcup_intel(payload)
     if panel_id == "global-weather-map":
         return format_weather_map(payload)
     if panel_id == "weather-news":
         return format_weather_news(payload)
     return []
+
+
+def format_panel_snapshot_outcome(panel_id: str, payload: Dict[str, Any]) -> FormatOutcome:
+    requested_id = str(panel_id or "").strip()
+    canonical_id = {
+        "related-intel": "related-news",
+        "worldcup-dashboard": "worldcup-intel",
+    }.get(requested_id, requested_id)
+    contract = delivery_contract(canonical_id)
+    if contract is None:
+        return FormatOutcome(
+            panel_id=requested_id,
+            mode="unsupported",
+            reason="panel is not present in the Telegram delivery catalog",
+        )
+    if not isinstance(payload, dict):
+        return FormatOutcome(
+            panel_id=canonical_id,
+            mode="format-error",
+            reason="payload is not an object",
+        )
+    try:
+        if contract.mode is DeliveryMode.SPECIALIZED:
+            candidates = _format_specialized(canonical_id, payload)
+        elif contract.mode is DeliveryMode.GENERIC:
+            candidates = format_generic_snapshot(canonical_id, payload, topic=contract.topic)
+        else:
+            return FormatOutcome(
+                panel_id=canonical_id,
+                mode=contract.mode.value,
+                reason=contract.reason,
+            )
+    except Exception as exc:
+        return FormatOutcome(
+            panel_id=canonical_id,
+            mode="format-error",
+            reason=f"formatter raised {exc.__class__.__name__}",
+        )
+    reason = "" if candidates else "formatter produced no candidate for the current payload"
+    return FormatOutcome(
+        panel_id=canonical_id,
+        mode=contract.mode.value,
+        candidates=tuple(candidates),
+        reason=reason,
+    )
+
+
+def format_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> List[MessageCandidate]:
+    """Compatibility wrapper for existing callers that only consume candidates."""
+    return list(format_panel_snapshot_outcome(panel_id, payload).candidates)
+
+
+def format_all_snapshots_with_stats(
+    snapshots: Dict[str, Dict[str, Any]],
+) -> tuple[List[MessageCandidate], Dict[str, int]]:
+    messages: List[MessageCandidate] = []
+    stats = {
+        "specialized": 0,
+        "generic": 0,
+        "empty": 0,
+        "aggregate": 0,
+        "market_scoped": 0,
+        "browser_only": 0,
+        "non_pushable": 0,
+        "unsupported": 0,
+        "format_errors": 0,
+    }
+    for panel_id, payload in snapshots.items():
+        outcome = format_panel_snapshot_outcome(panel_id, payload)
+        messages.extend(outcome.candidates)
+        if outcome.mode == DeliveryMode.SPECIALIZED.value:
+            stats["specialized"] += 1
+        elif outcome.mode == DeliveryMode.GENERIC.value:
+            stats["generic"] += 1
+        elif outcome.mode == DeliveryMode.AGGREGATE.value:
+            stats["aggregate"] += 1
+        elif outcome.mode == DeliveryMode.MARKET_SCOPED.value:
+            stats["market_scoped"] += 1
+        elif outcome.mode == DeliveryMode.BROWSER_ONLY.value:
+            stats["browser_only"] += 1
+        elif outcome.mode == DeliveryMode.NON_PUSHABLE.value:
+            stats["non_pushable"] += 1
+        elif outcome.mode == "unsupported":
+            stats["unsupported"] += 1
+        elif outcome.mode == "format-error":
+            stats["format_errors"] += 1
+        if not outcome.candidates and outcome.mode in {
+            DeliveryMode.SPECIALIZED.value,
+            DeliveryMode.GENERIC.value,
+        }:
+            stats["empty"] += 1
+    return messages, stats
+
+
+def format_all_snapshots(snapshots: Dict[str, Dict[str, Any]]) -> List[MessageCandidate]:
+    messages, _stats = format_all_snapshots_with_stats(snapshots)
+    return messages

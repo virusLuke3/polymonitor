@@ -61,9 +61,16 @@ class PolyDataApiClient:
             }
         )
 
-    def get_json(self, path: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def get_json(
+        self,
+        path: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
         url = f"{self.base_url}/{str(path).lstrip('/')}"
-        response = self.session.get(url, params=params, timeout=self.timeout_seconds)
+        timeout = self.timeout_seconds if timeout_seconds is None else max(1, int(timeout_seconds))
+        response = self.session.get(url, params=params, timeout=timeout)
         response.raise_for_status()
         payload = response.json()
         return payload if isinstance(payload, dict) else {"items": [], "status": "invalid", "raw": payload}

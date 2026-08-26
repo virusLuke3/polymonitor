@@ -19,19 +19,23 @@ class PublishState:
             except ValueError:
                 configured = 20000
         self.max_entries = max(100, int(configured or 20000))
-        self.payload: Dict[str, Any] = {"sent": {}}
+        self.payload: Dict[str, Any] = {"sent": {}, "catalogPrimes": {}}
         self.load()
 
     def load(self) -> None:
         if not self.path.exists():
-            self.payload = {"sent": {}}
+            self.payload = {"sent": {}, "catalogPrimes": {}}
             return
         try:
             parsed = json.loads(self.path.read_text(encoding="utf-8") or "{}")
         except (OSError, json.JSONDecodeError):
             parsed = {}
         sent = parsed.get("sent") if isinstance(parsed, dict) else {}
-        self.payload = {"sent": sent if isinstance(sent, dict) else {}}
+        catalog_primes = parsed.get("catalogPrimes") if isinstance(parsed, dict) else {}
+        self.payload = {
+            "sent": sent if isinstance(sent, dict) else {},
+            "catalogPrimes": catalog_primes if isinstance(catalog_primes, dict) else {},
+        }
 
     def seen(self, target: str, dedupe_key: str) -> bool:
         key = self._key(target, dedupe_key)
@@ -41,6 +45,16 @@ class PublishState:
         key = self._key(target, dedupe_key)
         self.payload.setdefault("sent", {})[key] = {"sentAt": int(time.time())}
         self._trim()
+
+    def catalog_primed(self, version: str) -> bool:
+        return str(version or "") in self.payload.setdefault("catalogPrimes", {})
+
+    def mark_catalog_primed(self, version: str) -> None:
+        clean_version = str(version or "").strip()
+        if clean_version:
+            self.payload.setdefault("catalogPrimes", {})[clean_version] = {
+                "primedAt": int(time.time())
+            }
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

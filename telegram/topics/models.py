@@ -15,5 +15,17 @@ class MessageCandidate:
     reply_markup: Dict[str, Any] | None = None
 
     def targets(self) -> Tuple[str, ...]:
-        extra = ("monitor",) if self.priority == "high" else ()
+        extra = ("monitor",) if self.priority == "high" and self.topic != "monitor" else ()
         return (self.topic, *extra)
+
+
+@dataclass(frozen=True)
+class FormatOutcome:
+    panel_id: str
+    mode: str
+    candidates: Tuple[MessageCandidate, ...] = ()
+    reason: str = ""
+
+    @property
+    def candidate_count(self) -> int:
+        return len(self.candidates)

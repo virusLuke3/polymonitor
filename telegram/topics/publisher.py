@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Dict, Iterable, List
 
 from .api_client import PolyDataApiClient, resolve_polydata_api_base
+from .catalog import CATALOG_VERSION, SERVER_RUNTIME_PANEL_IDS
 from .client import TelegramClient
 from .config import TelegramSettings, load_settings
-from .formatters import format_all_snapshots
+from .formatters import format_all_snapshots_with_stats
 from .models import MessageCandidate
 from .state import PublishState, state_lock
 
@@ -30,6 +31,8 @@ PANEL_ENDPOINTS = {
     "global-weather-map": ("/runtime/weather/global-map", {"limit": 34}),
     "weather-news": ("/runtime/weather/news", {"limit": 24}),
 }
+ALL_PANELS_BATCH_SIZE = 8
+ALL_PANELS_BATCH_TIMEOUT_SECONDS = 30
 
 
 TARGET_PANELS = {
@@ -40,6 +43,7 @@ TARGET_PANELS = {
     "nba": ("nba-scoreboard", "nba-intel", "espn-matchup-predictor"),
     "worldcup": ("worldcup-intel",),
     "weather": ("global-weather-map", "weather-news"),
+    "all-panels": (*SERVER_RUNTIME_PANEL_IDS, "latest-content", "worldcup-intel"),
 }
 
 
@@ -48,6 +52,8 @@ class PublishResult:
     fetched: int = 0
     candidates: int = 0
     sent: int = 0
+    previewed: int = 0
+    primed: int = 0
     skipped_seen: int = 0
     skipped_unconfigured: int = 0
     failed_sends: int = 0
@@ -55,6 +61,16 @@ class PublishResult:
     dry_run: bool = False
     api_base: str = ""
     api_healthy: bool = False
+    format_specialized: int = 0
+    format_generic: int = 0
+    format_empty: int = 0
+    format_aggregate: int = 0
+    format_market_scoped: int = 0
+    format_browser_only: int = 0
+    format_non_pushable: int = 0
+    format_unsupported: int = 0
+    format_errors: int = 0
+    catalog_primed: bool = False
 
 
 def _write_heartbeat(*, phase: str, result: PublishResult | None = None, error: str = "") -> None:
@@ -78,6 +94,52 @@ def _write_heartbeat(*, phase: str, result: PublishResult | None = None, error: 
 
 
 def fetch_snapshots(api: PolyDataApiClient, *, target: str) -> Dict[str, Dict]:
+    if target == "all-panels":
+        snapshots: Dict[str, Dict] = {}
+        runtime_batches = [
+            SERVER_RUNTIME_PANEL_IDS[index : index + ALL_PANELS_BATCH_SIZE]
+            for index in range(0, len(SERVER_RUNTIME_PANEL_IDS), ALL_PANELS_BATCH_SIZE)
+        ]
+        for batch_index, panel_ids in enumerate(runtime_batches, start=1):
+            try:
+                envelope = api.get_json(
+                    "/v1/runtime/panels",
+                    params={"ids": ",".join(panel_ids), "limit": 12},
+                    timeout_seconds=max(api.timeout_seconds, ALL_PANELS_BATCH_TIMEOUT_SECONDS),
+                )
+                data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+                panels = data.get("panels") if isinstance(data.get("panels"), dict) else {}
+                snapshots.update(
+                    (panel_id, payload)
+                    for panel_id, payload in panels.items()
+                    if panel_id in panel_ids and isinstance(payload, dict)
+                )
+                errors = envelope.get("errors") if isinstance(envelope.get("errors"), list) else []
+                if errors:
+                    print(
+                        "[telegram-publisher] WARN all-panels batch partial "
+                        f"batch={batch_index}/{len(runtime_batches)} requested={len(panel_ids)} "
+                        f"returned={sum(panel_id in snapshots for panel_id in panel_ids)} errors={len(errors)}",
+                        file=sys.stderr,
+                    )
+            except Exception as exc:
+                print(
+                    "[telegram-publisher] WARN all-panels batch failed "
+                    f"batch={batch_index}/{len(runtime_batches)} requested={len(panel_ids)} "
+                    f"error_class={exc.__class__.__name__}",
+                    file=sys.stderr,
+                )
+        for panel_id in ("latest-content", "worldcup-intel"):
+            path, params = PANEL_ENDPOINTS[panel_id]
+            try:
+                snapshots[panel_id] = api.get_json(path, params=params)
+            except Exception as exc:
+                print(
+                    f"[telegram-publisher] WARN fetch failed panel={panel_id} error_class={exc.__class__.__name__}",
+                    file=sys.stderr,
+                )
+        return snapshots
+
     panel_ids = TARGET_PANELS.get(target, TARGET_PANELS["all"])
     snapshots: Dict[str, Dict] = {}
     for panel_id in panel_ids:
@@ -85,7 +147,10 @@ def fetch_snapshots(api: PolyDataApiClient, *, target: str) -> Dict[str, Dict]:
         try:
             snapshots[panel_id] = api.get_json(path, params=params)
         except Exception as exc:
-            print(f"[telegram-publisher] WARN fetch failed panel={panel_id} error={exc}", file=sys.stderr)
+            print(
+                f"[telegram-publisher] WARN fetch failed panel={panel_id} error_class={exc.__class__.__name__}",
+                file=sys.stderr,
+            )
     return snapshots
 
 
@@ -94,6 +159,11 @@ def _candidate_targets(candidate: MessageCandidate, settings: TelegramSettings) 
         config = settings.topic_config(target)
         if config.enabled:
             yield target
+
+
+def _all_panels_fetch_complete(snapshots: Dict[str, Dict]) -> bool:
+    expected = set(TARGET_PANELS["all-panels"])
+    return expected.issubset(snapshots) and len(snapshots) == len(expected)
 
 
 def publish_candidates(
@@ -107,7 +177,7 @@ def publish_candidates(
 ) -> PublishResult:
     result = PublishResult(candidates=len(candidates), dry_run=dry_run)
     for candidate in candidates:
-        targets = list(_candidate_targets(candidate, settings))
+        targets = list(candidate.targets()) if prime or dry_run else list(_candidate_targets(candidate, settings))
         if not targets:
             result.skipped_unconfigured += 1
             continue
@@ -118,9 +188,14 @@ def publish_candidates(
             config = settings.topic_config(target)
             if dry_run:
                 print(json.dumps({"target": target, "dedupeKey": candidate.dedupe_key, "text": candidate.text}, ensure_ascii=False))
+                result.previewed += 1
                 result.sent += 1
                 continue
-            elif not prime:
+            if prime:
+                state.mark(target, candidate.dedupe_key)
+                result.primed += 1
+                continue
+            else:
                 try:
                     telegram.send_message(
                         chat_id=config.chat_id,
@@ -133,13 +208,14 @@ def publish_candidates(
                 except Exception as exc:
                     result.failed_sends += 1
                     print(
-                        f"[telegram-publisher] WARN send failed target={target} dedupe={candidate.dedupe_key} error={exc}",
+                        f"[telegram-publisher] WARN send failed target={target} dedupe={candidate.dedupe_key} error_class={exc.__class__.__name__}",
                         file=sys.stderr,
                     )
                     continue
-            state.mark(target, candidate.dedupe_key)
-            result.sent += 1
-    state.save()
+                state.mark(target, candidate.dedupe_key)
+                result.sent += 1
+    if not dry_run:
+        state.save()
     return result
 
 
@@ -163,14 +239,37 @@ def run_once(
         timeout_seconds=settings.request_timeout_seconds,
     )
     snapshots = fetch_snapshots(api, target=target)
-    candidates = format_all_snapshots(snapshots)
+    candidates, format_stats = format_all_snapshots_with_stats(snapshots)
     with state_lock(settings.state_path):
         state = PublishState(settings.state_path)
-        result = publish_candidates(candidates, settings=settings, state=state, telegram=telegram, dry_run=dry_run, prime=prime)
+        auto_prime = target == "all-panels" and not dry_run and not state.catalog_primed(CATALOG_VERSION)
+        effective_prime = bool(prime or auto_prime)
+        result = publish_candidates(
+            candidates,
+            settings=settings,
+            state=state,
+            telegram=telegram,
+            dry_run=dry_run,
+            prime=effective_prime,
+        )
+        all_panels_complete = _all_panels_fetch_complete(snapshots)
+        if target == "all-panels" and effective_prime and all_panels_complete:
+            state.mark_catalog_primed(CATALOG_VERSION)
+            state.save()
+            result.catalog_primed = True
     result.fetched = len(snapshots)
     result.fetch_failed = len(TARGET_PANELS.get(target, TARGET_PANELS["all"])) - len(snapshots)
     result.api_base = api.base_url
     result.api_healthy = resolution.healthy
+    result.format_specialized = format_stats["specialized"]
+    result.format_generic = format_stats["generic"]
+    result.format_empty = format_stats["empty"]
+    result.format_aggregate = format_stats["aggregate"]
+    result.format_market_scoped = format_stats["market_scoped"]
+    result.format_browser_only = format_stats["browser_only"]
+    result.format_non_pushable = format_stats["non_pushable"]
+    result.format_unsupported = format_stats["unsupported"]
+    result.format_errors = format_stats["format_errors"]
     return result
 
 
@@ -182,7 +281,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--interval", type=int, default=None, help="Watch interval in seconds")
     parser.add_argument("--api-base", default="", help="Override polyData API base URL for this run")
     parser.add_argument("--dry-run", action="store_true", help="Print outgoing messages without calling Telegram")
-    parser.add_argument("--prime", action="store_true", help="Mark current candidates as seen without sending them")
+    parser.add_argument(
+        "--prime",
+        action="store_true",
+        help="Mark current candidates as seen without sending them; all-panels also primes automatically on its first live run",
+    )
     return parser
 
 
