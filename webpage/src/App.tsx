@@ -1986,7 +1986,7 @@ function WorldMonitorApp() {
         key: 'global-transport-shipping',
         label: 'AVIATION',
         payloadStatus: aviationViewport.error
-          ? 'error'
+          ? (aviationViewport.payload || transportPayload ? 'degraded' : 'error')
           : aviationViewport.payload?.status === 'unavailable'
             ? 'degraded'
             : transportPayload?.status || aviationViewport.payload?.status || runtimeStatus.phase,
@@ -1996,7 +1996,11 @@ function WorldMonitorApp() {
         result: airReferenceAdapterResult,
         loaded: Boolean(transportPayload || aviationViewport.payload || aviationViewport.error),
       });
-      if (aviationViewport.error) status.message = aviationViewport.error;
+      if (aviationViewport.error) {
+        status.message = aviationViewport.payload || transportPayload
+          ? `Viewport refresh failed; retaining the last successful aviation snapshot: ${aviationViewport.error}`
+          : aviationViewport.error;
+      }
       else if (aviationViewport.payload?.limitations?.length) {
         status.message = aviationViewport.payload.limitations.join(' · ');
       }

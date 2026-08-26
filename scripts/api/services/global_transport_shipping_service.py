@@ -9,6 +9,7 @@ import os
 import threading
 from collections import Counter, defaultdict
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1269,21 +1270,35 @@ def _adsb_viewport_snapshot(
     errors: List[Dict[str, str]] = []
     sectors = _adsb_viewport_samples(bbox)
     seen: set[str] = set()
-    for index, sector in enumerate(sectors):
+
+    def fetch_sector(index: int, sector: Dict[str, float]) -> tuple[int, Dict[str, Any], List[Any]]:
         hub = {"id": f"viewport-{index + 1}", "iata": None, "icao": None}
         url = (
             f"{_adsb_base_url()}/point/{sector['lat']:.5f}/"
             f"{sector['lon']:.5f}/{int(sector['radiusNm'])}"
         )
-        try:
-            payload = _http_json_get(
-                ctx,
-                url,
-                timeout=_env_int("POLYDATA_ADSB_VIEWPORT_TIMEOUT_SECONDS", 6, minimum=2, maximum=15),
-                headers={"User-Agent": "polydata-global-transport/1.0"},
-            )
-            rows = payload.get("ac") if isinstance(payload, dict) else []
-            for row in rows if isinstance(rows, list) else []:
+        payload = _http_json_get(
+            ctx,
+            url,
+            timeout=_env_int("POLYDATA_ADSB_VIEWPORT_TIMEOUT_SECONDS", 6, minimum=2, maximum=15),
+            headers={"User-Agent": "polydata-global-transport/1.0"},
+        )
+        rows = payload.get("ac") if isinstance(payload, dict) else []
+        return index, hub, rows if isinstance(rows, list) else []
+
+    with ThreadPoolExecutor(max_workers=min(4, len(sectors)), thread_name_prefix="adsb-viewport") as executor:
+        futures = {
+            executor.submit(fetch_sector, index, sector): index
+            for index, sector in enumerate(sectors)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                _, hub, rows = future.result()
+            except Exception as exc:
+                errors.append({"sector": str(index + 1), "error": exc.__class__.__name__})
+                continue
+            for row in rows:
                 item = _normalize_adsb_aircraft(row, hub=hub, sampled_at=sampled_at)
                 if item is None:
                     continue
@@ -1294,9 +1309,8 @@ def _adsb_viewport_snapshot(
                     continue
                 seen.add(identity)
                 aircraft.append(item)
-        except Exception as exc:
-            errors.append({"sector": str(index + 1), "error": exc.__class__.__name__})
 
+    errors.sort(key=lambda item: item["sector"])
     aircraft.sort(key=lambda item: (
         0 if item.get("status") == "watch" else 1,
         -float(item.get("riskScore") or 0),

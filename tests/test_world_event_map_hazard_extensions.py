@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import threading
 import zipfile
 from datetime import datetime, timezone
 
@@ -347,3 +348,36 @@ def test_aviation_viewport_never_fabricates_when_live_providers_fail(monkeypatch
     assert result["source"] == "ADSB.lol"
     assert result["aircraft"] == []
     assert result["aircraftCount"] == 0
+
+
+def test_large_aviation_viewport_samples_adsb_sectors_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(transport, "_opensky_access_token", lambda _ctx: (None, {"status": "auth-error-cache"}))
+    barrier = threading.Barrier(4, timeout=2)
+
+    def fake_get(_ctx, url, **_kwargs):
+        barrier.wait()
+        parts = url.rstrip("/").split("/")
+        lat, lon = float(parts[-3]), float(parts[-2])
+        return {"ac": [{"hex": f"{lat}:{lon}", "flight": "LIVE", "lat": lat, "lon": lon}]}
+
+    monkeypatch.setattr(transport, "_http_json_get", fake_get)
+    context = transport.GlobalTransportShippingDependencies(
+        application=None,
+        utc_now_iso=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        http_text_get=None,
+        http_json_get=None,
+        http_form_post=None,
+        get_cached_json=None,
+        set_cached_json=None,
+        snapshot_store=None,
+        search_markets=None,
+    )
+    result = transport.get_aviation_viewport_snapshot(
+        context,
+        bbox=(-160, -60, 160, 60),
+        zoom=2,
+    )
+
+    assert result["status"] == "ok"
+    assert result["aircraftCount"] == 4
+    assert result["coverage"] == {"mode": "sampled-sectors", "sectorCount": 4, "complete": False}

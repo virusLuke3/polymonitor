@@ -1,7 +1,6 @@
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { chromium } from '@playwright/test';
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -22,6 +21,7 @@ const requireDynamic = args.includes('--require-dynamic');
 const requireEvents = args.includes('--require-events');
 const requireHazards = args.includes('--require-hazards');
 const openEvents = args.includes('--open-events');
+const traceInitialLoad = args.includes('--trace-initial-load');
 const viewportWidth = Math.max(320, Number(option('--width', '1440')));
 const viewportHeight = Math.max(480, Number(option('--height', '900')));
 const budgets = {
@@ -63,92 +63,30 @@ const useAngle = option('--use-angle', '');
 const progress = (message) => {
   if (verbose) process.stderr.write(`[map-perf] ${message}\n`);
 };
-const port = 19000 + (process.pid % 1000);
-const profile = mkdtempSync(resolve(tmpdir(), 'polymonitor-map-perf-'));
-const chrome = spawn('/usr/bin/google-chrome', [
-  '--headless=new',
-  '--disable-gpu-sandbox',
-  '--no-sandbox',
-  '--disable-extensions',
-  '--disable-background-networking',
-  '--disable-sync',
-  ...(proxyServer ? [`--proxy-server=${proxyServer}`] : ['--no-proxy-server']),
-  ...(useAngle ? [`--use-angle=${useAngle}`, '--ignore-gpu-blocklist'] : []),
-  ...(useAngle === 'vulkan' ? ['--enable-features=Vulkan'] : []),
-  `--remote-debugging-port=${port}`,
-  `--user-data-dir=${profile}`,
-  `--window-size=${viewportWidth},${viewportHeight}`,
-  'about:blank',
-], { stdio: 'ignore' });
-
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
-async function waitForEndpoint(path, attempts = 80) {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}${path}`, { method: path.startsWith('/json/new') ? 'PUT' : 'GET' });
-      if (response.ok) return response.json();
-    } catch {}
-    await sleep(100);
-  }
-  throw new Error('Chrome DevTools endpoint did not become ready.');
-}
 
 class CdpClient {
-  constructor(url) {
-    this.socket = new WebSocket(url);
-    this.nextId = 1;
-    this.pending = new Map();
-    this.listeners = new Map();
-    // Install the dispatcher before awaiting `open`. On a loopback DevTools
-    // socket the connection can already be OPEN when ready() runs; the old
-    // early return then left every CDP command waiting forever.
-    this.socket.addEventListener('message', (event) => {
-      const message = JSON.parse(String(event.data));
-      if (message.id) {
-        const pending = this.pending.get(message.id);
-        this.pending.delete(message.id);
-        clearTimeout(pending?.timeout);
-        if (message.error) pending?.reject(new Error(message.error.message));
-        else pending?.resolve(message.result);
-        return;
-      }
-      for (const listener of this.listeners.get(message.method) || []) listener(message.params);
-    });
-  }
-  async ready() {
-    if (this.socket.readyState === WebSocket.OPEN) return;
-    await new Promise((resolveReady, reject) => {
-      this.socket.addEventListener('open', resolveReady, { once: true });
-      this.socket.addEventListener('error', reject, { once: true });
-    });
+  constructor(session) {
+    this.session = session;
   }
   send(method, params = {}, timeoutMs = 15000) {
-    const id = this.nextId++;
-    return new Promise((resolveSend, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`CDP ${method} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve: resolveSend, reject, timeout });
-      this.socket.send(JSON.stringify({ id, method, params }));
-    });
+    let timeout;
+    return Promise.race([
+      this.session.send(method, params),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`CDP ${method} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]).finally(() => clearTimeout(timeout));
   }
   on(method, listener) {
-    const listeners = this.listeners.get(method) || [];
-    listeners.push(listener);
-    this.listeners.set(method, listeners);
+    this.session.on(method, listener);
   }
   once(method) {
     return new Promise((resolveOnce) => {
-      const listener = (params) => {
-        const listeners = this.listeners.get(method) || [];
-        this.listeners.set(method, listeners.filter((candidate) => candidate !== listener));
-        resolveOnce(params);
-      };
-      this.on(method, listener);
+      this.session.once(method, resolveOnce);
     });
   }
-  close() { this.socket.close(); }
+  close() { return this.session.detach().catch(() => undefined); }
 }
 
 async function waitForRenderer(client, timeoutMs = 15000) {
@@ -158,11 +96,11 @@ async function waitForRenderer(client, timeoutMs = 15000) {
       const result = await client.send('Runtime.evaluate', {
         expression: 'Boolean(document.querySelector("[data-map-renderer-ready]"))',
         returnByValue: true,
-      });
+      }, 5000);
       if (result.result?.value) return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!/Execution context was destroyed|Inspected target navigated/.test(message)) throw error;
+      if (!/Execution context was destroyed|Inspected target navigated|CDP Runtime\.evaluate timed out/.test(message)) throw error;
     }
     await sleep(100);
   }
@@ -172,17 +110,22 @@ async function waitForRenderer(client, timeoutMs = 15000) {
 async function waitForPerformanceSamples(client, dynamicRequired, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const result = await client.send('Runtime.evaluate', {
-      expression: `(() => {
-        const snapshot = window.__POLYMONITOR_MAP_PERF__?.snapshot();
-        if (!snapshot) return false;
-        return snapshot.phases['js-build'].count > 0
-          && snapshot.phases['deck-commit'].count > 0
-          && (${dynamicRequired ? 'true' : 'false'} ? snapshot.phases['dynamic-commit'].count > 0 : true);
-      })()`,
-      returnByValue: true,
-    });
-    if (result.result?.value) return true;
+    try {
+      const result = await client.send('Runtime.evaluate', {
+        expression: `(() => {
+          const snapshot = window.__POLYMONITOR_MAP_PERF__?.snapshot();
+          if (!snapshot) return false;
+          return snapshot.phases['js-build'].count > 0
+            && snapshot.phases['deck-commit'].count > 0
+            && (${dynamicRequired ? 'true' : 'false'} ? snapshot.phases['dynamic-commit'].count > 0 : true);
+        })()`,
+        returnByValue: true,
+      }, 5000);
+      if (result.result?.value) return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/Execution context was destroyed|Inspected target navigated|CDP Runtime\.evaluate timed out/.test(message)) throw error;
+    }
     await sleep(100);
   }
   return false;
@@ -192,17 +135,24 @@ async function waitForMappedEvents(client, hazardsRequired, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
   let lastState = { count: 0, hazardsReady: false, legend: '' };
   while (Date.now() < deadline) {
-    const result = await client.send('Runtime.evaluate', {
-      expression: `(() => {
-        const value = document.querySelector('.wm-world-event-list-toggle strong')?.textContent || '0';
-        const count = Number(value.replace(/[^0-9]/g, '')) || 0;
-        const legend = document.querySelector('.wm-weather-deck-legend')?.textContent || '';
-        const hazardsReady = /STORMS|QUAKES|VOLCANOES|WILDFIRES|EXTREME|ANOMAL/i.test(legend);
-        return { count, hazardsReady, legend, ready: count > 0 && (${hazardsRequired ? 'true' : 'false'} ? hazardsReady : true) };
-      })()`,
-      returnByValue: true,
-    });
-    if (result.result?.value) lastState = result.result.value;
+    try {
+      const result = await client.send('Runtime.evaluate', {
+        expression: `(() => {
+          const value = document.querySelector('.wm-world-event-list-toggle strong')?.textContent || '0';
+          const count = Number(value.replace(/[^0-9]/g, '')) || 0;
+          const legend = document.querySelector('.wm-weather-deck-legend')?.textContent || '';
+          const hazardPublished = (window.__POLYMONITOR_MAP_DATA_PERF__?.snapshot() || [])
+            .some((sample) => sample.phase === 'publish' && Number(sample.eventCount) > 0);
+          const hazardsReady = hazardPublished || /STORMS|QUAKES|VOLCANOES|WILDFIRES|EXTREME|ANOMAL/i.test(legend);
+          return { count, hazardsReady, legend, ready: count > 0 && (${hazardsRequired ? 'true' : 'false'} ? hazardsReady : true) };
+        })()`,
+        returnByValue: true,
+      }, 5000);
+      if (result.result?.value) lastState = result.result.value;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/Execution context was destroyed|Inspected target navigated|CDP Runtime\.evaluate timed out/.test(message)) throw error;
+    }
     if (lastState.ready) return lastState;
     await sleep(150);
   }
@@ -210,15 +160,28 @@ async function waitForMappedEvents(client, hazardsRequired, timeoutMs = 60000) {
 }
 
 let client;
+let browser;
 try {
-  progress('waiting for Chrome DevTools');
-  await waitForEndpoint('/json/version');
-  progress('creating page target');
-  const page = await waitForEndpoint('/json/new?about%3Ablank');
-  if (!page?.webSocketDebuggerUrl) throw new Error('Chrome page target was unavailable.');
-  client = new CdpClient(page.webSocketDebuggerUrl);
-  await client.ready();
-  progress('connected to page target');
+  progress('launching Chrome through Playwright');
+  browser = await chromium.launch({
+    channel: 'chrome',
+    headless: true,
+    proxy: proxyServer ? { server: proxyServer } : undefined,
+    args: [
+      '--disable-gpu-sandbox',
+      '--no-sandbox',
+      ...(useAngle ? [`--use-angle=${useAngle}`, '--ignore-gpu-blocklist'] : []),
+      ...(useAngle === 'vulkan' ? ['--enable-features=Vulkan'] : []),
+    ],
+  });
+  const context = await browser.newContext({
+    viewport: { width: viewportWidth, height: viewportHeight },
+    deviceScaleFactor: 1,
+    isMobile: viewportWidth <= 860,
+  });
+  const page = await context.newPage();
+  client = new CdpClient(await context.newCDPSession(page));
+  progress('connected to Chrome CDP session');
   await Promise.all([
     client.send('Page.enable'),
     client.send('Runtime.enable'),
@@ -287,23 +250,20 @@ try {
   });
   const traceEvents = [];
   client.on('Tracing.dataCollected', ({ value }) => traceEvents.push(...value));
-  await client.send('Tracing.start', {
+  const startTrace = () => client.send('Tracing.start', {
     categories: 'devtools.timeline,blink.user_timing,v8,disabled-by-default-devtools.timeline',
     options: 'sampling-frequency=10000',
     transferMode: 'ReportEvents',
   });
+  if (traceInitialLoad) await startTrace();
   progress(`navigating to ${target.href}`);
   try {
-    await client.send('Page.navigate', { url: target.href });
+    await page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
   } catch (error) {
-    // Some headless GPU stacks commit the navigation but do not acknowledge
-    // Page.navigate until the first renderer frame. Continue with the bounded
-    // readiness probe; a genuinely failed navigation is reported with DOM and
-    // network diagnostics below.
-    if (!(error instanceof Error) || !error.message.startsWith('CDP Page.navigate timed out')) throw error;
-    progress('Page.navigate acknowledgement timed out; probing the committed target');
+    if (!(error instanceof Error) || !error.message.includes('Timeout')) throw error;
+    progress('DOM navigation timed out; probing the committed target');
   }
-  const rendererReady = await waitForRenderer(client, 30000);
+  const rendererReady = await waitForRenderer(client, 60000);
   if (!rendererReady) {
     const diagnostics = await client.send('Runtime.evaluate', {
       expression: `({
@@ -322,6 +282,7 @@ try {
     })}`);
   }
   progress('renderer ready');
+  if (!traceInitialLoad) await startTrace();
   const samplesReady = await waitForPerformanceSamples(client, requireDynamic);
   if (!samplesReady) {
     const diagnostics = await client.send('Runtime.evaluate', {
@@ -484,6 +445,7 @@ try {
       deck: lifecycle.aviationCanvases,
     },
     warmupMs,
+    traceInitialLoad,
     budgets,
     chromeMetrics: Object.fromEntries((metrics.metrics || []).map((metric) => [metric.name, metric.value])),
   };
@@ -513,9 +475,6 @@ try {
     if (failures.length) throw new Error(`Map performance gate failed: ${failures.join('; ')}`);
   }
 } finally {
-  client?.close();
-  const chromeExited = new Promise((resolveExit) => chrome.once('exit', resolveExit));
-  chrome.kill('SIGTERM');
-  await Promise.race([chromeExited, sleep(2000)]);
-  rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await client?.close();
+  await browser?.close();
 }
