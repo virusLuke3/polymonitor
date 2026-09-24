@@ -16,7 +16,7 @@ const RESOURCE_NAV_LINKS: Array<{ key: MessageKey; href: string; external?: bool
   { key: 'nav.blog', href: '/blog/' },
   { key: 'nav.docs', href: '/docs/documentation/' },
   { key: 'nav.paper', href: 'https://arxiv.org/pdf/2604.20421', external: true },
-  { key: 'nav.github', href: 'https://github.com/virusLuke3/polymonitor', external: true },
+  { key: 'nav.github', href: 'https://github.com/3ky03/polymonitor', external: true },
   { key: 'nav.developers', href: '/developers' },
   { key: 'nav.quant', href: '/quant' },
 ];
