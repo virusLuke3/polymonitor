@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.clients import market_data_client
 
@@ -82,7 +75,3 @@ class MarketDataClientTestCase(unittest.TestCase):
 
         self.assertEqual(4353.9, snapshot["price"])
         self.assertEqual(-2.71, snapshot["changePercent"])
-
-
-if __name__ == "__main__":
-    unittest.main()

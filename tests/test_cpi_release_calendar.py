@@ -1,19 +1,14 @@
 from __future__ import annotations
 
+from api.routes.runtime_panels import RuntimePanelRouteDependencies
+
 import json
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
 from unittest.mock import patch
 
 from flask import Flask
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.services import cpi_release_calendar_service
@@ -341,7 +336,7 @@ def test_runtime_route_clamps_limit_to_max():
         "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
         "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
     }
-    app.register_blueprint(create_runtime_panels_blueprint(helpers))
+    app.register_blueprint(create_runtime_panels_blueprint(RuntimePanelRouteDependencies.from_context(helpers)))
 
     response = app.test_client().get("/runtime/macro/cpi-release-calendar?limit=99")
 

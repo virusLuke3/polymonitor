@@ -408,6 +408,8 @@ def _incident_observations(payload: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser()
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--output", type=Path)

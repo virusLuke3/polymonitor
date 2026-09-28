@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import grid_esports_service
 from runtime import grid_esports_watcher
@@ -331,7 +325,3 @@ class GridEsportsWatcherTestCase(unittest.TestCase):
         meta = json.loads(fake_redis.get("polydata:seed-meta:esports:esports-intel") or "{}")
         self.assertEqual("preserved", meta["status"])
         self.assertIn("Preserved previous GRID esports snapshot", meta["errorSummary"])
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -232,6 +232,8 @@ def _result_summary(result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser(description="Seed Market TV Wire snapshots into Redis and SQLite")
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--interval", type=int, default=int(os.environ.get("POLYDATA_MARKET_TV_WIRE_WATCH_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS)))

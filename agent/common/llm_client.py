@@ -204,6 +204,8 @@ class OpenAICompatibleClient:
             "messages": messages,
             token_key: max_tokens,
         }
+        if "qwen3.8" in self.model.lower():
+            body["chat_template_kwargs"] = {"enable_thinking": False}
         if "gpt-5.3" not in self.model.lower():
             body["temperature"] = 0.2
         headers = {
@@ -212,7 +214,7 @@ class OpenAICompatibleClient:
         }
         with without_proxy_env():
             response = requests.post(
-                self.api_base,
+                f"{_chat_completions_root(self.api_base)}/chat/completions",
                 headers=headers,
                 json=body,
                 timeout=self.timeout,
@@ -325,6 +327,12 @@ class OpenAICompatibleClient:
                 temperature=None,
                 max_tokens=None,
                 extra_body={"max_completion_tokens": max_tokens},
+            )
+        if "qwen3.8" in self.model.lower():
+            return ModelSettings(
+                temperature=0.2,
+                max_tokens=max_tokens,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
             )
         return ModelSettings(temperature=0.2, max_tokens=max_tokens)
 

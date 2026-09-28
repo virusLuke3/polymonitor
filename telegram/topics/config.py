@@ -9,14 +9,7 @@ from typing import Iterable, Optional
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _load_dotenv_files() -> None:
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    for candidate in (PROJECT_ROOT / ".env", PROJECT_ROOT / ".env.local"):
-        if candidate.exists():
-            load_dotenv(candidate, override=False)
+from scripts.runtime.environment import load_environment
 
 
 def _get_str(name: str, default: str = "") -> str:
@@ -128,7 +121,7 @@ def _topic_from_candidates(name: str, candidates: Iterable[tuple[str, str]]) -> 
 
 
 def load_settings() -> TelegramSettings:
-    _load_dotenv_files()
+    load_environment()
     api_port = _get_int("POLYDATA_API_PORT", 18500)
     local_api_base = f"http://127.0.0.1:{api_port}"
     local_default_api_base = "http://127.0.0.1:18500"

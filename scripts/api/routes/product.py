@@ -59,8 +59,7 @@ def _metadata(dependencies: ProductRouteDependencies) -> dict[str, Any]:
     return value
 
 
-def create_product_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = ProductRouteDependencies.from_context(context)
+def create_product_blueprint(dependencies: ProductRouteDependencies) -> Blueprint:
     bp = Blueprint("product_routes", __name__)
 
     @bp.get("/product/watchlist")

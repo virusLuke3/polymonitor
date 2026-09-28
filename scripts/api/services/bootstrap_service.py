@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-import threading
 import time
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, cast
 
-from api.context import resolve_service_callable, resolve_service_value
+from api.context import RuntimeResources, runtime_resources, resolve_service_callable
 from api.runtime_panels import get_default_panel_ids
+from market.market_serving_identity import binary_serving_identity_sql
 
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
-BOOTSTRAP_CACHE_KEY = "workspace-default-v12"
-DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
+BOOTSTRAP_CACHE_KEY = "workspace-default-v13"
+DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = f"""
+    {binary_serving_identity_sql("m")}
+    AND
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%onchain-registry%%'
@@ -38,17 +40,13 @@ DEFAULT_ACTIVE_MARKET_PRICE_SQL = """
 """
 DEFAULT_ACTIVE_MARKET_RECENT_TRADE_SQL = "COALESCE(stats_24h.last_trade_at, mlp.latest_trade_at) >= ?"
 SNAPSHOT_PREWARM_INTERVAL_SECONDS = 15
-_PREWARM_LAST_RUN_LOCK = threading.Lock()
-_PREWARM_LAST_RUN: Dict[str, float] = {}
-_DASHBOARD_REFRESH_LOCK = threading.Lock()
-_DASHBOARD_REFRESHING = False
 
 
 def _service_callable(
     context: Mapping[str, Any],
     name: str,
 ) -> Callable[..., Any]:
-    return cast(Callable[..., Any], resolve_service_callable(context, name))
+    return resolve_service_callable(context, name)
 
 
 @dataclass(frozen=True)
@@ -69,6 +67,8 @@ class DashboardBuildDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> DashboardBuildDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             fetch_market_status=_service_callable(
                 context,
@@ -94,22 +94,22 @@ class DashboardBuildDependencies:
             iso_days_before=_service_callable(context, "iso_days_before"),
             utc_now_iso=_service_callable(context, "utc_now_iso"),
             recent_trade_window=int(
-                resolve_service_value(context, "RECENT_TRADE_WINDOW", 0)
+                context.get("RECENT_TRADE_WINDOW", 0)
             ),
             cache_ttl_seconds=int(
-                resolve_service_value(context, "DASHBOARD_CACHE_TTL_SECONDS", 0)
+                context.get("DASHBOARD_CACHE_TTL_SECONDS", 0)
             ),
         )
 
 
 @dataclass(frozen=True)
 class DashboardCacheDependencies:
-    source: Mapping[str, Any] = field(repr=False)
+    resources: RuntimeResources
+    builder: DashboardBuildDependencies
     application: Any
     snapshot_store: Any
     cache: dict[str, Any]
     cache_lock: Any
-    threading_module: Any
     get_cached_json: Callable[..., Any]
     set_cached_json: Callable[..., Any]
     utc_now_iso: Callable[..., Any]
@@ -121,24 +121,26 @@ class DashboardCacheDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> DashboardCacheDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            source=context,
-            application=resolve_service_value(context, "app"),
-            snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
+            resources=runtime_resources(context),
+            builder=DashboardBuildDependencies.from_context(context),
+            application=context.get("app"),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             cache=cast(
                 dict[str, Any],
-                resolve_service_value(context, "_dashboard_cache", {}),
+                context.get("_dashboard_cache", {}),
             ),
-            cache_lock=resolve_service_value(context, "_dashboard_cache_lock"),
-            threading_module=resolve_service_value(context, "threading"),
+            cache_lock=context.get("_dashboard_cache_lock"),
             get_cached_json=_service_callable(context, "get_cached_json"),
             set_cached_json=_service_callable(context, "set_cached_json"),
             utc_now_iso=_service_callable(context, "utc_now_iso"),
             recent_trade_window=int(
-                resolve_service_value(context, "RECENT_TRADE_WINDOW", 0)
+                context.get("RECENT_TRADE_WINDOW", 0)
             ),
             cache_ttl_seconds=int(
-                resolve_service_value(context, "DASHBOARD_CACHE_TTL_SECONDS", 0)
+                context.get("DASHBOARD_CACHE_TTL_SECONDS", 0)
             ),
         )
 
@@ -174,14 +176,16 @@ class BootstrapCoreDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> BootstrapCoreDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            application=resolve_service_value(context, "app"),
+            application=context.get("app"),
             commodity_symbols=cast(
                 Sequence[Any],
-                resolve_service_value(context, "COMMODITY_SYMBOLS", ()),
+                context.get("COMMODITY_SYMBOLS", ()),
             ),
             finance_runtime_ttl_seconds=int(
-                resolve_service_value(context, "FINANCE_RUNTIME_TTL_SECONDS", 0)
+                context.get("FINANCE_RUNTIME_TTL_SECONDS", 0)
             ),
             query_all=_service_callable(context, "query_all"),
             query_one=_service_callable(context, "query_one"),
@@ -244,12 +248,12 @@ class BootstrapCoreDependencies:
 
 @dataclass(frozen=True)
 class BootstrapCacheDependencies:
-    source: Mapping[str, Any] = field(repr=False)
+    resources: RuntimeResources
+    builder: BootstrapCoreDependencies
     application: Any
     snapshot_store: Any
     cache: dict[str, Any]
     cache_lock: Any
-    threading_module: Any
     get_cached_json: Callable[..., Any]
     set_cached_json: Callable[..., Any]
     cache_ttl_seconds: int
@@ -260,32 +264,34 @@ class BootstrapCacheDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> BootstrapCacheDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            source=context,
-            application=resolve_service_value(context, "app"),
-            snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
+            resources=runtime_resources(context),
+            builder=BootstrapCoreDependencies.from_context(context),
+            application=context.get("app"),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             cache=cast(
                 dict[str, Any],
-                resolve_service_value(context, "_bootstrap_cache", {}),
+                context.get("_bootstrap_cache", {}),
             ),
-            cache_lock=resolve_service_value(context, "_bootstrap_cache_lock"),
-            threading_module=resolve_service_value(context, "threading"),
+            cache_lock=context.get("_bootstrap_cache_lock"),
             get_cached_json=_service_callable(context, "get_cached_json"),
             set_cached_json=_service_callable(context, "set_cached_json"),
             cache_ttl_seconds=int(
-                resolve_service_value(context, "BOOTSTRAP_CACHE_TTL_SECONDS", 0)
+                context.get("BOOTSTRAP_CACHE_TTL_SECONDS", 0)
             ),
             component_ttl_seconds=int(
-                resolve_service_value(context, "BOOTSTRAP_COMPONENT_TTL_SECONDS", 0)
+                context.get("BOOTSTRAP_COMPONENT_TTL_SECONDS", 0)
             ),
         )
 
 
 @dataclass(frozen=True)
 class BootstrapPrewarmDependencies:
+    resources: RuntimeResources
     bootstrap: BootstrapCoreDependencies
     application: Any
-    threading_module: Any
     commodity_symbols: Sequence[Any]
     finance_runtime_ttl_seconds: int
     signal_runtime_ttl_seconds: int
@@ -313,34 +319,24 @@ class BootstrapPrewarmDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> BootstrapPrewarmDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
+            resources=runtime_resources(context),
             bootstrap=BootstrapCoreDependencies.from_context(context),
-            application=resolve_service_value(context, "app"),
-            threading_module=resolve_service_value(context, "threading"),
+            application=context.get("app"),
             commodity_symbols=cast(
                 Sequence[Any],
-                resolve_service_value(context, "COMMODITY_SYMBOLS", ()),
+                context.get("COMMODITY_SYMBOLS", ()),
             ),
             finance_runtime_ttl_seconds=int(
-                resolve_service_value(
-                    context,
-                    "FINANCE_RUNTIME_TTL_SECONDS",
-                    0,
-                )
+                context.get("FINANCE_RUNTIME_TTL_SECONDS", 0)
             ),
             signal_runtime_ttl_seconds=int(
-                resolve_service_value(
-                    context,
-                    "SIGNAL_RUNTIME_TTL_SECONDS",
-                    0,
-                )
+                context.get("SIGNAL_RUNTIME_TTL_SECONDS", 0)
             ),
             snapshot_prewarm_enabled=bool(
-                resolve_service_value(
-                    context,
-                    "SNAPSHOT_PREWARM_ENABLED",
-                    False,
-                )
+                context.get("SNAPSHOT_PREWARM_ENABLED", False)
             ),
             get_market_groups_payload=_service_callable(
                 context,
@@ -518,21 +514,21 @@ def _schedule_dashboard_refresh(
     dependencies: DashboardCacheDependencies,
     reason: str,
 ) -> None:
-    global _DASHBOARD_REFRESHING
-    with _DASHBOARD_REFRESH_LOCK:
-        if _DASHBOARD_REFRESHING:
+
+    with dependencies.resources.dashboard_refresh_lock:
+        if dependencies.resources.dashboard_refreshing:
             return
-        _DASHBOARD_REFRESHING = True
+        dependencies.resources.dashboard_refreshing = True
 
     def refresh() -> None:
-        global _DASHBOARD_REFRESHING
+
         started_at = time.perf_counter()
         try:
             dependencies.application.logger.info(
                 "dashboard-cache refresh-start reason=%s",
                 reason,
             )
-            payload = build_dashboard_payload(dependencies.source)
+            payload = build_dashboard_payload(dependencies.builder)
             dependencies.snapshot_store.set(
                 "snapshot:dashboard",
                 "dashboard",
@@ -560,14 +556,12 @@ def _schedule_dashboard_refresh(
                 reason,
             )
         finally:
-            with _DASHBOARD_REFRESH_LOCK:
-                _DASHBOARD_REFRESHING = False
+            with dependencies.resources.dashboard_refresh_lock:
+                dependencies.resources.dashboard_refreshing = False
 
-    dependencies.threading_module.Thread(
-        target=refresh,
-        name="dashboard-refresh",
-        daemon=True,
-    ).start()
+    if not dependencies.resources.start_thread(refresh, name="dashboard-refresh"):
+        with dependencies.resources.dashboard_refresh_lock:
+            dependencies.resources.dashboard_refreshing = False
 
 
 def get_dashboard_payload_cached(ctx: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1026,7 +1020,7 @@ def _refresh_bootstrap_payload(
         reason,
     )
     try:
-        payload = build_bootstrap_payload(dependencies.source)
+        payload = build_bootstrap_payload(dependencies.builder)
     except Exception:
         with dependencies.cache_lock:
             dependencies.cache["refresh_in_progress"] = False
@@ -1048,21 +1042,20 @@ def _schedule_bootstrap_refresh(
     dependencies: BootstrapCacheDependencies,
     reason: str,
 ) -> None:
-    thread = dependencies.threading_module.Thread(
-        target=lambda: _refresh_bootstrap_payload(dependencies, reason),
-        name="polydata-bootstrap-refresh",
-        daemon=True,
-    )
-    thread.start()
+    if not dependencies.resources.start_thread(
+        lambda: _refresh_bootstrap_payload(dependencies, reason), name="polydata-bootstrap-refresh"
+    ):
+        with dependencies.cache_lock:
+            dependencies.cache["refresh_in_progress"] = False
 
 
-def _claim_prewarm_slot(task_name: str, interval_seconds: int) -> bool:
+def _claim_prewarm_slot(resources: RuntimeResources, task_name: str, interval_seconds: int) -> bool:
     now = time.monotonic()
-    with _PREWARM_LAST_RUN_LOCK:
-        last_run = _PREWARM_LAST_RUN.get(task_name, 0.0)
+    with resources.prewarm_lock:
+        last_run = resources.prewarm_last_run.get(task_name, 0.0)
         if now - last_run < interval_seconds:
             return False
-        _PREWARM_LAST_RUN[task_name] = now
+        resources.prewarm_last_run[task_name] = now
     return True
 
 
@@ -1074,7 +1067,7 @@ def _build_bootstrap_payload(
     dependencies: BootstrapCoreDependencies,
 ) -> Dict[str, Any]:
     preview_payload = dependencies.get_bootstrap_component_cached(
-        "active-markets-preview-v11",
+        "active-markets-preview-v12",
         lambda: _build_bootstrap_active_markets_payload(
             dependencies,
             page_size=20,
@@ -1349,7 +1342,7 @@ def _prewarm_snapshot_payloads(
             "bootstrap:active-markets-preview",
             15,
             lambda: dependencies.get_bootstrap_component_cached(
-                "active-markets-preview-v11",
+                "active-markets-preview-v12",
                 lambda: _build_bootstrap_active_markets_payload(
                     dependencies.bootstrap,
                     page_size=20,
@@ -1497,7 +1490,7 @@ def _prewarm_snapshot_payloads(
         ),
     ]
     for name, interval_seconds, builder in tasks:
-        if not _claim_prewarm_slot(name, interval_seconds):
+        if not _claim_prewarm_slot(dependencies.resources, name, interval_seconds):
             continue
         started_at = time.perf_counter()
         try:
@@ -1607,13 +1600,8 @@ def start_snapshot_prewarm_thread(ctx: Mapping[str, Any]) -> None:
         return
 
     def _runner() -> None:
-        while True:
+        while not dependencies.resources.stopped.is_set():
             _prewarm_snapshot_payloads(dependencies)
-            time.sleep(SNAPSHOT_PREWARM_INTERVAL_SECONDS)
+            dependencies.resources.stopped.wait(SNAPSHOT_PREWARM_INTERVAL_SECONDS)
 
-    thread = dependencies.threading_module.Thread(
-        target=_runner,
-        name="polydata-snapshot-prewarm",
-        daemon=True,
-    )
-    thread.start()
+    dependencies.resources.start_thread(_runner, name="polydata-snapshot-prewarm")

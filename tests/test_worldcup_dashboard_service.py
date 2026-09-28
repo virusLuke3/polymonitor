@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from types import SimpleNamespace
+from datetime import datetime, timezone
+import pytest
+from api.services.worldcup import schedule
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import worldcup_dashboard_service
 from api.services.worldcup.odds import bookmaker
@@ -30,6 +26,15 @@ class _FakeOddsApiResponse:
 
 class _FakeOddsApiError(Exception):
     response = _FakeOddsApiResponse()
+
+
+@pytest.fixture
+def before_tournament(monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 6, 10, tzinfo=timezone.utc).astimezone(tz)
+    monkeypatch.setattr(schedule, "datetime", Clock)
 
 
 def test_worldcup_bookmaker_quota_error_is_explicit():
@@ -120,7 +125,7 @@ def test_worldcup_bookmaker_links_configured_main_lines():
     assert rows[2]["outcomes"][0]["name"] == "Over"
 
 
-def test_worldcup_dashboard_links_strict_polymarket_market():
+def test_worldcup_dashboard_links_strict_polymarket_market(before_tournament):
     source_schedule = {
         "matches": [
             {
@@ -186,7 +191,7 @@ def test_worldcup_dashboard_links_strict_polymarket_market():
     assert "rihanna" not in odds["marketTitle"].lower()
 
 
-def test_worldcup_dashboard_rejects_event_level_false_positive_market():
+def test_worldcup_dashboard_rejects_event_level_false_positive_market(before_tournament):
     source_schedule = {
         "matches": [
             {
@@ -244,7 +249,7 @@ def test_worldcup_dashboard_rejects_event_level_false_positive_market():
     assert payload["marketLinker"]["rejections"]["missing-team"] >= 1
 
 
-def test_worldcup_dashboard_links_match_result_market_group():
+def test_worldcup_dashboard_links_match_result_market_group(before_tournament):
     source_schedule = {
         "matches": [
             {

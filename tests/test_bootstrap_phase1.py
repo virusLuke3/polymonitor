@@ -1,20 +1,16 @@
 from __future__ import annotations
 
+from api.routes.bootstrap import BootstrapRouteDependencies
+
 import json
-import sys
 import threading
 import unittest
-from pathlib import Path
 from typing import Any, Dict, List, Optional
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from api.context import RuntimeResources
 
 from flask import Flask
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.routes.bootstrap import create_bootstrap_blueprint
 from api.services import bootstrap_service
@@ -53,30 +49,8 @@ class FakeSnapshotStore:
         self.set_calls.append((namespace, cache_key, payload, ttl_seconds))
 
 
-class FakeThread:
-    def __init__(self, tracker: Dict[str, Any], target=None, name: str | None = None, daemon: bool | None = None):
-        self._tracker = tracker
-        self._target = target
-        self.name = name
-        self.daemon = daemon
-
-    def start(self) -> None:
-        self._tracker["starts"] = self._tracker.get("starts", 0) + 1
-        if self._tracker.get("run_target") and self._target is not None:
-            self._target()
-
-
-class FakeThreadingModule:
-    def __init__(self, tracker: Optional[Dict[str, Any]] = None):
-        self._tracker = tracker or {}
-        self.Lock = threading.Lock
-
-    def Thread(self, target=None, name: str | None = None, daemon: bool | None = None):
-        return FakeThread(self._tracker, target=target, name=name, daemon=daemon)
-
-
-class FakeLOBManager:
-    def get_market_snapshot(self, *args, **kwargs):
+class FakeLOBReader:
+    def __call__(self, *args, **kwargs):
         raise AssertionError("LOB runtime should not be called from bootstrap")
 
 
@@ -123,7 +97,6 @@ class BootstrapPhase1TestCase(unittest.TestCase):
         latest_content_from_db: bool = True,
         cached_json: Optional[Dict[str, Any]] = None,
         snapshot_store: Optional[FakeSnapshotStore] = None,
-        fake_threading: Optional[FakeThreadingModule] = None,
     ) -> Dict[str, Any]:
         candidate_rows = list(candidate_rows or [])
         status_rows = list(status_rows or [])
@@ -200,7 +173,7 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             "_bootstrap_cache": {"value": None, "expires_at": 0.0, "refresh_in_progress": False},
             "_bootstrap_cache_lock": threading.Lock(),
             "app": FakeApp(),
-            "threading": fake_threading or FakeThreadingModule({"run_target": True}),
+            "_resources": RuntimeResources(),
             "get_cached_json": lambda namespace, cache_key: redis_cache.get(namespace),
             "set_cached_json": lambda namespace, cache_key, payload, ttl_seconds: redis_cache.__setitem__(namespace, payload),
             "get_bootstrap_component_cached": get_bootstrap_component_cached,
@@ -222,7 +195,7 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             "query_one": query_one,
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
             "utc_date_days_ago": lambda days: "2026-04-20",
-            "LOB_RUNTIME_MANAGER": FakeLOBManager(),
+            "get_runtime_lob_by_token_payload": FakeLOBReader(),
         }
         return ctx
 
@@ -280,19 +253,18 @@ class BootstrapPhase1TestCase(unittest.TestCase):
 
     def test_get_bootstrap_payload_cached_returns_stale_and_schedules_one_refresh(self):
         stale_payload = {"generatedAt": "stale-cache"}
-        tracker = {"run_target": False}
         ctx = self.make_service_context(
             snapshot_store=FakeSnapshotStore(stale={(bootstrap_service.BOOTSTRAP_SNAPSHOT_NAMESPACE, bootstrap_service.BOOTSTRAP_CACHE_KEY): stale_payload}),
-            fake_threading=FakeThreadingModule(tracker),
         )
 
+        ctx["_resources"].start_thread = Mock(return_value=True)
         with patch.object(bootstrap_service, "build_bootstrap_payload", return_value={"generatedAt": "fresh-cache"}):
             first = bootstrap_service.get_bootstrap_payload_cached(ctx)
             second = bootstrap_service.get_bootstrap_payload_cached(ctx)
 
         self.assertEqual(first, stale_payload)
         self.assertEqual(second, stale_payload)
-        self.assertEqual(tracker.get("starts"), 1)
+        ctx["_resources"].start_thread.assert_called_once()
 
     def test_get_bootstrap_payload_cached_builds_synchronously_on_cold_miss(self):
         ctx = self.make_service_context()
@@ -349,7 +321,7 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             markets_by_id={88: market},
         )
         app = Flask(__name__)
-        app.register_blueprint(create_bootstrap_blueprint({"get_bootstrap_payload_cached": lambda: bootstrap_service.get_bootstrap_payload_cached(ctx)}))
+        app.register_blueprint(create_bootstrap_blueprint(BootstrapRouteDependencies.from_context({"get_bootstrap_payload_cached": lambda: bootstrap_service.get_bootstrap_payload_cached(ctx)})))
 
         with app.test_client() as client:
             response = client.get("/bootstrap")
@@ -362,7 +334,3 @@ class BootstrapPhase1TestCase(unittest.TestCase):
         self.assertIn("globalOraclePreview", payload)
         self.assertIn("latestContentPreview", payload)
         self.assertIn("systemHealth", payload)
-
-
-if __name__ == "__main__":
-    unittest.main()

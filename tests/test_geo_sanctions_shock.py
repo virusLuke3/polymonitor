@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from api.routes.runtime_panels import RuntimePanelRouteDependencies
+
 import json
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,13 +12,6 @@ from typing import Any, Dict
 
 from flask import Flask
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.config import load_api_settings
@@ -401,7 +395,7 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
             for key in previous:
                 os.environ.pop(key, None)
             os.environ["UCDP_ACCESS_TOKEN"] = "worldmonitor-token"
-            load_api_settings.cache_clear()
+
             settings = load_api_settings()
             self.assertEqual("worldmonitor-token", settings.geo_shock_ucdp_access_token)
         finally:
@@ -410,7 +404,7 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
-            load_api_settings.cache_clear()
+
 
 
 class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
@@ -505,7 +499,7 @@ class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
             "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
             "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
         }
-        app.register_blueprint(create_runtime_panels_blueprint(helpers))
+        app.register_blueprint(create_runtime_panels_blueprint(RuntimePanelRouteDependencies.from_context(helpers)))
 
         with app.test_client() as client:
             invalid = client.get("/runtime/world/geo-sanctions-shock?limit=oops")

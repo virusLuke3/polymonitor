@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from flask import Blueprint, jsonify, request
 
@@ -20,22 +20,10 @@ class ContentRouteDependencies:
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> ContentRouteDependencies:
         return cls(
-            get_market_by_id=cast(
-                Callable[[int], dict[str, Any] | None],
-                resolve_route_callable(context, "get_market_by_id"),
-            ),
-            get_related_content_payload=cast(
-                Callable[..., dict[str, Any]],
-                resolve_route_callable(context, "get_related_content_payload"),
-            ),
-            get_latest_content_payload=cast(
-                Callable[..., dict[str, Any]],
-                resolve_route_callable(context, "get_latest_content_payload"),
-            ),
-            get_runtime_content_latest=cast(
-                Callable[..., dict[str, Any]],
-                resolve_route_callable(context, "get_runtime_content_latest"),
-            ),
+            get_market_by_id=resolve_route_callable(context, "get_market_by_id"),
+            get_related_content_payload=resolve_route_callable(context, "get_related_content_payload"),
+            get_latest_content_payload=resolve_route_callable(context, "get_latest_content_payload"),
+            get_runtime_content_latest=resolve_route_callable(context, "get_runtime_content_latest"),
         )
 
 def _publish_latest_content(payload: dict) -> None:
@@ -82,8 +70,7 @@ def _runtime_content_fallback(
     return payload
 
 
-def create_content_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = ContentRouteDependencies.from_context(context)
+def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprint:
     bp = Blueprint("content_routes", __name__)
 
     @bp.route("/content/market/<int:market_id>", methods=["GET"])

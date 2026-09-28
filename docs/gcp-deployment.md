@@ -1,24 +1,28 @@
 # GCP Deployment Contract
 
-Polymonitor uses one repository with two runtime roles. It is not deployed as a
-single all-in-one host.
+Polymonitor deploys the consumer API and business workers. Canonical data
+acquisition is installed separately from the `market-data` repository.
 
 ## Runtime topology
 
-- The local collector host runs `polydata-local-collector.target`. It owns
-  market discovery, OrderFilled, oracle, derived-table, and quant price-source
-  pipelines.
+- The collector host runs the Market, OrderFilled, Oracle and live LOB services
+  supplied by `market-data`.
 - The GCP serving host runs `polydata-gcp.target`. It owns the public API,
-  Redis/SQLite-backed runtime seed workers, Telegram publishing, and selected
-  serving-side quant/LOB workers.
+  Redis/SQLite-backed business workers and Telegram publishing. LOB is consumed
+  through `MARKET_DATA_LOB_URL`.
 - PostgreSQL and ClickHouse remain on the collector side and are exposed to the
   GCP API through bounded SSH tunnels.
 - Nginx serves the frontend from `/var/www/polydata` and proxies `/wm-api/` to
   the API on `127.0.0.1:18500`.
 - GCP backend source currently lives under `/opt/polyData`.
 
-The systemd targets, rather than separate source trees, enforce the runtime
-boundary.
+When ClickHouse lives on XUE, the existing local XUE tunnel supplies port
+18123. `polydata-clickhouse-gcp-tunnel.service` forwards that port to GCP
+independently of the PostgreSQL tunnel; install this unit on the tunnel host.
+
+Only units reachable from `polydata-gcp.target` are installed by a backend
+release. Shipping a shared Python module does not start its CLI or grant it
+database write privileges.
 
 ## CI and deployment
 
@@ -46,16 +50,19 @@ The backend release:
 1. reads the last deployed commit from
    `~/.local/state/polydata-deploy/current.json`, falling back to the GCP Git
    HEAD only for the first managed release;
-2. builds a payload containing only changed backend/runtime files;
+2. builds a payload containing the complete consumer source packages from the
+   target commit, including unchanged dependencies that an older release may
+   have omitted, plus deletions of changed runtime files;
    systemd templates are limited to units owned by the target commit's
    `polydata-gcp.target`, so local collector units are never installed on GCP;
-   source files are limited to the API, serving-side runtime workers, Telegram,
-   GCP quant workers, required market lookup modules, and the GCP healthcheck;
-   frontend, documentation and CI assets are recorded as externally owned,
-   while any unclassified changed path fails the release with `ignored > 0`;
+   API, workers, database readers, market identity, Oracle parsing, weather,
+   F1/Jin10 helpers, Telegram, Agent, operations and runtime data files travel
+   together; archive migration tools, raw ClickHouse writers, development
+   tools, frontend, documentation and CI assets stay outside this release;
+   any unclassified changed path still fails with `ignored > 0`;
 3. compares every destination file with both its expected old and new hashes;
-4. blocks the entire release if any changed destination contains an unknown
-   remote edit;
+4. restores missing runtime files, but blocks the release if any included
+   destination contains an unknown remote edit;
 5. backs up every affected file before replacement;
 6. installs changed user-systemd templates and restarts only the units named by
    the operator;
@@ -64,7 +71,18 @@ The backend release:
 8. rolls files back automatically if verification fails.
 
 This process never runs `git reset`, never replaces the whole `/opt/polyData`
-tree, and does not start collector services on GCP.
+tree, and does not start collector services on GCP. Runtime databases, private
+configuration and logs are not release payloads.
+
+`scripts/db/trade_v2.py` is still a consumer dependency: it selects existing
+trade tables and converts stored values/SQL projections for API responses.
+It does not fetch data. Its MySQL migration helpers are used by archived
+commands; removing the entire module would break API imports.
+
+`tests/test_gcp_release.py` verifies missing-dependency repair, remote-edit
+protection, deletion/rollback and startup from an isolated release directory.
+The startup check blocks network access and does not validate live upstream
+data, credentials or freshness.
 
 ## Required GitHub configuration
 
@@ -87,10 +105,7 @@ will refuse to overwrite those paths.
 One-time, reviewed GCP content can be recorded in
 `deploy/gcp/accepted-remote-overrides.json`. The approvals are scoped to one
 exact base commit and exact file SHA-256 values. They stop applying as soon as a
-successful release advances the deployment state. The initial approvals retain
-the live Quant error backoff, Telegram linking guard, runtime-panel publish-loop
-guard, and GCP target split while allowing the reviewed repository versions to
-replace their ad-hoc remote forms.
+successful release advances the deployment state.
 
 Choose restart units from the changed runtime ownership. Examples:
 
@@ -101,4 +116,4 @@ Choose restart units from the changed runtime ownership. Examples:
   whose process must reload it
 
 After a successful release, verify representative Market, OrderFilled, Oracle,
-LOB, Quant, and runtime-panel payloads in addition to the generic health probes.
+LOB and runtime-panel payloads in addition to the generic health probes.

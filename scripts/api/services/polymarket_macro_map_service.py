@@ -7,12 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 
 
 MACRO_MAP_SNAPSHOT_NAMESPACE = "snapshot:macro:polymarket-macro-map"
@@ -88,9 +83,11 @@ class PolymarketMacroMapDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> PolymarketMacroMapDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_service_value(context, "app"),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             http_json_get=resolve_service_callable(
                 context,
                 "http_json_get",
@@ -107,10 +104,7 @@ class PolymarketMacroMapDependencies:
                 context,
                 "set_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
         )
 
 

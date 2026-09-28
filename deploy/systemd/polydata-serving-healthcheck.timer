@@ -2,10 +2,9 @@
 Description=Run the polyData GCP serving bounded healthcheck
 
 [Timer]
-OnBootSec=120s
-OnUnitActiveSec=60s
-AccuracySec=5s
-RandomizedDelaySec=5s
+OnCalendar=*-*-* *:*:10
+AccuracySec=1s
+RandomizedDelaySec=2s
 Unit=polydata-serving-healthcheck.service
 
 [Install]

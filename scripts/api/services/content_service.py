@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from api.context import RuntimeResources, runtime_resources
+
 import json
-import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, cast
+from typing import Any, Callable, Dict
 
 from api.context import (
     resolve_optional_service_callable,
@@ -15,12 +16,11 @@ from api.context import (
 
 _RELATED_CONTENT_CACHE_TTL_SECONDS = 120
 _RELATED_CONTENT_SNAPSHOT_TTL_SECONDS = 300
-_RELATED_CONTENT_CACHE: Dict[tuple[int, int], tuple[float, Dict[str, Any]]] = {}
-_RELATED_CONTENT_CACHE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
 class RelatedContentDependencies:
+    resources: RuntimeResources
     get_related_content_by_market_id: Callable[..., Any]
     query_one: Callable[..., Any]
     get_snapshot_payload: Callable[..., Any] | None
@@ -28,18 +28,15 @@ class RelatedContentDependencies:
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> RelatedContentDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            get_related_content_by_market_id=cast(
-                Callable[..., Any],
-                resolve_service_callable(
+            resources=runtime_resources(context),
+            get_related_content_by_market_id=resolve_service_callable(
                     context,
                     "get_related_content_by_market_id",
                 ),
-            ),
-            query_one=cast(
-                Callable[..., Any],
-                resolve_service_callable(context, "query_one"),
-            ),
+            query_one=resolve_service_callable(context, "query_one"),
             get_snapshot_payload=resolve_optional_service_callable(
                 context,
                 "get_snapshot_payload",
@@ -57,11 +54,10 @@ class LatestContentDependencies:
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> LatestContentDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            get_latest_content_snapshot=cast(
-                Callable[..., Any],
-                resolve_service_callable(context, "get_latest_content_snapshot"),
-            ),
+            get_latest_content_snapshot=resolve_service_callable(context, "get_latest_content_snapshot"),
         )
 
 
@@ -111,18 +107,18 @@ def _get_related_content_payload_local_cached(
 ) -> Dict[str, Any]:
     cache_key = (int(market_id), int(limit))
     now = time.time()
-    with _RELATED_CONTENT_CACHE_LOCK:
-        cached = _RELATED_CONTENT_CACHE.get(cache_key)
+    with dependencies.resources.content_lock:
+        cached = dependencies.resources.related_content.get(cache_key)
         if cached and now - cached[0] < _RELATED_CONTENT_CACHE_TTL_SECONDS:
             payload = dict(cached[1])
             payload["sourceMode"] = f"{payload.get('sourceMode') or 'database'}:cache"
             return payload
     payload = dependencies.get_related_content_by_market_id(market_id, limit=limit)
-    with _RELATED_CONTENT_CACHE_LOCK:
-        _RELATED_CONTENT_CACHE[cache_key] = (now, payload)
-        if len(_RELATED_CONTENT_CACHE) > 256:
-            oldest_key = min(_RELATED_CONTENT_CACHE, key=lambda key: _RELATED_CONTENT_CACHE[key][0])
-            _RELATED_CONTENT_CACHE.pop(oldest_key, None)
+    with dependencies.resources.content_lock:
+        dependencies.resources.related_content[cache_key] = (now, payload)
+        if len(dependencies.resources.related_content) > 256:
+            oldest_key = min(dependencies.resources.related_content, key=lambda key: dependencies.resources.related_content[key][0])
+            dependencies.resources.related_content.pop(oldest_key, None)
     return payload
 
 

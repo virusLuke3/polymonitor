@@ -31,7 +31,3 @@ class AgentGatewayBudgetTestCase(unittest.TestCase):
         self.assertEqual(payload["status"], "live")
         self.assertEqual(payload["dailyBudget"]["enabled"], False)
         self.assertNotEqual(payload.get("cacheStatus"), "budget-fallback")
-
-
-if __name__ == "__main__":
-    unittest.main()

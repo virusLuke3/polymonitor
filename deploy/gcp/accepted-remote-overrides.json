@@ -1,6 +1,34 @@
 {
-  "base_sha": "99d16211e776fe1d43e36b02bcedbbaacda9803e",
+  "base_sha": "6599170e8f44917fe7605c0d8bec6fddc813a578",
   "paths": {
-    "deploy/systemd/polydata-lob-websocket.service": "f33c2959f834266ff269d7872126b745b46368e278aee42a681d609c53c8ed07"
+    "deploy/systemd/polydata-gcp.target": "d2642176d38c85bee01a5e281841db8d6e559f8b90e2dc9d181fd304c496e3dc",
+    "deploy/systemd/polydata-new-market-signal.service": "33ff8c6b690478bd136f7eafe0edff7fe6b460e8e54b6e87b108f7b18453153e",
+    "deploy/systemd/polydata-serving-healthcheck.timer": "0e34a121f52699dee428ae6717f895f931c11c3cdf4746b4d05f5e9c0165a9d1",
+    "deploy/systemd/polydata-telegram-publisher.service": "60a8ebe09d53065cde53b5e2ccf9dd6bec0c2b770a46be7b572c5e2dbc630361",
+    "quant/backtest/vendor/README.md": "4e2537ac951bbfc5a33d4a41967b69e66e5c1440333b13077fc2865f38c48a8f",
+    "scripts/api/cache.py": "0c4ee4ed6ad8a2a9f0b37f3cc5733c9a6f7930061e0c4861cfaf4469e4349f13",
+    "scripts/api/routes/lob.py": "605d1c3cbf2ef77fbae91cc18590302e3e9db39d8001e2c95cf7442182731239",
+    "scripts/api/routes/system.py": "3c13ccbdeaa063f1d11d7217c245d1089102f4dfee82395ce328451425877dce",
+    "scripts/api/services/auth_service.py": "27a7e5ff7da023765c1ad50aa2882e3c7cdf1cbc5b9d46ffe4cbb7404e1b2817",
+    "scripts/api/services/clickhouse_orderfilled_service.py": "811d0a498f424103f9519e7e360bb6646734cac75055ea7b9c90efb51f4f9abc",
+    "scripts/api/services/lob_service.py": "d03f3997ce2ec8fa15a1e20bedf969c084db7b616475a3f7bb3a696a8f2a125f",
+    "scripts/api/services/market_workspace_cache_service.py": "356764a9c913d6a6abc77d119fc7cb0a7d26737874467840f41d7333814a47d4",
+    "scripts/api/services/new_market_signal_service.py": "fa836d15347a9d348ab5fce9b2f8c626313d26dec71b6f17b94ff4f03871f74e",
+    "scripts/api/services/sports_odds_service.py": "9a38c0e37bcde843e1b15802dbf3b33e09d54483c1cbcd6ec338ef2622be887c",
+    "scripts/api/services/system_service.py": "835ccfe37e1a63b9ced1d8da220a7e59d4a43b5dec172e60b4b3515b0d983604",
+    "scripts/api_server.py": "7f59cc66bbbb0d951f1c7180935079488140f75b95f2ed4a210b32a0a3a6c4cb",
+    "scripts/config.py": "4582b466af86e52d02d6f5ed720c550c550ef6bfc07e7aa412e939175e32e33a",
+    "scripts/data_sources.py": "409a31f1a8d8d7034d94a3154bcd2959301590251592390e90656a2b058fa39c",
+    "scripts/db/db.py": "43bf5c2d603e49450f23158f48133106838af8a257e9e54219ef35ad1d150057",
+    "scripts/db/sync_trade_analytics.py": "20cd775a678f898f564637aaf01ba6f2938cb15d12602d0e299c254655740601",
+    "scripts/ops/polydata_services.sh": "4461ca40742b8245ad985db2c6c59dbb5d7b7b6370c845ce5f3b6d3ac929298d",
+    "scripts/ops/postgres_reverse_tunnel_healthcheck.sh": "2e37a11648c40e545f66d4de31d61fa03a3ca7b8b9fdb8f55facc174e27d39ae",
+    "scripts/oracle/fetch_uma_oracle_chain.py": "4500196c300b62c5ccd48256dec975a996976d0ff9c35b07a59edb2171703a41",
+    "scripts/oracle/fetch_updown_oracle_chain.py": "d6b3ee695d928c57f5117b742b81a2b58f349774fd9b151ee6a43b57d198ae67",
+    "scripts/runtime/new_market_signal_watcher.py": "4af205f623fc637a63c3e5c1cc7d8c1f92c5d3c928c8ecb8944df11db75f203b",
+    "scripts/runtime/worldcup_core_watcher.py": "1401ab69169e4ca11a98602d1e709ed7f65c9c554728b6ab49cd49ba5a6d8bf5",
+    "scripts/runtime/worldcup_live_watcher.py": "429eafe1ed259da2bb93cd008bb2b2dd5e00b336c69ef9fd13122dca340a899f",
+    "scripts/trade/run_trades_indexer_clickhouse_live.sh": "d13ffc34009bfedcc86ed160acd18ecc1588f6e1f30c905c655b74272f12f765",
+    "scripts/trade/trades_indexer.py": "bfd70d24b1d1087fabce63b36e895c014671c7412c0fbe31a7618a6ef6337001"
   }
 }

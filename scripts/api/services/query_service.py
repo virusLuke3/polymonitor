@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+from api.context import RuntimeResources, runtime_resources
+
 import json
 import os
 import hashlib
 import re
-import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, cast
 
-from api.context import resolve_service_callable, resolve_service_value
+from api.context import resolve_service_callable
 from api.services import clickhouse_orderfilled_service
 
 
@@ -17,7 +18,7 @@ def _service_callable(
     context: Mapping[str, Any],
     name: str,
 ) -> Callable[..., Any]:
-    return cast(Callable[..., Any], resolve_service_callable(context, name))
+    return resolve_service_callable(context, name)
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,8 @@ class DashboardStatusDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> DashboardStatusDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             query_all=_service_callable(context, "query_all"),
         )
@@ -46,6 +49,8 @@ class RecentTradeWindowDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> RecentTradeWindowDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             query_one=_service_callable(context, "query_one"),
             table_exists=_service_callable(context, "table_exists"),
@@ -68,6 +73,8 @@ class DashboardTradeVolumeDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> DashboardTradeVolumeDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             query_all=_service_callable(context, "query_all"),
             get_existing_trade_read_source=_service_callable(
@@ -93,6 +100,8 @@ class DashboardRecentMarketsDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> DashboardRecentMarketsDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             query_all=_service_callable(context, "query_all"),
             get_existing_trade_read_source=_service_callable(
@@ -122,6 +131,8 @@ class TradeCountEstimateDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> TradeCountEstimateDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             query_one=_service_callable(context, "query_one"),
             get_existing_trade_read_source=_service_callable(
@@ -147,6 +158,8 @@ class RecentTradeDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> RecentTradeDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             query_all=_service_callable(context, "query_all"),
             get_existing_trade_read_source=_service_callable(
@@ -161,7 +174,7 @@ class RecentTradeDependencies:
             normalize_trade=_service_callable(context, "normalize_trade"),
             trade_v2_core_table=cast(
                 str,
-                resolve_service_value(context, "TRADE_V2_CORE_TABLE"),
+                context.get("TRADE_V2_CORE_TABLE"),
             ),
         )
 
@@ -176,6 +189,8 @@ class RecentOracleDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> RecentOracleDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             query_all=_service_callable(context, "query_all"),
             normalize_oracle_event=_service_callable(
@@ -187,6 +202,7 @@ class RecentOracleDependencies:
 
 @dataclass(frozen=True)
 class ContentStorageDependencies:
+    resources: RuntimeResources
     application: Any
     database_path: str
     get_backend: Callable[..., Any]
@@ -200,11 +216,14 @@ class ContentStorageDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> ContentStorageDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            application=resolve_service_value(context, "app"),
+            resources=runtime_resources(context),
+            application=context.get("app"),
             database_path=cast(
                 str,
-                resolve_service_value(context, "DB_PATH"),
+                context.get("DB_PATH"),
             ),
             get_backend=_service_callable(context, "get_backend"),
             table_exists=_service_callable(context, "table_exists"),
@@ -224,12 +243,11 @@ class ContentRefreshDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> ContentRefreshDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             storage=ContentStorageDependencies.from_context(context),
-            content_runtime_provider=resolve_service_value(
-                context,
-                "CONTENT_RUNTIME_PROVIDER",
-            ),
+            content_runtime_provider=context.get("CONTENT_RUNTIME_PROVIDER"),
         )
 
 
@@ -245,12 +263,11 @@ class RelatedContentQueryDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> RelatedContentQueryDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             storage=ContentStorageDependencies.from_context(context),
-            content_runtime_provider=resolve_service_value(
-                context,
-                "CONTENT_RUNTIME_PROVIDER",
-            ),
+            content_runtime_provider=context.get("CONTENT_RUNTIME_PROVIDER"),
             get_market_by_id=_service_callable(
                 context,
                 "get_market_by_id",
@@ -270,12 +287,11 @@ class LatestContentQueryDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> LatestContentQueryDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             storage=ContentStorageDependencies.from_context(context),
-            content_runtime_provider=resolve_service_value(
-                context,
-                "CONTENT_RUNTIME_PROVIDER",
-            ),
+            content_runtime_provider=context.get("CONTENT_RUNTIME_PROVIDER"),
             get_snapshot_payload=_service_callable(
                 context,
                 "get_snapshot_payload",
@@ -636,9 +652,6 @@ def _content_id_for_topic_url(topic_id: str, url: str) -> str:
     return f"topic-content:{digest}"
 
 
-_CONTENT_TABLE_EXISTS_CACHE: Dict[tuple[str, str], bool] = {}
-_CONTENT_TABLES_ENSURED_CACHE: set[str] = set()
-_CONTENT_TABLE_EXISTS_LOCK = threading.Lock()
 
 
 def _content_table_exists(
@@ -647,13 +660,13 @@ def _content_table_exists(
 ) -> bool:
     backend = str(dependencies.get_backend() or "").lower()
     key = (backend, table_name)
-    with _CONTENT_TABLE_EXISTS_LOCK:
-        cached = _CONTENT_TABLE_EXISTS_CACHE.get(key)
+    with dependencies.resources.content_lock:
+        cached = dependencies.resources.content_table_exists.get(key)
     if cached is not None:
         return cached
     exists = bool(dependencies.table_exists(table_name))
-    with _CONTENT_TABLE_EXISTS_LOCK:
-        _CONTENT_TABLE_EXISTS_CACHE[key] = exists
+    with dependencies.resources.content_lock:
+        dependencies.resources.content_table_exists[key] = exists
     return exists
 
 
@@ -663,8 +676,8 @@ def _ensure_content_tables(
     if _api_readonly():
         return
     backend = str(dependencies.get_backend() or "").lower()
-    with _CONTENT_TABLE_EXISTS_LOCK:
-        if backend in _CONTENT_TABLES_ENSURED_CACHE:
+    with dependencies.resources.content_lock:
+        if backend in dependencies.resources.content_tables_ensured:
             return
     conn = dependencies.get_connection(dependencies.database_path)
     try:
@@ -796,10 +809,10 @@ def _ensure_content_tables(
             conn.execute("CREATE INDEX IF NOT EXISTS idx_content_links_market_score ON content_links (market_id, link_score DESC, created_at DESC)")
         conn.commit()
         backend_key = str(dependencies.get_backend() or "").lower()
-        with _CONTENT_TABLE_EXISTS_LOCK:
-            _CONTENT_TABLE_EXISTS_CACHE[(backend_key, "content_items")] = True
-            _CONTENT_TABLE_EXISTS_CACHE[(backend_key, "content_links")] = True
-            _CONTENT_TABLES_ENSURED_CACHE.add(backend_key)
+        with dependencies.resources.content_lock:
+            dependencies.resources.content_table_exists[(backend_key, "content_items")] = True
+            dependencies.resources.content_table_exists[(backend_key, "content_links")] = True
+            dependencies.resources.content_tables_ensured.add(backend_key)
     except Exception:
         conn.rollback()
         dependencies.application.logger.exception(

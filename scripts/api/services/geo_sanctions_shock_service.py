@@ -10,12 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 from xml.etree import ElementTree as ET
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 
 GEO_SHOCK_SNAPSHOT_NAMESPACE = "snapshot:world:geo-sanctions-shock"
 GEO_SHOCK_CACHE_KEY = "panel-v1"
@@ -97,17 +92,16 @@ class GeoSanctionsShockDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> GeoSanctionsShockDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_service_value(context, "app"),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             utc_now_iso=resolve_service_callable(
                 context,
                 "utc_now_iso",
             ),
-            requests_lib=resolve_optional_service_value(
-                context,
-                "requests",
-            ),
+            requests_lib=context.get("requests"),
             http_json_get=resolve_optional_service_callable(
                 context,
                 "http_json_get",
@@ -120,10 +114,7 @@ class GeoSanctionsShockDependencies:
                 context,
                 "set_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             get_acled_auth_state=resolve_optional_service_callable(
                 context,
                 "get_acled_auth_state",

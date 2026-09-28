@@ -4,6 +4,8 @@ from decimal import Decimal
 import os
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from . import outcome_semantics_service
+
 
 MIN_CLUSTER_NOTIONAL = Decimal("250")
 MIN_CLUSTER_ADDRESSES = 2
@@ -64,10 +66,10 @@ def _get_market_price_rows(ctx: dict, market_ids: Iterable[Any]) -> Dict[int, Di
     return {int(row.get("market_id")): row for row in rows if row.get("market_id") is not None}
 
 
-def _current_probability(ctx: dict, price_row: Optional[Dict[str, Any]], outcome: Any) -> Any:
-    if not price_row:
+def _current_probability(ctx: dict, price_row: Optional[Dict[str, Any]], entry: Dict[str, Any]) -> Any:
+    if not price_row or not outcome_semantics_service.directional_semantics_allowed(entry):
         return None
-    outcome_text = str(outcome or "").upper()
+    outcome_text = str(entry.get("logicalOutcome") or entry.get("logical_outcome") or "").upper()
     yes_price = ctx["_safe_decimal"](price_row.get("latest_yes_price") or price_row.get("latest_price"))
     no_price = ctx["_safe_decimal"](price_row.get("latest_no_price"))
     if outcome_text == "YES":
@@ -94,7 +96,9 @@ def _score_cluster(
 ) -> Decimal:
     notional_score = min(Decimal("45"), total_notional / Decimal("120"))
     address_score = min(Decimal("20"), Decimal(address_count) * Decimal("4"))
-    new_score = min(Decimal("25"), Decimal(new_address_count) * Decimal("8") + Decimal(new_to_market_count) * Decimal("4"))
+    new_score = min(
+        Decimal("25"), Decimal(new_address_count) * Decimal("8") + Decimal(new_to_market_count) * Decimal("4")
+    )
     news_score = Decimal("6") if has_news else Decimal("0")
     return notional_score + address_score + new_score + news_score
 
@@ -107,8 +111,10 @@ def _severity(score: Decimal) -> str:
     return "watch"
 
 
-def _build_title(market_title: str, outcome: Any, total_notional: Decimal, new_address_count: int, address_count: int) -> str:
-    outcome_text = str(outcome or "UNKNOWN").upper()
+def _build_title(
+    market_title: str, outcome: Any, total_notional: Decimal, new_address_count: int, address_count: int
+) -> str:
+    outcome_text = str(outcome or "UNKNOWN").strip()
     if new_address_count >= 2:
         subject = _format_count("new account", new_address_count)
     elif address_count >= 3:
@@ -119,7 +125,9 @@ def _build_title(market_title: str, outcome: Any, total_notional: Decimal, new_a
 
 
 def _bias_for(entry: Dict[str, Any]) -> str:
-    outcome = str(entry.get("outcome") or "").upper()
+    if not outcome_semantics_service.directional_semantics_allowed(entry):
+        return "mixed"
+    outcome = str(entry.get("logicalOutcome") or entry.get("logical_outcome") or "").upper()
     if outcome == "NO":
         return "bearish"
     if outcome == "YES":
@@ -132,10 +140,10 @@ def _bias_for(entry: Dict[str, Any]) -> str:
 
 def _action_for(entry: Dict[str, Any]) -> Dict[str, str]:
     side = str(entry.get("side") or "BUY").upper()
-    outcome = str(entry.get("outcome") or "YES").upper()
+    outcome = str(entry.get("outcome") or "").strip()
     return {
         "label": "Sell" if side == "SELL" else "Buy",
-        "outcome": "No" if outcome == "NO" else "Yes" if outcome == "YES" else outcome.title(),
+        "outcome": outcome,
     }
 
 
@@ -170,12 +178,17 @@ def build_polybeats_clusters(
     *,
     limit: int = 8,
 ) -> list[Dict[str, Any]]:
+    trades = [
+        trade
+        for trade in outcome_semantics_service.annotate_raw_trade_rows(ctx, trades)
+        if outcome_semantics_service.directional_semantics_allowed(trade)
+    ]
     grouped: Dict[Tuple[Any, str, str], Dict[str, Any]] = {}
     for trade in trades:
         market_id = trade.get("marketId") or trade.get("market_id")
         if market_id is None:
             continue
-        outcome = str(trade.get("outcome") or "UNKNOWN").upper()
+        outcome = str(trade.get("outcome") or "UNKNOWN").strip()
         side = str(trade.get("side") or "UNKNOWN").upper()
         key = (market_id, outcome, side)
         price = _safe_decimal(ctx, trade.get("price"))
@@ -188,6 +201,12 @@ def build_polybeats_clusters(
                 "localMarketId": market_id,
                 "marketTitle": trade.get("marketTitle") or trade.get("market_title") or "Market signal",
                 "outcome": outcome,
+                "logicalOutcome": trade.get("logicalOutcome") or trade.get("logical_outcome"),
+                "sourceOutcomeLabel": trade.get("sourceOutcomeLabel") or trade.get("source_outcome_label"),
+                "semanticMode": trade.get("semanticMode") or trade.get("semantic_mode"),
+                "outcomeSemanticsStatus": trade.get("outcomeSemanticsStatus") or trade.get("outcome_semantics_status"),
+                "outcomeSemanticsValid": bool(trade.get("outcomeSemanticsValid", trade.get("outcome_semantics_valid"))),
+                "supports_directional_semantics": bool(trade.get("supports_directional_semantics")),
                 "side": side,
                 "totalNotional": Decimal("0"),
                 "weightedPrice": Decimal("0"),
@@ -254,7 +273,7 @@ def build_polybeats_clusters(
             has_news=bool(related),
         )
         avg_price = entry["weightedPrice"] / entry["size"] if entry["size"] else Decimal("0")
-        current_probability = _current_probability(ctx, price_rows.get(market_id), entry.get("outcome"))
+        current_probability = _current_probability(ctx, price_rows.get(market_id), entry)
         summary_parts = [
             f"{_format_count('address', len(addresses))} across {entry['tradeCount']} recent trades",
             f"average entry {ctx['format_trade_decimal'](avg_price)}",
@@ -276,7 +295,9 @@ def build_polybeats_clusters(
                 "sourceTag": source_tag,
                 "headline": related[0].get("title") if related else f"{len(addresses)} wallet flow clustered on-chain",
                 "action": action,
-                "title": _build_title(str(entry["marketTitle"]), entry.get("outcome"), total_notional, new_address_count, len(addresses)),
+                "title": _build_title(
+                    str(entry["marketTitle"]), entry.get("outcome"), total_notional, new_address_count, len(addresses)
+                ),
                 "summary": "; ".join(summary_parts),
                 "timestamp": entry.get("latestTimestamp"),
                 "marketId": market_id,
@@ -285,6 +306,12 @@ def build_polybeats_clusters(
                 "txHash": entry.get("txHash"),
                 "side": entry.get("side"),
                 "outcome": entry.get("outcome"),
+                "logicalOutcome": entry.get("logicalOutcome"),
+                "sourceOutcomeLabel": entry.get("sourceOutcomeLabel"),
+                "semanticMode": entry.get("semanticMode"),
+                "outcomeSemanticsStatus": entry.get("outcomeSemanticsStatus"),
+                "outcomeSemanticsValid": entry.get("outcomeSemanticsValid"),
+                "outcomeSemanticsCapabilities": {"supportsDirectionalSemantics": True},
                 "price": ctx["format_trade_decimal"](avg_price),
                 "notional": ctx["format_trade_decimal"](total_notional),
                 "contributors": ["cluster", "address", "news" if related else "flow"],

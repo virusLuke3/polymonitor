@@ -5,12 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 from jin10.flash_client import fetch_jin10_panel_payload
 
 
@@ -33,20 +28,16 @@ class Jin10RuntimeDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> Jin10RuntimeDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            requests_lib=resolve_optional_service_value(
-                context,
-                "requests",
-            ),
+            settings=context.get("SETTINGS"),
+            requests_lib=context.get("requests"),
             utc_now_iso=resolve_service_callable(
                 context,
                 "utc_now_iso",
             ),
-            snapshot_store=resolve_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             get_cached_json=resolve_service_callable(
                 context,
                 "get_cached_json",
@@ -55,10 +46,7 @@ class Jin10RuntimeDependencies:
                 context,
                 "set_cached_json",
             ),
-            signal_runtime_ttl_seconds=resolve_service_value(
-                context,
-                "SIGNAL_RUNTIME_TTL_SECONDS",
-            ),
+            signal_runtime_ttl_seconds=context.get("SIGNAL_RUNTIME_TTL_SECONDS"),
         )
 
 

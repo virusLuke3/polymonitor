@@ -1,17 +1,11 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import new_market_signal_service
 from runtime.new_market_signal_watcher import NewMarketSignalWatcher
@@ -273,7 +267,3 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         self.assertEqual(1, result["missingCreatedAt"])
         self.assertEqual(1, result["pending"])
         self.assertEqual([11], json.loads(watcher.redis_client.get(watcher.pending_key)))
-
-
-if __name__ == "__main__":
-    unittest.main()

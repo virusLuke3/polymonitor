@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from flask import Blueprint, g, jsonify, make_response, request
 
-from api.context import resolve_route_callable, resolve_route_value
+from api.context import resolve_route_callable
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class AuthRouteDependencies:
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> AuthRouteDependencies:
         return cls(
-            auth_enabled=cast(Callable[[], bool], resolve_route_callable(context, "auth_enabled")),
+            auth_enabled=resolve_route_callable(context, "auth_enabled"),
             authenticate_request=resolve_route_callable(context, "authenticate_request"),
             change_password=resolve_route_callable(context, "change_password"),
             create_api_key=resolve_route_callable(context, "create_api_key"),
@@ -40,11 +40,11 @@ class AuthRouteDependencies:
             logout=resolve_route_callable(context, "auth_logout"),
             request_metadata=resolve_route_callable(context, "auth_request_metadata"),
             revoke_api_key=resolve_route_callable(context, "revoke_api_key"),
-            session_cookie_name=cast(Callable[[], str], resolve_route_callable(context, "session_cookie_name")),
+            session_cookie_name=resolve_route_callable(context, "session_cookie_name"),
             session_snapshot=resolve_route_callable(context, "session_snapshot"),
-            session_ttl_seconds=cast(Callable[[], int], resolve_route_callable(context, "session_ttl_seconds")),
-            cookie_secure=cast(Callable[[], bool], resolve_route_callable(context, "auth_cookie_secure")),
-            allowed_scopes=tuple(resolve_route_value(context, "AUTH_ALLOWED_SCOPES", ())),
+            session_ttl_seconds=resolve_route_callable(context, "session_ttl_seconds"),
+            cookie_secure=resolve_route_callable(context, "auth_cookie_secure"),
+            allowed_scopes=tuple(context.get("AUTH_ALLOWED_SCOPES", ())),
         )
 
 
@@ -83,8 +83,7 @@ def _clear_session_cookie(response: Any, dependencies: AuthRouteDependencies) ->
     )
 
 
-def create_auth_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = AuthRouteDependencies.from_context(context)
+def create_auth_blueprint(dependencies: AuthRouteDependencies) -> Blueprint:
     bp = Blueprint("auth_routes", __name__)
 
     @bp.route("/auth/session", methods=["GET"])

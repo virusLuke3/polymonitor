@@ -258,13 +258,17 @@ class SignalsWatcher:
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, str(self.spec["cache_key"]), payload)
 
-    def service_context(self) -> Dict[str, Any]:
-        import api_server
+    def close(self) -> None:
+        if hasattr(self, "_service_runtime"):
+            self._service_runtime.close()
+        self.redis_client.close()
 
-        ctx = dict(api_server.build_service_context())
-        ctx["app"] = _AppAdapter()
-        ctx["DB_CONNECTION_EXIT_DISABLED"] = True
-        return ctx
+    def service_context(self):
+        from api.runtime import ServiceRuntime
+
+        if not hasattr(self, "_service_runtime"):
+            self._service_runtime = ServiceRuntime(self.settings, application=_AppAdapter())
+        return self._service_runtime.signal_context
 
     def fetch_payload(self) -> Dict[str, Any]:
         fetcher: Callable[..., Dict[str, Any]] = self.spec["fetcher"]
@@ -345,6 +349,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     args = build_arg_parser().parse_args()
     db_read_timeout = max(3, int(os.environ.get("POLYDATA_SIGNAL_DB_READ_TIMEOUT_SECONDS", DEFAULT_DB_READ_TIMEOUT_SECONDS)))
     current_read_timeout = int(os.environ.get("POLYMARKET_MYSQL_READ_TIMEOUT", "60") or "60")
@@ -361,28 +367,31 @@ def main() -> int:
         limit=limit,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
-    print(f"[signals] component={args.component} redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
-    if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        return 0
-
-    interval_seconds = max(15, int(args.interval or DEFAULT_INTERVAL_SECONDS))
-    while True:
-        try:
+    try:
+        watcher.redis_client.ping()
+        print(f"[signals] component={args.component} redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
+        if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        except KeyboardInterrupt:
             return 0
-        except Exception as exc:
-            watcher.store_seed_meta(
-                status="error",
-                record_count=0,
-                error_summary=str(exc),
-                preserve_last_success=True,
-                metadata={"result": "exception", "component": args.component},
-            )
-            print(f"[signals] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(interval_seconds)
+
+        interval_seconds = max(15, int(args.interval or DEFAULT_INTERVAL_SECONDS))
+        while True:
+            try:
+                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            except KeyboardInterrupt:
+                return 0
+            except Exception as exc:
+                watcher.store_seed_meta(
+                    status="error",
+                    record_count=0,
+                    error_summary=str(exc),
+                    preserve_last_success=True,
+                    metadata={"result": "exception", "component": args.component},
+                )
+                print(f"[signals] ERROR watch loop failed: {exc}", file=sys.stderr)
+            time.sleep(interval_seconds)
+    finally:
+        watcher.close()
 
 
 if __name__ == "__main__":

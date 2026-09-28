@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from api.context import RuntimeResources, runtime_resources
+
 import hashlib
 import html
 import json
 import re
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -14,12 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 from xml.etree import ElementTree
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 from weather.cities import load_weather_cities
 
 
@@ -27,8 +23,6 @@ WEATHER_NEWS_SNAPSHOT_NAMESPACE = "snapshot:weather:news"
 WEATHER_NEWS_CACHE_KEY = "panel-v1"
 DEFAULT_NEWS_LIMIT = 24
 
-_LIVE_REFRESH_LOCK = threading.Lock()
-_LIVE_REFRESHING: set[str] = set()
 
 RELEVANCE_RE = re.compile(r"\b(weather|forecast|storm|rain|heat|heatwave|cold|wind|snow|flood|warning|alert|temperature|typhoon|hurricane)\b", re.I)
 WEATHER_CONTEXT_RE = re.compile(
@@ -60,6 +54,7 @@ WEATHER_TOPIC_QUERIES: List[Dict[str, str]] = [
 
 @dataclass(frozen=True)
 class WeatherNewsDependencies:
+    resources: RuntimeResources
     settings: Any
     application: Any
     http_text_get: Callable[..., Any]
@@ -73,9 +68,12 @@ class WeatherNewsDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> WeatherNewsDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_optional_service_value(context, "app"),
+            resources=runtime_resources(context),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             http_text_get=resolve_service_callable(
                 context,
                 "http_text_get",
@@ -92,10 +90,7 @@ class WeatherNewsDependencies:
                 context,
                 "set_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
         )
 
 
@@ -393,11 +388,11 @@ def _schedule_live_refresh(
     reason: str,
 ) -> bool:
     dependencies = _dependencies(ctx)
-    refresh_key = f"{WEATHER_NEWS_SNAPSHOT_NAMESPACE}:{WEATHER_NEWS_CACHE_KEY}"
-    with _LIVE_REFRESH_LOCK:
-        if refresh_key in _LIVE_REFRESHING:
+    refresh_key = "weather_news_service:" + f"{WEATHER_NEWS_SNAPSHOT_NAMESPACE}:{WEATHER_NEWS_CACHE_KEY}"
+    with dependencies.resources.live_refresh_lock:
+        if refresh_key in dependencies.resources.live_refreshing:
             return False
-        _LIVE_REFRESHING.add(refresh_key)
+        dependencies.resources.live_refreshing.add(refresh_key)
 
     def refresh() -> None:
         logger = getattr(dependencies.application, "logger", None)
@@ -414,11 +409,12 @@ def _schedule_live_refresh(
             if logger is not None:
                 logger.exception("weather news async refresh failed reason=%s", reason)
         finally:
-            with _LIVE_REFRESH_LOCK:
-                _LIVE_REFRESHING.discard(refresh_key)
+            with dependencies.resources.live_refresh_lock:
+                dependencies.resources.live_refreshing.discard(refresh_key)
 
-    thread = threading.Thread(target=refresh, name="weather-news-refresh", daemon=True)
-    thread.start()
+    if not dependencies.resources.start_thread(refresh, name="weather-news-refresh"):
+        with dependencies.resources.live_refresh_lock:
+            dependencies.resources.live_refreshing.discard(refresh_key)
     return True
 
 

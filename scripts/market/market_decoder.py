@@ -41,7 +41,8 @@ _scripts_root = Path(__file__).resolve().parent.parent
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
 
-from data_sources import POLYGON_RPC_URL, POLYMARKET_GAMMA_API_BASE
+from data_sources import env_str
+from config import get_rpc_url
 
 
 # Polymarket 常量
@@ -52,7 +53,6 @@ CONDITIONAL_TOKENS_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"  # CTF
 CONDITION_PREPARATION_EVENT_SIGNATURE = "ConditionPreparation(bytes32,address,bytes32,uint256)"
 
 # Gamma API 基础 URL
-GAMMA_API_BASE = POLYMARKET_GAMMA_API_BASE
 
 
 def keccak256(data: bytes) -> bytes:
@@ -135,77 +135,59 @@ def calculate_collection_id(
     ctf_address: Optional[str] = None
 ) -> str:
     """
-    计算 CollectionId
-    
-    注意：CTF 的完整实现涉及椭圆曲线运算，非常复杂。
-    对于 Polymarket（parentCollectionId = 0），文档中描述的简化版本是：
-    collectionId = keccak256(abi.encodePacked(parentCollectionId, conditionId, indexSet))
-    
-    但如果需要精确结果，应该调用链上合约的 getCollectionId 方法。
-    
+    调用 CTF 的 getCollectionId；包括零 parent 的情况也需要椭圆曲线计算。
+    RPC 不可用时停止，禁止生成未经验证的替代 TokenId。
+
     Args:
         parent_collection_id: 父集合ID（Polymarket 总是 bytes32(0)）
         condition_id: 条件ID
         index_set: 索引集合（1=YES, 2=NO）
-        w3: Web3 实例（可选，用于调用链上合约）
-        ctf_address: ConditionalTokens 合约地址（可选）
-    
+        w3: Web3 实例
+        ctf_address: ConditionalTokens 合约地址
+
     Returns:
         CollectionId (bytes32 格式的十六进制字符串)
     """
-    # 如果提供了 Web3 和合约地址，尝试调用链上合约获取精确结果
-    if w3 and ctf_address:
-        try:
-            # ConditionalTokens 合约 ABI（只需要 getCollectionId 方法）
-            ctf_abi = [
-                {
-                    "inputs": [
-                        {"internalType": "bytes32", "name": "parentCollectionId", "type": "bytes32"},
-                        {"internalType": "bytes32", "name": "conditionId", "type": "bytes32"},
-                        {"internalType": "uint256", "name": "indexSet", "type": "uint256"}
-                    ],
-                    "name": "getCollectionId",
-                    "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
-                    "stateMutability": "view",
-                    "type": "function"
-                }
-            ]
-            
-            ctf_contract = w3.eth.contract(address=Web3.to_checksum_address(ctf_address), abi=ctf_abi)
-            
-            parent_bytes32 = bytes.fromhex(parent_collection_id[2:] if parent_collection_id.startswith("0x") else parent_collection_id)
-            condition_bytes32 = bytes.fromhex(condition_id[2:] if condition_id.startswith("0x") else condition_id)
-            
-            collection_id = ctf_contract.functions.getCollectionId(
-                parent_bytes32,
-                condition_bytes32,
-                index_set
-            ).call()
-            
-            return "0x" + collection_id.hex()
-        except Exception as e:
-            print(f"Warning: Failed to call on-chain getCollectionId: {e}", file=sys.stderr)
-            print("Falling back to simplified calculation...", file=sys.stderr)
-    
-    # 简化版本：使用文档中描述的公式
-    # 注意：这可能在 parentCollectionId != 0 时不够精确
-    if parent_collection_id.startswith("0x"):
-        parent_bytes = bytes.fromhex(parent_collection_id[2:])
-    else:
-        parent_bytes = bytes.fromhex(parent_collection_id)
-    
-    if condition_id.startswith("0x"):
-        condition_bytes = bytes.fromhex(condition_id[2:])
-    else:
-        condition_bytes = bytes.fromhex(condition_id)
-    
-    index_set_bytes = index_set.to_bytes(32, byteorder='big')
-    
-    # abi.encodePacked: 直接拼接字节
-    packed = parent_bytes + condition_bytes + index_set_bytes
-    collection_id = keccak256(packed)
-    
-    return "0x" + collection_id.hex()
+    if w3 is None or not ctf_address:
+        raise ValueError(
+            "CTF collection IDs require on-chain getCollectionId; provide Web3 "
+            "and ctf_address (CLI: --use-onchain --rpc-url <Polygon RPC URL>)"
+        )
+
+    # 不提供本地哈希回退：哈希不是 CTF 的 collectionId。
+    try:
+        # ConditionalTokens 合约 ABI（只需要 getCollectionId 方法）
+        ctf_abi = [
+            {
+                "inputs": [
+                    {"internalType": "bytes32", "name": "parentCollectionId", "type": "bytes32"},
+                    {"internalType": "bytes32", "name": "conditionId", "type": "bytes32"},
+                    {"internalType": "uint256", "name": "indexSet", "type": "uint256"}
+                ],
+                "name": "getCollectionId",
+                "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ]
+
+        ctf_contract = w3.eth.contract(address=Web3.to_checksum_address(ctf_address), abi=ctf_abi)
+
+        parent_bytes32 = bytes.fromhex(parent_collection_id[2:] if parent_collection_id.startswith("0x") else parent_collection_id)
+        condition_bytes32 = bytes.fromhex(condition_id[2:] if condition_id.startswith("0x") else condition_id)
+
+        collection_id = ctf_contract.functions.getCollectionId(
+            parent_bytes32,
+            condition_bytes32,
+            index_set
+        ).call()
+
+        return "0x" + collection_id.hex()
+    except Exception as exc:
+        raise RuntimeError(
+            "CTF getCollectionId failed; retry with a working Polygon RPC. "
+            "No substitute collection or token ID was generated."
+        ) from exc
 
 
 def calculate_position_id(
@@ -318,7 +300,7 @@ def decode_condition_preparation_log(log: Dict, w3: Web3) -> Optional[Dict]:
 
 def get_oracle_from_condition_id(
     condition_id: str,
-    rpc_url: str = POLYGON_RPC_URL,
+    rpc_url: str = None,
     ctf_address: Optional[str] = None
 ) -> Optional[str]:
     """
@@ -332,6 +314,7 @@ def get_oracle_from_condition_id(
     Returns:
         Oracle 地址，如果查询失败返回 None
     """
+    rpc_url = get_rpc_url() if rpc_url is None else rpc_url
     if ctf_address is None:
         ctf_address = CONDITIONAL_TOKENS_ADDRESS
     
@@ -381,7 +364,7 @@ def get_oracle_from_condition_id(
 def decode_market_from_log(
     tx_hash: str,
     log_index: int,
-    rpc_url: str = POLYGON_RPC_URL,
+    rpc_url: str = None,
     ctf_address: Optional[str] = None
 ) -> Optional[Dict]:
     """
@@ -395,6 +378,7 @@ def decode_market_from_log(
     Returns:
         市场信息字典
     """
+    rpc_url = get_rpc_url() if rpc_url is None else rpc_url
     w3 = Web3(Web3.HTTPProvider(rpc_url))
     
     if not w3.is_connected():
@@ -501,7 +485,7 @@ def fetch_gamma_event(slug: str) -> Optional[Dict]:
         事件信息字典，如果获取失败返回 None
     """
     try:
-        url = f"{GAMMA_API_BASE}/events"
+        url = f"{env_str('POLYDATA_GAMMA_API_BASE')}/events"
         params = {"slug": slug}
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
@@ -531,7 +515,7 @@ def fetch_gamma_market(slug: str, market_index: Optional[int] = None, _is_recurs
     """
     # 首先尝试作为市场 slug 查询（使用查询参数）
     try:
-        url = f"{GAMMA_API_BASE}/markets"
+        url = f"{env_str('POLYDATA_GAMMA_API_BASE')}/markets"
         params = {"slug": slug}
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
@@ -646,6 +630,8 @@ def verify_with_gamma(market_data: Dict, slug: str) -> bool:
 
 
 def main():
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser(
         description="Polymarket 市场参数解码器",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -699,7 +685,7 @@ def main():
     )
     parser.add_argument(
         "--rpc-url",
-        default=POLYGON_RPC_URL,
+        default=env_str("POLYMARKET_RPC_URL"),
         help="Polygon RPC URL（默认仅从 POLYMARKET_RPC_URL 读取）"
     )
     parser.add_argument(
@@ -715,7 +701,7 @@ def main():
     parser.add_argument(
         "--use-onchain",
         action="store_true",
-        help="调用链上合约获取精确的 collectionId（需要 RPC 连接）"
+        help="从 conditionId 或 Gamma 生成 TokenId 时必须启用，使用链上 CTF collectionId（需要 RPC）"
     )
     parser.add_argument(
         "--market-index",

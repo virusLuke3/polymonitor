@@ -458,10 +458,14 @@ def authenticate_request(
         return Principal("system", 0, "local-disabled", "admin", False, ALLOWED_SCOPES)
     authorization = str(request.headers.get("Authorization", "")).strip()
     raw_cookie = str(request.cookies.get(session_cookie_name(), "")).strip()
+    has_bearer = authorization.lower().startswith("bearer ")
+    if not has_bearer and not raw_cookie:
+        raise AuthError(401, "AUTH_REQUIRED", "Sign in with an administrator account or provide a scoped API key.")
+
     conn = get_connection()
     try:
         csrf_hash = ""
-        if authorization.lower().startswith("bearer "):
+        if has_bearer:
             principal = _api_key_principal(conn, authorization[7:].strip())
         elif raw_cookie:
             principal, csrf_hash = _session_principal(conn, raw_cookie, touch=True)

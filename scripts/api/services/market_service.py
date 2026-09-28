@@ -3,41 +3,33 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable, Dict, List, Optional, Protocol, cast
+from typing import Any, Callable, Dict, List, Optional, Protocol
 from urllib.parse import unquote
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 from api.services import clickhouse_orderfilled_service
 from api.services import market_group_service
+from api.services import outcome_semantics_service
 from market.market_identity import MarketIdentity, oracle_event_lookup_clause, oracle_event_lookup_terms
+from market.market_serving_identity import binary_serving_identity_sql
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v14"
-DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_AGE_HOURS", "336"))
-DEFAULT_ACTIVE_MARKET_ACTIVITY_HOURS = int(os.environ.get("POLYDATA_ACTIVE_MARKET_ACTIVITY_HOURS", "72"))
-DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT = int(os.environ.get("POLYDATA_ACTIVE_MARKET_LOB_PREFETCH_LIMIT", "0"))
-DEFAULT_ACTIVE_MARKET_MIN_PRICE = Decimal(os.environ.get("POLYDATA_ACTIVE_MARKET_MIN_PRICE", "0.05"))
-DEFAULT_ACTIVE_MARKET_MAX_PRICE = Decimal(os.environ.get("POLYDATA_ACTIVE_MARKET_MAX_PRICE", "0.95"))
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v16"
+from api.config import MarketSelectionSettings
+
+
 DEFAULT_MARKET_SEARCH_ACTIVE_POOL_SIZE = 25000
 DEFAULT_MARKET_SEARCH_RECENT_POOL_SIZE = 20000
-DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
+DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = f"""
+    {binary_serving_identity_sql("m")}
+    AND
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%onchain-registry%%'
-    AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%orderfilled-placeholder%%'
-    AND LOWER(COALESCE(CAST(m.category AS TEXT), '')) NOT LIKE '%%orderfilled-placeholder%%'
-    AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%trade-indexer-placeholder%%'
-    AND LOWER(COALESCE(CAST(m.title AS TEXT), '')) NOT LIKE 'trade indexer placeholder market%%'
     AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%updown-5m%%'
     AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%updown-15m%%'
     AND LOWER(COALESCE(CAST(m.title AS TEXT), '')) NOT LIKE '%% up or down - %%'
@@ -48,7 +40,7 @@ def _service_callable(
     context: Mapping[str, Any],
     name: str,
 ) -> Callable[..., Any]:
-    return cast(Callable[..., Any], resolve_service_callable(context, name))
+    return resolve_service_callable(context, name)
 
 
 @dataclass(frozen=True)
@@ -62,6 +54,8 @@ class MarketLookupDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketLookupDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             query_one=_service_callable(context, "query_one"),
             utc_now_iso=_service_callable(context, "utc_now_iso"),
@@ -84,6 +78,8 @@ class MarketOracleDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketOracleDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             lookup=MarketLookupDependencies.from_context(context),
             query_all=_service_callable(context, "query_all"),
@@ -108,6 +104,8 @@ class RecentOracleDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> RecentOracleDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             get_snapshot_payload=_service_callable(
                 context,
@@ -130,6 +128,8 @@ class MarketOraclePayloadDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketOraclePayloadDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             oracle=MarketOracleDependencies.from_context(context),
             get_snapshot_payload=_service_callable(
@@ -154,6 +154,8 @@ class MarketTradeReadDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketTradeReadDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             source=context,
             get_existing_trade_read_source=_service_callable(
@@ -161,10 +163,7 @@ class MarketTradeReadDependencies:
                 "get_existing_trade_read_source",
             ),
             identifier_name=_service_callable(context, "_identifier_name"),
-            trade_v2_core_table=resolve_service_value(
-                context,
-                "TRADE_V2_CORE_TABLE",
-            ),
+            trade_v2_core_table=context.get("TRADE_V2_CORE_TABLE"),
             query_all=_service_callable(context, "query_all"),
             get_trade_market_projection_sql=_service_callable(
                 context,
@@ -184,6 +183,8 @@ class RecentTradeDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> RecentTradeDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             get_snapshot_payload=_service_callable(
                 context,
@@ -195,6 +196,7 @@ class RecentTradeDependencies:
 
 @dataclass(frozen=True)
 class MarketSearchDependencies:
+    selection: MarketSelectionSettings
     source: Mapping[str, Any] = field(repr=False)
     utc_now_iso: Callable[..., Any]
     query_all: Callable[..., Any]
@@ -206,7 +208,10 @@ class MarketSearchDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketSearchDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
+            selection=getattr(context.get("SETTINGS"), "market_selection", MarketSelectionSettings()),
             source=context,
             utc_now_iso=_service_callable(context, "utc_now_iso"),
             query_all=_service_callable(context, "query_all"),
@@ -233,6 +238,8 @@ class MarketServingReadDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketServingReadDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             table_exists=_service_callable(context, "table_exists"),
             query_one=_service_callable(context, "query_one"),
@@ -258,6 +265,8 @@ class MarketPriceDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketPriceDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             lookup=MarketLookupDependencies.from_context(context),
             serving=MarketServingReadDependencies.from_context(context),
@@ -272,10 +281,7 @@ class MarketPriceDependencies:
                 "get_existing_trade_read_source",
             ),
             identifier_name=_service_callable(context, "_identifier_name"),
-            trade_v2_core_table=resolve_service_value(
-                context,
-                "TRADE_V2_CORE_TABLE",
-            ),
+            trade_v2_core_table=context.get("TRADE_V2_CORE_TABLE"),
             iso_days_before=_service_callable(context, "iso_days_before"),
             utc_date_days_ago=_service_callable(
                 context,
@@ -304,6 +310,8 @@ class MarketChartDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketChartDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             source=context,
             lookup=MarketLookupDependencies.from_context(context),
@@ -347,9 +355,11 @@ class MarketWorkspaceDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketWorkspaceDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             source=context,
-            application=resolve_service_value(context, "app"),
+            application=context.get("app"),
             lookup=MarketLookupDependencies.from_context(context),
             serving=MarketServingReadDependencies.from_context(context),
             price=MarketPriceDependencies.from_context(context),
@@ -367,10 +377,11 @@ class MarketWorkspaceDependencies:
 
 @dataclass(frozen=True)
 class MarketListDependencies:
+    selection: MarketSelectionSettings
     source: Mapping[str, Any] = field(repr=False)
     application: Any
     snapshot_store: Any
-    lob_runtime_manager: Any
+    lob_reader: Callable[..., Any] | None
     utc_now_iso: Callable[..., Any]
     parse_iso_datetime: Callable[..., Any]
     get_market_clob_price_snapshot: Callable[..., Any]
@@ -394,14 +405,14 @@ class MarketListDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketListDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
+            selection=getattr(context.get("SETTINGS"), "market_selection", MarketSelectionSettings()),
             source=context,
-            application=resolve_service_value(context, "app"),
-            snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
-            lob_runtime_manager=resolve_optional_service_value(
-                context,
-                "LOB_RUNTIME_MANAGER",
-            ),
+            application=context.get("app"),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
+            lob_reader=resolve_optional_service_callable(context, "get_runtime_lob_by_token_payload"),
             utc_now_iso=_service_callable(context, "utc_now_iso"),
             parse_iso_datetime=_service_callable(context, "parse_iso_datetime"),
             get_market_clob_price_snapshot=_service_callable(
@@ -417,10 +428,7 @@ class MarketListDependencies:
                 "utc_date_days_ago",
             ),
             identifier_name=_service_callable(context, "_identifier_name"),
-            trade_v2_core_table=resolve_service_value(
-                context,
-                "TRADE_V2_CORE_TABLE",
-            ),
+            trade_v2_core_table=context.get("TRADE_V2_CORE_TABLE"),
             query_all=_service_callable(context, "query_all"),
             query_one=_service_callable(context, "query_one"),
             parse_json_list=_service_callable(context, "parse_json_list"),
@@ -462,13 +470,15 @@ def _default_active_market_activity_sql(stats_alias: str) -> str:
     )
     """
 
-def _default_active_market_price_sql(stats_alias: str) -> str:
+
+def _default_active_market_price_sql(stats_alias: str, selection: MarketSelectionSettings) -> str:
     return f"""
     (
         {stats_alias}.latest_price IS NULL
-        OR (CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) >= {DEFAULT_ACTIVE_MARKET_MIN_PRICE} AND CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) <= {DEFAULT_ACTIVE_MARKET_MAX_PRICE})
+        OR (CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) >= {selection.min_price} AND CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) <= {selection.max_price})
     )
     """
+
 
 def _default_active_market_recent_trade_sql(stats_alias: str) -> str:
     return f"COALESCE({stats_alias}.last_trade_at, {stats_alias}.latest_trade_at) >= ?"
@@ -487,6 +497,7 @@ def _iso_hours_before(now_iso: str, hours: int) -> str:
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     return (now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+
 
 PRICE_TARGET_RE = re.compile(r"\b(?:hit|reach)\s+\$+\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kmb])?\b", re.IGNORECASE)
 PAIR_RE = re.compile(r"\b([A-Z0-9]{2,12}/[A-Z0-9]{2,12})\b")
@@ -534,6 +545,7 @@ def active_market_clickhouse_primary_enabled() -> bool:
 def _trim_active_markets_payload(
     payload: Any,
     page_size: int,
+    selection: MarketSelectionSettings,
 ) -> Optional[Dict[str, Any]]:
     if not isinstance(payload, dict):
         return None
@@ -544,7 +556,7 @@ def _trim_active_markets_payload(
         item
         for item in items
         if isinstance(item, dict)
-        and _is_tradeable_probability(item.get("latestPrice") or item.get("latest_price"))
+        and _is_tradeable_probability(item.get("latestPrice") or item.get("latest_price"), selection=selection)
         and int(item.get("tradeCount24h") or item.get("trade_count_24h") or 0) > 0
     ]
     if not filtered_items:
@@ -579,15 +591,9 @@ def _normalized_gamma_active_keys(
         return set(), set()
     payload = dependencies.get_gamma_active_market_filter() or {}
     condition_ids = {
-        str(value or "").strip().lower()
-        for value in (payload.get("conditionIds") or [])
-        if str(value or "").strip()
+        str(value or "").strip().lower() for value in (payload.get("conditionIds") or []) if str(value or "").strip()
     }
-    slugs = {
-        str(value or "").strip().lower()
-        for value in (payload.get("slugs") or [])
-        if str(value or "").strip()
-    }
+    slugs = {str(value or "").strip().lower() for value in (payload.get("slugs") or []) if str(value or "").strip()}
     return condition_ids, slugs
 
 
@@ -627,7 +633,9 @@ def _prefer_gamma_active_candidate_rows(
     return [*gamma_rows, *fallback_rows]
 
 
-def _blend_recent_candidate_rows(volume_rows: List[Dict[str, Any]], recent_rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+def _blend_recent_candidate_rows(
+    volume_rows: List[Dict[str, Any]], recent_rows: List[Dict[str, Any]], target_count: int
+) -> List[Dict[str, Any]]:
     if not recent_rows:
         return volume_rows
     target_count = max(1, int(target_count))
@@ -771,7 +779,11 @@ def _workspace_health(
         oracle_status = "open-no-events"
     else:
         oracle_status = "unbound"
-    price_status = "ok" if price and (price.get("latestYesPrice") not in (None, "") or price.get("latestPrice") not in (None, "")) else "missing"
+    price_status = (
+        "ok"
+        if price and (price.get("latestYesPrice") not in (None, "") or price.get("latestPrice") not in (None, ""))
+        else "missing"
+    )
     if chart_status == "missing" and price_status == "ok":
         chart_status = "snapshot" if (chart or {}).get("points") else "missing-local-history"
     if group and selected_outcome is None:
@@ -786,7 +798,7 @@ def _workspace_health(
         issues.append("oracle-market-id-mismatch")
     if group_status == "outcome-missing":
         issues.append("group-selected-outcome-missing")
-    return {
+    payload = {
         "marketId": market_id,
         "priceStatus": price_status,
         "chartStatus": chart_status,
@@ -824,27 +836,15 @@ def _workspace_evidence(
         outcomes = []
 
     latest_chart_at = max(
-        (
-            str(point.get("timestamp"))
-            for point in points
-            if isinstance(point, dict) and point.get("timestamp")
-        ),
+        (str(point.get("timestamp")) for point in points if isinstance(point, dict) and point.get("timestamp")),
         default=None,
     )
     latest_trade_at = max(
-        (
-            str(trade.get("timestamp"))
-            for trade in trades
-            if isinstance(trade, dict) and trade.get("timestamp")
-        ),
+        (str(trade.get("timestamp")) for trade in trades if isinstance(trade, dict) and trade.get("timestamp")),
         default=None,
     )
     latest_oracle_at = max(
-        (
-            str(event.get("eventTime"))
-            for event in timeline
-            if isinstance(event, dict) and event.get("eventTime")
-        ),
+        (str(event.get("eventTime")) for event in timeline if isinstance(event, dict) and event.get("eventTime")),
         default=None,
     )
     identifiers = {
@@ -858,11 +858,7 @@ def _workspace_evidence(
         if value not in (None, "")
     }
     has_price = bool(
-        price
-        and (
-            price.get("latestYesPrice") not in (None, "")
-            or price.get("latestPrice") not in (None, "")
-        )
+        price and (price.get("latestYesPrice") not in (None, "") or price.get("latestPrice") not in (None, ""))
     )
     claims = [
         {
@@ -911,8 +907,7 @@ def _workspace_evidence(
                     (
                         event.get("sourceAdapter") or event.get("sourceOracle")
                         for event in timeline
-                        if isinstance(event, dict)
-                        and (event.get("sourceAdapter") or event.get("sourceOracle"))
+                        if isinstance(event, dict) and (event.get("sourceAdapter") or event.get("sourceOracle"))
                     ),
                     identity.get("oracle") or "uma-oracle",
                 )
@@ -950,7 +945,10 @@ def _workspace_diagnostics(
     points = chart.get("points") if isinstance(chart, dict) else []
     if not isinstance(points, list):
         points = []
-    chart_status = str(chart.get("historyStatus") or _chart_history_status(str(chart.get("range") or ""), str(chart.get("interval") or ""), points))
+    chart_status = str(
+        chart.get("historyStatus")
+        or _chart_history_status(str(chart.get("range") or ""), str(chart.get("interval") or ""), points)
+    )
     oracle_timeline = oracle_payload.get("timeline") if isinstance(oracle_payload, dict) else []
     if not isinstance(oracle_timeline, list):
         oracle_timeline = []
@@ -995,11 +993,11 @@ def _workspace_diagnostics(
     }
 
 
-def _is_tradeable_probability(value: Any) -> bool:
+def _is_tradeable_probability(value: Any, selection: MarketSelectionSettings) -> bool:
     price = _decimal_from_any(value)
     if price is None:
         return True
-    return DEFAULT_ACTIVE_MARKET_MIN_PRICE <= price <= DEFAULT_ACTIVE_MARKET_MAX_PRICE
+    return selection.min_price <= price <= selection.max_price
 
 
 def _has_recent_trade_window(row: Dict[str, Any]) -> bool:
@@ -1008,20 +1006,20 @@ def _has_recent_trade_window(row: Dict[str, Any]) -> bool:
     return trade_count > 0 or (volume_24h is not None and volume_24h > 0)
 
 
-def _filter_tradeable_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _filter_tradeable_market_rows(rows: List[Dict[str, Any]], selection: MarketSelectionSettings) -> List[Dict[str, Any]]:
     filtered: List[Dict[str, Any]] = []
     for row in rows:
         if not _has_recent_trade_window(row):
             continue
-        if not _is_tradeable_probability(row.get("latest_price")):
+        if not _is_tradeable_probability(row.get("latest_price"), selection=selection):
             continue
         filtered.append(row)
     return filtered
 
 
-def _prefer_tradeable_market_rows(rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+def _prefer_tradeable_market_rows(rows: List[Dict[str, Any]], target_count: int, selection: MarketSelectionSettings) -> List[Dict[str, Any]]:
     """Prefer actively traded, non-terminal markets for the primary active feed."""
-    tradeable_rows = _filter_tradeable_market_rows(rows)
+    tradeable_rows = _filter_tradeable_market_rows(rows, selection=selection)
     return tradeable_rows[:target_count]
 
 
@@ -1037,7 +1035,11 @@ def _market_family_key(row: Dict[str, Any]) -> str:
     question_id = str(row.get("question_id") or "").strip().lower()
     if question_id:
         return f"question:{question_id}"
-    title = re.sub(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\b\d+(?:\.\d+)?\b", " ", str(row.get("title") or "").lower())
+    title = re.sub(
+        r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\b\d+(?:\.\d+)?\b",
+        " ",
+        str(row.get("title") or "").lower(),
+    )
     words = re.findall(r"[a-z][a-z0-9]+", title)
     prefix = " ".join(words[:5]) if words else str(row.get("slug") or row.get("condition_id") or row.get("id"))
     category = str(row.get("category") or "").strip().lower()
@@ -1052,17 +1054,26 @@ def _market_category_bucket(row: Dict[str, Any]) -> str:
     text = " ".join((category, tags, title, slug))
     if "orderfilled-placeholder" in text or title.startswith("trade indexer placeholder market"):
         return "placeholder"
-    if any(token in text for token in ("politic", "election", "trump", "biden", "congress", "iran", "ceasefire", "war", "president")):
+    if any(
+        token in text
+        for token in ("politic", "election", "trump", "biden", "congress", "iran", "ceasefire", "war", "president")
+    ):
         return "politics"
     if any(token in text for token in ("crypto", "bitcoin", "ethereum", "solana", "xrp", "token", "btc", "eth")):
         return "crypto"
-    if any(token in text for token in ("finance", "business", "econom", "fed", "rate", "inflation", "ipo", "valuation", "stock", "macro")):
+    if any(
+        token in text
+        for token in ("finance", "business", "econom", "fed", "rate", "inflation", "ipo", "valuation", "stock", "macro")
+    ):
         return "macro"
     if any(token in text for token in ("tech", "ai", "openai", "spacex", "tesla", "apple", "google", "nvidia")):
         return "tech"
     if any(token in text for token in ("weather", "temperature", "hurricane", "rain", "snow")):
         return "weather"
-    if any(token in text for token in ("sports", "tennis", "soccer", "nba", "nfl", "mlb", "nhl", "fifa", "formula1", "ufc", "valorant")):
+    if any(
+        token in text
+        for token in ("sports", "tennis", "soccer", "nba", "nfl", "mlb", "nhl", "fifa", "formula1", "ufc", "valorant")
+    ):
         return "sports"
     if any(token in text for token in ("esports", "games", "gaming", "counter-strike", "league of legends")):
         return "games"
@@ -1195,7 +1206,9 @@ def _coalesce_native_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, A
         ranked = _rank_default_market_rows(group_rows)
         representative = dict(ranked[0])
         representative["native_outcome_count"] = len(group_rows)
-        representative["volume_24h"] = sum((_decimal_from_any(row.get("volume_24h")) or Decimal("0")) for row in group_rows)
+        representative["volume_24h"] = sum(
+            (_decimal_from_any(row.get("volume_24h")) or Decimal("0")) for row in group_rows
+        )
         representative["trade_count_24h"] = sum(int(row.get("trade_count_24h") or 0) for row in group_rows)
         coalesced.append(representative)
     return [*coalesced, *passthrough]
@@ -1218,10 +1231,10 @@ def _prefer_lob_ready_market_rows(
 ) -> List[Dict[str, Any]]:
     if not _env_flag("POLYDATA_ACTIVE_MARKET_PREFER_LOB_READY", True):
         return rows
-    manager = dependencies.lob_runtime_manager
-    if manager is None or not hasattr(manager, "get_market_snapshot"):
+    reader = dependencies.lob_reader
+    if reader is None:
         return rows
-    max_checks = min(len(rows), max(0, DEFAULT_ACTIVE_MARKET_LOB_PREFETCH_LIMIT), max(target_count * 3, target_count))
+    max_checks = min(len(rows), max(0, dependencies.selection.lob_prefetch_limit), max(target_count * 3, target_count))
     if max_checks <= 0:
         return rows
 
@@ -1235,16 +1248,16 @@ def _prefer_lob_ready_market_rows(
             deferred.append(row)
             continue
         try:
-            payload = manager.get_market_snapshot(
+            payload = reader(
+                yes_token_id,
                 market_id=int(market_id),
-                yes_token_id=yes_token_id,
                 no_token_id=no_token_id,
                 market_title=str(row.get("title") or ""),
             )
         except Exception:
             deferred.append(row)
             continue
-        if _lob_payload_has_levels(payload):
+        if payload.get("bookStatus") == "live" and _lob_payload_has_levels(payload):
             ready.append(row)
         else:
             deferred.append(row)
@@ -1314,11 +1327,11 @@ def _extract_market_chart_context(
     pair_match = PAIR_RE.search(description)
     pair_label = pair_match.group(1) if pair_match else None
     yahoo_symbol = _resolve_yahoo_symbol(title, description)
-    is_up_down = "up or down" in title.lower() or "close price is greater than or equal to the open price" in description.lower()
+    is_up_down = (
+        "up or down" in title.lower() or "close price is greater than or equal to the open price" in description.lower()
+    )
     is_price_target = target_price is not None and (
-        "price specified in the title" in description.lower()
-        or "hit" in title.lower()
-        or "reach" in title.lower()
+        "price specified in the title" in description.lower() or "hit" in title.lower() or "reach" in title.lower()
     )
 
     if not yahoo_symbol or not (is_up_down or is_price_target):
@@ -1650,7 +1663,7 @@ def _search_markets(
         price = _decimal_from_any(row.get("latest_price"))
         if price is None:
             return True
-        return DEFAULT_ACTIVE_MARKET_MIN_PRICE <= price <= DEFAULT_ACTIVE_MARKET_MAX_PRICE
+        return dependencies.selection.min_price <= price <= dependencies.selection.max_price
 
     for row in rows:
         status = str(row.get("status") or "").lower()
@@ -1699,7 +1712,9 @@ def _search_markets(
 
     def row_sort_key(row: Dict[str, Any]) -> tuple:
         status = str(row.get("status") or "").lower()
-        status_rank = 0 if status == "active" else 1 if status == "open_terminal" else 2 if status == "open_no_data" else 3
+        status_rank = (
+            0 if status == "active" else 1 if status == "open_terminal" else 2 if status == "open_no_data" else 3
+        )
         recent_trade = timestamp_sort_value(row.get("last_trade_at") or row.get("latest_trade_at"))
         created = timestamp_sort_value(row.get("created_at"))
         trade_count = _int_value(row.get("trade_count_24h"), 0)
@@ -1718,12 +1733,7 @@ def _search_markets(
         )
 
     rows.sort(key=row_sort_key)
-    return {
-        "items": [
-            _market_list_item(dependencies, row)
-            for row in rows[:limit]
-        ]
-    }
+    return {"items": [_market_list_item(dependencies, row) for row in rows[:limit]]}
 
 
 def get_market_by_slug(
@@ -1766,6 +1776,7 @@ def _get_market_by_slug(
         LEFT JOIN market_status_snapshot mss_detail ON mss_detail.market_id = m.id
         LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
         WHERE m.slug = ? COLLATE NOCASE
+          AND {binary_serving_identity_sql("m")}
         LIMIT 1
         """,
         (now_iso, slug),
@@ -1806,18 +1817,45 @@ def _get_market_by_id(
             mss_detail.completion_time,
             COALESCE(mss_detail.gamma_closed, FALSE) AS gamma_closed,
             mss_detail.gamma_closed_time,
+            mia.canonical_market_id AS identity_alias_canonical_market_id,
             mlp.latest_yes_price,
             mlp.latest_no_price,
             mlp.latest_price
         FROM markets m
         LEFT JOIN market_status_snapshot mss_detail ON mss_detail.market_id = m.id
         LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+        LEFT JOIN market_identity_aliases_active_v1 mia ON mia.source_market_id = m.id
         WHERE m.id = ?
         LIMIT 1
         """,
         (now_iso, market_id),
     )
-    return market or None
+    if not market:
+        return None
+    canonical_market_id = market.get("identity_alias_canonical_market_id")
+    if canonical_market_id in (None, ""):
+        return market
+    result = dict(market)
+    result["superseded"] = True
+    result["canonicalMarketId"] = int(canonical_market_id)
+    result["canonical_market_id"] = int(canonical_market_id)
+    return result
+
+
+def _superseded_market_payload(market_id: int, market: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    if not bool(market.get("superseded")):
+        return None
+    canonical_market_id = market.get("canonicalMarketId") or market.get("canonical_market_id")
+    if canonical_market_id in (None, ""):
+        return None
+    return {
+        "error": "Market identity superseded",
+        "marketId": int(market_id),
+        "localMarketId": int(market_id),
+        "superseded": True,
+        "canonicalMarketId": int(canonical_market_id),
+        "_status": 409,
+    }
 
 
 def get_trades_by_market_id(
@@ -1857,7 +1895,7 @@ def _get_trades_by_market_id(
         rows = dependencies.query_all(
             f"""
             SELECT
-                {dependencies.get_trade_market_projection_sql('t')}
+                {dependencies.get_trade_market_projection_sql("t")}
             FROM {trade_source} t
             WHERE t.market_id = ?
             ORDER BY t.block_time DESC, t.block_number DESC, t.log_index DESC
@@ -1917,25 +1955,24 @@ def get_oracle_events_by_market_id(
     )
 
 
+def _with_oracle_logical_aliases(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Bind producer-owned logical oracle values before public label projection."""
+
+    return outcome_semantics_service.bind_trusted_oracle_logical_fields(payload)
+
+
 def _get_oracle_events_by_market_id(
     dependencies: MarketOracleDependencies,
     market_id: int,
     market: Optional[dict] = None,
 ) -> List[Dict[str, Any]]:
-    market = (
-        market
-        if market is not None
-        else _get_market_by_id(dependencies.lookup, market_id)
-    )
+    market = market if market is not None else _get_market_by_id(dependencies.lookup, market_id)
     identity = MarketIdentity.from_row(market) if market else None
-    backend = str(
-        dependencies.get_backend() if dependencies.get_backend is not None else ""
-    ).strip().lower()
+    backend = str(dependencies.get_backend() if dependencies.get_backend is not None else "").strip().lower()
     if backend in {"postgres", "postgresql"} and identity:
         terms = oracle_event_lookup_terms(identity)
         union_sql = "\nUNION ALL\n".join(
-            f"SELECT oe.* FROM oracle_events oe WHERE oe.{column_name} = ?"
-            for column_name, _value in terms
+            f"SELECT oe.* FROM oracle_events oe WHERE oe.{column_name} = ?" for column_name, _value in terms
         )
         rows = dependencies.query_all(
             f"""
@@ -1969,7 +2006,7 @@ def _get_oracle_events_by_market_id(
             """,
             (*[value for _column_name, value in terms], market_id),
         )
-        return [dependencies.normalize_oracle_event(row) for row in rows]
+        return [_with_oracle_logical_aliases(dependencies.normalize_oracle_event(row)) for row in rows]
 
     if market:
         where_sql, where_params = oracle_event_lookup_clause(identity or MarketIdentity.from_row(market), "oe")
@@ -2000,7 +2037,7 @@ def _get_oracle_events_by_market_id(
         """,
         (market_id, *where_params),
     )
-    return [dependencies.normalize_oracle_event(row) for row in rows]
+    return [_with_oracle_logical_aliases(dependencies.normalize_oracle_event(row)) for row in rows]
 
 
 def get_recent_oracle_snapshot(
@@ -2008,11 +2045,14 @@ def get_recent_oracle_snapshot(
     limit: int = 24,
 ) -> List[Dict[str, Any]]:
     dependencies = RecentOracleDependencies.from_context(ctx)
-    cache_key = json.dumps({"limit": limit, "v": 2}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"limit": limit, "v": 3}, sort_keys=True, ensure_ascii=True)
     return dependencies.get_snapshot_payload(
         "snapshot:oracle_recent",
         cache_key,
-        lambda: dependencies.get_recent_oracle_events(limit=limit),
+        lambda: [
+            _with_oracle_logical_aliases(row)
+            for row in dependencies.get_recent_oracle_events(limit=limit)
+        ],
         ttl_seconds=30,
     )
 
@@ -2049,10 +2089,13 @@ def _read_market_workspace_serving_row(
     if not dependencies.table_exists("market_workspace_serving"):
         return None
     return dependencies.query_one(
-        """
-        SELECT market_id, detail_payload, price_payload, oracle_summary, content_summary, updated_at
-        FROM market_workspace_serving
-        WHERE market_id = ?
+        f"""
+        SELECT serving.market_id, serving.detail_payload, serving.price_payload,
+               serving.oracle_summary, serving.content_summary, serving.updated_at
+        FROM market_workspace_serving serving
+        JOIN markets m ON m.id = serving.market_id
+        WHERE serving.market_id = ?
+          AND {binary_serving_identity_sql("m")}
         LIMIT 1
         """,
         (market_id,),
@@ -2136,11 +2179,16 @@ def _read_market_chart_serving_payload(
     normalized_range = str(range_name or "1d").strip().lower()
     normalized_interval = str(interval or "5m").strip().lower()
     row = dependencies.query_one(
-        """
-        SELECT market_id, range_name, interval_name, kind, history_status, point_count, points, updated_at
-        FROM market_chart_serving
-        WHERE market_id = ? AND range_name = ?
-        ORDER BY CASE WHEN interval_name = ? THEN 0 ELSE 1 END, updated_at DESC
+        f"""
+        SELECT serving.market_id, serving.range_name, serving.interval_name,
+               serving.kind, serving.history_status, serving.point_count,
+               serving.points, serving.updated_at
+        FROM market_chart_serving serving
+        JOIN markets m ON m.id = serving.market_id
+        WHERE serving.market_id = ? AND serving.range_name = ?
+          AND {binary_serving_identity_sql("m")}
+        ORDER BY CASE WHEN serving.interval_name = ? THEN 0 ELSE 1 END,
+                 serving.updated_at DESC
         LIMIT 1
         """,
         (market_id, normalized_range, normalized_interval),
@@ -2249,13 +2297,10 @@ def _get_market_price_summary(
             ),
             ttl_seconds=90,
         )
-    market = (
-        market
-        if market is not None
-        else _get_market_by_id(dependencies.lookup, market_id)
-    )
-    summary_row = dependencies.query_one(
-        """
+    market = market if market is not None else _get_market_by_id(dependencies.lookup, market_id)
+    summary_row = (
+        dependencies.query_one(
+            """
         SELECT
             COALESCE(mlp.market_id, mls.market_id) AS market_id,
             COALESCE(mlp.latest_price, mls.latest_price) AS latest_price,
@@ -2270,17 +2315,15 @@ def _get_market_price_summary(
         LEFT JOIN market_list_serving mls ON mls.market_id = requested.market_id
         LIMIT 1
         """,
-        (market_id,),
-    ) or {}
+            (market_id,),
+        )
+        or {}
+    )
     latest_price = summary_row.get("latest_yes_price") or summary_row.get("latest_price")
     latest_yes_price = summary_row.get("latest_yes_price")
     latest_no_price = summary_row.get("latest_no_price")
     updated_at = summary_row.get("latest_trade_at")
-    clob_snapshot = (
-        dependencies.get_market_clob_price_snapshot(market)
-        if include_runtime_price
-        else None
-    )
+    clob_snapshot = dependencies.get_market_clob_price_snapshot(market) if include_runtime_price else None
     if clob_snapshot:
         latest_price = clob_snapshot.get("latestYesPrice") or clob_snapshot.get("latestPrice") or latest_price
         latest_yes_price = clob_snapshot.get("latestYesPrice") or latest_yes_price
@@ -2293,11 +2336,7 @@ def _get_market_price_summary(
         "trade_count_24h": summary_row.get("serving_trade_count_24h") or 0,
         "volume_24h": summary_row.get("serving_volume_24h") or 0,
     }
-    trade_source = (
-        dependencies.get_existing_trade_read_source()
-        if include_recent_stats
-        else None
-    )
+    trade_source = dependencies.get_existing_trade_read_source() if include_recent_stats else None
     if trade_source is None:
         pass
     elif dependencies.identifier_name(trade_source) == dependencies.trade_v2_core_table:
@@ -2312,16 +2351,10 @@ def _get_market_price_summary(
             WHERE market_id = ?
             """,
             (
-                dependencies.iso_days_before(updated_at, 1)
-                if updated_at
-                else dependencies.utc_date_days_ago(1),
+                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
                 (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
-                dependencies.iso_days_before(updated_at, 1)
-                if updated_at
-                else dependencies.utc_date_days_ago(1),
-                dependencies.iso_days_before(updated_at, 1)
-                if updated_at
-                else dependencies.utc_date_days_ago(1),
+                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
+                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
                 market_id,
             ),
         )
@@ -2337,13 +2370,9 @@ def _get_market_price_summary(
             WHERE market_id = ?
             """,
             (
-                dependencies.iso_days_before(updated_at, 1)
-                if updated_at
-                else dependencies.utc_date_days_ago(1),
+                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
                 (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
-                dependencies.iso_days_before(updated_at, 1)
-                if updated_at
-                else dependencies.utc_date_days_ago(1),
+                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
                 market_id,
             ),
         )
@@ -2357,22 +2386,23 @@ def _get_market_price_summary(
             return None
         return format(delta, "f")
 
-    return {
+    payload = {
         "marketId": market_id,
         "localMarketId": market_id,
-        "latestPrice": dependencies.format_trade_decimal(
-            latest_yes_price or latest_price
-        ),
+        "latestPrice": dependencies.format_trade_decimal(latest_yes_price or latest_price),
         "latestYesPrice": dependencies.format_trade_decimal(latest_yes_price),
         "latestNoPrice": dependencies.format_trade_decimal(latest_no_price),
-        "change1h": clob_snapshot.get("change1h") if clob_snapshot else _change(latest_price, recent_stats.get("price_1h_ago")),
-        "change24h": clob_snapshot.get("change24h") if clob_snapshot else _change(latest_price, recent_stats.get("price_24h_ago")),
-        "volume24h": dependencies.format_trade_decimal(
-            recent_stats.get("volume_24h")
-        ),
+        "change1h": clob_snapshot.get("change1h")
+        if clob_snapshot
+        else _change(latest_price, recent_stats.get("price_1h_ago")),
+        "change24h": clob_snapshot.get("change24h")
+        if clob_snapshot
+        else _change(latest_price, recent_stats.get("price_24h_ago")),
+        "volume24h": dependencies.format_trade_decimal(recent_stats.get("volume_24h")),
         "tradeCount24h": int(recent_stats.get("trade_count_24h") or 0),
         "updatedAt": updated_at,
     }
+    return payload
 
 
 def get_market_chart_payload(
@@ -2438,11 +2468,7 @@ def _get_market_chart_payload(
             ),
             ttl_seconds=180,
         )
-    market = (
-        market
-        if market is not None
-        else _get_market_by_id(dependencies.lookup, market_id)
-    )
+    market = market if market is not None else _get_market_by_id(dependencies.lookup, market_id)
     chart_context = (
         _extract_market_chart_context(
             dependencies.get_yahoo_market_snapshot,
@@ -2515,11 +2541,7 @@ def _get_market_chart_payload(
             price_source = "orderfilled-history"
     if include_runtime_series:
         point_count, distinct_count = _chart_point_stats(points)
-        needs_clob_series = (
-            not points
-            or point_count <= 2
-            or distinct_count <= 1
-        )
+        needs_clob_series = not points or point_count <= 2 or distinct_count <= 1
         if needs_clob_series:
             clob_points = dependencies.get_market_clob_price_series(
                 market,
@@ -2534,9 +2556,20 @@ def _get_market_chart_payload(
     effective_interval = interval
     if not points and latest not in (None, ""):
         timestamp = price.get("updatedAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        token_binding = {key: price.get(key) for key in ("tokenId", "tokenPrice") if price.get(key) not in (None, "")}
         points = [
-            {"timestamp": timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
-            {"timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+            {
+                "timestamp": timestamp,
+                "yesPrice": latest,
+                "noPrice": price.get("latestNoPrice"),
+                **token_binding,
+            },
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "yesPrice": latest,
+                "noPrice": price.get("latestNoPrice"),
+                **token_binding,
+            },
         ]
         effective_range = "snapshot"
         effective_interval = "snapshot"
@@ -2571,7 +2604,7 @@ def _build_market_oracle_payload(
     market_id: int,
     market: dict,
 ) -> Dict[str, Any]:
-    return {
+    return _with_oracle_logical_aliases({
         "marketId": market_id,
         "localMarketId": market_id,
         "gammaMarketId": market.get("gamma_market_id"),
@@ -2590,7 +2623,7 @@ def _build_market_oracle_payload(
             market_id,
             market=market,
         ),
-    }
+    })
 
 
 def _get_market_oracle_payload(
@@ -2598,14 +2631,10 @@ def _get_market_oracle_payload(
     market_id: int,
     market: Optional[dict] = None,
 ) -> Dict[str, Any]:
-    market = (
-        market
-        if market is not None
-        else _get_market_by_id(dependencies.oracle.lookup, market_id)
-    )
+    market = market if market is not None else _get_market_by_id(dependencies.oracle.lookup, market_id)
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    cache_key = json.dumps({"marketId": int(market_id), "v": 4}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"marketId": int(market_id), "v": 5}, sort_keys=True, ensure_ascii=True)
 
     return dependencies.get_snapshot_payload(
         "snapshot:market_oracle_payload",
@@ -2805,7 +2834,7 @@ def _settlement_payload(row: Dict[str, Any], *, include_raw: bool = False) -> Di
     }
     if include_raw:
         payload["settlementRaw"] = row.get("settlement_raw")
-    return payload
+    return _with_oracle_logical_aliases(payload)
 
 
 def _market_status_from_snapshot(row: Dict[str, Any], now_iso: str) -> str:
@@ -2829,9 +2858,7 @@ def _market_status_from_snapshot(row: Dict[str, Any], now_iso: str) -> str:
 
 
 def _is_postgres_dependencies(dependencies: MarketListDependencies) -> bool:
-    backend = str(
-        dependencies.get_backend() if dependencies.get_backend is not None else ""
-    ).strip().lower()
+    backend = str(dependencies.get_backend() if dependencies.get_backend is not None else "").strip().lower()
     return backend in {"postgres", "postgresql"}
 
 
@@ -2858,7 +2885,7 @@ def _market_list_item(
     dependencies: MarketListItemDependencies,
     row: Dict[str, Any],
 ) -> Dict[str, Any]:
-    return {
+    item = {
         "id": row.get("id"),
         "localMarketId": row.get("id"),
         "gammaMarketId": row.get("gamma_market_id"),
@@ -2887,6 +2914,23 @@ def _market_list_item(
         "lastTradeAt": row.get("last_trade_at") or row.get("latest_trade_at"),
         **_settlement_payload(row),
     }
+    for source, target in (
+        ("latest_yes_price", "latestYesPrice"),
+        ("latest_no_price", "latestNoPrice"),
+        ("latest_up_price", "latestUpPrice"),
+        ("latest_down_price", "latestDownPrice"),
+        ("latest_token_id", "tokenId"),
+        ("latest_token_price", "tokenPrice"),
+        ("outcome_prices", "outcomePrices"),
+        ("semantic_mode", "semanticMode"),
+        ("outcome_semantics_status", "outcomeSemanticsStatus"),
+        ("outcome_semantics_valid", "outcomeSemanticsValid"),
+        ("outcome_semantics_capabilities", "outcomeSemanticsCapabilities"),
+        ("outcome_semantics_capability_reason", "outcomeSemanticsCapabilityReason"),
+    ):
+        if source in row:
+            item[target] = row.get(source)
+    return item
 
 
 def _merge_clickhouse_stats(
@@ -2909,9 +2953,27 @@ def _merge_clickhouse_stats(
             continue
         stat = stats[int(market_id)]
         merged = dict(row)
-        for key in ("trade_count_24h", "volume_24h", "latest_price", "last_trade_at", "latest_trade_at"):
+        for key in (
+            "trade_count_24h",
+            "volume_24h",
+            "latest_price",
+            "latest_yes_price",
+            "latest_no_price",
+            "latest_up_price",
+            "latest_down_price",
+            "latest_token_id",
+            "latest_token_price",
+            "outcome_prices",
+            "semantic_mode",
+            "outcome_semantics_status",
+            "outcome_semantics_valid",
+            "outcome_semantics_capabilities",
+            "outcome_semantics_capability_reason",
+            "last_trade_at",
+            "latest_trade_at",
+        ):
             value = stat.get(key)
-            if value not in (None, ""):
+            if value not in (None, "") or key.startswith("outcome_semantics"):
                 merged[key] = value
         merged_rows.append(merged)
     return merged_rows
@@ -2925,20 +2987,16 @@ def _clickhouse_active_market_candidate_rows(
     activity_rows = clickhouse_orderfilled_service.get_recent_market_activity(
         dependencies.source,
         limit=max(int(limit) * 6, 200),
-        hours=DEFAULT_ACTIVE_MARKET_ACTIVITY_HOURS,
+        hours=dependencies.selection.activity_hours,
     )
     if not activity_rows:
         return []
-    stats_by_market_id = {
-        int(row["market_id"]): row
-        for row in activity_rows
-        if row.get("market_id") is not None
-    }
+    stats_by_market_id = {int(row["market_id"]): row for row in activity_rows if row.get("market_id") is not None}
     market_ids = list(stats_by_market_id.keys())
     if not market_ids:
         return []
     placeholders = ", ".join("?" for _ in market_ids)
-    created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
+    created_cutoff = _iso_hours_before(now_iso, dependencies.selection.max_age_hours)
     detail_rows = dependencies.query_all(
         f"""
         SELECT
@@ -2972,6 +3030,7 @@ def _clickhouse_active_market_candidate_rows(
         FROM markets m
         LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
         WHERE m.id IN ({placeholders})
+          AND {binary_serving_identity_sql("m")}
           AND COALESCE(mss.has_settle, FALSE) = FALSE
           AND COALESCE(mss.has_propose, FALSE) = FALSE
           AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
@@ -2990,7 +3049,7 @@ def _clickhouse_active_market_candidate_rows(
             continue
         merged = dict(row)
         stats = stats_by_market_id.get(market_id, {})
-        if not _is_tradeable_probability(stats.get("latest_price")):
+        if not _is_tradeable_probability(stats.get("latest_price"), selection=dependencies.selection):
             continue
         merged.update(
             {
@@ -3007,7 +3066,7 @@ def _clickhouse_active_market_candidate_rows(
     return candidates
 
 
-def _active_market_candidate_select_sql(stats_alias: str) -> str:
+def _active_market_candidate_select_sql(stats_alias: str, selection: MarketSelectionSettings) -> str:
     return f"""
             SELECT
                 m.id,
@@ -3048,7 +3107,7 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
               AND ({_default_active_market_created_recent_sql()})
               AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
               AND {_default_active_market_activity_sql(stats_alias)}
-              AND {_default_active_market_price_sql(stats_alias)}
+              AND {_default_active_market_price_sql(stats_alias, selection=selection)}
               AND {_default_active_market_recent_trade_sql(stats_alias)}
         """
 
@@ -3058,10 +3117,7 @@ def _event_serving_active_market_candidate_rows(
     now_iso: str,
     limit: int,
 ) -> List[Dict[str, Any]]:
-    if (
-        dependencies.table_exists is not None
-        and not dependencies.table_exists("event_market_serving")
-    ):
+    if dependencies.table_exists is not None and not dependencies.table_exists("event_market_serving"):
         return []
     try:
         rows = dependencies.query_all(
@@ -3128,7 +3184,7 @@ def _event_serving_active_market_candidate_rows(
               AND COALESCE(mss.settlement_code, 0) = 0
               AND (m.end_date IS NULL OR m.end_date >= ?)
               AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
-              AND {_default_active_market_price_sql("mls")}
+              AND {_default_active_market_price_sql("mls", selection=dependencies.selection)}
             ORDER BY
                 CASE
                     WHEN LOWER(COALESCE(m.category, '')) IN ('sports', 'esports') AND re.category_rank > 4 THEN 1
@@ -3159,7 +3215,9 @@ def _market_list_serving_has_rows(
         return False
     min_rows = max(1, int(min_rows))
     row = dependencies.query_one(
-        "SELECT COUNT(*) AS c FROM market_list_serving WHERE volume_24h > 0 OR latest_price IS NOT NULL"
+        "SELECT COUNT(*) AS c FROM (SELECT 1 FROM market_list_serving "
+        "WHERE volume_24h > 0 OR latest_price IS NOT NULL LIMIT ?) AS available",
+        (min_rows,),
     )
     return bool(row and int(row.get("c") or 0) >= min_rows)
 
@@ -3169,7 +3227,7 @@ def _fallback_active_market_candidate_rows(
     now_iso: str,
     limit: int,
 ) -> List[Dict[str, Any]]:
-    created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
+    created_cutoff = _iso_hours_before(now_iso, dependencies.selection.max_age_hours)
     if _is_postgres_dependencies(dependencies):
         prelimit = max(int(limit) * 30, 5000)
         return dependencies.query_all(
@@ -3329,14 +3387,11 @@ def _read_market_detail_rows_by_ids(
         LEFT JOIN market_list_serving mls ON mls.market_id = m.id
         LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
         WHERE m.id IN ({placeholders})
+          AND {binary_serving_identity_sql("m")}
         """,
         market_ids,
     )
-    return {
-        int(row["id"]): row
-        for row in rows
-        if row.get("id") is not None
-    }
+    return {int(row["id"]): row for row in rows if row.get("id") is not None}
 
 
 def get_markets_payload(
@@ -3371,16 +3426,25 @@ def _get_markets_payload(
     page_size = min(500, max(1, int(page_size)))
     offset = (page - 1) * page_size
 
-    filters: List[str] = []
+    if status == "active" and not query and page == 1:
+        return get_active_markets_snapshot(
+            dependencies.source,
+            page_size=page_size,
+            include_runtime_prices=markets_runtime_prices_enabled(),
+        )
+
+    filters: List[str] = [binary_serving_identity_sql("m")]
     params: List[Any] = []
     recent_trade_cutoff = _iso_hours_before(now_iso, 24 * 7)
-    created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
+    created_cutoff = _iso_hours_before(now_iso, dependencies.selection.max_age_hours)
     serving_has_rows = _market_list_serving_has_rows(
         dependencies,
         min_rows=max(page_size * 10, 1000),
     )
     if status == "active":
-        filters.append("(COALESCE(mss.is_trading_closed, FALSE) = FALSE AND COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))")
+        filters.append(
+            "(COALESCE(mss.is_trading_closed, FALSE) = FALSE AND COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))"
+        )
         params.append(now_iso)
         if not query:
             filters.append(f"({_default_active_market_created_recent_sql()})")
@@ -3388,11 +3452,13 @@ def _get_markets_payload(
         if not query and serving_has_rows:
             filters.append(f"({DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL})")
             filters.append(_default_active_market_activity_sql("mls"))
-            filters.append(_default_active_market_price_sql("mls"))
+            filters.append(_default_active_market_price_sql("mls", selection=dependencies.selection))
             filters.append(_default_active_market_recent_trade_sql("mls"))
             params.append(recent_trade_cutoff)
     elif status == "closed":
-        filters.append("(COALESCE(mss.is_trading_closed, FALSE) = TRUE OR COALESCE(mss.has_settle, FALSE) = TRUE OR COALESCE(mss.settlement_code, 0) IN (1, 2, 3) OR (COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND m.end_date IS NOT NULL AND m.end_date < ?))")
+        filters.append(
+            "(COALESCE(mss.is_trading_closed, FALSE) = TRUE OR COALESCE(mss.has_settle, FALSE) = TRUE OR COALESCE(mss.settlement_code, 0) IN (1, 2, 3) OR (COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND m.end_date IS NOT NULL AND m.end_date < ?))"
+        )
         params.append(now_iso)
     if query:
         pattern = f"%{query}%"
@@ -3400,14 +3466,11 @@ def _get_markets_payload(
         params.extend([pattern, pattern, pattern, pattern])
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size, "v": 8}, sort_keys=True, ensure_ascii=True)
-
-    if status == "active" and not query and page == 1:
-        return get_active_markets_snapshot(
-            dependencies.source,
-            page_size=page_size,
-            include_runtime_prices=markets_runtime_prices_enabled(),
-        )
+    cache_key = json.dumps(
+        {"status": status, "query": query, "page": page, "pageSize": page_size, "v": 9},
+        sort_keys=True,
+        ensure_ascii=True,
+    )
 
     def build_payload() -> Dict[str, Any]:
         recent_14d_iso = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat().replace("+00:00", "Z")
@@ -3485,7 +3548,7 @@ def _get_markets_payload(
                 candidate_rows,
                 offset + page_size + 1,
             )
-        working_candidates = candidate_rows[offset: offset + max(page_size * 3, page_size + 1)]
+        working_candidates = candidate_rows[offset : offset + max(page_size * 3, page_size + 1)]
         if not working_candidates and candidate_rows:
             working_candidates = candidate_rows[: max(page_size * 3, page_size + 1)]
         visible_market_ids = [int(row["id"]) for row in working_candidates if row.get("id") is not None]
@@ -3537,7 +3600,7 @@ def _get_markets_payload(
         if status == "active":
             visible_rows = _merge_clickhouse_stats(dependencies, visible_rows)
         if status == "active":
-            visible_rows = _prefer_tradeable_market_rows(visible_rows, page_size + 1)
+            visible_rows = _prefer_tradeable_market_rows(visible_rows, page_size + 1, selection=dependencies.selection)
             if not query:
                 visible_rows = _rank_default_market_rows(visible_rows, now_iso)
                 visible_rows = _interleave_market_category_rows(visible_rows, page_size + 1)
@@ -3546,10 +3609,7 @@ def _get_markets_payload(
         has_more = len(visible_rows) > page_size
         visible_rows = visible_rows[:page_size]
         return {
-            "items": [
-                _market_list_item(dependencies, row)
-                for row in visible_rows
-            ],
+            "items": [_market_list_item(dependencies, row) for row in visible_rows],
             "pagination": {
                 "page": page,
                 "pageSize": page_size,
@@ -3585,7 +3645,7 @@ def _build_active_markets_payload(
     include_change_24h: bool = False,
 ) -> Dict[str, Any]:
     now_iso = dependencies.utc_now_iso()
-    created_cutoff = _iso_hours_before(now_iso, DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS)
+    created_cutoff = _iso_hours_before(now_iso, dependencies.selection.max_age_hours)
     raw_limit = min(2500, max(page_size * 20, 300))
     clickhouse_candidate_rows = (
         _clickhouse_active_market_candidate_rows(
@@ -3611,7 +3671,7 @@ def _build_active_markets_payload(
     ):
         volume_candidate_rows = dependencies.query_all(
             f"""
-            {_active_market_candidate_select_sql("stats_24h")}
+            {_active_market_candidate_select_sql("stats_24h", dependencies.selection)}
             ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
             LIMIT ?
             """,
@@ -3619,7 +3679,7 @@ def _build_active_markets_payload(
         )
         recent_candidate_rows = dependencies.query_all(
             f"""
-            {_active_market_candidate_select_sql("stats_24h")}
+            {_active_market_candidate_select_sql("stats_24h", dependencies.selection)}
             ORDER BY m.created_at DESC, COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC
             LIMIT ?
             """,
@@ -3692,7 +3752,7 @@ def _build_active_markets_payload(
     if include_change_24h:
         rows = enrich_market_rows_with_24h_change(dependencies.source, rows)
     rows = _merge_clickhouse_stats(dependencies, rows)
-    rows = _prefer_tradeable_market_rows(rows, max(page_size * 3, page_size))
+    rows = _prefer_tradeable_market_rows(rows, max(page_size * 3, page_size), selection=dependencies.selection)
     rows = _rank_default_market_rows(rows, now_iso)
     rows = _interleave_market_category_rows(rows, max(page_size * 3, page_size))
     rows = _coalesce_native_market_rows(rows)
@@ -3713,10 +3773,7 @@ def _active_markets_payload_has_price_history_schema(payload: Any) -> bool:
         return False
     return any(
         isinstance(item, dict)
-        and (
-            item.get("price24hAgo") not in (None, "")
-            or item.get("change24h") not in (None, "")
-        )
+        and (item.get("price24hAgo") not in (None, "") or item.get("change24h") not in (None, ""))
         for item in items[:20]
     )
 
@@ -3727,12 +3784,7 @@ def _active_markets_payload_has_token_schema(payload: Any) -> bool:
     items = payload.get("items")
     if not isinstance(items, list) or not items:
         return False
-    return all(
-        isinstance(item, dict)
-        and "yesTokenId" in item
-        and "noTokenId" in item
-        for item in items[:20]
-    )
+    return all(isinstance(item, dict) and "yesTokenId" in item and "noTokenId" in item for item in items[:20])
 
 
 def get_active_markets_snapshot(
@@ -3765,7 +3817,7 @@ def _get_active_markets_snapshot(
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": should_include_change_24h,
-            "maxAgeHours": DEFAULT_ACTIVE_MARKET_MAX_AGE_HOURS,
+            "maxAgeHours": dependencies.selection.max_age_hours,
             "v": 25,
         },
         sort_keys=True,
@@ -3778,11 +3830,7 @@ def _get_active_markets_snapshot(
     exact_payload_was_empty = False
     if exact_payload is not None:
         exact_items = exact_payload.get("items") if isinstance(exact_payload, dict) else None
-        if (
-            isinstance(exact_items, list)
-            and exact_items
-            and _active_markets_payload_has_token_schema(exact_payload)
-        ):
+        if isinstance(exact_items, list) and exact_items and _active_markets_payload_has_token_schema(exact_payload):
             dependencies.set_cached_json(
                 ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
                 cache_key,
@@ -3805,13 +3853,12 @@ def _get_active_markets_snapshot(
         fallback_payload = _trim_active_markets_payload(
             latest_payload,
             page_size,
+            selection=dependencies.selection,
         )
         if (
             fallback_payload is not None
             and _active_markets_payload_has_token_schema(fallback_payload)
-            and (
-                not should_include_change_24h or _active_markets_payload_has_price_history_schema(fallback_payload)
-            )
+            and (not should_include_change_24h or _active_markets_payload_has_price_history_schema(fallback_payload))
         ):
             dependencies.application.logger.info(
                 "markets-active latest-snapshot-fallback page_size=%s include_runtime_prices=%s",
@@ -3898,6 +3945,10 @@ def _get_market_detail_payload(
         # request/propose/dispute/settle events from the Oracle panel.
         market = _get_market_by_id(dependencies.lookup, market_id)
         if market:
+            serving_payload = dict(serving_payload)
+            serving_payload["market"] = _with_oracle_logical_aliases(
+                dependencies.normalize_market(market)
+            )
             oracle_payload = _build_market_oracle_payload(
                 dependencies.oracle,
                 market_id,
@@ -3905,20 +3956,20 @@ def _get_market_detail_payload(
             )
             if not oracle_payload.get("error"):
                 timeline = oracle_payload.get("timeline") or []
-                serving_payload = dict(serving_payload)
                 serving_payload["oracle"] = oracle_payload
                 serving_payload["oracleEvents"] = timeline
                 diagnostics = dict(serving_payload.get("diagnostics") or {})
-                diagnostics["oracleStatus"] = (
-                    oracle_payload.get("completionStatus") or "OPEN"
-                )
+                diagnostics["oracleStatus"] = oracle_payload.get("completionStatus") or "OPEN"
                 diagnostics["oracleEventCount"] = len(timeline) if isinstance(timeline, list) else 0
                 serving_payload["diagnostics"] = diagnostics
         return serving_payload
     market = _get_market_by_id(dependencies.lookup, market_id)
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    cache_key = json.dumps({"marketId": int(market_id), "v": 11}, sort_keys=True, ensure_ascii=True)
+    superseded_payload = _superseded_market_payload(market_id, market)
+    if superseded_payload is not None:
+        return superseded_payload
+    cache_key = json.dumps({"marketId": int(market_id), "v": 13}, sort_keys=True, ensure_ascii=True)
 
     def build_payload() -> Dict[str, Any]:
         price = _get_market_price_summary(
@@ -3932,8 +3983,20 @@ def _get_market_detail_payload(
         snapshot_time = price.get("updatedAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         chart_points = (
             [
-                {"timestamp": snapshot_time, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
-                {"timestamp": snapshot_time, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+                {
+                    "timestamp": snapshot_time,
+                    "yesPrice": latest,
+                    "noPrice": price.get("latestNoPrice"),
+                    "tokenId": price.get("tokenId"),
+                    "tokenPrice": price.get("tokenPrice"),
+                },
+                {
+                    "timestamp": snapshot_time,
+                    "yesPrice": latest,
+                    "noPrice": price.get("latestNoPrice"),
+                    "tokenId": price.get("tokenId"),
+                    "tokenPrice": price.get("tokenPrice"),
+                },
             ]
             if latest not in (None, "")
             else []
@@ -3959,7 +4022,7 @@ def _get_market_detail_payload(
             limit=24,
             offset=0,
         )
-        normalized_market = dependencies.normalize_market(market)
+        normalized_market = _with_oracle_logical_aliases(dependencies.normalize_market(market))
         identity = _workspace_identity(market_id, market)
         diagnostics = _workspace_diagnostics(
             market_id,
@@ -4009,6 +4072,9 @@ def _get_market_workspace_payload(
     market = _get_market_by_id(dependencies.lookup, market_id)
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
+    superseded_payload = _superseded_market_payload(market_id, market)
+    if superseded_payload is not None:
+        return superseded_payload
 
     detail_payload = _get_market_detail_payload(dependencies, market_id)
     if detail_payload.get("_status") == 404:
@@ -4051,7 +4117,11 @@ def _get_market_workspace_payload(
 
     detail_chart = detail_payload.get("chart") if isinstance(detail_payload.get("chart"), dict) else None
     detail_chart_points = detail_chart.get("points") if isinstance(detail_chart, dict) else []
-    chart = detail_chart if isinstance(detail_chart_points, list) and _is_usable_market_chart_serving(detail_chart) else None
+    chart = (
+        detail_chart
+        if isinstance(detail_chart_points, list) and _is_usable_market_chart_serving(detail_chart)
+        else None
+    )
     if chart is None:
         chart = _get_market_chart_payload(
             dependencies.chart,
@@ -4105,7 +4175,8 @@ def _get_market_workspace_payload(
         generated_at=generated_at,
     )
     return {
-        "market": detail_payload.get("market") or dependencies.normalize_market(market),
+        "market": detail_payload.get("market")
+        or _with_oracle_logical_aliases(dependencies.normalize_market(market)),
         "identity": identity,
         "diagnostics": diagnostics,
         "health": health,

@@ -1675,6 +1675,8 @@ def sync_trade_analytics(
 
 
 def main() -> None:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser(description="Sync trade analytics/materialized tables from trades")
     add_db_cli_args(parser)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="每批处理多少条 trades")

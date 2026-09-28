@@ -1,6 +1,26 @@
 from decimal import Decimal
 
-from scripts.api.services import signal_cluster_service
+
+from api.services import outcome_semantics_service, signal_cluster_service
+
+
+def _project_up_down(_ctx, trades):
+    projected = []
+    for trade in trades:
+        logical = str(trade.get("outcome") or "").upper()
+        projected.append(
+            {
+                **trade,
+                "outcome": "Up" if logical == "YES" else "Down",
+                "logicalOutcome": logical,
+                "sourceOutcomeLabel": "Up" if logical == "YES" else "Down",
+                "semanticMode": "up_down_labels",
+                "outcomeSemanticsStatus": "projected",
+                "outcomeSemanticsValid": True,
+                "supports_directional_semantics": True,
+            }
+        )
+    return projected
 
 
 def _ctx(related_calls):
@@ -64,6 +84,7 @@ def _trades():
 
 def test_polybeats_cluster_related_news_disabled_by_default(monkeypatch):
     monkeypatch.delenv("POLYDATA_SIGNAL_RELATED_NEWS_ENABLED", raising=False)
+    monkeypatch.setattr(outcome_semantics_service, "annotate_raw_trade_rows", _project_up_down)
     related_calls = []
 
     clusters = signal_cluster_service.build_polybeats_clusters(_ctx(related_calls), _trades(), {}, limit=4)
@@ -76,6 +97,7 @@ def test_polybeats_cluster_related_news_disabled_by_default(monkeypatch):
 
 def test_polybeats_cluster_related_news_enabled(monkeypatch):
     monkeypatch.setenv("POLYDATA_SIGNAL_RELATED_NEWS_ENABLED", "1")
+    monkeypatch.setattr(outcome_semantics_service, "annotate_raw_trade_rows", _project_up_down)
     related_calls = []
 
     clusters = signal_cluster_service.build_polybeats_clusters(_ctx(related_calls), _trades(), {}, limit=4)

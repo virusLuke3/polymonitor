@@ -9,6 +9,7 @@ from flask import Flask, jsonify, request
 
 from agent.common.budget import claim_agent_live_call
 from agent.common.env import get_env
+from scripts.runtime.environment import load_environment
 from agent.market_insight import build_market_insight, build_market_insight_fallback
 from agent.market_wide import build_market_wide_fallback, build_market_wide_insight
 
@@ -78,6 +79,7 @@ def _claim_gateway_live_call(kind: str):
 
 
 def create_app() -> Flask:
+    load_environment()
     app = Flask(__name__)
 
     @app.get("/health")
@@ -137,10 +139,10 @@ def create_app() -> Flask:
     return app
 
 
-app = create_app()
 
 
 def main() -> None:
+    app = create_app()
     host = get_env("POLYDATA_AGENT_GATEWAY_HOST", "127.0.0.1")
     port = int(get_env("POLYDATA_AGENT_GATEWAY_PORT", "18700"))
     debug = os.environ.get("POLYDATA_AGENT_GATEWAY_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}

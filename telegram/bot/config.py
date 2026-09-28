@@ -9,14 +9,7 @@ from typing import Iterable
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _load_dotenv_files() -> None:
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    for candidate in (PROJECT_ROOT / ".env", PROJECT_ROOT / ".env.local"):
-        if candidate.exists():
-            load_dotenv(candidate, override=False)
+from scripts.runtime.environment import load_environment
 
 
 def _get_str(name: str, default: str = "") -> str:
@@ -103,7 +96,7 @@ class BotSettings:
 
 
 def load_settings() -> BotSettings:
-    _load_dotenv_files()
+    load_environment()
     api_port = _get_int("POLYDATA_API_PORT", 18500)
     local_api_base = f"http://127.0.0.1:{api_port}"
     query_bot_token = _get_str("POLYDATA_TELEGRAM_QUERY_BOT_TOKEN", "")

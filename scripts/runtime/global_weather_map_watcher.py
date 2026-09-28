@@ -18,7 +18,8 @@ import redis
 import requests
 
 from api.config import load_api_settings
-from api.services import global_weather_map_service
+from api.context import RuntimeResources
+from api.services import global_weather_map_service, lob_service
 from db.db import DEFAULT_DB_PATH, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
@@ -93,6 +94,7 @@ def _should_preserve_previous(previous: Dict[str, Any], payload: Dict[str, Any])
 
 class GlobalWeatherMapWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, interval_seconds: int) -> None:
+        self.resources = RuntimeResources()
         if not redis_url:
             raise RuntimeError("POLYDATA_REDIS_URL is required for global weather map watcher")
         self.settings = settings
@@ -121,9 +123,16 @@ class GlobalWeatherMapWatcher:
         response.raise_for_status()
         return response.json()
 
+    def close(self) -> None:
+        self.resources.close()
+        self.requests.close()
+        self.redis_client.close()
+
     def context(self) -> Dict[str, Any]:
         return {
+            "_resources": self.resources,
             "SETTINGS": self.settings,
+            "get_runtime_lob_by_token_payload": lambda token: lob_service.get_runtime_lob_by_token_payload(token),
             "app": _App(),
             "http_json_get": self._http_json_get,
             "get_clob_session": lambda: self.requests,
@@ -207,26 +216,31 @@ class GlobalWeatherMapWatcher:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser()
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--interval", type=int, default=int(os.environ.get("POLYDATA_GLOBAL_WEATHER_MAP_WATCH_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS)))
     args = parser.parse_args()
     settings = load_api_settings()
     watcher = GlobalWeatherMapWatcher(redis_url=settings.redis_url, redis_prefix=settings.redis_prefix, snapshot_sqlite_path=settings.snapshot_sqlite_path, settings=settings, interval_seconds=args.interval)
-    watcher.redis_client.ping()
-    print(f"[global-weather-map] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
-    if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        return 0
-    while True:
-        try:
+    try:
+        watcher.redis_client.ping()
+        print(f"[global-weather-map] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
+        if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        except KeyboardInterrupt:
             return 0
-        except Exception as exc:
-            watcher.store_meta(status="error", record_count=0, source_states={"weather": "error"}, error_summary=str(exc), preserve=True)
-            print(f"[global-weather-map] ERROR {exc}", file=sys.stderr)
-        time.sleep(max(60, args.interval))
+        while True:
+            try:
+                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            except KeyboardInterrupt:
+                return 0
+            except Exception as exc:
+                watcher.store_meta(status="error", record_count=0, source_states={"weather": "error"}, error_summary=str(exc), preserve=True)
+                print(f"[global-weather-map] ERROR {exc}", file=sys.stderr)
+            time.sleep(max(60, args.interval))
+    finally:
+        watcher.close()
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, cast
 
-from api.context import resolve_route_callable, resolve_route_value
+from api.context import resolve_route_callable
 
 
 PanelPayload = Dict[str, Any]
@@ -27,37 +27,16 @@ class FinanceRuntimePanelDependencies:
         context: Mapping[str, Any],
     ) -> FinanceRuntimePanelDependencies:
         return cls(
-            watch_panel_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_finance_watch_panel_snapshot"),
-            ),
-            crypto_funding_watch_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_crypto_funding_watch_snapshot"),
-            ),
-            defi_token_watch_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_defi_token_watch_snapshot"),
-            ),
-            market_atlas_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_finance_market_atlas_snapshot"),
-            ),
-            equity_event_command_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_equity_event_command_snapshot"),
-            ),
-            onchain_tradfi_perp_radar_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(
+            watch_panel_snapshot=resolve_route_callable(context, "get_finance_watch_panel_snapshot"),
+            crypto_funding_watch_snapshot=resolve_route_callable(context, "get_crypto_funding_watch_snapshot"),
+            defi_token_watch_snapshot=resolve_route_callable(context, "get_defi_token_watch_snapshot"),
+            market_atlas_snapshot=resolve_route_callable(context, "get_finance_market_atlas_snapshot"),
+            equity_event_command_snapshot=resolve_route_callable(context, "get_equity_event_command_snapshot"),
+            onchain_tradfi_perp_radar_snapshot=resolve_route_callable(
                     context,
                     "get_onchain_tradfi_perp_radar_snapshot",
                 ),
-            ),
-            liquidity_regime_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_finance_liquidity_regime_snapshot"),
-            ),
+            liquidity_regime_snapshot=resolve_route_callable(context, "get_finance_liquidity_regime_snapshot"),
         )
 
 
@@ -125,10 +104,7 @@ class MacroRuntimePanelDependencies:
         }
         return cls(
             **{
-                field_name: cast(
-                    Callable[..., PanelPayload],
-                    resolve_route_callable(context, dependency_name),
-                )
+                field_name: resolve_route_callable(context, dependency_name)
                 for field_name, dependency_name in dependency_names.items()
             }
         )
@@ -149,30 +125,12 @@ class SportsRuntimePanelDependencies:
         context: Mapping[str, Any],
     ) -> SportsRuntimePanelDependencies:
         return cls(
-            nba_matchup_predictor_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_nba_matchup_predictor_snapshot"),
-            ),
-            grid_esports_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_grid_esports_snapshot"),
-            ),
-            f1_panel_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_f1_panel_snapshot"),
-            ),
-            nba_intel_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_nba_intel_snapshot"),
-            ),
-            nba_scoreboard_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_nba_scoreboard_snapshot"),
-            ),
-            sports_odds_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_sports_odds_snapshot"),
-            ),
+            nba_matchup_predictor_snapshot=resolve_route_callable(context, "get_nba_matchup_predictor_snapshot"),
+            grid_esports_snapshot=resolve_route_callable(context, "get_grid_esports_snapshot"),
+            f1_panel_snapshot=resolve_route_callable(context, "get_f1_panel_snapshot"),
+            nba_intel_snapshot=resolve_route_callable(context, "get_nba_intel_snapshot"),
+            nba_scoreboard_snapshot=resolve_route_callable(context, "get_nba_scoreboard_snapshot"),
+            sports_odds_snapshot=resolve_route_callable(context, "get_sports_odds_snapshot"),
         )
 
 
@@ -186,10 +144,7 @@ class TechnologyRuntimePanelDependencies:
         context: Mapping[str, Any],
     ) -> TechnologyRuntimePanelDependencies:
         return cls(
-            panel_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_tech_panel_snapshot"),
-            ),
+            panel_snapshot=resolve_route_callable(context, "get_tech_panel_snapshot"),
         )
 
 
@@ -205,29 +160,25 @@ class WorldRuntimePanelDependencies:
         context: Mapping[str, Any],
     ) -> WorldRuntimePanelDependencies:
         return cls(
-            geo_sanctions_shock_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_geo_sanctions_shock_snapshot"),
-            ),
-            global_transport_shipping_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(
+            geo_sanctions_shock_snapshot=resolve_route_callable(context, "get_geo_sanctions_shock_snapshot"),
+            global_transport_shipping_snapshot=resolve_route_callable(
                     context,
                     "get_global_transport_shipping_snapshot",
                 ),
-            ),
-            natural_hazards_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_natural_hazards_snapshot"),
-            ),
+            natural_hazards_snapshot=resolve_route_callable(context, "get_natural_hazards_snapshot"),
         )
 
 
 @dataclass(frozen=True)
-class RuntimePanelContext(Mapping[str, Any]):
+class RuntimePanelContext:
     """Typed dependencies for runtime panels during the module migration."""
 
-    source: Mapping[str, Any] = field(repr=False)
+    get_alpha_signal_snapshot: Callable[..., PanelPayload]
+    get_polybeats_snapshot: Callable[..., PanelPayload]
+    get_whale_trades_snapshot: Callable[..., PanelPayload]
+    get_suspicious_trades_snapshot: Callable[..., PanelPayload]
+    get_world_cup_match_ops_snapshot: Callable[..., PanelPayload]
+    get_new_market_signals_snapshot: Callable[..., PanelPayload]
     commodity_symbols: Sequence[MarketSymbol]
     crypto_symbols: Sequence[MarketSymbol]
     get_market_group_snapshot: Callable[..., PanelPayload]
@@ -245,39 +196,26 @@ class RuntimePanelContext(Mapping[str, Any]):
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelContext:
         return cls(
-            source=context,
+            get_alpha_signal_snapshot=resolve_route_callable(context, "get_alpha_signal_snapshot"),
+            get_polybeats_snapshot=resolve_route_callable(context, "get_polybeats_snapshot"),
+            get_whale_trades_snapshot=resolve_route_callable(context, "get_whale_trades_snapshot"),
+            get_suspicious_trades_snapshot=resolve_route_callable(context, "get_suspicious_trades_snapshot"),
+            get_world_cup_match_ops_snapshot=resolve_route_callable(context, "get_world_cup_match_ops_snapshot"),
+            get_new_market_signals_snapshot=resolve_route_callable(context, "get_new_market_signals_snapshot"),
             commodity_symbols=cast(
                 Sequence[MarketSymbol],
-                resolve_route_value(context, "COMMODITY_SYMBOLS", ()),
+                context.get("COMMODITY_SYMBOLS", ()),
             ),
             crypto_symbols=cast(
                 Sequence[MarketSymbol],
-                resolve_route_value(context, "CRYPTO_SYMBOLS", ()),
+                context.get("CRYPTO_SYMBOLS", ()),
             ),
-            get_market_group_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_market_group_snapshot"),
-            ),
-            get_breaking_event_radar_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_breaking_event_radar_snapshot"),
-            ),
-            get_market_tv_wire_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_market_tv_wire_snapshot"),
-            ),
-            get_market_youtube_channels_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_market_youtube_channels_snapshot"),
-            ),
-            get_global_weather_map_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_global_weather_map_snapshot"),
-            ),
-            get_weather_news_snapshot=cast(
-                Callable[..., PanelPayload],
-                resolve_route_callable(context, "get_weather_news_snapshot"),
-            ),
+            get_market_group_snapshot=resolve_route_callable(context, "get_market_group_snapshot"),
+            get_breaking_event_radar_snapshot=resolve_route_callable(context, "get_breaking_event_radar_snapshot"),
+            get_market_tv_wire_snapshot=resolve_route_callable(context, "get_market_tv_wire_snapshot"),
+            get_market_youtube_channels_snapshot=resolve_route_callable(context, "get_market_youtube_channels_snapshot"),
+            get_global_weather_map_snapshot=resolve_route_callable(context, "get_global_weather_map_snapshot"),
+            get_weather_news_snapshot=resolve_route_callable(context, "get_weather_news_snapshot"),
             finance=FinanceRuntimePanelDependencies.from_context(context),
             macro=MacroRuntimePanelDependencies.from_context(context),
             sports=SportsRuntimePanelDependencies.from_context(context),
@@ -285,14 +223,6 @@ class RuntimePanelContext(Mapping[str, Any]):
             world=WorldRuntimePanelDependencies.from_context(context),
         )
 
-    def __getitem__(self, name: str) -> Any:
-        return self.source[name]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self.source)
-
-    def __len__(self) -> int:
-        return len(self.source)
 
 
 @dataclass(frozen=True)

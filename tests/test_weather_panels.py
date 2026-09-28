@@ -1,14 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import global_weather_map_service, weather_news_service
 from runtime import global_weather_map_watcher, weather_news_watcher
@@ -202,23 +196,18 @@ def test_global_weather_map_builds_weather_metar_and_market_payload(monkeypatch)
         if "aviation.example" in url:
             return [{"icaoId": "KNYC", "temp": 21, "reportTime": "2026-05-12T11:50:00Z"}]
         if "gamma.example" in url:
-            return [
-                {
-                    "id": "evt-1",
-                    "slug": "highest-temperature-in-new-york-on-may-12-2026",
-                    "title": "Highest temperature in New York on May 12?",
-                    "active": True,
-                    "closed": False,
-                    "markets": [
-                        {"id": "m1", "question": "Highest temperature in New York on May 12? 80°F or higher", "slug": "ny-80", "outcomePrices": ["0.30", "0.70"], "active": True}
-                    ],
-                }
-            ]
+            raise AssertionError("Market discovery belongs to market-data")
         if "clob.example" in url:
             return {"bids": [{"price": "0.31"}], "asks": [{"price": "0.35"}]}
         return []
 
     ctx = make_ctx(http_json_get=http_json_get)
+    ctx["get_connection"] = lambda *args, **kwargs: FakeConnection([{
+        "market_id": 501, "title": "Highest temperature in New York on May 12? 80°F or higher",
+        "slug": "highest-temperature-in-new-york-on-may-12-2026-80forhigher",
+        "end_date": "2026-05-12T23:59:00Z", "yes_token_id": "yes-token", "no_token_id": "no-token",
+        "latest_yes_price": 0.3,
+    }])
     payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=1)
 
     assert payload["status"] == "ok"
@@ -243,6 +232,16 @@ def test_global_weather_map_builds_weather_metar_and_market_payload(monkeypatch)
     assert request_params["openMeteo"]["current"] == "temperature_2m,weather_code,precipitation,wind_speed_10m,wind_gusts_10m"
     assert "precipitation_probability" in request_params["openMeteo"]["hourly"]
     assert "wind_gusts_10m_max" in request_params["openMeteo"]["daily"]
+
+
+def test_weather_tokens_follow_upstream_canonical_yes_no_order():
+    market = global_weather_map_service._db_market_object({
+        "market_id": 1, "yes_token_id": "yes-token", "no_token_id": "no-token",
+        "clob_token_ids": ["no-token", "yes-token"],
+    })
+    assert market["clobTokenIds"] == ["yes-token", "no-token"]
+    missing_yes = global_weather_map_service._db_market_object({"no_token_id": "no-token"})
+    assert missing_yes["clobTokenIds"] == []
 
 
 def test_global_weather_map_uses_wttr_real_intensity_when_open_meteo_errors(monkeypatch):
@@ -751,13 +750,15 @@ def test_global_weather_map_watcher_context_can_read_market_database():
     watcher._set_cached_json = lambda namespace, cache_key, payload, ttl: None
     watcher._http_json_get = lambda *args, **kwargs: {}
 
+    from api.context import RuntimeResources
+    watcher.resources = RuntimeResources()
     ctx = watcher.context()
 
     assert callable(ctx["get_connection"])
     assert ctx["DB_PATH"]
 
 
-def test_global_weather_map_market_discovery_is_city_tolerant(monkeypatch):
+def test_global_weather_map_preserves_weather_for_cities_without_markets(monkeypatch):
     monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", lambda ctx, market: {"bestBidYes": 0.41, "bestAskYes": 0.45})
 
     def http_json_get(url, *, params=None, **kwargs):
@@ -777,32 +778,24 @@ def test_global_weather_map_market_discovery_is_city_tolerant(monkeypatch):
         if "aviation.example" in url:
             return [{"icaoId": "KNYC", "temp": 21, "reportTime": "2026-05-12T11:50:00Z"}]
         if "gamma.example" in url:
-            query = str((params or {}).get("q") or "")
-            if "Chicago" in query:
-                raise RuntimeError("gamma temporary miss")
-            return [
-                {
-                    "id": "evt-1",
-                    "slug": "highest-temperature-in-new-york-on-may-12-2026",
-                    "title": "Highest temperature in New York on May 12?",
-                    "active": True,
-                    "closed": False,
-                    "markets": [
-                        {"id": "m1", "question": "Highest temperature in New York on May 12? 80°F or higher", "slug": "ny-80", "outcomePrices": ["0.40", "0.60"], "active": True}
-                    ],
-                }
-            ]
+            raise AssertionError("Market discovery belongs to market-data")
         return []
 
     ctx = make_ctx(http_json_get=http_json_get)
+    ctx["get_connection"] = lambda *args, **kwargs: FakeConnection([{
+        "market_id": 501, "title": "Highest temperature in New York on May 12? 80°F or higher",
+        "slug": "highest-temperature-in-new-york-on-may-12-2026-80forhigher",
+        "end_date": "2026-05-12T23:59:00Z", "yes_token_id": "yes-token", "no_token_id": "no-token",
+        "latest_yes_price": 0.3,
+    }])
     payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=2)
     by_city = {item["cityId"]: item for item in payload["items"]}
 
     assert int(payload["summary"]["mappedCount"]) >= 2
     assert payload["summary"]["liveMarketCount"] == 1
-    assert payload["sources"]["gamma"] == "partial"
+    assert payload["sources"]["marketDatabase"] == "ok"
     assert by_city["new-york"]["sourceStates"]["polymarket"] == "ok"
-    assert by_city["chicago"]["sourceStates"]["polymarket"] == "error"
+    assert by_city["chicago"]["sourceStates"]["polymarket"] == "empty"
 
 
 def test_weather_news_builds_filters_dedupes_and_ranks():
@@ -987,3 +980,19 @@ def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):
     assert result["status"] == "preserved"
     assert stored["news_payload"] is previous_news
     assert stored["news_meta"]["preserve"] is True
+
+
+def test_weather_quotes_read_live_engine_without_reusing_stale_quote():
+    ctx = make_ctx()
+    state = {"bookStatus": "live", "bids": [{"price": "0.4"}], "asks": [{"price": "0.5"}]}
+    ctx["get_runtime_lob_by_token_payload"] = lambda token: {"yes": state}
+    market = {"clobTokenIds": ["123", "456"]}
+    quote = global_weather_map_service._clob_yes_quote(ctx, market)
+    assert (quote["bestBidYes"], quote["bestAskYes"]) == (0.4, 0.5)
+    for status in ("stale", "warming", "unavailable"):
+        state["bookStatus"] = status
+        quote = global_weather_map_service._clob_yes_quote(ctx, market)
+        assert quote["bestBidYes"] is None
+        assert quote["bestAskYes"] is None
+        assert quote["bookStatus"] == status
+    assert ctx["_calls"]["json"] == 0

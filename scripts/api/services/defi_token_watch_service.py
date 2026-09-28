@@ -6,12 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 
 
 DEFI_TOKEN_WATCH_NAMESPACE = "snapshot:finance:defi-token-watch"
@@ -45,8 +40,10 @@ class DefiTokenWatchDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> DefiTokenWatchDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
+            settings=context.get("SETTINGS"),
             http_json_get=resolve_service_callable(
                 context,
                 "http_json_get",
@@ -55,10 +52,7 @@ class DefiTokenWatchDependencies:
                 context,
                 "utc_now_iso",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",

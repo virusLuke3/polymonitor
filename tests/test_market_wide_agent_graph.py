@@ -464,7 +464,3 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertTrue(snapshot["liveAttempted"])
         self.assertEqual(snapshot["data"]["status"], "gateway-error")
         self.assertIn("gateway timed out", snapshot["data"]["error"])
-
-
-if __name__ == "__main__":
-    unittest.main()

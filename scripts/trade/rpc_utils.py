@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from typing import Any, Optional
@@ -39,6 +40,31 @@ DEFAULT_RPC_CONNECT_RETRY_DELAY_SECONDS = 10
 DEFAULT_HTTP_RETRIES = 5
 DEFAULT_POOL_CONNECTIONS = 64
 DEFAULT_POOL_MAXSIZE = 64
+RPC_FATAL_EXIT_CODE = 75
+
+
+class RpcAccessDeniedError(RuntimeError):
+    """Raised when retrying cannot repair an RPC authentication failure."""
+
+
+def is_access_denied_rpc_error(exc: BaseException) -> bool:
+    """Identify provider authentication failures without classifying outages as fatal."""
+    message = " ".join(str(exc).lower().split())
+    return any(
+        marker in message
+        for marker in (
+            "401 unauthorized",
+            "403 forbidden",
+            "status code 401",
+            "status code 403",
+            "http 401",
+            "http 403",
+            "access denied",
+            "authentication failed",
+            "invalid api key",
+            "invalid api-key",
+        )
+    )
 
 
 def format_rpc_error(exc: BaseException, max_len: int = 240) -> str:
@@ -95,6 +121,8 @@ def build_retry_session() -> Optional[Any]:
     if requests is None or HTTPAdapter is None:
         return None
     session = requests.Session()
+    trust_env = os.environ.get("POLYDATA_RPC_TRUST_ENV_PROXY", "1").strip().lower()
+    session.trust_env = trust_env not in {"0", "false", "no", "off"}
     retry = _build_retry()
     adapter = HTTPAdapter(
         max_retries=retry if retry is not None else DEFAULT_HTTP_RETRIES,
@@ -142,4 +170,3 @@ def build_web3(
             )
             time.sleep(connect_retry_delay_seconds)
     raise ConnectionError(f"Cannot connect to RPC: {rpc_url}") from last_error
-

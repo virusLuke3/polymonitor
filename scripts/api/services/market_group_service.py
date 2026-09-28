@@ -5,14 +5,11 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 from api.services import clickhouse_orderfilled_service
+from market.market_serving_identity import binary_serving_identity_sql
 
 MARKET_GROUPS_LIST_NAMESPACE = "snapshot:market-groups:list"
 MARKET_GROUPS_DETAIL_NAMESPACE = "snapshot:market-groups:detail"
@@ -79,7 +76,7 @@ def _service_callable(
     context: Mapping[str, Any],
     name: str,
 ) -> Callable[..., Any]:
-    return cast(Callable[..., Any], resolve_service_callable(context, name))
+    return resolve_service_callable(context, name)
 
 
 @dataclass(frozen=True)
@@ -102,10 +99,12 @@ class MarketGroupDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MarketGroupDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             source=context,
-            application=resolve_service_value(context, "app"),
-            settings=resolve_service_value(context, "SETTINGS"),
+            application=context.get("app"),
+            settings=context.get("SETTINGS"),
             query_all=_service_callable(context, "query_all"),
             get_cached_runtime_payload=_service_callable(
                 context,
@@ -390,6 +389,7 @@ def _query_market_rows(
                 LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
                 LEFT JOIN market_list_serving mls ON mls.market_id = m.id
                 WHERE {column_expr} IN ({placeholders})
+                  AND {binary_serving_identity_sql("m")}
                 """,
                 batch,
             )
@@ -1149,6 +1149,54 @@ def _group_market_ids(group: Dict[str, Any]) -> List[int]:
     return list(dict.fromkeys(ids))
 
 
+def _apply_binary_identity_policy(
+    dependencies: MarketGroupDependencies,
+    groups: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Remove governed local identities from materialized/fallback groups."""
+
+    market_ids = sorted({market_id for group in groups for market_id in _group_market_ids(group)})
+    if not market_ids:
+        return groups
+    allowed: set[int] = set()
+    for batch in _chunk((str(value) for value in market_ids)):
+        placeholders = ",".join("?" for _ in batch)
+        rows = dependencies.query_all(
+            f"""
+            SELECT m.id
+            FROM markets m
+            WHERE m.id IN ({placeholders})
+              AND {binary_serving_identity_sql("m")}
+            """,
+            [int(value) for value in batch],
+        )
+        allowed.update(int(row["id"]) for row in rows if row.get("id") is not None)
+
+    visible: List[Dict[str, Any]] = []
+    for original in groups:
+        group = dict(original)
+        for collection_name in ("outcomes", "topOutcomes"):
+            group[collection_name] = [
+                outcome
+                for outcome in (group.get(collection_name) or [])
+                if isinstance(outcome, dict)
+                and (
+                    _outcome_market_id(outcome) is None
+                    or _outcome_market_id(outcome) in allowed
+                )
+            ]
+        group["outcomeCount"] = len(group.get("outcomes") or [])
+        default_market_id = _float_value(group.get("defaultMarketId"))
+        if default_market_id is not None and int(default_market_id) not in allowed:
+            group["defaultMarketId"] = None
+            group["defaultOutcomeKey"] = None
+        if not group.get("outcomes"):
+            continue
+        _retarget_group_default_outcome(group)
+        visible.append(group)
+    return visible
+
+
 def _apply_orderfilled_trade_counts(
     dependencies: MarketGroupDependencies,
     items: List[Dict[str, Any]],
@@ -1209,7 +1257,7 @@ def _latest_block_close_by_market_id(
             "table_exists",
         )
         query_all = _service_callable(context, "query_all")
-        application = resolve_service_value(context, "app")
+        application = context.get("app")
     ids = [int(market_id) for market_id in dict.fromkeys(market_ids) if market_id is not None]
     if not ids:
         return {}
@@ -1443,7 +1491,10 @@ def _serving_market_groups_payload(
             params,
         )
         total = int((total_row[0] or {}).get("total") or 0) if total_row else 0
-    items = [_serving_group_from_row(dependencies, row) for row in rows]
+    items = _apply_binary_identity_policy(
+        dependencies,
+        [_serving_group_from_row(dependencies, row) for row in rows],
+    )
     if sort == "active":
         items = [item for item in items if _retarget_group_default_outcome(item)]
     if sort == "active" and not query:
@@ -1508,7 +1559,13 @@ def _serving_market_group_detail(
     )
     if not rows:
         return None
-    group = _serving_group_from_row(dependencies, rows[0])
+    visible = _apply_binary_identity_policy(
+        dependencies,
+        [_serving_group_from_row(dependencies, rows[0])],
+    )
+    if not visible:
+        return None
+    group = visible[0]
     _apply_orderfilled_trade_counts(dependencies, [group])
     group["status"] = "ok"
     return group
@@ -1567,7 +1624,7 @@ def _get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 34}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 35}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(
@@ -1662,6 +1719,7 @@ def _get_market_groups_payload(
             for group in [_normalize_group(dependencies, event, lookups)]
             if group is not None and _matches_query(group, query)
         ]
+        groups = _apply_binary_identity_policy(dependencies, groups)
         if sort == "active":
             groups.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
             _apply_latest_block_close_prices(dependencies, groups)
@@ -1713,7 +1771,7 @@ def _get_market_group_detail_payload(
     identifier = str(event_id or "").strip()
     if not identifier:
         return None
-    cache_key = json.dumps({"eventId": identifier, "v": 8}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "v": 9}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         serving_payload = _serving_market_group_detail(dependencies, identifier)
@@ -1742,6 +1800,10 @@ def _get_market_group_detail_payload(
         group = _normalize_group(dependencies, event, lookups)
         if group is None:
             return None
+        visible = _apply_binary_identity_policy(dependencies, [group])
+        if not visible:
+            return None
+        group = visible[0]
         group["generatedAt"] = dependencies.utc_now_iso()
         group["status"] = "ok"
         return group
@@ -1778,7 +1840,7 @@ def _get_market_group_chart_payload(
     normalized_range = str(range_name or "1d").strip().lower()
     if normalized_range not in CHART_RANGE_INTERVALS:
         normalized_range = "1d"
-    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 9}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 10}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         detail = _get_market_group_detail_payload(dependencies, identifier)

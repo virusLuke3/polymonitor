@@ -9,12 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 
 
 SNAPSHOT_NAMESPACE_PREFIX = "snapshot:macro:"
@@ -158,9 +153,11 @@ class MacroCpiPanelsDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MacroCpiPanelsDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_optional_service_value(context, "app"),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             http_text_get=resolve_service_callable(
                 context,
                 "http_text_get",
@@ -173,10 +170,7 @@ class MacroCpiPanelsDependencies:
                 context,
                 "utc_now_iso",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",

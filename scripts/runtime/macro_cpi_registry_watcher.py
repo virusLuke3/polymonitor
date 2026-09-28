@@ -141,6 +141,8 @@ class MacroCpiRegistryWatcher:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser(description="Seed composed CPI macro registry panel snapshots into Redis and SQLite")
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--interval", type=int, default=int(os.environ.get("POLYDATA_MACRO_CPI_REGISTRY_WATCH_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS)))

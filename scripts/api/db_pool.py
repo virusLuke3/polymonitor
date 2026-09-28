@@ -61,12 +61,15 @@ class ApiPostgresConnectionPool:
         self._condition = threading.Condition()
         self._idle: deque[Any] = deque()
         self._connection_count = 0
+        self._closed = False
 
     def acquire(self, *args: Any, **kwargs: Any) -> _ConnectionLease:
         deadline = time.monotonic() + self._acquire_timeout_seconds
         create_connection = False
         with self._condition:
             while True:
+                if self._closed:
+                    raise RuntimeError("database connection pool is closed")
                 if self._idle:
                     connection = self._idle.popleft()
                     break
@@ -78,8 +81,7 @@ class ApiPostgresConnectionPool:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError(
-                        f"timed out waiting for an API PostgreSQL connection "
-                        f"(pool size={self._max_size})"
+                        f"timed out waiting for an API PostgreSQL connection (pool size={self._max_size})"
                     )
                 self._condition.wait(timeout=remaining)
 
@@ -105,6 +107,11 @@ class ApiPostgresConnectionPool:
                             self._condition.notify()
                         raise
                     time.sleep(self._connect_retry_delay_seconds * attempt)
+        with self._condition:
+            if self._closed:
+                self._connection_count -= 1
+                connection.close()
+                raise RuntimeError("database connection pool is closed")
         return _ConnectionLease(self, connection)
 
     def release(self, connection: Any) -> None:
@@ -119,11 +126,23 @@ class ApiPostgresConnectionPool:
                 pass
 
         with self._condition:
-            if reusable:
+            if reusable and not self._closed:
                 self._idle.append(connection)
             else:
+                if reusable:
+                    connection.close()
                 self._connection_count -= 1
             self._condition.notify()
+
+    def close(self) -> None:
+        with self._condition:
+            self._closed = True
+            idle = tuple(self._idle)
+            self._idle.clear()
+            self._connection_count -= len(idle)
+            self._condition.notify_all()
+        for connection in idle:
+            connection.close()
 
 
 def build_api_connection_factory(
@@ -159,4 +178,5 @@ def build_api_connection_factory(
             return connection_factory(*args, **kwargs)
         return pool.acquire(*args, **kwargs)
 
+    _connect.close = pool.close
     return _connect

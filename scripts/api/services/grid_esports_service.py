@@ -8,11 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable
 
 
 GRID_ESPORTS_NAMESPACE = "snapshot:esports:esports-intel"
@@ -95,10 +91,12 @@ class GridEsportsDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> GridEsportsDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_optional_service_value(context, "app"),
-            requests_lib=resolve_optional_service_value(context, "requests"),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
+            requests_lib=context.get("requests"),
             http_json_post=resolve_optional_service_callable(
                 context,
                 "http_json_post",
@@ -119,10 +117,7 @@ class GridEsportsDependencies:
                 context,
                 "get_snapshot_payload",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",

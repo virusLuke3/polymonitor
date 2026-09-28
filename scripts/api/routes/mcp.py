@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 from flask import Blueprint, Response, jsonify, request
 
-from api.context import resolve_route_callable, resolve_route_value
+from api.context import resolve_route_callable
 from api.services.auth_service import AuthError
 from api.services.mcp_service import (
     MCP_PROTOCOL_VERSION,
@@ -39,7 +39,7 @@ class McpRouteDependencies:
             get_public_briefing=resolve_route_callable(context, "get_public_briefing"),
             allowed_origins=frozenset(
                 str(value)
-                for value in resolve_route_value(context, "MCP_ALLOWED_ORIGINS", ())
+                for value in context.get("MCP_ALLOWED_ORIGINS", ())
                 if str(value)
             ),
         )
@@ -70,8 +70,7 @@ def _origin_allowed(origin: str, request_host: str, configured_origins: frozense
     return parsed.scheme in {"http", "https"} and parsed.netloc == request_host
 
 
-def create_mcp_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = McpRouteDependencies.from_context(context)
+def create_mcp_blueprint(dependencies: McpRouteDependencies) -> Blueprint:
     service_dependencies = dependencies.service_dependencies()
     bp = Blueprint("mcp_routes", __name__)
 

@@ -46,8 +46,7 @@ class AnalyticsRouteDependencies:
         )
 
 
-def create_analytics_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = AnalyticsRouteDependencies.from_context(context)
+def create_analytics_blueprint(dependencies: AnalyticsRouteDependencies) -> Blueprint:
     bp = Blueprint("analytics_routes", __name__)
 
     @bp.route("/analytics/addresses/top", methods=["GET"])

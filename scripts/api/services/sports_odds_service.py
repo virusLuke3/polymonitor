@@ -11,12 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 from zoneinfo import ZoneInfo
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 
 SPORTS_ODDS_NAMESPACE = "snapshot:sports:sports-odds"
 DEFAULT_SPORTS_ODDS_LIMIT = 8
@@ -45,9 +40,11 @@ class SportsOddsDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> SportsOddsDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_optional_service_value(context, "app"),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             search_markets=resolve_optional_service_callable(
                 context,
                 "search_markets",
@@ -60,10 +57,7 @@ class SportsOddsDependencies:
                 context,
                 "set_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",
@@ -590,13 +584,19 @@ def get_sports_odds_snapshot(
         seed_limit = max(DEFAULT_SPORTS_ODDS_LIMIT, int(os.environ.get("POLYDATA_SPORTS_ODDS_LIMIT", "0") or 0))
     except ValueError:
         seed_limit = DEFAULT_SPORTS_ODDS_LIMIT
-    if seeded is None and int(limit or 0) != seed_limit:
-        seeded = _read_seeded_snapshot(
+    if int(limit or 0) != seed_limit:
+        full_seed = _read_seeded_snapshot(
             dependencies,
             namespace=SPORTS_ODDS_NAMESPACE,
             cache_key=build_sports_odds_cache_key(settings, limit=seed_limit),
             ttl_seconds=ttl_seconds,
         )
+        # A historical request-size cache must not hide a newer watcher snapshot.
+        if full_seed is not None:
+            requested_at = _parse_time(seeded.get("generatedAt")) if seeded else None
+            full_at = _parse_time(full_seed.get("generatedAt"))
+            if seeded is None or (full_at is not None and (requested_at is None or full_at > requested_at)):
+                seeded = full_seed
     if seeded is not None:
         return normalize_sports_odds_payload(
             seeded,

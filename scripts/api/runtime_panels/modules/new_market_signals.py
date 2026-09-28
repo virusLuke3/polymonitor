@@ -10,4 +10,4 @@ MAX_LIMIT = 50
 
 
 def get_snapshot(ctx: Dict[str, Any], *, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
-    return ctx["get_new_market_signals_snapshot"](limit=limit)
+    return ctx.get_new_market_signals_snapshot(limit=limit)

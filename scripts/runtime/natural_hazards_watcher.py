@@ -18,6 +18,7 @@ if str(_scripts_root) not in sys.path:
 import requests
 
 from api.config import load_api_settings
+from api.context import RuntimeResources
 from api.services import natural_hazards
 from runtime.snapshot_store import SnapshotStore
 
@@ -42,6 +43,7 @@ class _App:
 
 class NaturalHazardsWatcher:
     def __init__(self, *, settings: Any, snapshot_sqlite_path: str, interval_seconds: int) -> None:
+        self.resources = RuntimeResources()
         self.settings = settings
         self.interval_seconds = max(60, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
@@ -86,8 +88,13 @@ class NaturalHazardsWatcher:
         response.raise_for_status()
         return response.content
 
+    def close(self) -> None:
+        self.resources.close()
+        self.session.close()
+
     def context(self) -> Dict[str, Any]:
         return {
+            "_resources": self.resources,
             "SETTINGS": self.settings,
             "SNAPSHOT_STORE": self.snapshot_store,
             "app": _App(),
@@ -114,6 +121,8 @@ class NaturalHazardsWatcher:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser()
     parser.add_argument("--watch", action="store_true")
     parser.add_argument(
@@ -131,16 +140,19 @@ def main() -> int:
         snapshot_sqlite_path=settings.snapshot_sqlite_path,
         interval_seconds=args.interval,
     )
-    while True:
-        try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        except KeyboardInterrupt:
-            return 0
-        except Exception as exc:
-            print(f"[natural-hazards] ERROR {exc}", file=sys.stderr)
-        if not args.watch:
-            return 0
-        time.sleep(watcher.interval_seconds)
+    try:
+        while True:
+            try:
+                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            except KeyboardInterrupt:
+                return 0
+            except Exception as exc:
+                print(f"[natural-hazards] ERROR {exc}", file=sys.stderr)
+            if not args.watch:
+                return 0
+            time.sleep(watcher.interval_seconds)
+    finally:
+        watcher.close()
 
 
 if __name__ == "__main__":

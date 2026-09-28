@@ -6,12 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 
 
 ENERGY_SHOCK_SNAPSHOT_NAMESPACE = "snapshot:macro:energy-gasoline-shock"
@@ -35,22 +30,21 @@ class EnergyGasolineShockDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> EnergyGasolineShockDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_optional_service_value(context, "app"),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             http_bytes_get=resolve_service_callable(
                 context,
                 "http_bytes_get",
             ),
-            xlrd=resolve_optional_service_value(context, "xlrd"),
+            xlrd=context.get("xlrd"),
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",

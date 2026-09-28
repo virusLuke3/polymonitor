@@ -9,19 +9,6 @@ from .source_health import SOURCE_COVERAGE
 
 
 SNAPSHOT_NAMESPACE = "snapshot:world:natural-hazards"
-_SOURCE_LOCKS: dict[str, Lock] = {}
-_SOURCE_LOCKS_GUARD = Lock()
-
-
-def _source_lock(key: str) -> Lock:
-    with _SOURCE_LOCKS_GUARD:
-        lock = _SOURCE_LOCKS.get(key)
-        if lock is None:
-            lock = Lock()
-            _SOURCE_LOCKS[key] = lock
-        return lock
-
-
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -68,6 +55,7 @@ def fetch_with_snapshot(
     *,
     key: str,
     snapshot_store: Any,
+    source_lock: Lock,
     fetcher: Callable[[], Dict[str, Any]],
     ttl_seconds: int,
 ) -> SourceFetchResult:
@@ -85,7 +73,7 @@ def fetch_with_snapshot(
             "errorCode": None,
         }
 
-    with _source_lock(key):
+    with source_lock:
         fresh = snapshot_store.get(SNAPSHOT_NAMESPACE, key)
         if isinstance(fresh, dict) and isinstance(fresh.get("events"), list):
             return {

@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import f1_runtime_service
 from runtime import f1_watcher
@@ -70,7 +64,7 @@ class F1SeedWatcherTestCase(unittest.TestCase):
         fake_redis = FakeRedis()
         settings = make_settings(str(Path(snapshot_dir.name) / "snapshots.sqlite3"))
         redis_module = SimpleNamespace(from_url=lambda *args, **kwargs: fake_redis)
-        requests_module = SimpleNamespace()
+        requests_module = SimpleNamespace(Session=lambda: SimpleNamespace(trust_env=False))
         with patch.object(f1_watcher, "redis", redis_module), patch.object(f1_watcher, "requests", requests_module):
             watcher = f1_watcher.F1Watcher(
                 redis_url=settings.redis_url,
@@ -135,7 +129,3 @@ class F1SeedWatcherTestCase(unittest.TestCase):
 
         self.assertEqual("sqlite-seed", payload["cacheMode"])
         self.assertEqual("f1-1", payload["cards"][0]["id"])
-
-
-if __name__ == "__main__":
-    unittest.main()

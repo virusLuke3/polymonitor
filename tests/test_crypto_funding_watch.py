@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-import sys
+from api.routes.runtime_panels import RuntimePanelRouteDependencies
+
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
 
 from flask import Flask
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.services import crypto_funding_service
@@ -161,7 +156,7 @@ class CryptoFundingWatchTestCase(unittest.TestCase):
             "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
             "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
         }
-        app.register_blueprint(create_runtime_panels_blueprint(helpers))
+        app.register_blueprint(create_runtime_panels_blueprint(RuntimePanelRouteDependencies.from_context(helpers)))
 
         with app.test_client() as client:
             invalid = client.get("/runtime/crypto/funding-watch?limit=nope")
@@ -170,7 +165,3 @@ class CryptoFundingWatchTestCase(unittest.TestCase):
         self.assertEqual(200, invalid.status_code)
         self.assertEqual(200, large.status_code)
         self.assertEqual([18, 40], seen_limits)
-
-
-if __name__ == "__main__":
-    unittest.main()

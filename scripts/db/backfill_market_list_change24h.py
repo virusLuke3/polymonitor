@@ -178,6 +178,8 @@ def run_backfill(
 
 
 def main() -> None:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser(description="Backfill market_list_serving.price_24h_ago in resumable batches")
     add_db_cli_args(parser)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="每批回填多少个 market_id")

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from api.context import runtime_resources
+
 import json
-import threading
 import time
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from . import clickhouse_orderfilled_service
+from . import clickhouse_orderfilled_service, outcome_semantics_service
 
 
 CRITICAL_NOTIONAL = Decimal("2500")
@@ -19,8 +20,6 @@ DEFAULT_ALPHA_SIGNAL_LIMIT = 8
 DEFAULT_WHALE_TRADES_LIMIT = 14
 DEFAULT_SUSPICIOUS_TRADES_LIMIT = 12
 DEFAULT_WHALE_TRADES_LOOKBACK_DAYS = 7
-_SIGNAL_REFRESH_LOCK = threading.Lock()
-_SIGNAL_REFRESH_STATE: Dict[str, bool] = {}
 
 
 def build_whale_trades_cache_key(limit: int = 14, lookback_days: int = 7) -> str:
@@ -35,7 +34,9 @@ def build_alpha_signal_cache_key(limit: int = 8) -> str:
     return json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
 
 
-def normalize_signal_payload(payload: Dict[str, Any], *, generated_at: str, source: str = "polyData signal seed") -> Dict[str, Any]:
+def normalize_signal_payload(
+    payload: Dict[str, Any], *, generated_at: str, source: str = "polyData signal seed"
+) -> Dict[str, Any]:
     items = payload.get("items")
     normalized = dict(payload)
     normalized["items"] = items if isinstance(items, list) else []
@@ -126,6 +127,16 @@ def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "timestamp": row.get("timestamp"),
         "txHash": row.get("tx_hash"),
         "outcome": row.get("outcome"),
+        "logicalOutcome": row.get("logicalOutcome") or row.get("logical_outcome"),
+        "sourceOutcomeLabel": row.get("sourceOutcomeLabel") or row.get("source_outcome_label"),
+        "semanticMode": row.get("semanticMode") or row.get("semantic_mode"),
+        "outcomeSemanticsStatus": row.get("outcomeSemanticsStatus") or row.get("outcome_semantics_status"),
+        "outcomeSemanticsValid": bool(row.get("outcomeSemanticsValid", row.get("outcome_semantics_valid"))),
+        "outcomeSemanticsCapabilities": row.get("outcomeSemanticsCapabilities")
+        or {
+            "supportsYesNoWording": bool(row.get("supports_yes_no_wording")),
+            "supportsDirectionalSemantics": bool(row.get("supports_directional_semantics")),
+        },
         "side": row.get("side"),
         "price": ctx["format_trade_decimal"](row.get("price")),
         "size": ctx["format_trade_decimal"](row.get("size")),
@@ -134,7 +145,7 @@ def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "taker": ctx["format_trade_address"](row.get("taker")),
         "severity": row.get("severity") or _severity_for_notional(ctx, row.get("notional")),
     }
-    for source_key, target_key in (
+    metric_fields = [
         ("source_mode", "sourceMode"),
         ("signal_type", "signalType"),
         ("threshold_notional", "thresholdNotional"),
@@ -142,27 +153,40 @@ def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         ("critical_threshold_notional", "criticalThresholdNotional"),
         ("market_window_notional", "marketWindowNotional"),
         ("market_share", "marketShare"),
-        ("entry_yes_price", "entryYesPrice"),
-        ("price_after_1m", "priceAfter1m"),
-        ("price_after_5m", "priceAfter5m"),
-        ("price_after_15m", "priceAfter15m"),
-        ("edge_after_fees", "edgeAfterFees"),
-        ("edge_fee_probability", "edgeFeeProbability"),
-    ):
+    ]
+    if outcome_semantics_service.directional_semantics_allowed(row):
+        metric_fields.extend(
+            [
+                ("entry_yes_price", "entryYesPrice"),
+                ("price_after_1m", "priceAfter1m"),
+                ("price_after_5m", "priceAfter5m"),
+                ("price_after_15m", "priceAfter15m"),
+                ("edge_after_fees", "edgeAfterFees"),
+                ("edge_fee_probability", "edgeFeeProbability"),
+            ]
+        )
+    for source_key, target_key in metric_fields:
         if row.get(source_key) is not None:
-            item[target_key] = ctx["format_trade_decimal"](row.get(source_key)) if source_key != "source_mode" and source_key != "signal_type" else row.get(source_key)
+            item[target_key] = (
+                ctx["format_trade_decimal"](row.get(source_key))
+                if source_key != "source_mode" and source_key != "signal_type"
+                else row.get(source_key)
+            )
     return item
 
 
 def _format_alpha_volume_signal(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
+    if not outcome_semantics_service.directional_semantics_allowed(row):
+        raise ValueError("directional outcome semantics required for alpha volume signal")
     flow = ctx["format_trade_decimal"](row.get("flow_notional"))
     net_flow = ctx["format_trade_decimal"](row.get("net_flow_notional"))
     max_trade = ctx["format_trade_decimal"](row.get("max_trade_notional"))
     market_share = _format_percent(ctx, row.get("market_share"))
     net_strength = _format_percent(ctx, row.get("net_direction_strength"))
     side = str(row.get("side") or "FLOW").upper()
-    outcome = str(row.get("outcome") or "--").upper()
-    direction = str(row.get("direction") or ("bearish" if outcome == "NO" else "bullish")).lower()
+    outcome = str(row.get("outcome") or "--").strip()
+    logical_outcome = str(row.get("logicalOutcome") or row.get("logical_outcome") or "").upper()
+    direction = str(row.get("direction") or ("bearish" if logical_outcome == "NO" else "bullish")).lower()
     market_title = row.get("market_title") or "Market flow"
     window_minutes = row.get("window_minutes") or 15
     score = ctx["format_trade_decimal"](row.get("score"))
@@ -177,7 +201,10 @@ def _format_alpha_volume_signal(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any
         "sourceLabel": "FLOW+$",
         "sourceTag": "FLOW",
         "headline": f"{window_minutes}m net directional flow",
-        "action": {"label": "Sell" if side == "SELL" else "Buy", "outcome": "No" if outcome == "NO" else "Yes" if outcome == "YES" else outcome.title()},
+        "action": {
+            "label": "Sell" if side == "SELL" else "Buy",
+            "outcome": outcome,
+        },
         "title": f"{side} {outcome} flow {_money_text(ctx, row.get('flow_notional'))}: {market_title}",
         "summary": f"net {net_strength}; {row.get('trade_count') or 0} fills; max fill {max_trade_text}; {market_share} of market baseline{post_summary}",
         "timestamp": row.get("timestamp"),
@@ -187,6 +214,15 @@ def _format_alpha_volume_signal(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any
         "txHash": row.get("tx_hash"),
         "side": side,
         "outcome": outcome,
+        "logicalOutcome": row.get("logicalOutcome") or row.get("logical_outcome"),
+        "sourceOutcomeLabel": row.get("sourceOutcomeLabel") or row.get("source_outcome_label"),
+        "semanticMode": row.get("semanticMode") or row.get("semantic_mode"),
+        "outcomeSemanticsStatus": row.get("outcomeSemanticsStatus") or row.get("outcome_semantics_status"),
+        "outcomeSemanticsValid": True,
+        "outcomeSemanticsCapabilities": {
+            "supportsYesNoWording": bool(row.get("supports_yes_no_wording")),
+            "supportsDirectionalSemantics": True,
+        },
         "price": ctx["format_trade_decimal"](row.get("avg_price")),
         "notional": flow,
         "contributors": ["clickhouse", "volume", "flow"],
@@ -262,6 +298,8 @@ def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict
                 "timestamp": timestamp,
                 "tx_hash": trade.get("txHash") or trade.get("tx_hash"),
                 "outcome": trade.get("outcome"),
+                "logical_outcome": trade.get("logicalOutcome") or trade.get("logical_outcome"),
+                "token_id": trade.get("tokenId") or trade.get("token_id"),
                 "side": trade.get("side"),
                 "price": price,
                 "size": size,
@@ -271,10 +309,10 @@ def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict
                 "source_mode": "live-trades",
             }
         )
-    rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
+    rows.sort(key=lambda row: ctx["_safe_decimal"](row.get("notional")) or Decimal("0"), reverse=True)
     if not rows:
-        return _query_market_activity_rows(ctx, limit=limit, threshold_dt=threshold_dt)
-    return rows[: max(limit * 2, limit)]
+        rows = _query_market_activity_rows(ctx, limit=limit, threshold_dt=threshold_dt)
+    return outcome_semantics_service.annotate_raw_trade_rows(ctx, rows[: max(limit * 2, limit)])
 
 
 def _query_market_activity_rows(ctx: dict, *, limit: int, threshold_dt: Any = None) -> List[Dict[str, Any]]:
@@ -319,7 +357,7 @@ def _query_market_activity_rows(ctx: dict, *, limit: int, threshold_dt: Any = No
         )
     if not rows:
         rows.extend(_query_bootstrap_trade_rows(ctx, limit=limit, threshold_dt=threshold_dt))
-    rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
+    rows.sort(key=lambda row: ctx["_safe_decimal"](row.get("notional")) or Decimal("0"), reverse=True)
     return rows[: max(limit * 2, limit)]
 
 
@@ -379,7 +417,7 @@ def _query_bootstrap_trade_rows(ctx: dict, *, limit: int, threshold_dt: Any = No
                 "source_mode": "bootstrap-trades-fallback",
             }
         )
-    rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
+    rows.sort(key=lambda row: ctx["_safe_decimal"](row.get("notional")) or Decimal("0"), reverse=True)
     return rows[: max(limit * 2, limit)]
 
 
@@ -397,7 +435,9 @@ def _read_bootstrap_payload(ctx: dict) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _store_runtime_snapshot(ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
+def _store_runtime_snapshot(
+    ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int
+) -> Dict[str, Any]:
     ctx["SNAPSHOT_STORE"].set(namespace, cache_key, payload, ttl_seconds)
     return ctx["set_cached_runtime_payload"](namespace, cache_key, payload, ttl_seconds)
 
@@ -413,19 +453,22 @@ def _refresh_runtime_snapshot(
     label: str,
     reason: str,
 ) -> Optional[Dict[str, Any]]:
+    resources = runtime_resources(ctx)
     started_at = time.perf_counter()
     ctx["app"].logger.info("%s refresh-start reason=%s", label, reason)
     try:
-        payload = builder()
+        payload = _sanitize_signal_payload(ctx, namespace, builder())
         stored = _store_runtime_snapshot(ctx, namespace, cache_key, payload, ttl_seconds)
-        ctx["app"].logger.info("%s refresh-done reason=%s duration_ms=%.2f", label, reason, (time.perf_counter() - started_at) * 1000)
+        ctx["app"].logger.info(
+            "%s refresh-done reason=%s duration_ms=%.2f", label, reason, (time.perf_counter() - started_at) * 1000
+        )
         return stored
     except Exception:
         ctx["app"].logger.exception("%s refresh-failed reason=%s", label, reason)
         return None
     finally:
-        with _SIGNAL_REFRESH_LOCK:
-            _SIGNAL_REFRESH_STATE[refresh_state_key] = False
+        with resources.signal_lock:
+            resources.signal_refreshing[refresh_state_key] = False
 
 
 def _schedule_runtime_snapshot_refresh(
@@ -439,11 +482,12 @@ def _schedule_runtime_snapshot_refresh(
     label: str,
     reason: str,
 ) -> None:
-    with _SIGNAL_REFRESH_LOCK:
-        if _SIGNAL_REFRESH_STATE.get(refresh_state_key):
+    resources = runtime_resources(ctx)
+    with resources.signal_lock:
+        if resources.signal_refreshing.get(refresh_state_key):
             return
-        _SIGNAL_REFRESH_STATE[refresh_state_key] = True
-    thread = ctx["threading"].Thread(
+        resources.signal_refreshing[refresh_state_key] = True
+    started = resources.start_thread(
         target=lambda: _refresh_runtime_snapshot(
             ctx,
             namespace=namespace,
@@ -455,9 +499,10 @@ def _schedule_runtime_snapshot_refresh(
             reason=reason,
         ),
         name=f"{label}-refresh",
-        daemon=True,
     )
-    thread.start()
+    if not started:
+        with resources.signal_lock:
+            resources.signal_refreshing[refresh_state_key] = False
 
 
 def _get_stale_first_runtime_snapshot(
@@ -471,20 +516,29 @@ def _get_stale_first_runtime_snapshot(
     label: str,
     cold_fallback: Optional[Callable[[], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
+    resources = runtime_resources(ctx)
     cached = ctx["get_cached_runtime_payload"](namespace, cache_key)
     if cached is not None:
-        return cached
+        return _sanitize_signal_payload(ctx, namespace, cached)
 
     redis_reader = ctx.get("get_cached_json")
     if callable(redis_reader):
         redis_payload = redis_reader(namespace, cache_key)
         if isinstance(redis_payload, dict):
             ctx["SNAPSHOT_STORE"].set(namespace, cache_key, redis_payload, ttl_seconds)
-            return ctx["set_cached_runtime_payload"](namespace, cache_key, redis_payload, ttl_seconds)
+            return _sanitize_signal_payload(
+                ctx,
+                namespace,
+                ctx["set_cached_runtime_payload"](namespace, cache_key, redis_payload, ttl_seconds),
+            )
 
     fresh_payload = ctx["SNAPSHOT_STORE"].get(namespace, cache_key)
     if fresh_payload is not None:
-        return ctx["set_cached_runtime_payload"](namespace, cache_key, fresh_payload, ttl_seconds)
+        return _sanitize_signal_payload(
+            ctx,
+            namespace,
+            ctx["set_cached_runtime_payload"](namespace, cache_key, fresh_payload, ttl_seconds),
+        )
 
     stale_payload = ctx["SNAPSHOT_STORE"].get_stale(namespace, cache_key)
     if stale_payload is not None:
@@ -500,7 +554,7 @@ def _get_stale_first_runtime_snapshot(
             label=label,
             reason="stale-hit",
         )
-        return stale_payload
+        return _sanitize_signal_payload(ctx, namespace, stale_payload)
 
     if cold_fallback is not None:
         ctx["app"].logger.info("%s cold-miss returning_fallback=true scheduling_refresh=true", label)
@@ -515,13 +569,17 @@ def _get_stale_first_runtime_snapshot(
             reason="cold-miss",
         )
         fallback_payload = cold_fallback()
-        return ctx["set_cached_runtime_payload"](namespace, cache_key, fallback_payload, min(15, ttl_seconds))
+        return _sanitize_signal_payload(
+            ctx,
+            namespace,
+            ctx["set_cached_runtime_payload"](namespace, cache_key, fallback_payload, min(15, ttl_seconds)),
+        )
 
-    with _SIGNAL_REFRESH_LOCK:
-        if _SIGNAL_REFRESH_STATE.get(refresh_state_key):
+    with resources.signal_lock:
+        if resources.signal_refreshing.get(refresh_state_key):
             payload = {"items": [], "generatedAt": ctx["utc_now_iso"](), "status": "warming"}
             return ctx["set_cached_runtime_payload"](namespace, cache_key, payload, min(5, ttl_seconds))
-        _SIGNAL_REFRESH_STATE[refresh_state_key] = True
+        resources.signal_refreshing[refresh_state_key] = True
     payload = _refresh_runtime_snapshot(
         ctx,
         namespace=namespace,
@@ -533,23 +591,74 @@ def _get_stale_first_runtime_snapshot(
         reason="cold-miss",
     )
     if payload is not None:
-        return payload
+        return _sanitize_signal_payload(ctx, namespace, payload)
     raise RuntimeError(f"{label} snapshot refresh failed")
 
 
-def _set_runtime_payload_if_possible(ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
+def _set_runtime_payload_if_possible(
+    ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int
+) -> Dict[str, Any]:
     setter = ctx.get("set_cached_runtime_payload")
     if callable(setter):
         return setter(namespace, cache_key, payload, ttl_seconds)
     return payload
 
 
-def _read_cached_signal_snapshot(ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    sanitized = dict(payload)
+    items = [dict(item) for item in payload.get("items") or [] if isinstance(item, dict)]
+    positions_by_mode: Dict[str, List[int]] = {"raw": [], "aggregate": [], "probe": []}
+    currently_verified_positions: set[int] = set()
+    aggregate_kinds = {"volume-flow", "market-flow", "momentum", "polybeats"}
+    for index, item in enumerate(items):
+        if (item.get("marketId") or item.get("market_id")) is None:
+            continue
+        if item.get("tokenId") or item.get("token_id"):
+            mode = "raw"
+        elif str(item.get("kind") or "").strip().lower() in aggregate_kinds and any(
+            item.get(key) is not None for key in ("logicalOutcome", "logical_outcome", "outcome")
+        ):
+            mode = "aggregate"
+        elif any(item.get(key) is not None for key in ("logicalOutcome", "logical_outcome", "outcome")):
+            # Unknown/row-like cached items are raw by default.  Only named
+            # market aggregates above may use a logical slot without a token.
+            mode = "raw"
+        else:
+            mode = "probe"
+        positions_by_mode[mode].append(index)
+    for mode, positions in positions_by_mode.items():
+        if not positions:
+            continue
+        annotated = outcome_semantics_service.annotate_trade_rows(
+            ctx,
+            [items[index] for index in positions],
+            identity_mode=mode,
+        )
+        for index, row in zip(positions, annotated):
+            items[index] = row
+            currently_verified_positions.add(index)
+    if namespace == SIGNAL_SNAPSHOT_NAMESPACE_ALPHA:
+        items = [
+            item
+            for index, item in enumerate(items)
+            if index in currently_verified_positions
+            and outcome_semantics_service.directional_semantics_allowed(item)
+            and item.get("outcomeSemanticsIdentityMode") in {"raw", "aggregate"}
+        ]
+    sanitized["items"] = items
+    if not items and sanitized.get("status") == "ok":
+        sanitized["status"] = "empty"
+    return sanitized
+
+
+def _read_cached_signal_snapshot(
+    ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int
+) -> Optional[Dict[str, Any]]:
     runtime_reader = ctx.get("get_cached_runtime_payload")
     if callable(runtime_reader):
         cached = runtime_reader(namespace, cache_key)
         if isinstance(cached, dict):
-            return cached
+            return _sanitize_signal_payload(ctx, namespace, cached)
 
     redis_reader = ctx.get("get_cached_json")
     if callable(redis_reader):
@@ -558,17 +667,29 @@ def _read_cached_signal_snapshot(ctx: dict, *, namespace: str, cache_key: str, t
             snapshot_store = ctx.get("SNAPSHOT_STORE")
             if snapshot_store is not None:
                 snapshot_store.set(namespace, cache_key, redis_payload, ttl_seconds)
-            return _set_runtime_payload_if_possible(ctx, namespace, cache_key, redis_payload, ttl_seconds)
+            return _sanitize_signal_payload(
+                ctx,
+                namespace,
+                _set_runtime_payload_if_possible(ctx, namespace, cache_key, redis_payload, ttl_seconds),
+            )
 
     snapshot_store = ctx.get("SNAPSHOT_STORE")
     if snapshot_store is None:
         return None
     fresh_payload = snapshot_store.get(namespace, cache_key)
     if isinstance(fresh_payload, dict):
-        return _set_runtime_payload_if_possible(ctx, namespace, cache_key, fresh_payload, ttl_seconds)
+        return _sanitize_signal_payload(
+            ctx,
+            namespace,
+            _set_runtime_payload_if_possible(ctx, namespace, cache_key, fresh_payload, ttl_seconds),
+        )
     stale_payload = snapshot_store.get_stale(namespace, cache_key)
     if isinstance(stale_payload, dict):
-        return _set_runtime_payload_if_possible(ctx, namespace, cache_key, stale_payload, min(15, ttl_seconds))
+        return _sanitize_signal_payload(
+            ctx,
+            namespace,
+            _set_runtime_payload_if_possible(ctx, namespace, cache_key, stale_payload, min(15, ttl_seconds)),
+        )
     return None
 
 
@@ -598,7 +719,15 @@ def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int =
     status = "empty"
     if items:
         status = "ok" if source_modes and all(_is_live_signal_source(mode) for mode in source_modes) else "degraded"
-    source_mode = next(iter(source_modes)) if len(source_modes) == 1 else "mixed-live" if source_modes and all(_is_live_signal_source(mode) for mode in source_modes) else "fallback" if source_modes else "none"
+    source_mode = (
+        next(iter(source_modes))
+        if len(source_modes) == 1
+        else "mixed-live"
+        if source_modes and all(_is_live_signal_source(mode) for mode in source_modes)
+        else "fallback"
+        if source_modes
+        else "none"
+    )
     return normalize_signal_payload(
         {
             "items": items,
@@ -618,13 +747,17 @@ def fetch_live_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: i
     )
 
 
-def get_whale_trades_snapshot(ctx: dict, limit: int = DEFAULT_WHALE_TRADES_LIMIT, lookback_days: int = DEFAULT_WHALE_TRADES_LOOKBACK_DAYS) -> Dict[str, Any]:
+def get_whale_trades_snapshot(
+    ctx: dict, limit: int = DEFAULT_WHALE_TRADES_LIMIT, lookback_days: int = DEFAULT_WHALE_TRADES_LOOKBACK_DAYS
+) -> Dict[str, Any]:
     cache_key = build_whale_trades_cache_key(limit=limit, lookback_days=lookback_days)
     if int(limit or 0) != DEFAULT_WHALE_TRADES_LIMIT and int(lookback_days or 0) == DEFAULT_WHALE_TRADES_LOOKBACK_DAYS:
         default_payload = _read_cached_signal_snapshot(
             ctx,
             namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
-            cache_key=build_whale_trades_cache_key(limit=DEFAULT_WHALE_TRADES_LIMIT, lookback_days=DEFAULT_WHALE_TRADES_LOOKBACK_DAYS),
+            cache_key=build_whale_trades_cache_key(
+                limit=DEFAULT_WHALE_TRADES_LIMIT, lookback_days=DEFAULT_WHALE_TRADES_LOOKBACK_DAYS
+            ),
             ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
         )
         if default_payload is not None:
@@ -701,6 +834,7 @@ def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, 
         if logger is not None:
             logger.exception("suspicious trade source failed")
         recent_trades = []
+    recent_trades = outcome_semantics_service.annotate_raw_trade_rows(ctx, recent_trades)
     if not oracle_events and not recent_trades:
         return [
             {
@@ -747,10 +881,23 @@ def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, 
                 ctx,
                 {
                     "market_id": market_id,
-                    "market_title": trade.get("marketTitle") or trade.get("market_title") or event.get("marketTitle") or event.get("market_title"),
+                    "market_title": trade.get("marketTitle")
+                    or trade.get("market_title")
+                    or event.get("marketTitle")
+                    or event.get("market_title"),
                     "timestamp": trade.get("timestamp"),
                     "tx_hash": tx_hash,
                     "outcome": trade.get("outcome"),
+                    "logical_outcome": trade.get("logicalOutcome") or trade.get("logical_outcome"),
+                    "source_outcome_label": trade.get("sourceOutcomeLabel") or trade.get("source_outcome_label"),
+                    "semantic_mode": trade.get("semanticMode") or trade.get("semantic_mode"),
+                    "outcome_semantics_status": trade.get("outcomeSemanticsStatus")
+                    or trade.get("outcome_semantics_status"),
+                    "outcome_semantics_valid": trade.get("outcomeSemanticsValid", trade.get("outcome_semantics_valid")),
+                    "supports_directional_semantics": trade.get(
+                        "supportsDirectionalSemantics",
+                        trade.get("supports_directional_semantics"),
+                    ),
                     "side": trade.get("side"),
                     "price": price,
                     "size": size,
@@ -772,7 +919,7 @@ def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, 
             break
 
     if items:
-        items.sort(key=lambda item: (ctx["_safe_decimal"](item.get("notional")) or Decimal("0")), reverse=True)
+        items.sort(key=lambda item: ctx["_safe_decimal"](item.get("notional")) or Decimal("0"), reverse=True)
         return items[:limit]
 
     fallback_items = []
@@ -787,7 +934,16 @@ def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, 
     return fallback_items
 
 
-def _append_signal(signals: List[Dict[str, Any]], *, kind: str, severity: str, title: Any, summary: str, timestamp: Any, contributors: Iterable[str] | None = None) -> None:
+def _append_signal(
+    signals: List[Dict[str, Any]],
+    *,
+    kind: str,
+    severity: str,
+    title: Any,
+    summary: str,
+    timestamp: Any,
+    contributors: Iterable[str] | None = None,
+) -> None:
     signals.append(
         {
             "kind": kind,
@@ -813,14 +969,22 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
                 logger.exception("alpha volume source failed")
             trade_source_status = "degraded"
     if volume_rows is not None:
-        signals.extend(_format_alpha_volume_signal(ctx, row) for row in volume_rows[:limit])
+        signals.extend(
+            _format_alpha_volume_signal(ctx, row)
+            for row in volume_rows[:limit]
+            if outcome_semantics_service.directional_semantics_allowed(row)
+        )
     else:
         trade_source_status = "degraded"
 
     whale_rows = _query_whale_rows(ctx, limit=6, lookback_days=7)[:6] if len(signals) < limit else []
     if any(not _is_live_signal_source(str(row.get("source_mode") or "")) for row in whale_rows):
         trade_source_status = "degraded"
-    whales = [_format_trade_item(ctx, row) for row in whale_rows]
+    whales = [
+        _format_trade_item(ctx, row)
+        for row in whale_rows
+        if outcome_semantics_service.directional_semantics_allowed(row)
+    ]
     for trade in whales[:3]:
         if len(signals) >= limit:
             break
@@ -864,6 +1028,8 @@ def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     for row in _query_whale_rows(ctx, limit=min(6, limit), lookback_days=3):
         if len(signals) >= limit:
             break
+        if not outcome_semantics_service.directional_semantics_allowed(row):
+            continue
         trade = _format_trade_item(ctx, row)
         _append_signal(
             signals,
@@ -884,9 +1050,16 @@ def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
             if logger is not None:
                 logger.exception("alpha fallback active markets source failed")
             fallback_markets = []
-        for market in fallback_markets[:4]:
+        fallback_markets = fallback_markets[:4]
+        semantic_probes = outcome_semantics_service.annotate_aggregate_rows(
+            ctx,
+            [{"marketId": market.get("id") or market.get("marketId"), "outcome": "YES"} for market in fallback_markets],
+        )
+        for market, semantic_probe in zip(fallback_markets, semantic_probes):
             if len(signals) >= limit:
                 break
+            if not outcome_semantics_service.directional_semantics_allowed(semantic_probe):
+                continue
             price = ctx["_safe_decimal"](market.get("latestPrice"))
             change_24h = ctx["_safe_decimal"](market.get("change24h"))
             _append_signal(
@@ -898,17 +1071,35 @@ def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
                 timestamp=ctx["utc_now_iso"](),
                 contributors=["fast-fallback", "market"],
             )
+            signals[-1].update(
+                {
+                    "marketId": market.get("id") or market.get("marketId"),
+                    "outcome": semantic_probe.get("outcome"),
+                    "logicalOutcome": semantic_probe.get("logicalOutcome"),
+                    "sourceOutcomeLabel": semantic_probe.get("sourceOutcomeLabel"),
+                    "semanticMode": semantic_probe.get("semanticMode"),
+                    "outcomeSemanticsStatus": semantic_probe.get("outcomeSemanticsStatus"),
+                    "outcomeSemanticsValid": semantic_probe.get("outcomeSemanticsValid"),
+                    "supports_directional_semantics": True,
+                }
+            )
     return {
-        **normalize_signal_payload({"items": signals[:limit], "generatedAt": ctx["utc_now_iso"]()}, generated_at=ctx["utc_now_iso"]()),
+        **normalize_signal_payload(
+            {"items": signals[:limit], "generatedAt": ctx["utc_now_iso"]()}, generated_at=ctx["utc_now_iso"]()
+        ),
         "status": "warming",
         "sourceMode": "fast-fallback",
     }
 
 
 def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    return normalize_signal_payload(
-        _build_alpha_signal_payload(ctx, limit=limit),
-        generated_at=ctx["utc_now_iso"](),
+    return _sanitize_signal_payload(
+        ctx,
+        SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
+        normalize_signal_payload(
+            _build_alpha_signal_payload(ctx, limit=limit),
+            generated_at=ctx["utc_now_iso"](),
+        ),
     )
 
 

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import finance_external_sources_service, finance_panels_service
+
+
+@pytest.fixture(autouse=True)
+def no_live_finance_fallback(monkeypatch):
+    # An unhandled fixture URL must never fall through to real HTTP.
+    monkeypatch.setattr(finance_external_sources_service, "requests", None)
 
 
 def _ctx():
@@ -25,6 +27,10 @@ def _ctx():
         ]
 
     def http_json_get(url, params=None, timeout=12, headers=None):
+        if "okx" in url:
+            return {"data": []}
+        if "yahoo" in url:
+            return {"chart": {"result": []}}
         if "stablecoins" in url:
             return {
                 "peggedAssets": [
@@ -55,6 +61,13 @@ def _ctx():
         return {"symbol": symbol, "price": 10, "changePercent": 2, "volume24h": 1000}
 
     return {
+        "SETTINGS": SimpleNamespace(
+            finance_hyperliquid_info_url="https://hyperliquid.test/info",
+            finance_okx_market_ticker_url="https://okx.test/ticker",
+            finance_defillama_stablecoins_url="https://stablecoins.test/",
+            finance_cftc_legacy_cot_url="https://cftc.test/",
+            finance_yahoo_chart_url_template="https://yahoo.test/chart/{symbol}",
+        ),
         "http_json_get": http_json_get,
         "http_json_post": http_json_post,
         "get_yahoo_market_snapshot": yahoo,
@@ -68,7 +81,8 @@ def test_finance_external_sources_payload_has_seeded_sources():
     assert payload["status"] == "ok"
     assert payload["sources"]["hyperliquid"] == "ok"
     assert payload["sources"]["tradexyz"] == "proxy"
-    assert payload["summary"]["perpCount"] == 2
+    assert payload["summary"]["perpCount"] == 6
+    assert all(item["source"] == "yahoo-reference" for item in payload["tradfiPerps"]["items"])
     assert payload["summary"]["etfCount"] >= 1
     assert payload["summary"]["cotCount"] == 5
     assert payload["summary"]["stablecoinCount"] == 1

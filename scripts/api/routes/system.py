@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from api.context import RouteContext, resolve_route_callable
+from api.context import resolve_route_callable
 
 
 @dataclass(frozen=True)
@@ -21,32 +21,17 @@ class SystemRouteDependencies:
     def from_context(cls, context: Mapping[str, Any]) -> SystemRouteDependencies:
         authenticate_request = (
             resolve_route_callable(context, "authenticate_request")
-            if isinstance(context, RouteContext)
-            else cast(Callable[..., Any], context.get("authenticate_request", lambda *_args, **_kwargs: None))
         )
         return cls(
             authenticate_request=authenticate_request,
-            build_system_health_payload=cast(
-                Callable[[], Any],
-                resolve_route_callable(context, "build_system_health_payload"),
-            ),
-            build_seed_health_payload=cast(
-                Callable[[], Any],
-                resolve_route_callable(context, "build_seed_health_payload"),
-            ),
-            describe_db_target=cast(
-                Callable[[], str],
-                resolve_route_callable(context, "describe_db_target"),
-            ),
-            get_redis_client=cast(
-                Callable[[], Any],
-                resolve_route_callable(context, "get_redis_client"),
-            ),
+            build_system_health_payload=resolve_route_callable(context, "build_system_health_payload"),
+            build_seed_health_payload=resolve_route_callable(context, "build_seed_health_payload"),
+            describe_db_target=resolve_route_callable(context, "describe_db_target"),
+            get_redis_client=resolve_route_callable(context, "get_redis_client"),
         )
 
 
-def create_system_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = SystemRouteDependencies.from_context(context)
+def create_system_blueprint(dependencies: SystemRouteDependencies) -> Blueprint:
     bp = Blueprint("system_routes", __name__)
 
     @bp.route("/system/health", methods=["GET"])
@@ -62,11 +47,20 @@ def create_system_blueprint(context: Mapping[str, Any]) -> Blueprint:
 
     @bp.route("/health", methods=["GET"])
     def health():
+        try:
+            database_ready = bool(dependencies.describe_db_target())
+        except Exception:
+            database_ready = False
+        try:
+            client = dependencies.get_redis_client()
+            redis_ready = bool(client and client.ping())
+        except Exception:
+            redis_ready = False
         return jsonify(
             {
-                "status": "ok",
-                "database": dependencies.describe_db_target(),
-                "redis": bool(dependencies.get_redis_client()),
+                "status": "ok" if database_ready and redis_ready else "degraded",
+                "database": database_ready,
+                "redis": redis_ready,
             }
         )
 

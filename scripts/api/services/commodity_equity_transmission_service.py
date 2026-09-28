@@ -4,11 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 
 
 PANEL_ID = "commodity-equity-transmission"
@@ -32,19 +28,12 @@ class CommodityEquityTransmissionDependencies:
                 context,
                 "get_market_group_snapshot",
             ),
-            commodity_symbols=resolve_optional_service_value(
-                context,
-                "COMMODITY_SYMBOLS",
-                (),
-            ),
+            commodity_symbols=context.get("COMMODITY_SYMBOLS", ()),
             search_markets=resolve_optional_service_callable(
                 context,
                 "search_markets",
             ),
-            application=resolve_optional_service_value(
-                context,
-                "app",
-            ),
+            application=context.get("app"),
             utc_now_iso=resolve_service_callable(
                 context,
                 "utc_now_iso",

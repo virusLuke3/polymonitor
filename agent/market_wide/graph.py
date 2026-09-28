@@ -1082,21 +1082,17 @@ def _call_json_node(client: Any, node: str, messages: list[dict[str, str]], *, m
         "inputHash": _json_hash(messages),
         "status": "ok",
     }
+    budget_name = "POLYDATA_AGENT_MARKET_WIDE_WRITER_MAX_TOKENS" if node == "panel_writer" else "POLYDATA_AGENT_MARKET_WIDE_SPECIALIST_MAX_TOKENS"
+    max_tokens = max(128, min(8192, get_int_env(budget_name, max_tokens)))
+    event["maxOutputTokens"] = max_tokens
     try:
         raw_text = client.complete_json(
             messages,
             max_tokens=max_tokens,
             workflow_name=f"polydata-market-wide-fig-{node}-{run_id}",
         )
-        raw = extract_json_object(raw_text)
-        output_hash = _json_hash(raw)
         usage = getattr(client, "last_usage", None)
         event.update({
-            "finishedAt": _utc_now_iso(),
-            "latencyMs": int((time.monotonic() - start_monotonic) * 1000),
-            "outputHash": output_hash,
-            "outputJson": raw,
-            "evidenceRefs": _evidence_refs(raw),
             "model": getattr(client, "model", ""),
             "runtime": getattr(usage, "runtime", ""),
             "usage": {
@@ -1105,6 +1101,15 @@ def _call_json_node(client: Any, node: str, messages: list[dict[str, str]], *, m
                 "totalTokens": getattr(usage, "total_tokens", 0),
                 "inputChars": getattr(usage, "input_chars", 0),
             },
+        })
+        # A completed model call still consumed tokens when its JSON is truncated.
+        raw = extract_json_object(raw_text)
+        event.update({
+            "finishedAt": _utc_now_iso(),
+            "latencyMs": int((time.monotonic() - start_monotonic) * 1000),
+            "outputHash": _json_hash(raw),
+            "outputJson": raw,
+            "evidenceRefs": _evidence_refs(raw),
         })
         return raw, event
     except Exception as exc:

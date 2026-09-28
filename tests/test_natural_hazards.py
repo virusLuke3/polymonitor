@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-import sys
 import time
 import json
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from types import SimpleNamespace
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services.natural_hazards import map_feed, service, snapshots
 from api.services.natural_hazards.providers import eonet, firms, gdacs, nws, usgs
@@ -400,10 +393,13 @@ def test_provider_snapshot_lock_prevents_same_process_cache_stampede() -> None:
         time.sleep(0.03)
         return {"events": [], "data_updated_at": "2026-07-29T00:00:00Z"}
 
+    from threading import Lock
+    source_lock = Lock()
     with ThreadPoolExecutor(max_workers=5) as executor:
         results = list(executor.map(
             lambda _index: snapshots.fetch_with_snapshot(
                 key="usgs",
+                source_lock=source_lock,
                 snapshot_store=store,
                 fetcher=fetcher,
                 ttl_seconds=60,

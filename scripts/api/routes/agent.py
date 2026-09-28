@@ -5,7 +5,6 @@ import hmac
 import ipaddress
 import json
 import os
-import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -13,7 +12,7 @@ from typing import Any, Callable
 
 from flask import Blueprint, jsonify, request
 
-from api.context import resolve_route_value
+from api.context import RuntimeResources, runtime_resources
 from agent.common.budget import claim_agent_live_call
 from agent.common.gateway_client import call_market_insight_gateway, call_market_wide_insight_gateway, gateway_configured
 from agent.market_insight import build_market_insight, build_market_insight_fallback
@@ -22,15 +21,12 @@ from agent.market_wide import build_market_wide_fallback, build_market_wide_insi
 
 AGENT_CACHE_NAMESPACE = "agent:insights"
 AGENT_CACHE_VERSION = "v2"
-_REFRESH_LOCK = threading.Lock()
-_REFRESHING_KEYS: set[str] = set()
-_RATE_LOCK = threading.Lock()
 _RATE_WINDOW_SECONDS = 60
-_RATE_BUCKETS: dict[str, list[float]] = {}
 
 
 @dataclass(frozen=True)
 class AgentRouteDependencies:
+    resources: RuntimeResources
     application: Any
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
@@ -42,7 +38,8 @@ class AgentRouteDependencies:
         context: Mapping[str, Any],
     ) -> AgentRouteDependencies:
         return cls(
-            application=resolve_route_value(context, "app"),
+            resources=runtime_resources(context),
+            application=context.get("app"),
             get_cached_json=_optional_route_callable(
                 context,
                 "get_cached_json",
@@ -62,7 +59,7 @@ def _optional_route_callable(
     context: Mapping[str, Any],
     name: str,
 ) -> Callable[..., Any] | None:
-    dependency = resolve_route_value(context, name)
+    dependency = context.get(name)
     if dependency is None:
         return None
     if not callable(dependency):
@@ -163,19 +160,19 @@ def _agent_rate_key() -> str:
     return _normalize_ip(forwarded_for) or _normalize_ip(request.remote_addr) or "unknown"
 
 
-def _check_agent_rate_limit() -> int | None:
+def _check_agent_rate_limit(dependencies: AgentRouteDependencies) -> int | None:
     limit = _agent_rate_limit_per_minute()
     now = time.monotonic()
     cutoff = now - _RATE_WINDOW_SECONDS
     key = _agent_rate_key()
-    with _RATE_LOCK:
-        bucket = [ts for ts in _RATE_BUCKETS.get(key, []) if ts >= cutoff]
+    with dependencies.resources.agent_rate_lock:
+        bucket = [ts for ts in dependencies.resources.agent_rate_buckets.get(key, []) if ts >= cutoff]
         if len(bucket) >= limit:
-            _RATE_BUCKETS[key] = bucket
+            dependencies.resources.agent_rate_buckets[key] = bucket
             oldest = min(bucket) if bucket else now
             return max(1, int(_RATE_WINDOW_SECONDS - (now - oldest)))
         bucket.append(now)
-        _RATE_BUCKETS[key] = bucket
+        dependencies.resources.agent_rate_buckets[key] = bucket
     return None
 
 
@@ -337,17 +334,17 @@ def _log_exception(
         logger.exception(message, *args)
 
 
-def _enter_singleflight(cache_key: str) -> bool:
-    with _REFRESH_LOCK:
-        if cache_key in _REFRESHING_KEYS:
+def _enter_singleflight(dependencies: AgentRouteDependencies, cache_key: str) -> bool:
+    with dependencies.resources.agent_lock:
+        if cache_key in dependencies.resources.agent_refreshing:
             return False
-        _REFRESHING_KEYS.add(cache_key)
+        dependencies.resources.agent_refreshing.add(cache_key)
         return True
 
 
-def _leave_singleflight(cache_key: str) -> None:
-    with _REFRESH_LOCK:
-        _REFRESHING_KEYS.discard(cache_key)
+def _leave_singleflight(dependencies: AgentRouteDependencies, cache_key: str) -> None:
+    with dependencies.resources.agent_lock:
+        dependencies.resources.agent_refreshing.discard(cache_key)
 
 
 def _serve_agent_with_cache(
@@ -363,7 +360,7 @@ def _serve_agent_with_cache(
     if cached is not None:
         return cached
 
-    if not _enter_singleflight(cache_key):
+    if not _enter_singleflight(dependencies, cache_key):
         fallback = fallback_builder()
         fallback["cacheStatus"] = "in-flight"
         fallback["cacheKey"] = cache_key
@@ -418,11 +415,10 @@ def _serve_agent_with_cache(
         )
         return fallback
     finally:
-        _leave_singleflight(cache_key)
+        _leave_singleflight(dependencies, cache_key)
 
 
-def create_agent_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = AgentRouteDependencies.from_context(context)
+def create_agent_blueprint(dependencies: AgentRouteDependencies) -> Blueprint:
     bp = Blueprint("agent_routes", __name__)
 
     @bp.route("/agent/market-insights", methods=["POST"])
@@ -431,7 +427,7 @@ def create_agent_blueprint(context: Mapping[str, Any]) -> Blueprint:
             return _agent_disabled_response()
         if not _agent_access_allowed():
             return _agent_forbidden_response()
-        retry_after = _check_agent_rate_limit()
+        retry_after = _check_agent_rate_limit(dependencies)
         if retry_after is not None:
             return _agent_rate_limited_response(retry_after)
         payload = request.get_json(silent=True)
@@ -455,7 +451,7 @@ def create_agent_blueprint(context: Mapping[str, Any]) -> Blueprint:
             return _agent_disabled_response()
         if not _agent_access_allowed():
             return _agent_forbidden_response()
-        retry_after = _check_agent_rate_limit()
+        retry_after = _check_agent_rate_limit(dependencies)
         if retry_after is not None:
             return _agent_rate_limited_response(retry_after)
         payload = request.get_json(silent=True)

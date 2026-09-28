@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import crypto_funding_service
 from runtime import crypto_funding_watcher
@@ -139,7 +133,3 @@ class CryptoFundingSeedWatcherTestCase(unittest.TestCase):
 
         self.assertEqual("sqlite-seed", payload["cacheMode"])
         self.assertEqual(["BTC"], [item["asset"] for item in payload["assets"]])
-
-
-if __name__ == "__main__":
-    unittest.main()

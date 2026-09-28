@@ -24,6 +24,7 @@ except ImportError:
     requests = None
 
 from api.config import load_api_settings
+from api.context import RuntimeResources
 from api.services import global_transport_shipping_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso
 from runtime.snapshot_store import SnapshotStore
@@ -55,6 +56,7 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
 
 class GlobalTransportShippingWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, limit: int, interval_seconds: int) -> None:
+        self.resources = RuntimeResources()
         if redis is None:
             raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
@@ -110,8 +112,14 @@ class GlobalTransportShippingWatcher:
     def set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> None:
         self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
 
+    def close(self) -> None:
+        self.resources.close()
+        self.requests.close()
+        self.redis_client.close()
+
     def context(self) -> Dict[str, Any]:
         return {
+            "_resources": self.resources,
             "SETTINGS": self.settings,
             "SNAPSHOT_STORE": self.snapshot_store,
             "app": _App(),
@@ -190,6 +198,8 @@ class GlobalTransportShippingWatcher:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser()
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--interval", type=int, default=int(os.environ.get("POLYDATA_GLOBAL_TRANSPORT_WATCH_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS)))
@@ -204,20 +214,23 @@ def main() -> int:
         limit=args.limit,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
-    print(f"[global-transport-shipping] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
-    if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        return 0
-    while True:
-        try:
+    try:
+        watcher.redis_client.ping()
+        print(f"[global-transport-shipping] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
+        if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        except KeyboardInterrupt:
             return 0
-        except Exception as exc:
-            watcher.store_meta(status="error", record_count=0, source_states={"transport": "error"}, error_summary=str(exc), preserve=True)
-            print(f"[global-transport-shipping] ERROR {exc}", file=sys.stderr)
-        time.sleep(max(300, args.interval))
+        while True:
+            try:
+                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            except KeyboardInterrupt:
+                return 0
+            except Exception as exc:
+                watcher.store_meta(status="error", record_count=0, source_states={"transport": "error"}, error_summary=str(exc), preserve=True)
+                print(f"[global-transport-shipping] ERROR {exc}", file=sys.stderr)
+            time.sleep(max(300, args.interval))
+    finally:
+        watcher.close()
 
 
 if __name__ == "__main__":

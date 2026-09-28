@@ -18,10 +18,7 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
 from api.config import PROJECT_ROOT
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-)
+from api.context import resolve_optional_service_callable
 from api.services import trusted_hls_sources, youtube_live_probe_service
 
 
@@ -180,6 +177,8 @@ class LiveVideoSourceDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> LiveVideoSourceDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             source=context,
             utc_now_iso=resolve_optional_service_callable(
@@ -190,50 +189,23 @@ class LiveVideoSourceDependencies:
                 context,
                 "http_text_get",
             ),
-            requests_module=resolve_optional_service_value(
-                context,
-                "requests",
-            ),
-            youtube_probe_enabled=resolve_optional_service_value(
-                context,
-                "market_tv_youtube_probe_enabled",
-            ),
+            requests_module=context.get("requests"),
+            youtube_probe_enabled=context.get("market_tv_youtube_probe_enabled"),
             youtube_live_probe=resolve_optional_service_callable(
                 context,
                 "youtube_live_probe",
             ),
-            youtube_rss_fallback_enabled=resolve_optional_service_value(
-                context,
-                "market_tv_youtube_rss_fallback_enabled",
-            ),
-            youtube_rss_refresh_existing=resolve_optional_service_value(
-                context,
-                "market_tv_youtube_rss_refresh_existing",
-            ),
-            youtube_rss_refresh_existing_limit=resolve_optional_service_value(
-                context,
-                "market_tv_youtube_rss_refresh_existing_limit",
-            ),
-            hls_probe_enabled=resolve_optional_service_value(
-                context,
-                "market_tv_hls_probe_enabled",
-            ),
-            hls_probe_timeout_seconds=resolve_optional_service_value(
-                context,
-                "market_tv_hls_probe_timeout_seconds",
-            ),
-            hls_probe_workers=resolve_optional_service_value(
-                context,
-                "market_tv_hls_probe_workers",
-            ),
+            youtube_rss_fallback_enabled=context.get("market_tv_youtube_rss_fallback_enabled"),
+            youtube_rss_refresh_existing=context.get("market_tv_youtube_rss_refresh_existing"),
+            youtube_rss_refresh_existing_limit=context.get("market_tv_youtube_rss_refresh_existing_limit"),
+            hls_probe_enabled=context.get("market_tv_hls_probe_enabled"),
+            hls_probe_timeout_seconds=context.get("market_tv_hls_probe_timeout_seconds"),
+            hls_probe_workers=context.get("market_tv_hls_probe_workers"),
             hls_stream_probe=resolve_optional_service_callable(
                 context,
                 "hls_stream_probe",
             ),
-            ffprobe_path=resolve_optional_service_value(
-                context,
-                "ffprobe_path",
-            ),
+            ffprobe_path=context.get("ffprobe_path"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",
@@ -242,14 +214,8 @@ class LiveVideoSourceDependencies:
                 context,
                 "set_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
-            settings=resolve_optional_service_value(
-                context,
-                "SETTINGS",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
+            settings=context.get("SETTINGS"),
         )
 
 

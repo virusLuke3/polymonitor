@@ -847,6 +847,8 @@ def refresh_serving(conn, *, max_markets: int, prune: bool) -> int:
 
 
 def main() -> None:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser(description="Refresh PostgreSQL event/group market serving table.")
     add_db_cli_args(parser)
     parser.add_argument("--interval", type=int, default=60, help="Loop interval seconds when --watch is set")

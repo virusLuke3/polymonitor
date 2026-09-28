@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
 import time
 from pathlib import Path
 
-
-SCRIPTS_ROOT = Path(__file__).resolve().parents[1] / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from runtime.snapshot_store import SnapshotStore
 

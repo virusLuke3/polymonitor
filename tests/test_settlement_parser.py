@@ -1,15 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
 import unittest
-from pathlib import Path
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from db import init_schema
 from db.sync_trade_analytics import _full_refresh_market_status_snapshot
@@ -122,7 +115,3 @@ class MarketStatusSnapshotSettlementTestCase(unittest.TestCase):
         self.assertEqual("market_resolution_fast", rows[3]["settlement_source"])
         self.assertEqual(1, rows[4]["has_propose"])
         self.assertEqual("UNKNOWN", rows[4]["settlement_outcome"])
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,17 +1,11 @@
 [tool.pytest.ini_options]
-addopts = "-ra"
+addopts = "-ra -p no:cacheprovider"
 testpaths = ["tests"]
-markers = [
-    "backtest_validation: deterministic Polymarket backtest validation suite tests",
-    "db_smoke: optional DB-backed smoke tests gated by explicit environment variables",
-]
+pythonpath = [".", "scripts"]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 120
-extend-exclude = [
-    "quant/backtest/vendor",
-]
 
 [tool.ruff.lint]
 select = ["E9", "F63", "F7", "F82"]

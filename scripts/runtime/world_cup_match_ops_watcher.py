@@ -29,6 +29,7 @@ except ImportError:
     BeautifulSoup = None
 
 from api.config import load_api_settings
+from api.context import RuntimeResources
 from api.services import world_cup_match_ops_service, worldcup_dashboard_service
 from db import DEFAULT_DB_PATH, dict_from_row, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso
@@ -60,6 +61,7 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
 
 class WorldCupMatchOpsWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, limit: int, interval_seconds: int) -> None:
+        self.resources = RuntimeResources()
         if redis is None:
             raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
@@ -110,6 +112,11 @@ class WorldCupMatchOpsWatcher:
             return [dict_from_row(row) for row in cursor.fetchall()]
         finally:
             conn.close()
+
+    def close(self) -> None:
+        self.resources.close()
+        self.requests.close()
+        self.redis_client.close()
 
     def service_context(self) -> Dict[str, Any]:
         context: Dict[str, Any] = {
@@ -222,6 +229,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     args = build_arg_parser().parse_args()
     settings = load_api_settings()
     watcher = WorldCupMatchOpsWatcher(
@@ -232,20 +241,23 @@ def main() -> int:
         limit=args.limit,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
-    print(f"[world-cup-match-ops] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
-    if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        return 0
-    while True:
-        try:
+    try:
+        watcher.redis_client.ping()
+        print(f"[world-cup-match-ops] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
+        if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        except KeyboardInterrupt:
             return 0
-        except Exception as exc:
-            watcher.store_seed_meta(status="error", record_count=0, source_states={"worldCupMatchOps": "error"}, error_summary=str(exc), preserve_last_success=True)
-            print(f"[world-cup-match-ops] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(watcher.interval_seconds)
+        while True:
+            try:
+                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            except KeyboardInterrupt:
+                return 0
+            except Exception as exc:
+                watcher.store_seed_meta(status="error", record_count=0, source_states={"worldCupMatchOps": "error"}, error_summary=str(exc), preserve_last_success=True)
+                print(f"[world-cup-match-ops] ERROR watch loop failed: {exc}", file=sys.stderr)
+            time.sleep(watcher.interval_seconds)
+    finally:
+        watcher.close()
 
 
 if __name__ == "__main__":

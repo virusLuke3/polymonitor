@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from api.context import RuntimeResources, runtime_resources
+
 import json
 import re
-import threading
-import time
 from collections.abc import Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -12,13 +12,8 @@ from decimal import Decimal
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote_plus
 
-from api.context import (
-    ServiceContext,
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+
+from api.context import resolve_optional_service_callable, resolve_service_callable
 from weather.cities import load_weather_cities
 from weather.temperature_bins import parse_temperature_bin
 from weather.weather_codes import describe_weather_code
@@ -71,21 +66,12 @@ HURRICANE_SPORTS_FALSE_POSITIVE_TERMS = (
 GAMMA_QUERY_TIMEOUT_SECONDS = 6
 GAMMA_QUERIES_PER_CITY = 2
 GAMMA_QUERY_PAUSE_SECONDS = 0.03
-GAMMA_SYNC_MAX_TARGET_CITIES = 44
-GAMMA_SYNC_MAX_DIRECT_DATES = 1
-GAMMA_SYNC_MAX_QUERY_CITIES = 24
-WEATHER_CLOB_BOOK_CACHE_NAMESPACE = "weather-clob-book"
-WEATHER_CLOB_BOOK_TTL_SECONDS = 10
 
-_LIVE_REFRESH_LOCK = threading.Lock()
-_LIVE_REFRESHING: set[str] = set()
-_WEATHER_CONTEXT_STATE_LOCK = threading.Lock()
-_WEATHER_CLOB_BOOK_CACHE_LOCK = threading.Lock()
-_WEATHER_CLOB_BOOK_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 @dataclass(frozen=True)
 class GlobalWeatherMapDependencies:
+    resources: RuntimeResources
     settings: Any
     application: Any
     http_json_get: Callable[..., Any]
@@ -93,9 +79,7 @@ class GlobalWeatherMapDependencies:
     snapshot_store: Any
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
-    get_cached_runtime_payload: Callable[..., Any] | None
-    set_cached_runtime_payload: Callable[..., Any] | None
-    get_clob_session: Callable[..., Any] | None
+    lob_reader: Callable[[str], dict[str, Any]] | None
     get_connection: Callable[..., Any] | None
     database_path: Any
     runtime_state: MutableMapping[str, Any]
@@ -105,15 +89,13 @@ class GlobalWeatherMapDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> GlobalWeatherMapDependencies:
-        if isinstance(context, ServiceContext):
-            runtime_state = context.runtime_state
-        elif isinstance(context, MutableMapping):
-            runtime_state = context
-        else:
-            runtime_state = {}
+        if isinstance(context, cls):
+            return context
+        resources = runtime_resources(context)
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_optional_service_value(context, "app"),
+            resources=resources,
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             http_json_get=resolve_service_callable(
                 context,
                 "http_json_get",
@@ -122,10 +104,7 @@ class GlobalWeatherMapDependencies:
                 context,
                 "utc_now_iso",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",
@@ -134,27 +113,13 @@ class GlobalWeatherMapDependencies:
                 context,
                 "set_cached_json",
             ),
-            get_cached_runtime_payload=resolve_optional_service_callable(
-                context,
-                "get_cached_runtime_payload",
-            ),
-            set_cached_runtime_payload=resolve_optional_service_callable(
-                context,
-                "set_cached_runtime_payload",
-            ),
-            get_clob_session=resolve_optional_service_callable(
-                context,
-                "get_clob_session",
-            ),
+            lob_reader=resolve_optional_service_callable(context, "get_runtime_lob_by_token_payload"),
             get_connection=resolve_optional_service_callable(
                 context,
                 "get_connection",
             ),
-            database_path=resolve_optional_service_value(
-                context,
-                "DB_PATH",
-            ),
-            runtime_state=runtime_state,
+            database_path=context.get("DB_PATH"),
+            runtime_state=resources.weather_state,
         )
 
 
@@ -183,7 +148,7 @@ def _weather_context_state(
     state = dependencies.runtime_state.get(key)
     if isinstance(state, dict):
         return state
-    with _WEATHER_CONTEXT_STATE_LOCK:
+    with dependencies.resources.weather_state_lock:
         state = dependencies.runtime_state.get(key)
         if isinstance(state, dict):
             return state
@@ -864,239 +829,6 @@ def _metar_by_city(
     return result
 
 
-def _fetch_gamma_events_for_query(
-    ctx: GlobalWeatherMapContext,
-    query: str,
-) -> Tuple[List[Dict[str, Any]], str]:
-    dependencies = _dependencies(ctx)
-    base_url = str(dependencies.settings.gamma_api_base or "").rstrip("/")
-    if not base_url:
-        return [], "empty"
-    try:
-        payload = dependencies.http_json_get(
-            f"{base_url}/events",
-            params={"active": "true", "closed": "false", "limit": 80, "q": query},
-            timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
-            headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
-        )
-    except Exception as exc:
-        logger = getattr(dependencies.application, "logger", None)
-        if logger is not None:
-            logger.exception("global weather map gamma query failed query=%s error=%s", query, exc)
-        return [], "error"
-    rows = payload if isinstance(payload, list) else ((payload or {}).get("events") or (payload or {}).get("data") or [])
-    if not isinstance(rows, list):
-        return [], "empty"
-    events = [event for event in rows if isinstance(event, dict)]
-    return events, "ok" if events else "empty"
-
-
-def _gamma_event_rows(payload: Any) -> List[Dict[str, Any]]:
-    rows = payload if isinstance(payload, list) else ((payload or {}).get("events") or (payload or {}).get("data") or [])
-    if isinstance(payload, dict) and payload.get("markets") is not None:
-        rows = [payload]
-    return [event for event in rows if isinstance(event, dict)] if isinstance(rows, list) else []
-
-
-def _fetch_gamma_events_for_params(
-    ctx: GlobalWeatherMapContext,
-    params: Dict[str, Any],
-) -> Tuple[List[Dict[str, Any]], str]:
-    dependencies = _dependencies(ctx)
-    base_url = str(dependencies.settings.gamma_api_base or "").rstrip("/")
-    if not base_url:
-        return [], "empty"
-    try:
-        payload = dependencies.http_json_get(
-            f"{base_url}/events",
-            params=params,
-            timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
-            headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
-        )
-    except Exception as exc:
-        logger = getattr(dependencies.application, "logger", None)
-        if logger is not None:
-            logger.exception("global weather map gamma params query failed params=%s error=%s", params, exc)
-        return [], "error"
-    events = _gamma_event_rows(payload)
-    return events, "ok" if events else "empty"
-
-
-def _fetch_gamma_event_by_slug(
-    ctx: GlobalWeatherMapContext,
-    slug: str,
-) -> Tuple[List[Dict[str, Any]], str]:
-    dependencies = _dependencies(ctx)
-    base_url = str(dependencies.settings.gamma_api_base or "").rstrip("/")
-    slug = str(slug or "").strip("/")
-    if not base_url or not slug:
-        return [], "empty"
-    statuses: List[str] = []
-    for path in (f"/events/slug/{slug}", f"/events/{slug}"):
-        try:
-            payload = dependencies.http_json_get(
-                f"{base_url}{path}",
-                timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
-                headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
-            )
-        except Exception:
-            statuses.append("error")
-            continue
-        events = _gamma_event_rows(payload)
-        if events:
-            return events, "ok"
-        statuses.append("empty")
-    return [], "error" if statuses and all(status == "error" for status in statuses) else "empty"
-
-
-def _fetch_gamma_events(
-    ctx: GlobalWeatherMapContext,
-    queries: Iterable[str],
-) -> Tuple[List[Dict[str, Any]], str]:
-    events: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    statuses: List[str] = []
-    for query in queries:
-        rows, status = _fetch_gamma_events_for_query(ctx, query)
-        statuses.append(status)
-        for event in rows:
-            identity = str(event.get("id") or event.get("slug") or "")
-            if identity and identity not in seen:
-                seen.add(identity)
-                events.append(event)
-        if GAMMA_QUERY_PAUSE_SECONDS > 0:
-            time.sleep(GAMMA_QUERY_PAUSE_SECONDS)
-    if events:
-        return events, "ok"
-    if statuses and all(status == "error" for status in statuses):
-        return [], "error"
-    if any(status == "error" for status in statuses):
-        return [], "partial"
-    return [], "empty"
-
-
-def _dedupe_gamma_events(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    result: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    for event in events:
-        identity = str(event.get("id") or event.get("slug") or event.get("ticker") or "")
-        if identity and identity in seen:
-            continue
-        if identity:
-            seen.add(identity)
-        result.append(event)
-    return result
-
-
-def _preferred_weather_date_iso(
-    ctx: GlobalWeatherMapContext,
-    dates: List[Dict[str, str]],
-) -> Optional[str]:
-    dependencies = _dependencies(ctx)
-    try:
-        today = datetime.fromisoformat(
-            _utc_now_iso(dependencies).replace("Z", "+00:00"),
-        ).date()
-    except Exception:
-        today = datetime.now(timezone.utc).date()
-    for item in dates:
-        try:
-            market_date = datetime.fromisoformat(str(item.get("iso") or "")).date()
-        except Exception:
-            continue
-        if market_date > today:
-            return str(item["iso"])
-    return str(dates[0]["iso"]) if dates else None
-
-
-def _weather_sync_date_items(
-    ctx: GlobalWeatherMapContext,
-    dates: List[Dict[str, str]],
-) -> List[Dict[str, str]]:
-    preferred = _preferred_weather_date_iso(ctx, dates)
-    ordered: List[Dict[str, str]] = []
-    for item in dates:
-        if str(item.get("iso") or "") == preferred:
-            ordered.append(item)
-    for item in dates:
-        if str(item.get("iso") or "") != preferred:
-            ordered.append(item)
-    return ordered or dates
-
-
-def _date_slug(item: Dict[str, str]) -> str:
-    try:
-        parsed = datetime.fromisoformat(str(item.get("iso") or ""))
-        return parsed.strftime("on-%B-%-d-%Y").lower()
-    except Exception:
-        month = str(item.get("month") or "").lower()
-        day = str(item.get("day") or "").strip()
-        year = str(item.get("year") or "").strip()
-        return "-".join(part for part in ("on", month, day, year) if part)
-
-
-def _weather_city_slug_candidates(city: Dict[str, Any]) -> List[str]:
-    candidates: List[str] = []
-    for alias in [city.get("city"), *list(city.get("polymarket_aliases") or [])]:
-        slug = _slugify(alias)
-        if slug and slug not in candidates:
-            candidates.append(slug)
-    return candidates
-
-
-def _weather_gamma_sync_queries(cities: List[Dict[str, Any]], dates: List[Dict[str, str]]) -> List[str]:
-    queries: List[str] = []
-    preferred = dates[:GAMMA_SYNC_MAX_DIRECT_DATES]
-    for item in preferred:
-        month_day = f"{item['month']} {item['day']}"
-        queries.extend(
-            [
-                f"highest temperature {month_day}",
-                f"weather temperature {month_day}",
-            ]
-        )
-    for city in cities[:GAMMA_SYNC_MAX_QUERY_CITIES]:
-        name = str(city.get("city") or "").strip()
-        if not name:
-            continue
-        queries.extend([f"{name} highest temperature", f"{name} weather"])
-    deduped: List[str] = []
-    for query in queries:
-        normalized = query.strip().lower()
-        if normalized and normalized not in deduped:
-            deduped.append(normalized)
-    return deduped
-
-
-def _weather_gamma_category_params(dates: List[Dict[str, str]]) -> List[Dict[str, Any]]:
-    params: List[Dict[str, Any]] = [
-        {"active": "true", "closed": "false", "limit": 100, "category": "Weather"},
-        {"active": "true", "closed": "false", "limit": 100, "category": "weather"},
-        {"active": "true", "closed": "false", "limit": 100, "tag_slug": "weather"},
-    ]
-    for item in dates[:GAMMA_SYNC_MAX_DIRECT_DATES]:
-        month_day = f"{item['month']} {item['day']}"
-        params.append({"active": "true", "closed": "false", "limit": 100, "q": f"highest temperature {month_day}"})
-    return params
-
-
-def _market_label(event_title: str, market: Dict[str, Any]) -> str:
-    label = str(market.get("groupItemTitle") or market.get("group_item_title") or "").strip()
-    if label:
-        return label
-    question = str(market.get("question") or market.get("title") or "").strip()
-    if event_title and question.startswith(event_title):
-        suffix = question[len(event_title) :].strip(" -:·")
-        if suffix:
-            return suffix
-    return question or str(market.get("slug") or market.get("id") or "temperature bin")
-
-
-def _market_yes_price(market: Dict[str, Any]) -> Optional[float]:
-    prices = _as_list(market.get("outcomePrices") or market.get("outcome_prices"))
-    return _float(prices[0]) if prices else None
-
-
 def _token_ids(market: Dict[str, Any]) -> List[str]:
     candidates = (
         market.get("clobTokenIds"),
@@ -1131,69 +863,6 @@ def _weather_clob_stats(
     )
 
 
-def _cached_clob_book(
-    ctx: GlobalWeatherMapContext,
-    token_id: str,
-) -> Optional[Dict[str, Any]]:
-    dependencies = _dependencies(ctx)
-    cache_key = str(token_id)
-    if dependencies.get_cached_runtime_payload is not None:
-        try:
-            cached = dependencies.get_cached_runtime_payload(
-                WEATHER_CLOB_BOOK_CACHE_NAMESPACE,
-                cache_key,
-            )
-            if isinstance(cached, dict):
-                return cached
-        except Exception:
-            pass
-    now = time.monotonic()
-    with _WEATHER_CLOB_BOOK_CACHE_LOCK:
-        cached = _WEATHER_CLOB_BOOK_CACHE.get(cache_key)
-        if not cached:
-            return None
-        if float(cached.get("expires_at") or 0) <= now:
-            _WEATHER_CLOB_BOOK_CACHE.pop(cache_key, None)
-            return None
-        payload = cached.get("payload")
-        return payload if isinstance(payload, dict) else None
-
-
-def _set_cached_clob_book(
-    ctx: GlobalWeatherMapContext,
-    token_id: str,
-    payload: Dict[str, Any],
-) -> Dict[str, Any]:
-    dependencies = _dependencies(ctx)
-    cache_key = str(token_id)
-    if dependencies.set_cached_runtime_payload is not None:
-        try:
-            dependencies.set_cached_runtime_payload(
-                WEATHER_CLOB_BOOK_CACHE_NAMESPACE,
-                cache_key,
-                payload,
-                ttl_seconds=WEATHER_CLOB_BOOK_TTL_SECONDS,
-            )
-        except TypeError:
-            try:
-                dependencies.set_cached_runtime_payload(
-                    WEATHER_CLOB_BOOK_CACHE_NAMESPACE,
-                    cache_key,
-                    payload,
-                    WEATHER_CLOB_BOOK_TTL_SECONDS,
-                )
-            except Exception:
-                pass
-        except Exception:
-            pass
-    with _WEATHER_CLOB_BOOK_CACHE_LOCK:
-        _WEATHER_CLOB_BOOK_CACHE[cache_key] = {
-            "payload": payload,
-            "expires_at": time.monotonic() + WEATHER_CLOB_BOOK_TTL_SECONDS,
-        }
-    return payload
-
-
 def _empty_clob_quote(status: str, token_id: Optional[str] = None) -> Dict[str, Optional[float] | Optional[str]]:
     return {
         "bestBidYes": None,
@@ -1204,53 +873,14 @@ def _empty_clob_quote(status: str, token_id: Optional[str] = None) -> Dict[str, 
     }
 
 
-def _clob_book_payload(
-    ctx: GlobalWeatherMapContext,
-    base_url: str,
-    token_id: str,
-) -> Dict[str, Any]:
-    dependencies = _dependencies(ctx)
-    if dependencies.get_clob_session is not None:
-        session = dependencies.get_clob_session()
-        if session is not None:
-            response = session.get(
-                f"{base_url}/book",
-                params={"token_id": token_id},
-                timeout=min(
-                    4,
-                    int(
-                        getattr(
-                            dependencies.settings,
-                            "clob_timeout_seconds",
-                            8,
-                        )
-                        or 8
-                    ),
-                ),
-                headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
-            )
-            if getattr(response, "status_code", None) == 404:
-                return {"bookStatus": "no-book", "bids": [], "asks": []}
-            response.raise_for_status()
-            data = response.json() if getattr(response, "content", True) else {}
-            return data if isinstance(data, dict) else {}
-    data = dependencies.http_json_get(
-        f"{base_url}/book",
-        params={"token_id": token_id},
-        timeout=min(
-            4,
-            int(
-                getattr(
-                    dependencies.settings,
-                    "clob_timeout_seconds",
-                    8,
-                )
-                or 8
-            ),
-        ),
-        headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
-    )
-    return data if isinstance(data, dict) else {}
+def _clob_book_payload(ctx: GlobalWeatherMapContext, token_id: str) -> Dict[str, Any]:
+    reader = _dependencies(ctx).lob_reader
+    if reader is None:
+        return {"bookStatus": "unavailable", "bids": [], "asks": []}
+    payload = reader(token_id)
+    side = payload.get("yes") or {}
+    status = side.get("bookStatus") or payload.get("bookStatus") or "unknown"
+    return {"bookStatus": status, "bids": side.get("bids", []) if status == "live" else [], "asks": side.get("asks", []) if status == "live" else []}
 
 
 def _clob_yes_quote(
@@ -1263,40 +893,18 @@ def _clob_yes_quote(
         stats = _weather_clob_stats(ctx)
         stats["missingToken"] = int(stats.get("missingToken") or 0) + 1
         return _empty_clob_quote("missing-token")
-    base_url = str(
-        getattr(dependencies.settings, "clob_api_base", "")
-        or ""
-    ).rstrip("/")
-    if not base_url:
-        return _empty_clob_quote("disabled", token_ids[0])
     stats = _weather_clob_stats(ctx)
-    cached = _cached_clob_book(ctx, token_ids[0])
-    if cached is not None:
-        stats["cacheHits"] = int(stats.get("cacheHits") or 0) + 1
-        bid = _float(cached.get("bestBidYes"))
-        ask = _float(cached.get("bestAskYes"))
-        if bid is not None or ask is not None:
-            stats["quoted"] = int(stats.get("quoted") or 0) + 1
-        elif cached.get("bookStatus") == "no-book":
-            stats["noBook"] = int(stats.get("noBook") or 0) + 1
-        return {
-            "bestBidYes": bid,
-            "bestAskYes": ask,
-            "bookStatus": str(cached.get("bookStatus") or "cached"),
-            "priceSource": "clob-book",
-            "yesTokenId": token_ids[0],
-        }
     stats["attempts"] = int(stats.get("attempts") or 0) + 1
     try:
-        book = _clob_book_payload(ctx, base_url, token_ids[0])
+        book = _clob_book_payload(ctx, token_ids[0])
     except Exception:
         stats["errors"] = int(stats.get("errors") or 0) + 1
         payload = _empty_clob_quote("error", token_ids[0])
-        return _set_cached_clob_book(ctx, token_ids[0], payload)
+        return payload
     bids = book.get("bids") if isinstance(book, dict) and isinstance(book.get("bids"), list) else []
     asks = book.get("asks") if isinstance(book, dict) and isinstance(book.get("asks"), list) else []
-    best_bid = max((_float(row.get("price") if isinstance(row, dict) else None) for row in bids), default=None)
-    best_ask = min((_float(row.get("price") if isinstance(row, dict) else None) for row in asks), default=None)
+    best_bid = max((price for row in bids if isinstance(row, dict) and (price := _float(row.get("price"))) is not None), default=None)
+    best_ask = min((price for row in asks if isinstance(row, dict) and (price := _float(row.get("price"))) is not None), default=None)
     status = "ok" if best_bid is not None or best_ask is not None else str(book.get("bookStatus") or "no-book")
     if best_bid is not None or best_ask is not None:
         stats["quoted"] = int(stats.get("quoted") or 0) + 1
@@ -1309,7 +917,7 @@ def _clob_yes_quote(
         "priceSource": "clob-book",
         "yesTokenId": token_ids[0],
     }
-    return _set_cached_clob_book(ctx, token_ids[0], payload)
+    return payload
 
 
 def _apply_clob_quote_to_bin(
@@ -1334,58 +942,6 @@ def _apply_clob_quote_to_bin(
 def _strip_internal_market(rows: List[Dict[str, Any]]) -> None:
     for row in rows:
         row.pop("_clobMarket", None)
-
-
-def _normalize_temperature_event(
-    ctx: GlobalWeatherMapContext,
-    event: Dict[str, Any],
-    city: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
-    event_title = str(event.get("title") or "").strip()
-    markets = [market for market in (event.get("markets") or []) if isinstance(market, dict) and market.get("closed") is not True]
-    bins: List[Dict[str, Any]] = []
-    for market in markets:
-        label = _market_label(event_title, market)
-        parsed = parse_temperature_bin(label, default_unit=str(city.get("unit") or "F"))
-        if not parsed:
-            continue
-        fallback = _market_yes_price(market)
-        token_ids = _token_ids(market)
-        bins.append(
-            {
-                **parsed,
-                "bestBidYes": None,
-                "bestAskYes": None,
-                "midPriceYes": round(float(fallback), 4) if fallback is not None else None,
-                "marketSlug": market.get("slug") or market.get("market_slug"),
-                "marketStatus": "live" if market.get("active") is not False else "inactive",
-                "priceSource": "gamma-outcome" if fallback is not None else "missing",
-                "bookStatus": "not-queried",
-                "yesTokenId": token_ids[0] if token_ids else None,
-                "_clobMarket": market,
-            }
-        )
-    if not bins:
-        return None
-    bins.sort(key=lambda row: float(row.get("sortKey") or 0))
-    top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=None)
-    if top is not None:
-        _apply_clob_quote_to_bin(ctx, top)
-    quoted = len([row for row in bins if row.get("midPriceYes") is not None])
-    top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=None)
-    _strip_internal_market(bins)
-    slug = event.get("slug")
-    return {
-        "eventSlug": slug,
-        "eventTitle": event_title,
-        "marketSource": "gamma-api",
-        "eventStatus": "live" if event.get("active") is not False and event.get("closed") is not True else "inactive",
-        "marketUrl": f"https://polymarket.com/event/{slug}" if slug else None,
-        "quoteCoverage": f"{quoted}/{len(bins)}",
-        "topBin": top,
-        "bins": bins,
-        "updatedAt": event.get("updatedAt") or event.get("endDate") or event.get("createdAt"),
-    }
 
 
 def _db_weather_market_rows(
@@ -1432,7 +988,7 @@ def _db_weather_market_rows(
                 mlp.latest_trade_at,
                 mls.latest_price AS serving_latest_price,
                 mls.latest_trade_at AS serving_latest_trade_at,
-                mss.is_trading_closed,
+                (COALESCE(m.closed, FALSE) OR COALESCE(mss.is_trading_closed, FALSE)) AS is_trading_closed,
                 mss.is_resolved,
                 mss.gamma_closed
             FROM markets m
@@ -1463,6 +1019,8 @@ def _db_weather_market_rows(
                 AND m.end_date IS NOT NULL
                 AND m.end_date >= ?
                 AND m.end_date <= ?
+                AND m.active = TRUE
+                AND COALESCE(m.closed, FALSE) = FALSE
                 AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
                 AND COALESCE(mss.is_resolved, FALSE) = FALSE
                 AND COALESCE(mss.gamma_closed, FALSE) = FALSE
@@ -1496,15 +1054,13 @@ def _db_temperature_rows(
 
 
 def _db_market_object(row: Dict[str, Any]) -> Dict[str, Any]:
-    token_ids = _as_list(row.get("clob_token_ids"))
-    if not token_ids and row.get("yes_token_id"):
-        token_ids = [row.get("yes_token_id"), row.get("no_token_id")]
+    token_ids = [row.get("yes_token_id"), row.get("no_token_id")]
     return {
         "id": row.get("market_id"),
         "slug": row.get("slug"),
         "question": row.get("title"),
         "title": row.get("title"),
-        "clobTokenIds": [token for token in token_ids if token],
+        "clobTokenIds": token_ids if token_ids[0] else [],
         "active": not (_truthy(row.get("is_trading_closed")) or _truthy(row.get("is_resolved")) or _truthy(row.get("gamma_closed"))),
     }
 
@@ -1515,274 +1071,6 @@ def _db_price_fallback(row: Dict[str, Any]) -> Optional[float]:
         if price is not None:
             return round(price, 4)
     return None
-
-
-def _event_market_haystack(event: Dict[str, Any], market: Optional[Dict[str, Any]] = None) -> str:
-    market = market or {}
-    return _normalize_text(
-        event.get("title"),
-        event.get("name"),
-        event.get("slug"),
-        event.get("ticker"),
-        market.get("question"),
-        market.get("title"),
-        market.get("groupItemTitle"),
-        market.get("group_item_title"),
-        market.get("slug"),
-    )
-
-
-def _matches_weather_date_window(text: str, event: Dict[str, Any], market: Dict[str, Any], dates: List[Dict[str, str]]) -> bool:
-    if _matches_date(text, dates):
-        return True
-    allowed = {str(item.get("iso") or "") for item in dates}
-    for key in ("endDate", "end_date", "closedTime", "closed_time"):
-        value = market.get(key) or event.get(key)
-        if not value:
-            continue
-        try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00")).date().isoformat()
-        except Exception:
-            continue
-        if parsed in allowed:
-            return True
-    return False
-
-
-def _event_matches_city(event: Dict[str, Any], market: Dict[str, Any], cities: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    haystack = _event_market_haystack(event, market)
-    for city in cities:
-        if _matches_alias(haystack, city):
-            return city
-    return None
-
-
-def _gamma_latest_prices(market: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
-    prices = _as_list(market.get("outcomePrices") or market.get("outcome_prices"))
-    yes = _float(prices[0]) if len(prices) >= 1 else None
-    no = _float(prices[1]) if len(prices) >= 2 else None
-    return yes, no
-
-
-def _normalize_weather_gamma_markets(events: Iterable[Dict[str, Any]], cities: List[Dict[str, Any]], dates: List[Dict[str, str]]) -> List[Dict[str, Any]]:
-    try:
-        from market import market_discovery
-    except Exception:
-        return []
-
-    normalized: List[Dict[str, Any]] = []
-    seen_conditions: set[str] = set()
-    for event in events:
-        if not isinstance(event, dict):
-            continue
-        markets = event.get("markets") if isinstance(event.get("markets"), list) else []
-        for raw_market in markets:
-            if not isinstance(raw_market, dict):
-                continue
-            if raw_market.get("active") is False or raw_market.get("closed") is True:
-                continue
-            haystack = _event_market_haystack(event, raw_market)
-            if not _matches_weather_market(haystack) or _market_family(haystack) == "other":
-                continue
-            if not _matches_weather_date_window(haystack, event, raw_market, dates):
-                continue
-            if _event_matches_city(event, raw_market, cities) is None:
-                continue
-
-            market = dict(raw_market)
-            market_discovery._attach_event_meta_to_market(market, event)
-            yes_price, no_price = _gamma_latest_prices(market)
-            if yes_price is not None:
-                market["_gamma_latest_yes_price"] = yes_price
-            if no_price is not None:
-                market["_gamma_latest_no_price"] = no_price
-            latest_at = market.get("updatedAt") or market.get("lastTradePriceTimestamp") or event.get("updatedAt") or event.get("createdAt")
-            if latest_at:
-                market["_gamma_latest_trade_at"] = latest_at
-            normalized_market = market_discovery.normalize_market_from_gamma(market)
-            if not normalized_market:
-                continue
-            condition_id = str(normalized_market.get("condition_id") or "").strip()
-            if condition_id and condition_id in seen_conditions:
-                continue
-            if condition_id:
-                seen_conditions.add(condition_id)
-            normalized.append(normalized_market)
-    return normalized
-
-
-def _sync_weather_markets_from_gamma(
-    ctx: GlobalWeatherMapContext,
-    cities: List[Dict[str, Any]],
-    dates: List[Dict[str, str]],
-) -> Dict[str, Any]:
-    dependencies = _dependencies(ctx)
-    stats: Dict[str, Any] = {"events": 0, "markets": 0, "upserted": 0, "serving": 0, "status": "empty", "targets": len(cities)}
-    if not cities or not dates:
-        return stats
-    if dependencies.get_connection is None:
-        stats["status"] = "no-db"
-        return stats
-    if getattr(
-        dependencies.settings,
-        "global_weather_gamma_sync_enabled",
-        True,
-    ) is False:
-        stats["status"] = "disabled"
-        return stats
-
-    sync_dates = _weather_sync_date_items(ctx, dates)
-    events: List[Dict[str, Any]] = []
-    statuses: List[str] = []
-    for params in _weather_gamma_category_params(sync_dates):
-        rows, status = _fetch_gamma_events_for_params(ctx, params)
-        statuses.append(status)
-        events.extend(rows)
-        if GAMMA_QUERY_PAUSE_SECONDS > 0:
-            time.sleep(GAMMA_QUERY_PAUSE_SECONDS)
-
-    target_cities = cities[:GAMMA_SYNC_MAX_TARGET_CITIES]
-    rows: List[Dict[str, Any]] = []
-    for city in target_cities:
-        for city_slug in _weather_city_slug_candidates(city):
-            for item in sync_dates[:GAMMA_SYNC_MAX_DIRECT_DATES]:
-                slug = f"highest-temperature-in-{city_slug}-{_date_slug(item)}"
-                rows, status = _fetch_gamma_event_by_slug(ctx, slug)
-                statuses.append(status)
-                events.extend(rows)
-                if rows:
-                    break
-            if any(_matches_alias(_event_market_haystack(event), city) for event in rows):
-                break
-        if GAMMA_QUERY_PAUSE_SECONDS > 0:
-            time.sleep(GAMMA_QUERY_PAUSE_SECONDS)
-
-    query_events, query_status = _fetch_gamma_events(ctx, _weather_gamma_sync_queries(target_cities, sync_dates))
-    statuses.append(query_status)
-    events.extend(query_events)
-
-    events = _dedupe_gamma_events(events)
-    stats["events"] = len(events)
-    normalized_markets = _normalize_weather_gamma_markets(events, target_cities, dates)
-    stats["markets"] = len(normalized_markets)
-    if not normalized_markets:
-        stats["status"] = "error" if statuses and all(status == "error" for status in statuses) else "empty"
-        dependencies.runtime_state["_weather_gamma_sync_stats"] = stats
-        return stats
-
-    conn = None
-    try:
-        from market import market_discovery
-
-        try:
-            conn = dependencies.get_connection(
-                dependencies.database_path,
-                readonly=False,
-            )
-        except TypeError:
-            conn = dependencies.get_connection(dependencies.database_path)
-        stats["upserted"] = int(market_discovery.batch_upsert_markets(conn, normalized_markets) or 0)
-        stats["serving"] = int(market_discovery._upsert_market_serving_from_gamma(conn, normalized_markets) or 0)
-        stats["status"] = "ok" if stats["upserted"] else "empty"
-    except Exception as exc:
-        stats["status"] = "error"
-        logger = getattr(dependencies.application, "logger", None)
-        if logger is not None:
-            logger.exception("global weather map gamma sync failed error=%s", exc)
-    finally:
-        if conn is not None and hasattr(conn, "close"):
-            try:
-                conn.close()
-            except Exception:
-                pass
-        dependencies.runtime_state["_weather_gamma_sync_stats"] = stats
-    return stats
-
-
-def _fetch_gamma_market_by_id(
-    ctx: GlobalWeatherMapContext,
-    market_id: Any,
-) -> Optional[Dict[str, Any]]:
-    dependencies = _dependencies(ctx)
-    if not market_id:
-        return None
-    cache = _weather_context_state(
-        dependencies,
-        "_weather_gamma_market_cache",
-        {},
-    )
-    key = str(market_id)
-    if key in cache:
-        return cache[key]
-    base_url = str(dependencies.settings.gamma_api_base or "").rstrip("/")
-    if not base_url:
-        cache[key] = None
-        return None
-    stats = _weather_context_state(
-        dependencies,
-        "_weather_gamma_market_stats",
-        {"attempts": 0, "errors": 0, "priced": 0},
-    )
-    stats["attempts"] = int(stats.get("attempts") or 0) + 1
-    try:
-        payload = dependencies.http_json_get(
-            f"{base_url}/markets/{key}",
-            timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
-            headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
-        )
-    except Exception:
-        stats["errors"] = int(stats.get("errors") or 0) + 1
-        cache[key] = None
-        return None
-    market = payload if isinstance(payload, dict) else None
-    if market and _market_yes_price(market) is not None:
-        stats["priced"] = int(stats.get("priced") or 0) + 1
-    cache[key] = market
-    return market
-
-
-def _gamma_price_fallback(
-    ctx: GlobalWeatherMapContext,
-    row: Dict[str, Any],
-) -> Tuple[Optional[float], Optional[Dict[str, Any]]]:
-    market = _fetch_gamma_market_by_id(ctx, row.get("gamma_market_id"))
-    price = _market_yes_price(market or {})
-    return (round(price, 4) if price is not None else None), market
-
-
-def _prefetch_gamma_markets(
-    ctx: GlobalWeatherMapContext,
-    rows: Iterable[Dict[str, Any]],
-) -> None:
-    dependencies = _dependencies(ctx)
-    cache = _weather_context_state(
-        dependencies,
-        "_weather_gamma_market_cache",
-        {},
-    )
-    ids: List[str] = []
-    seen: set[str] = set()
-    for row in rows:
-        if _db_price_fallback(row) is not None:
-            continue
-        market_id = row.get("gamma_market_id")
-        if not market_id:
-            continue
-        key = str(market_id)
-        if key in seen or key in cache:
-            continue
-        seen.add(key)
-        ids.append(key)
-    if not ids:
-        return
-    max_workers = max(1, min(16, len(ids)))
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="weather-gamma-market") as executor:
-        futures = [executor.submit(_fetch_gamma_market_by_id, ctx, market_id) for market_id in ids]
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception:
-                pass
 
 
 def _normalize_temperature_db_group(
@@ -1801,12 +1089,6 @@ def _normalize_temperature_db_group(
             continue
         fallback = _db_price_fallback(row)
         fallback_source = "db-latest" if fallback is not None else "missing"
-        gamma_market = None
-        if fallback is None:
-            fallback, gamma_market = _gamma_price_fallback(ctx, row)
-            fallback_source = "gamma-outcome" if fallback is not None else "missing"
-        if gamma_market:
-            market = {**market, **gamma_market}
         token_ids = _token_ids(market)
         bins.append(
             {
@@ -1899,12 +1181,6 @@ def _normalize_weather_db_group(
             continue
         fallback = _db_price_fallback(row)
         fallback_source = "db-latest" if fallback is not None else "missing"
-        gamma_market = None
-        if fallback is None:
-            fallback, gamma_market = _gamma_price_fallback(ctx, row)
-            fallback_source = "gamma-outcome" if fallback is not None else "missing"
-        if gamma_market:
-            market = {**market, **gamma_market}
         token_ids = _token_ids(market)
         bins.append(
             {
@@ -2032,7 +1308,6 @@ def _db_markets_by_city(
         else:
             source_states[city_id] = "empty" if db_status == "ok" else db_status
 
-    _prefetch_gamma_markets(ctx, (row for groups in selected_groups.values() for _, _, _, group_rows in groups for row in group_rows))
     for city_id, groups in selected_groups.items():
         normalized_groups = [
             normalized
@@ -2055,46 +1330,6 @@ def _db_markets_by_city(
     return result, source_states
 
 
-def _market_source_status(stats: Dict[str, Any]) -> str:
-    if stats.get("match"):
-        return "ok"
-    query_statuses = list(stats.get("queryStatuses") or [])
-    if query_statuses and all(status == "error" for status in query_statuses):
-        return "error"
-    if any(status == "error" for status in query_statuses):
-        return "partial"
-    return "empty"
-
-
-def _weather_market_matches_preferred_date(market: Dict[str, Any], preferred_date: Optional[str]) -> bool:
-    if not preferred_date:
-        return True
-    haystack = _normalize_text(
-        market.get("eventTitle"),
-        market.get("eventSlug"),
-        market.get("marketUrl"),
-        " ".join(str((row or {}).get("marketSlug") or "") for row in market.get("bins") or []),
-    )
-    if preferred_date in haystack:
-        return True
-    markets = market.get("markets") if isinstance(market.get("markets"), list) else []
-    return any(_weather_market_matches_preferred_date(item, preferred_date) for item in markets if isinstance(item, dict))
-
-
-def _weather_sync_targets(
-    cities: List[Dict[str, Any]],
-    markets_by_city: Dict[str, Dict[str, Any]],
-    preferred_date: Optional[str],
-) -> List[Dict[str, Any]]:
-    targets: List[Dict[str, Any]] = []
-    for city in cities:
-        city_id = str(city.get("city_id") or "")
-        market = markets_by_city.get(city_id)
-        if not market or not _weather_market_matches_preferred_date(market, preferred_date):
-            targets.append(city)
-    return targets[:GAMMA_SYNC_MAX_TARGET_CITIES]
-
-
 def _markets_by_city(
     ctx: GlobalWeatherMapContext,
     cities: List[Dict[str, Any]],
@@ -2111,38 +1346,7 @@ def _markets_by_city(
             or 4
         ),
     )
-    result, source_states = _db_markets_by_city(ctx, cities, dates)
-    preferred_date = _preferred_weather_date_iso(ctx, dates)
-    sync_targets = _weather_sync_targets(cities, result, preferred_date)
-    if sync_targets:
-        sync_stats = _sync_weather_markets_from_gamma(ctx, sync_targets, dates)
-        if int(sync_stats.get("upserted") or 0) > 0:
-            result, source_states = _db_markets_by_city(ctx, cities, dates)
-    missing_cities = [city for city in cities if str(city["city_id"]) not in result]
-    for city in missing_cities:
-        city_id = str(city["city_id"])
-        name = str(city.get("city") or "").strip()
-        queries = [f"{name} temperature", f"{name} highest temperature"][:GAMMA_QUERIES_PER_CITY]
-        events, query_status = _fetch_gamma_events(ctx, queries)
-        stats = {"queryStatuses": [query_status], "match": False}
-        matches: List[Dict[str, Any]] = []
-        for event in events:
-            haystack = _normalize_text(event.get("title"), event.get("slug"), " ".join(str((market or {}).get("question") or "") for market in event.get("markets") or []))
-            if _matches_alias(haystack, city) and _matches_weather_market(haystack) and _matches_date(haystack, dates):
-                normalized = _normalize_temperature_event(ctx, event, city)
-                if normalized:
-                    matches.append(normalized)
-        if matches:
-            matches.sort(key=lambda row: (_parse_ts(row.get("updatedAt")), len(row.get("bins") or [])), reverse=True)
-            result[city_id] = matches[0]
-            stats["match"] = True
-        gamma_status = _market_source_status(stats)
-        prior_status = source_states.get(city_id)
-        if gamma_status == "ok" or prior_status in {None, "", "empty"}:
-            source_states[city_id] = gamma_status
-        else:
-            source_states[city_id] = prior_status
-    return result, source_states
+    return _db_markets_by_city(ctx, cities, dates)
 
 
 def _aggregate_source(values: Iterable[str], *, empty_value: str = "empty") -> str:
@@ -2350,14 +1554,7 @@ def build_global_weather_map_payload(
             logger.exception("global weather map metar fetch failed error=%s", exc)
     try:
         markets, market_source_states = _markets_by_city(ctx, cities)
-        sources["gamma"] = _aggregate_source(market_source_states.values())
-        gamma_sync_stats = (
-            dependencies.runtime_state.get("_weather_gamma_sync_stats")
-            or {}
-        )
-        if gamma_sync_stats:
-            sync_status = str(gamma_sync_stats.get("status") or "empty")
-            sources["gammaSync"] = sync_status if sync_status != "empty" else ("ok" if int(gamma_sync_stats.get("upserted") or 0) > 0 else "empty")
+        sources["marketDatabase"] = _aggregate_source(market_source_states.values())
         clob_stats = (
             dependencies.runtime_state.get("_weather_clob_stats")
             or {}
@@ -2382,7 +1579,7 @@ def build_global_weather_map_payload(
     except Exception as exc:
         markets = {}
         market_source_states = {str(city["city_id"]): "error" for city in cities}
-        sources["gamma"] = "error"
+        sources["marketDatabase"] = "error"
         sources["clob"] = "error"
         logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
@@ -2431,16 +1628,12 @@ def build_global_weather_map_payload(
         dependencies.runtime_state.get("_weather_unmapped_markets")
         or []
     )
-    if dependencies.runtime_state.get("_weather_gamma_sync_stats"):
-        summary["gammaSync"] = dependencies.runtime_state.get(
-            "_weather_gamma_sync_stats",
-        )
     status = "ok" if summary["mappedCount"] else "warming"
     if status == "ok" and any(value == "error" for value in sources.values()):
         status = "degraded"
     return {
         "generatedAt": _utc_now_iso(dependencies),
-        "source": "Open-Meteo/wttr + AviationWeather + Polymarket Gamma/CLOB",
+        "source": "Open-Meteo/wttr + AviationWeather + market-data",
         "sourceUrl": getattr(
             dependencies.settings,
             "weather_source_url",
@@ -2567,11 +1760,11 @@ def _schedule_live_refresh(
     reason: str,
 ) -> bool:
     dependencies = _dependencies(ctx)
-    refresh_key = f"{GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE}:{GLOBAL_WEATHER_MAP_CACHE_KEY}"
-    with _LIVE_REFRESH_LOCK:
-        if refresh_key in _LIVE_REFRESHING:
+    refresh_key = "global_weather_map_service:" + f"{GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE}:{GLOBAL_WEATHER_MAP_CACHE_KEY}"
+    with dependencies.resources.live_refresh_lock:
+        if refresh_key in dependencies.resources.live_refreshing:
             return False
-        _LIVE_REFRESHING.add(refresh_key)
+        dependencies.resources.live_refreshing.add(refresh_key)
 
     def refresh() -> None:
         logger = getattr(dependencies.application, "logger", None)
@@ -2602,11 +1795,12 @@ def _schedule_live_refresh(
             if logger is not None:
                 logger.exception("global weather map async refresh failed reason=%s", reason)
         finally:
-            with _LIVE_REFRESH_LOCK:
-                _LIVE_REFRESHING.discard(refresh_key)
+            with dependencies.resources.live_refresh_lock:
+                dependencies.resources.live_refreshing.discard(refresh_key)
 
-    thread = threading.Thread(target=refresh, name="global-weather-map-refresh", daemon=True)
-    thread.start()
+    if not dependencies.resources.start_thread(refresh, name="global-weather-map-refresh"):
+        with dependencies.resources.live_refresh_lock:
+            dependencies.resources.live_refreshing.discard(refresh_key)
     return True
 
 

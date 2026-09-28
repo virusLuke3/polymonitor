@@ -6,10 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-)
+from api.context import resolve_optional_service_callable
 
 try:
     import requests
@@ -92,7 +89,7 @@ class FinanceExternalSourceDependencies:
         context: Mapping[str, Any],
     ) -> FinanceExternalSourceDependencies:
         return cls(
-            settings=resolve_optional_service_value(context, "SETTINGS"),
+            settings=context.get("SETTINGS"),
             http_json_get=resolve_optional_service_callable(
                 context,
                 "http_json_get",
@@ -109,10 +106,7 @@ class FinanceExternalSourceDependencies:
                 context,
                 "get_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
         )
 
 
@@ -326,7 +320,8 @@ def _fetch_hyperliquid_perp_source(
         return {"status": "degraded", "items": [], "error": "unexpected Hyperliquid response"}
     universe = (payload[0] or {}).get("universe") or []
     asset_contexts = payload[1] or []
-    wanted = {symbol for symbol, _name, _asset_class in TRADFI_PERP_SYMBOLS}
+    # BTC/ETH are also required by the ETF demand fallback below.
+    wanted = {"BTC", "ETH"} | {symbol for symbol, _name, _asset_class in TRADFI_PERP_SYMBOLS}
     rows: List[Dict[str, Any]] = []
     for meta, asset_ctx in zip(universe, asset_contexts):
         if not isinstance(meta, dict) or not isinstance(asset_ctx, dict):

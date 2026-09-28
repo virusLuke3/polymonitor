@@ -4,6 +4,8 @@ After=network-online.target polydata-api.service
 Requires=polydata-api.service
 
 [Service]
+StandardOutput=journal
+StandardError=journal
 Type=simple
 WorkingDirectory=/opt/polyData
 EnvironmentFile=%h/.config/polydata/polydata.env

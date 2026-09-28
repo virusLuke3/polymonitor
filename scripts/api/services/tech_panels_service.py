@@ -12,10 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 from xml.etree import ElementTree
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-)
+from api.context import resolve_optional_service_callable
 
 try:
     import requests
@@ -164,9 +161,11 @@ class TechPanelsDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> TechPanelsDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_optional_service_value(context, "SETTINGS"),
-            application=resolve_optional_service_value(context, "app"),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             http_text_get=resolve_optional_service_callable(
                 context,
                 "http_text_get",
@@ -195,10 +194,7 @@ class TechPanelsDependencies:
                 context,
                 "get_snapshot_payload",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
         )
 
 

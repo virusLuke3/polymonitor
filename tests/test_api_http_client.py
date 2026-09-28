@@ -1,13 +1,5 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.clients import http_client
 
@@ -26,13 +18,14 @@ class FakeSession:
     def __init__(self) -> None:
         self.trust_env = True
         self.calls: list[str] = []
+        self.closed = False
 
     def get(self, url: str, **_kwargs):
         self.calls.append(url)
         return FakeResponse()
 
     def close(self) -> None:
-        return None
+        self.closed = True
 
 
 class FakeRequests:
@@ -56,3 +49,23 @@ def test_http_json_get_reuses_a_session_within_the_current_worker_thread(monkeyp
     assert len(requests_lib.sessions) == 1
     assert requests_lib.sessions[0].calls == ["https://example.test/one", "https://example.test/two"]
     assert requests_lib.sessions[0].trust_env is False
+
+
+def test_http_sessions_are_owned_by_the_application_and_closed(monkeypatch):
+    from api.runtime import ServiceRuntime
+    from api import bindings
+
+    requests_lib = FakeRequests()
+    monkeypatch.setattr(bindings, "requests", requests_lib)
+    first, second = ServiceRuntime(), ServiceRuntime()
+    try:
+        for runtime in (first, second):
+            assert runtime._bindings["http_json_get"]("https://example.test/data") == {}
+        assert len(requests_lib.sessions) == 2
+        first.close()
+        assert requests_lib.sessions[0].closed
+        assert not requests_lib.sessions[1].closed
+    finally:
+        first.close()
+        second.close()
+    assert all(session.closed for session in requests_lib.sessions)

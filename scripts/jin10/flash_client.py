@@ -8,14 +8,13 @@ from typing import Any, Dict, List, Optional
 import requests
 from zoneinfo import ZoneInfo
 
-from data_sources import JIN10_FLASH_API_URL, JIN10_FLASH_DETAIL_BASE_URL, JIN10_LIVE_URL
 
-DEFAULT_FLASH_API_URL = os.environ.get("POLYDATA_JIN10_FLASH_API_URL", JIN10_FLASH_API_URL).strip()
-DEFAULT_FLASH_CHANNEL = os.environ.get("POLYDATA_JIN10_FLASH_CHANNEL", "-8200").strip()
-DEFAULT_FLASH_APP_ID = os.environ.get("POLYDATA_JIN10_APP_ID", "SO1EJGmNgCtmpcPF").strip()
-DEFAULT_FLASH_VERSION = os.environ.get("POLYDATA_JIN10_VERSION", "1.0.0").strip()
-DEFAULT_FLASH_DETAIL_BASE_URL = os.environ.get("POLYDATA_JIN10_FLASH_DETAIL_BASE_URL", JIN10_FLASH_DETAIL_BASE_URL).strip()
-DEFAULT_LIVE_URL = os.environ.get("POLYDATA_JIN10_LIVE_URL", JIN10_LIVE_URL).strip()
+
+
+
+
+
+
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 12
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -48,9 +47,11 @@ def parse_timestamp(value: Any) -> Optional[str]:
 def normalize_item(
     item: Any,
     *,
-    detail_base_url: str = DEFAULT_FLASH_DETAIL_BASE_URL,
-    live_url: str = DEFAULT_LIVE_URL,
+    detail_base_url: str | None = None,
+    live_url: str | None = None,
 ) -> Optional[Dict[str, Any]]:
+    detail_base_url = os.environ.get("POLYDATA_JIN10_FLASH_DETAIL_BASE_URL", "").strip() if detail_base_url is None else detail_base_url
+    live_url = os.environ.get("POLYDATA_JIN10_LIVE_URL", "").strip() if live_url is None else live_url
     if not isinstance(item, dict):
         return None
     if bool((item.get("extras") or {}).get("ad")):
@@ -131,15 +132,21 @@ def select_panel_items(candidates: List[Dict[str, Any]], *, limit: int) -> List[
 def fetch_jin10_panel_payload(
     *,
     limit: int = 24,
-    api_url: str = DEFAULT_FLASH_API_URL,
-    channel: str = DEFAULT_FLASH_CHANNEL,
-    app_id: str = DEFAULT_FLASH_APP_ID,
-    version: str = DEFAULT_FLASH_VERSION,
-    detail_base_url: str = DEFAULT_FLASH_DETAIL_BASE_URL,
-    live_url: str = DEFAULT_LIVE_URL,
+    api_url: str | None = None,
+    channel: str | None = None,
+    app_id: str | None = None,
+    version: str | None = None,
+    detail_base_url: str | None = None,
+    live_url: str | None = None,
     timeout: int = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     requests_lib: Any = None,
 ) -> Dict[str, Any]:
+    api_url = os.environ.get("POLYDATA_JIN10_FLASH_API_URL", "").strip() if api_url is None else api_url
+    channel = os.environ.get("POLYDATA_JIN10_FLASH_CHANNEL", "-8200").strip() if channel is None else channel
+    app_id = os.environ.get("POLYDATA_JIN10_APP_ID", "SO1EJGmNgCtmpcPF").strip() if app_id is None else app_id
+    version = os.environ.get("POLYDATA_JIN10_VERSION", "1.0.0").strip() if version is None else version
+    detail_base_url = os.environ.get("POLYDATA_JIN10_FLASH_DETAIL_BASE_URL", "").strip() if detail_base_url is None else detail_base_url
+    live_url = os.environ.get("POLYDATA_JIN10_LIVE_URL", "").strip() if live_url is None else live_url
     headers = {
         "Accept": "application/json",
         "User-Agent": "polydata-jin10-panel/1.0",

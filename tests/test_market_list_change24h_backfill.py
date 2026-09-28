@@ -1,19 +1,14 @@
 from __future__ import annotations
 
+
 import json
 import sqlite3
-import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from db import dict_from_row
 from db import backfill_market_list_change24h as backfill_job
@@ -144,5 +139,12 @@ class MarketListChange24hBackfillTestCase(unittest.TestCase):
         self.assertEqual(second["threshold"], threshold_two.isoformat().replace("+00:00", "Z"))
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_active_first_page_uses_snapshot_without_scanning_serving_table(monkeypatch):
+    from types import SimpleNamespace
+    from api.services import market_service
+
+    cached = {"items": [{"id": 7}], "pagination": {"page": 1}}
+    monkeypatch.setattr(market_service, "get_active_markets_snapshot", lambda *args, **kwargs: cached)
+    # No database or table-count capability is available on the cached path.
+    dependencies = SimpleNamespace(utc_now_iso=lambda: "2026-09-28T00:00:00Z", source={})
+    assert market_service._get_markets_payload(dependencies, page_size=20) is cached

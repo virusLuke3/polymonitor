@@ -8,12 +8,7 @@ from datetime import datetime, time, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 from zoneinfo import ZoneInfo
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 
 
 CPI_CALENDAR_SNAPSHOT_NAMESPACE = "snapshot:macro:cpi-release-calendar"
@@ -99,17 +94,16 @@ class CpiReleaseCalendarDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> CpiReleaseCalendarDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_optional_service_value(context, "app"),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             http_text_get=resolve_service_callable(
                 context,
                 "http_text_get",
             ),
-            beautiful_soup=resolve_optional_service_value(
-                context,
-                "BeautifulSoup",
-            ),
+            beautiful_soup=context.get("BeautifulSoup"),
             get_polymarket_macro_map_snapshot=resolve_optional_service_callable(
                 context,
                 "get_polymarket_macro_map_snapshot",
@@ -118,10 +112,7 @@ class CpiReleaseCalendarDependencies:
                 context,
                 "utc_now_iso",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",

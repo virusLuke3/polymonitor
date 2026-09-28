@@ -23,6 +23,35 @@ load_env_file "$ENV_FILE"
 RPC_URL="${POLYMARKET_RPC_URL:-http://127.0.0.1:28545}"
 MAX_LAG_BLOCKS="${POLYDATA_POLYGON_RPC_MAX_LAG_BLOCKS:-5000}"
 TUNNEL_UNIT="${POLYDATA_POLYGON_RPC_TUNNEL_UNIT:-polydata-polygon-rpc-tunnel.service}"
+RESTART_FAILURE_THRESHOLD="${POLYDATA_POLYGON_RPC_RESTART_FAILURE_THRESHOLD:-3}"
+RPC_TIMEOUT_SECONDS="${POLYDATA_POLYGON_RPC_HEALTH_TIMEOUT_SECONDS:-8}"
+HEALTH_STATE_DIR="${POLYDATA_POLYGON_RPC_HEALTH_STATE_DIR:-${XDG_RUNTIME_DIR:-/tmp}/polydata-polygon-rpc-health}"
+FAILURE_COUNT_FILE="${HEALTH_STATE_DIR}/consecutive-transport-failures"
+
+if ! [[ "$RESTART_FAILURE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] || (( RESTART_FAILURE_THRESHOLD > 100 )); then
+  printf '[polygon-rpc-health] invalid restart failure threshold: %s\n' "$RESTART_FAILURE_THRESHOLD" >&2
+  exit 64
+fi
+
+umask 077
+mkdir -p "$HEALTH_STATE_DIR"
+
+reset_transport_failures() {
+  rm -f "$FAILURE_COUNT_FILE"
+}
+
+record_transport_failure() {
+  local previous=0
+  local next
+  if [[ -f "$FAILURE_COUNT_FILE" ]]; then
+    read -r previous < "$FAILURE_COUNT_FILE" || previous=0
+  fi
+  [[ "$previous" =~ ^[0-9]+$ ]] || previous=0
+  next=$((previous + 1))
+  printf '%s\n' "$next" > "${FAILURE_COUNT_FILE}.tmp"
+  mv -f "${FAILURE_COUNT_FILE}.tmp" "$FAILURE_COUNT_FILE"
+  printf '%s' "$next"
+}
 
 log() {
   printf '[polygon-rpc-health] %s\n' "$*" >&2
@@ -31,15 +60,19 @@ log() {
 check_rpc() {
   POLYDATA_POLYGON_HEALTH_RPC_URL="$RPC_URL" \
   POLYDATA_POLYGON_HEALTH_MAX_LAG="$MAX_LAG_BLOCKS" \
+  POLYDATA_POLYGON_HEALTH_TIMEOUT="$RPC_TIMEOUT_SECONDS" \
     python3 - <<'PY'
 import json
 import os
+import socket
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
 rpc_url = os.environ["POLYDATA_POLYGON_HEALTH_RPC_URL"]
 max_lag = max(0, int(os.environ["POLYDATA_POLYGON_HEALTH_MAX_LAG"]))
+rpc_timeout = max(0.1, float(os.environ["POLYDATA_POLYGON_HEALTH_TIMEOUT"]))
 parsed = urllib.parse.urlparse(rpc_url)
 if parsed.scheme not in {"http", "https"}:
     raise SystemExit("Polygon RPC URL must use HTTP(S)")
@@ -57,8 +90,21 @@ def rpc(method):
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=8) as response:
-        payload = json.load(response)
+    try:
+        with urllib.request.urlopen(request, timeout=rpc_timeout) as response:
+            payload = json.load(response)
+    except (TimeoutError, socket.timeout):
+        print(f"{method} timed out while Bor may be busy", file=sys.stderr)
+        raise SystemExit(77)
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            print(f"{method} timed out while Bor may be busy", file=sys.stderr)
+            raise SystemExit(77) from exc
+        print(
+            f"{method} transport failed: {type(exc.reason).__name__}",
+            file=sys.stderr,
+        )
+        raise SystemExit(78) from exc
     if payload.get("error"):
         raise RuntimeError(f"{method} failed: {payload['error']}")
     return payload.get("result")
@@ -91,6 +137,7 @@ PY
 
 status=0
 if check_rpc; then
+  reset_transport_failures
   log "self-hosted Polygon RPC healthy"
   exit 0
 else
@@ -98,16 +145,50 @@ else
 fi
 
 if (( status == 75 )); then
-  log "tunnel is healthy but the remote Bor node is stale; not restarting SSH"
-  exit 1
+  # A reachable Bor node may legitimately trail mainnet while restoring or
+  # crossing an upgrade. The indexers use their configured fallback until it
+  # catches up, so report a degraded state without failing the systemd unit.
+  reset_transport_failures
+  log "DEGRADED_SYNCING: tunnel is healthy but the remote Bor node is still catching up; not restarting SSH"
+  exit 0
 fi
 if (( status == 76 )); then
+  reset_transport_failures
   log "remote endpoint is not Polygon Bor; refusing to restart-loop the tunnel"
   exit 1
 fi
+if (( status == 77 )); then
+  # A long historical receipt/getter batch can keep Bor's HTTP worker busy for
+  # more than the probe timeout. Restarting the SSH tunnel cannot repair that
+  # remote load and instead destroys the in-flight integrity snapshot.
+  reset_transport_failures
+  log "DEGRADED_BUSY: Bor RPC probe timed out; tunnel left intact"
+  exit 0
+fi
 
-log "RPC check failed; restarting ${TUNNEL_UNIT} once"
+failure_count="$(record_transport_failure)"
+if (( failure_count < RESTART_FAILURE_THRESHOLD )); then
+  log "TRANSIENT_TRANSPORT_FAILURE: ${failure_count}/${RESTART_FAILURE_THRESHOLD}; tunnel left intact"
+  exit 0
+fi
+
+log "RPC transport failed ${failure_count} consecutive times; restarting ${TUNNEL_UNIT} once"
 systemctl --user restart "$TUNNEL_UNIT"
 sleep 3
-check_rpc
-log "self-hosted Polygon RPC recovered"
+reset_transport_failures
+post_status=0
+if check_rpc; then
+  log "self-hosted Polygon RPC recovered"
+  exit 0
+else
+  post_status=$?
+fi
+if (( post_status == 75 )); then
+  log "self-hosted Polygon RPC transport recovered; node remains DEGRADED_SYNCING"
+  exit 0
+fi
+if (( post_status == 77 )); then
+  log "tunnel restarted but Bor RPC remains busy; no restart loop"
+  exit 0
+fi
+exit "$post_status"

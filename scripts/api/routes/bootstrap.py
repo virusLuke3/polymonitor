@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from flask import Blueprint, jsonify, request
 
@@ -18,20 +18,13 @@ class BootstrapRouteDependencies:
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> BootstrapRouteDependencies:
         return cls(
-            get_dashboard_payload_cached=cast(
-                Callable[[], Any],
-                resolve_route_callable(context, "get_dashboard_payload_cached"),
-            ),
-            get_bootstrap_payload_cached=cast(
-                Callable[[], Any],
-                resolve_route_callable(context, "get_bootstrap_payload_cached"),
-            ),
+            get_dashboard_payload_cached=resolve_route_callable(context, "get_dashboard_payload_cached"),
+            get_bootstrap_payload_cached=resolve_route_callable(context, "get_bootstrap_payload_cached"),
             search_markets=resolve_route_callable(context, "search_markets"),
         )
 
 
-def create_bootstrap_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = BootstrapRouteDependencies.from_context(context)
+def create_bootstrap_blueprint(dependencies: BootstrapRouteDependencies) -> Blueprint:
     bp = Blueprint("bootstrap_routes", __name__)
 
     @bp.route("/dashboard", methods=["GET"])

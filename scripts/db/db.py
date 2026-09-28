@@ -14,6 +14,9 @@ import os
 import re
 import sqlite3
 import argparse
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -29,93 +32,10 @@ except ImportError:
     pymysql = None
 
 
-def _load_dotenv_files() -> None:
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    project_root = Path(__file__).resolve().parents[2]
-    scripts_root = Path(__file__).resolve().parents[1]
-    for candidate in (
-        project_root / ".env",
-        project_root / ".env.local",
-        scripts_root / ".env",
-    ):
-        if candidate.exists():
-            load_dotenv(candidate, override=False)
-
-
-_load_dotenv_files()
-
-DEFAULT_SQLITE_PATH = os.environ.get(
-    "POLYMARKET_SQLITE_PATH",
-    os.environ.get("POLYMARKET_DB", "/data/hy/myPolyDB/polymarket_indexer.db"),
-)
+DEFAULT_SQLITE_PATH = "/data/hy/myPolyDB/polymarket_indexer.db"
 DEFAULT_DB_PATH = DEFAULT_SQLITE_PATH
-_REQUESTED_DB_BACKEND = os.environ.get("POLYMARKET_DB_BACKEND", "postgres").strip().lower()
-DEFAULT_DB_BACKEND = (
-    _REQUESTED_DB_BACKEND
-    if _REQUESTED_DB_BACKEND in {"postgres", "postgresql", "sqlite"}
-    else "postgres"
-)
-
-DEFAULT_MYSQL_HOST = ""
-DEFAULT_MYSQL_PORT = 0
-DEFAULT_MYSQL_USER = ""
-DEFAULT_MYSQL_PASSWORD = ""
-DEFAULT_MYSQL_DATABASE = ""
-DEFAULT_MYSQL_CHARSET = "utf8mb4"
-
-DEFAULT_POSTGRES_HOST = (
-    os.environ.get("POLYDATA_POSTGRES_HOST")
-    or os.environ.get("POLYMARKET_POSTGRES_HOST")
-    or os.environ.get("POLYMARKET_PostgreSQL_HOST")
-    or "127.0.0.1"
-)
-DEFAULT_POSTGRES_PORT = int(
-    os.environ.get("POLYDATA_POSTGRES_PORT")
-    or os.environ.get("POLYMARKET_POSTGRES_PORT")
-    or os.environ.get("POLYMARKET_PostgreSQL_PORT")
-    or "45432"
-)
-DEFAULT_POSTGRES_USER = (
-    os.environ.get("POLYDATA_POSTGRES_USER")
-    or os.environ.get("POLYMARKET_POSTGRES_USER")
-    or os.environ.get("POLYMARKET_PostgreSQL_USER")
-    or "poly_user"
-)
-DEFAULT_POSTGRES_PASSWORD = (
-    os.environ.get("POLYDATA_POSTGRES_PASSWORD")
-    or os.environ.get("POLYMARKET_POSTGRES_PASSWORD")
-    or os.environ.get("POLYMARKET_POSTGRESQL_PASSWORD")
-    or os.environ.get("POLYMARKET_PostgreSQL_PASSWORD")
-    or ""
-)
-DEFAULT_POSTGRES_DATABASE = (
-    os.environ.get("POLYDATA_POSTGRES_DATABASE")
-    or os.environ.get("POLYMARKET_POSTGRES_DATABASE")
-    or os.environ.get("POLYMARKET_PostgreSQL_DATABASE")
-    or "poly_data_core"
-)
-DEFAULT_POSTGRES_SEARCH_PATH = os.environ.get(
-    "POLYDATA_POSTGRES_SEARCH_PATH",
-    "core,oracle,ops,public",
-)
-
-_runtime_db_backend = DEFAULT_DB_BACKEND
-_runtime_sqlite_path = DEFAULT_SQLITE_PATH
-_runtime_mysql_host = DEFAULT_MYSQL_HOST
-_runtime_mysql_port = DEFAULT_MYSQL_PORT
-_runtime_mysql_user = DEFAULT_MYSQL_USER
-_runtime_mysql_password = DEFAULT_MYSQL_PASSWORD
-_runtime_mysql_database = DEFAULT_MYSQL_DATABASE
-_runtime_mysql_charset = DEFAULT_MYSQL_CHARSET
-_runtime_postgres_host = DEFAULT_POSTGRES_HOST
-_runtime_postgres_port = DEFAULT_POSTGRES_PORT
-_runtime_postgres_user = DEFAULT_POSTGRES_USER
-_runtime_postgres_password = DEFAULT_POSTGRES_PASSWORD
-_runtime_postgres_database = DEFAULT_POSTGRES_DATABASE
-_runtime_postgres_search_path = DEFAULT_POSTGRES_SEARCH_PATH
+# Explicit CLI overrides only. Environment values are read at configuration time.
+_runtime_overrides: Dict[str, Any] = {}
 
 _NAMED_PARAM_RE = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)")
 _ON_CONFLICT_RE = re.compile(
@@ -125,124 +45,112 @@ _ON_CONFLICT_RE = re.compile(
 
 
 def get_backend() -> str:
-    return _runtime_db_backend
+    return str(_runtime_overrides.get("backend") or os.environ.get("POLYMARKET_DB_BACKEND", "postgres")).strip().lower()
 
 
 def get_sqlite_path() -> str:
-    return _runtime_sqlite_path
+    return str(
+        _runtime_overrides.get("sqlite_path")
+        or os.environ.get("POLYMARKET_SQLITE_PATH")
+        or os.environ.get("POLYMARKET_DB")
+        or DEFAULT_SQLITE_PATH
+    )
 
 
 def get_mysql_settings() -> Dict[str, Any]:
     return {
-        "host": _runtime_mysql_host,
-        "port": _runtime_mysql_port,
-        "user": _runtime_mysql_user,
-        "password": _runtime_mysql_password,
-        "database": _runtime_mysql_database,
-        "charset": _runtime_mysql_charset,
+        name: _runtime_overrides.get("mysql_" + name, default)
+        for name, default in {
+            "host": "",
+            "port": 0,
+            "user": "",
+            "password": "",
+            "database": "",
+            "charset": "utf8mb4",
+        }.items()
     }
 
 
 def get_postgres_settings() -> Dict[str, Any]:
-    return {
-        "host": _runtime_postgres_host,
-        "port": _runtime_postgres_port,
-        "user": _runtime_postgres_user,
-        "password": _runtime_postgres_password,
-        "database": _runtime_postgres_database,
-        "search_path": _runtime_postgres_search_path,
+    defaults = {
+        "host": "127.0.0.1",
+        "port": 45432,
+        "user": "poly_user",
+        "password": "",
+        "database": "poly_data_core",
+        "search_path": "core,oracle,ops,public",
     }
+    settings = {}
+    for name, default in defaults.items():
+        key = name.upper()
+        aliases = [f"POLYDATA_POSTGRES_{key}", f"POLYMARKET_POSTGRES_{key}", f"POLYMARKET_PostgreSQL_{key}"]
+        if name == "password":
+            aliases.insert(2, "POLYMARKET_POSTGRESQL_PASSWORD")
+        settings[name] = _runtime_overrides.get(
+            "postgres_" + name, next((os.environ[key] for key in aliases if os.environ.get(key)), default)
+        )
+    settings["port"] = int(settings["port"])
+    return settings
+
+
+@dataclass(frozen=True)
+class DatabaseSettings:
+    backend: str
+    sqlite_path: str
+    connection: Mapping[str, Any] = field(repr=False)
+
+    @classmethod
+    def from_environment(cls):
+        backend = get_backend()
+        settings = get_postgres_settings() if backend in {"postgres", "postgresql"} else get_mysql_settings()
+        return cls(backend, get_sqlite_path(), MappingProxyType(settings))
+
+    def connect(self, db_path=None, *, readonly=False):
+        if self.backend in {"postgres", "postgresql"}:
+            return get_postgres_connection(self.connection)
+        if self.backend == "mysql":
+            return get_mysql_connection(self.connection)
+        if self.backend == "sqlite":
+            return get_sqlite_connection(db_path or self.sqlite_path, readonly=readonly)
+        raise ValueError(f"Unsupported database backend: {self.backend}")
+
+    def describe(self) -> str:
+        if self.backend == "sqlite":
+            return f"sqlite:{Path(self.sqlite_path).expanduser()}"
+        settings = self.connection
+        return f"{self.backend}:{settings['user']}@{settings['host']}:{settings['port']}/{settings['database']}"
 
 
 def configure_runtime_db(
     *,
-    backend: Optional[str] = None,
-    sqlite_path: Optional[str] = None,
-    mysql_host: Optional[str] = None,
-    mysql_port: Optional[int] = None,
-    mysql_user: Optional[str] = None,
-    mysql_password: Optional[str] = None,
-    mysql_database: Optional[str] = None,
-    mysql_charset: Optional[str] = None,
-    postgres_host: Optional[str] = None,
-    postgres_port: Optional[int] = None,
-    postgres_user: Optional[str] = None,
-    postgres_password: Optional[str] = None,
-    postgres_database: Optional[str] = None,
-    postgres_search_path: Optional[str] = None,
+    backend=None,
+    sqlite_path=None,
+    mysql_host=None,
+    mysql_port=None,
+    mysql_user=None,
+    mysql_password=None,
+    mysql_database=None,
+    mysql_charset=None,
+    postgres_host=None,
+    postgres_port=None,
+    postgres_user=None,
+    postgres_password=None,
+    postgres_database=None,
+    postgres_search_path=None,
 ) -> None:
-    global _runtime_db_backend
-    global _runtime_sqlite_path
-    global _runtime_mysql_host
-    global _runtime_mysql_port
-    global _runtime_mysql_user
-    global _runtime_mysql_password
-    global _runtime_mysql_database
-    global _runtime_mysql_charset
-    global _runtime_postgres_host
-    global _runtime_postgres_port
-    global _runtime_postgres_user
-    global _runtime_postgres_password
-    global _runtime_postgres_database
-    global _runtime_postgres_search_path
-
-    if backend is not None:
-        _runtime_db_backend = backend.strip().lower()
-    if sqlite_path is not None:
-        _runtime_sqlite_path = str(Path(sqlite_path).expanduser())
-    if mysql_host is not None:
-        _runtime_mysql_host = mysql_host
-    if mysql_port is not None:
-        _runtime_mysql_port = int(mysql_port)
-    if mysql_user is not None:
-        _runtime_mysql_user = mysql_user
-    if mysql_password is not None:
-        _runtime_mysql_password = mysql_password
-    if mysql_database is not None:
-        _runtime_mysql_database = mysql_database
-    if mysql_charset is not None:
-        _runtime_mysql_charset = mysql_charset
-    if postgres_host is not None:
-        _runtime_postgres_host = postgres_host
-    if postgres_port is not None:
-        _runtime_postgres_port = int(postgres_port)
-    if postgres_user is not None:
-        _runtime_postgres_user = postgres_user
-    if postgres_password is not None:
-        _runtime_postgres_password = postgres_password
-    if postgres_database is not None:
-        _runtime_postgres_database = postgres_database
-    if postgres_search_path is not None:
-        _runtime_postgres_search_path = postgres_search_path
+    _runtime_overrides.update({name: value for name, value in locals().items() if value is not None})
 
 
 def add_db_cli_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--backend",
-        choices=["sqlite", "mysql", "postgres", "postgresql"],
-        default=DEFAULT_DB_BACKEND,
-        help="数据库后端；默认从 POLYMARKET_DB_BACKEND 读取",
-    )
-    parser.add_argument(
-        "--sqlite-path",
-        default=DEFAULT_SQLITE_PATH,
-        help="SQLite 文件路径；仅在 --backend sqlite 时作为真实落库目标使用",
-    )
-    parser.add_argument("--mysql-host", default=DEFAULT_MYSQL_HOST, help="MySQL host")
-    parser.add_argument("--mysql-port", type=int, default=DEFAULT_MYSQL_PORT, help="MySQL port")
-    parser.add_argument("--mysql-user", default=DEFAULT_MYSQL_USER, help="MySQL user")
-    parser.add_argument("--mysql-password", default=DEFAULT_MYSQL_PASSWORD, help="MySQL password")
-    parser.add_argument("--mysql-database", default=DEFAULT_MYSQL_DATABASE, help="MySQL database")
-    parser.add_argument("--mysql-charset", default=DEFAULT_MYSQL_CHARSET, help="MySQL charset")
-    parser.add_argument("--postgres-host", default=DEFAULT_POSTGRES_HOST, help="PostgreSQL host")
-    parser.add_argument("--postgres-port", type=int, default=DEFAULT_POSTGRES_PORT, help="PostgreSQL port")
-    parser.add_argument("--postgres-user", default=DEFAULT_POSTGRES_USER, help="PostgreSQL user")
-    parser.add_argument("--postgres-database", default=DEFAULT_POSTGRES_DATABASE, help="PostgreSQL database")
-    parser.add_argument(
-        "--postgres-search-path",
-        default=DEFAULT_POSTGRES_SEARCH_PATH,
-        help="PostgreSQL search_path for legacy unqualified table names",
-    )
+    parser.add_argument("--backend", choices=["sqlite", "mysql", "postgres", "postgresql"], default=get_backend())
+    parser.add_argument("--sqlite-path", default=get_sqlite_path())
+    for prefix, settings in (("mysql", get_mysql_settings()), ("postgres", get_postgres_settings())):
+        for name, value in settings.items():
+            if prefix == "postgres" and name == "password":
+                continue
+            parser.add_argument(
+                f"--{prefix}-{name.replace('_', '-')}", default=value, type=int if name == "port" else str
+            )
 
 
 def configure_db_from_args(args: argparse.Namespace) -> None:
@@ -570,10 +478,10 @@ def get_sqlite_connection(db_path: str = DEFAULT_DB_PATH, readonly: bool = False
     return conn
 
 
-def get_mysql_connection() -> MySQLConnectionWrapper:
+def get_mysql_connection(settings: Optional[Mapping[str, Any]] = None) -> MySQLConnectionWrapper:
     if pymysql is None:
         raise RuntimeError("pymysql is not installed. Please install pymysql first.")
-    settings = get_mysql_settings()
+    settings = settings if settings is not None else get_mysql_settings()
     raw = pymysql.connect(
         host=settings["host"],
         port=settings["port"],
@@ -589,10 +497,10 @@ def get_mysql_connection() -> MySQLConnectionWrapper:
     return MySQLConnectionWrapper(raw)
 
 
-def get_postgres_connection() -> PostgresConnectionWrapper:
+def get_postgres_connection(settings: Optional[Mapping[str, Any]] = None) -> PostgresConnectionWrapper:
     if psycopg is None:
         raise RuntimeError("psycopg is not installed. Please install psycopg[binary] first.")
-    settings = get_postgres_settings()
+    settings = settings if settings is not None else get_postgres_settings()
     raw = psycopg.connect(
         host=settings["host"],
         port=settings["port"],
@@ -609,7 +517,7 @@ def get_postgres_connection() -> PostgresConnectionWrapper:
 
 
 def get_connection(
-    db_path: Optional[str] = DEFAULT_DB_PATH,
+    db_path: Optional[str] = None,
     *,
     backend: Optional[str] = None,
     readonly: bool = False,
@@ -625,7 +533,7 @@ def get_connection(
 
 
 @contextmanager
-def get_db(db_path: Optional[str] = DEFAULT_DB_PATH, *, backend: Optional[str] = None, readonly: bool = False):
+def get_db(db_path: Optional[str] = None, *, backend: Optional[str] = None, readonly: bool = False):
     conn = get_connection(db_path, backend=backend, readonly=readonly)
     try:
         yield conn
@@ -722,9 +630,7 @@ def create_index_if_not_exists(conn, table: str, index_name: str, columns: Seque
         return
     if isinstance(conn, PostgresConnectionWrapper):
         unique_sql = "UNIQUE " if unique else ""
-        conn.execute(
-            f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} ON {table}({', '.join(columns)})"
-        )
+        conn.execute(f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} ON {table}({', '.join(columns)})")
         return
 
     cur = conn.execute(
@@ -739,9 +645,7 @@ def create_index_if_not_exists(conn, table: str, index_name: str, columns: Seque
     if cur.fetchone():
         return
     unique_sql = "UNIQUE " if unique else ""
-    conn.execute(
-        f"ALTER TABLE {table} ADD {unique_sql}INDEX {index_name} ({', '.join(columns)})"
-    )
+    conn.execute(f"ALTER TABLE {table} ADD {unique_sql}INDEX {index_name} ({', '.join(columns)})")
 
 
 def ensure_column_exists(conn, table: str, column: str, column_type: str) -> None:
@@ -783,7 +687,9 @@ def _ensure_mysql_uma_adapter_mapping_schema(conn) -> None:
         _create_mysql_uma_adapter_mapping_table(conn)
         return
 
-    column_types = {name: col_type.lower() for name, col_type in get_table_column_types(conn, "uma_adapter_mapping").items()}
+    column_types = {
+        name: col_type.lower() for name, col_type in get_table_column_types(conn, "uma_adapter_mapping").items()
+    }
     needs_rebuild = (
         column_types.get("ancillary_data", "").startswith("varchar(")
         or "ancillary_data_hash" not in column_types
@@ -824,6 +730,8 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         """
         CREATE TABLE IF NOT EXISTS core.markets (
             id BIGINT PRIMARY KEY DEFAULT nextval('core.markets_id_seq'),
+            identity_kind TEXT NOT NULL DEFAULT 'canonical_gamma'
+                CHECK (identity_kind IN ('canonical_gamma', 'protocol_structural')),
             gamma_market_id TEXT,
             event_id TEXT,
             event_slug TEXT,
@@ -1069,12 +977,28 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         ("core.markets", "idx_markets_end_date", ["end_date"]),
         ("core.markets", "idx_markets_created_at", ["created_at"]),
         ("core.market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
-        ("core.market_status_snapshot", "idx_market_status_snapshot_lifecycle_flags", ["has_settle", "has_propose", "has_dispute", "market_id"]),
+        (
+            "core.market_status_snapshot",
+            "idx_market_status_snapshot_lifecycle_flags",
+            ["has_settle", "has_propose", "has_dispute", "market_id"],
+        ),
         ("core.market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
-        ("core.market_status_snapshot", "idx_market_status_snapshot_completion_status", ["completion_status", "market_id"]),
-        ("core.market_status_snapshot", "idx_market_status_snapshot_completion_flags", ["is_final", "is_resolved", "is_trading_closed", "market_id"]),
+        (
+            "core.market_status_snapshot",
+            "idx_market_status_snapshot_completion_status",
+            ["completion_status", "market_id"],
+        ),
+        (
+            "core.market_status_snapshot",
+            "idx_market_status_snapshot_completion_flags",
+            ["is_final", "is_resolved", "is_trading_closed", "market_id"],
+        ),
         ("core.market_status_snapshot", "idx_market_status_snapshot_completion_time", ["completion_time"]),
-        ("core.market_status_snapshot", "idx_market_status_snapshot_gamma_closed", ["gamma_closed", "gamma_closed_time"]),
+        (
+            "core.market_status_snapshot",
+            "idx_market_status_snapshot_gamma_closed",
+            ["gamma_closed", "gamma_closed_time"],
+        ),
         ("core.market_resolution_fast", "idx_mrf_settlement_code", ["settlement_code"]),
         ("core.market_resolution_fast", "idx_mrf_condition_id", ["condition_id"]),
         ("core.market_resolution_fast", "idx_mrf_slug", ["slug"]),
@@ -1082,7 +1006,11 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         ("core.market_trade_daily_stats", "idx_market_trade_daily_stats_market_date", ["market_id", "trade_date"]),
         ("core.market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
         ("core.market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
-        ("core.market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
+        (
+            "core.market_list_serving",
+            "idx_market_list_serving_activity",
+            ["volume_24h", "trade_count_24h", "last_trade_at"],
+        ),
         ("core.market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
         ("core.market_chart_serving", "idx_market_chart_serving_updated", ["updated_at"]),
         ("core.market_chart_serving", "idx_market_chart_serving_status", ["history_status", "updated_at"]),
@@ -1093,7 +1021,9 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_tags_gin ON core.markets USING GIN (tags)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_clob_token_ids_gin ON core.markets USING GIN (clob_token_ids)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_category_lower ON core.markets (lower(category))")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_created_id_desc ON core.markets (created_at DESC NULLS LAST, id DESC)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_markets_created_id_desc ON core.markets (created_at DESC NULLS LAST, id DESC)"
+    )
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_market_status_snapshot_open_market_id
@@ -1178,7 +1108,11 @@ def _ensure_postgres_oracle_indexes(conn: PostgresConnectionWrapper) -> None:
         return
     for table, index_name, cols in (
         ("oracle.oracle_events", "idx_oracle_events_market_block_id", ["market_id", "block_number", "id"]),
-        ("oracle.oracle_events", "idx_oracle_events_external_market_block_id", ["external_market_id", "block_number", "id"]),
+        (
+            "oracle.oracle_events",
+            "idx_oracle_events_external_market_block_id",
+            ["external_market_id", "block_number", "id"],
+        ),
         ("oracle.oracle_events", "idx_oracle_events_question_block_id", ["question_id", "block_number", "id"]),
         ("oracle.oracle_events", "idx_oracle_events_condition_block_id", ["condition_id", "block_number", "id"]),
     ):
@@ -1210,6 +1144,8 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS markets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            identity_kind TEXT NOT NULL DEFAULT 'canonical_gamma'
+                CHECK (identity_kind IN ('canonical_gamma', 'protocol_structural')),
             gamma_market_id TEXT,
             slug TEXT NOT NULL UNIQUE,
             condition_id TEXT NOT NULL UNIQUE,
@@ -1229,6 +1165,7 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         """
     )
     for col, col_type in (
+        ("identity_kind", "TEXT NOT NULL DEFAULT 'canonical_gamma'"),
         ("gamma_market_id", "TEXT"),
         ("category", "TEXT"),
         ("tags", "TEXT"),
@@ -1552,17 +1489,29 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
         ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
         ("market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
-        ("market_status_snapshot", "idx_market_status_snapshot_lifecycle_flags", ["has_settle", "has_propose", "has_dispute", "market_id"]),
+        (
+            "market_status_snapshot",
+            "idx_market_status_snapshot_lifecycle_flags",
+            ["has_settle", "has_propose", "has_dispute", "market_id"],
+        ),
         ("market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
         ("market_status_snapshot", "idx_market_status_snapshot_completion_status", ["completion_status", "market_id"]),
-        ("market_status_snapshot", "idx_market_status_snapshot_completion_flags", ["is_final", "is_resolved", "is_trading_closed", "market_id"]),
+        (
+            "market_status_snapshot",
+            "idx_market_status_snapshot_completion_flags",
+            ["is_final", "is_resolved", "is_trading_closed", "market_id"],
+        ),
         ("market_status_snapshot", "idx_market_status_snapshot_completion_time", ["completion_time"]),
         ("market_status_snapshot", "idx_market_status_snapshot_gamma_closed", ["gamma_closed", "gamma_closed_time"]),
         ("market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
         ("market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
         ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
         ("trade_addresses", "idx_trade_addresses_address_market", ["address", "market_id"]),
-        ("trade_addresses", "idx_trade_addresses_market_time", ["market_id", "trade_time", "block_number", "log_index"]),
+        (
+            "trade_addresses",
+            "idx_trade_addresses_market_time",
+            ["market_id", "trade_time", "block_number", "log_index"],
+        ),
         ("trade_addresses", "idx_trade_addresses_trade_date_address", ["trade_date", "address"]),
         ("address_trade_daily_stats", "idx_address_trade_daily_stats_address_date", ["address", "trade_date"]),
         ("address_trade_daily_stats", "idx_address_trade_daily_stats_last_trade_at", ["last_trade_at"]),
@@ -1594,6 +1543,7 @@ def _init_mysql_schema(conn) -> None:
         """
         CREATE TABLE IF NOT EXISTS markets (
             id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            identity_kind VARCHAR(32) NOT NULL DEFAULT 'canonical_gamma',
             gamma_market_id VARCHAR(255),
             slug VARCHAR(512) NOT NULL,
             condition_id VARCHAR(255) NOT NULL,
@@ -1849,6 +1799,7 @@ def _init_mysql_schema(conn) -> None:
         """
     )
     for col, col_type in (
+        ("identity_kind", "VARCHAR(32) NOT NULL DEFAULT 'canonical_gamma'"),
         ("gamma_market_id", "VARCHAR(255)"),
         ("category", "VARCHAR(255)"),
         ("tags", "LONGTEXT"),
@@ -1899,17 +1850,29 @@ def _init_mysql_schema(conn) -> None:
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
         ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
         ("market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
-        ("market_status_snapshot", "idx_market_status_snapshot_lifecycle_flags", ["has_settle", "has_propose", "has_dispute", "market_id"]),
+        (
+            "market_status_snapshot",
+            "idx_market_status_snapshot_lifecycle_flags",
+            ["has_settle", "has_propose", "has_dispute", "market_id"],
+        ),
         ("market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
         ("market_status_snapshot", "idx_market_status_snapshot_completion_status", ["completion_status", "market_id"]),
-        ("market_status_snapshot", "idx_market_status_snapshot_completion_flags", ["is_final", "is_resolved", "is_trading_closed", "market_id"]),
+        (
+            "market_status_snapshot",
+            "idx_market_status_snapshot_completion_flags",
+            ["is_final", "is_resolved", "is_trading_closed", "market_id"],
+        ),
         ("market_status_snapshot", "idx_market_status_snapshot_completion_time", ["completion_time"]),
         ("market_status_snapshot", "idx_market_status_snapshot_gamma_closed", ["gamma_closed", "gamma_closed_time"]),
         ("market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
         ("market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
         ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
         ("trade_addresses", "idx_trade_addresses_address_market", ["address", "market_id"]),
-        ("trade_addresses", "idx_trade_addresses_market_time", ["market_id", "trade_time", "block_number", "log_index"]),
+        (
+            "trade_addresses",
+            "idx_trade_addresses_market_time",
+            ["market_id", "trade_time", "block_number", "log_index"],
+        ),
         ("trade_addresses", "idx_trade_addresses_trade_date_address", ["trade_date", "address"]),
         ("address_trade_daily_stats", "idx_address_trade_daily_stats_address_date", ["address", "trade_date"]),
         ("address_trade_daily_stats", "idx_address_trade_daily_stats_last_trade_at", ["last_trade_at"]),

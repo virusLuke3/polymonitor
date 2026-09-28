@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import copy
 import json
-import os
-import threading
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -11,54 +9,26 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 from api import cache as api_cache
-from api.context import resolve_service_callable, resolve_service_value
-from api.services import lob_service, market_service
-
-
-DETAIL_TTL_SECONDS = int(os.environ.get("POLYDATA_MARKET_WORKSPACE_DETAIL_TTL_SECONDS", "120"))
-CHART_TTL_SECONDS = int(os.environ.get("POLYDATA_MARKET_WORKSPACE_CHART_TTL_SECONDS", "90"))
-ORDERBOOK_TTL_SECONDS = int(os.environ.get("POLYDATA_MARKET_WORKSPACE_ORDERBOOK_TTL_SECONDS", "60"))
-FLOW_TTL_SECONDS = int(os.environ.get("POLYDATA_MARKET_WORKSPACE_FLOW_TTL_SECONDS", "8"))
-
-_REFRESH_LOCK = threading.Lock()
-_REFRESHING: set[str] = set()
-_REFRESH_EXECUTOR = ThreadPoolExecutor(
-    max_workers=max(2, min(int(os.environ.get("POLYDATA_MARKET_FOCUS_REFRESH_WORKERS", "6")), 12)),
-    thread_name_prefix="market-focus-refresh",
-)
+from api.context import RuntimeResources
 
 
 @dataclass(frozen=True)
 class MarketWorkspaceCacheDependencies:
-    source: Mapping[str, Any]
+    resources: RuntimeResources
+    cache: api_cache.CacheState
+    build_detail: Callable[..., Any]
+    build_chart: Callable[..., Any]
+    build_flow: Callable[..., Any]
+    build_lob: Callable[..., Any]
+    get_market_by_id: Callable[[int], dict | None]
     application: Any
     snapshot_store: Any
     utc_now_iso: Callable[..., str]
+    detail_ttl: int = 120
+    chart_ttl: int = 90
+    orderbook_ttl: int = 60
+    flow_ttl: int = 8
 
-    @classmethod
-    def from_context(
-        cls,
-        context: Mapping[str, Any],
-    ) -> MarketWorkspaceCacheDependencies:
-        return cls(
-            source=context,
-            application=resolve_service_value(context, "app"),
-            snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
-            utc_now_iso=resolve_service_callable(context, "utc_now_iso"),
-        )
-
-
-MarketWorkspaceCacheContext = (
-    Mapping[str, Any] | MarketWorkspaceCacheDependencies
-)
-
-
-def _dependencies(
-    context: MarketWorkspaceCacheContext,
-) -> MarketWorkspaceCacheDependencies:
-    if isinstance(context, MarketWorkspaceCacheDependencies):
-        return context
-    return MarketWorkspaceCacheDependencies.from_context(context)
 
 
 def _utc_now_iso() -> str:
@@ -134,14 +104,14 @@ def _is_empty_replacement(layer: str, payload: Any) -> bool:
 
 
 def _read_redis(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     namespace: str,
     cache_key: str,
 ) -> Optional[Any]:
-    dependencies = _dependencies(context)
+    dependencies = context
     try:
         return api_cache.get_cached_payload(
-            dependencies.source,
+            dependencies.cache,
             namespace,
             cache_key,
         )
@@ -155,16 +125,16 @@ def _read_redis(
 
 
 def _write_cache(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     namespace: str,
     cache_key: str,
     payload: Any,
     ttl_seconds: int,
 ) -> None:
-    dependencies = _dependencies(context)
+    dependencies = context
     try:
         api_cache.set_cached_runtime_payload(
-            dependencies.source,
+            dependencies.cache,
             namespace,
             cache_key,
             payload,
@@ -178,7 +148,7 @@ def _write_cache(
         )
     try:
         api_cache.set_cached_payload(
-            dependencies.source,
+            dependencies.cache,
             namespace,
             cache_key,
             payload,
@@ -206,7 +176,7 @@ def _write_cache(
 
 
 def _refresh_async(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     *,
     layer: str,
     namespace: str,
@@ -215,12 +185,12 @@ def _refresh_async(
     ttl_seconds: int,
     stale_payload: Any,
 ) -> None:
-    dependencies = _dependencies(context)
+    dependencies = context
     refresh_key = f"{namespace}:{cache_key}"
-    with _REFRESH_LOCK:
-        if refresh_key in _REFRESHING:
+    with dependencies.resources.workspace_lock:
+        if refresh_key in dependencies.resources.workspace_refreshing:
             return
-        _REFRESHING.add(refresh_key)
+        dependencies.resources.workspace_refreshing.add(refresh_key)
 
     def refresh() -> None:
         try:
@@ -246,14 +216,19 @@ def _refresh_async(
                 cache_key,
             )
         finally:
-            with _REFRESH_LOCK:
-                _REFRESHING.discard(refresh_key)
+            with dependencies.resources.workspace_lock:
+                dependencies.resources.workspace_refreshing.discard(refresh_key)
 
-    _REFRESH_EXECUTOR.submit(refresh)
+    try:
+        dependencies.resources.submit(dependencies.resources.workspace_executor, refresh)
+    except RuntimeError:
+        with dependencies.resources.workspace_lock:
+            dependencies.resources.workspace_refreshing.discard(refresh_key)
+        return
 
 
 def _cached_layer(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     *,
     layer: str,
     cache_key: str,
@@ -261,11 +236,11 @@ def _cached_layer(
     builder: Callable[[], Any],
     allow_stale_refresh: bool = True,
 ) -> Dict[str, Any]:
-    dependencies = _dependencies(context)
+    dependencies = context
     namespace = _namespace(layer)
 
     runtime_payload = api_cache.get_cached_runtime_payload(
-        dependencies.source,
+        dependencies.cache,
         namespace,
         cache_key,
     )
@@ -275,7 +250,7 @@ def _cached_layer(
     redis_payload = _read_redis(dependencies, namespace, cache_key)
     if redis_payload is not None:
         api_cache.set_cached_runtime_payload(
-            dependencies.source,
+            dependencies.cache,
             namespace,
             cache_key,
             redis_payload,
@@ -305,7 +280,7 @@ def _cached_layer(
             cache_key,
         )
         api_cache.set_cached_payload(
-            dependencies.source,
+            dependencies.cache,
             namespace,
             cache_key,
             stale_payload,
@@ -324,8 +299,8 @@ def _cached_layer(
         return {"payload": _with_cache_meta(stale_payload, layer, "stale-hit", cache_key), "mode": "stale-hit"}
 
     refresh_key = f"{namespace}:{cache_key}"
-    with _REFRESH_LOCK:
-        refresh_in_flight = refresh_key in _REFRESHING
+    with dependencies.resources.workspace_lock:
+        refresh_in_flight = refresh_key in dependencies.resources.workspace_refreshing
     if refresh_in_flight:
         payload = _fallback_payload(layer, cache_key)
         return {"payload": _with_cache_meta(payload, layer, "warming", cache_key), "mode": "warming"}
@@ -349,7 +324,7 @@ def _cached_layer(
 
 
 def _cached_layer_read_only(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     *,
     layer: str,
     cache_key: str,
@@ -357,11 +332,11 @@ def _cached_layer_read_only(
     builder: Callable[[], Any],
 ) -> Dict[str, Any]:
     """Return the best cached layer without making the request wait for a live build."""
-    dependencies = _dependencies(context)
+    dependencies = context
     namespace = _namespace(layer)
 
     runtime_payload = api_cache.get_cached_runtime_payload(
-        dependencies.source,
+        dependencies.cache,
         namespace,
         cache_key,
     )
@@ -371,7 +346,7 @@ def _cached_layer_read_only(
     redis_payload = _read_redis(dependencies, namespace, cache_key)
     if redis_payload is not None:
         api_cache.set_cached_runtime_payload(
-            dependencies.source,
+            dependencies.cache,
             namespace,
             cache_key,
             redis_payload,
@@ -436,11 +411,11 @@ def _truthy_flag(value: Any) -> bool:
 
 
 def _market_is_closed(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     market_id: int,
 ) -> bool:
-    dependencies = _dependencies(context)
-    resolver = dependencies.source.get("get_market_by_id")
+    dependencies = context
+    resolver = dependencies.get_market_by_id
     if not callable(resolver):
         return False
     try:
@@ -469,12 +444,12 @@ def _market_is_closed(
 
 
 def _closed_orderbook_result(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     *,
     market_id: int,
     cache_key: str,
 ) -> Dict[str, Any]:
-    dependencies = _dependencies(context)
+    dependencies = context
     namespace = _namespace("orderbook")
     payload = _fallback_payload("orderbook", cache_key)
     payload.update(
@@ -492,18 +467,17 @@ def _closed_orderbook_result(
         namespace,
         cache_key,
         wrapped,
-        ORDERBOOK_TTL_SECONDS,
+        dependencies.orderbook_ttl,
     )
     return {"payload": _copy_payload(wrapped), "mode": "closed"}
 
 
 def _build_detail(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     market_id: int,
 ) -> Dict[str, Any]:
-    dependencies = _dependencies(context)
-    payload = market_service.get_market_workspace_payload(
-        dependencies.source,
+    dependencies = context
+    payload = dependencies.build_detail(
         market_id,
     )
     if not isinstance(payload, dict):
@@ -517,16 +491,16 @@ def _build_detail(
 
 
 def get_market_detail_payload(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     market_id: int,
 ) -> Dict[str, Any]:
-    dependencies = _dependencies(context)
+    dependencies = context
     key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 3})
     result = _cached_layer(
         dependencies,
         layer="detail",
         cache_key=key,
-        ttl_seconds=DETAIL_TTL_SECONDS,
+        ttl_seconds=dependencies.detail_ttl,
         builder=lambda: _build_detail(dependencies, market_id),
     )
     payload = result["payload"]
@@ -534,13 +508,13 @@ def get_market_detail_payload(
 
 
 def get_market_chart_payload(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     market_id: int,
     *,
     range_name: str = "1d",
     interval: str = "5m",
 ) -> Dict[str, Any]:
-    dependencies = _dependencies(context)
+    dependencies = context
     normalized_range = str(range_name or "1d").strip().lower()
     normalized_interval = str(interval or "5m").strip().lower()
     key = _cache_key(
@@ -556,9 +530,8 @@ def get_market_chart_payload(
         dependencies,
         layer="chart",
         cache_key=key,
-        ttl_seconds=CHART_TTL_SECONDS,
-        builder=lambda: market_service.get_market_chart_payload(
-            dependencies.source,
+        ttl_seconds=dependencies.chart_ttl,
+        builder=lambda: dependencies.build_chart(
             market_id,
             range_name=normalized_range,
             interval=normalized_interval,
@@ -575,13 +548,13 @@ def get_market_chart_payload(
 
 
 def get_market_flow_payload(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     market_id: int,
     *,
     limit: int = 24,
     offset: int = 0,
 ) -> Dict[str, Any]:
-    dependencies = _dependencies(context)
+    dependencies = context
     safe_limit = min(max(int(limit), 1), 500)
     safe_offset = max(int(offset), 0)
     key = _cache_key(
@@ -598,8 +571,7 @@ def get_market_flow_payload(
         return {
             "marketId": market_id,
             "localMarketId": market_id,
-            "items": market_service.get_trades_by_market_id(
-                dependencies.source,
+            "items": dependencies.build_flow(
                 market_id,
                 limit=safe_limit,
                 offset=safe_offset,
@@ -611,7 +583,7 @@ def get_market_flow_payload(
         dependencies,
         layer="flow",
         cache_key=key,
-        ttl_seconds=FLOW_TTL_SECONDS,
+        ttl_seconds=dependencies.flow_ttl,
         builder=build,
     )
     payload = result["payload"]
@@ -624,7 +596,7 @@ def get_market_flow_payload(
 
 
 def get_market_flow_rows(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     market_id: int,
     *,
     limit: int = 24,
@@ -641,10 +613,10 @@ def get_market_flow_rows(
 
 
 def get_market_orderbook_payload(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     market_id: int,
 ) -> Dict[str, Any]:
-    dependencies = _dependencies(context)
+    dependencies = context
     key = _cache_key({"marketId": int(market_id), "layer": "orderbook", "v": 1})
     result = (
         _closed_orderbook_result(
@@ -657,9 +629,8 @@ def get_market_orderbook_payload(
             dependencies,
             layer="orderbook",
             cache_key=key,
-            ttl_seconds=ORDERBOOK_TTL_SECONDS,
-            builder=lambda: lob_service.get_runtime_lob_payload(
-                dependencies.source,
+            ttl_seconds=dependencies.orderbook_ttl,
+            builder=lambda: dependencies.build_lob(
                 market_id,
             ),
         )
@@ -676,10 +647,10 @@ def get_market_orderbook_payload(
 
 
 def get_market_workspace_payload(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     market_id: int,
 ) -> Dict[str, Any]:
-    dependencies = _dependencies(context)
+    dependencies = context
     detail_result = get_market_detail_payload(dependencies, market_id)
     if detail_result.get("_status") == 404:
         return detail_result
@@ -728,11 +699,11 @@ def get_market_workspace_payload(
 
 
 def get_market_focus_tile_payload(
-    context: MarketWorkspaceCacheContext,
+    context: MarketWorkspaceCacheDependencies,
     market_id: int,
 ) -> Dict[str, Any]:
     """Serve the selection-critical detail, chart and LOB without cold-path blocking."""
-    dependencies = _dependencies(context)
+    dependencies = context
     detail_key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 3})
     chart_key = _cache_key(
         {
@@ -749,16 +720,15 @@ def get_market_focus_tile_payload(
         dependencies,
         layer="detail",
         cache_key=detail_key,
-        ttl_seconds=DETAIL_TTL_SECONDS,
+        ttl_seconds=dependencies.detail_ttl,
         builder=lambda: _build_detail(dependencies, market_id),
     )
     chart_result = _cached_layer_read_only(
         dependencies,
         layer="chart",
         cache_key=chart_key,
-        ttl_seconds=CHART_TTL_SECONDS,
-        builder=lambda: market_service.get_market_chart_payload(
-            dependencies.source,
+        ttl_seconds=dependencies.chart_ttl,
+        builder=lambda: dependencies.build_chart(
             market_id,
             range_name="1d",
             interval="5m",
@@ -775,9 +745,8 @@ def get_market_focus_tile_payload(
             dependencies,
             layer="orderbook",
             cache_key=orderbook_key,
-            ttl_seconds=ORDERBOOK_TTL_SECONDS,
-            builder=lambda: lob_service.get_runtime_lob_payload(
-                dependencies.source,
+            ttl_seconds=dependencies.orderbook_ttl,
+            builder=lambda: dependencies.build_lob(
                 market_id,
             ),
         )

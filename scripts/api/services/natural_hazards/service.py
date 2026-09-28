@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import wait
+from threading import Lock
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Mapping
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_service_value,
-)
+from api.context import RuntimeResources, runtime_resources, resolve_optional_service_callable
 
 from .contracts import SCHEMA_VERSION, SourceFetchResult
 from .dedupe import latest_revision
@@ -31,6 +29,7 @@ SOURCE_PROVIDER_DEADLINE_SECONDS = 6.5
 
 @dataclass(frozen=True)
 class NaturalHazardDependencies:
+    resources: RuntimeResources
     http_json_get: Callable[..., Any]
     http_text_get: Callable[..., str] | None
     http_bytes_get: Callable[..., bytes] | None
@@ -46,16 +45,19 @@ class NaturalHazardDependencies:
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> "NaturalHazardDependencies":
+        if isinstance(context, cls):
+            return context
         getter = resolve_optional_service_callable(context, "http_json_get")
         if getter is None:
             raise RuntimeError("natural hazards require http_json_get")
-        settings = resolve_service_value(context, "SETTINGS")
-        app = resolve_service_value(context, "app")
+        settings = context.get("SETTINGS")
+        app = context.get("app")
         return cls(
+            resources=runtime_resources(context),
             http_json_get=getter,
             http_text_get=resolve_optional_service_callable(context, "http_text_get"),
             http_bytes_get=resolve_optional_service_callable(context, "http_bytes_get"),
-            snapshot_store=resolve_service_value(context, "SNAPSHOT_STORE"),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             logger=getattr(app, "logger", None),
             usgs_url=str(
                 getattr(settings, "natural_hazards_usgs_url", None)
@@ -96,10 +98,14 @@ def _fetch_provider_results(
     deadline_seconds: float = PROVIDER_DEADLINE_SECONDS,
 ) -> dict[str, SourceFetchResult]:
     results: dict[str, SourceFetchResult] = {}
-    executor = ThreadPoolExecutor(max_workers=len(source_specs), thread_name_prefix="natural-hazard")
+    resources = dependencies.resources
+    with resources.hazard_lock_guard:
+        for key in source_specs:
+            resources.hazard_locks.setdefault(key, Lock())
     futures = {
-        executor.submit(
-            fetch_with_snapshot,
+        resources.submit(
+            resources.hazard_executor, fetch_with_snapshot,
+            source_lock=resources.hazard_locks[key],
             key=key,
             snapshot_store=dependencies.snapshot_store,
             fetcher=fetcher,
@@ -129,7 +135,6 @@ def _fetch_provider_results(
             "status": "error",
             "events": [],
         }
-    executor.shutdown(wait=False, cancel_futures=True)
     return results
 
 
@@ -171,6 +176,7 @@ def _source_specs(
             60,
             lambda: nws.fetch(
                 dependencies.http_json_get,
+                resources=dependencies.resources,
                 url=dependencies.nws_url,
                 limit=min(700, bounded_limit),
                 previous_events=(previous_nws or {}).get("events", []),

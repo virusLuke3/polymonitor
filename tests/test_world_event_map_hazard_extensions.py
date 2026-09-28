@@ -1,4 +1,6 @@
 from __future__ import annotations
+from api.context import RuntimeResources
+
 
 import io
 import threading
@@ -247,6 +249,7 @@ def test_aviation_viewport_uses_bbox_and_never_fabricates(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(transport, "_http_json_get", fake_get)
     context = transport.GlobalTransportShippingDependencies(
+        resources=RuntimeResources(),
         application=None,
         utc_now_iso=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         http_text_get=None,
@@ -292,6 +295,7 @@ def test_aviation_viewport_falls_back_to_real_adsb_and_caches(monkeypatch: pytes
 
     monkeypatch.setattr(transport, "_http_json_get", fake_get)
     context = transport.GlobalTransportShippingDependencies(
+        resources=RuntimeResources(),
         application=None,
         utc_now_iso=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         http_text_get=None,
@@ -328,6 +332,7 @@ def test_aviation_viewport_never_fabricates_when_live_providers_fail(monkeypatch
     monkeypatch.setattr(transport, "_opensky_access_token", lambda _ctx: (None, {"status": "auth-error"}))
     monkeypatch.setattr(transport, "_http_json_get", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError()))
     context = transport.GlobalTransportShippingDependencies(
+        resources=RuntimeResources(),
         application=None,
         utc_now_iso=lambda: "2026-08-25T12:00:00Z",
         http_text_get=None,
@@ -362,6 +367,7 @@ def test_large_aviation_viewport_samples_adsb_sectors_concurrently(monkeypatch: 
 
     monkeypatch.setattr(transport, "_http_json_get", fake_get)
     context = transport.GlobalTransportShippingDependencies(
+        resources=RuntimeResources(),
         application=None,
         utc_now_iso=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         http_text_get=None,

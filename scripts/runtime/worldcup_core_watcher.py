@@ -8,7 +8,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Dict
 
 _scripts_root = Path(__file__).resolve().parents[1]
 if str(_scripts_root) not in sys.path:

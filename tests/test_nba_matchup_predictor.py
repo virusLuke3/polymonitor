@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-import sys
+from api.routes.runtime_sports import RuntimeSportsRouteDependencies
+
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
 
 from flask import Flask
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.routes.runtime_sports import create_runtime_sports_blueprint
 from api.services import runtime_service
@@ -132,11 +127,11 @@ class NbaMatchupPredictorTestCase(unittest.TestCase):
         app = Flask(__name__)
         app.register_blueprint(
             create_runtime_sports_blueprint(
-                {
+                RuntimeSportsRouteDependencies.from_context({
                     "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
                     "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
                     "get_nba_matchup_predictor_snapshot": lambda limit=8: seen_limits.append(limit) or {"limit": limit},
-                }
+                })
             )
         )
 
@@ -147,7 +142,3 @@ class NbaMatchupPredictorTestCase(unittest.TestCase):
         self.assertEqual(200, invalid.status_code)
         self.assertEqual(200, large.status_code)
         self.assertEqual([8, 16], seen_limits)
-
-
-if __name__ == "__main__":
-    unittest.main()

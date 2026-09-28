@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from flask import Blueprint, jsonify
 
@@ -16,15 +16,11 @@ class DataQualityRouteDependencies:
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> DataQualityRouteDependencies:
         return cls(
-            get_market_data_quality_payload=cast(
-                Callable[[], dict[str, Any]],
-                resolve_route_callable(context, "get_market_data_quality_payload"),
-            )
+            get_market_data_quality_payload=resolve_route_callable(context, "get_market_data_quality_payload")
         )
 
 
-def create_data_quality_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = DataQualityRouteDependencies.from_context(context)
+def create_data_quality_blueprint(dependencies: DataQualityRouteDependencies) -> Blueprint:
     bp = Blueprint("data_quality_routes", __name__)
 
     @bp.route("/data-quality/markets", methods=["GET"])

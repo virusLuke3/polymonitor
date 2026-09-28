@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from flask import Blueprint, jsonify, request
 
@@ -18,23 +18,13 @@ class MarketGroupRouteDependencies:
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> MarketGroupRouteDependencies:
         return cls(
-            get_market_groups_payload=cast(
-                Callable[..., dict[str, Any]],
-                resolve_route_callable(context, "get_market_groups_payload"),
-            ),
-            get_market_group_detail_payload=cast(
-                Callable[[str], dict[str, Any] | None],
-                resolve_route_callable(context, "get_market_group_detail_payload"),
-            ),
-            get_market_group_chart_payload=cast(
-                Callable[..., dict[str, Any] | None],
-                resolve_route_callable(context, "get_market_group_chart_payload"),
-            ),
+            get_market_groups_payload=resolve_route_callable(context, "get_market_groups_payload"),
+            get_market_group_detail_payload=resolve_route_callable(context, "get_market_group_detail_payload"),
+            get_market_group_chart_payload=resolve_route_callable(context, "get_market_group_chart_payload"),
         )
 
 
-def create_market_groups_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = MarketGroupRouteDependencies.from_context(context)
+def create_market_groups_blueprint(dependencies: MarketGroupRouteDependencies) -> Blueprint:
     bp = Blueprint("market_group_routes", __name__)
 
     @bp.route("/market-groups", methods=["GET"])

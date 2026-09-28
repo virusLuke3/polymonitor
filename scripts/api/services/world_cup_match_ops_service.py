@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from api.context import RuntimeResources, runtime_resources
+
 import json
 import os
 import threading
@@ -15,8 +17,6 @@ WORLD_CUP_MATCH_OPS_CACHE_KEY = "panel-v1"
 DEFAULT_LIMIT = 12
 DEFAULT_TTL_SECONDS = 300
 
-_LIVE_REFRESH_LOCK = threading.Lock()
-_LIVE_REFRESHING: set[str] = set()
 
 
 def _utc_now_iso(ctx: dict | None = None) -> str:
@@ -278,11 +278,12 @@ def _store_live(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None
 
 
 def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: str) -> bool:
-    refresh_key = f"{WORLD_CUP_MATCH_OPS_SNAPSHOT_NAMESPACE}:{WORLD_CUP_MATCH_OPS_CACHE_KEY}"
-    with _LIVE_REFRESH_LOCK:
-        if refresh_key in _LIVE_REFRESHING:
+    resources = runtime_resources(ctx)
+    refresh_key = "world_cup_match_ops_service:" + f"{WORLD_CUP_MATCH_OPS_SNAPSHOT_NAMESPACE}:{WORLD_CUP_MATCH_OPS_CACHE_KEY}"
+    with resources.live_refresh_lock:
+        if refresh_key in resources.live_refreshing:
             return False
-        _LIVE_REFRESHING.add(refresh_key)
+        resources.live_refreshing.add(refresh_key)
 
     def refresh() -> None:
         logger = getattr(ctx.get("app"), "logger", None)
@@ -296,11 +297,12 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
             if logger is not None:
                 logger.exception("world cup match ops refresh failed reason=%s", reason)
         finally:
-            with _LIVE_REFRESH_LOCK:
-                _LIVE_REFRESHING.discard(refresh_key)
+            with resources.live_refresh_lock:
+                resources.live_refreshing.discard(refresh_key)
 
-    thread = threading.Thread(target=refresh, name="world-cup-match-ops-refresh", daemon=True)
-    thread.start()
+    if not resources.start_thread(refresh, name="world-cup-match-ops-refresh"):
+        with resources.live_refresh_lock:
+            resources.live_refreshing.discard(refresh_key)
     return True
 
 

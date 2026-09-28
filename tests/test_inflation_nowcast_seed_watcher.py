@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import runtime_service
 from runtime import inflation_nowcast_watcher
@@ -108,7 +102,3 @@ class InflationNowcastSeedWatcherTestCase(unittest.TestCase):
 
         self.assertEqual("sqlite-seed", payload["cacheMode"])
         self.assertEqual("0.2", payload["monthOverMonth"]["CPI"])
-
-
-if __name__ == "__main__":
-    unittest.main()

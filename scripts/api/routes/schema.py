@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
 
 from flask import Blueprint, jsonify, make_response
 
@@ -9,7 +7,7 @@ from api.contracts import build_openapi_document
 from api.runtime_panels import RUNTIME_PANEL_MODULES
 
 
-def create_schema_blueprint(_context: Mapping[str, Any]) -> Blueprint:
+def create_schema_blueprint() -> Blueprint:
     bp = Blueprint("schema_routes", __name__)
     document = build_openapi_document(RUNTIME_PANEL_MODULES)
 

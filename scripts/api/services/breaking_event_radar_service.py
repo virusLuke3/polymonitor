@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from api.context import RuntimeResources, runtime_resources
+
 import hashlib
 import json
 import os
 import re
-import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -12,10 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 from urllib.parse import quote
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-)
+from api.context import resolve_optional_service_callable
 
 
 PANEL_ID = "breaking-event-radar"
@@ -26,8 +24,6 @@ DEFAULT_TTL_SECONDS = 300
 GDELT_DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 WIKIMEDIA_PAGEVIEWS_BASE_URL = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia.org/all-access/user"
 
-_LIVE_REFRESH_LOCK = threading.Lock()
-_LIVE_REFRESHING: set[str] = set()
 
 DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
     {
@@ -75,6 +71,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
 
 @dataclass(frozen=True)
 class BreakingEventRadarDependencies:
+    resources: RuntimeResources
     utc_now_iso: Callable[..., Any] | None
     settings: Any
     http_json_get: Callable[..., Any] | None
@@ -89,15 +86,15 @@ class BreakingEventRadarDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> BreakingEventRadarDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
+            resources=runtime_resources(context),
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",
             ),
-            settings=resolve_optional_service_value(
-                context,
-                "SETTINGS",
-            ),
+            settings=context.get("SETTINGS"),
             http_json_get=resolve_optional_service_callable(
                 context,
                 "http_json_get",
@@ -110,18 +107,12 @@ class BreakingEventRadarDependencies:
                 context,
                 "get_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             set_cached_json=resolve_optional_service_callable(
                 context,
                 "set_cached_json",
             ),
-            application=resolve_optional_service_value(
-                context,
-                "app",
-            ),
+            application=context.get("app"),
         )
 
 
@@ -725,11 +716,11 @@ def _schedule_live_refresh(
     ttl_seconds: int,
     reason: str,
 ) -> bool:
-    refresh_key = f"{BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE}:{BREAKING_EVENT_RADAR_CACHE_KEY}"
-    with _LIVE_REFRESH_LOCK:
-        if refresh_key in _LIVE_REFRESHING:
+    refresh_key = "breaking_event_radar_service:" + f"{BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE}:{BREAKING_EVENT_RADAR_CACHE_KEY}"
+    with dependencies.resources.live_refresh_lock:
+        if refresh_key in dependencies.resources.live_refreshing:
             return False
-        _LIVE_REFRESHING.add(refresh_key)
+        dependencies.resources.live_refreshing.add(refresh_key)
 
     def refresh() -> None:
         logger = getattr(dependencies.application, "logger", None)
@@ -753,11 +744,12 @@ def _schedule_live_refresh(
             if logger is not None:
                 logger.exception("breaking event radar refresh failed reason=%s", reason)
         finally:
-            with _LIVE_REFRESH_LOCK:
-                _LIVE_REFRESHING.discard(refresh_key)
+            with dependencies.resources.live_refresh_lock:
+                dependencies.resources.live_refreshing.discard(refresh_key)
 
-    thread = threading.Thread(target=refresh, name="breaking-event-radar-refresh", daemon=True)
-    thread.start()
+    if not dependencies.resources.start_thread(refresh, name="breaking-event-radar-refresh"):
+        with dependencies.resources.live_refresh_lock:
+            dependencies.resources.live_refreshing.discard(refresh_key)
     return True
 
 

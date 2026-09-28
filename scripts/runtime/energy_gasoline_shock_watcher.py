@@ -155,6 +155,8 @@ class EnergyGasolineShockWatcher:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser()
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--interval", type=int, default=int(os.environ.get("POLYDATA_ENERGY_SHOCK_WATCH_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS)))

@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import bootstrap_service
 from runtime import bootstrap_watcher
@@ -71,7 +65,7 @@ class BootstrapSeedWatcherTestCase(unittest.TestCase):
             result = watcher.run_once()
 
         self.assertEqual("ok", result["status"])
-        stored = json.loads(fake_redis.get("polydata:bootstrap:workspace-default-v9") or "{}")
+        stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
         self.assertEqual("seeded", stored["cacheMode"])
         self.assertEqual("ok", stored["status"])
         snapshot = watcher.snapshot_store.get(bootstrap_service.BOOTSTRAP_SNAPSHOT_NAMESPACE, bootstrap_service.BOOTSTRAP_CACHE_KEY)
@@ -88,11 +82,7 @@ class BootstrapSeedWatcherTestCase(unittest.TestCase):
             result = watcher.run_once()
 
         self.assertEqual("preserved", result["status"])
-        stored = json.loads(fake_redis.get("polydata:bootstrap:workspace-default-v9") or "{}")
+        stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
         self.assertEqual("Test", stored["defaultWorkspace"]["name"])
         meta = json.loads(fake_redis.get("polydata:seed-meta:bootstrap:bootstrap") or "{}")
         self.assertEqual("preserved", meta["status"])
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import sys
+from api.routes.system import SystemRouteDependencies
+
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -8,11 +9,6 @@ from pathlib import Path
 
 from flask import Flask
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.routes.system import create_system_blueprint
 from api.services import system_service
@@ -161,7 +157,7 @@ class SeedHealthTestCase(unittest.TestCase):
                 "payloadStatus": "ok",
             },
         }
-        payload = system_service.build_seed_health_payload(self.make_context(redis_payloads=redis_payloads))
+        payload = system_service.build_seed_health_payload(system_service.SeedHealthDependencies.from_context(self.make_context(redis_payloads=redis_payloads)))
 
         self.assertEqual("error", payload["status"])
         self.assertEqual(len(system_service.SEED_META_SPECS), payload["summary"]["watcherCount"])
@@ -182,7 +178,7 @@ class SeedHealthTestCase(unittest.TestCase):
                 "recordCount": 4,
             }
         }
-        payload = system_service.build_seed_health_payload(self.make_context(stale_payloads=stale_payloads))
+        payload = system_service.build_seed_health_payload(system_service.SeedHealthDependencies.from_context(self.make_context(stale_payloads=stale_payloads)))
 
         geo = next(item for item in payload["items"] if item["panelId"] == "geo-sanctions-shock")
         self.assertEqual("degraded", geo["status"])
@@ -191,12 +187,13 @@ class SeedHealthTestCase(unittest.TestCase):
     def test_seed_health_route_returns_json(self):
         app = Flask(__name__)
         helpers = {
+            "authenticate_request": lambda *a, **kw: None,
             "build_system_health_payload": lambda: {"status": "ok"},
             "build_seed_health_payload": lambda: {"status": "ok", "items": [{"panelId": "geo-sanctions-shock"}]},
             "describe_db_target": lambda: "mysql:test",
             "get_redis_client": lambda: object(),
         }
-        app.register_blueprint(create_system_blueprint(helpers))
+        app.register_blueprint(create_system_blueprint(SystemRouteDependencies.from_context(helpers)))
 
         with app.test_client() as client:
             response = client.get("/runtime/system/seed-health")
@@ -205,5 +202,17 @@ class SeedHealthTestCase(unittest.TestCase):
         self.assertEqual("ok", response.get_json()["status"])
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_system_health_does_not_assume_a_live_book_when_reader_is_missing():
+    context = {
+        "describe_db_target": lambda: "test",
+        "get_redis_client": lambda: None,
+        "table_exists": lambda name: False,
+    }
+    dependencies = system_service.SystemHealthDependencies.from_context(context)
+    payload = system_service._build_system_health_payload_uncached(dependencies)
+    assert payload["lobRuntime"] == {"status": "unavailable", "mode": "market-data"}
+    context["get_lob_runtime_status"] = lambda: {"status": "warming", "tokens": 0}
+    dependencies = system_service.SystemHealthDependencies.from_context(context)
+    payload = system_service._build_system_health_payload_uncached(dependencies)
+    assert payload["lobRuntime"]["status"] == "warming"
+    assert payload["lobRuntime"]["tokens"] == 0

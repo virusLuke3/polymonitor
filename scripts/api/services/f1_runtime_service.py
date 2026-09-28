@@ -5,12 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 from f1.runtime_feed import build_f1_panel_payload
 
 
@@ -34,13 +29,12 @@ class F1RuntimeDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> F1RuntimeDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_service_value(context, "app"),
-            requests_lib=resolve_optional_service_value(
-                context,
-                "requests",
-            ),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
+            requests_lib=context.get("requests"),
             utc_now_iso=resolve_service_callable(
                 context,
                 "utc_now_iso",
@@ -53,14 +47,8 @@ class F1RuntimeDependencies:
                 context,
                 "set_cached_json",
             ),
-            snapshot_store=resolve_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
-            sports_runtime_ttl_seconds=resolve_service_value(
-                context,
-                "SPORTS_RUNTIME_TTL_SECONDS",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
+            sports_runtime_ttl_seconds=context.get("SPORTS_RUNTIME_TTL_SECONDS"),
         )
 
 

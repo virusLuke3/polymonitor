@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import sys
+from api.routes.market_groups import MarketGroupRouteDependencies
+
 import unittest
-from pathlib import Path
 
 from flask import Flask
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.routes.market_groups import create_market_groups_blueprint
 from api.services import market_group_service
@@ -51,9 +46,14 @@ class MarketGroupServiceTestCase(unittest.TestCase):
             return payload
 
         def query_all(sql, params):
-            del sql
             rows = []
             values = {str(value).lower() for value in params}
+            if "market_identity_aliases_active_v1" in sql and "SELECT m.id" in sql:
+                return [
+                    {"id": int(value)}
+                    for value in params
+                    if str(value).isdigit()
+                ]
             if "cond-1" in values:
                 rows.append(
                     {
@@ -463,11 +463,11 @@ class MarketGroupRouteTestCase(unittest.TestCase):
         app = Flask(__name__)
         app.register_blueprint(
             create_market_groups_blueprint(
-                {
+                MarketGroupRouteDependencies.from_context({
                     "get_market_groups_payload": lambda **kwargs: {"items": [], "pagination": {"page": 1, "pageSize": 80, "hasMore": False}},
                     "get_market_group_detail_payload": lambda event_id: {"eventId": event_id, "title": "Demo event", "outcomes": []},
                     "get_market_group_chart_payload": lambda event_id, range_name="1d": {"eventId": event_id, "range": range_name, "series": []},
-                }
+                })
             )
         )
 
@@ -479,7 +479,3 @@ class MarketGroupRouteTestCase(unittest.TestCase):
         self.assertEqual("Demo event", detail.get_json()["title"])
         self.assertEqual(200, chart.status_code)
         self.assertEqual("1w", chart.get_json()["range"])
-
-
-if __name__ == "__main__":
-    unittest.main()

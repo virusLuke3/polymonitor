@@ -12,10 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlencode, urlparse
 from xml.etree import ElementTree
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-)
+from api.context import resolve_optional_service_callable
 
 try:
     import requests
@@ -204,8 +201,10 @@ class FinanceWatchDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> FinanceWatchDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_optional_service_value(context, "SETTINGS"),
+            settings=context.get("SETTINGS"),
             http_json_get=resolve_optional_service_callable(
                 context,
                 "http_json_get",
@@ -218,10 +217,7 @@ class FinanceWatchDependencies:
                 context,
                 "get_yahoo_market_snapshot",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",

@@ -8,10 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 from urllib.parse import quote_plus, urlencode
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-)
+from api.context import resolve_optional_service_callable
 
 
 YOUTUBE_LIVE_PROBE_NAMESPACE = "probe:youtube-live"
@@ -47,6 +44,8 @@ class YouTubeLiveProbeDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> YouTubeLiveProbeDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             http_text_get=resolve_optional_service_callable(
                 context,
@@ -56,23 +55,11 @@ class YouTubeLiveProbeDependencies:
                 context,
                 "http_json_get",
             ),
-            requests_module=resolve_optional_service_value(
-                context,
-                "requests",
-            ),
+            requests_module=context.get("requests"),
             relay_base_url_configured="youtube_live_relay_base_url" in context,
-            relay_base_url=resolve_optional_service_value(
-                context,
-                "youtube_live_relay_base_url",
-            ),
-            relay_token=resolve_optional_service_value(
-                context,
-                "youtube_live_relay_token",
-            ),
-            relay_auth_header=resolve_optional_service_value(
-                context,
-                "youtube_live_relay_auth_header",
-            ),
+            relay_base_url=context.get("youtube_live_relay_base_url"),
+            relay_token=context.get("youtube_live_relay_token"),
+            relay_auth_header=context.get("youtube_live_relay_auth_header"),
             youtube_live_probe=resolve_optional_service_callable(
                 context,
                 "youtube_live_probe",
@@ -85,10 +72,7 @@ class YouTubeLiveProbeDependencies:
                 context,
                 "set_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
         )
 
 

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from api.context import RuntimeResources, runtime_resources
+
 import csv
 import hashlib
 import io
 import json
 import math
 import os
-import threading
-from collections import Counter, defaultdict
+from collections import Counter
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -15,10 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-)
+from api.context import resolve_optional_service_callable
 
 
 PANEL_ID = "global-transport-shipping"
@@ -60,12 +58,11 @@ OPENSKY_REGIONS = [
     {"id": "southeast-asia", "label": "SE Asia", "lamin": -8.0, "lomin": 95.0, "lamax": 18.0, "lomax": 125.0},
 ]
 
-_LIVE_REFRESH_LOCK = threading.Lock()
-_LIVE_REFRESHING: set[str] = set()
 
 
 @dataclass(frozen=True)
 class GlobalTransportShippingDependencies:
+    resources: RuntimeResources
     application: Any
     utc_now_iso: Callable[..., Any] | None
     http_text_get: Callable[..., Any] | None
@@ -81,8 +78,11 @@ class GlobalTransportShippingDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> GlobalTransportShippingDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            application=resolve_optional_service_value(context, "app"),
+            resources=runtime_resources(context),
+            application=context.get("app"),
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",
@@ -107,10 +107,7 @@ class GlobalTransportShippingDependencies:
                 context,
                 "set_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             search_markets=resolve_optional_service_callable(
                 context,
                 "search_markets",
@@ -1965,11 +1962,11 @@ def _schedule_live_refresh(
     reason: str,
 ) -> bool:
     dependencies = _dependencies(ctx)
-    refresh_key = f"{GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE}:{GLOBAL_TRANSPORT_CACHE_KEY}"
-    with _LIVE_REFRESH_LOCK:
-        if refresh_key in _LIVE_REFRESHING:
+    refresh_key = "global_transport_shipping_service:" + f"{GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE}:{GLOBAL_TRANSPORT_CACHE_KEY}"
+    with dependencies.resources.live_refresh_lock:
+        if refresh_key in dependencies.resources.live_refreshing:
             return False
-        _LIVE_REFRESHING.add(refresh_key)
+        dependencies.resources.live_refreshing.add(refresh_key)
 
     def refresh() -> None:
         logger = getattr(dependencies.application, "logger", None)
@@ -1989,11 +1986,12 @@ def _schedule_live_refresh(
             if logger is not None:
                 logger.exception("global transport refresh failed reason=%s", reason)
         finally:
-            with _LIVE_REFRESH_LOCK:
-                _LIVE_REFRESHING.discard(refresh_key)
+            with dependencies.resources.live_refresh_lock:
+                dependencies.resources.live_refreshing.discard(refresh_key)
 
-    thread = threading.Thread(target=refresh, name="global-transport-refresh", daemon=True)
-    thread.start()
+    if not dependencies.resources.start_thread(refresh, name="global-transport-refresh"):
+        with dependencies.resources.live_refresh_lock:
+            dependencies.resources.live_refreshing.discard(refresh_key)
     return True
 
 

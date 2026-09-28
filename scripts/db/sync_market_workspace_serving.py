@@ -35,6 +35,7 @@ from db import (  # type: ignore
     table_exists,
 )
 from db.trade_v2 import get_trade_read_source  # type: ignore
+from market.market_serving_identity import binary_serving_identity_sql  # type: ignore
 
 
 RANGE_SPECS: Dict[str, Tuple[int, str, int]] = {
@@ -177,9 +178,13 @@ def ensure_schema(conn) -> None:
 
 def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int], active_only: bool) -> List[Dict[str, Any]]:
     params: List[Any] = []
+    identity_sql = binary_serving_identity_sql("m", qualified_ops=True)
     if market_ids:
         placeholders = ", ".join("?" for _ in market_ids)
-        candidate_pool_sql = f"SELECT id AS market_id FROM core.markets WHERE id IN ({placeholders})"
+        candidate_pool_sql = (
+            f"SELECT m.id AS market_id FROM core.markets m "
+            f"WHERE m.id IN ({placeholders}) AND {identity_sql}"
+        )
         event_pool_sql = ""
         params.extend(int(market_id) for market_id in market_ids)
     else:
@@ -209,8 +214,9 @@ def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int]
           ) price_candidates
           UNION
           SELECT market_id FROM (
-            SELECT id AS market_id
-            FROM core.markets
+            SELECT m.id AS market_id
+            FROM core.markets m
+            WHERE {identity_sql}
             ORDER BY created_at DESC NULLS LAST, id DESC
             LIMIT ?
           ) recent_candidates
@@ -218,8 +224,9 @@ def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int]
         event_pool_sql = "UNION SELECT market_id FROM event_candidates"
         params.extend((int(max_markets), int(max_markets), int(max_markets)))
     active_filter_sql = (
-        """
-        WHERE (
+        f"""
+        WHERE {identity_sql}
+          AND (
           COALESCE(mss.is_final, FALSE) = FALSE
           OR COALESCE(mls.volume_24h, 0) > 0
           OR ec.market_id IS NOT NULL
@@ -227,7 +234,7 @@ def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int]
         )
         """
         if active_only and not market_ids
-        else ""
+        else f"WHERE {identity_sql}"
     )
     params.append(int(max_markets))
     rows = conn.execute(
@@ -531,7 +538,32 @@ def _detail_payload(row: Dict[str, Any], price: Dict[str, Any], chart: Dict[str,
     }
 
 
+def _prune_nonservable_rows(conn) -> Dict[str, int]:
+    identity_sql = binary_serving_identity_sql("m", qualified_ops=True)
+    workspace = conn.execute(
+        f"""
+        DELETE FROM core.market_workspace_serving serving
+        USING core.markets m
+        WHERE m.id = serving.market_id
+          AND NOT {identity_sql}
+        """
+    )
+    charts = conn.execute(
+        f"""
+        DELETE FROM core.market_chart_serving serving
+        USING core.markets m
+        WHERE m.id = serving.market_id
+          AND NOT {identity_sql}
+        """
+    )
+    return {
+        "workspace_rows_pruned": max(0, int(workspace.rowcount or 0)),
+        "chart_rows_pruned": max(0, int(charts.rowcount or 0)),
+    }
+
+
 def refresh_market_workspace_serving(conn, *, max_markets: int, market_ids: Sequence[int], active_only: bool) -> Dict[str, int]:
+    pruned = _prune_nonservable_rows(conn)
     rows = _load_candidate_markets(conn, max_markets=max_markets, market_ids=market_ids, active_only=active_only)
     chart_rows: List[Tuple[Any, ...]] = []
     workspace_rows: List[Tuple[Any, ...]] = []
@@ -630,7 +662,12 @@ def refresh_market_workspace_serving(conn, *, max_markets: int, market_ids: Sequ
             workspace_rows,
         )
     conn.commit()
-    return {"markets": len(rows), "chart_rows": len(chart_rows), "workspace_rows": len(workspace_rows)}
+    return {
+        "markets": len(rows),
+        "chart_rows": len(chart_rows),
+        "workspace_rows": len(workspace_rows),
+        **pruned,
+    }
 
 
 def _parse_market_ids(values: Sequence[str]) -> List[int]:
@@ -645,6 +682,8 @@ def _parse_market_ids(values: Sequence[str]) -> List[int]:
 
 
 def main() -> None:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser(description="Refresh PostgreSQL single-market workspace serving tables.")
     add_db_cli_args(parser)
     parser.add_argument("--interval", type=int, default=60, help="Loop interval seconds when --watch is set")

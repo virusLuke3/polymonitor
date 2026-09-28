@@ -12,20 +12,20 @@ from html import unescape
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from data_sources import F1_BWENEWS_RSS_URL, F1_BWENEWS_SOURCE_URL
+from data_sources import env_str
 
 
 DEFAULT_PANEL_PATH = (Path(__file__).resolve().parents[2] / "data" / "runtime" / "f1" / "panel.json").resolve()
 
 
 def default_news_feeds() -> List[Dict[str, str]]:
-    if not F1_BWENEWS_RSS_URL:
+    if not env_str("POLYDATA_F1_BWENEWS_RSS_URL"):
         return []
     return [
         {
             "source": "BWENews",
-            "url": F1_BWENEWS_RSS_URL,
-            "source_url": F1_BWENEWS_SOURCE_URL,
+            "url": env_str("POLYDATA_F1_BWENEWS_RSS_URL"),
+            "source_url": env_str("POLYDATA_F1_BWENEWS_SOURCE_URL"),
         },
     ]
 

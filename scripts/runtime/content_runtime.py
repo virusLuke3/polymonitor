@@ -19,7 +19,7 @@ from urllib.parse import quote_plus, urlparse
 
 import requests
 
-from data_sources import CONTENT_TOPIC_REGISTRY, GEO_SHOCK_GDELT_DOC_API_URL, RSS_FEEDS, non_empty_feeds
+from data_sources import CONTENT_TOPIC_REGISTRY, env_str, rss_feeds, non_empty_feeds
 
 DEFAULT_CACHE_TTL_SECONDS = 900
 DEFAULT_TIMEOUT_SECONDS = 10
@@ -70,7 +70,7 @@ class RuntimeContentProvider:
     ) -> None:
         self.cache_ttl_seconds = max(60, int(cache_ttl_seconds))
         self.timeout_seconds = max(1, int(timeout_seconds))
-        self.feeds = non_empty_feeds(feeds if feeds is not None else RSS_FEEDS)
+        self.feeds = non_empty_feeds(feeds if feeds is not None else rss_feeds())
         self._lock = threading.Lock()
         self._cache: Dict[str, Any] = {"fetched_at": 0.0, "items": []}
         self._related_cache: Dict[str, Any] = {}
@@ -84,6 +84,9 @@ class RuntimeContentProvider:
                 "User-Agent": "polyData-runtime-content/1.0",
             }
         )
+
+    def close(self) -> None:
+        self._session.close()
 
     def get_related_news(
         self,
@@ -874,7 +877,7 @@ class RuntimeContentProvider:
         return self._fetch_gdelt_query_items(query=query, category=str(category or "GDELT"), maxrecords=10)
 
     def _fetch_gdelt_query_items(self, *, query: str, category: str, maxrecords: int = 10) -> List[RuntimeContentItem]:
-        base_url = GEO_SHOCK_GDELT_DOC_API_URL or DEFAULT_GDELT_DOC_API_URL
+        base_url = env_str("POLYDATA_GEO_SHOCK_GDELT_DOC_API_URL", DEFAULT_GDELT_DOC_API_URL)
         try:
             response = self._session.get(
                 base_url,

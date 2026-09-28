@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Trade v2 storage helpers.
+Trade table readers, value conversions and legacy migration helpers.
 
-This module keeps the hot trade table compact while preserving a compatibility
-path for legacy API payloads.
+The API consumes existing tables through these helpers; this module does not
+fetch market data. MySQL schema/write helpers below serve archived migration
+commands only and are not called by the consumer API.
 """
 
 from __future__ import annotations
@@ -13,9 +14,7 @@ import os
 import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Optional, Sequence, Tuple
-
-from .db import get_mysql_settings
+from typing import Any, Dict, Optional, Sequence
 
 LEGACY_TRADES_TABLE = "trades"
 TRADE_V2_CORE_TABLE = "trades_v2"
@@ -62,10 +61,6 @@ def _runtime_address_history_source() -> str:
     if explicit:
         return explicit
     return TRADE_V2_CORE_TABLE if _runtime_trade_write_mode() == "v2" else LEGACY_TRADES_TABLE
-
-
-def get_trade_write_mode() -> str:
-    return _runtime_trade_write_mode()
 
 
 def get_trade_read_source() -> str:
@@ -118,18 +113,6 @@ def hex_to_bytes32(value: Any) -> Optional[bytes]:
     return hex_to_bytes(value, 32)
 
 
-def bytes20_to_hex(value: Optional[bytes]) -> Optional[str]:
-    if value is None:
-        return None
-    return "0x" + value.hex()
-
-
-def bytes32_to_hex(value: Optional[bytes]) -> Optional[str]:
-    if value is None:
-        return None
-    return value.hex()
-
-
 def uint256_text_to_bytes32(value: Any) -> Optional[bytes]:
     if value is None:
         return None
@@ -174,18 +157,6 @@ def normalize_side_code(value: Any) -> int:
     return SIDE_UNKNOWN
 
 
-def side_code_to_text(value: Any) -> str:
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError):
-        return "UNKNOWN"
-    if numeric == SIDE_BUY:
-        return "BUY"
-    if numeric == SIDE_SELL:
-        return "SELL"
-    return "UNKNOWN"
-
-
 def normalize_outcome_code(value: Any) -> int:
     text = str(value or "").strip().upper()
     if text == "YES":
@@ -193,20 +164,6 @@ def normalize_outcome_code(value: Any) -> int:
     if text == "NO":
         return OUTCOME_NO
     return OUTCOME_UNKNOWN
-
-
-def outcome_code_to_text(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError):
-        return None
-    if numeric == OUTCOME_YES:
-        return "YES"
-    if numeric == OUTCOME_NO:
-        return "NO"
-    return "UNKNOWN"
 
 
 def parse_trade_timestamp(value: Any) -> Optional[datetime]:
@@ -225,12 +182,6 @@ def parse_trade_timestamp(value: Any) -> Optional[datetime]:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
-
-
-def format_trade_timestamp(value: Optional[datetime]) -> Optional[str]:
-    if value is None:
-        return None
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def parse_decimal(value: Any, default: str = "0") -> Decimal:
@@ -515,27 +466,3 @@ def update_trade_v2_migration_state(
         ),
     )
     conn.commit()
-
-
-def mysql_read_source_exists(conn, name: str) -> bool:
-    cur = conn.execute(
-        """
-        SELECT 1
-        FROM information_schema.tables
-        WHERE table_schema = %s AND table_name = %s
-        LIMIT 1
-        """,
-        (get_mysql_settings()["database"], name),
-    )
-    if cur.fetchone():
-        return True
-    cur = conn.execute(
-        """
-        SELECT 1
-        FROM information_schema.views
-        WHERE table_schema = %s AND table_name = %s
-        LIMIT 1
-        """,
-        (get_mysql_settings()["database"], name),
-    )
-    return bool(cur.fetchone())

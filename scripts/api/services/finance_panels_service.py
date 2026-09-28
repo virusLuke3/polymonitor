@@ -7,10 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-)
+from api.context import resolve_optional_service_callable
 
 from . import finance_external_sources_service
 
@@ -73,8 +70,10 @@ class FinancePanelDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> FinancePanelDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            application=resolve_optional_service_value(context, "app"),
+            application=context.get("app"),
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",

@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import runtime_service
 from runtime import nba_watcher
@@ -163,7 +157,3 @@ class NbaSeedWatcherTestCase(unittest.TestCase):
 
         self.assertEqual("sqlite-seed", payload["cacheMode"])
         self.assertEqual("game-1", payload["items"][0]["id"])
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -229,6 +229,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    from runtime.environment import load_environment
+    load_environment()
     args = build_arg_parser().parse_args()
     settings = load_api_settings()
     watcher = PolymarketMacroMapWatcher(

@@ -9,10 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-)
+from api.context import resolve_optional_service_callable
 from api.services import cpi_release_calendar_service, energy_gasoline_shock_service, food_retail_basket_service, macro_cpi_panels_service, runtime_service
 
 
@@ -103,16 +100,15 @@ class MacroCpiRegistryDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> MacroCpiRegistryDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
             source=context,
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",
             ),
-            settings=resolve_optional_service_value(
-                context,
-                "SETTINGS",
-            ),
+            settings=context.get("SETTINGS"),
             http_text_get=resolve_optional_service_callable(
                 context,
                 "http_text_get",
@@ -121,10 +117,7 @@ class MacroCpiRegistryDependencies:
                 context,
                 "get_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
         )
 
 

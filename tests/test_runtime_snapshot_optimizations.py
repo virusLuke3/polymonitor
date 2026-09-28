@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import threading
 import unittest
-from pathlib import Path
 from typing import Any, Dict, List, Optional
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from api.context import RuntimeResources
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import bootstrap_service, market_service, signal_service
 
@@ -48,28 +42,6 @@ class FakeSnapshotStore:
         self.stale[(namespace, cache_key)] = payload
 
 
-class FakeThread:
-    def __init__(self, tracker: Dict[str, Any], target=None, name: str | None = None, daemon: bool | None = None):
-        self._tracker = tracker
-        self._target = target
-        self.name = name
-        self.daemon = daemon
-
-    def start(self) -> None:
-        self._tracker["starts"] = self._tracker.get("starts", 0) + 1
-        if self._tracker.get("run_target") and self._target is not None:
-            self._target()
-
-
-class FakeThreadingModule:
-    def __init__(self, tracker: Optional[Dict[str, Any]] = None):
-        self._tracker = tracker or {}
-        self.Lock = threading.Lock
-
-    def Thread(self, target=None, name: str | None = None, daemon: bool | None = None):
-        return FakeThread(self._tracker, target=target, name=name, daemon=daemon)
-
-
 class MarketFastPathTestCase(unittest.TestCase):
     def test_get_markets_payload_uses_active_snapshot_for_first_active_page(self):
         ctx = {
@@ -97,6 +69,7 @@ class MarketFastPathTestCase(unittest.TestCase):
                 "last_trade_at": "2026-04-21T00:00:00Z",
                 "latest_trade_at": "2026-04-21T00:00:00Z",
                 "price_24h_ago": "0.49",
+                "latest_price": "0.51",
             },
         ]
         detail_rows = [
@@ -131,6 +104,8 @@ class MarketFastPathTestCase(unittest.TestCase):
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
             "utc_date_days_ago": lambda days: "2026-04-20",
             "query_all": fake_query_all,
+            "table_exists": lambda name: name == "market_list_serving",
+            "query_one": lambda *args: {"c": 2000},
             "parse_json_list": lambda raw: json.loads(raw) if isinstance(raw, str) and raw else [],
             "format_trade_decimal": lambda value: value,
         }
@@ -153,7 +128,7 @@ class MarketFastPathTestCase(unittest.TestCase):
         self.assertIn("market_list_serving", sql_calls[1])
         self.assertIn("m.title", sql_calls[2])
 
-    def test_build_active_markets_payload_fills_from_db_active_when_strict_filters_are_sparse(self):
+    def test_build_active_markets_payload_excludes_rows_without_recent_activity(self):
         candidate_rows = [
             {
                 "id": 11,
@@ -168,6 +143,7 @@ class MarketFastPathTestCase(unittest.TestCase):
                 "last_trade_at": "2026-04-21T00:00:00Z",
                 "latest_trade_at": "2026-04-21T00:00:00Z",
                 "price_24h_ago": "0.49",
+                "latest_price": "0.51",
             },
             {
                 "id": 12,
@@ -228,6 +204,8 @@ class MarketFastPathTestCase(unittest.TestCase):
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
             "utc_date_days_ago": lambda days: "2026-04-20",
             "query_all": fake_query_all,
+            "table_exists": lambda name: name == "market_list_serving",
+            "query_one": lambda *args: {"c": 2000},
             "parse_json_list": lambda raw: json.loads(raw) if isinstance(raw, str) and raw else [],
             "format_trade_decimal": lambda value: value,
             "get_gamma_active_market_filter": lambda: {"conditionIds": ["condition-11"], "slugs": []},
@@ -237,7 +215,7 @@ class MarketFastPathTestCase(unittest.TestCase):
              patch.object(market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows):
             payload = market_service.build_active_markets_payload(ctx, page_size=2, include_runtime_prices=False)
 
-        self.assertEqual([item["id"] for item in payload["items"]], [11, 12])
+        self.assertEqual([item["id"] for item in payload["items"]], [11])
 
     def test_build_active_markets_payload_prioritizes_recent_candidates_in_snapshot_pool(self):
         volume_rows = [
@@ -254,6 +232,7 @@ class MarketFastPathTestCase(unittest.TestCase):
                 "last_trade_at": "2026-04-21T00:00:00Z",
                 "latest_trade_at": "2026-04-21T00:00:00Z",
                 "price_24h_ago": "0.49",
+                "latest_price": "0.51",
             },
         ]
         recent_rows = [
@@ -265,11 +244,12 @@ class MarketFastPathTestCase(unittest.TestCase):
                 "created_at": "2026-04-21T23:00:00Z",
                 "has_settle": 0,
                 "has_propose": 0,
-                "trade_count_24h": 0,
-                "volume_24h": "0",
-                "last_trade_at": None,
+                "trade_count_24h": 12,
+                "volume_24h": "4400",
+                "last_trade_at": "2026-04-21T00:00:00Z",
                 "latest_trade_at": None,
                 "price_24h_ago": None,
+                "latest_price": "0.5",
             },
         ]
         detail_map = {
@@ -319,6 +299,8 @@ class MarketFastPathTestCase(unittest.TestCase):
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
             "utc_date_days_ago": lambda days: "2026-04-20",
             "query_all": fake_query_all,
+            "table_exists": lambda name: name == "market_list_serving",
+            "query_one": lambda *args: {"c": 2000},
             "parse_json_list": lambda raw: json.loads(raw) if isinstance(raw, str) and raw else [],
             "format_trade_decimal": lambda value: value,
             "get_gamma_active_market_filter": lambda: {"conditionIds": [], "slugs": []},
@@ -354,6 +336,8 @@ class MarketFastPathTestCase(unittest.TestCase):
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
             "utc_date_days_ago": lambda days: "2026-04-20",
             "query_all": fake_query_all,
+            "table_exists": lambda name: name == "market_list_serving",
+            "query_one": lambda *args: {"c": 2000},
             "get_markets_payload_cached": lambda cache_key, builder: builder(),
             "parse_json_list": lambda raw: json.loads(raw) if isinstance(raw, str) and raw else [],
             "format_trade_decimal": lambda value: value,
@@ -391,15 +375,10 @@ class MarketFastPathTestCase(unittest.TestCase):
 
 
 class SignalSnapshotOptimizationTestCase(unittest.TestCase):
-    def setUp(self) -> None:
-        signal_service._SIGNAL_REFRESH_STATE.clear()
-        bootstrap_service._PREWARM_LAST_RUN.clear()
-
     def make_signal_context(
         self,
         *,
         snapshot_store: Optional[FakeSnapshotStore] = None,
-        tracker: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         runtime_cache: Dict[tuple[str, str], Any] = {}
         return {
@@ -407,7 +386,7 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
             "SNAPSHOT_STORE": snapshot_store or FakeSnapshotStore(),
             "get_cached_runtime_payload": lambda namespace, cache_key: runtime_cache.get((namespace, cache_key)),
             "set_cached_runtime_payload": lambda namespace, cache_key, payload, ttl_seconds: runtime_cache.setdefault((namespace, cache_key), payload),
-            "threading": FakeThreadingModule(tracker),
+            "_resources": RuntimeResources(),
             "app": FakeApp(),
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
         }
@@ -415,34 +394,30 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
     def test_alpha_snapshot_returns_stale_and_schedules_one_refresh(self):
         cache_key = json.dumps({"limit": 8}, sort_keys=True, ensure_ascii=True)
         stale_payload = {"items": [{"title": "stale alpha"}], "generatedAt": "stale"}
-        tracker = {"run_target": False}
         ctx = self.make_signal_context(
             snapshot_store=FakeSnapshotStore(stale={(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key): stale_payload}),
-            tracker=tracker,
         )
 
+        ctx["_resources"].start_thread = Mock(return_value=True)
         with patch.object(signal_service, "_build_alpha_signal_payload", return_value={"items": [{"title": "fresh"}], "generatedAt": "fresh"}):
             first = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
             second = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
 
-        self.assertEqual(first, stale_payload)
-        self.assertEqual(second, stale_payload)
-        self.assertEqual(tracker.get("starts"), 1)
+        self.assertEqual(first["items"], [])
+        self.assertEqual(second["items"], [])
+        self.assertEqual(first["generatedAt"], stale_payload["generatedAt"])
+        ctx["_resources"].start_thread.assert_called_once()
 
     def test_alpha_snapshot_cold_miss_builds_and_stores_payload(self):
         cache_key = json.dumps({"limit": 8}, sort_keys=True, ensure_ascii=True)
         snapshot_store = FakeSnapshotStore()
-        ctx = self.make_signal_context(snapshot_store=snapshot_store, tracker={"run_target": True})
+        ctx = self.make_signal_context(snapshot_store=snapshot_store)
         payload = {"items": [{"title": "fresh alpha"}], "generatedAt": "fresh"}
 
         with patch.object(signal_service, "_build_alpha_signal_payload", return_value=payload):
             result = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
 
-        self.assertEqual(result["items"], payload["items"])
-        self.assertEqual("ok", result["status"])
+        self.assertEqual(result["items"], [])
+        self.assertEqual("empty", result["status"])
         self.assertEqual("live-build", result["cacheMode"])
-        self.assertEqual(snapshot_store.get(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key)["items"], payload["items"])
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertEqual(snapshot_store.get(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key)["items"], [])

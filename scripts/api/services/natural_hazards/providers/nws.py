@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import wait
 from datetime import datetime, timezone
-from threading import Lock
+from api.context import RuntimeResources
 from time import monotonic
 from typing import Any, Dict
 from urllib.parse import urlparse
@@ -21,8 +21,6 @@ MAX_ZONE_FETCHES_PER_REFRESH = 640
 ZONE_FETCH_WORKERS = 24
 MAX_RING_POINTS = 240
 
-_ZONE_CACHE: dict[str, tuple[float, Dict[str, Any] | None]] = {}
-_ZONE_CACHE_LOCK = Lock()
 
 
 def _hazard_kind(event_name: str) -> str | None:
@@ -119,10 +117,10 @@ def _generalized_geometry(raw: Any) -> Dict[str, Any] | None:
     return {"type": "MultiPolygon", "coordinates": normalized}
 
 
-def _zone_geometry(http_json_get, url: str) -> Dict[str, Any] | None:
+def _zone_geometry(resources, http_json_get, url: str) -> Dict[str, Any] | None:
     now = monotonic()
-    with _ZONE_CACHE_LOCK:
-        cached = _ZONE_CACHE.get(url)
+    with resources.zone_cache_lock:
+        cached = resources.zone_cache.get(url)
         if cached and now - cached[0] <= ZONE_CACHE_TTL_SECONDS:
             return cached[1]
     payload = http_json_get(
@@ -134,19 +132,19 @@ def _zone_geometry(http_json_get, url: str) -> Dict[str, Any] | None:
         },
     )
     geometry = _generalized_geometry(payload.get("geometry") if isinstance(payload, dict) else None)
-    with _ZONE_CACHE_LOCK:
-        _ZONE_CACHE[url] = (monotonic(), geometry)
+    with resources.zone_cache_lock:
+        resources.zone_cache[url] = (monotonic(), geometry)
     return geometry
 
 
-def _resolve_zone_geometries(http_json_get, zone_urls: list[str]) -> dict[str, Dict[str, Any]]:
+def _resolve_zone_geometries(resources, http_json_get, zone_urls: list[str]) -> dict[str, Dict[str, Any]]:
     unique_urls = list(dict.fromkeys(zone_urls))
     resolved: dict[str, Dict[str, Any]] = {}
     missing: list[str] = []
     now = monotonic()
-    with _ZONE_CACHE_LOCK:
+    with resources.zone_cache_lock:
         for url in unique_urls:
-            cached = _ZONE_CACHE.get(url)
+            cached = resources.zone_cache.get(url)
             if cached and now - cached[0] <= ZONE_CACHE_TTL_SECONDS:
                 if cached[1] is not None:
                     resolved[url] = cached[1]
@@ -155,8 +153,7 @@ def _resolve_zone_geometries(http_json_get, zone_urls: list[str]) -> dict[str, D
                     missing.append(url)
     if not missing:
         return resolved
-    executor = ThreadPoolExecutor(max_workers=min(ZONE_FETCH_WORKERS, len(missing)), thread_name_prefix="nws-zone")
-    futures = {executor.submit(_zone_geometry, http_json_get, url): url for url in missing}
+    futures = {resources.submit(resources.zone_executor, _zone_geometry, resources, http_json_get, url): url for url in missing}
     done, pending = wait(futures, timeout=ZONE_FETCH_DEADLINE_SECONDS)
     for future in done:
         url = futures[future]
@@ -168,7 +165,6 @@ def _resolve_zone_geometries(http_json_get, zone_urls: list[str]) -> dict[str, D
             resolved[url] = geometry
     for future in pending:
         future.cancel()
-    executor.shutdown(wait=False, cancel_futures=True)
     return resolved
 
 
@@ -210,9 +206,11 @@ def fetch(
     *,
     url: str = DEFAULT_URL,
     limit: int = 600,
+    resources: RuntimeResources | None = None,
     previous_events: list[Dict[str, Any]] | None = None,
     now: datetime | None = None,
 ) -> ProviderResult:
+    resources = resources or RuntimeResources()
     observed_now = now or datetime.now(timezone.utc)
     payload = http_json_get(
         url,
@@ -228,7 +226,7 @@ def fetch(
         raise ValueError("nws-schema-features")
     bounded_features = features[: max(1, limit)]
     zone_urls = _prioritized_zone_urls(bounded_features)
-    resolved_zones = _resolve_zone_geometries(http_json_get, zone_urls)
+    resolved_zones = _resolve_zone_geometries(resources, http_json_get, zone_urls)
     previous_by_id = {
         str(event.get("id")): event
         for event in (previous_events or [])

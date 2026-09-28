@@ -10,4 +10,4 @@ MAX_LIMIT = 40
 
 
 def get_snapshot(ctx: Dict[str, Any], *, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
-    return ctx["get_suspicious_trades_snapshot"](limit=limit)
+    return ctx.get_suspicious_trades_snapshot(limit=limit)

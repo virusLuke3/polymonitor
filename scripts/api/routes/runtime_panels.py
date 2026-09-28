@@ -33,7 +33,7 @@ class RuntimePanelRouteDependencies:
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelRouteDependencies:
         return cls(
             panel_context=RuntimePanelContext.from_context(context),
-            utc_now_iso=cast(Callable[[], str], resolve_route_callable(context, "utc_now_iso")),
+            utc_now_iso=resolve_route_callable(context, "utc_now_iso"),
             natural_hazard_map_snapshot=cast(
                 Callable[..., dict[str, Any]] | None,
                 context.get("get_natural_hazard_map_snapshot"),
@@ -77,8 +77,7 @@ def _get_panel_snapshot(panel, panel_context: RuntimePanelContext, limit: int | 
     return panel.get_snapshot(panel_context, **kwargs)
 
 
-def create_runtime_panels_blueprint(context: Mapping[str, Any]) -> Blueprint:
-    dependencies = RuntimePanelRouteDependencies.from_context(context)
+def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies) -> Blueprint:
     bp = Blueprint("runtime_panel_routes", __name__)
 
     def _youtube_relay_token() -> str:

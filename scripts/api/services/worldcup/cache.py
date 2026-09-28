@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import threading
+from api.context import runtime_resources
 from typing import Any, Callable, Dict, Optional
 
-_REFRESH_LOCK = threading.Lock()
-_REFRESHING: set[str] = set()
 
 
 def read_cached(
@@ -78,11 +76,12 @@ def refresh_async(
     has_generated_fallback_artifacts: Callable[[Dict[str, Any]], bool],
     stale_payload: Optional[Dict[str, Any]] = None,
 ) -> None:
-    refresh_key = f"{namespace}:{cache_key}"
-    with _REFRESH_LOCK:
-        if refresh_key in _REFRESHING:
+    resources = runtime_resources(ctx)
+    refresh_key = f"worldcup:{namespace}:{cache_key}"
+    with resources.live_refresh_lock:
+        if refresh_key in resources.live_refreshing:
             return
-        _REFRESHING.add(refresh_key)
+        resources.live_refreshing.add(refresh_key)
 
     def refresh() -> None:
         try:
@@ -93,8 +92,9 @@ def refresh_async(
         except Exception:
             log_exception(ctx, "worldcup-dashboard async refresh failed key=%s", refresh_key)
         finally:
-            with _REFRESH_LOCK:
-                _REFRESHING.discard(refresh_key)
+            with resources.live_refresh_lock:
+                resources.live_refreshing.discard(refresh_key)
 
-    thread = threading.Thread(target=refresh, name="worldcup-dashboard-refresh", daemon=True)
-    thread.start()
+    if not resources.start_thread(refresh, name="worldcup-dashboard-refresh"):
+        with resources.live_refresh_lock:
+            resources.live_refreshing.discard(refresh_key)

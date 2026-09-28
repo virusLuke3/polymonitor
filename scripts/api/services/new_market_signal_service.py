@@ -8,7 +8,10 @@ RUNTIME_NAMESPACE = "runtime:new-market-signals"
 SNAPSHOT_NAMESPACE = "snapshot:markets:new-market-signals"
 SNAPSHOT_CACHE_KEY = "items-v1"
 SNAPSHOT_TTL_SECONDS = 7 * 24 * 60 * 60
-PLACEHOLDER_TITLE_PREFIXES = ("On-chain recovered market ",)
+PLACEHOLDER_TITLE_PREFIXES = (
+    "On-chain recovered market ",
+    "Trade indexer placeholder market ",
+)
 
 
 def _redis_key(ctx: dict, suffix: str) -> str:

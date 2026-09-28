@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """Standalone watcher for new Polymarket market panel signals.
 
-The watcher is intentionally independent from market_discovery.py. It only reads
-the indexed markets table, snapshots the first visible YES probability from the
-CLOB order book, and stores recent panel items in Redis.
+The watcher only reads the shared indexed markets table, snapshots the first
+visible YES probability from the CLOB order book, and stores recent panel items
+in Redis.
 """
 
 from __future__ import annotations
@@ -34,7 +34,6 @@ except ImportError:
     requests = None
 
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, dict_from_row, get_connection
-from data_sources import POLYMARKET_CLOB_API_BASE
 from api.config import load_api_settings
 from api.services.new_market_signal_service import (
     SNAPSHOT_CACHE_KEY,
@@ -55,7 +54,11 @@ DEFAULT_PENDING_RETENTION = 500
 DEFAULT_CLOB_TIMEOUT_SECONDS = 10
 DEFAULT_DB_READ_TIMEOUT_SECONDS = 12
 DEFAULT_MAX_MARKET_AGE_HOURS = 72
-PLACEHOLDER_TITLE_PREFIXES = ("On-chain recovered market ",)
+PLACEHOLDER_TITLE_PREFIXES = (
+    "On-chain recovered market ",
+    "Trade indexer placeholder market ",
+)
+PERMANENT_PLACEHOLDER_TITLE_PREFIXES = ("Trade indexer placeholder market ",)
 SEED_META_NAMESPACE = "seed-meta:markets"
 SEED_META_CACHE_KEY = "new-market-signals"
 SEED_META_SERVICE_NAME = "polydata-new-market-signal.service"
@@ -127,6 +130,11 @@ def is_placeholder_market_title(value: Any) -> bool:
     if not title:
         return True
     return any(title.startswith(prefix) for prefix in PLACEHOLDER_TITLE_PREFIXES)
+
+
+def is_permanent_placeholder_market_title(value: Any) -> bool:
+    title = _clean_title(value)
+    return any(title.startswith(prefix) for prefix in PERMANENT_PLACEHOLDER_TITLE_PREFIXES)
 
 
 class NewMarketSignalWatcher:
@@ -407,7 +415,10 @@ class NewMarketSignalWatcher:
 
         pending_ids = self.load_pending_market_ids()
         pending_rows = self.fetch_markets_by_local_ids(pending_ids)
-        rows = self.fetch_new_markets(last_seen, limit=limit)
+        # The snapshot is also the publisher input. Never advance the cursor over
+        # more fresh rows than the snapshot can retain, otherwise the truncated
+        # rows can never be published on a later scan.
+        rows = self.fetch_new_markets(last_seen, limit=min(max(1, int(limit)), self.retention))
         if not rows and not pending_rows:
             result = {
                 "mode": "scan",
@@ -431,13 +442,18 @@ class NewMarketSignalWatcher:
         candidate_rows = [*pending_rows, *rows]
         seen_candidate_ids = set()
         for row in candidate_rows:
+            if len(signals) >= self.retention:
+                break
             market_id = int(row.get("id") or 0)
             if market_id <= 0 or market_id in seen_candidate_ids:
                 continue
             seen_candidate_ids.add(market_id)
             max_seen = max(max_seen, market_id)
             if not self.is_signal_ready(row):
-                next_pending_ids.add(market_id)
+                if is_permanent_placeholder_market_title(row.get("title")):
+                    next_pending_ids.discard(market_id)
+                else:
+                    next_pending_ids.add(market_id)
                 skipped += 1
                 continue
             freshness_state = self.market_freshness_state(row, now=now_dt)
@@ -491,6 +507,8 @@ class NewMarketSignalWatcher:
 
 
 def main() -> None:
+    from runtime.environment import load_environment
+    load_environment()
     settings = load_api_settings()
     parser = argparse.ArgumentParser(description="Watch new markets and store panel signals in Redis")
     add_db_cli_args(parser)
@@ -501,7 +519,7 @@ def main() -> None:
     parser.add_argument("--namespace", default=DEFAULT_NAMESPACE, help="Redis namespace after POLYDATA_REDIS_PREFIX")
     parser.add_argument("--redis-url", default=settings.redis_url, help="Redis URL")
     parser.add_argument("--redis-prefix", default=settings.redis_prefix, help="Redis key prefix")
-    parser.add_argument("--clob-api-base", default=settings.clob_api_base or POLYMARKET_CLOB_API_BASE, help="Polymarket CLOB API base")
+    parser.add_argument("--clob-api-base", default=settings.clob_api_base, help="Polymarket CLOB API base")
     parser.add_argument("--clob-timeout-seconds", type=int, default=settings.clob_timeout_seconds, help="CLOB request timeout")
     parser.add_argument(
         "--max-market-age-hours",

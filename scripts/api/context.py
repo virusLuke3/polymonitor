@@ -1,128 +1,137 @@
-"""Explicit runtime dependency container for the polyData API."""
+"""Application-owned resources and dependency-construction helpers."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Callable
-
-if TYPE_CHECKING:
-    from flask import Flask
-
-    from api.config import ApiSettings
+from typing import Any, Callable, Protocol
+import logging
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 
-@dataclass(frozen=True)
-class ServiceContext(Mapping[str, Any]):
-    """Own the API's shared runtime dependencies.
+@dataclass
+class RuntimeResources:
+    """Mutable caches and background work owned by one application/worker."""
 
-    ``Mapping`` compatibility is intentional while legacy services are migrated
-    from string-key lookups. New boundaries should depend on the explicit
-    attributes instead of creating another helper dictionary.
-    """
+    health_cache: dict[str, Any] = field(default_factory=dict)
+    health_lock: Any = field(default_factory=threading.Lock)
+    health_refresh_lock: Any = field(default_factory=threading.Lock)
+    health_refreshing: bool = False
+    dashboard_refresh_lock: Any = field(default_factory=threading.Lock)
+    dashboard_refreshing: bool = False
+    prewarm_lock: Any = field(default_factory=threading.Lock)
+    prewarm_last_run: dict[str, float] = field(default_factory=dict)
+    snapshot_lock: Any = field(default_factory=threading.Lock)
+    snapshot_refreshing: set[str] = field(default_factory=set)
+    snapshot_slots: Any = field(
+        default_factory=lambda: threading.BoundedSemaphore(
+            max(1, min(int(os.environ.get("POLYDATA_SNAPSHOT_REFRESH_WORKERS", "2")), 8))
+        )
+    )
+    workspace_lock: Any = field(default_factory=threading.Lock)
+    workspace_refreshing: set[str] = field(default_factory=set)
+    live_refresh_lock: Any = field(default_factory=threading.Lock)
+    live_refreshing: set[str] = field(default_factory=set)
+    weather_state: dict[str, Any] = field(default_factory=dict)
+    weather_state_lock: Any = field(default_factory=threading.Lock)
+    content_lock: Any = field(default_factory=threading.Lock)
+    content_table_exists: dict[tuple[str, str], bool] = field(default_factory=dict)
+    content_tables_ensured: set[str] = field(default_factory=set)
+    related_content: dict = field(default_factory=dict)
+    quality_lock: Any = field(default_factory=threading.Lock)
+    quality_last_good: dict | None = None
+    quality_last_error: dict | None = None
+    signal_lock: Any = field(default_factory=threading.Lock)
+    signal_refreshing: dict[str, bool] = field(default_factory=dict)
+    agent_lock: Any = field(default_factory=threading.Lock)
+    agent_refreshing: set[str] = field(default_factory=set)
+    agent_rate_lock: Any = field(default_factory=threading.Lock)
+    agent_rate_buckets: dict[str, list[float]] = field(default_factory=dict)
+    workspace_executor: ThreadPoolExecutor = field(
+        default_factory=lambda: ThreadPoolExecutor(
+            max_workers=max(1, min(int(os.environ.get("POLYDATA_MARKET_FOCUS_REFRESH_WORKERS", "2")), 12)),
+            thread_name_prefix="market-focus-refresh",
+        )
+    )
+    hazard_locks: dict[str, Any] = field(default_factory=dict)
+    hazard_lock_guard: Any = field(default_factory=threading.Lock)
+    hazard_executor: ThreadPoolExecutor = field(
+        default_factory=lambda: ThreadPoolExecutor(max_workers=9, thread_name_prefix="natural-hazard")
+    )
+    zone_cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
+    zone_cache_lock: Any = field(default_factory=threading.Lock)
+    zone_executor: ThreadPoolExecutor = field(
+        default_factory=lambda: ThreadPoolExecutor(max_workers=24, thread_name_prefix="nws-zone")
+    )
+    http_local: Any = field(default_factory=threading.local)
+    http_sessions: list[Any] = field(default_factory=list)
+    http_lock: Any = field(default_factory=threading.Lock)
+    stopped: threading.Event = field(default_factory=threading.Event)
+    _threads: set[threading.Thread] = field(default_factory=set, repr=False)
+    _thread_lock: Any = field(default_factory=threading.Lock, repr=False)
 
-    application: Flask
-    settings: ApiSettings
-    database_path: str
-    content_runtime_provider: Any
-    lob_runtime_manager: Any
-    snapshot_store: Any
-    capabilities: Mapping[str, Any] = field(repr=False)
-    runtime_state: dict[str, Any] = field(default_factory=dict, repr=False)
+    def start_thread(self, target: Callable[[], None], *, name: str) -> bool:
+        def run():
+            try:
+                target()
+            finally:
+                with self._thread_lock:
+                    self._threads.discard(threading.current_thread())
 
-    def __post_init__(self) -> None:
-        values = dict(self.capabilities)
-        explicit_values = {
-            "app": self.application,
-            "SETTINGS": self.settings,
-            "DB_PATH": self.database_path,
-            "CONTENT_RUNTIME_PROVIDER": self.content_runtime_provider,
-            "LOB_RUNTIME_MANAGER": self.lob_runtime_manager,
-            "SNAPSHOT_STORE": self.snapshot_store,
-        }
-        for name, value in explicit_values.items():
-            existing = values.get(name, value)
-            if existing is not value and existing != value:
-                raise ValueError(f"ServiceContext capability {name} conflicts with its explicit dependency")
-            values[name] = value
-        object.__setattr__(self, "capabilities", MappingProxyType(values))
+        with self._thread_lock:
+            if self.stopped.is_set():
+                return False
+            thread = threading.Thread(target=run, name=name, daemon=True)
+            self._threads.add(thread)
+            thread.start()
+        return True
 
-    def require_capabilities(self, *names: str) -> None:
-        missing = sorted(name for name in names if name not in self.capabilities)
-        if missing:
-            raise RuntimeError(f"ServiceContext is missing required capabilities: {', '.join(missing)}")
+    def submit(self, executor, target, *args, **kwargs):
+        with self._thread_lock:
+            if self.stopped.is_set():
+                raise RuntimeError("service runtime is closed")
+            return executor.submit(target, *args, **kwargs)
 
-    def __getitem__(self, name: str) -> Any:
-        if name in self.runtime_state:
-            return self.runtime_state[name]
-        try:
-            return self.capabilities[name]
-        except KeyError as exc:
-            raise KeyError(f"Unknown ServiceContext capability: {name}") from exc
-
-    def __iter__(self) -> Iterator[str]:
-        return iter((*self.capabilities, *self.runtime_state))
-
-    def __len__(self) -> int:
-        return len(self.capabilities) + len(self.runtime_state)
-
-    def __setitem__(self, name: str, value: Any) -> None:
-        if name in self.capabilities:
-            raise TypeError(f"ServiceContext dependency is immutable: {name}")
-        if not name.startswith("_"):
-            raise TypeError(f"ServiceContext runtime state must use a private name: {name}")
-        self.runtime_state[name] = value
-
-    def __delitem__(self, name: str) -> None:
-        if name in self.capabilities:
-            raise TypeError(f"ServiceContext dependency is immutable: {name}")
-        del self.runtime_state[name]
+    def close(self) -> None:
+        with self._thread_lock:
+            self.stopped.set()
+            threads = tuple(self._threads)
+        for thread in threads:
+            if thread is not threading.current_thread():
+                thread.join()
+        for executor in (self.workspace_executor, self.hazard_executor, self.zone_executor):
+            executor.shutdown(wait=True, cancel_futures=True)
+        with self.http_lock:
+            for session in self.http_sessions:
+                session.close()
+            self.http_sessions.clear()
 
 
-@dataclass(frozen=True)
-class RouteContext(Mapping[str, Any]):
-    """Immutable route-facing view over a shared :class:`ServiceContext`."""
+def runtime_resources(context) -> RuntimeResources:
+    """Partial worker/test contexts own their state just like application contexts."""
+    state = context.get("_resources")
+    if state is None:
+        state = RuntimeResources()
+        context["_resources"] = state
+    return state
 
-    services: ServiceContext
-    capabilities: Mapping[str, Any] = field(repr=False)
 
-    def __post_init__(self) -> None:
-        values = dict(self.capabilities)
-        values.setdefault("app", self.services.application)
-        object.__setattr__(self, "capabilities", MappingProxyType(values))
-
-    def require_capabilities(self, *names: str) -> None:
-        missing = sorted(name for name in names if name not in self.capabilities)
-        if missing:
-            raise RuntimeError(f"RouteContext is missing required capabilities: {', '.join(missing)}")
-
-    def __getitem__(self, name: str) -> Any:
-        try:
-            return self.capabilities[name]
-        except KeyError as exc:
-            raise KeyError(f"Unknown RouteContext capability: {name}") from exc
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self.capabilities)
-
-    def __len__(self) -> int:
-        return len(self.capabilities)
+class ApplicationLog(Protocol):
+    logger: logging.Logger
 
 
 def resolve_route_callable(context: Mapping[str, Any], name: str) -> Callable[..., Any]:
     """Resolve one typed route dependency.
 
-    Production ``RouteContext`` instances fail during blueprint registration.
-    Partial plain mappings remain useful for focused unit tests; their missing
-    dependency fails only if the corresponding endpoint is exercised.
+    Resolve a callable while constructing domain dependencies. Partial mappings
+    are used by isolated tests; missing operations fail when invoked.
     """
 
     try:
         dependency = context[name]
-    except KeyError as exc:
-        if isinstance(context, RouteContext):
-            raise RuntimeError(f"RouteContext is missing required callable: {name}") from exc
+    except KeyError:
 
         def missing_dependency(*_args: Any, **_kwargs: Any) -> Any:
             raise RuntimeError(f"Route dependency is unavailable: {name}")
@@ -133,25 +142,12 @@ def resolve_route_callable(context: Mapping[str, Any], name: str) -> Callable[..
     return dependency
 
 
-def resolve_route_value(context: Mapping[str, Any], name: str, default: Any = None) -> Any:
-    """Resolve a non-callable route dependency with production fail-fast semantics."""
-
-    try:
-        return context[name]
-    except KeyError as exc:
-        if isinstance(context, RouteContext):
-            raise RuntimeError(f"RouteContext is missing required dependency: {name}") from exc
-        return default
-
-
 def resolve_service_callable(context: Mapping[str, Any], name: str) -> Callable[..., Any]:
-    """Resolve one service dependency with production fail-fast semantics."""
+    """Resolve a service callback at composition time; unavailable operations fail on use."""
 
     try:
         dependency = context[name]
-    except KeyError as exc:
-        if isinstance(context, ServiceContext):
-            raise RuntimeError(f"ServiceContext is missing required callable: {name}") from exc
+    except KeyError:
 
         def missing_dependency(*_args: Any, **_kwargs: Any) -> Any:
             raise RuntimeError(f"Service dependency is unavailable: {name}")
@@ -174,24 +170,3 @@ def resolve_optional_service_callable(
     if not callable(dependency):
         raise TypeError(f"Service dependency is not callable: {name}")
     return dependency
-
-
-def resolve_service_value(context: Mapping[str, Any], name: str, default: Any = None) -> Any:
-    """Resolve a service value with production fail-fast semantics."""
-
-    try:
-        return context[name]
-    except KeyError as exc:
-        if isinstance(context, ServiceContext):
-            raise RuntimeError(f"ServiceContext is missing required dependency: {name}") from exc
-        return default
-
-
-def resolve_optional_service_value(
-    context: Mapping[str, Any],
-    name: str,
-    default: Any = None,
-) -> Any:
-    """Resolve an optional service value without making it a production requirement."""
-
-    return context.get(name, default)

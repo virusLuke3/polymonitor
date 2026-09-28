@@ -552,6 +552,8 @@ def refresh_active_market_serving(
 
 
 def main() -> None:
+    from runtime.environment import load_environment
+    load_environment()
     parser = argparse.ArgumentParser(description="Refresh current Gamma activity into PostgreSQL market serving tables.")
     add_db_cli_args(parser)
     parser.add_argument("--gamma-api-base", default=DEFAULT_GAMMA_API_BASE)

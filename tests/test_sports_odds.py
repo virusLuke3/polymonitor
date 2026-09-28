@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import sports_odds_service
 from runtime import sports_odds_watcher
@@ -142,6 +136,29 @@ class SportsOddsServiceTestCase(unittest.TestCase):
         self.assertEqual("seeded", payload["items"][0]["id"])
 
 
+    def test_newer_watcher_snapshot_beats_old_request_size_cache(self):
+        old = {"generatedAt": "2026-07-21T09:00:00Z", "items": [{"id": "old"}]}
+        current = {"generatedAt": "2026-09-23T01:00:00Z", "items": [{"id": str(i)} for i in range(12)]}
+        ctx = self.make_context()
+        ctx["get_cached_json"] = lambda namespace, key: current if json.loads(key)["limit"] == 32 else old
+        with patch.dict("os.environ", {"POLYDATA_SPORTS_ODDS_LIMIT": "32"}), patch.object(
+            sports_odds_service, "fetch_live_sports_odds_payload", side_effect=AssertionError("no live fetch")
+        ):
+            payload = sports_odds_service.get_sports_odds_snapshot(ctx, limit=8)
+        self.assertEqual(current["generatedAt"], payload["generatedAt"])
+        self.assertEqual(8, len(payload["items"]))
+        self.assertEqual("0", payload["items"][0]["id"])
+
+    def test_older_watcher_snapshot_does_not_replace_newer_request_cache(self):
+        current = {"generatedAt": "2026-09-23T01:00:00Z", "items": [{"id": "new"}]}
+        old = {"generatedAt": "2026-07-21T09:00:00Z", "items": [{"id": "old"}]}
+        ctx = self.make_context()
+        ctx["get_cached_json"] = lambda namespace, key: old if json.loads(key)["limit"] == 32 else current
+        with patch.dict("os.environ", {"POLYDATA_SPORTS_ODDS_LIMIT": "32"}):
+            payload = sports_odds_service.get_sports_odds_snapshot(ctx, limit=8)
+        self.assertEqual("new", payload["items"][0]["id"])
+
+
 class SportsOddsWatcherTestCase(unittest.TestCase):
     def make_watcher(self) -> tuple[sports_odds_watcher.SportsOddsWatcher, FakeRedis, tempfile.TemporaryDirectory]:
         snapshot_dir = tempfile.TemporaryDirectory()
@@ -211,7 +228,3 @@ class SportsOddsWatcherTestCase(unittest.TestCase):
         self.assertEqual("preserved", result["status"])
         stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
         self.assertEqual("old-event", stored["items"][0]["id"])
-
-
-if __name__ == "__main__":
-    unittest.main()

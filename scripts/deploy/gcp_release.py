@@ -21,34 +21,38 @@ MANIFEST_VERSION = 1
 GCP_SOURCE_PREFIXES = (
     "agent/",
     "config/operations/",
-    "quant/",
     "telegram/",
+    "scripts/agent/",
     "scripts/api/",
+    "scripts/data/",
+    "scripts/db/",
+    "scripts/f1/",
+    "scripts/jin10/",
+    "scripts/market/",
     "scripts/ops/",
+    "scripts/oracle/",
     "scripts/runtime/",
+    "scripts/trade/",
+    "scripts/weather/",
 )
 GCP_SOURCE_FILES = {
     ".python-version",
     "pyproject.toml",
     "scripts/config.py",
     "scripts/data_sources.py",
-    "scripts/agent/seed_market_wide_insights.py",
     "scripts/api_server.py",
-    "scripts/market/market_discovery.py",
-    "scripts/market/market_identity.py",
-    "scripts/ops/gcp_serving_healthcheck.py",
     "scripts/requirements.lock.txt",
-}
-GCP_EXCLUDED_SOURCE_FILES = {
-    "scripts/ops/polydata_services.sh",
 }
 EXTERNAL_RELEASE_PREFIXES = (
     ".github/",
-    "deploy/nginx/",
-    "deploy/systemd/",
+    "deploy/",
     "document/",
     "docs/",
-    "scripts/oracle/",
+    "scripts/NBA/",
+    "scripts/clickhouse/",
+    "scripts/db/archive/",
+    "scripts/dev/",
+    "scripts/devtools/",
     "scripts/qa/",
     "scripts/deploy/",
     "tests/",
@@ -56,34 +60,20 @@ EXTERNAL_RELEASE_PREFIXES = (
 )
 EXTERNAL_RELEASE_FILES = {
     ".env.example",
+    ".gitignore",
+    ".nvmrc",
     "AGENTS.md",
-    "deploy/gcp/accepted-remote-overrides.json",
-    "deploy/systemd/README.md",
-    "deploy/systemd/polydata-active-market-serving-refresh.service",
-    "deploy/systemd/polydata-active-market-serving-refresh.timer",
-    "deploy/systemd/polydata-block-timestamps-live.service",
-    "deploy/systemd/polydata-db-reverse-tunnel-healthcheck.service",
-    "deploy/systemd/polydata-external-availability.service",
-    "deploy/systemd/polydata-external-availability.timer",
-    "deploy/systemd/polydata-local-collector.target",
-    "deploy/systemd/polydata-oracle-sync.service",
-    "deploy/systemd/polydata-polygon-rpc-healthcheck.service",
-    "deploy/systemd/polydata-polygon-rpc-healthcheck.timer",
-    "deploy/systemd/polydata-polygon-rpc-tunnel.service",
-    "deploy/systemd/polydata-trade-sync.service",
-    "deploy/systemd/polydata.env.example",
-    "scripts/clickhouse/run_block_timestamps_live.sh",
-    "scripts/clickhouse/sync_block_timestamps.py",
+    "Makefile",
+    "README.md",
+    "scripts/generate_docs_i18n.py",
+    "scripts/db/migrate_sqlite_to_mysql.py",
     "scripts/market/market_decoder.py",
-    "scripts/market/refresh_active_market_serving.py",
-    "scripts/db/db.py",
-    "scripts/db/sync_event_market_serving.py",
-    "scripts/ops/polydata_services.sh",
-    "scripts/trade/run_trades_indexer_clickhouse_live.sh",
     "scripts/trade/trade_decoder.py",
-    "scripts/trade/trades_indexer.py",
+    "scripts/trade/clickhouse_orderfilled_writer.py",
+    "scripts/requirements-dev.in",
     "scripts/requirements-dev.lock.txt",
     "scripts/requirements.txt",
+    "scripts/start_dashboard.sh",
 }
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 APPROVED_OVERRIDES_PATH = Path("deploy/gcp/accepted-remote-overrides.json")
@@ -151,11 +141,7 @@ def _target_gcp_units(repo: Path, target: str) -> set[str]:
 def _deployable(path: str, *, gcp_units: set[str]) -> bool:
     if path.startswith("deploy/systemd/"):
         return PurePosixPath(path).name in gcp_units
-    if path in GCP_EXCLUDED_SOURCE_FILES:
-        return False
-    if path.startswith("quant/backtest/vendor/"):
-        return False
-    if path.startswith(("scripts/runtime/worldcup_", "scripts/runtime/world_cup_")):
+    if _externally_owned(path):
         return False
     return path in GCP_SOURCE_FILES or path.startswith(GCP_SOURCE_PREFIXES)
 
@@ -268,15 +254,22 @@ def build_release(repo: Path, base: str, target: str, output_dir: Path) -> dict[
     used_overrides: set[str] = set()
     gcp_units = _target_gcp_units(repo, target)
 
-    for path in _changed_paths(repo, base, target):
-        if not _deployable(path, gcp_units=gcp_units):
-            (external if _externally_owned(path) else ignored).append(path)
+    # Include unchanged runtime dependencies too: earlier releases may have
+    # omitted them. Read the committed target, never files from the worktree.
+    target_paths = set(str(_git(repo, "ls-tree", "-r", "--name-only", "-z", target)).split("\0"))
+    runtime_paths = {path for path in target_paths if _deployable(path, gcp_units=gcp_units)}
+    for path in sorted(runtime_paths | set(_changed_paths(repo, base, target))):
+        # Retire formerly shipped Quant sources without allowing new Quant
+        # files back into the consumer release.
+        retired_quant = path.startswith("quant/") and path not in target_paths
+        if not _deployable(path, gcp_units=gcp_units) and not retired_quant:
+            (external if path not in target_paths or _externally_owned(path) else ignored).append(path)
             continue
         before, before_mode = _git_entry(repo, base, path)
         after, after_mode = _git_entry(repo, target, path)
         if before is None and after is None:
             continue
-        accepted_hashes = _accepted_hashes(repo, base, target, path)
+        accepted_hashes = [None, *_accepted_hashes(repo, base, target, path)]
         if path in approved_overrides:
             accepted_hashes.append(approved_overrides[path])
             accepted_hashes = sorted(set(accepted_hashes), key=lambda value: (value is not None, value or ""))

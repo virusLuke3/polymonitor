@@ -1,32 +1,23 @@
 from __future__ import annotations
 
 import os
-import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, cast
+from typing import Any, Callable, Dict
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import runtime_resources, RuntimeResources, resolve_optional_service_callable, resolve_service_callable
 
 
 SYSTEM_HEALTH_CACHE_NAMESPACE = "system:health"
 SYSTEM_HEALTH_CACHE_KEY = "payload-v1"
 SYSTEM_HEALTH_CACHE_TTL_SECONDS = 15
-_SYSTEM_HEALTH_CACHE_LOCK = threading.Lock()
-_SYSTEM_HEALTH_REFRESH_LOCK = threading.Lock()
-_SYSTEM_HEALTH_CACHE: Dict[str, Any] = {}
-_SYSTEM_HEALTH_REFRESHING = False
 
 
 @dataclass(frozen=True)
 class SystemHealthDependencies:
+    resources: RuntimeResources
     application: Any
     describe_db_target: Callable[..., Any]
     get_redis_client: Callable[..., Any]
@@ -36,32 +27,19 @@ class SystemHealthDependencies:
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
     get_lob_runtime_status: Callable[..., Any] | None
-    get_lob_storage_status: Callable[..., Any] | None
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> SystemHealthDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            application=resolve_service_value(context, "app"),
-            describe_db_target=cast(
-                Callable[..., Any],
-                resolve_service_callable(context, "describe_db_target"),
-            ),
-            get_redis_client=cast(
-                Callable[..., Any],
-                resolve_service_callable(context, "get_redis_client"),
-            ),
-            table_exists=cast(
-                Callable[..., Any],
-                resolve_service_callable(context, "table_exists"),
-            ),
-            query_all=cast(
-                Callable[..., Any],
-                resolve_service_callable(context, "query_all"),
-            ),
-            query_one=cast(
-                Callable[..., Any],
-                resolve_service_callable(context, "query_one"),
-            ),
+            resources=runtime_resources(context),
+            application=context.get("app"),
+            describe_db_target=resolve_service_callable(context, "describe_db_target"),
+            get_redis_client=resolve_service_callable(context, "get_redis_client"),
+            table_exists=resolve_service_callable(context, "table_exists"),
+            query_all=resolve_service_callable(context, "query_all"),
+            query_one=resolve_service_callable(context, "query_one"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",
@@ -74,10 +52,6 @@ class SystemHealthDependencies:
                 context,
                 "get_lob_runtime_status",
             ),
-            get_lob_storage_status=resolve_optional_service_callable(
-                context,
-                "get_lob_storage_status",
-            ),
         )
 
 
@@ -89,19 +63,15 @@ class SeedHealthDependencies:
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> SeedHealthDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",
             ),
-            utc_now_iso=cast(
-                Callable[..., Any],
-                resolve_service_callable(context, "utc_now_iso"),
-            ),
+            utc_now_iso=resolve_service_callable(context, "utc_now_iso"),
         )
 
 
@@ -514,7 +484,7 @@ def _system_health_cache_ttl_seconds() -> int:
 def _build_system_health_payload_uncached(
     dependencies: SystemHealthDependencies,
 ) -> Dict[str, Any]:
-    lob_runtime: Dict[str, Any] = {"status": "ready", "mode": "local-orderbook"}
+    lob_runtime: Dict[str, Any] = {"status": "unavailable", "mode": "market-data"}
     if dependencies.get_lob_runtime_status is not None:
         try:
             runtime_payload = dependencies.get_lob_runtime_status()
@@ -522,17 +492,6 @@ def _build_system_health_payload_uncached(
                 lob_runtime.update(runtime_payload)
         except Exception as exc:
             lob_runtime.update({"status": "unavailable", "detail": str(exc)[:240]})
-    if dependencies.get_lob_storage_status is not None:
-        try:
-            storage_payload = dependencies.get_lob_storage_status()
-            if isinstance(storage_payload, dict):
-                lob_runtime["storage"] = storage_payload
-                if storage_payload.get("rollupWatermark") is not None:
-                    lob_runtime["rollupWatermark"] = storage_payload.get("rollupWatermark")
-                if storage_payload.get("deadLetters1h") is not None:
-                    lob_runtime["deadLetters1h"] = storage_payload.get("deadLetters1h")
-        except Exception as exc:
-            lob_runtime["storage"] = {"status": "unavailable", "detail": str(exc)[:240]}
     payload: Dict[str, Any] = {
         "database": dependencies.describe_db_target(),
         "redis": bool(dependencies.get_redis_client()),
@@ -605,7 +564,7 @@ def _build_system_health_warming_payload(
     return {
         "database": dependencies.describe_db_target(),
         "apiStatus": "warming",
-        "lobRuntime": {"status": "warming", "mode": "local-orderbook"},
+        "lobRuntime": {"status": "warming", "mode": "market-data"},
         "contentSync": {"status": "warming"},
         "syncState": {},
         "marketSync": None,
@@ -615,10 +574,10 @@ def _build_system_health_warming_payload(
     }
 
 
-def _store_local_system_health_payload(payload: Dict[str, Any], ttl_seconds: int) -> None:
-    with _SYSTEM_HEALTH_CACHE_LOCK:
-        _SYSTEM_HEALTH_CACHE["value"] = payload
-        _SYSTEM_HEALTH_CACHE["expires_at"] = time.monotonic() + ttl_seconds
+def _store_local_system_health_payload(dependencies: SystemHealthDependencies, payload: Dict[str, Any], ttl_seconds: int) -> None:
+    with dependencies.resources.health_lock:
+        dependencies.resources.health_cache["value"] = payload
+        dependencies.resources.health_cache["expires_at"] = time.monotonic() + ttl_seconds
 
 
 def _store_system_health_payload(
@@ -633,42 +592,42 @@ def _store_system_health_payload(
             payload,
             ttl_seconds,
         )
-    _store_local_system_health_payload(payload, ttl_seconds)
+    _store_local_system_health_payload(dependencies, payload, ttl_seconds)
 
 
 def _schedule_system_health_refresh(
     dependencies: SystemHealthDependencies,
     ttl_seconds: int,
 ) -> None:
-    global _SYSTEM_HEALTH_REFRESHING
-    with _SYSTEM_HEALTH_REFRESH_LOCK:
-        if _SYSTEM_HEALTH_REFRESHING:
+
+    with dependencies.resources.health_refresh_lock:
+        if dependencies.resources.health_refreshing:
             return
-        _SYSTEM_HEALTH_REFRESHING = True
+        dependencies.resources.health_refreshing = True
 
     def refresh() -> None:
-        global _SYSTEM_HEALTH_REFRESHING
+
         try:
             payload = _build_system_health_payload_uncached(dependencies)
             _store_system_health_payload(dependencies, payload, ttl_seconds)
         except Exception:
             dependencies.application.logger.exception("system-health refresh failed")
         finally:
-            with _SYSTEM_HEALTH_REFRESH_LOCK:
-                _SYSTEM_HEALTH_REFRESHING = False
+            with dependencies.resources.health_refresh_lock:
+                dependencies.resources.health_refreshing = False
 
-    thread = threading.Thread(target=refresh, name="system-health-refresh", daemon=True)
-    thread.start()
+    if not dependencies.resources.start_thread(refresh, name="system-health-refresh"):
+        with dependencies.resources.health_refresh_lock:
+            dependencies.resources.health_refreshing = False
 
 
-def build_system_health_payload(ctx: Mapping[str, Any]) -> Dict[str, Any]:
-    dependencies = SystemHealthDependencies.from_context(ctx)
+def build_system_health_payload(dependencies: SystemHealthDependencies) -> Dict[str, Any]:
     ttl_seconds = _system_health_cache_ttl_seconds()
     now = time.monotonic()
     stale_payload = None
-    with _SYSTEM_HEALTH_CACHE_LOCK:
-        cached = _SYSTEM_HEALTH_CACHE.get("value")
-        if isinstance(cached, dict) and float(_SYSTEM_HEALTH_CACHE.get("expires_at") or 0.0) > now:
+    with dependencies.resources.health_lock:
+        cached = dependencies.resources.health_cache.get("value")
+        if isinstance(cached, dict) and float(dependencies.resources.health_cache.get("expires_at") or 0.0) > now:
             return cached
         if isinstance(cached, dict):
             stale_payload = cached
@@ -679,9 +638,9 @@ def build_system_health_payload(ctx: Mapping[str, Any]) -> Dict[str, Any]:
             SYSTEM_HEALTH_CACHE_KEY,
         )
         if isinstance(redis_payload, dict):
-            with _SYSTEM_HEALTH_CACHE_LOCK:
-                _SYSTEM_HEALTH_CACHE["value"] = redis_payload
-                _SYSTEM_HEALTH_CACHE["expires_at"] = time.monotonic() + ttl_seconds
+            with dependencies.resources.health_lock:
+                dependencies.resources.health_cache["value"] = redis_payload
+                dependencies.resources.health_cache["expires_at"] = time.monotonic() + ttl_seconds
             return redis_payload
 
     if stale_payload is not None:
@@ -689,31 +648,29 @@ def build_system_health_payload(ctx: Mapping[str, Any]) -> Dict[str, Any]:
         return stale_payload
 
     warming_payload = _build_system_health_warming_payload(dependencies)
-    _store_local_system_health_payload(warming_payload, ttl_seconds)
+    _store_local_system_health_payload(dependencies, warming_payload, ttl_seconds)
     _schedule_system_health_refresh(dependencies, ttl_seconds)
     return warming_payload
 
 
-def prewarm_system_health_payload(ctx: Mapping[str, Any]) -> None:
+def prewarm_system_health_payload(dependencies: SystemHealthDependencies) -> None:
     """Start the full health probe without extending API startup latency."""
 
-    dependencies = SystemHealthDependencies.from_context(ctx)
     ttl_seconds = _system_health_cache_ttl_seconds()
-    with _SYSTEM_HEALTH_CACHE_LOCK:
-        cached = _SYSTEM_HEALTH_CACHE.get("value")
-        expires_at = float(_SYSTEM_HEALTH_CACHE.get("expires_at") or 0.0)
+    with dependencies.resources.health_lock:
+        cached = dependencies.resources.health_cache.get("value")
+        expires_at = float(dependencies.resources.health_cache.get("expires_at") or 0.0)
     if isinstance(cached, dict) and cached.get("apiStatus") != "warming" and expires_at > time.monotonic():
         return
     if not isinstance(cached, dict):
         _store_local_system_health_payload(
-            _build_system_health_warming_payload(dependencies),
+            dependencies, _build_system_health_warming_payload(dependencies),
             ttl_seconds,
         )
     _schedule_system_health_refresh(dependencies, ttl_seconds)
 
 
-def build_seed_health_payload(ctx: Mapping[str, Any]) -> Dict[str, Any]:
-    dependencies = SeedHealthDependencies.from_context(ctx)
+def build_seed_health_payload(dependencies: SeedHealthDependencies) -> Dict[str, Any]:
     items = []
     for spec in SEED_META_SPECS:
         payload = (

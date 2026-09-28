@@ -7,12 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from api.context import (
-    resolve_optional_service_callable,
-    resolve_optional_service_value,
-    resolve_service_callable,
-    resolve_service_value,
-)
+from api.context import resolve_optional_service_callable, resolve_service_callable
 
 
 @dataclass(frozen=True)
@@ -38,18 +33,16 @@ class RuntimeServiceDependencies:
         cls,
         context: Mapping[str, Any],
     ) -> RuntimeServiceDependencies:
+        if isinstance(context, cls):
+            return context
         return cls(
-            settings=resolve_service_value(context, "SETTINGS"),
-            application=resolve_service_value(context, "app"),
+            settings=context.get("SETTINGS"),
+            application=context.get("app"),
             get_yahoo_market_snapshot=resolve_service_callable(
                 context,
                 "get_yahoo_market_snapshot",
             ),
-            crypto_coingecko_ids=resolve_service_value(
-                context,
-                "CRYPTO_COINGECKO_IDS",
-                {},
-            ),
+            crypto_coingecko_ids=context.get("CRYPTO_COINGECKO_IDS", {}),
             http_json_get=resolve_service_callable(
                 context,
                 "http_json_get",
@@ -62,14 +55,8 @@ class RuntimeServiceDependencies:
                 context,
                 "utc_now_iso",
             ),
-            finance_runtime_ttl_seconds=resolve_service_value(
-                context,
-                "FINANCE_RUNTIME_TTL_SECONDS",
-            ),
-            sports_runtime_ttl_seconds=resolve_service_value(
-                context,
-                "SPORTS_RUNTIME_TTL_SECONDS",
-            ),
+            finance_runtime_ttl_seconds=context.get("FINANCE_RUNTIME_TTL_SECONDS"),
+            sports_runtime_ttl_seconds=context.get("SPORTS_RUNTIME_TTL_SECONDS"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",
@@ -78,18 +65,9 @@ class RuntimeServiceDependencies:
                 context,
                 "set_cached_json",
             ),
-            snapshot_store=resolve_optional_service_value(
-                context,
-                "SNAPSHOT_STORE",
-            ),
-            requests_lib=resolve_optional_service_value(
-                context,
-                "requests",
-            ),
-            beautiful_soup=resolve_optional_service_value(
-                context,
-                "BeautifulSoup",
-            ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
+            requests_lib=context.get("requests"),
+            beautiful_soup=context.get("BeautifulSoup"),
             get_snapshot_payload=resolve_optional_service_callable(
                 context,
                 "get_snapshot_payload",

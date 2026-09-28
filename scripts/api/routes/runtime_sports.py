@@ -72,10 +72,7 @@ def _bounded_int_arg(name: str, default: int, *, lower: int, upper: int) -> int:
     return min(upper, max(lower, value))
 
 
-def create_runtime_sports_blueprint(
-    context: Mapping[str, Any],
-) -> Blueprint:
-    dependencies = RuntimeSportsRouteDependencies.from_context(context)
+def create_runtime_sports_blueprint(dependencies: RuntimeSportsRouteDependencies) -> Blueprint:
     bp = Blueprint("runtime_sports_routes", __name__)
 
     @bp.route("/runtime/sports/nba", methods=["GET"])

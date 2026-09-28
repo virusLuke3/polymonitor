@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from api.routes.runtime_panels import RuntimePanelRouteDependencies
+
 
 from flask import Flask
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_default_panel_ids
@@ -91,7 +86,7 @@ def test_runtime_panel_blueprint_registers_all_routes():
         },
     }
 
-    app.register_blueprint(create_runtime_panels_blueprint(helpers))
+    app.register_blueprint(create_runtime_panels_blueprint(RuntimePanelRouteDependencies.from_context(helpers)))
     registered_routes = {rule.rule for rule in app.url_map.iter_rules()}
 
     for panel in RUNTIME_PANEL_MODULES:
@@ -151,8 +146,7 @@ def test_default_workspace_panel_ids_include_runtime_and_static_panels():
 
 
 def test_api_server_context_satisfies_bootstrap_prewarm_contract():
-    import api_server
+    from api.runtime import ServiceRuntime
 
-    dependencies = BootstrapPrewarmDependencies.from_context(api_server.build_service_context())
-
-    assert callable(dependencies.get_market_focus_tile_payload)
+    with ServiceRuntime() as runtime:
+        assert callable(runtime.bootstrap_prewarm.get_market_focus_tile_payload)

@@ -6,7 +6,6 @@ from typing import Any
 
 from flask import Blueprint, jsonify, make_response
 
-from api.context import resolve_route_value
 from agent.market_wide.snapshot import normalize_lens, read_market_wide_quant_snapshot, read_market_wide_snapshot, snapshot_response
 
 
@@ -21,15 +20,12 @@ class AgentSnapshotRouteDependencies:
         context: Mapping[str, Any],
     ) -> AgentSnapshotRouteDependencies:
         return cls(
-            source=context,
-            snapshot_store=resolve_route_value(context, "SNAPSHOT_STORE"),
+            source={name: context[name] for name in ("app", "SNAPSHOT_STORE", "get_cached_json") if name in context},
+            snapshot_store=context.get("SNAPSHOT_STORE"),
         )
 
 
-def create_agent_snapshot_blueprint(
-    context: Mapping[str, Any],
-) -> Blueprint:
-    dependencies = AgentSnapshotRouteDependencies.from_context(context)
+def create_agent_snapshot_blueprint(dependencies: AgentSnapshotRouteDependencies) -> Blueprint:
     bp = Blueprint("agent_snapshot_routes", __name__)
 
     @bp.route("/runtime/agent/market-wide-insights/<lens>", methods=["GET"])

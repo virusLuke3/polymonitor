@@ -1,14 +1,7 @@
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import content_service
 from runtime.content_runtime import RuntimeContentItem, RuntimeContentProvider
@@ -95,7 +88,3 @@ class ContentRelatedIntelTestCase(unittest.TestCase):
                 url="https://arxiv.org/abs/1234.5678",
             ),
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

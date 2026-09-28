@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -9,11 +8,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = REPO_ROOT / "scripts"
-if str(SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import signal_service
 from runtime import signals_watcher
@@ -73,7 +67,9 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         watcher, fake_redis = self.make_watcher(component="alpha", limit=8)
         previous = {"items": [{"title": "Old alpha"}], "generatedAt": "old", "status": "ok", "cacheMode": "seeded"}
         watcher.store_payload(previous)
-        with patch.object(watcher, "fetch_payload", return_value={"items": [], "generatedAt": "new", "status": "empty"}):
+        with patch.object(
+            watcher, "fetch_payload", return_value={"items": [], "generatedAt": "new", "status": "empty"}
+        ):
             result = watcher.run_once()
 
         self.assertEqual("preserved", result["status"])
@@ -92,16 +88,24 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
                 "SNAPSHOT_STORE": store,
                 "get_cached_runtime_payload": lambda namespace, key: None,
                 "set_cached_runtime_payload": lambda namespace, key, payload, ttl: payload,
-                "get_cached_json": lambda namespace, key: seeded if (namespace, key) == (signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key) else None,
+                "get_cached_json": lambda namespace, key: (
+                    seeded if (namespace, key) == (signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key) else None
+                ),
                 "threading": SimpleNamespace(Thread=object),
-                "app": SimpleNamespace(logger=SimpleNamespace(info=lambda *args, **kwargs: None, exception=lambda *args, **kwargs: None)),
+                "app": SimpleNamespace(
+                    logger=SimpleNamespace(info=lambda *args, **kwargs: None, exception=lambda *args, **kwargs: None)
+                ),
                 "utc_now_iso": lambda: "2026-05-03T08:00:00Z",
             }
-            with patch.object(signal_service, "fetch_live_alpha_signal_payload", side_effect=AssertionError("live build should not run")):
+            with patch.object(
+                signal_service,
+                "fetch_live_alpha_signal_payload",
+                side_effect=AssertionError("live build should not run"),
+            ):
                 payload = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
 
         self.assertEqual("seeded", payload["cacheMode"])
-        self.assertEqual("Seeded alpha", payload["items"][0]["title"])
+        self.assertEqual([], payload["items"])
 
     def test_api_trims_default_signal_seeds_for_smaller_limits_without_live_build(self):
         seeded_payloads = {
@@ -115,7 +119,10 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
                 "generatedAt": "seed",
                 "cacheMode": "seeded",
             },
-            (signal_service.SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS, signal_service.build_suspicious_trades_cache_key(limit=12)): {
+            (
+                signal_service.SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
+                signal_service.build_suspicious_trades_cache_key(limit=12),
+            ): {
                 "items": [{"title": "Suspicious 1"}, {"title": "Suspicious 2"}],
                 "generatedAt": "seed",
                 "cacheMode": "seeded",
@@ -128,19 +135,33 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
             "set_cached_runtime_payload": lambda namespace, key, payload, ttl: payload,
             "get_cached_json": lambda namespace, key: seeded_payloads.get((namespace, key)),
             "threading": SimpleNamespace(Thread=object),
-            "app": SimpleNamespace(logger=SimpleNamespace(info=lambda *args, **kwargs: None, exception=lambda *args, **kwargs: None)),
+            "app": SimpleNamespace(
+                logger=SimpleNamespace(info=lambda *args, **kwargs: None, exception=lambda *args, **kwargs: None)
+            ),
             "utc_now_iso": lambda: "2026-05-03T08:00:00Z",
         }
-        with patch.object(signal_service, "fetch_live_alpha_signal_payload", side_effect=AssertionError("live alpha should not run")), patch.object(
-            signal_service,
-            "fetch_live_whale_trades_payload",
-            side_effect=AssertionError("live whales should not run"),
-        ), patch.object(signal_service, "fetch_live_suspicious_trades_payload", side_effect=AssertionError("live suspicious should not run")):
+        with (
+            patch.object(
+                signal_service,
+                "fetch_live_alpha_signal_payload",
+                side_effect=AssertionError("live alpha should not run"),
+            ),
+            patch.object(
+                signal_service,
+                "fetch_live_whale_trades_payload",
+                side_effect=AssertionError("live whales should not run"),
+            ),
+            patch.object(
+                signal_service,
+                "fetch_live_suspicious_trades_payload",
+                side_effect=AssertionError("live suspicious should not run"),
+            ),
+        ):
             alpha = signal_service.get_alpha_signal_snapshot(ctx, limit=1)
             whales = signal_service.get_whale_trades_snapshot(ctx, limit=1)
             suspicious = signal_service.get_suspicious_trades_snapshot(ctx, limit=1)
 
-        self.assertEqual(["Alpha 1"], [item["title"] for item in alpha["items"]])
+        self.assertEqual([], alpha["items"])
         self.assertEqual(["Whale 1"], [item["title"] for item in whales["items"]])
         self.assertEqual(["Suspicious 1"], [item["title"] for item in suspicious["items"]])
         self.assertEqual("seeded", alpha["cacheMode"])
@@ -154,7 +175,9 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
             "get_recent_trades": lambda limit=24: (_ for _ in ()).throw(RuntimeError("db down")),
             "get_recent_oracle_events": lambda limit=24: (_ for _ in ()).throw(RuntimeError("db down")),
             "get_active_markets_snapshot": lambda page_size=8: (_ for _ in ()).throw(RuntimeError("db down")),
-            "get_market_group_snapshot": lambda items, kind: {"items": [{"label": "BTC", "changePercent": 3.2, "price": 68000}]},
+            "get_market_group_snapshot": lambda items, kind: {
+                "items": [{"label": "BTC", "changePercent": 3.2, "price": 68000}]
+            },
             "get_inflation_nowcast_snapshot": lambda: {"monthOverMonth": {"CPI": "0.41", "Core CPI": "0.21"}},
             "CRYPTO_SYMBOLS": [("btc", "BTC", "BTC-USD")],
             "_safe_decimal": lambda value: None,
@@ -172,7 +195,9 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
 
     def test_alpha_live_payload_uses_clickhouse_volume_rows_without_address_profiles(self):
         ctx = {
-            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)),
+            "app": SimpleNamespace(
+                logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+            ),
             "utc_now_iso": lambda: "2026-06-06T02:00:00Z",
             "query_all": lambda sql, params=(): [],
             "get_recent_trades": lambda limit=24: [],
@@ -214,12 +239,33 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
                 "severity": "critical",
                 "source_mode": "clickhouse-volume-alpha",
                 "window_minutes": 15,
+                "logicalOutcome": "YES",
+                "sourceOutcomeLabel": "Up",
+                "outcome": "Up",
+                "semanticMode": "up_down_labels",
+                "outcomeSemanticsStatus": "projected",
+                "outcomeSemanticsValid": True,
+                "supports_directional_semantics": True,
             }
         ]
-        with patch.object(signal_service.clickhouse_orderfilled_service, "get_alpha_volume_signal_rows", return_value=volume_rows), patch.object(
-            signal_service.clickhouse_orderfilled_service,
-            "get_volume_whale_rows",
-            return_value=[],
+        with (
+            patch.object(
+                signal_service.outcome_semantics_service,
+                "annotate_trade_rows",
+                side_effect=lambda _ctx, rows, *, identity_mode: [
+                    {**row, "outcomeSemanticsIdentityMode": identity_mode} for row in rows
+                ],
+            ),
+            patch.object(
+                signal_service.clickhouse_orderfilled_service,
+                "get_alpha_volume_signal_rows",
+                return_value=volume_rows,
+            ),
+            patch.object(
+                signal_service.clickhouse_orderfilled_service,
+                "get_volume_whale_rows",
+                return_value=[],
+            ),
         ):
             payload = signal_service.fetch_live_alpha_signal_payload(ctx, limit=3)
 
@@ -233,7 +279,9 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
 
     def test_whale_live_payload_uses_clickhouse_volume_rows(self):
         ctx = {
-            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)),
+            "app": SimpleNamespace(
+                logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+            ),
             "utc_now_iso": lambda: "2026-06-06T02:00:00Z",
             "query_all": lambda sql, params=(): [],
             "_safe_decimal": lambda value: signal_service.Decimal(str(value)) if value is not None else None,
@@ -259,7 +307,9 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
                 "market_share": "0.22",
             }
         ]
-        with patch.object(signal_service.clickhouse_orderfilled_service, "get_volume_whale_rows", return_value=whale_rows):
+        with patch.object(
+            signal_service.clickhouse_orderfilled_service, "get_volume_whale_rows", return_value=whale_rows
+        ):
             payload = signal_service.fetch_live_whale_trades_payload(ctx, limit=3)
 
         self.assertEqual("ok", payload["status"])
@@ -269,7 +319,9 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
 
     def test_whale_live_payload_filters_near_resolved_and_dedupes_router_splits(self):
         ctx = {
-            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)),
+            "app": SimpleNamespace(
+                logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+            ),
             "utc_now_iso": lambda: "2026-06-06T02:00:00Z",
             "query_all": lambda sql, params=(): [],
             "_safe_decimal": lambda value: signal_service.Decimal(str(value)) if value is not None else None,
@@ -322,7 +374,9 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
                 "source_mode": "clickhouse-volume-whales",
             },
         ]
-        with patch.object(signal_service.clickhouse_orderfilled_service, "get_volume_whale_rows", return_value=whale_rows):
+        with patch.object(
+            signal_service.clickhouse_orderfilled_service, "get_volume_whale_rows", return_value=whale_rows
+        ):
             payload = signal_service.fetch_live_whale_trades_payload(ctx, limit=3)
 
         self.assertEqual("ok", payload["status"])
@@ -348,10 +402,14 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
             "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None)),
             "utc_now_iso": lambda: "2026-06-06T01:00:00Z",
             "utc_date_days_ago": lambda days: "2026-05-30T01:00:00Z",
-            "parse_iso_datetime": lambda value: datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None,
+            "parse_iso_datetime": lambda value: (
+                datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+            ),
             "get_recent_trades": lambda limit=24: [],
             "get_active_markets_snapshot": lambda page_size=8: {"items": []},
-            "get_cached_json": lambda namespace, key: stale_bootstrap if (namespace, key) == ("bootstrap", "workspace-default-v9") else None,
+            "get_cached_json": lambda namespace, key: (
+                stale_bootstrap if (namespace, key) == ("bootstrap", "workspace-default-v9") else None
+            ),
             "SNAPSHOT_STORE": None,
             "_safe_decimal": signal_service.Decimal,
             "format_trade_decimal": lambda value: str(value) if value is not None else None,
@@ -370,12 +428,15 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
             "generatedAt": "2026-06-06T01:00:00Z",
             "status": "ok",
         }
-        with patch.object(watcher, "fetch_payload", return_value=payload), patch.object(
-            signals_watcher,
-            "datetime",
-            SimpleNamespace(
-                now=lambda tz=None: datetime(2026, 6, 6, 1, 0, 0, tzinfo=timezone.utc),
-                fromisoformat=datetime.fromisoformat,
+        with (
+            patch.object(watcher, "fetch_payload", return_value=payload),
+            patch.object(
+                signals_watcher,
+                "datetime",
+                SimpleNamespace(
+                    now=lambda tz=None: datetime(2026, 6, 6, 1, 0, 0, tzinfo=timezone.utc),
+                    fromisoformat=datetime.fromisoformat,
+                ),
             ),
         ):
             result = watcher.run_once()
@@ -387,7 +448,3 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("stale", meta["status"])
         self.assertEqual("2026-04-28T11:00:40Z", meta["metadata"]["maxItemTimestamp"])
         self.assertGreater(meta["metadata"]["dataAgeSeconds"], 7 * 24 * 60 * 60)
-
-
-if __name__ == "__main__":
-    unittest.main()
