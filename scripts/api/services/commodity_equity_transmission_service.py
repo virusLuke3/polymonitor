@@ -4,9 +4,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from api.context import resolve_optional_service_callable, resolve_service_callable
-
-
 PANEL_ID = "commodity-equity-transmission"
 
 
@@ -17,28 +14,6 @@ class CommodityEquityTransmissionDependencies:
     search_markets: Callable[..., Any] | None
     application: Any
     utc_now_iso: Callable[..., Any]
-
-    @classmethod
-    def from_context(
-        cls,
-        context: Mapping[str, Any],
-    ) -> CommodityEquityTransmissionDependencies:
-        return cls(
-            get_market_group_snapshot=resolve_optional_service_callable(
-                context,
-                "get_market_group_snapshot",
-            ),
-            commodity_symbols=context.get("COMMODITY_SYMBOLS", ()),
-            search_markets=resolve_optional_service_callable(
-                context,
-                "search_markets",
-            ),
-            application=context.get("app"),
-            utc_now_iso=resolve_service_callable(
-                context,
-                "utc_now_iso",
-            ),
-        )
 
     @property
     def logger(self) -> Any:
@@ -343,10 +318,9 @@ def _build_chain(
 
 
 def get_commodity_equity_transmission_snapshot(
-    ctx: Mapping[str, Any],
+    dependencies: CommodityEquityTransmissionDependencies,
     limit: int = 8,
 ) -> Dict[str, Any]:
-    dependencies = CommodityEquityTransmissionDependencies.from_context(ctx)
     rows = _commodity_rows(dependencies)
     commodity_ids = []
     for spec in CHAIN_SPECS:

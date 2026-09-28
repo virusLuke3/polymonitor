@@ -18,6 +18,7 @@ class FinanceRuntimePanelDependencies:
     defi_token_watch_snapshot: Callable[..., PanelPayload]
     market_atlas_snapshot: Callable[..., PanelPayload]
     equity_event_command_snapshot: Callable[..., PanelPayload]
+    commodity_equity_transmission_snapshot: Callable[..., PanelPayload]
     onchain_tradfi_perp_radar_snapshot: Callable[..., PanelPayload]
     liquidity_regime_snapshot: Callable[..., PanelPayload]
 
@@ -32,6 +33,9 @@ class FinanceRuntimePanelDependencies:
             defi_token_watch_snapshot=resolve_route_callable(context, "get_defi_token_watch_snapshot"),
             market_atlas_snapshot=resolve_route_callable(context, "get_finance_market_atlas_snapshot"),
             equity_event_command_snapshot=resolve_route_callable(context, "get_equity_event_command_snapshot"),
+            commodity_equity_transmission_snapshot=resolve_route_callable(
+                context, "get_commodity_equity_transmission_snapshot"
+            ),
             onchain_tradfi_perp_radar_snapshot=resolve_route_callable(
                     context,
                     "get_onchain_tradfi_perp_radar_snapshot",

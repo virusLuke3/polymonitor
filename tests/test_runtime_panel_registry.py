@@ -52,6 +52,7 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "get_inflation_nowcast_snapshot": lambda: {"items": []},
         "get_alpha_signal_snapshot": lambda limit=8: {"limit": limit},
         "get_crypto_funding_watch_snapshot": lambda limit=16: {"limit": limit},
+        "get_commodity_equity_transmission_snapshot": lambda limit=8: {"limit": limit},
         "get_cpi_release_calendar_snapshot": lambda limit=8: {"limit": limit},
         "get_cpi_release_command_center_snapshot": lambda limit=36: {"limit": limit},
         "get_cpi_components_pressure_registry_snapshot": lambda limit=48: {"limit": limit},
@@ -93,6 +94,12 @@ def test_runtime_panel_blueprint_registers_all_routes():
         assert panel.route in registered_routes
 
     client = app.test_client()
+    commodity_response = client.get(
+        "/runtime/finance/commodity-equity-transmission?limit=3",
+        headers={"X-PolyData-Telegram-Publisher": "1"},
+    )
+    assert commodity_response.status_code == 200
+    assert commodity_response.get_json()["limit"] == 3
     map_response = client.get("/runtime/world/natural-hazards/map?source=usgs&zoom=2")
     assert map_response.status_code == 200
     assert map_response.headers["Cache-Control"].startswith("public, max-age=30")

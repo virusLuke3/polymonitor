@@ -18,6 +18,7 @@ from api.services.natural_hazards.service import NaturalHazardDependencies
 from api.services import (
     address_service,
     bootstrap_service,
+    commodity_equity_transmission_service,
     cpi_release_calendar_service,
     energy_gasoline_shock_service,
     f1_runtime_service,
@@ -244,6 +245,17 @@ def bind_services(runtime: ServiceRuntime) -> dict:
         ),
         "get_equity_event_command_snapshot": lambda limit=12: finance_panels_service.get_equity_event_command_snapshot(
             runtime.finance_panels_context, limit=limit
+        ),
+        "get_commodity_equity_transmission_snapshot": lambda limit=8: (
+            commodity_equity_transmission_service.get_commodity_equity_transmission_snapshot(
+                commodity_equity_transmission_service.CommodityEquityTransmissionDependencies(
+                    get_market_group_snapshot=runtime._bindings["get_market_group_snapshot"],
+                    commodity_symbols=COMMODITY_SYMBOLS,
+                    search_markets=runtime._bindings["search_markets"],
+                    application=runtime.app,
+                    utc_now_iso=utc_now_iso,
+                ), limit=limit,
+            )
         ),
         "get_onchain_tradfi_perp_radar_snapshot": lambda limit=12: (
             finance_panels_service.get_onchain_tradfi_perp_radar_snapshot(runtime.finance_panels_context, limit=limit)
@@ -1016,6 +1028,7 @@ def build_blueprints(runtime: ServiceRuntime):
                 "get_tech_panel_snapshot",
                 "get_finance_market_atlas_snapshot",
                 "get_equity_event_command_snapshot",
+                "get_commodity_equity_transmission_snapshot",
                 "get_onchain_tradfi_perp_radar_snapshot",
                 "get_finance_liquidity_regime_snapshot",
                 "get_global_transport_shipping_snapshot",
