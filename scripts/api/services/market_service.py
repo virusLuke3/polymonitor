@@ -798,7 +798,7 @@ def _workspace_health(
         issues.append("oracle-market-id-mismatch")
     if group_status == "outcome-missing":
         issues.append("group-selected-outcome-missing")
-    payload = {
+    return {
         "marketId": market_id,
         "priceStatus": price_status,
         "chartStatus": chart_status,

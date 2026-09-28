@@ -19,6 +19,12 @@ acquisition is installed separately from the `market-data` repository.
 When ClickHouse lives on XUE, the existing local XUE tunnel supplies port
 18123. `polydata-clickhouse-gcp-tunnel.service` forwards that port to GCP
 independently of the PostgreSQL tunnel; install this unit on the tunnel host.
+Use `POLYDATA_CLICKHOUSE_GCP_SSH_TARGET` to select a private-network SSH target
+without changing other tunnels. Set `POLYDATA_CLICKHOUSE_GCP_HOST_KEY_ALIAS`
+to the existing trusted hostname when both addresses identify the same host.
+The SSH server should enable `ClientAliveInterval 30` and
+`ClientAliveCountMax 3` for the tunnel user so dead connections release their
+forwarded ports. Validate changes with `sshd -t` before reloading SSH.
 
 Only units reachable from `polydata-gcp.target` are installed by a backend
 release. Shipping a shared Python module does not start its CLI or grant it

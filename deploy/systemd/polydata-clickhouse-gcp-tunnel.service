@@ -7,8 +7,8 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecCondition=/bin/bash -lc 'test -n "$${POLYDATA_GCP_TUNNEL_SSH_TARGET:-$${POLYDATA_GCP_SSH_TARGET:-}}"'
-ExecStart=/bin/bash -lc 'target="$${POLYDATA_GCP_TUNNEL_SSH_TARGET:-$${POLYDATA_GCP_SSH_TARGET:-}}"; identity="$${POLYDATA_GCP_TUNNEL_SSH_IDENTITY_FILE:-}"; args=(-N -T -R "127.0.0.1:$${POLYDATA_REMOTE_CLICKHOUSE_HTTP_PORT:-18123}:127.0.0.1:$${POLYDATA_LOCAL_CLICKHOUSE_HTTP_PORT:-18123}" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3); if [[ -n "$$identity" ]]; then args+=(-i "$$identity" -o IdentitiesOnly=yes); fi; exec /usr/bin/ssh "$${args[@]}" "$$target"'
+ExecCondition=/bin/bash -lc 'test -n "$${POLYDATA_CLICKHOUSE_GCP_SSH_TARGET:-$${POLYDATA_GCP_TUNNEL_SSH_TARGET:-$${POLYDATA_GCP_SSH_TARGET:-}}}"'
+ExecStart=/bin/bash -lc 'target="$${POLYDATA_CLICKHOUSE_GCP_SSH_TARGET:-$${POLYDATA_GCP_TUNNEL_SSH_TARGET:-$${POLYDATA_GCP_SSH_TARGET:-}}}"; identity="$${POLYDATA_GCP_TUNNEL_SSH_IDENTITY_FILE:-}"; args=(-N -T -R "127.0.0.1:$${POLYDATA_REMOTE_CLICKHOUSE_HTTP_PORT:-18123}:127.0.0.1:$${POLYDATA_LOCAL_CLICKHOUSE_HTTP_PORT:-18123}" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3); if [[ -n "$$identity" ]]; then args+=(-i "$$identity" -o IdentitiesOnly=yes); fi; if [[ -n "$${POLYDATA_CLICKHOUSE_GCP_HOST_KEY_ALIAS:-}" ]]; then args+=(-o "HostKeyAlias=$$POLYDATA_CLICKHOUSE_GCP_HOST_KEY_ALIAS"); fi; exec /usr/bin/ssh "$${args[@]}" "$$target"'
 Restart=always
 RestartSec=8
 StandardOutput=journal

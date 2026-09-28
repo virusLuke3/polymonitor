@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import Mock, patch
 
 
-from api.services import clickhouse_orderfilled_service, market_workspace_cache_service
+from api.services import clickhouse_orderfilled_service, market_service, market_workspace_cache_service
 from api.context import RuntimeResources
 
 
@@ -25,6 +25,29 @@ class _SnapshotStore:
     def set(self, namespace, cache_key, payload, ttl_seconds):
         self.writes.append((namespace, cache_key, payload, ttl_seconds))
         return True
+
+
+def test_workspace_evidence_preserves_missing_price_and_oracle_identity_mismatch() -> None:
+    identity = {"conditionId": "0xabc"}
+    oracle = {"marketId": 8, "timeline": []}
+    health = market_service._workspace_health(
+        market_id=7, identity=identity, price=None, chart=None,
+        oracle_payload=oracle, diagnostics=None, group=None,
+        selected_outcome=None, serving_source="postgres",
+    )
+    evidence = market_service._workspace_evidence(
+        market_id=7, identity=identity, price=None, chart=None, trades=[],
+        oracle_payload=oracle, group=None, health=health,
+        serving_source="postgres", serving_updated_at=None,
+        generated_at="2026-09-28T00:00:00Z",
+    )
+
+    assert health["level"] == "critical"
+    claims = {claim["id"]: claim for claim in evidence["claims"]}
+    assert claims["price"]["status"] == "missing"
+    assert claims["price"]["recordCount"] == 0
+    assert claims["oracle"]["status"] == "mismatch"
+    assert evidence["issues"] == ["oracle-market-id-mismatch"]
 
 
 def test_market_orderfilled_keeps_missing_block_timestamp_unknown() -> None:
