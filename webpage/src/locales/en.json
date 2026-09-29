@@ -872,7 +872,7 @@
   "marketInsights.unknownTime": "TIME UNKNOWN",
   "marketInsights.updated": "Generated",
   "marketInsights.scope": "Sampled markets",
-  "marketInsights.noSnapshot": "No valid analysis snapshot is available. The panel will retry through its shared refresh cycle.",
+  "marketInsights.noSnapshot": "No valid analysis snapshot is available. The panel will retry automatically.",
   "marketInsights.rulesNotice": "AI generation is unavailable. This snapshot contains rules-based observations only.",
   "marketInsights.staleNotice": "This snapshot has expired. Its observations may no longer describe the market.",
   "marketInsights.evidence": "Evidence",

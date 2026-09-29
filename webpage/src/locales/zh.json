@@ -872,7 +872,7 @@
   "marketInsights.unknownTime": "时间未知",
   "marketInsights.updated": "生成于",
   "marketInsights.scope": "市场样本",
-  "marketInsights.noSnapshot": "暂无有效分析快照，面板会按刷新策略重试。",
+  "marketInsights.noSnapshot": "暂无有效分析快照，面板将自动重试。",
   "marketInsights.rulesNotice": "AI 生成暂不可用，当前快照仅包含规则计算的观察结果。",
   "marketInsights.staleNotice": "快照已过期，其中的观察可能不再反映当前市场。",
   "marketInsights.evidence": "证据",
