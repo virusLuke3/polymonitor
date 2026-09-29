@@ -863,7 +863,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         get_market_by_id=get_market_by_id,
         detail_ttl=runtime.SETTINGS.workspace_detail_ttl_seconds,
         chart_ttl=runtime.SETTINGS.workspace_chart_ttl_seconds,
-        orderbook_ttl=runtime.SETTINGS.workspace_orderbook_ttl_seconds,
         flow_ttl=runtime.SETTINGS.workspace_flow_ttl_seconds,
     )
     runtime.natural_hazard = NaturalHazardDependencies.from_context(runtime.natural_hazards_context)

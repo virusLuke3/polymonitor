@@ -147,7 +147,7 @@ def test_market_price_series_omits_rows_without_real_block_timestamp() -> None:
     assert "addSeconds(anchor_time" not in sql
 
 
-def test_closed_market_replaces_stale_orderbook_with_authoritative_empty_payload() -> None:
+def test_closed_market_ignores_old_orderbook_snapshots() -> None:
     stale_lob = {
         "marketId": 3712655,
         "bookStatus": "ok",
@@ -193,11 +193,21 @@ def test_closed_market_replaces_stale_orderbook_with_authoritative_empty_payload
 
     assert actual["bookStatus"] == "closed"
     dependencies.build_lob.assert_not_called()
-    assert not market_workspace_cache_service._lob_has_levels(actual)
-    assert runtime_writes
-    assert redis_writes
-    assert snapshot_store.writes
-    assert not market_workspace_cache_service._lob_has_levels(snapshot_store.writes[-1][2])
+    assert actual["yes"]["bids"] == actual["yes"]["asks"] == []
+    assert not runtime_writes
+    assert not redis_writes
+    assert not snapshot_store.writes
+    # A live upstream empty book must also replace the historical local levels.
+    from dataclasses import replace
+
+    current = {"bookStatus": "warming", "yes": {"bids": [], "asks": []}}
+    live = replace(dependencies, get_market_by_id=lambda mid: {"id": mid}, build_lob=Mock(return_value=current))
+    with patch.object(
+        market_workspace_cache_service.api_cache, "get_cached_runtime_payload", return_value=stale_lob
+    ) as cached:
+        assert market_workspace_cache_service.get_market_orderbook_payload(live, 3712655)["bookStatus"] == "warming"
+        cached.assert_not_called()
+        live.build_lob.assert_called_once_with(3712655)
 
 
 def test_detail_builder_does_not_read_chart_or_trades():

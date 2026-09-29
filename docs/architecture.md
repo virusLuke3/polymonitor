@@ -25,7 +25,8 @@ market-data acquisition -> PostgreSQL / ClickHouse
 
 `quant/`, the old standalone Quant entrypoints and their systemd jobs have
 been retired. LOB consumes the separate market-data live-book API; the old
-Quant snapshot endpoint returns HTTP 410. Archive history belongs to market-data.
+Quant snapshot endpoint returns HTTP 410. Archive history belongs to market-data. Live LOB bypasses consumer SQLite/Redis
+snapshots so cached heartbeats and old levels cannot override upstream state.
 Weather reads canonical markets from the database. Consumer
 Python imports do not depend on the removed `quant` package or a sibling
 `market_data` installation. Upstream availability and freshness still require

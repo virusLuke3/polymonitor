@@ -158,7 +158,6 @@ class ApiSettings:
     market_selection: MarketSelectionSettings
     workspace_detail_ttl_seconds: int
     workspace_chart_ttl_seconds: int
-    workspace_orderbook_ttl_seconds: int
     workspace_flow_ttl_seconds: int
     database: DatabaseSettings
     deploy_role: str
@@ -327,7 +326,6 @@ def load_api_settings() -> ApiSettings:
         ),
         workspace_detail_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_DETAIL_TTL_SECONDS", 120),
         workspace_chart_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_CHART_TTL_SECONDS", 90),
-        workspace_orderbook_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_ORDERBOOK_TTL_SECONDS", 60),
         workspace_flow_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_FLOW_TTL_SECONDS", 8),
         database=DatabaseSettings.from_environment(),
         deploy_role=deploy_role,

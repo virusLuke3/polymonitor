@@ -26,9 +26,7 @@ class MarketWorkspaceCacheDependencies:
     utc_now_iso: Callable[..., str]
     detail_ttl: int = 120
     chart_ttl: int = 90
-    orderbook_ttl: int = 60
     flow_ttl: int = 8
-
 
 
 def _utc_now_iso() -> str:
@@ -67,45 +65,11 @@ def _with_cache_meta(payload: Any, layer: str, mode: str, cache_key: str) -> Any
         copied["marketWorkspaceCache"] = _layer_meta(layer, mode, cache_key)
         if mode not in {"live-build", "refresh", "closed"}:
             copied["marketWorkspaceCache"]["generatedAt"] = previous.get("generatedAt") or copied.get("generatedAt")
-        if mode == "stale-hit" and layer == "flow":
-            copied["status"] = "stale"
+        if mode == "stale-hit":
+            copied["stale"] = True
+            if layer == "flow":
+                copied["status"] = "stale"
     return copied
-
-
-def _book_side_has_levels(side: Any) -> bool:
-    return isinstance(side, dict) and bool(side.get("bids") or side.get("asks"))
-
-
-def _lob_has_levels(payload: Any) -> bool:
-    return isinstance(payload, dict) and (_book_side_has_levels(payload.get("yes")) or _book_side_has_levels(payload.get("no")))
-
-
-def _chart_has_points(payload: Any) -> bool:
-    return isinstance(payload, dict) and isinstance(payload.get("points"), list) and bool(payload.get("points"))
-
-
-def _flow_has_rows(payload: Any) -> bool:
-    if isinstance(payload, dict):
-        rows = payload.get("items")
-    else:
-        rows = payload
-    return isinstance(rows, list) and bool(rows)
-
-
-def _detail_is_usable(payload: Any) -> bool:
-    return isinstance(payload, dict) and not payload.get("_status") and isinstance(payload.get("market"), dict)
-
-
-def _is_empty_replacement(layer: str, payload: Any) -> bool:
-    if layer == "detail":
-        return not _detail_is_usable(payload)
-    if layer == "chart":
-        return not _chart_has_points(payload)
-    if layer == "orderbook":
-        return not _lob_has_levels(payload)
-    if layer == "flow":
-        return not _flow_has_rows(payload)
-    return payload in (None, {}, [])
 
 
 def _read_redis(
@@ -184,7 +148,11 @@ def _claim_build(dependencies: MarketWorkspaceCacheDependencies, key: str):
     """Bound running builds; Redis excludes duplicate work across API workers."""
     resources = dependencies.resources
     with resources.workspace_lock:
-        if resources.stopped.is_set() or key in resources.workspace_refreshing or not resources.workspace_slots.acquire(blocking=False):
+        if (
+            resources.stopped.is_set()
+            or key in resources.workspace_refreshing
+            or not resources.workspace_slots.acquire(blocking=False)
+        ):
             return False, None
         resources.workspace_refreshing.add(key)
     lease = None
@@ -222,7 +190,6 @@ def _refresh_async(
     cache_key: str,
     builder: Callable[[], Any],
     ttl_seconds: int,
-    stale_payload: Any,
 ) -> None:
     dependencies = context
     refresh_key = f"{namespace}:{cache_key}"
@@ -233,13 +200,6 @@ def _refresh_async(
     def refresh() -> None:
         try:
             payload = builder()
-            if layer != "flow" and _is_empty_replacement(layer, payload) and not _is_empty_replacement(layer, stale_payload):
-                dependencies.application.logger.warning(
-                    "market-workspace-cache refresh skipped empty layer=%s key=%s",
-                    layer,
-                    cache_key,
-                )
-                return
             _write_cache(
                 dependencies,
                 namespace,
@@ -310,16 +270,24 @@ def _cached_layer(
             cache_key,
         )
         _refresh_async(
-            dependencies, layer=layer, namespace=namespace, cache_key=cache_key,
-            builder=builder, ttl_seconds=ttl_seconds, stale_payload=stale_payload,
+            dependencies,
+            layer=layer,
+            namespace=namespace,
+            cache_key=cache_key,
+            builder=builder,
+            ttl_seconds=ttl_seconds,
         )
         return {"payload": _with_cache_meta(stale_payload, layer, "stale-hit", cache_key), "mode": "stale-hit"}
 
     refresh_key = f"{namespace}:{cache_key}"
     if background_only:
         _refresh_async(
-            dependencies, layer=layer, namespace=namespace, cache_key=cache_key,
-            builder=builder, ttl_seconds=ttl_seconds, stale_payload=_fallback_payload(layer, cache_key),
+            dependencies,
+            layer=layer,
+            namespace=namespace,
+            cache_key=cache_key,
+            builder=builder,
+            ttl_seconds=ttl_seconds,
         )
         return {"payload": _fallback_payload(layer, cache_key), "mode": "warming"}
     claimed, lease = _claim_build(dependencies, refresh_key)
@@ -331,12 +299,13 @@ def _cached_layer(
         payload = builder()
         mode = "live-build"
         wrapped = _with_cache_meta(payload, layer, mode, cache_key)
-        ttl = ttl_seconds if not _is_empty_replacement(layer, payload) else min(ttl_seconds, 10)
-        _write_cache(dependencies, namespace, cache_key, wrapped, ttl)
+        _write_cache(dependencies, namespace, cache_key, wrapped, ttl_seconds)
         return {"payload": _copy_payload(wrapped), "mode": mode}
     except Exception:
         dependencies.application.logger.exception(
-            "market-workspace-cache live-build failed layer=%s key=%s", layer, cache_key,
+            "market-workspace-cache live-build failed layer=%s key=%s",
+            layer,
+            cache_key,
         )
         payload = _fallback_payload(layer, cache_key)
         payload["status"] = "unavailable"
@@ -388,48 +357,24 @@ def _market_is_closed(
         return False
     if not isinstance(market, Mapping):
         return False
-    if any(
-        _truthy_flag(market.get(key))
-        for key in ("is_trading_closed", "gamma_closed", "is_final")
-    ):
+    if any(_truthy_flag(market.get(key)) for key in ("is_trading_closed", "gamma_closed", "is_final")):
         return True
     statuses = " ".join(
-        str(market.get(key) or "").strip().lower().replace("_", "-")
-        for key in ("status", "completion_status")
+        str(market.get(key) or "").strip().lower().replace("_", "-") for key in ("status", "completion_status")
     )
     return any(
         token in statuses
-        for token in ("closed", "settled", "resolved", "final", "cancelled", "expired", "awaiting-oracle", "awaiting oracle")
+        for token in (
+            "closed",
+            "settled",
+            "resolved",
+            "final",
+            "cancelled",
+            "expired",
+            "awaiting-oracle",
+            "awaiting oracle",
+        )
     )
-
-
-def _closed_orderbook_result(
-    context: MarketWorkspaceCacheDependencies,
-    *,
-    market_id: int,
-    cache_key: str,
-) -> Dict[str, Any]:
-    dependencies = context
-    namespace = _namespace("orderbook")
-    payload = _fallback_payload("orderbook", cache_key)
-    payload.update(
-        {
-            "marketId": int(market_id),
-            "localMarketId": int(market_id),
-            "bookStatus": "closed",
-            "source": "market-lifecycle",
-            "fallbackReason": "Trading is closed; live CLOB levels are not applicable.",
-        }
-    )
-    wrapped = _with_cache_meta(payload, "orderbook", "closed", cache_key)
-    _write_cache(
-        dependencies,
-        namespace,
-        cache_key,
-        wrapped,
-        dependencies.orderbook_ttl,
-    )
-    return {"payload": _copy_payload(wrapped), "mode": "closed"}
 
 
 def get_market_detail_payload(
@@ -446,7 +391,11 @@ def get_market_detail_payload(
         builder=lambda: dependencies.build_detail(market_id),
     )
     payload = result["payload"]
-    return payload if isinstance(payload, dict) else {"error": "Invalid detail cache payload", "marketId": market_id, "_status": 502}
+    return (
+        payload
+        if isinstance(payload, dict)
+        else {"error": "Invalid detail cache payload", "marketId": market_id, "_status": 502}
+    )
 
 
 def get_market_chart_payload(
@@ -486,7 +435,13 @@ def get_market_chart_payload(
         payload.setdefault("range", normalized_range)
         payload.setdefault("interval", normalized_interval)
         return payload
-    return {"marketId": market_id, "localMarketId": market_id, "range": normalized_range, "interval": normalized_interval, "points": []}
+    return {
+        "marketId": market_id,
+        "localMarketId": market_id,
+        "range": normalized_range,
+        "interval": normalized_interval,
+        "points": [],
+    }
 
 
 def get_market_flow_payload(
@@ -562,37 +517,25 @@ def get_market_flow_rows(
 
 
 def get_market_orderbook_payload(
-    context: MarketWorkspaceCacheDependencies,
+    dependencies: MarketWorkspaceCacheDependencies,
     market_id: int,
 ) -> Dict[str, Any]:
-    dependencies = context
-    key = _cache_key({"marketId": int(market_id), "layer": "orderbook", "v": 1})
-    result = (
-        _closed_orderbook_result(
-            dependencies,
-            market_id=market_id,
-            cache_key=key,
+    """The upstream owns live book caching and continuity; never replay a local snapshot."""
+    if _market_is_closed(dependencies, market_id):
+        payload = _fallback_payload("orderbook", "")
+        payload.update(
+            bookStatus="closed",
+            source="market-lifecycle",
+            fallbackReason="Trading is closed; live CLOB levels are not applicable.",
         )
-        if _market_is_closed(dependencies, market_id)
-        else _cached_layer(
-            dependencies,
-            layer="orderbook",
-            cache_key=key,
-            ttl_seconds=dependencies.orderbook_ttl,
-            builder=lambda: dependencies.build_lob(
-                market_id,
-            ),
-        )
-    )
-    payload = result["payload"]
-    if isinstance(payload, dict):
-        payload.setdefault("marketId", market_id)
-        payload.setdefault("localMarketId", market_id)
-        return payload
-    fallback = _fallback_payload("orderbook", key)
-    fallback["marketId"] = market_id
-    fallback["localMarketId"] = market_id
-    return fallback
+    else:
+        payload = dependencies.build_lob(market_id)
+        if not isinstance(payload, dict):
+            payload = _fallback_payload("orderbook", "")
+            payload["bookStatus"] = "unavailable"
+    payload.setdefault("marketId", market_id)
+    payload.setdefault("localMarketId", market_id)
+    return payload
 
 
 def get_market_workspace_payload(
@@ -612,7 +555,7 @@ def get_market_workspace_payload(
         "detail": (detail_result.get("marketWorkspaceCache") or {}),
         "chart": (chart.get("marketWorkspaceCache") or {}),
         "flow": (flow.get("marketWorkspaceCache") or {}),
-        "orderbook": (orderbook.get("marketWorkspaceCache") or {}),
+        "orderbook": {"mode": "upstream", "status": orderbook.get("bookStatus")},
     }
     payload["marketWorkspaceCache"] = {
         "mode": "layered",
@@ -639,7 +582,6 @@ def get_market_focus_tile_payload(
             "v": 5,
         }
     )
-    orderbook_key = _cache_key({"marketId": int(market_id), "layer": "orderbook", "v": 1})
 
     detail_result = _cached_layer(
         dependencies,
@@ -664,27 +606,11 @@ def get_market_focus_tile_payload(
             interval="5m",
         ),
     )
-    orderbook_result = (
-        _closed_orderbook_result(
-            dependencies,
-            market_id=market_id,
-            cache_key=orderbook_key,
-        )
-        if _market_is_closed(dependencies, market_id)
-        else _cached_layer(
-            dependencies,
-            background_only=True,
-            layer="orderbook",
-            cache_key=orderbook_key,
-            ttl_seconds=dependencies.orderbook_ttl,
-            builder=lambda: dependencies.build_lob(
-                market_id,
-            ),
-        )
-    )
+    orderbook = get_market_orderbook_payload(dependencies, market_id)
 
-    chart = chart_result["payload"] if isinstance(chart_result["payload"], dict) else _fallback_payload("chart", chart_key)
-    orderbook = orderbook_result["payload"] if isinstance(orderbook_result["payload"], dict) else _fallback_payload("orderbook", orderbook_key)
+    chart = (
+        chart_result["payload"] if isinstance(chart_result["payload"], dict) else _fallback_payload("chart", chart_key)
+    )
     chart.setdefault("marketId", market_id)
     chart.setdefault("localMarketId", market_id)
     chart.setdefault("range", "1d")
@@ -700,7 +626,7 @@ def get_market_focus_tile_payload(
     payload["cacheLayers"] = {
         "detail": detail_result["mode"],
         "chart": chart_result["mode"],
-        "orderbook": orderbook_result["mode"],
+        "orderbook": "upstream",
     }
     modes = payload["cacheLayers"].values()
     payload["focusStatus"] = "unavailable" if "live-error" in modes else "warming" if "warming" in modes else "ready"
