@@ -86,7 +86,7 @@ try {
       });
       if (width !== 390) {
         await check('desktop: theme replacement remains primary after its deadline', async () => {
-          await page.getByRole('combobox', { name: 'Basemap theme', exact: true }).selectOption('light');
+          await page.getByRole('combobox', { name: 'Basemap theme', exact: true }).selectOption('positron');
           await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 45_000 });
           await page.waitForTimeout(11_000);
           await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');
