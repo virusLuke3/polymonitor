@@ -17,7 +17,7 @@ function source(provider: string, nativeId: string) {
   return [{ provider, nativeId, observedAt: GENERATED_AT, freshness: 'live', status: 'ok' }];
 }
 
-function hazard(overrides: Json): Json {
+export function hazard(overrides: Json): Json {
   const id = String(overrides.id);
   return {
     id,
@@ -167,7 +167,7 @@ const minimalStyle = {
   ],
 };
 
-function mapResponse(key: string, events: Json[], status = 'ok') {
+export function mapResponse(key: string, events: Json[], status = 'ok') {
   return {
     schemaVersion: 'natural-hazards-map.v1', generatedAt: GENERATED_AT, events,
     sources: [{
@@ -189,6 +189,11 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 
 export async function installFixtures(page: Page, climateUnavailable = false) {
   await installLocalAssets(page);
+  await page.addInitScript(() => {
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      localStorage.setItem('polydata:panel-library-open:v1', JSON.stringify(innerWidth > 720));
+    }
+  });
   await page.route('https://tiles.openfreemap.org/styles/**', (route) => fulfillJson(route, minimalStyle));
   await page.route('https://basemaps.cartocdn.com/gl/**', (route) => fulfillJson(route, minimalStyle));
   await page.route('**/wm-api/**', async (route) => {

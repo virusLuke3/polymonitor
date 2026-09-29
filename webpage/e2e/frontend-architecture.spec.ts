@@ -145,6 +145,9 @@ for (const width of [1440, 390]) {
     await expect(page.locator('#wm-event-inspector-title')).toBeFocused();
     await visual(page, `map-selected-${width}.png`);
     await page.getByRole('button', { name: 'Close event details' }).click();
+    // Returning from a report now restores the retained reading list. Close
+    // it explicitly before characterizing the map toggle's keyboard focus.
+    await page.getByRole('button', { name: 'Close all events drawer', exact: true }).click();
     await page.getByRole('button', { name: /^All events/i }).focus();
     await visual(page, `map-focus-${width}.png`);
     await page.unrouteAll({ behavior: 'wait' });

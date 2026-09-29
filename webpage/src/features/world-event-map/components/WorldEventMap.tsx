@@ -1,3 +1,5 @@
+import type { ClusterSelection, ScreenBox } from '../renderer/layerFactories/eventClusters';
+import { observeMapOcclusion } from '../renderer/mapOcclusion';
 import type { MapPresentationCounts } from '../renderer/eventDisclosure';
 import { useWeatherRadar } from '../data/useWeatherRadar';
 import { mapText } from '@/locales/map';
@@ -46,6 +48,7 @@ export type WorldEventMapProps = {
   onAviationClose?: () => void;
   onCountryChange?: (countryCode: string | null) => void;
   height?: number;
+  onWeatherPreset?: () => void;
 };
 
 export function WorldEventMap({
@@ -60,19 +63,24 @@ export function WorldEventMap({
   onAviationClose,
   onCountryChange,
   height = 620,
+  onWeatherPreset,
 }: WorldEventMapProps) {
   const { locale } = useI18n();
   const mt = (text: string) => mapText(locale, text);
   const [presentation, setPresentation] = useState<MapPresentationCounts | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const legendToggleRef = useRef<HTMLButtonElement>(null);
+  const focusToggleRef = useRef<HTMLButtonElement>(null);
   const [legendOpen, setLegendOpen] = useState(false);
   const [rendererKind, setRendererKind] = useState<'webgl' | 'svg'>('webgl');
   const [mapVisible, setMapVisible] = useState(true);
   const radar = useWeatherRadar(mapVisible && rendererKind === 'webgl' && state.activeLayerIds.includes('weather-radar'));
   const radarRef = useRef(radar); radarRef.current = radar;
   const [radarTiles, setRadarTiles] = useState<'off' | 'loading' | 'ready' | 'error'>('off');
-  const [clusterIds, setClusterIds] = useState<string[] | null>(null);
+  const [clusterSelection, setClusterSelection] = useState<ClusterSelection | null>(null);
   const languageRef = useRef(locale);
   languageRef.current = locale;
+  const occlusionsRef = useRef<ScreenBox[]>([]);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
   const stateRef = useRef(state);
@@ -86,10 +94,37 @@ export function WorldEventMap({
     position?: MapHoverPosition;
     context: boolean;
   } | null>(null);
-  const selectedEvent = useMemo(
-    () => events.find((event) => event.id === state.selectedEventId) || null,
-    [events, state.selectedEventId],
-  );
+  const retainedSelection = useRef<GeoEvent | null>(null);
+  const [listRequest, setListRequest] = useState<{ eventId: string } | null>(null);
+  const currentSelection = events.find(event => event.id === state.selectedEventId);
+  if (!state.selectedEventId) retainedSelection.current = null;
+  else if (currentSelection) retainedSelection.current = currentSelection;
+  const selectedEvent = currentSelection || (retainedSelection.current?.id === state.selectedEventId ? retainedSelection.current : null);
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const occlusion = observeMapOcclusion(host, boxes => { occlusionsRef.current = boxes; rendererRef.current?.setOcclusions?.(boxes); });
+    return () => occlusion.destroy();
+  }, [rendererKind]);
+  useEffect(() => {
+    const stage = hostRef.current?.closest('.wm-map-stage');
+    stage?.classList.toggle('is-map-focused', expanded);
+    rendererRef.current?.resize();
+    return () => stage?.classList.remove('is-map-focused');
+  }, [expanded]);
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const radar = hostRef.current?.parentElement?.querySelector<HTMLDetailsElement>('.wm-map-radar-status[open]');
+      if (legendOpen) { event.preventDefault(); event.stopImmediatePropagation(); setLegendOpen(false); legendToggleRef.current?.focus(); }
+      else if (radar) { event.preventDefault(); event.stopImmediatePropagation(); radar.open = false; radar.querySelector('summary')?.focus(); }
+      else if (expanded && !selectedEvent && !hostRef.current?.parentElement?.querySelector('.wm-world-event-list.is-open')) {
+        event.preventDefault(); setExpanded(false); focusToggleRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', close, true);
+    return () => document.removeEventListener('keydown', close, true);
+  }, [legendOpen, expanded, selectedEvent]);
   const legendItems = useMemo(
     () => {
       const activeLayerIds = new Set(state.activeLayerIds);
@@ -232,7 +267,7 @@ export function WorldEventMap({
         onPresentationChange: counts => { if (isCurrent()) setPresentation(counts); },
         onRadarStateChange: status => { if (isCurrent()) setRadarTiles(status); },
         onCameraChange: (camera) => { if (isCurrent()) callbackRef.current.onCameraChange(camera); },
-        onClusterSelect: (ids) => { if (isCurrent()) setClusterIds(ids); },
+        onClusterSelect: (ids) => { if (isCurrent()) setClusterSelection(ids); },
         onEventSelect: (eventId) => { if (isCurrent()) callbackRef.current.onEventSelect(eventId); },
         onCountrySelect: (country, position) => {
           if (isCurrent()) setCountryTarget(country ? { country, position, context: false } : null);
@@ -265,6 +300,7 @@ export function WorldEventMap({
         await renderer.mount(host, callbacks);
         if (!isCurrent()) return;
         clearRendererDeadline();
+        renderer.setOcclusions?.(occlusionsRef.current);
         host.dataset.mapRendererReady = kind;
         updatePauseState();
       } catch (error) {
@@ -431,7 +467,7 @@ export function WorldEventMap({
   return (
     <div
       className={`wm-weather-deck-map map-ready ${events.length ? 'has-screen-points' : 'no-screen-points'} map-state-${basemapState}`}
-      style={{ height: `${height}px`, '--wm-map-ocean': state.basemapTheme === 'positron' ? '#e6e9eb' : '#1b1b1d' }}
+      style={{ height: expanded ? '100%' : `${height}px`, '--wm-map-ocean': state.basemapTheme === 'positron' ? '#e6e9eb' : '#1b1b1d' }}
     >
       <div
         ref={hostRef}
@@ -442,20 +478,28 @@ export function WorldEventMap({
         tabIndex={0}
         aria-label="World event map. Use pointer or keyboard controls to explore active real-world events."
       />
+      <button ref={focusToggleRef} type="button" className="wm-map-focus-toggle" aria-pressed={expanded}
+        onClick={() => setExpanded(value => !value)} aria-label={locale === 'zh' ? '展开或收起地图' : 'Expand or restore map'}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d={expanded ? 'M3 9h6V3m12 6h-6V3M3 15h6v6m12-6h-6v6' : 'M9 3H3v6m12-6h6v6M3 15v6h6m6 0h6v-6'} /></svg></button>
       {selectedEvent ? (
         <EventInspector
           key={selectedEvent.id}
           event={selectedEvent}
+          outsideFilters={!currentSelection}
           onClose={() => onEventSelect(null)}
+          onBackToEvents={() => { setListRequest({ eventId: selectedEvent.id }); onEventSelect(null); }}
           onOpenMarket={onOpenMarket}
           returnFocusTarget={hostRef.current}
         />
       ) : null}
       <EventList
+        openRequest={listRequest}
         presentation={presentation}
+        detailVisible={Boolean(selectedEvent)}
+        onCloseDetails={() => onEventSelect(null)}
+        onHover={id => rendererRef.current?.setHoveredEvent?.(id)}
         events={events}
-        clusterIds={clusterIds}
-        onClearCluster={() => setClusterIds(null)}
+        clusterSelection={clusterSelection}
+        onClearCluster={() => setClusterSelection(null)}
         selectedEventId={state.selectedEventId}
         onSelect={onEventSelect}
       />
@@ -497,18 +541,28 @@ export function WorldEventMap({
             onZoomToAircraft={() => onCameraChange({ center: state.center, zoom: Math.max(2.5, state.zoom) })}
           />
         ) : null}
-      {state.activeLayerIds.includes('weather-radar') ? <div className="wm-map-radar-status" role="status">
-        <a href="https://www.rainviewer.com/" target="_blank" rel="noreferrer">© RainViewer</a>
-        <span>{locale === 'zh' ? '最新雷达合成帧' : 'Latest radar composite'} · {radar.frame ? new Date(radar.frame.time * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC') : '—'}</span>
-        <span>{locale === 'zh' ? '清单 / 瓦片' : 'Manifest / tiles'}: {radar.status} / {rendererKind === 'svg' ? 'unavailable (SVG)' : radarTiles}</span>
-        <span>{locale === 'zh' ? '覆盖不完整；透明不代表无降水。灰暗遮罩表示无雷达覆盖。' : 'Partial coverage; transparent does not mean dry. Shaded areas lack radar coverage.'}</span>
-        {radar.error ? <span>{radar.error}</span> : null}
-      </div> : null}
-      <button type="button" className="wm-map-legend-toggle" aria-expanded={legendOpen} onClick={() => setLegendOpen(value => !value)}>{mt('Legend')}</button>
+      <details className="wm-map-radar-status">
+        <summary>{locale === 'zh' ? '雷达' : 'Radar'} · {!state.activeLayerIds.includes('weather-radar') ? mt('Off')
+          : rendererKind === 'svg' ? (locale === 'zh' ? 'SVG 不支持' : 'Unavailable in SVG')
+          : radar.frame ? `${new Date(radar.frame.time * 1000).toISOString().slice(11, 16)} UTC${radar.status === 'stale' ? ' · stale' : radarTiles === 'error' ? ' · error' : radarTiles === 'loading' ? ' · loading' : ''}` : radar.status}</summary>
+        <div>
+          <a href="https://www.rainviewer.com/" target="_blank" rel="noreferrer">© RainViewer</a>
+          <span>{locale === 'zh' ? '最新雷达合成帧' : 'Latest radar composite'} · {radar.frame ? new Date(radar.frame.time * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC') : '—'}</span>
+          <span>{locale === 'zh' ? '清单 / 瓦片' : 'Manifest / tiles'}: {radar.status} / {rendererKind === 'svg' ? 'unavailable (SVG)' : radarTiles}</span>
+          <span>{locale === 'zh' ? '覆盖不完整；透明不代表无降水。灰暗遮罩表示无雷达覆盖。' : 'Partial coverage; transparent does not mean dry. Shaded areas lack radar coverage.'}</span>
+          {radar.error ? <span>{radar.error}</span> : null}
+          <span>{rendererKind === 'svg' ? 'SVG FALLBACK' : basemapState.replace(/-/g, ' ').toUpperCase()}</span>
+          {onWeatherPreset ? <button type="button" onClick={onWeatherPreset}>{locale === 'zh' ? '启用天气视图' : 'Enable weather view'}</button> : null}
+        </div>
+      </details>
+      <button ref={legendToggleRef} type="button" className="wm-map-legend-toggle" aria-controls="wm-map-legend" aria-expanded={legendOpen} onClick={() => setLegendOpen(value => !value)}>{mt('Legend')}</button>
       <div
+        id="wm-map-legend"
+        onWheel={event => event.stopPropagation()}
         className={`wm-weather-deck-legend ${legendOpen ? 'is-open' : ''}`}
         aria-label="Visible event types. Symbol shape identifies event type; color identifies severity."
       >
+        <h3>{locale === 'zh' ? '事件类型' : 'Event types'}</h3>
         <span className="wm-map-legend-group" aria-label="Visible event types">
           {legendItems.map((item) => (
             <span key={`${item.symbol}:${item.label}`}>
@@ -517,6 +571,7 @@ export function WorldEventMap({
             </span>
           ))}
         </span>
+        <h3>{locale === 'zh' ? '灾害等级' : 'Severity'}</h3>
         <span className="wm-map-legend-severity" aria-label="Severity colors">
           {state.severities.map((severity) => (
             <b key={severity} style={{ color: `rgb(${HAZARD_SEVERITY_COLORS[severity].slice(0, 3).join(",")})` }}>
@@ -524,6 +579,7 @@ export function WorldEventMap({
             </b>
           ))}
         </span>
+        <h3>{locale === 'zh' ? '观测、预测与数据状态' : 'Observation, forecast and data'}</h3>
         <span className="wm-map-legend-context" aria-label="Observation and coverage states">
           {legendContext.observed ? <b><i className="is-observed" />{mt('Observed')}</b> : null}
           {legendContext.forecast ? <b><i className="is-forecast" />{mt('Forecast')}</b> : null}
@@ -531,7 +587,7 @@ export function WorldEventMap({
           {legendContext.coverageGap ? <b><i className="is-coverage" />{mt('Coverage gap')}</b> : null}
         </span>
       </div>
-      <div className="wm-weather-deck-status" title={rendererError || undefined}>
+      <div className="wm-weather-deck-status" hidden={basemapState === 'primary-ready'} title={rendererError || undefined}>
         {rendererKind === 'svg'
           ? 'SVG FALLBACK'
           : basemapState === 'local-fallback-ready'

@@ -50,10 +50,14 @@ export function resolveWorldEventPMTilesUrl(
   return new URL(url, origin).href;
 }
 
-export function mapBasemapFonts(language: 'en' | 'zh') {
-  return language === 'zh'
-    ? ['Noto Sans SC Variable', 'Polymonitor DejaVu Mono', 'monospace']
-    : ['Polymonitor DejaVu Mono', 'Noto Sans SC Variable', 'monospace'];
+/** Local proportional fonts, preserving provider Regular/Medium/Bold/Italic roles. */
+export function mapBasemapFonts(_language: 'en' | 'zh', original?: unknown): NonNullable<SymbolLayerSpecification['layout']>['text-font'] {
+  if (Array.isArray(original) && !original.some(value => typeof value === 'string' && /Noto Sans|Polymonitor Map Sans/.test(value))) {
+    return original.map(value => Array.isArray(value) ? mapBasemapFonts(_language, value) : value) as NonNullable<SymbolLayerSpecification['layout']>['text-font'];
+  }
+  const fonts = JSON.stringify(original || '');
+  const role = /Bold/i.test(fonts) ? 'Bold' : /Medium/i.test(fonts) ? 'Medium' : /Italic/i.test(fonts) ? 'Italic' : 'Regular';
+  return [`Polymonitor Map Sans ${role}`, 'Noto Sans SC Variable', 'sans-serif'];
 }
 
 export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 'zh' = 'en', theme: WeatherMapTheme = 'dark'): Promise<StyleSpecification> {
@@ -64,7 +68,7 @@ export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 
   // paint and the bundled page font; provider label hierarchy is preserved.
   const tunedLayers = rankedLayers.map((originalLayer) => {
     const layer = originalLayer.type === 'symbol'
-      ? { ...originalLayer, layout: { ...originalLayer.layout, 'text-font': mapBasemapFonts(language) } }
+      ? { ...originalLayer, layout: { ...originalLayer.layout, 'text-font': mapBasemapFonts(language, originalLayer.layout?.['text-font']) } }
       : originalLayer;
     if (theme === 'positron') return layer;
     if (layer.id === 'background') return { ...layer, paint: { ...layer.paint, 'background-color': '#1b1b1d' } };
@@ -122,7 +126,7 @@ type LabelCapableMap = {
     layers?: Array<{ id: string; type?: string; source?: string; 'source-layer'?: string }>;
   };
   setGlyphs?: (url: string | null) => unknown;
-  getLayoutProperty: (layerId: string, name: 'text-field') => unknown;
+  getLayoutProperty: (layerId: string, name: 'text-field' | 'text-font') => unknown;
   setLayoutProperty: <K extends 'text-field' | 'text-size' | 'visibility' | 'text-font'>(
     layerId: string,
     name: K,
@@ -179,7 +183,7 @@ export function reinforceWorldEventBasemapLabels(map: LabelCapableMap, language:
     try {
       if (hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) {
         map.setLayoutProperty(layer.id, 'text-field', localizedNameExpression(language, protomaps));
-        map.setLayoutProperty(layer.id, 'text-font', mapBasemapFonts(language));
+        map.setLayoutProperty(layer.id, 'text-font', mapBasemapFonts(language, map.getLayoutProperty(layer.id, 'text-font')));
       }
     } catch {
       // A style may replace the symbol layer during load.

@@ -2,6 +2,14 @@
 
 @layer base {
 
+.wm-map-stage, .wm-world-event-map-toolbar {
+  --font-body: 'Noto Sans SC Variable', sans-serif;
+  --map-tools-left: 190px;
+}
+
+
+.wm-map-stage:has(.wm-layer-sidebar:not(.is-collapsed)) { --map-tools-left: 282px; }
+
 .wm-map-status-strip {
   display: inline-flex;
   align-items: center;
@@ -585,16 +593,19 @@
   position: absolute;
   right: 8px;
   bottom: 34px;
-  z-index: 13;
+  z-index: 40;
   display: flex;
   flex-direction: column-reverse;
   align-items: flex-end;
   font-family: var(--font-body);
+  pointer-events: none;
 }
 
+.wm-world-event-list > button, .wm-world-event-list > section { pointer-events: auto; }
+
 .wm-world-event-list.is-open {
-  top: 8px;
-  right: 92px;
+  top: 12px;
+  right: 60px;
 }
 
 .wm-world-event-list-toggle {
@@ -633,12 +644,13 @@
 
 .wm-world-event-list > section {
   display: flex;
-  width: min(500px, calc(100vw - 32px));
+  width: min(400px, calc(100vw - 100px));
   max-height: min(650px, 72vh);
   min-height: min(520px, 68vh);
   flex-direction: column;
   margin-bottom: 8px;
-  overflow: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid rgba(115, 216, 255, 0.34);
   border-radius: 10px;
   background: rgba(5, 10, 13, 0.985);
@@ -710,7 +722,17 @@
   color: #d8f5ff;
 }
 
+.wm-map-list-filter-disclosure { grid-column: 1 / -1; font: 12px var(--font-body); }
+.wm-map-list-filter-disclosure summary { cursor: pointer; padding: 6px 0; color: #aeb8bf; }
+.wm-map-list-advanced { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 6px 0; }
+.wm-map-counts { flex-shrink: 0; margin: 8px 12px; font: 12px var(--font-body); color: #bbc3c8; }
+.wm-map-counts summary { cursor: pointer; }
+.wm-map-list-options { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 12px; font: 12px var(--font-body); }
+.wm-map-list-options label { display: grid; gap: 4px; flex: 1; }
+.wm-map-list-options select, .wm-map-list-options button, .wm-map-counts button, .wm-map-back-to-events { font: inherit; color: #c6cdd2; padding: 6px 8px; background: #1b2329; border: 1px solid #38434b; border-radius: 3px; cursor: pointer; }
+.wm-map-back-to-events { margin-bottom: 12px; font: 12px var(--font-body); }
 .wm-world-event-list-filters {
+  max-height: 180px; overflow-y: auto; flex-shrink: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
@@ -770,7 +792,6 @@
   color: #647277;
 }
 
-.wm-map-counts { margin: 8px 12px; font: 12px var(--font-body); color: #bbc3c8; }
 .wm-map-counts small { display: block; margin-top: 4px; font-size: 11px; color: #89959d; }
 
 .wm-world-event-list-summary {
@@ -813,8 +834,8 @@
 }
 
 .wm-world-event-list-scroll {
-  min-height: 0;
-  flex: 1;
+  min-height: 136px;
+  flex: 1 0 136px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-color: rgba(115, 216, 255, 0.38) rgba(255, 255, 255, 0.03);
@@ -937,6 +958,8 @@
   white-space: nowrap;
 }
 
+.wm-world-event-list li time.wm-event-list-occurrence { grid-row: 2; }
+
 .wm-world-event-list-empty {
   display: grid;
   min-height: 180px;
@@ -982,19 +1005,29 @@
 }
 
 .wm-weather-deck-legend {
-  position: absolute; left: 50%; bottom: 22px; z-index: 5;
-  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 16px;
-  width: max-content; max-width: calc(100% - 380px); padding: 8px 12px;
-  border: 1px solid #30363b; border-radius: 5px; background: rgba(16,19,22,.93);
-  color: #c2c8cd; font: 400 11px/1.5 var(--font-body);
-  transform: translateX(-50%);
+  position: absolute; left: var(--map-tools-left); bottom: 66px; z-index: 36;
+  display: none; gap: 10px; width: min(300px, calc(100% - 24px));
+  max-height: min(360px, calc(100% - 90px)); overflow-y: auto; overscroll-behavior: contain;
+  padding: 14px; border: 1px solid #30363b; border-radius: 5px; background: #101316f5;
+  color: #c2c8cd; font: 400 12px/1.5 var(--font-body);
 }
-.wm-map-radar-status { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 4; display: grid; gap: 3px; max-width: min(390px, calc(100% - 100px)); padding: 8px; background: #13191de8; color: #bbc4cb; font: 11px/1.4 var(--font-body); }
+.wm-weather-deck-legend.is-open { display: grid; animation: wm-map-panel-enter 140ms ease-out; }
+@keyframes wm-map-panel-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.wm-weather-deck-legend h3 { margin: 0; font: 600 12px/1.5 var(--font-body); color: #e2e6e8; }
+.wm-map-radar-status { position: absolute; left: calc(var(--map-tools-left) + 84px); bottom: 24px; z-index: 17; color: #bbc4cb; font: 12px/1.4 var(--font-body); }
+.wm-map-radar-status summary { cursor: pointer; min-height: 36px; padding: 9px 10px; box-sizing: border-box; border: 1px solid #343b40; border-radius: 4px; background: #171b1eee; }
+.wm-map-radar-status > div { position: absolute; bottom: 44px; display: grid; gap: 8px; width: min(300px, calc(100vw - 120px)); padding: 12px; border: 1px solid #343b40; background: #13191df5; }
 .wm-map-radar-status a { color: #bbc4cb; }
+.wm-map-radar-status button { padding: 8px; font: inherit; background: #27323b; color: inherit; border: 1px solid #52606b; border-radius: 3px; cursor: pointer; }
+.wm-map-focus-toggle { display: grid; place-items: center; position: absolute; top: 18px; right: 66px; z-index: 30; width: 38px; height: 38px; font: 22px var(--font-body); color: #c2c8cd; background: #171b1eee; border: 1px solid #343b40; border-radius: 4px; cursor: pointer; }
+.wm-map-stage.is-map-focused { position: fixed; inset: 12px; z-index: 180; height: calc(100dvh - 24px); margin: 0; }
+.wm-map-stage.is-map-focused .wm-inline-weather-map { height: 100%; }
+.wm-map-selection-retained { padding: 8px; background: #171b1e; font: 12px var(--font-body); }
+.wm-weather-deck-status[hidden] { display: none; }
 .wm-map-help { position: relative; z-index: 35; margin-left: auto; color: #bbc3ca; font: 400 12px/1.5 var(--font-body); }
 .wm-map-help summary { display: grid; place-items: center; width: 32px; height: 32px; background: #171b1e; border: 1px solid #353a40; border-radius: 4px; cursor: pointer; }
 .wm-map-help p { position: absolute; right: 0; width: min(300px, 65vw); padding: 12px; background: #171b1e; border: 1px solid #353a40; }
-.wm-map-legend-toggle { display: none; }
+.wm-map-legend-toggle { display: inline-flex; align-items: center; position: absolute; bottom: 24px; left: var(--map-tools-left); z-index: 17; background: #171b1eee; color: #c2c8cd; border: 1px solid #343b40; border-radius: 4px; min-height: 36px; padding: 6px 12px; font: 12px var(--font-body); cursor: pointer; }
 .wm-map-time-segments { display: inline-flex; }
 .wm-map-time-segments button { border: 1px solid #343b40; padding: 5px 8px; background: #171b1e; color: #bac3ca; font: inherit; cursor: pointer; min-height: 32px; }
 .wm-map-time-segments button[aria-pressed="true"] { color: #f1f3f4; background: #3b444e; }
@@ -1118,7 +1151,7 @@
   position: absolute;
   top: 12px;
   right: 60px;
-  z-index: 12;
+  z-index: 40;
   width: min(400px, calc(100% - 110px));
   max-height: calc(100% - 94px);
   overflow: auto;
@@ -1473,9 +1506,13 @@
 }
 
 @media (max-width: 860px) {
-  .wm-map-legend-toggle { display: block; position: absolute; bottom: 28px; left: 12px; z-index: 16; background: #171b1e; color: #c2c8cd; border: 1px solid #343b40; min-height: 36px; padding: 6px 12px; }
-  .wm-weather-deck-legend { display: none; left: 12px; right: 12px; bottom: 70px; transform: none; width: auto; max-width: none; }
-  .wm-weather-deck-legend.is-open { display: flex; }
+  .wm-map-legend-toggle, .wm-map-radar-status summary { min-height: 44px; }
+  .wm-map-legend-toggle { left: 12px; bottom: 24px; }
+  .wm-weather-deck-legend { left: 12px; }
+  .wm-map-radar-status { left: 96px; bottom: 24px; }
+  .wm-map-controls button { width: 44px; height: 44px; }
+
+  .wm-map-focus-toggle { width: 44px; height: 44px; right: 70px; }
 
   .wm-world-event-list {
     right: 10px;

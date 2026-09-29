@@ -82,6 +82,9 @@ test.beforeEach(async ({ page }) => {
   const errors: string[] = [];
   pageErrors.set(page, errors);
   page.on('pageerror', (error) => errors.push(error.message));
+  // Aircraft freshness must be evaluated against the fixture clock, not the
+  // wall-clock date on which this regression suite happens to run.
+  await page.clock.setFixedTime(new Date(GENERATED_AT));
   await installFixtures(page);
 });
 
@@ -114,7 +117,7 @@ test('real vector basemap on hardware WebGL renders tiles and localized labels w
     const glyphs: string[] = [];
     page.on('response', response => {
       if (response.url().includes('planet.pmtiles')) ranges.push({ status: response.status(), range: response.headers()['content-range'] });
-      if (response.url().includes('/fonts/') && response.ok()) glyphs.push(response.url());
+      if (/\/fonts\/|noto-sans-sc.*\.woff2/.test(response.url()) && response.ok()) glyphs.push(response.url());
     });
     await page.goto('/?view=2d&basemap=pmtiles&time=all&layers=earthquakes-volcanoes&center=30,28&zoom=1.7');
     const host = page.locator('[data-map-renderer-ready]');
@@ -132,6 +135,7 @@ test('real vector basemap on hardware WebGL renders tiles and localized labels w
     await expect.poll(() => ranges.filter(range => range.status === 206 && range.range).length).toBeGreaterThan(1);
     await expect.poll(() => glyphs.length).toBeGreaterThan(0);
     await page.evaluate(() => document.fonts.ready);
+    expect(await page.evaluate(() => document.fonts.check('12px "Noto Sans SC Variable"', 'Tokyo São Paulo Montréal 北京 新加坡'))).toBe(true);
     await page.waitForTimeout(1200);
     const english = await host.screenshot({ path: testInfo.outputPath('primary-en.png') });
     await testInfo.attach('real-primary-en', { path: testInfo.outputPath('primary-en.png'), contentType: 'image/png' });
@@ -157,8 +161,10 @@ test('WebGL map covers layered hazards, details, URL state, provider reload and 
   await gotoMap(page, `center=-25,27&zoom=2.2&layers=${ALL_LAYERS}`);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
   await expect.poll(() => page.workers().some(worker => worker.url().includes('maplibre-gl-worker'))).toBe(true);
+  await page.locator('.wm-map-legend-toggle').click();
   await expect(page.getByText('Observed', { exact: true })).toBeVisible();
   await expect(page.getByText('Forecast', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
   await screenshot(page, '01-global-default.png');
 
   await page.getByRole('button', { name: /^All events/i }).click();
@@ -195,8 +201,10 @@ test('dense hazards, NHC geometry and FIRMS drill-down remain visually distinct'
   await screenshot(page, '02-high-density-hazards.png');
 
   await page.goto('/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-69,22&zoom=4.4&layers=weather-alerts');
+  await page.locator('.wm-map-legend-toggle').click();
   await expect(page.getByText('Observed', { exact: true })).toBeVisible();
   await expect(page.getByText('Forecast', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
   await waitForMapPaint(page);
   await screenshot(page, '03-hurricane-observed-forecast-cone.png');
 
@@ -222,9 +230,12 @@ test('climate anomaly includes reproducible geometry and visual evidence', async
 
 test('WebGL event and cluster picking form complete interaction loops', async ({ page }) => {
   await gotoMap(page, 'center=-122.1,37.4&zoom=8&layers=earthquakes-volcanoes');
-  let center = await mapCanvasCenter(page);
-  await hoverMapPoint(page, center, /Cluster Ridge Earthquake|M6.4 Test Ridge Earthquake/);
+  const center = await projectedMapPoint(page, -122.1, 37.4);
+  await hoverMapPoint(page, center, /Cluster.*7 earthquake/i);
   await page.mouse.click(center.x, center.y);
+  // Coincident targets now expose the candidates instead of choosing an arbitrary record.
+  await expect(page.getByRole('heading', { name: 'Cluster members' })).toBeVisible();
+  await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
   await expect(page.locator('.wm-event-inspector')).toBeVisible();
   await expect(page.locator('.wm-event-inspector')).toContainText(/Disaster report/i);
   await page.getByRole('button', { name: 'Close event details' }).click();
@@ -347,7 +358,7 @@ test('required source failure makes the affected layer unavailable instead of a 
   await expect(anomalyRow).toHaveClass(/is-unavailable/);
   await expect(anomalyRow.locator('input[type="checkbox"]')).toBeDisabled();
   await expect(anomalyRow.locator('input[type="checkbox"]')).not.toBeChecked();
-  await expect(page.locator('.wm-sidebar-footer')).toHaveText('3/8 LAYERS ACTIVE');
+  await expect(page.locator('.wm-sidebar-footer')).toHaveText('3/9 LAYERS ACTIVE');
 });
 
 test('country risk evidence reaches a selectable polygon in both primary and SVG renderers', async ({ page }) => {
@@ -393,11 +404,12 @@ test('thirty layer, provider and selection cycles keep resources bounded and too
     await expect(page.locator('.wm-event-inspector')).toContainText('6.4');
     await page.keyboard.press('Escape');
     await expect(page.locator('.wm-event-inspector')).toHaveCount(0);
+    await page.locator('.wm-world-event-list-close').click();
     expect(await page.locator('.wm-weather-deck-map canvas').count()).toBeLessThanOrEqual(baselineCanvases);
     expect(await page.locator('.wm-world-event-renderer-tooltip').count()).toBeLessThanOrEqual(1);
   }
   const point = await projectedMapPoint(page, -122.1, 37.4);
-  await hoverMapPoint(page, point, /Earthquake/);
+  await hoverMapPoint(page, point, /Cluster.*7 earthquake/i);
   const tooltip = page.locator('.wm-world-event-renderer-tooltip');
   const box = (await tooltip.boundingBox())!;
   const host = (await page.locator('[data-map-renderer-ready]').boundingBox())!;
@@ -446,12 +458,13 @@ test('rapid report switches reject a late response and source text remains inert
 test('edge tooltip stays inside the map and legend retains geometry semantics', async ({ page }) => {
   await gotoMap(page, 'center=-123.8,37.4&zoom=8&layers=earthquakes-volcanoes,weather-alerts');
   const point = await projectedMapPoint(page, -122.1, 37.4);
-  await hoverMapPoint(page, point, /Earthquake/);
+  await hoverMapPoint(page, point, /Cluster.*7 earthquake/i);
   const tip = (await page.locator('.wm-world-event-renderer-tooltip').boundingBox())!;
   const host = (await page.locator('[data-map-renderer-ready]').boundingBox())!;
   expect(tip.x).toBeGreaterThanOrEqual(host.x);
   expect(tip.x + tip.width).toBeLessThanOrEqual(host.x + host.width);
   expect(tip.y + tip.height).toBeLessThanOrEqual(host.y + host.height);
+  await page.locator('.wm-map-legend-toggle').click();
   await expect(page.locator('.wm-map-legend-context .is-observed')).toHaveCSS('border-bottom-style', 'solid');
   await expect(page.locator('.wm-map-legend-context .is-forecast')).toHaveCSS('border-bottom-style', 'dashed');
   const ratios = await page.locator('.wm-world-event-severity-filters button.active').evaluateAll(buttons => buttons.map(button => {

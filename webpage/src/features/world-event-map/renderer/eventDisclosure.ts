@@ -44,7 +44,7 @@ export function eventVisibleAtZoom(event: GeoEvent, zoom: number, selectedEventI
   return event.id === selectedEventId || eventDisclosureTier(event) <= disclosureTierForZoom(zoom);
 }
 
-export type MapPresentationCounts = { inView: number; singles: number; clusters: number; observations: number };
+export type MapPresentationCounts = { inView: number; singles: number; clusters: number; observations: number; inViewIds?: string[] };
 
 /** Geometry intersection and presentation counts have different denominators. */
 export function mapPresentationCounts(
@@ -59,6 +59,7 @@ export function mapPresentationCounts(
       && pointInView(eventRepresentativePoint(event))) singles.add(event.id);
   }
   return {
+    inViewIds: [...new Set(inView.map(event => event.id))],
     inView: new Set(inView.map(event => event.id)).size, singles: singles.size,
     clusters: presentation.clusters.filter(cluster => pointInView(cluster.coordinates)).length,
     observations: zoom < 4 ? inView.filter(event => isHazardEvent(event) && event.hazardKind === 'fire-detection').length : 0,

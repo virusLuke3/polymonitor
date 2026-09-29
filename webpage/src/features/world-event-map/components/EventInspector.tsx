@@ -20,8 +20,10 @@ import { useNaturalHazardDetail } from '../data/useNaturalHazardDetail';
 export type EventInspectorProps = {
   event: GeoEvent;
   onClose: () => void;
+  onBackToEvents?: () => void;
   onOpenMarket?: (marketId: number) => void;
   returnFocusTarget?: HTMLElement | null;
+  outsideFilters?: boolean;
 };
 
 function FieldList({ fields }: { fields: InspectorField[] }) {
@@ -66,8 +68,10 @@ function SourceCard({ source }: { source: GeoEventSource }) {
 export function EventInspector({
   event: mapEvent,
   onClose,
+  onBackToEvents,
   onOpenMarket,
   returnFocusTarget,
+  outsideFilters = false,
 }: EventInspectorProps) {
   const { locale } = useI18n();
   const mt = (text: string) => mapText(locale, text);
@@ -98,7 +102,7 @@ export function EventInspector({
 
   useEffect(() => {
     const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key !== 'Escape') return;
+      if (keyboardEvent.key !== 'Escape' || keyboardEvent.defaultPrevented) return;
       keyboardEvent.preventDefault();
       onClose();
     };
@@ -133,6 +137,8 @@ export function EventInspector({
         ×
       </button>
       <header className="wm-event-inspector-header">
+        <button type="button" className="wm-map-back-to-events" onClick={onBackToEvents || onClose}>{locale === 'zh' ? '← 返回事件' : '← Back to events'}</button>
+        {outsideFilters ? <p className="wm-map-selection-retained" role="status">{locale === 'zh' ? '所选事件不在当前筛选结果中' : 'Selected event is outside the current filters'}</p> : null}
         <div className="wm-event-inspector-kickers">
           <span>{mt(hazard ? hazardLabel(hazard) : event.category)}</span>
           <span>{mt(event.severity)}</span>
@@ -199,6 +205,7 @@ export function EventInspector({
         </div>
       </section>
 
+      {hazard?.hazardKind === 'tropical-cyclone' && !hazard.properties.geometries ? <p className="wm-map-counts">{locale === 'zh' ? '来源未提供观测轨迹或预测路径；仅显示已证实位置。' : 'No observed or forecast track was supplied. Only the verified position is shown.'}</p> : null}
       {hazard ? (
         <section className="wm-event-inspector-section" aria-labelledby="wm-event-coverage-heading">
           <h3 id="wm-event-coverage-heading">{mt("Coverage")}</h3>

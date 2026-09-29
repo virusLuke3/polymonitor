@@ -116,7 +116,7 @@ describe('world event hover tooltip', () => {
       kind: 'event-cluster',
       id: 'cluster:1',
       coordinates: [12, 34],
-      eventIds: ['one', 'two'],
+      members: [{ eventId: 'one', count: 1 }, { eventId: 'two', count: 1 }], generation: 1, typeCounts: { earthquake: 2 },
       count: 2,
       severity: 'critical',
       bounds: [10, 30, 14, 38],

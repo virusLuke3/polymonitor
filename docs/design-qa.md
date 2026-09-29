@@ -1,6 +1,54 @@
-# World Event Map 对齐与本地验收
+# World Event Map 对齐与验收
 
-本次依据用户提供的 `POLYMONITOR_MAP_ALIGNMENT_CODEX.md` 和两张原始参考图实施。仅修改本地工作区；没有提交、推送、合并或部署。对照 WorldMonitor 本地 `4691d9213a74c25bc2190146a11ebeba02b8cc85`，并保留 Polymonitor 的数据事实、报告和已有 feature 边界。
+
+## 第二轮精修：2026-09-29
+
+依据 `POLYMONITOR_MAP_POLISH_ROUND2/CODEX_GUIDE.md`，以任务开始的 `c9b97a0c43e7b35daed3f362a8b60e024deef063` 加实际 dirty worktree 为基线。原有未提交文档、后端、部署文件和公开文档素材不属于本轮提交范围。对照 WorldMonitor `4691d9213a74c25bc2190146a11ebeba02b8cc85` 的比例地图字体、稳定图层、事件摘要和交互入口；没有引入第二张地图或第二个业务注册表。
+
+| 批次 | 本轮改变 | 证据 |
+| --- | --- | --- |
+| A | 桌面图例默认折叠，分组 popover；实际控件安全区同时服务标签、tooltip 和选中避让；展开地图复用实例；健康底图标签收进状态详情。新访客图层面板默认收起，保存偏好继续恢复。 | `round2-A/`、安全区单元测试、行为测试 |
+| B | 小型计数圆；跨类型碰撞形成中性混合堆叠，限制屏幕跨度，不改记录坐标；同类型保留类型与等级；地震/火山符号简化；密集命中显示候选列表。 | `round2-B/`、713/5000 成员报告 |
+| C | 地名、地图控件、报告改用本地比例无衬线；保留 provider 的字体角色、rank、字号和密度；原始字段继续等宽；只请求必要字形样本。 | `round2-C/`、字体 readiness、provider 契约测试 |
+| D | 全部已加载/当前视野/簇范围；发生与更新时间分开；阅读时保留列表顺序，新增记录由用户应用；详情返回恢复筛选和位置，筛选外选择保留说明；雷达关闭状态可发现，天气预设是显式操作。 | `round2-D/`、列表/详情/天气预设浏览器测试 |
+| E | Supercluster map/reduce 摘要取代普通视口中的全量 getLeaves；成员每页最多 30，引用带索引代次；实际资源、成员完整性、互动 trace 和性能验证。 | `map-polish-round2/after/`、`resource-cycles-production.json` |
+
+第二轮截图入口：`webpage/artifacts/map-polish-round2/index.html`。保留 `round2-before` 与 A—E 的中英同镜头截图，另外有 2040×620 的密集数据对照。测试夹具明确标识，不进入生产；没有屏蔽地图、隐藏多数记录、修改坐标、降低 DPR 或放宽截图容差。测试预设打开图层面板，以保持改动前后的相同保存状态；产品新访客默认收起另行验证。
+
+性能对照使用同一 Chrome / GPU、相机、DPR、真实矢量资源与固定夹具，双方均关闭开发热更新。重测旧版的 713/5000 截图与原始 before 文件 SHA-256 相同。旧版仍保存在隔离基线中，没有覆盖原始截图。
+
+| 夹具规模 | 旧版拖动 P95 | 新版拖动 P95 | 新版 hover P95 | 拖动时索引/叶子读取 |
+| --- | --- | --- | --- | --- |
+| 713 | 23 ms | 25 ms | 91 ms | 索引 1→1，getLeaves 0→0 |
+| 5,000 | 21 ms | 23 ms | 70 ms | 索引 1→1，getLeaves 0→0 |
+
+这些数据满足本轮 32 ms / 120 ms 的指定环境目标，但不证明平均帧速更快，也不代表任意设备。新增碰撞分组带来额外计算；收益是消除每次查询的全量展开、明确成员入口和消除遮挡。713/5000 个输入 ID 均恰好有一个主表示，卫星原始观测、雷达瓦片及附属轨迹/区域使用不同分母；debug 表说明输入已经经过用户筛选，不冒充未加载的全球事件全集。
+
+资源检查曾发现开发 Prefresh 的 `lastSeen` Map 持有历史 vnode（堆路径 `Window.__PREFRESH__ → module Map → vnode → detached select`）。测试模式关闭该开发热更新；普通开发模式保留。生产构建没有该模块，30 次连续操作在第 10/20/30 次均为 1,884 个 DOM 节点、466 个监听器，未完成灾害请求为 0；堆约 18.1/19.0/19.0 MB。原失败日志保留，不将开发缓存误报成已部署组件泄漏；没有放宽资源阈值。禁用热更新后，进一步用堆快照定位到 `preact/debug` 的 owner stack（`vnode.__o` / module stack）保留了历史报告。资源断言因此在已有 startup 生产构建检查中执行，开发诊断通过 `MAP_RESOURCE_HEAP=1` 单独复现，不把开发失败写成通过。
+
+字体下载有 3 秒等待上限；下载停滞时主地图与 SVG 仍能显示并打开报告。列表透明外框不拦截其他控件；筛选外选择的说明置于报告内，避免被图层面板遮挡。
+
+新版截图先生成到独立候选目录，再审阅原图、差异区域和透明面板背景；仅把本轮设计变化纳入 golden，保留零像素容差。`reviewed-goldens.json` 记录逐张前后 SHA、范围和理由。
+
+第二轮已执行的检查（中间失败保留，最终结果分别列出）：
+
+| 检查 | 本轮结果 |
+| --- | --- |
+| 单元测试 | 202 passed，1 个 opt-in 在线测试 skipped；`map-polish-round2/unit-final.log` |
+| 类型、边界、locale 与生产构建 | 通过；`build-final.log`，包括 lazy bundle 检查 |
+| 页面 / 组件 / 视觉回归 | 52/52 passed；`visual-final.log`。38 张已审阅的设计变更 golden，零容差，无地图遮罩。14 个独立路由截图与旧 golden 保持一致。 |
+| 生产地图、启动、字体停滞、列表行为 | `production-regression.log` 26 passed、2 failed、1 opt-in skipped；两项失败分别是硬件运行配置与 SVG 专项预期冲突，以及测试点击图例后再读取已隐藏 tooltip。按各自场景修正执行后 `production-closure.log` 2/2 passed。未删除失败记录。 |
+| 30 次资源循环 | `resource-ci-final.log` 1/1 passed；沿用 startup 生产验收测试入口，通过独立无 trace 的 worker 采样，其他启动失败 trace 保留。 |
+| 真实主底图 | `real-basemap-final.log` 1/1 passed，中英实际底图截图和 Range/字体响应证据；前一次 Range 下载 20 秒超时导致本地底图降级，见 `real-basemap.log`，没有延长产品期限掩盖失败。 |
+| 真实雷达 | `radar-final.log` 1/1 passed；实际清单与瓦片、停止/重开、受控 503 后旧帧保留与恢复。 |
+
+当前工作区已有的 CI workflow 修改属于任务开始前的未提交工作，本轮保留且不代为提交；本次提交补充测试入口，不能将本地执行记录写成远端 CI 全套运行通过。
+
+最终同镜头、产品视口、DPR 1/1.25/1.5/2、原生浏览器 125% 缩放、符号原生尺寸与 713/5000 成员/性能矩阵：`acceptance-final.log` **14/14 passed**。英文与中文的最终连续 trace 分别约 30.7 / 30.2 秒；密集数据还保留完整拖动、hover 采样、簇列表、详情、缩放和图层开关 trace。`performance-comparison.json` 为最终数值。
+
+发布：本轮本地验收完成，待从仅包含本轮修改的 pushed commit 构建并验收 GCP 真实页面。真实 iOS/Safari/Android 设备仍不在本地 Chrome 矩阵内。雷达沿用最新实际帧，没有新增历史雷达播放、假轨迹或推测覆盖范围。
+
+以下首轮记录依据用户提供的 `POLYMONITOR_MAP_ALIGNMENT_CODEX.md` 和两张原始参考图实施，描述当时的本地验证；发布及第二轮状态以本文最前面的更新为准。对照 WorldMonitor 本地 `4691d9213a74c25bc2190146a11ebeba02b8cc85`，并保留 Polymonitor 的数据事实、报告和已有 feature 边界。
 
 ## 证据与重现
 

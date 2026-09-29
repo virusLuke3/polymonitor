@@ -47,12 +47,20 @@ export function createEventPointLayers({
 }): LayersList {
   const index = clusterIndex || new EventClusterIndex();
   index.update(events);
-  const { singles, clusters } = index.query(zoom, selectedEventId, viewport);
+  const { singles, clusters } = index.presentation(zoom, selectedEventId, viewport, project);
   const layers: Layer[] = [
     ...createEventObservationLayer(events, zoom, selectedEventId, viewport),
   ].filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer));
 
   if (clusters.length) {
+    // A quiet offset rim distinguishes a mixed record stack from one hazard.
+    const mixed = clusters.filter(cluster => cluster.mixed);
+    if (mixed.length) layers.push(new ScatterplotLayer<EventCluster>({
+      id: 'world-event-mixed-stack-rims', data: mixed,
+      getPosition: cluster => cluster.coordinates, getRadius: cluster => clusterMarkerSize(cluster.count) / 2 + 2,
+      getLineColor: [157, 174, 184, 200], getLineWidth: 1,
+      radiusUnits: 'pixels', lineWidthUnits: 'pixels', filled: false, stroked: true, pickable: false,
+    }));
     layers.push(new ScatterplotLayer<EventCluster>({
       id: 'world-event-clusters', data: clusters,
       getPosition: cluster => cluster.coordinates,
@@ -65,7 +73,7 @@ export function createEventPointLayers({
     layers.push(new TextLayer<EventCluster>({
       id: 'world-event-cluster-counts', data: clusters,
       getPosition: cluster => cluster.coordinates, getText: cluster => String(cluster.count),
-      getSize: 12, getColor: [12, 15, 18, 255], getTextAnchor: 'middle', getAlignmentBaseline: 'center',
+      getSize: 11, getColor: [12, 15, 18, 255], getTextAnchor: 'middle', getAlignmentBaseline: 'center',
       fontFamily: mapLabelFontFamily(), fontWeight: 600, characterSet: 'auto', pickable: false,
     }));
   }

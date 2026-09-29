@@ -17,12 +17,11 @@ export const SEVERITY_COLORS: Record<GeoEventSeverity, [number, number, number, 
 export const MAP_MONO_FONT_FAMILY = '"Polymonitor DejaVu Mono", "DejaVu Sans Mono", monospace';
 
 export function mapLabelFontFamily() {
-  const shell = typeof document !== 'undefined' ? document.querySelector('.wm-shell') : null;
-  return shell ? getComputedStyle(shell).fontFamily : MAP_MONO_FONT_FAMILY;
+  return '"Noto Sans SC Variable", sans-serif';
 }
 export const markerSize = (event: GeoEvent, selected: string | null) =>
   (event.severity === 'critical' ? 17 : event.severity === 'warning' ? 15 : 12) + (event.id === selected ? 3 : 0);
-export const clusterMarkerSize = (count: number) => Math.min(36, 24 + Math.log2(Math.max(1, count)) * 1.5);
+export const clusterMarkerSize = (count: number) => Math.min(30, Math.max(20, 18 + 1.6 * Math.log2(Math.max(1, count) + 1)));
 
 export function eventColor(event: GeoEvent, alpha?: number): [number, number, number, number] {
   let color: [number, number, number, number];

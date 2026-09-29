@@ -81,7 +81,7 @@ describe('World Event Map vector basemap', () => {
     expect(style.layers.map(layer => layer.id)).toEqual(original.map(layer => layer.id));
     for (const [index, layer] of original.entries()) {
       const actual = style.layers[index] as any;
-      expect(actual.layout).toEqual(layer.type === 'symbol' ? { ...layer.layout, 'text-font': mapBasemapFonts('en') } : (layer as any).layout);
+      expect(actual.layout).toEqual(layer.type === 'symbol' ? { ...layer.layout, 'text-font': mapBasemapFonts('en', layer.layout?.['text-font']) } : (layer as any).layout);
       for (const key of ['filter', 'minzoom', 'maxzoom']) expect(actual[key]).toEqual((layer as any)[key]);
     }
     expect(style.sources.basemap).toMatchObject({ url: 'pmtiles://https://maps.example.test/planet.pmtiles' });
@@ -96,7 +96,7 @@ describe('World Event Map vector basemap', () => {
         sources: { basemap: { type: 'vector' } },
         layers: [{ id: 'places_country', type: 'symbol', source: 'basemap', 'source-layer': 'places' }],
       }),
-      getLayoutProperty: () => ['get', 'name'],
+      getLayoutProperty: (_id: string, name: string) => name === 'text-font' ? ['Noto Sans Regular'] : ['get', 'name'],
       setLayoutProperty: (id: string, name: string, value: unknown) => updates.push([id, name, value]),
       setPaintProperty: (id: string, name: string, value: unknown) => updates.push([id, name, value]),
     };

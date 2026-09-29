@@ -1,4 +1,6 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { GENERATED_AT, installFixtures } from './fixtures/world-event-map';
+import { expect, test, type Page, type Route, type Request } from '@playwright/test';
 import { fixtureMarkets, installDashboard } from './fixtures/dashboard';
 
 const mapURL = '/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes&basemap=openfreemap';
@@ -57,6 +59,28 @@ test('failed WebGL module download enters SVG fallback without an unhandled reje
   await expect(page.locator('.wm-event-inspector')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+for (const renderer of ['webgl', 'svg'] as const) {
+  test(`stalled map fonts cannot block ${renderer} rendering or event details`, async ({ page }) => {
+    await installDashboard(page);
+    const errors: string[] = [];
+    let releaseFonts!: () => void;
+    const fonts = new Promise<void>(resolve => { releaseFonts = resolve; });
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route(/noto-sans-sc.*\.woff2/, async route => { await fonts; await route.abort().catch(() => {}); });
+    if (renderer === 'svg') await page.route(deckModule, route => route.abort('failed'));
+    try {
+      await page.goto(mapURL, { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', renderer, { timeout: 15_000 });
+      await page.locator('.wm-world-event-list-toggle').click();
+      await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
+      await expect(page.locator('.wm-event-inspector')).toBeVisible();
+      await page.getByRole('button', { name: 'Close event details', exact: true }).click();
+      await expect(page.locator('.wm-event-inspector')).toHaveCount(0);
+      expect(errors).toEqual([]);
+    } finally { releaseFonts(); }
+  });
+}
 
 test('a slow WebGL download shows temporary SVG then restores the primary map and current selection', async ({ page }) => {
   await installDashboard(page);
@@ -147,4 +171,52 @@ test.describe('production service worker startup', () => {
     expect(requestedAssets.filter(path => /(?:globe\.gl|hls|deck-stack|maplibre)/i.test(path))).toEqual([]);
     expect(await page.locator('link[rel="modulepreload"][href*="deck-stack"]').count()).toBe(0);
   });
+});
+
+const resourceTest = test.extend({ trace: ['off', { scope: 'worker' }] });
+// Isolate live resource accounting from the recorder; continuous interaction
+// traces are captured separately by map-polish.spec.ts.
+resourceTest('production resource ownership: 30 layer and detail cycles release listeners, DOM and requests', async ({ page }) => {
+  test.skip(process.env.POLYMONITOR_E2E_PREVIEW !== '1' && process.env.MAP_RESOURCE_HEAP !== '1', 'Resource ownership is measured on the production build, without Prefresh or preact/debug owner stacks.');
+  mkdirSync('artifacts/map-polish-round2', { recursive: true });
+  test.setTimeout(180_000);
+  await page.clock.setFixedTime(new Date(GENERATED_AT));
+  await installFixtures(page);
+  await page.goto('/?view=2d&basemap=openfreemap&mapPerf=1&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes,weather-alerts,wildfires,climate-anomalies');
+  const host = page.locator('[data-map-renderer-ready]');
+  await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
+  expect(await page.evaluate(() => '__PREFRESH__' in window)).toBe(false);
+  const cdp = await page.context().newCDPSession(page);
+  const samples: any[] = [];
+  const active = new Set<Request>(); let requests = 0;
+  page.on('request', request => { if (request.url().includes('/natural-hazards/')) { active.add(request); requests++; } });
+  page.on('requestfinished', request => active.delete(request)); page.on('requestfailed', request => active.delete(request));
+  for (let i = 0; i < 30; i++) {
+    await page.locator('.wm-world-event-list-toggle').click();
+    await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
+    await expect(page.locator('.wm-event-inspector')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.locator('.wm-world-event-list-close').click();
+    const layer = page.getByRole('checkbox', { name: /Earthquakes.*Volcanoes/i });
+    await layer.uncheck(); await layer.check();
+    if ([9, 19, 29].includes(i)) {
+      await expect.poll(() => active.size).toBe(0);
+      // Sample equivalent settled states after Preact effects, RO and camera motion.
+      await page.waitForTimeout(500);
+      await cdp.send('HeapProfiler.collectGarbage');
+      samples.push({ cycle: i + 1, requests, activeRequests: active.size, ...await cdp.send('Memory.getDOMCounters'), ...await cdp.send('Runtime.getHeapUsage') });
+    }
+  }
+  await test.info().attach('resource-cycles', { body: JSON.stringify(samples, null, 2), contentType: 'application/json' });
+  writeFileSync(`artifacts/map-polish-round2/resource-cycles-${process.env.POLYMONITOR_E2E_PREVIEW === '1' ? 'production' : 'development'}.json`, JSON.stringify(samples, null, 2));
+  if (process.env.MAP_RESOURCE_HEAP === '1') {
+    const chunks: string[] = [];
+    cdp.on('HeapProfiler.addHeapSnapshotChunk', ({ chunk }) => chunks.push(chunk));
+    await cdp.send('HeapProfiler.takeHeapSnapshot');
+    writeFileSync('artifacts/map-polish-round2/resource-current.heapsnapshot', chunks.join(''));
+  }
+  expect(samples[2].documents).toBeLessThanOrEqual(samples[0].documents + 2);
+  expect(samples[2].jsEventListeners).toBeLessThanOrEqual(samples[0].jsEventListeners + 12);
+  expect(samples[2].usedSize).toBeLessThan(samples[0].usedSize * 1.3);
+
 });

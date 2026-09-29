@@ -1,3 +1,4 @@
+import type { ScreenBox, ClusterSelection } from './layerFactories/eventClusters';
 import type { MapPresentationCounts } from './eventDisclosure';
 import type { RadarFrame } from '../data/useWeatherRadar';
 import type { GeoEvent } from '../domain/types';
@@ -22,7 +23,7 @@ export interface MapRendererCallbacks {
   onPresentationChange?: (counts: MapPresentationCounts) => void;
   onRadarStateChange?: (status: 'off' | 'loading' | 'ready' | 'error') => void;
   onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
-  onClusterSelect?: (eventIds: string[]) => void;
+  onClusterSelect?: (selection: ClusterSelection) => void;
   onEventSelect: (eventId: string | null) => void;
   onCountrySelect: (country: MapCountryTarget | null, position?: MapHoverPosition) => void;
   onCountryContextMenu: (country: MapCountryTarget, position: MapHoverPosition) => void;
@@ -38,6 +39,8 @@ export interface MapRenderer {
   setEvents(events: GeoEvent[]): void;
   setRadar?(frame: RadarFrame | null): void;
   resize(): void;
+  setOcclusions?(boxes: ScreenBox[]): void;
+  setHoveredEvent?(eventId: string | null): void;
   setReducedMotion(reduced: boolean): void;
   setLanguage?(language: 'en' | 'zh'): void;
   fitCountry(country: MapCountryTarget): void;

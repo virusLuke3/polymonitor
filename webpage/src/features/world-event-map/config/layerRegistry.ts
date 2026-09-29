@@ -175,7 +175,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
       sources: ['NASA EONET', 'NASA FIRMS'],
       freshness: 'EONET refreshes every five minutes; FIRMS availability is source-configured.',
       confidence: 'Event and detection evidence remains source-native.',
-      limitations: ['FIRMS raw detections must be spatially aggregated before rendering.', 'FIRMS is unavailable without a MAP_KEY.'],
+      limitations: ['FIRMS raw detections must be spatially aggregated before rendering.', 'FIRMS uses configured API access or the public rolling VIIRS feed; coverage and freshness are reported per source.'],
     },
   },
   {

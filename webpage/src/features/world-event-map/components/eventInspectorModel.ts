@@ -64,7 +64,7 @@ export function geometryLabel(event: GeoEvent): string {
 export function eventTimeFields(event: GeoEvent): InspectorField[] {
   const hazard = isHazardGeoEvent(event) ? event : null;
   return compact([
-    field('Occurred', formatTimestamp(event.occurredAt)),
+    field('Occurred', formatTimestamp(event.occurredAt) || 'Occurrence time unknown'),
     field('Effective', formatTimestamp(hazard?.effectiveAt)),
     field('Onset', formatTimestamp(hazard?.onsetAt)),
     field('Updated', formatTimestamp(event.updatedAt)),

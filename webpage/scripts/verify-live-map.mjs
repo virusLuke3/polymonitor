@@ -78,14 +78,16 @@ try {
         }
         record.sourceHealth = await page.locator('.wm-map-source-statuses').innerText();
       });
-      await check(`${width}: map UI uses the page font`, async () => {
+      await check(`${width}: map typography uses proportional map roles`, async () => {
         const fonts = await page.evaluate(() => {
           const family = selector => getComputedStyle(document.querySelector(selector)).fontFamily;
           return { body: family('.wm-shell'), toolbar: family('.wm-world-event-map-toolbar'), legend: family('.wm-weather-deck-legend') };
         });
         record.fonts = fonts;
-        assert.equal(fonts.toolbar, fonts.body);
-        assert.equal(fonts.legend, fonts.body);
+        assert.match(fonts.toolbar, /Noto Sans SC Variable/);
+        assert.match(fonts.legend, /Noto Sans SC Variable/);
+        record.fontReadiness = await page.evaluate(() => { const ctx = document.createElement('canvas').getContext('2d'); ctx.font = '12px \"Noto Sans SC Variable\"'; return { loaded: document.fonts.check(ctx.font, 'Tokyo São Paulo Montréal 北京 新加坡'), i: ctx.measureText('iiii').width, w: ctx.measureText('WWWW').width }; });
+        assert(record.fontReadiness.loaded && record.fontReadiness.w > record.fontReadiness.i * 2);
       });
       if (width !== 390) await check('desktop: default real radar frame and tiles', async () => {
         await expect(page.locator('.wm-map-radar-status')).toContainText('ready / ready', { timeout: 60_000 });
@@ -105,6 +107,7 @@ try {
         await expect(page.locator('#wm-event-inspector-title')).toBeVisible();
         await screenshot(`event-${width}`);
         await page.locator('.wm-event-inspector-close').click();
+        const closeList = page.locator('.wm-world-event-list-close'); if (await closeList.isVisible()) await closeList.click();
       });
       if (width !== 390) {
         await check('desktop: theme replacement remains primary after its deadline', async () => {
@@ -144,6 +147,7 @@ try {
           await expect(page.locator('.wm-event-inspector')).toContainText('ICAO24');
           await screenshot('desktop-aircraft-detail');
           await page.locator('.wm-event-inspector-close').click();
+        const closeList = page.locator('.wm-world-event-list-close'); if (await closeList.isVisible()) await closeList.click();
           page.off('response', responseListener);
         });
       }
@@ -166,7 +170,9 @@ try {
       });
     } catch (error) {
       await screenshot(`failure-${width}`).catch(() => {});
-      throw error;
+      record.failure = error.message;
+      receipt.failure = receipt.failure || error.message;
+      process.exitCode = 1;
     } finally { await context.tracing.stop({ path: resolve(output, `production-${width}.zip`) }); await context.close(); }
   }
 } catch (error) {

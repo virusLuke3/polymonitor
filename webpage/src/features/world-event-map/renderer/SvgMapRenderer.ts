@@ -1,3 +1,5 @@
+import { loadMapFonts } from '../config/mapTypography';
+import type { ScreenBox } from './layerFactories/eventClusters';
 import { mapPresentationCounts } from './eventDisclosure';
 import { selectionPanOffset } from './rendererVisibility';
 import { geoArea, geoMercator, geoPath, type GeoProjection } from 'd3-geo';
@@ -207,6 +209,7 @@ export class SvgMapRenderer implements MapRenderer {
   private pulseEvents: GeoEvent[] = [];
   private hoveredEventId: string | null = null;
   private destroyed = false;
+  private occupiedScreenBoxes: ScreenBox[] = [];
   private readonly clusterIndex = new EventClusterIndex();
   private drag:
     | { pointerId: number; x: number; y: number; center: WorldEventMapState['center'] }
@@ -216,6 +219,8 @@ export class SvgMapRenderer implements MapRenderer {
     if (this.svg) return;
     this.host = container;
     this.tooltip = new RendererTooltip(container);
+    await loadMapFonts();
+    if (this.destroyed) return;
     this.callbacks = callbacks;
     this.destroyed = false;
     callbacks.onBasemapStateChange('initializing');
@@ -307,6 +312,14 @@ export class SvgMapRenderer implements MapRenderer {
     this.scheduleRender();
     this.syncAnimationLoop();
   }
+
+  setOcclusions(boxes: ScreenBox[]) {
+    this.occupiedScreenBoxes = boxes;
+    this.tooltip?.setOcclusions(boxes);
+    this.selectionNeedsPan = Boolean(this.state?.selectedEventId);
+    this.scheduleRender();
+  }
+  setHoveredEvent(eventId: string | null) { this.hoveredEventId = eventId; this.scheduleRender(); }
 
   resize() {
     this.scheduleRender();
@@ -437,7 +450,7 @@ export class SvgMapRenderer implements MapRenderer {
         this.selectionNeedsPan = false;
         const projection = this.projection(width, height), point = projection(coordinate);
         if (point) {
-          const offset = selectionPanOffset(this.host, { x: point[0], y: point[1] });
+          const offset = selectionPanOffset(this.host, { x: point[0], y: point[1] }, this.occupiedScreenBoxes);
           const center = projection.invert?.([width / 2 + offset.x, height / 2 + offset.y]);
           if (center && (Math.abs(offset.x) > 1 || Math.abs(offset.y) > 1)) {
             this.state = { ...this.state, center: { lon: clampLongitude(center[0]), lat: clampLatitude(center[1]) } };
@@ -526,9 +539,9 @@ export class SvgMapRenderer implements MapRenderer {
       if (entity === 'air-flight') return false;
       return visibleAviationIds.has(event.id);
     });
-    const { singles, clusters } = this.clusterIndex.query(
-      this.state?.zoom ?? 1.25,
-      selectedId || null,
+    const { singles, clusters } = this.clusterIndex.presentation(
+      this.state?.zoom ?? 1.25, selectedId || null, undefined,
+      coordinate => { const p = projection(coordinate); return p ? { x: p[0], y: p[1] } : null; },
     );
     const sw = projection.invert?.([0, height]), ne = projection.invert?.([width, 0]);
     if (sw && ne) {
@@ -656,8 +669,13 @@ export class SvgMapRenderer implements MapRenderer {
       group.setAttribute('tabindex', '0');
       group.setAttribute('aria-label', `${cluster.count} ${cluster.label || 'mapped events'}. Zoom in to expand.`);
       const title = svgElement('title');
-      title.textContent = `${cluster.count} ${cluster.label || 'mapped events'} · ${cluster.severity.toUpperCase()} · click to expand`;
+      title.textContent = `${cluster.count} ${cluster.label || 'mapped events'} · ${cluster.mixed ? 'mixed records' : cluster.severity.toUpperCase()} · click to expand`;
       const symbolSize = clusterMarkerSize(cluster.count);
+      if (cluster.mixed) {
+        const rim = svgElement('circle'); rim.setAttribute('cx', String(x)); rim.setAttribute('cy', String(y));
+        rim.setAttribute('r', String(symbolSize / 2 + 2)); rim.setAttribute('fill', 'none');
+        rim.setAttribute('stroke', '#9daeb8'); group.appendChild(rim);
+      }
       occupiedEventLabels.push({ left: x - symbolSize / 2, top: y - symbolSize / 2, right: x + symbolSize / 2, bottom: y + symbolSize / 2 });
       const badge = svgElement('circle');
       badge.setAttribute('cx', String(x)); badge.setAttribute('cy', String(y));
@@ -670,8 +688,8 @@ export class SvgMapRenderer implements MapRenderer {
       label.textContent = String(cluster.count);
       const expand = () => {
         const zoom = clampWorldEventZoom(cluster.expansionZoom);
-        if (zoom <= (this.state?.zoom || 0) || (cluster.bounds[0] === cluster.bounds[2] && cluster.bounds[1] === cluster.bounds[3])) {
-          this.callbacks?.onClusterSelect?.(cluster.eventIds);
+        if (cluster.mixed || zoom <= (this.state?.zoom || 0) || (cluster.bounds[0] === cluster.bounds[2] && cluster.bounds[1] === cluster.bounds[3])) {
+          this.callbacks?.onClusterSelect?.(this.clusterIndex.selection(cluster));
         } else this.callbacks?.onCameraChange({ center: { lon: cluster.coordinates[0], lat: cluster.coordinates[1] }, zoom });
       };
       const showClusterTooltip = (pointerEvent: PointerEvent) => {
@@ -710,7 +728,10 @@ export class SvgMapRenderer implements MapRenderer {
       });
       const symbol = mapSymbolMarker(x, y, eventSymbol, symbolSize);
       symbol.setAttribute('fill', cssColor(eventColor(event, 245))); symbol.setAttribute('stroke', 'none');
-      group.append(symbol);
+      const hit = svgElement('circle'); hit.setAttribute('cx', String(x)); hit.setAttribute('cy', String(y));
+      hit.setAttribute('r', matchMedia('(pointer: coarse)').matches ? '20' : '11');
+      hit.setAttribute('fill', 'transparent'); hit.setAttribute('stroke', 'none');
+      group.append(hit, symbol);
       this.eventLayer.append(group);
       const mapZoom = this.state?.zoom || 1.25;
       if (event.id === selectedId || (mapZoom >= 3 && ( event.severity === 'critical'
@@ -723,11 +744,8 @@ export class SvgMapRenderer implements MapRenderer {
       || rank[right.event.severity] - rank[left.event.severity]
       || Date.parse(right.event.updatedAt || '') - Date.parse(left.event.updatedAt || '')
     ));
-    const hostBounds = this.host.getBoundingClientRect();
-    for (const control of this.host.closest('.wm-map-stage')?.querySelectorAll('.wm-event-inspector, .wm-weather-deck-legend, .wm-layer-sidebar, .wm-map-controls') || []) {
-      const rect = control.getBoundingClientRect();
-      if (rect.width && rect.height) occupiedEventLabels.push({ left: rect.left - hostBounds.left, top: rect.top - hostBounds.top, right: rect.right - hostBounds.left, bottom: rect.bottom - hostBounds.top });
-    }
+    occupiedEventLabels.push(...this.occupiedScreenBoxes.map(([left, top, right, bottom]) => ({ left, top, right, bottom })));
+
     for (const candidate of eventLabelCandidates.slice(0, (this.state?.zoom || 0) < 4 ? 24 : 100)) {
       const label = svgElement('text');
       label.classList.add('wm-world-event-svg-event-label');
@@ -947,6 +965,12 @@ export class SvgMapRenderer implements MapRenderer {
     element.addEventListener('pointerdown', (pointerEvent) => pointerEvent.stopPropagation());
     element.addEventListener('click', (pointerEvent) => {
       pointerEvent.stopPropagation();
+      if (this.host && this.state) {
+        const rect = this.host.getBoundingClientRect(), projection = this.projection(rect.width, rect.height);
+        const candidates = this.clusterIndex.hitSelection({ x: pointerEvent.clientX - rect.left, y: pointerEvent.clientY - rect.top },
+          coordinate => { const p = projection(coordinate); return p ? { x: p[0], y: p[1] } : null; }, pointerEvent.pointerType === 'touch');
+        if (candidates) { this.callbacks?.onClusterSelect?.(candidates); return; }
+      }
       this.callbacks?.onEventSelect(event.id);
     });
     element.addEventListener('keydown', (keyboardEvent) => {

@@ -1,8 +1,12 @@
+import { clearMapPosition } from './mapOcclusion';
+import type { ScreenBox } from './layerFactories/eventClusters';
 import type { WorldEventTooltipModel } from './hoverTooltip';
 import type { MapHoverPosition } from './MapRenderer';
 
 /** Renderer-owned SVG tooltip; hover never crosses into Preact/App state. */
 export class RendererTooltip {
+  private occupied: ScreenBox[] = [];
+  setOcclusions(boxes: ScreenBox[]) { this.occupied = boxes; }
   private element: HTMLDivElement | null = null;
 
   constructor(private readonly host: HTMLElement) {}
@@ -26,14 +30,12 @@ export class RendererTooltip {
       element.append(line);
     }
     element.hidden = false;
-    const margin = 12;
-    const width = element.offsetWidth;
-    const height = element.offsetHeight;
-    const x = position.x + width + 20 < this.host.clientWidth ? position.x + 12 : position.x - width - 12;
-    const y = position.y + height + 20 < this.host.clientHeight ? position.y + 12 : position.y - height - 12;
+    const target = clearMapPosition({ x: position.x + 12, y: position.y + 12 },
+      [element.offsetWidth, element.offsetHeight], [this.host.clientWidth, this.host.clientHeight], this.occupied);
     element.style.transform = 'none';
-    element.style.left = `${Math.max(margin, Math.min(x, this.host.clientWidth - width - margin))}px`;
-    element.style.top = `${Math.max(margin, Math.min(y, this.host.clientHeight - height - margin))}px`;
+    element.style.left = `${target.x}px`;
+    element.style.top = `${target.y}px`;
+
   }
 
   clear() {

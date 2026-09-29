@@ -15,6 +15,7 @@ export function WorldEventMapView({
   onAviationRiskSourceChange,
   onAviationClose,
   onCountryChange,
+  onWeatherPreset,
 }: {
   onRendererKindChange?: (kind: 'webgl' | 'svg') => void;
   events: GeoEvent[];
@@ -26,6 +27,7 @@ export function WorldEventMapView({
   onAviationRiskSourceChange: (source: AviationRiskSource) => void;
   onAviationClose: () => void;
   onCountryChange: (countryCode: string | null) => void;
+  onWeatherPreset?: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -42,6 +44,7 @@ export function WorldEventMapView({
           onAviationRiskSourceChange={onAviationRiskSourceChange}
           onAviationClose={onAviationClose}
           onCountryChange={onCountryChange}
+          onWeatherPreset={onWeatherPreset}
           height={620}
         />
       </Suspense>

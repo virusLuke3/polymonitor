@@ -5,8 +5,7 @@ export const MAP_SYMBOL_SIZE = 48;
 /**
  * Polymonitor's own compact signal alphabet.
  *
- * The silhouettes deliberately avoid WorldMonitor's generic square/diamond/
- * triangle/hexagon set. Every consumer (deck.gl, SVG fallback, legend and
+ * Compact silhouettes remain legible at 12 CSS pixels. Every consumer (deck.gl, SVG fallback, legend and
  * layer panel) reads these same paths so a hazard never changes identity when
  * the renderer changes.
  */
@@ -37,11 +36,11 @@ export const MAP_SYMBOL_DEFINITIONS = {
   },
   earthquake: {
     label: 'Earthquake',
-    paths: ['M5 8h16l-2.8 11.5 6 5-6.2 15.5H5Zm38 0H27l2.8 11.5-6 5L30 40h13Z'],
+    paths: ['M24 3 45 24 24 45 3 24Zm0 10L13 24l11 11 11-11Z', 'M24 19a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z'],
   },
   volcano: {
     label: 'Volcano',
-    paths: ['M4 42 17.5 16l6.5 7 6.5-11L44 42H30l-6-8-5 8Zm17-32 3-7 3 7-3 5Zm10 3 7-5-3 8-6 2ZM10 13 3 8l3 8 6 2Z'],
+    paths: ['M24 5 46 43H2Zm0 13-6 11h12Z'],
   },
   wildfire: {
     label: 'Wildfire',

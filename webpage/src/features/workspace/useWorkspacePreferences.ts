@@ -116,7 +116,7 @@ export function useWorkspacePreferences() {
   const [showPanelLibrary, setShowPanelLibrary] = useState<boolean>(() => {
     const stored = readJsonStorage<boolean | null>(LIBRARY_STORAGE_KEY, null);
     if (stored !== null) return stored;
-    return typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches;
+    return false;
   });
   const [marketGroupSort, setMarketGroupSort] = useState<MarketGroupSort>(() => readMarketGroupSortStorage());
   useEffect(() => {

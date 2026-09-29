@@ -149,7 +149,7 @@ describe('world event layer factories', () => {
       severity: 'watch',
       symbol: 'earthquake',
     });
-    expect(clustered.clusters[0]?.eventIds).toHaveLength(6);
+    expect(clustered.clusters[0]?.members.reduce((n, ref) => n + ref.count, 0)).toBe(6);
   });
 
   it('retains hazard identities across a disclosure boundary', () => {
@@ -300,9 +300,9 @@ describe('world event layer factories', () => {
     index.update(events);
 
     expect(index.buildCount).toBe(1);
-    expect(first.clusters[0]?.eventIds.length).toBe(240);
+    expect(first.clusters[0]?.count).toBe(240);
     expect(selected.clusters.reduce((sum, cluster) => sum + cluster.count, selected.singles.length)).toBe(240);
-    expect(selected.clusters.flatMap(cluster => cluster.eventIds)).not.toContain('persistent:239');
+    expect(selected.clusters.flatMap(cluster => Array.from({ length: Math.ceil(cluster.count / 30) }, (_, page) => index.readMembers(cluster, page * 30) || []).flat()).map(event => event.id)).not.toContain('persistent:239');
     expect(first.clusters[0]?.count).toBe(240);
     expect(selected.singles.some((event) => event.id === 'persistent:239')).toBe(true);
     expect(index.buildCount).toBe(1);
@@ -712,7 +712,7 @@ it('reports unique logical viewport IDs separately from marker and cluster count
   const area = hazardArea('area', 3, 3);
   const offscreen = hazardPoint('offscreen', 'earthquake', 100, 30);
   expect(mapPresentationCounts([a, a, b, area, offscreen], { singles: [a, a], clusters: [{ coordinates: [1, 1] }] }, [-5,-5,5,5], 1.5))
-    .toEqual({ inView: 3, singles: 1, clusters: 1, observations: 0 });
+    .toEqual({ inView: 3, inViewIds: ['a', 'b', 'area'], singles: 1, clusters: 1, observations: 0 });
 });
 
 it('keeps the selected measured label on map at low zoom even in a crowded viewport', () => {

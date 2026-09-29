@@ -1,3 +1,5 @@
+import { loadMapFonts } from '../config/mapTypography';
+import type { ScreenBox } from './layerFactories/eventClusters';
 import { mapPresentationCounts } from './eventDisclosure';
 import { selectionPanOffset } from './rendererVisibility';
 import { eventRepresentativePoint, mapLabelFontFamily } from './layerFactories/shared';
@@ -77,6 +79,7 @@ const COUNTRY_HOVER_BORDER_LAYER = 'world-event-country-hover-border';
 const EMPTY_COUNTRY_FILTER = ['==', ['get', 'ISO3166-1-Alpha-2'], ''] as FilterSpecification;
 
 type MapPerformanceHarnessHost = HTMLElement & {
+  __polymonitorMapPresentation?: (members?: boolean) => ReturnType<EventClusterIndex['diagnostics']>;
   __polymonitorProjectGeoPoint?: (lon: number, lat: number) => { x: number; y: number };
 };
 
@@ -210,6 +213,8 @@ export class DeckMapRenderer implements MapRenderer {
   private geometryLayers: LayersList = [];
   private geometryGeneration = 0;
   private geometryNeedsCommit = true;
+  private occupiedScreenBoxes: ScreenBox[] = [];
+  private readonly labelMeasureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
   private readonly clusterIndex = new EventClusterIndex();
   private readonly renderScheduler: MapRenderScheduler;
   private readonly heavyGeometryCommit: DeferredLatestCommit<{
@@ -315,7 +320,7 @@ export class DeckMapRenderer implements MapRenderer {
       this.language,
     );
     if (this.destroyed) return;
-    await document.fonts?.ready;
+    await loadMapFonts();
     if (this.destroyed) return;
     const map = new maplibregl.Map({
       container,
@@ -341,6 +346,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.map = map;
     if (new URLSearchParams(window.location.search).get('mapPerf') === '1') {
       this.performanceHarnessHost = container as MapPerformanceHarnessHost;
+      this.performanceHarnessHost.__polymonitorMapPresentation = members => this.clusterIndex.diagnostics(members);
       this.performanceHarnessHost.__polymonitorProjectGeoPoint = (lon, lat) => {
         const point = map.project([lon, lat]);
         return { x: point.x, y: point.y };
@@ -362,12 +368,14 @@ export class DeckMapRenderer implements MapRenderer {
       return isHovering || Boolean(this.hoveredCountryIso2) ? 'pointer' : 'grab';
     };
     const onClick = (info: PickingInfo<WorldEventPickedObject>) => {
+        const candidates = this.clusterIndex.hitSelection({ x: info.x, y: info.y }, coordinate => map.project(coordinate), matchMedia('(pointer: coarse)').matches);
+        if (candidates) { callbacks.onClusterSelect?.(candidates); return; }
         const cluster = pickedWorldEventCluster(info.object);
         if (cluster) {
           const [west, south, east, north] = cluster.bounds;
           const expansion = clampWorldEventZoom(cluster.expansionZoom);
-          if ((west === east && south === north) || expansion <= map.getZoom() || map.getZoom() >= 8) {
-            callbacks.onClusterSelect?.(cluster.eventIds);
+          if (cluster.mixed || (west === east && south === north) || expansion <= map.getZoom() || map.getZoom() >= 8) {
+            callbacks.onClusterSelect?.(this.clusterIndex.selection(cluster));
           } else {
             map.fitBounds([[west, south], [east, north]], {
               padding: 70, maxZoom: expansion, duration: this.reducedMotion ? 0 : 350,
@@ -381,7 +389,7 @@ export class DeckMapRenderer implements MapRenderer {
     const overlay = new MapLibreOverlay({
       interleaved: true,
       layers: [],
-      pickingRadius: 8,
+      pickingRadius: typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches ? 20 : 11,
       useDevicePixels: true,
       getCursor,
       getTooltip,
@@ -462,7 +470,7 @@ export class DeckMapRenderer implements MapRenderer {
       const coordinate = event ? eventRepresentativePoint(event) : null;
       const host = map.getContainer?.();
       if (coordinate && host) {
-        const { x: dx, y: dy } = selectionPanOffset(host, map.project(coordinate));
+        const { x: dx, y: dy } = selectionPanOffset(host, map.project(coordinate), this.occupiedScreenBoxes);
         if (Math.abs(dx) > 1 || Math.abs(dy) > 1) map.panBy([dx, dy], { duration: this.reducedMotion ? 0 : 280 });
       }
     }
@@ -562,6 +570,23 @@ export class DeckMapRenderer implements MapRenderer {
     this.map?.fitBounds([[-180, -58], [180, 76]], { padding: 40, maxZoom: 1.5, duration: this.reducedMotion ? 0 : 350 });
   }
 
+  setOcclusions(boxes: ScreenBox[]) {
+    this.occupiedScreenBoxes = boxes;
+    this.manualAviationTooltip?.setOcclusions(boxes);
+    this.pointLayers = null;
+    this.renderScheduler.request({ points: true });
+    const event = this.events.find(e => e.id === this.state?.selectedEventId);
+    const coordinate = event && eventRepresentativePoint(event);
+    if (coordinate && this.map && !this.interacting) {
+      const offset = selectionPanOffset(this.map.getContainer(), this.map.project(coordinate), boxes);
+      if (Math.abs(offset.x) > 1 || Math.abs(offset.y) > 1) this.map.panBy([offset.x, offset.y], { duration: this.reducedMotion ? 0 : 180 });
+    }
+  }
+  setHoveredEvent(eventId: string | null) {
+    this.hoveredDeckEventId = eventId;
+    this.renderScheduler.request({ interaction: true });
+  }
+
   fitCountry(country: MapCountryTarget) {
     this.map?.fitBounds(country.bounds, {
       padding: 64,
@@ -615,6 +640,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.clearAllHover();
     if (this.performanceHarnessHost) {
       delete this.performanceHarnessHost.__polymonitorProjectGeoPoint;
+      delete this.performanceHarnessHost.__polymonitorMapPresentation;
       this.performanceHarnessHost = null;
     }
     const map = this.map;
@@ -714,21 +740,14 @@ export class DeckMapRenderer implements MapRenderer {
             return Number.isFinite(point.x) && Number.isFinite(point.y) ? { x: point.x, y: point.y } : null;
           }
         : undefined;
-      const occupiedScreenBoxes: [number, number, number, number][] = [];
-      const measureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+      const occupiedScreenBoxes = [...this.occupiedScreenBoxes];
+      const measureContext = this.labelMeasureContext;
       const measureLabel = (text: string, size: number) => {
         if (!measureContext) return 220;
         measureContext.font = `500 ${size}px ${mapLabelFontFamily()}`;
         return measureContext.measureText(text).width;
       };
       const host = map?.getContainer?.();
-      if (host) {
-        const bounds = host.getBoundingClientRect();
-        for (const control of host.closest('.wm-map-stage')?.querySelectorAll('.wm-event-inspector, .wm-weather-deck-legend, .wm-layer-sidebar, .wm-map-controls') || []) {
-          const rect = control.getBoundingClientRect();
-          if (rect.width && rect.height) occupiedScreenBoxes.push([rect.left - bounds.left, rect.top - bounds.top, rect.right - bounds.left, rect.bottom - bounds.top]);
-        }
-      }
       if (map) {
         try {
           const symbolLayerIds = (map.getStyle()?.layers || [])
@@ -772,7 +791,7 @@ export class DeckMapRenderer implements MapRenderer {
     if (invalidation.points && bounds) {
       const actualViewport: [number, number, number, number] = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
       this.callbacks?.onPresentationChange?.(mapPresentationCounts(this.events,
-        this.clusterIndex.query(this.state.zoom, this.state.selectedEventId, viewport), actualViewport, this.state.zoom));
+        this.clusterIndex.lastPresentation || this.clusterIndex.query(this.state.zoom, this.state.selectedEventId, viewport), actualViewport, this.state.zoom));
     }
     if (invalidation.geometry || this.geometryNeedsCommit) {
       this.heavyGeometryCommit.stage({

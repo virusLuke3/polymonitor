@@ -1,3 +1,4 @@
+import type { ClusterSelection } from '../renderer/layerFactories/eventClusters';
 import type { MapPresentationCounts } from '../renderer/eventDisclosure';
 import { useI18n } from '@/services/i18n';
 import { mapText } from '@/locales/map';
@@ -30,6 +31,7 @@ export type EventListFilters = {
   severity: GeoEventSeverity | 'all';
   time: EventListTimeFilter;
   region: EventListRegion;
+  sort?: 'severity' | 'occurred' | 'updated';
 };
 
 export const EVENT_LIST_ROW_HEIGHT = 68;
@@ -195,7 +197,9 @@ export function filterEventListEvents(
     ].filter(Boolean).join(' ').toLocaleLowerCase();
     return searchable.includes(normalizedQuery);
   }).sort((left, right) => (
-    SEVERITY_RANK[right.severity] - SEVERITY_RANK[left.severity]
+    (filters.sort === 'occurred' ? (Date.parse(right.occurredAt || '') || 0) - (Date.parse(left.occurredAt || '') || 0)
+      : filters.sort === 'updated' ? eventTimestamp(right) - eventTimestamp(left)
+      : SEVERITY_RANK[right.severity] - SEVERITY_RANK[left.severity])
     || eventTimestamp(right) - eventTimestamp(left)
     || left.title.localeCompare(right.title)
   ));
@@ -227,9 +231,9 @@ export function virtualEventWindow(
   };
 }
 
-function eventTimeLabel(event: GeoEvent) {
-  const timestamp = eventTimestamp(event);
-  if (!timestamp) return 'Time unknown';
+function eventTimeLabel(value: string | undefined) {
+  const timestamp = Date.parse(value || '');
+  if (!Number.isFinite(timestamp)) return '—';
   return `${new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: '2-digit',
@@ -252,31 +256,67 @@ export function EventList({
   presentation,
   events,
   selectedEventId,
-  clusterIds,
+  clusterSelection,
   onClearCluster,
   onSelect,
+  onHover,
+  onCloseDetails,
+  detailVisible = false,
+  openRequest,
 }: {
   presentation?: MapPresentationCounts | null;
   events: GeoEvent[];
-  clusterIds?: string[] | null;
+  clusterSelection?: ClusterSelection | null;
   onClearCluster?: () => void;
   selectedEventId: string | null;
   onSelect: (eventId: string) => void;
+  onHover?: (eventId: string | null) => void;
+  onCloseDetails?: () => void;
+  detailVisible?: boolean;
+  openRequest?: { eventId: string } | null;
 }) {
   const { locale } = useI18n();
   const mt = (text: string) => mapText(locale, text);
   const [open, setOpen] = useState(false);
+  const [scope, setScope] = useState<'all' | 'view'>('all');
+  const [readingEvents, setReadingEvents] = useState(events);
   const [filters, setFilters] = useState<EventListFilters>(DEFAULT_FILTERS);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(DEFAULT_LIST_VIEWPORT_HEIGHT);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (clusterIds) { setFilters(DEFAULT_FILTERS); setScrollTop(0); setOpen(true); } }, [clusterIds]);
+  const [clusterEvents, setClusterEvents] = useState<GeoEvent[]>([]);
+  const [clusterExpired, setClusterExpired] = useState(false);
+  const lastSelected = useRef<string | null>(null);
+  if (selectedEventId) lastSelected.current = selectedEventId;
+  useEffect(() => { if (openRequest) { lastSelected.current = openRequest.eventId; setOpen(true); } }, [openRequest]);
+  const loadMembers = () => {
+    if (!clusterSelection) return;
+    const next = clusterSelection.readPage(clusterEvents.length, 30);
+    if (next === null) setClusterExpired(true);
+    else setClusterEvents(previous => [...previous, ...next]);
+  };
+  useEffect(() => {
+    if (!clusterSelection) { setClusterEvents([]); return; }
+    const first = clusterSelection.readPage(0, 30);
+    setClusterEvents(first || []); setClusterExpired(first === null);
+    setFilters(DEFAULT_FILTERS); setScrollTop(0); setOpen(true);
+  }, [clusterSelection]);
+  useEffect(() => { if (!open) setReadingEvents(events); }, [events, open]);
+  useEffect(() => {
+    if (clusterSelection && clusterSelection.readPage(0, 1) === null) setClusterExpired(true);
+  }, [events, clusterSelection]);
+  const incoming = useMemo(() => { const seen = new Set(readingEvents.map(event => event.id)); return events.filter(event => !seen.has(event.id)).length; }, [events, readingEvents]);
+  const scopedEvents = useMemo(() => {
+    if (clusterSelection) return clusterEvents;
+    const inView = new Set(presentation?.inViewIds || []);
+    return scope === 'view' ? readingEvents.filter(event => inView.has(event.id)) : readingEvents;
+  }, [clusterSelection, clusterEvents, scope, readingEvents, presentation]);
   const types = useMemo(() => eventTypeOptions(events), [events]);
   const filteredEvents = useMemo(
-    () => filterEventListEvents(clusterIds ? events.filter(event => clusterIds.includes(event.id)) : events, filters),
-    [events, filters, clusterIds],
+    () => filterEventListEvents(scopedEvents, filters),
+    [scopedEvents, filters],
   );
   const virtualWindow = useMemo(
     () => virtualEventWindow(filteredEvents, scrollTop, viewportHeight),
@@ -297,7 +337,7 @@ export function EventList({
   };
 
   useEffect(() => {
-    if (!open || typeof window === 'undefined') return undefined;
+    if (!open || detailVisible || typeof window === 'undefined') return undefined;
     const focusFrame = window.requestAnimationFrame(() => searchRef.current?.focus());
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -309,37 +349,44 @@ export function EventList({
       window.cancelAnimationFrame(focusFrame);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open]);
+  }, [open, detailVisible]);
 
   useEffect(() => {
-    if (!open || !scrollRef.current) return undefined;
+    if (!open || detailVisible || !scrollRef.current) return undefined;
     const scrollNode = scrollRef.current;
+    scrollNode.scrollTop = scrollTop;
     const updateHeight = () => setViewportHeight(scrollNode.clientHeight || DEFAULT_LIST_VIEWPORT_HEIGHT);
     updateHeight();
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(updateHeight);
     observer.observe(scrollNode);
     return () => observer.disconnect();
-  }, [open]);
+  }, [open, detailVisible]);
 
   useEffect(() => {
     setScrollTop(0);
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [filters]);
 
+  useEffect(() => {
+    if (!open || detailVisible || !lastSelected.current || !scrollRef.current) return;
+    const index = filteredEvents.findIndex(event => event.id === lastSelected.current);
+    if (index >= 0) { const y = index * EVENT_LIST_ROW_HEIGHT; scrollRef.current.scrollTop = y; setScrollTop(y); }
+  }, [selectedEventId, open, detailVisible]);
+
   return (
-    <div className={`wm-world-event-list ${open ? 'is-open' : ''}`}>
+    <div className={`wm-world-event-list ${open && !detailVisible ? 'is-open' : ''}`}>
       <button
         ref={toggleRef}
         type="button"
         className="wm-world-event-list-toggle"
-        aria-expanded={open}
+        aria-expanded={open && !detailVisible}
         aria-controls="wm-world-event-list-panel"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => { if (detailVisible) { onCloseDetails?.(); setOpen(true); } else setOpen(current => !current); }}
       >
-        <span>{mt("All events")}</span><b aria-hidden="true">·</b><strong>{events.length}</strong>
+        <span>{detailVisible ? (locale === 'zh' ? '返回事件列表' : 'Back to events') : mt("All events")}</span><b aria-hidden="true">·</b><strong>{events.length}</strong>
       </button>
-      {open ? (
+      {open && !detailVisible ? (
         <section
           id="wm-world-event-list-panel"
           aria-labelledby="wm-world-event-list-heading"
@@ -348,7 +395,7 @@ export function EventList({
           <header>
             <div>
               <span>{mt("WORLD EVENT INDEX")}</span>
-              <h2 id="wm-world-event-list-heading">{mt(clusterIds ? "Cluster members" : "All mapped events")}</h2>
+              <h2 id="wm-world-event-list-heading">{mt(clusterSelection ? "Cluster members" : "All mapped events")}</h2>
             </div>
             <button
               type="button"
@@ -360,6 +407,16 @@ export function EventList({
             </button>
           </header>
 
+          <div className="wm-map-list-options">
+            {!clusterSelection ? <label>{locale === 'zh' ? '范围' : 'Scope'}<select aria-label={locale === 'zh' ? '事件范围' : 'Event scope'} value={scope} onChange={event => { setScope(event.currentTarget.value as 'all' | 'view'); setScrollTop(0); }}>
+              <option value="all">{locale === 'zh' ? '全部已加载' : 'All loaded'}</option><option value="view">{locale === 'zh' ? '当前视口' : 'In view'}</option>
+            </select></label> : <button type="button" onClick={onClearCluster}>{locale === 'zh' ? '全部已加载事件' : 'All loaded events'}</button>}
+            <label>{locale === 'zh' ? '排序' : 'Sort'}<select aria-label={locale === 'zh' ? '事件排序' : 'Event sort'} value={filters.sort || 'severity'} onChange={event => setFilters(current => ({ ...current, sort: event.currentTarget.value as EventListFilters['sort'] }))}>
+              <option value="severity">{locale === 'zh' ? '严重等级' : 'Severity'}</option><option value="occurred">{locale === 'zh' ? '最近发生' : 'Recently occurred'}</option><option value="updated">{locale === 'zh' ? '最近更新' : 'Recently updated'}</option>
+            </select></label>
+            {incoming && !clusterSelection ? <button type="button" onClick={() => setReadingEvents(events)}>{locale === 'zh' ? `新增 ${incoming} 条 · 更新列表` : `${incoming} new · update list`}</button> : null}
+          </div>
+          <details className="wm-map-counts"><summary>{locale === 'zh' ? '时间窗口：最近更新' : 'Time window: latest update'}</summary><small>{locale === 'zh' ? '时间窗口按来源更新时间筛选（缺失时用发生时间），不代表实时直播。' : 'Time windows use source updates, falling back to occurrence. This is not a live timeline.'}</small></details>
           <div className="wm-world-event-list-filters">
             <label className="is-search" htmlFor="wm-event-list-search">
               <span>{mt("Search")}</span>
@@ -375,6 +432,7 @@ export function EventList({
                 }))}
               />
             </label>
+            <details className="wm-map-list-filter-disclosure"><summary>{locale === 'zh' ? '筛选类型、等级、时间和地区' : 'Filter type, severity, time and region'}</summary><div className="wm-map-list-advanced">
             <label htmlFor="wm-event-list-type">
               <span>{mt("Disaster type")}</span>
               <select
@@ -439,19 +497,28 @@ export function EventList({
                 ))}
               </select>
             </label>
+            </div></details>
           </div>
 
-          {presentation ? <p className="wm-map-counts">
+          {presentation ? <details className="wm-map-counts"><summary>
             {locale === 'zh' ? `视口内 ${presentation.inView} 个事件 · ${presentation.singles} 个事件点 / ${presentation.clusters} 个聚合 · ${presentation.observations} 条概览观测` : `In view: ${presentation.inView} events · ${presentation.singles} event points / ${presentation.clusters} clusters · ${presentation.observations} overview observations`}
-            <small>{locale === 'zh' ? '按事件 ID 去重；区域按真实几何相交。航空独立绘制，强调环不重复计数。观测不等于灾害发生。' : 'Unique event IDs; areas use geometry intersection. Aviation is drawn separately; emphasis rings are not extra events. Observations are not confirmed disasters.'}</small>
-          </p> : null}
+            </summary><small>{locale === 'zh' ? '按事件 ID 去重；区域按真实几何相交。航空独立绘制，强调环不重复计数。观测不等于灾害发生。' : 'Unique event IDs; areas use geometry intersection. Aviation is drawn separately; emphasis rings are not extra events. Observations are not confirmed disasters.'}</small>
+          </details> : null}
           <div className="wm-world-event-list-summary" id="wm-world-event-list-summary" aria-live="polite">
-            <span>{locale === 'zh' ? '显示' : 'Showing'} <strong>{filteredEvents.length}</strong> / {clusterIds?.length ?? events.length}</span>
+            <span>{locale === 'zh' ? '显示' : 'Showing'} <strong>{filteredEvents.length}</strong> / {clusterSelection?.count ?? events.length}</span>
             {hasFilters ? (
               <button type="button" onClick={() => setFilters(DEFAULT_FILTERS)}>{mt("Clear filters")}</button>
-            ) : <span>{mt("Sorted by severity and freshness")}</span>}
+            ) : <span>{filters.sort === 'occurred' ? (locale === 'zh' ? '按发生时间排序' : 'Sorted by occurrence')
+              : filters.sort === 'updated' ? (locale === 'zh' ? '按更新时间排序' : 'Sorted by latest update')
+              : mt("Sorted by severity and freshness")}</span>}
           </div>
 
+          {clusterSelection ? <div className="wm-map-counts">
+            {locale === 'zh' ? '已加载成员' : 'Loaded members'} {clusterEvents.length} / {clusterSelection.count}
+            {clusterExpired ? <span role="status">{locale === 'zh' ? '数据已更新，请重新打开此聚合。' : 'Data changed. Reopen this group for current members.'}</span> : clusterEvents.length < clusterSelection.count ?
+              <button type="button" onClick={loadMembers}>{locale === 'zh' ? '再加载 30 条' : 'Load 30 more'}</button> : null}
+            {hasFilters && clusterEvents.length < clusterSelection.count ? <small>{locale === 'zh' ? '筛选当前已加载成员' : 'Filters apply to loaded members'}</small> : null}
+          </div> : null}
           {filteredEvents.length ? (
             <div
               ref={scrollRef}
@@ -471,11 +538,15 @@ export function EventList({
                   >
                     <button
                       type="button"
+                      onMouseEnter={() => onHover?.(event.id)}
+                      onMouseLeave={() => onHover?.(null)}
+                      onFocus={() => onHover?.(event.id)}
+                      onBlur={() => onHover?.(null)}
                       className={event.id === selectedEventId ? 'is-selected' : ''}
                       aria-current={event.id === selectedEventId ? 'true' : undefined}
                       onClick={() => {
                         onSelect(event.id);
-                        closeDrawer(false);
+                        onHover?.(null);
                       }}
                     >
                       <span className="wm-event-list-symbol">
@@ -493,7 +564,8 @@ export function EventList({
                         {EVENT_TYPE_LABELS[eventListType(event)] || eventListType(event).replace(/-/g, ' ')}
                       </small>
                       <small className="wm-event-list-place">{event.locationLabel || 'Mapped geometry'}</small>
-                      <time dateTime={event.updatedAt || event.occurredAt}>{eventTimeLabel(event)}</time>
+                      <time className="wm-event-list-occurrence" dateTime={event.occurredAt}>{event.occurredAt ? `${locale === 'zh' ? '发生' : 'Occurred'} ${eventTimeLabel(event.occurredAt)}` : locale === 'zh' ? '发生时间未提供' : 'Occurrence unknown'}</time>
+                      <time dateTime={event.updatedAt}>{locale === 'zh' ? '更新 ' : 'Updated '}{eventTimeLabel(event.updatedAt)}</time>
                     </button>
                   </li>
                 ))}

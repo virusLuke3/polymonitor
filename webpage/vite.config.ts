@@ -76,7 +76,9 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
-    plugins: [preact(), pwaServiceWorker(buildId), ...(env.POLYDATA_READONLY_PREVIEW === '1' ? [{
+    // Prefresh retains historical vnodes for hot replacement. Browser tests
+    // measure application ownership, so use production-like component lifetime.
+    plugins: [preact({ prefreshEnabled: mode !== 'test' }), pwaServiceWorker(buildId), ...(env.POLYDATA_READONLY_PREVIEW === '1' ? [{
       name: 'anonymous-readonly-preview',
       apply: 'serve' as const,
       configureServer(server) {

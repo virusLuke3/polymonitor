@@ -1,47 +1,32 @@
-import { createHash } from 'node:crypto';
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, request, test, type Page } from '@playwright/test';
+import { chromium, expect, test } from '@playwright/test';
+import { installRealMapAssets } from './fixtures/real-map-assets';
 import { GENERATED_AT, installFixtures } from './fixtures/world-event-map';
+import { MAP_SYMBOL_DEFINITIONS } from '../src/features/world-event-map/config/mapSymbols';
 
 // Opt-in acceptance against real vector assets, cached byte-for-byte between
 // phases. API data is the existing deterministic fixture, never live evidence.
 const phase = process.env.MAP_ALIGNMENT_PHASE;
+const finalPhase = phase === 'P6' || phase === 'round2-E';
 const artifactRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../artifacts/map-alignment');
 const output = resolve(artifactRoot, phase || 'unrequested');
 const cache = resolve(artifactRoot, 'input-assets');
 test.use({ trace: 'off', deviceScaleFactor: Number(process.env.MAP_ALIGNMENT_DPR || 1) });
 test.skip(!phase, 'Set MAP_ALIGNMENT_PHASE to capture a reviewed alignment phase.');
 
-async function installRealMapAssets(page: Page) {
-  mkdirSync(cache, { recursive: true });
-    const network = await request.newContext({
-      ...(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {}),
-    });
-    await page.route(/(?:\/map-tiles\/|https:\/\/protomaps\.github\.io\/basemaps-assets\/)/, async route => {
-      const url = new URL(route.request().url());
-      if (url.pathname.startsWith('/map-tiles/')) {
-        url.protocol = 'https:'; url.host = 'polymonitor.club'; url.port = '';
-      }
-      const range = route.request().headers().range;
-      const key = createHash('sha256').update(url.href + (range || '')).digest('hex');
-      const bodyPath = resolve(cache, key);
-      const metaPath = `${bodyPath}.json`;
-      if (existsSync(metaPath)) {
-        await route.fulfill({ ...JSON.parse(readFileSync(metaPath, 'utf8')), body: readFileSync(bodyPath) });
-        return;
-      }
-      const response = await network.get(url.href, { headers: range ? { Range: range } : {}, timeout: 30_000 });
-      const body = await response.body();
-      const headers = response.headers();
-      delete headers['content-encoding']; delete headers['content-length'];
-      const metadata = { status: response.status(), headers };
-      if (response.ok()) { writeFileSync(bodyPath, body); writeFileSync(metaPath, JSON.stringify(metadata)); }
-      await route.fulfill({ ...metadata, body });
-    });
-  return network;
-}
+test('shared hazard symbols at native 12, 14 and 16 CSS pixels', async ({ page }) => {
+  test.skip(!finalPhase, 'Final native-size symbol review.');
+  await page.setViewportSize({ width: 720, height: 400 });
+  const rows = ['earthquake', 'volcano', 'wildfire', 'cyclone'].map(key => {
+    const symbol = MAP_SYMBOL_DEFINITIONS[key as keyof typeof MAP_SYMBOL_DEFINITIONS];
+    return `<tr><th>${symbol.label}</th>${[12,14,16].map(size => `<td><svg width="${size}" height="${size}" viewBox="0 0 48 48" fill="#d7b84e">${symbol.paths.map(d => `<path d="${d}" fill-rule="evenodd"/>`).join('')}</svg></td>`).join('')}</tr>`;
+  }).join('');
+  await page.setContent(`<style>body{background:#111;color:#ddd;font:14px system-ui}table{border-spacing:32px 20px}th{text-align:left}</style><p>Test fixture · shared production symbol paths · native CSS sizes · DPR ${process.env.MAP_ALIGNMENT_DPR || 1}</p><table><tr><th>Symbol</th><th>12 px</th><th>14 px</th><th>16 px</th></tr>${rows}</table>`);
+  await expect(page.locator('svg')).toHaveCount(12);
+  await page.screenshot({ path: resolve(output, `symbols-dpr${process.env.MAP_ALIGNMENT_DPR || 1}.png`) });
+});
 
 for (const language of ['en', 'zh']) {
   test(`alignment ${language}: fixed camera, real vector map, details and interaction`, async ({ page, browser }) => {
@@ -84,6 +69,7 @@ for (const language of ['en', 'zh']) {
       if (process.env.MAP_ALIGNMENT_PREVIEW === '1') { test.setTimeout(0); await page.pause(); }
       const metadata = await host.evaluate(el => ({ width: el.clientWidth, height: el.clientHeight, dpr: devicePixelRatio,
         canvases: [...el.querySelectorAll('canvas')].map(c => ({ width: c.width, height: c.height, cssWidth: c.clientWidth, cssHeight: c.clientHeight })),
+        fonts: Object.fromEntries(['.wm-map-legend-toggle', '.wm-world-event-list-toggle', '.wm-map-radar-status'].map(selector => [selector, getComputedStyle(document.querySelector(selector)!).fontFamily])),
         url: location.href, renderer: (el as HTMLElement).dataset.mapRendererReady, basemap: (el as HTMLElement).dataset.mapBasemapState,
         logicalEvents: Number(document.querySelector('.wm-world-event-list-toggle strong')?.textContent),
         performance: window.__POLYMONITOR_MAP_PERF__?.snapshot(),
@@ -95,12 +81,13 @@ for (const language of ['en', 'zh']) {
       await expect(page.locator('.wm-event-inspector')).toBeVisible();
       await page.waitForTimeout(500);
       await page.locator('.wm-weather-deck-map').screenshot({ path: resolve(output, `detail-${language}.png`) });
-      if (phase !== 'P0' && phase !== 'P6') {
+      if (phase !== 'P0' && !finalPhase) {
         writeFileSync(resolve(output, `evidence-${language}.json`), JSON.stringify({ phase, fixture: GENERATED_AT, browser: browser.version(), metadata, errors }, null, 2));
         expect(errors).toEqual([]);
         return;
       }
       await page.keyboard.press('Escape');
+      if (await page.locator('.wm-world-event-list-close').isVisible()) await page.locator('.wm-world-event-list-close').click();
       await page.emulateMedia({ reducedMotion: 'no-preference' });
       await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
       await host.scrollIntoViewIfNeeded();
@@ -132,8 +119,9 @@ for (const language of ['en', 'zh']) {
       await page.locator('.wm-world-event-list-toggle').click();
       await page.getByRole('button', { name: /HU ADA/ }).click();
       await page.waitForTimeout(1000);
-      if (phase === 'P6') {
+      if (finalPhase) {
         await page.keyboard.press('Escape');
+      if (await page.locator('.wm-world-event-list-close').isVisible()) await page.locator('.wm-world-event-list-close').click();
         await page.locator('.wm-map-controls button').nth(2).click();
         await page.waitForTimeout(800);
         await host.scrollIntoViewIfNeeded();
@@ -148,6 +136,7 @@ for (const language of ['en', 'zh']) {
         await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click({ timeout: 15_000 });
         await expect(page.locator('.wm-event-inspector')).toBeVisible();
         await page.waitForTimeout(1500); await page.keyboard.press('Escape');
+      if (await page.locator('.wm-world-event-list-close').isVisible()) await page.locator('.wm-world-event-list-close').click();
       }
       await page.context().tracing.stop({ path: resolve(output, `interaction-${language}.zip`) });
       writeFileSync(resolve(output, `evidence-${language}.json`), JSON.stringify({ phase, fixture: GENERATED_AT, browser: browser.version(), metadata, performance, errors }, null, 2));
@@ -159,7 +148,7 @@ for (const language of ['en', 'zh']) {
 }
 
 test('real radar: latest manifest, raster tiles, coverage, close and reopen', async ({ page }) => {
-  test.skip(phase !== 'P5', 'Real source acceptance is separate from fixed-event comparison.');
+  test.skip(phase !== 'P5' && phase !== 'round2-radar', 'Real source acceptance is separate from fixed-event comparison.');
   test.setTimeout(150_000);
   await page.setViewportSize({ width: 1536, height: 1100 });
   await page.clock.install({ time: new Date() });
@@ -195,7 +184,7 @@ test('real radar: latest manifest, raster tiles, coverage, close and reopen', as
     const latest = [...manifest.radar.past].filter((f: any) => f.time * 1000 <= Date.now()).sort((a: any,b: any) => b.time-a.time)[0];
     expect(receipts.filter(r => r.url.includes('/v2/radar/')).every(r => r.url.includes(latest.path))).toBe(true);
     await page.getByRole('checkbox', { name: 'Hide Weather radar', exact: true }).uncheck();
-    await expect(page.locator('.wm-map-radar-status')).toHaveCount(0);
+    await expect(page.locator('.wm-map-radar-status summary')).toContainText('Off');
     const stoppedCount = startedRequests.length; await page.waitForTimeout(1500); expect(startedRequests.length).toBe(stoppedCount);
     await page.getByRole('checkbox', { name: 'Show Weather radar', exact: true }).check();
     await expect(page.locator('.wm-map-radar-status')).toContainText(/ready \/ ready/, { timeout: 45_000 });
@@ -213,12 +202,12 @@ test('real radar: latest manifest, raster tiles, coverage, close and reopen', as
 
 for (const screen of [
   { width: 1440, height: 900, dpr: 1 }, { width: 2048, height: 900, dpr: 1 },
-  { width: 390, height: 844, dpr: 2 }, { width: 844, height: 390, dpr: 2 },
+  { width: 1920, height: 1080, dpr: 1 }, { width: 390, height: 844, dpr: 2 }, { width: 844, height: 390, dpr: 2 },
   { width: 1536, height: 1100, dpr: 1.25 }, { width: 1536, height: 1100, dpr: 1.5 }, { width: 1536, height: 1100, dpr: 2 },
 ]) {
   test(`product map ${screen.width}x${screen.height} DPR ${screen.dpr}`, async ({ browser }) => {
-    test.skip(phase !== 'P6', 'Final responsive and pixel-density matrix.');
-    const context = await browser.newContext({ viewport: screen, deviceScaleFactor: screen.dpr, reducedMotion: 'reduce', baseURL: 'http://127.0.0.1:4174' });
+    test.skip(!finalPhase, 'Final responsive and pixel-density matrix.');
+    const context = await browser.newContext({ viewport: screen, deviceScaleFactor: screen.dpr, hasTouch: screen.width <= 720, reducedMotion: 'reduce', baseURL: 'http://127.0.0.1:4174' });
     const page = await context.newPage();
     await page.clock.setFixedTime(new Date(GENERATED_AT));
     await installFixtures(page); const network = await installRealMapAssets(page);
@@ -248,10 +237,12 @@ for (const screen of [
         expect(Math.abs(canvas.w - canvas.cssW * screen.dpr)).toBeLessThanOrEqual(1);
         expect(Math.abs(canvas.h - canvas.cssH * screen.dpr)).toBeLessThanOrEqual(1);
       }
-      await page.locator('.wm-world-event-list-toggle').click();
+      if (screen.width <= 720) await page.locator('.wm-world-event-list-toggle').tap();
+      else await page.locator('.wm-world-event-list-toggle').click();
       await expect(page.locator('#wm-event-list-search')).toBeFocused();
       await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).scrollIntoViewIfNeeded();
-      await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click({ timeout: 15_000 });
+      if (screen.width <= 720) await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).tap({ timeout: 15_000 });
+      else await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click({ timeout: 15_000 });
       const inspector = page.locator('.wm-event-inspector'); await expect(inspector).toBeVisible();
       await expect(page.locator('#wm-event-inspector-title')).toBeFocused();
       if (screen.width <= 720) expect(Math.abs((await host.boundingBox())!.y)).toBeLessThanOrEqual(1);
@@ -275,7 +266,8 @@ for (const screen of [
         expect(point.y).toBeLessThan(screen.height);
       }
       await page.screenshot({ path: resolve(output, `product-detail-${name}.png`) });
-      await page.keyboard.press('Escape'); await expect(inspector).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      if (await page.locator('.wm-world-event-list-close').isVisible()) await page.locator('.wm-world-event-list-close').click(); await expect(inspector).toHaveCount(0);
       writeFileSync(resolve(output, `product-${name}.json`), JSON.stringify({ metrics, errors }, null, 2));
       expect(errors).toEqual([]);
     } finally { await page.unrouteAll({ behavior: 'ignoreErrors' }); await context.close(); await network.dispose(); }
@@ -309,4 +301,37 @@ test('live sources: real public hazards and real vector assets in the local fron
     writeFileSync(resolve(output, 'live-sources.json'), JSON.stringify({ observedAt: new Date().toISOString(), receipts,
       visibleEvents: await page.locator('.wm-world-event-list-toggle strong').textContent() }, null, 2));
   } finally { await page.unrouteAll({ behavior: 'ignoreErrors' }); await page.goto('about:blank'); await network.dispose(); }
+});
+
+// A real Chrome profile zoom preference, not DPR emulation or CSS transform.
+test('product map at native 125 percent browser zoom', async () => {
+  test.skip(!finalPhase, 'Final browser zoom matrix.');
+  const profile = mkdtempSync('/tmp/polymonitor-zoom-');
+  mkdirSync(resolve(profile, 'Default'));
+  writeFileSync(resolve(profile, 'Default/Preferences'), JSON.stringify({ partition: { default_zoom_level: { x: Math.log(1.25) / Math.log(1.2) } } }));
+  const context = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless: true, viewport: null, deviceScaleFactor: undefined,
+    reducedMotion: 'reduce', baseURL: 'http://127.0.0.1:4174',
+    args: ['--window-size=1920,1080', '--disable-partial-raster', ...(process.env.POLYMONITOR_E2E_HARDWARE_WEBGL === '1' ? ['--use-angle=vulkan', '--enable-features=Vulkan'] : [])] });
+  const page = context.pages()[0]!;
+  await page.clock.setFixedTime(new Date(GENERATED_AT)); await installFixtures(page);
+  const network = await installRealMapAssets(page);
+  try {
+    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes,weather-alerts');
+    const host = page.locator('[data-map-renderer-ready]');
+    await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');
+    await page.evaluate(() => document.fonts.ready);
+    const metrics = await host.evaluate(el => ({ browserZoom: 1.25, dpr: devicePixelRatio, cssWidth: innerWidth, outerWidth,
+      visualScale: visualViewport!.scale, mapRect: el.getBoundingClientRect().toJSON(),
+      canvas: [...el.querySelectorAll('canvas')].map(c => ({ width: c.width, cssWidth: c.clientWidth })) }));
+    expect(metrics.outerWidth).toBe(1920); expect(metrics.cssWidth).toBe(1536); expect(metrics.dpr).toBe(1.25); expect(metrics.visualScale).toBe(1);
+    for (const canvas of metrics.canvas) expect(Math.abs(canvas.width - canvas.cssWidth * 1.25)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: resolve(output, 'product-browser125.png') });
+    await page.locator('.wm-map-legend-toggle').click(); await expect(page.locator('.wm-weather-deck-legend')).toBeVisible();
+    await page.keyboard.press('Escape');
+      if (await page.locator('.wm-world-event-list-close').isVisible()) await page.locator('.wm-world-event-list-close').click(); await page.locator('.wm-world-event-list-toggle').click();
+    await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
+    await expect(page.locator('.wm-event-inspector')).toBeVisible();
+    await page.screenshot({ path: resolve(output, 'product-browser125-detail.png') });
+    writeFileSync(resolve(output, 'product-browser125.json'), JSON.stringify(metrics, null, 2));
+  } finally { await page.unrouteAll({ behavior: 'ignoreErrors' }); await context.close(); await network.dispose(); rmSync(profile, { recursive: true, force: true }); }
 });

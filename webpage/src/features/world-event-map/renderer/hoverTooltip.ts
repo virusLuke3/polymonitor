@@ -209,9 +209,14 @@ export function worldEventTooltipModel(
   const cluster = pickedWorldEventCluster(object);
   if (cluster) {
     return {
-      kicker: `${mapText(locale, cluster.severity)} · ${mapText(locale, 'Cluster members')}`,
+      kicker: `${cluster.mixed ? (locale === 'zh' ? '混合事件' : 'Mixed events') : mapText(locale, cluster.severity)} · ${mapText(locale, 'Cluster members')}`,
       title: `${cluster.count.toLocaleString('en-US')} ${cluster.label || 'mapped events'}`,
-      details: [cluster.severityCounts ? Object.entries(cluster.severityCounts).filter(([, count]) => count).map(([level, count]) => `${mapText(locale, level)}: ${count}`).join(' · ') : '', mapText(locale, 'Expand or open complete member list')],
+      details: compact([
+        cluster.mixed ? Object.entries(cluster.typeCounts).map(([type, n]) => `${mapText(locale, humanize(type))}: ${n}`).join(' · ') : '',
+        cluster.severityCounts ? Object.entries(cluster.severityCounts).filter(([, count]) => count).map(([level, count]) => `${mapText(locale, level)}: ${count}`).join(' · ') : '',
+        cluster.occurrenceRange ? `${locale === 'zh' ? '已知发生时间' : 'Known occurrence times'}: ${cluster.occurrenceRange.map(time => new Date(time).toISOString().replace('.000Z', ' UTC')).join(' – ')}` : mapText(locale, 'Occurrence time not provided'),
+        mapText(locale, 'Expand or open complete member list'),
+      ]),
     };
   }
 
