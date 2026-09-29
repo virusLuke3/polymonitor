@@ -30,11 +30,12 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'labor-wage-services-pressure',
+  dataDependencies: ['polymarket-macro-map'],
   title: 'Labor Wage Services Pressure',
   eyebrow: 'macro',
   description: 'Labor-market and wage pressure for services CPI and Fed markets.',
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeLaborWageServicesPressure(8),
+  fetchData: (context) => fetchRuntimeLaborWageServicesPressure(8, context?.signal),
 });

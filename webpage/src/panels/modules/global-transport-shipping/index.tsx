@@ -1,8 +1,10 @@
+import { openExternal as openSource } from '../../shared/renderers';
+import { seededStatusBadge as statusBadge, alertSeverityClass as severityClass, formatCompact } from '../../shared/formatters';
+import { numericValue as numeric } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGlobalTransportShipping } from '@/services/api';
 import type { RuntimeGlobalTransportShippingItem, RuntimeGlobalTransportShippingPayload } from '@/types';
-import { formatCompact } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
@@ -11,27 +13,6 @@ type TransportTab = 'ops' | 'flights' | 'airlines' | 'track' | 'news';
 type AviationIconKind = 'airport' | 'flight' | 'airline' | 'track' | 'news';
 type AviationPayload = NonNullable<RuntimeGlobalTransportShippingPayload['aviation']>;
 type AviationRoute = NonNullable<AviationPayload['routes']>[number];
-
-function statusBadge(payload?: RuntimeGlobalTransportShippingPayload | null) {
-  const mode = String(payload?.cacheMode || '').toLowerCase();
-  const status = String(payload?.status || '').toLowerCase();
-  if (mode.includes('stale') || mode.includes('preserved')) return 'STALE';
-  if (mode.includes('seed')) return status === 'degraded' ? 'PARTIAL' : 'SEED';
-  if (status === 'empty' || status === 'warming') return 'WARM';
-  return status === 'degraded' ? 'PARTIAL' : 'LIVE';
-}
-
-function severityClass(item: RuntimeGlobalTransportShippingItem) {
-  const severity = String(item.severity || '').toLowerCase();
-  if (severity === 'alert') return 'alert';
-  if (severity === 'watch') return 'watch';
-  return 'normal';
-}
-
-function numeric(value?: number | string | null) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 
 function clampPercent(value?: number | string | null) {
   return Math.max(0, Math.min(100, Math.round(numeric(value))));
@@ -78,11 +59,6 @@ function glyph(item: RuntimeGlobalTransportShippingItem) {
   if (type.includes('AIS')) return 'AIS';
   if (type.includes('TRANSIT') || type.includes('GTFS')) return 'GT';
   return 'AIR';
-}
-
-function openSource(url?: string | null) {
-  const target = String(url || '').trim();
-  if (target) window.open(target, '_blank', 'noopener,noreferrer');
 }
 
 function statusClass(status?: unknown) {
@@ -392,5 +368,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 900000,
-  fetchData: () => fetchRuntimeGlobalTransportShipping(14),
+  fetchData: (context) => fetchRuntimeGlobalTransportShipping(14, context?.signal),
 });

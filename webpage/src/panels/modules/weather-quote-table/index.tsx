@@ -1,3 +1,4 @@
+import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -11,7 +12,6 @@ import {
   marketSourceLabel,
   midCoverage,
   num,
-  panelStatus,
   priceLabel,
   selectedWeatherCity,
   statusBadge,
@@ -142,4 +142,5 @@ export const panel = panelFromRenderer(renderers, {
   eyebrow: 'weather',
   description: 'Selected city temperature market quote bins in a compact table.',
   defaultEnabled: true,
+  dataSourceId: 'global-temperature-monitor',
 });

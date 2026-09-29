@@ -1,3 +1,4 @@
+import { toneClass, watchStatusBadge as statusBadge, watchItemKey as itemKey } from '@/panels/shared/formatters';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeFinanceWatchPanel } from '@/services/api';
@@ -16,28 +17,6 @@ type FinancePanelConfig = {
   mode?: FinancePanelMode;
   limit?: number;
 };
-
-function toneClass(value?: string | null) {
-  const tone = String(value || 'neutral').toLowerCase();
-  if (tone === 'up') return 'tone-up';
-  if (tone === 'down') return 'tone-down';
-  if (tone === 'watch') return 'tone-watch';
-  return 'tone-neutral';
-}
-
-function statusBadge(payload?: RuntimeFinanceWatchPayload | null) {
-  const status = String(payload?.status || '').toLowerCase();
-  const cacheMode = String(payload?.cacheMode || '').toLowerCase();
-  if (cacheMode.includes('stale')) return 'STALE';
-  if (status === 'ok') return 'LIVE';
-  if (status === 'degraded' || status === 'partial') return 'PARTIAL';
-  if (status === 'empty') return 'WARMING';
-  return status ? status.toUpperCase() : 'SEED';
-}
-
-function itemKey(item: RuntimeFinanceWatchItem, index: number) {
-  return String(item.id || item.url || item.title || item.label || index);
-}
 
 function itemSignature(item: RuntimeFinanceWatchItem) {
   return [
@@ -400,6 +379,6 @@ export function createFinanceWatchPanel(config: FinancePanelConfig) {
   }, {
     tier: 'slow',
     intervalMs: 300000,
-    fetchData: () => fetchRuntimeFinanceWatchPanel(config.id, limit),
+    fetchData: (context) => fetchRuntimeFinanceWatchPanel(config.id, limit, context?.signal),
   });
 }

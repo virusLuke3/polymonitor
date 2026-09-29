@@ -10,5 +10,5 @@ export const panel = runtimePanelFromRenderer(jin10PanelRenderers, {
   defaultEnabled: true,
 }, {
   tier: 'fast',
-  fetchData: () => fetchRuntimeJin10(24),
+  fetchData: (context) => fetchRuntimeJin10(24, context?.signal),
 });

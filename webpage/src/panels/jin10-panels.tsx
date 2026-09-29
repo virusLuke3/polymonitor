@@ -1,16 +1,11 @@
+import type { RuntimeJin10Item, RuntimeJin10Payload } from '@/types';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import type { RuntimeJin10Item } from '@/types';
 import type { PanelRenderMap } from './types';
 import { emptyState } from './shared/renderers';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type Jin10Filter = 'impact' | 'latest' | 'vip';
-type Jin10Tag = {
-  label: string;
-  tone: string;
-};
-
 function filterItems(items: RuntimeJin10Item[], filter: Jin10Filter) {
   const sorted = [...items].sort(
     (left, right) =>
@@ -54,28 +49,21 @@ function tagTone(label: string) {
   return 'default';
 }
 
-function addTag(tags: Jin10Tag[], label: string) {
-  const clean = label.trim();
-  if (!clean) return;
-  if (tags.some((tag) => tag.label.toLowerCase() === clean.toLowerCase())) return;
-  tags.push({ label: clean, tone: tagTone(clean) });
-}
-
 function inferJin10Tags(item: RuntimeJin10Item) {
-  const tags: Jin10Tag[] = [];
-  addTag(tags, cardMarker(item));
+  const tags: string[] = [];
+  tags.push(cardMarker(item));
   const text = [item.headline, item.summary, ...(item.assetHints || [])].filter(Boolean).join(' ');
-  if (/原油|油价|石油|布伦特|brent|wti|opec|欧佩克|天然气|能源|汽油|柴油|eia|库存/i.test(text)) addTag(tags, 'ENERGY');
-  if (/黄金|白银|铜|贵金属|金价|有色|铝|镍|锂|铁矿/i.test(text)) addTag(tags, 'METALS');
-  if (/中国|a股|港股|恒指|人民币|央行|上交所|深交所|香港|沪|深|中概/i.test(text)) addTag(tags, 'CHINA');
-  if (/美元|人民币|日元|欧元|英镑|汇率|外汇|dxy|usd|cny/i.test(text)) addTag(tags, 'FX');
-  if (/比特币|以太坊|加密|btc|eth|sol|etf/i.test(text)) addTag(tags, 'CRYPTO');
-  if (/美股|纳指|标普|道指|股票|股市|公司|财报|恒指|港股/i.test(text)) addTag(tags, 'EQUITY');
-  if (/cpi|ppi|gdp|pmi|非农|就业|通胀|利率|美联储|国债|债券|收益率|财政|关税|贸易/i.test(text)) addTag(tags, 'ECONOMIC');
-  if (/ai|人工智能|算力|芯片|半导体|英伟达|nvidia|openai|数据中心|云|科技/i.test(text)) addTag(tags, 'TECH');
-  if (/央行|监管|证监会|财政部|商务部|白宫|国务院|制裁|政策|关税|立法|法院|政府/i.test(text)) addTag(tags, 'POLICY');
-  if (/债务|债券|美债|评级|违约|融资|信贷|贷款|收益率/i.test(text)) addTag(tags, 'CREDIT');
-  return tags.slice(0, 3);
+  if (/原油|油价|石油|布伦特|brent|wti|opec|欧佩克|天然气|能源|汽油|柴油|eia|库存/i.test(text)) tags.push('ENERGY');
+  if (/黄金|白银|铜|贵金属|金价|有色|铝|镍|锂|铁矿/i.test(text)) tags.push('METALS');
+  if (/中国|a股|港股|恒指|人民币|央行|上交所|深交所|香港|沪|深|中概/i.test(text)) tags.push('CHINA');
+  if (/美元|人民币|日元|欧元|英镑|汇率|外汇|dxy|usd|cny/i.test(text)) tags.push('FX');
+  if (/比特币|以太坊|加密|btc|eth|sol|etf/i.test(text)) tags.push('CRYPTO');
+  if (/美股|纳指|标普|道指|股票|股市|公司|财报|恒指|港股/i.test(text)) tags.push('EQUITY');
+  if (/cpi|ppi|gdp|pmi|非农|就业|通胀|利率|美联储|国债|债券|收益率|财政|关税|贸易/i.test(text)) tags.push('ECONOMIC');
+  if (/ai|人工智能|算力|芯片|半导体|英伟达|nvidia|openai|数据中心|云|科技/i.test(text)) tags.push('TECH');
+  if (/央行|监管|证监会|财政部|商务部|白宫|国务院|制裁|政策|关税|立法|法院|政府/i.test(text)) tags.push('POLICY');
+  if (/债务|债券|美债|评级|违约|融资|信贷|贷款|收益率/i.test(text)) tags.push('CREDIT');
+  return tags.slice(0, 3).map((label) => ({ label, tone: tagTone(label) }));
 }
 
 function topicHints(item: RuntimeJin10Item) {
@@ -192,6 +180,6 @@ function Jin10FlashPanel({ items }: { items: RuntimeJin10Item[] }) {
 
 export const jin10PanelRenderers: PanelRenderMap = {
   'jin10-flash': {
-    render: (ctx) => <Jin10FlashPanel items={ctx.jin10?.items || []} />,
+    render: (ctx) => <Jin10FlashPanel items={(ctx.runtimeData['jin10-flash'] as RuntimeJin10Payload | undefined)?.items || []} />,
   },
 };

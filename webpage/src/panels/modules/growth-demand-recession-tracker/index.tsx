@@ -30,11 +30,12 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'growth-demand-recession-tracker',
+  dataDependencies: ['polymarket-macro-map'],
   title: 'Growth Demand Recession Tracker',
   eyebrow: 'macro',
   description: 'Demand and recession indicators for macro market positioning.',
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeGrowthDemandRecessionTracker(8),
+  fetchData: (context) => fetchRuntimeGrowthDemandRecessionTracker(8, context?.signal),
 });

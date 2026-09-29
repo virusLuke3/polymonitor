@@ -1,3 +1,4 @@
+import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -8,7 +9,6 @@ import {
   currentWeatherTemp,
   highWeatherTemp,
   marketSourceLabel,
-  panelStatus,
   selectedWeatherCity,
   sourceStatus,
   statusBadge,
@@ -94,4 +94,5 @@ export const panel = panelFromRenderer(renderers, {
   eyebrow: 'weather',
   description: 'Selected city temperature, condition, daily range, and market coverage.',
   defaultEnabled: true,
+  dataSourceId: 'global-temperature-monitor',
 });

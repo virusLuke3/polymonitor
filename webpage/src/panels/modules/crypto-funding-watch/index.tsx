@@ -261,5 +261,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 15000,
-  fetchData: () => fetchRuntimeCryptoFundingWatch(18),
+  fetchData: (context) => fetchRuntimeCryptoFundingWatch(18, context?.signal),
 });

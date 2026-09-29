@@ -22,7 +22,7 @@ export type LayerPanelItem = {
   isExecutable: boolean;
 };
 
-export const LAYER_PANEL_COPY = {
+const LAYER_PANEL_COPY = {
   title: 'LAYERS',
   searchPlaceholder: 'Search layers…',
   emptyLabel: 'No matching layers',

@@ -1,8 +1,8 @@
+import { panelStatus as badgeStatus } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeMacroDriverItem, RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
-import { MacroAlertStrip, PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from './macro-intel';
-import type { PanelGlyphName } from './macro-intel';
+import { MacroAlertStrip, PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from './macro-intel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 export type MacroDriverConfig = {
@@ -18,10 +18,6 @@ export type MacroDriverConfig = {
   linkedCategories: string[];
   linkedTitle: string;
 };
-
-function badgeStatus(status?: string | null): 'live' | 'muted' {
-  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
-}
 
 function compactNumber(value?: string | number | null) {
   const n = Number(value);

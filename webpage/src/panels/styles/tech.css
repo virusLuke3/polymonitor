@@ -1,0 +1,431 @@
+/* tech panels: shared body styles and their state/responsive variants. */
+
+@layer base {
+
+.wm-tech-panel .wm-panel-body {
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: rgba(10, 11, 12, 0.74);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(92, 101, 120, 0.56) rgba(6, 7, 8, 0.2);
+}
+
+.wm-tech-panel .wm-panel-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.wm-tech-panel .wm-panel-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(95, 105, 124, 0.62);
+}
+
+.wm-tech-feed-list,
+.wm-tech-cap-list,
+.wm-tech-app-list {
+  min-width: 0;
+  padding: 7px 12px 6px;
+}
+
+.wm-tech-panel.mode-market-cap .wm-tech-cap-list {
+  padding: 4px 7px 5px;
+}
+
+.wm-tech-watch-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.wm-tech-watch-strip button {
+  min-width: 0;
+  min-height: 27px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 5px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(235, 235, 235, 0.68);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.wm-tech-watch-strip button:hover {
+  border-color: rgba(126, 220, 255, 0.28);
+  background: rgba(126, 220, 255, 0.055);
+  color: #e9f8ff;
+}
+
+.wm-tech-watch-strip button.active {
+  border-color: rgba(36, 242, 132, 0.36);
+  background: rgba(36, 242, 132, 0.075);
+  box-shadow: inset 0 -2px 0 rgba(36, 242, 132, 0.44);
+  color: #24f284;
+}
+
+.wm-tech-watch-strip button.active.tone-watch {
+  border-color: rgba(255, 197, 61, 0.48);
+  background: rgba(255, 197, 61, 0.07);
+  box-shadow: inset 0 -2px 0 rgba(255, 197, 61, 0.48);
+  color: #ffc53d;
+}
+
+.wm-tech-watch-strip b,
+.wm-tech-watch-strip em {
+  overflow: hidden;
+  font-size: 8.5px;
+  font-style: normal;
+  font-weight: 850;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-tech-watch-strip em {
+  color: rgba(235, 235, 235, 0.52);
+}
+
+.wm-tech-feed-row {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 10px 0 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  color: inherit;
+  text-decoration: none;
+}
+
+.wm-tech-feed-meta,
+.wm-tech-feed-foot {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: rgba(235, 235, 235, 0.48);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 730;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.wm-tech-feed-meta b {
+  min-width: 0;
+  overflow: hidden;
+  color: #68daf4;
+  font-size: 10.5px;
+  font-weight: 860;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-tech-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border: 1px solid #18bde6;
+  border-radius: 2px;
+}
+
+.wm-tech-tag {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid rgba(75, 84, 92, 0.82);
+  background: rgba(255, 255, 255, 0.035);
+  color: #a8aaa7;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.wm-tech-tag.tag-release,
+.wm-tech-tag.tag-benchmark,
+.wm-tech-tag.tag-api,
+.wm-tech-tag.tag-app-store,
+.wm-tech-tag.tag-top-free {
+  border-color: rgba(36, 242, 132, 0.42);
+  color: #24f284;
+}
+
+.wm-tech-tag.tag-reg,
+.wm-tech-tag.tag-legal,
+.wm-tech-tag.tag-ban,
+.wm-tech-tag.tag-outage,
+.wm-tech-tag.tag-risk {
+  border-color: rgba(255, 72, 72, 0.72);
+  color: #ff5c5c;
+}
+
+.wm-tech-tag.tag-valuation,
+.wm-tech-tag.tag-pricing,
+.wm-tech-tag.tag-rank,
+.wm-tech-tag.tag-download {
+  border-color: rgba(255, 197, 61, 0.52);
+  color: #ffc53d;
+}
+
+.wm-tech-feed-row > strong {
+  overflow: hidden;
+  display: -webkit-box;
+  color: #e9e9e9;
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1.23;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.wm-tech-feed-row > em {
+  overflow: hidden;
+  display: -webkit-box;
+  color: rgba(235, 235, 235, 0.58);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 620;
+  line-height: 1.28;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.wm-tech-feed-foot b {
+  color: #8bdcf4;
+  text-decoration: underline;
+}
+
+.wm-tech-feed-metric {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: #efefef;
+  font-size: 9.5px;
+  font-weight: 880;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-tech-feed-metric em {
+  margin-left: 6px;
+  color: rgba(235, 235, 235, 0.52);
+  font-style: normal;
+  font-weight: 760;
+}
+
+.wm-tech-cap-row {
+  min-width: 0;
+  min-height: 41px;
+  display: grid;
+  grid-template-columns: 26px minmax(72px, 1fr) minmax(68px, auto) minmax(42px, auto);
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+}
+
+.wm-tech-cap-rank {
+  color: rgba(235, 235, 235, 0.58);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.wm-tech-cap-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.wm-tech-cap-main strong {
+  overflow: hidden;
+  color: #e9e9e9;
+  font-size: 11px;
+  font-weight: 780;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-tech-cap-main span {
+  color: rgba(235, 235, 235, 0.48);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 720;
+}
+
+.wm-tech-cap-main div {
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.wm-tech-cap-value {
+  display: grid;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wm-tech-cap-value strong {
+  color: #efefef;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.wm-tech-cap-value em {
+  color: rgba(235, 235, 235, 0.5);
+  font-size: 8.5px;
+  font-style: normal;
+  font-weight: 720;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.wm-tech-cap-value em.tone-up {
+  color: #24f284;
+}
+
+.wm-tech-cap-value em.tone-down {
+  color: #ff4d55;
+}
+
+.wm-tech-cap-row > b {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.wm-tech-app-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) minmax(54px, auto);
+  align-items: center;
+  gap: 9px;
+  padding: 9px 0 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  color: inherit;
+  text-decoration: none;
+}
+
+.wm-tech-app-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.045);
+  color: #f0f0f0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.wm-tech-app-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.wm-tech-app-main > strong {
+  overflow: hidden;
+  color: #e9e9e9;
+  font-size: 12px;
+  font-weight: 770;
+  line-height: 1.14;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-tech-app-main > em {
+  overflow: hidden;
+  color: rgba(235, 235, 235, 0.52);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 620;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-tech-app-value {
+  display: grid;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wm-tech-app-value strong {
+  color: #e9e9e9;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.wm-tech-app-value em {
+  color: rgba(235, 235, 235, 0.48);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.wm-tech-empty {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  color: rgba(235, 235, 235, 0.48);
+  text-align: center;
+}
+
+.wm-tech-empty span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.wm-tech-empty strong {
+  color: #f0f0f0;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.wm-tech-panel .tone-up {
+  color: #24f284;
+}
+
+.wm-tech-panel .tone-down {
+  color: #ff4d55;
+}
+
+.wm-tech-panel .tone-watch {
+  color: #ffc53d;
+}
+
+.wm-tech-panel .tone-neutral {
+  color: rgba(235, 235, 235, 0.7);
+}
+
+.wm-ai-market-panel .wm-panel-body {
+  padding: 9px;
+}
+
+.wm-ai-market-focus {
+  display: grid;
+  gap: 8px;
+}
+}

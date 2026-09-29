@@ -1,3 +1,5 @@
+import { probabilityLabel, PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '../macro-intel';
+import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimePolymarketMacroMap } from '@/services/api';
@@ -7,8 +9,6 @@ import type {
 } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
-import type { PanelGlyphName } from '../macro-intel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badgeLabel(status?: string | null) {
@@ -19,10 +19,6 @@ function badgeLabel(status?: string | null) {
   return 'STALE';
 }
 
-function panelTone(status?: string | null): 'live' | 'muted' {
-  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
-}
-
 function numberLabel(value?: string | number | null) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
@@ -30,12 +26,6 @@ function numberLabel(value?: string | number | null) {
     return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(numeric);
   }
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(numeric);
-}
-
-function probabilityLabel(value?: string | number | null) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return '--';
-  return `${Math.round(numeric * 100)}%`;
 }
 
 function catalystLabel(payload: RuntimePolymarketMacroMapPayload | null | undefined, copy: ReturnType<typeof useSpecialistCopy>['copy'], formatRelativeTime: ReturnType<typeof useSpecialistCopy>['formatRelativeTime']) {
@@ -84,9 +74,6 @@ function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
           <span>VOL {numberLabel(item.volume24h)}</span>
         </div>
         <strong>{item.title || copy('untitledMarket', 'Untitled macro market')}</strong>
-        <div className="wm-macro-map-subline">
-          {(item.marketTypes || []).slice(0, 2).join(' / ') || copy('macroRoute', 'Polymarket macro route')}
-        </div>
       </div>
       <div className="wm-macro-map-prob">
         <StatusBadge tone="market">{probabilityLabel(topOutcome?.yesPrice)}</StatusBadge>
@@ -192,5 +179,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimePolymarketMacroMap(12),
+  fetchData: (context) => fetchRuntimePolymarketMacroMap(12, context?.signal),
 });

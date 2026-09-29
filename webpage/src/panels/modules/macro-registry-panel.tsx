@@ -1,8 +1,15 @@
+import {
+  displayValue,
+  numberLabel as compactNumber,
+  RowGlyph,
+  StatusBadge,
+  signalToneClass,
+  type PanelGlyphName,
+} from './macro-intel';
+import { panelStatus } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeMacroRegistryItem, RuntimeMacroRegistryPayload } from '@/types';
-import { RowGlyph, StatusBadge, signalToneClass } from './macro-intel';
-import type { PanelGlyphName } from './macro-intel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 export type MacroRegistryConfig = {
@@ -15,10 +22,6 @@ export type MacroRegistryConfig = {
   emptyTitle: string;
   implicationItems: string[];
 };
-
-function panelStatus(status?: string | null): 'live' | 'muted' {
-  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
-}
 
 function rowGlyph(item: RuntimeMacroRegistryItem): PanelGlyphName {
   const text = `${item.group || ''} ${item.type || ''} ${item.label || ''}`.toLowerCase();
@@ -39,17 +42,6 @@ function rowTone(item: RuntimeMacroRegistryItem) {
   const tone = String(item.tone || '').toLowerCase();
   if (tone === 'hot' || tone === 'cool' || tone === 'watch') return tone;
   return 'neutral';
-}
-
-function compactNumber(value?: number | string | null) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '--';
-  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(number);
-}
-
-function displayValue(value?: number | string | null) {
-  const text = String(value ?? '').trim();
-  return text || '--';
 }
 
 function DataMetric({ label, value, tone }: { label: string; value?: number | string | null; tone?: string }) {

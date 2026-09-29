@@ -1,9 +1,10 @@
+import { panelStatus } from '../../shared/formatters';
 import { useMemo } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
-import { forecastSourceLabel, num, panelStatus, selectedWeatherCity, statusBadge, tempLabel } from '../weather-detail-utils';
+import { forecastSourceLabel, num, selectedWeatherCity, statusBadge, tempLabel } from '../weather-detail-utils';
 import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '../weather-live-chart';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
@@ -147,6 +148,7 @@ export const panel = panelFromRenderer(renderers, {
   eyebrow: 'weather',
   description: 'Selected city 1D temperature trend chart.',
   defaultEnabled: true,
+  dataSourceId: 'global-temperature-monitor',
 });
 
 export { sevenDayPoints, TrendChart };

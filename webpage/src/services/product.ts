@@ -162,10 +162,10 @@ export const revokeWebPushSubscription = (endpoint: string) =>
     body: JSON.stringify({ endpoint }),
   }, { csrf: true });
 
-export const fetchWorkspaceLayout = () => authRequest<WorkspaceLayout>('/product/workspace-layout');
-export const saveWorkspaceLayout = (value: Omit<WorkspaceLayout, 'exists' | 'updatedAt'>) =>
+export const fetchWorkspaceLayout = (signal?: AbortSignal) => authRequest<WorkspaceLayout>('/product/workspace-layout', { signal });
+export const saveWorkspaceLayout = (value: Omit<WorkspaceLayout, 'exists' | 'updatedAt'>, signal?: AbortSignal) =>
   authRequest<WorkspaceLayout>('/product/workspace-layout', {
-    method: 'PUT',
+    signal, method: 'PUT',
     body: JSON.stringify(value),
   }, { csrf: true });
 export const fetchBriefings = () =>

@@ -1,0 +1,370 @@
+import { expect, test, type Page } from '@playwright/test';
+import { fixtureBundle, installDashboard } from './fixtures/dashboard';
+import { installFixtures } from './fixtures/world-event-map';
+
+async function settled(page: Page) {
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(1200);
+}
+
+// Baselines are captured from the existing working tree before production code
+// changes. No masks: clock, API data, locale and motion are deterministic.
+async function visual(page: Page, name: string) {
+  await settled(page);
+  await expect(page).toHaveScreenshot(name, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
+}
+
+for (const width of [1440, 390]) {
+  for (const locale of ['en', 'zh']) {
+    test(`dashboard ${width} ${locale}: map, focus, panels, settings and commands`, async ({ page }) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await installDashboard(page, locale);
+      await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+      await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
+      await expect(page.locator('.wm-banner')).toHaveCount(0);
+      await visual(page, `home-${width}-${locale}.png`);
+      await page.locator('.wm-focused-market-row').scrollIntoViewIfNeeded();
+      await visual(page, `focus-${width}-${locale}.png`);
+      await page.locator('[data-workspace-panel-id="global-transport-shipping"]').scrollIntoViewIfNeeded();
+      await visual(page, `panels-${width}-${locale}.png`);
+      await page.locator('.wm-side-beta').click();
+      await expect(page.locator('.wm-settings-modal')).toBeVisible();
+      await visual(page, `settings-${width}-${locale}.png`);
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Control+k');
+      await expect(page.locator('.wm-command-modal')).toBeVisible();
+      await page.locator('.wm-command-input').fill('fixture');
+      await visual(page, `commands-${width}-${locale}.png`);
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+for (const path of ['/login', '/account', '/watchlist', '/briefings', '/developers', '/data-quality', '/markets/1']) {
+  for (const width of [1440, 390]) {
+    test(`route ${path} ${width}`, async ({ page }) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await installDashboard(page);
+      // The login entry is characterized independently of authenticated pages.
+      if (path === '/login') await page.route('**/auth/session', (route) => route.fulfill({ json: { enabled: true, authenticated: false, user: null, csrfToken: null, allowedScopes: [] } }));
+      await page.goto(path);
+      const readySelector: Record<string, string> = {
+        '/login': '.auth-login-layout', '/account': '.auth-account',
+        '/watchlist': '.watchlist-main', '/briefings': '.brief-manager-main',
+        '/developers': '.developer-main', '/data-quality': '.quality-error-banner',
+        '/markets/1': '.market-main',
+      };
+      await expect(page.locator(readySelector[path]!)).toBeVisible();
+      await visual(page, `route-${path.replaceAll('/', '-')}-${width}.png`);
+      expect(errors).toEqual([]);
+      if (path !== '/login') expect(new URL(page.url()).pathname).toBe(path);
+    });
+  }
+}
+
+for (const width of [1440, 390]) {
+  test(`Chinese market sort keeps its caption with warm fonts ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installDashboard(page, 'zh');
+    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+    await expect(page.locator('.wm-market-sort')).toBeVisible();
+    await settled(page);
+    const caption = page.locator('.wm-market-sort-caption');
+    const coldCaption = await caption.screenshot({ animations: 'disabled' });
+    // Reload after the locale font is cached: the native select used to choose
+    // a different anonymous line box here than when the font arrived late.
+    await page.reload();
+    await expect(caption).toBeVisible();
+    await settled(page);
+    expect(await caption.screenshot({ animations: 'disabled' })).toEqual(coldCaption);
+    const sort = page.getByRole('combobox', { name: '市场排序', exact: true });
+    await expect(caption).toHaveText('活跃度与成交量');
+    await expect(caption).toHaveCSS('line-height', '14px');
+    await sort.focus();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(sort).toHaveValue('volume');
+    await expect(caption).toHaveText('成交量');
+    await expect(sort).toBeFocused();
+    await expect(page.locator('.wm-market-sort-explainer')).toContainText('24 小时成交量');
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`map details and source failure ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installDashboard(page);
+    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+    await expect(page.getByRole('button', { name: /ALL EVENTS/ })).toContainText('9');
+    await page.getByRole('button', { name: /ALL EVENTS/ }).click();
+    await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
+    await expect(page.locator('.wm-event-inspector')).toBeVisible();
+    // The inspector's focus effect can scroll after its first visible frame.
+    // Wait for that real accessibility behavior before fixing the viewport.
+    await expect(page.locator('#wm-event-inspector-title')).toBeFocused();
+    // Restore both scroll containers from the baseline. Focusing the bottom
+    // sheet may scroll the overflow-hidden map's 5px inline-SVG overflow too.
+    if (width === 390) {
+      await page.evaluate(() => {
+        window.scrollTo(0, 413);
+        document.querySelector('.wm-weather-deck-map')!.scrollTop = 5;
+      });
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(413);
+      await expect.poll(() => page.locator('.wm-weather-deck-map').evaluate(e => e.scrollTop)).toBe(5);
+    }
+    await visual(page, `map-selected-${width}.png`);
+    await page.getByRole('button', { name: 'Close event details' }).click();
+    await page.getByRole('button', { name: /ALL EVENTS/ }).focus();
+    await visual(page, `map-focus-${width}.png`);
+    await page.unrouteAll({ behavior: 'wait' });
+    await installFixtures(page, true);
+    await page.goto('/?view=2d&time=all&layers=weather-alerts,earthquakes-volcanoes,climate-anomalies');
+    await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
+    const layersButton = page.getByRole('button', { name: 'Open layers panel' });
+    if (await layersButton.isVisible()) await layersButton.click();
+    await expect(page.locator('.wm-layer-row.is-unavailable')).not.toHaveCount(0);
+    await visual(page, `map-degraded-${width}.png`);
+  });
+  test(`3d globe ${width}`, async ({ page }) => {
+    const hazardRequests: string[] = [];
+    const geometryRequests: string[] = [];
+    page.on('request', request => {
+      if (request.url().includes('/natural-hazards/map')) hazardRequests.push(request.url());
+      if (request.url().includes('/map-data/world-countries.geojson')) geometryRequests.push(request.url());
+    });
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installDashboard(page);
+    // Kapsule's debounce uses Date.now(). A frozen Date prevents globe.gl's
+    // texture and size updates; advance Date and timers together instead.
+    await page.clock.install({ time: new Date('2026-08-26T03:00:00Z') });
+    const texture = page.waitForResponse(response => response.url().endsWith('/textures/earth-topo-bathy.jpg') && response.ok());
+    // Development enables telemetry by default; production does not. Use the
+    // existing debug query so the keyboard toggle starts from the same state.
+    await page.goto('/?view=3d&layers=earthquakes-volcanoes&globePerf=1');
+    await expect(page.locator('.wm-globe-runtime canvas')).toBeAttached();
+    await texture;
+    await expect.poll(() => page.workers().filter(worker => worker.url().includes('worldGlobeMarkers')).length).toBe(1);
+    const canvas = page.locator('.wm-globe-runtime canvas');
+    await expect.poll(() => canvas.evaluate(c => c.getBoundingClientRect().height)).toBeGreaterThan(300);
+    await expect.poll(() => canvas.evaluate(c => Math.abs(c.getBoundingClientRect().height - c.closest('.wm-globe-runtime')!.clientHeight))).toBeLessThan(1);
+    await page.locator('.wm-globe-quality-control select').selectOption('high');
+    await expect(page.locator('.wm-globe-perf-overlay')).toBeVisible();
+    await page.keyboard.press('Alt+Shift+g');
+    await expect(page.locator('.wm-globe-perf-overlay')).toHaveCount(0);
+    await settled(page);
+    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveClass(/is-render-idle/);
+    // The scene itself is stable; FPS telemetry in the surrounding toolbar is
+    // measured live and is covered by behavior rather than a masked screenshot.
+    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveScreenshot(`globe-visible-${width}.png`, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
+    expect(hazardRequests).toEqual([]);
+    expect(geometryRequests).toEqual([]);
+    await page.waitForTimeout(500);
+    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveClass(/is-render-idle/);
+    const beforeZoom = await canvas.screenshot();
+    await canvas.hover({ position: { x: width / 2, y: 220 } });
+    await page.mouse.wheel(0, -200);
+    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveClass(/is-render-idle/);
+    expect((await canvas.screenshot()).equals(beforeZoom)).toBe(false);
+    await page.setViewportSize({ width: width - 30, height: width === 390 ? 800 : 850 });
+    await expect.poll(() => canvas.evaluate(c => {
+      const box = c.getBoundingClientRect(), parent = c.closest('.wm-globe-runtime')!;
+      return Math.max(Math.abs(box.width - parent.clientWidth), Math.abs(box.height - parent.clientHeight));
+    })).toBeLessThan(1);
+    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveClass(/is-render-idle/);
+    expect((await canvas.screenshot()).equals(beforeZoom)).toBe(false);
+    // Preserve the established scene/zoom checks above, then exercise geometry
+    // demand through the real layer control (which overlays the narrow canvas).
+    const layersButton = page.getByRole('button', { name: 'Open layers panel' });
+    if (await layersButton.isVisible()) await layersButton.click();
+    await page.getByRole('checkbox', { name: 'Show Sanctions & Country Risk', exact: true }).check();
+    await page.waitForTimeout(500);
+    expect(geometryRequests).toEqual([]);
+    await page.getByRole('tab', { name: '2D Map', exact: true }).click();
+    await expect(page.locator('.wm-globe-runtime canvas')).toHaveCount(0);
+    await expect.poll(() => page.workers().filter(worker => worker.url().includes('worldGlobeMarkers')).length).toBe(0);
+    await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
+    await expect.poll(() => hazardRequests.length).toBeGreaterThan(0);
+    await expect.poll(() => geometryRequests.length).toBeGreaterThan(0);
+    await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
+    await expect(page.locator('.wm-globe-runtime canvas')).toBeAttached();
+    const stopped = hazardRequests.length;
+    await page.clock.fastForward(65_000);
+    expect(hazardRequests).toHaveLength(stopped);
+  });
+}
+
+
+test('effective panel sizes at every breakpoint', async ({ page }) => {
+  const ids = ['market-tv-wire', 'market-youtube-channels', 'breaking-event-radar', 'global-transport-shipping', 'global-temperature-monitor', 'market-summary'];
+  await installDashboard(page, 'en', ids);
+  await page.goto('/?view=2d&layers=earthquakes-volcanoes');
+  await expect(page.locator('[data-workspace-panel-id="market-tv-wire"]')).toBeAttached();
+  const layouts = [];
+  for (const width of [1600, 1501, 1500, 1101, 1100, 761, 760, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(500);
+    layouts.push({ width, panels: await page.locator('.wm-panels-grid > .wm-panel-slot').evaluateAll((elements) => elements.map((el) => {
+      const css = getComputedStyle(el);
+      return { id: el.getAttribute('data-workspace-panel-id'), column: css.gridColumn, row: css.gridRow, width: el.getBoundingClientRect().width };
+    })) });
+  }
+  expect(JSON.stringify(layouts, null, 2)).toMatchSnapshot('effective-panel-sizes.json');
+});
+
+// These component baselines are recorded before the focus CSS consolidation.
+for (const state of ['loading', 'empty', 'error', 'stale', 'closed'] as const) {
+  for (const width of [1440, 390]) {
+    test(`focus status ${state} ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await installDashboard(page);
+      if (state === 'loading') {
+        await page.route('**/wm-api/bootstrap', () => {});
+        // Bootstrap no longer blocks independent sources indefinitely. Freeze
+        // the initial loading phase, then exercise its release in startup tests.
+        await page.clock.install({ time: new Date('2026-08-26T03:00:00Z') });
+        await page.clock.pauseAt(new Date('2026-08-26T03:00:00Z'));
+      }
+      if (state === 'empty' || state === 'error') await page.route('**/wm-api/**', async (route) => {
+        const path = new URL(route.request().url()).pathname;
+        if (!/\/(bootstrap|markets|market-groups)$/.test(path)) return route.fallback();
+        await route.fulfill({ status: state === 'error' ? 503 : 200, json: state === 'error'
+          ? { error: 'Fixture source unavailable' }
+          : { generatedAt: '2026-08-26T03:00:00Z', items: [], featuredMarket: null, activeMarketsPreview: [], activeMarketGroupsPreview: [] } });
+      });
+      if (state === 'stale' || state === 'closed') await page.route('**/wm-api/**', async (route) => {
+        const path = new URL(route.request().url()).pathname;
+        if (!/\/markets\/1\/(focus-tile|workspace)$/.test(path) && !path.includes('/runtime/lob/token/')) return route.fallback();
+        const bundle = fixtureBundle(1);
+        bundle.lob.yes.bookStatus = bundle.lob.no.bookStatus = 'stale';
+        bundle.lob.yes.continuity = bundle.lob.no.continuity = false;
+        if (state === 'closed') bundle.market = { ...bundle.market, status: 'closed' };
+        await route.fulfill({ json: path.includes('/runtime/lob/token/') ? bundle.lob : bundle });
+      });
+      await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes&center=-98,39&zoom=2.2');
+      if (state === 'loading') {
+        for (let frame = 0; frame < 10; frame++) {
+          await page.clock.runFor(50);
+          if (await page.locator('[data-map-renderer-ready]').count()) break;
+        }
+        await expect(page.locator('[data-map-renderer-ready]')).toBeAttached();
+        await page.clock.runFor(200);
+      }
+      await expect(page.locator('.wm-focused-market-row')).toBeVisible({ timeout: 60_000 });
+      if (state === 'stale' || state === 'closed') await expect(page.locator('.wm-focus-book-panel .wm-panel-badge')).toHaveText(state === 'stale' ? 'Stale' : 'Closed');
+      if (state === 'error') await expect(page.locator('.wm-banner.error')).toBeVisible();
+      if (state === 'loading') await expect(page.locator('.wm-banner').first()).toContainText('Bootstrapping');
+      await page.locator('.wm-focused-market-row').scrollIntoViewIfNeeded();
+      if (state === 'loading') await page.clock.runFor(200);
+      await visual(page, `focus-status-${state}-${width}.png`);
+    });
+  }
+}
+
+for (const width of [1440, 390]) {
+  test(`market hover, keyboard, selected and disabled controls ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installDashboard(page);
+    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes');
+    const market = page.locator('.wm-poly-market-card').filter({ hasText: 'Fixture market 2' });
+    await expect(market).toBeVisible({ timeout: 60_000 });
+    await market.scrollIntoViewIfNeeded();
+    await market.hover(); await market.focus();
+    await expect(market).toBeFocused();
+    await expect(page.locator('.wm-focused-market-list')).toHaveScreenshot(`catalog-hover-focus-${width}.png`, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
+    await page.keyboard.press('Enter');
+    await expect(market).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.wm-focus-detail-panel')).toContainText('Fixture market 2');
+    await page.locator('.wm-focused-market-row').scrollIntoViewIfNeeded();
+    await visual(page, `market-selected-${width}.png`);
+    let release!: () => Promise<void>;
+    await page.route('**/wm-api/market-groups?**', route => { release = () => route.fulfill({ json: { items: [] } }); });
+    const refresh = page.locator('.wm-market-refresh');
+    await refresh.click();
+    await expect(refresh).toBeDisabled();
+    await settled(page);
+    await expect(page.locator('.wm-focused-market-list')).toHaveScreenshot(`catalog-refresh-disabled-${width}.png`, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
+    await release();
+    await expect(refresh).toBeEnabled();
+  });
+}
+
+test('panel drag, constrained resize, enable and remote layout restore', async ({ page }) => {
+  await installDashboard(page);
+  let saved: any = { exists: true, revision: 1, activePanelIds: ['active-markets','price-chart','lob-depth','global-orderfilled','oracle-feed','global-transport-shipping','breaking-event-radar'], panelLayout: {}, preferences: {}, updatedAt: '2026-08-26T03:00:00Z' };
+  await page.route('**/wm-api/product/workspace-layout', async route => {
+    if (route.request().method() === 'PUT') saved = { ...saved, ...route.request().postDataJSON(), revision: saved.revision + 1 };
+    await route.fulfill({ json: saved });
+  });
+  await page.goto('/?view=2d&layers=earthquakes-volcanoes');
+  const source = page.locator('[data-workspace-panel-id="breaking-event-radar"]');
+  const target = page.locator('[data-workspace-panel-id="global-transport-shipping"]');
+  await source.scrollIntoViewIfNeeded();
+  await expect(source.locator('.wm-panel-header')).toBeVisible();
+  const start = await source.locator('.wm-panel-title').boundingBox();
+  const end = await target.boundingBox();
+  await page.mouse.move(start!.x + 8, start!.y + 8); await page.mouse.down();
+  await page.mouse.move(end!.x + 30, end!.y + 30, { steps: 12 }); await page.mouse.up();
+  await expect.poll(() => page.locator('.wm-panels-grid > .wm-panel-slot').evaluateAll(els => els.map(el => el.getAttribute('data-workspace-panel-id')))).toEqual(['breaking-event-radar', 'global-transport-shipping']);
+  await expect(page.locator('.wm-panel-drag-ghost')).toHaveCount(0);
+  await expect.poll(() => source.evaluate(el => getComputedStyle(el).transform)).toBe('none');
+  const before = await source.boundingBox();
+  const handle = source.locator('.wm-panel-col-resize-handle');
+  await handle.hover(); const box = await handle.boundingBox();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2 + 270, box!.y + box!.height / 2); await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('polydata:workspace-panel-layout:v4') || '{}')['breaking-event-radar']?.colSpan)).toBe(3);
+  expect((await source.boundingBox())!.width).toBe(before!.width);
+  await handle.dblclick();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('polydata:workspace-panel-layout:v4') || '{}')['breaking-event-radar'])).toBeUndefined();
+  await page.keyboard.press('Control+k');
+  await page.locator('.wm-command-tabs button').filter({ hasText: /^Panels/ }).click();
+  await page.locator('.wm-command-input').fill('weather-market-browser');
+  await page.locator('.wm-command-panel-result').filter({ hasText: 'weather-market-browser' }).click();
+  await expect(page.locator('[data-workspace-panel-id="weather-market-browser"]')).toBeAttached();
+  await expect.poll(() => saved.activePanelIds.includes('weather-market-browser')).toBe(true);
+  await page.reload();
+  await expect(page.locator('[data-workspace-panel-id="weather-market-browser"]')).toBeAttached({ timeout: 60_000 });
+  await expect.poll(() => page.locator('.wm-panels-grid > .wm-panel-slot').evaluateAll(els => els.map(el => el.getAttribute('data-workspace-panel-id')))).toEqual(['breaking-event-radar', 'global-transport-shipping', 'weather-market-browser']);
+});
+
+for (const width of [1440, 390]) for (const kind of ['detail', 'book']) {
+  test(`${kind === 'detail' ? 'focus' : 'book'} drag preview preserves detached panel styles ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installDashboard(page);
+    await page.goto('/?view=2d&layers=earthquakes-volcanoes');
+    const panel = page.locator(`.wm-focus-${kind}-panel`);
+    await expect(panel).toContainText('Fixture market 1');
+    if (kind === 'book') await expect(panel.locator('.wm-focus-book-row')).toHaveCount(2);
+    await panel.scrollIntoViewIfNeeded();
+    await settled(page);
+    const header = await panel.locator('.wm-panel-title').boundingBox();
+    await page.mouse.move(header!.x + 8, header!.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(header!.x + 36, header!.y + 36, { steps: 5 });
+    const ghost = page.locator('body > .wm-panel-drag-ghost');
+    await expect(ghost).toBeVisible();
+    await expect(ghost).toHaveScreenshot(`${kind === 'detail' ? 'focus' : 'book'}-drag-preview-${width}.png`, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
+    await page.mouse.up();
+    await expect(ghost).toHaveCount(0);
+  });
+}
+
+test('anonymous homepage renders a saved empty panel list without restoring defaults', async ({ page }) => {
+  await installDashboard(page, 'en', []);
+  await page.route('**/wm-api/auth/session', route => route.fulfill({ json: { enabled: true, authenticated: false, user: null } }));
+  for (let visit = 0; visit < 2; visit += 1) {
+    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+    await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
+    await expect(page.locator('.wm-focused-market-list .wm-poly-market-card')).toHaveCount(2);
+    await expect(page.locator('.wm-panels-grid [data-workspace-panel-id]')).toHaveCount(0);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('polydata:workspace-panels:v4')!))).toEqual([]);
+    // Fixed focus panels retain their existing product behavior.
+    await expect(page.locator('.wm-focus-book-panel')).toBeVisible();
+    await page.locator('.wm-side-beta').click();
+    await expect(page.locator('.wm-settings-modal a[href="/login?next=/"]')).toBeVisible();
+  }
+});

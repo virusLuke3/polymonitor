@@ -1,11 +1,11 @@
+import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeFoodRetailBasket } from '@/services/api';
 import type { RuntimeFoodBasketItem, RuntimeFoodRetailBasketPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
-import type { PanelGlyphName } from '../macro-intel';
+import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '../macro-intel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badgeLabel(status?: string | null) {
@@ -13,10 +13,6 @@ function badgeLabel(status?: string | null) {
   if (normalized === 'ok') return undefined;
   if (normalized === 'degraded') return 'PARTIAL';
   return 'WARMING';
-}
-
-function panelTone(status?: string | null): 'live' | 'muted' {
-  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
 }
 
 function pctLabel(value?: string | number | null) {
@@ -145,11 +141,12 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'food-retail-basket-pressure',
+  dataDependencies: ['polymarket-macro-map'],
   title: 'Food & Retail Basket Pressure',
   eyebrow: 'macro',
   description: 'Official CPI food-component pressure for inflation market positioning.',
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeFoodRetailBasket(8),
+  fetchData: (context) => fetchRuntimeFoodRetailBasket(8, context?.signal),
 });

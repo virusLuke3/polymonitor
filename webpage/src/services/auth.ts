@@ -102,8 +102,10 @@ function rememberSession(session: AuthSession) {
   return session;
 }
 
-export async function fetchAuthSession(): Promise<AuthSession> {
-  return rememberSession(await authRequest<AuthSession>('/auth/session'));
+export async function fetchAuthSession(signal?: AbortSignal): Promise<AuthSession> {
+  const session = await authRequest<AuthSession>('/auth/session', { signal });
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  return rememberSession(session);
 }
 
 export async function login(username: string, password: string): Promise<AuthSession> {

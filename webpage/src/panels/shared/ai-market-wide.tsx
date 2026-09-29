@@ -1,14 +1,8 @@
+import { numericValue } from '@/panels/shared/formatters';
+import type { MarketGroupItem, MarketListItem, MarketWideAiInsightLens, MarketWideAiInsightPayload, MarketWideAiInsightResponse, PanelRenderContext, RuntimeSignalPayload } from '@/types';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchMarketWideAiSnapshot } from '@/services/api';
-import type {
-  MarketGroupItem,
-  MarketListItem,
-  MarketWideAiInsightLens,
-  MarketWideAiInsightPayload,
-  MarketWideAiInsightResponse,
-  PanelRenderContext,
-} from '@/types';
 import { formatCompact, formatCurrencyCompact } from './formatters';
 import { globalMarkets } from './selectors';
 import '@/styles/ai-market-panels.css';
@@ -64,11 +58,6 @@ const PANEL_COPY: Record<MarketWideAiInsightLens, {
   },
 };
 
-function numericValue(value: string | number | null | undefined) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : 0;
-}
-
 function topMarkets(ctx: PanelRenderContext) {
   return globalMarkets(ctx)
     .slice()
@@ -92,9 +81,9 @@ function buildMarketWidePayload(ctx: PanelRenderContext, lens: MarketWideAiInsig
     trades: (ctx.globalTrades || []).slice(0, 24),
     oracle: (ctx.globalOracle || []).slice(0, 24),
     content: (ctx.latestContent || []).slice(0, 12),
-    alphaSignals: (ctx.alphaSignals?.items || []).slice(0, 10),
-    whaleSignals: (ctx.whaleTrades?.items || []).slice(0, 10),
-    suspiciousSignals: (ctx.suspiciousTrades?.items || []).slice(0, 10),
+    alphaSignals: ((ctx.runtimeData['alpha-signal'] as RuntimeSignalPayload | undefined)?.items || []).slice(0, 10),
+    whaleSignals: ((ctx.runtimeData['whale-tracker'] as RuntimeSignalPayload | undefined)?.items || []).slice(0, 10),
+    suspiciousSignals: ((ctx.runtimeData['suspicious-flow'] as RuntimeSignalPayload | undefined)?.items || []).slice(0, 10),
   };
 }
 
@@ -267,15 +256,15 @@ function sourceStatus(insight: MarketWideAiInsightResponse) {
 
 export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanelProps) {
   const payload = useMemo(() => buildMarketWidePayload(ctx, lens), [
-    ctx.alphaSignals,
+    ctx.runtimeData['alpha-signal'],
     ctx.bootstrap,
     ctx.globalOracle,
     ctx.globalTrades,
     ctx.latestContent,
     ctx.marketGroups,
     ctx.markets,
-    ctx.suspiciousTrades,
-    ctx.whaleTrades,
+    ctx.runtimeData['suspicious-flow'],
+    ctx.runtimeData['whale-tracker'],
     lens,
   ]);
   const fallback = useMemo(() => localMarketWideFallback(payload), [payload]);
@@ -283,22 +272,22 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setSnapshotInsight(null);
-    fetchMarketWideAiSnapshot(lens)
+    fetchMarketWideAiSnapshot(lens, 8000, controller.signal)
       .then((response) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setSnapshotInsight(response);
       })
       .catch(() => {
-        if (!cancelled) setSnapshotInsight(null);
+        if (!controller.signal.aborted) setSnapshotInsight(null);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [lens]);
 

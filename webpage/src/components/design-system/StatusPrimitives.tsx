@@ -1,3 +1,5 @@
+import type { useI18n } from '@/services/i18n';
+import { cleanSourceLabel } from '@/panels/shared/formatters';
 import type { ComponentChildren } from 'preact';
 import type { PanelRuntimeStatus } from '@/panels/types';
 
@@ -9,12 +11,6 @@ type StatusBadgeProps = {
   detail?: string | null;
   compact?: boolean;
   className?: string;
-};
-
-type FreshnessBadgeProps = {
-  freshness?: string | null;
-  ageSeconds?: number | null;
-  compact?: boolean;
 };
 
 type RuntimeStatusBadgeProps = {
@@ -42,7 +38,7 @@ export function operationalTone(value?: string | null): OperationalTone {
   return 'neutral';
 }
 
-export function formatAge(ageSeconds?: number | null): string {
+function formatAge(ageSeconds?: number | null): string {
   if (ageSeconds == null || !Number.isFinite(ageSeconds) || ageSeconds < 0) return '--';
   if (ageSeconds < 5) return 'now';
   if (ageSeconds < 60) return `${Math.round(ageSeconds)}s`;
@@ -67,20 +63,6 @@ export function StatusBadge({
       <span>{label}</span>
       {detail && !compact ? <em>{detail}</em> : null}
     </span>
-  );
-}
-
-export function FreshnessBadge({ freshness, ageSeconds, compact = false }: FreshnessBadgeProps) {
-  const normalized = String(freshness || 'unknown').trim().toLowerCase();
-  const age = formatAge(ageSeconds);
-  const label = age === '--' ? normalized : `${normalized} · ${age}`;
-  return (
-    <StatusBadge
-      compact={compact}
-      label={label.toUpperCase()}
-      tone={operationalTone(normalized)}
-      detail={age === '--' ? 'No observation timestamp available' : `Observed ${age} ago`}
-    />
   );
 }
 
@@ -119,4 +101,41 @@ export function MetricCard({
       {detail ? <div className="ds-metric-card-detail">{detail}</div> : null}
     </article>
   );
+}
+
+type Translator = ReturnType<typeof useI18n>['t'];
+
+export function statusLabel(value: string | null | undefined, t: Translator, additionalLabels: Record<string, Parameters<Translator>[0]> = {}): string {
+  const normalized = String(value || 'unknown').trim().toLowerCase().replace(/_/g, '-');
+  const known = {
+    loading: 'status.loading',
+    unknown: 'status.unknown',
+    fresh: 'status.fresh',
+    aging: 'status.aging',
+    stale: 'status.stale',
+    ok: 'status.ok',
+    missing: 'status.missing',
+    partial: 'status.partial',
+    critical: 'status.critical',
+    degraded: 'status.degraded',
+    warning: 'status.warning',
+    ready: 'status.ready',
+    observed: 'status.observed',
+    bound: 'status.bound',
+    unbound: 'status.unbound',
+    pending: 'status.pending',
+    open: 'status.open',
+    closed: 'status.closed',
+    proposed: 'status.proposed',
+    disputed: 'status.disputed',
+    resolved: 'status.resolved',
+    error: 'status.error',
+    snapshot: 'status.snapshot',
+    'single-market': 'status.singleMarket',
+    'open-no-events': 'status.openNoEvents',
+    'not-loaded': 'status.notLoaded',
+    'ended-awaiting-oracle': 'status.endedAwaitingOracle',
+  } as const;
+  const key = additionalLabels[normalized] || known[normalized as keyof typeof known];
+  return key ? t(key) : cleanSourceLabel(value);
 }

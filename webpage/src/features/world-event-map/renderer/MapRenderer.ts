@@ -33,6 +33,7 @@ export interface MapRenderer {
   setEvents(events: GeoEvent[]): void;
   resize(): void;
   setReducedMotion(reduced: boolean): void;
+  setLanguage?(language: 'en' | 'zh'): void;
   fitCountry(country: MapCountryTarget): void;
   pause(): void;
   resume(): void;

@@ -1,3 +1,4 @@
+import { toneClass, watchStatusBadge as statusBadge, watchItemKey as itemKey } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeTechPanel } from '@/services/api';
@@ -16,28 +17,6 @@ type TechPanelConfig = {
   mode: TechPanelMode;
   limit?: number;
 };
-
-function toneClass(value?: string | null) {
-  const tone = String(value || 'neutral').toLowerCase();
-  if (tone === 'up') return 'tone-up';
-  if (tone === 'down') return 'tone-down';
-  if (tone === 'watch') return 'tone-watch';
-  return 'tone-neutral';
-}
-
-function statusBadge(payload?: RuntimeTechPanelPayload | null) {
-  const status = String(payload?.status || '').toLowerCase();
-  const cacheMode = String(payload?.cacheMode || '').toLowerCase();
-  if (cacheMode.includes('stale')) return 'STALE';
-  if (status === 'ok') return 'LIVE';
-  if (status === 'partial' || status === 'degraded') return 'PARTIAL';
-  if (status === 'empty') return 'WARMING';
-  return status ? status.toUpperCase() : 'SEED';
-}
-
-function itemKey(item: RuntimeTechPanelItem, index: number) {
-  return String(item.id || item.url || item.title || item.label || index);
-}
 
 function tags(item: RuntimeTechPanelItem) {
   return (item.tags || []).filter((tag) => String(tag).toUpperCase() !== 'TOP FREE').slice(0, 3).map((tag) => (
@@ -226,6 +205,6 @@ export function createTechPanel(config: TechPanelConfig) {
   }, {
     tier: 'slow',
     intervalMs: 300000,
-    fetchData: () => fetchRuntimeTechPanel(config.id, limit),
+    fetchData: (context) => fetchRuntimeTechPanel(config.id, limit, context?.signal),
   });
 }

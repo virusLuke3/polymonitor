@@ -404,7 +404,7 @@ export type MapLayerExecutionContext = {
   availableSources?: ReadonlySet<string>;
 };
 
-export function isWorldEventLayerExecutable(
+function isWorldEventLayerExecutable(
   layer: MapLayerDefinition,
   context: MapLayerExecutionContext = {},
 ) {

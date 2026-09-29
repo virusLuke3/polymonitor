@@ -32,5 +32,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeFedReactionGrowthRiskBoard(36),
+  fetchData: (context) => fetchRuntimeFedReactionGrowthRiskBoard(36, context?.signal),
 });

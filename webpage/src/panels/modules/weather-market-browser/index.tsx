@@ -1,10 +1,10 @@
+import { panelStatus } from '../../shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import { fetchRuntimeGlobalTemperatureMonitor } from '@/services/api';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
-import { bookCoverage, panelStatus, priceLabel, statusBadge } from '../weather-detail-utils';
+import { panelFromRenderer } from '../helpers';
+import { bookCoverage, priceLabel, statusBadge } from '../weather-detail-utils';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 const FAMILY_LABELS: Record<string, string> = {
@@ -139,14 +139,11 @@ const renderers: PanelRenderMap = {
   },
 };
 
-export const panel = runtimePanelFromRenderer(renderers, {
+export const panel = panelFromRenderer(renderers, {
   id: 'weather-market-browser',
   title: 'Weather Market Browser',
   eyebrow: 'weather',
   description: 'Grouped Polymarket weather markets across temperature, precipitation, storms, climate, and disaster families.',
   defaultEnabled: true,
-}, {
-  tier: 'slow',
-  intervalMs: 60000,
-  fetchData: () => fetchRuntimeGlobalTemperatureMonitor(60),
+  dataSourceId: 'global-temperature-monitor',
 });

@@ -21,13 +21,13 @@ export type PanelGlyphName =
   | 'rates'
   | 'source';
 
-function numberLabel(value?: string | number | null) {
+export function numberLabel(value?: string | number | null) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '--';
   return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 }
 
-function probabilityLabel(value?: string | number | null) {
+export function probabilityLabel(value?: string | number | null) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '--';
   return `${Math.round(n * 100)}%`;
@@ -42,14 +42,6 @@ export function signalToneClass(value?: string | null) {
   if (/(hot|rising|hawk|alert|high|sticky|underpriced)/.test(text)) return 'hot';
   if (/(cool|cooling|dovish|disinflation|soft|low)/.test(text)) return 'cool';
   if (/(watch|mixed|event|partial|degraded|warming)/.test(text)) return 'watch';
-  return 'neutral';
-}
-
-export function sourceStateTone(value?: string | null) {
-  const text = normalized(value);
-  if (text === 'ok' || text === 'live' || text === 'official' || text === 'seeded') return 'ok';
-  if (text === 'fallback' || text === 'partial' || text === 'degraded') return 'watch';
-  if (text === 'error' || text === 'stale' || text === 'warming') return 'bad';
   return 'neutral';
 }
 
@@ -85,7 +77,6 @@ export function PanelGlyph({ icon, tone = 'neutral' }: { icon: PanelGlyphName; t
   return (
     <span className={`wm-intel-mark ${tone}`} aria-label={label} title={label}>
       <i />
-      <em>{meta.token}</em>
     </span>
   );
 }
@@ -121,21 +112,6 @@ export function MacroAlertStrip({
       <span className="wm-macro-alert-chip alert"><strong>{shared('alert', 'ALERT')}</strong><em>{Number(hot) || 0}</em></span>
       <span className="wm-macro-alert-chip cool"><strong>{shared('cool', 'COOL')}</strong><em>{Number(cool) || 0}</em></span>
       <span className="wm-macro-alert-chip watch"><strong>{shared('watch', 'WATCH')}</strong><em>{Number(watch) || 0}</em></span>
-    </div>
-  );
-}
-
-export function SourceStack({ sources, labels }: { sources?: Record<string, string>; labels?: Record<string, string> }) {
-  const entries = Object.entries(sources || {});
-  if (!entries.length) return null;
-  return (
-    <div className="wm-macro-source-stack">
-      {entries.slice(0, 6).map(([key, value]) => (
-        <span key={key} className={`wm-source-pill ${sourceStateTone(value)}`}>
-          <strong>{labels?.[key] || key}</strong>
-          <em>{String(value || 'unknown').toUpperCase()}</em>
-        </span>
-      ))}
     </div>
   );
 }
@@ -197,4 +173,9 @@ export function LinkedMarketRegistry({
       ) : null}
     </div>
   );
+}
+
+export function displayValue(value?: number | string | null) {
+  const text = String(value ?? '').trim();
+  return text || '--';
 }

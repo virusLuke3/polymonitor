@@ -1,34 +1,19 @@
+import { compactText as compact, relativeDuration as timeLabel } from '../../shared/formatters';
+import { numericValue as numeric } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeSportsOdds } from '@/services/api';
 import type { RuntimeSportsOddsItem, RuntimeSportsOddsPayload } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'signal' | 'start' | 'dispersion';
 
-function numeric(value?: number | string | null) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function percent(value?: number | string | null) {
   const parsed = numeric(value);
   if (!parsed) return '--';
   return `${Math.round(parsed * 100)}%`;
-}
-
-function compact(value?: string | null, maxLength = 28) {
-  const text = String(value || '').trim();
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(1, maxLength - 1)).trim()}...`;
-}
-
-function timeLabel(value?: string | null) {
-  if (!value) return '--';
-  return formatRelative(value).replace(' ago', '').replace('in ', '');
 }
 
 function sourceStatus(payload?: RuntimeSportsOddsPayload | null) {
@@ -179,5 +164,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 45000,
-  fetchData: () => fetchRuntimeSportsOdds(8),
+  fetchData: (context) => fetchRuntimeSportsOdds(8, context?.signal),
 });

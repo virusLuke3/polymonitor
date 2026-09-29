@@ -1,13 +1,22 @@
+import { scoreLabel } from '../../shared/formatters';
+import { openExternal } from '../../shared/renderers';
+import {
+  youtubeVideoId,
+  panelStatus,
+  categoryToneClass,
+  sourceLocation,
+  categoryLabel,
+  useStaggeredLoad,
+  youtubeBridgeMessageMatches,
+} from '../../shared/videoPlayback';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketYoutubeChannels } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketYoutubeChannelsPayload } from '@/types';
-import { useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
-const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const YOUTUBE_PANEL_LIMIT = 80;
 const YOUTUBE_LIVE_ROTATE_MS = 10 * 60 * 1000;
 const YOUTUBE_VIDEO_ROTATE_MS = 7 * 60 * 1000;
@@ -22,38 +31,12 @@ function badgeLabel(payload?: RuntimeMarketYoutubeChannelsPayload | null) {
   return 'LIVE';
 }
 
-function panelStatus(payload?: RuntimeMarketYoutubeChannelsPayload | null): 'live' | 'muted' {
-  const status = String(payload?.status || '').toLowerCase();
-  return status === 'warming' || status === 'empty' ? 'muted' : 'live';
-}
-
 function itemTitle(item: RuntimeMarketTvWireItem) {
   return item.youtubeLiveTitle || item.displayName || item.name || 'YouTube source';
 }
 
 function channelName(item: RuntimeMarketTvWireItem) {
   return item.youtubeChannelName || item.displayName || item.sourceName || 'YouTube';
-}
-
-function categoryLabel(value?: string | null) {
-  const category = String(value || 'other').toUpperCase();
-  return category === 'GEO' ? 'GEO' : category;
-}
-
-function categoryToneClass(value?: string | null) {
-  const category = String(value || 'all').toLowerCase().replace(/[^a-z0-9-]/g, '');
-  return `tone-${category || 'all'}`;
-}
-
-function sourceLocation(item: RuntimeMarketTvWireItem) {
-  return [item.region, item.country, item.language].filter(Boolean).join(' / ') || 'GLOBAL';
-}
-
-function youtubeVideoId(item?: RuntimeMarketTvWireItem | null) {
-  const liveId = String(item?.youtubeLiveVideoId || '').trim();
-  if (YOUTUBE_VIDEO_ID_RE.test(liveId)) return liveId;
-  const fallbackId = String(item?.fallbackVideoId || '').trim();
-  return YOUTUBE_VIDEO_ID_RE.test(fallbackId) ? fallbackId : '';
 }
 
 function hasPlayableYoutubeEmbed(item?: RuntimeMarketTvWireItem | null) {
@@ -74,17 +57,6 @@ function probeLabel(item?: RuntimeMarketTvWireItem | null) {
   if (status === 'offline') return 'VIDEO';
   if (status === 'error') return 'FALLBACK';
   return 'OPEN';
-}
-
-function scoreLabel(value?: string | number | null) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? String(Math.round(numeric)) : '--';
-}
-
-function openExternal(url?: string | null) {
-  const target = String(url || '').trim();
-  if (!target) return;
-  window.open(target, '_blank', 'noopener,noreferrer');
 }
 
 function stableHash(value: string) {
@@ -421,5 +393,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 180000,
-  fetchData: () => fetchRuntimeMarketYoutubeChannels(YOUTUBE_PANEL_LIMIT),
+  fetchData: (context) => fetchRuntimeMarketYoutubeChannels(YOUTUBE_PANEL_LIMIT, undefined, context?.signal),
 });

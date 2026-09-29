@@ -7,4 +7,5 @@ export const panel = panelFromRenderer(chainPanelRenderers, {
   eyebrow: 'agent',
   description: 'Market-wide AI radar for unusual, high-attention, and fast-moving markets.',
   defaultEnabled: false,
+  dataDependencies: ['alpha-signal', 'whale-tracker', 'suspicious-flow'],
 });

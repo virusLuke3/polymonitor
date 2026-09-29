@@ -32,5 +32,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeCpiComponentsPressureRegistry(48),
+  fetchData: (context) => fetchRuntimeCpiComponentsPressureRegistry(48, context?.signal),
 });

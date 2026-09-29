@@ -36,7 +36,7 @@ const VALID_HAZARD_KINDS = new Set([
   'other-weather-anomaly',
 ]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
@@ -44,7 +44,7 @@ function isFiniteCoordinate(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-export function isGeoPoint(value: unknown): value is [number, number] {
+function isGeoPoint(value: unknown): value is [number, number] {
   return Array.isArray(value)
     && value.length === 2
     && isFiniteCoordinate(value[0])
@@ -69,7 +69,7 @@ function isClosedRing(value: unknown): value is number[][] {
     && pointsEqual(value[0] as number[], value[value.length - 1] as number[]);
 }
 
-export function isGeoEventGeometry(value: unknown): value is GeoEventGeometry {
+function isGeoEventGeometry(value: unknown): value is GeoEventGeometry {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
   if (value.type === 'Point') return isGeoPoint(value.coordinates);
   if (value.type === 'LineString') {

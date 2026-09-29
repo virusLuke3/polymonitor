@@ -2,7 +2,6 @@ import type { VNode } from 'preact';
 import type { PanelDefinition, PanelRenderContext } from '@/types';
 
 export type PanelRuntimeData = Record<string, unknown>;
-export type PanelWorkspace = 'world' | 'worldcup' | 'quant';
 export type PanelRuntimePhase = 'idle' | 'loading' | 'ready' | 'stale' | 'degraded' | 'error' | 'suspended';
 
 export type PanelRuntimeContext = PanelRenderContext & {
@@ -11,12 +10,7 @@ export type PanelRuntimeContext = PanelRenderContext & {
 
 export type PanelRenderer = (ctx: PanelRuntimeContext) => VNode;
 
-export type RegistryEntry = PanelDefinition & {
-  render: PanelRenderer;
-  defaultEnabled?: boolean;
-  refresh?: PanelRefreshConfig;
-  fetchData?: PanelFetchData;
-};
+export type RegistryEntry = PanelModule;
 
 export type PanelEntryFragment = {
   render: PanelRenderer;
@@ -38,12 +32,6 @@ export type PanelRefreshConfig = {
   };
 };
 
-export type PanelDataSource = {
-  id: string;
-  transport: 'batch' | 'single' | 'local';
-  limit?: number;
-};
-
 export type PanelFetchContext = {
   signal: AbortSignal;
   reason: 'bootstrap' | 'refresh' | 'interval' | 'retry' | 'manual';
@@ -63,18 +51,14 @@ export type PanelRuntimeStatus = {
 };
 
 export type PanelModule = PanelDefinition & {
+  /** Another registered panel owns this view's shared snapshot and refresh. */
+  dataSourceId?: string;
+  /** Additional registered snapshots used by this panel's rendering. */
+  dataDependencies?: string[];
   defaultEnabled?: boolean;
-  workspaces?: PanelWorkspace[];
-  dataSources?: PanelDataSource[];
-  permissions?: string[];
   maxBatchSize?: number;
   refreshPolicy?: PanelRefreshConfig;
-  /** @deprecated Use refreshPolicy. Retained while panel modules migrate. */
-  refresh?: PanelRefreshConfig;
   fetchData?: PanelFetchData;
-  render: PanelRenderer;
+  /** FocusedMarketStrip owns rendering for its fixed price, book and trade panels. */
+  render?: PanelRenderer;
 };
-
-export function getPanelRefreshPolicy(panel: PanelModule): PanelRefreshConfig | undefined {
-  return panel.refreshPolicy || panel.refresh;
-}

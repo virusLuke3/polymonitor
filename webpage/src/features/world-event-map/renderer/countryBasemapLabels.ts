@@ -4,6 +4,7 @@ import type { Feature, FeatureCollection, Geometry } from 'geojson';
 export type CountryBasemapLabel = {
   id: string;
   name: string;
+  iso2?: string;
   coordinates: [number, number];
   area: number;
 };
@@ -44,10 +45,19 @@ export function countryBasemapLabels(countries: FeatureCollection): CountryBasem
     return [{
       id: String(typedFeature.id || typedFeature.properties?.['ISO3166-1-Alpha-3'] || `${name}:${index}`),
       name,
+      iso2: String(typedFeature.properties?.['ISO3166-1-Alpha-2'] || ''),
       coordinates,
       area,
     }];
   }).sort((left, right) => right.area - left.area);
+}
+
+const chineseCountryNames = new Intl.DisplayNames(['zh-CN'], { type: 'region', fallback: 'none' });
+
+export function countryBasemapLabelName(label: CountryBasemapLabel, language: 'en' | 'zh') {
+  return language === 'zh' && /^[A-Z]{2}$/.test(label.iso2 || '')
+    ? chineseCountryNames.of(label.iso2!) || label.name
+    : label.name;
 }
 
 export function visibleCountryBasemapLabels(labels: CountryBasemapLabel[], zoom: number) {

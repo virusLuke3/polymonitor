@@ -1,0 +1,655 @@
+/* transport panels: shared body styles and their state/responsive variants. */
+
+@layer base {
+
+.wm-global-transport-panel .wm-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wm-global-transport-panel .wm-panel-title::before {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.08);
+  color: rgba(125, 211, 252, 0.98);
+  content: "✈";
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1;
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.58);
+}
+
+.wm-aviation-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 5px;
+  background: rgba(56, 189, 248, 0.1);
+  color: rgba(125, 211, 252, 0.95);
+}
+
+.wm-aviation-icon svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+  transform: rotate(-10deg);
+}
+
+.wm-aviation-icon.flight {
+  border-color: rgba(56, 189, 248, 0.3);
+  background: rgba(56, 189, 248, 0.1);
+  color: rgba(125, 211, 252, 1);
+}
+
+.wm-aviation-icon.airline {
+  border-color: rgba(60, 255, 136, 0.22);
+  background: rgba(60, 255, 136, 0.07);
+  color: rgba(91, 255, 160, 0.94);
+}
+
+.wm-aviation-icon.track {
+  border-color: rgba(250, 204, 21, 0.24);
+  background: rgba(250, 204, 21, 0.07);
+  color: rgba(250, 204, 21, 0.94);
+}
+
+.wm-aviation-icon.news {
+  border-color: rgba(248, 113, 113, 0.24);
+  background: rgba(248, 113, 113, 0.07);
+  color: rgba(248, 113, 113, 0.94);
+}
+
+.wm-aviation-status-deck {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(158px, 0.48fr) minmax(0, 1fr);
+  gap: 12px;
+  margin: 12px 16px 0;
+  min-height: 122px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  border-radius: 7px;
+  background:
+    radial-gradient(circle at 20% 25%, rgba(56, 189, 248, 0.18), transparent 32%),
+    radial-gradient(circle at 78% 12%, rgba(60, 255, 136, 0.14), transparent 30%),
+    linear-gradient(135deg, rgba(2, 6, 23, 0.84), rgba(8, 15, 27, 0.94));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 24px rgba(14, 165, 233, 0.08);
+  isolation: isolate;
+}
+
+.wm-aviation-status-deck::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.05) 1px, transparent 1px);
+  background-size: 26px 26px;
+  content: "";
+  mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.62));
+}
+
+.wm-aviation-radar-scope {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  overflow: hidden;
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.wm-aviation-radar-scope::before,
+.wm-aviation-radar-scope::after {
+  position: absolute;
+  border-radius: 999px;
+  content: "";
+}
+
+.wm-aviation-radar-scope::before {
+  width: 84px;
+  height: 84px;
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  box-shadow: 0 0 28px rgba(56, 189, 248, 0.1);
+}
+
+.wm-aviation-radar-scope::after {
+  width: 12px;
+  height: 12px;
+  background: rgba(60, 255, 136, 0.95);
+  box-shadow: 0 0 16px rgba(60, 255, 136, 0.65);
+}
+
+.wm-aviation-radar-sweep {
+  position: absolute;
+  width: 92px;
+  height: 92px;
+  border-radius: 999px;
+  background: conic-gradient(from -28deg, rgba(56, 189, 248, 0.36), rgba(60, 255, 136, 0.06) 38deg, transparent 72deg);
+  opacity: 0.82;
+  transform-origin: center;
+  animation: wm-aviation-sweep 5.8s linear infinite;
+}
+
+.wm-aviation-radar-scope.watch .wm-aviation-radar-sweep,
+.wm-aviation-radar-scope.alert .wm-aviation-radar-sweep {
+  background: conic-gradient(from -28deg, rgba(250, 204, 21, 0.36), rgba(56, 189, 248, 0.08) 40deg, transparent 74deg);
+}
+
+.wm-aviation-radar-scope svg {
+  position: relative;
+  z-index: 1;
+  width: min(96%, 190px);
+  height: 104px;
+  overflow: visible;
+}
+
+.wm-aviation-radar-scope .grid {
+  fill: none;
+  stroke: rgba(148, 163, 184, 0.14);
+  stroke-dasharray: 3 7;
+  stroke-linecap: round;
+  stroke-width: 1;
+}
+
+.wm-aviation-radar-scope .route {
+  fill: none;
+  stroke: rgba(56, 189, 248, 0.75);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 7px rgba(56, 189, 248, 0.38));
+}
+
+.wm-aviation-radar-scope .route.ghost {
+  stroke: rgba(60, 255, 136, 0.38);
+  stroke-width: 1.6;
+}
+
+.wm-aviation-radar-scope circle {
+  fill: rgba(56, 189, 248, 0.96);
+  stroke: rgba(2, 6, 23, 0.92);
+  stroke-width: 1.5;
+}
+
+.wm-aviation-radar-scope circle.hot {
+  fill: rgba(250, 204, 21, 0.98);
+  filter: drop-shadow(0 0 7px rgba(250, 204, 21, 0.56));
+}
+
+.wm-aviation-radar-readout {
+  position: absolute;
+  left: 13px;
+  bottom: 10px;
+  z-index: 2;
+}
+
+.wm-aviation-radar-readout b,
+.wm-aviation-radar-readout span {
+  display: block;
+  font-family: var(--font-mono);
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.wm-aviation-radar-readout b {
+  color: rgba(248, 250, 252, 0.98);
+  font-size: 25px;
+  line-height: 0.9;
+}
+
+.wm-aviation-radar-readout span {
+  margin-top: 3px;
+  color: rgba(125, 211, 252, 0.86);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.wm-aviation-status-copy {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  padding: 14px 14px 14px 0;
+}
+
+.wm-aviation-status-copy > span {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(125, 211, 252, 0.92);
+  font-size: 9px;
+}
+
+.wm-aviation-status-copy > em,
+.wm-aviation-stat-row small {
+  overflow: hidden;
+  color: rgba(148, 163, 184, 0.72);
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-aviation-status-copy > strong {
+  overflow: hidden;
+  margin-top: 4px;
+  color: rgba(248, 250, 252, 0.98);
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-aviation-status-copy > em {
+  margin-top: 5px;
+  font-size: 9px;
+}
+
+.wm-aviation-stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 13px;
+}
+
+.wm-aviation-stat-row i {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.22);
+  font-style: normal;
+  padding: 7px 8px;
+}
+
+.wm-aviation-stat-row b {
+  display: block;
+  overflow: hidden;
+  color: rgba(248, 250, 252, 0.96);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 950;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-aviation-stat-row small {
+  display: block;
+  margin-top: 4px;
+  font-size: 7px;
+}
+
+.wm-aviation-tabs {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 47px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.42), rgba(15, 23, 42, 0.2));
+  padding: 0 16px;
+}
+
+.wm-aviation-source-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(86px, 1fr));
+  gap: 6px;
+  padding: 8px 16px 0;
+}
+
+.wm-aviation-source-strip span {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.62), rgba(2, 6, 23, 0.48));
+  padding: 5px 7px;
+}
+
+.wm-aviation-source-strip span.normal {
+  border-color: rgba(74, 222, 128, 0.22);
+  background: linear-gradient(180deg, rgba(22, 101, 52, 0.18), rgba(2, 6, 23, 0.42));
+}
+
+.wm-aviation-source-strip span.watch {
+  border-color: rgba(250, 204, 21, 0.24);
+}
+
+.wm-aviation-source-strip span.alert {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.wm-aviation-source-strip b,
+.wm-aviation-source-strip em {
+  display: block;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-aviation-source-strip b {
+  color: rgba(226, 232, 240, 0.58);
+  font-size: 8px;
+}
+
+.wm-aviation-source-strip em {
+  margin-top: 2px;
+  color: rgba(248, 250, 252, 0.9);
+  font-size: 10px;
+}
+
+.wm-aviation-tabs button {
+  appearance: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 5px;
+  background: rgba(2, 6, 23, 0.34);
+  color: rgba(226, 232, 240, 0.58);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0;
+  padding: 0 8px 0 6px;
+  text-align: left;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.wm-aviation-tabs button .wm-aviation-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  opacity: 0.7;
+}
+
+.wm-aviation-tabs button .wm-aviation-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wm-aviation-tabs button strong {
+  color: inherit;
+  font: inherit;
+}
+
+.wm-aviation-tabs button span {
+  color: rgba(148, 163, 184, 0.62);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.wm-aviation-tabs button.active {
+  border-color: rgba(125, 211, 252, 0.28);
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.18), rgba(2, 6, 23, 0.24));
+  color: rgba(248, 250, 252, 0.96);
+}
+
+.wm-aviation-tabs button.active .wm-aviation-icon {
+  border-color: rgba(248, 250, 252, 0.34);
+  color: rgba(248, 250, 252, 0.98);
+  opacity: 1;
+}
+
+.wm-aviation-tabs button.active::after {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -8px;
+  height: 2px;
+  background: rgba(125, 211, 252, 0.98);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.58);
+  content: "";
+}
+
+.wm-aviation-intel-list {
+  display: grid;
+  gap: 0;
+  padding: 10px 16px 8px;
+}
+
+.wm-aviation-intel-row {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr) 66px 78px 44px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 50px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: transparent;
+  color: inherit;
+  padding: 8px 0;
+  text-align: left;
+}
+
+.wm-aviation-intel-row.flight.live {
+  position: relative;
+}
+
+.wm-aviation-intel-row.flight.live::after {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(250, 204, 21, 0.25);
+  border-radius: 999px;
+  content: "";
+  opacity: 0.55;
+  transform: translateY(-50%);
+}
+
+.wm-aviation-intel-row::before {
+  width: 1px;
+  height: 34px;
+  background: linear-gradient(180deg, transparent, rgba(56, 189, 248, 0.45), transparent);
+  content: "";
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+  opacity: 0.28;
+  transform: translateX(8px);
+}
+
+.wm-aviation-intel-row.flight::before {
+  background: linear-gradient(180deg, transparent, rgba(56, 189, 248, 0.72), transparent);
+}
+
+.wm-aviation-intel-row.airline::before {
+  background: linear-gradient(180deg, transparent, rgba(74, 222, 128, 0.52), transparent);
+}
+
+.wm-aviation-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.wm-aviation-code > b {
+  color: rgba(248, 250, 252, 0.92);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.wm-aviation-intel-row span {
+  min-width: 0;
+}
+
+.wm-aviation-intel-row > span:nth-of-type(2) {
+  grid-column: 2;
+}
+
+.wm-aviation-intel-row strong,
+.wm-aviation-intel-row em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-aviation-intel-row strong {
+  color: rgba(248, 250, 252, 0.94);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.12;
+}
+
+.wm-aviation-intel-row em {
+  margin-top: 3px;
+  color: rgba(148, 163, 184, 0.68);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wm-aviation-intel-row > i {
+  grid-column: 4;
+  justify-self: end;
+  min-width: 72px;
+  background: transparent;
+  color: rgba(74, 222, 128, 0.98);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 950;
+  padding: 0;
+  text-align: right;
+}
+
+.wm-aviation-intel-row > i.watch {
+  color: rgba(250, 204, 21, 0.98);
+}
+
+.wm-aviation-intel-row > i.alert {
+  color: rgba(248, 113, 113, 0.98);
+}
+
+.wm-aviation-intel-row > small {
+  grid-column: 5;
+  justify-self: end;
+  color: rgba(226, 232, 240, 0.42);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+@keyframes wm-aviation-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wm-aviation-radar-sweep {
+    animation: none;
+  }
+}
+
+.wm-aviation-spark {
+  grid-column: 3;
+  width: 56px;
+  height: 26px;
+  overflow: visible;
+}
+
+.wm-aviation-spark polyline {
+  fill: none;
+  stroke: rgba(74, 222, 128, 0.9);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.32));
+}
+
+.wm-aviation-risk-meter {
+  position: relative;
+  grid-column: 3;
+  width: 58px;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(148, 163, 184, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.wm-aviation-risk-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--risk);
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, #4ade80, #facc15);
+}
+
+.wm-aviation-risk-meter.watch i {
+  background: linear-gradient(90deg, #38bdf8, #facc15);
+}
+
+.wm-aviation-risk-meter.alert i {
+  background: linear-gradient(90deg, #f97316, #ef4444);
+}
+
+.wm-aviation-intel-row.flight .wm-aviation-code > b {
+  color: rgba(125, 211, 252, 0.96);
+}
+
+.wm-aviation-intel-row.flight.live .wm-aviation-code > b {
+  color: rgba(250, 204, 21, 0.96);
+}
+
+.wm-aviation-intel-row.flight.live .wm-aviation-icon {
+  border-color: rgba(250, 204, 21, 0.3);
+  background: rgba(250, 204, 21, 0.08);
+  color: rgba(250, 204, 21, 0.96);
+}
+
+.wm-aviation-intel-row.airline .wm-aviation-code > b {
+  color: rgba(60, 255, 136, 0.92);
+}
+
+.wm-aviation-intel-row.news .wm-aviation-code > b {
+  color: rgba(250, 204, 21, 0.92);
+}
+
+.wm-aviation-intel-row.source {
+  cursor: pointer;
+}
+
+.wm-aviation-intel-row.source:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wm-aviation-refresh-button {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  text-align: center;
+}
+}

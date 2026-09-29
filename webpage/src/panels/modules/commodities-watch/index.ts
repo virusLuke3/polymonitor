@@ -10,5 +10,5 @@ export const panel = runtimePanelFromRenderer(macroPanelRenderers, {
   defaultEnabled: true,
 }, {
   tier: 'fast',
-  fetchData: fetchRuntimeCommodities,
+  fetchData: (context) => fetchRuntimeCommodities(context?.signal),
 });

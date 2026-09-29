@@ -1,5 +1,6 @@
 import { useMemo } from 'preact/hooks';
 import type { GeoEvent } from '../domain/types';
+import { aviationLayerStatsForState } from '../renderer/layerFactories/aviationScene';
 import {
   AVIATION_LENS_MODES,
   AVIATION_RISK_SOURCES,
@@ -7,7 +8,6 @@ import {
   type AviationRiskSource,
   type WorldEventMapState,
 } from '../state/mapState';
-import { aviationLayerStatsForState } from '../renderer/layerFactories/aviationLayers';
 
 const LENS_LABELS: Record<AviationLensMode, string> = {
   all: 'All',

@@ -1,12 +1,9 @@
+import { isRecord } from '../domain/validation';
 import type {
   HazardMarketEvidence,
   HazardMarketLinksResponse,
   RelatedWeatherMarket,
 } from '../domain/types';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function parseEvidence(value: unknown, key: string): HazardMarketEvidence {
   if (!isRecord(value) || typeof value.passed !== 'boolean' || typeof value.reason !== 'string') {

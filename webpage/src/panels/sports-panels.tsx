@@ -1,5 +1,5 @@
+import type { PanelRenderContext, RuntimeNbaIntelPayload, RuntimeNbaMatchupPredictorPayload, RuntimeNbaPayload } from '@/types';
 import { Panel } from '@/components/Panel';
-import type { PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
 import { emptyState } from './shared/renderers';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
@@ -27,7 +27,7 @@ function formatMargin(value?: number | null) {
 }
 
 function nbaIntelPanel(ctx: PanelRenderContext, copy: ReturnType<typeof useSpecialistCopy>['copy'], shared: ReturnType<typeof useSpecialistCopy>['shared'], formatDateTime: ReturnType<typeof useSpecialistCopy>['formatDateTime']) {
-  const intel = ctx.nbaIntel;
+  const intel = (ctx.runtimeData['nba-intel'] as RuntimeNbaIntelPayload | undefined);
   if (!intel || (!intel.items.length && !intel.lineups.length)) {
     return emptyState(copy('empty', 'No NBA intel loaded.'));
   }
@@ -83,7 +83,7 @@ function nbaIntelPanel(ctx: PanelRenderContext, copy: ReturnType<typeof useSpeci
 
 
 function nbaMatchupPredictorPanel(ctx: PanelRenderContext, copy: ReturnType<typeof useSpecialistCopy>['copy'], shared: ReturnType<typeof useSpecialistCopy>['shared'], formatDateTime: ReturnType<typeof useSpecialistCopy>['formatDateTime']) {
-  const items = ctx.nbaMatchupPredictor?.items || [];
+  const items = (ctx.runtimeData['espn-matchup-predictor'] as RuntimeNbaMatchupPredictorPayload | undefined)?.items || [];
   if (!items.length) return emptyState(copy('empty', 'No ESPN Matchup Predictor data loaded.'));
   return (
     <div className="wm-matchup-predictor-list">
@@ -142,7 +142,7 @@ function nbaMatchupPredictorPanel(ctx: PanelRenderContext, copy: ReturnType<type
 }
 
 
-function nbaGames(items: NonNullable<PanelRenderContext['nba']>['items'], copy: ReturnType<typeof useSpecialistCopy>['copy'], shared: ReturnType<typeof useSpecialistCopy>['shared'], formatDateTime: ReturnType<typeof useSpecialistCopy>['formatDateTime']) {
+function nbaGames(items: RuntimeNbaPayload['items'], copy: ReturnType<typeof useSpecialistCopy>['copy'], shared: ReturnType<typeof useSpecialistCopy>['shared'], formatDateTime: ReturnType<typeof useSpecialistCopy>['formatDateTime']) {
   if (!items.length) return emptyState(copy('empty', 'No NBA games loaded.'));
   return (
     <div className="wm-scoreboard-list">
@@ -174,17 +174,17 @@ function nbaGames(items: NonNullable<PanelRenderContext['nba']>['items'], copy: 
 
 function NbaScoreboardPanel({ ctx }: { ctx: PanelRenderContext }) {
   const { copy, shared, formatDateTime } = useSpecialistCopy('nba-scoreboard');
-  return <Panel title={copy('title', 'NBA SCOREBOARD')} badge="SPORTS" status="live" count={ctx.nba?.items.length || 0} className="wm-market-panel wm-nba-scoreboard-panel" dataPanelId="nba-scoreboard">{nbaGames(ctx.nba?.items || [], copy, shared, formatDateTime)}</Panel>;
+  return <Panel title={copy('title', 'NBA SCOREBOARD')} badge="SPORTS" status="live" count={(ctx.runtimeData['nba-scoreboard'] as RuntimeNbaPayload | undefined)?.items.length || 0} className="wm-market-panel wm-nba-scoreboard-panel" dataPanelId="nba-scoreboard">{nbaGames((ctx.runtimeData['nba-scoreboard'] as RuntimeNbaPayload | undefined)?.items || [], copy, shared, formatDateTime)}</Panel>;
 }
 
 function NbaIntelPanel({ ctx }: { ctx: PanelRenderContext }) {
   const { copy, shared, formatDateTime } = useSpecialistCopy('nba-intel');
-  return <Panel title={copy('title', 'NBA INTEL')} badge="ESPN" status="live" count={ctx.nbaIntel?.items.length || 0} className="wm-market-panel wm-nba-intel-panel" dataPanelId="nba-intel">{nbaIntelPanel(ctx, copy, shared, formatDateTime)}</Panel>;
+  return <Panel title={copy('title', 'NBA INTEL')} badge="ESPN" status="live" count={(ctx.runtimeData['nba-intel'] as RuntimeNbaIntelPayload | undefined)?.items.length || 0} className="wm-market-panel wm-nba-intel-panel" dataPanelId="nba-intel">{nbaIntelPanel(ctx, copy, shared, formatDateTime)}</Panel>;
 }
 
 function EspnPredictorPanel({ ctx }: { ctx: PanelRenderContext }) {
   const { copy, shared, formatDateTime } = useSpecialistCopy('espn-matchup-predictor');
-  return <Panel title={copy('title', 'ESPN MATCHUP PREDICTOR')} badge="BPI" status="live" count={ctx.nbaMatchupPredictor?.items.length || 0} className="wm-market-panel wm-matchup-predictor-panel" dataPanelId="espn-matchup-predictor">{nbaMatchupPredictorPanel(ctx, copy, shared, formatDateTime)}</Panel>;
+  return <Panel title={copy('title', 'ESPN MATCHUP PREDICTOR')} badge="BPI" status="live" count={(ctx.runtimeData['espn-matchup-predictor'] as RuntimeNbaMatchupPredictorPayload | undefined)?.items.length || 0} className="wm-market-panel wm-matchup-predictor-panel" dataPanelId="espn-matchup-predictor">{nbaMatchupPredictorPanel(ctx, copy, shared, formatDateTime)}</Panel>;
 }
 
 

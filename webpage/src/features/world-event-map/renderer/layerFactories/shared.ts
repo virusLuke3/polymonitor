@@ -1,8 +1,9 @@
+import { isHazardGeoEvent as isHazardEvent } from '../../config/layerRegistry';
+export { isHazardGeoEvent as isHazardEvent } from '../../config/layerRegistry';
 import type {
   GeoEvent,
   GeoPoint,
   GeoEventSeverity,
-  HazardEvent,
   HazardKind,
 } from '../../domain/types';
 import { MAP_SEVERITY_STYLES } from '../../config/mapSymbols';
@@ -53,11 +54,6 @@ export function eventColor(event: GeoEvent, alpha?: number): [number, number, nu
   }
   if (alpha != null) color[3] = alpha;
   return color;
-}
-
-export function isHazardEvent(event: GeoEvent): event is HazardEvent {
-  return (event.category === 'natural-hazard' || event.category === 'weather')
-    && typeof (event as Partial<HazardEvent>).hazardKind === 'string';
 }
 
 function visitGeometryCoordinates(
@@ -150,8 +146,8 @@ export function eventRepresentativePoint(event: GeoEvent): GeoPoint | null {
     : null;
 }
 
-export const HAZARD_AREA_REGIONAL_MIN_ZOOM = 3;
-export const HAZARD_AREA_DETAIL_MIN_ZOOM = 4.5;
+const HAZARD_AREA_REGIONAL_MIN_ZOOM = 3;
+const HAZARD_AREA_DETAIL_MIN_ZOOM = 4.5;
 
 export type HazardAreaPresentation = {
   mode: 'hidden' | 'regional' | 'detail' | 'selected';

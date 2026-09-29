@@ -250,7 +250,3 @@ export function mapSymbolPalette(symbol: MapSymbolKey) {
 export function mapSymbolPaths(symbol: MapSymbolKey) {
   return MAP_SYMBOL_DEFINITIONS[symbol].paths;
 }
-
-export function isMapSymbolKey(value: string): value is MapSymbolKey {
-  return value in MAP_SYMBOL_DEFINITIONS;
-}

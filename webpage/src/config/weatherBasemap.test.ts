@@ -33,6 +33,18 @@ function createLabelMap(zoom: number) {
 }
 
 describe('World Event Map vector basemap', () => {
+  it('localizes primary labels without replacing provider rank or styling', () => {
+    const { map, updates } = createLabelMap(2);
+    reinforceWorldEventBasemapLabels(map, 'zh');
+    expect(updates).toContainEqual(['place_country_major', 'text-field', [
+      'coalesce', ['get', 'name:zh-Hans'], ['get', 'name:zh'], ['get', 'name_zh'],
+      ['coalesce', ['get', 'name_en'], ['get', 'name:en'], ['get', 'name:latin'], ['get', 'name']],
+    ]]);
+    expect(updates.some(([id]) => id === 'road-shield')).toBe(false);
+    updates.length = 0;
+    reinforceWorldEventBasemapLabels(map, 'en');
+    expect(JSON.stringify(updates)).not.toContain('name:zh');
+  });
   it('resolves a same-origin PMTiles route before handing it to the protocol', () => {
     expect(resolveWorldEventPMTilesUrl('/map-tiles/planet.pmtiles', 'https://polymonitor.club'))
       .toBe('https://polymonitor.club/map-tiles/planet.pmtiles');

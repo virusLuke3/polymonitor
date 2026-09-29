@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { fetchNaturalHazardMapSource } from '@/services/api';
 import type {
   HazardEvent,
@@ -144,13 +144,6 @@ function sourceStatus(
   };
 }
 
-function yieldMainThread() {
-  const scheduler = globalThis as typeof globalThis & { scheduler?: { yield?: () => Promise<void> } };
-  return typeof scheduler.scheduler?.yield === 'function'
-    ? scheduler.scheduler.yield()
-    : new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-}
-
 function viewportForCamera(center: [number, number], zoom: number): [number, number, number, number] | undefined {
   if (zoom < 5) return undefined;
   const longitudinalSpan = Math.max(1.5, 360 / (2 ** zoom) * 1.5);
@@ -166,184 +159,184 @@ function viewportForCamera(center: [number, number], zoom: number): [number, num
   ].map((value) => Number(value.toFixed(3))) as [number, number, number, number];
 }
 
-export function useNaturalHazards(zoom = 2, center: [number, number] = [0, 18]): NaturalHazardsState {
+type SourceTask = {
+  key: string;
+  controller: AbortController | null;
+  timer: number | null;
+  queued: boolean;
+  run: () => void;
+};
+
+function stopSource(task: SourceTask) {
+  task.controller?.abort();
+  if (task.timer != null) window.clearTimeout(task.timer);
+}
+
+/** One cancellable lane per demanded source; changing FIRMS scope leaves other lanes alone. */
+export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
+  sourceKeys: readonly string[];
+  zoom: number;
+  center: [number, number];
+  suspended: boolean;
+}): NaturalHazardsState {
   const geometryZoom = hazardMapGeometryZoom(zoom);
   const firmsViewport = viewportForCamera(center, zoom);
   const firmsViewportKey = firmsViewport?.join(',') || '';
+  const desired = INITIAL_SOURCE_PRIORITY.filter((source) => sourceKeys.includes(source));
+  const demandKey = desired.join(',');
+  const demand = useRef(desired);
+  demand.current = desired;
+  const scope = useRef({ geometryZoom, firmsViewportKey });
+  scope.current = { geometryZoom, firmsViewportKey };
+  const paused = useRef(suspended);
+  paused.current = suspended;
+  const mounted = useRef(true);
+  const tasks = useRef(new Map<HazardMapSourceKey, SourceTask>());
+  const records = useRef(new Map<HazardMapSourceKey, SourceRecord>());
+  const errors = useRef(new Map<HazardMapSourceKey, string>());
+  const publishFrame = useRef<number | null>(null);
   const [state, setState] = useState<NaturalHazardsState>({
-    events: [],
-    response: null,
+    events: [], response: null,
     sources: HAZARD_MAP_SOURCE_KEYS.map((key) => sourceStatus(key, undefined, false, undefined)),
-    loading: true,
-    error: null,
-    rejectedCount: 0,
+    loading: desired.length > 0, error: null, rejectedCount: 0,
   });
-  const requestGenerationRef = useRef(0);
+
+  const publish = useCallback(() => {
+    if (!mounted.current || publishFrame.current != null) return;
+    publishFrame.current = window.requestAnimationFrame(() => {
+      publishFrame.current = null;
+      if (!mounted.current) return;
+      const startedAt = performance.now();
+      const active = new Map(demand.current.flatMap((source) => {
+        const record = records.current.get(source);
+        return record ? [[source, record] as const] : [];
+      }));
+      const events = mergeHazardEvents(active);
+      const sources = HAZARD_MAP_SOURCE_KEYS.map((source) => sourceStatus(
+        source, records.current.get(source), errors.current.has(source), errors.current.get(source),
+      ));
+      const activeStatuses = sources.filter((source) => demand.current.includes(source.key as HazardMapSourceKey));
+      const responseErrors = [...active.values()].flatMap((record) => record.parsed.response.errors);
+      for (const source of demand.current) {
+        const message = errors.current.get(source);
+        if (message && !active.has(source)) responseErrors.push({ source, code: message });
+      }
+      const rejectedCount = [...active.values()].reduce((total, record) => total + record.parsed.rejected.length, 0);
+      const loading = activeStatuses.some((source) => source.status === 'loading');
+      setState({
+        events, sources, loading, rejectedCount,
+        error: !events.length && !loading && responseErrors.length
+          ? responseErrors.map((error) => error.code).join(' · ') : null,
+        response: active.size ? {
+          schemaVersion: 'natural-hazards-map.v1', generatedAt: latestGeneratedAt(active), events,
+          sources: [...active.values()].flatMap((record) => record.parsed.response.sources),
+          isPartial: activeStatuses.some((source) => source.status !== 'ok') || rejectedCount > 0,
+          errors: responseErrors, counts: { events: events.length, byHazardKind: countsByKind(events) },
+        } : null,
+      });
+      recordMapDataPhase('publish', 'all', startedAt, events.length);
+    });
+  }, []);
+
+  const pump = useCallback(() => {
+    if (!mounted.current || paused.current || document.hidden) return;
+    let running = [...tasks.current.values()].filter((task) => task.controller).length;
+    for (const task of tasks.current.values()) {
+      if (running >= INITIAL_SOURCE_CONCURRENCY) break;
+      if (!task.queued || task.controller) continue;
+      running += 1;
+      task.queued = false;
+      task.run();
+    }
+  }, []);
 
   useEffect(() => {
-    let disposed = false;
-    let publishFrame: number | null = null;
-    const generation = ++requestGenerationRef.current;
-    const records = new Map<HazardMapSourceKey, SourceRecord>();
-    const attempts = new Set<HazardMapSourceKey>();
-    const requestErrors = new Map<HazardMapSourceKey, string>();
-    const failureCounts = new Map<HazardMapSourceKey, number>();
-    const controllers = new Map<HazardMapSourceKey, AbortController>();
-    const timers = new Map<HazardMapSourceKey, number>();
-
-    const publish = () => {
-      if (disposed || publishFrame != null) return;
-      publishFrame = window.requestAnimationFrame(() => {
-        publishFrame = null;
-        if (disposed || generation !== requestGenerationRef.current) return;
-        const startedAt = performance.now();
-        const events = mergeHazardEvents(records);
-        const sources = HAZARD_MAP_SOURCE_KEYS.map((source) => sourceStatus(
-          source,
-          records.get(source),
-          attempts.has(source),
-          requestErrors.get(source),
-        ));
-        const responseSources = [...records.values()].flatMap((record) => record.parsed.response.sources);
-        const errors = [...records.values()].flatMap((record) => record.parsed.response.errors);
-        for (const [source, message] of requestErrors) {
-          if (!records.has(source)) errors.push({ source, code: message });
-        }
-        const rejectedCount = [...records.values()].reduce(
-          (total, record) => total + record.parsed.rejected.length,
-          0,
-        );
-        const response: HazardMapResponse | null = records.size ? {
-          schemaVersion: 'natural-hazards-map.v1',
-          generatedAt: latestGeneratedAt(records),
-          events,
-          sources: responseSources,
-          isPartial: sources.some((source) => source.status !== 'ok') || rejectedCount > 0,
-          errors,
-          counts: { events: events.length, byHazardKind: countsByKind(events) },
-        } : null;
-        const loading = sources.some((source) => source.status === 'loading');
-        setState({
-          events,
-          response,
-          sources,
-          loading,
-          error: !events.length && !loading && requestErrors.size
-            ? [...requestErrors.values()].join(' · ')
-            : null,
-          rejectedCount,
-        });
-        recordMapDataPhase('publish', 'all', startedAt, events.length);
-      });
-    };
-
-    const commit = (
-      source: HazardMapSourceKey,
-      parsed: ParsedNaturalHazards,
-      origin: SourceRecord['origin'],
-    ) => {
-      const existing = records.get(source);
-      if (origin === 'cache' && existing?.origin === 'network') return;
-      const signature = sourceSignature(parsed);
-      records.set(source, existing?.signature === signature
-        ? { ...existing, origin, refreshError: null }
-        : { parsed, signature, origin, refreshError: null });
-      requestErrors.delete(source);
-      publish();
-    };
-
-    const schedule = (source: HazardMapSourceKey, failed: boolean) => {
-      if (disposed) return;
-      const failures = failureCounts.get(source) || 0;
-      const delay = failed
-        ? RETRY_DELAYS_MS[Math.min(RETRY_DELAYS_MS.length - 1, Math.max(0, failures - 1))]!
-        : REFRESH_INTERVAL_MS[source];
-      const jitter = failed ? Math.floor(Math.random() * 1_000) : Math.floor(Math.random() * 3_000);
-      timers.set(source, window.setTimeout(() => void loadSource(source), delay + jitter));
-    };
-
-    const loadSource = async (source: HazardMapSourceKey) => {
-      controllers.get(source)?.abort();
-      const controller = new AbortController();
-      controllers.set(source, controller);
-      attempts.add(source);
-      const networkStartedAt = performance.now();
-      try {
-        const payload = await fetchNaturalHazardMapSource(
-          source,
-          geometryZoom,
-          source === 'firms' ? firmsViewport : undefined,
-          controller.signal,
-        );
-        recordMapDataPhase('network', source, networkStartedAt, payload.events?.length || 0);
-        const parseStartedAt = performance.now();
-        const parsed = parseNaturalHazardsResponse(payload);
-        recordMapDataPhase('parse', source, parseStartedAt, parsed.events.length);
-        if (disposed || controller.signal.aborted || generation !== requestGenerationRef.current) return;
-        commit(source, parsed, 'network');
-        failureCounts.set(source, 0);
-        void writeHazardMapSnapshot(
-          source,
-          geometryZoom,
-          parsed.response,
-          source === 'firms' ? firmsViewportKey : '',
-        );
-        schedule(source, false);
-      } catch (error) {
-        if (disposed || controller.signal.aborted || generation !== requestGenerationRef.current) return;
-        const message = error instanceof Error ? error.message : String(error);
-        const failures = (failureCounts.get(source) || 0) + 1;
-        failureCounts.set(source, failures);
-        requestErrors.set(source, message);
-        const existing = records.get(source);
-        if (existing) records.set(source, { ...existing, refreshError: message });
-        publish();
-        schedule(source, true);
-      }
-    };
-
-    for (const source of HAZARD_MAP_SOURCE_KEYS) {
-      const cacheStartedAt = performance.now();
-      void readHazardMapSnapshot(
-        source,
-        geometryZoom,
-        source === 'firms' ? firmsViewportKey : '',
-      ).then((cached) => {
-        recordMapDataPhase('cache-read', source, cacheStartedAt, cached?.payload.events?.length || 0);
-        if (!cached || disposed || generation !== requestGenerationRef.current) return;
-        try {
-          commit(source, parseNaturalHazardsResponse(cached.payload), 'cache');
-        } catch {
-          // Invalid or old schema cache is ignored and replaced by the network response.
-        }
-      });
-    }
-
-    // Keep the first-paint network fan-out bounded. Fast canonical sources
-    // immediately free a slot for the next provider, so a slow GDACS request
-    // cannot head-of-line block USGS/EONET/NWS or the persisted cache path.
-    let initialSourceIndex = 0;
-    const hydrateWorker = async () => {
-      while (!disposed && generation === requestGenerationRef.current) {
-        const source = INITIAL_SOURCE_PRIORITY[initialSourceIndex];
-        initialSourceIndex += 1;
-        if (!source) return;
-        await loadSource(source);
-        await yieldMainThread();
-      }
-    };
-    for (let worker = 0; worker < INITIAL_SOURCE_CONCURRENCY; worker += 1) {
-      void hydrateWorker();
-    }
-
+    mounted.current = true;
     return () => {
-      disposed = true;
-      requestGenerationRef.current += 1;
-      if (publishFrame != null) window.cancelAnimationFrame(publishFrame);
-      for (const controller of controllers.values()) controller.abort();
-      for (const timer of timers.values()) window.clearTimeout(timer);
+      mounted.current = false;
+      tasks.current.forEach(stopSource);
+      tasks.current.clear();
+      if (publishFrame.current != null) window.cancelAnimationFrame(publishFrame.current);
+      publishFrame.current = null;
     };
-  }, [geometryZoom, firmsViewportKey]);
+  }, []);
+
+  useEffect(() => {
+    const keyFor = (source: HazardMapSourceKey) => `${geometryZoom}:${source === 'firms' ? firmsViewportKey : ''}`;
+    tasks.current.forEach((task, source) => {
+      if (suspended || !demand.current.includes(source) || task.key !== keyFor(source)) {
+        tasks.current.delete(source);
+        stopSource(task);
+      }
+    });
+    if (!suspended) for (const source of demand.current) {
+      if (tasks.current.has(source)) continue;
+      const task: SourceTask = { key: keyFor(source), controller: null, timer: null, queued: true, run: () => {} };
+      tasks.current.set(source, task);
+      let failures = 0;
+      let networkCommitted = false;
+      const isCurrent = () => mounted.current && !paused.current && !document.hidden
+        && demand.current.includes(source) && tasks.current.get(source) === task
+        && task.key === `${scope.current.geometryZoom}:${source === 'firms' ? scope.current.firmsViewportKey : ''}`;
+      const commit = (parsed: ParsedNaturalHazards, origin: SourceRecord['origin']) => {
+        if (!isCurrent() || (origin === 'cache' && networkCommitted)) return;
+        const existing = records.current.get(source);
+        const signature = sourceSignature(parsed);
+        records.current.set(source, existing?.signature === signature
+          ? { ...existing, origin, refreshError: null }
+          : { parsed, signature, origin, refreshError: null });
+        if (origin === 'network') networkCommitted = true;
+        errors.current.delete(source);
+        publish();
+      };
+      const schedule = (failed: boolean) => {
+        if (!isCurrent()) return;
+        const delay = failed ? RETRY_DELAYS_MS[Math.min(RETRY_DELAYS_MS.length - 1, Math.max(0, failures - 1))]!
+          : REFRESH_INTERVAL_MS[source];
+        const jitter = Math.floor(Math.random() * (failed ? 1000 : 3000));
+        task.timer = window.setTimeout(() => {
+          task.timer = null; task.queued = true; pump();
+        }, delay + jitter);
+      };
+      task.run = () => {
+        const controller = new AbortController();
+        task.controller = controller;
+        const startedAt = performance.now();
+        void fetchNaturalHazardMapSource(source, geometryZoom, source === 'firms' ? firmsViewport : undefined, controller.signal)
+          .then((payload) => {
+            if (!isCurrent() || controller.signal.aborted) return;
+            recordMapDataPhase('network', source, startedAt, payload.events?.length || 0);
+            const parseStartedAt = performance.now();
+            const parsed = parseNaturalHazardsResponse(payload);
+            recordMapDataPhase('parse', source, parseStartedAt, parsed.events.length);
+            commit(parsed, 'network');
+            failures = 0;
+            void writeHazardMapSnapshot(source, geometryZoom, parsed.response, source === 'firms' ? firmsViewportKey : '');
+            schedule(false);
+          }).catch((error) => {
+            if (!isCurrent() || controller.signal.aborted) return;
+            const message = error instanceof Error ? error.message : String(error);
+            failures += 1;
+            errors.current.set(source, message);
+            const existing = records.current.get(source);
+            if (existing) records.current.set(source, { ...existing, refreshError: message });
+            publish(); schedule(true);
+          }).finally(() => {
+            task.controller = null;
+            if (isCurrent()) pump();
+          });
+      };
+      const cacheStartedAt = performance.now();
+      void readHazardMapSnapshot(source, geometryZoom, source === 'firms' ? firmsViewportKey : '').then((cached) => {
+        if (!cached || !isCurrent() || networkCommitted) return;
+        recordMapDataPhase('cache-read', source, cacheStartedAt, cached.payload.events?.length || 0);
+        try { commit(parseNaturalHazardsResponse(cached.payload), 'cache'); }
+        catch { /* Invalid cached schemas are replaced by the network response. */ }
+      });
+    }
+    publish();
+    pump();
+  }, [demandKey, geometryZoom, firmsViewportKey, suspended, publish, pump]);
 
   return state;
 }

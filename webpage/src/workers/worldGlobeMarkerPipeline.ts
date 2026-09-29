@@ -1,3 +1,4 @@
+import { markerViolenceLabel } from './worldGlobeMarkers';
 import type {
   GlobeMarkerMeta,
   GlobeMarkerTone,
@@ -5,7 +6,7 @@ import type {
   GlobeMarkerWorkerResult,
   GlobeQualityLevel,
   GlobeWorkerEvent,
-} from './worldGlobeMarkersTypes';
+} from './worldGlobeMarkers';
 
 const GLOBE_RADIUS = 100;
 const HTML_MARKER_CAP = 20;
@@ -64,14 +65,6 @@ function ucdpTone(item: GlobeWorkerEvent): GlobeMarkerTone {
   if (type === '2') return 'nonstate';
   if (type === '3') return 'onesided';
   return 'watch';
-}
-
-function markerViolenceLabel(value?: unknown) {
-  const text = String(value || '').trim();
-  if (text === '1') return 'STATE-BASED';
-  if (text === '2') return 'NON-STATE';
-  if (text === '3') return 'ONE-SIDED';
-  return text || 'UCDP EVENT';
 }
 
 function markerDateScore(value?: string | null) {

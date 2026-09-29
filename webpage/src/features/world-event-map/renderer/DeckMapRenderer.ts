@@ -1,13 +1,16 @@
-import { MapboxOverlay } from '@deck.gl/mapbox';
+import { coordinatePositions } from '../domain/countryGeometry';
+import { MapLibreOverlay } from '@deck.gl/maplibre';
 import type { Layer, LayersList, PickingInfo } from '@deck.gl/core';
 import { TextLayer } from '@deck.gl/layers';
 import type { FeatureCollection, Geometry, Position } from 'geojson';
-import maplibregl, {
+import * as maplibregl from 'maplibre-gl';
+import {
   type FilterSpecification,
   type Map as MapLibreMap,
   type MapMouseEvent,
   type MapSourceDataEvent,
 } from 'maplibre-gl';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   getWeatherMapFallbackStyle,
@@ -55,9 +58,14 @@ import { MapRenderScheduler, type MapRenderInvalidation } from './renderSchedule
 import { RendererTooltip } from './rendererTooltip';
 import {
   countryBasemapLabels,
+  countryBasemapLabelName,
   visibleCountryBasemapLabels,
   type CountryBasemapLabel,
 } from './countryBasemapLabels';
+
+// MapLibre 6 cannot infer a worker URL after Vite rewrites its module path.
+// Bundle the worker and its shared imports, while keeping the renderer lazy.
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 const COUNTRY_INTERACTION_SOURCE = 'world-event-country-interaction-source';
 const FALLBACK_COUNTRY_SOURCE = 'wm-weather-country-boundaries';
@@ -73,17 +81,7 @@ type MapPerformanceHarnessHost = HTMLElement & {
 function geometryPositions(geometry: Geometry | null | undefined): Position[] {
   if (!geometry) return [];
   if (geometry.type === 'GeometryCollection') return geometry.geometries.flatMap(geometryPositions);
-  const positions: Position[] = [];
-  const visit = (value: unknown) => {
-    if (!Array.isArray(value)) return;
-    if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
-      positions.push(value as Position);
-      return;
-    }
-    value.forEach(visit);
-  };
-  visit(geometry.coordinates);
-  return positions;
+  return coordinatePositions(geometry.coordinates);
 }
 
 function countryTarget(feature: { properties?: Record<string, unknown> | null; geometry?: Geometry | null } | undefined) {
@@ -131,10 +129,11 @@ function sameEventReferences(
 
 export class DeckMapRenderer implements MapRenderer {
   private map: MapLibreMap | null = null;
-  private overlay: MapboxOverlay | null = null;
-  private aviationOverlay: MapboxOverlay | null = null;
+  private overlay: MapLibreOverlay | null = null;
+  private aviationOverlay: MapLibreOverlay | null = null;
   private callbacks: MapRendererCallbacks | null = null;
   private state: WorldEventMapState | null = null;
+  private language: 'en' | 'zh' = 'en';
   private events: GeoEvent[] = [];
   private fallbackApplied = false;
   private fallbackTimer: number | null = null;
@@ -244,6 +243,13 @@ export class DeckMapRenderer implements MapRenderer {
     );
   }
 
+  setLanguage(language: 'en' | 'zh') {
+    if (this.language === language) return;
+    this.language = language;
+    if (this.map) reinforceWorldEventBasemapLabels(this.map, language);
+    this.requestRender({ points: true });
+  }
+
   async mount(container: HTMLElement, callbacks: MapRendererCallbacks) {
     if (this.map) return;
     this.destroyed = false;
@@ -254,6 +260,7 @@ export class DeckMapRenderer implements MapRenderer {
     const primaryStyle = await getWeatherMapStyle(
       state?.basemapTheme ?? 'dark',
       state?.basemapProvider ?? 'auto',
+      this.language,
     );
     if (this.destroyed) return;
     const map = new maplibregl.Map({
@@ -313,7 +320,7 @@ export class DeckMapRenderer implements MapRenderer {
         const picked = pickedWorldEvent(info.object);
         callbacks.onEventSelect(picked?.id ?? this.manualAviationEvent?.id ?? null);
     };
-    const overlay = new MapboxOverlay({
+    const overlay = new MapLibreOverlay({
       interleaved: true,
       layers: [],
       pickingRadius: 8,
@@ -329,7 +336,7 @@ export class DeckMapRenderer implements MapRenderer {
     map.once('load', () => {
       if (this.destroyed) return;
       this.mountOverlaysIfNeeded();
-      reinforceWorldEventBasemapLabels(map);
+      reinforceWorldEventBasemapLabels(map, this.language);
       this.ensureCountryHoverLayers();
       if (this.fallbackApplied) {
         if (!this.markLocalFallbackReadyIfLoaded()) this.scheduleFallbackSourceTimeout();
@@ -343,6 +350,7 @@ export class DeckMapRenderer implements MapRenderer {
     });
     map.on('style.load', this.handleStyleLoad);
     map.on('sourcedata', this.handleSourceData);
+    map.on('idle', this.handleBasemapIdle);
     map.on('moveend', this.handleMoveEnd);
     map.on('movestart', this.handleMoveStart);
     map.on('mousemove', this.handleCountryHoverMove);
@@ -540,6 +548,7 @@ export class DeckMapRenderer implements MapRenderer {
     if (map) {
       map.off('style.load', this.handleStyleLoad);
       map.off('sourcedata', this.handleSourceData);
+      map.off('idle', this.handleBasemapIdle);
       map.off('moveend', this.handleMoveEnd);
       map.off('movestart', this.handleMoveStart);
       map.off('mousemove', this.handleCountryHoverMove);
@@ -554,7 +563,7 @@ export class DeckMapRenderer implements MapRenderer {
       window.removeEventListener('mouseup', this.handlePointerUp, { capture: true });
       if (this.overlay) {
         try {
-          map.removeControl(this.overlay as unknown as maplibregl.IControl);
+          map.removeControl(this.overlay);
         } catch {
           // MapLibre may already be tearing the style down.
         }
@@ -564,7 +573,7 @@ export class DeckMapRenderer implements MapRenderer {
           map.off('render', this.aviationOverlayViewSync);
         }
         try {
-          map.removeControl(this.aviationOverlay as unknown as maplibregl.IControl);
+          map.removeControl(this.aviationOverlay);
         } catch {
           // MapLibre may already be tearing the style down.
         }
@@ -842,7 +851,7 @@ export class DeckMapRenderer implements MapRenderer {
     });
   }
 
-  private warmOverlayPicking(overlay: MapboxOverlay | null) {
+  private warmOverlayPicking(overlay: MapLibreOverlay | null) {
     if (!overlay) return false;
     const deck = (overlay as unknown as { _deck?: { isInitialized?: boolean } })._deck;
     const canvas = overlay.getCanvas();
@@ -1056,7 +1065,7 @@ export class DeckMapRenderer implements MapRenderer {
       && performance.getEntriesByName('polymonitor:map:first-basemap').length === 0) {
       performance.mark('polymonitor:map:first-basemap');
     }
-    reinforceWorldEventBasemapLabels(this.map);
+    reinforceWorldEventBasemapLabels(this.map, this.language);
     this.ensureCountryHoverLayers();
     if (this.fallbackApplied) this.markLocalFallbackReadyIfLoaded();
     this.invalidateGeometry();
@@ -1071,11 +1080,20 @@ export class DeckMapRenderer implements MapRenderer {
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
   };
 
+  private handleBasemapIdle = () => {
+    if (!this.map || this.destroyed || this.fallbackApplied || this.fallbackTimer == null) return;
+    // `load` only fires for the first style. A user-selected replacement must
+    // also cancel its deadline once its sources/tiles have finished loading.
+    if (!this.map.isStyleLoaded() || !this.map.areTilesLoaded()) return;
+    this.clearFallbackTimer();
+    this.emitBasemapState('primary-ready');
+  };
+
   private mountOverlaysIfNeeded() {
     const map = this.map;
     if (!map || this.destroyed) return;
     if (this.overlay && !this.overlayMounted) {
-      map.addControl(this.overlay as unknown as maplibregl.IControl);
+      map.addControl(this.overlay);
       this.overlayMounted = true;
     }
   }
@@ -1084,7 +1102,7 @@ export class DeckMapRenderer implements MapRenderer {
     const map = this.map;
     if (!map || this.destroyed || this.paused || this.interacting) return null;
     if (!this.aviationOverlay) {
-      this.aviationOverlay = new MapboxOverlay({
+      this.aviationOverlay = new MapLibreOverlay({
         interleaved: false,
         layers: [],
         // Only moving aircraft and 2-4px route runners use this canvas. The
@@ -1095,7 +1113,7 @@ export class DeckMapRenderer implements MapRenderer {
       this.aviationDeckSuspended = false;
     }
     if (!this.aviationOverlayMounted) {
-      map.addControl(this.aviationOverlay as unknown as maplibregl.IControl);
+      map.addControl(this.aviationOverlay);
       this.aviationOverlayMounted = true;
       const nativeViewSync = (this.aviationOverlay as unknown as {
         _updateViewState?: () => void;
@@ -1120,7 +1138,7 @@ export class DeckMapRenderer implements MapRenderer {
     if (overlay) overlay.setProps({ layers: [] });
     if (map && overlay && this.aviationOverlayMounted) {
       try {
-        map.removeControl(overlay as unknown as maplibregl.IControl);
+        map.removeControl(overlay);
       } catch {
         // MapLibre may already be replacing its style or tearing down.
       }
@@ -1223,7 +1241,7 @@ export class DeckMapRenderer implements MapRenderer {
       fontWeight: 700,
       sizeUnits: 'pixels',
       getPosition: (label) => label.coordinates,
-      getText: (label) => label.name.toUpperCase(),
+      getText: (label) => countryBasemapLabelName(label, this.language).toUpperCase(),
       getSize: zoom < 2.4 ? 10 : zoom < 4 ? 11 : 12,
       getColor: [134, 146, 151, 205],
       getTextAnchor: 'middle',
@@ -1336,7 +1354,7 @@ export class DeckMapRenderer implements MapRenderer {
     );
   }
 
-  private handleMapError = (event: { error?: Error; message?: string }) => {
+  private handleMapError = (event: { error?: { message?: string }; message?: string }) => {
     const message = event.error?.message || event.message || 'Unknown MapLibre error';
     if (!this.fallbackApplied && /fetch|ajax|cors|network|403|forbidden|tile|style/i.test(message)) {
       // MapLibre emits transient tile/glyph errors before the first `load`
@@ -1416,7 +1434,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.clearFallbackSourceTimer();
     this.emitBasemapState('initializing');
     try {
-      const style = await getWeatherMapStyle(state.basemapTheme, state.basemapProvider);
+      const style = await getWeatherMapStyle(state.basemapTheme, state.basemapProvider, this.language);
       if (this.destroyed || generation !== this.basemapStyleGeneration || map !== this.map) return;
       map.setStyle(style, { diff: false });
       this.fallbackTimer = window.setTimeout(() => {

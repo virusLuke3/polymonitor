@@ -183,3 +183,18 @@ export function buildCountryGeometryIndex(collection: FeatureCollection): Countr
     },
   };
 }
+
+/** Read provider coordinates without inventing points or changing coordinate dimensions. */
+export function coordinatePositions(coordinates: unknown): number[][] {
+  const positions: number[][] = [];
+  const visit = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+      positions.push(value as number[]);
+      return;
+    }
+    value.forEach(visit);
+  };
+  visit(coordinates);
+  return positions;
+}

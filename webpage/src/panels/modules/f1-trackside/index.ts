@@ -10,5 +10,5 @@ export const panel = runtimePanelFromRenderer(f1PanelRenderers, {
   defaultEnabled: true,
 }, {
   tier: 'fast',
-  fetchData: () => fetchRuntimeF1(10),
+  fetchData: (context) => fetchRuntimeF1(10, context?.signal),
 });

@@ -1,10 +1,8 @@
 import type {
   PanelFetchContext,
   PanelModule,
-  PanelRefreshTier,
   PanelRuntimeData,
 } from './types';
-import { getPanelRefreshPolicy } from './types';
 import {
   fetchRuntimePanels,
   type RuntimePanelMetadata,
@@ -34,7 +32,6 @@ const PANEL_RUNTIME_LIMITS: Record<string, number> = {
   'global-index-monitor': 12,
   'global-temperature-monitor': 60,
   'global-transport-shipping': 14,
-  'weather-market-browser': 60,
   'goods-tariff-supply-watch': 36,
   'ipo-news-watch': 12,
   'jin10-flash': 24,
@@ -50,14 +47,6 @@ const PANEL_RUNTIME_LIMITS: Record<string, number> = {
   'weather-news': 24,
   'whale-tracker': 14,
 };
-
-export function buildRuntimeDataPatch(panelId: string, value: unknown): PanelRuntimeData {
-  return { [panelId]: value };
-}
-
-export function getRefreshablePanels(panels: PanelModule[], tier: PanelRefreshTier): PanelModule[] {
-  return panels.filter((panel) => getPanelRefreshPolicy(panel)?.tier === tier && typeof panel.fetchData === 'function');
-}
 
 export type PanelRuntimeFetchOptions = {
   signal: AbortSignal;
@@ -85,17 +74,20 @@ export async function fetchPanelRuntimeData(
   const maxBatchSize = Math.max(1, options.maxBatchSize || 12);
 
   const recordData = (panelId: string, value: unknown, panelMetadata?: RuntimePanelMetadata) => {
+    if (options.signal.aborted) return;
     data[panelId] = value;
     if (panelMetadata) metadata[panelId] = panelMetadata;
     options.onPanelData?.(panelId, value, panelMetadata);
   };
   const recordError = (panelId: string, error: unknown) => {
+    if (options.signal.aborted) return;
     const normalized = error instanceof Error ? error : new Error(String(error || 'Panel refresh failed.'));
     errors[panelId] = normalized;
     options.onPanelError?.(panelId, normalized);
   };
   const fetchIndividually = async (individualEntries: PanelModule[]) => {
     await Promise.all(individualEntries.map(async (panel) => {
+      if (options.signal.aborted) return;
       try {
         const value = await panel.fetchData!({ signal: options.signal, reason: options.reason });
         if (value !== undefined) recordData(panel.id, value);
@@ -109,6 +101,7 @@ export async function fetchPanelRuntimeData(
   };
 
   for (let offset = 0; offset < entries.length; offset += maxBatchSize) {
+    if (options.signal.aborted) break;
     const batch = entries.slice(offset, offset + maxBatchSize);
     if (batch.length <= 1) {
       await fetchIndividually(batch);

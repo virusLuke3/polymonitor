@@ -1,3 +1,4 @@
+import { isRecord } from '../domain/validation';
 import type {
   GeoEventAdapterIssue,
   HazardDetailResponse,
@@ -7,10 +8,6 @@ import type {
 } from '../domain/types';
 import { isHazardGeoEvent } from '../config/layerRegistry';
 import { validateGeoEvents } from '../domain/validation';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function isHazardSource(value: unknown): value is HazardMapSource {
   if (!isRecord(value) || typeof value.key !== 'string') return false;

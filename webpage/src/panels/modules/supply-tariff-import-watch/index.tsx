@@ -30,11 +30,12 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'supply-tariff-import-watch',
+  dataDependencies: ['polymarket-macro-map'],
   title: 'Supply Tariff Import Watch',
   eyebrow: 'macro',
   description: 'Supply-chain and tariff watch for CPI goods pressure.',
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeSupplyTariffImportWatch(8),
+  fetchData: (context) => fetchRuntimeSupplyTariffImportWatch(8, context?.signal),
 });

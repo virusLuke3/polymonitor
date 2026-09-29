@@ -88,13 +88,25 @@ export function registerPwa() {
     emit({ installed: true, installable: false, installing: false });
   });
   if (!('serviceWorker' in navigator) || import.meta.env.DEV) return;
-  navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+  // First install claims the already-running page; it is not an update. A
+  // reload here interrupts startup and repeats every request on a cold visit.
+  let hadController = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) { hadController = true; return; }
+    if (reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
   navigator.serviceWorker.register(`/sw.js?build=${encodeURIComponent(__BUILD_ID__)}`, {
     scope: '/',
     updateViaCache: 'none',
   }).then((registration) => {
     watchRegistration(registration);
-    window.setInterval(() => void registration.update(), 60 * 60 * 1000);
+    window.setInterval(() => {
+      if (document.hidden || !navigator.onLine) return;
+      void registration.update().catch((error) => console.warn('[PWA] update check failed', error));
+    }, 60 * 60 * 1000);
   }).catch((error) => {
     console.warn('[PWA] service worker registration failed', error);
   });

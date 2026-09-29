@@ -1,3 +1,4 @@
+import { markerViolenceLabel as markerViolenceLabelForFilter } from '@/workers/worldGlobeMarkers';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import * as THREE from 'three';
 import type { ContentItem, MarketListItem, MarketSummary, OracleEvent, RuntimeGeoSanctionsShockItem, TradeRow } from '@/types';
@@ -6,7 +7,7 @@ import type {
   GlobeMarkerWorkerResult,
   GlobeQualityLevel,
   GlobeQualitySetting,
-} from '@/workers/worldGlobeMarkersTypes';
+} from '@/workers/worldGlobeMarkers';
 
 type GlobePoint = {
   layer: GlobeLayerId;
@@ -154,14 +155,6 @@ function markerDateLabel(value?: string | null) {
     year: 'numeric',
     timeZone: 'UTC',
   }).toUpperCase();
-}
-
-function markerViolenceLabelForFilter(value?: unknown) {
-  const text = String(value || '').trim();
-  if (text === '1') return 'STATE-BASED';
-  if (text === '2') return 'NON-STATE';
-  if (text === '3') return 'ONE-SIDED';
-  return text || 'UCDP EVENT';
 }
 
 function createUcdpMarkerElement(marker: GlobeHtmlMarker, onSelect: (marker: GlobeHtmlMarker) => void) {
@@ -699,7 +692,9 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
     } catch {
       // globe.gl exposes these methods in current builds; keep this best-effort for older bundles.
     }
-    requestMarkerBuild('UPDATE_VIEW');
+    // Pausing must not enqueue work whose result calls wakeGlobe. That feedback
+    // loop restarted rendering immediately after every idle/visibility pause.
+    if (!paused) requestMarkerBuild('UPDATE_VIEW');
   };
 
   const clearIdleTimer = () => {
@@ -720,7 +715,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
   };
 
   const wakeGlobe = () => {
-    if (!globeRef.current) return;
+    if (!globeRef.current || document.hidden) return;
     if (!isAnimatingRef.current) setAnimationPaused(false);
     scheduleIdlePause();
   };
@@ -935,8 +930,8 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
 
       const glCanvas = containerRef.current.querySelector('canvas');
       if (glCanvas) {
-        (glCanvas as HTMLElement).style.cssText =
-          'position:absolute;top:0;left:0;width:100% !important;height:100% !important;';
+        // globe.width/height own both CSS and drawing-buffer dimensions. Keeping
+        // the canvas in normal flow also gives globe.gl's scene container height.
         const canvas = glCanvas as HTMLElement;
         const handleMarkerMove = (event: MouseEvent) => {
           wakeGlobe();
@@ -969,6 +964,7 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
         if (!containerRef.current || !globeRef.current) return;
         globeRef.current.width(containerRef.current.clientWidth);
         globeRef.current.height(containerRef.current.clientHeight);
+        wakeGlobe();
       };
 
       resize();

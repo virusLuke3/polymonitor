@@ -32,5 +32,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeGoodsTariffSupplyWatch(36),
+  fetchData: (context) => fetchRuntimeGoodsTariffSupplyWatch(36, context?.signal),
 });

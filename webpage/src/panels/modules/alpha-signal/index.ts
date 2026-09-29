@@ -10,5 +10,5 @@ export const panel = runtimePanelFromRenderer(signalPanelRenderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeAlpha(8),
+  fetchData: (context) => fetchRuntimeAlpha(8, context?.signal),
 });

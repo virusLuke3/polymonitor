@@ -1,8 +1,15 @@
+import {
+  signedClass as pnlTone,
+  formatCompact,
+  formatCurrencyCompact,
+  formatPercent,
+  formatRelative,
+  shortHash,
+} from '../../shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimePolybeats } from '@/services/api';
 import type { RuntimePolybeatsItem, RuntimePolybeatsPayload, RuntimePolybeatsWallet } from '@/types';
-import { formatCompact, formatCurrencyCompact, formatPercent, formatRelative, shortHash } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
@@ -62,12 +69,6 @@ function domainClass(value?: string | null) {
   if (domain === 'crypto') return 'crypto';
   if (domain === 'economic') return 'economic';
   return 'pmkt';
-}
-
-function pnlTone(value?: string | number | null) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric === 0) return 'flat';
-  return numeric > 0 ? 'up' : 'down';
 }
 
 function WalletStrip({ wallet }: { wallet: RuntimePolybeatsWallet | null }) {
@@ -251,5 +252,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimePolybeats(8),
+  fetchData: (context) => fetchRuntimePolybeats(8, context?.signal),
 });

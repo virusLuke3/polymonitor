@@ -3,7 +3,7 @@ import type { ContentItem } from '@/types';
 import { useMemo, useState } from 'preact/hooks';
 import type { PanelRenderMap, PanelRuntimeContext } from './types';
 import { contentList } from './shared/renderers';
-import { contentByType, focusedContent } from './shared/selectors';
+import { focusedContent } from './shared/selectors';
 import { useI18n, type MessageKey } from '@/services/i18n';
 
 type IntelTab = {
@@ -46,7 +46,7 @@ function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
   const items = focusedContent(ctx);
   const tabItems = useMemo(() => Object.fromEntries(
     INTEL_TABS.map((tab) => [tab.id, smartContentByType(items, tab.id)]),
-  ) as Record<IntelTab['id'], ReturnType<typeof contentByType>>, [items]);
+  ) as Record<IntelTab['id'], ContentItem[]>, [items]);
   const visibleItems = tabItems[activeTab] || [];
   const activeLabel = t(INTEL_TABS.find((tab) => tab.id === activeTab)?.labelKey || 'atlasIntel.intel');
   const emptyMessage = activeTab === 'news'
@@ -91,26 +91,5 @@ function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
 export const contentPanelRenderers: PanelRenderMap = {
   'related-news': {
     render: (ctx) => <RelatedIntelPanel ctx={ctx} />,
-  },
-  'related-video': {
-    render: (ctx) => (
-      <Panel title="VIDEO FEED" badge="VIDEO" status="muted" count={contentByType(focusedContent(ctx), 'video').length} className="wm-market-panel wm-content-feed-panel wm-related-video-panel">
-        {contentList(contentByType(focusedContent(ctx), 'video'), 'No linked videos yet.')}
-      </Panel>
-    ),
-  },
-  'report-feed': {
-    render: (ctx) => (
-      <Panel title="REPORT FEED" badge="REPORT" status="muted" count={contentByType(ctx.latestContent, 'report').length} className="wm-market-panel wm-content-feed-panel wm-report-feed-panel">
-        {contentList(contentByType(ctx.latestContent, 'report'), 'No linked reports yet.')}
-      </Panel>
-    ),
-  },
-  'research-feed': {
-    render: (ctx) => (
-      <Panel title="RESEARCH FEED" badge="RESEARCH" status="muted" count={contentByType(ctx.latestContent, 'research').length} className="wm-market-panel wm-content-feed-panel wm-research-feed-panel">
-        {contentList(contentByType(ctx.latestContent, 'research'), 'No linked research yet.')}
-      </Panel>
-    ),
   },
 };

@@ -32,7 +32,7 @@ function normalizeLongitude(longitude: number) {
   return normalized;
 }
 
-export function buildAviationArc(
+function buildAviationArc(
   from: [number, number],
   to: [number, number],
   steps = 36,
@@ -57,7 +57,7 @@ export function buildAviationArc(
   });
 }
 
-export function splitAviationArc(points: [number, number][]): [number, number][][] {
+function splitAviationArc(points: [number, number][]): [number, number][][] {
   if (points.length < 2) return [];
   const segments: [number, number][][] = [];
   let current: [number, number][] = [[normalizeLongitude(points[0]![0]), points[0]![1]]];

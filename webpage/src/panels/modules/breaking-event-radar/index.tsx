@@ -1,3 +1,5 @@
+import { scoreLabel as score, seededStatusBadge as statusBadge, alertSeverityClass as severityClass } from '../../shared/formatters';
+import { openExternal as openSource } from '../../shared/renderers';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeBreakingEventRadar } from '@/services/api';
@@ -7,27 +9,6 @@ import { runtimePanelFromRenderer } from '../helpers';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'velocity' | 'latest' | 'markets';
-
-function statusBadge(payload?: RuntimeBreakingEventRadarPayload | null) {
-  const mode = String(payload?.cacheMode || '').toLowerCase();
-  const status = String(payload?.status || '').toLowerCase();
-  if (mode.includes('stale') || mode.includes('preserved')) return 'STALE';
-  if (mode.includes('seed')) return status === 'degraded' ? 'PARTIAL' : 'SEED';
-  if (status === 'empty' || status === 'warming') return 'WARM';
-  return status === 'degraded' ? 'PARTIAL' : 'LIVE';
-}
-
-function severityClass(item: RuntimeBreakingEventRadarItem) {
-  const severity = String(item.severity || '').toLowerCase();
-  if (severity === 'alert') return 'alert';
-  if (severity === 'watch') return 'watch';
-  return 'normal';
-}
-
-function score(value?: number | string | null) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? String(Math.round(numeric)) : '--';
-}
 
 function clamp(value: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
@@ -61,11 +42,6 @@ function modeLabel(mode: SortMode, shared: ReturnType<typeof useSpecialistCopy>[
   if (mode === 'latest') return shared('latest', 'Latest');
   if (mode === 'markets') return 'PMKT';
   return shared('heat', 'Heat');
-}
-
-function openSource(url?: string | null) {
-  const target = String(url || '').trim();
-  if (target) window.open(target, '_blank', 'noopener,noreferrer');
 }
 
 function heatBars(items: RuntimeBreakingEventRadarItem[]) {
@@ -194,5 +170,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 300000,
-  fetchData: () => fetchRuntimeBreakingEventRadar(12),
+  fetchData: (context) => fetchRuntimeBreakingEventRadar(12, context?.signal),
 });

@@ -1,4 +1,4 @@
-import maplibregl, { type StyleSpecification } from 'maplibre-gl';
+import { addProtocol, type ExpressionSpecification, type StyleSpecification, type SymbolLayerSpecification } from 'maplibre-gl';
 import {
   OPENFREEMAP_DARK_STYLE,
   OPENFREEMAP_LIGHT_STYLE,
@@ -22,13 +22,13 @@ let pmtilesRegistered = false;
 let pmtilesRegistration: Promise<void> | null = null;
 
 /** Register the exact PMTiles protocol used by WorldMonitor, once per page. */
-export async function registerWorldEventPMTilesProtocol() {
+async function registerWorldEventPMTilesProtocol() {
   if (pmtilesRegistered) return;
   pmtilesRegistration ??= (async () => {
     const { Protocol } = await import('pmtiles');
     if (pmtilesRegistered) return;
     const protocol = new Protocol();
-    maplibregl.addProtocol('pmtiles', protocol.tile);
+    addProtocol('pmtiles', protocol.tile);
     pmtilesRegistered = true;
   })().catch((error) => {
     pmtilesRegistration = null;
@@ -50,10 +50,10 @@ export function resolveWorldEventPMTilesUrl(
   return new URL(url, origin).href;
 }
 
-export async function buildWorldEventPMTilesStyle(url: string): Promise<StyleSpecification> {
+export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 'zh' = 'en'): Promise<StyleSpecification> {
   const { layers, namedFlavor } = await import('@protomaps/basemaps');
   const archiveUrl = resolveWorldEventPMTilesUrl(url);
-  const rankedLayers = layers('basemap', namedFlavor('black'), { lang: 'en' }) as StyleSpecification['layers'];
+  const rankedLayers = layers('basemap', namedFlavor('black'), { lang: language }) as StyleSpecification['layers'];
   const eventBasemapLayerIds = new Set([
     'background',
     'earth',
@@ -147,13 +147,14 @@ export type WeatherBasemapProvider = 'auto' | 'pmtiles' | 'openfreemap' | 'carto
 export async function getWeatherMapStyle(
   theme: WeatherMapTheme = 'dark',
   provider: WeatherBasemapProvider = 'auto',
+  language: 'en' | 'zh' = 'en',
 ): Promise<StyleSpecification | string> {
   const resolvedProvider = provider === 'auto'
     ? (theme !== 'positron' && WORLD_EVENT_PMTILES_URL ? 'pmtiles' : 'openfreemap')
     : provider;
   if (resolvedProvider === 'pmtiles' && WORLD_EVENT_PMTILES_URL) {
     await registerWorldEventPMTilesProtocol();
-    return buildWorldEventPMTilesStyle(WORLD_EVENT_PMTILES_URL);
+    return buildWorldEventPMTilesStyle(WORLD_EVENT_PMTILES_URL, language);
   }
   if (resolvedProvider === 'carto') return theme === 'positron' ? CARTO_LIGHT_STYLE : CARTO_DARK_STYLE;
   return theme === 'positron' ? OPENFREEMAP_LIGHT_STYLE : OPENFREEMAP_DARK_STYLE;
@@ -167,15 +168,15 @@ type LabelCapableMap = {
     layers?: Array<{ id: string; type?: string; source?: string; 'source-layer'?: string }>;
   };
   getLayoutProperty: (layerId: string, name: 'text-field') => unknown;
-  setLayoutProperty: (
+  setLayoutProperty: <K extends 'text-field' | 'text-size' | 'visibility'>(
     layerId: string,
-    name: 'text-field' | 'text-size' | 'visibility',
-    value: unknown,
+    name: K,
+    value: NonNullable<SymbolLayerSpecification['layout']>[K],
   ) => void;
-  setPaintProperty: (
+  setPaintProperty: <K extends 'text-color' | 'text-halo-color' | 'text-halo-width' | 'text-halo-blur' | 'text-opacity'>(
     layerId: string,
-    name: 'text-color' | 'text-halo-color' | 'text-halo-width' | 'text-halo-blur' | 'text-opacity',
-    value: unknown,
+    name: K,
+    value: NonNullable<SymbolLayerSpecification['paint']>[K],
   ) => void;
 };
 
@@ -189,7 +190,7 @@ function hasNameField(field: unknown) {
   return JSON.stringify(field || '').toLowerCase().includes('name');
 }
 
-const ENGLISH_NAME_EXPRESSION = [
+const ENGLISH_NAME_EXPRESSION: ExpressionSpecification = [
   'coalesce',
   ['get', 'name_en'],
   ['get', 'name:en'],
@@ -197,11 +198,20 @@ const ENGLISH_NAME_EXPRESSION = [
   ['get', 'name'],
 ];
 
-const PROTOMAPS_ENGLISH_NAME_EXPRESSION = [
+const PROTOMAPS_ENGLISH_NAME_EXPRESSION: ExpressionSpecification = [
   'coalesce',
   ['get', 'name:en'],
   ['get', 'name'],
 ];
+
+// Match the source fields used by WorldMonitor: Protomaps has zh-Hans,
+// CARTO has zh, and OpenFreeMap may expose both. Never translate coordinates.
+function localizedNameExpression(language: 'en' | 'zh', protomaps: boolean): ExpressionSpecification {
+  const english = protomaps ? PROTOMAPS_ENGLISH_NAME_EXPRESSION : ENGLISH_NAME_EXPRESSION;
+  return language === 'en' ? english : [
+    'coalesce', ['get', 'name:zh-Hans'], ['get', 'name:zh'], ['get', 'name_zh'], english,
+  ];
+}
 
 type LabelKind =
   | 'continent'
@@ -248,7 +258,7 @@ function labelVisible(kind: LabelKind, density: LabelDensity) {
   return true;
 }
 
-function labelSize(kind: LabelKind): unknown | null {
+function labelSize(kind: LabelKind): ExpressionSpecification | null {
   if (kind === 'country-major') return ['interpolate', ['linear'], ['zoom'], 0, 13, 3, 15, 5, 17];
   if (kind === 'country-minor') return ['interpolate', ['linear'], ['zoom'], 1.85, 11, 4, 13, 6, 15];
   if (kind === 'city-major') return ['interpolate', ['linear'], ['zoom'], 0, 14, 3, 16, 6, 18];
@@ -260,7 +270,7 @@ function labelSize(kind: LabelKind): unknown | null {
  * OpenFreeMap-only fallback tuning. Protomaps already implements ranked labels
  * and must never be overwritten by this compatibility path.
  */
-export function reinforceWorldEventBasemapLabels(map: LabelCapableMap) {
+export function reinforceWorldEventBasemapLabels(map: LabelCapableMap, language: 'en' | 'zh' = 'en') {
   labelDensityByMap.delete(map);
   if (usesProtomapsStyle(map)) {
     // WorldMonitor runs localizeMapLabels() after the Protomaps style loads.
@@ -270,7 +280,7 @@ export function reinforceWorldEventBasemapLabels(map: LabelCapableMap) {
       if (layer.type !== 'symbol') continue;
       try {
         if (!hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) continue;
-        map.setLayoutProperty(layer.id, 'text-field', PROTOMAPS_ENGLISH_NAME_EXPRESSION);
+        map.setLayoutProperty(layer.id, 'text-field', localizedNameExpression(language, true));
       } catch {
         // A style can replace a symbol layer during load.
       }
@@ -278,11 +288,13 @@ export function reinforceWorldEventBasemapLabels(map: LabelCapableMap) {
     return;
   }
   for (const layer of map.getStyle().layers || []) {
-    if (layer.type !== 'symbol' || layer['source-layer'] !== 'place') continue;
+    if (layer.type !== 'symbol') continue;
     try {
       if (!hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) continue;
+      map.setLayoutProperty(layer.id, 'text-field', localizedNameExpression(language, false));
+      // Translate water/region labels too, but retain their provider styling.
+      if (layer['source-layer'] !== 'place') continue;
       const kind = labelKind(layer);
-      map.setLayoutProperty(layer.id, 'text-field', ENGLISH_NAME_EXPRESSION);
       const size = labelSize(kind);
       if (size) map.setLayoutProperty(layer.id, 'text-size', size);
       map.setPaintProperty(layer.id, 'text-color', '#aeb7ba');

@@ -29,6 +29,7 @@ import { EventList } from './EventList';
 import { AviationLens } from './AviationLens';
 import { getWeatherBasemapAttribution } from '@/config/weatherBasemapMeta';
 import { MapSymbolIcon } from './MapSymbolIcon';
+import { useI18n } from '@/services/i18n';
 
 export type WorldEventMapProps = {
   events: GeoEvent[];
@@ -55,6 +56,9 @@ export function WorldEventMap({
   onCountryChange,
   height = 620,
 }: WorldEventMapProps) {
+  const { locale } = useI18n();
+  const languageRef = useRef(locale);
+  languageRef.current = locale;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
   const stateRef = useRef(state);
@@ -167,60 +171,107 @@ export function WorldEventMap({
       else renderer.resume();
     };
 
-    let installRenderer: (kind: 'webgl' | 'svg', reason?: Error) => Promise<void>;
-    const callbacks: MapRendererCallbacks = {
-      onCameraChange: (camera) => callbackRef.current.onCameraChange(camera),
-      onEventSelect: (eventId) => callbackRef.current.onEventSelect(eventId),
-      onCountrySelect: (country, position) => {
-        if (!disposed) setCountryTarget(country ? { country, position, context: false } : null);
-      },
-      onCountryContextMenu: (country, position) => {
-        if (!disposed) setCountryTarget({ country, position, context: true });
-      },
-      onBasemapStateChange: (nextState) => {
-        if (!disposed) setBasemapState(nextState);
-      },
-      onRendererFallbackRequested: (error) => {
-        if (disposed) return;
-        setRendererError(error.message);
-        void installRenderer('svg', error);
-      },
-      onLayerDegraded: (layerId, error) => {
-        if (!disposed) setRendererLayerError(`${layerId}: ${error.message}`);
-      },
-      onError: (error) => setRendererError(error.message),
+    let rendererGeneration = 0;
+    let preferredLoadGeneration = 0;
+    let slowLoadTimer: number | null = null;
+    let rendererDeadline: number | null = null;
+    const clearRendererDeadline = () => {
+      if (rendererDeadline != null) window.clearTimeout(rendererDeadline);
+      rendererDeadline = null;
     };
-
-    installRenderer = async (kind, reason) => {
+    const installRenderer = async (
+      kind: 'webgl' | 'svg', reason?: Error, loadedRenderer?: new () => MapRenderer,
+    ): Promise<void> => {
       if (disposed) return;
+      const generation = ++rendererGeneration;
+      const isCurrent = () => !disposed && generation === rendererGeneration;
+      clearRendererDeadline();
       rendererRef.current?.destroy();
-      const renderer: MapRenderer = kind === 'webgl'
-        ? new (await import('../renderer/DeckMapRenderer')).DeckMapRenderer()
-        : new (await import('../renderer/SvgMapRenderer')).SvgMapRenderer();
-      if (disposed) {
-        renderer.destroy();
-        return;
-      }
-      rendererRef.current = renderer;
+      rendererRef.current = null;
+      delete host.dataset.mapRendererReady;
       setRendererKind(kind);
       setRendererLayerError(null);
-      if (reason) setRendererError(reason.message);
-      renderer.setReducedMotion(motionQuery.matches);
-      renderer.setState(stateRef.current);
-      renderer.setEvents(eventsRef.current);
+      setRendererError(reason?.message ?? null);
+
+      const fail = (error: unknown) => {
+        if (!isCurrent()) return;
+        const failure = error instanceof Error ? error : new Error(String(error));
+        clearRendererDeadline();
+        if (kind === 'webgl') {
+          void installRenderer('svg', failure);
+        } else {
+          // Invalidate even a pending import/mount, so a late result cannot
+          // resurrect a renderer after its deadline or overwrite the fallback.
+          ++rendererGeneration;
+          rendererRef.current?.destroy();
+          rendererRef.current = null;
+          setBasemapState('failed');
+          setRendererError(failure.message);
+        }
+      };
+      const callbacks: MapRendererCallbacks = {
+        onCameraChange: (camera) => { if (isCurrent()) callbackRef.current.onCameraChange(camera); },
+        onEventSelect: (eventId) => { if (isCurrent()) callbackRef.current.onEventSelect(eventId); },
+        onCountrySelect: (country, position) => {
+          if (isCurrent()) setCountryTarget(country ? { country, position, context: false } : null);
+        },
+        onCountryContextMenu: (country, position) => {
+          if (isCurrent()) setCountryTarget({ country, position, context: true });
+        },
+        onBasemapStateChange: (nextState) => { if (isCurrent()) setBasemapState(nextState); },
+        onRendererFallbackRequested: fail,
+        onLayerDegraded: (layerId, error) => {
+          if (isCurrent()) setRendererLayerError(`${layerId}: ${error.message}`);
+        },
+        onError: (error) => { if (isCurrent()) setRendererError(error.message); },
+      };
+      // Bound actual initialization. A slow preferred-module download is
+      // handled separately, without permanently rejecting a capable desktop.
+      rendererDeadline = window.setTimeout(() => fail(new Error(
+        `${kind === 'webgl' ? 'WebGL' : 'SVG'} map renderer loading timed out.`,
+      )), 12_000);
       try {
+        const Renderer = loadedRenderer ?? (await import('../renderer/SvgMapRenderer')).SvgMapRenderer;
+        if (!isCurrent()) return;
+        const renderer: MapRenderer = new Renderer();
+        rendererRef.current = renderer;
+        renderer.setLanguage?.(languageRef.current);
+        renderer.setReducedMotion(motionQuery.matches);
+        renderer.setState(stateRef.current);
+        renderer.setEvents(eventsRef.current);
         await renderer.mount(host, callbacks);
+        if (!isCurrent()) return;
+        clearRendererDeadline();
         host.dataset.mapRendererReady = kind;
         updatePauseState();
       } catch (error) {
-        if (disposed || rendererRef.current !== renderer) return;
-        const failure = error instanceof Error ? error : new Error(String(error));
-        if (kind === 'webgl') {
-          await installRenderer('svg', failure);
-          return;
-        }
-        setBasemapState('failed');
-        setRendererError(failure.message);
+        fail(error);
+      }
+    };
+
+    const loadPreferredRenderer = async () => {
+      const generation = ++preferredLoadGeneration;
+      const isCurrent = () => !disposed && generation === preferredLoadGeneration;
+      // SVG is a temporary usable surface while the same download continues.
+      // Once it arrives, rehydrate WebGL from the latest camera/events. There
+      // is one promotion attempt, never a context-recreation/retry loop.
+      slowLoadTimer = window.setTimeout(() => {
+        slowLoadTimer = null;
+        if (isCurrent()) void installRenderer('svg', new Error(
+          'The detailed map is still downloading. It will replace this temporary map when ready.',
+        ));
+      }, 6_000);
+      try {
+        const { DeckMapRenderer } = await import('../renderer/DeckMapRenderer');
+        if (!isCurrent()) return;
+        if (slowLoadTimer != null) window.clearTimeout(slowLoadTimer);
+        slowLoadTimer = null;
+        await installRenderer('webgl', undefined, DeckMapRenderer);
+      } catch (error) {
+        if (!isCurrent()) return;
+        if (slowLoadTimer != null) window.clearTimeout(slowLoadTimer);
+        slowLoadTimer = null;
+        void installRenderer('svg', error instanceof Error ? error : new Error(String(error)));
       }
     };
 
@@ -232,9 +283,10 @@ export function WorldEventMap({
     const performanceHarnessEnabled = new URLSearchParams(window.location.search).get('mapPerf') === '1';
     const handleHarnessRendererFailure = () => {
       if (!performanceHarnessEnabled || disposed) return;
-      callbacks.onRendererFallbackRequested(
-        new Error('Simulated WebGL renderer failure from the deterministic map harness.'),
-      );
+      ++preferredLoadGeneration;
+      if (slowLoadTimer != null) window.clearTimeout(slowLoadTimer);
+      slowLoadTimer = null;
+      void installRenderer('svg', new Error('Simulated WebGL renderer failure from the deterministic map harness.'));
     };
     if (performanceHarnessEnabled) {
       host.addEventListener('polymonitor:map-renderer-failure', handleHarnessRendererFailure);
@@ -257,7 +309,7 @@ export function WorldEventMap({
           const support = inspectWebGL2Support({
             allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1',
           });
-          if (support.supported && !compactDevice) void installRenderer('webgl');
+          if (support.supported && !compactDevice) void loadPreferredRenderer();
           else void installRenderer('svg', new Error(compactDevice
             ? 'Compact devices start with the lightweight SVG renderer.'
             : support.reason || 'WebGL2 is unavailable.'));
@@ -322,6 +374,10 @@ export function WorldEventMap({
     }, 2_500);
     return () => {
       disposed = true;
+      ++rendererGeneration;
+      ++preferredLoadGeneration;
+      if (slowLoadTimer != null) window.clearTimeout(slowLoadTimer);
+      clearRendererDeadline();
       if (installFrame != null) window.cancelAnimationFrame(installFrame);
       if (secondInstallFrame != null) window.cancelAnimationFrame(secondInstallFrame);
       if (idleHandle != null) {
@@ -347,6 +403,7 @@ export function WorldEventMap({
 
   useEffect(() => rendererRef.current?.setState(state), [state]);
   useEffect(() => rendererRef.current?.setEvents(events), [events]);
+  useEffect(() => rendererRef.current?.setLanguage?.(locale), [locale]);
 
   return (
     <div
@@ -356,6 +413,8 @@ export function WorldEventMap({
       <div
         ref={hostRef}
         className="wm-weather-deck-basemap ready"
+        data-map-basemap-state={basemapState}
+        data-map-renderer-reason={rendererError || undefined}
         role="application"
         tabIndex={0}
         aria-label="World event map. Use pointer or keyboard controls to explore active real-world events."
@@ -437,7 +496,7 @@ export function WorldEventMap({
           {legendContext.coverageGap ? <b><i className="is-coverage" />COVERAGE GAP</b> : null}
         </span>
       </div>
-      <div className="wm-weather-deck-status">
+      <div className="wm-weather-deck-status" title={rendererError || undefined}>
         {rendererKind === 'svg'
           ? 'SVG FALLBACK'
           : basemapState === 'local-fallback-ready'

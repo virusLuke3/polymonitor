@@ -2,8 +2,9 @@
 
 @import url('./design-system.css') layer(components);
 @import url('./main.css') layer(base);
-@import url('./panels.css') layer(base);
+@import url('./panels.css');
 @import url('./panel-workspace.css') layer(base);
+@import url('../features/market-focus/styles.css') layer(base);
 @import url('./market-workspace.css') layer(components);
 @import url('./data-quality-workspace.css') layer(components);
 @import url('./auth-workspace.css') layer(components);

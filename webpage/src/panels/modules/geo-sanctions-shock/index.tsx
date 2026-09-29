@@ -1,3 +1,4 @@
+import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGeoSanctionsShock } from '@/services/api';
@@ -21,10 +22,6 @@ function badgeLabel(status?: string | null) {
   if (normalized === 'empty') return 'QUIET';
   if (normalized === 'degraded') return 'DEGRADED';
   return 'LIVE';
-}
-
-function panelTone(status?: string | null): 'live' | 'muted' {
-  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
 }
 
 function formatDate(value?: string | null) {
@@ -192,5 +189,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeGeoSanctionsShock(2000),
+  fetchData: (context) => fetchRuntimeGeoSanctionsShock(2000, context?.signal),
 });

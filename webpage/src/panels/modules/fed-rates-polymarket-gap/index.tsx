@@ -30,11 +30,12 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'fed-rates-polymarket-gap',
+  dataDependencies: ['polymarket-macro-map'],
   title: 'Fed Rates Polymarket Gap',
   eyebrow: 'macro',
   description: 'Rates tape and Polymarket Fed-market context.',
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeFedRatesPolymarketGap(8),
+  fetchData: (context) => fetchRuntimeFedRatesPolymarketGap(8, context?.signal),
 });

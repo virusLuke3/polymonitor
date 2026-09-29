@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FeatureCollection } from 'geojson';
-import { countryBasemapLabels, visibleCountryBasemapLabels } from './countryBasemapLabels';
+import { countryBasemapLabels, countryBasemapLabelName, visibleCountryBasemapLabels } from './countryBasemapLabels';
 
 const countries: FeatureCollection = {
   type: 'FeatureCollection',
@@ -19,6 +19,12 @@ const countries: FeatureCollection = {
 };
 
 describe('SVG fallback country labels', () => {
+  it('localizes verified ISO country names and preserves unknown names', () => {
+    const label = { id: 'CHN', iso2: 'CN', name: 'China', coordinates: [100, 30] as [number, number], area: 1 };
+    expect(countryBasemapLabelName(label, 'zh')).toBe('中国');
+    expect(countryBasemapLabelName(label, 'en')).toBe('China');
+    expect(countryBasemapLabelName({ ...label, iso2: '' }, 'zh')).toBe('China');
+  });
   it('derives labels from verified country geometry without city coordinates', () => {
     const labels = countryBasemapLabels(countries);
     expect(labels.map((label) => label.name)).toEqual([

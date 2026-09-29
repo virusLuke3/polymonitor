@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": "20.19.1",
+    "node": "22.23.3",
     "npm": ">=10 <11"
   },
   "scripts": {
@@ -14,20 +14,24 @@
     "test:map": "vitest run src/features/world-event-map",
     "test:map:e2e": "playwright test e2e/world-event-map.spec.ts",
     "perf:map": "node scripts/measure-map-performance.mjs",
-    "build": "npm run check:locales && tsc && vite build && npm run check:map-bundle",
-    "preview": "vite preview"
+    "build": "npm run check:locales && npm run check:boundaries && tsc && vite build && npm run check:map-bundle",
+    "preview": "vite preview",
+    "check:boundaries": "node scripts/check-frontend-boundaries.mjs",
+    "test:unit": "vitest run src",
+    "test:frontend:e2e": "playwright test e2e/frontend-lifecycle.spec.ts e2e/frontend-architecture.spec.ts e2e/panel-styles.spec.ts",
+    "test:browser": "playwright test"
   },
   "dependencies": {
-    "@deck.gl/core": "9.3.10",
-    "@deck.gl/layers": "9.3.10",
-    "@deck.gl/mapbox": "9.3.10",
+    "@deck.gl/core": "9.4.0",
+    "@deck.gl/layers": "9.4.0",
+    "@deck.gl/maplibre": "9.4.0",
     "@fontsource-variable/noto-sans-sc": "^5.3.0",
     "@protomaps/basemaps": "^5.7.2",
     "d3-geo": "^3.1.1",
     "globe.gl": "^2.45.3",
     "hls.js": "^1.6.16",
     "lightweight-charts": "^5.2.0",
-    "maplibre-gl": "^5.24.0",
+    "maplibre-gl": "^6.4.1",
     "pmtiles": "^4.4.1",
     "preact": "^10.26.4",
     "supercluster": "^8.0.1",
@@ -43,6 +47,6 @@
     "@types/topojson-client": "^3.1.5",
     "typescript": "^5.8.2",
     "vite": "^6.3.5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

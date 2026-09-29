@@ -1,13 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import {
+  statusLabel,
   MetricCard,
   operationalTone,
   StatusBadge,
   type OperationalTone,
 } from '@/components/design-system/StatusPrimitives';
-import { shortHash, signedClass } from '@/panels/shared/formatters';
-import { fetchMarketLobByToken, fetchWorkspaceBundle } from '@/services/api';
+import {
+  ageSeconds,
+  cleanSourceLabel as cleanSource,
+  formatLocalizedCompact as formatMarketCompact,
+  shortHash,
+  signedClass,
+} from '@/panels/shared/formatters';
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
+import { useMarketDossier } from '@/features/market-focus/useMarketDossier';
+import { selectedWorkspaceOutcome } from '@/features/market-focus/marketBundle';
 import { fetchAuthSession } from '@/services/auth';
 import { useI18n } from '@/services/i18n';
 import { addWatchlistMarket } from '@/services/product';
@@ -23,7 +31,6 @@ import type {
   WorkspaceBundle,
 } from '@/types';
 
-const REFRESH_INTERVAL_MS = 30_000;
 const MAX_VISIBLE_TRADES = 16;
 const MAX_VISIBLE_CONTENT = 8;
 const MAX_BOOK_LEVELS = 8;
@@ -38,16 +45,6 @@ function readMarketId(): number | null {
   const match = window.location.pathname.match(/^\/markets\/(\d+)(?:\/|$)/);
   const marketId = Number(match?.[1]);
   return Number.isSafeInteger(marketId) && marketId > 0 ? marketId : null;
-}
-
-function parseTimestamp(value?: string | null): number | null {
-  const parsed = Date.parse(String(value || ''));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function ageSeconds(value?: string | null): number | null {
-  const parsed = parseTimestamp(value);
-  return parsed == null ? null : Math.max(0, Math.round((Date.now() - parsed) / 1_000));
 }
 
 function freshnessFromTimestamp(value?: string | null, staleAfterSeconds = 300): string {
@@ -77,41 +74,6 @@ function formatProbabilityCents(value?: string | number | null): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
   return `${Math.round(numeric * 100)}¢`;
-}
-
-function statusLabel(value: string | null | undefined, t: Translator): string {
-  const normalized = String(value || 'unknown').trim().toLowerCase().replace(/_/g, '-');
-  const known = {
-    loading: 'status.loading',
-    unknown: 'status.unknown',
-    fresh: 'status.fresh',
-    aging: 'status.aging',
-    stale: 'status.stale',
-    ok: 'status.ok',
-    missing: 'status.missing',
-    partial: 'status.partial',
-    critical: 'status.critical',
-    degraded: 'status.degraded',
-    warning: 'status.warning',
-    ready: 'status.ready',
-    observed: 'status.observed',
-    bound: 'status.bound',
-    unbound: 'status.unbound',
-    pending: 'status.pending',
-    open: 'status.open',
-    closed: 'status.closed',
-    proposed: 'status.proposed',
-    disputed: 'status.disputed',
-    resolved: 'status.resolved',
-    error: 'status.error',
-    snapshot: 'status.snapshot',
-    'single-market': 'status.singleMarket',
-    'open-no-events': 'status.openNoEvents',
-    'not-loaded': 'status.notLoaded',
-    'ended-awaiting-oracle': 'status.endedAwaitingOracle',
-  } as const;
-  const key = known[normalized as keyof typeof known];
-  return key ? t(key) : cleanSource(value);
 }
 
 function formatShares(value: string | number | null | undefined, formatNumber: NumberFormatter): string {
@@ -149,13 +111,6 @@ function formatMarketSignedPercent(value: string | number | null | undefined, fo
     : '--';
 }
 
-function formatMarketCompact(value: string | number | null | undefined, formatNumber: NumberFormatter): string {
-  const numeric = Number(value);
-  return Number.isFinite(numeric)
-    ? formatNumber(numeric, { notation: 'compact', maximumFractionDigits: 1 })
-    : '--';
-}
-
 function formatMarketCurrency(value: string | number | null | undefined, formatNumber: NumberFormatter): string {
   const numeric = Number(value);
   return Number.isFinite(numeric)
@@ -168,18 +123,6 @@ function formatMarketCurrency(value: string | number | null | undefined, formatN
     : '--';
 }
 
-function cleanSource(value?: string | null): string {
-  return String(value || 'unknown')
-    .replace(/[_-]/g, ' ')
-    .replace(/\b\w/g, (character: string) => character.toUpperCase());
-}
-
-function selectedOutcome(bundle: WorkspaceBundle | null): MarketGroupOutcome | null {
-  if (!bundle) return null;
-  if (bundle.selectedOutcome) return bundle.selectedOutcome;
-  const marketId = bundle.market?.id || bundle.identity?.localMarketId;
-  return (bundle.group?.outcomes || []).find((outcome) => Number(outcome.marketId) === Number(marketId)) || null;
-}
 
 function probabilityPoint(point: ChartPoint): number | null {
   const value = Number(point.yesPrice ?? point.value);
@@ -698,61 +641,10 @@ export function MarketWorkspace() {
     formatRelativeTime,
   } = useI18n();
   const marketId = readMarketId();
-  const [bundle, setBundle] = useState<WorkspaceBundle | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const { bundle, loading, error, setError, lastRefreshedAt, refresh } = useMarketDossier(marketId, t);
   const [watchState, setWatchState] = useState<'idle' | 'busy' | 'watched'>('idle');
-  const requestRef = useRef(0);
 
-  const refresh = useCallback(async () => {
-    if (!marketId) {
-      setError(t('market.invalidUrlDetail'));
-      setLoading(false);
-      return;
-    }
-    const requestId = ++requestRef.current;
-    setLoading(true);
-    try {
-      const next = await fetchWorkspaceBundle(marketId, { includeContent: true, includeLob: true });
-      if (!next.market) {
-        throw new Error(t('market.noIdentity', { id: marketId }));
-      }
-      const outcome = selectedOutcome(next);
-      const tokenId = String(outcome?.yesTokenId || next.identity?.yesTokenId || next.market?.yesTokenId || '').trim();
-      const noTokenId = String(outcome?.noTokenId || next.identity?.noTokenId || next.market?.noTokenId || '').trim();
-      if (tokenId) {
-        try {
-          next.lob = await fetchMarketLobByToken(tokenId, outcome?.label || next.market?.title || '', noTokenId, 3500);
-        } catch {
-          // The market dossier remains usable when the live book is unavailable.
-        }
-      }
-      if (requestId !== requestRef.current) return;
-      setBundle(next);
-      setError(null);
-      setLastRefreshedAt(Date.now());
-    } catch (loadError) {
-      if (requestId !== requestRef.current) return;
-      setError(loadError instanceof Error ? loadError.message : t('market.loadError'));
-    } finally {
-      if (requestId === requestRef.current) setLoading(false);
-    }
-  }, [marketId, t]);
-
-  useEffect(() => {
-    void refresh();
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === 'hidden') return;
-      void refresh();
-    }, REFRESH_INTERVAL_MS);
-    return () => {
-      window.clearInterval(interval);
-      requestRef.current += 1;
-    };
-  }, [refresh]);
-
-  const outcome = useMemo(() => selectedOutcome(bundle), [bundle]);
+  const outcome = useMemo(() => selectedWorkspaceOutcome(bundle), [bundle]);
   const market = bundle?.market;
 
   const watchMarket = async () => {

@@ -1,11 +1,11 @@
+import { probabilityLabel, PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '../macro-intel';
+import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeCpiReleaseCalendar } from '@/services/api';
 import type { RuntimeCpiCalendarItem, RuntimeCpiReleaseCalendarPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
-import type { PanelGlyphName } from '../macro-intel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badgeLabel(status?: string | null) {
@@ -14,10 +14,6 @@ function badgeLabel(status?: string | null) {
   if (normalized === 'degraded') return 'PARTIAL';
   if (normalized === 'warming') return 'WARMING';
   return 'STALE';
-}
-
-function panelTone(status?: string | null): 'live' | 'muted' {
-  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
 }
 
 function eventKindLabel(kind?: string | null) {
@@ -46,12 +42,6 @@ function dateShortLabel(value?: string | null) {
     day: '2-digit',
     timeZone: 'America/New_York',
   }).format(date);
-}
-
-function probabilityLabel(value?: string | number | null) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return '--';
-  return `${Math.round(numeric * 100)}%`;
 }
 
 function compactHours(value?: string | number | null) {
@@ -165,11 +155,12 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'cpi-release-calendar',
+  dataDependencies: ['polymarket-macro-map'],
   title: 'CPI Release Calendar & Consensus Baseline',
   eyebrow: 'macro',
   description: 'Official CPI, PCE, NFP, and FOMC release timing with Polymarket implied CPI baseline.',
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeCpiReleaseCalendar(8),
+  fetchData: (context) => fetchRuntimeCpiReleaseCalendar(8, context?.signal),
 });

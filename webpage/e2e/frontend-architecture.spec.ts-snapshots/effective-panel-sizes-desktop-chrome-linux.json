@@ -1,0 +1,330 @@
+[
+  {
+    "width": 1600,
+    "panels": [
+      {
+        "id": "market-tv-wire",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 634.390625
+      },
+      {
+        "id": "market-youtube-channels",
+        "column": "span 3",
+        "row": "span 2",
+        "width": 953.609375
+      },
+      {
+        "id": "breaking-event-radar",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 634.390625
+      },
+      {
+        "id": "global-transport-shipping",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 634.40625
+      },
+      {
+        "id": "global-temperature-monitor",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 315.203125
+      },
+      {
+        "id": "market-summary",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 315.1875
+      }
+    ]
+  },
+  {
+    "width": 1501,
+    "panels": [
+      {
+        "id": "market-tv-wire",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 594.796875
+      },
+      {
+        "id": "market-youtube-channels",
+        "column": "span 3",
+        "row": "span 2",
+        "width": 894.1875
+      },
+      {
+        "id": "breaking-event-radar",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 594.796875
+      },
+      {
+        "id": "global-transport-shipping",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 594.796875
+      },
+      {
+        "id": "global-temperature-monitor",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 295.390625
+      },
+      {
+        "id": "market-summary",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 295.390625
+      }
+    ]
+  },
+  {
+    "width": 1500,
+    "panels": [
+      {
+        "id": "market-tv-wire",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 744
+      },
+      {
+        "id": "market-youtube-channels",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 744
+      },
+      {
+        "id": "breaking-event-radar",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 744
+      },
+      {
+        "id": "global-transport-shipping",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 744
+      },
+      {
+        "id": "global-temperature-monitor",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 370
+      },
+      {
+        "id": "market-summary",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 370
+      }
+    ]
+  },
+  {
+    "width": 1101,
+    "panels": [
+      {
+        "id": "market-tv-wire",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 544.5
+      },
+      {
+        "id": "market-youtube-channels",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 544.5
+      },
+      {
+        "id": "breaking-event-radar",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 544.5
+      },
+      {
+        "id": "global-transport-shipping",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 544.5
+      },
+      {
+        "id": "global-temperature-monitor",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 270.25
+      },
+      {
+        "id": "market-summary",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 270.25
+      }
+    ]
+  },
+  {
+    "width": 1100,
+    "panels": [
+      {
+        "id": "market-tv-wire",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 1092
+      },
+      {
+        "id": "market-youtube-channels",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 1092
+      },
+      {
+        "id": "breaking-event-radar",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 1092
+      },
+      {
+        "id": "global-transport-shipping",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 1092
+      },
+      {
+        "id": "global-temperature-monitor",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 544
+      },
+      {
+        "id": "market-summary",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 544
+      }
+    ]
+  },
+  {
+    "width": 761,
+    "panels": [
+      {
+        "id": "market-tv-wire",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 753
+      },
+      {
+        "id": "market-youtube-channels",
+        "column": "span 2",
+        "row": "span 2",
+        "width": 753
+      },
+      {
+        "id": "breaking-event-radar",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 753
+      },
+      {
+        "id": "global-transport-shipping",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 753
+      },
+      {
+        "id": "global-temperature-monitor",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 374.5
+      },
+      {
+        "id": "market-summary",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 374.5
+      }
+    ]
+  },
+  {
+    "width": 760,
+    "panels": [
+      {
+        "id": "market-tv-wire",
+        "column": "span 1",
+        "row": "span 2",
+        "width": 552.296875
+      },
+      {
+        "id": "market-youtube-channels",
+        "column": "span 1",
+        "row": "span 2",
+        "width": 195.703125
+      },
+      {
+        "id": "breaking-event-radar",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 752
+      },
+      {
+        "id": "global-transport-shipping",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 752
+      },
+      {
+        "id": "global-temperature-monitor",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 552.296875
+      },
+      {
+        "id": "market-summary",
+        "column": "1 / span 2",
+        "row": "span 1",
+        "width": 752
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "panels": [
+      {
+        "id": "market-tv-wire",
+        "column": "span 1",
+        "row": "span 2",
+        "width": 182.296875
+      },
+      {
+        "id": "market-youtube-channels",
+        "column": "span 1",
+        "row": "span 2",
+        "width": 195.703125
+      },
+      {
+        "id": "breaking-event-radar",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 382
+      },
+      {
+        "id": "global-transport-shipping",
+        "column": "span 2",
+        "row": "span 1",
+        "width": 382
+      },
+      {
+        "id": "global-temperature-monitor",
+        "column": "span 1",
+        "row": "span 1",
+        "width": 182.296875
+      },
+      {
+        "id": "market-summary",
+        "column": "1 / span 2",
+        "row": "span 1",
+        "width": 382
+      }
+    ]
+  }
+]

@@ -3,8 +3,7 @@ import { fetchRuntimeEnergyGasolineShock } from '@/services/api';
 import type { RuntimeEnergyGasolineShockPayload, RuntimeEnergyShockItem, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
-import type { PanelGlyphName } from '../macro-intel';
+import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '../macro-intel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badge(status?: string | null) {
@@ -91,11 +90,12 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'energy-gasoline-shock',
+  dataDependencies: ['polymarket-macro-map'],
   title: 'Energy & Gasoline Shock',
   eyebrow: 'macro',
   description: 'EIA WTI, gasoline, and diesel pressure for headline CPI markets.',
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeEnergyGasolineShock(6),
+  fetchData: (context) => fetchRuntimeEnergyGasolineShock(6, context?.signal),
 });

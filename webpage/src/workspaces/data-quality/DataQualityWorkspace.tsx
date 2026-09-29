@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import {
+  statusLabel as sharedStatusLabel,
   MetricCard,
   StatusBadge,
   type OperationalTone,
 } from '@/components/design-system/StatusPrimitives';
-import { shortHash } from '@/panels/shared/formatters';
+import {
+  ageSeconds,
+  cleanSourceLabel as cleanLabel,
+  formatLocalizedCompact as formatCompact,
+  shortHash,
+} from '@/panels/shared/formatters';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { MobileWorkspaceNav } from '@/components/MobileWorkspaceNav';
 import { fetchMarketDataQuality } from '@/services/api';
 import { useI18n } from '@/services/i18n';
 import type {
@@ -22,6 +28,10 @@ const MAX_VISIBLE_ORACLE_EVENTS = 16;
 type Translator = ReturnType<typeof useI18n>['t'];
 type NumberFormatter = ReturnType<typeof useI18n>['formatNumber'];
 
+function statusLabel(value: string | null | undefined, t: Translator) {
+  return sharedStatusLabel(value, t, { 'not-collected': 'status.notCollected' });
+}
+
 function statusTone(status?: string | null): OperationalTone {
   const normalized = String(status || '').trim().toLowerCase();
   if (['critical', 'error', 'missing', 'stale'].includes(normalized)) return 'critical';
@@ -30,69 +40,10 @@ function statusTone(status?: string | null): OperationalTone {
   return 'neutral';
 }
 
-function parseTimestamp(value?: string | null): number | null {
-  const parsed = Date.parse(String(value || ''));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function ageSeconds(value?: string | null): number | null {
-  const parsed = parseTimestamp(value);
-  return parsed == null ? null : Math.max(0, Math.round((Date.now() - parsed) / 1_000));
-}
-
-function cleanLabel(value?: string | null): string {
-  return String(value || 'unknown')
-    .replace(/[_-]/g, ' ')
-    .replace(/\b\w/g, (character: string) => character.toUpperCase());
-}
-
-function statusLabel(value: string | null | undefined, t: Translator): string {
-  const normalized = String(value || 'unknown').trim().toLowerCase().replace(/_/g, '-');
-  const known = {
-    loading: 'status.loading',
-    unknown: 'status.unknown',
-    fresh: 'status.fresh',
-    aging: 'status.aging',
-    stale: 'status.stale',
-    ok: 'status.ok',
-    missing: 'status.missing',
-    partial: 'status.partial',
-    critical: 'status.critical',
-    degraded: 'status.degraded',
-    warning: 'status.warning',
-    ready: 'status.ready',
-    observed: 'status.observed',
-    bound: 'status.bound',
-    unbound: 'status.unbound',
-    pending: 'status.pending',
-    'not-collected': 'status.notCollected',
-    open: 'status.open',
-    closed: 'status.closed',
-    proposed: 'status.proposed',
-    disputed: 'status.disputed',
-    resolved: 'status.resolved',
-    error: 'status.error',
-    snapshot: 'status.snapshot',
-    'single-market': 'status.singleMarket',
-    'open-no-events': 'status.openNoEvents',
-    'not-loaded': 'status.notLoaded',
-    'ended-awaiting-oracle': 'status.endedAwaitingOracle',
-  } as const;
-  const key = known[normalized as keyof typeof known];
-  return key ? t(key) : cleanLabel(value);
-}
-
 function formatCoverage(value: number | null | undefined, formatNumber: NumberFormatter): string {
   return value == null || !Number.isFinite(value)
     ? '--'
     : `${formatNumber(value, { maximumFractionDigits: value >= 99 ? 1 : 2 })}%`;
-}
-
-function formatCompact(value: number | string | null | undefined, formatNumber: NumberFormatter): string {
-  const numeric = Number(value);
-  return Number.isFinite(numeric)
-    ? formatNumber(numeric, { notation: 'compact', maximumFractionDigits: 1 })
-    : '--';
 }
 
 function formatCount(value: number | null | undefined, formatNumber: NumberFormatter, t: Translator): string {

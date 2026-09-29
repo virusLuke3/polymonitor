@@ -1,3 +1,9 @@
+import {
+  requestedPanelLayout,
+  effectivePanelLayout,
+  type PanelLayoutPrefs,
+  type PanelSizeHint,
+} from '@/features/workspace/panelLayout';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { PanelLoading } from '@/components/Panel';
@@ -14,8 +20,6 @@ const PANEL_MIN_COL_SPAN = 1;
 const PANEL_MAX_COL_SPAN = 3;
 const PANEL_CONTENT_ROOT_MARGIN = '240px 0px';
 
-export type PanelLayoutPrefs = Record<string, { rowSpan?: number; colSpan?: number }>;
-export type PanelSizeHint = 'default' | 'wide' | 'tall' | undefined;
 
 type DragState = {
   active: boolean;
@@ -49,6 +53,8 @@ type PanelWorkspaceSlotProps = {
   panelId: string;
   size: PanelSizeHint;
   layoutPrefs: PanelLayoutPrefs;
+  layoutWidth: number;
+  onVisibilityChange: (panelId: string, visible: boolean) => void;
   children: ComponentChildren;
   loading?: boolean;
   runtimeStatus?: PanelRuntimeStatus;
@@ -72,22 +78,6 @@ function clampSpan(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-function defaultPanelRowSpan(size: PanelSizeHint) {
-  return size === 'tall' ? 2 : 1;
-}
-
-function defaultPanelColSpan(size: PanelSizeHint) {
-  return size === 'wide' ? 2 : 1;
-}
-
-function getPanelLayout(layoutPrefs: PanelLayoutPrefs, panelId: string, size: PanelSizeHint) {
-  const saved = layoutPrefs[panelId] || {};
-  return {
-    rowSpan: clampSpan(saved.rowSpan ?? defaultPanelRowSpan(size), PANEL_MIN_ROW_SPAN, PANEL_MAX_ROW_SPAN),
-    colSpan: clampSpan(saved.colSpan ?? defaultPanelColSpan(size), PANEL_MIN_COL_SPAN, PANEL_MAX_COL_SPAN),
-  };
-}
-
 function removeDragListeners(state: DragState) {
   if (state.move) document.removeEventListener('mousemove', state.move);
   if (state.up) document.removeEventListener('mouseup', state.up);
@@ -108,6 +98,8 @@ export function PanelWorkspaceSlot({
   panelId,
   size,
   layoutPrefs,
+  layoutWidth,
+  onVisibilityChange,
   children,
   loading = false,
   runtimeStatus,
@@ -122,7 +114,8 @@ export function PanelWorkspaceSlot({
   const { t } = useI18n();
   const slotRef = useRef<HTMLDivElement | null>(null);
   const [contentReady, setContentReady] = useState(!layoutManaged);
-  const layout = getPanelLayout(layoutPrefs, panelId, size);
+  const layout = requestedPanelLayout(layoutPrefs, panelId, size);
+  const effective = layoutManaged ? effectivePanelLayout(panelId, layoutWidth) : { rowSpan: layout.rowSpan, column: `span ${layout.colSpan}` };
   const dragRef = useRef<DragState>({
     active: false,
     started: false,
@@ -360,20 +353,20 @@ export function PanelWorkspaceSlot({
   }, []);
 
   useEffect(() => {
-    if (contentReady || !layoutManaged) return;
     const slot = slotRef.current;
     if (!slot || typeof IntersectionObserver === 'undefined') {
       setContentReady(true);
-      return;
+      onVisibilityChange(panelId, true);
+      return () => onVisibilityChange(panelId, false);
     }
     const observer = new IntersectionObserver((entries) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return;
-      observer.disconnect();
-      setContentReady(true);
+      const visible = entries.some((entry) => entry.isIntersecting);
+      onVisibilityChange(panelId, visible);
+      if (visible) setContentReady(true);
     }, { rootMargin: PANEL_CONTENT_ROOT_MARGIN });
     observer.observe(slot);
-    return () => observer.disconnect();
-  }, [contentReady, layoutManaged]);
+    return () => { observer.disconnect(); onVisibilityChange(panelId, false); };
+  }, [onVisibilityChange, panelId]);
 
   return (
     <div
@@ -384,8 +377,8 @@ export function PanelWorkspaceSlot({
       ref={slotRef}
       onMouseDown={startDrag}
       style={{
-        '--wm-panel-row-span': String(layout.rowSpan),
-        '--wm-panel-col-span': String(layout.colSpan),
+        '--wm-panel-row-span': String(effective.rowSpan),
+        '--wm-panel-column': effective.column,
       } as Record<string, string>}
     >
       {contentReady ? (
@@ -415,7 +408,7 @@ export function PanelWorkspaceSlot({
   );
 }
 
-export function PanelRuntimeBoundary({
+function PanelRuntimeBoundary({
   children,
   loading,
   status,

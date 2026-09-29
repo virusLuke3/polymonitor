@@ -10,5 +10,5 @@ export const panel = runtimePanelFromRenderer(chainPanelRenderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeSuspicious(12),
+  fetchData: (context) => fetchRuntimeSuspicious(12, context?.signal),
 });

@@ -94,7 +94,7 @@ function eventTimestamp(event: GeoEvent) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function eventListType(event: GeoEvent) {
+function eventListType(event: GeoEvent) {
   return isHazardGeoEvent(event) ? event.hazardKind : event.category;
 }
 

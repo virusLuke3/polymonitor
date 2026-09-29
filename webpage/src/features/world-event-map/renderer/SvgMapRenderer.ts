@@ -1,13 +1,5 @@
 import { geoMercator, geoPath, type GeoProjection } from 'd3-geo';
-import type {
-  Feature,
-  FeatureCollection,
-  Geometry,
-  MultiPolygon,
-  Polygon,
-  Position,
-} from 'geojson';
-import type { GeoEvent } from '../domain/types';
+import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon, Position } from 'geojson';
 import {
   MAP_SEVERITY_STYLES,
   MAP_SYMBOL_SIZE,
@@ -16,12 +8,32 @@ import {
   mapSymbolPaths,
   type MapSymbolKey,
 } from '../config/mapSymbols';
+import { coordinatePositions } from '../domain/countryGeometry';
+import type { GeoEvent } from '../domain/types';
+import { clampLatitude, clampLongitude, clampWorldEventZoom, type WorldEventMapState } from '../state/mapState';
+import { advanceAnimationTime, boundedAnimationDelta, MAP_ANIMATION_FRAME_INTERVAL_MS } from './animationClock';
 import {
-  clampLatitude,
-  clampLongitude,
-  clampWorldEventZoom,
-  type WorldEventMapState,
-} from '../state/mapState';
+  countryBasemapLabels,
+  visibleCountryBasemapLabels,
+  type CountryBasemapLabel,
+} from './countryBasemapLabels';
+import { worldEventTooltipModel, type WorldEventPickedObject } from './hoverTooltip';
+import {
+  aviationAltitudeColor,
+  aviationLiveAircraftMarkers,
+  aviationRouteMotionPoints,
+  aviationRouteTone,
+  aviationSeededFlightPoints,
+  selectAviationRenderData,
+} from './layerFactories/aviationScene';
+import { EventClusterIndex } from './layerFactories/eventClusters';
+import {
+  hasAnimatedHazardPulse,
+  HAZARD_PULSE_INTERVAL_MS,
+  hazardPulseTargets,
+  selectEventPulseCandidates,
+} from './layerFactories/eventEmphasis';
+import { eventObservationTextureCandidates } from './layerFactories/eventObservations';
 import {
   continuousMetricRadiusMeters,
   eventColor,
@@ -33,37 +45,7 @@ import {
   pointRadiusMeters,
   SEVERITY_COLORS,
 } from './layerFactories/shared';
-import {
-  HAZARD_PULSE_INTERVAL_MS,
-  hazardPulseTargets,
-  hasAnimatedHazardPulse,
-  selectEventPulseCandidates,
-} from './layerFactories/eventEmphasisLayers';
-import { EventClusterIndex } from './layerFactories/eventPointLayer';
-import { eventObservationTextureCandidates } from './layerFactories/eventObservationLayer';
-import {
-  aviationRouteMotionPoints,
-  aviationRouteTone,
-  aviationSeededFlightPoints,
-  aviationAltitudeColor,
-  aviationLiveAircraftMarkers,
-  selectAviationRenderData,
-} from './layerFactories/aviationLayers';
-import {
-  countryBasemapLabels,
-  visibleCountryBasemapLabels,
-  type CountryBasemapLabel,
-} from './countryBasemapLabels';
-import {
-  advanceAnimationTime,
-  boundedAnimationDelta,
-  MAP_ANIMATION_FRAME_INTERVAL_MS,
-} from './animationClock';
 import type { MapCountryTarget, MapHoverPosition, MapRenderer, MapRendererCallbacks } from './MapRenderer';
-import {
-  worldEventTooltipModel,
-  type WorldEventPickedObject,
-} from './hoverTooltip';
 import { RendererTooltip } from './rendererTooltip';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -205,20 +187,12 @@ function featureCountryTarget(feature: Feature): MapCountryTarget | null {
   const iso2 = String(properties['ISO3166-1-Alpha-2'] || '').toUpperCase();
   const name = String(properties['name:en'] || properties.name || iso2);
   const positions: Position[] = [];
-  const visit = (value: unknown) => {
-    if (!Array.isArray(value)) return;
-    if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
-      positions.push(value as Position);
-      return;
-    }
-    value.forEach(visit);
-  };
   if (feature.geometry?.type === 'GeometryCollection') {
     feature.geometry.geometries.forEach((geometry) => {
-      if ('coordinates' in geometry) visit(geometry.coordinates);
+      if ('coordinates' in geometry) positions.push(...coordinatePositions(geometry.coordinates));
     });
   } else if (feature.geometry && 'coordinates' in feature.geometry) {
-    visit(feature.geometry.coordinates);
+    positions.push(...coordinatePositions(feature.geometry.coordinates));
   }
   if (!iso2 || !positions.length) return null;
   const lons = positions.map((position) => Number(position[0])).filter(Number.isFinite);

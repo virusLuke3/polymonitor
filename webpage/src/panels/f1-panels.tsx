@@ -1,13 +1,8 @@
+import type { RuntimeF1PanelCard, RuntimeF1Payload } from '@/types';
 import { Panel } from '@/components/Panel';
-import type { RuntimeF1PanelCard } from '@/types';
 import type { PanelRenderMap } from './types';
 import { emptyState } from './shared/renderers';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
-
-type BweTag = {
-  label: string;
-  tone: string;
-};
 
 function tagTone(label: string) {
   const normalized = label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -20,16 +15,9 @@ function tagTone(label: string) {
   return 'default';
 }
 
-function addTag(tags: BweTag[], label: string) {
-  const clean = label.trim();
-  if (!clean) return;
-  if (tags.some((tag) => tag.label.toLowerCase() === clean.toLowerCase())) return;
-  tags.push({ label: clean, tone: tagTone(clean) });
-}
-
 function inferBweTags(card: RuntimeF1PanelCard) {
-  const tags: BweTag[] = [];
-  addTag(tags, card.status === 'live' ? 'LIVE' : 'NEWS');
+  const tags: string[] = [];
+  tags.push(card.status === 'live' ? 'LIVE' : 'NEWS');
   const text = [
     card.title,
     card.summary,
@@ -39,16 +27,16 @@ function inferBweTags(card: RuntimeF1PanelCard) {
     card.secondaryMetric,
     card.tertiaryMetric,
   ].filter(Boolean).join(' ');
-  if (/binance|upbit|bithumb|coinbase|okx|bybit|kraken|exchange|交易所|币安/i.test(text)) addTag(tags, 'EXCHANGE');
-  if (/delist|下架/i.test(text)) addTag(tags, 'DELIST');
-  if (/\blisting\b|\blist\b|上线|上新/i.test(text)) addTag(tags, 'LISTING');
-  if (/futures|perpetual|合约|永续/i.test(text)) addTag(tags, 'FUTURES');
-  if (/bitcoin|btc|比特币/i.test(text)) addTag(tags, 'BTC');
-  if (/ethereum|eth|以太坊/i.test(text)) addTag(tags, 'ETH');
-  if (/crypto|token|usdt|coin|代币|加密/i.test(text)) addTag(tags, 'CRYPTO');
-  if (/\bai\b|人工智能|openai|nvidia|芯片|算力/i.test(text)) addTag(tags, 'AI');
-  if (/risk|hack|exploit|漏洞|攻击|监管|sec|cftc|制裁/i.test(text)) addTag(tags, 'RISK');
-  return tags.slice(0, 3);
+  if (/binance|upbit|bithumb|coinbase|okx|bybit|kraken|exchange|交易所|币安/i.test(text)) tags.push('EXCHANGE');
+  if (/delist|下架/i.test(text)) tags.push('DELIST');
+  if (/\blisting\b|\blist\b|上线|上新/i.test(text)) tags.push('LISTING');
+  if (/futures|perpetual|合约|永续/i.test(text)) tags.push('FUTURES');
+  if (/bitcoin|btc|比特币/i.test(text)) tags.push('BTC');
+  if (/ethereum|eth|以太坊/i.test(text)) tags.push('ETH');
+  if (/crypto|token|usdt|coin|代币|加密/i.test(text)) tags.push('CRYPTO');
+  if (/\bai\b|人工智能|openai|nvidia|芯片|算力/i.test(text)) tags.push('AI');
+  if (/risk|hack|exploit|漏洞|攻击|监管|sec|cftc|制裁/i.test(text)) tags.push('RISK');
+  return tags.slice(0, 3).map((label) => ({ label, tone: tagTone(label) }));
 }
 
 function topicHints(card: RuntimeF1PanelCard) {
@@ -138,6 +126,6 @@ function F1TracksidePanel({ cards }: { cards: RuntimeF1PanelCard[] }) {
 
 export const f1PanelRenderers: PanelRenderMap = {
   'f1-trackside': {
-    render: (ctx) => <F1TracksidePanel cards={ctx.f1?.cards || []} />,
+    render: (ctx) => <F1TracksidePanel cards={(ctx.runtimeData['f1-trackside'] as RuntimeF1Payload | undefined)?.cards || []} />,
   },
 };

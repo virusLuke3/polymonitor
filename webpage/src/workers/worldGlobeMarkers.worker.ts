@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 import { buildMarkerPayload } from './worldGlobeMarkerPipeline';
-import type { GlobeMarkerWorkerMessage, GlobeMarkerWorkerResult } from './worldGlobeMarkersTypes';
+import type { GlobeMarkerWorkerMessage, GlobeMarkerWorkerResult } from './worldGlobeMarkers';
 
 const workerScope = self as DedicatedWorkerGlobalScope;
 

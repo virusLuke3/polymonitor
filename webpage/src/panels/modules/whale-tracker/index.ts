@@ -10,5 +10,5 @@ export const panel = runtimePanelFromRenderer(chainPanelRenderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeWhales(14),
+  fetchData: (context) => fetchRuntimeWhales(14, context?.signal),
 });

@@ -1,50 +1,5 @@
-import { RefObject } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
-
-export const VIDEO_IDLE_PAUSE_MS = 6 * 60 * 1000;
-
-export function useElementInView<T extends Element>(rootMargin = '120px'): [RefObject<T>, boolean] {
-  const ref = useRef<T>(null);
-  const [inView, setInView] = useState(true);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element || typeof IntersectionObserver === 'undefined') {
-      setInView(true);
-      return undefined;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => setInView(Boolean(entry?.isIntersecting)),
-      { root: null, rootMargin, threshold: 0.01 },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [rootMargin]);
-
-  return [ref, inView];
-}
-
-export function useIdlePause(timeoutMs = VIDEO_IDLE_PAUSE_MS) {
-  const [idle, setIdle] = useState(false);
-
-  useEffect(() => {
-    let timer = 0;
-    const reset = () => {
-      setIdle(false);
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => setIdle(true), timeoutMs);
-    };
-    const events: Array<keyof WindowEventMap> = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'pointerdown'];
-    events.forEach((eventName) => window.addEventListener(eventName, reset, { passive: true }));
-    reset();
-    return () => {
-      window.clearTimeout(timer);
-      events.forEach((eventName) => window.removeEventListener(eventName, reset));
-    };
-  }, [timeoutMs]);
-
-  return idle;
-}
+import { type RuntimeMarketTvWireItem } from '@/types';
+import { useEffect, useState } from 'preact/hooks';
 
 export function useStaggeredLoad(enabled: boolean, delayMs = 0) {
   const [ready, setReady] = useState(delayMs <= 0);
@@ -71,4 +26,31 @@ export function youtubeBridgeMessageMatches(event: MessageEvent, iframe: HTMLIFr
   if (!payload || typeof payload !== 'object') return false;
   if (!String(payload.type || '').startsWith('yt-')) return false;
   return !payload.videoId || payload.videoId === videoId;
+}
+
+const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
+export function youtubeVideoId(item?: RuntimeMarketTvWireItem | null) {
+  const liveId = String(item?.youtubeLiveVideoId || '').trim();
+  if (YOUTUBE_VIDEO_ID_RE.test(liveId)) return liveId;
+  const fallbackId = String(item?.fallbackVideoId || '').trim();
+  return YOUTUBE_VIDEO_ID_RE.test(fallbackId) ? fallbackId : '';
+}
+
+export function panelStatus(payload?: { status?: string | null } | null): 'live' | 'muted' {
+  const status = String(payload?.status || '').toLowerCase();
+  return status === 'warming' || status === 'empty' ? 'muted' : 'live';
+}
+
+export function categoryToneClass(value?: string | null) {
+  const category = String(value || 'all').toLowerCase().replace(/[^a-z0-9-]/g, '');
+  return `tone-${category || 'all'}`;
+}
+
+export function sourceLocation(item: RuntimeMarketTvWireItem) {
+  return [item.region, item.country, item.language].filter(Boolean).join(' / ') || 'GLOBAL';
+}
+
+export function categoryLabel(value?: string | null) {
+  return String(value || 'other').toUpperCase();
 }

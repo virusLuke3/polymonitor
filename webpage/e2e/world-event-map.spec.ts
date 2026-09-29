@@ -1,251 +1,27 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, request, test, type Page } from '@playwright/test';
 
-const GENERATED_AT = '2026-08-26T03:00:00Z';
+import { ALL_LAYERS, GENERATED_AT, installFixtures } from './fixtures/world-event-map';
+
 const ARTIFACT_DIR = resolve('artifacts/world-event-map-e2e');
-const ALL_LAYERS = [
-  'weather-alerts',
-  'earthquakes-volcanoes',
-  'wildfires',
-  'extreme-temperature',
-  'climate-anomalies',
-  'air-routes',
-].join(',');
+const pageErrors = new WeakMap<Page, string[]>();
 
-type Json = Record<string, unknown>;
-
-function source(provider: string, nativeId: string) {
-  return [{ provider, nativeId, observedAt: GENERATED_AT, freshness: 'live', status: 'ok' }];
-}
-
-function hazard(overrides: Json): Json {
-  const id = String(overrides.id);
-  return {
-    id,
-    category: 'natural-hazard',
-    title: id,
-    summary: 'Deterministic World Event Map browser fixture.',
-    severity: 'warning',
-    occurredAt: GENERATED_AT,
-    updatedAt: GENERATED_AT,
-    geometry: { type: 'Point', coordinates: [0, 0] },
-    locationPrecision: 'exact',
-    locationLabel: 'Browser fixture',
-    sources: source('Fixture authority', id),
-    limitations: ['Deterministic browser fixture; not production data.'],
-    relatedMarketIds: [],
-    properties: { mapEntity: 'hazard-event', detailAvailable: true, geometryMode: 'simplified' },
-    hazardKind: 'earthquake',
-    lifecycle: 'active',
-    coverage: { scope: 'provider-area', label: 'Deterministic browser coverage', isComplete: false, gaps: ['Fixture only.'] },
-    severityEvidence: { provider: 'Fixture authority', rawLevel: 'fixture', mappingVersion: 'fixture.v1', reason: 'Deterministic browser contract.' },
-    revision: { nativeEventId: id, revisionAt: GENERATED_AT, replaces: [], cancelled: false },
-    metrics: { kind: 'earthquake', magnitude: 6.4, depthKm: 12 },
-    ...overrides,
-  };
-}
-
-const quake = hazard({
-  id: 'earthquake:usgs:fixture',
-  title: 'M6.4 Test Ridge Earthquake',
-  severity: 'critical',
-  geometry: { type: 'Point', coordinates: [-122.1, 37.4] },
-  sources: source('USGS', 'fixture'),
+test.afterEach(async ({ page }) => {
+  // Asset routes can still be fetching country geometry after UI assertions.
+  // Stop the document producing late asset requests before draining callbacks.
+  await page.goto('about:blank');
+  await page.unrouteAll({ behavior: 'wait' });
+  expect(pageErrors.get(page), 'map rendering must not throw browser exceptions').toEqual([]);
 });
-const quakeCluster = Array.from({ length: 6 }, (_, index) => hazard({
-  id: `earthquake:usgs:cluster-${index}`,
-  title: `M5.${index} Cluster Ridge Earthquake`,
-  severity: index >= 4 ? 'warning' : 'watch',
-  geometry: { type: 'Point', coordinates: [-122.1, 37.4] },
-  sources: source('USGS', `cluster-${index}`),
-  metrics: { kind: 'earthquake', magnitude: 5 + index / 10, depthKm: 8 + index },
-}));
-const volcano = hazard({
-  id: 'volcano:usgs:fixture',
-  title: 'Fixture Volcano · WATCH / ORANGE',
-  hazardKind: 'volcano',
-  geometry: { type: 'Point', coordinates: [-155.3, 19.4] },
-  sources: source('USGS Volcano Hazards Program', 'fixture-volcano'),
-  metrics: { kind: 'volcano-or-other', statusLabel: 'WATCH / ORANGE' },
-});
-const cyclone = hazard({
-  id: 'tropical-cyclone:nhc:al012026',
-  title: 'HU ADA · NHC Advisory 12',
-  hazardKind: 'tropical-cyclone',
-  geometry: { type: 'Point', coordinates: [-70, 20] },
-  sources: source('NOAA National Hurricane Center', 'AL012026'),
-  properties: {
-    mapEntity: 'hazard-event', detailAvailable: true, geometryMode: 'simplified',
-    movementDirectionDegrees: 315, movementSpeedKnots: 12,
-    geometries: {
-      observedPosition: { type: 'Point', coordinates: [-70, 20] },
-      observedTrack: { type: 'LineString', coordinates: [[-76, 16], [-73, 18], [-70, 20]] },
-      forecastTrack: { type: 'LineString', coordinates: [[-70, 20], [-67, 23], [-64, 27]] },
-      forecastCone: { type: 'Polygon', coordinates: [[[-72, 18], [-66, 19], [-62, 28], [-67, 29], [-72, 18]]] },
-    },
-  },
-  revision: { nativeEventId: 'AL012026', advisoryId: '12', revisionAt: GENERATED_AT, replaces: [], cancelled: false },
-  metrics: { kind: 'tropical-cyclone', maximumWind: { value: 100, unit: 'kt' }, pressureHpa: 960, advisoryNumber: '12', categoryLabel: 'HU' },
-});
-const wildfire = hazard({
-  id: 'wildfire:eonet:fixture',
-  title: 'Sierra Major Wildfire',
-  hazardKind: 'wildfire',
-  severity: 'warning',
-  geometry: { type: 'Point', coordinates: [-118.2, 34.1] },
-  sources: source('NASA EONET', 'fixture-fire'),
-  metrics: { kind: 'wildfire', detectionCount: 84, fireRadiativePowerMw: 420, sensor: 'VIIRS', confidenceLabel: 'high' },
-});
-const detection = hazard({
-  id: 'fire-detection:firms:fixture',
-  title: 'VIIRS Detection · FRP 125 MW',
-  hazardKind: 'fire-detection',
-  severity: 'watch',
-  geometry: { type: 'Point', coordinates: [-118.35, 34.18] },
-  sources: source('NASA FIRMS', 'fixture-detection'),
-  properties: { mapEntity: 'hazard-observation', detailAvailable: true, rawDetection: true, geometryMode: 'source-native' },
-  coverage: { scope: 'viewport', label: 'Requested viewport', isComplete: false, gaps: ['Cloud and satellite overpass limitations apply.'] },
-  metrics: { kind: 'wildfire', detectionCount: 1, fireRadiativePowerMw: 125, sensor: 'VIIRS', satellite: 'N20', confidenceLabel: 'high' },
-});
-const anomaly = hazard({
-  id: 'temperature-anomaly:ncei:202607:42.5N,12.5E',
-  title: 'Observed Temperature Anomaly +3.3 °C',
-  hazardKind: 'temperature-anomaly',
-  severity: 'critical',
-  geometry: { type: 'Polygon', coordinates: [[[10, 40], [15, 40], [15, 45], [10, 45], [10, 40]]] },
-  sources: source('NOAA NCEI Climate at a Glance', '202607:42.5N,12.5E'),
-  metrics: {
-    kind: 'climate-anomaly', variable: 'temperature', value: 3.3, anomaly: 3.3, unit: '°C',
-    baselinePeriod: '1991-2020', calculationVersion: 'ncei-cag-global-mapping.v1',
-    timeWindow: '202607', spatialResolution: '5-degree-grid', provider: 'NOAA NCEI',
-  },
-});
-
-const sourceEvents: Record<string, Json[]> = {
-  usgs: [quake, ...quakeCluster],
-  'usgs-volcano-cap': [volcano],
-  nhc: [cyclone],
-  eonet: [wildfire],
-  gdacs: [],
-  nws: [],
-  firms: [wildfire],
-  'climate-anomaly': [anomaly],
-};
-
-const transportPayload = {
-  generatedAt: GENERATED_AT,
-  status: 'ok',
-  source: 'OpenFlights fixture',
-  freshness: 'live',
-  items: [],
-  aviation: {
-    generatedAt: GENERATED_AT,
-    routes: [{
-      id: 'JFK-LHR', fromCode: 'JFK', toCode: 'LHR', fromLon: -73.78, fromLat: 40.64,
-      toLon: -0.45, toLat: 51.47, corridor: 'North Atlantic trunk', trafficScore: 92,
-      riskScore: 55, status: 'watch', layer: 'trunk', phase: 0.2, speed: 0.00002,
-      riskSources: ['weather'], source: 'OpenFlights fixture',
-    }],
-    hubs: [
-      { code: 'JFK', name: 'John F Kennedy', city: 'New York', country: 'US', lon: -73.78, lat: 40.64, routeCount: 92, status: 'watch' },
-      { code: 'LHR', name: 'Heathrow', city: 'London', country: 'GB', lon: -0.45, lat: 51.47, routeCount: 88, status: 'ok' },
-    ],
-    flights: [{
-      id: 'fixture-seeded', callsign: 'PX101', fromCode: 'JFK', toCode: 'LHR',
-      fromLon: -73.78, fromLat: 40.64, toLon: -0.45, toLat: 51.47,
-      phase: 0.37, speed: 0.00002, status: 'watch', layer: 'trunk', riskScore: 55,
-    }],
-  },
-};
-
-const minimalStyle = {
-  version: 8,
-  sources: { countries: { type: 'geojson', data: '/map-data/world-countries.geojson' } },
-  layers: [
-    { id: 'background', type: 'background', paint: { 'background-color': '#070a0c' } },
-    { id: 'countries', type: 'fill', source: 'countries', paint: { 'fill-color': '#12181c', 'fill-opacity': 1 } },
-    { id: 'country-lines', type: 'line', source: 'countries', paint: { 'line-color': '#526068', 'line-opacity': 0.7, 'line-width': 0.7 } },
-  ],
-};
-
-function mapResponse(key: string, events: Json[], status = 'ok') {
-  return {
-    schemaVersion: 'natural-hazards-map.v1', generatedAt: GENERATED_AT, events,
-    sources: [{
-      key, status,
-      coverage: { scope: 'provider-area', label: `${key} deterministic fixture coverage`, isComplete: false, gaps: ['Fixture only.'] },
-      fetchedAt: GENERATED_AT, dataUpdatedAt: GENERATED_AT, staleAfter: null,
-      lastSuccessAt: status === 'ok' ? GENERATED_AT : null,
-      errorCode: status === 'ok' ? null : 'fixture-unavailable',
-    }],
-    isPartial: status !== 'ok', errors: status === 'ok' ? [] : [{ source: key, code: 'fixture-unavailable' }],
-    counts: { events: events.length, byHazardKind: {} },
-    meta: { source: key, geometryMode: 'simplified', geometryZoom: 3, detailEndpoint: '/runtime/world/natural-hazards/events/{eventId}' },
-  };
-}
-
-async function fulfillJson(route: Route, body: unknown, status = 200) {
-  await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-}
-
-async function installFixtures(page: Page, climateUnavailable = false) {
-  await page.route('https://tiles.openfreemap.org/styles/**', (route) => fulfillJson(route, minimalStyle));
-  await page.route('https://basemaps.cartocdn.com/gl/**', (route) => fulfillJson(route, minimalStyle));
-  await page.route('**/wm-api/**', async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname.replace(/^\/wm-api/, '');
-    if (path === '/bootstrap') {
-      await fulfillJson(route, {
-        generatedAt: GENERATED_AT,
-        defaultWorkspace: { name: 'World Event Map fixture', panels: ['global-transport-shipping'] },
-        featuredMarket: null, activeMarketsPreview: [], activeMarketGroupsPreview: [],
-        globalTradesPreview: [], globalOraclePreview: [], latestContentPreview: [], recentTradesPreview: [],
-        oraclePreview: [], contentPreview: [], pricePreview: null, systemHealth: { apiStatus: 'ok', database: 'fixture' },
-      });
-      return;
-    }
-    if (path === '/runtime/world/natural-hazards/map') {
-      const key = url.searchParams.get('source') || '';
-      const zoom = Number(url.searchParams.get('zoom') || 2);
-      if (key === 'climate-anomaly' && climateUnavailable) {
-        await fulfillJson(route, mapResponse(key, [], 'error'));
-        return;
-      }
-      const events = key === 'firms' && zoom >= 5 ? [detection] : sourceEvents[key] || [];
-      await fulfillJson(route, mapResponse(key, events));
-      return;
-    }
-    if (path.startsWith('/runtime/world/natural-hazards/events/')) {
-      const id = decodeURIComponent(path.split('/').pop() || '');
-      const event = Object.values(sourceEvents).flat().find((candidate) => candidate.id === id) || detection;
-      await fulfillJson(route, { schemaVersion: 'natural-hazard-detail.v1', generatedAt: GENERATED_AT, event });
-      return;
-    }
-    if (path === '/runtime/transport/global-shipping') {
-      await fulfillJson(route, transportPayload);
-      return;
-    }
-    if (path === '/runtime/transport/aviation-viewport') {
-      await fulfillJson(route, {
-        schemaVersion: 'aviation-viewport.v1', generatedAt: GENERATED_AT, status: 'ok',
-        bbox: (url.searchParams.get('bbox') || '-90,30,-60,55').split(',').map(Number), zoom: Number(url.searchParams.get('zoom') || 3),
-        aircraft: [{ id: 'abc123', icao24: 'abc123', callsign: 'PX202', lon: -70, lat: 43, baroAltitude: 10300, velocity: 240, heading: 72, status: 'watch', riskScore: 64, source: 'OpenSky fixture', updatedAt: GENERATED_AT }],
-        aircraftCount: 1, availableAircraftCount: 1, source: 'OpenSky fixture', limitations: ['Deterministic browser fixture.'],
-      });
-      return;
-    }
-    if (path === '/markets' || path === '/market-groups') {
-      await fulfillJson(route, { items: [], pagination: { page: 1, pageSize: 80, total: 0, totalPages: 0, hasMore: false } });
-      return;
-    }
-    await fulfillJson(route, { generatedAt: GENERATED_AT, status: 'ok', items: [], panels: {} });
-  });
-}
 
 async function gotoMap(page: Page, search = '') {
-  await page.goto(`/?view=2d&mapPerf=1&time=all&severity=info,watch,warning,critical&${search}`);
-  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/);
+  // Production defaults to PMTiles; select the same intercepted style in dev
+  // and preview so worker/interaction checks never depend on external tiles.
+  await page.goto(`/?view=2d&mapPerf=1&basemap=openfreemap&time=all&severity=info,watch,warning,critical&${search}`);
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute(
+    'data-map-renderer-ready', (page.viewportSize()?.width || 1440) <= 720 ? 'svg' : 'webgl',
+  );
   await expect(page.getByRole('button', { name: /ALL EVENTS/ })).toContainText(/[1-9]/);
   await waitForMapPaint(page);
 }
@@ -277,6 +53,17 @@ async function mapCanvasCenter(page: Page) {
   return { canvas, x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
+async function hoverMapPoint(page: Page, point: { x: number; y: number }, tooltip: RegExp) {
+  // A props commit can precede the lazy WebGL device import and GPU picking.
+  // Exercise pointer movement until the real tooltip is ready, within the
+  // existing timeout; waiting on text after one early move misses that event.
+  await expect(async () => {
+    await page.mouse.move(point.x - 12, point.y - 12);
+    await page.mouse.move(point.x, point.y);
+    await expect(page.locator('.deck-tooltip:visible')).toContainText(tooltip, { timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
+}
+
 async function projectedMapPoint(page: Page, lon: number, lat: number) {
   const host = page.locator('[data-map-renderer-ready="webgl"]');
   const box = await host.boundingBox();
@@ -292,12 +79,84 @@ async function projectedMapPoint(page: Page, lon: number, lat: number) {
 }
 
 test.beforeEach(async ({ page }) => {
+  const errors: string[] = [];
+  pageErrors.set(page, errors);
+  page.on('pageerror', (error) => errors.push(error.message));
   await installFixtures(page);
+});
+
+test('real vector basemap on hardware WebGL renders tiles and localized labels without the test renderer override', async ({ page }, testInfo) => {
+  test.skip(process.env.POLYMONITOR_E2E_LIVE_BASEMAP !== '1', 'Opt-in external basemap and hardware GPU acceptance.');
+  // API events stay deterministic; the production PMTiles, glyphs and sprites
+  // remain real. In particular, do not use mapPerf=1 to permit SwiftShader.
+  await page.unroute('https://tiles.openfreemap.org/styles/**');
+  await page.unroute('https://basemaps.cartocdn.com/gl/**');
+  // Forward real production assets through the host's existing network proxy
+  // when needed; Vite's Node proxy does not honor HTTPS_PROXY. Preserve Range
+  // responses byte-for-byte. This is not a replacement style or tile fixture.
+  const network = await request.newContext({
+    ...(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {}),
+  });
+  const realAssets = /(?:\/map-tiles\/|https:\/\/protomaps\.github\.io\/basemaps-assets\/)/;
+  await page.route(realAssets, async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.startsWith('/map-tiles/')) {
+      url.host = 'polymonitor.club';
+      url.protocol = 'https:';
+      url.port = '';
+    }
+    const range = route.request().headers().range;
+    const response = await network.get(url.href, { headers: range ? { Range: range } : {}, timeout: 20_000 });
+    await route.fulfill({ response });
+  });
+  try {
+    const ranges: Array<{ status: number; range: string | undefined }> = [];
+    const glyphs: string[] = [];
+    page.on('response', response => {
+      if (response.url().includes('planet.pmtiles')) ranges.push({ status: response.status(), range: response.headers()['content-range'] });
+      if (response.url().includes('/fonts/') && response.ok()) glyphs.push(response.url());
+    });
+    await page.goto('/?view=2d&basemap=pmtiles&time=all&layers=earthquakes-volcanoes&center=30,28&zoom=1.7');
+    const host = page.locator('[data-map-renderer-ready]');
+    await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
+    const gpu = await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl2')!;
+      const debug = gl.getExtension('WEBGL_debug_renderer_info')!;
+      const renderer = String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL));
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return renderer;
+    });
+    expect(gpu).not.toMatch(/swiftshader|llvmpipe|softpipe|software/i);
+    await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');
+    await expect.poll(() => ranges.filter(range => range.status === 206 && range.range).length).toBeGreaterThan(1);
+    await expect.poll(() => glyphs.length).toBeGreaterThan(0);
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(1200);
+    const english = await host.screenshot({ path: testInfo.outputPath('primary-en.png') });
+    await testInfo.attach('real-primary-en', { path: testInfo.outputPath('primary-en.png'), contentType: 'image/png' });
+    await page.locator('.wm-language-switch select').selectOption('zh');
+    // MapLibre draws CJK glyphs locally where supported; extra network requests
+    // are not a valid language assertion. Retain both actual rendered frames.
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(1200);
+    await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');
+    const chinese = await host.screenshot({ path: testInfo.outputPath('primary-zh.png') });
+    expect(chinese.equals(english)).toBe(false);
+    await testInfo.attach('real-primary-zh', { path: testInfo.outputPath('primary-zh.png'), contentType: 'image/png' });
+    await testInfo.attach('real-basemap-network', { body: JSON.stringify({ gpu, ranges, glyphs }, null, 2), contentType: 'application/json' });
+    await expect(page.locator('.wm-world-event-svg-map')).toHaveCount(0);
+  } finally {
+    await page.goto('about:blank');
+    await page.unrouteAll({ behavior: 'wait' });
+    await network.dispose();
+  }
 });
 
 test('WebGL map covers layered hazards, details, URL state, provider reload and aviation', async ({ page }) => {
   await gotoMap(page, `center=-25,27&zoom=2.2&layers=${ALL_LAYERS}`);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
+  await expect.poll(() => page.workers().some(worker => worker.url().includes('maplibre-gl-worker'))).toBe(true);
   await expect(page.getByText('OBSERVED', { exact: true })).toBeVisible();
   await expect(page.getByText('FORECAST', { exact: true })).toBeVisible();
   await screenshot(page, '01-global-default.png');
@@ -321,7 +180,7 @@ test('WebGL map covers layered hazards, details, URL state, provider reload and 
   await waitForMapPaint(page);
   await screenshot(page, '07-country-filter.png');
 
-  await page.goto(`/?view=2d&mapPerf=1&time=all&center=-73,42&zoom=3.2&layers=air-routes&air=all`);
+  await page.goto(`/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-73,42&zoom=3.2&layers=air-routes&air=all`);
   await expect(page.getByText('ALL AVIATION')).toBeVisible();
   await expect.poll(async () => page.evaluate(() => (
     window.__POLYMONITOR_MAP_PERF__?.snapshot().phases['dynamic-commit'].count || 0
@@ -335,14 +194,21 @@ test('dense hazards, NHC geometry and FIRMS drill-down remain visually distinct'
   await gotoMap(page, 'center=-118,35&zoom=4.6&layers=earthquakes-volcanoes,wildfires,weather-alerts');
   await screenshot(page, '02-high-density-hazards.png');
 
-  await page.goto('/?view=2d&mapPerf=1&time=all&center=-69,22&zoom=4.4&layers=weather-alerts');
+  await page.goto('/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-69,22&zoom=4.4&layers=weather-alerts');
   await expect(page.getByText('OBSERVED', { exact: true })).toBeVisible();
   await expect(page.getByText('FORECAST', { exact: true })).toBeVisible();
   await waitForMapPaint(page);
   await screenshot(page, '03-hurricane-observed-forecast-cone.png');
 
-  await page.goto('/?view=2d&mapPerf=1&time=all&center=-118.25,34.15&zoom=6&layers=wildfires');
-  await expect(page.getByRole('button', { name: /ALL EVENTS/ })).toContainText('1');
+  await page.goto('/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-118.25,34.15&zoom=6&layers=wildfires');
+  // EONET's wildfire and FIRMS' individual detection are distinct fixture IDs.
+  // Waiting for only one could accept the partial first paint before EONET arrived.
+  const events = page.getByRole('button', { name: /ALL EVENTS/ });
+  await expect(events).toContainText('2');
+  await events.click();
+  await expect(page.getByRole('button', { name: /Sierra Major Wildfire/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /VIIRS Detection/ })).toBeVisible();
+  await events.click();
   await waitForMapPaint(page);
   await screenshot(page, '04-firms-drill-down.png');
 
@@ -357,19 +223,17 @@ test('climate anomaly includes reproducible geometry and visual evidence', async
 test('WebGL event and cluster picking form complete interaction loops', async ({ page }) => {
   await gotoMap(page, 'center=-122.1,37.4&zoom=8&layers=earthquakes-volcanoes');
   let center = await mapCanvasCenter(page);
-  await page.mouse.move(center.x, center.y);
-  await expect(page.locator('.deck-tooltip:visible')).toContainText(/Cluster Ridge Earthquake|M6.4 Test Ridge Earthquake/);
+  await hoverMapPoint(page, center, /Cluster Ridge Earthquake|M6.4 Test Ridge Earthquake/);
   await page.mouse.click(center.x, center.y);
   await expect(page.locator('.wm-event-inspector')).toBeVisible();
   await expect(page.locator('.wm-event-inspector')).toContainText(/Disaster report/i);
   await page.getByRole('button', { name: 'Close event details' }).click();
 
-  await page.goto('/?view=2d&mapPerf=1&time=all&center=-122.1,37.4&zoom=2.2&layers=earthquakes-volcanoes');
+  await page.goto('/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-122.1,37.4&zoom=2.2&layers=earthquakes-volcanoes');
   await expect(page.getByRole('button', { name: /ALL EVENTS/ })).toContainText('8');
   await waitForMapPaint(page);
   const clusterPoint = await projectedMapPoint(page, -122.1, 37.4);
-  await page.mouse.move(clusterPoint.x, clusterPoint.y);
-  await expect(page.locator('.deck-tooltip:visible')).toContainText(/Cluster.*7 earthquake/i);
+  await hoverMapPoint(page, clusterPoint, /Cluster.*7 earthquake/i);
   const clusterUrl = page.url();
   await page.mouse.click(clusterPoint.x, clusterPoint.y);
   await expect.poll(() => page.url()).not.toBe(clusterUrl);
@@ -443,6 +307,9 @@ test('SVG country context and filtering remain keyboard-accessible', async ({ pa
 test('WebGL context failure switches to SVG and destroys stale deck canvases', async ({ page }) => {
   await gotoMap(page, 'center=-70,22&zoom=3&layers=weather-alerts,earthquakes-volcanoes');
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
+  const mapWorkers = () => page.workers().filter(worker => worker.url().includes('maplibre-gl-worker'));
+  await expect.poll(() => mapWorkers().length).toBeGreaterThan(0);
+  const sharedWorkers = mapWorkers();
   // The mapPerf-only harness invokes the production renderer-level failure
   // callback. It is deterministic across native GPUs and SwiftShader while
   // exercising the real WebGL destroy -> state handoff -> SVG mount path.
@@ -452,6 +319,17 @@ test('WebGL context failure switches to SVG and destroys stale deck canvases', a
   await expect(page.locator('.wm-weather-deck-basemap canvas')).toHaveCount(0);
   await expect(page.locator('.deck-tooltip')).toHaveCount(0);
   await screenshot(page, '08-svg-fallback.png');
+  // MapLibre's global RTL dispatcher holds the shared pool for the document.
+  // Removing a map releases its own actor; remounting must reuse that pool.
+  await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
+  await expect(page.locator('.wm-globe-runtime')).toBeVisible();
+  await page.getByRole('tab', { name: '2D Map', exact: true }).click();
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
+  await waitForMapPaint(page);
+  expect(mapWorkers()).toHaveLength(sharedWorkers.length);
+  expect(mapWorkers().every(worker => sharedWorkers.includes(worker))).toBe(true);
+  await page.goto('about:blank');
+  await expect.poll(() => mapWorkers().length).toBe(0);
 });
 
 test('required source failure makes the affected layer unavailable instead of a working empty toggle', async ({ page }) => {
@@ -465,4 +343,31 @@ test('required source failure makes the affected layer unavailable instead of a 
   await expect(anomalyRow.locator('input[type="checkbox"]')).toBeDisabled();
   await expect(anomalyRow.locator('input[type="checkbox"]')).not.toBeChecked();
   await expect(page.locator('.wm-sidebar-footer')).toHaveText('3/8 LAYERS ACTIVE');
+});
+
+test('country risk evidence reaches a selectable polygon in both primary and SVG renderers', async ({ page }) => {
+  const payload = {
+    generatedAt: GENERATED_AT, status: 'ok', items: [],
+    sanctionsTargetBreakdown: [{ label: 'Ukraine', count: 30, latestOccurredAt: GENERATED_AT, latestSource: 'Fixture authority' }],
+    countryRiskBreakdown: [],
+  };
+  await page.route('**/wm-api/v1/runtime/panels?**', route => route.fulfill({ json: {
+    apiVersion: 'v1', status: 'ok', generatedAt: GENERATED_AT,
+    data: { panels: { 'geo-sanctions-shock': payload } }, meta: { panels: {} }, errors: [],
+  } }));
+  await page.route('**/wm-api/runtime/world/geo-sanctions-shock?**', route => route.fulfill({ json: payload }));
+  await gotoMap(page, 'center=31,49&zoom=3.2&layers=sanctions-country-risk');
+  await expect(page.getByRole('button', { name: /ALL EVENTS/ })).toContainText('1');
+  const point = await projectedMapPoint(page, 31, 49);
+  await hoverMapPoint(page, point, /Sanctions activity: Ukraine/);
+  await page.mouse.click(point.x, point.y);
+  await expect(page.locator('.wm-event-inspector')).toContainText('Sanctions activity: Ukraine');
+  await page.getByRole('button', { name: 'Close event details' }).click();
+  await page.locator('[data-map-renderer-ready]').dispatchEvent('polymonitor:map-renderer-failure');
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'svg');
+  const area = page.locator('.wm-world-event-svg-shape[data-event-id="geo-sanctions-shock:UA"]');
+  await expect(area).toBeVisible();
+  await expect(area).not.toHaveAttribute('d', '');
+  await area.dispatchEvent('click');
+  await expect(page.locator('.wm-event-inspector')).toContainText('Sanctions activity: Ukraine');
 });

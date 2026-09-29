@@ -7,4 +7,5 @@ export const panel = panelFromRenderer(marketPanelRenderers, {
   eyebrow: 'agent',
   description: 'Market-wide AI brief, focal points, and convergence signals.',
   defaultEnabled: false,
+  dataDependencies: ['alpha-signal', 'whale-tracker', 'suspicious-flow'],
 });

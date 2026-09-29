@@ -32,5 +32,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeLaborServicesInflationMonitor(36),
+  fetchData: (context) => fetchRuntimeLaborServicesInflationMonitor(36, context?.signal),
 });

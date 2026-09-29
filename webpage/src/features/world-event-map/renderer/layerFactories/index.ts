@@ -1,39 +1,36 @@
 import type { LayersList } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import type { WorldEventMapState } from '../../state/mapState';
-import { createEventGeometryLayers } from './eventGeometryLayers';
-import {
-  createEventPointLayers,
-  type EventClusterIndex,
-  type LabelProjection,
-  type ScreenBox,
-} from './eventPointLayer';
 import { createAviationLayers } from './aviationLayers';
+import { type EventClusterIndex, type LabelProjection, type ScreenBox } from './eventClusters';
+import { createEventGeometryLayers } from './eventGeometryLayers';
+import { createEventPointLayers } from './eventPointLayer';
 
-export { EventClusterIndex, type EventCluster } from './eventPointLayer';
-export { isHazardEvent } from './shared';
 export {
-  createEventInteractionLayers,
-  createEventPulseLayers,
-  eventRepresentativePoint,
-  HAZARD_PULSE_INTERVAL_MS,
-  hasAnimatedHazardPulse,
-  hazardPulseTargets,
-  selectEventPulseCandidates,
-  RECENT_EVENT_PULSE_MS,
-} from './eventEmphasisLayers';
+  createAviationDynamicLayers,
+  createAviationLayers,
+  createAviationStaticLayerSections,
+  type AviationStaticLayerSections,
+} from './aviationLayers';
 export {
   aviationLayerStats,
   aviationLayerStatsForState,
   aviationLiveAircraftMarkers,
-  createAviationDynamicLayers,
-  createAviationLayers,
-  createAviationStaticLayerSections,
-  type AviationRenderData,
   type AviationMotionPoint,
-  type AviationStaticLayerSections,
+  type AviationRenderData,
   type AviationViewport,
-} from './aviationLayers';
+} from './aviationScene';
+export { EventClusterIndex, type EventCluster } from './eventClusters';
+export {
+  eventRepresentativePoint,
+  hasAnimatedHazardPulse,
+  HAZARD_PULSE_INTERVAL_MS,
+  hazardPulseTargets,
+  RECENT_EVENT_PULSE_MS,
+  selectEventPulseCandidates,
+} from './eventEmphasis';
+export { createEventInteractionLayers, createEventPulseLayers } from './eventEmphasisLayers';
+export { isHazardEvent } from './shared';
 
 export type WorldEventStaticLayerSections = {
   geometry: LayersList;
@@ -45,7 +42,7 @@ export type WorldEventStaticLayerSections = {
  * from the moving aviation overlay so a route runner does not rebuild every
  * hazard polygon, point and label on each animation tick.
  */
-export function createWorldEventStaticLayerSections(
+function createWorldEventStaticLayerSections(
   events: GeoEvent[],
   state: WorldEventMapState,
   showLabels = true,

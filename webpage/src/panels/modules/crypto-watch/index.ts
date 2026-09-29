@@ -11,5 +11,5 @@ export const panel = runtimePanelFromRenderer(macroPanelRenderers, {
 }, {
   tier: 'slow',
   intervalMs: 5000,
-  fetchData: fetchRuntimeCrypto,
+  fetchData: (context) => fetchRuntimeCrypto(context?.signal),
 });

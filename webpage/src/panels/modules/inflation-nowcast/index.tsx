@@ -103,11 +103,12 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'inflation-nowcast',
+  dataDependencies: ['polymarket-macro-map'],
   title: 'Inflation Nowcast',
   eyebrow: 'macro',
   description: 'Cleveland Fed CPI/PCE nowcasting panel.',
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: fetchRuntimeInflationNowcast,
+  fetchData: (context) => fetchRuntimeInflationNowcast(context?.signal),
 });

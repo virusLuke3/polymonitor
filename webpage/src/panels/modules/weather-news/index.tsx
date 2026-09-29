@@ -84,7 +84,6 @@ function HighlightedText({ text, city }: { text?: string | null; city?: string |
 function NewsItem({ item }: { item: RuntimeWeatherNewsItem }) {
   const { copy, shared, formatRelativeTime } = useSpecialistCopy('weather-news');
   const severity = String(item.severity || 'normal').toLowerCase();
-  const tags = (item.tags || []).slice(0, 2);
   const city = item.city || shared('global', 'Global');
   return (
     <a className={`wm-weather-news-item ${severity}`} href={item.url || '#'} target="_blank" rel="noreferrer">
@@ -94,11 +93,9 @@ function NewsItem({ item }: { item: RuntimeWeatherNewsItem }) {
           <span className="wm-weather-news-city">{city}</span>
           <span className="wm-weather-news-source">{item.source || copy('weatherSource', 'Weather source')}</span>
           <span className={`wm-weather-news-severity ${severity}`}>{displaySeverity(severity, shared)}</span>
-          {tags.map((tag) => <span className="wm-weather-news-tag" key={tag}>{tag}</span>)}
         </div>
       </div>
       <strong><HighlightedText text={item.title || copy('weatherUpdate', 'Weather update')} city={city} /></strong>
-      <em><HighlightedText text={item.summary || copy('summaryPending', 'Weather summary pending')} city={city} /></em>
       <div className="wm-weather-news-card-foot">
         <span>{formatRelativeTime(item.publishedAt)}</span>
         <b>{shared('readSource', 'Read source')}</b>
@@ -157,5 +154,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 300000,
-  fetchData: () => fetchRuntimeWeatherNews(24),
+  fetchData: (context) => fetchRuntimeWeatherNews(24, context?.signal),
 });

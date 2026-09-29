@@ -80,3 +80,88 @@ export {
   shortHash,
 };
 
+export function toneClass(value?: string | null) {
+  const tone = String(value || 'neutral').toLowerCase();
+  if (tone === 'up') return 'tone-up';
+  if (tone === 'down') return 'tone-down';
+  if (tone === 'watch') return 'tone-watch';
+  return 'tone-neutral';
+}
+
+export function watchStatusBadge(payload?: { status?: string | null; cacheMode?: string | null } | null) {
+  const status = String(payload?.status || '').toLowerCase();
+  const cacheMode = String(payload?.cacheMode || '').toLowerCase();
+  if (cacheMode.includes('stale')) return 'STALE';
+  if (status === 'ok') return 'LIVE';
+  if (status === 'degraded' || status === 'partial') return 'PARTIAL';
+  if (status === 'empty') return 'WARMING';
+  return status ? status.toUpperCase() : 'SEED';
+}
+
+export function watchItemKey(item: { id?: string | number | null; url?: string | null; title?: string | null; label?: string | null }, index: number) {
+  return String(item.id || item.url || item.title || item.label || index);
+}
+
+export function numericValue(value?: number | string | null) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+export function seededStatusBadge(payload?: { status?: string | null; cacheMode?: string | null } | null) {
+  const mode = String(payload?.cacheMode || '').toLowerCase();
+  const status = String(payload?.status || '').toLowerCase();
+  if (mode.includes('stale') || mode.includes('preserved')) return 'STALE';
+  if (mode.includes('seed')) return status === 'degraded' ? 'PARTIAL' : 'SEED';
+  if (status === 'empty' || status === 'warming') return 'WARM';
+  return status === 'degraded' ? 'PARTIAL' : 'LIVE';
+}
+
+export function alertSeverityClass(item: { severity?: string | null }) {
+  const severity = String(item.severity || '').toLowerCase();
+  if (severity === 'alert') return 'alert';
+  if (severity === 'watch') return 'watch';
+  return 'normal';
+}
+
+export function scoreLabel(value?: string | number | null) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(Math.round(numeric)) : '--';
+}
+
+export function relativeDuration(value?: string | null) {
+  if (!value) return '--';
+  return formatRelative(value).replace(' ago', '').replace('in ', '');
+}
+
+export function compactText(value: string | null | undefined, maxLength: number) {
+  const text = String(value || '').trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(1, maxLength - 1)).trim()}...`;
+}
+
+export function panelStatus(status?: string | null): 'live' | 'muted' {
+  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
+}
+
+function parseTimestamp(value?: string | null): number | null {
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function ageSeconds(value?: string | null): number | null {
+  const parsed = parseTimestamp(value);
+  return parsed == null ? null : Math.max(0, Math.round((Date.now() - parsed) / 1_000));
+}
+
+export function cleanSourceLabel(value?: string | null): string {
+  return String(value || 'unknown')
+    .replace(/[_-]/g, ' ')
+    .replace(/\b\w/g, (character: string) => character.toUpperCase());
+}
+
+export function formatLocalizedCompact(value: string | number | null | undefined, formatNumber: (value: number, options?: Intl.NumberFormatOptions) => string): string {
+  const numeric = Number(value);
+  return Number.isFinite(numeric)
+    ? formatNumber(numeric, { notation: 'compact', maximumFractionDigits: 1 })
+    : '--';
+}

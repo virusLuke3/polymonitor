@@ -1,6 +1,6 @@
+import type { PanelRenderContext, RuntimeInflationNowcastPayload, RuntimeMarketGroup, RuntimeMarketTicker } from '@/types';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import type { PanelRenderContext, RuntimeMarketGroup, RuntimeMarketTicker } from '@/types';
 import type { PanelRenderMap } from './types';
 import { emptyState } from './shared/renderers';
 import { formatCompact } from './shared/formatters';
@@ -74,12 +74,12 @@ function tickerTone(item: RuntimeMarketTicker) {
   return changePercent > 0 ? 'up' : 'down';
 }
 
-function tickerMoveTag(item: RuntimeMarketTicker, mode: 'crypto' | 'macro') {
+function tickerMoveTag(item: RuntimeMarketTicker) {
   const absChange = Math.abs(Number(item.changePercent));
-  if (!Number.isFinite(absChange)) return mode === 'crypto' ? 'SPOT' : 'QUOTE';
-  if (absChange >= (mode === 'crypto' ? 4 : 1.5)) return 'ALERT';
-  if (absChange >= (mode === 'crypto' ? 1.5 : 0.6)) return 'MOVE';
-  return mode === 'crypto' ? 'SPOT' : 'WATCH';
+  if (!Number.isFinite(absChange)) return 'QUOTE';
+  if (absChange >= 1.5) return 'ALERT';
+  if (absChange >= 0.6) return 'MOVE';
+  return 'WATCH';
 }
 
 function tagKey(value: string) {
@@ -178,7 +178,6 @@ function cryptoBoard(
               <b>{item.volume24h ? `$${formatCompact(item.volume24h)}` : item.marketCap ? `$${formatCompact(item.marketCap)}` : '--'}</b>
               <em>{item.volume24h ? labels.volume24h : item.marketCap ? labels.marketCap : labels.flow}</em>
             </div>
-            <span className={`wm-market-signal-chip ${tone}`}>{tickerMoveTag(item, 'crypto')}</span>
           </article>
         );
       })}
@@ -302,7 +301,7 @@ function commodityBoard(
   }
   const leader = topMover(items);
   const avg = averageChange(items);
-  const alertCount = items.filter((item) => tickerMoveTag(item, 'macro') === 'ALERT').length;
+  const alertCount = items.filter((item) => tickerMoveTag(item) === 'ALERT').length;
   return (
     <div className="wm-commodity-board">
       <div className="wm-market-radar-strip">
@@ -315,7 +314,7 @@ function commodityBoard(
         const tone = tickerTone(item);
         const sparkColor = tone === 'down' ? '#ff6464' : '#39ff73';
         const assetClass = commodityClass(item);
-        const signalTag = tickerMoveTag(item, 'macro');
+        const signalTag = tickerMoveTag(item);
         const auxMeta = commodityAuxMeta(item);
         return (
           <div className={`commodity-item ${tone}`} key={item.symbol}>
@@ -402,7 +401,7 @@ function CommoditiesWatchPanel({ commodities }: { commodities?: RuntimeMarketGro
 
 function InflationNowcastPanel({ ctx }: { ctx: PanelRenderContext }) {
   const { copy } = useSpecialistCopy('inflation-nowcast');
-  const nowcast = ctx.inflationNowcast;
+  const nowcast = (ctx.runtimeData['inflation-nowcast'] as RuntimeInflationNowcastPayload | undefined);
   if (!nowcast) return emptyState(copy('empty', 'No inflation nowcast loaded.'));
   const mom = nowcast.monthOverMonth || {};
   const yoy = nowcast.yearOverYear || {};
@@ -460,10 +459,10 @@ function InflationNowcastWorkspacePanel({ ctx }: { ctx: PanelRenderContext }) {
 
 export const macroPanelRenderers: PanelRenderMap = {
   'commodities-watch': {
-    render: (ctx) => <CommoditiesWatchPanel commodities={ctx.commodities} />,
+    render: (ctx) => <CommoditiesWatchPanel commodities={(ctx.runtimeData['commodities-watch'] as RuntimeMarketGroup | undefined)} />,
   },
   'crypto-watch': {
-    render: (ctx) => <CryptoWatchPanel crypto={ctx.crypto} />,
+    render: (ctx) => <CryptoWatchPanel crypto={(ctx.runtimeData['crypto-watch'] as RuntimeMarketGroup | undefined)} />,
   },
   'inflation-nowcast': {
     render: (ctx) => <InflationNowcastWorkspacePanel ctx={ctx} />,

@@ -3,7 +3,6 @@ import type { FeatureCollection } from 'geojson';
 import { buildCountryGeometryIndex } from '../domain/countryGeometry';
 import { adaptBreakingEventMapPayload, adaptBreakingEventPayload } from './breakingEventAdapter';
 import { adaptGeoShockCountryRiskPayload, adaptGeoShockPayload } from './geoShockAdapter';
-import { adaptTransportDisruptions } from './transportDisruptionAdapter';
 import { adaptTransportReference } from './transportReferenceAdapter';
 
 describe('World Event Map adapters', () => {
@@ -204,27 +203,6 @@ describe('World Event Map adapters', () => {
     }, countries);
     expect(result.events).toHaveLength(0);
     expect(result.rejected[0]?.code).toBe('unresolved-country-geometry');
-  });
-
-  it('only emits transport disruptions at watch severity or above', () => {
-    const result = adaptTransportDisruptions({
-      source: 'Transport',
-      items: [
-        { id: 'normal', title: 'Normal route', severity: 'normal' },
-        {
-          id: 'closure',
-          title: 'Airport closure',
-          severity: 'alert',
-          evidence: { lon: 103.99, lat: 1.36 },
-        },
-      ],
-    });
-    expect(result.events).toHaveLength(1);
-    expect(result.events[0]).toMatchObject({
-      id: 'Transport:closure',
-      category: 'transport-disruption',
-      geometry: { type: 'Point', coordinates: [103.99, 1.36] },
-    });
   });
 
   it('normalizes optional route topology into canonical reference geometry', () => {

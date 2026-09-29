@@ -29,13 +29,6 @@ export function priceLabel(value?: string | number | null) {
   return `${Math.round(parsed * 1000) / 10}%`;
 }
 
-export function bookPrice(bin?: RuntimeWeatherQuoteBin | null) {
-  const bid = num(bin?.bestBidYes);
-  const ask = num(bin?.bestAskYes);
-  if (bid !== null && ask !== null) return (bid + ask) / 2;
-  return bid ?? ask ?? null;
-}
-
 export function bookMidPrice(bin?: RuntimeWeatherQuoteBin | null) {
   const bid = num(bin?.bestBidYes);
   const ask = num(bin?.bestAskYes);
@@ -195,7 +188,7 @@ export function midCoverage(city?: RuntimeGlobalWeatherCity | null) {
   return `${bins.filter((bin) => num(bin.midPriceYes) !== null).length}/${bins.length}`;
 }
 
-export function expectedQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
+function expectedQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
   if (!city) return [];
   const unit = city.unit || '';
   const anchor = num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp ?? city.metarTemp);
@@ -223,19 +216,11 @@ export function expectedQuoteBins(city?: RuntimeGlobalWeatherCity | null): Runti
   });
 }
 
-export function displayQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
+function displayQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
   const family = String(city?.marketFamily || city?.metricType || '').toLowerCase();
   if (city?.bins?.length) return city.bins;
   if (family && !family.includes('temperature')) return [];
   return expectedQuoteBins(city);
-}
-
-export function quoteCoverage(city?: RuntimeGlobalWeatherCity | null) {
-  if (!city) return '0/0';
-  if (city.quoteCoverage) return city.quoteCoverage;
-  const bins = city.bins || [];
-  if (!bins.length) return '0/0';
-  return `${bins.filter((bin) => num(bin.midPriceYes) !== null).length}/${bins.length}`;
 }
 
 export function statusBadge(status?: string | null) {
@@ -244,10 +229,6 @@ export function statusBadge(status?: string | null) {
   if (text === 'degraded') return 'PARTIAL';
   if (text === 'warming') return 'WARMING';
   return text ? text.toUpperCase() : 'SEED';
-}
-
-export function panelStatus(status?: string | null): 'live' | 'muted' {
-  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
 }
 
 export function sourceStatus(city?: RuntimeGlobalWeatherCity | null) {

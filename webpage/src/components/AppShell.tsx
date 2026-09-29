@@ -18,7 +18,6 @@ const RESOURCE_NAV_LINKS: Array<{ key: MessageKey; href: string; external?: bool
   { key: 'nav.paper', href: 'https://arxiv.org/pdf/2604.20421', external: true },
   { key: 'nav.github', href: 'https://github.com/3ky03/polymonitor', external: true },
   { key: 'nav.developers', href: '/developers' },
-  { key: 'nav.quant', href: '/quant' },
 ];
 
 type RegionOption = {
@@ -111,7 +110,6 @@ export function AppShell({
               {RESOURCE_NAV_LINKS.map((link) => (
                 <a
                   key={link.key}
-                  className={link.key === 'nav.quant' ? 'wm-site-nav-quant' : undefined}
                   href={link.href}
                   target={link.external ? '_blank' : undefined}
                   rel={link.external ? 'noopener noreferrer' : undefined}

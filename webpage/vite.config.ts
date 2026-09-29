@@ -19,12 +19,21 @@ function pwaServiceWorker(buildId: string): Plugin {
     name: 'polydata-pwa-service-worker',
     apply: 'build',
     generateBundle(_options, bundle) {
-      const generatedAssets = Object.keys(bundle)
-        .filter((name) => /\.(?:css|js)$/.test(name))
-        // The map renderer is demand-loaded. Precaching it during SW install
-        // would compete with first paint and defeat the lazy chunk boundary.
-        .filter((name) => !LAZY_MAP_ASSET_RE.test(name))
-        .map((name) => `/${name}`);
+      this.emitFile({ type: 'asset', fileName: 'release-sha', source: `${buildId}\n` });
+      // Follow only static entry dependencies. Dynamic routes, video and 3D
+      // engines remain demand-loaded, including during first SW installation.
+      const shellAssets = new Set<string>();
+      const visit = (name: string) => {
+        if (shellAssets.has(name)) return;
+        const asset = bundle[name];
+        if (!asset || asset.type !== 'chunk') return;
+        shellAssets.add(name);
+        asset.imports.forEach(visit);
+        const metadata = (asset as typeof asset & { viteMetadata?: { importedCss: Set<string> } }).viteMetadata;
+        metadata?.importedCss.forEach((css) => shellAssets.add(css));
+      };
+      Object.values(bundle).forEach((asset) => { if (asset.type === 'chunk' && asset.isEntry) visit(asset.fileName); });
+      const generatedAssets = [...shellAssets].map((name) => `/${name}`);
       const precache = [
         '/',
         '/offline.html',
@@ -108,6 +117,10 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
+            // Otherwise Rollup can put Vite's shared import helper in deck-stack,
+            // making the entry import the whole WebGL engine before first paint.
+            if (id === '\0vite/preload-helper.js') return 'module-preload';
+            if (id.includes('commonjsHelpers.js')) return 'module-helpers';
             if (id.includes('/maplibre-gl/')) return 'maplibre';
             if (id.includes('/@deck.gl/')
               || id.includes('/deck.gl/')

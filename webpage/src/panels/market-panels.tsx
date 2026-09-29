@@ -1,10 +1,11 @@
+import { numericValue } from '@/panels/shared/formatters';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem, PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
 import { AiMarketWidePanel } from './shared/ai-market-wide';
 import { shortHash } from './shared/formatters';
-import { emptyState, priceLine } from './shared/renderers';
+import { emptyState } from './shared/renderers';
 import { globalMarkets } from './shared/selectors';
 import { useI18n, type MessageKey } from '@/services/i18n';
 
@@ -14,6 +15,14 @@ const MARKET_CATALOG_AUTO_REFRESH_MS = 20_000;
 const MARKET_CATALOG_SYNC_DELAYED_MS = 60_000;
 const MARKET_ACTIVITY_DELAYED_MS = 12 * 60 * 60 * 1000;
 const MARKET_ACTIVITY_STALE_MS = 24 * 60 * 60 * 1000;
+const MARKET_SORT_OPTIONS: ReadonlyArray<{ value: MarketGroupSort; label: MessageKey }> = [
+  { value: 'active', label: 'atlasMarket.sort.active' },
+  { value: 'volume', label: 'atlasMarket.sort.volume' },
+  { value: 'close', label: 'atlasMarket.sort.close' },
+  { value: 'move', label: 'atlasMarket.sort.move' },
+  { value: 'trades', label: 'atlasMarket.sort.transactions' },
+  { value: 'new', label: 'atlasMarket.sort.newest' },
+];
 const MARKET_SORT_HELP_KEYS: Record<MarketGroupSort, MessageKey> = {
   active: 'atlasMarket.sortHelp.active',
   volume: 'atlasMarket.sortHelp.volume',
@@ -62,11 +71,6 @@ const GENERIC_MARKET_TAGS = new Set([
   '5m',
   '15m',
 ]);
-
-function numericValue(value: string | number | null | undefined) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : 0;
-}
 
 function parseTimestamp(value: string | null | undefined) {
   if (!value) return 0;
@@ -777,13 +781,11 @@ function ActiveMarketsPanel({
             onInput={(event) => setMarketGroupSort(event.currentTarget.value as MarketGroupSort)}
             aria-label={t('atlasMarket.sort')}
           >
-            <option value="active">{t('atlasMarket.sort.active')}</option>
-            <option value="volume">{t('atlasMarket.sort.volume')}</option>
-            <option value="close">{t('atlasMarket.sort.close')}</option>
-            <option value="move">{t('atlasMarket.sort.move')}</option>
-            <option value="trades">{t('atlasMarket.sort.transactions')}</option>
-            <option value="new">{t('atlasMarket.sort.newest')}</option>
+            {MARKET_SORT_OPTIONS.map(({ value, label }) => <option key={value} value={value}>{t(label)}</option>)}
           </select>
+          <span className="wm-market-sort-caption" aria-hidden="true">
+            {t(MARKET_SORT_OPTIONS.find(option => option.value === marketGroupSort)!.label)}
+          </span>
         </div>
       }
     >
@@ -963,37 +965,6 @@ function MarketSummaryPanel({ ctx }: { ctx: PanelRenderContext }) {
   );
 }
 
-function PriceSurfacePanel({ ctx }: { ctx: PanelRenderContext }) {
-  const i18n = useI18n();
-  const { t } = i18n;
-  return (
-    <Panel title={t('atlasMarket.priceSurface')} badge="YES" status="live" count={ctx.bundle?.chart?.points.length || 0}>
-      <div className="wm-price-surface">
-        <div className="wm-price-surface-head">
-          <article>
-            <span>{t('atlasMarket.last')}</span>
-            <strong>{localizedPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice, i18n)}</strong>
-          </article>
-          <article>
-            <span>1H</span>
-            <strong>{localizedPercent(ctx.bundle?.price?.change1h, i18n)}</strong>
-          </article>
-          <article>
-            <span>{t('atlasMarket.trades24h')}</span>
-            <strong>{localizedCompact(ctx.bundle?.price?.tradeCount24h, i18n)}</strong>
-          </article>
-        </div>
-        {priceLine(ctx.bundle?.chart?.points || [], {
-          noHistory: t('atlasMarket.noPriceHistory'),
-          low: (value) => t('atlasMarket.low', { value }),
-          high: (value) => t('atlasMarket.high', { value }),
-          empty: localizedEmptyCopy(i18n),
-        })}
-      </div>
-    </Panel>
-  );
-}
-
 export const marketPanelRenderers: PanelRenderMap = {
   'active-markets': {
     render: (ctx) => (
@@ -1021,8 +992,5 @@ export const marketPanelRenderers: PanelRenderMap = {
   },
   'price-implications': {
     render: (ctx) => <AiMarketWidePanel ctx={ctx} lens="overview" title="AI INSIGHTS" badge="LIVE" />,
-  },
-  'price-chart': {
-    render: (ctx) => <PriceSurfacePanel ctx={ctx} />,
   },
 };

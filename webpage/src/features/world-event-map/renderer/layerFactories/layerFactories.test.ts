@@ -1,28 +1,19 @@
-import { describe, expect, it } from 'vitest';
 import type { Layer } from '@deck.gl/core';
+import { describe, expect, it } from 'vitest';
+import { createWorldEventGeometryLayers, createWorldEventLayers } from '.';
 import type { GeoEvent } from '../../domain/types';
 import { defaultWorldEventMapState } from '../../state/mapState';
-import { createWorldEventGeometryLayers, createWorldEventLayers } from '.';
+import { createAviationDynamicLayers, createAviationStaticLayerSections } from './aviationLayers';
 import {
-  aviationRouteMotionPoints,
-  aviationSeededFlightPoints,
   aviationAltitudeColor,
   aviationLayerStatsForState,
-  createAviationDynamicLayers,
-  createAviationStaticLayerSections,
+  aviationRouteMotionPoints,
+  aviationSeededFlightPoints,
   selectAviationRenderData,
-} from './aviationLayers';
-import {
-  clusterEventPoints,
-  eventVisibleAtZoom,
-  EventClusterIndex,
-} from './eventPointLayer';
-import {
-  createEventInteractionLayers,
-  createEventPulseLayers,
-  eventRepresentativePoint,
-  hazardPulseTargets,
-} from './eventEmphasisLayers';
+} from './aviationScene';
+import { clusterEventPoints, EventClusterIndex, eventVisibleAtZoom } from './eventClusters';
+import { eventRepresentativePoint, hazardPulseTargets } from './eventEmphasis';
+import { createEventInteractionLayers, createEventPulseLayers } from './eventEmphasisLayers';
 
 const pointEvent = (id: string, lon: number, lat: number, severity: GeoEvent['severity'] = 'watch'): GeoEvent => ({
   id,

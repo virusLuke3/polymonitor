@@ -1,8 +1,9 @@
+import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
-import { panelStatus, selectedWeatherCity, statusBadge } from '../weather-detail-utils';
+import { selectedWeatherCity, statusBadge } from '../weather-detail-utils';
 import { sevenDayPoints, TrendChart } from '../weather-trend-detail';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
@@ -49,4 +50,5 @@ export const panel = panelFromRenderer(renderers, {
   eyebrow: 'weather',
   description: 'Selected city 7 day temperature trend chart.',
   defaultEnabled: true,
+  dataSourceId: 'global-temperature-monitor',
 });

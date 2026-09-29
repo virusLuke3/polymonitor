@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { FeatureCollection } from 'geojson';
 import {
   buildCountryGeometryIndex,
@@ -17,6 +17,8 @@ type CountryGeometryState = {
 let cachedIndex: CountryGeometryIndex | null = null;
 
 export function useCountryGeometry(enabled: boolean): CountryGeometryState {
+  const demand = useRef(enabled);
+  demand.current = enabled;
   const [state, setState] = useState<CountryGeometryState>(() => ({
     index: cachedIndex,
     loading: enabled && cachedIndex == null,
@@ -33,6 +35,7 @@ export function useCountryGeometry(enabled: boolean): CountryGeometryState {
       return;
     }
     const controller = new AbortController();
+    let active = true;
     const timer = window.setTimeout(() => controller.abort(), COUNTRY_GEOMETRY_TIMEOUT_MS);
     setState({ index: null, loading: true, error: null });
     void fetch(COUNTRY_GEOMETRY_URL, {
@@ -41,6 +44,7 @@ export function useCountryGeometry(enabled: boolean): CountryGeometryState {
     }).then(async (response) => {
       if (!response.ok) throw new Error(`Country geometry returned HTTP ${response.status}.`);
       const payload = await response.json() as FeatureCollection;
+      if (!active || !demand.current || controller.signal.aborted) return;
       if (payload?.type !== 'FeatureCollection' || !Array.isArray(payload.features)) {
         throw new Error('Country geometry is not a GeoJSON FeatureCollection.');
       }
@@ -49,6 +53,9 @@ export function useCountryGeometry(enabled: boolean): CountryGeometryState {
       cachedIndex = index;
       setState({ index, loading: false, error: null });
     }).catch((error) => {
+      // Cancellation on a layer/view change is not a source timeout, and an
+      // obsolete response must not populate the cache for the next consumer.
+      if (!active || !demand.current) return;
       if (controller.signal.aborted) {
         setState({
           index: null,
@@ -64,6 +71,7 @@ export function useCountryGeometry(enabled: boolean): CountryGeometryState {
       });
     }).finally(() => window.clearTimeout(timer));
     return () => {
+      active = false;
       window.clearTimeout(timer);
       controller.abort();
     };

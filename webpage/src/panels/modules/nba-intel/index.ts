@@ -11,5 +11,5 @@ export const panel = runtimePanelFromRenderer(sportsPanelRenderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeNbaIntel(12),
+  fetchData: (context) => fetchRuntimeNbaIntel(12, context?.signal),
 });

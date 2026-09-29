@@ -11,5 +11,5 @@ export const panel = runtimePanelFromRenderer(sportsPanelRenderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeNbaMatchupPredictor(8),
+  fetchData: (context) => fetchRuntimeNbaMatchupPredictor(8, context?.signal),
 });

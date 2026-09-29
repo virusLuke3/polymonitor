@@ -1,14 +1,23 @@
+import { scoreLabel } from '../../shared/formatters';
+import { openExternal } from '../../shared/renderers';
+import {
+  youtubeVideoId,
+  panelStatus,
+  categoryToneClass,
+  sourceLocation,
+  categoryLabel,
+  useStaggeredLoad,
+  youtubeBridgeMessageMatches,
+} from '../../shared/videoPlayback';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { buildRuntimeHlsProxyUrl, buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketTvWire } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketTvWirePayload } from '@/types';
-import { useStaggeredLoad, youtubeBridgeMessageMatches } from '../../shared/videoPlayback';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type PlaybackState = 'connecting' | 'playing' | 'waiting' | 'blocked' | 'external';
-const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const HLS_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 
 function badgeLabel(payload?: RuntimeMarketTvWirePayload | null) {
@@ -21,30 +30,8 @@ function badgeLabel(payload?: RuntimeMarketTvWirePayload | null) {
   return 'LIVE';
 }
 
-function panelStatus(payload?: RuntimeMarketTvWirePayload | null): 'live' | 'muted' {
-  const status = String(payload?.status || '').toLowerCase();
-  return status === 'warming' || status === 'empty' ? 'muted' : 'live';
-}
-
-function scoreLabel(value?: string | number | null) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return '--';
-  return String(Math.round(numeric));
-}
-
 function itemTitle(item: RuntimeMarketTvWireItem) {
   return item.displayName || item.name || 'Live video source';
-}
-
-function categoryLabel(value?: string | null) {
-  const category = String(value || 'other').toUpperCase();
-  if (category === 'GEO') return 'GEO';
-  return category;
-}
-
-function categoryToneClass(value?: string | null) {
-  const category = String(value || 'all').toLowerCase().replace(/[^a-z0-9-]/g, '');
-  return `tone-${category || 'all'}`;
 }
 
 function sourceTypeLabel(value?: string | null) {
@@ -68,16 +55,6 @@ function statusLabel(value?: string | null) {
   return status.toUpperCase();
 }
 
-function sourceLocation(item: RuntimeMarketTvWireItem) {
-  return [item.region, item.country, item.language].filter(Boolean).join(' / ') || 'GLOBAL';
-}
-
-function openExternal(url?: string | null) {
-  const target = String(url || '').trim();
-  if (!target) return;
-  window.open(target, '_blank', 'noopener,noreferrer');
-}
-
 function isHlsPreviewable(item?: RuntimeMarketTvWireItem | null) {
   const probeStatus = String(item?.hlsProbeStatus || '').toLowerCase();
   const status = String(item?.status || '').toLowerCase();
@@ -98,13 +75,6 @@ function hlsPlaybackUrl(item?: RuntimeMarketTvWireItem | null) {
 function isInPlaybackCooldown(item: RuntimeMarketTvWireItem | null | undefined, cooldowns: Record<string, number>) {
   if (!item?.id) return false;
   return Number(cooldowns[item.id] || 0) > Date.now();
-}
-
-function youtubeVideoId(item?: RuntimeMarketTvWireItem | null) {
-  const liveId = String(item?.youtubeLiveVideoId || '').trim();
-  if (YOUTUBE_VIDEO_ID_RE.test(liveId)) return liveId;
-  const fallbackId = String(item?.fallbackVideoId || '').trim();
-  return YOUTUBE_VIDEO_ID_RE.test(fallbackId) ? fallbackId : '';
 }
 
 function youtubeEmbedUrl(item?: RuntimeMarketTvWireItem | null) {
@@ -601,5 +571,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 180000,
-  fetchData: () => fetchRuntimeMarketTvWire(60),
+  fetchData: (context) => fetchRuntimeMarketTvWire(60, undefined, context?.signal),
 });

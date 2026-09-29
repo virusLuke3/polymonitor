@@ -1,7 +1,7 @@
 import type { PanelModule, PanelRenderMap } from '../types';
 
 type RuntimeOptions = {
-  tier: NonNullable<PanelModule['refresh']>['tier'];
+  tier: NonNullable<PanelModule['refreshPolicy']>['tier'];
   intervalMs?: number;
   fetchData: NonNullable<PanelModule['fetchData']>;
 };
@@ -23,13 +23,13 @@ export function panelFromRenderer(
 
 export function runtimePanelFromRenderer(
   renderers: PanelRenderMap,
-  definition: Omit<PanelModule, 'render' | 'fetchData' | 'refresh'>,
+  definition: Omit<PanelModule, 'render' | 'fetchData' | 'refreshPolicy'>,
   runtime: RuntimeOptions,
 ): PanelModule {
   return panelFromRenderer(renderers, {
     ...definition,
     fetchData: runtime.fetchData,
-    refresh: {
+    refreshPolicy: {
       tier: runtime.tier,
       intervalMs: runtime.intervalMs,
     },

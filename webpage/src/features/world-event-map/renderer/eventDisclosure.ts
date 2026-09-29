@@ -6,7 +6,7 @@ import { isHazardEvent } from './layerFactories/shared';
  * Keeping it outside the Supercluster factory lets the WebGL and SVG
  * renderers share the same visibility and context-texture contract.
  */
-export function isMajorWorldEvent(event: GeoEvent) {
+function isMajorWorldEvent(event: GeoEvent) {
   if (event.severity === 'critical') return true;
   if (event.severity !== 'warning') return false;
   if (!isHazardEvent(event)) return true;

@@ -18,14 +18,13 @@ export function inspectWebGL2Support(options: { allowSoftware?: boolean } = {}):
   let gl: WebGL2RenderingContext | null = null;
   try {
     gl = canvas.getContext('webgl2', {
-      failIfMajorPerformanceCaveat: !options.allowSoftware,
       powerPreference: 'high-performance',
     });
     if (!gl) {
       return {
         supported: false,
         renderer: null,
-        reason: 'WebGL2 context creation failed or only a major performance caveat was available.',
+        reason: 'WebGL2 context creation failed.',
       };
     }
     const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');

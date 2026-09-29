@@ -83,4 +83,5 @@ export const panel = panelFromRenderer(renderers, {
   eyebrow: 'time',
   description: 'Live market clocks for Shanghai, New York, London, and the selected weather city.',
   defaultEnabled: true,
+  dataSourceId: 'global-temperature-monitor',
 });

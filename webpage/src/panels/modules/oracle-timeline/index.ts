@@ -7,4 +7,5 @@ export const panel = panelFromRenderer(oraclePanelRenderers, {
   eyebrow: 'agent',
   description: 'Market-wide AI synthesis of Polymarket trend clusters, catalysts, and watch items.',
   defaultEnabled: false,
+  dataDependencies: ['alpha-signal', 'whale-tracker', 'suspicious-flow'],
 });

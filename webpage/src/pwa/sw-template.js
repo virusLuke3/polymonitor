@@ -84,7 +84,7 @@ async function networkFirst(request) {
 
 async function cacheFirst(request) {
   const cache = await caches.open(STATIC_CACHE);
-  const cached = await cache.match(request);
+  const cached = (await cache.match(request)) || (await (await caches.open(SHELL_CACHE)).match(request));
   if (cached) return cached;
   const response = await fetch(request);
   if (response.ok) await cache.put(request, response.clone());
@@ -99,7 +99,8 @@ self.addEventListener('fetch', (event) => {
 
   // Canonical market, auth and product data must never be served from a Service Worker cache.
   if (url.pathname === '/wm-api' || url.pathname.startsWith('/wm-api/')) {
-    event.respondWith(fetch(request));
+    // Let the document own the fetch and its AbortSignal. Proxying it through
+    // the worker adds no caching and can outlive the consumer's cancellation.
     return;
   }
   if (request.mode === 'navigate') {

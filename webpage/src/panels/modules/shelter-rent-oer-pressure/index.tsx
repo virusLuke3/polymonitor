@@ -30,11 +30,12 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'shelter-rent-oer-pressure',
+  dataDependencies: ['polymarket-macro-map'],
   title: 'Shelter Rent OER Pressure',
   eyebrow: 'macro',
   description: 'Rent and OER pressure for core CPI markets.',
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeShelterRentOerPressure(8),
+  fetchData: (context) => fetchRuntimeShelterRentOerPressure(8, context?.signal),
 });

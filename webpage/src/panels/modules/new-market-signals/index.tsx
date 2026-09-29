@@ -96,5 +96,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeNewMarketSignals(12),
+  fetchData: (context) => fetchRuntimeNewMarketSignals(12, context?.signal),
 });

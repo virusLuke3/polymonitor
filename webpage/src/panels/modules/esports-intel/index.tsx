@@ -1,18 +1,14 @@
+import { compactText, relativeDuration as startLabel } from '../../shared/formatters';
+import { numericValue as numeric } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGridEsports } from '@/services/api';
 import type { RuntimeGridEsportsItem, RuntimeGridEsportsPayload } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'state' | 'start' | 'momentum';
-
-function numeric(value?: number | string | null) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 
 function stateRank(value?: string | null) {
   if (value === 'live') return 0;
@@ -52,17 +48,6 @@ function pmLabel(item: RuntimeGridEsportsItem) {
   const probability = Number(pm.probability);
   if (Number.isFinite(probability)) return `${Math.round(probability * 100)}% PM`;
   return pm.signal || 'PM';
-}
-
-function startLabel(value?: string | null) {
-  if (!value) return '--';
-  return formatRelative(value).replace(' ago', '').replace('in ', '');
-}
-
-function compactText(value?: string | null, maxLength = 30) {
-  const text = String(value || '').trim();
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(1, maxLength - 1)).trim()}...`;
 }
 
 function sortItems(items: RuntimeGridEsportsItem[], sortMode: SortMode) {
@@ -244,5 +229,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 30000,
-  fetchData: () => fetchRuntimeGridEsports(3),
+  fetchData: (context) => fetchRuntimeGridEsports(3, context?.signal),
 });

@@ -1,3 +1,5 @@
+import { panelStatus } from '../../shared/formatters';
+import { statusBadge, num, tempLabel } from '../weather-detail-utils';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGlobalTemperatureMonitor } from '@/services/api';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
@@ -5,30 +7,6 @@ import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 import { bookCoverage as liveBookCoverage, WeatherCanvasSparkline, weatherSourceLabel } from '../weather-detail-utils';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
-
-function statusBadge(status?: string | null) {
-  const text = String(status || '').toLowerCase();
-  if (text === 'ok') return 'LIVE';
-  if (text === 'degraded') return 'PARTIAL';
-  if (text === 'warming') return 'WARMING';
-  return text ? text.toUpperCase() : 'SEED';
-}
-
-function panelStatus(status?: string | null): 'live' | 'muted' {
-  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
-}
-
-function num(value?: string | number | null) {
-  if (value === null || value === undefined || value === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function tempLabel(value?: string | number | null, unit?: string | null) {
-  const parsed = num(value);
-  if (parsed === null) return '--';
-  return `${Math.round(parsed)}°${unit || ''}`;
-}
 
 function priceLabel(value?: string | number | null) {
   const parsed = num(value);
@@ -194,5 +172,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 60000,
-  fetchData: () => fetchRuntimeGlobalTemperatureMonitor(60),
+  fetchData: (context) => fetchRuntimeGlobalTemperatureMonitor(60, context?.signal),
 });
