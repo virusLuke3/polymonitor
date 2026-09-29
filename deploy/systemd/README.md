@@ -54,6 +54,16 @@ The optional ports are `POLYDATA_CONSUMER_POSTGRES_REMOTE_PORT` and
 to the dedicated remote port only after a database query through it succeeds.
 The existing ClickHouse consumer tunnel remains separate.
 
+
+GCP can share its original environment file with other projects. Put the host
+and port in a private `~/.config/polydata/consumer-database.env`, then add
+`EnvironmentFile=%h/.config/polydata/consumer-database.env` in
+`<unit>.d/polymonitor-database.conf` for services owned by `polydata-gcp.target`.
+This later environment file overrides the shared connection settings without
+changing collector or paper-trading services. Restart affected consumer
+services after changing the connection. Regular code releases preserve these
+private drop-ins.
+
 Do not borrow a collector or paper-trading tunnel for the API. This unit never
 kills listeners or reclaims another service's port: a collision fails startup.
 
