@@ -36,12 +36,18 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
 
+    outputs:
+      tested_sha: ${{ steps.revision.outputs.sha }}
     steps:
       - name: Check out current main
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
+
+      - name: Pin tested revision
+        id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -59,9 +65,9 @@ jobs:
         run: |
           python scripts/qa/check_tracked_secrets.py
           python scripts/qa/check_systemd_units.py
-          python -m compileall -q agent quant scripts telegram tests
-          ruff check agent quant scripts telegram tests
-          python scripts/qa/run_pytest.py
+          python -m compileall -q agent scripts telegram tests
+          ruff check agent scripts telegram tests
+          PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
 
   deploy:
     needs: backend-quality
@@ -84,7 +90,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ needs.backend-quality.outputs.tested_sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5

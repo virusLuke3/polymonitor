@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import market_groups as _route_market_groups
 
 from api.routes.market_groups import MarketGroupRouteDependencies
 
@@ -49,11 +51,7 @@ class MarketGroupServiceTestCase(unittest.TestCase):
             rows = []
             values = {str(value).lower() for value in params}
             if "market_identity_aliases_active_v1" in sql and "SELECT m.id" in sql:
-                return [
-                    {"id": int(value)}
-                    for value in params
-                    if str(value).isdigit()
-                ]
+                return [{"id": int(value)} for value in params if str(value).isdigit()]
             if "cond-1" in values:
                 rows.append(
                     {
@@ -90,12 +88,14 @@ class MarketGroupServiceTestCase(unittest.TestCase):
             "get_cached_runtime_payload": get_cached_runtime_payload,
             "get_snapshot_payload": get_snapshot_payload,
             "set_cached_runtime_payload": set_cached_runtime_payload,
-            "get_market_clob_price_series": lambda market, range_name="1d", interval="15m": [
-                {"timestamp": "2026-04-27T00:00:00Z", "yesPrice": "0.20", "noPrice": "0.80"},
-                {"timestamp": "2026-04-27T01:00:00Z", "yesPrice": "0.21", "noPrice": "0.79"},
-            ]
-            if str(market.get("yes_token_id") or "")
-            else [],
+            "get_market_clob_price_series": lambda market, range_name="1d", interval="15m": (
+                [
+                    {"timestamp": "2026-04-27T00:00:00Z", "yesPrice": "0.20", "noPrice": "0.80"},
+                    {"timestamp": "2026-04-27T01:00:00Z", "yesPrice": "0.21", "noPrice": "0.79"},
+                ]
+                if str(market.get("yes_token_id") or "")
+                else []
+            ),
             "http_json_get": http_json_get,
             "query_all": query_all,
             "utc_now_iso": lambda: "2026-04-27T12:00:00Z",
@@ -178,8 +178,22 @@ class MarketGroupServiceTestCase(unittest.TestCase):
     def test_new_sort_uses_created_at(self):
         ctx = self.make_ctx(
             [
-                {"id": "old", "title": "Old", "active": True, "closed": False, "createdAt": "2026-04-01T00:00:00Z", "markets": [{"id": "m1", "outcomePrices": ["0.4", "0.6"]}]},
-                {"id": "new", "title": "New", "active": True, "closed": False, "createdAt": "2026-04-27T00:00:00Z", "markets": [{"id": "m2", "outcomePrices": ["0.4", "0.6"]}]},
+                {
+                    "id": "old",
+                    "title": "Old",
+                    "active": True,
+                    "closed": False,
+                    "createdAt": "2026-04-01T00:00:00Z",
+                    "markets": [{"id": "m1", "outcomePrices": ["0.4", "0.6"]}],
+                },
+                {
+                    "id": "new",
+                    "title": "New",
+                    "active": True,
+                    "closed": False,
+                    "createdAt": "2026-04-27T00:00:00Z",
+                    "markets": [{"id": "m2", "outcomePrices": ["0.4", "0.6"]}],
+                },
             ]
         )
 
@@ -198,9 +212,24 @@ class MarketGroupServiceTestCase(unittest.TestCase):
                     "createdAt": "2025-06-01T00:00:00Z",
                     "volume24hr": 900000,
                     "markets": [
-                        {"id": "m-old-1", "groupItemTitle": "Thunder", "clobTokenIds": ["old-1"], "outcomePrices": ["0.34", "0.66"]},
-                        {"id": "m-old-2", "groupItemTitle": "Wolves", "clobTokenIds": ["old-2"], "outcomePrices": ["0.18", "0.82"]},
-                        {"id": "m-old-3", "groupItemTitle": "Celtics", "clobTokenIds": ["old-3"], "outcomePrices": ["0.12", "0.88"]},
+                        {
+                            "id": "m-old-1",
+                            "groupItemTitle": "Thunder",
+                            "clobTokenIds": ["old-1"],
+                            "outcomePrices": ["0.34", "0.66"],
+                        },
+                        {
+                            "id": "m-old-2",
+                            "groupItemTitle": "Wolves",
+                            "clobTokenIds": ["old-2"],
+                            "outcomePrices": ["0.18", "0.82"],
+                        },
+                        {
+                            "id": "m-old-3",
+                            "groupItemTitle": "Celtics",
+                            "clobTokenIds": ["old-3"],
+                            "outcomePrices": ["0.12", "0.88"],
+                        },
                     ],
                 },
                 {
@@ -211,8 +240,18 @@ class MarketGroupServiceTestCase(unittest.TestCase):
                     "createdAt": "2026-04-27T08:00:00Z",
                     "volume24hr": 4000,
                     "markets": [
-                        {"id": "m-fresh-1", "groupItemTitle": "YES", "clobTokenIds": ["fresh-1"], "outcomePrices": ["0.48", "0.52"]},
-                        {"id": "m-fresh-2", "groupItemTitle": "NO", "clobTokenIds": ["fresh-2"], "outcomePrices": ["0.52", "0.48"]},
+                        {
+                            "id": "m-fresh-1",
+                            "groupItemTitle": "YES",
+                            "clobTokenIds": ["fresh-1"],
+                            "outcomePrices": ["0.48", "0.52"],
+                        },
+                        {
+                            "id": "m-fresh-2",
+                            "groupItemTitle": "NO",
+                            "clobTokenIds": ["fresh-2"],
+                            "outcomePrices": ["0.52", "0.48"],
+                        },
                     ],
                 },
             ]
@@ -232,8 +271,18 @@ class MarketGroupServiceTestCase(unittest.TestCase):
                     "closed": False,
                     "createdAt": "2026-04-27T08:59:37Z",
                     "markets": [
-                        {"id": "m-fresh-a", "groupItemTitle": "Match Winner", "clobTokenIds": ["fresh-a"], "outcomePrices": ["0.50", "0.50"]},
-                        {"id": "m-fresh-b", "groupItemTitle": "Map 1 Winner", "clobTokenIds": ["fresh-b"], "outcomePrices": ["0.50", "0.50"]},
+                        {
+                            "id": "m-fresh-a",
+                            "groupItemTitle": "Match Winner",
+                            "clobTokenIds": ["fresh-a"],
+                            "outcomePrices": ["0.50", "0.50"],
+                        },
+                        {
+                            "id": "m-fresh-b",
+                            "groupItemTitle": "Map 1 Winner",
+                            "clobTokenIds": ["fresh-b"],
+                            "outcomePrices": ["0.50", "0.50"],
+                        },
                     ],
                 },
                 {
@@ -243,8 +292,19 @@ class MarketGroupServiceTestCase(unittest.TestCase):
                     "closed": False,
                     "createdAt": "2026-04-27T03:00:00Z",
                     "markets": [
-                        {"id": "m-ready-1", "groupItemTitle": "YES", "conditionId": "cond-1", "clobTokenIds": ["yes-1"], "outcomePrices": ["0.48", "0.52"]},
-                        {"id": "m-ready-2", "groupItemTitle": "NO", "clobTokenIds": ["ready-2"], "outcomePrices": ["0.52", "0.48"]},
+                        {
+                            "id": "m-ready-1",
+                            "groupItemTitle": "YES",
+                            "conditionId": "cond-1",
+                            "clobTokenIds": ["yes-1"],
+                            "outcomePrices": ["0.48", "0.52"],
+                        },
+                        {
+                            "id": "m-ready-2",
+                            "groupItemTitle": "NO",
+                            "clobTokenIds": ["ready-2"],
+                            "outcomePrices": ["0.52", "0.48"],
+                        },
                     ],
                 },
             ]
@@ -463,11 +523,56 @@ class MarketGroupRouteTestCase(unittest.TestCase):
         app = Flask(__name__)
         app.register_blueprint(
             create_market_groups_blueprint(
-                MarketGroupRouteDependencies.from_context({
-                    "get_market_groups_payload": lambda **kwargs: {"items": [], "pagination": {"page": 1, "pageSize": 80, "hasMore": False}},
-                    "get_market_group_detail_payload": lambda event_id: {"eventId": event_id, "title": "Demo event", "outcomes": []},
-                    "get_market_group_chart_payload": lambda event_id, range_name="1d": {"eventId": event_id, "range": range_name, "series": []},
-                })
+                MarketGroupRouteDependencies(
+                    get_market_groups_payload={
+                        "get_market_groups_payload": lambda **kwargs: {
+                            "items": [],
+                            "pagination": {"page": 1, "pageSize": 80, "hasMore": False},
+                        },
+                        "get_market_group_detail_payload": lambda event_id: {
+                            "eventId": event_id,
+                            "title": "Demo event",
+                            "outcomes": [],
+                        },
+                        "get_market_group_chart_payload": lambda event_id, range_name="1d": {
+                            "eventId": event_id,
+                            "range": range_name,
+                            "series": [],
+                        },
+                    }.get("get_market_groups_payload", missing_route_dependency),
+                    get_market_group_detail_payload={
+                        "get_market_groups_payload": lambda **kwargs: {
+                            "items": [],
+                            "pagination": {"page": 1, "pageSize": 80, "hasMore": False},
+                        },
+                        "get_market_group_detail_payload": lambda event_id: {
+                            "eventId": event_id,
+                            "title": "Demo event",
+                            "outcomes": [],
+                        },
+                        "get_market_group_chart_payload": lambda event_id, range_name="1d": {
+                            "eventId": event_id,
+                            "range": range_name,
+                            "series": [],
+                        },
+                    }.get("get_market_group_detail_payload", missing_route_dependency),
+                    get_market_group_chart_payload={
+                        "get_market_groups_payload": lambda **kwargs: {
+                            "items": [],
+                            "pagination": {"page": 1, "pageSize": 80, "hasMore": False},
+                        },
+                        "get_market_group_detail_payload": lambda event_id: {
+                            "eventId": event_id,
+                            "title": "Demo event",
+                            "outcomes": [],
+                        },
+                        "get_market_group_chart_payload": lambda event_id, range_name="1d": {
+                            "eventId": event_id,
+                            "range": range_name,
+                            "series": [],
+                        },
+                    }.get("get_market_group_chart_payload", missing_route_dependency),
+                )
             )
         )
 

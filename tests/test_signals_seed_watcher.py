@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 from api.services import signal_service
@@ -17,6 +17,9 @@ from runtime.snapshot_store import SnapshotStore
 class FakeRedis:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
+
+    def close(self) -> None:
+        pass
 
     def ping(self) -> bool:
         return True
@@ -63,7 +66,7 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("ok", meta["status"])
         self.assertEqual(1, meta["recordCount"])
 
-    def test_watcher_preserves_previous_payload_when_new_payload_is_empty(self):
+    def test_watcher_replaces_previous_payload_when_successful_result_is_empty(self):
         watcher, fake_redis = self.make_watcher(component="alpha", limit=8)
         previous = {"items": [{"title": "Old alpha"}], "generatedAt": "old", "status": "ok", "cacheMode": "seeded"}
         watcher.store_payload(previous)
@@ -72,17 +75,18 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         ):
             result = watcher.run_once()
 
-        self.assertEqual("preserved", result["status"])
+        self.assertEqual("empty", result["status"])
         stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
-        self.assertEqual("Old alpha", stored["items"][0]["title"])
+        self.assertEqual([], stored["items"])
+        self.assertEqual("new", stored["generatedAt"])
         meta = json.loads(fake_redis.get("polydata:seed-meta:signals:alpha-signal") or "{}")
-        self.assertEqual("preserved", meta["status"])
+        self.assertEqual("empty", meta["status"])
 
     def test_api_reads_seeded_signal_redis_without_live_build(self):
         with tempfile.TemporaryDirectory() as snapshot_dir:
             store = SnapshotStore(str(Path(snapshot_dir) / "snapshots.sqlite3"))
             cache_key = signal_service.build_alpha_signal_cache_key(limit=8)
-            seeded = {"items": [{"title": "Seeded alpha"}], "generatedAt": "seed", "cacheMode": "seeded"}
+            seeded = {"items": [{"title": "Seeded alpha"}], "generatedAt": "2026-05-03T08:00:00Z", "cacheMode": "seeded"}
             ctx = {
                 "SIGNAL_RUNTIME_TTL_SECONDS": 45,
                 "SNAPSHOT_STORE": store,
@@ -111,12 +115,12 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         seeded_payloads = {
             (signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, signal_service.build_alpha_signal_cache_key(limit=8)): {
                 "items": [{"title": "Alpha 1"}, {"title": "Alpha 2"}],
-                "generatedAt": "seed",
+                "generatedAt": "2026-05-03T08:00:00Z",
                 "cacheMode": "seeded",
             },
             (signal_service.SIGNAL_SNAPSHOT_NAMESPACE_WHALES, signal_service.build_whale_trades_cache_key(limit=14)): {
                 "items": [{"title": "Whale 1"}, {"title": "Whale 2"}],
-                "generatedAt": "seed",
+                "generatedAt": "2026-05-03T08:00:00Z",
                 "cacheMode": "seeded",
             },
             (
@@ -124,7 +128,7 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
                 signal_service.build_suspicious_trades_cache_key(limit=12),
             ): {
                 "items": [{"title": "Suspicious 1"}, {"title": "Suspicious 2"}],
-                "generatedAt": "seed",
+                "generatedAt": "2026-05-03T08:00:00Z",
                 "cacheMode": "seeded",
             },
         }
@@ -188,7 +192,8 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
             "utc_date_days_ago": lambda days: "2026-05-01",
         }
 
-        payload = signal_service.fetch_live_alpha_signal_payload(ctx, limit=3)
+        with patch.object(signal_service.clickhouse_orderfilled_service, "get_volume_whale_rows", return_value=None):
+            payload = signal_service.fetch_live_alpha_signal_payload(ctx, limit=3)
 
         self.assertEqual("degraded", payload["status"])
         self.assertEqual([], payload["items"])
@@ -382,44 +387,43 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("ok", payload["status"])
         self.assertEqual(["0xkeep"], [item["txHash"] for item in payload["items"]])
 
-    def test_whale_bootstrap_fallback_filters_stale_trades(self):
-        stale_bootstrap = {
-            "globalTradesPreview": [
-                {
-                    "marketId": 1,
-                    "marketTitle": "Old market",
-                    "timestamp": "2026-04-28T11:00:40Z",
-                    "price": "0.97",
-                    "size": "60",
-                    "notional": "58.2",
-                    "side": "BUY",
-                    "outcome": "YES",
-                    "txHash": "old",
-                }
-            ]
-        }
-        ctx = {
-            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None)),
-            "utc_now_iso": lambda: "2026-06-06T01:00:00Z",
-            "utc_date_days_ago": lambda days: "2026-05-30T01:00:00Z",
-            "parse_iso_datetime": lambda value: (
-                datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
-            ),
-            "get_recent_trades": lambda limit=24: [],
-            "get_active_markets_snapshot": lambda page_size=8: {"items": []},
-            "get_cached_json": lambda namespace, key: (
-                stale_bootstrap if (namespace, key) == ("bootstrap", "workspace-default-v9") else None
-            ),
-            "SNAPSHOT_STORE": None,
-            "_safe_decimal": signal_service.Decimal,
-            "format_trade_decimal": lambda value: str(value) if value is not None else None,
-            "format_trade_address": lambda value: value,
-        }
+    def test_whale_source_failure_does_not_read_bootstrap_or_market_activity(self):
+        ctx = {"get_cached_json": Mock(), "get_active_markets_snapshot": Mock()}
+        with patch.object(signal_service.clickhouse_orderfilled_service, "get_volume_whale_rows", return_value=None):
+            with self.assertRaises(TimeoutError):
+                signal_service.fetch_live_whale_trades_payload(ctx, limit=3)
+        ctx["get_cached_json"].assert_not_called()
+        ctx["get_active_markets_snapshot"].assert_not_called()
 
-        payload = signal_service.fetch_live_whale_trades_payload(ctx, limit=3)
+    def test_watcher_runtime_receives_settings_and_closes(self):
+        watcher, _ = self.make_watcher()
+        with patch("api.runtime.ServiceRuntime") as runtime:
+            self.assertIs(watcher.service_context(), runtime.return_value.signal_context)
+            runtime.assert_called_once_with(watcher.settings, application=unittest.mock.ANY)
+            watcher.close()
+            runtime.return_value.close.assert_called_once()
 
-        self.assertEqual("empty", payload["status"])
-        self.assertEqual([], payload["items"])
+    def test_failed_refresh_preserves_data_time_and_marks_stale(self):
+        watcher, redis = self.make_watcher()
+        previous = {"items": [{"title": "Old whale"}], "status": "ok", "generatedAt": "2026-09-28T10:00:00Z"}
+        watcher.store_payload(previous)
+        with patch.object(watcher, "fetch_payload", side_effect=TimeoutError("read failed")):
+            watcher.run_once()
+        stored = json.loads(redis.get(watcher.redis_key()))
+        self.assertEqual("stale", stored["status"])
+        self.assertEqual(previous["generatedAt"], stored["generatedAt"])
+        self.assertEqual(previous["items"], stored["items"])
+
+    def test_small_limit_on_expired_seed_schedules_default_snapshot_refresh(self):
+        old = {"items": [{"title": "old"}], "generatedAt": "2026-09-28T10:00:00Z", "status": "ok"}
+        ctx = {"get_cached_runtime_payload": lambda *a: old, "utc_now_iso": lambda: "2026-09-29T10:00:00Z",
+               "SIGNAL_RUNTIME_TTL_SECONDS": 45}
+        with patch.object(signal_service, "_schedule_runtime_snapshot_refresh") as refresh:
+            result = signal_service.get_whale_trades_snapshot(ctx, limit=1)
+        self.assertEqual("stale", result["status"])
+        self.assertEqual(old["generatedAt"], result["generatedAt"])
+        refresh.assert_called_once()
+        self.assertEqual(signal_service.build_whale_trades_cache_key(limit=14), refresh.call_args.kwargs["cache_key"])
 
     def test_watcher_marks_old_payload_stale_even_with_records(self):
         watcher, fake_redis = self.make_watcher(component="whales", limit=14)

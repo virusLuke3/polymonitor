@@ -7,7 +7,6 @@ from urllib.parse import urlsplit
 
 from flask import Blueprint, Response, jsonify, request
 
-from api.context import resolve_route_callable
 from api.services.auth_service import AuthError
 from api.services.mcp_service import (
     MCP_PROTOCOL_VERSION,
@@ -27,22 +26,6 @@ class McpRouteDependencies:
     get_market_data_quality: Callable[[], dict[str, Any]]
     get_public_briefing: Callable[[str], dict[str, Any]]
     allowed_origins: frozenset[str]
-
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> McpRouteDependencies:
-        return cls(
-            authenticate=resolve_route_callable(context, "authenticate_request"),
-            search_markets=resolve_route_callable(context, "search_markets"),
-            get_market_workspace=resolve_route_callable(context, "get_market_workspace_payload"),
-            get_market_oracle=resolve_route_callable(context, "get_market_oracle_payload"),
-            get_market_data_quality=resolve_route_callable(context, "get_market_data_quality_payload"),
-            get_public_briefing=resolve_route_callable(context, "get_public_briefing"),
-            allowed_origins=frozenset(
-                str(value)
-                for value in context.get("MCP_ALLOWED_ORIGINS", ())
-                if str(value)
-            ),
-        )
 
     def service_dependencies(self) -> McpDependencies:
         return McpDependencies(
@@ -79,10 +62,12 @@ def create_mcp_blueprint(dependencies: McpRouteDependencies) -> Blueprint:
         if request.method == "OPTIONS":
             return Response(status=204)
         if request.method == "GET":
-            response = jsonify({
-                "error": "This stateless Streamable HTTP endpoint accepts JSON-RPC over POST.",
-                "discovery": "/.well-known/mcp/server-card.json",
-            })
+            response = jsonify(
+                {
+                    "error": "This stateless Streamable HTTP endpoint accepts JSON-RPC over POST.",
+                    "discovery": "/.well-known/mcp/server-card.json",
+                }
+            )
             response.status_code = 405
             response.headers["Allow"] = "POST, OPTIONS"
             response.headers["MCP-Protocol-Version"] = MCP_PROTOCOL_VERSION

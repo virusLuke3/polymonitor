@@ -43,7 +43,7 @@ jobs:
         run: python scripts/qa/check_systemd_units.py
 
       - name: Compile Python sources
-        run: python -m compileall -q agent quant scripts telegram tests
+        run: python -m compileall -q agent scripts telegram tests
 
       - name: Check shell syntax
         run: |
@@ -55,10 +55,10 @@ jobs:
         run: bash scripts/qa/verify_systemd_units.sh
 
       - name: Run fatal Python lint checks
-        run: ruff check agent quant scripts telegram tests
+        run: ruff check agent scripts telegram tests
 
-      - name: Run non-quarantined Python tests
-        run: python scripts/qa/run_pytest.py
+      - name: Run Python tests
+        run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
 
   frontend-build:
     runs-on: ubuntu-22.04

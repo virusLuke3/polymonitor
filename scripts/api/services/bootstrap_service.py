@@ -298,7 +298,6 @@ class BootstrapPrewarmDependencies:
     snapshot_prewarm_enabled: bool
     get_market_groups_payload: Callable[..., Any]
     get_market_group_chart_payload: Callable[..., Any]
-    get_market_focus_tile_payload: Callable[..., Any]
     get_market_group_snapshot: Callable[..., Any]
     get_bootstrap_component_cached: Callable[..., Any]
     get_active_markets_snapshot: Callable[..., Any]
@@ -345,10 +344,6 @@ class BootstrapPrewarmDependencies:
             get_market_group_chart_payload=_service_callable(
                 context,
                 "get_market_group_chart_payload",
-            ),
-            get_market_focus_tile_payload=_service_callable(
-                context,
-                "get_market_focus_tile_payload",
             ),
             get_market_group_snapshot=_service_callable(
                 context,
@@ -1289,18 +1284,6 @@ def prewarm_snapshot_payloads(ctx: Mapping[str, Any]) -> None:
     )
 
 
-def _prewarm_active_market_focus_tiles(
-    dependencies: BootstrapPrewarmDependencies,
-) -> None:
-    payload = dependencies.get_active_markets_snapshot(page_size=80)
-    items = payload.get("items") if isinstance(payload, dict) else []
-    limit = max(1, min(int(os.environ.get("POLYDATA_PREWARM_MARKET_FOCUS_LIMIT", "16")), 40))
-    for market in (items or [])[:limit]:
-        market_id = market.get("id") if isinstance(market, dict) else None
-        if market_id is not None:
-            dependencies.get_market_focus_tile_payload(int(market_id))
-
-
 def _prewarm_snapshot_payloads(
     dependencies: BootstrapPrewarmDependencies,
 ) -> None:
@@ -1354,11 +1337,6 @@ def _prewarm_snapshot_payloads(
             "markets:80",
             15,
             lambda: dependencies.get_active_markets_snapshot(page_size=80),
-        ),
-        (
-            "markets:focus-tiles",
-            30,
-            lambda: _prewarm_active_market_focus_tiles(dependencies),
         ),
         (
             "oracle:12",
@@ -1517,10 +1495,6 @@ def _prewarm_critical_payloads(
     dependencies: BootstrapPrewarmDependencies,
 ) -> None:
     tasks = [
-        (
-            "markets:focus-tiles",
-            lambda: _prewarm_active_market_focus_tiles(dependencies),
-        ),
         (
             "commodities",
             lambda: dependencies.get_market_group_snapshot(

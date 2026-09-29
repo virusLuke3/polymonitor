@@ -6,8 +6,6 @@ from typing import Any
 
 from flask import Blueprint, g, jsonify, request
 
-from api.context import resolve_route_callable
-
 
 @dataclass(frozen=True)
 class ProductRouteDependencies:
@@ -26,26 +24,6 @@ class ProductRouteDependencies:
     get_web_push: Callable[..., dict[str, Any]]
     subscribe_web_push: Callable[..., dict[str, Any]]
     unsubscribe_web_push: Callable[..., dict[str, Any]]
-
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> ProductRouteDependencies:
-        return cls(
-            authenticate=resolve_route_callable(context, "authenticate_user_request"),
-            request_metadata=resolve_route_callable(context, "auth_request_metadata"),
-            get_watchlist=resolve_route_callable(context, "get_product_watchlist"),
-            add_market=resolve_route_callable(context, "add_product_watchlist_market"),
-            remove_market=resolve_route_callable(context, "remove_product_watchlist_market"),
-            create_rule=resolve_route_callable(context, "create_product_alert_rule"),
-            delete_rule=resolve_route_callable(context, "delete_product_alert_rule"),
-            get_alerts=resolve_route_callable(context, "get_product_alert_events"),
-            mark_alert_read=resolve_route_callable(context, "mark_product_alert_read"),
-            mark_all_read=resolve_route_callable(context, "mark_all_product_alerts_read"),
-            get_preferences=resolve_route_callable(context, "get_product_notification_preferences"),
-            update_preferences=resolve_route_callable(context, "update_product_notification_preferences"),
-            get_web_push=resolve_route_callable(context, "get_product_web_push"),
-            subscribe_web_push=resolve_route_callable(context, "subscribe_product_web_push"),
-            unsubscribe_web_push=resolve_route_callable(context, "unsubscribe_product_web_push"),
-        )
 
 
 def _payload() -> dict[str, Any]:

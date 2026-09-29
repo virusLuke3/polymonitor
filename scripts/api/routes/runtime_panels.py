@@ -9,7 +9,6 @@ from typing import Any, cast
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from api.contracts import api_envelope, api_error, runtime_panel_metadata
-from api.context import resolve_route_callable
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
 from api.runtime_panels.types import RuntimePanelContext
 from api.services import hls_proxy_service, youtube_embed_service, youtube_live_probe_service
@@ -29,42 +28,6 @@ class RuntimePanelRouteDependencies:
     natural_hazard_related_markets: Callable[..., dict[str, Any] | None] | None
     aviation_viewport_snapshot: Callable[..., dict[str, Any]] | None
 
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelRouteDependencies:
-        return cls(
-            panel_context=RuntimePanelContext.from_context(context),
-            utc_now_iso=resolve_route_callable(context, "utc_now_iso"),
-            natural_hazard_map_snapshot=cast(
-                Callable[..., dict[str, Any]] | None,
-                context.get("get_natural_hazard_map_snapshot"),
-            ),
-            natural_hazard_event_detail=cast(
-                Callable[..., dict[str, Any] | None] | None,
-                context.get("get_natural_hazard_event_detail"),
-            ),
-            natural_hazard_related_markets=cast(
-                Callable[..., dict[str, Any] | None] | None,
-                context.get("get_natural_hazard_related_markets"),
-            ),
-            aviation_viewport_snapshot=cast(
-                Callable[..., dict[str, Any]] | None,
-                context.get("get_aviation_viewport_snapshot"),
-            ),
-        )
-
-
-def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
-    if request.headers.get("X-PolyData-Telegram-Publisher") == "1":
-        return
-    try:
-        from telegram.topics.runtime_bridge import publish_panel_snapshot
-    except Exception:
-        return
-    try:
-        publish_panel_snapshot(panel_id, payload)
-    except Exception:
-        return
-
 
 def _get_panel_snapshot(panel, panel_context: RuntimePanelContext, limit: int | None):
     kwargs = {}
@@ -82,17 +45,18 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
 
     def _youtube_relay_token() -> str:
         return str(
-            os.environ.get("POLYDATA_YOUTUBE_LIVE_RELAY_TOKEN")
-            or os.environ.get("RELAY_SHARED_SECRET")
-            or ""
+            os.environ.get("POLYDATA_YOUTUBE_LIVE_RELAY_TOKEN") or os.environ.get("RELAY_SHARED_SECRET") or ""
         ).strip()
 
     def _youtube_relay_auth_header() -> str:
-        return str(
-            os.environ.get("POLYDATA_YOUTUBE_LIVE_RELAY_AUTH_HEADER")
-            or os.environ.get("RELAY_AUTH_HEADER")
+        return (
+            str(
+                os.environ.get("POLYDATA_YOUTUBE_LIVE_RELAY_AUTH_HEADER")
+                or os.environ.get("RELAY_AUTH_HEADER")
+                or "x-polymonitor-relay-key"
+            ).strip()
             or "x-polymonitor-relay-key"
-        ).strip() or "x-polymonitor-relay-key"
+        )
 
     def _is_authorized_youtube_relay_request() -> bool:
         expected = _youtube_relay_token()
@@ -104,11 +68,7 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
 
     def _requested_panel_ids() -> list[str]:
         raw_ids = request.args.get("ids") or ""
-        panel_ids = [
-            panel_id.strip()
-            for panel_id in raw_ids.split(",")
-            if panel_id.strip()
-        ]
+        panel_ids = [panel_id.strip() for panel_id in raw_ids.split(",") if panel_id.strip()]
         if not panel_ids:
             panel_ids = [panel.panel_id for panel in RUNTIME_PANEL_MODULES]
         return list(dict.fromkeys(panel_ids))
@@ -136,7 +96,6 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
                 payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
                 payloads[panel.panel_id] = payload
                 panel_meta[panel.panel_id] = runtime_panel_metadata(panel, payload)
-                _publish_runtime_panel(panel.panel_id, payload)
             except Exception as exc:
                 current_app.logger.exception("runtime-panels batch failed panel_id=%s", panel_id)
                 legacy_errors[panel_id] = exc.__class__.__name__
@@ -219,15 +178,19 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
     def api_natural_hazard_related_markets():
         event_id = str(request.args.get("eventId") or "").strip()
         if not event_id:
-            return jsonify({
-                "status": "error",
-                "error": "event-id-required",
-            }), 400
+            return jsonify(
+                {
+                    "status": "error",
+                    "error": "event-id-required",
+                }
+            ), 400
         if dependencies.natural_hazard_related_markets is None:
-            return jsonify({
-                "status": "error",
-                "error": "hazard-market-linker-unavailable",
-            }), 503
+            return jsonify(
+                {
+                    "status": "error",
+                    "error": "hazard-market-linker-unavailable",
+                }
+            ), 503
         try:
             limit = max(1, min(25, int(request.args.get("limit") or 8)))
         except (TypeError, ValueError):
@@ -237,11 +200,13 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             limit=limit,
         )
         if payload is None:
-            return jsonify({
-                "status": "error",
-                "error": "hazard-event-not-found",
-                "eventId": event_id,
-            }), 404
+            return jsonify(
+                {
+                    "status": "error",
+                    "error": "hazard-event-not-found",
+                    "eventId": event_id,
+                }
+            ), 404
         response = jsonify(payload)
         response.headers["Cache-Control"] = "private, max-age=30"
         return response
@@ -313,11 +278,13 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             return jsonify({"status": "error", "error": "hazard-detail-unavailable"}), 503
         payload = dependencies.natural_hazard_event_detail(event_id=event_id)
         if payload is None:
-            return jsonify({
-                "status": "error",
-                "error": "hazard-event-not-found",
-                "eventId": event_id,
-            }), 404
+            return jsonify(
+                {
+                    "status": "error",
+                    "error": "hazard-event-not-found",
+                    "eventId": event_id,
+                }
+            ), 404
         return _public_conditional_json(
             payload,
             "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400",
@@ -349,7 +316,6 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             return jsonify({"error": "unknown-panel", "panelId": panel_id}), 404
         limit = panel.clamp_limit(request.args.get("limit"))
         payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
-        _publish_runtime_panel(panel.panel_id, payload)
         return jsonify(payload)
 
     @bp.route("/v1/runtime/panels/<panel_id>", methods=["GET"])
@@ -375,7 +341,6 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
         limit = panel.clamp_limit(request.args.get("limit"))
         try:
             payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
-            _publish_runtime_panel(panel.panel_id, payload)
         except Exception:
             current_app.logger.exception("runtime-panel failed panel_id=%s", panel_id)
             return jsonify(
@@ -408,7 +373,6 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
         def _handler(panel=panel):
             limit = panel.clamp_limit(request.args.get("limit"))
             payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
-            _publish_runtime_panel(panel.panel_id, payload)
             return jsonify(payload)
 
         bp.add_url_rule(panel.route, endpoint, _handler, methods=["GET"])

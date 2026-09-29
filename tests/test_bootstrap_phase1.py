@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import bootstrap as _route_bootstrap
 
 from api.routes.bootstrap import BootstrapRouteDependencies
 
@@ -32,7 +34,9 @@ class FakeApp:
 
 
 class FakeSnapshotStore:
-    def __init__(self, fresh: Optional[Dict[tuple[str, str], Any]] = None, stale: Optional[Dict[tuple[str, str], Any]] = None):
+    def __init__(
+        self, fresh: Optional[Dict[tuple[str, str], Any]] = None, stale: Optional[Dict[tuple[str, str], Any]] = None
+    ):
         self.fresh = dict(fresh or {})
         self.stale = dict(stale or {})
         self.set_calls: List[tuple[str, str, Any, int]] = []
@@ -175,13 +179,19 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             "app": FakeApp(),
             "_resources": RuntimeResources(),
             "get_cached_json": lambda namespace, cache_key: redis_cache.get(namespace),
-            "set_cached_json": lambda namespace, cache_key, payload, ttl_seconds: redis_cache.__setitem__(namespace, payload),
+            "set_cached_json": lambda namespace, cache_key, payload, ttl_seconds: redis_cache.__setitem__(
+                namespace, payload
+            ),
             "get_bootstrap_component_cached": get_bootstrap_component_cached,
             "get_market_by_id": get_market_by_id,
             "normalize_market": normalize_market,
-            "get_trades_by_market_id": lambda market_id, limit=12, offset=0: [{"marketId": market_id, "txHash": "0xtrade"}],
+            "get_trades_by_market_id": lambda market_id, limit=12, offset=0: [
+                {"marketId": market_id, "txHash": "0xtrade"}
+            ],
             "get_oracle_events_by_market_id": lambda market_id: [{"marketId": market_id, "eventStatus": "propose"}],
-            "get_related_content_by_market_id": lambda market_id, limit=6: {"items": [{"id": 1, "title": "Linked article"}]},
+            "get_related_content_by_market_id": lambda market_id, limit=6: {
+                "items": [{"id": 1, "title": "Linked article"}]
+            },
             "get_recent_trades_snapshot": lambda limit=18: [{"marketId": 1, "txHash": "0xglobal"}],
             "get_recent_oracle_snapshot": lambda limit=12: [{"marketId": 1, "eventStatus": "propose"}],
             "get_latest_content_snapshot": lambda limit=8: {"items": [{"id": 7, "title": "Latest article"}]},
@@ -189,7 +199,9 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             "get_gamma_active_market_filter": lambda: {},
             "enrich_market_rows_with_runtime_prices": lambda rows, max_updates=18, force_refresh=False: rows,
             "build_system_health_payload": lambda: {"apiStatus": "ok", "redis": True},
-            "table_exists": lambda table_name: latest_content_from_db if table_name in {"content_items", "content_links"} else True,
+            "table_exists": lambda table_name: (
+                latest_content_from_db if table_name in {"content_items", "content_links"} else True
+            ),
             "parse_json_list": parse_json_list,
             "query_all": query_all,
             "query_one": query_one,
@@ -201,9 +213,21 @@ class BootstrapPhase1TestCase(unittest.TestCase):
 
     def test_build_bootstrap_payload_skips_lob_and_keeps_shape(self):
         candidate_rows = [
-            self.make_market_row(11, status="Proposed", yes_token_id="yes-11", no_token_id="no-11", volume_24h="90", trade_count_24h=8),
-            self.make_market_row(22, status="Active", yes_token_id="yes-22", no_token_id="no-22", volume_24h="140", trade_count_24h=12, last_trade_at="2026-04-21T00:00:00Z"),
-            self.make_market_row(33, status="Active", yes_token_id="", no_token_id="", volume_24h="999", trade_count_24h=50),
+            self.make_market_row(
+                11, status="Proposed", yes_token_id="yes-11", no_token_id="no-11", volume_24h="90", trade_count_24h=8
+            ),
+            self.make_market_row(
+                22,
+                status="Active",
+                yes_token_id="yes-22",
+                no_token_id="no-22",
+                volume_24h="140",
+                trade_count_24h=12,
+                last_trade_at="2026-04-21T00:00:00Z",
+            ),
+            self.make_market_row(
+                33, status="Active", yes_token_id="", no_token_id="", volume_24h="999", trade_count_24h=50
+            ),
         ]
         status_rows = [
             {"market_id": 11, "has_settle": 0, "has_propose": 1},
@@ -211,7 +235,9 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             {"market_id": 33, "has_settle": 0, "has_propose": 0},
         ]
         markets_by_id = {int(row["id"]): dict(row) for row in candidate_rows}
-        ctx = self.make_service_context(candidate_rows=candidate_rows, status_rows=status_rows, markets_by_id=markets_by_id)
+        ctx = self.make_service_context(
+            candidate_rows=candidate_rows, status_rows=status_rows, markets_by_id=markets_by_id
+        )
 
         payload = bootstrap_service.build_bootstrap_payload(ctx)
 
@@ -254,7 +280,14 @@ class BootstrapPhase1TestCase(unittest.TestCase):
     def test_get_bootstrap_payload_cached_returns_stale_and_schedules_one_refresh(self):
         stale_payload = {"generatedAt": "stale-cache"}
         ctx = self.make_service_context(
-            snapshot_store=FakeSnapshotStore(stale={(bootstrap_service.BOOTSTRAP_SNAPSHOT_NAMESPACE, bootstrap_service.BOOTSTRAP_CACHE_KEY): stale_payload}),
+            snapshot_store=FakeSnapshotStore(
+                stale={
+                    (
+                        bootstrap_service.BOOTSTRAP_SNAPSHOT_NAMESPACE,
+                        bootstrap_service.BOOTSTRAP_CACHE_KEY,
+                    ): stale_payload
+                }
+            ),
         )
 
         ctx["_resources"].start_thread = Mock(return_value=True)
@@ -276,7 +309,9 @@ class BootstrapPhase1TestCase(unittest.TestCase):
         self.assertEqual(payload, cold_payload)
         self.assertEqual(ctx["_bootstrap_cache"]["value"], cold_payload)
         self.assertEqual(
-            ctx["SNAPSHOT_STORE"].fresh[(bootstrap_service.BOOTSTRAP_SNAPSHOT_NAMESPACE, bootstrap_service.BOOTSTRAP_CACHE_KEY)],
+            ctx["SNAPSHOT_STORE"].fresh[
+                (bootstrap_service.BOOTSTRAP_SNAPSHOT_NAMESPACE, bootstrap_service.BOOTSTRAP_CACHE_KEY)
+            ],
             cold_payload,
         )
 
@@ -288,9 +323,16 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             "COMMODITY_SYMBOLS": [],
             "get_bootstrap_component_cached": lambda component_key, builder, ttl_seconds=60: builder(),
             "get_market_group_snapshot": lambda symbols, kind="commodities": {"kind": kind, "items": []},
-            "get_recent_oracle_snapshot": lambda limit=12: (_ for _ in ()).throw(RuntimeError("boom")) if limit == 12 else counters.__setitem__("oracle16", counters.get("oracle16", 0) + 1),
-            "get_recent_trades_snapshot": lambda limit=18: counters.__setitem__(f"trades{limit}", counters.get(f"trades{limit}", 0) + 1),
-            "get_active_markets_snapshot": lambda page_size=40: {"items": []},
+            "get_recent_oracle_snapshot": lambda limit=12: (
+                (_ for _ in ()).throw(RuntimeError("boom"))
+                if limit == 12
+                else counters.__setitem__("oracle16", counters.get("oracle16", 0) + 1)
+            ),
+            "get_recent_trades_snapshot": lambda limit=18: counters.__setitem__(
+                f"trades{limit}", counters.get(f"trades{limit}", 0) + 1
+            ),
+            "get_active_markets_snapshot": lambda page_size=40: {"items": [{"id": 42}]},
+            "get_market_focus_tile_payload": Mock(),
             "get_bootstrap_payload_cached": lambda: counters.__setitem__("bootstrap", counters.get("bootstrap", 0) + 1),
             "get_whale_trades_snapshot": lambda limit=14: {"items": []},
             "get_suspicious_trades_snapshot": lambda limit=12: {"items": []},
@@ -312,6 +354,9 @@ class BootstrapPhase1TestCase(unittest.TestCase):
         self.assertEqual(counters.get("trades18"), 1)
         self.assertEqual(counters.get("trades24"), 1)
         self.assertEqual(counters.get("oracle16"), 1)
+        ctx["get_market_focus_tile_payload"].assert_not_called()
+        bootstrap_service.prewarm_critical_payloads(ctx)
+        ctx["get_market_focus_tile_payload"].assert_not_called()
 
     def test_bootstrap_route_returns_payload_without_lob_runtime(self):
         market = self.make_market_row(88, status="Active", yes_token_id="yes-88", no_token_id="no-88", volume_24h="50")
@@ -321,7 +366,21 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             markets_by_id={88: market},
         )
         app = Flask(__name__)
-        app.register_blueprint(create_bootstrap_blueprint(BootstrapRouteDependencies.from_context({"get_bootstrap_payload_cached": lambda: bootstrap_service.get_bootstrap_payload_cached(ctx)})))
+        app.register_blueprint(
+            create_bootstrap_blueprint(
+                BootstrapRouteDependencies(
+                    get_dashboard_payload_cached={
+                        "get_bootstrap_payload_cached": lambda: bootstrap_service.get_bootstrap_payload_cached(ctx)
+                    }.get("get_dashboard_payload_cached", missing_route_dependency),
+                    get_bootstrap_payload_cached={
+                        "get_bootstrap_payload_cached": lambda: bootstrap_service.get_bootstrap_payload_cached(ctx)
+                    }.get("get_bootstrap_payload_cached", missing_route_dependency),
+                    search_markets={
+                        "get_bootstrap_payload_cached": lambda: bootstrap_service.get_bootstrap_payload_cached(ctx)
+                    }.get("search_markets", missing_route_dependency),
+                )
+            )
+        )
 
         with app.test_client() as client:
             response = client.get("/bootstrap")

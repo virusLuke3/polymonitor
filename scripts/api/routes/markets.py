@@ -6,7 +6,6 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from api.context import resolve_route_callable
 from api.services import outcome_semantics_service
 
 
@@ -26,31 +25,13 @@ class MarketRouteDependencies:
     sanitize_payload: Callable[..., Any]
     get_market_focus_tile_payload: Callable[[int], dict[str, Any]]
 
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> MarketRouteDependencies:
-        query_context = {
-            "query_all": context.get("query_all"),
-            "get_backend": context.get("get_backend"),
-        }
-        return cls(
-            sanitize_payload=lambda payload, **kw: outcome_semantics_service.sanitize_public_market_payload(query_context, payload, **kw),
-            get_markets_payload=resolve_route_callable(context, "get_markets_payload"),
-            get_market_by_id=resolve_route_callable(context, "get_market_by_id"),
-            get_market_by_slug=resolve_route_callable(context, "get_market_by_slug"),
-            normalize_market=resolve_route_callable(context, "normalize_market"),
-            get_trades_by_market_id=resolve_route_callable(context, "get_trades_by_market_id"),
-            get_recent_trades_snapshot=resolve_route_callable(context, "get_recent_trades_snapshot"),
-            get_market_oracle_payload=resolve_route_callable(context, "get_market_oracle_payload"),
-            get_recent_oracle_snapshot=resolve_route_callable(context, "get_recent_oracle_snapshot"),
-            get_market_detail_payload=resolve_route_callable(context, "get_market_detail_payload"),
-            get_market_chart_payload=resolve_route_callable(context, "get_market_chart_payload"),
-            get_market_workspace_payload=resolve_route_callable(context, "get_market_workspace_payload"),
-            get_market_focus_tile_payload=resolve_route_callable(context, "get_market_focus_tile_payload"),
-        )
-
 
 def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint:
     bp = Blueprint("market_routes", __name__)
+
+    @bp.errorhandler(TimeoutError)
+    def unavailable(_error):
+        return jsonify({"status": "unavailable", "error": "Market data temporarily unavailable"}), 503
 
     def sanitize(payload: Any, *, market_id: int | None = None) -> Any:
         return dependencies.sanitize_payload(
@@ -80,18 +61,30 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
         market = dependencies.get_market_by_id(market_id)
         if not market:
             return jsonify({"error": "Market not found", "marketId": market_id}), 404
-        normalized = outcome_semantics_service.bind_trusted_oracle_logical_fields(
-            dependencies.normalize_market(market)
-        )
+        normalized = outcome_semantics_service.bind_trusted_oracle_logical_fields(dependencies.normalize_market(market))
         return jsonify(sanitize(normalized, market_id=market_id))
 
     @bp.route("/markets/<int:market_id>/trades", methods=["GET"])
     def api_market_trades_by_id(market_id: int):
-        limit = min(int(request.args.get("limit", 100)), 500)
-        offset = max(0, int(request.args.get("offset", 0)))
+        try:
+            limit = min(max(int(request.args.get("limit", 100)), 1), 500)
+            offset = max(0, int(request.args.get("offset", 0)))
+            if offset > 5000:
+                raise ValueError("Use before=block:log:tx_hash for deeper pagination")
+            cursor = {}
+            if request.args.get("before"):
+                block, log, tx = request.args["before"].split(":")
+                block, log, tx = int(block), int(log), tx.lower().removeprefix("0x")
+                if block < 0 or log < 0 or len(tx) != 64 or any(c not in "0123456789abcdef" for c in tx):
+                    raise ValueError("Invalid trade cursor")
+                if offset:
+                    raise ValueError("Use either before or offset")
+                cursor["before"] = (block, log, tx)
+        except ValueError:
+            return jsonify({"error": "Invalid pagination; before must be block:log:tx_hash, offset at most 5000"}), 400
         return jsonify(
             sanitize(
-                dependencies.get_trades_by_market_id(market_id, limit=limit, offset=offset),
+                dependencies.get_trades_by_market_id(market_id, limit=limit, offset=offset, **cursor),
                 market_id=market_id,
             )
         )
@@ -169,9 +162,7 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
             return jsonify({"error": "Market not found", "slug": slug}), 404
         return jsonify(
             sanitize(
-                outcome_semantics_service.bind_trusted_oracle_logical_fields(
-                    dependencies.normalize_market(market)
-                ),
+                outcome_semantics_service.bind_trusted_oracle_logical_fields(dependencies.normalize_market(market)),
                 market_id=int(market.get("id") or 0) or None,
             )
         )
@@ -184,17 +175,6 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
         market = dependencies.get_market_by_slug(slug)
         if not market:
             return jsonify({"error": "Market not found", "slug": slug}), 404
-        limit = min(int(request.args.get("limit", 100)), 500)
-        offset = max(0, int(request.args.get("offset", 0)))
-        return jsonify(
-            sanitize(
-                dependencies.get_trades_by_market_id(
-                    market["id"],
-                    limit=limit,
-                    offset=offset,
-                ),
-                market_id=int(market["id"]),
-            )
-        )
+        return api_market_trades_by_id(int(market["id"]))
 
     return bp

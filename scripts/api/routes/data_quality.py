@@ -6,18 +6,10 @@ from typing import Any
 
 from flask import Blueprint, jsonify
 
-from api.context import resolve_route_callable
-
 
 @dataclass(frozen=True)
 class DataQualityRouteDependencies:
     get_market_data_quality_payload: Callable[[], dict[str, Any]]
-
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> DataQualityRouteDependencies:
-        return cls(
-            get_market_data_quality_payload=resolve_route_callable(context, "get_market_data_quality_payload")
-        )
 
 
 def create_data_quality_blueprint(dependencies: DataQualityRouteDependencies) -> Blueprint:

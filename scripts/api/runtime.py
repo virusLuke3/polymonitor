@@ -18,10 +18,7 @@ except ImportError:
 from types import SimpleNamespace
 
 from db.trade_v2 import (
-    TRADE_V2_CORE_TABLE,
-    get_address_history_source,
     get_trade_read_source,
-    get_trade_stats_source,
     sql_identifier,
 )
 from runtime.content_runtime import RuntimeContentProvider
@@ -33,7 +30,6 @@ from api.context import ApplicationLog, RuntimeResources
 from api.db_pool import build_api_connection_factory
 from api.services import (
     bootstrap_service,
-    clickhouse_orderfilled_service,
     global_weather_map_service,
     natural_hazards,
     system_service,
@@ -47,7 +43,11 @@ class ServiceRuntime:
         self, settings: ApiSettings | None = None, *, application: ApplicationLog | None = None, connection_factory=None
     ):
         self.SETTINGS = settings or load_api_settings()
-        self.resources = RuntimeResources()
+        self.resources = RuntimeResources(
+            clickhouse=self.SETTINGS.clickhouse,
+            snapshot_workers=self.SETTINGS.snapshot_refresh_workers,
+            workspace_workers=self.SETTINGS.workspace_refresh_workers,
+        )
         self.app = application or SimpleNamespace(logger=logging.getLogger("polydata.services"))
         self.ALLOWED_ORIGINS = set(self.SETTINGS.allowed_origins)
         self._dashboard_cache_lock = threading.Lock()
@@ -60,8 +60,6 @@ class ServiceRuntime:
             self.SETTINGS.database.connect, lambda: self.SETTINGS.database.backend
         )
         self.TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
-        self.TRADE_STATS_SOURCE = sql_identifier(get_trade_stats_source())
-        self.ADDRESS_HISTORY_SOURCE = sql_identifier(get_address_history_source())
         self.CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
         self.SNAPSHOT_STORE = SnapshotStore(self.SETTINGS.snapshot_sqlite_path)
         self._runtime_init_lock = threading.Lock()
@@ -70,7 +68,7 @@ class ServiceRuntime:
         self._snapshot_prewarm_owner_fd = None
         from api.bindings import bind_services
 
-        self._bindings = bind_services(self)
+        bind_services(self)
 
     def _runtime_coordination_dir(self) -> Path:
         candidate = Path(self.SETTINGS.snapshot_sqlite_path).expanduser()
@@ -242,58 +240,6 @@ class ServiceRuntime:
         if ttl_seconds is None:
             ttl_seconds = self.SETTINGS.bootstrap_component_ttl_seconds
         return api_cache.get_bootstrap_component_cached(self.cache, component_key, builder, ttl_seconds=ttl_seconds)
-
-    def get_trade_derived_market_price_series(self, market_id: int, limit: int = 400) -> List[Dict[str, Any]]:
-        clickhouse_points = clickhouse_orderfilled_service.get_price_series(
-            self.market_context, market_id, limit=limit
-        )
-        if clickhouse_points is not None:
-            return clickhouse_points
-        trade_source = self._bindings["get_existing_trade_read_source"]()
-        if trade_source is None:
-            return []
-        if self._bindings["_identifier_name"](trade_source) == TRADE_V2_CORE_TABLE:
-            rows = self._bindings["query_all"](
-                f"""
-            SELECT
-                DATE_FORMAT(block_time, '%%Y-%%m-%%dT%%H:%%i:%%sZ') AS timestamp,
-                CASE outcome_code
-                    WHEN 1 THEN 'YES'
-                    WHEN 2 THEN 'NO'
-                    ELSE 'UNKNOWN'
-                END AS outcome,
-                price,
-                block_number,
-                log_index
-            FROM {trade_source}
-            WHERE market_id = ?
-            ORDER BY block_time DESC, block_number DESC, log_index DESC
-            LIMIT ?
-            """,
-                (market_id, limit),
-            )
-        else:
-            rows = self._bindings["query_all"](
-                f"""
-            SELECT timestamp, outcome, price, block_number, log_index
-            FROM {trade_source}
-            WHERE market_id = ?
-            ORDER BY timestamp DESC, block_number DESC, log_index DESC
-            LIMIT ?
-            """,
-                (market_id, limit),
-            )
-        rows.reverse()
-        yes_price = None
-        no_price = None
-        points = []
-        for row in rows:
-            if row.get("outcome") == "YES":
-                yes_price = row.get("price")
-            elif row.get("outcome") == "NO":
-                no_price = row.get("price")
-            points.append({"timestamp": row.get("timestamp"), "yesPrice": yes_price, "noPrice": no_price})
-        return points
 
     def prewarm_critical_payloads(self) -> None:
         bootstrap_service.prewarm_critical_payloads(self.bootstrap_prewarm)

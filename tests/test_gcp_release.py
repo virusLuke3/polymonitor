@@ -15,8 +15,18 @@ def git(repo, *args):
 
 def commit(repo):
     git(repo, "add", ".")
-    git(repo, "-c", "user.name=Release Test", "-c", "user.email=test@example.invalid",
-        "-c", "commit.gpgsign=false", "commit", "-qm", "fixture")
+    git(
+        repo,
+        "-c",
+        "user.name=Release Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "fixture",
+    )
     return git(repo, "rev-parse", "HEAD")
 
 
@@ -26,9 +36,11 @@ def test_release_repairs_missing_dependencies_and_preserves_remote_edits(tmp_pat
     remote.mkdir()
     git(repo, "init", "-q")
     files = {
-        "deploy/systemd/polydata-gcp.target": "[Unit]\nWants=polydata-api.service\n",
+        "deploy/systemd/polydata-gcp.target": "[Unit]\nWants=polydata-api.service polydata-retired.timer\n",
         "deploy/systemd/polydata-api.service": "[Service]\nExecStart=python -m api.app\n",
         "deploy/systemd/polydata-market-sync.service": "collector",
+        "deploy/systemd/polydata-retired.timer": "[Timer]\nUnit=polydata-retired.service\n",
+        "deploy/systemd/polydata-retired.service": "[Service]\nExecStart=retired\n",
         "scripts/api/app.py": "old API",
         "scripts/db/db.py": "unchanged database dependency",
         "scripts/db/trade_v2.py": "unchanged trade reader",
@@ -47,6 +59,9 @@ def test_release_repairs_missing_dependencies_and_preserves_remote_edits(tmp_pat
     (repo / "scripts/runtime/retired.py").unlink()
     (repo / "quant/api/read_api.py").unlink()
     (repo / "design-qa.md").unlink()
+    (repo / "deploy/systemd/polydata-gcp.target").write_text("[Unit]\nWants=polydata-api.service\n")
+    for unit in ("polydata-retired.service", "polydata-retired.timer"):
+        (repo / "deploy/systemd" / unit).unlink()
     target = commit(repo)
     (repo / "scripts/api/app.py").write_text("uncommitted edit must not ship")
     output = tmp_path / "release"
@@ -58,7 +73,8 @@ def test_release_repairs_missing_dependencies_and_preserves_remote_edits(tmp_pat
     assert "webpage/src/App.tsx" not in paths
     assert "design-qa.md" in manifest["external_paths"]
     assert "quant/api/read_api.py" in paths
-    for name in ("scripts/api/app.py", "scripts/runtime/retired.py"):
+    assert {"deploy/systemd/polydata-retired.service", "deploy/systemd/polydata-retired.timer"} <= paths
+    for name in ("scripts/api/app.py", "scripts/runtime/retired.py", "deploy/systemd/polydata-retired.timer"):
         path = remote / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(files[name])
@@ -67,28 +83,40 @@ def test_release_repairs_missing_dependencies_and_preserves_remote_edits(tmp_pat
     assert (remote / "scripts/api/app.py").read_text() == "new API"
     assert (remote / "scripts/db/trade_v2.py").read_text() == files["scripts/db/trade_v2.py"]
     assert not (remote / "scripts/runtime/retired.py").exists()
+    assert not (remote / "deploy/systemd/polydata-retired.timer").exists()
     (remote / "scripts/db/db.py").write_text("unknown remote hotfix")
     assert [entry["path"] for entry in release.preflight(remote, manifest)] == ["scripts/db/db.py"]
     release.rollback_release(remote, receipt)
     assert (remote / "scripts/api/app.py").read_text() == "old API"
     assert (remote / "scripts/runtime/retired.py").exists()
+    assert (remote / "deploy/systemd/polydata-retired.timer").exists()
     assert not (remote / "scripts/db/db.py").exists()
 
 
 def test_release_scope_keeps_consumer_packages_and_excludes_tools():
     for path in (
-        "scripts/db/__init__.py", "scripts/db/db.py", "scripts/db/trade_v2.py",
-        "scripts/market/market_serving_identity.py", "scripts/trade/orderfilled_raw.py",
-        "scripts/oracle/settlement_parser.py", "scripts/weather/temperature_bins.py",
-        "scripts/f1/runtime_feed.py", "scripts/jin10/flash_client.py",
-        "scripts/runtime/worldcup_seed_common.py", "scripts/data/live_video_sources.json",
+        "scripts/db/__init__.py",
+        "scripts/db/db.py",
+        "scripts/db/trade_v2.py",
+        "scripts/market/market_serving_identity.py",
+        "scripts/trade/orderfilled_raw.py",
+        "scripts/oracle/settlement_parser.py",
+        "scripts/weather/temperature_bins.py",
+        "scripts/f1/runtime_feed.py",
+        "scripts/jin10/flash_client.py",
+        "scripts/runtime/worldcup_seed_common.py",
+        "scripts/data/live_video_sources.json",
     ):
         assert release._deployable(path, gcp_units=set()), path
     for path in (
-        "scripts/db/archive/backfill_trades_v2.py", "scripts/db/migrate_sqlite_to_mysql.py",
-        "scripts/trade/clickhouse_orderfilled_writer.py", "scripts/trade/trade_decoder.py",
-        "scripts/clickhouse/build_position_snapshots.py", "scripts/deploy/gcp_release.py",
-        "scripts/qa/check_systemd_units.py", "webpage/src/App.tsx",
+        "scripts/db/archive/backfill_trades_v2.py",
+        "scripts/db/migrate_sqlite_to_mysql.py",
+        "scripts/trade/clickhouse_orderfilled_writer.py",
+        "scripts/trade/trade_decoder.py",
+        "scripts/clickhouse/build_position_snapshots.py",
+        "scripts/deploy/gcp_release.py",
+        "scripts/qa/check_systemd_units.py",
+        "webpage/src/App.tsx",
     ):
         assert not release._deployable(path, gcp_units=set()), path
         assert release._externally_owned(path), path
@@ -115,7 +143,12 @@ def test_packaged_api_starts_without_the_source_checkout(tmp_path):
     release.apply_release(remote, output / "manifest.json", output / "payload.tar.gz", tmp_path / "backups")
     env = {key: os.environ[key] for key in ("PATH", "HOME", "SYSTEMROOT") if key in os.environ}
     env.update(POLYDATA_DISABLE_DOTENV="1", PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=f"{remote}/scripts:{remote}")
-    subprocess.run([sys.executable, "-B", "-c", """
+    subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-c",
+            """
 import importlib, json, pathlib, socket
 def no_network(*args, **kwargs):
     raise AssertionError('startup attempted network access')
@@ -134,4 +167,88 @@ try:
     assert pathlib.Path(importlib.import_module('db.db').__file__).is_relative_to(pathlib.Path.cwd())
 finally:
     app.extensions['polydata_runtime'].close()
-"""], cwd=remote, env=env, check=True, timeout=60)
+""",
+        ],
+        cwd=remote,
+        env=env,
+        check=True,
+        timeout=60,
+    )
+
+
+def test_unit_retirement_and_rollback_restore_installed_state(tmp_path, monkeypatch):
+    import json
+
+    root, units = tmp_path / "root", tmp_path / "units"
+    (root / "deploy/systemd").mkdir(parents=True)
+    units.mkdir()
+    retired = "polydata-retired.timer"
+    foreign = units / "market-data-live.service"
+    foreign.write_text("foreign service")
+    (units / retired).write_text("old timer")
+    manifest = {
+        "version": release.MANIFEST_VERSION,
+        "entries": [{"path": "deploy/systemd/" + retired, "action": "delete"}],
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({"entries": []}))
+    calls = []
+
+    def systemctl(*args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="enabled\n" if args[0] == "is-enabled" else "active\n")
+
+    monkeypatch.setattr(release, "_systemctl", systemctl)
+    release.sync_systemd_units(root, manifest_path, receipt, units)
+    assert not (units / retired).exists()
+    assert ("stop", retired) in calls
+    assert ("disable", retired) in calls
+    release.rollback_release(root, receipt)
+    assert (units / retired).read_text() == "old timer"
+    assert ("enable", retired) in calls
+    assert ("restart", retired) in calls
+    assert foreign.read_text() == "foreign service"
+
+
+def test_unit_rollback_stops_previously_inactive_service(tmp_path, monkeypatch):
+    installed = tmp_path / "polydata-api.service"
+    installed.write_text("new unit")
+    calls = []
+    monkeypatch.setattr(release, "_systemctl", lambda *args, **kwargs: calls.append(args))
+    release._restore_systemd_units(
+        [
+            {
+                "name": installed.name,
+                "path": str(installed),
+                "content": "old unit",
+                "mode": 0o640,
+                "active": False,
+                "enabled": False,
+            }
+        ]
+    )
+    assert installed.read_text() == "old unit"
+    assert installed.stat().st_mode & 0o777 == 0o640
+    assert ("stop", installed.name) in calls
+    assert ("restart", installed.name) not in calls
+
+
+def test_release_readiness_rejects_successful_http_with_stale_or_unavailable_data():
+    from datetime import datetime, timezone
+    import pytest
+
+    now = datetime(2026, 9, 29, 12, tzinfo=timezone.utc)
+    for payload in (
+        {"items": [], "status": "stale", "generatedAt": now.isoformat()},
+        {"items": [], "status": "empty", "generatedAt": "2026-09-28T12:00:00Z"},
+        {"items": [], "status": "unavailable", "generatedAt": now.isoformat()},
+    ):
+        with pytest.raises(RuntimeError):
+            release.validate_readiness_payload("whales", payload, now=now)
+    release.validate_readiness_payload(
+        "flow", {"items": [], "status": "empty", "generatedAt": now.isoformat()}, now=now
+    )
+    with pytest.raises(RuntimeError):
+        release.validate_readiness_payload("health", {"status": "degraded", "database": True, "redis": False}, now=now)

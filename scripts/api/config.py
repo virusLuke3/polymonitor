@@ -5,7 +5,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
@@ -53,6 +54,96 @@ def _get_csv(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
     return values or default
 
 
+def _get_float(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, default))
+        return value if math.isfinite(value) else default
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass(frozen=True)
+class ClickHouseSettings:
+    enabled: bool = True
+    http_url: str = ""
+    container: str = "polydata_clickhouse_orderfilled"
+    database: str = "poly_orderfilled"
+    user: str = "poly_user"
+    password: str = field(default="", repr=False)
+    table: str = "orderfilled_fact"
+    concurrency: int = 1
+    alpha_edge_fee_probability: float = 0.01
+    whale_min_notional: float = 1000.0
+    whale_elevated_notional: float = 2500.0
+    whale_critical_notional: float = 10000.0
+    whale_market_share_threshold: float = 0.1
+    whale_relative_min_notional: float = 500.0
+    signal_min_price: float = 0.02
+    signal_max_price: float = 0.98
+    alpha_volume_window_minutes: int = 15
+    alpha_market_baseline_minutes: int = 60
+    alpha_min_flow_notional: float = 1000.0
+    alpha_min_single_trade_notional: float = 2500.0
+    alpha_relative_min_flow_notional: float = 500.0
+    alpha_market_share_threshold: float = 0.12
+    alpha_min_net_strength: float = 0.55
+    whale_volume_window_minutes: int = 60
+    max_threads: int = 2
+    max_memory_bytes: int = 536870912
+    max_bytes_to_read: int = 536870912
+    max_execution_seconds: int = 6
+
+    def __post_init__(self):
+        for value in (self.database, self.table):
+            if not value or not all(c.isalnum() or c == "_" for c in value):
+                raise ValueError("Unsafe ClickHouse identifier")
+
+    @classmethod
+    def from_environment(cls):
+        return cls(
+            enabled=_get_bool("POLYDATA_ORDERFILLED_CLICKHOUSE_READ_ENABLED", True),
+            http_url=_get_str("POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL", ""),
+            container=_get_str("POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER", cls.container),
+            database=_get_str("POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE", cls.database),
+            user=_get_str("POLYDATA_ORDERFILLED_CLICKHOUSE_USER", cls.user),
+            password=_get_str("POLYDATA_ORDERFILLED_CLICKHOUSE_PASSWORD", _get_str("CLICKHOUSE_PASSWORD", "")),
+            table=_get_str("POLYDATA_ORDERFILLED_CLICKHOUSE_READ_TABLE", cls.table),
+            concurrency=max(1, min(_get_int("POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_CONCURRENCY", 1), 4)),
+            alpha_edge_fee_probability=max(0.0, min(_get_float("POLYDATA_ALPHA_EDGE_FEE_PROBABILITY", 0.01), 0.25)),
+            whale_min_notional=max(0.0, min(_get_float("POLYDATA_WHALE_MIN_NOTIONAL", 1000.0), 1000000000.0)),
+            whale_elevated_notional=max(0.0, min(_get_float("POLYDATA_WHALE_ELEVATED_NOTIONAL", 2500.0), 1000000000.0)),
+            whale_critical_notional=max(
+                0.0, min(_get_float("POLYDATA_WHALE_CRITICAL_NOTIONAL", 10000.0), 1000000000.0)
+            ),
+            whale_market_share_threshold=max(0.0, min(_get_float("POLYDATA_WHALE_MARKET_SHARE_THRESHOLD", 0.1), 1.0)),
+            whale_relative_min_notional=max(
+                0.0, min(_get_float("POLYDATA_WHALE_RELATIVE_MIN_NOTIONAL", 500.0), 1000000000.0)
+            ),
+            signal_min_price=max(0.0, min(_get_float("POLYDATA_SIGNAL_MIN_PRICE", 0.02), 0.49)),
+            signal_max_price=max(0.51, min(_get_float("POLYDATA_SIGNAL_MAX_PRICE", 0.98), 1.0)),
+            alpha_volume_window_minutes=max(5, min(_get_int("POLYDATA_ALPHA_VOLUME_WINDOW_MINUTES", 15), 360)),
+            alpha_market_baseline_minutes=max(15, min(_get_int("POLYDATA_ALPHA_MARKET_BASELINE_MINUTES", 60), 1440)),
+            alpha_min_flow_notional=max(0.0, min(_get_float("POLYDATA_ALPHA_MIN_FLOW_NOTIONAL", 1000.0), 1000000000.0)),
+            alpha_min_single_trade_notional=max(
+                0.0, min(_get_float("POLYDATA_ALPHA_MIN_SINGLE_TRADE_NOTIONAL", 2500.0), 1000000000.0)
+            ),
+            alpha_relative_min_flow_notional=max(
+                0.0, min(_get_float("POLYDATA_ALPHA_RELATIVE_MIN_FLOW_NOTIONAL", 500.0), 1000000000.0)
+            ),
+            alpha_market_share_threshold=max(0.0, min(_get_float("POLYDATA_ALPHA_MARKET_SHARE_THRESHOLD", 0.12), 1.0)),
+            alpha_min_net_strength=max(0.0, min(_get_float("POLYDATA_ALPHA_MIN_NET_STRENGTH", 0.55), 1.0)),
+            whale_volume_window_minutes=max(5, min(_get_int("POLYDATA_WHALE_VOLUME_WINDOW_MINUTES", 60), 1440)),
+            max_threads=max(1, min(_get_int("POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_THREADS", 2), 8)),
+            max_memory_bytes=max(
+                67108864, min(_get_int("POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_MEMORY_BYTES", 536870912), 4294967296)
+            ),
+            max_bytes_to_read=max(
+                67108864, min(_get_int("POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_BYTES_TO_READ", 536870912), 8589934592)
+            ),
+            max_execution_seconds=max(1, min(_get_int("POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_EXECUTION_SECONDS", 6), 30)),
+        )
+
+
 @dataclass(frozen=True)
 class MarketSelectionSettings:
     max_age_hours: int = 336
@@ -67,7 +158,6 @@ class ApiSettings:
     market_selection: MarketSelectionSettings
     workspace_detail_ttl_seconds: int
     workspace_chart_ttl_seconds: int
-    workspace_orderbook_ttl_seconds: int
     workspace_flow_ttl_seconds: int
     database: DatabaseSettings
     deploy_role: str
@@ -212,6 +302,13 @@ class ApiSettings:
     jin10_flash_channel: str
     jin10_flash_app_id: str
     jin10_flash_version: str
+    clickhouse: ClickHouseSettings = field(default_factory=ClickHouseSettings.from_environment)
+    snapshot_refresh_workers: int = field(
+        default_factory=lambda: max(1, min(_get_int("POLYDATA_SNAPSHOT_REFRESH_WORKERS", 2), 8))
+    )
+    workspace_refresh_workers: int = field(
+        default_factory=lambda: max(1, min(_get_int("POLYDATA_MARKET_FOCUS_REFRESH_WORKERS", 2), 12))
+    )
 
 
 def load_api_settings() -> ApiSettings:
@@ -229,7 +326,6 @@ def load_api_settings() -> ApiSettings:
         ),
         workspace_detail_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_DETAIL_TTL_SECONDS", 120),
         workspace_chart_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_CHART_TTL_SECONDS", 90),
-        workspace_orderbook_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_ORDERBOOK_TTL_SECONDS", 60),
         workspace_flow_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_FLOW_TTL_SECONDS", 8),
         database=DatabaseSettings.from_environment(),
         deploy_role=deploy_role,

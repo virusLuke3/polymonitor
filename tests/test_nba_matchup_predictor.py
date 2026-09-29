@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import runtime_sports as _route_runtime_sports
 
 from api.routes.runtime_sports import RuntimeSportsRouteDependencies
 
@@ -127,11 +129,64 @@ class NbaMatchupPredictorTestCase(unittest.TestCase):
         app = Flask(__name__)
         app.register_blueprint(
             create_runtime_sports_blueprint(
-                RuntimeSportsRouteDependencies.from_context({
-                    "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
-                    "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
-                    "get_nba_matchup_predictor_snapshot": lambda limit=8: seen_limits.append(limit) or {"limit": limit},
-                })
+                RuntimeSportsRouteDependencies(
+                    get_nba_scoreboard_snapshot={
+                        "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
+                        "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
+                        "get_nba_matchup_predictor_snapshot": lambda limit=8: (
+                            seen_limits.append(limit) or {"limit": limit}
+                        ),
+                    }.get("get_nba_scoreboard_snapshot", missing_route_dependency),
+                    get_nba_intel_snapshot={
+                        "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
+                        "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
+                        "get_nba_matchup_predictor_snapshot": lambda limit=8: (
+                            seen_limits.append(limit) or {"limit": limit}
+                        ),
+                    }.get("get_nba_intel_snapshot", missing_route_dependency),
+                    get_nba_matchup_predictor_snapshot={
+                        "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
+                        "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
+                        "get_nba_matchup_predictor_snapshot": lambda limit=8: (
+                            seen_limits.append(limit) or {"limit": limit}
+                        ),
+                    }.get("get_nba_matchup_predictor_snapshot", missing_route_dependency),
+                    get_worldcup_intel_snapshot={
+                        "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
+                        "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
+                        "get_nba_matchup_predictor_snapshot": lambda limit=8: (
+                            seen_limits.append(limit) or {"limit": limit}
+                        ),
+                    }.get("get_worldcup_intel_snapshot", missing_route_dependency),
+                    get_worldcup_dashboard_snapshot={
+                        "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
+                        "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
+                        "get_nba_matchup_predictor_snapshot": lambda limit=8: (
+                            seen_limits.append(limit) or {"limit": limit}
+                        ),
+                    }.get("get_worldcup_dashboard_snapshot", missing_route_dependency),
+                    get_worldcup_core_snapshot={
+                        "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
+                        "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
+                        "get_nba_matchup_predictor_snapshot": lambda limit=8: (
+                            seen_limits.append(limit) or {"limit": limit}
+                        ),
+                    }.get("get_worldcup_core_snapshot", missing_route_dependency),
+                    get_worldcup_live_snapshot={
+                        "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
+                        "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
+                        "get_nba_matchup_predictor_snapshot": lambda limit=8: (
+                            seen_limits.append(limit) or {"limit": limit}
+                        ),
+                    }.get("get_worldcup_live_snapshot", missing_route_dependency),
+                    get_worldcup_panel_snapshot={
+                        "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
+                        "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
+                        "get_nba_matchup_predictor_snapshot": lambda limit=8: (
+                            seen_limits.append(limit) or {"limit": limit}
+                        ),
+                    }.get("get_worldcup_panel_snapshot", missing_route_dependency),
+                )
             )
         )
 

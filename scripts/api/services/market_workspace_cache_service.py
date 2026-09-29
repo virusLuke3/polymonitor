@@ -3,13 +3,13 @@ from __future__ import annotations
 import copy
 import json
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 from api import cache as api_cache
 from api.context import RuntimeResources
+from api.services.market_service import assemble_market_workspace
 
 
 @dataclass(frozen=True)
@@ -26,9 +26,7 @@ class MarketWorkspaceCacheDependencies:
     utc_now_iso: Callable[..., str]
     detail_ttl: int = 120
     chart_ttl: int = 90
-    orderbook_ttl: int = 60
     flow_ttl: int = 8
-
 
 
 def _utc_now_iso() -> str:
@@ -62,45 +60,16 @@ def _layer_meta(layer: str, mode: str, cache_key: str) -> Dict[str, Any]:
 def _with_cache_meta(payload: Any, layer: str, mode: str, cache_key: str) -> Any:
     copied = _copy_payload(payload)
     if isinstance(copied, dict):
+        previous = copied.get("marketWorkspaceCache") or {}
         copied["cacheMode"] = mode
         copied["marketWorkspaceCache"] = _layer_meta(layer, mode, cache_key)
+        if mode not in {"live-build", "refresh", "closed"}:
+            copied["marketWorkspaceCache"]["generatedAt"] = previous.get("generatedAt") or copied.get("generatedAt")
+        if mode == "stale-hit":
+            copied["stale"] = True
+            if layer == "flow":
+                copied["status"] = "stale"
     return copied
-
-
-def _book_side_has_levels(side: Any) -> bool:
-    return isinstance(side, dict) and bool(side.get("bids") or side.get("asks"))
-
-
-def _lob_has_levels(payload: Any) -> bool:
-    return isinstance(payload, dict) and (_book_side_has_levels(payload.get("yes")) or _book_side_has_levels(payload.get("no")))
-
-
-def _chart_has_points(payload: Any) -> bool:
-    return isinstance(payload, dict) and isinstance(payload.get("points"), list) and bool(payload.get("points"))
-
-
-def _flow_has_rows(payload: Any) -> bool:
-    if isinstance(payload, dict):
-        rows = payload.get("items")
-    else:
-        rows = payload
-    return isinstance(rows, list) and bool(rows)
-
-
-def _detail_is_usable(payload: Any) -> bool:
-    return isinstance(payload, dict) and not payload.get("_status") and isinstance(payload.get("market"), dict)
-
-
-def _is_empty_replacement(layer: str, payload: Any) -> bool:
-    if layer == "detail":
-        return not _detail_is_usable(payload)
-    if layer == "chart":
-        return not _chart_has_points(payload)
-    if layer == "orderbook":
-        return not _lob_has_levels(payload)
-    if layer == "flow":
-        return not _flow_has_rows(payload)
-    return payload in (None, {}, [])
 
 
 def _read_redis(
@@ -175,6 +144,44 @@ def _write_cache(
         )
 
 
+def _claim_build(dependencies: MarketWorkspaceCacheDependencies, key: str):
+    """Bound running builds; Redis excludes duplicate work across API workers."""
+    resources = dependencies.resources
+    with resources.workspace_lock:
+        if (
+            resources.stopped.is_set()
+            or key in resources.workspace_refreshing
+            or not resources.workspace_slots.acquire(blocking=False)
+        ):
+            return False, None
+        resources.workspace_refreshing.add(key)
+    lease = None
+    try:
+        client = api_cache.get_redis_client(dependencies.cache)
+        if client is not None:
+            lease = client.lock(f"{dependencies.cache.redis_prefix}build:{key}", timeout=180, thread_local=False)
+            if not lease.acquire(blocking=False):
+                _release_build(dependencies, key, None)
+                return False, None
+        return True, lease
+    except Exception:
+        _release_build(dependencies, key, None)
+        dependencies.application.logger.warning("market cache build lease unavailable", exc_info=True)
+        return False, None
+
+
+def _release_build(dependencies: MarketWorkspaceCacheDependencies, key: str, lease) -> None:
+    try:
+        if lease is not None:
+            lease.release()
+    except Exception:
+        dependencies.application.logger.warning("market cache build lease expired", exc_info=True)
+    finally:
+        with dependencies.resources.workspace_lock:
+            dependencies.resources.workspace_refreshing.discard(key)
+        dependencies.resources.workspace_slots.release()
+
+
 def _refresh_async(
     context: MarketWorkspaceCacheDependencies,
     *,
@@ -183,25 +190,16 @@ def _refresh_async(
     cache_key: str,
     builder: Callable[[], Any],
     ttl_seconds: int,
-    stale_payload: Any,
 ) -> None:
     dependencies = context
     refresh_key = f"{namespace}:{cache_key}"
-    with dependencies.resources.workspace_lock:
-        if refresh_key in dependencies.resources.workspace_refreshing:
-            return
-        dependencies.resources.workspace_refreshing.add(refresh_key)
+    claimed, lease = _claim_build(dependencies, refresh_key)
+    if not claimed:
+        return
 
     def refresh() -> None:
         try:
             payload = builder()
-            if _is_empty_replacement(layer, payload) and not _is_empty_replacement(layer, stale_payload):
-                dependencies.application.logger.warning(
-                    "market-workspace-cache refresh skipped empty layer=%s key=%s",
-                    layer,
-                    cache_key,
-                )
-                return
             _write_cache(
                 dependencies,
                 namespace,
@@ -216,15 +214,14 @@ def _refresh_async(
                 cache_key,
             )
         finally:
-            with dependencies.resources.workspace_lock:
-                dependencies.resources.workspace_refreshing.discard(refresh_key)
+            _release_build(dependencies, refresh_key, lease)
 
     try:
-        dependencies.resources.submit(dependencies.resources.workspace_executor, refresh)
+        started = dependencies.resources.start_thread(refresh, name="market-cache-refresh")
     except RuntimeError:
-        with dependencies.resources.workspace_lock:
-            dependencies.resources.workspace_refreshing.discard(refresh_key)
-        return
+        started = False
+    if not started:
+        _release_build(dependencies, refresh_key, lease)
 
 
 def _cached_layer(
@@ -234,7 +231,7 @@ def _cached_layer(
     cache_key: str,
     ttl_seconds: int,
     builder: Callable[[], Any],
-    allow_stale_refresh: bool = True,
+    background_only: bool = False,
 ) -> Dict[str, Any]:
     dependencies = context
     namespace = _namespace(layer)
@@ -260,13 +257,6 @@ def _cached_layer(
 
     sqlite_payload = dependencies.snapshot_store.get(namespace, cache_key)
     if sqlite_payload is not None:
-        _write_cache(
-            dependencies,
-            namespace,
-            cache_key,
-            sqlite_payload,
-            ttl_seconds,
-        )
         return {"payload": _with_cache_meta(sqlite_payload, layer, "sqlite-hit", cache_key), "mode": "sqlite-hit"}
 
     stale_payload = dependencies.snapshot_store.get_stale(
@@ -279,88 +269,6 @@ def _cached_layer(
             layer,
             cache_key,
         )
-        api_cache.set_cached_payload(
-            dependencies.cache,
-            namespace,
-            cache_key,
-            stale_payload,
-            min(15, ttl_seconds),
-        )
-        if allow_stale_refresh:
-            _refresh_async(
-                dependencies,
-                layer=layer,
-                namespace=namespace,
-                cache_key=cache_key,
-                builder=builder,
-                ttl_seconds=ttl_seconds,
-                stale_payload=stale_payload,
-            )
-        return {"payload": _with_cache_meta(stale_payload, layer, "stale-hit", cache_key), "mode": "stale-hit"}
-
-    refresh_key = f"{namespace}:{cache_key}"
-    with dependencies.resources.workspace_lock:
-        refresh_in_flight = refresh_key in dependencies.resources.workspace_refreshing
-    if refresh_in_flight:
-        payload = _fallback_payload(layer, cache_key)
-        return {"payload": _with_cache_meta(payload, layer, "warming", cache_key), "mode": "warming"}
-
-    try:
-        payload = builder()
-    except Exception:
-        dependencies.application.logger.exception(
-            "market-workspace-cache live-build failed layer=%s key=%s",
-            layer,
-            cache_key,
-        )
-        payload = _fallback_payload(layer, cache_key)
-        return {"payload": _with_cache_meta(payload, layer, "live-error", cache_key), "mode": "live-error"}
-
-    mode = "live-build"
-    wrapped = _with_cache_meta(payload, layer, mode, cache_key)
-    ttl = ttl_seconds if not _is_empty_replacement(layer, payload) else min(ttl_seconds, 10)
-    _write_cache(dependencies, namespace, cache_key, wrapped, ttl)
-    return {"payload": _copy_payload(wrapped), "mode": mode}
-
-
-def _cached_layer_read_only(
-    context: MarketWorkspaceCacheDependencies,
-    *,
-    layer: str,
-    cache_key: str,
-    ttl_seconds: int,
-    builder: Callable[[], Any],
-) -> Dict[str, Any]:
-    """Return the best cached layer without making the request wait for a live build."""
-    dependencies = context
-    namespace = _namespace(layer)
-
-    runtime_payload = api_cache.get_cached_runtime_payload(
-        dependencies.cache,
-        namespace,
-        cache_key,
-    )
-    if runtime_payload is not None:
-        return {"payload": _with_cache_meta(runtime_payload, layer, "memory-hit", cache_key), "mode": "memory-hit"}
-
-    redis_payload = _read_redis(dependencies, namespace, cache_key)
-    if redis_payload is not None:
-        api_cache.set_cached_runtime_payload(
-            dependencies.cache,
-            namespace,
-            cache_key,
-            redis_payload,
-            min(ttl_seconds, 30),
-        )
-        return {"payload": _with_cache_meta(redis_payload, layer, "redis-hit", cache_key), "mode": "redis-hit"}
-
-    sqlite_payload = dependencies.snapshot_store.get(namespace, cache_key)
-    if sqlite_payload is not None:
-        _write_cache(dependencies, namespace, cache_key, sqlite_payload, ttl_seconds)
-        return {"payload": _with_cache_meta(sqlite_payload, layer, "sqlite-hit", cache_key), "mode": "sqlite-hit"}
-
-    stale_payload = dependencies.snapshot_store.get_stale(namespace, cache_key)
-    if stale_payload is not None:
         _refresh_async(
             dependencies,
             layer=layer,
@@ -368,21 +276,42 @@ def _cached_layer_read_only(
             cache_key=cache_key,
             builder=builder,
             ttl_seconds=ttl_seconds,
-            stale_payload=stale_payload,
         )
         return {"payload": _with_cache_meta(stale_payload, layer, "stale-hit", cache_key), "mode": "stale-hit"}
 
-    fallback = _fallback_payload(layer, cache_key)
-    _refresh_async(
-        dependencies,
-        layer=layer,
-        namespace=namespace,
-        cache_key=cache_key,
-        builder=builder,
-        ttl_seconds=ttl_seconds,
-        stale_payload=fallback,
-    )
-    return {"payload": _with_cache_meta(fallback, layer, "warming", cache_key), "mode": "warming"}
+    refresh_key = f"{namespace}:{cache_key}"
+    if background_only:
+        _refresh_async(
+            dependencies,
+            layer=layer,
+            namespace=namespace,
+            cache_key=cache_key,
+            builder=builder,
+            ttl_seconds=ttl_seconds,
+        )
+        return {"payload": _fallback_payload(layer, cache_key), "mode": "warming"}
+    claimed, lease = _claim_build(dependencies, refresh_key)
+    if not claimed:
+        payload = _fallback_payload(layer, cache_key)
+        return {"payload": _with_cache_meta(payload, layer, "warming", cache_key), "mode": "warming"}
+
+    try:
+        payload = builder()
+        mode = "live-build"
+        wrapped = _with_cache_meta(payload, layer, mode, cache_key)
+        _write_cache(dependencies, namespace, cache_key, wrapped, ttl_seconds)
+        return {"payload": _copy_payload(wrapped), "mode": mode}
+    except Exception:
+        dependencies.application.logger.exception(
+            "market-workspace-cache live-build failed layer=%s key=%s",
+            layer,
+            cache_key,
+        )
+        payload = _fallback_payload(layer, cache_key)
+        payload["status"] = "unavailable"
+        return {"payload": _with_cache_meta(payload, layer, "live-error", cache_key), "mode": "live-error"}
+    finally:
+        _release_build(dependencies, refresh_key, lease)
 
 
 def _fallback_payload(layer: str, cache_key: str) -> Any:
@@ -428,66 +357,24 @@ def _market_is_closed(
         return False
     if not isinstance(market, Mapping):
         return False
-    if any(
-        _truthy_flag(market.get(key))
-        for key in ("is_trading_closed", "gamma_closed", "is_final")
-    ):
+    if any(_truthy_flag(market.get(key)) for key in ("is_trading_closed", "gamma_closed", "is_final")):
         return True
     statuses = " ".join(
-        str(market.get(key) or "").strip().lower().replace("_", "-")
-        for key in ("status", "completion_status")
+        str(market.get(key) or "").strip().lower().replace("_", "-") for key in ("status", "completion_status")
     )
     return any(
         token in statuses
-        for token in ("closed", "settled", "resolved", "final", "cancelled", "expired", "awaiting-oracle", "awaiting oracle")
+        for token in (
+            "closed",
+            "settled",
+            "resolved",
+            "final",
+            "cancelled",
+            "expired",
+            "awaiting-oracle",
+            "awaiting oracle",
+        )
     )
-
-
-def _closed_orderbook_result(
-    context: MarketWorkspaceCacheDependencies,
-    *,
-    market_id: int,
-    cache_key: str,
-) -> Dict[str, Any]:
-    dependencies = context
-    namespace = _namespace("orderbook")
-    payload = _fallback_payload("orderbook", cache_key)
-    payload.update(
-        {
-            "marketId": int(market_id),
-            "localMarketId": int(market_id),
-            "bookStatus": "closed",
-            "source": "market-lifecycle",
-            "fallbackReason": "Trading is closed; live CLOB levels are not applicable.",
-        }
-    )
-    wrapped = _with_cache_meta(payload, "orderbook", "closed", cache_key)
-    _write_cache(
-        dependencies,
-        namespace,
-        cache_key,
-        wrapped,
-        dependencies.orderbook_ttl,
-    )
-    return {"payload": _copy_payload(wrapped), "mode": "closed"}
-
-
-def _build_detail(
-    context: MarketWorkspaceCacheDependencies,
-    market_id: int,
-) -> Dict[str, Any]:
-    dependencies = context
-    payload = dependencies.build_detail(
-        market_id,
-    )
-    if not isinstance(payload, dict):
-        return {"error": "Invalid market workspace payload", "marketId": market_id, "_status": 502}
-    detail = dict(payload)
-    detail.pop("chart", None)
-    detail.pop("trades", None)
-    detail.pop("lob", None)
-    detail["generatedAt"] = dependencies.utc_now_iso()
-    return detail
 
 
 def get_market_detail_payload(
@@ -495,16 +382,20 @@ def get_market_detail_payload(
     market_id: int,
 ) -> Dict[str, Any]:
     dependencies = context
-    key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 3})
+    key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 4})
     result = _cached_layer(
         dependencies,
         layer="detail",
         cache_key=key,
         ttl_seconds=dependencies.detail_ttl,
-        builder=lambda: _build_detail(dependencies, market_id),
+        builder=lambda: dependencies.build_detail(market_id),
     )
     payload = result["payload"]
-    return payload if isinstance(payload, dict) else {"error": "Invalid detail cache payload", "marketId": market_id, "_status": 502}
+    return (
+        payload
+        if isinstance(payload, dict)
+        else {"error": "Invalid detail cache payload", "marketId": market_id, "_status": 502}
+    )
 
 
 def get_market_chart_payload(
@@ -544,7 +435,13 @@ def get_market_chart_payload(
         payload.setdefault("range", normalized_range)
         payload.setdefault("interval", normalized_interval)
         return payload
-    return {"marketId": market_id, "localMarketId": market_id, "range": normalized_range, "interval": normalized_interval, "points": []}
+    return {
+        "marketId": market_id,
+        "localMarketId": market_id,
+        "range": normalized_range,
+        "interval": normalized_interval,
+        "points": [],
+    }
 
 
 def get_market_flow_payload(
@@ -553,6 +450,7 @@ def get_market_flow_payload(
     *,
     limit: int = 24,
     offset: int = 0,
+    before: Optional[tuple[int, int, str]] = None,
 ) -> Dict[str, Any]:
     dependencies = context
     safe_limit = min(max(int(limit), 1), 500)
@@ -563,7 +461,8 @@ def get_market_flow_payload(
             "layer": "flow",
             "limit": safe_limit,
             "offset": safe_offset,
-            "v": 1,
+            "before": before,
+            "v": 2,
         }
     )
 
@@ -575,6 +474,7 @@ def get_market_flow_payload(
                 market_id,
                 limit=safe_limit,
                 offset=safe_offset,
+                **({"before": before} if before is not None else {}),
             ),
             "generatedAt": dependencies.utc_now_iso(),
         }
@@ -601,49 +501,41 @@ def get_market_flow_rows(
     *,
     limit: int = 24,
     offset: int = 0,
+    before: Optional[tuple[int, int, str]] = None,
 ) -> list[Dict[str, Any]]:
     payload = get_market_flow_payload(
         context,
         market_id,
         limit=limit,
         offset=offset,
+        before=before,
     )
-    rows = payload.get("items") if isinstance(payload, dict) else []
+    if payload.get("status") in {"warming", "unavailable"}:
+        raise TimeoutError("Market trade data is not ready")
+    rows = payload.get("items")
     return rows if isinstance(rows, list) else []
 
 
 def get_market_orderbook_payload(
-    context: MarketWorkspaceCacheDependencies,
+    dependencies: MarketWorkspaceCacheDependencies,
     market_id: int,
 ) -> Dict[str, Any]:
-    dependencies = context
-    key = _cache_key({"marketId": int(market_id), "layer": "orderbook", "v": 1})
-    result = (
-        _closed_orderbook_result(
-            dependencies,
-            market_id=market_id,
-            cache_key=key,
+    """The upstream owns live book caching and continuity; never replay a local snapshot."""
+    if _market_is_closed(dependencies, market_id):
+        payload = _fallback_payload("orderbook", "")
+        payload.update(
+            bookStatus="closed",
+            source="market-lifecycle",
+            fallbackReason="Trading is closed; live CLOB levels are not applicable.",
         )
-        if _market_is_closed(dependencies, market_id)
-        else _cached_layer(
-            dependencies,
-            layer="orderbook",
-            cache_key=key,
-            ttl_seconds=dependencies.orderbook_ttl,
-            builder=lambda: dependencies.build_lob(
-                market_id,
-            ),
-        )
-    )
-    payload = result["payload"]
-    if isinstance(payload, dict):
-        payload.setdefault("marketId", market_id)
-        payload.setdefault("localMarketId", market_id)
-        return payload
-    fallback = _fallback_payload("orderbook", key)
-    fallback["marketId"] = market_id
-    fallback["localMarketId"] = market_id
-    return fallback
+    else:
+        payload = dependencies.build_lob(market_id)
+        if not isinstance(payload, dict):
+            payload = _fallback_payload("orderbook", "")
+            payload["bookStatus"] = "unavailable"
+    payload.setdefault("marketId", market_id)
+    payload.setdefault("localMarketId", market_id)
+    return payload
 
 
 def get_market_workspace_payload(
@@ -652,42 +544,18 @@ def get_market_workspace_payload(
 ) -> Dict[str, Any]:
     dependencies = context
     detail_result = get_market_detail_payload(dependencies, market_id)
-    if detail_result.get("_status") == 404:
+    if detail_result.get("_status"):
         return detail_result
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        chart_future = executor.submit(
-            get_market_chart_payload,
-            dependencies,
-            market_id,
-            range_name="1d",
-            interval="5m",
-        )
-        flow_future = executor.submit(
-            get_market_flow_payload,
-            dependencies,
-            market_id,
-            limit=24,
-            offset=0,
-        )
-        orderbook_future = executor.submit(
-            get_market_orderbook_payload,
-            dependencies,
-            market_id,
-        )
-        chart = chart_future.result()
-        flow = flow_future.result()
-        orderbook = orderbook_future.result()
-
-    payload = dict(detail_result)
-    payload["chart"] = chart
-    payload["trades"] = flow.get("items") if isinstance(flow, dict) else []
-    payload["lob"] = orderbook
+    flow = get_market_flow_payload(dependencies, market_id, limit=24, offset=0)
+    chart = get_market_chart_payload(dependencies, market_id, range_name="1d", interval="5m")
+    orderbook = get_market_orderbook_payload(dependencies, market_id)
+    payload = assemble_market_workspace(detail_result, chart=chart, flow=flow, lob=orderbook)
     payload["cacheLayers"] = {
         "detail": (detail_result.get("marketWorkspaceCache") or {}),
         "chart": (chart.get("marketWorkspaceCache") or {}),
         "flow": (flow.get("marketWorkspaceCache") or {}),
-        "orderbook": (orderbook.get("marketWorkspaceCache") or {}),
+        "orderbook": {"mode": "upstream", "status": orderbook.get("bookStatus")},
     }
     payload["marketWorkspaceCache"] = {
         "mode": "layered",
@@ -704,7 +572,7 @@ def get_market_focus_tile_payload(
 ) -> Dict[str, Any]:
     """Serve the selection-critical detail, chart and LOB without cold-path blocking."""
     dependencies = context
-    detail_key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 3})
+    detail_key = _cache_key({"marketId": int(market_id), "layer": "detail", "v": 4})
     chart_key = _cache_key(
         {
             "marketId": int(market_id),
@@ -714,17 +582,21 @@ def get_market_focus_tile_payload(
             "v": 5,
         }
     )
-    orderbook_key = _cache_key({"marketId": int(market_id), "layer": "orderbook", "v": 1})
 
-    detail_result = _cached_layer_read_only(
+    detail_result = _cached_layer(
         dependencies,
+        background_only=True,
         layer="detail",
         cache_key=detail_key,
         ttl_seconds=dependencies.detail_ttl,
-        builder=lambda: _build_detail(dependencies, market_id),
+        builder=lambda: dependencies.build_detail(market_id),
     )
-    chart_result = _cached_layer_read_only(
+    detail = detail_result["payload"] if isinstance(detail_result["payload"], dict) else {}
+    if detail.get("_status"):
+        return detail
+    chart_result = _cached_layer(
         dependencies,
+        background_only=True,
         layer="chart",
         cache_key=chart_key,
         ttl_seconds=dependencies.chart_ttl,
@@ -734,27 +606,11 @@ def get_market_focus_tile_payload(
             interval="5m",
         ),
     )
-    orderbook_result = (
-        _closed_orderbook_result(
-            dependencies,
-            market_id=market_id,
-            cache_key=orderbook_key,
-        )
-        if _market_is_closed(dependencies, market_id)
-        else _cached_layer_read_only(
-            dependencies,
-            layer="orderbook",
-            cache_key=orderbook_key,
-            ttl_seconds=dependencies.orderbook_ttl,
-            builder=lambda: dependencies.build_lob(
-                market_id,
-            ),
-        )
-    )
+    orderbook = get_market_orderbook_payload(dependencies, market_id)
 
-    detail = detail_result["payload"] if isinstance(detail_result["payload"], dict) else {}
-    chart = chart_result["payload"] if isinstance(chart_result["payload"], dict) else _fallback_payload("chart", chart_key)
-    orderbook = orderbook_result["payload"] if isinstance(orderbook_result["payload"], dict) else _fallback_payload("orderbook", orderbook_key)
+    chart = (
+        chart_result["payload"] if isinstance(chart_result["payload"], dict) else _fallback_payload("chart", chart_key)
+    )
     chart.setdefault("marketId", market_id)
     chart.setdefault("localMarketId", market_id)
     chart.setdefault("range", "1d")
@@ -762,7 +618,7 @@ def get_market_focus_tile_payload(
     orderbook.setdefault("marketId", market_id)
     orderbook.setdefault("localMarketId", market_id)
 
-    payload = dict(detail)
+    payload = assemble_market_workspace(detail, chart=chart, lob=orderbook)
     payload.setdefault("marketId", market_id)
     payload.setdefault("localMarketId", market_id)
     payload["chart"] = chart
@@ -770,12 +626,9 @@ def get_market_focus_tile_payload(
     payload["cacheLayers"] = {
         "detail": detail_result["mode"],
         "chart": chart_result["mode"],
-        "orderbook": orderbook_result["mode"],
+        "orderbook": "upstream",
     }
-    payload["focusStatus"] = (
-        "ready"
-        if detail_result["mode"] != "warming" and chart_result["mode"] != "warming" and orderbook_result["mode"] != "warming"
-        else "warming"
-    )
+    modes = payload["cacheLayers"].values()
+    payload["focusStatus"] = "unavailable" if "live-error" in modes else "warming" if "warming" in modes else "ready"
     payload["generatedAt"] = _utc_now_iso()
     return payload

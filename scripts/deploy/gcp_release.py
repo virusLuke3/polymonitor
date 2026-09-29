@@ -13,6 +13,9 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+import time
+from datetime import datetime, timezone
+from urllib.request import Request, urlopen
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -67,13 +70,16 @@ EXTERNAL_RELEASE_FILES = {
     "README.md",
     "scripts/generate_docs_i18n.py",
     "scripts/db/migrate_sqlite_to_mysql.py",
-    "scripts/market/market_decoder.py",
-    "scripts/trade/trade_decoder.py",
-    "scripts/trade/clickhouse_orderfilled_writer.py",
     "scripts/requirements-dev.in",
     "scripts/requirements-dev.lock.txt",
     "scripts/requirements.txt",
     "scripts/start_dashboard.sh",
+}
+RETIRED_SOURCE_FILES = {
+    "scripts/demo.sh",
+    "scripts/market/market_decoder.py",
+    "scripts/trade/trade_decoder.py",
+    "scripts/trade/clickhouse_orderfilled_writer.py",
 }
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 APPROVED_OVERRIDES_PATH = Path("deploy/gcp/accepted-remote-overrides.json")
@@ -149,7 +155,7 @@ def _deployable(path: str, *, gcp_units: set[str]) -> bool:
 def _externally_owned(path: str) -> bool:
     """Classify assets released by GitHub/frontend/docs workflows, not GCP backend."""
 
-    return path in EXTERNAL_RELEASE_FILES or path.startswith(EXTERNAL_RELEASE_PREFIXES)
+    return path in EXTERNAL_RELEASE_FILES or path in RETIRED_SOURCE_FILES or path.startswith(EXTERNAL_RELEASE_PREFIXES)
 
 
 def _git_entry(repo: Path, ref: str, path: str) -> tuple[bytes | None, str | None]:
@@ -253,6 +259,7 @@ def build_release(repo: Path, base: str, target: str, output_dir: Path) -> dict[
     approved_overrides = _approved_remote_overrides(repo, base)
     used_overrides: set[str] = set()
     gcp_units = _target_gcp_units(repo, target)
+    previous_gcp_units = _target_gcp_units(repo, base)
 
     # Include unchanged runtime dependencies too: earlier releases may have
     # omitted them. Read the committed target, never files from the worktree.
@@ -261,8 +268,13 @@ def build_release(repo: Path, base: str, target: str, output_dir: Path) -> dict[
     for path in sorted(runtime_paths | set(_changed_paths(repo, base, target))):
         # Retire formerly shipped Quant sources without allowing new Quant
         # files back into the consumer release.
-        retired_quant = path.startswith("quant/") and path not in target_paths
-        if not _deployable(path, gcp_units=gcp_units) and not retired_quant:
+        retired_quant = (path.startswith("quant/") or path in RETIRED_SOURCE_FILES) and path not in target_paths
+        retired_unit = (
+            path.startswith("deploy/systemd/")
+            and path not in target_paths
+            and PurePosixPath(path).name in previous_gcp_units
+        )
+        if not _deployable(path, gcp_units=gcp_units) and not retired_quant and not retired_unit:
             (external if path not in target_paths or _externally_owned(path) else ignored).append(path)
             continue
         before, before_mode = _git_entry(repo, base, path)
@@ -448,6 +460,76 @@ def apply_release(
     return receipt_path
 
 
+def _systemctl(*args: str, check: bool = True):
+    return subprocess.run(["systemctl", "--user", *args], check=check, capture_output=True, text=True)
+
+
+def sync_systemd_units(root: Path, manifest_path: Path, receipt_path: Path, unit_dir: Path) -> None:
+    """Install or retire owned units, recording installed state before mutation."""
+    manifest = load_manifest(manifest_path)
+    receipt = json.loads(receipt_path.read_text())
+    states = []
+    for entry in manifest["entries"]:
+        path = entry["path"]
+        if not path.startswith("deploy/systemd/"):
+            continue
+        name = PurePosixPath(path).name
+        if not re.fullmatch(r"polydata-[A-Za-z0-9@_.-]+\.(service|timer|target)", name) and name != "polydata.target":
+            raise RuntimeError(f"Unsupported systemd unit: {name}")
+        installed = unit_dir / name
+        if installed.is_symlink():
+            raise RuntimeError(f"Refusing to replace linked unit: {name}")
+        states.append(
+            {
+                "name": name,
+                "path": str(installed),
+                "source": path,
+                "content": installed.read_text() if installed.exists() else None,
+                "mode": installed.stat().st_mode & 0o777 if installed.exists() else None,
+                "enabled": _systemctl("is-enabled", name, check=False).stdout.strip() == "enabled",
+                "active": _systemctl("is-active", name, check=False).returncode == 0,
+            }
+        )
+    if not states:
+        return
+    receipt["systemd_units"] = states
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    for state in states:
+        source, installed = root / state["source"], Path(state["path"])
+        if source.exists():
+            installed.write_text(source.read_text().replace("/__POLYDATA_REPO_ROOT__", str(root)))
+        else:
+            if state["active"]:
+                _systemctl("stop", state["name"])
+            if state["enabled"]:
+                _systemctl("disable", state["name"])
+            installed.unlink(missing_ok=True)
+    _systemctl("daemon-reload")
+
+
+def _restore_systemd_units(states: list[dict[str, Any]]) -> None:
+    for state in states:
+        installed = Path(state["path"])
+        if state["content"] is None:
+            _systemctl("disable", "--now", state["name"], check=False)
+            installed.unlink(missing_ok=True)
+        else:
+            installed.parent.mkdir(parents=True, exist_ok=True)
+            installed.write_text(state["content"])
+            if state.get("mode") is not None:
+                installed.chmod(state["mode"])
+    if states:
+        _systemctl("daemon-reload")
+    for state in states:
+        if state["enabled"]:
+            _systemctl("enable", state["name"])
+        if state["active"]:
+            _systemctl("restart", state["name"])
+        elif state["content"] is not None:
+            _systemctl("stop", state["name"])
+
+
 def rollback_release(root: Path, receipt_path: Path) -> None:
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     backup_dir = receipt_path.parent
@@ -462,6 +544,8 @@ def rollback_release(root: Path, receipt_path: Path) -> None:
             temporary_destination.replace(destination)
         elif destination.exists():
             destination.unlink()
+
+    _restore_systemd_units(receipt.get("systemd_units", []))
 
 
 def _command_build(args: argparse.Namespace) -> int:
@@ -501,6 +585,63 @@ def _command_rollback(args: argparse.Namespace) -> int:
     return 0
 
 
+def validate_readiness_payload(kind: str, payload: Any, *, now: datetime, max_age: int = 300) -> None:
+    if kind == "health":
+        if (
+            not isinstance(payload, dict)
+            or payload.get("status") != "ok"
+            or not payload.get("database")
+            or not payload.get("redis")
+        ):
+            raise RuntimeError("API dependencies are not ready")
+        return
+    if kind == "trades":
+        if not isinstance(payload, list) or not payload:
+            raise RuntimeError("Recent trade read returned no verifiable data")
+        stamps = [row.get("timestamp") for row in payload if isinstance(row, dict)]
+        stamp = max(str(value) for value in stamps if value) if any(stamps) else ""
+    else:
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise RuntimeError(f"{kind}: invalid signal payload")
+        if payload.get("status") not in {"ok", "empty"} or payload.get("stale"):
+            raise RuntimeError(f"{kind}: source is {payload.get('status', 'unknown')}")
+        stamp = str(payload.get("generatedAt") or "")
+    try:
+        generated = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        age = (now - generated).total_seconds()
+    except (TypeError, ValueError):
+        raise RuntimeError(f"{kind}: missing or invalid data timestamp") from None
+    if not -5 <= age <= max_age:
+        raise RuntimeError(f"{kind}: data age {age:.0f}s exceeds acceptance window")
+
+
+def _command_verify(args: argparse.Namespace) -> int:
+    endpoints = {
+        "health": "/health",
+        "whales": "/runtime/panels/whale-tracker?limit=14",
+        "flow": "/runtime/panels/suspicious-flow?limit=12",
+        "trades": "/trades/recent?limit=1",
+    }
+    deadline = time.monotonic() + args.wait_seconds
+    while True:
+        errors = []
+        for kind, path in endpoints.items():
+            try:
+                request = Request(args.url.rstrip("/") + path, headers={"X-PolyData-Telegram-Publisher": "1"})
+                with urlopen(request, timeout=20) as response:
+                    payload = json.load(response)
+                validate_readiness_payload(kind, payload, now=datetime.now(timezone.utc))
+            except (OSError, ValueError, RuntimeError) as exc:
+                errors.append(f"{kind}: {exc}")
+        if not errors:
+            print("release-readiness: health, recent trades, Whale Tracker and Flow Watch passed")
+            return 0
+        print("release-readiness pending: " + "; ".join(errors), flush=True)
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Release data readiness failed")
+        time.sleep(5)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -524,10 +665,23 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--backup-root", type=Path, required=True)
     apply_parser.set_defaults(handler=_command_apply)
 
+    units = commands.add_parser("sync-units", help="synchronize installed units with rollback state")
+    units.add_argument("--root", type=Path, required=True)
+    units.add_argument("--manifest", type=Path, required=True)
+    units.add_argument("--receipt", type=Path, required=True)
+    units.add_argument("--unit-dir", type=Path, default=Path.home() / ".config/systemd/user")
+    units.set_defaults(
+        handler=lambda args: sync_systemd_units(args.root, args.manifest, args.receipt, args.unit_dir) or 0
+    )
+
     rollback_parser = commands.add_parser("rollback", help="restore files from an apply receipt")
     rollback_parser.add_argument("--root", type=Path, required=True)
     rollback_parser.add_argument("--receipt", type=Path, required=True)
     rollback_parser.set_defaults(handler=_command_rollback)
+    verify = commands.add_parser("verify", help="check dependency health and live data freshness")
+    verify.add_argument("--url", default="http://127.0.0.1:18500")
+    verify.add_argument("--wait-seconds", type=int, default=180)
+    verify.set_defaults(handler=_command_verify)
     return parser
 
 

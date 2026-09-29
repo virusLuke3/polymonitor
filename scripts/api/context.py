@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from api.config import ClickHouseSettings
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 import logging
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -14,6 +15,18 @@ from concurrent.futures import ThreadPoolExecutor
 @dataclass
 class RuntimeResources:
     """Mutable caches and background work owned by one application/worker."""
+
+    clickhouse: ClickHouseSettings = field(default_factory=ClickHouseSettings.from_environment)
+    snapshot_workers: int = 2
+    workspace_workers: int = 2
+    clickhouse_slots: Any = field(init=False)
+    snapshot_slots: Any = field(init=False)
+    workspace_slots: Any = field(init=False)
+
+    def __post_init__(self):
+        self.clickhouse_slots = threading.BoundedSemaphore(self.clickhouse.concurrency)
+        self.snapshot_slots = threading.BoundedSemaphore(self.snapshot_workers)
+        self.workspace_slots = threading.BoundedSemaphore(self.workspace_workers)
 
     health_cache: dict[str, Any] = field(default_factory=dict)
     health_lock: Any = field(default_factory=threading.Lock)
@@ -25,11 +38,7 @@ class RuntimeResources:
     prewarm_last_run: dict[str, float] = field(default_factory=dict)
     snapshot_lock: Any = field(default_factory=threading.Lock)
     snapshot_refreshing: set[str] = field(default_factory=set)
-    snapshot_slots: Any = field(
-        default_factory=lambda: threading.BoundedSemaphore(
-            max(1, min(int(os.environ.get("POLYDATA_SNAPSHOT_REFRESH_WORKERS", "2")), 8))
-        )
-    )
+
     workspace_lock: Any = field(default_factory=threading.Lock)
     workspace_refreshing: set[str] = field(default_factory=set)
     live_refresh_lock: Any = field(default_factory=threading.Lock)
@@ -49,12 +58,7 @@ class RuntimeResources:
     agent_refreshing: set[str] = field(default_factory=set)
     agent_rate_lock: Any = field(default_factory=threading.Lock)
     agent_rate_buckets: dict[str, list[float]] = field(default_factory=dict)
-    workspace_executor: ThreadPoolExecutor = field(
-        default_factory=lambda: ThreadPoolExecutor(
-            max_workers=max(1, min(int(os.environ.get("POLYDATA_MARKET_FOCUS_REFRESH_WORKERS", "2")), 12)),
-            thread_name_prefix="market-focus-refresh",
-        )
-    )
+
     hazard_locks: dict[str, Any] = field(default_factory=dict)
     hazard_lock_guard: Any = field(default_factory=threading.Lock)
     hazard_executor: ThreadPoolExecutor = field(
@@ -101,7 +105,7 @@ class RuntimeResources:
         for thread in threads:
             if thread is not threading.current_thread():
                 thread.join()
-        for executor in (self.workspace_executor, self.hazard_executor, self.zone_executor):
+        for executor in (self.hazard_executor, self.zone_executor):
             executor.shutdown(wait=True, cancel_futures=True)
         with self.http_lock:
             for session in self.http_sessions:

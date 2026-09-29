@@ -145,41 +145,6 @@ class TradeCountEstimateDependencies:
 
 
 @dataclass(frozen=True)
-class RecentTradeDependencies:
-    query_all: Callable[..., Any]
-    get_existing_trade_read_source: Callable[..., Any]
-    identifier_name: Callable[..., Any]
-    get_trade_market_projection_sql: Callable[..., Any]
-    normalize_trade: Callable[..., Any]
-    trade_v2_core_table: str
-
-    @classmethod
-    def from_context(
-        cls,
-        context: Mapping[str, Any],
-    ) -> RecentTradeDependencies:
-        if isinstance(context, cls):
-            return context
-        return cls(
-            query_all=_service_callable(context, "query_all"),
-            get_existing_trade_read_source=_service_callable(
-                context,
-                "get_existing_trade_read_source",
-            ),
-            identifier_name=_service_callable(context, "_identifier_name"),
-            get_trade_market_projection_sql=_service_callable(
-                context,
-                "get_trade_market_projection_sql",
-            ),
-            normalize_trade=_service_callable(context, "normalize_trade"),
-            trade_v2_core_table=cast(
-                str,
-                context.get("TRADE_V2_CORE_TABLE"),
-            ),
-        )
-
-
-@dataclass(frozen=True)
 class RecentOracleDependencies:
     query_all: Callable[..., Any]
     normalize_oracle_event: Callable[..., Any]
@@ -539,49 +504,7 @@ def get_recent_trades(
     clickhouse_rows = clickhouse_orderfilled_service.get_recent_trades(ctx, limit=limit)
     if clickhouse_rows is not None:
         return clickhouse_rows
-    if clickhouse_orderfilled_service.clickhouse_orderfilled_enabled():
-        fallback_enabled = str(os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_FALLBACK_ON_UNAVAILABLE", "")).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        if not fallback_enabled:
-            raise RuntimeError("ClickHouse OrderFilled read is enabled but unavailable")
-    dependencies = RecentTradeDependencies.from_context(ctx)
-    trade_source = dependencies.get_existing_trade_read_source()
-    if trade_source is None:
-        return []
-    if dependencies.identifier_name(trade_source) == dependencies.trade_v2_core_table:
-        rows = dependencies.query_all(
-            f"""
-            SELECT
-                {dependencies.get_trade_market_projection_sql('t')},
-                m.title AS market_title
-            FROM {trade_source} t
-            LEFT JOIN markets m ON m.id = t.market_id
-            WHERE t.market_id IS NOT NULL
-            ORDER BY t.block_number DESC, t.log_index DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-    else:
-        rows = dependencies.query_all(
-            f"""
-            SELECT
-                tx_hash, log_index, market_id, maker, taker, price, size, side, outcome,
-                token_id, timestamp, block_number, order_hash, maker_asset_id, taker_asset_id,
-                maker_amount, taker_amount, fee, contract,
-                NULL AS market_title
-            FROM {trade_source}
-            WHERE market_id IS NOT NULL
-            ORDER BY timestamp DESC, block_number DESC, log_index DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-    return [dependencies.normalize_trade(row) for row in rows]
+    raise RuntimeError("ClickHouse OrderFilled read is enabled but unavailable")
 
 
 def get_recent_oracle_events(

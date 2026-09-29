@@ -6,8 +6,6 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from api.context import resolve_route_callable
-
 
 @dataclass(frozen=True)
 class AnalyticsRouteDependencies:
@@ -16,34 +14,6 @@ class AnalyticsRouteDependencies:
     normalize_address: Callable[..., Any]
     get_address_summary_cached: Callable[..., Any]
     get_address_trades_payload: Callable[..., Any]
-
-    @classmethod
-    def from_context(
-        cls,
-        context: Mapping[str, Any],
-    ) -> AnalyticsRouteDependencies:
-        return cls(
-            get_top_addresses_cached=resolve_route_callable(
-                context,
-                "get_top_addresses_cached",
-            ),
-            get_active_addresses_cached=resolve_route_callable(
-                context,
-                "get_active_addresses_cached",
-            ),
-            normalize_address=resolve_route_callable(
-                context,
-                "normalize_address",
-            ),
-            get_address_summary_cached=resolve_route_callable(
-                context,
-                "get_address_summary_cached",
-            ),
-            get_address_trades_payload=resolve_route_callable(
-                context,
-                "get_address_trades_payload",
-            ),
-        )
 
 
 def create_analytics_blueprint(dependencies: AnalyticsRouteDependencies) -> Blueprint:
@@ -54,9 +24,7 @@ def create_analytics_blueprint(dependencies: AnalyticsRouteDependencies) -> Blue
         limit = min(200, max(1, int(request.args.get("limit", 50))))
         days_raw = request.args.get("days")
         days = int(days_raw) if days_raw not in (None, "", "0") else None
-        return jsonify(
-            dependencies.get_top_addresses_cached(days=days, limit=limit)
-        )
+        return jsonify(dependencies.get_top_addresses_cached(days=days, limit=limit))
 
     @bp.route("/analytics/addresses/active", methods=["GET"])
     def api_active_addresses():
@@ -69,9 +37,7 @@ def create_analytics_blueprint(dependencies: AnalyticsRouteDependencies) -> Blue
         if not normalized:
             return jsonify({"error": "address required"}), 400
         days = min(365, max(1, int(request.args.get("days", 30))))
-        return jsonify(
-            dependencies.get_address_summary_cached(normalized, days=days)
-        )
+        return jsonify(dependencies.get_address_summary_cached(normalized, days=days))
 
     @bp.route("/analytics/addresses/<address>/trades", methods=["GET"])
     def api_address_trades(address: str):

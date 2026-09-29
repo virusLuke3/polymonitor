@@ -6,8 +6,6 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from api.context import resolve_route_callable
-
 
 @dataclass(frozen=True)
 class SystemRouteDependencies:
@@ -16,19 +14,6 @@ class SystemRouteDependencies:
     build_seed_health_payload: Callable[[], Any]
     describe_db_target: Callable[[], str]
     get_redis_client: Callable[[], Any]
-
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> SystemRouteDependencies:
-        authenticate_request = (
-            resolve_route_callable(context, "authenticate_request")
-        )
-        return cls(
-            authenticate_request=authenticate_request,
-            build_system_health_payload=resolve_route_callable(context, "build_system_health_payload"),
-            build_seed_health_payload=resolve_route_callable(context, "build_seed_health_payload"),
-            describe_db_target=resolve_route_callable(context, "describe_db_target"),
-            get_redis_client=resolve_route_callable(context, "get_redis_client"),
-        )
 
 
 def create_system_blueprint(dependencies: SystemRouteDependencies) -> Blueprint:

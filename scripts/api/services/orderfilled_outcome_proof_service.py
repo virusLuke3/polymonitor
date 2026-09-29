@@ -458,66 +458,6 @@ def _mapping_predicate(entry: Mapping[str, Any]) -> str:
     return " OR ".join(predicates)
 
 
-def _query_json_rows_safe(
-    query_context: Mapping[str, Any],
-    query: str,
-    *,
-    timeout_seconds: float,
-) -> Optional[list[dict[str, Any]]]:
-    """Use the API transport without placing a ClickHouse password on argv."""
-
-    if not clickhouse_orderfilled_service.clickhouse_orderfilled_enabled():
-        return None
-    settings = clickhouse_orderfilled_service._settings()
-    if settings["http_url"]:
-        # A configured HTTP tunnel is authoritative.  A timeout must fail
-        # closed instead of silently spending a second timeout on docker.
-        return clickhouse_orderfilled_service._query_json_rows_http(
-            dict(query_context),
-            query,
-            timeout_seconds=timeout_seconds,
-        )
-    if query_context.get("app") is None or shutil.which("docker") is None:
-        return None
-    command = ["docker", "exec", "-i"]
-    environment = os.environ.copy()
-    if settings["password"]:
-        command.extend(["--env", "CLICKHOUSE_PASSWORD"])
-        environment["CLICKHOUSE_PASSWORD"] = settings["password"]
-    command.extend(
-        [
-            settings["container"],
-            "clickhouse-client",
-            "--database",
-            settings["database"],
-            "--user",
-            settings["user"],
-            "--query",
-            query,
-        ]
-    )
-    try:
-        completed = subprocess.run(
-            command,
-            check=True,
-            text=True,
-            capture_output=True,
-            timeout=timeout_seconds,
-            env=environment,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    rows: list[dict[str, Any]] = []
-    for line in completed.stdout.splitlines():
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            rows.append(parsed)
-    return rows
-
-
 def _clickhouse_runtime_probe(
     *,
     entry: Mapping[str, Any],
@@ -528,7 +468,7 @@ def _clickhouse_runtime_probe(
     """Collect one bounded, exact-market source watermark and runtime gate."""
 
     market_id = _positive_int(entry.get("marketId"), field="entry.marketId")
-    table = clickhouse_orderfilled_service._table_sql()
+    table = clickhouse_orderfilled_service._table_sql(dict(query_context or {}))
     if table != "orderfilled_fact":
         return None
     mapping_predicate = _mapping_predicate(entry)
@@ -572,7 +512,7 @@ def _clickhouse_runtime_probe(
         PREWHERE market_id = {market_id}
         FORMAT JSONEachRow
     """
-    rows = _query_json_rows_safe(
+    rows = clickhouse_orderfilled_service._query_json_rows(
         dict(query_context or {}),
         query,
         timeout_seconds=timeout_seconds,

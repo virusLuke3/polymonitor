@@ -14,7 +14,11 @@ from flask import Blueprint, jsonify, request
 
 from api.context import RuntimeResources, runtime_resources
 from agent.common.budget import claim_agent_live_call
-from agent.common.gateway_client import call_market_insight_gateway, call_market_wide_insight_gateway, gateway_configured
+from agent.common.gateway_client import (
+    call_market_insight_gateway,
+    call_market_wide_insight_gateway,
+    gateway_configured,
+)
 from agent.market_insight import build_market_insight, build_market_insight_fallback
 from agent.market_wide import build_market_wide_fallback, build_market_wide_insight
 
@@ -31,28 +35,6 @@ class AgentRouteDependencies:
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
     get_redis_client: Callable[..., Any] | None
-
-    @classmethod
-    def from_context(
-        cls,
-        context: Mapping[str, Any],
-    ) -> AgentRouteDependencies:
-        return cls(
-            resources=runtime_resources(context),
-            application=context.get("app"),
-            get_cached_json=_optional_route_callable(
-                context,
-                "get_cached_json",
-            ),
-            set_cached_json=_optional_route_callable(
-                context,
-                "set_cached_json",
-            ),
-            get_redis_client=_optional_route_callable(
-                context,
-                "get_redis_client",
-            ),
-        )
 
 
 def _optional_route_callable(
@@ -80,7 +62,9 @@ def _agent_forbidden_response():
 
 
 def _agent_rate_limited_response(retry_after_seconds: int):
-    response = jsonify({"error": "agent-rate-limited", "status": "rate-limited", "retryAfterSeconds": retry_after_seconds})
+    response = jsonify(
+        {"error": "agent-rate-limited", "status": "rate-limited", "retryAfterSeconds": retry_after_seconds}
+    )
     response.status_code = 429
     response.headers["Retry-After"] = str(retry_after_seconds)
     return response
@@ -111,7 +95,7 @@ def _normalize_ip(raw: str | None) -> str:
     if "," in value:
         value = value.split(",", 1)[0].strip()
     if value.startswith("[") and "]" in value:
-        return value[1:value.index("]")]
+        return value[1 : value.index("]")]
     if value.count(":") == 0 and ":" in value:
         return value
     if value.count(":") == 1 and "." in value:
@@ -245,11 +229,7 @@ def _cached_response(
     cache_key: str,
 ) -> dict[str, Any] | None:
     reader = dependencies.get_cached_json
-    cached = (
-        reader(AGENT_CACHE_NAMESPACE, cache_key)
-        if callable(reader)
-        else None
-    )
+    cached = reader(AGENT_CACHE_NAMESPACE, cache_key) if callable(reader) else None
     if not isinstance(cached, dict):
         cached = _direct_redis_get(dependencies, cache_key)
     if not isinstance(cached, dict):
@@ -437,13 +417,17 @@ def create_agent_blueprint(dependencies: AgentRouteDependencies) -> Blueprint:
             return jsonify({"error": "JSON object required"}), 400
         if request.headers.get("X-PolyData-Agent-Gateway-Attempt") == "1":
             return jsonify(build_market_insight(payload))
-        return jsonify(_serve_agent_with_cache(
-            dependencies,
-            kind="market",
-            payload=payload,
-            live_builder=lambda: call_market_insight_gateway(payload) if gateway_configured() else build_market_insight(payload),
-            fallback_builder=lambda: build_market_insight_fallback(payload),
-        ))
+        return jsonify(
+            _serve_agent_with_cache(
+                dependencies,
+                kind="market",
+                payload=payload,
+                live_builder=lambda: (
+                    call_market_insight_gateway(payload) if gateway_configured() else build_market_insight(payload)
+                ),
+                fallback_builder=lambda: build_market_insight_fallback(payload),
+            )
+        )
 
     @bp.route("/agent/market-wide-insights", methods=["POST"])
     def api_market_wide_insights():
@@ -461,12 +445,18 @@ def create_agent_blueprint(dependencies: AgentRouteDependencies) -> Blueprint:
             return jsonify({"error": "JSON object required"}), 400
         if request.headers.get("X-PolyData-Agent-Gateway-Attempt") == "1":
             return jsonify(build_market_wide_insight(payload))
-        return jsonify(_serve_agent_with_cache(
-            dependencies,
-            kind="market-wide",
-            payload=payload,
-            live_builder=lambda: call_market_wide_insight_gateway(payload) if gateway_configured() else build_market_wide_insight(payload),
-            fallback_builder=lambda: build_market_wide_fallback(payload),
-        ))
+        return jsonify(
+            _serve_agent_with_cache(
+                dependencies,
+                kind="market-wide",
+                payload=payload,
+                live_builder=lambda: (
+                    call_market_wide_insight_gateway(payload)
+                    if gateway_configured()
+                    else build_market_wide_insight(payload)
+                ),
+                fallback_builder=lambda: build_market_wide_fallback(payload),
+            )
+        )
 
     return bp

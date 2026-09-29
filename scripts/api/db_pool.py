@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import threading
 import time
 from collections import deque
@@ -61,6 +62,7 @@ class ApiPostgresConnectionPool:
         self._condition = threading.Condition()
         self._idle: deque[Any] = deque()
         self._connection_count = 0
+        self._leases: dict[int, tuple[float, str]] = {}
         self._closed = False
 
     def acquire(self, *args: Any, **kwargs: Any) -> _ConnectionLease:
@@ -80,8 +82,13 @@ class ApiPostgresConnectionPool:
                     break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
+                    held = sorted(
+                        ((round(time.monotonic() - started, 1), owner) for started, owner in self._leases.values()),
+                        reverse=True,
+                    )
                     raise TimeoutError(
-                        f"timed out waiting for an API PostgreSQL connection (pool size={self._max_size})"
+                        f"timed out waiting for an API PostgreSQL connection "
+                        f"(pool size={self._max_size}, held_seconds_and_threads={held})"
                     )
                 self._condition.wait(timeout=remaining)
 
@@ -101,7 +108,7 @@ class ApiPostgresConnectionPool:
                         except Exception:
                             pass
                     connection = None
-                    if attempt >= self._connect_attempts:
+                    if attempt >= self._connect_attempts or time.monotonic() >= deadline:
                         with self._condition:
                             self._connection_count -= 1
                             self._condition.notify()
@@ -112,6 +119,7 @@ class ApiPostgresConnectionPool:
                 self._connection_count -= 1
                 connection.close()
                 raise RuntimeError("database connection pool is closed")
+            self._leases[id(connection)] = (time.monotonic(), threading.current_thread().name)
         return _ConnectionLease(self, connection)
 
     def release(self, connection: Any) -> None:
@@ -126,6 +134,7 @@ class ApiPostgresConnectionPool:
                 pass
 
         with self._condition:
+            lease = self._leases.pop(id(connection), None)
             if reusable and not self._closed:
                 self._idle.append(connection)
             else:
@@ -133,6 +142,10 @@ class ApiPostgresConnectionPool:
                     connection.close()
                 self._connection_count -= 1
             self._condition.notify()
+        if lease is not None and time.monotonic() - lease[0] >= 5:
+            logging.getLogger(__name__).warning(
+                "API PostgreSQL connection held %.1fs thread=%s", time.monotonic() - lease[0], lease[1],
+            )
 
     def close(self) -> None:
         with self._condition:

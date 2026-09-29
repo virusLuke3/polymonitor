@@ -36,13 +36,6 @@ DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = f"""
 """
 
 
-def _service_callable(
-    context: Mapping[str, Any],
-    name: str,
-) -> Callable[..., Any]:
-    return resolve_service_callable(context, name)
-
-
 @dataclass(frozen=True)
 class MarketLookupDependencies:
     query_one: Callable[..., Any]
@@ -57,9 +50,9 @@ class MarketLookupDependencies:
         if isinstance(context, cls):
             return context
         return cls(
-            query_one=_service_callable(context, "query_one"),
-            utc_now_iso=_service_callable(context, "utc_now_iso"),
-            build_market_status_case=_service_callable(
+            query_one=resolve_service_callable(context, "query_one"),
+            utc_now_iso=resolve_service_callable(context, "utc_now_iso"),
+            build_market_status_case=resolve_service_callable(
                 context,
                 "build_market_status_case",
             ),
@@ -82,8 +75,8 @@ class MarketOracleDependencies:
             return context
         return cls(
             lookup=MarketLookupDependencies.from_context(context),
-            query_all=_service_callable(context, "query_all"),
-            normalize_oracle_event=_service_callable(
+            query_all=resolve_service_callable(context, "query_all"),
+            normalize_oracle_event=resolve_service_callable(
                 context,
                 "normalize_oracle_event",
             ),
@@ -107,11 +100,11 @@ class RecentOracleDependencies:
         if isinstance(context, cls):
             return context
         return cls(
-            get_snapshot_payload=_service_callable(
+            get_snapshot_payload=resolve_service_callable(
                 context,
                 "get_snapshot_payload",
             ),
-            get_recent_oracle_events=_service_callable(
+            get_recent_oracle_events=resolve_service_callable(
                 context,
                 "get_recent_oracle_events",
             ),
@@ -132,44 +125,10 @@ class MarketOraclePayloadDependencies:
             return context
         return cls(
             oracle=MarketOracleDependencies.from_context(context),
-            get_snapshot_payload=_service_callable(
+            get_snapshot_payload=resolve_service_callable(
                 context,
                 "get_snapshot_payload",
             ),
-        )
-
-
-@dataclass(frozen=True)
-class MarketTradeReadDependencies:
-    source: Mapping[str, Any] = field(repr=False)
-    get_existing_trade_read_source: Callable[..., Any]
-    identifier_name: Callable[..., Any]
-    trade_v2_core_table: Any
-    query_all: Callable[..., Any]
-    get_trade_market_projection_sql: Callable[..., Any]
-    normalize_trade: Callable[..., Any]
-
-    @classmethod
-    def from_context(
-        cls,
-        context: Mapping[str, Any],
-    ) -> MarketTradeReadDependencies:
-        if isinstance(context, cls):
-            return context
-        return cls(
-            source=context,
-            get_existing_trade_read_source=_service_callable(
-                context,
-                "get_existing_trade_read_source",
-            ),
-            identifier_name=_service_callable(context, "_identifier_name"),
-            trade_v2_core_table=context.get("TRADE_V2_CORE_TABLE"),
-            query_all=_service_callable(context, "query_all"),
-            get_trade_market_projection_sql=_service_callable(
-                context,
-                "get_trade_market_projection_sql",
-            ),
-            normalize_trade=_service_callable(context, "normalize_trade"),
         )
 
 
@@ -186,11 +145,11 @@ class RecentTradeDependencies:
         if isinstance(context, cls):
             return context
         return cls(
-            get_snapshot_payload=_service_callable(
+            get_snapshot_payload=resolve_service_callable(
                 context,
                 "get_snapshot_payload",
             ),
-            get_recent_trades=_service_callable(context, "get_recent_trades"),
+            get_recent_trades=resolve_service_callable(context, "get_recent_trades"),
         )
 
 
@@ -213,10 +172,10 @@ class MarketSearchDependencies:
         return cls(
             selection=getattr(context.get("SETTINGS"), "market_selection", MarketSelectionSettings()),
             source=context,
-            utc_now_iso=_service_callable(context, "utc_now_iso"),
-            query_all=_service_callable(context, "query_all"),
-            parse_json_list=_service_callable(context, "parse_json_list"),
-            format_trade_decimal=_service_callable(
+            utc_now_iso=resolve_service_callable(context, "utc_now_iso"),
+            query_all=resolve_service_callable(context, "query_all"),
+            parse_json_list=resolve_service_callable(context, "parse_json_list"),
+            format_trade_decimal=resolve_service_callable(
                 context,
                 "format_trade_decimal",
             ),
@@ -241,23 +200,15 @@ class MarketServingReadDependencies:
         if isinstance(context, cls):
             return context
         return cls(
-            table_exists=_service_callable(context, "table_exists"),
-            query_one=_service_callable(context, "query_one"),
+            table_exists=resolve_service_callable(context, "table_exists"),
+            query_one=resolve_service_callable(context, "query_one"),
         )
 
 
 @dataclass(frozen=True)
 class MarketPriceDependencies:
-    lookup: MarketLookupDependencies
     serving: MarketServingReadDependencies
-    get_snapshot_payload: Callable[..., Any]
     query_one: Callable[..., Any]
-    get_market_clob_price_snapshot: Callable[..., Any]
-    get_existing_trade_read_source: Callable[..., Any]
-    identifier_name: Callable[..., Any]
-    trade_v2_core_table: Any
-    iso_days_before: Callable[..., Any]
-    utc_date_days_ago: Callable[..., Any]
     format_trade_decimal: Callable[..., Any]
 
     @classmethod
@@ -268,26 +219,9 @@ class MarketPriceDependencies:
         if isinstance(context, cls):
             return context
         return cls(
-            lookup=MarketLookupDependencies.from_context(context),
             serving=MarketServingReadDependencies.from_context(context),
-            get_snapshot_payload=_service_callable(context, "get_snapshot_payload"),
-            query_one=_service_callable(context, "query_one"),
-            get_market_clob_price_snapshot=_service_callable(
-                context,
-                "get_market_clob_price_snapshot",
-            ),
-            get_existing_trade_read_source=_service_callable(
-                context,
-                "get_existing_trade_read_source",
-            ),
-            identifier_name=_service_callable(context, "_identifier_name"),
-            trade_v2_core_table=context.get("TRADE_V2_CORE_TABLE"),
-            iso_days_before=_service_callable(context, "iso_days_before"),
-            utc_date_days_ago=_service_callable(
-                context,
-                "utc_date_days_ago",
-            ),
-            format_trade_decimal=_service_callable(
+            query_one=resolve_service_callable(context, "query_one"),
+            format_trade_decimal=resolve_service_callable(
                 context,
                 "format_trade_decimal",
             ),
@@ -300,9 +234,7 @@ class MarketChartDependencies:
     lookup: MarketLookupDependencies
     serving: MarketServingReadDependencies
     price: MarketPriceDependencies
-    get_snapshot_payload: Callable[..., Any]
     get_yahoo_market_snapshot: Callable[..., Any]
-    get_trade_derived_market_price_series: Callable[..., Any]
     get_market_clob_price_series: Callable[..., Any]
 
     @classmethod
@@ -317,19 +249,11 @@ class MarketChartDependencies:
             lookup=MarketLookupDependencies.from_context(context),
             serving=MarketServingReadDependencies.from_context(context),
             price=MarketPriceDependencies.from_context(context),
-            get_snapshot_payload=_service_callable(
-                context,
-                "get_snapshot_payload",
-            ),
-            get_yahoo_market_snapshot=_service_callable(
+            get_yahoo_market_snapshot=resolve_service_callable(
                 context,
                 "get_yahoo_market_snapshot",
             ),
-            get_trade_derived_market_price_series=_service_callable(
-                context,
-                "get_trade_derived_market_price_series",
-            ),
-            get_market_clob_price_series=_service_callable(
+            get_market_clob_price_series=resolve_service_callable(
                 context,
                 "get_market_clob_price_series",
             ),
@@ -337,16 +261,13 @@ class MarketChartDependencies:
 
 
 @dataclass(frozen=True)
-class MarketWorkspaceDependencies:
+class MarketDetailDependencies:
     source: Mapping[str, Any] = field(repr=False)
     application: Any
     lookup: MarketLookupDependencies
     serving: MarketServingReadDependencies
     price: MarketPriceDependencies
-    chart: MarketChartDependencies
     oracle: MarketOraclePayloadDependencies
-    trades: MarketTradeReadDependencies
-    get_snapshot_payload: Callable[..., Any]
     normalize_market: Callable[..., Any]
     utc_now_iso: Callable[..., Any]
 
@@ -354,7 +275,7 @@ class MarketWorkspaceDependencies:
     def from_context(
         cls,
         context: Mapping[str, Any],
-    ) -> MarketWorkspaceDependencies:
+    ) -> MarketDetailDependencies:
         if isinstance(context, cls):
             return context
         return cls(
@@ -363,15 +284,9 @@ class MarketWorkspaceDependencies:
             lookup=MarketLookupDependencies.from_context(context),
             serving=MarketServingReadDependencies.from_context(context),
             price=MarketPriceDependencies.from_context(context),
-            chart=MarketChartDependencies.from_context(context),
             oracle=MarketOraclePayloadDependencies.from_context(context),
-            trades=MarketTradeReadDependencies.from_context(context),
-            get_snapshot_payload=_service_callable(
-                context,
-                "get_snapshot_payload",
-            ),
-            normalize_market=_service_callable(context, "normalize_market"),
-            utc_now_iso=_service_callable(context, "utc_now_iso"),
+            normalize_market=resolve_service_callable(context, "normalize_market"),
+            utc_now_iso=resolve_service_callable(context, "utc_now_iso"),
         )
 
 
@@ -385,10 +300,6 @@ class MarketListDependencies:
     utc_now_iso: Callable[..., Any]
     parse_iso_datetime: Callable[..., Any]
     get_market_clob_price_snapshot: Callable[..., Any]
-    get_existing_trade_read_source: Callable[..., Any]
-    utc_date_days_ago: Callable[..., Any]
-    identifier_name: Callable[..., Any]
-    trade_v2_core_table: Any
     query_all: Callable[..., Any]
     query_one: Callable[..., Any]
     parse_json_list: Callable[..., Any]
@@ -413,35 +324,25 @@ class MarketListDependencies:
             application=context.get("app"),
             snapshot_store=context.get("SNAPSHOT_STORE"),
             lob_reader=resolve_optional_service_callable(context, "get_runtime_lob_by_token_payload"),
-            utc_now_iso=_service_callable(context, "utc_now_iso"),
-            parse_iso_datetime=_service_callable(context, "parse_iso_datetime"),
-            get_market_clob_price_snapshot=_service_callable(
+            utc_now_iso=resolve_service_callable(context, "utc_now_iso"),
+            parse_iso_datetime=resolve_service_callable(context, "parse_iso_datetime"),
+            get_market_clob_price_snapshot=resolve_service_callable(
                 context,
                 "get_market_clob_price_snapshot",
             ),
-            get_existing_trade_read_source=_service_callable(
-                context,
-                "get_existing_trade_read_source",
-            ),
-            utc_date_days_ago=_service_callable(
-                context,
-                "utc_date_days_ago",
-            ),
-            identifier_name=_service_callable(context, "_identifier_name"),
-            trade_v2_core_table=context.get("TRADE_V2_CORE_TABLE"),
-            query_all=_service_callable(context, "query_all"),
-            query_one=_service_callable(context, "query_one"),
-            parse_json_list=_service_callable(context, "parse_json_list"),
-            format_trade_decimal=_service_callable(
+            query_all=resolve_service_callable(context, "query_all"),
+            query_one=resolve_service_callable(context, "query_one"),
+            parse_json_list=resolve_service_callable(context, "parse_json_list"),
+            format_trade_decimal=resolve_service_callable(
                 context,
                 "format_trade_decimal",
             ),
-            get_markets_payload_cached=_service_callable(
+            get_markets_payload_cached=resolve_service_callable(
                 context,
                 "get_markets_payload_cached",
             ),
-            set_cached_json=_service_callable(context, "set_cached_json"),
-            get_snapshot_payload=_service_callable(
+            set_cached_json=resolve_service_callable(context, "set_cached_json"),
+            get_snapshot_payload=resolve_service_callable(
                 context,
                 "get_snapshot_payload",
             ),
@@ -817,7 +718,7 @@ def _workspace_evidence(
     identity: Dict[str, Any],
     price: Optional[Dict[str, Any]],
     chart: Optional[Dict[str, Any]],
-    trades: List[Dict[str, Any]],
+    trades: Optional[List[Dict[str, Any]]],
     oracle_payload: Optional[Dict[str, Any]],
     group: Optional[Dict[str, Any]],
     health: Dict[str, Any],
@@ -840,7 +741,7 @@ def _workspace_evidence(
         default=None,
     )
     latest_trade_at = max(
-        (str(trade.get("timestamp")) for trade in trades if isinstance(trade, dict) and trade.get("timestamp")),
+        (str(trade.get("timestamp")) for trade in (trades or []) if isinstance(trade, dict) and trade.get("timestamp")),
         default=None,
     )
     latest_oracle_at = max(
@@ -892,10 +793,10 @@ def _workspace_evidence(
         {
             "id": "trades",
             "label": "OrderFilled evidence",
-            "status": "ok" if trades else "missing",
+            "status": "not-loaded" if trades is None else ("ok" if trades else "missing"),
             "source": "polygon-orderfilled",
             "observedAt": latest_trade_at,
-            "recordCount": len(trades),
+            "recordCount": len(trades or []),
             "detail": "Canonical transaction hash and log index rows",
         },
         {
@@ -938,10 +839,11 @@ def _workspace_diagnostics(
     market_id: int,
     market: Dict[str, Any],
     price: Dict[str, Any],
-    chart: Dict[str, Any],
+    chart: Optional[Dict[str, Any]],
     oracle_payload: Dict[str, Any],
-    trades: List[Dict[str, Any]],
+    trades: Optional[List[Dict[str, Any]]],
 ) -> Dict[str, Any]:
+    chart = chart if chart is not None else {"historyStatus": "not-loaded"}
     points = chart.get("points") if isinstance(chart, dict) else []
     if not isinstance(points, list):
         points = []
@@ -969,7 +871,7 @@ def _workspace_diagnostics(
         issues.append("missing-oracle-timeline")
     volume = _decimal_from_any(price.get("volume24h") if isinstance(price, dict) else None)
     trade_count = int((price or {}).get("tradeCount24h") or 0)
-    if not trades and ((volume is not None and volume > 0) or trade_count > 0):
+    if trades is not None and not trades and ((volume is not None and volume > 0) or trade_count > 0):
         issues.append("serving-volume-without-local-trades")
 
     critical_issues = {"missing-condition-id", "missing-clob-token-ids"}
@@ -985,7 +887,7 @@ def _workspace_diagnostics(
         "chartStatus": chart_status,
         "oracleStatus": completion_status,
         "oracleEventCount": len(oracle_timeline),
-        "tradeCount": len(trades),
+        "tradeCount": len(trades) if trades is not None else None,
         "hasPrice": bool(price and price.get("latestPrice") not in (None, "")),
         "hasLobTokens": bool(token_ids),
         "issues": issues,
@@ -1863,61 +1765,14 @@ def get_trades_by_market_id(
     market_id: int,
     limit: int = 100,
     offset: int = 0,
+    before: Optional[tuple[int, int, str]] = None,
 ) -> List[Dict[str, Any]]:
-    return _get_trades_by_market_id(
-        MarketTradeReadDependencies.from_context(ctx),
-        market_id,
-        limit=limit,
-        offset=offset,
+    rows = clickhouse_orderfilled_service.get_market_trades(
+        ctx, market_id, limit=limit, offset=offset, before=before,
     )
-
-
-def _get_trades_by_market_id(
-    dependencies: MarketTradeReadDependencies,
-    market_id: int,
-    limit: int = 100,
-    offset: int = 0,
-) -> List[Dict[str, Any]]:
-    clickhouse_rows = clickhouse_orderfilled_service.get_market_trades(
-        dependencies.source,
-        market_id,
-        limit=limit,
-        offset=offset,
-    )
-    if clickhouse_rows is not None:
-        return clickhouse_rows
-    if clickhouse_orderfilled_service.clickhouse_orderfilled_enabled():
-        return []
-    trade_source = dependencies.get_existing_trade_read_source()
-    if trade_source is None:
-        return []
-    if dependencies.identifier_name(trade_source) == dependencies.trade_v2_core_table:
-        rows = dependencies.query_all(
-            f"""
-            SELECT
-                {dependencies.get_trade_market_projection_sql("t")}
-            FROM {trade_source} t
-            WHERE t.market_id = ?
-            ORDER BY t.block_time DESC, t.block_number DESC, t.log_index DESC
-            LIMIT ? OFFSET ?
-            """,
-            (market_id, limit, offset),
-        )
-    else:
-        rows = dependencies.query_all(
-            f"""
-            SELECT
-                tx_hash, log_index, market_id, maker, taker, price, size, side, outcome,
-                token_id, timestamp, block_number, order_hash, maker_asset_id, taker_asset_id,
-                maker_amount, taker_amount, fee, contract
-            FROM {trade_source}
-            WHERE market_id = ?
-            ORDER BY timestamp DESC, block_number DESC, log_index DESC
-            LIMIT ? OFFSET ?
-            """,
-            (market_id, limit, offset),
-        )
-    return [dependencies.normalize_trade(row) for row in rows]
+    if rows is None:
+        raise TimeoutError("Market trade source unavailable")
+    return rows
 
 
 def get_recent_trades_snapshot(
@@ -2072,16 +1927,6 @@ def _json_payload(value: Any, expected_type: type) -> Optional[Any]:
     return None
 
 
-def _get_market_workspace_serving_row(
-    ctx: Mapping[str, Any],
-    market_id: int,
-) -> Optional[Dict[str, Any]]:
-    return _read_market_workspace_serving_row(
-        MarketServingReadDependencies.from_context(ctx),
-        market_id,
-    )
-
-
 def _read_market_workspace_serving_row(
     dependencies: MarketServingReadDependencies,
     market_id: int,
@@ -2102,16 +1947,6 @@ def _read_market_workspace_serving_row(
     )
 
 
-def _get_market_workspace_detail_payload(
-    ctx: Mapping[str, Any],
-    market_id: int,
-) -> Optional[Dict[str, Any]]:
-    return _read_market_workspace_detail_payload(
-        MarketServingReadDependencies.from_context(ctx),
-        market_id,
-    )
-
-
 def _read_market_workspace_detail_payload(
     dependencies: MarketServingReadDependencies,
     market_id: int,
@@ -2125,16 +1960,6 @@ def _read_market_workspace_detail_payload(
     payload.setdefault("servingSource", "postgres")
     payload.setdefault("servingUpdatedAt", row.get("updated_at"))
     return payload
-
-
-def _get_market_workspace_price_payload(
-    ctx: Mapping[str, Any],
-    market_id: int,
-) -> Optional[Dict[str, Any]]:
-    return _read_market_workspace_price_payload(
-        MarketServingReadDependencies.from_context(ctx),
-        market_id,
-    )
 
 
 def _read_market_workspace_price_payload(
@@ -2152,20 +1977,6 @@ def _read_market_workspace_price_payload(
     payload.setdefault("servingSource", "postgres")
     payload.setdefault("servingUpdatedAt", row.get("updated_at"))
     return payload
-
-
-def _get_market_chart_serving_payload(
-    ctx: Mapping[str, Any],
-    market_id: int,
-    range_name: str,
-    interval: str,
-) -> Optional[Dict[str, Any]]:
-    return _read_market_chart_serving_payload(
-        MarketServingReadDependencies.from_context(ctx),
-        market_id,
-        range_name,
-        interval,
-    )
 
 
 def _read_market_chart_serving_payload(
@@ -2251,53 +2062,13 @@ def _merge_chart_latest_price(price: Dict[str, Any], chart: Optional[Dict[str, A
     return merged
 
 
-def get_market_price_summary(
-    ctx: Mapping[str, Any],
-    market_id: int,
-    market: Optional[dict] = None,
-    *,
-    include_runtime_price: bool = False,
-    include_recent_stats: bool = False,
-) -> Dict[str, Any]:
-    return _get_market_price_summary(
-        MarketPriceDependencies.from_context(ctx),
-        market_id,
-        market=market,
-        include_runtime_price=include_runtime_price,
-        include_recent_stats=include_recent_stats,
-    )
-
-
 def _get_market_price_summary(
     dependencies: MarketPriceDependencies,
     market_id: int,
-    market: Optional[dict] = None,
-    *,
-    include_runtime_price: bool = False,
-    include_recent_stats: bool = False,
 ) -> Dict[str, Any]:
-    if not include_runtime_price and not include_recent_stats:
-        serving_payload = _read_market_workspace_price_payload(
-            dependencies.serving,
-            market_id,
-        )
-        if serving_payload is not None:
-            return serving_payload
-    if market is None and not include_runtime_price and not include_recent_stats:
-        cache_key = json.dumps({"marketId": int(market_id), "v": 3}, sort_keys=True, ensure_ascii=True)
-        return dependencies.get_snapshot_payload(
-            "snapshot:market_price_summary",
-            cache_key,
-            lambda: _get_market_price_summary(
-                dependencies,
-                market_id,
-                market=_get_market_by_id(dependencies.lookup, market_id),
-                include_runtime_price=False,
-                include_recent_stats=False,
-            ),
-            ttl_seconds=90,
-        )
-    market = market if market is not None else _get_market_by_id(dependencies.lookup, market_id)
+    serving_payload = _read_market_workspace_price_payload(dependencies.serving, market_id)
+    if serving_payload is not None:
+        return serving_payload
     summary_row = (
         dependencies.query_one(
             """
@@ -2323,59 +2094,12 @@ def _get_market_price_summary(
     latest_yes_price = summary_row.get("latest_yes_price")
     latest_no_price = summary_row.get("latest_no_price")
     updated_at = summary_row.get("latest_trade_at")
-    clob_snapshot = dependencies.get_market_clob_price_snapshot(market) if include_runtime_price else None
-    if clob_snapshot:
-        latest_price = clob_snapshot.get("latestYesPrice") or clob_snapshot.get("latestPrice") or latest_price
-        latest_yes_price = clob_snapshot.get("latestYesPrice") or latest_yes_price
-        latest_no_price = clob_snapshot.get("latestNoPrice") or latest_no_price
-        updated_at = clob_snapshot.get("updatedAt") or updated_at
-
     recent_stats = {
         "price_24h_ago": summary_row.get("serving_price_24h_ago"),
         "price_1h_ago": None,
         "trade_count_24h": summary_row.get("serving_trade_count_24h") or 0,
         "volume_24h": summary_row.get("serving_volume_24h") or 0,
     }
-    trade_source = dependencies.get_existing_trade_read_source() if include_recent_stats else None
-    if trade_source is None:
-        pass
-    elif dependencies.identifier_name(trade_source) == dependencies.trade_v2_core_table:
-        recent_stats = dependencies.query_one(
-            f"""
-            SELECT
-                MAX(CASE WHEN block_time >= ? THEN price END) AS price_24h_ago,
-                MAX(CASE WHEN block_time >= ? THEN price END) AS price_1h_ago,
-                SUM(CASE WHEN block_time >= ? THEN 1 ELSE 0 END) AS trade_count_24h,
-                COALESCE(SUM(CASE WHEN block_time >= ? THEN size * price END), 0) AS volume_24h
-            FROM {trade_source}
-            WHERE market_id = ?
-            """,
-            (
-                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
-                (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
-                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
-                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
-                market_id,
-            ),
-        )
-    else:
-        recent_stats = dependencies.query_one(
-            f"""
-            SELECT
-                MAX(CASE WHEN timestamp >= ? THEN price END) AS price_24h_ago,
-                MAX(CASE WHEN timestamp >= ? THEN price END) AS price_1h_ago,
-                COUNT(*) AS trade_count_24h,
-                COALESCE(SUM(CASE WHEN timestamp >= ? THEN size * price END), 0) AS volume_24h
-            FROM {trade_source}
-            WHERE market_id = ?
-            """,
-            (
-                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
-                (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
-                dependencies.iso_days_before(updated_at, 1) if updated_at else dependencies.utc_date_days_ago(1),
-                market_id,
-            ),
-        )
 
     def _change(current: Any, past: Any) -> Optional[str]:
         if current in (None, "") or past in (None, ""):
@@ -2392,12 +2116,8 @@ def _get_market_price_summary(
         "latestPrice": dependencies.format_trade_decimal(latest_yes_price or latest_price),
         "latestYesPrice": dependencies.format_trade_decimal(latest_yes_price),
         "latestNoPrice": dependencies.format_trade_decimal(latest_no_price),
-        "change1h": clob_snapshot.get("change1h")
-        if clob_snapshot
-        else _change(latest_price, recent_stats.get("price_1h_ago")),
-        "change24h": clob_snapshot.get("change24h")
-        if clob_snapshot
-        else _change(latest_price, recent_stats.get("price_24h_ago")),
+        "change1h": _change(latest_price, recent_stats.get("price_1h_ago")),
+        "change24h": _change(latest_price, recent_stats.get("price_24h_ago")),
         "volume24h": dependencies.format_trade_decimal(recent_stats.get("volume_24h")),
         "tradeCount24h": int(recent_stats.get("trade_count_24h") or 0),
         "updatedAt": updated_at,
@@ -2442,32 +2162,6 @@ def _get_market_chart_payload(
     )
     if _is_usable_market_chart_serving(serving_payload):
         return serving_payload
-    if market is None and price is None:
-        cache_key = json.dumps(
-            {
-                "marketId": int(market_id),
-                "range": str(range_name or "1d").strip().lower(),
-                "interval": str(interval or "5m").strip().lower(),
-                "includeRuntimeSeries": bool(include_runtime_series),
-                "v": 11,
-            },
-            sort_keys=True,
-            ensure_ascii=True,
-        )
-        return dependencies.get_snapshot_payload(
-            "snapshot:market_chart",
-            cache_key,
-            lambda: _get_market_chart_payload(
-                dependencies,
-                market_id,
-                range_name=range_name,
-                interval=interval,
-                market=_get_market_by_id(dependencies.lookup, market_id),
-                price=None,
-                include_runtime_series=include_runtime_series,
-            ),
-            ttl_seconds=180,
-        )
     market = market if market is not None else _get_market_by_id(dependencies.lookup, market_id)
     chart_context = (
         _extract_market_chart_context(
@@ -2501,44 +2195,15 @@ def _get_market_chart_payload(
         else _get_market_price_summary(
             dependencies.price,
             market_id,
-            market=market,
         )
     )
     latest = price.get("latestYesPrice") or price.get("latestPrice")
-    latest_decimal = _decimal_from_any(latest)
-    recent_volume = _decimal_from_any(price.get("volume24h")) or Decimal("0")
-    recent_trades = int(price.get("tradeCount24h") or 0)
-    points: List[Dict[str, Any]] = []
-    price_source = "missing"
-    if recent_volume > 0 or recent_trades > 0:
-        limit = 400
-        if range_name == "7d":
-            limit = 700
-        clickhouse_points = clickhouse_orderfilled_service.get_price_series(
-            dependencies.source,
-            market_id,
-            limit=limit,
-        )
-        points = (
-            clickhouse_points
-            if clickhouse_points is not None
-            else dependencies.get_trade_derived_market_price_series(
-                market_id,
-                limit=limit,
-            )
-        )
-        if points:
-            price_source = "orderfilled-history" if clickhouse_points is not None else "trade-history"
-    if not points:
-        limit = 700 if range_name == "7d" else 400
-        clickhouse_points = clickhouse_orderfilled_service.get_price_series(
-            dependencies.source,
-            market_id,
-            limit=limit,
-        )
-        if clickhouse_points:
-            points = clickhouse_points
-            price_source = "orderfilled-history"
+    points = clickhouse_orderfilled_service.get_price_series(
+        dependencies.source, market_id, limit=700 if range_name == "7d" else 400,
+    )
+    history_unavailable = points is None
+    price_source = "orderfilled-history" if points else "missing"
+    points = points or []
     if include_runtime_series:
         point_count, distinct_count = _chart_point_stats(points)
         needs_clob_series = not points or point_count <= 2 or distinct_count <= 1
@@ -2575,6 +2240,8 @@ def _get_market_chart_payload(
         effective_interval = "snapshot"
         price_source = "snapshot"
     history_status = _chart_history_status(effective_range, effective_interval, points)
+    if not points and history_unavailable:
+        history_status = "unavailable"
     return {
         "marketId": market_id,
         "localMarketId": market_id,
@@ -2721,38 +2388,10 @@ def _enrich_market_rows_with_24h_change(
     market_ids = [int(row["id"]) for row in rows if row.get("id") is not None]
     if not market_ids:
         return rows
-    trade_source = dependencies.get_existing_trade_read_source()
-    if trade_source is None:
-        return rows
-
     placeholders = ", ".join("?" for _ in market_ids)
-    threshold = dependencies.utc_date_days_ago(1)
-    if dependencies.identifier_name(trade_source) == dependencies.trade_v2_core_table:
-        time_column = "block_time"
-        order_columns = "block_time DESC, block_number DESC, log_index DESC"
-        yes_price_expr = "CASE WHEN outcome_code = 2 THEN 1 - price ELSE price END"
-    else:
-        time_column = "timestamp"
-        order_columns = "timestamp DESC, block_number DESC, log_index DESC"
-        yes_price_expr = "CASE WHEN UPPER(COALESCE(outcome, '')) = 'NO' THEN 1 - price ELSE price END"
-
     price_rows = dependencies.query_all(
-        f"""
-        SELECT market_id, price
-        FROM (
-            SELECT
-                market_id,
-                {yes_price_expr} AS price,
-                ROW_NUMBER() OVER (
-                    PARTITION BY market_id
-                    ORDER BY {order_columns}
-                ) AS row_num
-            FROM {trade_source}
-            WHERE market_id IN ({placeholders}) AND {time_column} <= ?
-        ) ranked_prices
-        WHERE row_num = 1
-        """,
-        (*market_ids, threshold),
+        f"SELECT market_id, price_24h_ago AS price FROM market_list_serving WHERE market_id IN ({placeholders})",
+        market_ids,
     )
     price_map = {int(row["market_id"]): row.get("price") for row in price_rows if row.get("market_id") is not None}
     enriched_rows: List[Dict[str, Any]] = []
@@ -3920,276 +3559,88 @@ def _get_active_markets_snapshot(
     )
 
 
-def get_market_detail_payload(
-    ctx: Mapping[str, Any],
-    market_id: int,
-) -> Dict[str, Any]:
-    return _get_market_detail_payload(
-        MarketWorkspaceDependencies.from_context(ctx),
-        market_id,
-    )
-
-
-def _get_market_detail_payload(
-    dependencies: MarketWorkspaceDependencies,
-    market_id: int,
-) -> Dict[str, Any]:
-    serving_payload = _read_market_workspace_detail_payload(
-        dependencies.serving,
-        market_id,
-    )
-    if serving_payload is not None:
-        # The pre-generated serving row intentionally contains only a compact
-        # Oracle summary. Hydrate the selected market from the canonical
-        # oracle_events table so a stale serving row cannot hide newly indexed
-        # request/propose/dispute/settle events from the Oracle panel.
-        market = _get_market_by_id(dependencies.lookup, market_id)
-        if market:
-            serving_payload = dict(serving_payload)
-            serving_payload["market"] = _with_oracle_logical_aliases(
-                dependencies.normalize_market(market)
-            )
-            oracle_payload = _build_market_oracle_payload(
-                dependencies.oracle,
-                market_id,
-                market,
-            )
-            if not oracle_payload.get("error"):
-                timeline = oracle_payload.get("timeline") or []
-                serving_payload["oracle"] = oracle_payload
-                serving_payload["oracleEvents"] = timeline
-                diagnostics = dict(serving_payload.get("diagnostics") or {})
-                diagnostics["oracleStatus"] = oracle_payload.get("completionStatus") or "OPEN"
-                diagnostics["oracleEventCount"] = len(timeline) if isinstance(timeline, list) else 0
-                serving_payload["diagnostics"] = diagnostics
-        return serving_payload
+def get_market_detail_payload(ctx: Mapping[str, Any], market_id: int) -> Dict[str, Any]:
+    """Build metadata once; chart, trades and LOB belong to their own cache layers."""
+    dependencies = MarketDetailDependencies.from_context(ctx)
     market = _get_market_by_id(dependencies.lookup, market_id)
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    superseded_payload = _superseded_market_payload(market_id, market)
-    if superseded_payload is not None:
-        return superseded_payload
-    cache_key = json.dumps({"marketId": int(market_id), "v": 13}, sort_keys=True, ensure_ascii=True)
-
-    def build_payload() -> Dict[str, Any]:
-        price = _get_market_price_summary(
-            dependencies.price,
-            market_id,
-            market=market,
-            include_runtime_price=False,
-            include_recent_stats=False,
-        )
-        latest = price.get("latestYesPrice") or price.get("latestPrice")
-        snapshot_time = price.get("updatedAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        chart_points = (
-            [
-                {
-                    "timestamp": snapshot_time,
-                    "yesPrice": latest,
-                    "noPrice": price.get("latestNoPrice"),
-                    "tokenId": price.get("tokenId"),
-                    "tokenPrice": price.get("tokenPrice"),
-                },
-                {
-                    "timestamp": snapshot_time,
-                    "yesPrice": latest,
-                    "noPrice": price.get("latestNoPrice"),
-                    "tokenId": price.get("tokenId"),
-                    "tokenPrice": price.get("tokenPrice"),
-                },
-            ]
-            if latest not in (None, "")
-            else []
-        )
-        chart = {
-            "marketId": market_id,
-            "localMarketId": market_id,
-            "range": "snapshot" if chart_points else "missing",
-            "interval": "snapshot" if chart_points else "missing",
-            "kind": "probability",
-            "historyStatus": "snapshot" if chart_points else "missing",
-            "points": chart_points,
-        }
-        oracle_payload = _get_market_oracle_payload(
-            dependencies.oracle,
-            market_id,
-            market=market,
-        )
-        oracle_events = oracle_payload.get("timeline", [])
-        trades = _get_trades_by_market_id(
-            dependencies.trades,
-            market_id,
-            limit=24,
-            offset=0,
-        )
-        normalized_market = _with_oracle_logical_aliases(dependencies.normalize_market(market))
-        identity = _workspace_identity(market_id, market)
-        diagnostics = _workspace_diagnostics(
-            market_id,
-            market,
-            price,
-            chart,
-            oracle_payload,
-            trades,
-        )
-        return {
-            "market": normalized_market,
-            "localMarketId": market_id,
-            "gammaMarketId": market.get("gamma_market_id"),
-            "identity": identity,
-            "diagnostics": diagnostics,
-            "price": price,
-            "chart": chart,
-            "priceSeries": chart.get("points", []),
-            "trades": trades,
-            "oracle": oracle_payload,
-            "oracleEvents": oracle_events,
-            "content": None,
-        }
-
-    return dependencies.get_snapshot_payload(
-        "snapshot:market_detail_bundle",
-        cache_key,
-        build_payload,
-        ttl_seconds=90,
+    superseded = _superseded_market_payload(market_id, market)
+    if superseded is not None:
+        return superseded
+    serving = _read_market_workspace_detail_payload(dependencies.serving, market_id) or {}
+    price = serving.get("price") or _get_market_price_summary(
+        dependencies.price, market_id,
     )
-
-
-def get_market_workspace_payload(
-    ctx: Mapping[str, Any],
-    market_id: int,
-) -> Dict[str, Any]:
-    return _get_market_workspace_payload(
-        MarketWorkspaceDependencies.from_context(ctx),
-        market_id,
-    )
-
-
-def _get_market_workspace_payload(
-    dependencies: MarketWorkspaceDependencies,
-    market_id: int,
-) -> Dict[str, Any]:
-    market = _get_market_by_id(dependencies.lookup, market_id)
-    if not market:
-        return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    superseded_payload = _superseded_market_payload(market_id, market)
-    if superseded_payload is not None:
-        return superseded_payload
-
-    detail_payload = _get_market_detail_payload(dependencies, market_id)
-    if detail_payload.get("_status") == 404:
-        return detail_payload
-
-    identity = dict(detail_payload.get("identity") or _workspace_identity(market_id, market))
-    identity.setdefault("eventId", market.get("event_id"))
-    identity.setdefault("eventSlug", market.get("event_slug"))
-
+    oracle = _get_market_oracle_payload(dependencies.oracle, market_id, market=market)
+    identity = _workspace_identity(market_id, market)
     group = None
-    event_id = str(market.get("event_id") or identity.get("eventId") or "").strip()
+    event_id = str(market.get("event_id") or "").strip()
     if event_id:
         try:
-            group = market_group_service.get_market_group_detail_payload(
-                dependencies.source,
-                event_id,
-            )
+            group = market_group_service.get_market_group_detail_payload(dependencies.source, event_id)
         except Exception:
             dependencies.application.logger.exception(
-                "market workspace group load failed market_id=%s event_id=%s",
-                market_id,
-                event_id,
+                "market detail group load failed market_id=%s event_id=%s", market_id, event_id,
             )
-            group = None
-    selected_outcome = _workspace_selected_outcome(group, market_id, market)
-    if selected_outcome and selected_outcome.get("outcomeKey"):
-        identity["selectedOutcomeKey"] = selected_outcome.get("outcomeKey")
+    selected = _workspace_selected_outcome(group, market_id, market)
+    if selected and selected.get("outcomeKey"):
+        identity["selectedOutcomeKey"] = selected["outcomeKey"]
+    return assemble_market_workspace({
+        "market": _with_oracle_logical_aliases(dependencies.normalize_market(market)),
+        "localMarketId": market_id, "gammaMarketId": market.get("gamma_market_id"),
+        "identity": identity, "group": group, "selectedOutcome": selected,
+        "price": price, "oracle": oracle, "oracleEvents": oracle.get("timeline") or [],
+        "content": serving.get("content"),
+        "servingSource": serving.get("servingSource") or "fallback",
+        "servingUpdatedAt": serving.get("servingUpdatedAt"),
+        "generatedAt": dependencies.utc_now_iso(),
+    })
 
-    price = detail_payload.get("price") or _get_market_price_summary(
-        dependencies.price,
-        market_id,
-        market=market,
-    )
-    if not (price or {}).get("latestYesPrice") and not (price or {}).get("latestPrice"):
-        price = _get_market_price_summary(
-            dependencies.price,
-            market_id,
-            market=market,
-        )
 
-    detail_chart = detail_payload.get("chart") if isinstance(detail_payload.get("chart"), dict) else None
-    detail_chart_points = detail_chart.get("points") if isinstance(detail_chart, dict) else []
-    chart = (
-        detail_chart
-        if isinstance(detail_chart_points, list) and _is_usable_market_chart_serving(detail_chart)
-        else None
-    )
-    if chart is None:
-        chart = _get_market_chart_payload(
-            dependencies.chart,
-            market_id,
-            range_name="1d",
-            interval="5m",
-            market=market,
-            price=price,
-            include_runtime_series=True,
-        )
-    price = _merge_chart_latest_price(price, chart)
-    oracle_payload = detail_payload.get("oracle") or _get_market_oracle_payload(
-        dependencies.oracle,
-        market_id,
-        market=market,
-    )
-    trades = detail_payload.get("trades") if isinstance(detail_payload.get("trades"), list) else []
-    if not trades:
-        trades = _get_trades_by_market_id(
-            dependencies.trades,
-            market_id,
-            limit=24,
-            offset=0,
-        )
-    diagnostics = dict(detail_payload.get("diagnostics") or {})
-    if diagnostics:
-        diagnostics["workspaceContract"] = "v1"
-    health = _workspace_health(
-        market_id=market_id,
-        identity=identity,
-        price=price,
-        chart=chart,
-        oracle_payload=oracle_payload,
-        diagnostics=diagnostics,
-        group=group,
-        selected_outcome=selected_outcome,
-        serving_source=detail_payload.get("servingSource"),
-    )
-    generated_at = dependencies.utc_now_iso()
-    evidence = _workspace_evidence(
-        market_id=market_id,
-        identity=identity,
-        price=price,
-        chart=chart,
-        trades=trades,
-        oracle_payload=oracle_payload,
-        group=group,
-        health=health,
-        serving_source=detail_payload.get("servingSource"),
-        serving_updated_at=detail_payload.get("servingUpdatedAt"),
-        generated_at=generated_at,
-    )
-    return {
-        "market": detail_payload.get("market")
-        or _with_oracle_logical_aliases(dependencies.normalize_market(market)),
-        "identity": identity,
-        "diagnostics": diagnostics,
-        "health": health,
-        "evidence": evidence,
-        "group": group,
-        "selectedOutcome": selected_outcome,
-        "price": price,
-        "chart": chart,
-        "trades": trades,
-        "oracle": oracle_payload,
-        "content": detail_payload.get("content"),
-        "lob": None,
-        "servingSource": detail_payload.get("servingSource") or "fallback",
-        "servingUpdatedAt": detail_payload.get("servingUpdatedAt"),
-        "generatedAt": generated_at,
+def assemble_market_workspace(
+    detail: Dict[str, Any], *, chart: Optional[Dict[str, Any]] = None,
+    flow: Optional[Dict[str, Any]] = None, lob: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Compose already-read layers without acquiring any external resource."""
+    if detail.get("_status"):
+        return dict(detail)
+    payload = dict(detail)
+    identity = payload.get("identity") or {}
+    market_id = int(identity.get("marketId") or payload.get("marketId") or payload.get("localMarketId") or 0)
+    market = {
+        "gamma_market_id": identity.get("gammaMarketId"), "condition_id": identity.get("conditionId"),
+        "yes_token_id": identity.get("yesTokenId"), "no_token_id": identity.get("noTokenId"),
     }
+    price = payload.get("price") or {}
+    if chart is not None:
+        price = _merge_chart_latest_price(price, chart)
+        payload["chart"] = chart
+    trades = (flow.get("items") or []) if flow is not None else None
+    if flow is not None:
+        payload["trades"] = trades
+        payload["flowStatus"] = flow.get("status", "ok")
+    if lob is not None:
+        payload["lob"] = lob
+    oracle = payload.get("oracle") or {}
+    diagnostics = _workspace_diagnostics(market_id, market, price, chart, oracle, trades)
+    health = _workspace_health(
+        market_id=market_id, identity=identity, price=price,
+        chart=chart or {"historyStatus": "not-loaded"}, oracle_payload=oracle,
+        diagnostics=diagnostics, group=payload.get("group"),
+        selected_outcome=payload.get("selectedOutcome"), serving_source=payload.get("servingSource"),
+    )
+    if lob is not None:
+        health["lobStatus"] = lob.get("bookStatus", "unknown")
+    evidence = _workspace_evidence(
+        market_id=market_id, identity=identity, price=price, chart=chart, trades=trades,
+        oracle_payload=oracle, group=payload.get("group"), health=health,
+        serving_source=payload.get("servingSource"), serving_updated_at=payload.get("servingUpdatedAt"),
+        generated_at=payload.get("generatedAt") or "",
+    )
+    if flow is not None and flow.get("status", "ok") != "ok":
+        for claim in evidence["claims"]:
+            if claim["id"] == "trades":
+                claim["status"] = flow["status"]
+    payload.update(price=price, diagnostics=diagnostics, health=health, evidence=evidence)
+    return payload

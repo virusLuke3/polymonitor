@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import markets as _route_markets
 
 from api.routes.markets import MarketRouteDependencies
 
@@ -124,9 +126,7 @@ def _mutation_proof(row: dict | None = None) -> dict:
                 outcome_semantics_service._payload_sha256(receipt),
             ),
             "rowSha256": outcome_semantics_service._aggregate_row_sha256(row),
-            "rebuiltFromReceiptSha256": outcome_semantics_service._payload_sha256(
-                receipt
-            ),
+            "rebuiltFromReceiptSha256": outcome_semantics_service._payload_sha256(receipt),
             "zeroResidual": True,
             "residualRows": 0,
         },
@@ -336,9 +336,7 @@ def test_underlying_price_chart_points_are_not_treated_as_probability_facts(
         },
     )
 
-    assert sanitized["points"] == [
-        {"timestamp": "2026-08-29T00:00:00Z", "price": 123.45}
-    ]
+    assert sanitized["points"] == [{"timestamp": "2026-08-29T00:00:00Z", "price": 123.45}]
 
 
 def test_tokenless_aggregate_requires_content_bound_mutation_receipt(install_semantics):
@@ -416,8 +414,8 @@ def test_malformed_rehashed_receipt_numeric_fails_closed_without_exception(insta
     receipt_sha = outcome_semantics_service._payload_sha256(receipt)
     proof["receiptSha256"] = receipt_sha
     proof["coverage"]["rebuiltFromReceiptSha256"] = receipt_sha
-    proof["coverage"]["sourceVersionSha256"] = (
-        outcome_semantics_service._receipt_source_version_sha256(receipt, receipt_sha)
+    proof["coverage"]["sourceVersionSha256"] = outcome_semantics_service._receipt_source_version_sha256(
+        receipt, receipt_sha
     )
     proof["proofSha256"] = outcome_semantics_service._payload_sha256(
         {key: item for key, item in proof.items() if key != "proofSha256"}
@@ -720,10 +718,7 @@ def test_reversed_yes_no_oracle_projection_is_idempotent_and_requires_logical_bi
     assert ambiguous["oracleOutcomeSemanticsValid"] is False
     assert ambiguous_again["settlementOutcome"] is None
     assert ambiguous_again["oracleOutcomeSemanticsValid"] is False
-    assert (
-        ambiguous_again["oracleOutcomeSemanticsReason"]
-        == "cached_oracle_projection_previously_rejected"
-    )
+    assert ambiguous_again["oracleOutcomeSemanticsReason"] == "cached_oracle_projection_previously_rejected"
 
 
 def test_market_price_route_rechecks_stale_detail_cache(install_semantics):
@@ -756,7 +751,31 @@ def test_market_price_route_rechecks_stale_detail_cache(install_semantics):
         "get_market_focus_tile_payload": lambda market_id: {"marketId": market_id},
     }
     app = Flask(__name__)
-    app.register_blueprint(create_markets_blueprint(MarketRouteDependencies.from_context(context)))
+    app.register_blueprint(
+        create_markets_blueprint(
+            MarketRouteDependencies(
+                sanitize_payload=lambda payload, **kw: (
+                    _route_markets.outcome_semantics_service.sanitize_public_market_payload(
+                        {"query_all": context.get("query_all", None), "get_backend": context.get("get_backend", None)},
+                        payload,
+                        **kw,
+                    )
+                ),
+                get_markets_payload=context.get("get_markets_payload", missing_route_dependency),
+                get_market_by_id=context.get("get_market_by_id", missing_route_dependency),
+                get_market_by_slug=context.get("get_market_by_slug", missing_route_dependency),
+                normalize_market=context.get("normalize_market", missing_route_dependency),
+                get_trades_by_market_id=context.get("get_trades_by_market_id", missing_route_dependency),
+                get_recent_trades_snapshot=context.get("get_recent_trades_snapshot", missing_route_dependency),
+                get_market_oracle_payload=context.get("get_market_oracle_payload", missing_route_dependency),
+                get_recent_oracle_snapshot=context.get("get_recent_oracle_snapshot", missing_route_dependency),
+                get_market_detail_payload=context.get("get_market_detail_payload", missing_route_dependency),
+                get_market_chart_payload=context.get("get_market_chart_payload", missing_route_dependency),
+                get_market_workspace_payload=context.get("get_market_workspace_payload", missing_route_dependency),
+                get_market_focus_tile_payload=context.get("get_market_focus_tile_payload", missing_route_dependency),
+            )
+        )
+    )
 
     response = app.test_client().get("/markets/7/price")
 
@@ -797,7 +816,31 @@ def test_oracle_routes_apply_fresh_source_label_projection(install_semantics):
         "get_market_focus_tile_payload": lambda market_id: {"marketId": market_id},
     }
     app = Flask(__name__)
-    app.register_blueprint(create_markets_blueprint(MarketRouteDependencies.from_context(context)))
+    app.register_blueprint(
+        create_markets_blueprint(
+            MarketRouteDependencies(
+                sanitize_payload=lambda payload, **kw: (
+                    _route_markets.outcome_semantics_service.sanitize_public_market_payload(
+                        {"query_all": context.get("query_all", None), "get_backend": context.get("get_backend", None)},
+                        payload,
+                        **kw,
+                    )
+                ),
+                get_markets_payload=context.get("get_markets_payload", missing_route_dependency),
+                get_market_by_id=context.get("get_market_by_id", missing_route_dependency),
+                get_market_by_slug=context.get("get_market_by_slug", missing_route_dependency),
+                normalize_market=context.get("normalize_market", missing_route_dependency),
+                get_trades_by_market_id=context.get("get_trades_by_market_id", missing_route_dependency),
+                get_recent_trades_snapshot=context.get("get_recent_trades_snapshot", missing_route_dependency),
+                get_market_oracle_payload=context.get("get_market_oracle_payload", missing_route_dependency),
+                get_recent_oracle_snapshot=context.get("get_recent_oracle_snapshot", missing_route_dependency),
+                get_market_detail_payload=context.get("get_market_detail_payload", missing_route_dependency),
+                get_market_chart_payload=context.get("get_market_chart_payload", missing_route_dependency),
+                get_market_workspace_payload=context.get("get_market_workspace_payload", missing_route_dependency),
+                get_market_focus_tile_payload=context.get("get_market_focus_tile_payload", missing_route_dependency),
+            )
+        )
+    )
     client = app.test_client()
 
     market_payload = client.get("/markets/7/oracle").get_json()
@@ -835,7 +878,31 @@ def test_basic_market_routes_bind_fresh_raw_settlement_before_reversed_projectio
         "get_market_focus_tile_payload": lambda market_id: {"marketId": market_id},
     }
     app = Flask(__name__)
-    app.register_blueprint(create_markets_blueprint(MarketRouteDependencies.from_context(context)))
+    app.register_blueprint(
+        create_markets_blueprint(
+            MarketRouteDependencies(
+                sanitize_payload=lambda payload, **kw: (
+                    _route_markets.outcome_semantics_service.sanitize_public_market_payload(
+                        {"query_all": context.get("query_all", None), "get_backend": context.get("get_backend", None)},
+                        payload,
+                        **kw,
+                    )
+                ),
+                get_markets_payload=context.get("get_markets_payload", missing_route_dependency),
+                get_market_by_id=context.get("get_market_by_id", missing_route_dependency),
+                get_market_by_slug=context.get("get_market_by_slug", missing_route_dependency),
+                normalize_market=context.get("normalize_market", missing_route_dependency),
+                get_trades_by_market_id=context.get("get_trades_by_market_id", missing_route_dependency),
+                get_recent_trades_snapshot=context.get("get_recent_trades_snapshot", missing_route_dependency),
+                get_market_oracle_payload=context.get("get_market_oracle_payload", missing_route_dependency),
+                get_recent_oracle_snapshot=context.get("get_recent_oracle_snapshot", missing_route_dependency),
+                get_market_detail_payload=context.get("get_market_detail_payload", missing_route_dependency),
+                get_market_chart_payload=context.get("get_market_chart_payload", missing_route_dependency),
+                get_market_workspace_payload=context.get("get_market_workspace_payload", missing_route_dependency),
+                get_market_focus_tile_payload=context.get("get_market_focus_tile_payload", missing_route_dependency),
+            )
+        )
+    )
     client = app.test_client()
 
     by_id = client.get("/markets/7").get_json()

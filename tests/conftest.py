@@ -24,3 +24,7 @@ for credential_name in (
     "UC_DP_KEY",
 ):
     os.environ.pop(credential_name, None)
+
+
+def missing_route_dependency(*args, **kwargs):
+    raise AssertionError("Test invoked an unconfigured route dependency")

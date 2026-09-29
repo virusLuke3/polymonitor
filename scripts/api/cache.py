@@ -121,8 +121,9 @@ def set_cached_json(ctx: CacheState, namespace: str, cache_key: str, payload: Di
 
 
 def _store_snapshot_payload(ctx: CacheState, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
+    if isinstance(payload, dict) and (payload.get("error") or payload.get("status") in {"error", "unavailable"}):
+        raise RuntimeError("Snapshot builder returned an unavailable result")
     ctx.snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
-    set_cached_payload(ctx, namespace, cache_key, payload, ttl_seconds)
 
 
 def _refresh_snapshot_payload_async(ctx: CacheState, namespace: str, cache_key: str, builder, ttl_seconds: int) -> None:
@@ -143,11 +144,6 @@ def _refresh_snapshot_payload_async(ctx: CacheState, namespace: str, cache_key: 
     def refresh() -> None:
         try:
             payload = builder()
-            if isinstance(payload, dict) and isinstance(payload.get("items"), list) and not payload.get("items"):
-                ctx.application.logger.warning(
-                    "snapshot-refresh skipped empty payload namespace=%s key=%s", namespace, cache_key
-                )
-                return
             _store_snapshot_payload(ctx, namespace, cache_key, payload, ttl_seconds)
             ctx.application.logger.info("snapshot-refresh completed namespace=%s key=%s", namespace, cache_key)
         except Exception:
@@ -164,24 +160,19 @@ def _refresh_snapshot_payload_async(ctx: CacheState, namespace: str, cache_key: 
 
 
 def get_snapshot_payload(ctx: CacheState, namespace: str, cache_key: str, builder, *, ttl_seconds: int) -> Any:
-    redis_payload = get_cached_payload(ctx, namespace, cache_key)
-    if redis_payload is not None:
-        return redis_payload
-
     sqlite_payload = ctx.snapshot_store.get(namespace, cache_key)
     if sqlite_payload is not None:
-        set_cached_payload(ctx, namespace, cache_key, sqlite_payload, ttl_seconds)
         return sqlite_payload
 
     stale_payload = ctx.snapshot_store.get_stale(namespace, cache_key)
-    if stale_payload is not None:
+    if isinstance(stale_payload, dict):
         ctx.application.logger.info(
             "snapshot-cache stale-hit namespace=%s key=%s scheduling_refresh=true", namespace, cache_key
         )
-        set_cached_payload(ctx, namespace, cache_key, stale_payload, min(15, ttl_seconds))
         _refresh_snapshot_payload_async(ctx, namespace, cache_key, builder, ttl_seconds)
-        return stale_payload
+        return {**stale_payload, "stale": True, "cacheStatus": "stale"}
 
+    # Bare lists cannot carry a stale marker; refresh before returning them.
     try:
         payload = builder()
     except Exception:
