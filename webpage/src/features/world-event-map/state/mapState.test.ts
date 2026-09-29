@@ -10,6 +10,21 @@ import {
 import type { GeoEvent, HazardEvent } from '../domain/types';
 
 describe('World Event Map state', () => {
+  it('fits only a missing valid camera, and global overview preserves filters', () => {
+    const defaults = { ...defaultWorldEventMapState(), fitWorld: true };
+    expect(readStoredWorldEventMapState('{bad', defaults).fitWorld).toBe(true);
+    expect(parseWorldEventMapState('?layers=wildfires', defaults).fitWorld).toBe(true);
+    expect(parseWorldEventMapState('?center=12,35', defaults).fitWorld).toBe(false);
+    expect(parseWorldEventMapState('?zoom=4', defaults).fitWorld).toBe(false);
+    const saved = readStoredWorldEventMapState(JSON.stringify({ center: { lon: 12, lat: 35 }, zoom: 4 }), defaults);
+    expect(saved.fitWorld).toBe(false);
+    const filtered = { ...saved, activeLayerIds: ['wildfires'], timeRange: '24h' as const };
+    const home = worldEventMapReducer(filtered, { type: 'set-region', region: 'global' });
+    expect(parseWorldEventMapState('?center=0,20&zoom=-0.5').zoom).toBe(-0.5);
+    expect(home).toMatchObject({ fitWorld: true, activeLayerIds: ['wildfires'], timeRange: '24h' });
+    expect(worldEventMapReducer(home, { type: 'set-camera', center: { lon: 0, lat: 20 }, zoom: 1 }).fitWorld).toBe(false);
+  });
+
   it('defaults to hazards, risk, and a bounded trunk aviation reference', () => {
     const defaults = defaultWorldEventMapState();
     expect(defaults.activeLayerIds).toEqual([

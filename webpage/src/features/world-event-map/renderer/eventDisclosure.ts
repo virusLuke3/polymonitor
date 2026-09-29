@@ -1,5 +1,5 @@
 import type { GeoEvent } from '../domain/types';
-import { isHazardEvent } from './layerFactories/shared';
+import { boundsIntersect, eventGeometryBounds, eventRepresentativePoint, isHazardEvent } from './layerFactories/shared';
 
 /**
  * Zoom disclosure is a presentation decision, not a clustering decision.
@@ -38,5 +38,29 @@ export function disclosureTierForZoom(zoom: number) {
 }
 
 export function eventVisibleAtZoom(event: GeoEvent, zoom: number, selectedEventId: string | null) {
+  // Canonical events selected by the user's severity filters remain visible.
+  // Only raw satellite observations use the separate overview texture.
+  if (isHazardEvent(event)) return event.id === selectedEventId || event.hazardKind !== 'fire-detection' || zoom >= 4;
   return event.id === selectedEventId || eventDisclosureTier(event) <= disclosureTierForZoom(zoom);
+}
+
+export type MapPresentationCounts = { inView: number; singles: number; clusters: number; observations: number };
+
+/** Geometry intersection and presentation counts have different denominators. */
+export function mapPresentationCounts(
+  events: GeoEvent[], presentation: { singles: GeoEvent[]; clusters: { coordinates: [number, number] }[] },
+  viewport: [number, number, number, number], zoom: number,
+): MapPresentationCounts {
+  const pointInView = (p: [number, number] | null) => p != null && boundsIntersect([p[0], p[1], p[0], p[1]], viewport);
+  const inView = events.filter(event => { const bounds = eventGeometryBounds(event); return bounds && boundsIntersect(bounds, viewport); });
+  const singles = new Set(presentation.singles.filter(event => pointInView(eventRepresentativePoint(event))).map(event => event.id));
+  for (const event of inView) {
+    if (isHazardEvent(event) && event.hazardKind === 'tropical-cyclone' && event.geometry?.type === 'LineString'
+      && pointInView(eventRepresentativePoint(event))) singles.add(event.id);
+  }
+  return {
+    inView: new Set(inView.map(event => event.id)).size, singles: singles.size,
+    clusters: presentation.clusters.filter(cluster => pointInView(cluster.coordinates)).length,
+    observations: zoom < 4 ? inView.filter(event => isHazardEvent(event) && event.hazardKind === 'fire-detection').length : 0,
+  };
 }

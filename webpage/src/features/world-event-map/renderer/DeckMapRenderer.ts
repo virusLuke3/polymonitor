@@ -1,3 +1,7 @@
+import { mapPresentationCounts } from './eventDisclosure';
+import { selectionPanOffset } from './rendererVisibility';
+import { eventRepresentativePoint } from './layerFactories/shared';
+import type { RadarFrame } from '../data/useWeatherRadar';
 import { coordinatePositions } from '../domain/countryGeometry';
 import { MapLibreOverlay } from '@deck.gl/maplibre';
 import type { Layer, LayersList, PickingInfo } from '@deck.gl/core';
@@ -15,10 +19,10 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   getWeatherMapFallbackStyle,
   getWeatherMapStyle,
-  refreshWorldEventBasemapLabelDensity,
   reinforceWorldEventBasemapLabels,
 } from '@/config/weatherBasemap';
 import type { GeoEvent } from '../domain/types';
+import { clampLatitude, clampLongitude, clampWorldEventZoom } from '../state/mapState';
 import type { WorldEventMapState } from '../state/mapState';
 import type { BasemapState, MapCountryTarget, MapRenderer, MapRendererCallbacks } from './MapRenderer';
 import {
@@ -29,7 +33,6 @@ import {
   createWorldEventGeometryLayers,
   createWorldEventPointLayers,
   EventClusterIndex,
-  HAZARD_PULSE_INTERVAL_MS,
   hasAnimatedHazardPulse,
   selectEventPulseCandidates,
   type AviationStaticLayerSections,
@@ -44,7 +47,6 @@ import {
 import {
   pickedWorldEvent,
   pickedWorldEventCluster,
-  worldEventTooltipHtml,
   worldEventTooltipModel,
   type WorldEventPickedObject,
 } from './hoverTooltip';
@@ -128,6 +130,54 @@ function sameEventReferences(
 }
 
 export class DeckMapRenderer implements MapRenderer {
+  private radarFrame: RadarFrame | null = null;
+  private radarAppliedUrl = '';
+  private radarIdlePending = false;
+
+  setRadar(frame: RadarFrame | null) { this.radarFrame = frame; this.applyRadar(); }
+
+  private applyRadar = () => {
+    const map = this.map;
+    if (!map || this.destroyed) return;
+    if (!this.radarFrame || this.paused) {
+      for (const id of ['weather-radar', 'weather-radar-coverage']) {
+        if (map.getLayer(id)) map.removeLayer(id);
+        if (map.getSource(id)) map.removeSource(id);
+      }
+      this.radarAppliedUrl = '';
+      this.callbacks?.onRadarStateChange?.('off');
+      return;
+    }
+    if (!map.isStyleLoaded()) {
+      if (!this.radarIdlePending) {
+        this.radarIdlePending = true;
+        map.once('idle', () => { this.radarIdlePending = false; this.applyRadar(); });
+      }
+      return;
+    }
+    const frame = this.radarFrame;
+    const existing = map.getSource('weather-radar') as maplibregl.RasterTileSource | undefined;
+    if (existing) {
+      if (this.radarAppliedUrl === frame.tiles) return;
+      if (!map.isSourceLoaded('weather-radar')) {
+        if (!this.radarIdlePending) {
+          this.radarIdlePending = true;
+          map.once('idle', () => { this.radarIdlePending = false; this.applyRadar(); });
+        }
+        return;
+      }
+      existing.setTiles([frame.tiles]);
+    } else {
+      const before = map.getStyle().layers.find(layer => layer.type === 'symbol' || layer.id.includes('boundar'))?.id;
+      for (const [id, url, opacity] of [['weather-radar', frame.tiles, 0.6], ['weather-radar-coverage', frame.coverageTiles, 0.16]] as const) {
+        map.addSource(id, { type: 'raster', tiles: [url], tileSize: 256, minzoom: 0, maxzoom: 7, attribution: '© RainViewer' });
+        map.addLayer({ id, type: 'raster', source: id, paint: { 'raster-opacity': opacity, 'raster-fade-duration': 200 } }, before);
+      }
+    }
+    this.radarAppliedUrl = frame.tiles;
+    this.callbacks?.onRadarStateChange?.('loading');
+  };
+
   private map: MapLibreMap | null = null;
   private overlay: MapLibreOverlay | null = null;
   private aviationOverlay: MapLibreOverlay | null = null;
@@ -178,6 +228,7 @@ export class DeckMapRenderer implements MapRenderer {
   private staticDeckHoverActive = false;
   private aviationDeckHoverActive = false;
   private hoveredCountryIso2: string | null = null;
+  private countryPointer: MapMouseEvent["point"] | null = null;
   private countryHoverQueryController: CountryHoverQueryController<MapMouseEvent['point']> | null = null;
   private interacting = false;
   private mapDragging = false;
@@ -185,7 +236,8 @@ export class DeckMapRenderer implements MapRenderer {
   private animationRecoveryFrames = 0;
   private cancelPickingWarmup: (() => void) | null = null;
   private pickingWarmupStage: 0 | 1 | 2 = 0;
-  private hazardPulseTimer: number | null = null;
+  private initializedEventSources = new Set<string>();
+  private observedEventIds = new Set<string>();
   private hazardPulseTime = Date.now();
   private readonly eventFirstSeenAt = new Map<string, number>();
   private receivedInitialEventSnapshot = false;
@@ -263,12 +315,22 @@ export class DeckMapRenderer implements MapRenderer {
       this.language,
     );
     if (this.destroyed) return;
+    await document.fonts?.ready;
+    if (this.destroyed) return;
     const map = new maplibregl.Map({
       container,
       style: primaryStyle,
       center: state ? [state.center.lon, state.center.lat] : [20, 24],
       zoom: state?.zoom ?? 1.25,
       renderWorldCopies: false,
+      // Keep one world while permitting a complete world in a wide/short
+      // viewport. MapLibre's default constraint otherwise forces zoom up.
+      transformConstrain: (center, zoom) => ({
+        center: new maplibregl.LngLat(clampLongitude(center.lng), clampLatitude(center.lat)),
+        zoom: clampWorldEventZoom(zoom),
+      }),
+      minZoom: -1,
+      maxZoom: 8,
       attributionControl: false,
       interactive: true,
       pitchWithRotate: false,
@@ -292,8 +354,8 @@ export class DeckMapRenderer implements MapRenderer {
 
     const getTooltip = (info: PickingInfo<WorldEventPickedObject>) => {
       if (this.manualAviationEvent) return null;
-      const html = worldEventTooltipHtml(info.object, info.layer?.id || '');
-      return html ? { html } : null;
+      this.manualAviationTooltip?.show(worldEventTooltipModel(info.object, info.layer?.id || '', this.language), { x: info.x, y: info.y });
+      return null;
     };
     const getCursor = ({ isDragging, isHovering }: { isDragging: boolean; isHovering: boolean }) => {
       if (isDragging) return 'grabbing';
@@ -303,17 +365,13 @@ export class DeckMapRenderer implements MapRenderer {
         const cluster = pickedWorldEventCluster(info.object);
         if (cluster) {
           const [west, south, east, north] = cluster.bounds;
-          if (west === east && south === north) {
-            map.easeTo({
-              center: cluster.coordinates,
-              zoom: Math.min(6, cluster.expansionZoom || map.getZoom() + 1.5),
-              duration: this.reducedMotion ? 0 : 420,
-            });
+          const expansion = clampWorldEventZoom(cluster.expansionZoom);
+          if ((west === east && south === north) || expansion <= map.getZoom() || map.getZoom() >= 8) {
+            callbacks.onClusterSelect?.(cluster.eventIds);
           } else {
-            map.fitBounds(
-              [[west, south], [east, north]],
-              { padding: 70, maxZoom: 6, duration: this.reducedMotion ? 0 : 480 },
-            );
+            map.fitBounds([[west, south], [east, north]], {
+              padding: 70, maxZoom: expansion, duration: this.reducedMotion ? 0 : 350,
+            });
           }
           return;
         }
@@ -324,7 +382,7 @@ export class DeckMapRenderer implements MapRenderer {
       interleaved: true,
       layers: [],
       pickingRadius: 8,
-      useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
+      useDevicePixels: true,
       getCursor,
       getTooltip,
       onHover: (info: PickingInfo<WorldEventPickedObject>) => this.handleDeckHover('static', info),
@@ -336,6 +394,7 @@ export class DeckMapRenderer implements MapRenderer {
     map.once('load', () => {
       if (this.destroyed) return;
       this.mountOverlaysIfNeeded();
+      if (this.state?.fitWorld) this.fitWorld();
       reinforceWorldEventBasemapLabels(map, this.language);
       this.ensureCountryHoverLayers();
       if (this.fallbackApplied) {
@@ -346,8 +405,7 @@ export class DeckMapRenderer implements MapRenderer {
       }
       this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
       this.syncAnimationLoop();
-      this.syncHazardPulseLoop();
-    });
+      });
     map.on('style.load', this.handleStyleLoad);
     map.on('sourcedata', this.handleSourceData);
     map.on('idle', this.handleBasemapIdle);
@@ -381,7 +439,7 @@ export class DeckMapRenderer implements MapRenderer {
       this.pulseEvents = selectEventPulseCandidates(this.events, state.selectedEventId);
     }
     const map = this.map;
-    if (map && (!previous
+    if (map && !state.fitWorld && (!previous
       || Math.abs(previous.center.lon - state.center.lon) > 0.0001
       || Math.abs(previous.center.lat - state.center.lat) > 0.0001
       || Math.abs(previous.zoom - state.zoom) > 0.001)) {
@@ -394,8 +452,18 @@ export class DeckMapRenderer implements MapRenderer {
           center: [state.center.lon, state.center.lat],
           zoom: state.zoom,
           duration: this.reducedMotion ? 0 : 260,
-          essential: true,
+          essential: false,
         });
+      }
+    }
+    if (map && state.fitWorld && !previous?.fitWorld) this.fitWorld();
+    if (map && state.selectedEventId && previous?.selectedEventId !== state.selectedEventId) {
+      const event = this.events.find(item => item.id === state.selectedEventId);
+      const coordinate = event ? eventRepresentativePoint(event) : null;
+      const host = map.getContainer?.();
+      if (coordinate && host) {
+        const { x: dx, y: dy } = selectionPanOffset(host, map.project(coordinate));
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) map.panBy([dx, dy], { duration: this.reducedMotion ? 0 : 280 });
       }
     }
     const staticLayersChanged = !previous
@@ -429,7 +497,6 @@ export class DeckMapRenderer implements MapRenderer {
       interaction: previous?.selectedEventId !== state.selectedEventId,
     });
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
   }
 
   setEvents(events: GeoEvent[]) {
@@ -445,11 +512,15 @@ export class DeckMapRenderer implements MapRenderer {
     const now = Date.now();
     if (this.receivedInitialEventSnapshot) {
       for (const event of events) {
-        if (!previousIds.has(event.id)) this.eventFirstSeenAt.set(event.id, now);
+        const occurred = Date.parse(event.occurredAt || event.updatedAt || '');
+        if (event.sources.some(source => this.initializedEventSources.has(source.provider))
+          && !previousIds.has(event.id) && !this.observedEventIds.has(event.id)
+          && occurred <= now && now - occurred <= 6_000) this.eventFirstSeenAt.set(event.id, now);
       }
     } else if (events.length > 0) {
       this.receivedInitialEventSnapshot = true;
     }
+    events.forEach(event => { this.observedEventIds.add(event.id); event.sources.forEach(source => this.initializedEventSources.add(source.provider)); });
     const nextIds = new Set(events.map((event) => event.id));
     for (const eventId of this.eventFirstSeenAt.keys()) {
       if (!nextIds.has(eventId)) this.eventFirstSeenAt.delete(eventId);
@@ -474,7 +545,6 @@ export class DeckMapRenderer implements MapRenderer {
       interaction: true,
     });
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
   }
 
   resize() {
@@ -484,8 +554,12 @@ export class DeckMapRenderer implements MapRenderer {
   setReducedMotion(reduced: boolean) {
     this.reducedMotion = reduced;
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
     this.requestRender({ dynamic: true, pulse: true });
+  }
+
+  private fitWorld() {
+    this.fittingWorld = true;
+    this.map?.fitBounds([[-180, -58], [180, 76]], { padding: 40, maxZoom: 1.5, duration: this.reducedMotion ? 0 : 350 });
   }
 
   fitCountry(country: MapCountryTarget) {
@@ -498,10 +572,10 @@ export class DeckMapRenderer implements MapRenderer {
 
   pause() {
     this.paused = true;
+    this.applyRadar();
     this.clearAllHover();
     this.cancelAnimationLoop();
     this.cancelAnimationResume();
-    this.cancelHazardPulseLoop();
     this.cancelPickingWarmup?.();
     this.cancelPickingWarmup = null;
     this.cancelStagedAviationCommit();
@@ -515,10 +589,10 @@ export class DeckMapRenderer implements MapRenderer {
   resume() {
     if (!this.paused) return;
     this.paused = false;
+    this.applyRadar();
     this.resize();
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
   }
 
   destroy() {
@@ -529,7 +603,6 @@ export class DeckMapRenderer implements MapRenderer {
     this.clearContextRecoveryTimer();
     this.cancelAnimationLoop();
     this.cancelAnimationResume();
-    this.cancelHazardPulseLoop();
     this.cancelPickingWarmup?.();
     this.cancelPickingWarmup = null;
     this.cancelStagedAviationCommit();
@@ -642,6 +715,20 @@ export class DeckMapRenderer implements MapRenderer {
           }
         : undefined;
       const occupiedScreenBoxes: [number, number, number, number][] = [];
+      const measureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+      const measureLabel = (text: string, size: number) => {
+        if (!measureContext) return 220;
+        measureContext.font = `500 ${size}px "Noto Sans SC Variable", Arial, sans-serif`;
+        return measureContext.measureText(text).width;
+      };
+      const host = map?.getContainer?.();
+      if (host) {
+        const bounds = host.getBoundingClientRect();
+        for (const control of host.closest('.wm-map-stage')?.querySelectorAll('.wm-event-inspector, .wm-weather-deck-legend, .wm-layer-sidebar, .wm-map-controls') || []) {
+          const rect = control.getBoundingClientRect();
+          if (rect.width && rect.height) occupiedScreenBoxes.push([rect.left - bounds.left, rect.top - bounds.top, rect.right - bounds.left, rect.bottom - bounds.top]);
+        }
+      }
       if (map) {
         try {
           const symbolLayerIds = (map.getStyle()?.layers || [])
@@ -658,7 +745,7 @@ export class DeckMapRenderer implements MapRenderer {
             const properties = feature.properties || {};
             const text = String(properties.name_en || properties.name || properties.name_int || '');
             if (!text) continue;
-            const width = Math.min(220, Math.max(30, text.length * 7));
+            const width = measureLabel(text, 12);
             occupiedScreenBoxes.push([
               screen.x - width / 2, screen.y - 9, screen.x + width / 2, screen.y + 9,
             ]);
@@ -677,15 +764,22 @@ export class DeckMapRenderer implements MapRenderer {
           this.clusterIndex,
           project,
           occupiedScreenBoxes,
+          measureLabel,
+          host ? [host.clientWidth, host.clientHeight] : undefined,
         ),
       );
+    }
+    if (invalidation.points && bounds) {
+      const actualViewport: [number, number, number, number] = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+      this.callbacks?.onPresentationChange?.(mapPresentationCounts(this.events,
+        this.clusterIndex.query(this.state.zoom, this.state.selectedEventId, viewport), actualViewport, this.state.zoom));
     }
     if (invalidation.geometry || this.geometryNeedsCommit) {
       this.heavyGeometryCommit.stage({
         events: this.events,
         selectedEventId: this.state.selectedEventId,
         zoom: this.state.zoom,
-        beforeId: this.map?.getStyle()?.layers?.find((layer) => layer.type === 'symbol')?.id,
+        beforeId: this.map?.getStyle()?.layers?.find((layer) => layer.id.startsWith('boundaries') || layer.type === 'symbol')?.id,
         viewport,
         generation: this.geometryGeneration,
       });
@@ -868,10 +962,14 @@ export class DeckMapRenderer implements MapRenderer {
     }
   }
 
+  private fittingWorld = false;
   private handleMoveEnd = () => {
     const map = this.map;
     if (!map || !this.callbacks) return;
-    refreshWorldEventBasemapLabelDensity(map);
+    // Initial resize emits moveend before load; it must not consume the fit
+    // request and persist the constructor's provisional camera.
+    if (this.state?.fitWorld && !this.fittingWorld) return;
+    this.fittingWorld = false;
     const zoomChanged = Math.abs(map.getZoom() - (this.state?.zoom ?? map.getZoom())) > 0.001;
     this.mapDragging = false;
     this.interacting = false;
@@ -884,7 +982,6 @@ export class DeckMapRenderer implements MapRenderer {
     this.invalidateGeometry();
     this.requestRender({ points: true, aviation: zoomChanged, geometry: true, dynamic: zoomChanged });
     this.scheduleAnimationResume();
-    this.syncHazardPulseLoop();
     const center = map.getCenter();
     const camera = { center: { lon: center.lng, lat: center.lat }, zoom: map.getZoom() };
     if (this.applyingCamera) {
@@ -900,6 +997,7 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleMoveStart = () => {
     this.mapDragging = true;
+    this.clearAllHover();
     this.beginMapInteraction();
   };
 
@@ -914,8 +1012,7 @@ export class DeckMapRenderer implements MapRenderer {
       this.resumeAviationOverlayViewSync();
       this.requestRender({ dynamic: true, pulse: true, interaction: true });
       this.syncAnimationLoop();
-      this.syncHazardPulseLoop();
-    });
+      });
   };
 
   private beginMapInteraction() {
@@ -923,7 +1020,6 @@ export class DeckMapRenderer implements MapRenderer {
     this.interacting = true;
     this.cancelAnimationLoop();
     this.cancelAnimationResume();
-    this.cancelHazardPulseLoop();
     // The non-interleaved motion canvas otherwise performs a synchronous deck
     // redraw on every MapLibre drag frame even though its animation clock is
     // paused. Freeze and hide it until moveend; the labelled basemap, routes
@@ -932,7 +1028,9 @@ export class DeckMapRenderer implements MapRenderer {
     this.cancelStagedAviationCommit();
     this.pauseAviationOverlayViewSync();
     this.countryHoverQueryController?.cancel();
-    this.clearAllHover();
+    // Preserve the picked entity across mousedown -> click. Clearing it here
+    // races Deck picking and lets the underlying country steal the click.
+    // A genuine MapLibre move starts by clearing hover in handleMoveStart.
   }
 
   private handleDeckHover(
@@ -970,6 +1068,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.cancelAnimationLoop();
     this.scheduleAnimationResume(120);
     this.handleManualAviationHover(event);
+    this.countryPointer = event.point;
     this.countryHoverQueryController?.queue(event.point);
   };
 
@@ -1029,6 +1128,14 @@ export class DeckMapRenderer implements MapRenderer {
     // click, so checking `this.interacting` here made every genuine country
     // click impossible. Deck/manual aviation ownership is still respected.
     if (this.deckHoverActive || this.manualAviationEvent) return;
+    // A fast click (or touch) can precede the next hover frame. Query the actual
+    // click position instead of letting the country underneath claim it too.
+    try {
+      if (this.overlay?.pickObject({ x: event.point.x, y: event.point.y, radius: 8 })?.object) return;
+    } catch {
+      // Picking is unavailable during context teardown; do not guess a country.
+      return;
+    }
     const country = this.countryAtPoint(event.point);
     this.callbacks?.onCountrySelect(country, country ? { x: event.point.x, y: event.point.y } : undefined);
   };
@@ -1067,12 +1174,14 @@ export class DeckMapRenderer implements MapRenderer {
     }
     reinforceWorldEventBasemapLabels(this.map, this.language);
     this.ensureCountryHoverLayers();
+    this.radarAppliedUrl = ''; this.applyRadar();
     if (this.fallbackApplied) this.markLocalFallbackReadyIfLoaded();
     this.invalidateGeometry();
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
   };
 
   private handleSourceData = (event: MapSourceDataEvent) => {
+    if (event.sourceId === 'weather-radar' && event.isSourceLoaded) this.callbacks?.onRadarStateChange?.('ready');
     if (!this.fallbackApplied || event.sourceId !== FALLBACK_COUNTRY_SOURCE) return;
     if (!this.markLocalFallbackReadyIfLoaded()) return;
     this.mountOverlaysIfNeeded();
@@ -1081,6 +1190,9 @@ export class DeckMapRenderer implements MapRenderer {
   };
 
   private handleBasemapIdle = () => {
+    // Country GeoJSON may arrive after the pointer stops moving. Re-query
+    // once the newly loaded style/source has actually painted.
+    if (this.countryPointer && !this.paused && !this.interacting) this.countryHoverQueryController?.queue(this.countryPointer);
     if (!this.map || this.destroyed || this.fallbackApplied || this.fallbackTimer == null) return;
     // `load` only fires for the first style. A user-selected replacement must
     // also cancel its deadline once its sources/tiles have finished loading.
@@ -1277,7 +1389,7 @@ export class DeckMapRenderer implements MapRenderer {
           id: COUNTRY_HOVER_FILL_LAYER,
           type: 'fill',
           source: sourceId,
-          paint: { 'fill-color': '#ffffff', 'fill-opacity': 0.055 },
+          paint: { 'fill-color': '#ffffff', 'fill-opacity': 0.025 },
           filter: EMPTY_COUNTRY_FILTER,
         }, beforeId);
       }
@@ -1288,8 +1400,8 @@ export class DeckMapRenderer implements MapRenderer {
           source: sourceId,
           paint: {
             'line-color': '#d8f7ff',
-            'line-width': 1.35,
-            'line-opacity': 0.56,
+            'line-width': 0.7,
+            'line-opacity': 0.3,
           },
           filter: EMPTY_COUNTRY_FILTER,
         }, beforeId);
@@ -1333,6 +1445,7 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   private clearAllHover() {
+    this.countryPointer = null;
     const hadEventHover = this.hoveredDeckEventId != null;
     const hadClusterHover = this.hoveredDeckCluster != null;
     this.staticDeckHoverActive = false;
@@ -1354,8 +1467,11 @@ export class DeckMapRenderer implements MapRenderer {
     );
   }
 
-  private handleMapError = (event: { error?: { message?: string }; message?: string }) => {
+  private handleMapError = (event: { sourceId?: string; error?: { message?: string }; message?: string }) => {
     const message = event.error?.message || event.message || 'Unknown MapLibre error';
+    if (event.sourceId?.startsWith('weather-radar') || /rainviewer/i.test(message)) {
+      this.callbacks?.onRadarStateChange?.('error'); return;
+    }
     if (!this.fallbackApplied && /fetch|ajax|cors|network|403|forbidden|tile|style/i.test(message)) {
       // MapLibre emits transient tile/glyph errors before the first `load`
       // event as well as after it. Counting two resource errors as a fatal
@@ -1378,7 +1494,6 @@ export class DeckMapRenderer implements MapRenderer {
     this.paused = true;
     this.cancelAnimationLoop();
     this.cancelAnimationResume();
-    this.cancelHazardPulseLoop();
     this.cancelPickingWarmup?.();
     this.cancelPickingWarmup = null;
     this.cancelStagedAviationCommit();
@@ -1408,7 +1523,6 @@ export class DeckMapRenderer implements MapRenderer {
     this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
   };
 
   private applyLocalFallback(error: Error) {
@@ -1538,7 +1652,7 @@ export class DeckMapRenderer implements MapRenderer {
     }
     if (this.animationIntervalMs <= MAP_ANIMATION_FRAME_INTERVAL_MS) return;
     this.animationRecoveryFrames += 1;
-    if (this.animationRecoveryFrames >= 600) {
+    if (this.animationRecoveryFrames >= 60) {
       this.animationIntervalMs = MAP_ANIMATION_FRAME_INTERVAL_MS;
       this.animationRecoveryFrames = 0;
     }
@@ -1552,55 +1666,13 @@ export class DeckMapRenderer implements MapRenderer {
     ));
   }
 
-  private syncHazardPulseLoop() {
-    const shouldPulse = !this.destroyed
-      && !this.paused
-      && !this.interacting
-      && !this.reducedMotion
-      && Boolean(this.overlay)
-      && hasAnimatedHazardPulse(
-        this.pulseEvents,
-        this.state?.selectedEventId || null,
-        this.eventFirstSeenAt,
-        Date.now(),
-        this.state?.zoom ?? 0,
-      );
-    if (!shouldPulse) {
-      this.cancelHazardPulseLoop();
-      return;
-    }
-    if (this.hazardPulseTimer != null) return;
-    this.hazardPulseTimer = window.setInterval(() => {
-      if (
-        this.destroyed
-        || this.paused
-        || this.interacting
-        || this.reducedMotion
-        || !hasAnimatedHazardPulse(
-          this.pulseEvents,
-          this.state?.selectedEventId || null,
-          this.eventFirstSeenAt,
-          Date.now(),
-          this.state?.zoom ?? 0,
-        )
-      ) {
-        this.cancelHazardPulseLoop();
-        return;
-      }
-      this.hazardPulseTime = Date.now();
-      if (this.shouldRenderAnimationFrame()) this.requestRender({ pulse: true });
-    }, HAZARD_PULSE_INTERVAL_MS);
-  }
-
-  private cancelHazardPulseLoop() {
-    if (this.hazardPulseTimer != null) {
-      window.clearInterval(this.hazardPulseTimer);
-      this.hazardPulseTimer = null;
-    }
+  private hasAnimation() {
+    return this.hasAnimatedAviation() || hasAnimatedHazardPulse(this.pulseEvents,
+      this.state?.selectedEventId || null, this.eventFirstSeenAt, Date.now(), this.state?.zoom ?? 0);
   }
 
   private syncAnimationLoop() {
-    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) {
+    if (this.destroyed || this.paused || this.interacting || this.reducedMotion || !this.hasAnimation()) {
       this.cancelAnimationLoop();
       return;
     }
@@ -1610,7 +1682,8 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleAnimationFrame = (timestamp: number) => {
     this.animationFrame = null;
-    if (this.destroyed || this.paused || this.reducedMotion || !this.hasAnimatedAviation()) return;
+    if (this.destroyed || this.paused || this.reducedMotion) return;
+    if (!this.hasAnimation()) { this.hazardPulseTime = Date.now(); this.requestRender({ pulse: true }); return; }
     const actualFrameDelay = this.lastAnimationTimestamp == null
       ? 0
       : Math.max(0, timestamp - this.lastAnimationTimestamp);
@@ -1621,7 +1694,8 @@ export class DeckMapRenderer implements MapRenderer {
     if (this.pendingAnimationDeltaMs >= this.animationIntervalMs && this.shouldRenderAnimationFrame()) {
       this.animationTime = advanceAnimationTime(this.animationTime, this.pendingAnimationDeltaMs);
       this.pendingAnimationDeltaMs = 0;
-      this.requestRender({ dynamic: true });
+      this.hazardPulseTime = Date.now();
+      this.requestRender({ dynamic: this.hasAnimatedAviation(), pulse: true });
     } else {
       this.pendingAnimationDeltaMs = Math.min(this.pendingAnimationDeltaMs, 160);
     }

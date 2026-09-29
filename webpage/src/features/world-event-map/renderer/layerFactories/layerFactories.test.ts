@@ -1,3 +1,5 @@
+import { mapPresentationCounts } from '../eventDisclosure';
+import { createEventPointLayers } from './eventPointLayer';
 import type { Layer } from '@deck.gl/core';
 import { describe, expect, it } from 'vitest';
 import { createWorldEventGeometryLayers, createWorldEventLayers } from '.';
@@ -83,18 +85,16 @@ describe('world event layer factories', () => {
       pointEvent(`dense:${index}`, 10 + index * 0.03, 10 + index * 0.02, index === 5 ? 'critical' : 'warning')
     )), state);
     expect((layers as Layer[]).map((layer) => layer.id)).toEqual([
-      'world-event-cluster-severity-rings',
-      'world-event-cluster-critical-rings',
       'world-event-clusters',
       'world-event-cluster-counts',
     ]);
     const clusterCounts = (layers as Layer[]).find((layer) => layer.id === 'world-event-cluster-counts');
     const clusterCountProps = clusterCounts?.props as unknown as {
       characterSet?: string;
-      getIcon?: unknown;
+      getText?: unknown;
     };
-    expect(clusterCountProps.getIcon).toBeTypeOf('function');
-    expect(clusterCountProps.characterSet).toBeUndefined();
+    expect(clusterCountProps.getText).toBeTypeOf('function');
+    expect(clusterCountProps.characterSet).toBe('auto');
   });
 
   it('keeps the selected event outside a cluster', () => {
@@ -120,15 +120,15 @@ describe('world event layer factories', () => {
     expect(clustered.clusters[0]?.label).toBe('earthquake');
     expect(clustered.clusters[0]?.symbol).toBe('earthquake');
     expect(clustered.clusters[0]?.badge).toBe('EQ');
-    expect(clustered.singles).toHaveLength(0);
+    expect(clustered.singles.map(event => event.id)).toEqual(['vo:a']);
   });
 
-  it('progressively discloses lower-priority events without hiding the selected event', () => {
+  it('preserves enabled hazard severities at every zoom, including selection', () => {
     const info = hazardPoint('info', 'volcano', 10, 10, 'info');
     const moderateQuake = hazardPoint('moderate-quake', 'earthquake', 11, 11, 'warning');
-    expect(eventVisibleAtZoom(info, 1.25, null)).toBe(false);
+    expect(eventVisibleAtZoom(info, 1.25, null)).toBe(true);
     expect(eventVisibleAtZoom(info, 4, null)).toBe(true);
-    expect(eventVisibleAtZoom(moderateQuake, 1.25, null)).toBe(false);
+    expect(eventVisibleAtZoom(moderateQuake, 1.25, null)).toBe(true);
     expect(eventVisibleAtZoom(moderateQuake, 3, null)).toBe(true);
     expect(eventVisibleAtZoom(info, 1.25, info.id)).toBe(true);
   });
@@ -152,7 +152,7 @@ describe('world event layer factories', () => {
     expect(clustered.clusters[0]?.eventIds).toHaveLength(6);
   });
 
-  it('invalidates the query cache when zoom crosses a disclosure boundary', () => {
+  it('retains hazard identities across a disclosure boundary', () => {
     const events = [
       hazardPoint('volcano:watch-a', 'volcano', 10, 10, 'watch'),
       hazardPoint('volcano:watch-b', 'volcano', 30, 20, 'watch'),
@@ -160,7 +160,7 @@ describe('world event layer factories', () => {
     const index = new EventClusterIndex();
     index.update(events);
 
-    expect(index.query(2.49, null).singles).toHaveLength(0);
+    expect(index.query(2.49, null).singles).toHaveLength(2);
     expect(index.query(2.5, null).singles.map((event) => event.id)).toEqual([
       'volcano:watch-a',
       'volcano:watch-b',
@@ -175,32 +175,32 @@ describe('world event layer factories', () => {
     expect(clustered.clusters).toHaveLength(1);
     expect(clustered.clusters[0]?.count).toBe(5);
     expect(clustered.clusters[0]?.symbol).toBe('volcano');
-    expect(clustered.clusters[0]?.bounds).toEqual([10, 10, 12.32, 12.16]);
+    [10, 10, 12.32, 12.16].forEach((value, i) => expect(clustered.clusters[0]?.bounds[i]).toBeCloseTo(value, 8));
     expect(clustered.singles).toHaveLength(0);
   });
 
-  it('hides hazard footprints globally, reveals restrained regional fill, and preserves selection', () => {
+  it('shows important footprints globally, with restrained regional fill and selection', () => {
     const area = hazardArea('area:progressive', 10, 10, 'warning');
     const globalLayers = createWorldEventLayers(
       [area],
       { ...defaultWorldEventMapState(), zoom: 1.25 },
     ) as Layer[];
-    expect(globalLayers.some((layer) => layer.id === 'world-event-hazard-areas')).toBe(false);
+    expect(globalLayers.some((layer) => layer.id === 'world-event-hazard-areas')).toBe(true);
     expect(globalLayers.some((layer) => layer.id === 'world-event-points')).toBe(true);
 
     const regional = createWorldEventGeometryLayers([area], null, 3.2, 'country-labels') as Layer[];
     const regionalLayer = regional.find((layer) => layer.id === 'world-event-hazard-areas');
     const regionalProps = regionalLayer?.props as unknown as Record<string, any>;
     const regionalFeature = regionalProps.data.features[0];
-    expect(regionalProps.getFillColor(regionalFeature)[3]).toBe(16);
-    expect(regionalProps.getLineColor(regionalFeature)[3]).toBe(0);
+    expect(regionalProps.getFillColor(regionalFeature)[3]).toBe(36);
+    expect(regionalProps.getLineColor(regionalFeature)[3]).toBe(170);
     expect(regionalProps.beforeId).toBe('country-labels');
 
     const selected = createWorldEventGeometryLayers([area], area.id, 1.25) as Layer[];
     const selectedLayer = selected.find((layer) => layer.id === 'world-event-hazard-areas');
     const selectedProps = selectedLayer?.props as unknown as Record<string, any>;
     const selectedFeature = selectedProps.data.features[0];
-    expect(selectedProps.getFillColor(selectedFeature)[3]).toBe(46);
+    expect(selectedProps.getFillColor(selectedFeature)[3]).toBe(56);
     expect(selectedProps.getLineColor(selectedFeature)[3]).toBe(245);
   });
 
@@ -224,18 +224,18 @@ describe('world event layer factories', () => {
     expect(selectedFeatures.map((feature: any) => feature.id)).toEqual([nearby.id, remote.id]);
   });
 
-  it('uses metric-sized circles only when a continuous metric exists', () => {
+  it('does not imply a geographic impact radius from magnitude alone', () => {
     const quake = hazardPoint('quake', 'earthquake', 10, 10, 'warning');
     const volcano = hazardPoint('volcano', 'volcano', 11, 11, 'warning');
     const state = { ...defaultWorldEventMapState(), zoom: 3 };
     const quakeLayers = createWorldEventLayers([quake], state) as Layer[];
     const volcanoLayers = createWorldEventLayers([volcano], state) as Layer[];
-    expect(quakeLayers.some((layer) => layer.id === 'world-event-point-intensity')).toBe(true);
+    expect(quakeLayers.some((layer) => layer.id === 'world-event-point-intensity')).toBe(false);
     expect(volcanoLayers.some((layer) => layer.id === 'world-event-point-intensity')).toBe(false);
     expect(volcanoLayers.some((layer) => layer.id === 'world-event-points')).toBe(true);
   });
 
-  it('uses a colored semantic icon with a separate non-pickable severity ring', () => {
+  it('encodes hazard type in shape and severity in fill without another severity ring', () => {
     const warning = hazardPoint('volcano:warning', 'volcano', 10, 10, 'warning');
     const state = { ...defaultWorldEventMapState(), zoom: 1.25 };
     const layers = createWorldEventLayers([warning], state) as Layer[];
@@ -247,10 +247,10 @@ describe('world event layer factories', () => {
     expect(layers.some((layer) => layer.id === 'world-event-point-underlays')).toBe(false);
     const ring = layers.find((layer) => layer.id === 'world-event-point-severity-rings');
     expect(pointProps.getIcon).toBeDefined();
-    expect(color.slice(0, 3)).toEqual([255, 255, 255]);
-    expect(color[3]).toBeLessThan(220);
-    expect(pointProps.sizeMaxPixels).toBe(22);
-    expect((ring?.props as unknown as Record<string, unknown>).pickable).toBe(false);
+    expect(color.slice(0, 3)).toEqual([231, 140, 68]);
+    expect(color[3]).toBe(245);
+    expect(pointProps.sizeMaxPixels).toBe(20);
+    expect(ring).toBeUndefined();
   });
 
   it('retains low-priority spatial texture without making observations pickable', () => {
@@ -300,7 +300,9 @@ describe('world event layer factories', () => {
     index.update(events);
 
     expect(index.buildCount).toBe(1);
-    expect(first.clusters[0]?.eventIds.length).toBeLessThanOrEqual(200);
+    expect(first.clusters[0]?.eventIds.length).toBe(240);
+    expect(selected.clusters.reduce((sum, cluster) => sum + cluster.count, selected.singles.length)).toBe(240);
+    expect(selected.clusters.flatMap(cluster => cluster.eventIds)).not.toContain('persistent:239');
     expect(first.clusters[0]?.count).toBe(240);
     expect(selected.singles.some((event) => event.id === 'persistent:239')).toBe(true);
     expect(index.buildCount).toBe(1);
@@ -317,11 +319,11 @@ describe('world event layer factories', () => {
     const pulseLayers = createEventPulseLayers({
       events: [warning],
       selectedEventId: null,
-      firstSeenAt: new Map(),
+      firstSeenAt: new Map([[warning.id, 0]]),
       pulseTime: 1_000,
     }) as Layer[];
     const point = stableLayers.find((layer) => layer.id === 'world-event-points');
-    const pulse = pulseLayers.find((layer) => layer.id === 'world-event-status-pulses');
+    const pulse = pulseLayers.find((layer) => layer.id === 'world-event-recent-pulses');
 
     const pointProps = point?.props as unknown as Record<string, unknown>;
     const pulseProps = pulse?.props as unknown as Record<string, unknown>;
@@ -579,32 +581,30 @@ describe('world event layer factories', () => {
     expect(selected.liveAircraft.map((event) => event.id)).toEqual(['near-aircraft']);
   });
 
-  it('uses slow warning rings, strong critical rings and a 30 second recent-event fade', () => {
+  it('uses a six second fade only for newly received events', () => {
     const warning = hazardPoint('hazard:warning', 'earthquake', 10, 10, 'warning');
     const critical = hazardPoint('hazard:critical', 'volcano', 20, 20, 'critical');
     const now = 100_000;
     const targets = hazardPulseTargets(
       [warning, critical],
       null,
-      new Map([[critical.id, now - 15_000]]),
+      new Map([[critical.id, now - 3_000]]),
       now,
     );
 
-    expect(targets.status.find((target) => target.event.id === warning.id)?.strength).toBe('warning');
-    expect(targets.status.find((target) => target.event.id === critical.id)?.strength).toBe('strong');
     expect(targets.recent).toHaveLength(1);
     expect(targets.recent[0]?.fade).toBeCloseTo(0.5);
   });
 
-  it('suppresses warning motion at world zoom while retaining critical pulses', () => {
+  it('does not animate historical warning or critical events at world zoom', () => {
     const warning = hazardPoint('hazard:warning:global', 'earthquake', 10, 10, 'warning');
     const critical = hazardPoint('hazard:critical:global', 'volcano', 20, 20, 'critical');
     const targets = hazardPulseTargets([warning, critical], null, new Map(), 100_000, 1.25);
 
-    expect(targets.status.map((target) => target.event.id)).toEqual([critical.id]);
+    expect(targets.recent).toEqual([]);
   });
 
-  it('never pulses low-priority FIRMS cells and only animates major aggregates', () => {
+  it('does not animate raw satellite detections', () => {
     const firms = (id: string, severity: GeoEvent['severity'], detectionCount: number): GeoEvent => ({
       ...hazardPoint(id, 'volcano', 10, 10, severity),
       hazardKind: 'fire-detection',
@@ -615,7 +615,7 @@ describe('world event layer factories', () => {
     const major = firms('firms:major', 'warning', 100);
     const targets = hazardPulseTargets([low, watch, major], null, new Map(), 10_000);
 
-    expect(targets.status.map((target) => target.event.id)).toEqual(['firms:major']);
+    expect(targets.recent).toEqual([]);
   });
 
   it('animates a polygon centre marker without flashing the polygon fill', () => {
@@ -623,26 +623,25 @@ describe('world event layer factories', () => {
       ...hazardPoint('hazard:polygon', 'volcano', 0, 0, 'critical'),
       geometry: { type: 'Polygon', coordinates: [[[10, 10], [14, 10], [14, 12], [10, 10]]] },
     } as GeoEvent;
-    expect(eventRepresentativePoint(polygon)?.[0]).toBeCloseTo(12.67, 2);
-    expect(eventRepresentativePoint(polygon)?.[1]).toBeCloseTo(10.67, 2);
+    expect(eventRepresentativePoint(polygon)?.[0]).toBeCloseTo(13, 2);
+    expect(eventRepresentativePoint(polygon)?.[1]).toBeCloseTo(11, 2);
     const layers = createEventPulseLayers({
       events: [polygon],
       selectedEventId: null,
-      firstSeenAt: new Map(),
+      firstSeenAt: new Map([[polygon.id, 3_000]]),
       pulseTime: 5_000,
     }) as Layer[];
     expect(layers[0]?.constructor.name).toBe('ScatterplotLayer');
     expect((layers[0]?.props as unknown as Record<string, unknown>).filled).toBe(false);
   });
 
-  it('uses a restrained hover outline and double hollow rings only for selection', () => {
+  it('uses a restrained hover outline and a single white ring for selection', () => {
     const event = hazardPoint('hazard:selected', 'earthquake', 10, 10, 'watch');
     const hover = createEventInteractionLayers([event], null, event.id) as Layer[];
     const selected = createEventInteractionLayers([event], event.id, null) as Layer[];
     expect(hover.map((layer) => layer.id)).toEqual(['world-event-hover-ring']);
     expect(selected.map((layer) => layer.id)).toEqual([
       'world-event-selected-ring-outer',
-      'world-event-selected-ring-inner',
     ]);
     expect(selected.every((layer) => {
       const props = layer.props as unknown as Record<string, unknown>;
@@ -705,4 +704,32 @@ describe('world event layer factories', () => {
     expect(clustered.clusters.length).toBeGreaterThan(0);
     expect(clustered.singles.length + clustered.clusters.length).toBeLessThan(500);
   });
+});
+
+it('reports unique logical viewport IDs separately from marker and cluster counts', () => {
+  const a = hazardPoint('a', 'earthquake', 0, 0);
+  const b = hazardPoint('b', 'earthquake', 1, 1);
+  const area = hazardArea('area', 3, 3);
+  const offscreen = hazardPoint('offscreen', 'earthquake', 100, 30);
+  expect(mapPresentationCounts([a, a, b, area, offscreen], { singles: [a, a], clusters: [{ coordinates: [1, 1] }] }, [-5,-5,5,5], 1.5))
+    .toEqual({ inView: 3, singles: 1, clusters: 1, observations: 0 });
+});
+
+it('keeps the selected measured label on map at low zoom even in a crowded viewport', () => {
+  const selected = hazardPoint('selected', 'earthquake', 0, 0);
+  const layers = createEventPointLayers({ events: [selected], selectedEventId: selected.id,
+    zoom: 1.5, showLabels: true, project: () => ({ x: 195, y: 5 }), screenSize: [200, 100],
+    occupiedScreenBoxes: [[180, 0, 200, 100]], measureLabel: () => 60 }) as Layer[];
+  const label = layers.find(layer => layer.id === 'world-event-labels')!;
+  expect(label.props.data).toEqual([selected]);
+  const offset = (label.props as any).getPixelOffset(selected);
+  expect(195 + offset[0]).toBeGreaterThanOrEqual(4);
+  expect(195 + offset[0] + 60).toBeLessThanOrEqual(180);
+});
+
+it('retains global events when fitting a compact viewport below zoom zero', () => {
+  const events = [hazardPoint('west', 'earthquake', -100, 10, 'info'), hazardPoint('east', 'earthquake', 100, 10, 'watch')];
+  const index = new EventClusterIndex(); index.update(events);
+  const rendered = index.query(-0.75, null);
+  expect(rendered.singles.length + rendered.clusters.reduce((count, cluster) => count + cluster.count, 0)).toBe(2);
 });

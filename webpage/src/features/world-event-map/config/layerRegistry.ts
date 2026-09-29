@@ -7,6 +7,8 @@ import type {
 } from '../domain/types';
 import type { MapSymbolKey } from './mapSymbols';
 
+export const WEATHER_RADAR_ENABLED = import.meta.env.VITE_WEATHER_RADAR_ENABLED === '1';
+
 export type MapLayerDefinition = {
   id: string;
   label: string;
@@ -26,7 +28,7 @@ export type MapLayerDefinition = {
     availableSources?: ReadonlySet<string>;
   }) => boolean;
   aliases: string[];
-  capabilities: Array<'points' | 'areas' | 'paths' | 'animation' | 'clustering' | 'details'>;
+  capabilities: Array<'points' | 'areas' | 'paths' | 'animation' | 'clustering' | 'details' | 'raster'>;
   defaultEnabled: boolean;
   selectable: boolean;
   minZoom: number;
@@ -48,6 +50,21 @@ export type MapLayerDefinition = {
 
 export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   {
+    id: 'weather-radar', label: 'Weather radar', legendLabel: 'Radar reflectivity', messageKey: 'atlas.layer.weatherRadar',
+    panelEmoji: '📡', icon: 'storm', categories: [], sourceKeys: ['rainviewer'], requiredSources: [],
+    supportedRenderers: ['webgl'], availability: WEATHER_RADAR_ENABLED ? 'ready' : 'unavailable',
+    availabilityReason: WEATHER_RADAR_ENABLED ? undefined : 'RainViewer use conditions must be confirmed before enabling this deployment.',
+    isExecutable: () => WEATHER_RADAR_ENABLED, aliases: ['radar', 'rain', 'precipitation'], capabilities: ['raster'],
+    defaultEnabled: false, selectable: true, minZoom: 0, labelMinZoom: 0, cluster: false, clusterRadius: 0,
+    clusterMinPoints: 0, timeFilter: false, severities: [], legend: [{ label: 'Radar reflectivity', symbol: 'storm' }],
+    explanation: {
+      purpose: 'Latest available real radar composite, independently timestamped from the event window.',
+      sources: ['RainViewer'], freshness: 'Manifest checked every five minutes while visible and enabled.',
+      confidence: 'Frame generation time is not a simultaneous observation at every station.',
+      limitations: ['Partial radar coverage; transparent tiles do not prove absence of precipitation.', 'Native zoom up to 7; no forecast, no seven-day archive.', 'Public API: personal / educational use, attribution and rate limits apply.'],
+    },
+  },
+  {
     id: 'weather-alerts',
     label: 'Storms, Cyclones & Floods',
     legendLabel: 'Storms / floods',
@@ -68,7 +85,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 34,
+    clusterRadius: 28,
     clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
@@ -108,7 +125,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 32,
+    clusterRadius: 28,
     clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
@@ -145,7 +162,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 36,
+    clusterRadius: 30,
     clusterMinPoints: 6,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
@@ -182,7 +199,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 34,
+    clusterRadius: 28,
     clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
@@ -219,7 +236,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 34,
+    clusterRadius: 28,
     clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],
@@ -253,7 +270,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 34,
+    clusterRadius: 28,
     clusterMinPoints: 5,
     timeFilter: true,
     severities: ['watch', 'warning', 'critical'],
@@ -287,7 +304,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     minZoom: 0,
     labelMinZoom: 3,
     cluster: true,
-    clusterRadius: 32,
+    clusterRadius: 28,
     clusterMinPoints: 5,
     timeFilter: true,
     severities: ['info', 'watch', 'warning', 'critical'],

@@ -1,3 +1,6 @@
+import type { MapPresentationCounts } from '../renderer/eventDisclosure';
+import { useI18n } from '@/services/i18n';
+import { mapText } from '@/locales/map';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { isHazardGeoEvent } from '../config/layerRegistry';
 import type {
@@ -246,14 +249,22 @@ function DrawerCloseIcon() {
 }
 
 export function EventList({
+  presentation,
   events,
   selectedEventId,
+  clusterIds,
+  onClearCluster,
   onSelect,
 }: {
+  presentation?: MapPresentationCounts | null;
   events: GeoEvent[];
+  clusterIds?: string[] | null;
+  onClearCluster?: () => void;
   selectedEventId: string | null;
   onSelect: (eventId: string) => void;
 }) {
+  const { locale } = useI18n();
+  const mt = (text: string) => mapText(locale, text);
   const [open, setOpen] = useState(false);
   const [filters, setFilters] = useState<EventListFilters>(DEFAULT_FILTERS);
   const [scrollTop, setScrollTop] = useState(0);
@@ -261,10 +272,11 @@ export function EventList({
   const toggleRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (clusterIds) { setFilters(DEFAULT_FILTERS); setScrollTop(0); setOpen(true); } }, [clusterIds]);
   const types = useMemo(() => eventTypeOptions(events), [events]);
   const filteredEvents = useMemo(
-    () => filterEventListEvents(events, filters),
-    [events, filters],
+    () => filterEventListEvents(clusterIds ? events.filter(event => clusterIds.includes(event.id)) : events, filters),
+    [events, filters, clusterIds],
   );
   const virtualWindow = useMemo(
     () => virtualEventWindow(filteredEvents, scrollTop, viewportHeight),
@@ -278,6 +290,7 @@ export function EventList({
 
   const closeDrawer = (restoreFocus: boolean) => {
     setOpen(false);
+    onClearCluster?.();
     if (restoreFocus && typeof window !== 'undefined') {
       window.requestAnimationFrame(() => toggleRef.current?.focus());
     }
@@ -324,7 +337,7 @@ export function EventList({
         aria-controls="wm-world-event-list-panel"
         onClick={() => setOpen((current) => !current)}
       >
-        <span>ALL EVENTS</span><b aria-hidden="true">·</b><strong>{events.length}</strong>
+        <span>{mt("All events")}</span><b aria-hidden="true">·</b><strong>{events.length}</strong>
       </button>
       {open ? (
         <section
@@ -334,13 +347,13 @@ export function EventList({
         >
           <header>
             <div>
-              <span>WORLD EVENT INDEX</span>
-              <h2 id="wm-world-event-list-heading">All mapped events</h2>
+              <span>{mt("WORLD EVENT INDEX")}</span>
+              <h2 id="wm-world-event-list-heading">{mt(clusterIds ? "Cluster members" : "All mapped events")}</h2>
             </div>
             <button
               type="button"
               className="wm-world-event-list-close"
-              aria-label="Close all events drawer"
+              aria-label={mt("Close all events drawer")}
               onClick={() => closeDrawer(true)}
             >
               <DrawerCloseIcon />
@@ -349,13 +362,13 @@ export function EventList({
 
           <div className="wm-world-event-list-filters">
             <label className="is-search" htmlFor="wm-event-list-search">
-              <span>Search</span>
+              <span>{mt("Search")}</span>
               <input
                 ref={searchRef}
                 id="wm-event-list-search"
                 type="search"
                 value={filters.query}
-                placeholder="Title, place or source"
+                placeholder={mt("Title, place or source")}
                 onInput={(event) => setFilters((current) => ({
                   ...current,
                   query: event.currentTarget.value,
@@ -363,7 +376,7 @@ export function EventList({
               />
             </label>
             <label htmlFor="wm-event-list-type">
-              <span>Disaster type</span>
+              <span>{mt("Disaster type")}</span>
               <select
                 id="wm-event-list-type"
                 value={filters.eventType}
@@ -372,12 +385,12 @@ export function EventList({
                   eventType: event.currentTarget.value,
                 }))}
               >
-                <option value="all">All types</option>
-                {types.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                <option value="all">{mt("All types")}</option>
+                {types.map((type) => <option key={type.value} value={type.value}>{mt(type.label)}</option>)}
               </select>
             </label>
             <label htmlFor="wm-event-list-severity">
-              <span>Severity</span>
+              <span>{mt("Severity")}</span>
               <select
                 id="wm-event-list-severity"
                 value={filters.severity}
@@ -386,15 +399,15 @@ export function EventList({
                   severity: event.currentTarget.value as EventListFilters['severity'],
                 }))}
               >
-                <option value="all">All severities</option>
-                <option value="critical">Critical</option>
-                <option value="warning">Warning</option>
-                <option value="watch">Watch</option>
-                <option value="info">Info</option>
+                <option value="all">{mt("All severities")}</option>
+                <option value="critical">{mt("Critical")}</option>
+                <option value="warning">{mt("Warning")}</option>
+                <option value="watch">{mt("Watch")}</option>
+                <option value="info">{mt("Info")}</option>
               </select>
             </label>
             <label htmlFor="wm-event-list-time">
-              <span>Time</span>
+              <span>{mt("Time")}</span>
               <select
                 id="wm-event-list-time"
                 value={filters.time}
@@ -403,16 +416,16 @@ export function EventList({
                   time: event.currentTarget.value as EventListTimeFilter,
                 }))}
               >
-                <option value="all">Any time</option>
-                <option value="1h">Last 1 hour</option>
-                <option value="6h">Last 6 hours</option>
-                <option value="24h">Last 24 hours</option>
-                <option value="48h">Last 48 hours</option>
-                <option value="7d">Last 7 days</option>
+                <option value="all">{mt("Any time")}</option>
+                <option value="1h">{mt("Last 1 hour")}</option>
+                <option value="6h">{mt("Last 6 hours")}</option>
+                <option value="24h">{mt("Last 24 hours")}</option>
+                <option value="48h">{mt("Last 48 hours")}</option>
+                <option value="7d">{mt("Last 7 days")}</option>
               </select>
             </label>
             <label htmlFor="wm-event-list-region">
-              <span>Region</span>
+              <span>{mt("Region")}</span>
               <select
                 id="wm-event-list-region"
                 value={filters.region}
@@ -422,17 +435,21 @@ export function EventList({
                 }))}
               >
                 {REGION_OPTIONS.map((region) => (
-                  <option key={region.value} value={region.value}>{region.label}</option>
+                  <option key={region.value} value={region.value}>{mt(region.label)}</option>
                 ))}
               </select>
             </label>
           </div>
 
+          {presentation ? <p className="wm-map-counts">
+            {locale === 'zh' ? `视口内 ${presentation.inView} 个事件 · ${presentation.singles} 个事件点 / ${presentation.clusters} 个聚合 · ${presentation.observations} 条概览观测` : `In view: ${presentation.inView} events · ${presentation.singles} event points / ${presentation.clusters} clusters · ${presentation.observations} overview observations`}
+            <small>{locale === 'zh' ? '按事件 ID 去重；区域按真实几何相交。航空独立绘制，强调环不重复计数。观测不等于灾害发生。' : 'Unique event IDs; areas use geometry intersection. Aviation is drawn separately; emphasis rings are not extra events. Observations are not confirmed disasters.'}</small>
+          </p> : null}
           <div className="wm-world-event-list-summary" id="wm-world-event-list-summary" aria-live="polite">
-            <span>Showing <strong>{filteredEvents.length}</strong> of {events.length}</span>
+            <span>{locale === 'zh' ? '显示' : 'Showing'} <strong>{filteredEvents.length}</strong> / {clusterIds?.length ?? events.length}</span>
             {hasFilters ? (
-              <button type="button" onClick={() => setFilters(DEFAULT_FILTERS)}>Clear filters</button>
-            ) : <span>Sorted by severity and freshness</span>}
+              <button type="button" onClick={() => setFilters(DEFAULT_FILTERS)}>{mt("Clear filters")}</button>
+            ) : <span>{mt("Sorted by severity and freshness")}</span>}
           </div>
 
           {filteredEvents.length ? (
@@ -465,11 +482,12 @@ export function EventList({
                         <MapSymbolIcon
                           symbol={mapSymbolForEvent(event)}
                           severity={event.severity}
+            hazard={event.category === "natural-hazard"}
                           framed={false}
                           size={18}
                         />
                       </span>
-                      <span className={`wm-event-list-severity severity-${event.severity}`}>{event.severity}</span>
+                      <span className={`wm-event-list-severity severity-${event.severity}`}>{mt(event.severity)}</span>
                       <strong>{event.title}</strong>
                       <small className="wm-event-list-kind">
                         {EVENT_TYPE_LABELS[eventListType(event)] || eventListType(event).replace(/-/g, ' ')}
@@ -483,9 +501,9 @@ export function EventList({
             </div>
           ) : (
             <div className="wm-world-event-list-empty">
-              <strong>No matching events</strong>
-              <p>Adjust the search, type, severity, time or region filters.</p>
-              {hasFilters ? <button type="button" onClick={() => setFilters(DEFAULT_FILTERS)}>Clear filters</button> : null}
+              <strong>{mt("No matching events")}</strong>
+              <p>{mt("Adjust the search, type, severity, time or region filters.")}</p>
+              {hasFilters ? <button type="button" onClick={() => setFilters(DEFAULT_FILTERS)}>{mt("Clear filters")}</button> : null}
             </div>
           )}
         </section>

@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from 'preact/hooks';
+import { clampWorldEventZoom } from '../state/mapState';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { RuntimeBreakingEventRadarPayload, RuntimeGeoSanctionsShockPayload, RuntimeGlobalTransportShippingPayload } from '@/types';
 import type { usePanelRuntime } from '@/panels/usePanelRuntime';
 import type { MapSymbolKey } from '../config/mapSymbols';
@@ -50,7 +51,7 @@ const INITIAL_LAYERS: LayerToggle[] = selectableWorldEventLayers().map((layer) =
 export function clampMapZoom(value: unknown) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 1.25;
-  return Math.max(0.75, Math.min(8, Math.round(numeric * 4) / 4));
+  return clampWorldEventZoom(Math.round(numeric * 4) / 4);
 }
 
 
@@ -60,6 +61,7 @@ type SharedRuntime = Pick<ReturnType<typeof usePanelRuntime>, 'runtimeData' | 'g
 /** Owns map state and source composition. Shared snapshots stay in Panel Runtime. */
 export function useWorldEventMapController({ runtimeData, getStatus: getPanelRuntimeStatus, refreshIds, setConsumerPanels, suspended }: SharedRuntime, mapActive = true) {
   const worldEventMap = useWorldEventMapState();
+  const [mapRendererKind, setMapRendererKind] = useState<'webgl' | 'svg'>('webgl');
   const naturalHazards = useNaturalHazards({
     sourceKeys: worldEventMap.state.activeLayerIds.flatMap((id) => worldEventLayerById(id)?.sourceKeys || []),
     zoom: worldEventMap.state.zoom,
@@ -75,6 +77,10 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
   const layers = useMemo<LayerToggle[]>(() => {
     const statuses = new Map(naturalHazards.sources.map((source) => [source.key, source]));
     return INITIAL_LAYERS.map((layer) => {
+      if (layer.id === 'weather-radar' && mapRendererKind === 'svg') return {
+        ...layer, enabled: false, isExecutable: false, availability: 'unavailable' as const,
+        availabilityReason: 'Radar requires the WebGL renderer; SVG keeps the event map available.',
+      };
       const relevant = layer.sourceKeys.map((key) => statuses.get(key)).filter(Boolean);
       const required = layer.requiredSources.map((key) => statuses.get(key)).filter(Boolean);
       const requiredUnavailable = required.length > 0 && required.some((source) => (
@@ -108,6 +114,7 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
       };
     });
   }, [
+    mapRendererKind,
     aviationViewport.error,
     aviationViewport.payload,
     naturalHazards.sources,
@@ -337,6 +344,6 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
     if (missingSources) void refreshIds(missingSources.split(','), { reason: 'refresh' });
   }, [missingSources, refreshIds]);
   useEffect(() => { writeWorldEventMapSeed(geoShockPayload); }, [geoShockPayload]);
-  return { worldEventMap, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
+  return { worldEventMap, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
     ucdpRawMapEvents, worldEventMapEvents, mapSourceStatuses };
 }

@@ -50,87 +50,32 @@ export function resolveWorldEventPMTilesUrl(
   return new URL(url, origin).href;
 }
 
-export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 'zh' = 'en'): Promise<StyleSpecification> {
+export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 'zh' = 'en', theme: WeatherMapTheme = 'dark'): Promise<StyleSpecification> {
   const { layers, namedFlavor } = await import('@protomaps/basemaps');
   const archiveUrl = resolveWorldEventPMTilesUrl(url);
-  const rankedLayers = layers('basemap', namedFlavor('black'), { lang: language }) as StyleSpecification['layers'];
-  const eventBasemapLayerIds = new Set([
-    'background',
-    'earth',
-    'water',
-    'boundaries_country',
-    'boundaries',
-    'water_label_ocean',
-    'water_label_lakes',
-    'earth_label_islands',
-    'places_region',
-    'places_locality',
-    'places_country',
-  ]);
-  const tunedLayers = rankedLayers.filter((layer) => eventBasemapLayerIds.has(layer.id)).flatMap((layer) => {
-    if (layer.id === 'places_country') {
-      const regional = { ...layer, minzoom: 2.6 };
-      const global = {
-        ...layer,
-        id: 'places_country_global',
-        maxzoom: 2.6,
-        filter: ['all', ['==', 'kind', 'country'], ['>=', 'population_rank', 9]],
-        layout: {
-          ...layer.layout,
-          'text-size': ['interpolate', ['linear'], ['zoom'], 0, 14, 2, 18, 2.6, 19],
-          'text-padding': 8,
-        },
-        paint: {
-          ...layer.paint,
-          'text-color': '#aeb7ba',
-          'text-halo-color': '#070a0c',
-          'text-halo-width': 1.25,
-          'text-halo-blur': 0.15,
-          'text-opacity': 0.95,
-        },
-      };
-      return [global, regional] as typeof rankedLayers;
+  const rankedLayers = layers('basemap', namedFlavor(theme === 'positron' ? 'light' : 'black'), { lang: language }) as StyleSpecification['layers'];
+  // Preserve provider order, rank, collision and zoom rules. Alignment changes
+  // paint only; localization below never introduces another label hierarchy.
+  const tunedLayers = rankedLayers.map((layer) => {
+    if (theme === 'positron') return layer;
+    if (layer.id === 'background') return { ...layer, paint: { ...layer.paint, 'background-color': '#1b1b1d' } };
+    if (layer.id === 'earth') return { ...layer, paint: { ...layer.paint, 'fill-color': '#0c0c0c' } };
+    if (layer.id === 'water') return { ...layer, paint: { ...layer.paint, 'fill-color': '#1b1b1d' } };
+    if (layer.type === 'line' && layer.id.startsWith('boundaries')) {
+      return { ...layer, paint: { ...layer.paint, 'line-color': layer.id === 'boundaries_country' ? '#35383b' : '#292d30' } };
     }
-    if (layer.id === 'places_locality') {
-      const detail = { ...layer, minzoom: 4.5 };
-      const regional = {
-        ...layer,
-        id: 'places_locality_regional',
-        minzoom: 2.6,
-        maxzoom: 4.5,
-        filter: ['all', ['==', 'kind', 'locality'], ['>=', 'population_rank', 11]],
-      };
-      const global = {
-        ...layer,
-        id: 'places_locality_global',
-        maxzoom: 2.6,
-        filter: ['all', ['==', 'kind', 'locality'], ['>=', 'population_rank', 11]],
-        layout: {
-          ...layer.layout,
-          'text-size': ['interpolate', ['linear'], ['zoom'], 0, 13, 2, 17, 2.6, 18],
-          'text-padding': 10,
-        },
-        paint: {
-          ...layer.paint,
-          'text-color': '#aeb7ba',
-          'text-halo-color': '#070a0c',
-          'text-halo-width': 1.25,
-          'text-halo-blur': 0.15,
-          'text-opacity': 0.94,
-        },
-      };
-      return [global, regional, detail] as typeof rankedLayers;
+    if (layer.type === 'symbol' && layer['source-layer'] === 'places') {
+      return { ...layer, paint: { ...layer.paint,
+        'text-color': layer.id === 'places_country' ? '#a3a8ad' : '#858d95',
+        'text-halo-color': '#0c0c0c', 'text-halo-width': 0.6, 'text-halo-blur': 0.1,
+      } };
     }
-    if (layer.id === 'water_label_lakes' || layer.id === 'earth_label_islands') return [{ ...layer, minzoom: 4 }];
-    if (layer.id === 'places_region') return [{ ...layer, minzoom: 5 }];
-    if (layer.id === 'places_subplace') return [{ ...layer, minzoom: 7 }];
-    if (layer.id === 'boundaries') return [{ ...layer, minzoom: 5 }];
-    return [layer];
+    return layer;
   }) as StyleSpecification['layers'];
   return {
     version: 8,
     glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
-    sprite: 'https://protomaps.github.io/basemaps-assets/sprites/v4/dark',
+    sprite: `https://protomaps.github.io/basemaps-assets/sprites/v4/${theme === 'positron' ? 'light' : 'dark'}`,
     sources: {
       basemap: {
         type: 'vector',
@@ -154,7 +99,7 @@ export async function getWeatherMapStyle(
     : provider;
   if (resolvedProvider === 'pmtiles' && WORLD_EVENT_PMTILES_URL) {
     await registerWorldEventPMTilesProtocol();
-    return buildWorldEventPMTilesStyle(WORLD_EVENT_PMTILES_URL, language);
+    return buildWorldEventPMTilesStyle(WORLD_EVENT_PMTILES_URL, language, theme);
   }
   if (resolvedProvider === 'carto') return theme === 'positron' ? CARTO_LIGHT_STYLE : CARTO_DARK_STYLE;
   return theme === 'positron' ? OPENFREEMAP_LIGHT_STYLE : OPENFREEMAP_DARK_STYLE;
@@ -213,127 +158,26 @@ function localizedNameExpression(language: 'en' | 'zh', protomaps: boolean): Exp
   ];
 }
 
-type LabelKind =
-  | 'continent'
-  | 'country-major'
-  | 'country-minor'
-  | 'country-other'
-  | 'city-major'
-  | 'city'
-  | 'state'
-  | 'locality'
-  | 'context';
-
-type LabelDensity = 'global' | 'regional' | 'area' | 'detail';
-
-const labelDensityByMap = new WeakMap<LabelCapableMap, LabelDensity>();
-
-function labelKind(layer: { id: string; 'source-layer'?: string }): LabelKind {
-  const identity = `${layer.id} ${layer['source-layer'] || ''}`.toLowerCase();
-  if (identity.includes('place_continent')) return 'continent';
-  if (identity.includes('place_country_other')) return 'country-other';
-  if (identity.includes('place_country_major')) return 'country-major';
-  if (identity.includes('place_country')) return 'country-minor';
-  if (identity.includes('place_city_large')) return 'city-major';
-  if (identity.includes('place_city')) return 'city';
-  if (identity.includes('place_state')) return 'state';
-  if (/place_(town|village|suburb|other)/.test(identity)) return 'locality';
-  return 'context';
-}
-
-function labelDensity(zoom: number): LabelDensity {
-  if (zoom < 1.85) return 'global';
-  if (zoom < 3.1) return 'regional';
-  if (zoom < 4.5) return 'area';
-  return 'detail';
-}
-
-function labelVisible(kind: LabelKind, density: LabelDensity) {
-  if (kind === 'continent' || kind === 'country-major' || kind === 'city-major') return true;
-  if (density === 'global') return false;
-  if (kind === 'country-minor') return true;
-  if (density === 'regional') return false;
-  if (kind === 'country-other' || kind === 'city' || kind === 'state') return true;
-  if (density === 'area') return false;
-  return true;
-}
-
-function labelSize(kind: LabelKind): ExpressionSpecification | null {
-  if (kind === 'country-major') return ['interpolate', ['linear'], ['zoom'], 0, 13, 3, 15, 5, 17];
-  if (kind === 'country-minor') return ['interpolate', ['linear'], ['zoom'], 1.85, 11, 4, 13, 6, 15];
-  if (kind === 'city-major') return ['interpolate', ['linear'], ['zoom'], 0, 14, 3, 16, 6, 18];
-  if (kind === 'city') return ['interpolate', ['linear'], ['zoom'], 3.1, 11, 5, 13, 7, 15];
-  return null;
-}
-
-/**
- * OpenFreeMap-only fallback tuning. Protomaps already implements ranked labels
- * and must never be overwritten by this compatibility path.
- */
+/** Language changes leave provider rank, size, collision and styling intact. */
 export function reinforceWorldEventBasemapLabels(map: LabelCapableMap, language: 'en' | 'zh' = 'en') {
-  labelDensityByMap.delete(map);
-  if (usesProtomapsStyle(map)) {
-    // WorldMonitor runs localizeMapLabels() after the Protomaps style loads.
-    // This removes the generated bilingual second line while preserving the
-    // provider's population rank, min_zoom, collision and font hierarchy.
-    for (const layer of map.getStyle().layers || []) {
-      if (layer.type !== 'symbol') continue;
-      try {
-        if (!hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) continue;
-        map.setLayoutProperty(layer.id, 'text-field', localizedNameExpression(language, true));
-      } catch {
-        // A style can replace a symbol layer during load.
-      }
-    }
-    return;
-  }
+  const protomaps = usesProtomapsStyle(map);
   for (const layer of map.getStyle().layers || []) {
     if (layer.type !== 'symbol') continue;
     try {
-      if (!hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) continue;
-      map.setLayoutProperty(layer.id, 'text-field', localizedNameExpression(language, false));
-      // Translate water/region labels too, but retain their provider styling.
-      if (layer['source-layer'] !== 'place') continue;
-      const kind = labelKind(layer);
-      const size = labelSize(kind);
-      if (size) map.setLayoutProperty(layer.id, 'text-size', size);
-      map.setPaintProperty(layer.id, 'text-color', '#aeb7ba');
-      map.setPaintProperty(layer.id, 'text-halo-color', '#070a0c');
-      map.setPaintProperty(layer.id, 'text-halo-width', 1.25);
-      map.setPaintProperty(layer.id, 'text-halo-blur', 0.15);
-      map.setPaintProperty(
-        layer.id,
-        'text-opacity',
-        kind === 'context' ? 0.72 : kind === 'country-major' || kind === 'city-major' ? 0.95 : 0.9,
-      );
+      if (hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) {
+        map.setLayoutProperty(layer.id, 'text-field', localizedNameExpression(language, protomaps));
+      }
     } catch {
-      // A remote style may replace a layer during load. Its defaults remain usable.
+      // A style may replace the symbol layer during load.
     }
   }
-  refreshWorldEventBasemapLabelDensity(map);
-}
-
-export function refreshWorldEventBasemapLabelDensity(map: LabelCapableMap) {
-  if (usesProtomapsStyle(map)) return;
-  const density = labelDensity(map.getZoom());
-  if (labelDensityByMap.get(map) === density) return;
-  for (const layer of map.getStyle().layers || []) {
-    if (layer.type !== 'symbol' || layer['source-layer'] !== 'place') continue;
-    try {
-      if (!hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) continue;
-      map.setLayoutProperty(layer.id, 'visibility', labelVisible(labelKind(layer), density) ? 'visible' : 'none');
-    } catch {
-      // A style can be replaced between getStyle() and setLayoutProperty().
-    }
-  }
-  labelDensityByMap.set(map, density);
 }
 
 export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
   const light = theme === 'positron';
-  const background = light ? '#dce5e8' : '#070a0c';
-  const land = light ? '#f4f1e9' : '#1c252a';
-  const border = light ? '#7d8a90' : '#69767d';
+  const background = light ? '#dce5e8' : '#1b1b1d';
+  const land = light ? '#f4f1e9' : '#0c0c0c';
+  const border = light ? '#7d8a90' : '#35383b';
 
   return {
     version: 8,
@@ -382,7 +226,7 @@ export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
         },
         paint: {
           'text-color': light ? '#4a5459' : '#aeb7ba',
-          'text-halo-color': light ? '#eef3f4' : '#070a0c',
+          'text-halo-color': light ? '#eef3f4' : '#1b1b1d',
           'text-halo-width': 1.25,
           'text-halo-blur': 0.15,
           'text-opacity': 0.94,

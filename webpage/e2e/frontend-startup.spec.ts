@@ -8,7 +8,7 @@ const svgModule = /\/(?:assets\/SvgMapRenderer-[\w-]+\.js|src\/features\/world-e
 async function readyFallback(page: Page) {
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'svg');
   await expect(page.locator('.wm-world-event-svg-map')).toBeVisible();
-  await expect(page.getByRole('button', { name: /ALL EVENTS/ })).toContainText('8');
+  await expect(page.getByRole('button', { name: /^All events/i })).toContainText('8');
 }
 
 test.afterEach(async ({ page }) => {
@@ -52,7 +52,7 @@ test('failed WebGL module download enters SVG fallback without an unhandled reje
   await page.goto(mapURL);
   await readyFallback(page);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-reason', /import|fetch|module/i);
-  await page.getByRole('button', { name: /ALL EVENTS/ }).click();
+  await page.getByRole('button', { name: /^All events/i }).click();
   await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
   await expect(page.locator('.wm-event-inspector')).toBeVisible();
   expect(errors).toEqual([]);
@@ -66,7 +66,7 @@ test('a slow WebGL download shows temporary SVG then restores the primary map an
   await expect.poll(() => Boolean(pending)).toBe(true);
   await readyFallback(page);
   await expect(page.locator('.wm-weather-deck-status')).toHaveAttribute('title', /still downloading/);
-  await page.getByRole('button', { name: /ALL EVENTS/ }).click();
+  await page.getByRole('button', { name: /^All events/i }).click();
   await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
   await expect(page).toHaveURL(/event=earthquake%3Ausgs%3Afixture/);
   const url = page.url();

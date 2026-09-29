@@ -1,3 +1,5 @@
+import type { MapPresentationCounts } from './eventDisclosure';
+import type { RadarFrame } from '../data/useWeatherRadar';
 import type { GeoEvent } from '../domain/types';
 import type { WorldEventMapState } from '../state/mapState';
 
@@ -17,7 +19,10 @@ export type MapCountryTarget = {
 };
 
 export interface MapRendererCallbacks {
+  onPresentationChange?: (counts: MapPresentationCounts) => void;
+  onRadarStateChange?: (status: 'off' | 'loading' | 'ready' | 'error') => void;
   onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
+  onClusterSelect?: (eventIds: string[]) => void;
   onEventSelect: (eventId: string | null) => void;
   onCountrySelect: (country: MapCountryTarget | null, position?: MapHoverPosition) => void;
   onCountryContextMenu: (country: MapCountryTarget, position: MapHoverPosition) => void;
@@ -31,6 +36,7 @@ export interface MapRenderer {
   mount(container: HTMLElement, callbacks: MapRendererCallbacks): Promise<void>;
   setState(state: WorldEventMapState): void;
   setEvents(events: GeoEvent[]): void;
+  setRadar?(frame: RadarFrame | null): void;
   resize(): void;
   setReducedMotion(reduced: boolean): void;
   setLanguage?(language: 'en' | 'zh'): void;

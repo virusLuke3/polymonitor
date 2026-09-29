@@ -43,6 +43,7 @@ export function worldEventMapReducer(
   if (action.type === 'set-camera') {
     return {
       ...state,
+      fitWorld: false,
       center: {
         lon: clampLongitude(action.center.lon),
         lat: clampLatitude(action.center.lat),
@@ -50,11 +51,11 @@ export function worldEventMapReducer(
       zoom: clampWorldEventZoom(action.zoom),
     };
   }
-  if (action.type === 'set-zoom') return { ...state, zoom: clampWorldEventZoom(action.zoom) };
+  if (action.type === 'set-zoom') return { ...state, fitWorld: false, zoom: clampWorldEventZoom(action.zoom) };
   if (action.type === 'set-region') {
     if (!isWorldEventRegion(action.region)) return state;
     const preset = worldEventRegionPreset(action.region);
-    return { ...state, region: action.region, center: { ...preset.center }, zoom: preset.zoom };
+    return { ...state, fitWorld: action.region === 'global', region: action.region, center: { ...preset.center }, zoom: preset.zoom };
   }
   if (action.type === 'toggle-layer') {
     const layerIds = state.activeLayerIds.includes(action.layerId)

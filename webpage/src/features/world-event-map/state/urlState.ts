@@ -51,18 +51,19 @@ export function parseWorldEventMapState(
   const region = params.get('region');
   if (isWorldEventRegion(region)) {
     const preset = worldEventRegionPreset(region);
-    state = { ...state, region, center: { ...preset.center }, zoom: preset.zoom };
+    state = { ...state, fitWorld: false, region, center: { ...preset.center }, zoom: preset.zoom };
   }
   const center = parsedList(params.get('center'));
   if (center?.length === 2) {
     const lon = finite(center[0] || null);
     const lat = finite(center[1] || null);
     if (lon != null && lat != null && lon >= -180 && lon <= 180 && lat >= -85 && lat <= 85) {
+      state.fitWorld = false;
       state.center = { lon: clampLongitude(lon), lat: clampLatitude(lat) };
     }
   }
   const zoom = finite(params.get('zoom'));
-  if (zoom != null) state.zoom = clampWorldEventZoom(zoom);
+  if (zoom != null) { state.zoom = clampWorldEventZoom(zoom); state.fitWorld = false; }
 
   const selectable = new Set(executableWorldEventLayers().map((layer) => layer.id));
   const rawLayers = params.get('layers');

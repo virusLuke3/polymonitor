@@ -1,3 +1,5 @@
+import { useI18n, type MessageKey } from '@/services/i18n';
+import { mapText } from '@/locales/map';
 import { Fragment } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import {
@@ -41,32 +43,34 @@ function LayerBrief({
   eventCount: number;
   onClose: () => void;
 }) {
+  const { locale, t } = useI18n();
+  const mt = (text: string) => mapText(locale, text);
   return (
     <aside className="wm-layer-brief" aria-labelledby="wm-layer-brief-title">
-      <button type="button" className="wm-layer-brief-close" onClick={onClose} aria-label="Close layer brief">×</button>
+      <button type="button" className="wm-layer-brief-close" onClick={onClose} aria-label={mt("Close layer brief")}>×</button>
       <header>
-        <span>Layer intelligence brief</span>
+        <span>{mt("Layer intelligence brief")}</span>
         <h2 id="wm-layer-brief-title">
           <MapSymbolIcon symbol={layer.icon} size={18} />
-          {layer.label}
+          {layer.messageKey ? t(layer.messageKey as MessageKey) : layer.label}
         </h2>
         <p>{layer.explanation.purpose}</p>
       </header>
       <dl>
         <div>
-          <dt>Mapped now</dt>
+          <dt>{mt("Mapped now")}</dt>
           <dd>{eventCount} events</dd>
         </div>
         <div>
-          <dt>Freshness</dt>
+          <dt>{mt("Freshness")}</dt>
           <dd>{layer.explanation.freshness}</dd>
         </div>
         <div>
-          <dt>Evidence standard</dt>
+          <dt>{mt("Evidence standard")}</dt>
           <dd>{layer.explanation.confidence}</dd>
         </div>
         <div>
-          <dt>Runtime capability</dt>
+          <dt>{mt("Runtime capability")}</dt>
           <dd>
             {(runtime?.availability || layer.availability).toUpperCase()}
             {runtime?.availabilityReason ? ` · ${runtime.availabilityReason}` : ''}
@@ -74,7 +78,7 @@ function LayerBrief({
         </div>
       </dl>
       <section>
-        <h3>Sources</h3>
+        <h3>{mt("Sources")}</h3>
         <div className="wm-layer-brief-sources">
           {layer.explanation.sources.map((source) => <span key={source}>{source}</span>)}
         </div>
@@ -107,14 +111,17 @@ export function LayerPanel({
   onCollapse: () => void;
   onExpand: () => void;
 }) {
+  const { locale, t } = useI18n();
+  const mt = (text: string) => mapText(locale, text);
+  const layerLabel = (item: LayerPanelItem) => { const key = worldEventLayerById(item.id)?.messageKey; return key ? t(key as MessageKey) : item.label; };
   const [query, setQuery] = useState('');
   const [briefLayerId, setBriefLayerId] = useState<string | null>(null);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized
-      ? items.filter((item) => `${item.label} ${item.hint || ''} ${item.id} ${item.aliases.join(' ')}`.toLowerCase().includes(normalized))
+      ? items.filter((item) => `${layerLabel(item)} ${layerLabel(item)} ${item.hint || ''} ${item.id} ${item.aliases.join(' ')}`.toLowerCase().includes(normalized))
       : items;
-  }, [items, query]);
+  }, [items, query, locale]);
   const counts = useMemo(() => {
     const next = new Map<string, number>();
     for (const event of events) {
@@ -134,7 +141,7 @@ export function LayerPanel({
     )).length,
     [items],
   );
-  const activeSummary = `${activeCount}/${executableCount} LAYERS ACTIVE`;
+  const activeSummary = `${activeCount}/${executableCount} ${mt("LAYERS ACTIVE")}`;
 
   const toggleCollapsed = () => {
     if (collapsed) {
@@ -150,10 +157,10 @@ export function LayerPanel({
       <aside
         id="wm-layer-sidebar"
         className={`wm-layer-sidebar ${collapsed ? 'is-collapsed' : ''}`}
-        aria-label={LAYER_PANEL_COPY.title}
+        aria-label={mt(LAYER_PANEL_COPY.title)}
       >
         <div className="wm-toggle-header">
-          <span className="wm-layer-heading">{LAYER_PANEL_COPY.title}</span>
+          <span className="wm-layer-heading">{mt(LAYER_PANEL_COPY.title)}</span>
           <span
             className="wm-layer-status-orb"
             role="status"
@@ -165,7 +172,7 @@ export function LayerPanel({
           <button
             type="button"
             className="wm-toggle-collapse"
-            aria-label={collapsed ? LAYER_PANEL_COPY.openLabel : LAYER_PANEL_COPY.collapseLabel}
+            aria-label={mt(collapsed ? LAYER_PANEL_COPY.openLabel : LAYER_PANEL_COPY.collapseLabel)}
             aria-controls="wm-layer-panel-body"
             aria-expanded={!collapsed}
             onClick={toggleCollapsed}
@@ -178,8 +185,8 @@ export function LayerPanel({
             className="wm-layer-search"
             value={query}
             onInput={(event) => setQuery((event.currentTarget as HTMLInputElement).value)}
-            placeholder={LAYER_PANEL_COPY.searchPlaceholder}
-            aria-label={LAYER_PANEL_COPY.searchPlaceholder}
+            placeholder={mt(LAYER_PANEL_COPY.searchPlaceholder)}
+            aria-label={mt(LAYER_PANEL_COPY.searchPlaceholder)}
             autoComplete="off"
             spellcheck={false}
           />
@@ -193,8 +200,8 @@ export function LayerPanel({
               const unavailable = !item.isExecutable || item.availability === 'unavailable';
               const visiblyEnabled = item.enabled && !unavailable;
               const actionLabel = unavailable
-                ? `${item.label} unavailable`
-                : `${visiblyEnabled ? 'Hide' : 'Show'} ${item.label}`;
+                ? `${layerLabel(item)} ${mt('unavailable')}`
+                : `${mt(visiblyEnabled ? 'Hide' : 'Show')} ${layerLabel(item)}`;
               return (
                 <div
                   key={item.id}
@@ -215,7 +222,7 @@ export function LayerPanel({
                     >
                       {item.panelEmoji}
                     </span>
-                    <span className="wm-layer-label">{item.label}</span>
+                    <span className="wm-layer-label">{layerLabel(item)}</span>
                     {item.hint ? (
                       <em className="wm-layer-hint">
                         {unavailable ? 'OFFLINE' : item.availability === 'degraded' ? 'DEGRADED' : item.hint}
@@ -225,7 +232,7 @@ export function LayerPanel({
                   <button
                     type="button"
                     className="wm-layer-info"
-                    aria-label={`Open ${item.label} source and coverage brief`}
+                    aria-label={`Open ${layerLabel(item)} source and coverage brief`}
                     aria-pressed={briefOpen}
                     onClick={() => setBriefLayerId(briefOpen ? null : item.id)}
                   >
@@ -233,7 +240,7 @@ export function LayerPanel({
                   </button>
                 </div>
               );
-            }) : <div className="wm-layer-empty">{LAYER_PANEL_COPY.emptyLabel}</div>}
+            }) : <div className="wm-layer-empty">{mt(LAYER_PANEL_COPY.emptyLabel)}</div>}
           </div>
           <div className="wm-sidebar-footer">{activeSummary}</div>
         </div>

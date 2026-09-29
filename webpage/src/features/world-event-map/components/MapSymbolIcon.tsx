@@ -1,6 +1,7 @@
 import type { GeoEventSeverity } from '../domain/types';
 import {
   MAP_SEVERITY_STYLES,
+  HAZARD_SEVERITY_COLORS,
   MAP_SYMBOL_DEFINITIONS,
   MAP_SYMBOL_PALETTES,
   MAP_SYMBOL_SIZE,
@@ -15,6 +16,7 @@ export function MapSymbolIcon({
   label,
   className,
   framed,
+  hazard = false,
 }: {
   symbol: MapSymbolKey;
   color?: string;
@@ -23,12 +25,13 @@ export function MapSymbolIcon({
   label?: string;
   className?: string;
   framed?: boolean;
+  hazard?: boolean;
 }) {
   const definition = MAP_SYMBOL_DEFINITIONS[symbol];
   const palette = MAP_SYMBOL_PALETTES[symbol];
   const severityStyle = severity ? MAP_SEVERITY_STYLES[severity] : null;
-  const showFrame = framed ?? Boolean(severityStyle);
-  const glyphColor = color === 'currentColor' ? palette.primary : color;
+  const showFrame = !hazard && (framed ?? Boolean(severityStyle));
+  const glyphColor = hazard && severity ? `rgb(${HAZARD_SEVERITY_COLORS[severity].slice(0, 3).join(',')})` : color === 'currentColor' ? palette.primary : color;
   return (
     <svg
       className={className}
@@ -66,7 +69,7 @@ export function MapSymbolIcon({
       <g
         fill={glyphColor}
         fillRule="evenodd"
-        stroke={palette.secondary}
+        stroke={hazard || color !== 'currentColor' ? "none" : palette.secondary}
         strokeWidth="0.65"
         paintOrder="stroke"
       >

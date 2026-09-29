@@ -9,6 +9,8 @@ export type WorldEventBasemapProvider = 'auto' | 'pmtiles' | 'openfreemap' | 'ca
 export type WorldEventBasemapTheme = 'dark' | 'positron';
 
 export interface WorldEventMapState {
+  /** Transient camera command; never restored from persistence or URL. */
+  fitWorld?: boolean;
   center: { lon: number; lat: number };
   zoom: number;
   region: WorldEventRegion;
@@ -56,7 +58,7 @@ export function defaultWorldEventMapState(): WorldEventMapState {
 
 export function clampWorldEventZoom(value: unknown) {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? Math.max(0.75, Math.min(8, numeric)) : 1.25;
+  return Number.isFinite(numeric) ? Math.max(-1, Math.min(8, numeric)) : 1.25;
 }
 
 export function clampLongitude(value: unknown) {

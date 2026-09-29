@@ -4,7 +4,7 @@ import { worldEventLayerById, worldEventLayerIdForEvent } from '../../config/lay
 import { mapSymbolForEvent, type MapSymbolKey } from '../../config/mapSymbols';
 import type { GeoEvent, GeoEventSeverity } from '../../domain/types';
 import { disclosureTierForZoom, eventDisclosureTier, eventVisibleAtZoom } from '../eventDisclosure';
-import { eventGeometryBounds, eventRepresentativePoint, isHazardEvent, SEVERITY_COLORS } from './shared';
+import { coordinateBounds, eventGeometryBounds, eventRepresentativePoint, isHazardEvent, eventColor, SEVERITY_COLORS } from './shared';
 export { eventDisclosureTier, eventVisibleAtZoom } from '../eventDisclosure';
 
 export type EventCluster = {
@@ -13,6 +13,7 @@ export type EventCluster = {
   coordinates: [number, number];
   eventIds: string[];
   count: number;
+  severityCounts?: Record<GeoEventSeverity, number>;
   severity: GeoEventSeverity;
   bounds: [number, number, number, number];
   expansionZoom: number;
@@ -52,7 +53,6 @@ type UnclusteredBucket = { layerId: string; events: GeoEvent[] };
 export type ScreenBox = [number, number, number, number];
 export type LabelProjection = (position: [number, number]) => { x: number; y: number } | null;
 
-const MAX_CLUSTER_LEAVES = 200;
 const WORLD_VIEWPORT: [number, number, number, number] = [-180, -85, 180, 85];
 
 const SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
@@ -249,14 +249,14 @@ export class EventClusterIndex {
     };
     for (const bucket of this.unclustered) {
       const layer = worldEventLayerById(bucket.layerId);
-      if (!layer || zoom < layer.minZoom) continue;
+      if (!layer || Math.max(0, zoom) < layer.minZoom) continue;
       for (const event of bucket.events) addVisible(event);
     }
 
     const clusters: EventCluster[] = [];
     for (const bucket of this.buckets) {
       const layer = worldEventLayerById(bucket.layerId);
-      if (!layer || zoom < layer.minZoom) continue;
+      if (!layer || Math.max(0, zoom) < layer.minZoom) continue;
       for (const feature of bucket.index.getClusters(viewport, normalizedZoom)) {
         if (!('cluster' in feature.properties)) {
           const event = bucket.eventById.get(feature.properties.eventId);
@@ -269,21 +269,25 @@ export class EventClusterIndex {
         // footprints. A cluster is the bounded world-view representation of
         // every active event it contains; removing watch/info leaves from the
         // aggregate made a healthy 500-event feed look empty.
-        const visibleCount = Number(feature.properties.point_count);
+        let visibleCount = Number(feature.properties.point_count);
         const representativeId = properties.representativeEventId;
         const representative = bucket.eventById.get(representativeId)
           || bucket.eventById.get(properties.representativeEventId)
           || bucket.eventById.values().next().value as GeoEvent | undefined;
         if (!representative) continue;
-        const leaves = bucket.index.getLeaves(clusterId, MAX_CLUSTER_LEAVES);
+        const leaves = bucket.index.getLeaves(clusterId, Infinity);
         const visibleLeaves = leaves
           .map((leaf) => bucket.eventById.get(leaf.properties.eventId))
-          .filter((event): event is GeoEvent => event != null);
+          .filter((event): event is GeoEvent => event != null && event.id !== selectedEventId);
+        visibleCount = visibleLeaves.length;
+        if (!visibleCount) continue;
         if (visibleCount === 1) {
-          addVisible(representative);
+          addVisible(visibleLeaves[0]!);
           continue;
         }
-        const severityRank = properties.severityRank;
+        const severityCounts = { info: 0, watch: 0, warning: 0, critical: 0 };
+        visibleLeaves.forEach(event => severityCounts[event.severity]++);
+        const severityRank = Math.max(...visibleLeaves.map(event => SEVERITY_RANK[event.severity]));
         const severity = severityFromRank(Number(severityRank || 0));
         const [red, green, blue] = SEVERITY_COLORS[severity];
         clusters.push({
@@ -292,10 +296,14 @@ export class EventClusterIndex {
           coordinates: feature.geometry.coordinates as [number, number],
           eventIds: visibleLeaves.map((event) => event.id),
           count: visibleCount,
+          severityCounts,
           severity,
-          bounds: [properties.west, properties.south, properties.east, properties.north],
+          bounds: coordinateBounds(visibleLeaves.flatMap(event => {
+            const b = eventGeometryBounds(event);
+            return b ? [[b[0], b[1]], [b[2], b[3]]] as [number, number][] : [];
+          })) || [properties.west, properties.south, properties.east, properties.north],
           expansionZoom: bucket.index.getClusterExpansionZoom(clusterId),
-          color: [red, green, blue, SEVERITY_COLORS[severity][3]],
+          color: isHazardEvent(representative) ? eventColor({ ...representative, severity }) : [red, green, blue, SEVERITY_COLORS[severity][3]],
           symbol: mapSymbolForEvent(representative),
           label: semanticLabel(representative),
           badge: semanticBadge(representative),

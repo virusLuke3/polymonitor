@@ -1,7 +1,8 @@
-import { geoMercator, geoPath, type GeoProjection } from 'd3-geo';
+import { mapPresentationCounts } from './eventDisclosure';
+import { selectionPanOffset } from './rendererVisibility';
+import { geoArea, geoMercator, geoPath, type GeoProjection } from 'd3-geo';
 import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon, Position } from 'geojson';
 import {
-  MAP_SEVERITY_STYLES,
   MAP_SYMBOL_SIZE,
   mapSymbolForEvent,
   mapSymbolPalette,
@@ -14,6 +15,7 @@ import { clampLatitude, clampLongitude, clampWorldEventZoom, type WorldEventMapS
 import { advanceAnimationTime, boundedAnimationDelta, MAP_ANIMATION_FRAME_INTERVAL_MS } from './animationClock';
 import {
   countryBasemapLabels,
+  countryBasemapLabelName,
   visibleCountryBasemapLabels,
   type CountryBasemapLabel,
 } from './countryBasemapLabels';
@@ -29,20 +31,19 @@ import {
 import { EventClusterIndex } from './layerFactories/eventClusters';
 import {
   hasAnimatedHazardPulse,
-  HAZARD_PULSE_INTERVAL_MS,
   hazardPulseTargets,
   selectEventPulseCandidates,
 } from './layerFactories/eventEmphasis';
 import { eventObservationTextureCandidates } from './layerFactories/eventObservations';
 import {
-  continuousMetricRadiusMeters,
   eventColor,
+  markerSize,
+  clusterMarkerSize,
   eventLabel,
   eventRepresentativePoint,
   eventSeverityColor,
   hazardAreaPresentation,
   isHazardEvent,
-  pointRadiusMeters,
   SEVERITY_COLORS,
 } from './layerFactories/shared';
 import type { MapCountryTarget, MapHoverPosition, MapRenderer, MapRendererCallbacks } from './MapRenderer';
@@ -72,7 +73,7 @@ function eventNamedGeometry(event: GeoEvent, name: string): Geometry | null {
   if (!geometry || typeof geometry !== 'object' || Array.isArray(geometry)) return null;
   const type = String((geometry as { type?: unknown }).type || '');
   return ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'].includes(type)
-    ? geometry as Geometry
+    ? normalizePolygonWinding(geometry as Geometry)
     : null;
 }
 
@@ -113,49 +114,11 @@ function mapSymbolMarker(x: number, y: number, symbol: MapSymbolKey, size: numbe
   return marker;
 }
 
-function mapSymbolBackdrop(x: number, y: number, symbol: MapSymbolKey, size: number) {
-  const palette = mapSymbolPalette(symbol);
-  const backdrop = svgElement('circle');
-  backdrop.setAttribute('cx', String(x));
-  backdrop.setAttribute('cy', String(y));
-  backdrop.setAttribute('r', String(size * 0.4375));
-  backdrop.setAttribute('fill', palette.surface);
-  backdrop.setAttribute('fill-opacity', '0.92');
-  backdrop.setAttribute('stroke', palette.primary);
-  backdrop.setAttribute('stroke-opacity', '0.44');
-  backdrop.setAttribute('stroke-width', '1');
-  backdrop.setAttribute('pointer-events', 'none');
-  return backdrop;
-}
-
-function severityRing(x: number, y: number, radius: number, severity: GeoEvent['severity'], outer = false) {
-  const style = MAP_SEVERITY_STYLES[severity];
-  const ring = svgElement('circle');
-  ring.setAttribute('cx', String(x));
-  ring.setAttribute('cy', String(y));
-  ring.setAttribute('r', String(radius));
-  ring.setAttribute('fill', 'none');
-  ring.setAttribute('stroke', style.color);
-  ring.setAttribute('stroke-opacity', outer ? '0.57' : '0.94');
-  ring.setAttribute('stroke-width', String(outer ? 1 : style.lineWidth));
-  ring.setAttribute('pointer-events', 'none');
-  ring.setAttribute('vector-effect', 'non-scaling-stroke');
-  return ring;
-}
-
-function ringSignedArea(ring: Position[]) {
-  let area = 0;
-  for (let index = 0; index < ring.length - 1; index += 1) {
-    const current = ring[index]!;
-    const next = ring[index + 1]!;
-    area += (current[0] || 0) * (next[1] || 0) - (next[0] || 0) * (current[1] || 0);
-  }
-  return area / 2;
-}
-
 function d3Ring(ring: Position[], outer: boolean) {
-  const clockwise = ringSignedArea(ring) < 0;
-  return clockwise === outer ? ring : [...ring].reverse();
+  // Planar winding reverses polar/dateline rings (notably Antarctica),
+  // filling the rest of the world. D3 uses spherical area and small shells.
+  const smallInterior = geoArea({ type: 'Polygon', coordinates: [ring] }) <= 2 * Math.PI;
+  return smallInterior === outer ? ring : [...ring].reverse();
 }
 
 export function normalizePolygonWinding(geometry: Geometry): Geometry {
@@ -205,6 +168,9 @@ function featureCountryTarget(feature: Feature): MapCountryTarget | null {
 }
 
 export class SvgMapRenderer implements MapRenderer {
+  private selectionNeedsPan = false;
+  private language: 'en' | 'zh' = 'en';
+  setLanguage(language: 'en' | 'zh') { this.language = language; this.scheduleRender(); }
   private host: HTMLElement | null = null;
   private svg: SVGSVGElement | null = null;
   private countryLayer: SVGGElement | null = null;
@@ -233,7 +199,8 @@ export class SvgMapRenderer implements MapRenderer {
   private lastAnimationTimestamp: number | null = null;
   private pendingAnimationDeltaMs = 0;
   private animationTime = 0;
-  private hazardPulseTimer: number | null = null;
+  private initializedEventSources = new Set<string>();
+  private observedEventIds = new Set<string>();
   private hazardPulseTime = Date.now();
   private readonly eventFirstSeenAt = new Map<string, number>();
   private receivedInitialEventSnapshot = false;
@@ -256,8 +223,8 @@ export class SvgMapRenderer implements MapRenderer {
     const svg = svgElement('svg');
     svg.classList.add('wm-world-event-svg-map');
     svg.classList.toggle('reduced-motion', this.reducedMotion);
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('focusable', 'false');
+    svg.setAttribute('role', 'group');
+    svg.setAttribute('aria-label', this.language === 'zh' ? '世界事件地图' : 'World event map');
     const countries = svgElement('g');
     countries.classList.add('wm-world-event-svg-countries');
     const areas = svgElement('g');
@@ -287,19 +254,32 @@ export class SvgMapRenderer implements MapRenderer {
     container.addEventListener('pointerup', this.handlePointerUp);
     container.addEventListener('pointercancel', this.handlePointerUp);
 
+    if (this.state?.fitWorld) this.fitDefaultWorld();
     this.scheduleRender();
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
     await this.loadLocalBasemap();
   }
 
   setState(state: WorldEventMapState) {
+    if (state.fitWorld && this.host && !this.state?.fitWorld) {
+      this.state = state;
+      this.fitDefaultWorld();
+      state = this.state;
+    }
     const selectionChanged = this.state?.selectedEventId !== state.selectedEventId;
     this.state = state;
+    if (selectionChanged) this.selectionNeedsPan = Boolean(state.selectedEventId);
     if (selectionChanged) this.pulseEvents = selectEventPulseCandidates(this.events, state.selectedEventId);
     this.scheduleRender();
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
+  }
+
+  private fitDefaultWorld() {
+    if (!this.host || !this.state) return;
+    const width = this.host.clientWidth, height = this.host.clientHeight;
+    const zoom = clampWorldEventZoom(Math.min(Math.log2(Math.max(1, width - 80) / 512), Math.log2(Math.max(1, height - 80) / 322)));
+    this.state = { ...this.state, fitWorld: false, center: { lon: 0, lat: 20 }, zoom };
+    this.callbacks?.onCameraChange({ center: this.state.center, zoom });
   }
 
   setEvents(events: GeoEvent[]) {
@@ -308,11 +288,15 @@ export class SvgMapRenderer implements MapRenderer {
     const now = Date.now();
     if (this.receivedInitialEventSnapshot) {
       for (const event of events) {
-        if (!previousIds.has(event.id)) this.eventFirstSeenAt.set(event.id, now);
+        const occurred = Date.parse(event.occurredAt || event.updatedAt || '');
+        if (event.sources.some(source => this.initializedEventSources.has(source.provider))
+          && !previousIds.has(event.id) && !this.observedEventIds.has(event.id)
+          && occurred <= now && now - occurred <= 6_000) this.eventFirstSeenAt.set(event.id, now);
       }
     } else if (events.length > 0) {
       this.receivedInitialEventSnapshot = true;
     }
+    events.forEach(event => { this.observedEventIds.add(event.id); event.sources.forEach(source => this.initializedEventSources.add(source.provider)); });
     const nextIds = new Set(events.map((event) => event.id));
     for (const eventId of this.eventFirstSeenAt.keys()) {
       if (!nextIds.has(eventId)) this.eventFirstSeenAt.delete(eventId);
@@ -322,7 +306,6 @@ export class SvgMapRenderer implements MapRenderer {
     this.clusterIndex.update(events);
     this.scheduleRender();
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
   }
 
   resize() {
@@ -333,7 +316,6 @@ export class SvgMapRenderer implements MapRenderer {
     this.reducedMotion = reduced;
     this.svg?.classList.toggle('reduced-motion', reduced);
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
     this.scheduleRender();
   }
 
@@ -349,7 +331,6 @@ export class SvgMapRenderer implements MapRenderer {
     this.paused = true;
     this.clearHover();
     this.cancelAnimationLoop();
-    this.cancelHazardPulseLoop();
   }
 
   resume() {
@@ -357,14 +338,12 @@ export class SvgMapRenderer implements MapRenderer {
     this.paused = false;
     this.scheduleRender();
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
   }
 
   destroy() {
     this.destroyed = true;
     this.clearHover();
     this.cancelAnimationLoop();
-    this.cancelHazardPulseLoop();
     this.cancelScheduledRender();
     this.clearBasemapTimer();
     this.basemapController?.abort();
@@ -451,6 +430,22 @@ export class SvgMapRenderer implements MapRenderer {
       || !this.countryLabelLayer || !this.eventLayer || !this.host) return;
     const width = Math.max(1, this.host.clientWidth || 1_200);
     const height = Math.max(1, this.host.clientHeight || 620);
+    if (this.selectionNeedsPan && this.state) {
+      const event = this.events.find(item => item.id === this.state?.selectedEventId);
+      const coordinate = event ? eventRepresentativePoint(event) : null;
+      if (coordinate) {
+        this.selectionNeedsPan = false;
+        const projection = this.projection(width, height), point = projection(coordinate);
+        if (point) {
+          const offset = selectionPanOffset(this.host, { x: point[0], y: point[1] });
+          const center = projection.invert?.([width / 2 + offset.x, height / 2 + offset.y]);
+          if (center && (Math.abs(offset.x) > 1 || Math.abs(offset.y) > 1)) {
+            this.state = { ...this.state, center: { lon: clampLongitude(center[0]), lat: clampLatitude(center[1]) } };
+            this.callbacks?.onCameraChange({ center: this.state.center, zoom: this.state.zoom });
+          }
+        }
+      }
+    }
     this.svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     const projection = this.projection(width, height);
     const path = geoPath(projection);
@@ -504,7 +499,7 @@ export class SvgMapRenderer implements MapRenderer {
       text.setAttribute('x', String(x));
       text.setAttribute('y', String(y));
       text.setAttribute('font-size', String(labelSize));
-      text.textContent = label.name;
+      text.textContent = countryBasemapLabelName(label, this.language);
       this.countryLabelLayer.append(text);
       occupiedCountryLabels.push(box);
     }
@@ -535,10 +530,28 @@ export class SvgMapRenderer implements MapRenderer {
       this.state?.zoom ?? 1.25,
       selectedId || null,
     );
+    const sw = projection.invert?.([0, height]), ne = projection.invert?.([width, 0]);
+    if (sw && ne) {
+      const worldWidth = 2 * Math.PI * projection.scale();
+      const viewport: [number, number, number, number] = width >= worldWidth
+        ? [-180, sw[1], 180, ne[1]] : [sw[0], sw[1], ne[0], ne[1]];
+      this.callbacks?.onPresentationChange?.(mapPresentationCounts(this.events, { singles, clusters }, viewport, this.state?.zoom ?? 1.25));
+    }
     const occupiedEventLabels = [...occupiedCountryLabels];
     const eventLabelCandidates: Array<{ event: GeoEvent; x: number; y: number; size: number }> = [];
     for (const event of renderEvents) {
       if (!isHazardEvent(event) || event.hazardKind !== 'tropical-cyclone') continue;
+      const observedPosition = eventRepresentativePoint(event);
+      const screen = observedPosition ? projection(observedPosition) : null;
+      if (screen && event.geometry?.type === 'LineString') {
+        const center = svgElement('circle');
+        center.setAttribute('cx', String(screen[0])); center.setAttribute('cy', String(screen[1]));
+        center.setAttribute('r', event.id === selectedId ? '9.5' : '8');
+        this.decorateEventElement(center, event, event.id === selectedId);
+        center.setAttribute('fill', cssColor(eventSeverityColor(event, 245)));
+        center.setAttribute('stroke', '#f4f7f7'); center.setAttribute('stroke-width', '1.2');
+        this.eventLayer.append(center);
+      }
       for (const [name, mode] of [
         ['forecastCone', 'cone'],
         ['observedTrack', 'observed'],
@@ -551,23 +564,24 @@ export class SvgMapRenderer implements MapRenderer {
         const shape = svgElement('path');
         shape.setAttribute('d', data);
         shape.classList.add('wm-world-event-svg-cyclone-geometry', `is-${mode}`);
-        this.decorateEventElement(shape, event, event.id === selectedId);
+        this.decorateEventElement(shape, event, event.id === selectedId, mode === 'cone' ? 'forecast-cone' : `${mode}-track`);
         if (mode === 'cone') {
-          shape.setAttribute('fill', cssColor(eventColor(event, 28)));
-          shape.setAttribute('stroke', cssColor(eventColor(event, 135)));
+          shape.setAttribute('fill', 'rgba(160,174,181,0.11)');
+          shape.setAttribute('stroke', 'rgba(160,174,181,0.53)');
           shape.setAttribute('stroke-width', '1');
           this.areaLayer.append(shape);
         } else {
           shape.setAttribute('fill', 'none');
           shape.setAttribute('stroke', mode === 'observed' ? cssColor(eventColor(event, 205)) : '#cde1e89b');
-          shape.setAttribute('stroke-width', mode === 'observed' ? '2.2' : '1.2');
-          if (mode === 'forecast') shape.setAttribute('stroke-dasharray', '4 4');
+          shape.setAttribute('stroke-width', mode === 'observed' ? '2.2' : '1.6');
+          if (mode === 'forecast') shape.setAttribute('stroke-dasharray', '5 3');
           this.eventLayer.append(shape);
         }
       }
     }
     for (const event of renderEvents) {
       if (!event.geometry || event.geometry.type === 'Point') continue;
+      if (event.geometry.type === 'LineString' && (eventNamedGeometry(event, 'observedTrack') || eventNamedGeometry(event, 'forecastTrack'))) continue;
       const isArea = event.geometry.type === 'Polygon' || event.geometry.type === 'MultiPolygon';
       const areaPresentation = isArea && isHazardEvent(event)
         ? hazardAreaPresentation(event, this.state?.zoom ?? 1.25, selectedId || null)
@@ -643,43 +657,23 @@ export class SvgMapRenderer implements MapRenderer {
       group.setAttribute('aria-label', `${cluster.count} ${cluster.label || 'mapped events'}. Zoom in to expand.`);
       const title = svgElement('title');
       title.textContent = `${cluster.count} ${cluster.label || 'mapped events'} · ${cluster.severity.toUpperCase()} · click to expand`;
-      const symbolSize = Math.min(24, 15 + Math.log2(cluster.count + 1) * 1.25);
-      occupiedEventLabels.push({
-        left: x - symbolSize / 2 - 3,
-        top: y - symbolSize / 2 - 3,
-        right: x + symbolSize / 2 + 18,
-        bottom: y + symbolSize / 2 + 14,
-      });
-      const underlay = mapSymbolBackdrop(x, y, cluster.symbol, symbolSize);
-      underlay.classList.add('wm-world-event-svg-symbol-underlay');
-      const ring = severityRing(x, y, symbolSize / 2 + 1, cluster.severity);
-      const outerRing = cluster.severity === 'critical'
-        ? severityRing(x, y, symbolSize / 2 + 3.5, cluster.severity, true)
-        : null;
-      const symbol = mapSymbolMarker(
-        x,
-        y,
-        cluster.symbol,
-        symbolSize,
-      );
-      const badgeWidth = Math.max(12, String(cluster.count).length * 5 + 6);
-      const badge = svgElement('rect');
-      badge.classList.add('wm-world-event-svg-cluster-badge');
-      badge.setAttribute('x', String(x + 4));
-      badge.setAttribute('y', String(y + 3));
-      badge.setAttribute('width', String(badgeWidth));
-      badge.setAttribute('height', '12');
-      badge.setAttribute('rx', '4');
-      badge.setAttribute('fill', 'rgba(4, 10, 14, 0.95)');
-      badge.setAttribute('stroke', cssColor(cluster.color));
+      const symbolSize = clusterMarkerSize(cluster.count);
+      occupiedEventLabels.push({ left: x - symbolSize / 2, top: y - symbolSize / 2, right: x + symbolSize / 2, bottom: y + symbolSize / 2 });
+      const badge = svgElement('circle');
+      badge.setAttribute('cx', String(x)); badge.setAttribute('cy', String(y));
+      badge.setAttribute('r', String(symbolSize / 2)); badge.setAttribute('fill', cssColor(cluster.color));
+      badge.setAttribute('stroke', '#0f1215');
       const label = svgElement('text');
-      label.setAttribute('x', String(x + 4 + badgeWidth / 2));
-      label.setAttribute('y', String(y + 9));
+      label.setAttribute('x', String(x)); label.setAttribute('y', String(y));
+      label.setAttribute('fill', '#0c0f12'); label.setAttribute('font-size', '12');
+      label.setAttribute('text-anchor', 'middle'); label.setAttribute('dominant-baseline', 'central');
       label.textContent = String(cluster.count);
-      const expand = () => this.callbacks?.onCameraChange({
-        center: { lon: cluster.coordinates[0], lat: cluster.coordinates[1] },
-        zoom: clampWorldEventZoom(cluster.expansionZoom),
-      });
+      const expand = () => {
+        const zoom = clampWorldEventZoom(cluster.expansionZoom);
+        if (zoom <= (this.state?.zoom || 0) || (cluster.bounds[0] === cluster.bounds[2] && cluster.bounds[1] === cluster.bounds[3])) {
+          this.callbacks?.onClusterSelect?.(cluster.eventIds);
+        } else this.callbacks?.onCameraChange({ center: { lon: cluster.coordinates[0], lat: cluster.coordinates[1] }, zoom });
+      };
       const showClusterTooltip = (pointerEvent: PointerEvent) => {
         this.queueHoverTooltip(cluster, pointerEvent, 'world-event-clusters');
       };
@@ -693,7 +687,7 @@ export class SvgMapRenderer implements MapRenderer {
         keyboardEvent.preventDefault();
         expand();
       });
-      group.append(title, ...(outerRing ? [outerRing] : []), ring, underlay, symbol, badge, label);
+      group.append(title, badge, label);
       this.eventLayer.append(group);
     }
     for (const event of singles) {
@@ -706,24 +700,7 @@ export class SvgMapRenderer implements MapRenderer {
       const group = svgElement('g');
       group.classList.add('wm-world-event-svg-point');
       this.decorateEventElement(group, event, event.id === selectedId);
-      const severityColor = SEVERITY_COLORS[event.severity];
-      const metricRadius = continuousMetricRadiusMeters(event);
-      if (metricRadius != null) {
-        const intensity = svgElement('circle');
-        const radius = Math.max(7, Math.min(22, Math.log2(Math.max(2, metricRadius / 1_000)) * 1.8));
-        intensity.classList.add('wm-world-event-svg-intensity');
-        intensity.setAttribute('cx', String(x));
-        intensity.setAttribute('cy', String(y));
-        intensity.setAttribute('r', String(radius));
-        intensity.setAttribute('fill', cssColor([severityColor[0], severityColor[1], severityColor[2], 28]));
-        intensity.setAttribute('stroke', cssColor([severityColor[0], severityColor[1], severityColor[2], 90]));
-        group.append(intensity);
-      }
-      const symbolSize = event.id === selectedId
-        ? 22
-        : (this.state?.zoom || 1.25) < 2.5
-          ? 14
-          : (this.state?.zoom || 1.25) < 4 ? 16 : 18;
+      const symbolSize = markerSize(event, selectedId || null);
       const eventSymbol = mapSymbolForEvent(event);
       occupiedEventLabels.push({
         left: x - symbolSize / 2 - 2,
@@ -731,26 +708,14 @@ export class SvgMapRenderer implements MapRenderer {
         right: x + symbolSize / 2 + 2,
         bottom: y + symbolSize / 2 + 2,
       });
-      const underlay = mapSymbolBackdrop(x, y, eventSymbol, symbolSize);
-      underlay.classList.add('wm-world-event-svg-symbol-underlay');
-      const ring = severityRing(x, y, symbolSize / 2 + 0.75, event.severity);
-      const outerRing = event.severity === 'critical'
-        ? severityRing(x, y, symbolSize / 2 + 3.2, event.severity, true)
-        : null;
-      const symbol = mapSymbolMarker(
-        x,
-        y,
-        eventSymbol,
-        symbolSize,
-      );
-      group.append(...(outerRing ? [outerRing] : []), ring, underlay, symbol);
+      const symbol = mapSymbolMarker(x, y, eventSymbol, symbolSize);
+      symbol.setAttribute('fill', cssColor(eventColor(event, 245))); symbol.setAttribute('stroke', 'none');
+      group.append(symbol);
       this.eventLayer.append(group);
       const mapZoom = this.state?.zoom || 1.25;
-      if (mapZoom >= 3 && (
-        event.id === selectedId
-        || event.severity === 'critical'
+      if (event.id === selectedId || (mapZoom >= 3 && ( event.severity === 'critical'
         || (mapZoom >= 4 && event.severity === 'warning')
-      )) eventLabelCandidates.push({ event, x, y, size: event.id === selectedId ? 11 : 9 });
+      ))) eventLabelCandidates.push({ event, x, y, size: event.id === selectedId ? 13 : 11 });
     }
     const rank = { info: 0, watch: 1, warning: 2, critical: 3 } as const;
     eventLabelCandidates.sort((left, right) => (
@@ -758,26 +723,34 @@ export class SvgMapRenderer implements MapRenderer {
       || rank[right.event.severity] - rank[left.event.severity]
       || Date.parse(right.event.updatedAt || '') - Date.parse(left.event.updatedAt || '')
     ));
+    const hostBounds = this.host.getBoundingClientRect();
+    for (const control of this.host.closest('.wm-map-stage')?.querySelectorAll('.wm-event-inspector, .wm-weather-deck-legend, .wm-layer-sidebar, .wm-map-controls') || []) {
+      const rect = control.getBoundingClientRect();
+      if (rect.width && rect.height) occupiedEventLabels.push({ left: rect.left - hostBounds.left, top: rect.top - hostBounds.top, right: rect.right - hostBounds.left, bottom: rect.bottom - hostBounds.top });
+    }
     for (const candidate of eventLabelCandidates.slice(0, (this.state?.zoom || 0) < 4 ? 24 : 100)) {
-      const textValue = eventLabel(candidate.event);
-      const widthEstimate = Math.min(220, Math.max(30, textValue.length * candidate.size * 0.62));
-      const box = {
-        left: candidate.x + 6,
-        top: candidate.y - candidate.size - 13,
-        right: candidate.x + 6 + widthEstimate,
-        bottom: candidate.y - 2,
-      };
-      const collides = occupiedEventLabels.some((other) => (
-        box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top
-      ));
-      if (candidate.event.id !== selectedId && collides) continue;
       const label = svgElement('text');
       label.classList.add('wm-world-event-svg-event-label');
-      label.setAttribute('x', String(box.left));
-      label.setAttribute('y', String(candidate.y - 8));
       label.setAttribute('font-size', String(candidate.size));
-      label.textContent = textValue;
+      label.textContent = candidate.event.id === selectedId ? candidate.event.title.slice(0, 64) : eventLabel(candidate.event);
       this.eventLayer.append(label);
+      // Measure the actual SVG font, including CJK fallback, rather than
+      // estimating character widths. Only truncate to the viewport safe area.
+      while (label.getComputedTextLength() > width - 24 && label.textContent.length > 2) {
+        label.textContent = label.textContent.replace(/…$/, '').slice(0, -1) + '…';
+      }
+      const textWidth = label.getComputedTextLength(), textHeight = candidate.size + 4;
+      const anchors = [[candidate.x + 12, candidate.y - textHeight - 8], [candidate.x - textWidth - 12, candidate.y - textHeight - 8],
+        [candidate.x + 12, candidate.y + 12], [candidate.x - textWidth - 12, candidate.y + 12]];
+      const boxes = anchors.map(([x, y]) => {
+        const left = Math.max(12, Math.min(width - textWidth - 12, x!));
+        const top = Math.max(12, Math.min(height - textHeight - 12, y!));
+        return { left, top, right: left + textWidth, bottom: top + textHeight };
+      });
+      const clear = boxes.find(box => !occupiedEventLabels.some(other => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top));
+      const box = clear || (candidate.event.id === selectedId ? boxes[0] : null);
+      if (!box) { label.remove(); continue; }
+      label.setAttribute('x', String(box.left)); label.setAttribute('y', String(box.top + candidate.size));
       occupiedEventLabels.push(box);
     }
     for (const event of aviation.hubs) {
@@ -898,9 +871,7 @@ export class SvgMapRenderer implements MapRenderer {
       circle.setAttribute('vector-effect', 'non-scaling-stroke');
       layer.append(circle);
     };
-    const pixelRadius = (event: GeoEvent) => event.geometry?.type === 'Point'
-      ? Math.max(5, Math.min(18, Math.log2(Math.max(2, pointRadiusMeters(event) / 1_000)) * 1.8))
-      : 9;
+    const pixelRadius = (event: GeoEvent) => markerSize(event, this.state?.selectedEventId || null) / 2;
 
     if (!this.reducedMotion) {
       const targets = hazardPulseTargets(
@@ -910,24 +881,11 @@ export class SvgMapRenderer implements MapRenderer {
         this.hazardPulseTime,
         this.state?.zoom ?? 0,
       );
-      for (const target of targets.status) {
-        const wave = 0.5 + 0.5 * Math.sin(
-          this.hazardPulseTime / (target.strength === 'warning' ? 900 : 400),
-        );
-        const multiplier = target.strength === 'warning' ? 1.35 + wave * 0.25 : 1.45 + wave * 0.75;
-        appendRing(
-          target.position,
-          pixelRadius(target.event) * multiplier,
-          eventColor(target.event, target.strength === 'warning' ? 58 : 126),
-          target.strength === 'warning' ? 1 : 1.5,
-        );
-      }
       for (const target of targets.recent) {
-        const wave = 0.5 + 0.5 * Math.sin(this.hazardPulseTime / 318);
         appendRing(
           target.position,
-          pixelRadius(target.event) * (1.6 + wave * 1.05),
-          eventColor(target.event, Math.round(150 * target.fade)),
+          pixelRadius(target.event) + 3 + target.phase * 6,
+          eventColor(target.event, Math.round(120 * target.fade * (1 - target.phase))),
           1.5,
         );
       }
@@ -945,8 +903,7 @@ export class SvgMapRenderer implements MapRenderer {
       : null;
     const selectedPosition = selected ? eventRepresentativePoint(selected) : null;
     if (selected && selectedPosition && selected.geometry?.type !== 'LineString') {
-      appendRing(selectedPosition, pixelRadius(selected) * 2.05, eventColor(selected, 235), 1.7);
-      appendRing(selectedPosition, pixelRadius(selected) * 1.48, [220, 244, 248, 210], 1.25);
+      appendRing(selectedPosition, pixelRadius(selected) + 2, [235, 241, 245, 240], 1.25);
     }
   }
 
@@ -963,7 +920,7 @@ export class SvgMapRenderer implements MapRenderer {
     this.renderFrame = null;
   }
 
-  private decorateEventElement(element: SVGElement, event: GeoEvent, selected: boolean) {
+  private decorateEventElement(element: SVGElement, event: GeoEvent, selected: boolean, geometryRole?: string) {
     const color = cssColor(eventColor(event, selected ? 250 : 205));
     element.setAttribute('fill', color);
     element.setAttribute('stroke', selected ? '#fffade' : color);
@@ -982,7 +939,7 @@ export class SvgMapRenderer implements MapRenderer {
     title.textContent = `${event.title} · ${event.locationLabel || event.severity}`;
     element.append(title);
     const showEventTooltip = (pointerEvent: PointerEvent) => {
-      this.queueHoverTooltip(event, pointerEvent, '', event.id);
+      this.queueHoverTooltip(geometryRole ? { ...event, geometryRole } : event, pointerEvent, '', event.id);
     };
     element.addEventListener('pointerenter', showEventTooltip);
     element.addEventListener('pointermove', showEventTooltip);
@@ -1032,7 +989,6 @@ export class SvgMapRenderer implements MapRenderer {
     if (!this.state || event.button !== 0) return;
     this.clearHover();
     this.cancelAnimationLoop();
-    this.cancelHazardPulseLoop();
     this.drag = {
       pointerId: event.pointerId,
       x: event.clientX,
@@ -1059,7 +1015,6 @@ export class SvgMapRenderer implements MapRenderer {
     this.host?.releasePointerCapture(event.pointerId);
     this.drag = null;
     this.syncAnimationLoop();
-    this.syncHazardPulseLoop();
   };
 
   private clearBasemapTimer() {
@@ -1091,7 +1046,7 @@ export class SvgMapRenderer implements MapRenderer {
       }
     }
     this.pendingHover = {
-      tooltip: worldEventTooltipModel(object, layerId),
+      tooltip: worldEventTooltipModel(object, layerId, this.language),
       position: this.pointerPosition(pointerEvent),
     };
     if (this.hoverFrame != null) return;
@@ -1126,46 +1081,13 @@ export class SvgMapRenderer implements MapRenderer {
       ));
   }
 
-  private syncHazardPulseLoop() {
-    const shouldPulse = Boolean(this.svg)
-      && !this.destroyed
-      && !this.paused
-      && !this.drag
-      && !this.reducedMotion
-      && hasAnimatedHazardPulse(
-        this.pulseEvents,
-        this.state?.selectedEventId || null,
-        this.eventFirstSeenAt,
-        Date.now(),
-        this.state?.zoom ?? 0,
-      );
-    if (!shouldPulse) {
-      this.cancelHazardPulseLoop();
-      return;
-    }
-    if (this.hazardPulseTimer != null) return;
-    this.hazardPulseTimer = window.setInterval(() => {
-      if (this.destroyed || this.paused || this.drag || this.reducedMotion) {
-        this.cancelHazardPulseLoop();
-        return;
-      }
-      this.hazardPulseTime = Date.now();
-      if (!this.host) return;
-      const width = Math.max(1, this.host.clientWidth || 1_200);
-      const height = Math.max(1, this.host.clientHeight || 620);
-      this.renderEmphasis(this.projection(width, height), width, height);
-    }, HAZARD_PULSE_INTERVAL_MS);
-  }
-
-  private cancelHazardPulseLoop() {
-    if (this.hazardPulseTimer != null) {
-      window.clearInterval(this.hazardPulseTimer);
-      this.hazardPulseTimer = null;
-    }
+  private hasAnimation() {
+    return this.hasAnimatedAviation() || hasAnimatedHazardPulse(this.pulseEvents,
+      this.state?.selectedEventId || null, this.eventFirstSeenAt, Date.now(), this.state?.zoom ?? 0);
   }
 
   private syncAnimationLoop() {
-    if (!this.svg || this.destroyed || this.paused || this.drag || this.reducedMotion || !this.hasAnimatedAviation()) {
+    if (!this.svg || this.destroyed || this.paused || this.drag || this.reducedMotion || !this.hasAnimation()) {
       this.cancelAnimationLoop();
       return;
     }
@@ -1175,7 +1097,12 @@ export class SvgMapRenderer implements MapRenderer {
 
   private handleAnimationFrame = (timestamp: number) => {
     this.animationFrame = null;
-    if (this.destroyed || this.paused || this.drag || this.reducedMotion || !this.hasAnimatedAviation()) return;
+    if (this.destroyed || this.paused || this.drag || this.reducedMotion) return;
+    if (!this.hasAnimation()) {
+      this.hazardPulseTime = Date.now();
+      if (this.host) this.renderEmphasis(this.projection(this.host.clientWidth, this.host.clientHeight), this.host.clientWidth, this.host.clientHeight);
+      return;
+    }
     this.pendingAnimationDeltaMs += boundedAnimationDelta(this.lastAnimationTimestamp, timestamp);
     this.lastAnimationTimestamp = timestamp;
     if (this.pendingAnimationDeltaMs >= MAP_ANIMATION_FRAME_INTERVAL_MS) {
@@ -1184,7 +1111,9 @@ export class SvgMapRenderer implements MapRenderer {
       if (this.host) {
         const width = Math.max(1, this.host.clientWidth || 1_200);
         const height = Math.max(1, this.host.clientHeight || 620);
-        this.renderAviationMotion(this.projection(width, height), width, height);
+        if (this.hasAnimatedAviation()) this.renderAviationMotion(this.projection(width, height), width, height);
+        this.hazardPulseTime = Date.now();
+        this.renderEmphasis(this.projection(width, height), width, height);
       }
     }
     this.animationFrame = window.requestAnimationFrame(this.handleAnimationFrame);

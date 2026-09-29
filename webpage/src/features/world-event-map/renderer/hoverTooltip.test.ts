@@ -4,7 +4,7 @@ import type { EventCluster } from './layerFactories';
 import {
   pickedWorldEvent,
   pickedWorldEventCluster,
-  worldEventTooltipHtml,
+  worldEventTooltipModel,
 } from './hoverTooltip';
 
 function event(overrides: Partial<GeoEvent> = {}): GeoEvent {
@@ -23,13 +23,15 @@ function event(overrides: Partial<GeoEvent> = {}): GeoEvent {
   };
 }
 
+const tooltipText = (...args: Parameters<typeof worldEventTooltipModel>) => JSON.stringify(worldEventTooltipModel(...args));
+
 describe('world event hover tooltip', () => {
-  it('unwraps GeoJSON features and escapes event content', () => {
+  it('unwraps GeoJSON features without interpreting source markup', () => {
     const target = { properties: { event: event() } };
     expect(pickedWorldEvent(target)?.id).toBe('event:1');
-    expect(worldEventTooltipHtml(target)).toContain('Evidence &lt;alert&gt;');
-    expect(worldEventTooltipHtml(target)).toContain('warning Conflict');
-    expect(worldEventTooltipHtml(target)).toContain('<small>Example</small><small>UCDP</small>');
+    expect(tooltipText(target)).toContain('Evidence <alert>');
+    expect(tooltipText(target)).toContain('warning Conflict');
+    expect(tooltipText(target)).toContain('Example');
   });
 
   it('unwraps animated aircraft motion objects', () => {
@@ -40,8 +42,8 @@ describe('world event hover tooltip', () => {
     });
     const target = { event: flight };
     expect(pickedWorldEvent(target)).toBe(flight);
-    expect(worldEventTooltipHtml(target, 'aviation-seeded-aircraft')).toContain('Animated Reference Aircraft');
-    expect(worldEventTooltipHtml(target, 'aviation-seeded-aircraft')).toContain('SIN → LHR');
+    expect(tooltipText(target, 'aviation-seeded-aircraft')).toContain('Animated Reference Aircraft');
+    expect(tooltipText(target, 'aviation-seeded-aircraft')).toContain('SIN → LHR');
   });
 
   it('formats routes and hubs from their real adapter fields', () => {
@@ -56,10 +58,10 @@ describe('world event hover tooltip', () => {
       category: 'infrastructure',
       properties: { mapEntity: 'air-hub', code: 'SIN', city: 'Singapore', country: 'SG', routeCount: 128 },
     });
-    expect(worldEventTooltipHtml(route, 'aviation-route-core')).toContain('JFK → LHR');
-    expect(worldEventTooltipHtml(route, 'aviation-route-core')).toContain('Traffic 91');
-    expect(worldEventTooltipHtml(route, 'aviation-route-core')).toContain('Exposure: weather, conflict');
-    expect(worldEventTooltipHtml(hub, 'aviation-hubs')).toContain('128 connected routes');
+    expect(tooltipText(route, 'aviation-route-core')).toContain('JFK → LHR');
+    expect(tooltipText(route, 'aviation-route-core')).toContain('Traffic 91');
+    expect(tooltipText(route, 'aviation-route-core')).toContain('Exposure: weather, conflict');
+    expect(tooltipText(hub, 'aviation-hubs')).toContain('128 connected routes');
   });
 
   it('formats live aircraft telemetry with aviation units', () => {
@@ -70,7 +72,7 @@ describe('world event hover tooltip', () => {
         baroAltitude: 10_668, velocity: 250, heading: 92,
       },
     });
-    const html = worldEventTooltipHtml(aircraft, 'aviation-live-aircraft');
+    const html = tooltipText(aircraft, 'aviation-live-aircraft');
     expect(html).toContain('TEST123');
     expect(html).toContain('35,000 ft');
     expect(html).toContain('486 kt');
@@ -85,7 +87,7 @@ describe('world event hover tooltip', () => {
         countryRiskEvidenceCount: 9, latestSource: 'OFAC',
       },
     });
-    const html = worldEventTooltipHtml({ properties: { event: risk } }, 'world-event-country-risk');
+    const html = tooltipText({ properties: { event: risk } }, 'world-event-country-risk');
     expect(html).toContain('18 evidence records');
     expect(html).toContain('4 sanctions');
     expect(html).toContain('OFAC');
@@ -104,7 +106,7 @@ describe('world event hover tooltip', () => {
       revision: { nativeEventId: 'eq-1' },
       metrics: { kind: 'earthquake', magnitude: 6.4, depthKm: 12.5, pagerAlert: 'orange' },
     };
-    const html = worldEventTooltipHtml(earthquake, 'world-event-hazard-areas');
+    const html = tooltipText(earthquake, 'world-event-hazard-areas');
     expect(html).toContain('Magnitude 6.4 · Depth 12.5 km');
     expect(html).toContain('PAGER ORANGE');
   });
@@ -124,6 +126,6 @@ describe('world event hover tooltip', () => {
     };
     expect(pickedWorldEvent(cluster)).toBeNull();
     expect(pickedWorldEventCluster(cluster)).toBe(cluster);
-    expect(worldEventTooltipHtml(cluster)).toContain('2 mapped events');
+    expect(tooltipText(cluster)).toContain('2 mapped events');
   });
 });

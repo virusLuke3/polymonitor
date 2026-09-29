@@ -2,6 +2,13 @@ import { expect, test, type Page } from '@playwright/test';
 import { fixtureBundle, installDashboard } from './fixtures/dashboard';
 import { installFixtures } from './fixtures/world-event-map';
 
+test.afterEach(async ({ page }) => {
+  // Assertions have finished. Detach routes before aborting the document so
+  // pending image/module transfers cannot escape into the next test's teardown.
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await page.goto('about:blank');
+});
+
 async function settled(page: Page) {
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(1200);
@@ -11,7 +18,7 @@ async function settled(page: Page) {
 // changes. No masks: clock, API data, locale and motion are deterministic.
 async function visual(page: Page, name: string) {
   await settled(page);
-  await expect(page).toHaveScreenshot(name, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
+  await expect.soft(page).toHaveScreenshot(name, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
 }
 
 for (const width of [1440, 390]) {
@@ -29,7 +36,8 @@ for (const width of [1440, 390]) {
       await visual(page, `focus-${width}-${locale}.png`);
       await page.locator('[data-workspace-panel-id="global-transport-shipping"]').scrollIntoViewIfNeeded();
       await visual(page, `panels-${width}-${locale}.png`);
-      await page.locator('.wm-side-beta').click();
+      await page.locator('.wm-more-nav summary').click();
+      await page.getByRole('menuitem', { name: /settings|设置/i }).click();
       await expect(page.locator('.wm-settings-modal')).toBeVisible();
       await visual(page, `settings-${width}-${locale}.png`);
       await page.keyboard.press('Escape');
@@ -67,6 +75,36 @@ for (const path of ['/login', '/account', '/watchlist', '/briefings', '/develope
 }
 
 for (const width of [1440, 390]) {
+  test(`Chinese map filters keep their captions with warm fonts ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installDashboard(page, 'zh');
+    // Force the cold CJK face to arrive after the controls first render.
+    await page.route(/noto-sans-sc.*\.woff2/, async route => {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await route.fallback();
+    });
+    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes');
+    const controls = page.locator('.wm-world-event-basemap-control');
+    await expect(controls).toHaveCount(2);
+    await settled(page);
+    const cold = await Promise.all([0, 1].map(i => controls.nth(i).screenshot({ animations: 'disabled' })));
+    await page.unroute(/noto-sans-sc.*\.woff2/);
+    await page.reload();
+    await expect(controls).toHaveCount(2);
+    await settled(page);
+    for (let i = 0; i < 2; i++) {
+      expect(await controls.nth(i).screenshot({ animations: 'disabled' })).toEqual(cold[i]);
+    }
+    const theme = controls.nth(1).locator('select');
+    await theme.focus();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(theme).toHaveValue('positron');
+    await expect(theme).toBeFocused();
+    await page.goto('about:blank');
+    await page.unrouteAll({ behavior: 'wait' });
+  });
+
   test(`Chinese market sort keeps its caption with warm fonts ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page, 'zh');
@@ -99,26 +137,15 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page);
     await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
-    await expect(page.getByRole('button', { name: /ALL EVENTS/ })).toContainText('9');
-    await page.getByRole('button', { name: /ALL EVENTS/ }).click();
+    await expect(page.getByRole('button', { name: /^All events/i })).toContainText('9');
+    await page.getByRole('button', { name: /^All events/i }).click();
     await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
     await expect(page.locator('.wm-event-inspector')).toBeVisible();
-    // The inspector's focus effect can scroll after its first visible frame.
-    // Wait for that real accessibility behavior before fixing the viewport.
+    // Focus must settle without scrolling the page or the clipped map canvas.
     await expect(page.locator('#wm-event-inspector-title')).toBeFocused();
-    // Restore both scroll containers from the baseline. Focusing the bottom
-    // sheet may scroll the overflow-hidden map's 5px inline-SVG overflow too.
-    if (width === 390) {
-      await page.evaluate(() => {
-        window.scrollTo(0, 413);
-        document.querySelector('.wm-weather-deck-map')!.scrollTop = 5;
-      });
-      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(413);
-      await expect.poll(() => page.locator('.wm-weather-deck-map').evaluate(e => e.scrollTop)).toBe(5);
-    }
     await visual(page, `map-selected-${width}.png`);
     await page.getByRole('button', { name: 'Close event details' }).click();
-    await page.getByRole('button', { name: /ALL EVENTS/ }).focus();
+    await page.getByRole('button', { name: /^All events/i }).focus();
     await visual(page, `map-focus-${width}.png`);
     await page.unrouteAll({ behavior: 'wait' });
     await installFixtures(page, true);
@@ -364,7 +391,8 @@ test('anonymous homepage renders a saved empty panel list without restoring defa
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('polydata:workspace-panels:v4')!))).toEqual([]);
     // Fixed focus panels retain their existing product behavior.
     await expect(page.locator('.wm-focus-book-panel')).toBeVisible();
-    await page.locator('.wm-side-beta').click();
+    await page.locator('.wm-more-nav summary').click();
+      await page.getByRole('menuitem', { name: /settings|设置/i }).click();
     await expect(page.locator('.wm-settings-modal a[href="/login?next=/"]')).toBeVisible();
   }
 });

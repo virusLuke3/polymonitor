@@ -152,7 +152,7 @@ function WorldMonitorApp() {
   const { selectedMarketId, setSelectedMarketId, resetMarketSelection, selectedMarketGroupId, selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey,
     selectedMarketGroupDetail, selectedMarketGroupChart, selectedMarketGroupChartRange, setSelectedMarketGroupChartRange,
     bundle, bundleLoading, focusMarketGroup, prefetchMarketFocus, error: focusError } = useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded });
-  const { worldEventMap, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
+  const { worldEventMap, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
     ucdpRawMapEvents, worldEventMapEvents, mapSourceStatuses } = useWorldEventMapController(runtime, viewMode === '2d');
   const { workspaceSyncStatus, workspaceSyncUpdatedAt, retryWorkspaceSync } = useWorkspaceSync(workspace, { region, mapZoom, setRegion, setMapZoom });
   const [commandQuery, setCommandQuery] = useState('');
@@ -365,10 +365,7 @@ function WorldMonitorApp() {
     setNotice(t('atlas.workspaceReset'));
   };
 
-  const resetMap = () => {
-    worldEventMap.reset();
-    setNotice(t('atlas.workspaceReset'));
-  };
+  const resetMap = () => worldEventMap.setRegion('global');
 
   const copyLink = async () => {
     const writeClipboard = async (value: string) => {
@@ -472,7 +469,7 @@ function WorldMonitorApp() {
           <div className="wm-map-header">
             <div className="wm-map-heading">
               <span className="wm-map-kicker">{t('atlas.kicker')}</span>
-              <div className="wm-map-title">{t('atlas.title')}</div>
+              <div className="wm-map-title">{t('atlas.title')} <small className="wm-map-beta">BETA</small></div>
             </div>
             <div className="wm-map-status-strip" aria-label={t('atlas.mapStatus')}>
               <span className="wm-status-chip">{t('atlas.liveStatus')}</span>
@@ -534,6 +531,7 @@ function WorldMonitorApp() {
                   />
                 ) : (
                   <WorldEventMapView
+                    onRendererKindChange={setMapRendererKind}
                     events={worldEventMapEvents}
                     state={worldEventMap.state}
                     onCameraChange={(nextCamera) => worldEventMap.setCamera(nextCamera.center, nextCamera.zoom)}
@@ -549,10 +547,9 @@ function WorldMonitorApp() {
               </div>
 
               <div className="wm-map-controls">
-                <button type="button" className="wm-side-beta" onClick={() => setShowSettings(true)}>BETA</button>
-                <button type="button" onClick={zoomIn}>＋</button>
-                <button type="button" onClick={zoomOut}>－</button>
-                <button type="button" onClick={resetMap}>⌂</button>
+                <button type="button" aria-label={t("map.zoomin")} onClick={zoomIn}>＋</button>
+                <button type="button" aria-label={t("map.zoomout")} onClick={zoomOut}>－</button>
+                <button type="button" aria-label={t("map.globaloverview")} onClick={resetMap}>⌂</button>
               </div>
 
               {loading ? <div className="wm-banner">{t('atlas.bootstrapping')}</div> : null}
@@ -868,7 +865,7 @@ function WorldMonitorApp() {
             </label>
             <label className="wm-settings-row">
               <span>{t('settings.mapZoom')}</span>
-              <input type="range" min="0.75" max="8" step="0.25" value={String(mapZoom)} onInput={(event) => setMapZoom(clampMapZoom((event.currentTarget as HTMLInputElement).value))} />
+              <input type="range" min="-1" max="8" step="0.25" value={String(mapZoom)} onInput={(event) => setMapZoom(clampMapZoom((event.currentTarget as HTMLInputElement).value))} />
             </label>
             <section className={`wm-settings-sync is-${workspaceSyncStatus}`} aria-live="polite">
               <div>

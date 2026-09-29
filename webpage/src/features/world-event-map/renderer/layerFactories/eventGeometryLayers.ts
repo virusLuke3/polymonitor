@@ -1,9 +1,12 @@
+import { PathStyleExtension, type PathStyleExtensionProps } from '@deck.gl/extensions';
 import { GeoJsonLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers';
 import type { LayersList } from '@deck.gl/core';
 import type { GeoEvent } from '../../domain/types';
 import {
   eventSeverityColor,
   eventGeometryBounds,
+  boundsIntersect,
+  eventRepresentativePoint,
   hazardAreaPresentation,
   isHazardEvent,
   type HazardAreaPresentation,
@@ -13,6 +16,7 @@ import { eventColor } from './shared';
 
 type CycloneCenter = {
   event: GeoEvent;
+  geometryRole: "center";
   coordinates: [number, number];
 };
 
@@ -25,6 +29,7 @@ type NamedCyclonePath = {
   event: GeoEvent;
   path: [number, number][];
   mode: 'observed' | 'forecast';
+  geometryRole: string;
 };
 
 type NamedCycloneCone = { event: GeoEvent; geometry: Record<string, unknown> };
@@ -41,10 +46,10 @@ function namedGeometry(event: GeoEvent, name: string) {
 function namedPaths(event: GeoEvent, name: string, mode: NamedCyclonePath['mode']): NamedCyclonePath[] {
   const geometry = namedGeometry(event, name);
   if (geometry?.type === 'LineString' && Array.isArray(geometry.coordinates)) {
-    return [{ event, path: geometry.coordinates as [number, number][], mode }];
+    return [{ event, path: geometry.coordinates as [number, number][], mode, geometryRole: `${mode}-track` }];
   }
   if (geometry?.type === 'MultiLineString' && Array.isArray(geometry.coordinates)) {
-    return (geometry.coordinates as [number, number][][]).map((path) => ({ event, path, mode }));
+    return (geometry.coordinates as [number, number][][]).map((path) => ({ event, path, mode, geometryRole: `${mode}-track` }));
   }
   return [];
 }
@@ -60,25 +65,21 @@ export function createEventGeometryLayers(
     ? events.filter((event) => {
       if (event.id === selectedEventId) return true;
       const bounds = eventGeometryBounds(event);
-      return !bounds || (
-        bounds[0] <= viewport[2]
-        && bounds[2] >= viewport[0]
-        && bounds[1] <= viewport[3]
-        && bounds[3] >= viewport[1]
-      );
+      return !bounds || boundsIntersect(bounds, viewport);
     })
     : events;
   const lines = visibleEvents.filter((event) => (
     event.properties.mapEntity !== 'air-route'
     && event.properties.mapEntity !== 'air-flight'
     && event.geometry?.type === 'LineString'
+    && !namedGeometry(event, 'observedTrack') && !namedGeometry(event, 'forecastTrack')
   ));
-  const cycloneCenters: CycloneCenter[] = lines.flatMap((event) => {
+  const cycloneCenters: CycloneCenter[] = visibleEvents.flatMap((event) => {
     if (!isHazardEvent(event) || event.hazardKind !== 'tropical-cyclone' || event.geometry?.type !== 'LineString') {
       return [];
     }
-    const coordinates = event.geometry.coordinates[event.geometry.coordinates.length - 1];
-    return coordinates ? [{ event, coordinates }] : [];
+    const coordinates = eventRepresentativePoint(event);
+    return coordinates ? [{ event, coordinates, geometryRole: "center" as const }] : [];
   });
   const hazardAreas = visibleEvents.flatMap((event) => {
     if (!isHazardEvent(event)
@@ -113,14 +114,15 @@ export function createEventGeometryLayers(
       data: {
         type: 'FeatureCollection',
         features: cycloneCones.map(({ event, geometry }) => ({
-          type: 'Feature', id: event.id, properties: { event }, geometry,
+          type: 'Feature', id: event.id, properties: { event, geometryRole: 'forecast-cone' }, geometry,
         })),
       } as any,
       filled: true,
       stroked: true,
-      getFillColor: (feature) => eventColor(feature.properties?.event as GeoEvent, 28),
-      getLineColor: (feature) => eventColor(feature.properties?.event as GeoEvent, 135),
+      getFillColor: [160, 174, 181, 28],
+      getLineColor: [160, 174, 181, 135],
       getLineWidth: 1,
+      lineWidthUnits: 'pixels',
       lineWidthMinPixels: 0.75,
       pickable: true,
       autoHighlight: false,
@@ -130,14 +132,19 @@ export function createEventGeometryLayers(
   }
 
   if (cyclonePaths.length) {
-    layers.push(new PathLayer<NamedCyclonePath>({
+    layers.push(new PathLayer<NamedCyclonePath, PathStyleExtensionProps<NamedCyclonePath>>({
       id: 'world-event-cyclone-tracks',
       data: cyclonePaths,
       getPath: (item) => item.path,
       getColor: (item) => item.mode === 'observed'
         ? eventColor(item.event, item.event.id === selectedEventId ? 245 : 205)
         : [205, 225, 232, item.event.id === selectedEventId ? 225 : 155],
-      getWidth: (item) => item.mode === 'observed' ? 2.2 : 1.2,
+      getWidth: (item) => item.event.id === selectedEventId ? 2.8 : item.mode === 'observed' ? 2.2 : 1.6,
+      widthUnits: 'pixels',
+      extensions: [new PathStyleExtension({ dash: true })],
+      getDashArray: (item: NamedCyclonePath) => item.mode === 'forecast' ? [5, 3] : [0, 0],
+      dashGapPickable: true,
+      dashUnits: 'pixels',
       widthMinPixels: 1,
       widthMaxPixels: 4,
       jointRounded: true,
@@ -155,7 +162,7 @@ export function createEventGeometryLayers(
         features: hazardAreas.map((event) => ({
           type: 'Feature',
           id: event.event.id,
-          properties: event,
+          properties: { ...event, geometryRole: "area" },
           geometry: event.event.geometry,
         })),
       } as any,
@@ -172,9 +179,11 @@ export function createEventGeometryLayers(
       getLineWidth: (feature) => (
         (feature.properties as HazardAreaFeatureProperties).presentation.lineWidth
       ),
+      lineWidthUnits: 'pixels',
       lineWidthMinPixels: 0.5,
       pickable: true,
       autoHighlight: false,
+      wrapLongitude: true,
       beforeId,
     }));
   }
@@ -196,9 +205,11 @@ export function createEventGeometryLayers(
       getFillColor: (feature) => eventColor(feature.properties?.event as GeoEvent, 38),
       getLineColor: (feature) => eventColor(feature.properties?.event as GeoEvent, 185),
       getLineWidth: (feature) => feature.properties?.event?.id === selectedEventId ? 2.5 : 1,
+      lineWidthUnits: 'pixels',
       lineWidthMinPixels: 1,
       pickable: true,
       autoHighlight: false,
+      wrapLongitude: true,
       beforeId,
     }));
   }
@@ -206,10 +217,12 @@ export function createEventGeometryLayers(
   if (lines.length) {
     layers.push(new PathLayer<GeoEvent>({
       id: 'world-event-paths',
+      wrapLongitude: true,
       data: lines,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
       getColor: (event) => eventColor(event, event.id === selectedEventId ? 240 : 165),
       getWidth: (event) => event.id === selectedEventId ? 2.4 : 1.5,
+      widthUnits: 'pixels',
       widthMinPixels: 0.6,
       widthMaxPixels: 5,
       jointRounded: true,
@@ -222,12 +235,12 @@ export function createEventGeometryLayers(
       id: 'world-event-cyclone-centers',
       data: cycloneCenters,
       getPosition: (center) => center.coordinates,
-      getRadius: (center) => center.event.id === selectedEventId ? 34_000 : 24_000,
-      getFillColor: (center) => eventColor(center.event, 245),
+      getRadius: (center) => center.event.id === selectedEventId ? 9.5 : 8,
+      radiusUnits: 'pixels',
+      getFillColor: (center) => eventSeverityColor(center.event, 245),
       getLineColor: [235, 250, 255, 255],
       getLineWidth: (center) => center.event.id === selectedEventId ? 2.8 : 1.5,
-      radiusMinPixels: 7,
-      radiusMaxPixels: 22,
+      lineWidthUnits: 'pixels',
       lineWidthMinPixels: 1.2,
       pickable: true,
       stroked: true,

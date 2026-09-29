@@ -76,7 +76,23 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
-    plugins: [preact(), pwaServiceWorker(buildId)],
+    plugins: [preact(), pwaServiceWorker(buildId), ...(env.POLYDATA_READONLY_PREVIEW === '1' ? [{
+      name: 'anonymous-readonly-preview',
+      apply: 'serve' as const,
+      configureServer(server) {
+        server.middlewares.use((request, response, next) => {
+          if (!request.url?.startsWith('/wm-api')) return next();
+          if (!['GET', 'HEAD'].includes(request.method || '')) {
+            response.writeHead(405, { 'Content-Type': 'application/json', Allow: 'GET, HEAD' });
+            response.end(JSON.stringify({ error: 'This local preview only reads public data.' }));
+            return;
+          }
+          delete request.headers.cookie;
+          delete request.headers.authorization;
+          next();
+        });
+      },
+    } satisfies Plugin] : [])],
     define: {
       __BUILD_ID__: JSON.stringify(buildId),
     },
@@ -87,6 +103,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 3000,
+      watch: { ignored: ['**/artifacts/**', '**/test-results/**', '**/playwright-report/**'] },
       proxy: {
         '/wm-api': {
           target,

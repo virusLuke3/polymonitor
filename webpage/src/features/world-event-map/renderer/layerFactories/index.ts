@@ -24,7 +24,6 @@ export { EventClusterIndex, type EventCluster } from './eventClusters';
 export {
   eventRepresentativePoint,
   hasAnimatedHazardPulse,
-  HAZARD_PULSE_INTERVAL_MS,
   hazardPulseTargets,
   RECENT_EVENT_PULSE_MS,
   selectEventPulseCandidates,
@@ -79,6 +78,8 @@ export function createWorldEventPointLayers(
   clusterIndex: EventClusterIndex,
   project?: LabelProjection,
   occupiedScreenBoxes?: ScreenBox[],
+  measureLabel?: (text: string, size: number) => number,
+  screenSize?: [number, number],
 ) {
   return createEventPointLayers({
     events,
@@ -89,6 +90,8 @@ export function createWorldEventPointLayers(
     clusterIndex,
     project,
     occupiedScreenBoxes,
+    measureLabel,
+    screenSize,
   });
 }
 

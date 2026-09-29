@@ -574,12 +574,11 @@ html[lang='zh-CN'] .wm-promo-copy {
 }
 
 .wm-map-view-toggle button,
-.wm-map-controls button,
-.wm-side-beta {
+.wm-map-controls button {
   border: 1px solid var(--wm-border);
   background: rgba(23, 23, 23, 0.86);
   color: var(--wm-text);
-  font-family: var(--font-mono);
+  font-family: "Noto Sans SC Variable", Arial, sans-serif;
   cursor: pointer;
 }
 
@@ -798,7 +797,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   flex-direction: column;
   overflow: hidden;
   color: var(--wm-text);
-  font-family: var(--font-body);
+  font-family: "Noto Sans SC Variable", Arial, sans-serif;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
 }
 
@@ -975,7 +974,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   background: transparent;
   transition: background var(--ds-duration-fast) ease, border-color var(--ds-duration-fast) ease, opacity var(--ds-duration-fast) ease;
   position: relative;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--wm-text);
 }
 
@@ -1378,7 +1377,6 @@ html[lang='zh-CN'] .wm-promo-copy {
 
 .wm-chip,
 .wm-empty,
-.wm-layer-row,
 .wm-sidebar-footer {
   font-family: var(--font-mono);
 }
@@ -1402,17 +1400,6 @@ html[lang='zh-CN'] .wm-promo-copy {
   background: rgba(19, 19, 20, 0.86);
   border-color: rgba(255, 255, 255, 0.09);
   backdrop-filter: blur(12px);
-}
-
-.wm-map-controls .wm-side-beta {
-  width: 64px;
-  height: 44px;
-  border-radius: 6px;
-  background: rgba(0, 188, 255, 0.18);
-  color: #2de4ff;
-  margin-bottom: 8px;
-  border-color: rgba(45, 228, 255, 0.22);
-  box-shadow: 0 0 26px rgba(45, 228, 255, 0.16);
 }
 
 .wm-banner {

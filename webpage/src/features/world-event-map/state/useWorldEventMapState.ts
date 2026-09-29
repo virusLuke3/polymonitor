@@ -18,10 +18,11 @@ import {
 } from './urlState';
 
 function initialState() {
-  const defaults = defaultWorldEventMapState();
+  const defaults = { ...defaultWorldEventMapState(), fitWorld: true };
   if (typeof window === 'undefined') return defaults;
   const stored = readStoredWorldEventMapState(window.localStorage.getItem(WORLD_EVENT_MAP_STORAGE_KEY), defaults);
-  return parseWorldEventMapState(window.location.search, stored);
+  const state = parseWorldEventMapState(window.location.search, stored);
+  return state;
 }
 
 export function useWorldEventMapState() {
@@ -30,7 +31,7 @@ export function useWorldEventMapState() {
     if (typeof window === 'undefined') return;
     let cancelled = false;
     const persist = () => {
-      if (!cancelled) window.localStorage.setItem(WORLD_EVENT_MAP_STORAGE_KEY, JSON.stringify(state));
+      if (!cancelled) window.localStorage.setItem(WORLD_EVENT_MAP_STORAGE_KEY, JSON.stringify({ ...state, fitWorld: undefined }));
     };
     const scheduler = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;

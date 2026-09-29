@@ -4,9 +4,8 @@ import type {
   GeoEvent,
   GeoPoint,
   GeoEventSeverity,
-  HazardKind,
 } from '../../domain/types';
-import { MAP_SEVERITY_STYLES } from '../../config/mapSymbols';
+import { MAP_SEVERITY_STYLES, HAZARD_SEVERITY_COLORS } from '../../config/mapSymbols';
 
 export const SEVERITY_COLORS: Record<GeoEventSeverity, [number, number, number, number]> = {
   info: [...MAP_SEVERITY_STYLES.info.rgba],
@@ -17,27 +16,15 @@ export const SEVERITY_COLORS: Record<GeoEventSeverity, [number, number, number, 
 
 export const MAP_MONO_FONT_FAMILY = '"JetBrains Mono", "SFMono-Regular", Consolas, monospace';
 
-const HAZARD_COLORS: Record<HazardKind, [number, number, number, number]> = {
-  'severe-storm': [167, 139, 250, 210],
-  tornado: [192, 132, 252, 220],
-  'tropical-cyclone': [56, 189, 248, 220],
-  flood: [45, 212, 191, 210],
-  'extreme-heat': [255, 77, 79, 220],
-  'extreme-cold': [96, 165, 250, 215],
-  earthquake: [251, 146, 60, 220],
-  volcano: [244, 63, 94, 220],
-  tsunami: [34, 211, 238, 220],
-  wildfire: [255, 107, 53, 225],
-  'fire-detection': [249, 115, 22, 205],
-  'temperature-anomaly': [232, 121, 249, 210],
-  'precipitation-anomaly': [129, 140, 248, 210],
-  'other-weather-anomaly': [217, 70, 239, 210],
-};
+export const MAP_LABEL_FONT_FAMILY = '"Noto Sans SC Variable", Arial, sans-serif';
+export const markerSize = (event: GeoEvent, selected: string | null) =>
+  (event.severity === 'critical' ? 17 : event.severity === 'warning' ? 15 : 12) + (event.id === selected ? 3 : 0);
+export const clusterMarkerSize = (count: number) => Math.min(36, 24 + Math.log2(Math.max(1, count)) * 1.5);
 
 export function eventColor(event: GeoEvent, alpha?: number): [number, number, number, number] {
   let color: [number, number, number, number];
   if (isHazardEvent(event)) {
-    color = [...HAZARD_COLORS[event.hazardKind]];
+    color = [...(HAZARD_SEVERITY_COLORS[event.severity] || [150, 156, 162, 245])] as [number, number, number, number];
   } else if (event.category === 'conflict' || event.category === 'unrest') {
     const violenceType = String(event.properties.violenceType || '');
     color = violenceType === '1'
@@ -68,89 +55,78 @@ function visitGeometryCoordinates(
   for (const child of value) visitGeometryCoordinates(child, visitor);
 }
 
-/** Bounds are derived only from the provider geometry; no fallback location is invented. */
-export function eventGeometryBounds(event: GeoEvent): [number, number, number, number] | null {
-  if (!event.geometry) return null;
-  let west = Infinity;
-  let south = Infinity;
-  let east = -Infinity;
-  let north = -Infinity;
-  visitGeometryCoordinates(event.geometry.coordinates, ([lon, lat]) => {
-    west = Math.min(west, lon);
-    south = Math.min(south, lat);
-    east = Math.max(east, lon);
-    north = Math.max(north, lat);
-  });
-  return [west, south, east, north].every(Number.isFinite)
-    ? [west, south, east, north]
-    : null;
-}
-
-function polygonOuterRings(event: GeoEvent): number[][][] {
-  if (event.geometry?.type === 'Polygon') return event.geometry.coordinates.slice(0, 1);
-  if (event.geometry?.type === 'MultiPolygon') {
-    return event.geometry.coordinates.flatMap((polygon) => polygon.slice(0, 1));
+/** Smallest circular longitude interval, possibly ending beyond +180. */
+export function coordinateBounds(points: GeoPoint[]): [number, number, number, number] | null {
+  if (!points.length) return null;
+  const lons = [...new Set(points.map(p => ((p[0] % 360) + 360) % 360))].sort((a, b) => a - b);
+  let gap = -1, start = 0;
+  for (let i = 0; i < lons.length; i++) {
+    const next = (lons[(i + 1) % lons.length] ?? 0) + (i === lons.length - 1 ? 360 : 0);
+    if (next - lons[i]! > gap) { gap = next - lons[i]!; start = (i + 1) % lons.length; }
   }
-  return [];
+  let west = lons[start]!; if (west > 180) west -= 360;
+  return [west, Math.min(...points.map(p => p[1])), west + 360 - gap, Math.max(...points.map(p => p[1]))];
 }
 
-function ringCentroid(ring: number[][]): { point: GeoPoint; weight: number } | null {
-  if (ring.length < 3) return null;
-  let areaTwice = 0;
-  let longitudeTotal = 0;
-  let latitudeTotal = 0;
-  for (let index = 0; index < ring.length; index += 1) {
-    const current = ring[index];
-    const next = ring[(index + 1) % ring.length];
-    const x0 = Number(current?.[0]);
-    const y0 = Number(current?.[1]);
-    const x1 = Number(next?.[0]);
-    const y1 = Number(next?.[1]);
-    if (![x0, y0, x1, y1].every(Number.isFinite)) continue;
-    const cross = x0 * y1 - x1 * y0;
-    areaTwice += cross;
-    longitudeTotal += (x0 + x1) * cross;
-    latitudeTotal += (y0 + y1) * cross;
+const boundsCache = new WeakMap<GeoEvent, [number, number, number, number] | null>();
+/** Include every geometry actually drawn, including forecast outside the center viewport. */
+export function eventGeometryBounds(event: GeoEvent) {
+  if (boundsCache.has(event)) return boundsCache.get(event)!;
+  const points: GeoPoint[] = [];
+  visitGeometryCoordinates(event.geometry?.coordinates, p => points.push(p));
+  const named = event.properties.geometries;
+  if (named && typeof named === 'object') for (const geometry of Object.values(named)) {
+    visitGeometryCoordinates((geometry as { coordinates?: unknown })?.coordinates, p => points.push(p));
   }
-  if (Math.abs(areaTwice) < 1e-9) return null;
-  return {
-    point: [longitudeTotal / (3 * areaTwice), latitudeTotal / (3 * areaTwice)],
-    weight: Math.abs(areaTwice),
-  };
+  const bounds = coordinateBounds(points); boundsCache.set(event, bounds); return bounds;
 }
 
-/**
- * Derives a stable marker position from the supplied geometry. Polygon markers
- * use an area-weighted centroid and fall back to the geometry bounds centre.
- */
+export function boundsIntersect(a: [number, number, number, number], b: [number, number, number, number]) {
+  if (a[1] > b[3] || a[3] < b[1]) return false;
+  const east = b[2] < b[0] ? b[2] + 360 : b[2];
+  return [-360, 0, 360].some(shift => a[0] + shift <= east && a[2] + shift >= b[0]);
+}
+
+const representativeCache = new WeakMap<GeoEvent, GeoPoint | null>();
+/** A polygon summary is an interior point, never an asserted observation location. */
 export function eventRepresentativePoint(event: GeoEvent): GeoPoint | null {
+  if (representativeCache.has(event)) return representativeCache.get(event)!;
+  const observed = (event.properties.geometries as Record<string, any> | undefined)?.observedPosition;
+  if (observed?.type === 'Point' && Array.isArray(observed.coordinates)) return observed.coordinates as GeoPoint;
   const geometry = event.geometry;
   if (!geometry) return null;
   if (geometry.type === 'Point') return geometry.coordinates;
-  if (geometry.type === 'LineString') return geometry.coordinates[geometry.coordinates.length - 1] || null;
-  const centroids = polygonOuterRings(event)
-    .map(ringCentroid)
-    .filter((centroid): centroid is NonNullable<typeof centroid> => centroid != null);
-  if (centroids.length) {
-    const totalWeight = centroids.reduce((sum, centroid) => sum + centroid.weight, 0);
-    if (totalWeight > 0) {
-      return [
-        centroids.reduce((sum, centroid) => sum + centroid.point[0] * centroid.weight, 0) / totalWeight,
-        centroids.reduce((sum, centroid) => sum + centroid.point[1] * centroid.weight, 0) / totalWeight,
-      ];
+  // An arbitrary path endpoint is not a current observed center.
+  if (geometry.type === 'LineString') return null;
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  let result: GeoPoint | null = null, widest = -1;
+  for (const polygon of polygons) {
+    const first = polygon[0]?.[0]?.[0]; if (first == null) continue;
+    const rings = polygon.map(ring => ring.map(([lon, lat]) => [first + ((((lon! - first) + 540) % 360) - 180), lat!]));
+    const ys = [...new Set(rings.flat().map(p => p[1]!))].sort((a, b) => a - b);
+    // Midpoints between vertex latitudes avoid ambiguous vertex intersections.
+    for (let k = 1; k < ys.length; k += Math.max(1, Math.floor(ys.length / 64))) {
+      const y = (ys[k - 1]! + ys[k]!) / 2;
+      const xs: number[] = [];
+      for (const ring of rings) for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const a = ring[i]!, b = ring[j]!;
+        if ((a[1]! > y) !== (b[1]! > y)) xs.push(a[0]! + (y - a[1]!) * (b[0]! - a[0]!) / (b[1]! - a[1]!));
+      }
+      xs.sort((a, b) => a - b);
+      for (let i = 0; i + 1 < xs.length; i += 2) if (xs[i + 1]! - xs[i]! > widest) {
+        widest = xs[i + 1]! - xs[i]!;
+        result = [((xs[i]! + xs[i + 1]!) / 2 + 540) % 360 - 180, y];
+      }
     }
   }
-  const bounds = eventGeometryBounds(event);
-  return bounds
-    ? [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2]
-    : null;
+  representativeCache.set(event, result); return result;
 }
 
 const HAZARD_AREA_REGIONAL_MIN_ZOOM = 3;
 const HAZARD_AREA_DETAIL_MIN_ZOOM = 4.5;
 
 export type HazardAreaPresentation = {
-  mode: 'hidden' | 'regional' | 'detail' | 'selected';
+  mode: 'hidden' | 'global' | 'regional' | 'detail' | 'selected';
   fillAlpha: number;
   lineAlpha: number;
   lineWidth: number;
@@ -163,16 +139,21 @@ export function hazardAreaPresentation(
   selectedEventId: string | null,
 ): HazardAreaPresentation {
   if (event.id === selectedEventId) {
-    return { mode: 'selected', fillAlpha: 46, lineAlpha: 245, lineWidth: 2.2 };
+    return { mode: 'selected', fillAlpha: 56, lineAlpha: 245, lineWidth: 1.6 };
   }
   if (zoom < HAZARD_AREA_REGIONAL_MIN_ZOOM) {
-    return { mode: 'hidden', fillAlpha: 0, lineAlpha: 0, lineWidth: 0 };
+    const bounds = eventGeometryBounds(event);
+    const scale = 512 * Math.pow(2, zoom) / 360;
+    const largeEnough = bounds && (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]) * scale * scale >= 16;
+    return largeEnough && (event.severity === 'warning' || event.severity === 'critical')
+      ? { mode: 'global', fillAlpha: 28, lineAlpha: 150, lineWidth: 0.8 }
+      : { mode: 'hidden', fillAlpha: 0, lineAlpha: 0, lineWidth: 0 };
   }
   if (zoom < HAZARD_AREA_DETAIL_MIN_ZOOM) {
     if (event.severity !== 'warning' && event.severity !== 'critical') {
       return { mode: 'hidden', fillAlpha: 0, lineAlpha: 0, lineWidth: 0 };
     }
-    return { mode: 'regional', fillAlpha: 16, lineAlpha: 0, lineWidth: 0 };
+    return { mode: 'regional', fillAlpha: 36, lineAlpha: 170, lineWidth: 1 };
   }
   return {
     mode: 'detail',
@@ -186,7 +167,7 @@ export function eventSeverityColor(
   event: GeoEvent,
   alpha = SEVERITY_COLORS[event.severity][3],
 ): [number, number, number, number] {
-  const [red, green, blue] = SEVERITY_COLORS[event.severity];
+  const [red, green, blue] = isHazardEvent(event) ? HAZARD_SEVERITY_COLORS[event.severity] : SEVERITY_COLORS[event.severity];
   return [red, green, blue, alpha];
 }
 
@@ -208,11 +189,6 @@ export function continuousMetricRadiusMeters(event: GeoEvent): number | null {
     return Math.max(10_000, Math.sqrt(deaths + 1) * 6_200);
   }
   return null;
-}
-
-export function pointRadiusMeters(event: GeoEvent) {
-  return continuousMetricRadiusMeters(event)
-    ?? (event.category === 'infrastructure' ? 13_000 : 18_000);
 }
 
 export function eventLabel(event: GeoEvent) {

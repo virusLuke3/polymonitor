@@ -1,3 +1,5 @@
+import { useI18n } from '@/services/i18n';
+import { mapText } from '@/locales/map';
 import {
   WORLD_EVENT_SEVERITIES,
   WORLD_EVENT_TIME_RANGES,
@@ -32,24 +34,22 @@ export function MapToolbar({
   onBasemapThemeChange: (theme: WorldEventBasemapTheme) => void;
   onClearCountry: () => void;
 }) {
+  const { locale, t } = useI18n();
+  const mt = (text: string) => mapText(locale, text);
   const selected = new Set(state.severities);
   return (
-    <div className="wm-world-event-map-toolbar" aria-label="World Event Map filters">
+    <div className="wm-world-event-map-toolbar" aria-label={mt("World Event Map filters")}>
       <label>
-        <span>Time</span>
-        <select
-          aria-label="Map time range"
-          value={state.timeRange}
-          onChange={(event) => onTimeRangeChange(
-            (event.currentTarget as HTMLSelectElement).value as WorldEventTimeRange,
-          )}
-        >
-          {WORLD_EVENT_TIME_RANGES.map((timeRange) => (
-            <option value={timeRange} key={timeRange}>{timeRange === 'all' ? 'All time' : timeRange}</option>
-          ))}
-        </select>
+        <span>{mt("Time")}</span>
+        <div className="wm-map-time-segments" role="group" aria-label={mt('Map time range')}>
+          {WORLD_EVENT_TIME_RANGES.map(timeRange => <button type="button" key={timeRange}
+            aria-pressed={state.timeRange === timeRange}
+            onClick={() => onTimeRangeChange(timeRange)}>
+            {timeRange === 'all' ? mt('All time') : timeRange}
+          </button>)}
+        </div>
       </label>
-      <span className="wm-world-event-severity-label">Severity</span>
+      <span className="wm-world-event-severity-label">{mt("Severity")}</span>
       <div className="wm-world-event-severity-filters">
         {WORLD_EVENT_SEVERITIES.map((severity) => (
           <button
@@ -63,43 +63,44 @@ export function MapToolbar({
                 : [...state.severities, severity],
             )}
           >
-            {SEVERITY_LABELS[severity]}
+            {mt(SEVERITY_LABELS[severity])}
           </button>
         ))}
       </div>
       <label className="wm-world-event-basemap-control">
-        <span>Basemap</span>
+        <span>{mt("Basemap")}</span>
         <select
-          aria-label="Basemap provider"
+          aria-label={mt("Basemap provider")}
           value={state.basemapProvider}
           onChange={(event) => onBasemapProviderChange(
             (event.currentTarget as HTMLSelectElement).value as WorldEventBasemapProvider,
           )}
         >
           {WORLD_EVENT_BASEMAP_PROVIDERS.map((provider) => (
-            <option value={provider} key={provider}>{provider === 'auto' ? 'Auto' : provider.toUpperCase()}</option>
+            <option value={provider} key={provider}>{provider === 'auto' ? mt('Auto') : provider.toUpperCase()}</option>
           ))}
         </select>
       </label>
       <label className="wm-world-event-basemap-control">
-        <span>Theme</span>
+        <span>{mt("Theme")}</span>
         <select
-          aria-label="Basemap theme"
+          aria-label={mt("Basemap theme")}
           value={state.basemapTheme}
           onChange={(event) => onBasemapThemeChange(
             (event.currentTarget as HTMLSelectElement).value as WorldEventBasemapTheme,
           )}
         >
           {WORLD_EVENT_BASEMAP_THEMES.map((theme) => (
-            <option value={theme} key={theme}>{theme === 'positron' ? 'Light' : 'Dark'}</option>
+            <option value={theme} key={theme}>{mt(theme === 'positron' ? 'Light' : 'Dark')}</option>
           ))}
         </select>
       </label>
       {state.countryCode ? (
         <button type="button" className="wm-world-event-country-filter" onClick={onClearCountry}>
-          COUNTRY · {state.countryCode} ×
+          {mt('Country')} · {state.countryCode} ×
         </button>
       ) : null}
+      <details className="wm-map-help"><summary aria-label={mt('Map help')}>?</summary><p>{t('atlas.weatherHint')}</p></details>
     </div>
   );
 }

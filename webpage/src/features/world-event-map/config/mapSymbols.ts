@@ -151,6 +151,12 @@ export const MAP_SEVERITY_STYLES: Record<GeoEventSeverity, {
   critical: { color: '#ff4c46', rgba: [255, 76, 70, 245], lineWidth: 2.1 },
 };
 
+/** Hazard-only fill palette; other business layers keep their own semantics. */
+export const HAZARD_SEVERITY_COLORS = {
+  info: [109, 151, 213, 245], watch: [213, 184, 76, 245],
+  warning: [231, 140, 68, 245], critical: [234, 83, 83, 245],
+} satisfies Record<GeoEventSeverity, [number, number, number, number]>;
+
 const HAZARD_SYMBOLS: Record<HazardKind, MapSymbolKey> = {
   'severe-storm': 'storm',
   tornado: 'tornado',

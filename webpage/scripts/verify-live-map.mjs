@@ -56,7 +56,7 @@ try {
       const host = page.locator('[data-map-renderer-ready]');
       await check(`${width}: real renderer and events`, async () => {
         await expect(host).toHaveAttribute('data-map-renderer-ready', width === 390 ? 'svg' : 'webgl', { timeout: 60_000 });
-        await expect(page.getByRole('button', { name: /ALL EVENTS/ })).toContainText(/[1-9]/, { timeout: 60_000 });
+        await expect(page.locator('.wm-world-event-list-toggle strong')).toContainText(/[1-9]/, { timeout: 60_000 });
         if (width !== 390) {
           await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 45_000 });
           record.gpu = await page.evaluate(() => {
@@ -78,20 +78,20 @@ try {
       await page.waitForTimeout(1500);
       await screenshot(`${width === 390 ? 'mobile' : 'desktop'}-${width}-zh`);
       await check(`${width}: live event details`, async () => {
-        await page.getByRole('button', { name: /ALL EVENTS/ }).click();
+        await page.locator('.wm-world-event-list-toggle').click();
         await page.locator('.wm-world-event-list-scroll li button').first().click();
         await expect(page.locator('#wm-event-inspector-title')).toBeVisible();
         await screenshot(`event-${width}`);
-        await page.getByRole('button', { name: 'Close event details', exact: true }).click();
+        await page.locator('.wm-event-inspector-close').click();
       });
       if (width !== 390) {
         await check('desktop: theme replacement remains primary after its deadline', async () => {
-          await page.getByRole('combobox', { name: 'Basemap theme', exact: true }).selectOption('positron');
+          await page.locator('.wm-world-event-basemap-control select').nth(1).selectOption('positron');
           await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 45_000 });
           await page.waitForTimeout(11_000);
           await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');
           await screenshot('desktop-light');
-          await page.getByRole('combobox', { name: 'Basemap theme', exact: true }).selectOption('dark');
+          await page.locator('.wm-world-event-basemap-control select').nth(1).selectOption('dark');
         });
       }
       await check(`${width}: service worker reload uses published assets`, async () => {

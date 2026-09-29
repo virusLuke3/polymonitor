@@ -18,6 +18,46 @@ function callbacks(): MapRendererCallbacks {
 }
 
 describe('renderer hover lifecycle', () => {
+  it('checks event picking at the click position before claiming a country without prior hover', () => {
+    const renderer = new DeckMapRenderer() as any;
+    renderer.callbacks = callbacks();
+    renderer.countryAtPoint = vi.fn(() => ({ iso2: 'US' }));
+    const pickObject = vi.fn(() => ({ object: { kind: 'event-cluster' } }));
+    renderer.overlay = { pickObject };
+    renderer.handleCountryClick({ point: { x: 12, y: 34 } });
+    expect(pickObject).toHaveBeenCalledWith({ x: 12, y: 34, radius: 8 });
+    expect(renderer.countryAtPoint).not.toHaveBeenCalled();
+    renderer.overlay = null; renderer.destroy();
+  });
+  it('retains picked event ownership between pointer down and click', () => {
+    const renderer = new DeckMapRenderer() as any;
+    renderer.callbacks = callbacks();
+    renderer.hoveredDeckEventId = 'event:1'; renderer.deckHoverActive = true;
+    renderer.countryAtPoint = vi.fn(() => ({ iso2: 'US' }));
+    renderer.handlePointerDown();
+    renderer.handleCountryClick({ point: { x: 10, y: 10 } });
+    expect(renderer.hoveredDeckEventId).toBe('event:1');
+    expect(renderer.countryAtPoint).not.toHaveBeenCalled();
+    expect(renderer.callbacks.onCountrySelect).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+  it('removes radar demand while its source is still loading', () => {
+    const renderer = new DeckMapRenderer() as any;
+    const removeSource = vi.fn(), removeLayer = vi.fn();
+    renderer.map = { isStyleLoaded: () => false, getLayer: () => ({}), getSource: () => ({}), removeLayer, removeSource };
+    renderer.setRadar(null);
+    expect(removeSource.mock.calls.map(([id]) => id)).toEqual(['weather-radar', 'weather-radar-coverage']);
+    expect(removeLayer).toHaveBeenCalledTimes(2);
+    renderer.map = null; renderer.destroy();
+  });
+  it('does not persist the provisional camera before initial world fit', () => {
+    const renderer = new DeckMapRenderer() as any;
+    renderer.state = { ...defaultWorldEventMapState(), fitWorld: true };
+    renderer.callbacks = callbacks(); renderer.map = {};
+    renderer.handleMoveEnd();
+    expect(renderer.callbacks.onCameraChange).not.toHaveBeenCalled();
+    renderer.map = null; renderer.destroy();
+  });
   it('does not declare the local fallback ready before country geometry loads', () => {
     const onBasemapStateChange = vi.fn();
     const renderer = new DeckMapRenderer() as unknown as {
@@ -237,6 +277,7 @@ describe('renderer hover lifecycle', () => {
   it('does not rebuild disaster and geometry layers for an aviation-only refresh', () => {
     const hazard = {
       id: 'hazard:stable',
+      sources: [{ provider: 'fixture' }],
       category: 'natural-hazard',
       severity: 'warning',
       geometry: { type: 'Point', coordinates: [10, 10] },
@@ -311,9 +352,9 @@ describe('renderer hover lifecycle', () => {
     renderer.updateAdaptiveAnimationBudget(25);
     expect(renderer.animationIntervalMs).toBe(80);
 
-    for (let frame = 0; frame < 599; frame += 1) renderer.updateAdaptiveAnimationBudget(16);
+    for (let frame = 0; frame < 59; frame += 1) renderer.updateAdaptiveAnimationBudget(16);
     expect(renderer.animationIntervalMs).toBe(80);
-    expect(renderer.animationRecoveryFrames).toBe(599);
+    expect(renderer.animationRecoveryFrames).toBe(59);
 
     renderer.updateAdaptiveAnimationBudget(16);
     expect(renderer.animationIntervalMs).toBe(40);
@@ -321,10 +362,10 @@ describe('renderer hover lifecycle', () => {
     renderer.destroy();
   });
 
-  it('runs hazard pulses on a separate 500ms clock and stops it during interaction', () => {
-    const setInterval = vi.fn(() => 41);
-    const clearInterval = vi.fn();
-    vi.stubGlobal('window', { location: { search: '' }, setInterval, clearInterval });
+  it('uses the shared animation clock only for recent events and stops during interaction', () => {
+    const requestAnimationFrame = vi.fn(() => 41);
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal('window', { location: { search: '' }, requestAnimationFrame, cancelAnimationFrame });
     const critical = {
       id: 'earthquake:critical',
       category: 'natural-hazard',
@@ -349,25 +390,25 @@ describe('renderer hover lifecycle', () => {
       events: GeoEvent[];
       pulseEvents: GeoEvent[];
       eventFirstSeenAt: Map<string, number>;
-      hazardPulseTimer: number | null;
+      animationFrame: number | null;
       interacting: boolean;
-      syncHazardPulseLoop: () => void;
+      syncAnimationLoop: () => void;
       destroy: () => void;
     };
     renderer.overlay = {};
     renderer.state = defaultWorldEventMapState();
     renderer.events = [critical];
     renderer.pulseEvents = [critical];
-    renderer.eventFirstSeenAt = new Map();
+    renderer.eventFirstSeenAt = new Map([[critical.id, Date.now()]]);
 
-    renderer.syncHazardPulseLoop();
-    expect(setInterval).toHaveBeenCalledWith(expect.any(Function), 500);
-    expect(renderer.hazardPulseTimer).toBe(41);
+    renderer.syncAnimationLoop();
+    expect(requestAnimationFrame).toHaveBeenCalledWith(expect.any(Function));
+    expect(renderer.animationFrame).toBe(41);
 
     renderer.interacting = true;
-    renderer.syncHazardPulseLoop();
-    expect(clearInterval).toHaveBeenCalledWith(41);
-    expect(renderer.hazardPulseTimer).toBeNull();
+    renderer.syncAnimationLoop();
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(41);
+    expect(renderer.animationFrame).toBeNull();
     renderer.destroy();
     vi.unstubAllGlobals();
   });
@@ -452,3 +493,30 @@ describe('renderer hover lifecycle', () => {
     renderer.destroy();
   });
 });
+
+for (const Renderer of [DeckMapRenderer, SvgMapRenderer]) {
+  it(`${Renderer.name} treats provider bootstrap and historical records as static, then cues only a new arrival`, () => {
+    const now = Date.now();
+    const event = (id: string, provider = 'USGS', occurred = now): GeoEvent => ({
+      id, title: id, category: 'natural-hazard', severity: 'critical',
+      geometry: { type: 'Point', coordinates: [10, 20] }, locationPrecision: 'exact',
+      occurredAt: new Date(occurred).toISOString(), sources: [{ provider }],
+      properties: {}, limitations: [], relatedMarketIds: [],
+    });
+    const renderer = new Renderer() as unknown as { paused: boolean; setEvents: (events: GeoEvent[]) => void; eventFirstSeenAt: Map<string, number>; destroy: () => void };
+    renderer.paused = true; // Exercise arrival classification independently of a mounted DOM.
+    const initial = event('initial');
+    renderer.setEvents([initial]);
+    expect(renderer.eventFirstSeenAt.size).toBe(0);
+    const otherProvider = event('other-source', 'EONET');
+    renderer.setEvents([initial, otherProvider]);
+    expect(renderer.eventFirstSeenAt.size).toBe(0);
+    const arrival = event('new');
+    renderer.setEvents([initial, otherProvider, arrival, event('historical', 'USGS', now - 600_000)]);
+    expect([...renderer.eventFirstSeenAt.keys()]).toEqual(['new']);
+    renderer.setEvents([initial]);
+    renderer.setEvents([initial, arrival]);
+    expect(renderer.eventFirstSeenAt.size).toBe(0);
+    renderer.destroy();
+  });
+}

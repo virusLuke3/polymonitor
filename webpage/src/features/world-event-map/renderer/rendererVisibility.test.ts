@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { rectIntersectsViewport } from './rendererVisibility';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { rectIntersectsViewport, selectionPanOffset } from './rendererVisibility';
 
 const rect = (overrides: Partial<DOMRectReadOnly> = {}) => ({
   top: 100,
@@ -12,6 +12,7 @@ const rect = (overrides: Partial<DOMRectReadOnly> = {}) => ({
 });
 
 describe('renderer visibility', () => {
+  afterEach(() => vi.unstubAllGlobals());
   it('recognizes a map that is already visible before IntersectionObserver reports', () => {
     expect(rectIntersectsViewport(rect(), 1920, 1080)).toBe(true);
   });
@@ -24,5 +25,21 @@ describe('renderer visibility', () => {
 
   it('accepts a partially visible map host', () => {
     expect(rectIntersectsViewport(rect({ top: -300, bottom: 100 }), 1920, 1080)).toBe(true);
+  });
+
+  it('moves selection only enough to clear the desktop report', () => {
+    vi.stubGlobal('innerWidth', 1440); vi.stubGlobal('innerHeight', 900);
+    const host = { getBoundingClientRect: () => rect({ left: 0, top: 100, width: 1440, height: 620 }),
+      closest: () => ({ querySelectorAll: () => [{ getBoundingClientRect: () => rect({ left: 1020, top: 116, width: 400, height: 500 }) }] }) } as unknown as HTMLElement;
+    expect(selectionPanOffset(host, { x: 1100, y: 300 })).toEqual({ x: 104, y: 0 });
+    expect(selectionPanOffset(host, { x: 500, y: 300 })).toEqual({ x: 0, y: 0 });
+  });
+
+  it('keeps selection in the visible strip above a fixed mobile report', () => {
+    vi.stubGlobal('innerWidth', 390); vi.stubGlobal('innerHeight', 844);
+    const host = { getBoundingClientRect: () => rect({ left: 0, top: -100, width: 390, height: 620 }),
+      closest: () => ({ querySelectorAll: () => [{ getBoundingClientRect: () => rect({ left: 10, top: 300, width: 370, height: 464 }) }] }) } as unknown as HTMLElement;
+    expect(selectionPanOffset(host, { x: 200, y: 500 })).toEqual({ x: 0, y: 124 });
+    expect(selectionPanOffset(host, { x: 200, y: 20 })).toEqual({ x: 0, y: -96 });
   });
 });

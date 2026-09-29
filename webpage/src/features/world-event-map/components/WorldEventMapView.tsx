@@ -5,6 +5,7 @@ import type { AviationLensMode, AviationRiskSource, WorldEventMapState } from '.
 const WorldEventMap = lazy(() => import('./WorldEventMap').then((module) => ({ default: module.WorldEventMap })));
 
 export function WorldEventMapView({
+  onRendererKindChange,
   events,
   state,
   onCameraChange,
@@ -15,6 +16,7 @@ export function WorldEventMapView({
   onAviationClose,
   onCountryChange,
 }: {
+  onRendererKindChange?: (kind: 'webgl' | 'svg') => void;
   events: GeoEvent[];
   state: WorldEventMapState;
   onCameraChange: (camera: Pick<WorldEventMapState, 'center' | 'zoom'>) => void;
@@ -28,9 +30,9 @@ export function WorldEventMapView({
   const { t } = useI18n();
   return (
     <div className="wm-inline-weather-map">
-      <div className="wm-inline-weather-map-hint">{t('atlas.weatherHint')}</div>
-      <Suspense fallback={<div className="wm-world-event-map-shell" role="status">Loading world event renderer…</div>}>
+      <Suspense fallback={<div className="wm-world-event-map-shell" role="status">{t('map.loadingworldeventrenderer')}</div>}>
         <WorldEventMap
+          onRendererKindChange={onRendererKindChange}
           events={events}
           state={state}
           onCameraChange={onCameraChange}

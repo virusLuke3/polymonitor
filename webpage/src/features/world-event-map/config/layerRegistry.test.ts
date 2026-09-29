@@ -22,6 +22,7 @@ describe('World Event Map layer registry', () => {
       'intel-hotspots',
       'ucdp',
       'sanctions-country-risk',
+      'weather-radar',
     ]);
     expect(selectableWorldEventLayers().filter((layer) => layer.defaultEnabled).map((layer) => layer.id)).toEqual([
       'weather-alerts',

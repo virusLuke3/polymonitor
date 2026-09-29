@@ -4,12 +4,11 @@ import type { GeoEvent } from '../../domain/types';
 import type { EventCluster } from './eventClusters';
 import {
   type EventEmphasisTarget,
-  type HazardPulseTarget,
   hazardPulseTargets,
   type RecentPulseTarget,
   targetForEvent,
 } from './eventEmphasis';
-import { eventColor } from './shared';
+import { eventColor, clusterMarkerSize } from './shared';
 
 export function createEventPulseLayers({
   events,
@@ -24,46 +23,19 @@ export function createEventPulseLayers({
   pulseTime: number;
   zoom?: number;
 }): LayersList {
-  const { status, recent } = hazardPulseTargets(events, selectedEventId, firstSeenAt, pulseTime, zoom);
+  const { recent } = hazardPulseTargets(events, selectedEventId, firstSeenAt, pulseTime, zoom);
   const layers: Layer[] = [];
-  if (status.length) {
-    layers.push(new ScatterplotLayer<HazardPulseTarget>({
-      id: 'world-event-status-pulses',
-      data: status,
-      getPosition: (target) => target.position,
-      getRadius: (target) => {
-        const wave = 0.5 + 0.5 * Math.sin(
-          pulseTime / (target.strength === 'warning' ? 900 : 400),
-        );
-        return target.radius * (target.strength === 'warning' ? 1.35 + wave * 0.25 : 1.45 + wave * 0.75);
-      },
-      getLineColor: (target) => eventColor(target.event, target.strength === 'warning' ? 58 : 126),
-      getLineWidth: (target) => target.strength === 'warning' ? 1 : 1.5,
-      radiusMinPixels: 8,
-      radiusMaxPixels: 34,
-      lineWidthMinPixels: 1,
-      filled: false,
-      stroked: true,
-      pickable: false,
-      updateTriggers: {
-        getRadius: pulseTime,
-        getLineColor: pulseTime,
-      },
-    }));
-  }
   if (recent.length) {
     layers.push(new ScatterplotLayer<RecentPulseTarget>({
       id: 'world-event-recent-pulses',
       data: recent,
       getPosition: (target) => target.position,
-      getRadius: (target) => {
-        const wave = 0.5 + 0.5 * Math.sin(pulseTime / 318);
-        return target.radius * (1.6 + wave * 1.05);
-      },
-      getLineColor: (target) => eventColor(target.event, Math.round(150 * target.fade)),
+      getRadius: target => target.radius + 3 + target.phase * 6,
+      radiusUnits: 'pixels',
+      getLineColor: target => eventColor(target.event, Math.round(120 * target.fade * (1 - target.phase))),
       getLineWidth: 1.5,
-      radiusMinPixels: 9,
-      radiusMaxPixels: 38,
+      radiusMinPixels: 0,
+      radiusMaxPixels: 18,
       lineWidthMinPixels: 1.25,
       filled: false,
       stroked: true,
@@ -100,7 +72,8 @@ export function createEventInteractionLayers(
       id: 'world-event-cluster-hover-ring',
       data: [hoveredCluster],
       getPosition: (cluster) => cluster.coordinates,
-      getRadius: (cluster) => Math.max(52_000, Math.log2(cluster.count + 1) * 48_000) * 1.18,
+      getRadius: cluster => clusterMarkerSize(cluster.count) / 2 + 2,
+      radiusUnits: 'pixels',
       getLineColor: (cluster) => [cluster.color[0], cluster.color[1], cluster.color[2], 190],
       getLineWidth: 1.2,
       radiusMinPixels: 11,
@@ -119,6 +92,7 @@ export function createEventInteractionLayers(
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
       getColor: (event) => eventColor(event, 170),
       getWidth: 2.6,
+      widthUnits: 'pixels',
       widthMinPixels: 1.4,
       widthMaxPixels: 5,
       pickable: false,
@@ -136,6 +110,7 @@ export function createEventInteractionLayers(
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
       getColor: (event) => eventColor(event, 225),
       getWidth: 3.4,
+      widthUnits: 'pixels',
       widthMinPixels: 2,
       widthMaxPixels: 6,
       pickable: false,
@@ -147,7 +122,8 @@ export function createEventInteractionLayers(
       id: 'world-event-hover-ring',
       data: [hovered],
       getPosition: (target) => target.position,
-      getRadius: (target) => target.radius * 1.38,
+      getRadius: target => target.radius + 2,
+      radiusUnits: 'pixels',
       getLineColor: (target) => eventColor(target.event, 190),
       getLineWidth: 1.2,
       radiusMinPixels: 7,
@@ -160,36 +136,12 @@ export function createEventInteractionLayers(
   }
   const selected = pointTarget(events, selectedEventId);
   if (selected) {
-    layers.push(
-      new ScatterplotLayer<EventEmphasisTarget>({
-        id: 'world-event-selected-ring-outer',
-        data: [selected],
-        getPosition: (target) => target.position,
-        getRadius: (target) => target.radius * 2.05,
-        getLineColor: (target) => eventColor(target.event, 235),
-        getLineWidth: 1.7,
-        radiusMinPixels: 10,
-        radiusMaxPixels: 36,
-        lineWidthMinPixels: 1.4,
-        filled: false,
-        stroked: true,
-        pickable: false,
-      }),
-      new ScatterplotLayer<EventEmphasisTarget>({
-        id: 'world-event-selected-ring-inner',
-        data: [selected],
-        getPosition: (target) => target.position,
-        getRadius: (target) => target.radius * 1.48,
-        getLineColor: [220, 244, 248, 210],
-        getLineWidth: 1.25,
-        radiusMinPixels: 8,
-        radiusMaxPixels: 28,
-        lineWidthMinPixels: 1,
-        filled: false,
-        stroked: true,
-        pickable: false,
-      }),
-    );
+    layers.push(new ScatterplotLayer<EventEmphasisTarget>({
+      id: 'world-event-selected-ring-outer', data: [selected],
+      getPosition: target => target.position, getRadius: target => target.radius + 3,
+      radiusUnits: 'pixels', lineWidthUnits: 'pixels', getLineWidth: 1.25,
+      getLineColor: [235, 241, 245, 240], filled: false, stroked: true, pickable: false,
+    }));
   }
   return layers;
 }
