@@ -309,13 +309,6 @@ def _cached_layer(
             layer,
             cache_key,
         )
-        api_cache.set_cached_payload(
-            dependencies.cache,
-            namespace,
-            cache_key,
-            stale_payload,
-            min(15, ttl_seconds),
-        )
         _refresh_async(
             dependencies, layer=layer, namespace=namespace, cache_key=cache_key,
             builder=builder, ttl_seconds=ttl_seconds, stale_payload=stale_payload,
@@ -611,8 +604,8 @@ def get_market_workspace_payload(
     if detail_result.get("_status"):
         return detail_result
 
-    chart = get_market_chart_payload(dependencies, market_id, range_name="1d", interval="5m")
     flow = get_market_flow_payload(dependencies, market_id, limit=24, offset=0)
+    chart = get_market_chart_payload(dependencies, market_id, range_name="1d", interval="5m")
     orderbook = get_market_orderbook_payload(dependencies, market_id)
     payload = assemble_market_workspace(detail_result, chart=chart, flow=flow, lob=orderbook)
     payload["cacheLayers"] = {

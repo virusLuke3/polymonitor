@@ -310,3 +310,32 @@ def test_market_trade_route_cursor_validation_and_unavailable_status():
     read.side_effect = TimeoutError("source unavailable")
     response = client.get("/markets/7/trades")
     assert response.status_code == 503 and response.get_json()["status"] == "unavailable"
+
+
+def test_expired_flow_is_not_republished_as_fresh_while_refresh_is_busy():
+    from api.cache import CacheState
+
+    store, app = Mock(), Mock()
+    store.get.return_value = None
+    store.get_stale.return_value = {"items": [{"txHash": "old"}], "generatedAt": "2026-09-28T01:00:00Z"}
+    resources = RuntimeResources()
+    try:
+        deps = market_workspace_cache_service.MarketWorkspaceCacheDependencies(
+            resources=resources, cache=CacheState(resources, app, store), application=app, snapshot_store=store,
+            build_detail=Mock(), build_chart=Mock(), build_flow=Mock(), build_lob=Mock(), get_market_by_id=Mock(),
+            utc_now_iso=lambda: "now",
+        )
+        with (
+            patch.object(market_workspace_cache_service, "_claim_build", return_value=(False, None)),
+            patch.object(market_workspace_cache_service.api_cache, "set_cached_payload") as write,
+        ):
+            for _ in range(2):
+                result = market_workspace_cache_service._cached_layer(
+                    deps, layer="flow", cache_key="7", ttl_seconds=8, builder=deps.build_flow,
+                )
+                assert result["payload"]["status"] == "stale"
+                assert result["payload"]["marketWorkspaceCache"]["generatedAt"] == "2026-09-28T01:00:00Z"
+            write.assert_not_called()
+            deps.build_flow.assert_not_called()
+    finally:
+        resources.close()
