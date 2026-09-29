@@ -71,6 +71,13 @@ try {
           assert(record.responses.some(r => r.url.includes('planet.pmtiles') && r.status === 206 && r.range));
         }
       });
+      if (width !== 390) await check('desktop: repaired sources reach healthy UI state', async () => {
+        for (const label of ['NHC', 'NWS', 'FIRMS', 'COUNTRY RISK']) {
+          const badge = page.locator('.wm-map-source-status').filter({ has: page.locator('b', { hasText: new RegExp(`^${label}$`) }) });
+          await expect(badge).toHaveClass(/is-ok/, { timeout: 120_000 });
+        }
+        record.sourceHealth = await page.locator('.wm-map-source-statuses').innerText();
+      });
       await check(`${width}: map UI uses the page font`, async () => {
         const fonts = await page.evaluate(() => {
           const family = selector => getComputedStyle(document.querySelector(selector)).fontFamily;
@@ -127,6 +134,9 @@ try {
           record.aircraft = { source: snapshot.source, status: snapshot.status, generatedAt: snapshot.generatedAt, count: snapshot.aircraft.length, limitations: snapshot.limitations };
           const aircraft = snapshot.aircraft.find(item => item.callsign) || snapshot.aircraft[0];
           await expect(page.locator('.wm-aviation-lens-stats')).toContainText('observed aircraft');
+          await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 45_000 });
+          await expect(page.locator('.wm-map-radar-status')).toContainText('ready / ready', { timeout: 60_000 });
+          await page.waitForTimeout(2000);
           await screenshot('desktop-aircraft');
           await page.locator('.wm-world-event-list-toggle').click();
           await page.locator('.wm-world-event-list input[type="search"]').fill(aircraft.callsign || aircraft.icao24);

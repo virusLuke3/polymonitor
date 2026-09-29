@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { FeatureCollection } from 'geojson';
 import { buildCountryGeometryIndex, normalizeCountryIdentity } from './countryGeometry';
@@ -30,6 +31,16 @@ describe('country geometry identity', () => {
     const index = buildCountryGeometryIndex(collection);
     expect(index.resolve('Global')).toBeNull();
     expect(index.resolve('Acme Corporation')).toBeNull();
+  });
+
+  it('resolves UCDP country labels against shipped boundaries without resolving combined topics', () => {
+    const real = JSON.parse(readFileSync(new URL('../../../../public/map-data/world-countries.geojson', import.meta.url), 'utf8')) as FeatureCollection;
+    const index = buildCountryGeometryIndex(real);
+    for (const [name, code] of Object.entries({
+      'DR Congo (Zaire)': 'CD', 'Myanmar (Burma)': 'MM', 'Russia (Soviet Union)': 'RU',
+      'Yemen (North Yemen)': 'YE', 'Cambodia (Kampuchea)': 'KH',
+    })) expect(index.resolve(name)?.iso2).toBe(code);
+    expect(index.resolve('ISRAEL / GAZA')).toBeNull();
   });
 
   it('normalizes punctuation without conflating arbitrary entities', () => {

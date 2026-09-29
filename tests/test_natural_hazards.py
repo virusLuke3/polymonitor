@@ -795,10 +795,11 @@ def test_firms_public_download_is_shared_and_viewport_is_filtered():
     def get(url, **kwargs):
         calls.append(url)
         return "latitude,longitude,acq_date,acq_time,frp\n10,20,2026-09-29,0910,12\n40,-100,2026-09-29,0920,5\n"
-    global_result = firms.fetch(get, map_key="", snapshot_store=store)
+    global_result = firms.fetch(get, map_key="", snapshot_store=store, limit=1)
     local = firms.fetch_viewport(get, map_key="", bbox=(19,9,21,11), snapshot_store=store)
     assert calls == [firms.PUBLIC_NOAA20_URL]
-    assert len(global_result["events"]) == 2
+    assert len(global_result["events"]) == 1
+    assert global_result["data_updated_at"] == "2026-09-29T09:20:00Z"
     assert len(local["events"]) == 1
     assert local["events"][0]["geometry"]["coordinates"] == [20,10]
     assert local["data_updated_at"] == "2026-09-29T09:10:00Z"

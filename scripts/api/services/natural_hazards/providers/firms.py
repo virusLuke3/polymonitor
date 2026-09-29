@@ -227,8 +227,15 @@ def fetch(
     clean_source = str(source or DEFAULT_SOURCE).strip()
     reader = _rows(http_text_get, map_key=str(map_key or "").strip(), base_url=base_url,
                    source=clean_source, area="world", snapshot_store=snapshot_store, resources=resources)
-    events = _cluster_rows(reader, clean_source, limit)
-    newest = max((event["updatedAt"] for event in events), default=None)
+    newest = None
+    def observed_rows():
+        nonlocal newest
+        for row in reader:
+            observed = _observed_at(row)
+            if observed:
+                newest = max(newest or observed, observed)
+            yield row
+    events = _cluster_rows(observed_rows(), clean_source, limit)
     return {"events": events, "data_updated_at": newest}
 
 
