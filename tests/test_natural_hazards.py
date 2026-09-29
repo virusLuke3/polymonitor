@@ -233,6 +233,41 @@ def test_nws_zone_queue_prioritizes_one_official_zone_per_alert() -> None:
     ]
 
 
+def test_nws_slow_catalog_keeps_alert_and_cached_geometry_without_extra_network(monkeypatch) -> None:
+    from api.context import RuntimeResources
+
+    clock = [100.0]
+    monkeypatch.setattr(nws, "monotonic", lambda: clock[0])
+    resources = RuntimeResources()
+    cached_url = "https://api.weather.gov/zones/forecast/AAA001"
+    uncached_url = "https://api.weather.gov/zones/forecast/AAA002"
+    geometry = {"type": "Polygon", "coordinates": [[[-100, 35], [-99, 35], [-99, 36], [-100, 35]]]}
+    resources.zone_cache[cached_url] = (100.0, geometry)
+    calls = []
+
+    def get_catalog(url, **_kwargs):
+        calls.append(url)
+        assert "/zones/" not in url
+        clock[0] += nws.PROVIDER_FETCH_BUDGET_SECONDS + 0.1
+        return {"updated": "2026-09-29T12:00:00Z", "features": [{
+            "geometry": None,
+            "properties": {"id": "budget-alert", "event": "Flood Warning",
+                           "affectedZones": [cached_url, uncached_url]},
+        }]}
+
+    try:
+        result = nws.fetch(get_catalog, resources=resources)
+        assert len(calls) == 1
+        assert result["data_updated_at"] == "2026-09-29T12:00:00Z"
+        event = result["events"][0]
+        assert event["geometry"] == geometry
+        assert event["properties"]["resolvedZoneCount"] == 1
+        assert event["properties"]["unresolvedZoneCount"] == 1
+        assert any("unavailable" in text for text in event["limitations"])
+    finally:
+        resources.close()
+
+
 def test_nws_provider_rejects_untrusted_zone_urls() -> None:
     calls: list[str] = []
     payload = {
@@ -442,6 +477,38 @@ def test_provider_deadline_returns_partial_error_without_waiting_for_slow_source
 def test_default_provider_deadline_fits_inside_browser_request_budget() -> None:
     assert service.PROVIDER_DEADLINE_SECONDS < 25
     assert service.SOURCE_PROVIDER_DEADLINE_SECONDS < 10
+    assert nws.PROVIDER_FETCH_BUDGET_SECONDS < service.SOURCE_PROVIDER_DEADLINE_SECONDS
+
+
+def test_provider_deadline_uses_snapshot_published_at_wait_boundary(monkeypatch) -> None:
+    store = FakeSnapshotStore()
+    dependencies = service.NaturalHazardDependencies.from_context({
+        "http_json_get": lambda *_args, **_kwargs: {},
+        "SNAPSHOT_STORE": store,
+    })
+
+    def publication_at_deadline(futures, **_kwargs):
+        for future in futures:
+            future.result(timeout=1)
+        # Model the race between wait's pending classification and reading the
+        # store. The actual completed fetch, not the timeout, wrote freshness.
+        return set(), set(futures)
+
+    monkeypatch.setattr(service, "wait", publication_at_deadline)
+    try:
+        result = service._fetch_provider_results(
+            dependencies=dependencies,
+            source_specs={"nws": (60, lambda: {
+                "events": [{"id": "new-alert"}],
+                "data_updated_at": "2026-09-29T12:00:00Z",
+            })},
+        )["nws"]
+        assert result["status"] == "ok"
+        assert result["events"] == [{"id": "new-alert"}]
+        assert result["errorCode"] is None
+        assert result["dataUpdatedAt"] == "2026-09-29T12:00:00Z"
+    finally:
+        dependencies.resources.close()
 
 
 def test_provider_deadline_retains_last_successful_snapshot() -> None:

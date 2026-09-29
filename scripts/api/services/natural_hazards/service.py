@@ -128,6 +128,13 @@ def _fetch_provider_results(
     for future in pending:
         key = futures[future]
         future.cancel()
+        # Another worker (or this future at the deadline boundary) may have
+        # published a successful snapshot while wait() returned. Use that
+        # verified fresh result before declaring the source degraded.
+        cached = cached_source_result(dependencies.snapshot_store, key)
+        if cached is not None and cached["status"] == "ok":
+            results[key] = cached
+            continue
         error_code = f"{key}-provider-deadline-exceeded"
         stale = stale_source_result(dependencies.snapshot_store, key, error_code)
         results[key] = stale or {

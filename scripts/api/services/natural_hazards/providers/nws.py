@@ -16,7 +16,9 @@ PROVIDER_KEY = "nws"
 DEFAULT_URL = "https://api.weather.gov/alerts"
 SOURCE_URL = "https://www.weather.gov/documentation/services-web-alerts"
 ZONE_CACHE_TTL_SECONDS = 6 * 60 * 60
-ZONE_FETCH_DEADLINE_SECONDS = 7
+# Optional zone enrichment must finish inside the compact feed's 6.5s
+# provider deadline, including time already spent fetching the CAP catalog.
+PROVIDER_FETCH_BUDGET_SECONDS = 5.5
 MAX_ZONE_FETCHES_PER_REFRESH = 640
 ZONE_FETCH_WORKERS = 24
 MAX_RING_POINTS = 240
@@ -137,7 +139,7 @@ def _zone_geometry(resources, http_json_get, url: str) -> Dict[str, Any] | None:
     return geometry
 
 
-def _resolve_zone_geometries(resources, http_json_get, zone_urls: list[str]) -> dict[str, Dict[str, Any]]:
+def _resolve_zone_geometries(resources, http_json_get, zone_urls: list[str], *, deadline: float) -> dict[str, Dict[str, Any]]:
     unique_urls = list(dict.fromkeys(zone_urls))
     resolved: dict[str, Dict[str, Any]] = {}
     missing: list[str] = []
@@ -151,10 +153,11 @@ def _resolve_zone_geometries(resources, http_json_get, zone_urls: list[str]) -> 
             else:
                 if len(missing) < MAX_ZONE_FETCHES_PER_REFRESH:
                     missing.append(url)
-    if not missing:
+    remaining = max(0, deadline - monotonic())
+    if not missing or not remaining:
         return resolved
     futures = {resources.submit(resources.zone_executor, _zone_geometry, resources, http_json_get, url): url for url in missing}
-    done, pending = wait(futures, timeout=ZONE_FETCH_DEADLINE_SECONDS)
+    done, pending = wait(futures, timeout=max(0, deadline - monotonic()))
     for future in done:
         url = futures[future]
         try:
@@ -210,6 +213,7 @@ def fetch(
     previous_events: list[Dict[str, Any]] | None = None,
     now: datetime | None = None,
 ) -> ProviderResult:
+    deadline = monotonic() + PROVIDER_FETCH_BUDGET_SECONDS
     resources = resources or RuntimeResources()
     observed_now = now or datetime.now(timezone.utc)
     payload = http_json_get(
@@ -226,7 +230,7 @@ def fetch(
         raise ValueError("nws-schema-features")
     bounded_features = features[: max(1, limit)]
     zone_urls = _prioritized_zone_urls(bounded_features)
-    resolved_zones = _resolve_zone_geometries(resources, http_json_get, zone_urls)
+    resolved_zones = _resolve_zone_geometries(resources, http_json_get, zone_urls, deadline=deadline)
     previous_by_id = {
         str(event.get("id")): event
         for event in (previous_events or [])
