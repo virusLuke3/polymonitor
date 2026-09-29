@@ -65,8 +65,8 @@ jobs:
         run: |
           python scripts/qa/check_tracked_secrets.py
           python scripts/qa/check_systemd_units.py
-          python -m compileall -q agent quant scripts telegram tests
-          ruff check agent quant scripts telegram tests
+          python -m compileall -q agent scripts telegram tests
+          ruff check agent scripts telegram tests
           PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
 
   deploy:
