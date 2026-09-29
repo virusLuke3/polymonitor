@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimeCryptoFundingWatch } from '@/services/api';
 import type { RuntimeCryptoFundingAsset, RuntimeCryptoFundingPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function absolutePercentLabel(value?: number | null, digits = 4) {
@@ -261,5 +261,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 15000,
-  fetchData: (context) => fetchRuntimeCryptoFundingWatch(18, context?.signal),
+  limit: 18,
+  fetchData: (context, limit) => fetchRuntimeCryptoFundingWatch(limit, context?.signal),
 });

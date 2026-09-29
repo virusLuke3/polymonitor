@@ -14,7 +14,7 @@ import { Panel } from '@/components/Panel';
 import { buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketYoutubeChannels } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketYoutubeChannelsPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 const YOUTUBE_PANEL_LIMIT = 80;
@@ -393,5 +393,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 180000,
-  fetchData: (context) => fetchRuntimeMarketYoutubeChannels(YOUTUBE_PANEL_LIMIT, undefined, context?.signal),
+  limit: YOUTUBE_PANEL_LIMIT,
+  fetchData: (context, limit) => fetchRuntimeMarketYoutubeChannels(limit, undefined, context?.signal),
 });

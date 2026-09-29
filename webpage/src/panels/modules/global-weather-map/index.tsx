@@ -1,11 +1,12 @@
 import { panelStatus } from '../../shared/formatters';
-import { statusBadge, num, tempLabel } from '../weather-detail-utils';
+import { statusBadge, num, tempLabel } from '@/panels/shared/weather/model';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGlobalTemperatureMonitor } from '@/services/api';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
-import { bookCoverage as liveBookCoverage, WeatherCanvasSparkline, weatherSourceLabel } from '../weather-detail-utils';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { bookCoverage as liveBookCoverage, weatherSourceLabel } from '@/panels/shared/weather/model';
+import { WeatherCanvasSparkline } from '@/panels/shared/weather/WeatherSparklines';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function priceLabel(value?: string | number | null) {
@@ -151,7 +152,7 @@ function TemperatureMonitorPanel({
   );
 }
 
-const renderers: PanelRenderMap = {
+const renderers: PanelRenderMap<'selectedWeatherCityId' | 'setSelectedWeatherCityId'> = {
   'global-temperature-monitor': {
     render: (ctx) => (
       <TemperatureMonitorPanel
@@ -164,6 +165,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  contextKeys: ['selectedWeatherCityId', 'setSelectedWeatherCityId'],
   id: 'global-temperature-monitor',
   title: 'Global Temp Monitor',
   eyebrow: 'weather',
@@ -172,5 +174,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 60000,
-  fetchData: (context) => fetchRuntimeGlobalTemperatureMonitor(60, context?.signal),
+  limit: 60,
+  fetchData: (context, limit) => fetchRuntimeGlobalTemperatureMonitor(limit, context?.signal),
 });

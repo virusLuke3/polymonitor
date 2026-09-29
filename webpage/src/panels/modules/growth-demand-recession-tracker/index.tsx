@@ -1,8 +1,8 @@
 import { fetchRuntimeGrowthDemandRecessionTracker } from '@/services/api';
 import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
-import { MacroDriverPanel } from '../macro-driver-panel';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { MacroDriverPanel } from '@/panels/shared/macro-driver';
 
 const renderers: PanelRenderMap = {
   'growth-demand-recession-tracker': {
@@ -37,5 +37,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeGrowthDemandRecessionTracker(8, context?.signal),
+  limit: 8,
+  fetchData: (context, limit) => fetchRuntimeGrowthDemandRecessionTracker(limit, context?.signal),
 });

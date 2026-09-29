@@ -7,8 +7,10 @@ import { formatCompact, formatCurrencyCompact } from './formatters';
 import { globalMarkets } from './selectors';
 import '@/styles/ai-market-panels.css';
 
+export type AiMarketInputs = Pick<PanelRenderContext, 'bootstrap' | 'markets' | 'marketGroups' | 'globalTrades' | 'globalOracle' | 'latestContent' | 'runtimeData'>;
+
 type AiMarketWidePanelProps = {
-  ctx: PanelRenderContext;
+  ctx: AiMarketInputs;
   lens: MarketWideAiInsightLens;
   title: string;
   badge: string;
@@ -58,14 +60,14 @@ const PANEL_COPY: Record<MarketWideAiInsightLens, {
   },
 };
 
-function topMarkets(ctx: PanelRenderContext) {
+function topMarkets(ctx: AiMarketInputs) {
   return globalMarkets(ctx)
     .slice()
     .sort((a, b) => numericValue(b.volume24h) - numericValue(a.volume24h))
     .slice(0, 48);
 }
 
-function topGroups(ctx: PanelRenderContext) {
+function topGroups(ctx: AiMarketInputs) {
   const groups = ctx.marketGroups.length ? ctx.marketGroups : (ctx.bootstrap?.activeMarketGroupsPreview || []);
   return groups
     .slice()
@@ -73,7 +75,7 @@ function topGroups(ctx: PanelRenderContext) {
     .slice(0, 36);
 }
 
-function buildMarketWidePayload(ctx: PanelRenderContext, lens: MarketWideAiInsightLens): MarketWideAiInsightPayload {
+function buildMarketWidePayload(ctx: AiMarketInputs, lens: MarketWideAiInsightLens): MarketWideAiInsightPayload {
   return {
     lens,
     markets: topMarkets(ctx),

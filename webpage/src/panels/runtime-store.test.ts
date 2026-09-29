@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchPanelRuntimeData, mergeRuntimeData } from './runtime-store';
 import { fetchRuntimePanels } from '@/services/api';
 import type { PanelModule } from './types';
+import { runtimePanelFromRenderer } from './definePanel';
 
 vi.mock('@/services/api', () => ({ fetchRuntimePanels: vi.fn() }));
 const panel = (id: string, fetchData = vi.fn().mockResolvedValue({ items: [id] })) => ({
@@ -10,6 +11,20 @@ const panel = (id: string, fetchData = vi.fn().mockResolvedValue({ items: [id] }
 beforeEach(() => vi.clearAllMocks());
 
 describe('runtime results', () => {
+  it('uses each panel request limit for batches and their individual fallback with the same cancellation signal', async () => {
+    const fetchData = vi.fn().mockResolvedValue({ items: ['source'] });
+    const limited = (id: string, limit: number) => runtimePanelFromRenderer({
+      [id]: { render: vi.fn() },
+    }, { id, title: id, description: '', eyebrow: '' }, { tier: 'slow', limit, fetchData });
+    const panels = [limited('a', 36), limited('b', 8)];
+    const signal = new AbortController().signal;
+    vi.mocked(fetchRuntimePanels).mockRejectedValue(new Error('Batch unavailable'));
+    const result = await fetchPanelRuntimeData(panels, { signal, reason: 'refresh' });
+    expect(fetchRuntimePanels).toHaveBeenCalledWith(['a', 'b'], { a: 36, b: 8 }, signal);
+    expect(fetchData).toHaveBeenNthCalledWith(1, { signal, reason: 'refresh' }, 36);
+    expect(fetchData).toHaveBeenNthCalledWith(2, { signal, reason: 'refresh' }, 8);
+    expect(Object.keys(result.data)).toEqual(['a', 'b']);
+  });
   it('retains independent successes from a partially failed batch', async () => {
     vi.mocked(fetchRuntimePanels).mockResolvedValue({ generatedAt: '2026-08-26T03:00:00Z', status: 'partial', requestId: 'fixture', panels: { a: { items: ['a'] } }, errors: { b: 'unavailable' }, metadata: {} });
     const result = await fetchPanelRuntimeData([panel('a'), panel('b')], { signal: new AbortController().signal, reason: 'refresh' });

@@ -3,8 +3,8 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimeDefiTokenWatch } from '@/services/api';
 import type { RuntimeDefiTokenRow, RuntimeDefiTokenWatchPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
-import { formatMoney, formatPercent, StatusDots, toneFromValue } from '../market-monitor-kit';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { formatMoney, formatPercent, StatusDots, toneFromValue } from '@/panels/shared/market-monitor';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function TokenRow({ item }: { item: RuntimeDefiTokenRow }) {
@@ -94,5 +94,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 60000,
-  fetchData: (context) => fetchRuntimeDefiTokenWatch(10, context?.signal),
+  limit: 10,
+  fetchData: (context, limit) => fetchRuntimeDefiTokenWatch(limit, context?.signal),
 });

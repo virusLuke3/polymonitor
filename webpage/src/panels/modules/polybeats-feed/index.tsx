@@ -11,7 +11,7 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimePolybeats } from '@/services/api';
 import type { RuntimePolybeatsItem, RuntimePolybeatsPayload, RuntimePolybeatsWallet } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 
 function badgeLabel(payload?: RuntimePolybeatsPayload | null) {
   const status = String(payload?.status || '').toLowerCase();
@@ -229,7 +229,7 @@ function PolybeatsFeedPanel({
   );
 }
 
-const renderers: PanelRenderMap = {
+const renderers: PanelRenderMap<'selectedMarketId' | 'setSelectedMarketId'> = {
   'polybeats-feed': {
     render: (ctx) => {
       const payload = ctx.runtimeData['polybeats-feed'] as RuntimePolybeatsPayload | undefined;
@@ -245,6 +245,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  contextKeys: ['selectedMarketId', 'setSelectedMarketId'],
   id: 'polybeats-feed',
   title: 'PolySignal',
   eyebrow: 'signal',
@@ -252,5 +253,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimePolybeats(8, context?.signal),
+  limit: 8,
+  fetchData: (context, limit) => fetchRuntimePolybeats(limit, context?.signal),
 });

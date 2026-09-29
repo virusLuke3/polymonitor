@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OracleEvent, OraclePayload } from '@/types';
-import { oracleFeedView } from './oracle-panels';
+import { oracleFeedView } from './modules/oracle-feed';
 
 describe('Oracle feed presentation', () => {
   it('surfaces global events when the selected market has no Oracle timeline', () => {

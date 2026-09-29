@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimeWeatherNews } from '@/services/api';
 import type { RuntimeWeatherNewsItem, RuntimeWeatherNewsPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'latest' | 'severity' | 'city';
@@ -154,5 +154,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 300000,
-  fetchData: (context) => fetchRuntimeWeatherNews(24, context?.signal),
+  limit: 24,
+  fetchData: (context, limit) => fetchRuntimeWeatherNews(limit, context?.signal),
 });

@@ -6,7 +6,7 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimeGlobalTransportShipping } from '@/services/api';
 import type { RuntimeGlobalTransportShippingItem, RuntimeGlobalTransportShippingPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type TransportTab = 'ops' | 'flights' | 'airlines' | 'track' | 'news';
@@ -368,5 +368,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 900000,
-  fetchData: (context) => fetchRuntimeGlobalTransportShipping(14, context?.signal),
+  limit: 14,
+  fetchData: (context, limit) => fetchRuntimeGlobalTransportShipping(limit, context?.signal),
 });

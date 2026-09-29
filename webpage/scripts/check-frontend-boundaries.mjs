@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import ts from 'typescript';
 import postcss from 'postcss';
 import { panelStyleOwner, panelStyleFiles } from './frontend-style-owners.mjs';
@@ -18,6 +18,7 @@ for (const file of files(root).filter((path) => /\.[cm]?tsx?$/.test(path) && !pa
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const fail = (node, message) => failures.push(`${path}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}: ${message}`);
   const sourceReads = new Map();
+  const contextReads = new Map();
   let definition;
   function walk(node) {
     if (path.startsWith('panels/modules/') && ts.isVariableDeclaration(node) && node.name.getText(source) === 'panel'
@@ -29,9 +30,23 @@ for (const file of files(root).filter((path) => /\.[cm]?tsx?$/.test(path) && !pa
       && ts.isStringLiteral(node.argumentExpression) && /\.runtimeData$/.test(node.expression.getText(source))) {
       sourceReads.set(node.argumentExpression.text, node);
     }
+    if (path.startsWith('panels/modules/') && ts.isPropertyAccessExpression(node)
+      && node.expression.getText(source) === 'ctx' && node.name.text !== 'runtimeData') {
+      contextReads.set(node.name.text, node);
+    }
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const target = node.moduleSpecifier.text;
       const typeOnly = node.importClause?.isTypeOnly;
+      const resolvedTarget = target.startsWith('@/') ? target.slice(2)
+        : target.startsWith('.') ? relative(root, resolve(dirname(file), target)).replaceAll('\\', '/') : target;
+      const ownPanel = path.match(/^panels\/modules\/([^/]+)\//)?.[1];
+      const targetPanel = resolvedTarget.match(/^panels\/modules\/([^/]+)(?:\/|$)/)?.[1];
+      if (targetPanel && ((ownPanel && ownPanel !== targetPanel) || path.startsWith('panels/shared/'))) {
+        fail(node, 'Panels do not import sibling implementations; shared domain code belongs in panels/shared.');
+      }
+      if (ownPanel && /^panels\/[^/]+-panels$/.test(resolvedTarget)) {
+        fail(node, 'Keep the panel implementation in its module instead of a grouped renderer registry.');
+      }
       if (path === 'App.tsx' && (/services\/(api|auth|product)$/.test(target) || /world-event-map\//.test(target))) {
         fail(node, 'Compose domain controllers through the map public entry; App does not own business requests.');
       }
@@ -49,12 +64,16 @@ for (const file of files(root).filter((path) => /\.[cm]?tsx?$/.test(path) && !pa
         fail(node, 'Services must not depend on page components.');
       }
     }
-    if (path.startsWith('panels/modules/') && ts.isPropertyAssignment(node)
+    if (/^panels\/(modules|shared)\//.test(path) && ts.isPropertyAssignment(node)
       && node.name.getText(source) === 'fetchData' && ts.isArrowFunction(node.initializer)
       && ts.isCallExpression(node.initializer.body)
-      && /^fetchRuntime/.test(node.initializer.body.expression.getText(source))
-      && !node.initializer.body.arguments.some((arg) => /\??\.signal$/.test(arg.getText(source)))) {
-      fail(node, 'Forward the Runtime AbortSignal to the source request.');
+      && /^fetchRuntime/.test(node.initializer.body.expression.getText(source))) {
+      if (!node.initializer.body.arguments.some((arg) => /\??\.signal$/.test(arg.getText(source)))) {
+        fail(node, 'Forward the Runtime AbortSignal to the source request.');
+      }
+      if (node.initializer.body.arguments.some(ts.isNumericLiteral)) {
+        fail(node, 'Declare the request limit once in the runtime options and consume the bound limit.');
+      }
     }
     ts.forEachChild(node, walk);
   }
@@ -66,6 +85,10 @@ for (const file of files(root).filter((path) => /\.[cm]?tsx?$/.test(path) && !pa
     const declared = new Set(['id', 'dataSourceId', 'dataDependencies'].flatMap((name) => literals(property(name))));
     for (const [id, node] of sourceReads) if (!declared.has(id)) {
       fail(node, `Declare shared source ${id} in dataSourceId or dataDependencies so hiding its own panel cannot stop this consumer.`);
+    }
+    const contextKeys = new Set(literals(property('contextKeys')));
+    for (const [key, node] of contextReads) if (!contextKeys.has(key)) {
+      fail(node, `Declare workspace input ${key} in contextKeys instead of accessing the whole dashboard context.`);
     }
   }
 }

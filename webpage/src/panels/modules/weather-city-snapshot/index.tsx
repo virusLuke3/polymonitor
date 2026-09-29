@@ -2,21 +2,9 @@ import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { panelFromRenderer } from '../helpers';
-import {
-  bestQuoteBin,
-  bookCoverage,
-  currentWeatherTemp,
-  highWeatherTemp,
-  marketSourceLabel,
-  selectedWeatherCity,
-  sourceStatus,
-  statusBadge,
-  tempLabel,
-  updatedLabel,
-  weatherSourceLabel,
-  WeatherMiniLine,
-} from '../weather-detail-utils';
+import { panelFromRenderer } from '@/panels/definePanel';
+import { bestQuoteBin, bookCoverage, currentWeatherTemp, highWeatherTemp, marketSourceLabel, selectedWeatherCity, sourceStatus, statusBadge, tempLabel, updatedLabel, weatherSourceLabel } from '@/panels/shared/weather/model';
+import { WeatherMiniLine } from '@/panels/shared/weather/WeatherSparklines';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function WeatherCitySnapshotPanel({
@@ -77,7 +65,7 @@ function WeatherCitySnapshotPanel({
   );
 }
 
-const renderers: PanelRenderMap = {
+const renderers: PanelRenderMap<'selectedWeatherCityId'> = {
   'weather-city-snapshot': {
     render: (ctx) => (
       <WeatherCitySnapshotPanel
@@ -89,6 +77,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = panelFromRenderer(renderers, {
+  contextKeys: ['selectedWeatherCityId'],
   id: 'weather-city-snapshot',
   title: 'Weather City Snapshot',
   eyebrow: 'weather',

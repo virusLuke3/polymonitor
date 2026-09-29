@@ -1,11 +1,11 @@
-import { displayValue as display } from '../macro-intel';
+import { displayValue as display } from '@/panels/shared/macro-intel';
 import { panelStatus } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeCpiReleaseCommandCenter } from '@/services/api';
 import type { RuntimeCpiReleaseCommandEvent, RuntimeCpiReleaseCommandPayload, RuntimeMacroRegistryItem } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function formatReleaseTime(value?: string | null) {
@@ -190,5 +190,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeCpiReleaseCommandCenter(36, context?.signal),
+  limit: 36,
+  fetchData: (context, limit) => fetchRuntimeCpiReleaseCommandCenter(limit, context?.signal),
 });

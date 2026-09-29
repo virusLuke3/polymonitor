@@ -8,7 +8,7 @@ import type {
   RuntimeTransmissionChain,
 } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function statusBadge(payload?: RuntimeCommodityTransmissionPayload | null) {
@@ -237,5 +237,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeCommodityEquityTransmission(8, context?.signal),
+  limit: 8,
+  fetchData: (context, limit) => fetchRuntimeCommodityEquityTransmission(limit, context?.signal),
 });

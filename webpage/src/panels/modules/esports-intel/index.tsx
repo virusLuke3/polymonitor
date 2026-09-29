@@ -5,7 +5,7 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimeGridEsports } from '@/services/api';
 import type { RuntimeGridEsportsItem, RuntimeGridEsportsPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'state' | 'start' | 'momentum';
@@ -229,5 +229,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 30000,
-  fetchData: (context) => fetchRuntimeGridEsports(3, context?.signal),
+  limit: 3,
+  fetchData: (context, limit) => fetchRuntimeGridEsports(limit, context?.signal),
 });

@@ -1,8 +1,8 @@
 import { fetchRuntimeShelterRentOerPressure } from '@/services/api';
 import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
-import { MacroDriverPanel } from '../macro-driver-panel';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { MacroDriverPanel } from '@/panels/shared/macro-driver';
 
 const renderers: PanelRenderMap = {
   'shelter-rent-oer-pressure': {
@@ -37,5 +37,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeShelterRentOerPressure(8, context?.signal),
+  limit: 8,
+  fetchData: (context, limit) => fetchRuntimeShelterRentOerPressure(limit, context?.signal),
 });

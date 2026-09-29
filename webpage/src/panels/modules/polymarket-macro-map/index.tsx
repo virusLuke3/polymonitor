@@ -1,4 +1,4 @@
-import { probabilityLabel, PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '../macro-intel';
+import { probabilityLabel, PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '@/panels/shared/macro-intel';
 import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
@@ -8,7 +8,7 @@ import type {
   RuntimePolymarketMacroMapPayload,
 } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badgeLabel(status?: string | null) {
@@ -179,5 +179,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimePolymarketMacroMap(12, context?.signal),
+  limit: 12,
+  fetchData: (context, limit) => fetchRuntimePolymarketMacroMap(limit, context?.signal),
 });

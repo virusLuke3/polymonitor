@@ -1,4 +1,4 @@
-import { createTechPanel } from '../tech-watch-kit';
+import { createTechPanel } from '@/panels/shared/tech-watch';
 
 export const panel = createTechPanel({
   id: 'consumer-app-pulse',

@@ -8,46 +8,6 @@ import {
   type RuntimePanelMetadata,
 } from '@/services/api';
 
-const PANEL_RUNTIME_LIMITS: Record<string, number> = {
-  'alpha-signal': 8,
-  'polybeats-feed': 8,
-  'cpi-components-pressure-registry': 48,
-  'cpi-release-calendar': 8,
-  'cpi-release-command-center': 36,
-  'blockchain-policy-news': 12,
-  'broker-research-watch': 12,
-  'crypto-etf-flow': 8,
-  'crypto-fear-greed': 6,
-  'crypto-funding-watch': 18,
-  'crypto-perp-funding': 10,
-  'defi-security-watch': 12,
-  'defi-token-watch': 10,
-  'defi-yield-monitor': 10,
-  'energy-gasoline-shock': 6,
-  'espn-matchup-predictor': 8,
-  'esports-intel': 3,
-  'fed-reaction-growth-risk-board': 36,
-  'food-retail-basket-pressure': 8,
-  'geo-sanctions-shock': 2000,
-  'global-index-monitor': 12,
-  'global-temperature-monitor': 60,
-  'global-transport-shipping': 14,
-  'goods-tariff-supply-watch': 36,
-  'ipo-news-watch': 12,
-  'jin10-flash': 24,
-  'labor-services-inflation-monitor': 36,
-  'nba-intel': 12,
-  'nba-scoreboard': 10,
-  'new-market-signals': 12,
-  'polymarket-macro-map': 12,
-  'sports-odds': 8,
-  'stablecoin-monitor': 8,
-  'suspicious-flow': 12,
-  'tradfi-perp-radar': 16,
-  'weather-news': 24,
-  'whale-tracker': 14,
-};
-
 export type PanelRuntimeFetchOptions = {
   signal: AbortSignal;
   reason: PanelFetchContext['reason'];
@@ -109,7 +69,7 @@ export async function fetchPanelRuntimeData(
     }
     try {
       const ids = batch.map((panel) => panel.id);
-      const payload = await fetchRuntimePanels(ids, PANEL_RUNTIME_LIMITS, options.signal);
+      const payload = await fetchRuntimePanels(ids, Object.fromEntries(batch.filter((panel) => panel.request).map((panel) => [panel.id, panel.request!.limit])), options.signal);
       const values = payload.panels || {};
       const batchErrors = payload.errors || {};
       const batchMetadata = payload.metadata || {};

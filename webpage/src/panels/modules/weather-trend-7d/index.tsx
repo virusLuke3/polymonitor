@@ -2,9 +2,10 @@ import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { panelFromRenderer } from '../helpers';
-import { selectedWeatherCity, statusBadge } from '../weather-detail-utils';
-import { sevenDayPoints, TrendChart } from '../weather-trend-detail';
+import { panelFromRenderer } from '@/panels/definePanel';
+import { selectedWeatherCity, statusBadge } from '@/panels/shared/weather/model';
+import { sevenDayPoints } from '../../shared/weather/trend';
+import { TrendChart } from '../../shared/weather/TrendChart';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function WeatherTrend7dPanel({
@@ -33,7 +34,7 @@ function WeatherTrend7dPanel({
   );
 }
 
-const renderers: PanelRenderMap = {
+const renderers: PanelRenderMap<'selectedWeatherCityId'> = {
   'weather-trend-7d': {
     render: (ctx) => (
       <WeatherTrend7dPanel
@@ -45,6 +46,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = panelFromRenderer(renderers, {
+  contextKeys: ['selectedWeatherCityId'],
   id: 'weather-trend-7d',
   title: 'WU 7 Day',
   eyebrow: 'weather',

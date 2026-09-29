@@ -20,7 +20,19 @@ The current design uses explicit registry lists rather than filesystem auto-disc
 
 Each panel owns a module under `webpage/src/panels/modules/<panel-id>/` and exports `panel`.
 
-Runtime panels declare `fetchData` and `refresh.tier`; the dashboard loads those through the generic runtime store instead of adding per-panel `useState` and refresh code in `App.tsx`.
+Runtime panels declare `fetchData` and `refreshPolicy.tier`; the dashboard loads those through the generic runtime store instead of adding per-panel `useState` and refresh code in `App.tsx`. The helper below accepts `tier` and constructs that policy.
+
+The constructors live in `webpage/src/panels/definePanel.ts`. A renderer defaults
+to snapshot inputs only. A panel that uses workspace state declares, for example,
+`PanelRenderMap<'selectedWeatherCityId'>` and
+`contextKeys: ['selectedWeatherCityId']`. The constructor passes only these fields
+and the snapshots named by the panel ID, `dataSourceId`, and `dataDependencies`;
+the full `PanelRenderContext` remains at the application composition boundary.
+
+Declare a request `limit` in the runtime options once. The constructor exposes it
+as `panel.request.limit` for batching and binds the same value as the second
+argument to the individual `fetchData` callback. The runtime store must not keep
+a separate table of panel-specific request parameters.
 
 The frontend runtime uses the versioned `/v1/runtime/panels` envelope. Legacy
 `/runtime/panels` and per-panel routes remain raw-payload compatibility
@@ -34,6 +46,8 @@ The machine-readable OpenAPI 3.1 contract is served from `/openapi.json` and
 Minimal runtime panel shape:
 
 ```ts
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'example-panel',
   title: 'Example Panel',
@@ -42,22 +56,35 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchExamplePanel(),
+  limit: 12,
+  fetchData: (context, limit) => fetchExamplePanel(limit, context?.signal),
 });
 ```
 
 For a new frontend panel:
 
-1. Create `webpage/src/panels/modules/<panel-id>/index.ts`.
-2. Put panel-specific UI in that directory when writing new UI. Compatibility wrappers may reuse existing grouped renderers during migration.
+1. Create `webpage/src/panels/modules/<panel-id>/index.ts` (or `.tsx` when it contains UI).
+2. Keep panel-specific UI in that directory. Shared Finance, Tech and Macro templates live under `panels/shared/`; do not reintroduce grouped renderer registries or import another panel's implementation. The fixed price/book/trade strip remains owned by `FocusedMarketStrip`.
 3. Add the module to `webpage/src/panels/modules/index.ts`.
 4. Do not add panel-specific state or refresh code to `App.tsx`.
+
+Weather sharing is split into pure `shared/weather/model.ts` and `trend.ts`,
+the token-book hook, and reusable chart components. Views share these modules
+without importing another weather panel entrypoint. `check:boundaries` enforces
+sibling-panel import restrictions, declared workspace inputs and snapshot reads.
 
 ## Backend
 
 Runtime API panels are registered in `scripts/api/runtime_panels/registry.py`. Each module under `scripts/api/runtime_panels/modules/` declares `PANEL_ID`, `ROUTE`, limit bounds, and `get_snapshot`.
 
 The Flask route layer uses `scripts/api/routes/runtime_panels.py` to register all runtime routes while preserving existing API paths.
+
+Finance watch snapshot/cache orchestration remains in
+`scripts/api/services/finance_watch_panels_service.py`. Its payload builders are
+owned by `finance_watch/research.py`, `news.py`, `markets.py`, and `sentiment.py`;
+their dependencies and common request/payload utilities live in `common.py`.
+Builders do not import the orchestration service. Existing API and watcher
+entrypoints, cache keys, stale-snapshot handling and public payloads stay stable.
 
 Minimal backend runtime module shape:
 

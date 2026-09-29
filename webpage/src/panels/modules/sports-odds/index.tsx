@@ -5,7 +5,7 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimeSportsOdds } from '@/services/api';
 import type { RuntimeSportsOddsItem, RuntimeSportsOddsPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'signal' | 'start' | 'dispersion';
@@ -164,5 +164,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 45000,
-  fetchData: (context) => fetchRuntimeSportsOdds(8, context?.signal),
+  limit: 8,
+  fetchData: (context, limit) => fetchRuntimeSportsOdds(limit, context?.signal),
 });

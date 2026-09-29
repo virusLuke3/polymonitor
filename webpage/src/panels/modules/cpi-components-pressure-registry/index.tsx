@@ -1,8 +1,8 @@
 import { fetchRuntimeCpiComponentsPressureRegistry } from '@/services/api';
 import type { RuntimeMacroRegistryPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
-import { MacroRegistryPanel } from '../macro-registry-panel';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { MacroRegistryPanel } from '@/panels/shared/macro-registry';
 
 const renderers: PanelRenderMap = {
   'cpi-components-pressure-registry': {
@@ -32,5 +32,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeCpiComponentsPressureRegistry(48, context?.signal),
+  limit: 48,
+  fetchData: (context, limit) => fetchRuntimeCpiComponentsPressureRegistry(limit, context?.signal),
 });

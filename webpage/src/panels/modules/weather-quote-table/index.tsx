@@ -2,22 +2,9 @@ import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { panelFromRenderer } from '../helpers';
-import {
-  bestBookQuoteBin,
-  bestQuoteBin,
-  bookMidCoverage,
-  bookMidPrice,
-  bookCoverage,
-  marketSourceLabel,
-  midCoverage,
-  num,
-  priceLabel,
-  selectedWeatherCity,
-  statusBadge,
-  tempLabel,
-  useLiveWeatherQuoteBins,
-} from '../weather-detail-utils';
+import { panelFromRenderer } from '@/panels/definePanel';
+import { bestBookQuoteBin, bestQuoteBin, bookMidCoverage, bookMidPrice, bookCoverage, marketSourceLabel, midCoverage, num, priceLabel, selectedWeatherCity, statusBadge, tempLabel } from '@/panels/shared/weather/model';
+import { useLiveWeatherQuoteBins } from '@/panels/shared/weather/useLiveWeatherQuoteBins';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function sourceLabel(value?: string | null) {
@@ -125,7 +112,7 @@ function WeatherQuoteTablePanel({
   );
 }
 
-const renderers: PanelRenderMap = {
+const renderers: PanelRenderMap<'selectedWeatherCityId'> = {
   'weather-quote-table': {
     render: (ctx) => (
       <WeatherQuoteTablePanel
@@ -137,6 +124,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = panelFromRenderer(renderers, {
+  contextKeys: ['selectedWeatherCityId'],
   id: 'weather-quote-table',
   title: 'Weather Quote Table',
   eyebrow: 'weather',

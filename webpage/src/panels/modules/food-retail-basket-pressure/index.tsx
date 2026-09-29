@@ -4,8 +4,8 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimeFoodRetailBasket } from '@/services/api';
 import type { RuntimeFoodBasketItem, RuntimeFoodRetailBasketPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
-import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '../macro-intel';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '@/panels/shared/macro-intel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badgeLabel(status?: string | null) {
@@ -148,5 +148,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeFoodRetailBasket(8, context?.signal),
+  limit: 8,
+  fetchData: (context, limit) => fetchRuntimeFoodRetailBasket(limit, context?.signal),
 });

@@ -1,8 +1,8 @@
 import { fetchRuntimeFedReactionGrowthRiskBoard } from '@/services/api';
 import type { RuntimeMacroRegistryPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
-import { MacroRegistryPanel } from '../macro-registry-panel';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { MacroRegistryPanel } from '@/panels/shared/macro-registry';
 
 const renderers: PanelRenderMap = {
   'fed-reaction-growth-risk-board': {
@@ -32,5 +32,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeFedReactionGrowthRiskBoard(36, context?.signal),
+  limit: 36,
+  fetchData: (context, limit) => fetchRuntimeFedReactionGrowthRiskBoard(limit, context?.signal),
 });

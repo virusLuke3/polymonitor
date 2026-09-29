@@ -3,8 +3,8 @@ import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { panelFromRenderer } from '../helpers';
-import { bookCoverage, priceLabel, statusBadge } from '../weather-detail-utils';
+import { panelFromRenderer } from '@/panels/definePanel';
+import { bookCoverage, priceLabel, statusBadge } from '@/panels/shared/weather/model';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 const FAMILY_LABELS: Record<string, string> = {
@@ -127,7 +127,7 @@ function WeatherMarketBrowserPanel({
   );
 }
 
-const renderers: PanelRenderMap = {
+const renderers: PanelRenderMap<'selectedWeatherCityId' | 'setSelectedWeatherCityId'> = {
   'weather-market-browser': {
     render: (ctx) => (
       <WeatherMarketBrowserPanel
@@ -140,6 +140,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = panelFromRenderer(renderers, {
+  contextKeys: ['selectedWeatherCityId', 'setSelectedWeatherCityId'],
   id: 'weather-market-browser',
   title: 'Weather Market Browser',
   eyebrow: 'weather',

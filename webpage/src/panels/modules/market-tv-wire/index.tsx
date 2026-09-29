@@ -14,7 +14,7 @@ import { Panel } from '@/components/Panel';
 import { buildRuntimeHlsProxyUrl, buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketTvWire } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketTvWirePayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type PlaybackState = 'connecting' | 'playing' | 'waiting' | 'blocked' | 'external';
@@ -571,5 +571,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 180000,
-  fetchData: (context) => fetchRuntimeMarketTvWire(60, undefined, context?.signal),
+  limit: 60,
+  fetchData: (context, limit) => fetchRuntimeMarketTvWire(limit, undefined, context?.signal),
 });

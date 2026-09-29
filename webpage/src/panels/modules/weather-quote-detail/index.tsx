@@ -3,9 +3,10 @@ import { useMemo } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { panelFromRenderer } from '../helpers';
-import { bookMidPrice, selectedWeatherCity, statusBadge, useLiveWeatherQuoteBins } from '../weather-detail-utils';
-import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '../weather-live-chart';
+import { panelFromRenderer } from '@/panels/definePanel';
+import { bookMidPrice, selectedWeatherCity, statusBadge } from '@/panels/shared/weather/model';
+import { useLiveWeatherQuoteBins } from '@/panels/shared/weather/useLiveWeatherQuoteBins';
+import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '@/panels/shared/weather/WeatherLiveChart';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function percentAxisLabel(value: number) {
@@ -86,7 +87,7 @@ function WeatherQuoteDetailPanel({
   );
 }
 
-const renderers: PanelRenderMap = {
+const renderers: PanelRenderMap<'selectedWeatherCityId'> = {
   'weather-quote-detail': {
     render: (ctx) => (
       <WeatherQuoteDetailPanel
@@ -98,6 +99,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = panelFromRenderer(renderers, {
+  contextKeys: ['selectedWeatherCityId'],
   id: 'weather-quote-detail',
   title: 'Weather Quote Curve',
   eyebrow: 'weather',

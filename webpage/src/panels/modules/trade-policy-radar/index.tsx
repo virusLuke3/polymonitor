@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { PanelRenderMap } from '../../types';
-import { panelFromRenderer } from '../helpers';
+import { panelFromRenderer } from '@/panels/definePanel';
 import './styles.css';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 

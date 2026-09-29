@@ -1,4 +1,4 @@
-import { createFinanceWatchPanel } from '../finance-watch-kit';
+import { createFinanceWatchPanel } from '@/panels/shared/finance-watch';
 
 export const panel = createFinanceWatchPanel({
   id: 'crypto-fear-greed',

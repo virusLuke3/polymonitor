@@ -3,7 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload } from '@/types';
 import { buildWorldClockRows, CORE_WORLD_CLOCKS, normalizeTimezone, type WorldClockLocation } from '@/utils/worldClock';
 import type { PanelRenderMap } from '../../types';
-import { panelFromRenderer } from '../helpers';
+import { panelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function selectedClockLocation(payload?: RuntimeGlobalWeatherMapPayload | null, selectedCityId?: string | null, fallback = 'Selected city'): WorldClockLocation | null {
@@ -66,7 +66,7 @@ function WorldClockPanel({
   );
 }
 
-const renderers: PanelRenderMap = {
+const renderers: PanelRenderMap<'selectedWeatherCityId'> = {
   'world-clock': {
     render: (ctx) => (
       <WorldClockPanel
@@ -78,6 +78,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = panelFromRenderer(renderers, {
+  contextKeys: ['selectedWeatherCityId'],
   id: 'world-clock',
   title: 'World Clock',
   eyebrow: 'time',

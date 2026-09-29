@@ -5,7 +5,7 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimeBreakingEventRadar } from '@/services/api';
 import type { RuntimeBreakingEventRadarItem, RuntimeBreakingEventRadarPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 type SortMode = 'velocity' | 'latest' | 'markets';
@@ -170,5 +170,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 300000,
-  fetchData: (context) => fetchRuntimeBreakingEventRadar(12, context?.signal),
+  limit: 12,
+  fetchData: (context, limit) => fetchRuntimeBreakingEventRadar(limit, context?.signal),
 });

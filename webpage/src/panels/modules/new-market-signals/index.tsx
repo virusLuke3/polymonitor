@@ -1,7 +1,7 @@
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeNewMarketSignals } from '@/services/api';
 import type { RuntimeNewMarketSignalItem, RuntimeNewMarketSignalsPayload } from '@/types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import type { PanelRenderMap } from '../../types';
 
 function probabilityLabel(value: RuntimeNewMarketSignalItem['initialYesProbability']) {
@@ -70,7 +70,7 @@ function NewMarketSignalsList({
   );
 }
 
-const renderers: PanelRenderMap = {
+const renderers: PanelRenderMap<'selectedMarketId' | 'setSelectedMarketId'> = {
   'new-market-signals': {
     render: (ctx) => {
       const payload = ctx.runtimeData['new-market-signals'] as RuntimeNewMarketSignalsPayload | undefined;
@@ -89,6 +89,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  contextKeys: ['selectedMarketId', 'setSelectedMarketId'],
   id: 'new-market-signals',
   title: 'New Market Signals',
   eyebrow: 'market',
@@ -96,5 +97,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeNewMarketSignals(12, context?.signal),
+  limit: 12,
+  fetchData: (context, limit) => fetchRuntimeNewMarketSignals(limit, context?.signal),
 });

@@ -3,8 +3,8 @@ import { fetchRuntimeInflationNowcast } from '@/services/api';
 import type { RuntimeInflationNowcastPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, linkedMacroMarkets, signalToneClass } from '@/panels/shared/macro-intel';
 
 function rowValue(row?: Record<string, string | undefined> | null, key?: string) {
   if (!row || !key) return '--';

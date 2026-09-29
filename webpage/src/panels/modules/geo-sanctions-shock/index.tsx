@@ -4,7 +4,7 @@ import { Panel } from '@/components/Panel';
 import { fetchRuntimeGeoSanctionsShock } from '@/services/api';
 import type { RuntimeGeoSanctionsShockItem, RuntimeGeoSanctionsShockPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 
 type UcdpTab = 'state-based' | 'non-state' | 'one-sided';
 
@@ -189,5 +189,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeGeoSanctionsShock(2000, context?.signal),
+  limit: 2000,
+  fetchData: (context, limit) => fetchRuntimeGeoSanctionsShock(limit, context?.signal),
 });

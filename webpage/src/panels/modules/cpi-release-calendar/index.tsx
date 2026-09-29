@@ -1,11 +1,11 @@
-import { probabilityLabel, PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '../macro-intel';
+import { probabilityLabel, PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '@/panels/shared/macro-intel';
 import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeCpiReleaseCalendar } from '@/services/api';
 import type { RuntimeCpiCalendarItem, RuntimeCpiReleaseCalendarPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '../helpers';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function badgeLabel(status?: string | null) {
@@ -162,5 +162,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
-  fetchData: (context) => fetchRuntimeCpiReleaseCalendar(8, context?.signal),
+  limit: 8,
+  fetchData: (context, limit) => fetchRuntimeCpiReleaseCalendar(limit, context?.signal),
 });

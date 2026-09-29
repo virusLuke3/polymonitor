@@ -4,20 +4,21 @@ import type { PanelDefinition, PanelRenderContext } from '@/types';
 export type PanelRuntimeData = Record<string, unknown>;
 export type PanelRuntimePhase = 'idle' | 'loading' | 'ready' | 'stale' | 'degraded' | 'error' | 'suspended';
 
-export type PanelRuntimeContext = PanelRenderContext & {
-  runtimeData: PanelRuntimeData;
-};
+export type PanelContextKey = Exclude<keyof PanelRenderContext, 'runtimeData'>;
+/** Panels opt into the workspace inputs they actually consume. */
+export type PanelInputs<K extends PanelContextKey = never> = Pick<PanelRenderContext, K | 'runtimeData'>;
+export type PanelRuntimeContext = PanelInputs;
 
-export type PanelRenderer = (ctx: PanelRuntimeContext) => VNode;
+export type PanelRenderer<K extends PanelContextKey = never> = (ctx: PanelInputs<K>) => VNode;
 
 export type RegistryEntry = PanelModule;
 
-export type PanelEntryFragment = {
-  render: PanelRenderer;
+export type PanelEntryFragment<K extends PanelContextKey = never> = {
+  render: PanelRenderer<K>;
   size?: PanelDefinition['size'];
 };
 
-export type PanelRenderMap = Record<string, PanelEntryFragment>;
+export type PanelRenderMap<K extends PanelContextKey = never> = Record<string, PanelEntryFragment<K>>;
 
 export type PanelRefreshTier = 'bootstrap' | 'fast' | 'slow' | 'manual';
 
@@ -51,14 +52,18 @@ export type PanelRuntimeStatus = {
 };
 
 export type PanelModule = PanelDefinition & {
+  /** Workspace fields passed to this panel, in addition to declared snapshots. */
+  contextKeys?: readonly PanelContextKey[];
   /** Another registered panel owns this view's shared snapshot and refresh. */
   dataSourceId?: string;
   /** Additional registered snapshots used by this panel's rendering. */
   dataDependencies?: string[];
   defaultEnabled?: boolean;
   maxBatchSize?: number;
+  /** Shared by batch requests and the individual fallback. */
+  request?: { limit: number };
   refreshPolicy?: PanelRefreshConfig;
   fetchData?: PanelFetchData;
   /** FocusedMarketStrip owns rendering for its fixed price, book and trade panels. */
-  render?: PanelRenderer;
+  render?: (ctx: PanelRenderContext) => VNode;
 };
