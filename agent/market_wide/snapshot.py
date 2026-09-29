@@ -461,7 +461,9 @@ def build_market_wide_snapshot(
     existing = read_market_wide_snapshot(helpers, normalized_lens, allow_stale=True)
     if existing is not None and not force:
         age_seconds = _snapshot_age_seconds(existing)
-        if age_seconds is not None and age_seconds < snapshot_min_live_interval_seconds():
+        data = existing.get("data") or {}
+        retry_interval = snapshot_min_live_interval_seconds() if data.get("status") == "live" else 300
+        if age_seconds is not None and age_seconds < retry_interval:
             return _return_skipped_snapshot(existing, "fresh-snapshot")
         if not (live and _seed_live_enabled()):
             return _return_skipped_snapshot(existing, "live-disabled-existing-snapshot")

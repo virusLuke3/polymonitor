@@ -34,12 +34,12 @@ function FocusFixture({ data }: { data: Partial<PanelRenderContext> }) {
 }
 const api = {
   ids: PANEL_MODULES.filter(p => p.render && !['active-markets', 'global-orderfilled', 'oracle-feed'].includes(p.id)).map(p => p.id),
-  mount(id: string, runtimeData: Record<string, unknown> = {}) {
+  mount(id: string, runtimeData: Record<string, unknown> = {}, data: Partial<PanelRenderContext> = {}) {
     render(null, root);
     const panel = PANEL_MODULES.find(p => p.id === id)!;
     render(<LocaleProvider><main className="wm-dashboard"><div className="wm-panels-grid">
       <div className="wm-panel-slot" data-workspace-panel-id={id}>
-        {panel.render!({ ...context, runtimeData })}
+        {panel.render!({ ...context, ...data, runtimeData })}
       </div>
     </div></main></LocaleProvider>, root);
   },

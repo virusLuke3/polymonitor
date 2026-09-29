@@ -20,6 +20,10 @@ Prediction-market usefulness rules:
 - Surface probability structure: near-50c repricing zones, deadline ladders, term spreads, mutually related markets, one-sided liquidity, stale prices, and group-vs-single-market mismatches.
 - Explain what would move the price next: official source, match result, court/government release, shipping/oil data, oracle update, or new large fills.
 - Say "no directional edge" when price-change data is missing; then identify what data would be needed. Do not fill the gap with category commentary.
+- A loaded sample is not the whole market. Do not add event-group turnover to underlying-market turnover.
+- Absolute turnover does not prove a spike. Category counts do not prove rotation. Require a named historical baseline for either claim.
+- Null trade counts are unknown, never zero. Stale fills cannot anchor current prices; show their timestamp and limitation.
+- Leave arrays empty when evidence does not support a finding. Do not manufacture four findings to fill the panel.
 - Keep all claims informational. Do not recommend trades, position sizing, or financial advice.
 """
 
@@ -378,6 +382,7 @@ def _market_rows(context: dict[str, Any]) -> list[dict[str, Any]]:
                 "price24hAgo": item.get("price24hAgo") or item.get("price_24h_ago"),
                 "volume24h": _as_float(item.get("volume24h")),
                 "tradeCount24h": _as_float(item.get("tradeCount24h")),
+                "tradeCountKnown": item.get("tradeCount24h") not in (None, "", "null"),
                 "change24h": item.get("change24h"),
                 "bestBid": item.get("bestBid") or item.get("bid") or item.get("yesBid"),
                 "bestAsk": item.get("bestAsk") or item.get("ask") or item.get("yesAsk"),
@@ -525,7 +530,9 @@ def _fill_tape_microstructure(context: dict[str, Any]) -> list[dict[str, Any]]:
             "latestFill": _fmt_price(latest_fill),
             "fillVwap": _fmt_price(item.get("fillVwapYesPrice")),
         }
-        if conflict:
+        if item.get("fillFreshness") != "fresh-fills":
+            interpretation = "Fill freshness is stale or unknown; these fills cannot anchor current implied probability."
+        elif conflict:
             interpretation = "Snapshot/detail/recent-fill sources disagree; anchor live commentary to the recent fill tape and discount stale detail prices."
         elif latest_fill > 0 and abs(fill_drift_value) >= 0.02:
             interpretation = "Loaded recent fills show directional repricing; treat this as a low-cost tape drift, not full 24h momentum."
@@ -585,7 +592,7 @@ def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, 
                 "drift24h": f"{drift * 100:+.1f} pts",
                 "price24hAgo": _fmt_price(item.get("price24hAgo")),
                 "volume24h": _fmt_money(item["volume24h"]),
-                "tradeCount24h": int(item["tradeCount24h"]),
+                "tradeCount24h": int(item["tradeCount24h"]) if item.get("tradeCountKnown") else None,
                 "interpretation": "Directional price move over the last 24h; validate against catalysts and fill quality.",
                 "_rank": abs(drift) * (1 + math.log10(max(1.0, item["volume24h"] + item["tradeCount24h"]))),
             })
@@ -601,7 +608,7 @@ def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, 
                 "interpretation": "Wide displayed spread means the last price may overstate executable confidence.",
                 "_rank": width,
             })
-        if item["volume24h"] >= 100_000 and item["tradeCount24h"] <= 2:
+        if item.get("tradeCountKnown") and item["volume24h"] >= 100_000 and item["tradeCount24h"] <= 2:
             anomalies.append({
                 "title": item["title"],
                 "type": "volume-without-trade-count",
@@ -654,7 +661,7 @@ def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, 
                 "price": _fmt_price(item["price"]),
                 "band": _price_band(item["price"]),
                 "volume24h": _fmt_money(item["volume24h"]),
-                "tradeCount24h": int(item["tradeCount24h"]),
+                "tradeCount24h": int(item["tradeCount24h"]) if item.get("tradeCountKnown") else None,
                 "endDate": item.get("endDate"),
             }
             for item in ranked_flow[:6]
@@ -664,7 +671,7 @@ def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, 
                 "title": item["title"],
                 "price": _fmt_price(item["price"]),
                 "volume24h": _fmt_money(item["volume24h"]),
-                "tradeCount24h": int(item["tradeCount24h"]),
+                "tradeCount24h": int(item["tradeCount24h"]) if item.get("tradeCountKnown") else None,
                 "why": "Price sits near 50c/contested territory where fresh information can move probability quickly.",
             }
             for item in near_repricing[:6]
@@ -736,7 +743,7 @@ def _build_related_markets(context: dict[str, Any]) -> dict[str, Any]:
         near = [item for item in outcomes if 0.42 <= item["yesPrice"] <= 0.58]
         volume = _as_float(group.get("volume24h"))
         trades = _as_float(group.get("tradeCount24h"))
-        mismatch = volume >= 100_000 and trades <= 2
+        mismatch = group.get("tradeCount24h") not in (None, "", "null") and volume >= 100_000 and trades <= 2
         score = min(
             100.0,
             spread * 60
@@ -777,7 +784,7 @@ def _build_related_markets(context: dict[str, Any]) -> dict[str, Any]:
                 "evidence": ", ".join(f"{item['label']} {_fmt_price(item['yesPrice'])}" for item in outcomes[:3]),
                 "interpretation": "Likely live/resolved/stale ladder or feed issue; do not read as normal ex-ante probabilities.",
             })
-        if volume >= 100_000 and trades <= 2:
+        if mismatch:
             anomalies.append({
                 "title": title,
                 "type": "group-volume-without-group-trades",
@@ -1186,6 +1193,8 @@ def _graph_response(state: dict[str, Any], *, configured: bool) -> dict[str, Any
     }
     response["usage"] = {**response.get("usage", {}), **_usage_total(events), "contextChars": (state.get("context") or {}).get("contextChars")}
     response["agentRuntime"] = "forecast-intelligence-graph"
+    warnings = (state.get("quantForecaster") or {}).get("dataWarnings") or []
+    response["limitations"] = list(dict.fromkeys([*(response.get("limitations") or []), *warnings]))[:8]
     return response
 
 
@@ -1609,4 +1618,6 @@ def run_forecast_intelligence_graph(
     }
     response["usage"] = {**response.get("usage", {}), **_usage_total(events), "contextChars": context.get("contextChars")}
     response["agentRuntime"] = "forecast-intelligence-graph"
+    warnings = (state.get("quantForecaster") or {}).get("dataWarnings") or []
+    response["limitations"] = list(dict.fromkeys([*(response.get("limitations") or []), *warnings]))[:8]
     return response

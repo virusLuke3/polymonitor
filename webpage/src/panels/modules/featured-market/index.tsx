@@ -4,20 +4,24 @@ import type { PanelRenderMap } from '@/panels/types';
 import { shortHash } from '@/panels/shared/formatters';
 import { useI18n } from '@/services/i18n';
 import { panelFromRenderer } from '@/panels/definePanel';
+import { marketRules } from './model';
 
-type Inputs = PanelInputs<'bootstrap' | 'bundle' | 'selectedMarket'>;
+type Inputs = PanelInputs<'bundle' | 'selectedMarket' | 'selectedMarketId'>;
 
 function FeaturedMarketPanel({ ctx }: { ctx: Inputs }) {
   const { t } = useI18n();
-  const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;
-  const tags = (selected?.tags || []).filter(Boolean).slice(0, 4);
-  const resolutionText = selected?.description || ctx.bundle?.chart?.referenceRule || t('atlasMarket.resolutionLoading');
+  const rules = marketRules(ctx.selectedMarketId, ctx.selectedMarket, ctx.bundle);
+  const selected = rules?.market;
+  const tags = rules?.tags || [];
+  const resolutionText = rules?.text || t(ctx.selectedMarketId == null ? 'atlasMarket.noSelection' : 'marketRules.unavailable');
   return (
-    <Panel title={t('atlasMarket.context')} badge={t('atlasMarket.rules')} status="live" className="wm-market-panel wm-market-context-panel">
+    <Panel title={t('atlasMarket.context')} badge={t(rules?.text ? 'atlasMarket.rules' : 'marketRules.missing')} status={rules?.text ? 'locked' : 'muted'} className="wm-market-panel wm-market-context-panel">
       <div className="wm-feature-panel">
         <section className="wm-feature-hero">
+          {selected ? <strong className="wm-feature-market-title">{selected.title}</strong> : null}
           <span className="wm-feature-kicker">{t('atlasMarket.resolutionContext')}</span>
           <p>{resolutionText}</p>
+          {rules?.text ? <small>{t(rules.ruleSource === 'description' ? 'marketRules.description' : 'marketRules.reference')}</small> : null}
         </section>
 
         <div className="wm-feature-tags" aria-label={t('atlasMarket.tags')}>
@@ -28,7 +32,7 @@ function FeaturedMarketPanel({ ctx }: { ctx: Inputs }) {
         <div className="wm-feature-grid">
           <article className="wm-feature-stat">
             <span>ORACLE</span>
-            <strong>{shortHash(selected?.oracle || ctx.bundle?.oracle?.oracle || '', 8, 5)}</strong>
+            <strong>{shortHash(rules?.oracle || '', 8, 5)}</strong>
           </article>
           <article className="wm-feature-stat">
             <span>CONDITION</span>
@@ -36,7 +40,7 @@ function FeaturedMarketPanel({ ctx }: { ctx: Inputs }) {
           </article>
           <article className="wm-feature-stat">
             <span>QUESTION ID</span>
-            <strong>{shortHash(selected?.questionId || ctx.bundle?.oracle?.questionId || '', 8, 5)}</strong>
+            <strong>{shortHash(rules?.questionId || '', 8, 5)}</strong>
           </article>
           <article className="wm-feature-stat">
             <span>GAMMA ID</span>
@@ -48,14 +52,14 @@ function FeaturedMarketPanel({ ctx }: { ctx: Inputs }) {
   );
 }
 
-const renderers: PanelRenderMap<'bootstrap' | 'bundle' | 'selectedMarket'> = {
+const renderers: PanelRenderMap<'bundle' | 'selectedMarket' | 'selectedMarketId'> = {
   'featured-market': {
     render: (ctx) => <FeaturedMarketPanel ctx={ctx} />,
   },
 };
 
 export const panel = panelFromRenderer(renderers, {
-  contextKeys: ['bootstrap', 'bundle', 'selectedMarket'],
+  contextKeys: ['bundle', 'selectedMarket', 'selectedMarketId'],
   id: 'featured-market',
   title: 'Market Context',
   eyebrow: 'focus',

@@ -492,33 +492,25 @@ test('market dossier cancels a hidden book and recovers with the correct identit
   await page.evaluate(() => window.frontendHarness.unmount());
 });
 
-test('registered AI consumers keep their shared signal owners alive without duplicate refreshes', async ({ page }) => {
-  const requested: string[][] = [];
-  await page.route('**/wm-api/v1/runtime/panels?**', route => {
-    const ids = (new URL(route.request().url()).searchParams.get('ids') || '').split(',');
-    requested.push(ids);
-    return route.fulfill({ json: { apiVersion: 'v1', requestId: 'fixture', generatedAt: GENERATED_AT, status: 'ok',
-      data: { panels: Object.fromEntries(ids.map(id => [id, { generatedAt: GENERATED_AT, status: 'ok', items: [] }])) }, meta: { panels: {} }, errors: [] } });
+test('registered analysis snapshots refresh independently and pause when hidden', async ({ page }) => {
+  const requested: string[] = [];
+  await page.route('**/wm-api/runtime/agent/market-wide-insights/**', route => {
+    const lens = route.request().url().split('/').pop()!;
+    requested.push(lens);
+    return route.fulfill({ json: { lens, status: 'live', generationMode: 'ai', model: 'fixture', generatedAt: GENERATED_AT,
+      brief: 'Snapshot', focus: [], specialMarkets: [], themes: [], watchlist: [], evidence: [] } });
   });
   await harness(page, 'registered-runtime');
-  const owners = ['alpha-signal', 'suspicious-flow', 'whale-tracker'];
-  await expect.poll(() => page.evaluate(() => Object.keys(window.frontendHarness.runtime!.runtimeData).sort())).toEqual(owners);
-  expect(requested.flat().sort()).toEqual(owners);
-  await page.evaluate(() => {
-    const h = window.frontendHarness;
-    h.setPanels(['oracle-timeline', 'alpha-signal']);
-    h.runtime!.setPanelVisible('alpha-signal', false);
-  });
-  await page.clock.runFor(100);
-  await page.evaluate(async () => {
-    const r = window.frontendHarness.runtime!;
-    await Promise.all([r.refreshIds(['oracle-timeline'], { reason: 'manual' }), r.refreshIds(['alpha-signal'], { reason: 'manual' })]);
-  });
-  expect(requested.flat().sort()).toEqual([...owners, ...owners].sort());
+  await expect.poll(() => page.evaluate(() => Object.keys(window.frontendHarness.runtime!.runtimeData).sort()))
+    .toEqual(['oracle-timeline', 'price-implications', 'sample-chain-trades']);
+  expect(requested.sort()).toEqual(['overview', 'special', 'trend']);
+  await page.evaluate(() => window.frontendHarness.setPanels(['oracle-timeline']));
+  await page.clock.runFor(60_000);
+  await expect.poll(() => requested.length).toBe(4);
+  expect(requested[3]).toBe('trend');
   await page.evaluate(() => window.frontendHarness.runtime!.setPanelVisible('oracle-timeline', false));
-  const stopped = requested.length;
   await page.clock.runFor(600_000);
-  expect(requested).toHaveLength(stopped);
+  expect(requested).toHaveLength(4);
   await page.evaluate(() => window.frontendHarness.unmount());
 });
 
@@ -609,16 +601,13 @@ test('country geometry reports a real timeout, then cancels a fresh attempt on u
   expect(await geometryCalls(page)).toEqual([{ aborted: true }, { aborted: true }]);
 });
 
-test('AI snapshot requests abort when their registered panel is replaced', async ({ page }) => {
+test('shared runtime aborts analysis snapshot requests on unmount', async ({ page }) => {
   await trackRequests(page);
   await page.route('**/wm-api/runtime/agent/market-wide-insights/**', () => {});
-  await installLocalAssets(page);
-  await page.goto('/e2e/panels.html');
-  await page.waitForFunction(() => window.panelHarness);
-  await page.evaluate(() => window.panelHarness.mount('price-implications'));
+  await harness(page, 'registered-runtime');
   const snapshotCalls = () => page.evaluate(() => (window as any).fetchCalls
     .filter((call: any) => call.url.includes('/market-wide-insights/')).map((call: any) => call.signal?.aborted));
-  await expect.poll(snapshotCalls).toEqual([false]);
-  await page.evaluate(() => window.panelHarness.mount('market-summary'));
-  await expect.poll(snapshotCalls).toEqual([true]);
+  await expect.poll(snapshotCalls).toEqual([false, false, false]);
+  await page.evaluate(() => window.frontendHarness.unmount());
+  await expect.poll(snapshotCalls).toEqual([true, true, true]);
 });

@@ -27,7 +27,8 @@ export async function fetchPanelRuntimeData(
   panels: PanelModule[],
   options: PanelRuntimeFetchOptions,
 ): Promise<PanelRuntimeFetchResult> {
-  const entries = panels.filter((panel) => typeof panel.fetchData === 'function');
+  const fetchable = panels.filter((panel) => typeof panel.fetchData === 'function');
+  const entries = fetchable.filter((panel) => panel.batch !== false);
   const data: PanelRuntimeData = {};
   const errors: Record<string, Error> = {};
   const metadata: Record<string, RuntimePanelMetadata> = {};
@@ -60,6 +61,7 @@ export async function fetchPanelRuntimeData(
     }));
   };
 
+  const individualRequests = fetchIndividually(fetchable.filter((panel) => panel.batch === false));
   for (let offset = 0; offset < entries.length; offset += maxBatchSize) {
     if (options.signal.aborted) break;
     const batch = entries.slice(offset, offset + maxBatchSize);
@@ -94,6 +96,7 @@ export async function fetchPanelRuntimeData(
       await fetchIndividually(batch);
     }
   }
+  await individualRequests;
   return { data, errors, metadata };
 }
 

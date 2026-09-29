@@ -25,6 +25,15 @@ describe('runtime results', () => {
     expect(fetchData).toHaveBeenNthCalledWith(2, { signal, reason: 'refresh' }, 8);
     expect(Object.keys(result.data)).toEqual(['a', 'b']);
   });
+  it('fetches dedicated endpoints through shared cancellation without batching their IDs', async () => {
+    const dedicated = { ...panel('analysis'), batch: false };
+    vi.mocked(fetchRuntimePanels).mockResolvedValue({ panels: { a: {}, b: {} }, errors: {}, metadata: {} } as any);
+    const signal = new AbortController().signal;
+    const result = await fetchPanelRuntimeData([panel('a'), dedicated, panel('b')], { signal, reason: 'manual' });
+    expect(fetchRuntimePanels).toHaveBeenCalledWith(['a', 'b'], {}, signal);
+    expect(dedicated.fetchData).toHaveBeenCalledWith({ signal, reason: 'manual' });
+    expect(result.data.analysis).toEqual({ items: ['analysis'] });
+  });
   it('retains independent successes from a partially failed batch', async () => {
     vi.mocked(fetchRuntimePanels).mockResolvedValue({ generatedAt: '2026-08-26T03:00:00Z', status: 'partial', requestId: 'fixture', panels: { a: { items: ['a'] } }, errors: { b: 'unavailable' }, metadata: {} });
     const result = await fetchPanelRuntimeData([panel('a'), panel('b')], { signal: new AbortController().signal, reason: 'refresh' });

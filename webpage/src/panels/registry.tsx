@@ -9,6 +9,7 @@ export const PANEL_LIBRARY = PANEL_MODULES.map(({
   fetchData,
   refreshPolicy,
   maxBatchSize,
+  batch,
   request,
   contextKeys,
   ...definition

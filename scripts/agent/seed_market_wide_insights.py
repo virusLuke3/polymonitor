@@ -60,7 +60,8 @@ def main() -> int:
                         **item
                     )
                 )
-        return 0
+    # A stored fallback is useful data, but not a successful AI refresh.
+    return 1 if not args.fallback_only and any(item["liveAttempted"] and item["status"] != "live" for item in summary) else 0
 
 
 if __name__ == "__main__":

@@ -1,21 +1,29 @@
 import type { PanelRenderMap } from '@/panels/types';
-import { AiMarketWidePanel } from '@/panels/shared/ai-market-wide';
-import { panelFromRenderer } from '@/panels/definePanel';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { fetchInsightSnapshot } from '@/panels/shared/market-insights/data';
+import { useI18n } from '@/services/i18n';
+import { insightView } from '@/panels/shared/market-insights/model';
+import { InsightFrame, InsightCards, InsightWatchlist } from '@/panels/shared/market-insights/components';
 
-const renderers: PanelRenderMap<'bootstrap' | 'globalOracle' | 'globalTrades' | 'latestContent' | 'marketGroups' | 'markets'> = {
-  'oracle-timeline': {
-    render: (ctx) => (
-      <AiMarketWidePanel ctx={ctx} lens="trend" title="TREND WATCH" badge="TREND" />
-    ),
-  },
+function TrendWatch({ snapshot }: { snapshot: unknown }) {
+  const { t } = useI18n();
+  const view = insightView(snapshot, 'trend');
+  const items = view.insight?.themes || [];
+  return <InsightFrame view={view} lens="trend" title={t('marketInsights.title.trend')} count={items.length}>
+      <InsightCards title={t('marketInsights.trend')} items={items} empty={t('marketInsights.trendEmpty')} />
+      <InsightWatchlist items={view.insight?.watchlist || []} />
+    </InsightFrame>;
+}
+
+const renderers: PanelRenderMap = {
+  'oracle-timeline': { render: (ctx) => <TrendWatch snapshot={ctx.runtimeData['oracle-timeline']} /> },
 };
 
-export const panel = panelFromRenderer(renderers, {
-  contextKeys: ['bootstrap', 'globalOracle', 'globalTrades', 'latestContent', 'marketGroups', 'markets'],
-  id: 'oracle-timeline',
-  title: 'AI Trend Radar',
-  eyebrow: 'agent',
-  description: 'Market-wide AI synthesis of Polymarket trend clusters, catalysts, and watch items.',
+export const panel = runtimePanelFromRenderer(renderers, {
+  id: 'oracle-timeline', title: 'Trend Watch', eyebrow: 'agent',
+  description: 'Trend Watch from a saved market sample, with generation and freshness status.',
   defaultEnabled: false,
-  dataDependencies: ['alpha-signal', 'whale-tracker', 'suspicious-flow'],
+}, {
+  tier: 'bootstrap', intervalMs: 60_000, staleAfterMs: 12 * 60 * 60_000, batch: false,
+  fetchData: (context) => fetchInsightSnapshot('trend', context?.signal),
 });

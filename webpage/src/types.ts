@@ -615,6 +615,8 @@ export type MarketWideAiInsightPayload = {
 };
 
 export type MarketWideAiInsightResponse = MarketAiInsightResponse & {
+  generationMode?: 'ai' | 'rules';
+  limitations?: string[];
   lens?: MarketWideAiInsightLens | string;
   specialMarkets?: MarketWideSpecialMarket[];
   themes?: MarketWideTheme[];

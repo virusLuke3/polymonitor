@@ -58,8 +58,9 @@ function payloadTimestamp(value: unknown): number | null {
 
 function payloadIsDegraded(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
-  const status = String((value as { status?: unknown }).status || '').trim().toLowerCase();
-  return status === 'degraded' || status === 'error' || status === 'failed' || status === 'warming';
+  const payload = value as { status?: unknown; generationMode?: unknown };
+  const status = String(payload.status || '').trim().toLowerCase();
+  return payload.generationMode === 'rules' || ['degraded', 'error', 'failed', 'warming', 'gateway-error', 'agent-error', 'missing-api-key', 'invalid-agent-output'].includes(status);
 }
 
 function metadataTimestamp(metadata?: RuntimePanelMetadata): number | null {

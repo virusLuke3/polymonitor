@@ -1,19 +1,29 @@
 import type { PanelRenderMap } from '@/panels/types';
-import { AiMarketWidePanel } from '@/panels/shared/ai-market-wide';
-import { panelFromRenderer } from '@/panels/definePanel';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { fetchInsightSnapshot } from '@/panels/shared/market-insights/data';
+import { useI18n } from '@/services/i18n';
+import { insightView } from '@/panels/shared/market-insights/model';
+import { InsightFrame, InsightCards, InsightWatchlist } from '@/panels/shared/market-insights/components';
 
-const renderers: PanelRenderMap<'bootstrap' | 'globalOracle' | 'globalTrades' | 'latestContent' | 'marketGroups' | 'markets'> = {
-  'price-implications': {
-    render: (ctx) => <AiMarketWidePanel ctx={ctx} lens="overview" title="AI INSIGHTS" badge="LIVE" />,
-  },
+function MarketBrief({ snapshot }: { snapshot: unknown }) {
+  const { t } = useI18n();
+  const view = insightView(snapshot, 'overview');
+  const items = view.insight?.focus || [];
+  return <InsightFrame view={view} lens="overview" title={t('marketInsights.title.overview')} count={items.length}>
+      <InsightCards title={t('marketInsights.overview')} items={items} empty={t('marketInsights.overviewEmpty')} />
+      <InsightWatchlist items={view.insight?.watchlist || []} />
+    </InsightFrame>;
+}
+
+const renderers: PanelRenderMap = {
+  'price-implications': { render: (ctx) => <MarketBrief snapshot={ctx.runtimeData['price-implications']} /> },
 };
 
-export const panel = panelFromRenderer(renderers, {
-  contextKeys: ['bootstrap', 'globalOracle', 'globalTrades', 'latestContent', 'marketGroups', 'markets'],
-  id: 'price-implications',
-  title: 'AI Market Brief',
-  eyebrow: 'agent',
-  description: 'Market-wide AI brief, focal points, and convergence signals.',
+export const panel = runtimePanelFromRenderer(renderers, {
+  id: 'price-implications', title: 'AI Insights', eyebrow: 'agent',
+  description: 'AI Insights from a saved market sample, with generation and freshness status.',
   defaultEnabled: false,
-  dataDependencies: ['alpha-signal', 'whale-tracker', 'suspicious-flow'],
+}, {
+  tier: 'bootstrap', intervalMs: 60_000, staleAfterMs: 12 * 60 * 60_000, batch: false,
+  fetchData: (context) => fetchInsightSnapshot('overview', context?.signal),
 });

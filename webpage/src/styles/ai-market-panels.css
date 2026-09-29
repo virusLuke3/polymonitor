@@ -395,3 +395,23 @@
     text-align: left;
   }
 }
+
+.wm-ai-insight-timestamp,
+.wm-ai-insight-notice,
+.wm-ai-insight-limitations {
+  color: var(--text-dim, #a9b4bd);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.wm-ai-insight-timestamp { display: block; margin-top: 10px; }
+.wm-ai-insight-notice { margin: 0; padding: 8px; border: 1px solid rgba(230, 182, 94, 0.3); }
+.wm-ai-insight-limitations summary { cursor: pointer; }
+.wm-ai-insight-limitations ul { padding-left: 18px; }
+
+.wm-ai-insights[data-generation-mode="rules"] .wm-ai-insight-source b,
+.wm-ai-insights[data-stale="true"] .wm-ai-insight-source b {
+  color: #d8bd82;
+  border-color: rgba(216, 189, 130, 0.35);
+  background: rgba(216, 189, 130, 0.06);
+}

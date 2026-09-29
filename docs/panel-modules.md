@@ -114,3 +114,11 @@ For a new backend runtime panel:
 - Keep old compatibility paths working during refactors.
 - Avoid moving visual behavior and architecture in the same change; split UI redesign from module decomposition.
 - If a panel needs shared helpers, put reusable code under `webpage/src/panels/shared/` or an appropriate backend service module instead of coupling unrelated panels together.
+
+## Market analysis panels
+
+`price-implications`, `sample-chain-trades` and `oracle-timeline` retain their saved-layout IDs and own the overview, special and trend views. Each declares a cancellable snapshot fetch, a one-minute polling interval and `batch: false` because the analysis API has its own endpoints. Refreshing a view reads a saved snapshot; it does not trigger a model call. The shared runtime owns visibility, retry and cancellation.
+
+`shared/market-insights` validates the lens and response cards and supplies common presentation. It contains no local market-ranking algorithm. AI results, rules summaries, expired snapshots, unknown timestamps and unavailable data remain distinct. Empty server arrays are authoritative. Snapshot generation and sample-scoped deterministic observations live in `agent/market_wide`, with rules in `rules.py`. Absolute volume cannot imply a spike; category counts cannot imply rotation. Failed generation remains observable even when a usable rules snapshot is saved.
+
+`featured-market` consumes only selected-market identity, metadata and the matching bundle. It never substitutes a bootstrap market or another market's oracle/reference rule.

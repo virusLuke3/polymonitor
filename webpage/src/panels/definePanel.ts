@@ -7,6 +7,8 @@ type PanelDefinition<K extends PanelContextKey> = Omit<PanelModule, 'render' | '
 type RuntimeOptions = {
   tier: NonNullable<PanelModule['refreshPolicy']>['tier'];
   intervalMs?: number;
+  staleAfterMs?: number;
+  batch?: boolean;
   limit?: number;
   fetchData: (context?: PanelFetchContext, limit?: number) => Promise<unknown>;
 };
@@ -42,10 +44,12 @@ export function runtimePanelFromRenderer<K extends PanelContextKey = never>(
   return panelFromRenderer(renderers, {
     ...definition,
     request: runtime.limit === undefined ? undefined : { limit: runtime.limit },
+    batch: runtime.batch,
     fetchData: (context) => runtime.fetchData(context, runtime.limit),
     refreshPolicy: {
       tier: runtime.tier,
       intervalMs: runtime.intervalMs,
+      staleAfterMs: runtime.staleAfterMs,
     },
   });
 }

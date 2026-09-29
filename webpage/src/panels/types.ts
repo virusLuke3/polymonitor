@@ -60,6 +60,8 @@ export type PanelModule = PanelDefinition & {
   dataDependencies?: string[];
   defaultEnabled?: boolean;
   maxBatchSize?: number;
+  /** Sources with their own endpoint still use shared cancellation and refresh. */
+  batch?: boolean;
   /** Shared by batch requests and the individual fallback. */
   request?: { limit: number };
   refreshPolicy?: PanelRefreshConfig;
