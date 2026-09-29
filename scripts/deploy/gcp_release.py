@@ -76,6 +76,7 @@ EXTERNAL_RELEASE_FILES = {
     "scripts/start_dashboard.sh",
 }
 RETIRED_SOURCE_FILES = {
+    "scripts/demo.sh",
     "scripts/market/market_decoder.py",
     "scripts/trade/trade_decoder.py",
     "scripts/trade/clickhouse_orderfilled_writer.py",
