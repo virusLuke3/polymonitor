@@ -277,6 +277,13 @@ test('WebGL country hover, click, fit, context menu and filter remain connected'
 test('live aircraft supports viewport loading, hover, click and inspector details', async ({ page }) => {
   await gotoMap(page, 'center=-70,43&zoom=5&layers=air-routes&air=all');
   await expect(page.getByText('ALL AVIATION')).toBeVisible();
+  const expand = (await page.locator('.wm-map-focus-toggle').boundingBox())!;
+  const lens = (await page.locator('.wm-aviation-lens').boundingBox())!;
+  expect(lens.x + lens.width).toBeLessThanOrEqual(expand.x);
+  await page.locator('.wm-map-focus-toggle').click();
+  await expect(page.locator('.wm-map-stage')).toHaveClass(/is-map-focused/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.wm-map-stage')).not.toHaveClass(/is-map-focused/);
   const center = await mapCanvasCenter(page);
   await page.mouse.move(center.x, center.y);
   await expect(page.locator('.deck-tooltip:visible')).toContainText('PX202');

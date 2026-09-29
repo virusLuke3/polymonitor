@@ -94,6 +94,11 @@ try {
         assert(record.responses.some(r => r.url.includes('/v2/radar/') && r.status === 200));
         record.radar = await page.locator('.wm-map-radar-status').innerText();
       });
+      if (width > 900) await check('desktop: aviation card leaves map controls accessible', async () => {
+        const lens = await page.locator('.wm-aviation-lens').boundingBox();
+        const expand = await page.locator('.wm-map-focus-toggle').boundingBox();
+        if (lens) assert(lens.x + lens.width <= expand.x);
+      });
       // Allow real labels and event sources to finish their first paint.
       await page.waitForTimeout(2000);
       await screenshot(`${width === 390 ? 'mobile' : 'desktop'}-${width}-en`);

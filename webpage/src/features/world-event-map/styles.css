@@ -386,7 +386,8 @@
 .wm-aviation-lens {
   position: absolute;
   top: 12px;
-  right: 76px;
+  /* Leave both the expand control and the zoom column accessible. */
+  right: 124px;
   z-index: 10;
   display: grid;
   gap: 8px;

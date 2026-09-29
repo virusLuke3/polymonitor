@@ -15,7 +15,7 @@
 
 第二轮截图入口：`webpage/artifacts/map-polish-round2/index.html`。保留 `round2-before` 与 A—E 的中英同镜头截图，另外有 2040×620 的密集数据对照。测试夹具明确标识，不进入生产；没有屏蔽地图、隐藏多数记录、修改坐标、降低 DPR 或放宽截图容差。测试预设打开图层面板，以保持改动前后的相同保存状态；产品新访客默认收起另行验证。
 
-性能对照使用同一 Chrome / GPU、相机、DPR、真实矢量资源与固定夹具，双方均关闭开发热更新。重测旧版的 713/5000 截图与原始 before 文件 SHA-256 相同。旧版仍保存在隔离基线中，没有覆盖原始截图。
+性能对照使用同一 Chrome / GPU、相机、DPR、真实矢量资源与固定夹具，双方均关闭开发热更新。重测旧版的 713/5000 截图与原始 before 文件 SHA-256 相同。旧版对照图与复跑哈希已保留；验收后移除了临时隔离工作区，没有覆盖原始截图。
 
 | 夹具规模 | 旧版拖动 P95 | 新版拖动 P95 | 新版 hover P95 | 拖动时索引/叶子读取 |
 | --- | --- | --- | --- | --- |
@@ -46,7 +46,7 @@
 
 最终同镜头、产品视口、DPR 1/1.25/1.5/2、原生浏览器 125% 缩放、符号原生尺寸与 713/5000 成员/性能矩阵：`acceptance-final.log` **14/14 passed**。英文与中文的最终连续 trace 分别约 30.7 / 30.2 秒；密集数据还保留完整拖动、hover 采样、簇列表、详情、缩放和图层开关 trace。`performance-comparison.json` 为最终数值。
 
-发布：本轮本地验收完成，待从仅包含本轮修改的 pushed commit 构建并验收 GCP 真实页面。真实 iOS/Safari/Android 设备仍不在本地 Chrome 矩阵内。雷达沿用最新实际帧，没有新增历史雷达播放、假轨迹或推测覆盖范围。
+发布：主体 `8889d03480c2c29030d8b478a0ab733fd0cac7fa` 已推送到 `codex/map-polish-round2`，从干净 checkout 构建并部署 GCP，保留线上 51 份独立文档/素材的原始哈希。GitHub run `36598045956` 的 frontend-build 与 python-quality 通过。第一轮真实页面检查见 `production-final/receipt.json`：主底图、真实雷达、字体、事件详情和移动端 Service Worker 通过；航班视口两次 HTTP 500，未将本次整体标为通过。GCP 日志定位为 API 线程耗尽（`RuntimeError: can't start new thread`）；16:38 UTC 服务由外部操作重启后，读请求再次返回真实 ADS-B 数据，本任务没有变更后端或执行该重启。线上截图另发现航空卡关闭按钮与展开地图按钮重叠，本轮补修已通过 `aviation-controls.log` 的真实点击/展开/退出及飞机详情测试，待补修版本再次发布后的独立验收。真实 iOS/Safari/Android 设备仍不在本地 Chrome 矩阵内。雷达沿用最新实际帧，没有新增历史雷达播放、假轨迹或推测覆盖范围。
 
 以下首轮记录依据用户提供的 `POLYMONITOR_MAP_ALIGNMENT_CODEX.md` 和两张原始参考图实施，描述当时的本地验证；发布及第二轮状态以本文最前面的更新为准。对照 WorldMonitor 本地 `4691d9213a74c25bc2190146a11ebeba02b8cc85`，并保留 Polymonitor 的数据事实、报告和已有 feature 边界。
 
