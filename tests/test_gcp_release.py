@@ -26,9 +26,11 @@ def test_release_repairs_missing_dependencies_and_preserves_remote_edits(tmp_pat
     remote.mkdir()
     git(repo, "init", "-q")
     files = {
-        "deploy/systemd/polydata-gcp.target": "[Unit]\nWants=polydata-api.service\n",
+        "deploy/systemd/polydata-gcp.target": "[Unit]\nWants=polydata-api.service polydata-retired.timer\n",
         "deploy/systemd/polydata-api.service": "[Service]\nExecStart=python -m api.app\n",
         "deploy/systemd/polydata-market-sync.service": "collector",
+        "deploy/systemd/polydata-retired.timer": "[Timer]\nUnit=polydata-retired.service\n",
+        "deploy/systemd/polydata-retired.service": "[Service]\nExecStart=retired\n",
         "scripts/api/app.py": "old API",
         "scripts/db/db.py": "unchanged database dependency",
         "scripts/db/trade_v2.py": "unchanged trade reader",
@@ -47,6 +49,9 @@ def test_release_repairs_missing_dependencies_and_preserves_remote_edits(tmp_pat
     (repo / "scripts/runtime/retired.py").unlink()
     (repo / "quant/api/read_api.py").unlink()
     (repo / "design-qa.md").unlink()
+    (repo / "deploy/systemd/polydata-gcp.target").write_text("[Unit]\nWants=polydata-api.service\n")
+    for unit in ("polydata-retired.service", "polydata-retired.timer"):
+        (repo / "deploy/systemd" / unit).unlink()
     target = commit(repo)
     (repo / "scripts/api/app.py").write_text("uncommitted edit must not ship")
     output = tmp_path / "release"
@@ -58,7 +63,8 @@ def test_release_repairs_missing_dependencies_and_preserves_remote_edits(tmp_pat
     assert "webpage/src/App.tsx" not in paths
     assert "design-qa.md" in manifest["external_paths"]
     assert "quant/api/read_api.py" in paths
-    for name in ("scripts/api/app.py", "scripts/runtime/retired.py"):
+    assert {"deploy/systemd/polydata-retired.service", "deploy/systemd/polydata-retired.timer"} <= paths
+    for name in ("scripts/api/app.py", "scripts/runtime/retired.py", "deploy/systemd/polydata-retired.timer"):
         path = remote / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(files[name])
@@ -67,11 +73,13 @@ def test_release_repairs_missing_dependencies_and_preserves_remote_edits(tmp_pat
     assert (remote / "scripts/api/app.py").read_text() == "new API"
     assert (remote / "scripts/db/trade_v2.py").read_text() == files["scripts/db/trade_v2.py"]
     assert not (remote / "scripts/runtime/retired.py").exists()
+    assert not (remote / "deploy/systemd/polydata-retired.timer").exists()
     (remote / "scripts/db/db.py").write_text("unknown remote hotfix")
     assert [entry["path"] for entry in release.preflight(remote, manifest)] == ["scripts/db/db.py"]
     release.rollback_release(remote, receipt)
     assert (remote / "scripts/api/app.py").read_text() == "old API"
     assert (remote / "scripts/runtime/retired.py").exists()
+    assert (remote / "deploy/systemd/polydata-retired.timer").exists()
     assert not (remote / "scripts/db/db.py").exists()
 
 

@@ -253,6 +253,7 @@ def build_release(repo: Path, base: str, target: str, output_dir: Path) -> dict[
     approved_overrides = _approved_remote_overrides(repo, base)
     used_overrides: set[str] = set()
     gcp_units = _target_gcp_units(repo, target)
+    previous_gcp_units = _target_gcp_units(repo, base)
 
     # Include unchanged runtime dependencies too: earlier releases may have
     # omitted them. Read the committed target, never files from the worktree.
@@ -262,7 +263,11 @@ def build_release(repo: Path, base: str, target: str, output_dir: Path) -> dict[
         # Retire formerly shipped Quant sources without allowing new Quant
         # files back into the consumer release.
         retired_quant = path.startswith("quant/") and path not in target_paths
-        if not _deployable(path, gcp_units=gcp_units) and not retired_quant:
+        retired_unit = (
+            path.startswith("deploy/systemd/") and path not in target_paths
+            and PurePosixPath(path).name in previous_gcp_units
+        )
+        if not _deployable(path, gcp_units=gcp_units) and not retired_quant and not retired_unit:
             (external if path not in target_paths or _externally_owned(path) else ignored).append(path)
             continue
         before, before_mode = _git_entry(repo, base, path)
